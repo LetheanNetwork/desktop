@@ -320,6 +320,95 @@ func (s *EnvService) OpenFileManager(path string, selectFile bool) error {
 }
 
 // ---------------------------------------------------------------------
+// ScreenService — wraps app.Screen (multi-monitor info).
+// ---------------------------------------------------------------------
+
+// ScreenInfo is the JSON-stable shape exposed to the frontend.
+// Mirrors application.Screen but uses flat width/height instead
+// of the nested Size struct so the TS bindings are easier to read.
+type ScreenInfo struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	X           int     `json:"x"`
+	Y           int     `json:"y"`
+	Width       int     `json:"width"`
+	Height      int     `json:"height"`
+	ScaleFactor float32 `json:"scale_factor"`
+	IsPrimary   bool    `json:"is_primary"`
+	Rotation    float32 `json:"rotation"`
+}
+
+func screenToInfo(s *application.Screen) ScreenInfo {
+	if s == nil {
+		return ScreenInfo{}
+	}
+	return ScreenInfo{
+		ID:          s.ID,
+		Name:        s.Name,
+		X:           s.X,
+		Y:           s.Y,
+		Width:       s.Size.Width,
+		Height:      s.Size.Height,
+		ScaleFactor: s.ScaleFactor,
+		IsPrimary:   s.IsPrimary,
+		Rotation:    s.Rotation,
+	}
+}
+
+type ScreenService struct {
+	// app is set by desktop.Run() post-construction.
+	app *application.App
+}
+
+func NewScreenService() *ScreenService { return &ScreenService{} }
+
+func (s *ScreenService) ServiceName() string { return "Screen" }
+func (s *ScreenService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	return nil
+}
+func (s *ScreenService) ServiceShutdown() error { return nil }
+
+// All returns every connected display.
+//
+// Use case: model-load dialog asks the user which monitor to
+// anchor the chat window to; settings page renders a layout
+// preview from the bounds.
+func (s *ScreenService) All() ([]ScreenInfo, error) {
+	if s.app == nil {
+		return nil, errors.New("screen service not yet attached to wails app")
+	}
+	raw := s.app.Screen.GetAll()
+	out := make([]ScreenInfo, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, screenToInfo(r))
+	}
+	return out, nil
+}
+
+// Primary returns the OS-designated primary display — the one with
+// the menubar on macOS, the taskbar's anchor on Windows.
+func (s *ScreenService) Primary() (ScreenInfo, error) {
+	if s.app == nil {
+		return ScreenInfo{}, errors.New("screen service not yet attached to wails app")
+	}
+	return screenToInfo(s.app.Screen.GetPrimary()), nil
+}
+
+// ByID returns the screen with the given ID, or an error if no
+// such display exists. ID strings vary by OS — use All() to
+// discover them.
+func (s *ScreenService) ByID(id string) (ScreenInfo, error) {
+	if s.app == nil {
+		return ScreenInfo{}, errors.New("screen service not yet attached to wails app")
+	}
+	scr := s.app.Screen.GetByID(id)
+	if scr == nil {
+		return ScreenInfo{}, errors.New("no screen with id: " + id)
+	}
+	return screenToInfo(scr), nil
+}
+
+// ---------------------------------------------------------------------
 // ClipboardService — wraps app.Clipboard (text copy/paste).
 // ---------------------------------------------------------------------
 
