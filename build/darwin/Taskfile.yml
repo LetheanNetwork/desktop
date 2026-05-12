@@ -51,8 +51,12 @@ tasks:
       GOOS: darwin
       CGO_ENABLED: 1
       GOARCH: '{{.ARCH | default ARCH}}'
-      # macOS deployment target left to system default — pinning it
-      # to 12.0 broke DuckDB Arrow C symbol linking (go-store cgo).
+      # Note: NO -mmacosx-version-min pin. Any explicit value
+      # (12.0 from the scaffold, or 26.0) breaks DuckDB Arrow C
+      # symbol linking via go-store's cgo. The system default
+      # matches the precompiled DuckDB library and links cleanly.
+      # macOS 26.0 is our effective floor anyway (Metal mainline,
+      # go-mlx needs it) — let the SDK default carry that.
 
   build:docker:
     summary: Cross-compiles for macOS using Docker (for Linux/Windows hosts)
