@@ -1,0 +1,51 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # No verb — exit 2
+        run_capture_all 2 "$output" ../bin/lthn sessions
+        assert_contains "missing verb" "$output"
+
+        # Missing TITLE — exit 2
+        run_capture_all 2 "$output" ../bin/lthn sessions create
+        assert_contains "usage" "$output"
+
+        # Create — prints id on stdout (16-byte hex = 32 chars)
+        run_capture_stdout 0 "$output" ../bin/lthn sessions create "first chat"
+        id="$(cat "$output")"
+        [[ ${#id} -eq 32 ]] || { echo "id should be 32 chars, got: $id" >&2; exit 1; }
+
+        # Append two messages
+        run_capture_all 0 "$output" ../bin/lthn sessions append "$id" user "hello"
+        run_capture_all 0 "$output" ../bin/lthn sessions append "$id" assistant "hi there"
+
+        # Read — JSON array of two messages
+        run_capture_stdout 0 "$output" ../bin/lthn sessions read "$id"
+        assert_jq 'length == 2' "$output"
+        assert_jq '.[0].role == "user"' "$output"
+        assert_jq '.[0].content == "hello"' "$output"
+        assert_jq '.[1].role == "assistant"' "$output"
+
+        # List — JSON array with manifest entry
+        run_capture_stdout 0 "$output" ../bin/lthn sessions list
+        assert_jq 'length == 1' "$output"
+        assert_jq '.[0].title == "first chat"' "$output"
+        assert_jq '.[0].messages == 2' "$output"
+
+        # Missing args on append — exit 2
+        run_capture_all 2 "$output" ../bin/lthn sessions append "$id" user
+        assert_contains "usage" "$output"
+
+        # Read missing id — exit 1
+        run_capture_all 1 "$output" ../bin/lthn sessions read nosuch
+        EOF

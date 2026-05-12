@@ -20,6 +20,7 @@ tasks:
       - task -d state test
       - task -d events test
       - task -d process test
+      - task -d sessions test
       - task -d ai test
       - task -d serve test
 
