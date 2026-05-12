@@ -245,7 +245,7 @@ class LthnToolsWindow extends LitElement {
     return renderChrome({
       title: "Tools · MCP", subtitle: "2 servers · 12 tools · 648 calls today",
       w: this.w, h: this.h, toolbar, body,
-      footer: html`~/.lthn/mcp.json · 5 servers configured · 3 enabled · 648 calls today · 99.4 % ok`,
+      footer: html`~/Lethean/conf/mcp.json · 5 servers configured · 3 enabled · 648 calls today · 99.4 % ok`,
     });
   }
 }
@@ -466,7 +466,7 @@ class LthnDistillationWindow extends LitElement {
             <div style="margin-top:8px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
               ${[
                 { who: "base · pre-tune", text: "Sure! Here are some general tips that may help you set up a Lethean instance, though I'm not certain about the specifics…", tone: "var(--fg-3)" },
-                { who: "ours · step 184", text: "Add `LTHN_HOME=~/.lthn` to your shell, then `lthn runner start --model gemma-4-e2b`. The tray icon should appear within a few seconds.", tone: "var(--fg-1)" },
+                { who: "ours · step 184", text: "Add `LTHN_HOME=~/Lethean` to your shell, then `lthn runner start --model gemma-4-e2b`. The tray icon should appear within a few seconds.", tone: "var(--fg-1)" },
               ].map(s => html`
                 <div style="padding:10px 12px; border-radius:6px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05);">
                   <div style="font-family:var(--font-mono); font-size:9.5px; color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase; margin-bottom:6px;">${s.who}</div>
@@ -481,7 +481,7 @@ class LthnDistillationWindow extends LitElement {
           <div>
             <lthn-label>Output adapter</lthn-label>
             <div style="font-family:var(--font-mono); font-size:12px; color:var(--fg-0); margin-top:6px;">gemma-4-e2b-helpcenter-lora</div>
-            <div style="font-size:11px; color:var(--fg-3); margin-top:3px;">~/.lthn/adapters/ · 42 MB</div>
+            <div style="font-size:11px; color:var(--fg-3); margin-top:3px;">~/Lethean/conf/adapters/ · 42 MB</div>
           </div>
           <div style="display:flex; flex-direction:column; gap:6px;">
             <lthn-btn tone="primary" size="md"><i class="fa-regular fa-comment"></i> Test in chat</lthn-btn>

@@ -116,7 +116,7 @@ class LthnBenchmarkWindow extends LitElement {
     return renderChrome({
       title: "Benchmark", subtitle: "run · compare · export",
       w: this.w, h: this.h, toolbar, body,
-      footer: html`5 runs on file · ~/.lthn/bench/results.jsonl · last run 47.2 tok/s · 8.4 W`,
+      footer: html`5 runs on file · ~/Lethean/data/bench/results.jsonl · last run 47.2 tok/s · 8.4 W`,
     });
   }
 }

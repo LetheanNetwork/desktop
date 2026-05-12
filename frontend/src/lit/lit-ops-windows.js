@@ -128,7 +128,7 @@ class LthnWelcomeWindow extends LitElement {
           </div>
           <div style="flex:1;">
             <div style="font-family:var(--font-mono); font-size:13px; color:var(--fg-0); letter-spacing:-0.005em;">
-              ~/.lthn/models/
+              ~/Lethean/conf/models/
             </div>
             <div style="font-size:11px; color:var(--fg-3); margin-top:2px;">
               312 GB free on this volume · default location
@@ -349,7 +349,7 @@ class LthnSettingsWindow extends LitElement {
                       background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07);
                       font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">
             <i class="fa-regular fa-folder" style="font-size:11px; color:var(--fg-3);"></i>
-            ~/.lthn/models/
+            ~/Lethean/conf/models/
             <lthn-btn tone="quiet" size="sm" style="margin-left:4px;">Change…</lthn-btn>
           </div>
         `)}
@@ -541,7 +541,7 @@ class LthnModelBrowserWindow extends LitElement {
       subtitle: "local · 4 · huggingface",
       w: this.w, h: this.h,
       toolbar, body,
-      footer: html`4 local · 312 GB free · ~/.lthn/models/ · airplane-mode OK (browsing requires network)`,
+      footer: html`4 local · 312 GB free · ~/Lethean/conf/models/ · airplane-mode OK (browsing requires network)`,
     });
   }
 

@@ -89,14 +89,14 @@ Wiring against:
 
 - **Bundle ID:** `ai.lthn.desktop` (Snider 2026-05-12)
 - **First version:** `v0.1.0` (Snider 2026-05-12)
+- **User-data root:** `~/Lethean/` — visible in Finder, no hidden dot-dirs. **Never** `~/.lthn/`. Sub-layout: `~/Lethean/{cli, data, conf, wallets}`. Models live at `~/Lethean/conf/models/`. Per the "no hidden user bloat" principle (Snider 2026-05-12 — memory `design_no_hidden_user_bloat.md`). Uniform with the blockchain app's existing convention.
 
 ## Open decisions (need Snider's call)
 
 Tracked at [`plans/project/lthn/desktop/RFC.first-release.md`](../../host-uk/core/plans/project/lthn/desktop/RFC.first-release.md) §7:
 
 1. Telemetry source — `powermetrics` (sudo) vs `IOReport` (no sudo) vs XPC helper
-2. Model directory convention — `~/.lthn/models/` (proposed; not yet confirmed)
-3. First-launch flow when no model present
+2. First-launch flow when no model present
 
 ## Parallel sub-tasks for multi-agent direction
 
