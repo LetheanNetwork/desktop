@@ -5,11 +5,11 @@
 	"info": {
 		"0000": {
 			"ProductVersion": "0.1.0",
-			"CompanyName": "My Company",
-			"FileDescription": "A lthn-scaffold application",
-			"LegalCopyright": "© 2026, My Company",
+			"CompanyName": "Lethean",
+			"FileDescription": "Local AI, sovereign by design.",
+			"LegalCopyright": "© 2026, Lethean (EUPL-1.2)",
 			"ProductName": "Lethean Desktop",
-			"Comments": "This is a comment"
+			"Comments": "lthn — Lethean Desktop"
 		}
 	}
 }

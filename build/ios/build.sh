@@ -2,7 +2,7 @@
 set -e
 
 # Build configuration
-APP_NAME="lthn-scaffold"
+APP_NAME="lthn"
 BUNDLE_ID="ai.lthn.desktop"
 VERSION="0.1.0"
 BUILD_NUMBER="0.1.0"

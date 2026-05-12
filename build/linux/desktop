@@ -1,13 +1,13 @@
 [Desktop Entry]
 Version=1.0
 Name=Lethean Desktop
-Comment=A lthn-scaffold application
+Comment=Local AI, sovereign by design.
 # The Exec line includes %u to pass the URL to the application
-Exec=/usr/local/bin/lthn-scaffold %u
+Exec=/usr/local/bin/lthn %u
 Terminal=false
 Type=Application
-Icon=lthn-scaffold
+Icon=lthn
 Categories=Utility;
-StartupWMClass=lthn-scaffold
+StartupWMClass=lthn
 
  

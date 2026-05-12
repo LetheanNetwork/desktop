@@ -31,3 +31,4 @@ go/tests/cli/bin/
 
 # Task runner cache
 .task/
+go/lthn
