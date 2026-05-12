@@ -47,13 +47,66 @@ lthn/desktop/
 ## Quickstart (dev)
 
 ```bash
-# Frontend design canvas (Lit windows side-by-side):
+# Frontend-only — Lit windows on the design canvas, no Go runtime:
 cd frontend && npm install && npm run dev
-# → http://127.0.0.1:5173/  (mount any window via ?surface=chat etc.)
+# → http://localhost:9245/  (mount any window via ?surface=chat etc.)
 
-# Production build (when Go services are wired):
-task build
+# Full hot-reload dev loop — Wails app + Vite + Go rebuild watcher:
+wails3 dev
+# .app launches on first build cycle; menubar icon = lthn-glyph
+# Edits to go/**/*.go and frontend/**/*.ts trigger automatic rebuild.
+
+# One-shot release build (auto-detect OS):
+task build               # produces bin/lthn{.app,.exe,}
+task package             # produces a distributable bundle
+
+# Targeted per-OS:
+task darwin:build        # macOS .app
+task linux:build         # Linux ELF
+task windows:build       # Windows .exe
 ```
+
+### Prerequisites
+
+| Tool | Min version | Purpose |
+|---|---|---|
+| Go | 1.26.0 | backend |
+| Node | 22 | frontend + Vite |
+| `wails3` | v3.0.0-alpha.91 | CLI scaffold + dev orchestrator |
+| `task` (go-task) | 3.x | build runner |
+
+```bash
+# One-time tool install:
+go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+go install github.com/go-task/task/v3/cmd/task@latest
+
+# Linux only — webkit + GTK:
+sudo apt-get install libgtk-3-dev libwebkit2gtk-4.1-dev
+```
+
+## CI / artifact builds
+
+GitHub Actions builds darwin-arm64, linux-amd64, windows-amd64 on every push to `main` / `dev` and uploads the binaries as workflow artifacts (7-day retention).
+
+Pushing a `v*` tag creates a GitHub Release with the artifacts attached:
+
+```bash
+git tag v0.1.0 && git push github v0.1.0
+# → .github/workflows/build.yml runs the matrix, then `release` job
+#   attaches lthn-darwin-arm64.zip + lthn-linux-amd64 + lthn-windows-amd64.exe
+```
+
+Workflow definition: [`.github/workflows/build.yml`](.github/workflows/build.yml).
+
+## First-run flow
+
+The systray app detects fresh installs via `firstlaunch.Detect()` — checks `~/Lethean/conf/lthn.yaml`, the state DB, and any configured routes. When all three are absent, the welcome wizard opens on top of the tray:
+
+1. **Model directory** — where models will live (default `~/.lthn/models/`)
+2. **First model** — Gemma 4 E2B (Lethean-recommended starter)
+3. **Connect** — opt-in OpenAI-compatible endpoint wiring for Claude Code / OpenCode / Codex
+
+The final "Finish" / "Skip for now" buttons call `ConfigService.Set("welcome.completed", "true")` and open the settings window, so the user can change their mind without re-running the wizard.
 
 ## Consumed libraries
 

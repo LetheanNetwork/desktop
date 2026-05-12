@@ -35,6 +35,7 @@ import (
 	"strings"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
 	"github.com/gin-gonic/gin"
@@ -310,11 +311,22 @@ func (s *Service) Run() core.Result {
 	// blur / hide / show / resize / files-dropped). See sysevents.go.
 	registerWindowEvents(s.app, window)
 
-	// Pre-create chat / models / settings / about windows hidden,
-	// so first tray-menu open is instant. See windows.go.
+	// Pre-create welcome / chat / models / settings / about windows
+	// hidden, so first tray-menu open is instant. See windows.go.
 	preCreateWindows(s.app)
 
 	systray.AttachWindow(window).WindowOffset(5)
+
+	// First-launch detection — if ~/Lethean/conf/lthn.yaml and the
+	// state DB don't exist, open the welcome wizard on top of the
+	// systray rather than dumping a fresh user straight into the
+	// popover. The wizard's final step writes config + opens the
+	// settings window; firstlaunch.Detect flips fresh→false naturally.
+	if state := firstlaunch.Detect(nil); state.OK {
+		if fl, ok := state.Value.(firstlaunch.State); ok && fl.Fresh {
+			openWindow(s.app, "welcome")
+		}
+	}
 
 	if err := s.app.Run(); err != nil {
 		return core.Fail(err)

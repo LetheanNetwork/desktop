@@ -5,6 +5,33 @@
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
 
+/* Step 3 "Finish" handler — marks onboarding complete, opens the
+ * settings window so the user can change their mind, and closes
+ * the wizard. Dynamic import so a Lit unit test or canvas preview
+ * doesn't pull the Wails runtime at module load. */
+async function completeOnboarding(): Promise<void> {
+  try {
+    const { ConfigService, WindowService } = await import("@service");
+    await ConfigService.Set("welcome.completed", "true");
+    await WindowService.Open("settings");
+    await WindowService.Hide("welcome");
+  } catch (err) {
+    console.error("welcome: completeOnboarding failed", err);
+  }
+}
+
+/* Advance helper — used by Back / Skip / forward buttons. Mutates the
+ * step property on the host element via a property setter. */
+function advance(host: LthnWelcomeWindow, delta: number): void {
+  const next = host.step + delta;
+  if (next < 1) return;
+  if (next > 3) {
+    void completeOnboarding();
+    return;
+  }
+  host.step = next;
+}
+
 class LthnWelcomeWindow extends LitElement {
   static properties = {
     step: { type: Number, reflect: true },
@@ -76,10 +103,12 @@ class LthnWelcomeWindow extends LitElement {
           ${this.step === 1 ? this._step1() : this.step === 2 ? this._step2() : this._step3()}
           <div style="flex:1"></div>
           <div style="display:flex; align-items:center; gap:10px; padding-top:18px;">
-            ${this.step > 1 ? html`<lthn-btn tone="ghost" size="lg">Back</lthn-btn>` : nothing}
-            <lthn-btn tone="quiet" size="lg">Skip for now</lthn-btn>
+            ${this.step > 1
+              ? html`<lthn-btn tone="ghost" size="lg" @click=${() => advance(this, -1)}>Back</lthn-btn>`
+              : nothing}
+            <lthn-btn tone="quiet" size="lg" @click=${completeOnboarding}>Skip for now</lthn-btn>
             <div style="flex:1"></div>
-            <lthn-btn tone="primary" size="lg">
+            <lthn-btn tone="primary" size="lg" @click=${() => advance(this, 1)}>
               ${this.step === 3
                 ? html`<i class="fa-solid fa-check"></i> Finish`
                 : this.step === 1

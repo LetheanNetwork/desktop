@@ -18,7 +18,18 @@
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
     "allowSyntheticDefaultImports": true,
-    "noEmit": true
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*":          ["src/*"],
+      "@ui/*":        ["src/lit/*"],
+      "@types":       ["src/lit/types"],
+      "@service":     ["bindings/dappco.re/lthn/desktop/pkg/desktop/index"],
+      "@service/*":   ["bindings/dappco.re/lthn/desktop/pkg/desktop/*"],
+      "@models/*":    ["bindings/dappco.re/lthn/desktop/pkg/*/models"],
+      "@inference/*": ["bindings/dappco.re/go/inference/*"],
+      "@bindings/*":  ["bindings/*"]
+    }
   },
   "include": ["src/**/*.ts", "src/**/*.js", "bindings/**/*.ts"],
   "exclude": ["node_modules", "dist"]

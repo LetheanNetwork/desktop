@@ -48,6 +48,7 @@ type WindowSpec struct {
 // settings (preferences), about (about box).
 func windowRegistry() []WindowSpec {
 	return []WindowSpec{
+		{Name: "welcome", Title: "Welcome to lthn", Width: 760, Height: 580, HideOnClose: true},
 		{Name: "chat", Title: "Lethean Chat", Width: 900, Height: 700, MinWidth: 600, MinHeight: 400, HideOnClose: true, EnableFileDrop: true},
 		{Name: "models", Title: "Models", Width: 800, Height: 600, MinWidth: 500, MinHeight: 400, HideOnClose: true, EnableFileDrop: true},
 		{Name: "settings", Title: "Settings", Width: 700, Height: 550, MinWidth: 500, MinHeight: 400, HideOnClose: true},

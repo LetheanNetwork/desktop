@@ -1,0 +1,158 @@
+# Lethean Desktop — multi-OS build + artifact upload.
+#
+# Triggers:
+#   - push to main / dev   → CI build, upload as workflow artifacts (7d retention)
+#   - tag `v*`             → CI build + create GitHub Release with the binaries
+#   - manual dispatch      → on-demand build (useful for PR sanity checks)
+#
+# Each OS produces a single canonical artifact:
+#   - macOS (arm64): bin/lthn.app (ad-hoc signed, .zip-bundled for upload)
+#   - Linux (amd64): bin/lthn (raw ELF)
+#   - Windows (amd64): bin/lthn.exe
+#
+# Local builds: `task build` (auto-detects OS). CI mirrors that path
+# via OS-specific wails3 Taskfile targets — no separate CI build logic
+# to keep in sync.
+
+name: build
+
+on:
+  push:
+    branches: [ main, dev ]
+    tags:     [ "v*" ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+env:
+  GO_VERSION:   "1.26.0"
+  NODE_VERSION: "22"   # vite 7 wants ≥20; pin to LTS-ish
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os:        macos
+            runner:    macos-14            # arm64 (Apple Silicon)
+            artifact:  lthn-darwin-arm64
+            ext:       .app
+            task:      darwin:build
+          - os:        linux
+            runner:    ubuntu-latest
+            artifact:  lthn-linux-amd64
+            ext:       ""
+            task:      linux:build
+          - os:        windows
+            runner:    windows-latest
+            artifact:  lthn-windows-amd64
+            ext:       .exe
+            task:      windows:build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache:      true
+          cache-dependency-path: go/go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache:        npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Linux build deps
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev libwebkit2gtk-4.1-dev \
+            pkg-config build-essential
+
+      - name: Install Wails CLI + Task
+        shell: bash
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+          go install github.com/go-task/task/v3/cmd/task@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Generate bindings (TypeScript)
+        run: task common:generate:bindings
+
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: task ${{ matrix.task }}
+
+      - name: Bundle macOS .app
+        if: matrix.os == 'macos'
+        run: |
+          mkdir -p artifact
+          # task darwin:build produces bin/lthn.app; zip preserves the
+          # codesign + bundle structure across the upload boundary.
+          ditto -c -k --keepParent bin/lthn.app artifact/lthn-darwin-arm64.zip
+
+      - name: Stage Linux artifact
+        if: matrix.os == 'linux'
+        run: |
+          mkdir -p artifact
+          cp bin/lthn artifact/lthn-linux-amd64
+
+      - name: Stage Windows artifact
+        if: matrix.os == 'windows'
+        shell: bash
+        run: |
+          mkdir -p artifact
+          cp bin/lthn.exe artifact/lthn-windows-amd64.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name:           ${{ matrix.artifact }}
+          path:           artifact/*
+          retention-days: 7
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./dist
+
+      - name: Flatten artifacts
+        run: |
+          find ./dist -type f -exec mv {} ./dist/ \; 2>/dev/null || true
+          ls -la ./dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/lthn-darwin-arm64.zip
+            dist/lthn-linux-amd64
+            dist/lthn-windows-amd64.exe
+          generate_release_notes: true
+          draft:      false
+          prerelease: ${{ contains(github.ref, '-') }}

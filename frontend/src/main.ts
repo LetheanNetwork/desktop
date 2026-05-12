@@ -30,7 +30,7 @@ switch (surface) {
      *   - sparkline data  ← heap_alloc_mb samples (last 24)
      *   - connection dot  ← Sample() throwing → err; success → ok
      */
-    import("../bindings/dappco.re/lthn/desktop/pkg/desktop/index.js").then(({ TelemetryService, RunnerService }) => {
+    import("@service").then(({ TelemetryService, RunnerService }) => {
       interface TrayState {
         model:     string;
         uptime:    number;
