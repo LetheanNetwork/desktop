@@ -15,20 +15,21 @@ See:
 
 ## Architectural rules (load-bearing — read first)
 
-1. **The tray IS the process.** `ApplicationShouldTerminateAfterLastWindowClosed = false`. Windows are transient surfaces; closing all of them does NOT quit the app. The NSStatusItem is the lifetime anchor.
-2. **Single screen tray panel — no internal navigation.** The 400×560 popover has no side menus, tabs, drawers. Anything that doesn't fit ships as a separate transient window.
-3. **Glue only.** No new library code lives in this repo. Library capability lives in `core/`, `go-mlx`, `core/gui`, etc. This repo composes them.
-4. **Lit + light DOM for windows.** Leaf components are light DOM (matches the Lethean Lit-rule canon). Tokens.css cascades in.
-5. **British English everywhere.** colour, organisation, centre, behaviour.
-6. **EUPL-1.2 / CIC asset-locked.** No "Pro" gates, no upgrade prompts, no feature paywalls.
+1. **The binary is a CLI router first; Wails is one mode.** `cmd/lthn/main.go` dispatches on subcommand (`lthn`, `lthn version`, `lthn serve`, `lthn ai chat`, `lthn gui`, etc.). The Wails GUI is one consumer of that dispatch, NOT the binary's identity. **Decoupled by design** — if GUI is broken, `lthn serve` + `lthn ai` still ship. The CLI grammar follows the namespace canon (`lthn <verb> <noun>`).
+2. **The tray IS the process (in GUI mode).** When Wails launches, `ApplicationShouldTerminateAfterLastWindowClosed = false`. Windows are transient surfaces; closing all of them does NOT quit the app. The NSStatusItem is the lifetime anchor.
+3. **Single screen tray panel — no internal navigation.** The 400×560 popover has no side menus, tabs, drawers. Anything that doesn't fit ships as a separate transient window.
+4. **Glue only.** No new library code lives in this repo. Library capability lives in `core/`, `go-mlx`, `core/gui`, etc. This repo composes them.
+5. **Lit + light DOM for windows.** Leaf components are light DOM (matches the Lethean Lit-rule canon). Tokens.css cascades in.
+6. **British English everywhere.** colour, organisation, centre, behaviour.
+7. **EUPL-1.2 / CIC asset-locked.** No "Pro" gates, no upgrade prompts, no feature paywalls.
 
 ## Repo shape
 
 ```
 lthn/desktop/
-├── cmd/lthn/             — main entry
-├── pkg/tray/             — NSStatusItem + popover anchor + window-spawn router
-├── pkg/runner/           — go-mlx adapter (start/stop/generate + signals)
+├── cmd/lthn/             — CLI router (main entry). Subcommands: version / help / gui / tray / serve / ai. Future: gateway / build / wallet.
+├── pkg/tray/             — NSStatusItem + popover anchor + window-spawn router (consumed by `lthn gui`)
+├── pkg/runner/           — go-mlx adapter (start/stop/generate + signals; consumed by `lthn ai` and `lthn serve`)
 ├── pkg/telemetry/        — powermetrics/IOReport sampler
 ├── frontend/
 │   ├── index.html        — app entry (single-window mount via ?surface=)
@@ -41,6 +42,31 @@ lthn/desktop/
     ├── HANDOVER.md       — Lethean-5 Lit handover (architecture + SwiftUI/Tauri translation notes)
     └── lethean-4-react-reference/  — original React/JSX visual source (animated; reference only, not built)
 ```
+
+### CLI dispatch shape
+
+```
+lthn                       # default — launches GUI (when GUI is wired; today: scaffold banner)
+lthn version               # version info
+lthn help [subcommand]     # built-in help
+
+lthn gui                   # explicit Wails GUI launch
+lthn tray                  # tray-only mode (NSStatusItem, no popover pre-open)
+
+lthn serve [--port PORT]   # HTTP API only — OpenAI-compatible, no GUI
+lthn ai chat               # interactive REPL with the loaded model
+lthn ai generate "prompt"  # one-shot generation
+lthn ai models ls          # list local models in ~/Lethean/conf/models/
+lthn ai models pull NAME   # download from HuggingFace
+lthn ai serve              # alias for `lthn serve`
+
+# Future subcommands per namespace canon:
+lthn gateway vpn ...       # gateway controls
+lthn build ...             # branded `core build`
+lthn wallet ...            # blockchain wallet (when side-loaded)
+```
+
+`lthn://` URI handlers route through the same dispatch — see `plans/project/lthn/RFC.md` §7.
 
 ## Frontend dev
 
