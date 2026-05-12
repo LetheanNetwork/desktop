@@ -1,0 +1,23 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # Missing MESSAGE — exit 2
+        run_capture_all 2 "$output" ../../bin/lthn ai chat
+        assert_contains "usage" "$output"
+
+        # No routes configured — echo stub
+        run_capture_stdout 0 "$output" ../../bin/lthn ai chat "hello"
+        assert_contains "[lthn stub]" "$output"
+        assert_contains "hello" "$output"
+        EOF

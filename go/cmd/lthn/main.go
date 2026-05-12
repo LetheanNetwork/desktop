@@ -202,8 +202,11 @@ func cmdServe(args []string) int {
 		}
 	}
 
-	c := core.New()
-	r := runner.NewService(runner.Options{})
+	c := newAppCore()
+	if c == nil {
+		return 1
+	}
+	r := runner.NewServiceFromCore(c)
 	if rr := r.Register(c); !rr.OK {
 		core.Print(core.Stderr(), "lthn serve: %s\n", rr.Error())
 		return 1
@@ -236,14 +239,11 @@ func cmdAI(args []string) int {
 	}
 	switch args[0] {
 	case "chat":
-		core.Print(core.Stderr(), "lthn ai chat: not yet wired in scaffold\n")
-		return 1
+		return aiChat(args[1:])
 	case "generate":
-		core.Print(core.Stderr(), "lthn ai generate: not yet wired in scaffold\n")
-		return 1
+		return aiGenerate(args[1:])
 	case "models":
-		core.Print(core.Stderr(), "lthn ai models: not yet wired in scaffold\n")
-		return 1
+		return aiModels(args[1:])
 	case "serve":
 		return cmdServe(args[1:])
 	default:

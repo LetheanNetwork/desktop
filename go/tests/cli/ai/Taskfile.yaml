@@ -1,0 +1,9 @@
+version: "3"
+
+tasks:
+  test:
+    desc: Run every ai leaf test
+    cmds:
+      - task -d models test
+      - task -d generate test
+      - task -d chat test

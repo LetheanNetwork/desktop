@@ -1,0 +1,27 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # No routes configured — exit 0, prints the bootstrap hint.
+        run_capture_stdout 0 "$output" ../../bin/lthn ai models
+        assert_contains "no routes configured" "$output"
+
+        # Configure one route — config.set writes through to ~/Lethean/conf/lthn.yaml.
+        ../../bin/lthn config set routes.local.kind openai
+        ../../bin/lthn config set routes.local.base_url "http://127.0.0.1:11434/v1"
+        ../../bin/lthn config set routes.local.model llama3:8b
+
+        # Now the route discovers — exit 0, lists the name.
+        run_capture_stdout 0 "$output" ../../bin/lthn ai models
+        assert_contains "local" "$output"
+        EOF
