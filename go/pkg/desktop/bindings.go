@@ -246,6 +246,80 @@ func (s *TelemetryService) Sample() (telemetry.Reading, error) {
 }
 
 // ---------------------------------------------------------------------
+// EnvService — wraps app.Env (OS info / dark-mode / file manager).
+// ---------------------------------------------------------------------
+
+// EnvInfo mirrors application.EnvironmentInfo with JSON-stable
+// field names. PlatformInfo is left as map[string]any because
+// the field shapes vary per OS.
+type EnvInfo struct {
+	OS           string         `json:"os"`
+	Arch         string         `json:"arch"`
+	Debug        bool           `json:"debug"`
+	DarkMode     bool           `json:"dark_mode"`
+	PlatformInfo map[string]any `json:"platform_info,omitempty"`
+	OSName       string         `json:"os_name,omitempty"`
+	OSVersion    string         `json:"os_version,omitempty"`
+}
+
+type EnvService struct {
+	// app is set by desktop.Run() AFTER application.New returns —
+	// EnvironmentManager isn't available pre-construction.
+	app *application.App
+}
+
+func NewEnvService() *EnvService { return &EnvService{} }
+
+func (s *EnvService) ServiceName() string { return "Env" }
+func (s *EnvService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	return nil
+}
+func (s *EnvService) ServiceShutdown() error { return nil }
+
+// Info returns a snapshot of the runtime environment.
+func (s *EnvService) Info() (EnvInfo, error) {
+	if s.app == nil {
+		return EnvInfo{}, errors.New("env service not yet attached to wails app")
+	}
+	info := s.app.Env.Info()
+	out := EnvInfo{
+		OS:           info.OS,
+		Arch:         info.Arch,
+		Debug:        info.Debug,
+		DarkMode:     s.app.Env.IsDarkMode(),
+		PlatformInfo: info.PlatformInfo,
+	}
+	if info.OSInfo != nil {
+		out.OSName = info.OSInfo.Name
+		out.OSVersion = info.OSInfo.Version
+	}
+	return out, nil
+}
+
+// IsDarkMode returns true when the OS theme is dark. Theme changes
+// are re-broadcast as "lthn:theme" events from desktop.Run().
+func (s *EnvService) IsDarkMode() (bool, error) {
+	if s.app == nil {
+		return false, errors.New("env service not yet attached to wails app")
+	}
+	return s.app.Env.IsDarkMode(), nil
+}
+
+// OpenFileManager opens the OS-native file manager at path. When
+// selectFile is true and path points at a file, the manager
+// highlights it (Finder, Explorer; Linux varies by DE).
+//
+// Common use: "Show models folder" → Finder opens
+// ~/Lethean/conf/models/. "Reveal this session" → Finder opens
+// the directory with the file highlighted.
+func (s *EnvService) OpenFileManager(path string, selectFile bool) error {
+	if s.app == nil {
+		return errors.New("env service not yet attached to wails app")
+	}
+	return s.app.Env.OpenFileManager(path, selectFile)
+}
+
+// ---------------------------------------------------------------------
 // LifecycleService — OS service install/start/stop for the wizard.
 // ---------------------------------------------------------------------
 

@@ -134,6 +134,7 @@ func (s *Service) Run() core.Result {
 	// surfacing the app in the Dock when chat is active (so users
 	// can ⌘-Tab to it), then hiding back to tray-only when chat
 	// closes.
+	envSvc := NewEnvService()
 	wailsServices := []application.Service{
 		application.NewService(NewRunnerService(s.opts.Runner)),
 		application.NewService(NewSessionsService(s.opts.Core)),
@@ -143,6 +144,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(NewValidatorService()),
 		application.NewService(NewTelemetryService()),
 		application.NewService(NewLifecycleService()),
+		application.NewService(envSvc),
 		application.NewService(dock.New()),
 	}
 
@@ -158,6 +160,20 @@ func (s *Service) Run() core.Result {
 			Handler:    engine,
 			Middleware: ginMiddleware(engine),
 		},
+	})
+
+	// Attach the constructed app to EnvService now that it exists —
+	// app.Env isn't available pre-application.New().
+	envSvc.app = s.app
+
+	// Re-broadcast OS theme changes to the WebView as "lthn:theme".
+	// Lit elements subscribe via @wailsio/runtime's Events.On.
+	s.app.Event.OnApplicationEvent(events.Common.ThemeChanged, func(_ *application.ApplicationEvent) {
+		mode := "light"
+		if s.app.Env.IsDarkMode() {
+			mode = "dark"
+		}
+		s.app.Event.Emit("lthn:theme", mode)
 	})
 
 	systray := s.app.SystemTray.New()
