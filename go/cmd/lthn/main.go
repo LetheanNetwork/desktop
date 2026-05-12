@@ -27,6 +27,7 @@ package main
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/server"
 )
 
 // version is the lthn binary's release tag. Updated per Mantis ticket.
@@ -178,12 +179,18 @@ func cmdServe(args []string) int {
 			port = v
 		}
 	}
-	_ = port // used when api wiring lands
 
-	core.Print(core.Stderr(), "lthn serve: not yet wired in scaffold\n")
-	core.Print(core.Stderr(), "target: dappco.re/go/api gin engine,\n")
-	core.Print(core.Stderr(), "OpenAI-compatible endpoints, in-process inference via go-mlx\n")
-	return 1
+	s := server.NewService(server.Options{Addr: core.Concat(":", port)})
+	c := core.New()
+	if r := s.Register(c); !r.OK {
+		core.Print(core.Stderr(), "lthn serve: %s\n", r.Error())
+		return 1
+	}
+	if r := s.Start(core.Background()); !r.OK {
+		core.Print(core.Stderr(), "lthn serve: %s\n", r.Error())
+		return 1
+	}
+	return 0
 }
 
 // cmdAI handles `lthn ai <verb> [args...]`. AI subsystem dispatch.
