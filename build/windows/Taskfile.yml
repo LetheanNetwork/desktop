@@ -29,7 +29,7 @@ tasks:
       CGO_ENABLED: '{{.CGO_ENABLED | default "0"}}'
 
   build:native:
-    summary: Builds the application using native Go cross-compilation
+    summary: Builds the application using native Go cross-compilation (Lethean go/ layout)
     internal: true
     deps:
       - task: common:go:mod:tidy
@@ -44,13 +44,16 @@ tasks:
       - task: generate:syso
         vars:
           ARCH: '{{.ARCH}}'
-      - go build {{.BUILD_FLAGS}} -o "{{.BIN_DIR}}/{{.APP_NAME}}.exe"
-      - cmd: powershell Remove-item *.syso
+      - cd "{{.GO_DIR}}" && go build {{.BUILD_FLAGS}} -o "../{{.BIN_DIR}}/{{.APP_NAME}}.exe" "{{.GO_CMD}}"
+      - cmd: powershell Remove-item {{.GO_DIR}}/cmd/lthn/*.syso
         platforms: [windows]
-      - cmd: rm -f *.syso
+      - cmd: rm -f {{.GO_DIR}}/cmd/lthn/*.syso
         platforms: [linux, darwin]
     vars:
-      BUILD_FLAGS: '{{if eq .DEV "true"}}{{if .EXTRA_TAGS}}-tags {{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui"{{end}}'
+      # Strip flags (-w -s) removed for the same reason darwin drops them:
+      # DuckDB Arrow C symbols imported via go-store's cgo break under
+      # ld stripping. -H windowsgui stays — it picks the GUI subsystem.
+      BUILD_FLAGS: '{{if eq .DEV "true"}}{{if .EXTRA_TAGS}}-tags {{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-H windowsgui"{{end}}'
     env:
       GOOS: windows
       CGO_ENABLED: '{{.CGO_ENABLED | default "0"}}'
@@ -104,10 +107,13 @@ tasks:
       FORMAT: '{{.FORMAT | default "nsis"}}'
 
   generate:syso:
-    summary: Generates Windows `.syso` file
+    summary: Generates Windows `.syso` file (placed in the main package dir so go build links it)
     dir: build
     cmds:
-      - wails3 generate syso -arch {{.ARCH}} -icon windows/icon.ico -manifest windows/wails.exe.manifest -info windows/info.json -out ../wails_windows_{{.ARCH}}.syso
+      # Go links syso files automatically when they live in the main
+      # package directory. With go/cmd/lthn/ as our main, the syso
+      # must land there — NOT at repo root like the scaffold default.
+      - wails3 generate syso -arch {{.ARCH}} -icon windows/icon.ico -manifest windows/wails.exe.manifest -info windows/info.json -out ../{{.GO_DIR}}/cmd/lthn/wails_windows_{{.ARCH}}.syso
     vars:
       ARCH: '{{.ARCH | default ARCH}}'
 
