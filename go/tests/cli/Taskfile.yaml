@@ -27,6 +27,7 @@ tasks:
       - task -d validate test
       - task -d permissions test
       - task -d telemetry test
+      - task -d service test
       - task -d serve test
 
   build:

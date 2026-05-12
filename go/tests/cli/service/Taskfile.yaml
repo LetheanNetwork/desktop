@@ -1,0 +1,56 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        # No verb — exit 2
+        run_capture_all 2 "$output" ../bin/lthn service
+        assert_contains "missing verb" "$output"
+
+        # Unknown verb — exit 2
+        run_capture_all 2 "$output" ../bin/lthn service nosuch
+        assert_contains "unknown verb" "$output"
+
+        # list — exit 0, JSON array with the known names
+        run_capture_stdout 0 "$output" ../bin/lthn service list
+        assert_jq '.[0].Name == "serve"' "$output"
+        assert_jq '.[1].Name == "tray"' "$output"
+        assert_jq '.[0].DisplayName | length > 0' "$output"
+
+        # status of known service that isn't installed — exit 0, "not_installed"
+        run_capture_stdout 0 "$output" ../bin/lthn service status serve
+        assert_equals "not_installed" "$output"
+
+        # status of unknown — exit 1, stderr names the unknown
+        run_capture_all 1 "$output" ../bin/lthn service status nosuch
+        assert_contains "unknown service" "$output"
+
+        # Each lifecycle verb needs a NAME — exit 2
+        run_capture_all 2 "$output" ../bin/lthn service install
+        assert_contains "usage" "$output"
+        run_capture_all 2 "$output" ../bin/lthn service uninstall
+        assert_contains "usage" "$output"
+        run_capture_all 2 "$output" ../bin/lthn service start
+        assert_contains "usage" "$output"
+        run_capture_all 2 "$output" ../bin/lthn service stop
+        assert_contains "usage" "$output"
+        run_capture_all 2 "$output" ../bin/lthn service restart
+        assert_contains "usage" "$output"
+        run_capture_all 2 "$output" ../bin/lthn service reload
+        assert_contains "usage" "$output"
+        run_capture_all 2 "$output" ../bin/lthn service status
+        assert_contains "usage" "$output"
+
+        # Stop on an uninstalled service — exit 1, error from kardianos
+        # (mac: "service not installed"). This proves the dispatch path
+        # is wired without touching the user's launchctl on success.
+        run_capture_all 1 "$output" ../bin/lthn service stop serve
+        EOF

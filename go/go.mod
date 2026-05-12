@@ -6,6 +6,7 @@ require (
 	dappco.re/go v0.9.0
 	dappco.re/go/ai v0.8.0-alpha.1
 	dappco.re/go/inference v0.9.0
+	github.com/kardianos/service v1.2.4
 	github.com/wailsapp/wails/v3 v3.0.0-alpha.90
 )
 
