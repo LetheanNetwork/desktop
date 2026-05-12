@@ -320,6 +320,58 @@ func (s *EnvService) OpenFileManager(path string, selectFile bool) error {
 }
 
 // ---------------------------------------------------------------------
+// WindowService — open / hide / focus named windows from the frontend.
+// ---------------------------------------------------------------------
+
+type WindowService struct {
+	app *application.App
+}
+
+func NewWindowService() *WindowService { return &WindowService{} }
+
+func (s *WindowService) ServiceName() string { return "Window" }
+func (s *WindowService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	return nil
+}
+func (s *WindowService) ServiceShutdown() error { return nil }
+
+// Open shows + focuses the named window (chat / models / settings /
+// about). No-op if the name isn't in the windows.go registry.
+func (s *WindowService) Open(name string) error {
+	if s.app == nil {
+		return errors.New("window service not yet attached to wails app")
+	}
+	openWindow(s.app, name)
+	return nil
+}
+
+// Hide hides the named window. Steady-state windows (chat / models
+// / settings) hide-on-close anyway; this lets the frontend dismiss
+// programmatically without waiting for a close click.
+func (s *WindowService) Hide(name string) error {
+	if s.app == nil {
+		return errors.New("window service not yet attached to wails app")
+	}
+	w, ok := s.app.Window.GetByName(name)
+	if !ok {
+		return errors.New("no window named: " + name)
+	}
+	w.Hide()
+	return nil
+}
+
+// List returns the names of every registered window. Frontend can
+// render a "window switcher" or jump-list from this.
+func (s *WindowService) List() ([]string, error) {
+	registry := windowRegistry()
+	names := make([]string, len(registry))
+	for i, spec := range registry {
+		names[i] = spec.Name
+	}
+	return names, nil
+}
+
+// ---------------------------------------------------------------------
 // ScreenService — wraps app.Screen (multi-monitor info).
 // ---------------------------------------------------------------------
 

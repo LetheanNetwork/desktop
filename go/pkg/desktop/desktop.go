@@ -138,6 +138,7 @@ func (s *Service) Run() core.Result {
 	envSvc := NewEnvService()
 	clipboardSvc := NewClipboardService()
 	screenSvc := NewScreenService()
+	windowSvc := NewWindowService()
 	notifier := notifications.New()
 	wailsServices := []application.Service{
 		application.NewService(NewRunnerService(s.opts.Runner)),
@@ -151,6 +152,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(envSvc),
 		application.NewService(clipboardSvc),
 		application.NewService(screenSvc),
+		application.NewService(windowSvc),
 		application.NewService(dock.New()),
 		application.NewService(notifier),
 	}
@@ -175,6 +177,7 @@ func (s *Service) Run() core.Result {
 	envSvc.app = s.app
 	clipboardSvc.app = s.app
 	screenSvc.app = s.app
+	windowSvc.app = s.app
 
 	// Re-broadcast OS theme changes to the WebView as "lthn:theme".
 	// Lit elements subscribe via @wailsio/runtime's Events.On.
@@ -225,16 +228,20 @@ func (s *Service) Run() core.Result {
 	menu.Add("Lethean Desktop").SetEnabled(false)
 	menu.AddSeparator()
 	menu.Add("Open Chat…").OnClick(func(_ *application.Context) {
+		openWindow(s.app, "chat")
 		s.app.Event.Emit("lthn:tray:open", "chat")
 	})
 	menu.Add("Models…").OnClick(func(_ *application.Context) {
+		openWindow(s.app, "models")
 		s.app.Event.Emit("lthn:tray:open", "models")
 	})
 	menu.Add("Settings…").OnClick(func(_ *application.Context) {
+		openWindow(s.app, "settings")
 		s.app.Event.Emit("lthn:tray:open", "settings")
 	})
 	menu.AddSeparator()
 	menu.Add("About lthn").OnClick(func(_ *application.Context) {
+		openWindow(s.app, "about")
 		s.app.Event.Emit("lthn:tray:open", "about")
 	})
 	menu.AddSeparator()
@@ -288,6 +295,10 @@ func (s *Service) Run() core.Result {
 	// Per-window lthn:window:* event re-broadcasts (ready / focus /
 	// blur / hide / show / resize / files-dropped). See sysevents.go.
 	registerWindowEvents(s.app, window)
+
+	// Pre-create chat / models / settings / about windows hidden,
+	// so first tray-menu open is instant. See windows.go.
+	preCreateWindows(s.app)
 
 	systray.AttachWindow(window).WindowOffset(5)
 
