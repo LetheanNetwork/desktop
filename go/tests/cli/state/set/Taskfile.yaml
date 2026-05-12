@@ -1,0 +1,29 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # No verb — exit 2
+        run_capture_all 2 "$output" ../../bin/lthn state
+        assert_contains "missing verb" "$output"
+
+        # set with missing args — exit 2
+        run_capture_all 2 "$output" ../../bin/lthn state set
+        assert_contains "usage" "$output"
+
+        run_capture_all 2 "$output" ../../bin/lthn state set config host
+        assert_contains "usage" "$output"
+
+        # Good — exit 0, side effect: SQLite file exists
+        run_capture_all 0 "$output" ../../bin/lthn state set config host homelab
+        test -f "$LTHN_TEST_HOME/Lethean/data/lthn.db"
+        EOF

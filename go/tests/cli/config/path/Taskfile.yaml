@@ -1,0 +1,20 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        isolate_home
+        trap "rm -rf $LTHN_TEST_HOME" EXIT
+
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # `lthn config path` — exit 0, prints the resolved config file
+        run_capture_stdout 0 "$output" ../../bin/lthn config path
+        assert_contains "Lethean/conf/lthn.yaml" "$output"
+        EOF

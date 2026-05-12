@@ -1,0 +1,22 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # Config returns a JSON projection with heartbeat/pong/write timeouts.
+        # HubConfig itself has func fields that encoding/json rejects; the
+        # CLI handler projects the JSON-serialisable subset.
+        run_capture_stdout 0 "$output" ../../bin/lthn events config
+        assert_jq 'has("heartbeat_interval")' "$output"
+        assert_jq 'has("pong_timeout")' "$output"
+        assert_jq 'has("write_timeout")' "$output"
+        EOF

@@ -1,0 +1,23 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # Seed two groups
+        ../../bin/lthn state set config host homelab
+        ../../bin/lthn state set sessions last-id abc123
+
+        # `lthn state groups` — exit 0, lists both group names
+        run_capture_stdout 0 "$output" ../../bin/lthn state groups
+        assert_contains "config" "$output"
+        assert_contains "sessions" "$output"
+        EOF

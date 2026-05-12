@@ -1,0 +1,29 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # Missing GROUP — exit 2
+        run_capture_all 2 "$output" ../../bin/lthn state list
+        assert_contains "usage" "$output"
+
+        # Seed
+        ../../bin/lthn state set config host homelab
+        ../../bin/lthn state set config port 8080
+
+        # List — exit 0, contains both keys
+        run_capture_stdout 0 "$output" ../../bin/lthn state list config
+        assert_contains "host" "$output"
+        assert_contains "homelab" "$output"
+        assert_contains "port" "$output"
+        assert_contains "8080" "$output"
+        EOF

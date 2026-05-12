@@ -1,0 +1,25 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        # `lthn version` — exit 0, stdout "lthn vX.Y.Z\n"
+        run_capture_stdout 0 "$output" ../bin/lthn version
+        assert_contains "lthn v" "$output"
+
+        # `lthn -v` alias
+        run_capture_stdout 0 "$output" ../bin/lthn -v
+        assert_contains "lthn v" "$output"
+
+        # `lthn --version` alias
+        run_capture_stdout 0 "$output" ../bin/lthn --version
+        assert_contains "lthn v" "$output"
+        EOF

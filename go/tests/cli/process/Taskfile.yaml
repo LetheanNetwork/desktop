@@ -1,0 +1,8 @@
+version: "3"
+
+tasks:
+  test:
+    desc: Run every process leaf test
+    cmds:
+      - task -d list test
+      - task -d get test

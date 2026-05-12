@@ -1,0 +1,22 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # Missing ID — exit 2
+        run_capture_all 2 "$output" ../../bin/lthn process get
+        assert_contains "usage" "$output"
+
+        # Unknown ID — exit 1, stderr explains
+        run_capture_all 1 "$output" ../../bin/lthn process get nosuch-id
+        assert_contains "process get" "$output"
+        EOF

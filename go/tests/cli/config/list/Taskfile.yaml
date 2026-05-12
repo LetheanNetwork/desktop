@@ -1,0 +1,23 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # Seed two values
+        ../../bin/lthn config set transport.port 8080
+        ../../bin/lthn config set runner.timeout 30s
+
+        # `lthn config list` — exit 0, JSON map containing both keys
+        run_capture_stdout 0 "$output" ../../bin/lthn config list
+        assert_jq '."transport.port" == "8080"' "$output"
+        assert_jq '."runner.timeout" == "30s"' "$output"
+        EOF

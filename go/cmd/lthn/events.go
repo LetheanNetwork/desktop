@@ -6,6 +6,7 @@ import (
 	"context"
 
 	core "dappco.re/go"
+	"dappco.re/go/stream"
 )
 
 // cmdEvents dispatches `lthn events <verb>` — operations against the
@@ -76,10 +77,31 @@ func eventsConfig(c *core.Core, _ []string) int {
 		core.Print(core.Stderr(), "lthn events config: %s\n", r.Error())
 		return 1
 	}
-	if jr := core.JSONMarshalIndent(r.Value, "", "  "); jr.OK {
-		if b, ok := jr.Value.([]byte); ok {
-			core.Print(core.Stdout(), "%s\n", string(b))
-		}
+	// HubConfig has func fields (OnConnect / OnDisconnect /
+	// ChannelAuthoriser) that encoding/json rejects. Project the
+	// JSON-serialisable subset so consumers see the durations.
+	type configView struct {
+		HeartbeatInterval string `json:"heartbeat_interval"`
+		PongTimeout       string `json:"pong_timeout"`
+		WriteTimeout      string `json:"write_timeout"`
+	}
+	cfg, ok := r.Value.(stream.HubConfig)
+	if !ok {
+		core.Print(core.Stderr(), "lthn events config: unexpected value type\n")
+		return 1
+	}
+	view := configView{
+		HeartbeatInterval: cfg.HeartbeatInterval.String(),
+		PongTimeout:       cfg.PongTimeout.String(),
+		WriteTimeout:      cfg.WriteTimeout.String(),
+	}
+	jr := core.JSONMarshalIndent(view, "", "  ")
+	if !jr.OK {
+		core.Print(core.Stderr(), "lthn events config: %s\n", jr.Error())
+		return 1
+	}
+	if b, ok := jr.Value.([]byte); ok {
+		core.Print(core.Stdout(), "%s\n", string(b))
 	}
 	return 0
 }

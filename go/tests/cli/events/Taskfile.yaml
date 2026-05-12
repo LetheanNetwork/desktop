@@ -1,0 +1,9 @@
+version: "3"
+
+tasks:
+  test:
+    desc: Run every events leaf test
+    cmds:
+      - task -d running test
+      - task -d stats test
+      - task -d config test

@@ -1,0 +1,20 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # Stats returns a JSON object with peers/channels/subscriber_count.
+        run_capture_stdout 0 "$output" ../../bin/lthn events stats
+        assert_jq '.peers >= 0' "$output"
+        assert_jq '.channels >= 0' "$output"
+        assert_jq 'has("subscriber_count")' "$output"
+        EOF

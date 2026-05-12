@@ -1,0 +1,11 @@
+version: "3"
+
+tasks:
+  test:
+    desc: Run every state leaf test
+    cmds:
+      - task -d set test
+      - task -d get test
+      - task -d list test
+      - task -d groups test
+      - task -d delete test

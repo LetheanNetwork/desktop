@@ -1,0 +1,48 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        # `lthn help` — exit 0, lists subcommands
+        run_capture_stdout 0 "$output" ../bin/lthn help
+        assert_contains "version" "$output"
+        assert_contains "help" "$output"
+        assert_contains "gui" "$output"
+        assert_contains "tray" "$output"
+        assert_contains "serve" "$output"
+        assert_contains "ai" "$output"
+        assert_contains "config" "$output"
+        assert_contains "state" "$output"
+        assert_contains "events" "$output"
+        assert_contains "process" "$output"
+
+        # `lthn help ai` — sub-help
+        run_capture_stdout 0 "$output" ../bin/lthn help ai
+        assert_contains "chat" "$output"
+        assert_contains "generate" "$output"
+        assert_contains "models" "$output"
+
+        # `lthn help serve` — sub-help
+        run_capture_stdout 0 "$output" ../bin/lthn help serve
+        assert_contains "OpenAI" "$output"
+
+        # `lthn help unknown` — exit 2
+        run_capture_all 2 "$output" ../bin/lthn help unknown
+        assert_contains "no help" "$output"
+
+        # Unknown root subcommand — exit 2
+        run_capture_all 2 "$output" ../bin/lthn nosuchverb
+        assert_contains "unknown subcommand" "$output"
+
+        # `-h` alias
+        run_capture_stdout 0 "$output" ../bin/lthn -h
+        assert_contains "Subcommands" "$output"
+        EOF

@@ -1,0 +1,22 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # `lthn process list` — exit 0, JSON array (empty on fresh boot)
+        run_capture_stdout 0 "$output" ../../bin/lthn process list
+        assert_jq 'type == "array"' "$output"
+
+        # --running flag still exit 0
+        run_capture_stdout 0 "$output" ../../bin/lthn process list --running
+        assert_jq 'type == "array"' "$output"
+        EOF

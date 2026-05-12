@@ -1,0 +1,70 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../_lib/run.sh
+
+        isolate_home
+
+        # Pick a high random port to avoid clash with anything.
+        port=$((40000 + RANDOM % 20000))
+
+        # Boot the server in the background, log to a tempfile.
+        log="$(mktemp)"
+        ../bin/lthn serve --port "$port" >"$log" 2>&1 &
+        pid=$!
+
+        cleanup() {
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          rm -f "$log"
+          rm -rf "$LTHN_TEST_HOME"
+        }
+        trap cleanup EXIT
+
+        # Wait for the listener (max 5s).
+        for i in $(seq 1 50); do
+          if curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/health" 2>/dev/null | grep -q '^200$'; then
+            break
+          fi
+          sleep 0.1
+        done
+
+        out="$(mktemp)"
+        trap "rm -f $out; cleanup" EXIT
+
+        # /health
+        run_capture_stdout 0 "$out" curl -sS "http://127.0.0.1:$port/health"
+        assert_jq '.status == "ok"' "$out"
+        assert_jq '.service == "lthn"' "$out"
+
+        # /v1/models
+        run_capture_stdout 0 "$out" curl -sS "http://127.0.0.1:$port/v1/models"
+        assert_jq '.object == "list"' "$out"
+        assert_jq '.data | type == "array"' "$out"
+
+        # /v1/chat/completions — stub today, OpenAI-shaped envelope
+        run_capture_stdout 0 "$out" curl -sS -X POST \
+          -H 'Content-Type: application/json' \
+          -d '{"messages":[{"role":"user","content":"ping"}]}' \
+          "http://127.0.0.1:$port/v1/chat/completions"
+        assert_jq '.object == "chat.completion"' "$out"
+        assert_jq '.choices[0].message.role == "assistant"' "$out"
+        assert_jq '.choices[0].finish_reason == "stop"' "$out"
+
+        # /v1/completions
+        run_capture_stdout 0 "$out" curl -sS -X POST \
+          -H 'Content-Type: application/json' \
+          -d '{"prompt":"hello"}' \
+          "http://127.0.0.1:$port/v1/completions"
+        assert_jq '.object == "text_completion"' "$out"
+        assert_jq '.choices[0].finish_reason == "stop"' "$out"
+
+        # Wrong method on /v1/chat/completions — 405
+        code="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/v1/chat/completions")"
+        [[ "$code" == "405" ]] || { echo "expected 405, got $code" >&2; exit 1; }
+        EOF

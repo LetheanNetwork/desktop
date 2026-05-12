@@ -1,0 +1,25 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # Missing KEY — exit 2
+        run_capture_all 2 "$output" ../../bin/lthn config get
+        assert_contains "usage" "$output"
+
+        # Seed a value
+        ../../bin/lthn config set runner.timeout 30s
+
+        # Read it back — exit 0, JSON-marshalled string
+        run_capture_stdout 0 "$output" ../../bin/lthn config get runner.timeout
+        assert_contains "30s" "$output"
+        EOF

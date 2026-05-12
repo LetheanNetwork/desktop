@@ -1,0 +1,34 @@
+version: "3"
+
+# Top-level CLI test runner for lthn. Each subsystem has its own folder
+# with a Taskfile.yaml that runs its leaf verb tests. Pattern mirrors
+# core/agent/tests/cli — Taskfile-driven, _lib/run.sh helpers, leaf
+# folder per verb.
+#
+# Run all:    task -d go/tests/cli test
+# Run one:    task -d go/tests/cli/config test
+# Run leaf:   task -d go/tests/cli/config/set test
+
+tasks:
+  test:
+    desc: Run every CLI test in subsystem order
+    deps: [build]
+    cmds:
+      - task -d version test
+      - task -d help test
+      - task -d config test
+      - task -d state test
+      - task -d events test
+      - task -d process test
+      - task -d serve test
+
+  build:
+    desc: Build the lthn binary the tests will exercise
+    dir: ../../..
+    cmds:
+      - go build -o go/tests/cli/bin/lthn ./go/cmd/lthn
+
+  clean:
+    desc: Remove the test binary
+    cmds:
+      - rm -rf bin
