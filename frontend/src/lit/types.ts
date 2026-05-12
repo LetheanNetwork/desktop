@@ -60,6 +60,26 @@ export interface Conversation {
   model:   string;
 }
 
+/* ── model browser (display, derived from ModelsService.Entry + runner) ── */
+
+export type LocalModelStatus = "loaded" | "available" | "downloading" | "error";
+
+export interface LocalModel {
+  id:     string;            // slug (kebab-case)
+  name:   string;            // friendly label
+  family: string;            // "Gemma" / "Llama" / "Phi" / "Qwen"
+  size:   string;            // human-readable "2.1 GB"
+  status: LocalModelStatus;
+}
+
+/* ── chrome primitives (lit-chrome) ────────────────────────────── */
+
+export type BtnTone   = "primary" | "ghost" | "quiet" | "danger";
+export type BtnSize   = "sm" | "md" | "lg";
+export type StatusDotVariant = "ok" | "warn" | "err" | "idle" | "active";
+export type StatePillVariant = "connected" | "running" | "queued" | "disconnected" | "preview" | "latest";
+
 /* ── shared template helpers ───────────────────────────────────── */
 
-export type LitContent = TemplateResult | string | typeof import("lit").nothing | unknown;
+import type { nothing } from "lit";
+export type LitContent = TemplateResult | string | typeof nothing | null;

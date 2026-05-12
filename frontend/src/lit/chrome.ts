@@ -19,15 +19,18 @@
  */
 
 import { LitElement, html, nothing, type TemplateResult } from "lit";
+import type {
+  BtnTone, BtnSize, StatusDotVariant, StatePillVariant, LitContent,
+} from "./types";
 
 export interface ChromeOptions {
   title?:    string;
   subtitle?: string;
   w?:        number;
   h?:        number;
-  toolbar?:  TemplateResult | typeof nothing | null;
-  body?:     TemplateResult | typeof nothing | null;
-  footer?:   TemplateResult | typeof nothing | null;
+  toolbar?:  LitContent;
+  body?:     LitContent;
+  footer?:   LitContent;
 }
 
 declare global {
@@ -102,10 +105,10 @@ class LthnBtn extends LitElement {
     active: { type: Boolean, reflect: true },
     dim:    { type: Boolean, reflect: true },
   };
-  declare tone: string;
-  declare size: string;
+  declare tone:   BtnTone;
+  declare size:   BtnSize;
   declare active: boolean;
-  declare dim: boolean;
+  declare dim:    boolean;
   constructor() { super(); this.tone = "ghost"; this.size = "md"; this.active = false; this.dim = false; }
   createRenderRoot() { return this; }
   render() {
@@ -114,14 +117,14 @@ class LthnBtn extends LitElement {
       md: { pad: "6px 12px", font: 12,   gap: 7 },
       lg: { pad: "9px 16px", font: 13,   gap: 8 },
     };
-    const s = sizes[this.size as keyof typeof sizes] || sizes.md;
+    const s = sizes[this.size] || sizes.md;
     const tones = {
       primary: { bg: "linear-gradient(180deg, var(--brand-400), var(--brand-500))", color: "#fff", border: "1px solid rgba(64,193,197,0.45)", shadow: "0 1px 0 rgba(255,255,255,0.10) inset, 0 1px 2px rgba(0,0,0,0.30)" },
       ghost:   { bg: this.active ? "rgba(64,193,197,0.10)" : "rgba(255,255,255,0.04)", color: this.active ? "var(--brand-300)" : "var(--fg-1)", border: this.active ? "1px solid rgba(64,193,197,0.30)" : "1px solid rgba(255,255,255,0.07)", shadow: "none" },
       quiet:   { bg: "transparent", color: "var(--fg-2)", border: "1px solid transparent", shadow: "none" },
       danger:  { bg: "rgba(255,76,76,0.12)", color: "var(--err-300, #ffb4b4)", border: "1px solid rgba(255,76,76,0.30)", shadow: "none" },
     };
-    const t = tones[this.tone as keyof typeof tones] || tones.ghost;
+    const t = tones[this.tone] || tones.ghost;
     return html`
       <button style="
         display:inline-flex; align-items:center; gap:${s.gap}px;
@@ -174,8 +177,8 @@ customElements.define("lthn-toggle", LthnToggle);
 /* ────────────────────────────────── <lthn-status-dot> ───────────── */
 class LthnStatusDot extends LitElement {
   static properties = { variant: { type: String, reflect: true }, pulse: { type: Boolean } };
-  declare variant: string;
-  declare pulse: boolean;
+  declare variant: StatusDotVariant;
+  declare pulse:   boolean;
   constructor() { super(); this.variant = "ok"; this.pulse = false; }
   createRenderRoot() { return this; }
   render() {
@@ -190,7 +193,7 @@ customElements.define("lthn-status-dot", LthnStatusDot);
 /* ────────────────────────────────── <lthn-state-pill> ───────────── */
 class LthnStatePill extends LitElement {
   static properties = { variant: { type: String, reflect: true } };
-  declare variant: string;
+  declare variant: StatePillVariant;
   constructor() { super(); this.variant = "connected"; }
   createRenderRoot() { return this; }
   render() {
@@ -202,7 +205,7 @@ class LthnStatePill extends LitElement {
       preview:      { bg:"rgba(245,158,11,0.10)",  bd:"rgba(245,158,11,0.22)",  fg:"var(--warning-400)" },
       latest:       { bg:"rgba(64,193,197,0.10)",  bd:"rgba(64,193,197,0.22)",  fg:"var(--brand-300)" },
     };
-    const t = map[this.variant as keyof typeof map] || map.queued;
+    const t = map[this.variant] || map.queued;
     return html`
       <span style="font-family:var(--font-mono); font-size:9.5px; padding:2px 8px; border-radius:999px; background:${t.bg}; border:1px solid ${t.bd}; color:${t.fg}; letter-spacing:0.06em; text-transform:uppercase; display:inline-block; width:fit-content;">
         <slot></slot>

@@ -4,6 +4,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
+import type { LitContent } from "../types";
 
 class LthnSettingsWindow extends LitElement {
   static properties = {
@@ -64,7 +65,7 @@ class LthnSettingsWindow extends LitElement {
     });
   }
 
-  _section({ title, desc, open, content }: { title: string; desc?: string; open: boolean; content: unknown }) {
+  _section({ title, desc, open, content }: { title: string; desc?: string; open: boolean; content: LitContent }) {
     return html`
       <div style="display:flex; flex-direction:column; gap:14px;">
         <div style="display:flex; align-items:center; gap:8px;">
@@ -83,7 +84,7 @@ class LthnSettingsWindow extends LitElement {
     `;
   }
 
-  _row(label: string, hint: string | null, control: unknown) {
+  _row(label: string, hint: string | null, control: LitContent) {
     return html`
       <div style="display:grid; grid-template-columns: 200px 1fr; gap:18px; align-items:flex-start; padding-top:8px;">
         <div style="display:flex; flex-direction:column; gap:3px;">

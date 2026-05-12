@@ -4,6 +4,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
+import type { LocalModel } from "../types";
 
 class LthnModelBrowserWindow extends LitElement {
   static properties = {
@@ -18,7 +19,7 @@ class LthnModelBrowserWindow extends LitElement {
   createRenderRoot() { return this; }
 
   render() {
-    const local = [
+    const local: LocalModel[] = [
       { id:"gemma-4-e2b",  name:"gemma-4-e2b",  family:"Gemma", size:"2.1 GB", status:"loaded" },
       { id:"llama-3.2-3b", name:"llama-3.2-3b", family:"Llama", size:"3.4 GB", status:"available" },
       { id:"phi-3.5-mini", name:"phi-3.5-mini", family:"Phi",   size:"2.6 GB", status:"available" },
@@ -152,7 +153,7 @@ class LthnModelBrowserWindow extends LitElement {
     });
   }
 
-  _localItem(m: { id: string; name: string; family: string; size: string; status: string }) {
+  _localItem(m: LocalModel) {
     const active = m.id === this.selected;
     const tone = m.status === "loaded" ? "var(--success-400)"
                : m.status === "downloading" ? "var(--warning-400)"
