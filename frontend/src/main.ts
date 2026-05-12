@@ -30,7 +30,16 @@ switch (surface) {
      *   - sparkline data  ← heap_alloc_mb samples (last 24)
      *   - connection dot  ← Sample() throwing → err; success → ok
      */
-    import("@service").then(({ TelemetryService, RunnerService }) => {
+    import("@service").then(({ TelemetryService, RunnerService, WindowService }) => {
+      /* Open a named window via the Go-side WindowService. Names are
+       * the same keys in pkg/desktop/windows.go's registry — chat,
+       * models, settings, welcome, about. */
+      const openWindow = (name: string) => () => {
+        WindowService.Open(name).catch((err: unknown) => {
+          console.error(`open ${name} failed:`, err);
+        });
+      };
+
       interface TrayState {
         model:     string;
         uptime:    number;
@@ -67,7 +76,7 @@ switch (surface) {
           subtitle: state.err ? "local · offline" : "local · ready",
           w: 400, h: 560,
           body: html`
-            <div style="display:flex; flex-direction:column; gap:14px; padding:14px; flex:1; min-height:0; overflow-y:auto;">
+            <div style="display:flex; flex-direction:column; gap:14px; padding:14px; flex:1; min-height:0; overflow-y:auto; overscroll-behavior: none;">
               <section style="display:flex; align-items:center; gap:10px; padding:10px 12px;
                               background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.06); border-radius:8px;">
                 <lthn-status-dot variant=${variant} ?pulse=${state.connected}></lthn-status-dot>
@@ -82,10 +91,11 @@ switch (surface) {
 
               <section style="display:flex; flex-direction:column; gap:6px;">
                 <lthn-label>Open</lthn-label>
-                <lthn-btn tone="ghost" size="md" @click=${() => location.assign("?surface=chat")}>Chat</lthn-btn>
-                <lthn-btn tone="ghost" size="md" @click=${() => location.assign("?surface=models")}>Models</lthn-btn>
-                <lthn-btn tone="ghost" size="md" @click=${() => location.assign("?surface=settings")}>Settings</lthn-btn>
-                <lthn-btn tone="ghost" size="md" @click=${() => location.assign("?surface=telemetry")}>Telemetry</lthn-btn>
+                <lthn-btn tone="primary" size="md" @click=${openWindow("app")}>Lethean Desktop</lthn-btn>
+                <lthn-btn tone="ghost" size="md" @click=${openWindow("chat")}>Chat</lthn-btn>
+                <lthn-btn tone="ghost" size="md" @click=${openWindow("models")}>Models</lthn-btn>
+                <lthn-btn tone="ghost" size="md" @click=${openWindow("settings")}>Settings</lthn-btn>
+                <lthn-btn tone="ghost" size="md" @click=${openWindow("telemetry")}>Telemetry</lthn-btn>
               </section>
 
               <section style="display:flex; flex-direction:column; gap:8px; padding:10px 12px;
@@ -95,7 +105,7 @@ switch (surface) {
                   <span style="flex:1"></span>
                   <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--brand-300);">${state.heapMb.toFixed(1)} MB</span>
                 </div>
-                <lthn-sparkline width="372" height="32" data=${sparkData} max=${sparkMax} fill></lthn-sparkline>
+                <lthn-sparkline width="340" height="32" data=${sparkData} max=${sparkMax} fill></lthn-sparkline>
               </section>
             </div>
           `,
@@ -138,6 +148,15 @@ switch (surface) {
   case "chat": {
     const state = params.get("state") || "multi-turn";
     app.innerHTML = `<lthn-chat-window state="${state}"></lthn-chat-window>`;
+    break;
+  }
+  case "app": {
+    /* Lethean-6 application shell — single frameless main window with
+     * titlebar + side-nav + body that auto-mounts the matching window
+     * for the `active` nav entry. ?pane=chat|models|settings|... picks
+     * the initial view; the nav buttons swap thereafter. */
+    const pane = params.get("pane") || "chat";
+    app.innerHTML = `<lthn-app-shell active="${pane}"></lthn-app-shell>`;
     break;
   }
   case "welcome": {

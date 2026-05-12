@@ -7,8 +7,19 @@
   <link rel="stylesheet" href="/src/tokens.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; background: var(--surf-0, #0a0a0e); color: var(--fg-0, #f0f0f5); font-family: var(--font-sans, "Geist", system-ui); }
-    #app { height: 100%; }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      background: var(--surf-0, #0a0a0e);
+      color: var(--fg-0, #f0f0f5);
+      font-family: var(--font-sans, "Geist", system-ui);
+      /* Kill the macOS WebKit rubber-band overscroll — every named
+         lthn window has internal scrolling where needed; the OS
+         shouldn't bounce the whole page when content fits. */
+      overflow: hidden;
+      overscroll-behavior: none;
+      -webkit-overflow-scrolling: auto;
+    }
+    #app { height: 100%; overscroll-behavior: none; }
   </style>
 </head>
 <body>

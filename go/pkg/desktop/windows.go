@@ -47,11 +47,25 @@ type WindowSpec struct {
 // open. Today: chat (full chat surface), models (model browser),
 // settings (preferences), about (about box).
 func windowRegistry() []WindowSpec {
+	// All windows ship frameless — renderChrome() / lthn-app-shell
+	// paint their own titlebar + traffic-lights, so the native macOS
+	// chrome would be a second, redundant set (Snider confirmed in
+	// the Lethean-6 handover: "frameless yes, rounded edges yes").
+	// The body's border-radius:11px from renderChrome provides the
+	// rounded card; window.BackgroundIsTransparent (set on app
+	// construction in desktop.go) lets the rounded corners actually
+	// show transparency at the four corners.
 	return []WindowSpec{
-		{Name: "welcome", Title: "Welcome to lthn", Width: 760, Height: 580, HideOnClose: true},
-		{Name: "chat", Title: "Lethean Chat", Width: 900, Height: 700, MinWidth: 600, MinHeight: 400, HideOnClose: true, EnableFileDrop: true},
-		{Name: "models", Title: "Models", Width: 800, Height: 600, MinWidth: 500, MinHeight: 400, HideOnClose: true, EnableFileDrop: true},
-		{Name: "settings", Title: "Settings", Width: 700, Height: 550, MinWidth: 500, MinHeight: 400, HideOnClose: true},
+		{Name: "welcome", Title: "Welcome to lthn", Width: 760, Height: 580, HideOnClose: true, Frameless: true},
+		// `app` is the Lethean-6 unified application shell — single
+		// window holding titlebar + grouped side-nav + body that
+		// auto-mounts any <lthn-*-window>. Tray buttons open this with
+		// ?pane=<id> set; the side-nav swaps panes internally thereafter.
+		{Name: "app", Title: "Lethean Desktop", Width: 1200, Height: 800, MinWidth: 900, MinHeight: 600, Frameless: true, HideOnClose: true, EnableFileDrop: true},
+		{Name: "chat", Title: "Lethean Chat", Width: 900, Height: 700, MinWidth: 600, MinHeight: 400, HideOnClose: true, EnableFileDrop: true, Frameless: true},
+		{Name: "models", Title: "Models", Width: 800, Height: 600, MinWidth: 500, MinHeight: 400, HideOnClose: true, EnableFileDrop: true, Frameless: true},
+		{Name: "settings", Title: "Settings", Width: 700, Height: 550, MinWidth: 500, MinHeight: 400, HideOnClose: true, Frameless: true},
+		{Name: "telemetry", Title: "Telemetry", Width: 880, Height: 560, MinWidth: 600, MinHeight: 400, HideOnClose: true, Frameless: true},
 		{Name: "about", Title: "About Lethean Desktop", Width: 420, Height: 320, Frameless: true},
 	}
 }
@@ -73,6 +87,12 @@ func preCreateWindows(app *application.App) {
 			Hidden:         true,
 			EnableFileDrop: spec.EnableFileDrop,
 			URL:            "/?surface=" + spec.Name,
+			// Transparent background so the rounded corners of the
+			// renderChrome()-painted lthn-window card aren't framed by
+			// an opaque OS rectangle. The Lit body has border-radius
+			// 11px (Lethean-6 canon); without alpha=0 here you'd see
+			// dark grey squares behind each rounded corner.
+			BackgroundColour: application.NewRGBA(0, 0, 0, 0),
 		})
 
 		if spec.HideOnClose {

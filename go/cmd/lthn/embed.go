@@ -17,10 +17,23 @@ var frontendDist embed.FS
 
 // trayIcon is the embedded hoplite-helmet systray icon. On macOS
 // it's used as a template icon — only the alpha channel matters,
-// the OS handles dark/light-mode tinting automatically. The white
-// variant is the canonical default; tray-black.png is available
-// as a fallback if the white template ever renders invisible on
-// a future macOS version.
+// the OS handles dark/light-mode tinting automatically.
+//
+// File: 256×256 tight-cropped hoplite (copied verbatim from
+// core/ide/icons/apptray.png — the proven asset Snider built for
+// core-ide's systray, same SetTemplateIcon pipeline).
+// tray-black.png is kept as a fallback if the template renders
+// invisible on some future macOS version.
 //
 //go:embed assets/tray.png
 var trayIcon []byte
+
+// appIcon is the embedded application icon used by application.Options.Icon
+// — Wails renders it in the default About dialog. The macOS Dock /
+// Launchpad / Finder bundle icon comes separately from
+// build/darwin/icons.icns (regenerated from build/appicon.png by
+// `task common:generate:icons`); both files are derived from the
+// same gradient hoplite master so they stay visually consistent.
+//
+//go:embed assets/app-icon.png
+var appIcon []byte

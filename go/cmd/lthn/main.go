@@ -209,6 +209,7 @@ func cmdGUI(args []string) int {
 		Core:        c,
 		Runner:      r,
 		TrayIcon:    trayIcon,
+		AppIcon:     appIcon,
 	})
 	if rr := d.Run(); !rr.OK {
 		core.Print(core.Stderr(), "lthn gui: %s\n", rr.Error())

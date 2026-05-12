@@ -74,7 +74,7 @@ class LthnTrafficLights extends LitElement {
   createRenderRoot() { return this; }
   render() {
     return html`
-      <div style="display:flex; gap:8px; align-items:center;">
+      <div style="display:flex; gap:8px; align-items:center; --wails-draggable: no-drag;">
         <span style="width:12px; height:12px; border-radius:50%; background:#ff5f57;"></span>
         <span style="width:12px; height:12px; border-radius:50%; background:#febc2e;"></span>
         <span style="width:12px; height:12px; border-radius:50%; background:#28c840;"></span>
@@ -110,7 +110,11 @@ class LthnBtn extends LitElement {
   declare active: boolean;
   declare dim:    boolean;
   constructor() { super(); this.tone = "ghost"; this.size = "md"; this.active = false; this.dim = false; }
-  createRenderRoot() { return this; }
+  // Shadow DOM (default) — required because the template uses <slot>
+  // to project the button label. Light DOM would leave the slot inert
+  // (appears empty next to the slotted text). Per feedback memory
+  // feedback_lit_shadow_dom_rules.md: slot → Shadow DOM. All styles
+  // are inline so the token-css-doesn't-cross-shadow caveat is moot.
   render() {
     const sizes = {
       sm: { pad: "4px 9px",  font: 11,   gap: 6 },
@@ -239,9 +243,12 @@ class LthnSparkline extends LitElement {
       // procedurally generate a calm wave so a bare <lthn-sparkline> still draws something
       samples = Array.from({length: 24}, (_, i) => 30 + Math.sin(i * 0.7) * 10 + Math.sin(i * 1.3) * 5);
     }
-    const w = this.width, h = this.height, m = this.max;
+    const w = this.width, h = this.height, m = this.max || 1;
+    // With a single sample the x-step formula `i / (n-1)` divides by zero.
+    // Draw a flat horizontal line across the canvas instead.
+    const xStep = samples.length > 1 ? w / (samples.length - 1) : 0;
     const path = "M " + samples.map((s, i) =>
-      `${(i / (samples.length - 1)) * w} ${h - (s / m) * h}`
+      `${(samples.length > 1 ? i * xStep : w / 2)} ${h - (s / m) * h}`
     ).join(" L ");
     return html`
       <svg viewBox="0 0 ${w} ${h}" width=${w} height=${h} style="display:block;">
@@ -285,10 +292,13 @@ export function renderChrome({ title, subtitle, w = 900, h = 600, toolbar, body,
       color: var(--fg-1);
       font-family: var(--font-sans);
     ">
-      <!-- titlebar -->
+      <!-- titlebar — Wails3 frameless drag region via --wails-draggable.
+           Interactive children should override with --wails-draggable: no-drag. -->
       <header style="
         display:flex; align-items:center; gap:14px;
         height:40px; padding:0 14px;
+        --wails-draggable: drag;
+        user-select: none;
         background: rgba(255,255,255,0.015);
         border-bottom: 1px solid rgba(255,255,255,0.04);
         flex-shrink:0;

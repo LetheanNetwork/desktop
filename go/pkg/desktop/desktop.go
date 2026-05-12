@@ -73,6 +73,12 @@ type Options struct {
 	// TrayIcon is the light-mode systray icon bytes. Empty = use the
 	// Wails default macOS template glyph.
 	TrayIcon []byte
+	// AppIcon is the application icon shown in the default About box
+	// (application.Options.Icon). Empty = Wails-default 'W'. macOS
+	// Dock / Launchpad uses build/darwin/icons.icns from the .app
+	// bundle separately; both should derive from the same source PNG
+	// to stay visually consistent.
+	AppIcon []byte
 }
 
 // Service holds the Wails application and the SystemTray anchor.
@@ -165,6 +171,7 @@ func (s *Service) Run() core.Result {
 	s.app = application.New(application.Options{
 		Name:        s.opts.Name,
 		Description: s.opts.Description,
+		Icon:        s.opts.AppIcon,
 		Services:    wailsServices,
 		Mac: application.MacOptions{
 			// Tray IS the process — closing every window must NOT quit.
@@ -352,9 +359,21 @@ func (s *Service) attachSPA() error {
 // ginMiddleware delegates /wails/* requests back to Wails, hands
 // everything else to the engine. Matches the example at
 // wails/v3/examples/gin-routing/main.go.
+//
+// One carve-out: /wails/custom.js. Wails' runtime fetches this URL
+// at boot to allow user-supplied JS overrides; we don't ship any,
+// so the default Wails handler returns 404 and spams the console.
+// Intercept here and return an empty 200 instead — the runtime
+// happily continues with no overrides applied.
 func ginMiddleware(engine http.Handler) application.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/wails/custom.js" {
+				w.Header().Set("Content-Type", "application/javascript")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("/* no user overrides */\n"))
+				return
+			}
 			if strings.HasPrefix(r.URL.Path, "/wails") {
 				next.ServeHTTP(w, r)
 				return
