@@ -20,6 +20,7 @@ use (
 	./external/i18n/go
 	./external/inference/go
 	./external/io/go
+	./external/orm/go
 	./external/process/go
 	./external/store/go
 	./external/stream/go
