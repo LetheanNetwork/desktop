@@ -143,6 +143,39 @@ tasks:
     cmds:
       - task: create:app:bundle
 
+  create:dmg:
+    summary: Creates a DMG disk image for distribution
+    # Mirrors wails3's internal dmg.Creator wiring at
+    # v3/internal/commands/dmg/dmg.go — alpha.91 ships the Go
+    # package but tool_package.go has the dispatch disabled with
+    # a stale "missing dmg package" error. macos.mdx documents
+    # the `darwin:create:dmg` task as the canonical entrypoint;
+    # we provide the hdiutil flow locally until upstream re-enables.
+    #
+    # The staged temp directory + Applications symlink gives the
+    # standard drag-to-install UX: the mounted volume shows the
+    # .app on the left and an Applications shortcut on the right.
+    #
+    # Consumes whatever .app already exists at bin/<APP_NAME>.app —
+    # so the caller chooses whether that's the host-arch .app from
+    # `wails3 task darwin:package` or the universal .app from
+    # `wails3 task darwin:package:universal`. Run one of those first.
+    preconditions:
+      - sh: test -d "{{.BIN_DIR}}/{{.APP_NAME}}.app"
+        msg: "{{.BIN_DIR}}/{{.APP_NAME}}.app not found. Run `wails3 task darwin:package` (host arch) or `wails3 task darwin:package:universal` (both arches) first."
+    cmds:
+      - |-
+        set -e
+        STAGE="$(mktemp -d -t lthn-dmg-stage)"
+        trap 'rm -rf "$STAGE"' EXIT
+        cp -R "{{.BIN_DIR}}/{{.APP_NAME}}.app" "$STAGE/"
+        ln -s /Applications "$STAGE/Applications"
+        rm -f "{{.BIN_DIR}}/{{.APP_NAME}}.dmg"
+        hdiutil create \
+          -volname "{{.APP_NAME}}" \
+          -srcfolder "$STAGE" \
+          -format UDZO -ov \
+          "{{.BIN_DIR}}/{{.APP_NAME}}.dmg"
 
   create:app:bundle:
     summary: Creates an `.app` bundle
