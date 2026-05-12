@@ -1,0 +1,347 @@
+/* ─────────────────────────────────────────────────────────
+   Lethean / Host UK — Dark-Calm Design Tokens
+   Tailwind v4 @theme-ready. Anchored to Vi's #663399 royal
+   purple, with brand-variant accents and an OFM slot reserved.
+   ─────────────────────────────────────────────────────── */
+
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap");
+
+:root {
+  /* ── Neutrals (ink with a barely-warm purple cast — never pure black) ── */
+  --ink-0:   oklch(0.14 0.012 285);   /* deepest — page bg                */
+  --ink-1:   oklch(0.18 0.012 285);   /* canvas / app background          */
+  --ink-2:   oklch(0.22 0.013 285);   /* card / surface 1                 */
+  --ink-3:   oklch(0.26 0.014 285);   /* surface 2 (elevated)             */
+  --ink-4:   oklch(0.32 0.014 285);   /* hover, popover, raised input     */
+  --ink-5:   oklch(0.42 0.012 285);   /* subtle border                    */
+  --ink-6:   oklch(0.55 0.010 285);   /* muted icon / divider strong      */
+
+  /* ── Foreground (paper-soft, never pure white — easier on eyes) ── */
+  --fg-0:    oklch(0.97 0.005 285);   /* primary text                     */
+  --fg-1:    oklch(0.88 0.006 285);   /* body text                        */
+  --fg-2:    oklch(0.74 0.008 285);   /* secondary                        */
+  --fg-3:    oklch(0.60 0.008 285);   /* tertiary, captions               */
+  --fg-4:    oklch(0.48 0.008 285);   /* placeholder, disabled            */
+
+  /* ── Hairlines ── */
+  --line-1:  color-mix(in oklch, var(--fg-0) 8%, transparent);
+  --line-2:  color-mix(in oklch, var(--fg-0) 14%, transparent);
+  --line-3:  color-mix(in oklch, var(--fg-0) 22%, transparent);
+
+  /* ── Brand accent (default = Host UK / Vi purple) ── */
+  --brand-50:  oklch(0.96 0.020 305);
+  --brand-100: oklch(0.90 0.045 305);
+  --brand-200: oklch(0.82 0.080 305);
+  --brand-300: oklch(0.72 0.115 305);
+  --brand-400: oklch(0.62 0.145 305);
+  --brand-500: oklch(0.54 0.160 305);   /* ≈ #663399 lineage              */
+  --brand-600: oklch(0.46 0.155 305);
+  --brand-700: oklch(0.38 0.130 305);
+  --brand-800: oklch(0.30 0.105 305);
+  --brand-900: oklch(0.22 0.075 305);
+
+  /* The eye-highlight gold becomes a universal warm accent. */
+  --gold-300: oklch(0.90 0.110 88);
+  --gold-400: oklch(0.84 0.130 88);
+  --gold-500: oklch(0.76 0.135 80);
+  --gold-600: oklch(0.66 0.135 70);
+
+  /* Vi's beak/feet — used for callouts, badges, "British warmth" */
+  --ember-400: oklch(0.78 0.140 55);
+  --ember-500: oklch(0.70 0.155 50);
+  --ember-600: oklch(0.60 0.155 45);
+
+  /* ── State colours (desaturated for dark-calm) ── */
+  --success-400: oklch(0.78 0.110 165);
+  --success-500: oklch(0.68 0.115 165);
+  --warning-400: oklch(0.82 0.115 78);
+  --warning-500: oklch(0.74 0.130 70);
+  --danger-400:  oklch(0.74 0.140 22);
+  --danger-500:  oklch(0.64 0.150 22);
+  --info-400:    oklch(0.78 0.090 230);
+  --info-500:    oklch(0.68 0.105 230);
+
+  /* ── Radii / spacing / shadow ── */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-2xl: 22px;
+  --r-pill: 999px;
+
+  --shadow-1: 0 1px 0 0 var(--line-1) inset, 0 1px 2px rgba(0,0,0,.25);
+  --shadow-2: 0 1px 0 0 var(--line-1) inset, 0 4px 14px rgba(0,0,0,.35);
+  --shadow-3: 0 1px 0 0 var(--line-2) inset, 0 12px 40px rgba(0,0,0,.5);
+
+  /* ── Type ── */
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+
+  /* Brand identity — set per data-brand on ancestor */
+  --brand-name: "Host UK";
+}
+
+/* ─────────────────────────────────────────────────────────
+   Brand variants — overrides set on [data-brand]
+   ─────────────────────────────────────────────────────── */
+[data-brand="hostuk"] {
+  /* default Vi purple — already set above */
+  --brand-name: "Host UK";
+  --brand-hue: 305;
+  --brand-secondary: var(--ember-500);
+}
+
+[data-brand="lethean"] {
+  /* Lethean brand guidelines — teal/cyan #40c1c5 + near-black #070b0b + warm grey #cccccb.
+   * Lethe = Greek river of forgetfulness/oblivion. Spartan helmet mark.
+   * Hue ~195 calibrated so --brand-400 lands on the canonical #40c1c5. */
+  --brand-50:  oklch(0.97 0.020 195);
+  --brand-100: oklch(0.91 0.038 195);
+  --brand-200: oklch(0.84 0.060 195);
+  --brand-300: oklch(0.78 0.085 195);
+  --brand-400: oklch(0.74 0.105 195);  /* canonical #40c1c5 */
+  --brand-500: oklch(0.66 0.115 195);
+  --brand-600: oklch(0.56 0.110 195);
+  --brand-700: oklch(0.46 0.090 195);
+  --brand-800: oklch(0.36 0.070 195);
+  --brand-900: oklch(0.26 0.050 195);
+  --brand-name: "Lethean";
+  --brand-hue: 195;
+  --brand-secondary: var(--info-500);
+}
+
+[data-brand="ofm"] {
+  /* Reserved slot — warm rose-amber for creator-agency vibe */
+  --brand-50:  oklch(0.96 0.022 28);
+  --brand-100: oklch(0.90 0.050 28);
+  --brand-200: oklch(0.82 0.085 28);
+  --brand-300: oklch(0.74 0.120 28);
+  --brand-400: oklch(0.66 0.145 28);
+  --brand-500: oklch(0.58 0.160 28);
+  --brand-600: oklch(0.50 0.150 28);
+  --brand-700: oklch(0.42 0.125 28);
+  --brand-800: oklch(0.34 0.100 28);
+  --brand-900: oklch(0.26 0.075 28);
+  --brand-name: "OFM";
+  --brand-hue: 28;
+  --brand-secondary: var(--gold-500);
+}
+
+/* ─────────────────────────────────────────────────────────
+   Native platform profiles.
+
+   The web is one platform. Darwin (Wails / WebView), iOS, and
+   iPadOS are separate platforms — same brand DNA, but the type,
+   density and chrome must FEEL native. We swap fonts and a few
+   tokens via [data-platform] so a single React tree can render
+   correctly on every surface.
+
+   Web profile (default)  → Geist · 13.5–15px body · 8px radii
+   Darwin profile         → SF Pro · 13px body · 6px radii · denser
+   iOS profile            → SF Pro Text · 17pt body · 10px radii
+   iPadOS profile         → SF Pro Text · 15pt body · 10px radii
+   ─────────────────────────────────────────────────────── */
+
+[data-platform="darwin"] {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "Helvetica Neue", sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "Menlo", monospace;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro", sans-serif;
+
+  /* tighter radii for desktop chrome */
+  --r-xs: 3px;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-xl: 10px;
+  --r-2xl: 14px;
+
+  /* macOS prefers slightly cooler hairlines */
+  --line-1: color-mix(in oklch, var(--fg-0) 7%, transparent);
+  --line-2: color-mix(in oklch, var(--fg-0) 13%, transparent);
+}
+
+[data-platform="ios"], [data-platform="ipad"] {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "Helvetica Neue", sans-serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, monospace;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro", sans-serif;
+
+  /* iOS likes a touch more curve, especially on grouped lists */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+  --r-2xl: 22px;
+}
+
+/* Native list-row chrome — used by Darwin/iOS/iPad shells.
+   Keeps the body data identical; only the row+separator change. */
+.native-list { background: var(--ink-2); border: 1px solid var(--line-1); border-radius: var(--r-lg); overflow: hidden; }
+.native-list .row { display: flex; align-items: center; gap: 12px; padding: 0 14px; border-top: 1px solid var(--line-1); }
+.native-list .row:first-child { border-top: none; }
+.native-list .row .label { color: var(--fg-1); }
+.native-list .row .value { color: var(--fg-2); margin-left: auto; }
+[data-platform="darwin"] .native-list .row { height: 30px; font-size: 13px; }
+[data-platform="ios"] .native-list { border-radius: 14px; }
+[data-platform="ios"] .native-list .row { height: 50px; font-size: 17px; padding: 0 16px; }
+[data-platform="ipad"] .native-list .row { height: 44px; font-size: 15px; padding: 0 16px; }
+
+/* ─────────────────────────────────────────────────────────
+   Light mode — opt-in via [data-mode="light"] (Lethean only).
+   Host UK stays dark. Lethean gets a paired light variant
+   that uses the same colour math (relative chroma, hue
+   anchored to brand-hue) so the system stays one design.
+   ─────────────────────────────────────────────────────── */
+[data-mode="light"] {
+  --ink-0:   oklch(0.99 0.003 285);   /* page bg — barely-warm paper      */
+  --ink-1:   oklch(0.985 0.004 285);  /* canvas / app bg                  */
+  --ink-2:   oklch(0.97 0.005 285);   /* card / surface 1                 */
+  --ink-3:   oklch(0.94 0.006 285);   /* surface 2                        */
+  --ink-4:   oklch(0.90 0.007 285);   /* hover / popover                  */
+  --ink-5:   oklch(0.84 0.008 285);   /* subtle border                    */
+  --ink-6:   oklch(0.62 0.010 285);   /* muted icon / divider             */
+
+  --fg-0:    oklch(0.18 0.012 285);   /* primary text                     */
+  --fg-1:    oklch(0.28 0.012 285);   /* body text                        */
+  --fg-2:    oklch(0.42 0.010 285);   /* secondary                        */
+  --fg-3:    oklch(0.54 0.010 285);   /* tertiary                         */
+  --fg-4:    oklch(0.66 0.010 285);   /* placeholder                      */
+
+  --line-1:  color-mix(in oklch, var(--fg-0) 6%, transparent);
+  --line-2:  color-mix(in oklch, var(--fg-0) 12%, transparent);
+  --line-3:  color-mix(in oklch, var(--fg-0) 22%, transparent);
+
+  --shadow-1: 0 1px 0 0 rgba(255,255,255,.6) inset, 0 1px 2px rgba(20,18,30,.06);
+  --shadow-2: 0 1px 0 0 rgba(255,255,255,.6) inset, 0 4px 14px rgba(20,18,30,.08);
+  --shadow-3: 0 1px 0 0 rgba(255,255,255,.6) inset, 0 12px 40px rgba(20,18,30,.12);
+}
+
+/* ─────────────────────────────────────────────────────────
+   Base resets scoped to .surface so we don't fight the canvas
+   ─────────────────────────────────────────────────────── */
+.surface {
+  background: var(--ink-1);
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.surface *, .surface *::before, .surface *::after { box-sizing: border-box; }
+.surface h1, .surface h2, .surface h3, .surface h4 {
+  color: var(--fg-0);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  margin: 0;
+}
+.surface p { margin: 0; }
+.surface a { color: inherit; text-decoration: none; }
+.surface button { font: inherit; color: inherit; cursor: pointer; }
+.surface .num, .surface code, .surface kbd { font-family: var(--font-mono); font-feature-settings: "tnum","ss01"; }
+.surface .editorial { font-family: var(--font-serif); font-weight: 400; letter-spacing: -0.015em; }
+
+/* ─────────────────────────────────────────────────────────
+   Reusable atoms
+   ─────────────────────────────────────────────────────── */
+.surface .btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 8px; height: 40px; padding: 0 16px;
+  border-radius: var(--r-md);
+  font-weight: 500; font-size: 14px; letter-spacing: -0.005em;
+  border: 1px solid transparent;
+  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+  white-space: nowrap;
+}
+.surface .btn-primary {
+  background: var(--brand-500); color: var(--fg-0);
+  border-color: var(--brand-400);
+  box-shadow: inset 0 1px 0 var(--line-2), 0 1px 2px rgba(0,0,0,.35);
+}
+.surface .btn-primary:hover { background: var(--brand-400); }
+.surface .btn-secondary {
+  background: var(--ink-3); color: var(--fg-0);
+  border-color: var(--line-2);
+}
+.surface .btn-secondary:hover { background: var(--ink-4); border-color: var(--line-3); }
+.surface .btn-ghost { background: transparent; color: var(--fg-1); }
+.surface .btn-ghost:hover { background: var(--ink-3); color: var(--fg-0); }
+.surface .btn-lg { height: 48px; padding: 0 22px; font-size: 15px; border-radius: var(--r-lg); }
+.surface .btn-sm { height: 32px; padding: 0 12px; font-size: 13px; border-radius: var(--r-sm); }
+
+.surface .card {
+  background: var(--ink-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-lg);
+}
+.surface .card-elev {
+  background: var(--ink-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+}
+
+.surface .input {
+  width: 100%; height: 40px; padding: 0 12px;
+  background: var(--ink-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  color: var(--fg-0); font: inherit;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.surface .input:focus { outline: none; border-color: var(--brand-400); background: var(--ink-2); }
+.surface .input::placeholder { color: var(--fg-4); }
+
+.surface .label {
+  display: block; font-size: 12px; font-weight: 500;
+  color: var(--fg-2); margin-bottom: 6px;
+  letter-spacing: 0.01em; text-transform: none;
+}
+
+.surface .pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 22px; padding: 0 10px;
+  border-radius: var(--r-pill);
+  font-size: 11.5px; font-weight: 500;
+  background: var(--ink-3); color: var(--fg-2);
+  border: 1px solid var(--line-1);
+  letter-spacing: 0.005em;
+}
+.surface .pill-brand { background: color-mix(in oklch, var(--brand-500) 22%, var(--ink-2)); color: var(--brand-200); border-color: color-mix(in oklch, var(--brand-500) 35%, transparent); }
+.surface .pill-success { background: color-mix(in oklch, var(--success-500) 22%, var(--ink-2)); color: var(--success-400); border-color: color-mix(in oklch, var(--success-500) 35%, transparent); }
+.surface .pill-warn { background: color-mix(in oklch, var(--warning-500) 22%, var(--ink-2)); color: var(--warning-400); border-color: color-mix(in oklch, var(--warning-500) 35%, transparent); }
+
+.surface .divider { height: 1px; background: var(--line-1); width: 100%; }
+
+/* Subtle dotted texture for hero/bg moments */
+.surface .dot-grid {
+  background-image: radial-gradient(circle at 1px 1px, var(--line-2) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+/* Soft brand glow used sparingly */
+.surface .brand-glow {
+  background:
+    radial-gradient(ellipse 60% 80% at 70% 20%, color-mix(in oklch, var(--brand-500) 22%, transparent), transparent 60%),
+    radial-gradient(ellipse 50% 60% at 10% 90%, color-mix(in oklch, var(--brand-700) 18%, transparent), transparent 60%);
+}
+
+/* Stripes for placeholder image blocks */
+.surface .img-placeholder {
+  background:
+    repeating-linear-gradient(135deg,
+      var(--ink-3) 0 12px,
+      var(--ink-2) 12px 24px);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-md);
+  display: grid; place-items: center;
+  color: var(--fg-3); font-family: var(--font-mono); font-size: 11px;
+  text-align: center;
+}
+
+/* Currency/number alignment helper */
+.surface .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }

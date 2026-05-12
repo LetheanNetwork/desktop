@@ -1,0 +1,19 @@
+{
+  "name": "lthn-frontend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Lethean Desktop frontend — Lit primitives from Lethean-5",
+  "license": "EUPL-1.2",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "lit": "^3.1.4"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}

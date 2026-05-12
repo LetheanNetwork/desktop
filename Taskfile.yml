@@ -1,0 +1,65 @@
+version: "3"
+
+# lthn — Lethean Desktop build/dev tasks.
+#
+#   task dev          # frontend dev server (Vite, port 5173)
+#   task build        # production binary (preferred — go via `core build`)
+#   task frontend     # build frontend only
+#   task qa           # fmt + vet + test
+#   task qa:full      # + race + vuln + security
+#
+# Architecture: the lthn binary is the tray-rooted process. See
+# plans/project/lthn/desktop/RFC.first-release.md.
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list-all
+
+  dev:
+    desc: Start frontend dev server (Vite — design canvas)
+    dir: frontend
+    cmds:
+      - npm install
+      - npm run dev
+
+  frontend:
+    desc: Build frontend (Lit + Vite → frontend/dist)
+    dir: frontend
+    cmds:
+      - npm install
+      - npm run build
+
+  build:
+    desc: Production build (use `core build` from the workspace root for the canonical orchestration)
+    deps: [frontend]
+    cmds:
+      - go build -o bin/lthn ./cmd/lthn
+
+  qa:
+    desc: Format + vet + test
+    cmds:
+      - go fmt ./...
+      - go vet ./...
+      - go test ./...
+
+  qa:full:
+    desc: + race detector + vuln + security audit
+    cmds:
+      - go fmt ./...
+      - go vet ./...
+      - go test -race ./...
+      - which govulncheck >/dev/null && govulncheck ./... || echo "govulncheck not installed"
+
+  darwin:build:
+    desc: macOS build (signed .app bundle pending L codesigning config)
+    deps: [frontend]
+    cmds:
+      - GOOS=darwin GOARCH=arm64 go build -o bin/lthn ./cmd/lthn
+
+  darwin:package:
+    desc: macOS .app bundle (TODO — wire via core/gui's wails3 package or hand-rolled)
+    deps: [darwin:build]
+    cmds:
+      - echo "TODO — implement .app bundle packaging per core/gui's pattern"
