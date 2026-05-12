@@ -56,7 +56,12 @@ func registerSystemEvents(app *application.App) {
 //	WindowHide             → "lthn:window:hide"
 //	WindowShow             → "lthn:window:show"
 //	WindowDidResize        → "lthn:window:resize"
-//	WindowFilesDropped     → "lthn:window:files-dropped"  (file paths)
+//	WindowFilesDropped     → "lthn:window:files-dropped"
+//	   payload: { files: []string, target: { id, classList, x, y, attributes } }
+//	   Requires EnableFileDrop: true on the window spec. Frontend
+//	   marks drop zones with data-file-drop-target; the element's
+//	   id + classList come back in target so handlers can route
+//	   (drop on #chat-attach → upload; drop on #model-import → import).
 func registerWindowEvents(app *application.App, window application.Window) {
 	emit := func(verb string, payload any) {
 		app.Event.Emit("lthn:window:"+verb, map[string]any{
@@ -72,6 +77,16 @@ func registerWindowEvents(app *application.App, window application.Window) {
 	window.OnWindowEvent(events.Common.WindowShow, func(_ *application.WindowEvent) { emit("show", nil) })
 	window.OnWindowEvent(events.Common.WindowDidResize, func(_ *application.WindowEvent) { emit("resize", nil) })
 	window.OnWindowEvent(events.Common.WindowFilesDropped, func(e *application.WindowEvent) {
-		emit("files-dropped", e.Context().DroppedFiles())
+		payload := map[string]any{"files": e.Context().DroppedFiles()}
+		if d := e.Context().DropTargetDetails(); d != nil {
+			payload["target"] = map[string]any{
+				"id":         d.ElementID,
+				"classList":  d.ClassList,
+				"x":          d.X,
+				"y":          d.Y,
+				"attributes": d.Attributes,
+			}
+		}
+		emit("files-dropped", payload)
 	})
 }

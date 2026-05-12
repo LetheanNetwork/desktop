@@ -34,6 +34,13 @@ type WindowSpec struct {
 	// when the window is part of the steady-state UX (chat,
 	// settings) — re-opening just shows it again.
 	HideOnClose bool
+	// EnableFileDrop accepts files dragged from the OS onto the
+	// window. When true, Wails fires WindowFilesDropped with the
+	// full filesystem paths + DropTargetDetails (which
+	// data-file-drop-target element received the drop). Off by
+	// default — chat and models surfaces opt in; settings/about
+	// don't need it.
+	EnableFileDrop bool
 }
 
 // windowRegistry returns the named windows the app knows how to
@@ -41,8 +48,8 @@ type WindowSpec struct {
 // settings (preferences), about (about box).
 func windowRegistry() []WindowSpec {
 	return []WindowSpec{
-		{Name: "chat", Title: "Lethean Chat", Width: 900, Height: 700, MinWidth: 600, MinHeight: 400, HideOnClose: true},
-		{Name: "models", Title: "Models", Width: 800, Height: 600, MinWidth: 500, MinHeight: 400, HideOnClose: true},
+		{Name: "chat", Title: "Lethean Chat", Width: 900, Height: 700, MinWidth: 600, MinHeight: 400, HideOnClose: true, EnableFileDrop: true},
+		{Name: "models", Title: "Models", Width: 800, Height: 600, MinWidth: 500, MinHeight: 400, HideOnClose: true, EnableFileDrop: true},
 		{Name: "settings", Title: "Settings", Width: 700, Height: 550, MinWidth: 500, MinHeight: 400, HideOnClose: true},
 		{Name: "about", Title: "About Lethean Desktop", Width: 420, Height: 320, Frameless: true},
 	}
@@ -55,15 +62,16 @@ func windowRegistry() []WindowSpec {
 func preCreateWindows(app *application.App) {
 	for _, spec := range windowRegistry() {
 		w := app.Window.NewWithOptions(application.WebviewWindowOptions{
-			Name:      spec.Name,
-			Title:     spec.Title,
-			Width:     spec.Width,
-			Height:    spec.Height,
-			MinWidth:  spec.MinWidth,
-			MinHeight: spec.MinHeight,
-			Frameless: spec.Frameless,
-			Hidden:    true,
-			URL:       "/?surface=" + spec.Name,
+			Name:           spec.Name,
+			Title:          spec.Title,
+			Width:          spec.Width,
+			Height:         spec.Height,
+			MinWidth:       spec.MinWidth,
+			MinHeight:      spec.MinHeight,
+			Frameless:      spec.Frameless,
+			Hidden:         true,
+			EnableFileDrop: spec.EnableFileDrop,
+			URL:            "/?surface=" + spec.Name,
 		})
 
 		if spec.HideOnClose {
