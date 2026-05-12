@@ -166,8 +166,16 @@ func (s *Service) Run() core.Result {
 		Description: s.opts.Description,
 		Services:    wailsServices,
 		Mac: application.MacOptions{
+			// Tray IS the process — closing every window must NOT quit.
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
-			ActivationPolicy:                                application.ActivationPolicyAccessory,
+			// Accessory: menu-bar only, no Dock icon, no Cmd+Tab entry.
+			ActivationPolicy: application.ActivationPolicyAccessory,
+		},
+		Windows: application.WindowsOptions{
+			// Windows-side equivalent of the Mac flag above — without
+			// this, closing the last window quits the process and the
+			// systray goes with it. v3/examples/systray-custom canon.
+			DisableQuitOnLastWindowClosed: true,
 		},
 		Assets: application.AssetOptions{
 			Handler:    engine,
