@@ -2,15 +2,18 @@
 
 // Package server exposes lthn's HTTP API surface. OpenAI-compatible
 // endpoints (/v1/chat/completions, /v1/completions, /v1/models) plus
-// a liveness probe (/health). The Service wraps core.HTTPServer +
-// core.ServeMux behind the canonical Mantis #1336 shape, so consumers
-// can wire it into a Core container or run it standalone via Start.
+// a liveness probe (/health), built on Gin per the Lethean design
+// canon — core/api is Gin-based, lthn services follow.
+//
+// The Service holds a *gin.Engine. Same engine is exposed two ways:
+//
+//	Start(ctx)      → standalone HTTP listener on opts.Addr (lthn serve)
+//	Handler()       → http.Handler for Wails Asset.Handler (lthn gui)
 //
 // The runner reference is optional. When unset, completion endpoints
 // echo the prompt and /v1/models reports the static stub list. When
 // set, requests are routed through the runner subsystem for real
-// inference. Decoupling lets `lthn serve` ship before go-mlx wiring
-// lands.
+// inference.
 //
 // Usage example:
 //
@@ -25,7 +28,11 @@
 package server
 
 import (
+	"context"
+	"net/http"
+
 	core "dappco.re/go"
+	"github.com/gin-gonic/gin"
 )
 
 // Runner is the optional inference surface the server consumes for
@@ -55,9 +62,9 @@ type Options struct {
 
 // Service is the HTTP API subsystem.
 type Service struct {
-	opts Options
-	mux  *core.ServeMux
-	http *core.HTTPServer
+	opts   Options
+	engine *gin.Engine
+	http   *http.Server
 }
 
 // NewService constructs the server with the canonical shape.
@@ -70,10 +77,13 @@ func NewService(opts Options) *Service {
 	if opts.Addr == "" {
 		opts.Addr = ":8000"
 	}
-	mux := &core.ServeMux{}
-	s := &Service{opts: opts, mux: mux}
+	gin.SetMode(gin.ReleaseMode)
+	engine := gin.New()
+	engine.HandleMethodNotAllowed = true // return 405 (not 404) on POST/GET mismatch
+	engine.Use(gin.Recovery())
+	s := &Service{opts: opts, engine: engine}
 	s.routes()
-	s.http = &core.HTTPServer{Addr: opts.Addr, Handler: mux}
+	s.http = &http.Server{Addr: opts.Addr, Handler: engine}
 	return s
 }
 
@@ -92,6 +102,33 @@ func (s *Service) Register(c *core.Core) core.Result {
 	return core.Ok(nil)
 }
 
+// Handler returns the http.Handler that serves the OpenAI-compatible
+// surface. Exposed so consumers (pkg/desktop's Wails Asset.Handler)
+// can mount the same routes the standalone `lthn serve` exposes
+// inside the WebView origin — no CORS, no port hunting.
+//
+// Usage example:
+//
+//	s := server.NewService(server.Options{Runner: r})
+//	app := application.New(application.Options{
+//	    Assets: application.AssetOptions{Handler: s.Handler()},
+//	})
+func (s *Service) Handler() http.Handler {
+	return s.engine
+}
+
+// Engine returns the underlying *gin.Engine for callers that need to
+// register additional routes (frontend SPA fallback, custom verbs).
+// pkg/desktop uses this to attach the SPA static handler.
+//
+// Usage example:
+//
+//	s := server.NewService(server.Options{})
+//	s.Engine().NoRoute(spaHandler)
+func (s *Service) Engine() *gin.Engine {
+	return s.engine
+}
+
 // Start begins serving HTTP on the configured Addr. Blocks until the
 // listener errors or Stop is called. Returns core.Ok(nil) on graceful
 // shutdown, core.Fail(err) otherwise.
@@ -99,29 +136,23 @@ func (s *Service) Register(c *core.Core) core.Result {
 // Usage example:
 //
 //	go func() { _ = s.Start(core.Background()) }()
-func (s *Service) Start(ctx core.Context) core.Result {
+func (s *Service) Start(_ core.Context) core.Result {
 	core.Print(core.Stdout(), "lthn serve: listening on %s\n", s.opts.Addr)
 	err := s.http.ListenAndServe()
-	if err == nil {
-		return core.Ok(nil)
-	}
-	// http.ErrServerClosed is the expected outcome of a graceful Stop.
-	if err.Error() == "http: Server closed" {
+	if err == nil || err == http.ErrServerClosed {
 		return core.Ok(nil)
 	}
 	return core.Fail(err)
 }
 
-// Stop gracefully shuts the server down within the context deadline.
+// Stop gracefully shuts the server down. Uses a background context
+// today — graceful-shutdown deadlines wire later via Options.
 //
 // Usage example:
 //
-//	ctx, cancel := core.WithTimeout(core.Background(), 5*core.Second)
-//	defer cancel()
-//	_ = s.Stop(ctx)
-func (s *Service) Stop(ctx core.Context) core.Result {
-	err := s.http.Shutdown(ctx)
-	if err != nil {
+//	_ = s.Stop(core.Background())
+func (s *Service) Stop(_ core.Context) core.Result {
+	if err := s.http.Shutdown(context.Background()); err != nil {
 		return core.Fail(err)
 	}
 	return core.Ok(nil)

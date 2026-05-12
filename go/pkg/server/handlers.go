@@ -1,20 +1,25 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-// HTTP handlers for the lthn API server. OpenAI-compatible shape for
-// /v1/models, /v1/chat/completions, /v1/completions. The handlers are
-// thin: parse request JSON, dispatch to the runner (or stub fallback),
-// marshal the response, write it. All Result-handling stays inside the
-// handler — the runner contract returns Result, not (T, error).
+// HTTP handlers for the lthn API server. Gin-based per the Lethean
+// design canon — same handler shape that core/api uses, so this
+// surface composes into core/api.Engine when the swagger / openapi
+// / authentik wrapping is needed later.
+//
+// OpenAI-compatible shape: /health, /v1/models, /v1/chat/completions,
+// /v1/completions. The handlers are thin: bind JSON, dispatch to the
+// runner (or stub fallback), respond.
 //
 // Usage example:
 //
 //	s := server.NewService(server.Options{Runner: r})
-//	mux := &core.ServeMux{}
-//	s.routes() // wires the OpenAI surface onto s.mux
+//	s.routes() // wires the OpenAI surface onto s.engine
 package server
 
 import (
+	"net/http"
+
 	core "dappco.re/go"
+	"github.com/gin-gonic/gin"
 )
 
 // healthResponse is the /health endpoint payload.
@@ -99,30 +104,28 @@ type errorBody struct {
 	Type    string `json:"type"`
 }
 
-// routes wires the OpenAI-compatible surface onto s.mux. Called from
-// NewService.
+// routes wires the OpenAI-compatible surface onto s.engine. Called
+// from NewService.
 func (s *Service) routes() {
-	s.mux.HandleFunc("/health", s.handleHealth)
-	s.mux.HandleFunc("/v1/models", s.handleModels)
-	s.mux.HandleFunc("/v1/chat/completions", s.handleChat)
-	s.mux.HandleFunc("/v1/completions", s.handleCompletion)
+	s.engine.GET("/health", s.handleHealth)
+	s.engine.GET("/v1/models", s.handleModels)
+	s.engine.POST("/v1/chat/completions", s.handleChat)
+	s.engine.POST("/v1/completions", s.handleCompletion)
 }
 
 // handleHealth returns the liveness probe response. Always 200 OK.
-func (s *Service) handleHealth(w core.ResponseWriter, r *core.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	writeJSON(w, healthResponse{Status: "ok", Service: "lthn"})
+func (s *Service) handleHealth(c *gin.Context) {
+	c.JSON(http.StatusOK, healthResponse{Status: "ok", Service: "lthn"})
 }
 
 // handleModels returns the OpenAI /v1/models list. Routes through the
 // runner when set; falls back to the stub list otherwise.
-func (s *Service) handleModels(w core.ResponseWriter, r *core.Request) {
-	w.Header().Set("Content-Type", "application/json")
+func (s *Service) handleModels(c *gin.Context) {
 	var ids []string
 	if s.opts.Runner != nil {
 		mr := s.opts.Runner.Models()
 		if !mr.OK {
-			writeError(w, 500, mr.Error(), "runner_error")
+			writeGinError(c, http.StatusInternalServerError, mr.Error(), "runner_error")
 			return
 		}
 		if v, ok := mr.Value.([]string); ok {
@@ -142,30 +145,20 @@ func (s *Service) handleModels(w core.ResponseWriter, r *core.Request) {
 			OwnedBy: "lthn",
 		})
 	}
-	writeJSON(w, resp)
+	c.JSON(http.StatusOK, resp)
 }
 
-// handleChat implements POST /v1/chat/completions. Non-streaming today;
-// streaming SSE responses land in the next pass.
-func (s *Service) handleChat(w core.ResponseWriter, r *core.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if r.Method != "POST" {
-		writeError(w, 405, "method not allowed", "invalid_request_error")
-		return
-	}
-	body := core.ReadAll(r.Body)
-	if !body.OK {
-		writeError(w, 400, body.Error(), "invalid_request_error")
-		return
-	}
+// handleChat implements POST /v1/chat/completions. Non-streaming
+// today; SSE responses land in the next pass.
+func (s *Service) handleChat(c *gin.Context) {
 	var req chatRequest
-	if pr := core.JSONUnmarshalString(body.Value.(string), &req); !pr.OK {
-		writeError(w, 400, pr.Error(), "invalid_request_error")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeGinError(c, http.StatusBadRequest, err.Error(), "invalid_request_error")
 		return
 	}
 	prompt := lastUserMessage(req.Messages)
 	reply := s.generate(prompt)
-	writeJSON(w, chatResponse{
+	c.JSON(http.StatusOK, chatResponse{
 		ID:      core.Concat("chatcmpl-", randID()),
 		Object:  "chat.completion",
 		Created: core.UnixNow(),
@@ -179,24 +172,14 @@ func (s *Service) handleChat(w core.ResponseWriter, r *core.Request) {
 }
 
 // handleCompletion implements POST /v1/completions.
-func (s *Service) handleCompletion(w core.ResponseWriter, r *core.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if r.Method != "POST" {
-		writeError(w, 405, "method not allowed", "invalid_request_error")
-		return
-	}
-	body := core.ReadAll(r.Body)
-	if !body.OK {
-		writeError(w, 400, body.Error(), "invalid_request_error")
-		return
-	}
+func (s *Service) handleCompletion(c *gin.Context) {
 	var req completionRequest
-	if pr := core.JSONUnmarshalString(body.Value.(string), &req); !pr.OK {
-		writeError(w, 400, pr.Error(), "invalid_request_error")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeGinError(c, http.StatusBadRequest, err.Error(), "invalid_request_error")
 		return
 	}
 	reply := s.generate(req.Prompt)
-	writeJSON(w, completionResponse{
+	c.JSON(http.StatusOK, completionResponse{
 		ID:      core.Concat("cmpl-", randID()),
 		Object:  "text_completion",
 		Created: core.UnixNow(),
@@ -258,26 +241,10 @@ func randID() string {
 	return "stub"
 }
 
-// writeJSON marshals v and writes it as the response body. On marshal
-// failure, writes a JSON error envelope at 500.
-func writeJSON(w core.ResponseWriter, v any) {
-	r := core.JSONMarshal(v)
-	if !r.OK {
-		writeError(w, 500, r.Error(), "encoding_error")
-		return
-	}
-	if b, ok := r.Value.([]byte); ok {
-		_, _ = w.Write(b)
-	}
-}
-
-// writeError writes an OpenAI-style error envelope at the given status.
-func writeError(w core.ResponseWriter, status int, msg, kind string) {
-	w.WriteHeader(status)
-	r := core.JSONMarshal(errorResponse{Error: errorBody{Message: msg, Type: kind}})
-	if r.OK {
-		if b, ok := r.Value.([]byte); ok {
-			_, _ = w.Write(b)
-		}
-	}
+// writeGinError writes an OpenAI-style error envelope at the given
+// HTTP status.
+func writeGinError(c *gin.Context, status int, msg, kind string) {
+	c.AbortWithStatusJSON(status, errorResponse{
+		Error: errorBody{Message: msg, Type: kind},
+	})
 }
