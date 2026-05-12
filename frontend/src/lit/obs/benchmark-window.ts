@@ -3,10 +3,12 @@
 // Light-DOM Lit element. Composes renderChrome() from ../chrome.js.
 
 import { LitElement, html, nothing } from "lit";
-import { renderChrome } from "../chrome.js";
+import { renderChrome } from "../chrome";
 
 class LthnBenchmarkWindow extends LitElement {
   static properties = { w: { type: Number }, h: { type: Number } };
+  declare w: number;
+  declare h: number;
   constructor() { super(); this.w = 1000; this.h = 660; }
   createRenderRoot() { return this; }
 
@@ -23,8 +25,8 @@ class LthnBenchmarkWindow extends LitElement {
       { ctx: 2048, tg: 47.2 }, { ctx: 4096, tg: 43.1 }, { ctx: 6144, tg: 38.4 }, { ctx: 8192, tg: 33.6 },
     ];
     const cw = 880, ch = 220, pad = { l: 48, r: 18, t: 16, b: 28 };
-    const xs = (c) => pad.l + (Math.log2(c / 128) / Math.log2(8192 / 128)) * (cw - pad.l - pad.r);
-    const ys = (t) => pad.t + (1 - (t - 20) / (60 - 20)) * (ch - pad.t - pad.b);
+    const xs = (c: number) => pad.l + (Math.log2(c / 128) / Math.log2(8192 / 128)) * (cw - pad.l - pad.r);
+    const ys = (t: number) => pad.t + (1 - (t - 20) / (60 - 20)) * (ch - pad.t - pad.b);
 
     const toolbar = html`
       <div style="display:flex; align-items:center; gap:6px; padding:4px 10px; border-radius:6px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); font-size:11px; color:var(--fg-1); font-family:var(--font-mono);">

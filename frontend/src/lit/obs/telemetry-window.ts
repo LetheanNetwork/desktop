@@ -3,10 +3,13 @@
 // Light-DOM Lit element. Composes renderChrome() from ../chrome.js.
 
 import { LitElement, html, nothing } from "lit";
-import { renderChrome } from "../chrome.js";
+import { renderChrome } from "../chrome";
 
 class LthnTelemetryWindow extends LitElement {
   static properties = { w: { type: Number }, h: { type: Number }, fullscreen: { type: Boolean } };
+  declare w: number;
+  declare h: number;
+  declare fullscreen: boolean;
   constructor() { super(); this.w = 880; this.h = 560; this.fullscreen = false; }
   createRenderRoot() { return this; }
 
@@ -14,7 +17,7 @@ class LthnTelemetryWindow extends LitElement {
     const tokSpark  = "38,41,44,45,46,47.2,47,46.8,47.1,47.4,47.2,47.0,47.3,47.2,47.4,47.2,47.1,47.3,47.2,47.0";
     const wattSpark = "0.6,0.8,4.2,7.8,8.2,8.4,8.3,8.4,8.5,8.4,8.3,8.4,8.4,8.5,8.4,8.3,8.4,8.4,8.3,8.2";
 
-    const big = (label, value, sub, glow, data, max) => html`
+    const big = (label: string, value: string, sub: string, glow: string, data: string, max: number) => html`
       <div style="display:flex; flex-direction:column; align-items:center; gap:10px;">
         <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); letter-spacing:0.20em; text-transform:uppercase;">${label}</div>
         <div style="font-family:var(--font-mono); font-size:92px; font-weight:300; color:var(--fg-0); letter-spacing:-0.04em; line-height:1; text-shadow:0 0 30px ${glow}55, 0 0 60px ${glow}22;">${value}</div>

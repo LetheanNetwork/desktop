@@ -3,39 +3,82 @@
 // Light-DOM Lit element. Composes renderChrome() from ../chrome.js.
 
 import { LitElement, html, nothing } from "lit";
-import { renderChrome } from "../chrome.js";
+import { renderChrome } from "../chrome";
+import type {
+  ChatState, ChatStateData, ChatTurn, ChatBanner, ChatComposer,
+  Conversation, RailData, RailMode, RightRailMode,
+} from "../types";
 
-function chatStateData(state) {
-  const railData = {
+/* ── data fixtures (shared with the React version) ────────────────── */
+const CONVERSATIONS: Conversation[] = [
+  { id:"c1", bucket:"today",     title:"Refactor the embed loop",  snippet:"Looks like the issue is the closure capturing…", model:"Gemma 4 E2B" },
+  { id:"c2", bucket:"today",     title:"Brief read · drone bill",  snippet:"Two paragraphs summarising the key clauses.",   model:"Llama 3.2 3B" },
+  { id:"c3", bucket:"yesterday", title:"JSON to TOML",             snippet:"Here's the converted config in TOML…",         model:"Gemma 4 E2B" },
+  { id:"c4", bucket:"yesterday", title:"Vi voice samples",         snippet:"Three drafts in plain-spoken register.",       model:"Gemma 4 E2B" },
+  { id:"c5", bucket:"week",      title:"Tokeniser benchmarks",     snippet:"PP throughput on M3 Pro vs M4 Air…",           model:"Gemma 4 E2B" },
+  { id:"c6", bucket:"week",      title:"Onboarding microcopy",     snippet:"Calm-presence voice across the welcome flow.", model:"Llama 3.2 3B" },
+];
+
+const TURNS_MULTI: ChatTurn[] = [
+  { role:"you",   text:"Walk me through how this Go embed loop closes over its loop variable. The captured value is wrong on every iteration." },
+  { role:"model", text:"The loop variable is shared across iterations — every closure captures the same address, so by the time the goroutines fire, they all see the final value.\n\nGo 1.22 changed this so each iteration gets its own copy. If you're on 1.21 or earlier, you need to shadow the variable explicitly.",
+    code:{ lang:"go", text:"for _, item := range items {\n    item := item // shadow for the closure\n    go func() {\n        process(item)\n    }()\n}" } },
+  { role:"you",   text:"Right, so just `item := item` before the goroutine. Why does the runtime not see this as a redundant assignment?" },
+  { role:"model", text:"Because it isn't redundant — it creates a new variable in the inner scope. The compiler treats the inner `item` as a distinct binding; the closure captures THAT one. The optimiser can't elide it because the goroutine outlives the iteration.",
+    citations:["go.dev/ref/spec#Variable_scope", "go.dev/blog/loopvar-preview"] },
+];
+
+const TURNS_GEN: ChatTurn[] = [
+  ...TURNS_MULTI.slice(0, 2),
+  { role:"you",   text:"Now write the test that would have caught this." },
+  { role:"model", text:"A table-driven test that fires each goroutine and asserts the captured value matches the iteration — running it under `-race` proves the closure capture rather than just timing luck.\n\n" },
+];
+
+/* ── per-state derived props ──────────────────────────────────────── */
+function chatStateData(state: ChatState): ChatStateData {
+  const railData: Record<ChatState, RailData> = {
     empty:            { toksLive:"—",    watts:"—",      kvHit:"—",   tokens:"—",              ctx:"—" },
     generating:       { toksLive:"47.2", watts:"12.4 W", kvHit:"94%", tokens:"1,284 / 4,096",  ctx:"1,284 / 4,096", sparkline:true,
                         sources:[{title:"Go specification · variable scope", kind:"Reference · loaded from cache"}] },
     "multi-turn":     { toksLive:"44.6", watts:"11.8 W", kvHit:"96%", tokens:"2,041 / 4,096",  ctx:"2,041 / 4,096" },
     "switched-model": { toksLive:"—",    watts:"—",      kvHit:"0%",  tokens:"0 / 8,192",      ctx:"0 / 8,192" },
     "no-model":       { toksLive:"—",    watts:"—",      kvHit:"—",   tokens:"—",              ctx:"—" },
-  }[state];
+  };
 
-  const turns = { empty:null, generating:TURNS_GEN, "multi-turn":TURNS_MULTI,
-                  "switched-model":TURNS_MULTI, "no-model":null }[state];
+  const turns: Record<ChatState, ChatTurn[] | null> = {
+    empty: null,
+    generating: TURNS_GEN,
+    "multi-turn": TURNS_MULTI,
+    "switched-model": TURNS_MULTI,
+    "no-model": null,
+  };
 
-  const banner =
+  const banner: ChatBanner | null =
     state === "switched-model" ? { tone:"warn", text:"Switched to Llama 3.2 3B mid-conversation — KV cache cleared. The next turn will replay context.", action:"Restore Gemma" } :
     state === "no-model"       ? { tone:"warn", text:"No model loaded. Pick one from the tray to start composing.", action:"Open tray" } :
     null;
 
-  const composer = {
+  const composer: Record<ChatState, ChatComposer> = {
     empty:            { value:"" },
     generating:       { value:"Now write the test that would have caught this.", sending:true, hint:"Esc · stop" },
     "multi-turn":     { value:"", hint:"⌘↵ · send" },
     "switched-model": { value:"", hint:"⌘↵ · send" },
     "no-model":       { value:"", disabled:true },
-  }[state];
+  };
 
-  const toolbarModel = { empty:"Gemma 4 E2B", generating:"Gemma 4 E2B",
-                         "multi-turn":"Gemma 4 E2B", "switched-model":"Llama 3.2 3B",
-                         "no-model":"No model" }[state];
+  const toolbarModel: Record<ChatState, string> = {
+    empty:"Gemma 4 E2B", generating:"Gemma 4 E2B",
+    "multi-turn":"Gemma 4 E2B", "switched-model":"Llama 3.2 3B",
+    "no-model":"No model",
+  };
 
-  return { railData, turns, banner, composer, toolbarModel };
+  return {
+    railData: railData[state],
+    turns: turns[state],
+    banner,
+    composer: composer[state],
+    toolbarModel: toolbarModel[state],
+  };
 }
 
 class LthnChatWindow extends LitElement {
@@ -46,6 +89,11 @@ class LthnChatWindow extends LitElement {
     w:         { type: Number },
     h:         { type: Number },
   };
+  declare state:     ChatState;
+  declare rail:      RailMode;
+  declare rightRail: RightRailMode;
+  declare w:         number;
+  declare h:         number;
   constructor() {
     super();
     this.state = "multi-turn";
@@ -159,7 +207,7 @@ class LthnChatWindow extends LitElement {
     `;
   }
 
-  _renderRailItem(c, active) {
+  _renderRailItem(c: Conversation, active: boolean) {
     return html`
       <div style="padding:8px 10px; border-radius:6px;
                   background:${active ? "rgba(255,255,255,0.07)" : "transparent"};
@@ -176,7 +224,7 @@ class LthnChatWindow extends LitElement {
   }
 
   /* — surface (conversation transcript or empty hero) — */
-  _renderSurface(turns, banner) {
+  _renderSurface(turns: ChatTurn[] | null, banner: ChatBanner | null) {
     const empty = this.state === "empty";
     const streamingIdx = this.state === "generating" ? (turns?.length || 0) - 1 : -1;
     return html`
@@ -241,7 +289,7 @@ class LthnChatWindow extends LitElement {
     `;
   }
 
-  _renderTurn(t, streaming) {
+  _renderTurn(t: ChatTurn, streaming: boolean) {
     const isYou = t.role === "you";
     return html`
       <div style="display:flex; flex-direction:column; gap:8px; padding-top:4px;">
@@ -309,7 +357,7 @@ class LthnChatWindow extends LitElement {
   }
 
   /* — composer — */
-  _renderComposer({ value, disabled, sending, error, hint }) {
+  _renderComposer({ value, disabled, sending, error, hint }: ChatComposer & { error?: string }) {
     return html`
       <div style="padding:14px 22px 16px; border-top:1px solid rgba(255,255,255,0.05);
                   background:rgba(0,0,0,0.12); display:flex; flex-direction:column; gap:8px;">
@@ -359,7 +407,7 @@ class LthnChatWindow extends LitElement {
   }
 
   /* — right rail (turn metadata) — */
-  _renderRightRail(data) {
+  _renderRightRail(data: RailData) {
     if (this.rightRail === "collapsed") {
       return html`
         <aside style="width:36px; flex-shrink:0; border-left:1px solid rgba(255,255,255,0.05);
@@ -414,7 +462,7 @@ class LthnChatWindow extends LitElement {
     `;
   }
 
-  _renderRailStat(label, value, sparkline = false) {
+  _renderRailStat(label: string, value: string, sparkline = false) {
     return html`
       <div style="padding:10px 12px; border-radius:8px;
                   background:rgba(255,255,255,0.03);

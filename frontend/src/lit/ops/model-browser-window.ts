@@ -3,7 +3,7 @@
 // Light-DOM Lit element. Composes renderChrome() from ../chrome.js.
 
 import { LitElement, html, nothing } from "lit";
-import { renderChrome } from "../chrome.js";
+import { renderChrome } from "../chrome";
 
 class LthnModelBrowserWindow extends LitElement {
   static properties = {
@@ -11,6 +11,9 @@ class LthnModelBrowserWindow extends LitElement {
     w:        { type: Number },
     h:        { type: Number },
   };
+  declare selected: string;
+  declare w: number;
+  declare h: number;
   constructor() { super(); this.selected = "gemma-4-e2b"; this.w = 1040; this.h = 700; }
   createRenderRoot() { return this; }
 
@@ -149,7 +152,7 @@ class LthnModelBrowserWindow extends LitElement {
     });
   }
 
-  _localItem(m) {
+  _localItem(m: { id: string; name: string; family: string; size: string; status: string }) {
     const active = m.id === this.selected;
     const tone = m.status === "loaded" ? "var(--success-400)"
                : m.status === "downloading" ? "var(--warning-400)"

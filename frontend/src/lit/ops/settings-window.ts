@@ -3,7 +3,7 @@
 // Light-DOM Lit element. Composes renderChrome() from ../chrome.js.
 
 import { LitElement, html, nothing } from "lit";
-import { renderChrome } from "../chrome.js";
+import { renderChrome } from "../chrome";
 
 class LthnSettingsWindow extends LitElement {
   static properties = {
@@ -11,6 +11,9 @@ class LthnSettingsWindow extends LitElement {
     w:    { type: Number },
     h:    { type: Number },
   };
+  declare open: string;
+  declare w: number;
+  declare h: number;
   constructor() { super(); this.open = "models"; this.w = 760; this.h = 600; }
   createRenderRoot() { return this; }
 
@@ -61,7 +64,7 @@ class LthnSettingsWindow extends LitElement {
     });
   }
 
-  _section({ title, desc, open, content }) {
+  _section({ title, desc, open, content }: { title: string; desc?: string; open: boolean; content: unknown }) {
     return html`
       <div style="display:flex; flex-direction:column; gap:14px;">
         <div style="display:flex; align-items:center; gap:8px;">
@@ -80,7 +83,7 @@ class LthnSettingsWindow extends LitElement {
     `;
   }
 
-  _row(label, hint, control) {
+  _row(label: string, hint: string | null, control: unknown) {
     return html`
       <div style="display:grid; grid-template-columns: 200px 1fr; gap:18px; align-items:flex-start; padding-top:8px;">
         <div style="display:flex; flex-direction:column; gap:3px;">
@@ -92,7 +95,7 @@ class LthnSettingsWindow extends LitElement {
     `;
   }
 
-  _select(value) {
+  _select(value: string) {
     return html`
       <div style="display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:6px;
                   background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07);
@@ -103,7 +106,7 @@ class LthnSettingsWindow extends LitElement {
     `;
   }
 
-  _segment(value, options) {
+  _segment(value: string, options: string[]) {
     return html`
       <div style="display:inline-flex; border-radius:6px;
                   background:rgba(0,0,0,0.18); border:1px solid rgba(255,255,255,0.06); padding:2px;">

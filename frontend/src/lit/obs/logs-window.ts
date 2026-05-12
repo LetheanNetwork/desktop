@@ -3,10 +3,13 @@
 // Light-DOM Lit element. Composes renderChrome() from ../chrome.js.
 
 import { LitElement, html, nothing } from "lit";
-import { renderChrome } from "../chrome.js";
+import { renderChrome } from "../chrome";
 
 class LthnLogsWindow extends LitElement {
   static properties = { w: { type: Number }, h: { type: Number }, tab: { type: String } };
+  declare w: number;
+  declare h: number;
+  declare tab: string;
   constructor() { super(); this.w = 1000; this.h = 660; this.tab = "live"; }
   createRenderRoot() { return this; }
 
@@ -40,7 +43,7 @@ class LthnLogsWindow extends LitElement {
     return renderChrome({
       title: "Activity", subtitle: "logs · history · power",
       w: this.w, h: this.h, toolbar, body,
-      footer: html`${footers[this.tab]}`,
+      footer: html`${footers[this.tab as keyof typeof footers]}`,
     });
   }
 
@@ -106,7 +109,7 @@ class LthnLogsWindow extends LitElement {
             <div style="display:grid; grid-template-columns:112px 64px 50px 1fr; padding:1.5px 16px; background:${l.s === "warn" ? "rgba(245,158,11,0.06)" : i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)"}; gap:10px;">
               <span style="color:var(--fg-3);">${l.t}</span>
               <span style="color:var(--fg-2);">${l.c}</span>
-              <span style="color:${sevColor[l.s]}; letter-spacing:0.04em; font-size:10px; text-transform:uppercase;">${l.s}</span>
+              <span style="color:${sevColor[l.s as keyof typeof sevColor]}; letter-spacing:0.04em; font-size:10px; text-transform:uppercase;">${l.s}</span>
               <span style="color:var(--fg-1); white-space:pre-wrap;">${l.m}</span>
             </div>
           `)}

@@ -3,10 +3,12 @@
 // Light-DOM Lit element. Composes renderChrome() from ../chrome.js.
 
 import { LitElement, html, nothing } from "lit";
-import { renderChrome } from "../chrome.js";
+import { renderChrome } from "../chrome";
 
 class LthnIntegrationsWindow extends LitElement {
   static properties = { w: { type: Number }, h: { type: Number } };
+  declare w: number;
+  declare h: number;
   constructor() { super(); this.w = 880; this.h = 660; }
   createRenderRoot() { return this; }
 
