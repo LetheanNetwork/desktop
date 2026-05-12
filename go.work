@@ -6,8 +6,18 @@ go 1.26.0
 //
 // Submodule pins live in .gitmodules + the recorded SHA per submodule entry.
 // Bump a single dep:   git submodule update --remote external/<name>
+//
+// dappco.re/go is pinned at our external/go (top-level). go-ai's own nested
+// external/go copy is unused — we want one canonical version of the Core
+// primitives across the workspace.
 
 use (
+	./external/ai/external/go-inference/go
+	./external/ai/external/go-io/go
+	./external/ai/external/go-log/go
+	./external/ai/external/go-rag/go
+	./external/ai/external/go-ratelimit/go
+	./external/ai/go
 	./external/go
 	./go
 )

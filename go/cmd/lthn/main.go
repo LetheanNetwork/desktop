@@ -27,6 +27,7 @@ package main
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
 )
 
@@ -180,14 +181,22 @@ func cmdServe(args []string) int {
 		}
 	}
 
-	s := server.NewService(server.Options{Addr: core.Concat(":", port)})
 	c := core.New()
-	if r := s.Register(c); !r.OK {
-		core.Print(core.Stderr(), "lthn serve: %s\n", r.Error())
+	r := runner.NewService(runner.Options{})
+	if rr := r.Register(c); !rr.OK {
+		core.Print(core.Stderr(), "lthn serve: %s\n", rr.Error())
 		return 1
 	}
-	if r := s.Start(core.Background()); !r.OK {
-		core.Print(core.Stderr(), "lthn serve: %s\n", r.Error())
+	s := server.NewService(server.Options{
+		Addr:   core.Concat(":", port),
+		Runner: r,
+	})
+	if rr := s.Register(c); !rr.OK {
+		core.Print(core.Stderr(), "lthn serve: %s\n", rr.Error())
+		return 1
+	}
+	if rr := s.Start(core.Background()); !rr.OK {
+		core.Print(core.Stderr(), "lthn serve: %s\n", rr.Error())
 		return 1
 	}
 	return 0
