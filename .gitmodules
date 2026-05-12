@@ -38,3 +38,7 @@
 	path = external/orm
 	url = https://github.com/dAppCore/orm.git
 	branch = dev
+[submodule "external/config"]
+	path = external/config
+	url = https://github.com/dappcore/config.git
+	branch = dev

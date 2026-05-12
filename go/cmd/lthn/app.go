@@ -6,6 +6,7 @@ import (
 	"context"
 
 	core "dappco.re/go"
+	"dappco.re/go/config"
 	"dappco.re/go/i18n"
 	"dappco.re/go/io"
 	"dappco.re/go/process"
@@ -44,8 +45,17 @@ func newAppCore() *core.Core {
 		core.Print(core.Stderr(), "lthn: %s\n", dataDir.Error())
 		return nil
 	}
+	configFile := paths.ConfigFile()
+	if !configFile.OK {
+		core.Print(core.Stderr(), "lthn: %s\n", configFile.Error())
+		return nil
+	}
 
 	c := core.New(
+		core.WithName("config", config.NewConfigServiceWith(config.ServiceOptions{
+			Path:      configFile.Value.(string),
+			EnvPrefix: "LTHN",
+		})),
 		core.WithName("store", store.NewService(store.StoreConfig{
 			DatabasePath:            dbPath.Value.(string),
 			WorkspaceStateDirectory: workspace.Value.(string),

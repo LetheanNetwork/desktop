@@ -16,6 +16,7 @@ use (
 	./external/ai/external/go-rag/go
 	./external/ai/external/go-ratelimit/go
 	./external/ai/go
+	./external/config/go
 	./external/go
 	./external/i18n/go
 	./external/inference/go

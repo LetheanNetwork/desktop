@@ -54,6 +54,8 @@ func main() {
 		core.Exit(cmdServe(args[1:]))
 	case "ai":
 		core.Exit(cmdAI(args[1:]))
+	case "config":
+		core.Exit(cmdConfig(args[1:]))
 	case "state":
 		core.Exit(cmdState(args[1:]))
 	case "events":
@@ -115,6 +117,7 @@ func cmdHelp(args []string) int {
 		core.Println("  tray                 Tray-only mode (NSStatusItem, no popover pre-open)")
 		core.Println("  serve [--port PORT]  HTTP API server (OpenAI-compatible)")
 		core.Println("  ai <verb> [args...]  AI subsystem — chat, generate, models")
+		core.Println("  config <verb>        Config file (get / set / list / commit / path)")
 		core.Println("  state <verb>         KV store (get / set / delete / list / groups)")
 		core.Println("  events <verb>        Event bus (stats / publish / config / running)")
 		core.Println("  process <verb>       Subsystem supervisor (list / get)")
