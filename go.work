@@ -12,12 +12,12 @@ go 1.26.0
 // primitives across the workspace.
 
 use (
-	./external/ai/external/go-inference/go
 	./external/ai/external/go-io/go
 	./external/ai/external/go-log/go
 	./external/ai/external/go-rag/go
 	./external/ai/external/go-ratelimit/go
 	./external/ai/go
 	./external/go
+	./external/inference/go
 	./go
 )

@@ -6,3 +6,7 @@
 	path = external/ai
 	url = https://github.com/dappcore/go-ai.git
 	branch = dev
+[submodule "external/inference"]
+	path = external/inference
+	url = https://github.com/dappcore/go-inference.git
+	branch = dev
