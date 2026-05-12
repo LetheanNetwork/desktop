@@ -29,6 +29,7 @@ import (
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
+	"dappco.re/lthn/desktop/pkg/tray"
 )
 
 // version is the lthn binary's release tag. Updated per Mantis ticket.
@@ -156,19 +157,27 @@ func cmdHelp(args []string) int {
 //
 //	rc := cmdGUI(nil) // launches the GUI when wired; today returns 1
 func cmdGUI(args []string) int {
-	core.Print(core.Stderr(), "lthn gui: not yet wired in scaffold\n")
-	core.Print(core.Stderr(), "see plans/project/lthn/desktop/RFC.first-release.md §4 for the target\n")
-	return 1
+	t := tray.NewService(tray.Options{
+		Name:        "lthn",
+		Description: "Lethean Desktop",
+	})
+	if r := t.Run(); !r.OK {
+		core.Print(core.Stderr(), "lthn gui: %s\n", r.Error())
+		return 1
+	}
+	return 0
 }
 
 // cmdTray handles `lthn tray`. NSStatusItem-only, no popover pre-open.
+// Today identical to cmdGUI — both launch the Wails app in
+// accessory-policy mode with the tray as lifetime anchor. Will
+// diverge when cmdGUI gains "open the chat window on launch".
 //
 // Usage example:
 //
-//	rc := cmdTray(nil) // tray-only mode; today returns 1
+//	rc := cmdTray(nil) // tray-only mode
 func cmdTray(args []string) int {
-	core.Print(core.Stderr(), "lthn tray: not yet wired in scaffold\n")
-	return 1
+	return cmdGUI(args)
 }
 
 // cmdServe handles `lthn serve [--port PORT] [--token TOKEN]
