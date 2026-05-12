@@ -1,0 +1,49 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # No verb — exit 2
+        run_capture_all 2 "$output" ../bin/lthn permissions
+        assert_contains "missing verb" "$output"
+
+        # Missing args — exit 2
+        run_capture_all 2 "$output" ../bin/lthn permissions check
+        assert_contains "usage" "$output"
+        run_capture_all 2 "$output" ../bin/lthn permissions set network.outbound
+        assert_contains "usage" "$output"
+
+        # Default check (no config) — exit 0, allowed:true, unlimited:true
+        run_capture_stdout 0 "$output" ../bin/lthn permissions check network.outbound
+        assert_jq '.allowed == true' "$output"
+        assert_jq '.unlimited == true' "$output"
+
+        # Set deny — re-check exits 1, allowed:false
+        # Use run_capture_stdout (NOT run_capture_all) — the entitlement
+        # denial emits a [SEC] line to stderr, capturing it into stdout
+        # would break jq parsing.
+        run_capture_stdout 0 "$output" ../bin/lthn permissions set network.outbound deny
+        run_capture_stdout 1 "$output" ../bin/lthn permissions check network.outbound
+        assert_jq '.allowed == false' "$output"
+        assert_jq '.reason | length > 0' "$output"
+
+        # Set allow — re-check exits 0
+        run_capture_stdout 0 "$output" ../bin/lthn permissions set telemetry anonymous
+        run_capture_stdout 0 "$output" ../bin/lthn permissions check telemetry
+        assert_jq '.allowed == true' "$output"
+
+        # List — JSON object containing nested keys
+        run_capture_stdout 0 "$output" ../bin/lthn permissions list
+        # Order of keys depends on viper internals; assert at least one
+        # of the two known keys is present.
+        jq -e 'has("network") or has("telemetry")' "$output" >/dev/null
+        EOF

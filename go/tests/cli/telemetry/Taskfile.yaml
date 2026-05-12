@@ -1,0 +1,28 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        # No verb — exit 2
+        run_capture_all 2 "$output" ../bin/lthn telemetry
+        assert_contains "missing verb" "$output"
+
+        # Unknown verb — exit 2
+        run_capture_all 2 "$output" ../bin/lthn telemetry nosuch
+        assert_contains "unknown verb" "$output"
+
+        # sample — exit 0, JSON Reading
+        run_capture_stdout 0 "$output" ../bin/lthn telemetry sample
+        assert_jq '.heap_alloc_mb > 0' "$output"
+        assert_jq '.num_goroutines >= 1' "$output"
+        assert_jq 'has("uptime_seconds")' "$output"
+        assert_jq 'has("watts_active")' "$output"
+        EOF

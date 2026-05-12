@@ -25,6 +25,8 @@ tasks:
       - task -d models test
       - task -d firstlaunch test
       - task -d validate test
+      - task -d permissions test
+      - task -d telemetry test
       - task -d serve test
 
   build:
