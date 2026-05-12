@@ -6,11 +6,11 @@ import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
 
 class LthnDistillationWindow extends LitElement {
-  static properties = { w: { type: Number }, h: { type: Number } };
+  static properties = { w: { type: Number }, h: { type: Number }, embedded: { type: Boolean, reflect: true } };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
-  constructor() { super(); this.w = 1100; this.h = 740; }
+  constructor() { super(); this.w = 1100; this.h = 740; this.embedded = false; }
   createRenderRoot() { return this; }
 
   render() {

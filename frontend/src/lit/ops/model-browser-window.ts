@@ -11,12 +11,13 @@ class LthnModelBrowserWindow extends LitElement {
     selected: { type: String, reflect: true },
     w:        { type: Number },
     h:        { type: Number },
+    embedded: { type: Boolean, reflect: true },
   };
   declare selected: string;
   declare w: number;
   declare h: number;
   declare embedded: boolean;
-  constructor() { super(); this.selected = "gemma-4-e2b"; this.w = 1040; this.h = 700; }
+  constructor() { super(); this.selected = "gemma-4-e2b"; this.w = 1040; this.h = 700; this.embedded = false; }
   createRenderRoot() { return this; }
 
   render() {

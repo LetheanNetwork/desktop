@@ -6,12 +6,12 @@ import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
 
 class LthnTelemetryWindow extends LitElement {
-  static properties = { w: { type: Number }, h: { type: Number }, fullscreen: { type: Boolean } };
+  static properties = { w: { type: Number }, h: { type: Number }, fullscreen: { type: Boolean }, embedded: { type: Boolean, reflect: true } };
   declare w: number;
   declare h: number;
   declare fullscreen: boolean;
   declare embedded: boolean;
-  constructor() { super(); this.w = 880; this.h = 560; this.fullscreen = false; }
+  constructor() { super(); this.w = 880; this.h = 560; this.fullscreen = false; this.embedded = false; }
   createRenderRoot() { return this; }
 
   render() {

@@ -39,6 +39,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
 	"github.com/gin-gonic/gin"
+	"github.com/leaanthony/u"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/icons"
@@ -149,6 +150,11 @@ func (s *Service) Run() core.Result {
 	browserSvc := NewBrowserService()
 	dialogSvc := NewDialogService()
 	notifier := notifications.New()
+	// Dock service captured so windows.go can elevate/demote the macOS
+	// activation policy when the unified app shell opens / closes. See
+	// policy.go for the routing.
+	dockSvc := dock.New()
+	attachDock(dockSvc)
 	wailsServices := []application.Service{
 		application.NewService(NewRunnerService(s.opts.Runner)),
 		application.NewService(NewSessionsService(s.opts.Core)),
@@ -164,7 +170,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(windowSvc),
 		application.NewService(browserSvc),
 		application.NewService(dialogSvc),
-		application.NewService(dock.New()),
+		application.NewService(dockSvc),
 		application.NewService(notifier),
 	}
 
@@ -173,6 +179,80 @@ func (s *Service) Run() core.Result {
 		Description: s.opts.Description,
 		Icon:        s.opts.AppIcon,
 		Services:    wailsServices,
+		// SingleInstance — a second launch hands off URL/file/args
+		// to the first instance via OnSecondInstanceLaunch and then
+		// exits. UniqueID is the macOS Bundle Identifier so the OS
+		// flock honours app-store distribution + dev/prod isolation.
+		// The second-instance payload is re-emitted onto the lthn:*
+		// bus so the frontend reacts the same way it does to first-
+		// launch open-with-file / launched-with-url.
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID: "io.lethean.desktop",
+			OnSecondInstanceLaunch: func(d application.SecondInstanceData) {
+				if s.app == nil {
+					return
+				}
+				// Re-broadcast the second-launch context so any
+				// frontend subscribers (router / wizard / chat)
+				// can act on it. Same shape as ApplicationStarted
+				// / OpenedWithFile / LaunchedWithUrl emit.
+				s.app.Event.Emit("lthn:app:second-instance", map[string]any{
+					"args":         d.Args,
+					"workdir":      d.WorkingDir,
+					"additional":   d.AdditionalData,
+				})
+				// Bring the tray popover (or the unified app
+				// shell if it's open) back to the foreground so
+				// the user notices the redirect.
+				if w, ok := s.app.Window.GetByName("app"); ok {
+					w.Show()
+					w.Focus()
+				} else if w, ok := s.app.Window.GetByName("tray"); ok {
+					w.Show()
+					w.Focus()
+				}
+			},
+		},
+		// ShouldQuit fires when the OS / user requests quit. Today
+		// we always allow — pkg/sessions and pkg/store flush on
+		// OnShutdown and survive a clean exit. Return false here to
+		// veto (e.g. unsaved-state guard once chat composer state
+		// is wired into the loop).
+		ShouldQuit: func() bool { return true },
+		// OnShutdown — pre-quit cleanup. Sessions persist to the
+		// store between every interaction already; this is the
+		// belt-and-braces flush + a hook for any service that
+		// needs to drain in-flight work (runner / telemetry).
+		OnShutdown: func() {
+			s.app.Event.Emit("lthn:app:shutdown", nil)
+		},
+		// PostShutdown runs after the Wails event loop has fully
+		// stopped. Last chance to close anything that held a ref
+		// into the event loop (HTTP server, store, runner).
+		PostShutdown: func() {
+			if s.opts.Server != nil {
+				_ = s.opts.Server.Stop(core.Background())
+			}
+		},
+		// PanicHandler captures uncaught panics from Go-side service
+		// methods (binding adapters etc.) and re-broadcasts them
+		// onto lthn:app:panic so the frontend can show a crash
+		// pane + offer a "send report" button. Without this the
+		// panic kills the process silently.
+		PanicHandler: func(details *application.PanicDetails) {
+			if s.app == nil || details == nil {
+				return
+			}
+			errStr := ""
+			if details.Error != nil {
+				errStr = details.Error.Error()
+			}
+			s.app.Event.Emit("lthn:app:panic", map[string]any{
+				"error":      errStr,
+				"stack":      details.StackTrace,
+				"full_stack": details.FullStackTrace,
+			})
+		},
 		Mac: application.MacOptions{
 			// Tray IS the process — closing every window must NOT quit.
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
@@ -184,6 +264,10 @@ func (s *Service) Run() core.Result {
 			// this, closing the last window quits the process and the
 			// systray goes with it. v3/examples/systray-custom canon.
 			DisableQuitOnLastWindowClosed: true,
+			// Enable WebView2's draggable-regions feature — Wails3
+			// needs this for --wails-draggable CSS to work on
+			// Windows (macOS handles it natively without the flag).
+			EnabledFeatures: []string{"msWebView2EnableDraggableRegions"},
 		},
 		Assets: application.AssetOptions{
 			Handler:    engine,
@@ -303,6 +387,39 @@ func (s *Service) Run() core.Result {
 		HideOnEscape:    true,
 		HideOnFocusLost: true,
 		URL:             "/?surface=tray",
+		// Transparent background so the rounded card corners render
+		// against the desktop, matching the rest of the windows.
+		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
+		// We ship our own context menus — the WebView's native menu
+		// would only confuse things on the tray popover.
+		DefaultContextMenuDisabled: true,
+		Mac: application.MacWindow{
+			// Floating keeps the popover above normal windows when
+			// AlwaysOnTop isn't enough (Lion+ raised the bar for
+			// "above-everything" — Floating is the menubar-utility
+			// level used by Bartender / Itsycal / 1Password Mini).
+			WindowLevel: application.MacWindowLevelFloating,
+			// CanJoinAllSpaces — the popover appears on every Space
+			// (no disappearing when the user swipes desktops).
+			// FullScreenAuxiliary — the popover can overlay
+			// fullscreen apps (otherwise it would vanish whenever
+			// the user enters Cmd+Ctrl+F on any app).
+			// IgnoresCycle — exclude from Cmd+` window cycling.
+			CollectionBehavior: application.MacWindowCollectionBehaviorCanJoinAllSpaces |
+				application.MacWindowCollectionBehaviorFullScreenAuxiliary |
+				application.MacWindowCollectionBehaviorIgnoresCycle,
+			// Top 40px = our renderChrome titlebar strip — declare
+			// it as the OS-native drag region so macOS picks up the
+			// drag without depending on the --wails-draggable CSS
+			// path alone.
+			InvisibleTitleBarHeight: 40,
+			WebviewPreferences: application.MacWebviewPreferences{
+				AllowsBackForwardNavigationGestures: u.False,
+			},
+		},
+		Linux: application.LinuxWindow{
+			Icon: s.opts.AppIcon,
+		},
 		Windows: application.WindowsWindow{
 			HiddenOnTaskbar: true,
 		},
@@ -320,7 +437,9 @@ func (s *Service) Run() core.Result {
 
 	// Pre-create welcome / chat / models / settings / about windows
 	// hidden, so first tray-menu open is instant. See windows.go.
-	preCreateWindows(s.app)
+	// Options threaded through for Linux icon + future per-window
+	// opts that depend on s.opts (telemetry endpoint, brand, etc.).
+	preCreateWindows(s.app, s.opts)
 
 	systray.AttachWindow(window).WindowOffset(5)
 

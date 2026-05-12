@@ -11,12 +11,13 @@ class LthnSettingsWindow extends LitElement {
     open: { type: String, reflect: true },
     w:    { type: Number },
     h:    { type: Number },
+    embedded: { type: Boolean, reflect: true },
   };
   declare open: string;
   declare w: number;
   declare h: number;
   declare embedded: boolean;
-  constructor() { super(); this.open = "models"; this.w = 760; this.h = 600; }
+  constructor() { super(); this.open = "models"; this.w = 760; this.h = 600; this.embedded = false; }
   createRenderRoot() { return this; }
 
   render() {

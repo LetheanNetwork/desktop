@@ -37,12 +37,13 @@ class LthnWelcomeWindow extends LitElement {
     step: { type: Number, reflect: true },
     w:    { type: Number },
     h:    { type: Number },
+    embedded: { type: Boolean, reflect: true },
   };
   declare step: number;
   declare w: number;
   declare h: number;
   declare embedded: boolean;
-  constructor() { super(); this.step = 1; this.w = 760; this.h = 580; }
+  constructor() { super(); this.step = 1; this.w = 760; this.h = 580; this.embedded = false; }
   createRenderRoot() { return this; }
 
   render() {

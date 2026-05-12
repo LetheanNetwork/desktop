@@ -88,6 +88,11 @@ class LthnChatWindow extends LitElement {
     rightRail: { type: String, attribute: "right-rail", reflect: true },
     w:         { type: Number },
     h:         { type: Number },
+    // Without this static-properties entry Lit won't observe the
+    // `embedded=""` attribute that <lthn-app-shell>._instantiate sets
+    // on the child element, so renderChrome's embedded branch never
+    // fires and the window double-renders inside the shell.
+    embedded:  { type: Boolean, reflect: true },
   };
   declare state:     ChatState;
   declare rail:      RailMode;

@@ -76,6 +76,15 @@ func registerWindowEvents(app *application.App, window application.Window) {
 	window.OnWindowEvent(events.Common.WindowHide, func(_ *application.WindowEvent) { emit("hide", nil) })
 	window.OnWindowEvent(events.Common.WindowShow, func(_ *application.WindowEvent) { emit("show", nil) })
 	window.OnWindowEvent(events.Common.WindowDidResize, func(_ *application.WindowEvent) { emit("resize", nil) })
+	// Position + state events — sessions/runner-stats consumers
+	// snapshot last position + maximise state to restore on next
+	// launch. The frontend doesn't subscribe to these directly;
+	// they exist as the persistence hook surface.
+	window.OnWindowEvent(events.Common.WindowDidMove, func(_ *application.WindowEvent) { emit("move", nil) })
+	window.OnWindowEvent(events.Common.WindowMaximise, func(_ *application.WindowEvent) { emit("maximise", nil) })
+	window.OnWindowEvent(events.Common.WindowUnMaximise, func(_ *application.WindowEvent) { emit("unmaximise", nil) })
+	window.OnWindowEvent(events.Common.WindowMinimise, func(_ *application.WindowEvent) { emit("minimise", nil) })
+	window.OnWindowEvent(events.Common.WindowUnMinimise, func(_ *application.WindowEvent) { emit("unminimise", nil) })
 	window.OnWindowEvent(events.Common.WindowFilesDropped, func(e *application.WindowEvent) {
 		payload := map[string]any{"files": e.Context().DroppedFiles()}
 		if d := e.Context().DropTargetDetails(); d != nil {

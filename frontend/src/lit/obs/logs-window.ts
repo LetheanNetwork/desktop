@@ -6,12 +6,12 @@ import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
 
 class LthnLogsWindow extends LitElement {
-  static properties = { w: { type: Number }, h: { type: Number }, tab: { type: String } };
+  static properties = { w: { type: Number }, h: { type: Number }, tab: { type: String }, embedded: { type: Boolean, reflect: true } };
   declare w: number;
   declare h: number;
   declare tab: string;
   declare embedded: boolean;
-  constructor() { super(); this.w = 1000; this.h = 660; this.tab = "live"; }
+  constructor() { super(); this.w = 1000; this.h = 660; this.tab = "live"; this.embedded = false; }
   createRenderRoot() { return this; }
 
   render() {
