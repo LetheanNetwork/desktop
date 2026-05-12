@@ -320,6 +320,149 @@ func (s *EnvService) OpenFileManager(path string, selectFile bool) error {
 }
 
 // ---------------------------------------------------------------------
+// DialogService — wraps app.Dialog (message, file, folder dialogs).
+// ---------------------------------------------------------------------
+
+// DialogFilter describes one file-filter row in an open/save
+// dialog. Pattern uses the platform-native shape (Wails normalises
+// across OSes) — e.g. "*.gguf;*.safetensors".
+type DialogFilter struct {
+	Name    string `json:"name"`
+	Pattern string `json:"pattern"`
+}
+
+// OpenFileOptions describes an open-file dialog. When Multiple is
+// true, the binding returns a []string with every selected path.
+type OpenFileOptions struct {
+	Title     string         `json:"title"`
+	Directory string         `json:"directory"`
+	Filters   []DialogFilter `json:"filters"`
+	Multiple  bool           `json:"multiple"`
+}
+
+// SaveFileOptions describes a save-file dialog.
+type SaveFileOptions struct {
+	Title     string         `json:"title"`
+	Filename  string         `json:"filename"`
+	Directory string         `json:"directory"`
+	Filters   []DialogFilter `json:"filters"`
+}
+
+// OpenFolderOptions describes a folder-picker dialog.
+type OpenFolderOptions struct {
+	Title     string `json:"title"`
+	Directory string `json:"directory"`
+}
+
+type DialogService struct {
+	app *application.App
+}
+
+func NewDialogService() *DialogService { return &DialogService{} }
+
+func (s *DialogService) ServiceName() string { return "Dialog" }
+func (s *DialogService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	return nil
+}
+func (s *DialogService) ServiceShutdown() error { return nil }
+
+// Info shows a non-blocking info dialog. Returns when the user
+// dismisses it.
+func (s *DialogService) Info(title, message string) error {
+	if s.app == nil {
+		return errors.New("dialog service not yet attached to wails app")
+	}
+	s.app.Dialog.Info().SetTitle(title).SetMessage(message).Show()
+	return nil
+}
+
+// Warning shows a warning dialog.
+func (s *DialogService) Warning(title, message string) error {
+	if s.app == nil {
+		return errors.New("dialog service not yet attached to wails app")
+	}
+	s.app.Dialog.Warning().SetTitle(title).SetMessage(message).Show()
+	return nil
+}
+
+// ErrorDialog shows an error dialog. Named ErrorDialog (not Error)
+// to avoid colliding with Go's error type when the TS binding
+// generator inspects the method set.
+func (s *DialogService) ErrorDialog(title, message string) error {
+	if s.app == nil {
+		return errors.New("dialog service not yet attached to wails app")
+	}
+	s.app.Dialog.Error().SetTitle(title).SetMessage(message).Show()
+	return nil
+}
+
+// OpenFile shows an open-file picker. Returns the selected path(s) —
+// always a slice, even when opts.Multiple is false (length 1 in that
+// case). Empty slice = user cancelled.
+func (s *DialogService) OpenFile(opts OpenFileOptions) ([]string, error) {
+	if s.app == nil {
+		return nil, errors.New("dialog service not yet attached to wails app")
+	}
+	d := s.app.Dialog.OpenFile().SetTitle(opts.Title)
+	if opts.Directory != "" {
+		d = d.SetDirectory(opts.Directory)
+	}
+	for _, f := range opts.Filters {
+		d = d.AddFilter(f.Name, f.Pattern)
+	}
+	if opts.Multiple {
+		paths, err := d.PromptForMultipleSelection()
+		if err != nil {
+			return nil, err
+		}
+		return paths, nil
+	}
+	path, err := d.PromptForSingleSelection()
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		return []string{}, nil
+	}
+	return []string{path}, nil
+}
+
+// SaveFile shows a save-file picker. Returns the chosen path, or
+// empty string if the user cancelled.
+func (s *DialogService) SaveFile(opts SaveFileOptions) (string, error) {
+	if s.app == nil {
+		return "", errors.New("dialog service not yet attached to wails app")
+	}
+	d := s.app.Dialog.SaveFile().SetMessage(opts.Title)
+	if opts.Filename != "" {
+		d = d.SetFilename(opts.Filename)
+	}
+	if opts.Directory != "" {
+		d = d.SetDirectory(opts.Directory)
+	}
+	for _, f := range opts.Filters {
+		d = d.AddFilter(f.Name, f.Pattern)
+	}
+	return d.PromptForSingleSelection()
+}
+
+// OpenFolder shows a folder picker (uses OpenFile with the
+// CanChooseDirectories flag, per Wails' API).
+func (s *DialogService) OpenFolder(opts OpenFolderOptions) (string, error) {
+	if s.app == nil {
+		return "", errors.New("dialog service not yet attached to wails app")
+	}
+	d := s.app.Dialog.OpenFile().
+		SetTitle(opts.Title).
+		CanChooseFiles(false).
+		CanChooseDirectories(true)
+	if opts.Directory != "" {
+		d = d.SetDirectory(opts.Directory)
+	}
+	return d.PromptForSingleSelection()
+}
+
+// ---------------------------------------------------------------------
 // BrowserService — wraps app.Browser (open URL/file in default browser).
 // ---------------------------------------------------------------------
 
