@@ -320,6 +320,54 @@ func (s *EnvService) OpenFileManager(path string, selectFile bool) error {
 }
 
 // ---------------------------------------------------------------------
+// ClipboardService — wraps app.Clipboard (text copy/paste).
+// ---------------------------------------------------------------------
+
+type ClipboardService struct {
+	// app is set by desktop.Run() AFTER application.New returns —
+	// app.Clipboard isn't available pre-construction.
+	app *application.App
+}
+
+func NewClipboardService() *ClipboardService { return &ClipboardService{} }
+
+func (s *ClipboardService) ServiceName() string { return "Clipboard" }
+func (s *ClipboardService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	return nil
+}
+func (s *ClipboardService) ServiceShutdown() error { return nil }
+
+// Copy writes text to the system clipboard.
+//
+// Why expose this when the WebView already has navigator.clipboard?
+// The browser clipboard API requires user-gesture context and only
+// works under HTTPS/localhost — fine for most paths but breaks for
+// background-triggered copies (e.g. "copy session export to
+// clipboard" from a notification action). The Wails surface has
+// no gesture/origin gate.
+func (s *ClipboardService) Copy(text string) error {
+	if s.app == nil {
+		return errors.New("clipboard service not yet attached to wails app")
+	}
+	if !s.app.Clipboard.SetText(text) {
+		return errors.New("clipboard SetText returned false")
+	}
+	return nil
+}
+
+// Paste reads text from the system clipboard.
+func (s *ClipboardService) Paste() (string, error) {
+	if s.app == nil {
+		return "", errors.New("clipboard service not yet attached to wails app")
+	}
+	text, ok := s.app.Clipboard.Text()
+	if !ok {
+		return "", errors.New("clipboard empty or unreadable")
+	}
+	return text, nil
+}
+
+// ---------------------------------------------------------------------
 // LifecycleService — OS service install/start/stop for the wizard.
 // ---------------------------------------------------------------------
 

@@ -136,6 +136,7 @@ func (s *Service) Run() core.Result {
 	// can ⌘-Tab to it), then hiding back to tray-only when chat
 	// closes.
 	envSvc := NewEnvService()
+	clipboardSvc := NewClipboardService()
 	notifier := notifications.New()
 	wailsServices := []application.Service{
 		application.NewService(NewRunnerService(s.opts.Runner)),
@@ -147,6 +148,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(NewTelemetryService()),
 		application.NewService(NewLifecycleService()),
 		application.NewService(envSvc),
+		application.NewService(clipboardSvc),
 		application.NewService(dock.New()),
 		application.NewService(notifier),
 	}
@@ -165,9 +167,11 @@ func (s *Service) Run() core.Result {
 		},
 	})
 
-	// Attach the constructed app to EnvService now that it exists —
-	// app.Env isn't available pre-application.New().
+	// Attach the constructed app to services that need app refs
+	// post-construction (app.Env / app.Clipboard aren't available
+	// pre-application.New()).
 	envSvc.app = s.app
+	clipboardSvc.app = s.app
 
 	// Re-broadcast OS theme changes to the WebView as "lthn:theme".
 	// Lit elements subscribe via @wailsio/runtime's Events.On.
