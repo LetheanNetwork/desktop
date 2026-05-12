@@ -24,3 +24,10 @@ coverage.out
 *.dmg
 /lthn
 go/tests/cli/bin/
+
+# Override global gitignore — Wails build/ scaffold is canonical, NOT a build cache
+!build/
+!build/**
+
+# Task runner cache
+.task/

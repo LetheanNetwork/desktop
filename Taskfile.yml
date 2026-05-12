@@ -1,66 +1,59 @@
-version: "3"
+version: '3'
 
-# lthn — Lethean Desktop build/dev tasks.
+# lthn — Lethean Desktop. Wails3-canonical Taskfile structure
+# (lifted from `wails3 init -t lit`), adapted for the Lethean
+# go/ subfolder layout. The per-OS task files in build/{darwin,
+# linux,windows,ios,android}/Taskfile.yml are unchanged from the
+# scaffold — they assume the Go module sits at the repo root.
 #
-#   task dev          # frontend dev server (Vite, port 5173)
-#   task build        # production binary (preferred — go via `core build`)
-#   task frontend     # build frontend only
-#   task qa           # fmt + vet + test
-#   task qa:full      # + race + vuln + security
+# Our module lives at go/ (Lethean canon). Adaptations live in this
+# top file: BIN_DIR points outside go/, the go build / go mod tidy
+# / wails3 generate bindings commands all `cd go` first.
 #
-# Architecture: the lthn binary is the tray-rooted process. See
-# plans/project/lthn/desktop/RFC.first-release.md.
+# Common verbs:
+#
+#   task build        # OS-detect → build/{OS}:build
+#   task dev          # wails3 dev orchestrator (hot reload)
+#   task run          # build + launch the .app
+#   task package      # OS-detect → build/{OS}:package
+#
+# CLI-suite tests (unaffected by Wails):
+#
+#   cd go/tests/cli && task test
+
+includes:
+  common: ./build/Taskfile.yml
+  windows: ./build/windows/Taskfile.yml
+  darwin: ./build/darwin/Taskfile.yml
+  linux: ./build/linux/Taskfile.yml
+  ios: ./build/ios/Taskfile.yml
+  android: ./build/android/Taskfile.yml
+
+vars:
+  APP_NAME: "lthn"
+  BIN_DIR: "bin"
+  VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
+  # Where the Go module + cmd live (Lethean canon: go/ subfolder).
+  GO_DIR: "go"
+  GO_CMD: "./cmd/lthn"
 
 tasks:
-  default:
-    desc: List available tasks
+  build:
+    summary: Builds the application (OS-detect)
     cmds:
-      - task --list-all
+      - task: "{{OS}}:build"
+
+  package:
+    summary: Packages a production build
+    cmds:
+      - task: "{{OS}}:package"
+
+  run:
+    summary: Build + launch the application
+    cmds:
+      - task: "{{OS}}:run"
 
   dev:
-    desc: Start frontend dev server (Vite — design canvas)
-    dir: frontend
+    summary: Wails3 dev mode (hot reload)
     cmds:
-      - npm install
-      - npm run dev
-
-  frontend:
-    desc: Build frontend (Lit + Vite → frontend/dist) and stage for embed
-    cmds:
-      - cd frontend && npm install && npm run build
-      - rm -rf go/cmd/lthn/dist
-      - mkdir -p go/cmd/lthn/dist
-      - cp -R frontend/dist/. go/cmd/lthn/dist/
-
-  build:
-    desc: Production build (frontend + go embed)
-    deps: [frontend]
-    cmds:
-      - go build -o bin/lthn ./go/cmd/lthn
-
-  qa:
-    desc: Format + vet + test
-    cmds:
-      - gofmt -l go/
-      - go vet ./go/...
-      - go test ./go/...
-
-  qa:full:
-    desc: + race detector + vuln + security audit
-    cmds:
-      - gofmt -l go/
-      - go vet ./go/...
-      - go test -race ./go/...
-      - which govulncheck >/dev/null && govulncheck ./go/... || echo "govulncheck not installed"
-
-  darwin:build:
-    desc: macOS build (signed .app bundle pending L codesigning config)
-    deps: [frontend]
-    cmds:
-      - GOOS=darwin GOARCH=arm64 go build -o bin/lthn ./go/cmd/lthn
-
-  darwin:package:
-    desc: macOS .app bundle (TODO — wire via core/gui's wails3 package or hand-rolled)
-    deps: [darwin:build]
-    cmds:
-      - echo "TODO — implement .app bundle packaging per core/gui's pattern"
+      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
