@@ -139,6 +139,7 @@ func (s *Service) Run() core.Result {
 	clipboardSvc := NewClipboardService()
 	screenSvc := NewScreenService()
 	windowSvc := NewWindowService()
+	browserSvc := NewBrowserService()
 	notifier := notifications.New()
 	wailsServices := []application.Service{
 		application.NewService(NewRunnerService(s.opts.Runner)),
@@ -153,6 +154,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(clipboardSvc),
 		application.NewService(screenSvc),
 		application.NewService(windowSvc),
+		application.NewService(browserSvc),
 		application.NewService(dock.New()),
 		application.NewService(notifier),
 	}
@@ -178,6 +180,7 @@ func (s *Service) Run() core.Result {
 	clipboardSvc.app = s.app
 	screenSvc.app = s.app
 	windowSvc.app = s.app
+	browserSvc.app = s.app
 
 	// Re-broadcast OS theme changes to the WebView as "lthn:theme".
 	// Lit elements subscribe via @wailsio/runtime's Events.On.

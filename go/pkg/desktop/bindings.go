@@ -320,6 +320,48 @@ func (s *EnvService) OpenFileManager(path string, selectFile bool) error {
 }
 
 // ---------------------------------------------------------------------
+// BrowserService — wraps app.Browser (open URL/file in default browser).
+// ---------------------------------------------------------------------
+
+type BrowserService struct {
+	app *application.App
+}
+
+func NewBrowserService() *BrowserService { return &BrowserService{} }
+
+func (s *BrowserService) ServiceName() string { return "Browser" }
+func (s *BrowserService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	return nil
+}
+func (s *BrowserService) ServiceShutdown() error { return nil }
+
+// OpenURL launches the user's default web browser at url. Uses
+// macOS `open` / Windows Shell API / Linux xdg-open under the
+// hood.
+//
+// TODO entitlements: route through core.Entitled("network.outbound")
+// when permissions are enforced — user might want to gate external
+// links via the same `lthn permissions check` surface. For now
+// every URL opens.
+func (s *BrowserService) OpenURL(url string) error {
+	if s.app == nil {
+		return errors.New("browser service not yet attached to wails app")
+	}
+	return s.app.Browser.OpenURL(url)
+}
+
+// OpenFile opens a local file in the OS-default handler — browser
+// for .html / .pdf / images, system app otherwise. Useful for
+// exported chat-history HTML, downloaded model READMEs, generated
+// inference reports.
+func (s *BrowserService) OpenFile(path string) error {
+	if s.app == nil {
+		return errors.New("browser service not yet attached to wails app")
+	}
+	return s.app.Browser.OpenFile(path)
+}
+
+// ---------------------------------------------------------------------
 // WindowService — open / hide / focus named windows from the frontend.
 // ---------------------------------------------------------------------
 
