@@ -6,187 +6,211 @@
 // subcommand; the Wails GUI is one consumer of that dispatch, not the
 // binary's identity.
 //
-//	lthn                       # default mode (launches tray + GUI)
+// Usage example:
+//
+//	lthn                       # default mode (launches tray + GUI when wired)
 //	lthn version               # version info
-//	lthn gui                   # explicit GUI launch (tray + popover + windows)
-//	lthn tray                  # tray-only mode (no popover-window pre-open)
-//	lthn serve [--port PORT]   # HTTP API only — OpenAI-compatible endpoints, no GUI
-//	lthn ai chat               # interactive CLI chat with the loaded model
+//	lthn gui                   # explicit GUI launch
+//	lthn tray                  # tray-only mode (NSStatusItem)
+//	lthn serve --port 8000     # HTTP API only, no GUI
+//	lthn ai chat               # interactive CLI chat
 //	lthn ai generate "prompt"  # one-shot generation
 //	lthn ai models ls          # list local models
 //	lthn ai models pull NAME   # download from HuggingFace
-//	lthn ai serve              # alias for `lthn serve` with AI-only scope
 //	lthn help [subcommand]     # built-in help
 //
-// Future subcommands (not yet wired — placeholders per the namespace canon):
-//
-//	lthn gateway vpn ...       # gateway / VPN controls
-//	lthn build ...             # build pipeline (branded `core build`)
-//	lthn wallet ...            # wallet operations (when blockchain side-loads)
-//
-// Architectural rule: the CLI dispatch is the LOAD-BEARING entry. The
+// Architectural rule: the CLI dispatch is the load-bearing entry. The
 // Wails GUI is decoupled — if GUI build is broken, the binary still
 // ships via CLI + serve modes. See plans/project/lthn/desktop/
 // RFC.first-release.md §1.3.
 package main
 
 import (
-	"fmt"
-	"os"
+	core "dappco.re/go"
 )
 
-const version = "0.1.0" // first release per Snider 2026-05-12
-
-// dispatch maps a subcommand string to its handler. The empty-string
-// key handles the default `lthn` (no-args) invocation.
-//
-// Handlers receive the remaining argv slice (after the subcommand
-// itself was consumed) and return an exit code.
-type handler func(args []string) int
+// version is the lthn binary's release tag. Updated per Mantis ticket.
+const version = "0.1.0"
 
 func main() {
-	args := os.Args[1:]
+	args := core.Args()[1:]
 
-	// Default mode (no subcommand): launch GUI.
-	// Until GUI is wired, print a banner directing the user to
-	// `lthn help` so the binary is useful even pre-GUI.
 	if len(args) == 0 {
-		os.Exit(cmdDefault(args))
+		core.Exit(cmdDefault(args))
 	}
 
 	switch args[0] {
 	case "version", "-v", "--version":
-		os.Exit(cmdVersion(args[1:]))
+		core.Exit(cmdVersion(args[1:]))
 	case "help", "-h", "--help":
-		os.Exit(cmdHelp(args[1:]))
+		core.Exit(cmdHelp(args[1:]))
 	case "gui":
-		os.Exit(cmdGUI(args[1:]))
+		core.Exit(cmdGUI(args[1:]))
 	case "tray":
-		os.Exit(cmdTray(args[1:]))
+		core.Exit(cmdTray(args[1:]))
 	case "serve":
-		os.Exit(cmdServe(args[1:]))
+		core.Exit(cmdServe(args[1:]))
 	case "ai":
-		os.Exit(cmdAI(args[1:]))
+		core.Exit(cmdAI(args[1:]))
 	default:
-		fmt.Fprintf(os.Stderr, "lthn: unknown subcommand %q\nrun `lthn help` for available commands\n", args[0])
-		os.Exit(2)
+		core.Print(core.Stderr(), "lthn: unknown subcommand %q\nrun `lthn help` for available commands\n", args[0])
+		core.Exit(2)
 	}
 }
 
-// cmdDefault — no subcommand. Future: launch tray + GUI.
-// Today: stub printing the namespace banner.
+// cmdDefault is invoked when `lthn` is run without a subcommand.
+// Today: prints the banner pointing at help. When the GUI is wired,
+// this will launch the tray + popover.
 //
-// TODO: wire core.New() + tray.Register() + runner.Register() +
-// telemetry.Register() + api.Register() + the GUI bootstrap. The
-// pattern follows core/ide/cmd/core-ide/main.go.
+// Usage example:
+//
+//	core.Exit(cmdDefault(core.Args()[1:]))
 func cmdDefault(args []string) int {
-	fmt.Println("lthn — Lethean unified binary")
-	fmt.Println()
-	fmt.Println("This is the default mode. The GUI is not yet wired in the scaffold.")
-	fmt.Println("Available subcommands right now:")
-	fmt.Println("  lthn version       — print version")
-	fmt.Println("  lthn help          — full subcommand list")
-	fmt.Println("  lthn serve         — HTTP API server (stub)")
-	fmt.Println("  lthn ai            — AI subsystem")
-	fmt.Println()
-	fmt.Println("See `lthn help` or plans/project/lthn/desktop/RFC.first-release.md")
+	core.Println("lthn — Lethean unified binary")
+	core.Println("")
+	core.Println("This is the default mode. The GUI is not yet wired in the scaffold.")
+	core.Println("Available subcommands:")
+	core.Println("  lthn version       — print version")
+	core.Println("  lthn help          — full subcommand list")
+	core.Println("  lthn serve         — HTTP API server (stub)")
+	core.Println("  lthn ai            — AI subsystem")
+	core.Println("")
+	core.Println("See `lthn help` or plans/project/lthn/desktop/RFC.first-release.md")
 	return 0
 }
 
-// cmdVersion — `lthn version` / `lthn -v` / `lthn --version`.
+// cmdVersion handles `lthn version` / `lthn -v` / `lthn --version`.
+//
+// Usage example:
+//
+//	rc := cmdVersion(nil) // prints "lthn vX.Y.Z" and returns 0
 func cmdVersion(args []string) int {
-	fmt.Printf("lthn v%s\n", version)
+	core.Print(core.Stdout(), "lthn v%s\n", version)
 	return 0
 }
 
-// cmdHelp — `lthn help [subcommand]`. Built-in help text.
+// cmdHelp handles `lthn help [subcommand]`. Built-in help text.
+//
+// Usage example:
+//
+//	rc := cmdHelp([]string{"ai"}) // prints `lthn ai` help
 func cmdHelp(args []string) int {
 	if len(args) == 0 {
-		fmt.Println("lthn — Lethean unified binary")
-		fmt.Println()
-		fmt.Println("Usage: lthn <subcommand> [args...]")
-		fmt.Println()
-		fmt.Println("Subcommands:")
-		fmt.Println("  version              Print version information")
-		fmt.Println("  help [subcommand]    Show help for a subcommand")
-		fmt.Println("  gui                  Launch the Wails GUI (tray + popover + windows)")
-		fmt.Println("  tray                 Tray-only mode (NSStatusItem, no popover pre-open)")
-		fmt.Println("  serve [--port PORT]  HTTP API server (OpenAI-compatible)")
-		fmt.Println("  ai <verb> [args...]  AI subsystem — chat, generate, models")
-		fmt.Println()
-		fmt.Println("Address handler: lthn:// URIs route through the same dispatch")
-		fmt.Println("(see plans/project/lthn/RFC.md §7 — the unified namespace canon)")
+		core.Println("lthn — Lethean unified binary")
+		core.Println("")
+		core.Println("Usage: lthn <subcommand> [args...]")
+		core.Println("")
+		core.Println("Subcommands:")
+		core.Println("  version              Print version information")
+		core.Println("  help [subcommand]    Show help for a subcommand")
+		core.Println("  gui                  Launch the Wails GUI (tray + popover + windows)")
+		core.Println("  tray                 Tray-only mode (NSStatusItem, no popover pre-open)")
+		core.Println("  serve [--port PORT]  HTTP API server (OpenAI-compatible)")
+		core.Println("  ai <verb> [args...]  AI subsystem — chat, generate, models")
+		core.Println("")
+		core.Println("Address handler: lthn:// URIs route through the same dispatch")
+		core.Println("(see plans/project/lthn/RFC.md §7 — the unified namespace canon)")
 		return 0
 	}
 	switch args[0] {
 	case "ai":
-		fmt.Println("lthn ai — AI subsystem")
-		fmt.Println()
-		fmt.Println("Verbs:")
-		fmt.Println("  chat                       Interactive REPL with the loaded model")
-		fmt.Println("  generate \"prompt\"          One-shot generation")
-		fmt.Println("  models ls                  List local models in ~/Lethean/conf/models/")
-		fmt.Println("  models pull NAME           Download model from HuggingFace")
-		fmt.Println("  serve [--port PORT]        AI HTTP API (alias for `lthn serve`)")
+		core.Println("lthn ai — AI subsystem")
+		core.Println("")
+		core.Println("Verbs:")
+		core.Println("  chat                       Interactive REPL with the loaded model")
+		core.Println("  generate \"prompt\"          One-shot generation")
+		core.Println("  models ls                  List local models in ~/Lethean/conf/models/")
+		core.Println("  models pull NAME           Download model from HuggingFace")
+		core.Println("  serve [--port PORT]        AI HTTP API (alias for `lthn serve`)")
 	case "serve":
-		fmt.Println("lthn serve — HTTP API server")
-		fmt.Println()
-		fmt.Println("Starts the OpenAI-compatible HTTP API on the given port.")
-		fmt.Println("Endpoints: /v1/chat/completions, /v1/completions, /v1/models")
-		fmt.Println("Default port: 8000")
+		core.Println("lthn serve — HTTP API server")
+		core.Println("")
+		core.Println("Starts the OpenAI-compatible HTTP API on the given port.")
+		core.Println("Endpoints: /v1/chat/completions, /v1/completions, /v1/models")
+		core.Println("Default port: 8000")
 	default:
-		fmt.Fprintf(os.Stderr, "lthn help: no help for unknown subcommand %q\n", args[0])
+		core.Print(core.Stderr(), "lthn help: no help for unknown subcommand %q\n", args[0])
 		return 2
 	}
 	return 0
 }
 
-// cmdGUI — `lthn gui`. Launches the Wails app.
+// cmdGUI handles `lthn gui`. Launches the Wails app.
 // TODO: import core/gui + Lethean-5 Lit frontend, follow core/ide pattern.
+//
+// Usage example:
+//
+//	rc := cmdGUI(nil) // launches the GUI when wired; today returns 1
 func cmdGUI(args []string) int {
-	fmt.Fprintln(os.Stderr, "lthn gui: not yet wired in scaffold")
-	fmt.Fprintln(os.Stderr, "see plans/project/lthn/desktop/RFC.first-release.md §4 for the target")
+	core.Print(core.Stderr(), "lthn gui: not yet wired in scaffold\n")
+	core.Print(core.Stderr(), "see plans/project/lthn/desktop/RFC.first-release.md §4 for the target\n")
 	return 1
 }
 
-// cmdTray — `lthn tray`. NSStatusItem-only, no popover pre-open.
+// cmdTray handles `lthn tray`. NSStatusItem-only, no popover pre-open.
+//
+// Usage example:
+//
+//	rc := cmdTray(nil) // tray-only mode; today returns 1
 func cmdTray(args []string) int {
-	fmt.Fprintln(os.Stderr, "lthn tray: not yet wired in scaffold")
+	core.Print(core.Stderr(), "lthn tray: not yet wired in scaffold\n")
 	return 1
 }
 
-// cmdServe — `lthn serve [--port PORT]`. HTTP API only, no GUI.
-// TODO: wire core/api for the HTTP server, runner for generation,
-// telemetry for stats endpoints.
+// cmdServe handles `lthn serve [--port PORT] [--token TOKEN]
+// [--cors ORIGINS]`. HTTP API only, no GUI.
+//
+// Usage example:
+//
+//	rc := cmdServe([]string{"--port=8000"}) // starts server when wired
 func cmdServe(args []string) int {
-	fmt.Fprintln(os.Stderr, "lthn serve: not yet wired in scaffold")
-	fmt.Fprintln(os.Stderr, "target: gin-based HTTP server via dappco.re/go/api,")
-	fmt.Fprintln(os.Stderr, "OpenAI-compatible endpoints, in-process inference via go-mlx")
+	port := "8000"
+	for i := 0; i < len(args); i++ {
+		k, v, valid := core.ParseFlag(args[i])
+		if !valid {
+			continue
+		}
+		if k == "port" {
+			if v == "" && i+1 < len(args) {
+				i++
+				v = args[i]
+			}
+			port = v
+		}
+	}
+	_ = port // used when api wiring lands
+
+	core.Print(core.Stderr(), "lthn serve: not yet wired in scaffold\n")
+	core.Print(core.Stderr(), "target: dappco.re/go/api gin engine,\n")
+	core.Print(core.Stderr(), "OpenAI-compatible endpoints, in-process inference via go-mlx\n")
 	return 1
 }
 
-// cmdAI — `lthn ai <verb> [args...]`. AI subsystem dispatch.
+// cmdAI handles `lthn ai <verb> [args...]`. AI subsystem dispatch.
+//
+// Usage example:
+//
+//	rc := cmdAI([]string{"chat"}) // routes to the chat verb (stub today)
 func cmdAI(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "lthn ai: missing verb (chat / generate / models / serve)")
-		fmt.Fprintln(os.Stderr, "run `lthn help ai` for usage")
+		core.Print(core.Stderr(), "lthn ai: missing verb (chat / generate / models / serve)\n")
+		core.Print(core.Stderr(), "run `lthn help ai` for usage\n")
 		return 2
 	}
 	switch args[0] {
 	case "chat":
-		fmt.Fprintln(os.Stderr, "lthn ai chat: not yet wired in scaffold")
+		core.Print(core.Stderr(), "lthn ai chat: not yet wired in scaffold\n")
 		return 1
 	case "generate":
-		fmt.Fprintln(os.Stderr, "lthn ai generate: not yet wired in scaffold")
+		core.Print(core.Stderr(), "lthn ai generate: not yet wired in scaffold\n")
 		return 1
 	case "models":
-		fmt.Fprintln(os.Stderr, "lthn ai models: not yet wired in scaffold")
+		core.Print(core.Stderr(), "lthn ai models: not yet wired in scaffold\n")
 		return 1
 	case "serve":
-		// Alias for top-level `lthn serve`.
 		return cmdServe(args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "lthn ai: unknown verb %q\nrun `lthn help ai` for available verbs\n", args[0])
+		core.Print(core.Stderr(), "lthn ai: unknown verb %q\nrun `lthn help ai` for available verbs\n", args[0])
 		return 2
 	}
 }

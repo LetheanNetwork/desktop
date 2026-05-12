@@ -9,9 +9,18 @@
 //   - `IOReport` framework (no sudo, less detail)
 //   - small XPC helper (best of both, more build complexity)
 //
+// Usage example:
+//
 //	c := core.New()
-//	telemetry.Register(c)
+//	t := telemetry.NewService(telemetry.Options{})
+//	if r := t.Register(c); !r.OK {
+//		return r
+//	}
 package telemetry
+
+import (
+	core "dappco.re/go"
+)
 
 // Reading is a single telemetry sample.
 type Reading struct {
@@ -20,27 +29,53 @@ type Reading struct {
 	MemoryMB    float64 // RSS of the process
 }
 
+// Options configures the telemetry service.
+type Options struct {
+	// Source selects the platform telemetry backend
+	// ("powermetrics" | "ioreport" | "xpc"). Empty = platform default.
+	Source string
+}
+
 // Service polls the platform telemetry source at a configured cadence
 // and emits Reading values to subscribers (runner signals, frontend).
 type Service struct {
-	// Fields:
-	//   - source ("powermetrics" | "ioreport" | "xpc")
-	//   - sampling interval
-	//   - subscriber channels / event bus
+	opts Options
 }
 
-// New constructs the telemetry service.
+// NewService constructs the telemetry service.
 //
-//	s := telemetry.New()
-//	s.Register(c)
-func New() *Service { return &Service{} }
+// Usage example:
+//
+//	t := telemetry.NewService(telemetry.Options{Source: "ioreport"})
+//	t.Register(c)
+func NewService(opts Options) *Service {
+	return &Service{opts: opts}
+}
 
 // Register wires the telemetry service into the Core container.
 // Pattern per Mantis #1336 canonical Service.go.
-func (s *Service) Register() error {
-	// Wires:
+//
+// Usage example:
+//
+//	if r := svc.Register(c); !r.OK {
+//		return r
+//	}
+func (s *Service) Register(c *core.Core) core.Result {
+	// TODO when telemetry source is selected: wire
 	//   - telemetry.sample action (one-shot read)
 	//   - telemetry.subscribe action (returns a stream)
 	//   - signal exports consumed by runner + frontend
-	return nil
+	return core.Ok(nil)
+}
+
+// Register constructs a default telemetry Service and wires it into
+// the Core container. One-shot canonical entry per Mantis #1336.
+//
+// Usage example:
+//
+//	if r := telemetry.Register(c); !r.OK {
+//		return r
+//	}
+func Register(c *core.Core) core.Result {
+	return NewService(Options{}).Register(c)
 }
