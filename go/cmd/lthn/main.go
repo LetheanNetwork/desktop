@@ -27,9 +27,9 @@ package main
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/desktop"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
-	"dappco.re/lthn/desktop/pkg/tray"
 )
 
 // version is the lthn binary's release tag. Updated per Mantis ticket.
@@ -178,12 +178,22 @@ func cmdHelp(args []string) int {
 //
 //	rc := cmdGUI(nil) // launches the GUI when wired; today returns 1
 func cmdGUI(args []string) int {
-	t := tray.NewService(tray.Options{
+	c := newAppCore()
+	if c == nil {
+		return 1
+	}
+	r := runner.NewServiceFromCore(c)
+	s := server.NewService(server.Options{Runner: r})
+	d := desktop.NewService(desktop.Options{
 		Name:        "lthn",
 		Description: "Lethean Desktop",
+		Frontend:    frontendDist,
+		Server:      s,
+		Core:        c,
+		Runner:      r,
 	})
-	if r := t.Run(); !r.OK {
-		core.Print(core.Stderr(), "lthn gui: %s\n", r.Error())
+	if rr := d.Run(); !rr.OK {
+		core.Print(core.Stderr(), "lthn gui: %s\n", rr.Error())
 		return 1
 	}
 	return 0
