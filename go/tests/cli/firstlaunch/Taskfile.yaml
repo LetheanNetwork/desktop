@@ -1,0 +1,34 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # Fresh home — everything false except fresh:true
+        run_capture_stdout 0 "$output" ../bin/lthn firstlaunch
+        assert_jq '.fresh == true' "$output"
+        assert_jq '.has_config_file == false' "$output"
+        assert_jq '.has_state_db == false' "$output"
+        assert_jq '.has_routes == false' "$output"
+
+        # Seed a config write — fresh flips to false
+        ../bin/lthn config set runner.timeout 30s
+        run_capture_stdout 0 "$output" ../bin/lthn firstlaunch
+        assert_jq '.fresh == false' "$output"
+        assert_jq '.has_config_file == true' "$output"
+
+        # Seed a route — has_routes flips to true
+        ../bin/lthn config set routes.local.kind openai
+        ../bin/lthn config set routes.local.base_url http://localhost:11434/v1
+        ../bin/lthn config set routes.local.model llama3:8b
+        run_capture_stdout 0 "$output" ../bin/lthn firstlaunch
+        assert_jq '.has_routes == true' "$output"
+        EOF

@@ -1,0 +1,43 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        isolate_home
+        output="$(mktemp)"
+        trap "rm -f $output; rm -rf $LTHN_TEST_HOME" EXIT
+
+        # Empty models/ dir — exit 0, returns []
+        run_capture_stdout 0 "$output" ../../bin/lthn models list
+        assert_jq 'type == "array"' "$output"
+        assert_jq 'length == 0' "$output"
+
+        # Seed a fake model file under ~/Lethean/conf/models/
+        ../../bin/lthn config path >/dev/null  # ensures the path tree exists
+        mkdir -p "$LTHN_TEST_HOME/Lethean/conf/models"
+        echo "fake content" > "$LTHN_TEST_HOME/Lethean/conf/models/fake.gguf"
+
+        # list now reports one entry
+        run_capture_stdout 0 "$output" ../../bin/lthn models list
+        assert_jq 'length == 1' "$output"
+        assert_jq '.[0].name == "fake.gguf"' "$output"
+        assert_jq '.[0].is_dir == false' "$output"
+        assert_jq '.[0].size > 0' "$output"
+
+        # `ls` alias works
+        run_capture_stdout 0 "$output" ../../bin/lthn models ls
+        assert_jq 'length == 1' "$output"
+
+        # Missing verb — exit 2
+        run_capture_all 2 "$output" ../../bin/lthn models
+        assert_contains "missing verb" "$output"
+
+        # `pull` with no args — exit 2
+        run_capture_all 2 "$output" ../../bin/lthn models pull
+        assert_contains "usage" "$output"
+        EOF

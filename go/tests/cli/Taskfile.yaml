@@ -22,6 +22,9 @@ tasks:
       - task -d process test
       - task -d sessions test
       - task -d ai test
+      - task -d models test
+      - task -d firstlaunch test
+      - task -d validate test
       - task -d serve test
 
   build:

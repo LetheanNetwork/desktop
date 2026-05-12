@@ -65,6 +65,12 @@ func main() {
 		core.Exit(cmdProcess(args[1:]))
 	case "sessions":
 		core.Exit(cmdSessions(args[1:]))
+	case "models":
+		core.Exit(cmdModels(args[1:]))
+	case "validate":
+		core.Exit(cmdValidate(args[1:]))
+	case "firstlaunch":
+		core.Exit(cmdFirstLaunch(args[1:]))
 	default:
 		core.Print(core.Stderr(), "lthn: unknown subcommand %q\nrun `lthn help` for available commands\n", args[0])
 		core.Exit(2)
@@ -125,6 +131,9 @@ func cmdHelp(args []string) int {
 		core.Println("  events <verb>        Event bus (stats / publish / config / running)")
 		core.Println("  process <verb>       Subsystem supervisor (list / get)")
 		core.Println("  sessions <verb>      Chat history (create / list / read / append)")
+		core.Println("  models <verb>        Local model snapshots (list / pull)")
+		core.Println("  validate URL         Probe a remote OpenAI-compat endpoint")
+		core.Println("  firstlaunch          Detect fresh-install state (JSON)")
 		core.Println("")
 		core.Println("Address handler: lthn:// URIs route through the same dispatch")
 		core.Println("(see plans/project/lthn/RFC.md §7 — the unified namespace canon)")
