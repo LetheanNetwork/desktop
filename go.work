@@ -1,4 +1,4 @@
-go 1.26.0
+go 1.26.2
 
 // Workspace mode for development: pulls fresh code from external/ submodules.
 //
@@ -7,17 +7,22 @@ go 1.26.0
 // Submodule pins live in .gitmodules + the recorded SHA per submodule entry.
 // Bump a single dep:   git submodule update --remote external/<name>
 //
-// dappco.re/go is pinned at our external/go (top-level). go-ai's own nested
-// external/go copy is unused — we want one canonical version of the Core
-// primitives across the workspace.
+// dappco.re/go is pinned at our external/go (top-level). go-ai's nested
+// copies of go-io / go-i18n / go-inference are unused — we pin those at
+// our top level for self-consistent build state.
 
 use (
-	./external/ai/external/go-io/go
 	./external/ai/external/go-log/go
 	./external/ai/external/go-rag/go
 	./external/ai/external/go-ratelimit/go
 	./external/ai/go
 	./external/go
+	./external/i18n/go
 	./external/inference/go
+	./external/io/go
+	./external/process/go
+	./external/store/go
+	./external/stream/go
+	./external/ws/go
 	./go
 )

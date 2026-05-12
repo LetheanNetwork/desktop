@@ -10,7 +10,6 @@ require (
 
 require (
 	dappco.re/go/core v0.8.0-alpha.1 // indirect
-	dappco.re/go/io v0.8.0-alpha.1 // indirect
 	dappco.re/go/log v0.8.0-alpha.1 // indirect
 	dappco.re/go/rag v0.8.0-alpha.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect

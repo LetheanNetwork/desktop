@@ -4,7 +4,6 @@ dappco.re/go/ai v0.8.0-alpha.1 h1:f2Z2oG8OSmNk8HyLi8Sfd+joaIO0MlJD0a/ZRwfJavY=
 dappco.re/go/core v0.8.0-alpha.1 h1:gj7+Scv+L63Z7wMxbJYHhaRFkHJo2u4MMPuUSv/Dhtk=
 dappco.re/go/inference v0.9.0 h1:6eD49KTjj4xrowWdltobEWZYLPY+zbiyDiq+Hv2nkmc=
 dappco.re/go/io v0.8.0-alpha.1 h1:tIJ/Nd6lGr2DFEUj2HzGM8dPglS5bEAI4h2RAgzGCNE=
-dappco.re/go/io v0.8.0-alpha.1/go.mod h1:491Lt0LOTK4/88EGWVWhrACuXAoxPXvXYu/iIwYc9C0=
 dappco.re/go/log v0.8.0-alpha.1 h1:eXTdrt88Ovbdm0KJkJDaEpgLUHUZgJ2xYEu2uN3eV4I=
 dappco.re/go/log v0.8.0-alpha.1/go.mod h1:IC04Em9SfVTcXiWc1BqZDQfa1MtOuMDEermZkQcTz9c=
 dappco.re/go/rag v0.8.0-alpha.1 h1:zmwOPHdf6voifKBpqAqeLW+EnAP4/V7A1ceKmTJjeNk=

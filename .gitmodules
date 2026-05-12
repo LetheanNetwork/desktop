@@ -10,3 +10,27 @@
 	path = external/inference
 	url = https://github.com/dappcore/go-inference.git
 	branch = dev
+[submodule "external/store"]
+	path = external/store
+	url = https://github.com/dappcore/go-store.git
+	branch = dev
+[submodule "external/stream"]
+	path = external/stream
+	url = https://github.com/dappcore/go-stream.git
+	branch = dev
+[submodule "external/ws"]
+	path = external/ws
+	url = https://github.com/dappcore/go-ws.git
+	branch = dev
+[submodule "external/process"]
+	path = external/process
+	url = https://github.com/dappcore/go-process.git
+	branch = dev
+[submodule "external/i18n"]
+	path = external/i18n
+	url = https://github.com/dappcore/go-i18n.git
+	branch = dev
+[submodule "external/io"]
+	path = external/io
+	url = https://github.com/dappcore/go-io.git
+	branch = dev
