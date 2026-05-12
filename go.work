@@ -1,0 +1,13 @@
+go 1.26.0
+
+// Workspace mode for development: pulls fresh code from external/ submodules.
+//
+// Devs:   git clone --recursive   →   go.work picks up local sources, latest dev.
+//
+// Submodule pins live in .gitmodules + the recorded SHA per submodule entry.
+// Bump a single dep:   git submodule update --remote external/<name>
+
+use (
+	./external/go
+	./go
+)

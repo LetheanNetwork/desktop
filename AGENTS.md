@@ -4,12 +4,22 @@
 
 This repository is the Lethean Desktop product binary — `lthn`. It is a CLI router that dispatches to subsystems (GUI, HTTP server, AI runtime, future blockchain / LNS / wallet modules). The Wails GUI is one consumer of that dispatch, not the binary's identity.
 
+## Repository layout
+
+Canonical Lethean Go repo shape:
+
+- `go/` — the Go module (`dappco.re/lthn/desktop`). All Go code lives here.
+- `external/` — git submodules of canonical Lethean dependencies, pinned to `dev` branches via `.gitmodules`.
+- `go.work` at repo root — workspace mode points at `./go` + `./external/*`. Live dev sources resolve through here.
+- `frontend/`, `docs/`, `bin/`, `build/`, `LICENCE`, `README.md`, `CLAUDE.md`, `AGENTS.md`, `Taskfile.yml` at repo root.
+
 ## Code Map
 
-- `cmd/lthn/main.go` — CLI router. Parses `core.Args()`, dispatches on subcommand (`version`, `help`, `gui`, `tray`, `serve`, `ai`). Add new subcommands here as flat handlers that delegate to `pkg/*`.
-- `pkg/tray/tray.go` — NSStatusItem + popover anchor + window-spawn router (consumed by `lthn gui`).
-- `pkg/runner/service.go` — go-mlx adapter signals contract (consumed by `lthn ai` and `lthn serve`).
-- `pkg/telemetry/service.go` — `powermetrics` / `IOReport` sampler.
+- `go/cmd/lthn/main.go` — CLI router. Parses `core.Args()`, dispatches on subcommand (`version`, `help`, `gui`, `tray`, `serve`, `ai`). Add new subcommands here as flat handlers that delegate to `go/pkg/*`.
+- `go/pkg/tray/tray.go` — NSStatusItem + popover anchor + window-spawn router (consumed by `lthn gui`).
+- `go/pkg/runner/service.go` — go-mlx adapter signals contract (consumed by `lthn ai` and `lthn serve`).
+- `go/pkg/telemetry/service.go` — `powermetrics` / `IOReport` sampler.
+- `external/go/` — submodule of `dappco.re/go` (the Core primitives module) on its `dev` branch.
 - `frontend/` — Vite + Lit. Lethean-5 components in `src/lit/`. `index.html` is the app entry; `canvas.html` is the design canvas.
 - `docs/design/lethean-4-react-reference/` — animated React/JSX visual source for design review only; not built.
 
@@ -27,13 +37,13 @@ Use TDD when adding code. Each new public symbol ships with `Test<File>_<Symbol>
 
 ## Before Stopping
 
-Use the exact repository gate, with `GOWORK=off` for Go commands. The Go workspace at `~/Code/go.work` references modules at paths that don't all exist on every machine; standalone mode keeps the build reproducible.
+Workspace mode is the bar. From the repo root with `go.work` active:
 
 ```bash
-GOWORK=off go mod tidy
-GOWORK=off go vet ./...
-GOWORK=off go test -count=1 ./...
-gofmt -l .
+go work sync
+go vet ./go/...
+go test -count=1 ./go/...
+gofmt -l go/
 bash /Users/snider/Code/core/go/tests/cli/v090-upgrade/audit.sh .
 ```
 

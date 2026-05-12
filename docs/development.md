@@ -37,20 +37,26 @@ This guide covers everything needed to build, test, extend, and contribute to lt
 - `gofmt` and `golangci-lint` on PATH for the audit gate.
 - `bash` + `python3` for the v0.9.0 compliance audit script.
 
-The Go workspace at `~/Code/go.work` is shared across the Lethean ecosystem and references modules at paths that don't all exist on every machine. Use `GOWORK=off` for the lthn/desktop build to stay reproducible:
+lthn/desktop uses workspace mode (the canonical Lethean pattern). The `go.work` at the repo root pulls live dev sources from `external/` submodules. Clone with submodules to set it up:
 
 ```bash
-export GOWORK=off
+git clone --recursive <repo-url> lthn-desktop
+cd lthn-desktop
+go work sync
 ```
 
-Or prefix every command.
+If you cloned without `--recursive`, fetch the submodules:
+
+```bash
+git submodule update --init --recursive
+```
 
 ---
 
 ## 2. Build
 
 ```bash
-GOWORK=off go build -o bin/lthn ./cmd/lthn
+go build -o bin/lthn ./go/cmd/lthn
 ```
 
 Produces a single binary at `bin/lthn`. The frontend is not embedded yet — when the GUI is wired, the Wails build step will compile the frontend assets into the binary.
@@ -82,7 +88,7 @@ Unknown subcommands return exit 2 with a help pointer. Missing required args ret
 ## 4. Test
 
 ```bash
-GOWORK=off go test -count=1 ./...
+go test -count=1 ./go/...
 ```
 
 Tests follow the canonical Test triplet pattern. For every public symbol `Foo` in `pkg/x/x.go`:
@@ -111,10 +117,13 @@ The audit's `ax7-triplet-gaps`, `example-gaps`, `missing-test-files`, and `missi
 
 ## 5. Audit gate
 
+From the repo root with `go.work` active:
+
 ```bash
-gofmt -l .
-GOWORK=off go vet ./...
-GOWORK=off go test -count=1 ./...
+gofmt -l go/
+go work sync
+go vet ./go/...
+go test -count=1 ./go/...
 bash /Users/snider/Code/core/go/tests/cli/v090-upgrade/audit.sh .
 ```
 

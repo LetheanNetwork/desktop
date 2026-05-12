@@ -35,28 +35,28 @@ tasks:
     desc: Production build (use `core build` from the workspace root for the canonical orchestration)
     deps: [frontend]
     cmds:
-      - go build -o bin/lthn ./cmd/lthn
+      - go build -o bin/lthn ./go/cmd/lthn
 
   qa:
     desc: Format + vet + test
     cmds:
-      - go fmt ./...
-      - go vet ./...
-      - go test ./...
+      - gofmt -l go/
+      - go vet ./go/...
+      - go test ./go/...
 
   qa:full:
     desc: + race detector + vuln + security audit
     cmds:
-      - go fmt ./...
-      - go vet ./...
-      - go test -race ./...
-      - which govulncheck >/dev/null && govulncheck ./... || echo "govulncheck not installed"
+      - gofmt -l go/
+      - go vet ./go/...
+      - go test -race ./go/...
+      - which govulncheck >/dev/null && govulncheck ./go/... || echo "govulncheck not installed"
 
   darwin:build:
     desc: macOS build (signed .app bundle pending L codesigning config)
     deps: [frontend]
     cmds:
-      - GOOS=darwin GOARCH=arm64 go build -o bin/lthn ./cmd/lthn
+      - GOOS=darwin GOARCH=arm64 go build -o bin/lthn ./go/cmd/lthn
 
   darwin:package:
     desc: macOS .app bundle (TODO — wire via core/gui's wails3 package or hand-rolled)

@@ -23,25 +23,36 @@ See:
 6. **British English everywhere.** colour, organisation, centre, behaviour.
 7. **EUPL-1.2 / CIC asset-locked.** No "Pro" gates, no upgrade prompts, no feature paywalls.
 
-## Repo shape
+## Repo shape (canonical Lethean Go layout)
 
 ```
 lthn/desktop/
-├── cmd/lthn/             — CLI router (main entry). Subcommands: version / help / gui / tray / serve / ai. Future: gateway / build / wallet.
-├── pkg/tray/             — NSStatusItem + popover anchor + window-spawn router (consumed by `lthn gui`)
-├── pkg/runner/           — go-mlx adapter (start/stop/generate + signals; consumed by `lthn ai` and `lthn serve`)
-├── pkg/telemetry/        — powermetrics/IOReport sampler
+├── go.work                  — workspace pins ./go + ./external/* for dev-branch sources
+├── .gitmodules              — submodule URLs (dev branch on each)
+├── go/                      — the Go module (dappco.re/lthn/desktop)
+│   ├── go.mod
+│   ├── go.sum
+│   ├── cmd/lthn/            — CLI router (main entry). Subcommands: version / help / gui / tray / serve / ai. Future: gateway / build / wallet.
+│   ├── pkg/tray/            — NSStatusItem + popover anchor + window-spawn router (consumed by `lthn gui`)
+│   ├── pkg/runner/          — go-mlx adapter (start/stop/generate + signals; consumed by `lthn ai` and `lthn serve`)
+│   └── pkg/telemetry/       — powermetrics/IOReport sampler
+├── external/                — git submodules pinned to dev branches
+│   └── go/                  — dappco.re/go (Core primitives)
 ├── frontend/
-│   ├── index.html        — app entry (single-window mount via ?surface=)
-│   ├── canvas.html       — design canvas (every window side-by-side)
+│   ├── index.html           — app entry (single-window mount via ?surface=)
+│   ├── canvas.html          — design canvas (every window side-by-side)
 │   └── src/
-│       ├── tokens.css    — Lethean-4 OKLCH tokens, Vi-anchored
-│       ├── main.js       — surface router for index.html
-│       └── lit/          — Lit primitives + windows from Lethean-5
-└── docs/design/
-    ├── HANDOVER.md       — Lethean-5 Lit handover (architecture + SwiftUI/Tauri translation notes)
-    └── lethean-4-react-reference/  — original React/JSX visual source (animated; reference only, not built)
+│       ├── tokens.css       — Lethean-4 OKLCH tokens, Vi-anchored
+│       ├── main.js          — surface router for index.html
+│       └── lit/             — Lit primitives + windows from Lethean-5
+└── docs/
+    ├── index.md / architecture.md / development.md
+    └── design/
+        ├── HANDOVER.md      — Lethean-5 Lit handover
+        └── lethean-4-react-reference/  — animated React/JSX visual source (reference only)
 ```
+
+Workspace mode is the bar — `go.work` is the dev-resolution mechanism. Submodules pinned to `dev` branches give live upstream sources; the build resolves through `external/` first.
 
 ### CLI dispatch shape
 
