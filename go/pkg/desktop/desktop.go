@@ -42,6 +42,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/icons"
 	"github.com/wailsapp/wails/v3/pkg/services/dock"
+	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
 // Options configures the desktop service.
@@ -135,6 +136,7 @@ func (s *Service) Run() core.Result {
 	// can ⌘-Tab to it), then hiding back to tray-only when chat
 	// closes.
 	envSvc := NewEnvService()
+	notifier := notifications.New()
 	wailsServices := []application.Service{
 		application.NewService(NewRunnerService(s.opts.Runner)),
 		application.NewService(NewSessionsService(s.opts.Core)),
@@ -146,6 +148,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(NewLifecycleService()),
 		application.NewService(envSvc),
 		application.NewService(dock.New()),
+		application.NewService(notifier),
 	}
 
 	s.app = application.New(application.Options{
@@ -174,6 +177,14 @@ func (s *Service) Run() core.Result {
 			mode = "dark"
 		}
 		s.app.Event.Emit("lthn:theme", mode)
+	})
+
+	// Bridge notification-action callbacks back to the WebView as
+	// "lthn:notification:response". The Lit element that sent the
+	// notification subscribes via Events.On and dispatches per the
+	// response.ActionIdentifier (OPEN / REPLY / ARCHIVE / etc.).
+	notifier.OnNotificationResponse(func(result notifications.NotificationResult) {
+		s.app.Event.Emit("lthn:notification:response", result.Response)
 	})
 
 	systray := s.app.SystemTray.New()
