@@ -41,6 +41,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/icons"
+	"github.com/wailsapp/wails/v3/pkg/services/dock"
 )
 
 // Options configures the desktop service.
@@ -124,6 +125,15 @@ func (s *Service) Run() core.Result {
 	// Binding adapters exposed to the WebView via Wails TS bindings.
 	// Each adapter wraps one lthn domain package, translating
 	// core.Result → (T, error) for clean TS typing.
+	//
+	// dock.New() is the Wails-native dock/taskbar service — it
+	// ships in `(T, error)` shape already, no adapter needed. The
+	// generated TS bindings give the frontend SetBadge / RemoveBadge
+	// / HideAppIcon / ShowAppIcon. Useful for unread-count badges
+	// over the tray (macOS draws them on the menubar item) and for
+	// surfacing the app in the Dock when chat is active (so users
+	// can ⌘-Tab to it), then hiding back to tray-only when chat
+	// closes.
 	wailsServices := []application.Service{
 		application.NewService(NewRunnerService(s.opts.Runner)),
 		application.NewService(NewSessionsService(s.opts.Core)),
@@ -133,6 +143,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(NewValidatorService()),
 		application.NewService(NewTelemetryService()),
 		application.NewService(NewLifecycleService()),
+		application.NewService(dock.New()),
 	}
 
 	s.app = application.New(application.Options{
