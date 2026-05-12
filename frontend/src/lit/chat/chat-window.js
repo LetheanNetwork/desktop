@@ -1,49 +1,10 @@
-/* lit-chat-window.js — <lthn-chat-window state="...">
- *
- * Faithful Lit port of windows-chat.jsx (E0).
- *
- * Attribute API:
- *   state         empty | generating | multi-turn | switched-model | no-model
- *   rail          empty | filled
- *   right-rail    expanded | collapsed | hidden
- *   w             window width (default 1100)
- *   h             window height (default 740)
- *
- * Reactive: change any attribute and the window re-renders.
- *
- * Composes <lthn-glyph>, <lthn-btn>, <lthn-label>, <lthn-rail-row>,
- * <lthn-sparkline>, and the renderChrome() helper from lit-chrome.js.
- */
+// SPDX-Licence-Identifier: EUPL-1.2
+// E0 · chat — <lthn-chat-window>
+// Light-DOM Lit element. Composes renderChrome() from ../chrome.js.
 
-import { LitElement, html, nothing } from "https://esm.run/lit@3.1.4";
-import { renderChrome } from "./lit-chrome.js";
+import { LitElement, html, nothing } from "lit";
+import { renderChrome } from "../chrome.js";
 
-/* ── data fixtures (shared with the React version) ────────────────── */
-const CONVERSATIONS = [
-  { id:"c1", bucket:"today",     title:"Refactor the embed loop",  snippet:"Looks like the issue is the closure capturing…", model:"Gemma 4 E2B" },
-  { id:"c2", bucket:"today",     title:"Brief read · drone bill",  snippet:"Two paragraphs summarising the key clauses.",   model:"Llama 3.2 3B" },
-  { id:"c3", bucket:"yesterday", title:"JSON to TOML",             snippet:"Here's the converted config in TOML…",         model:"Gemma 4 E2B" },
-  { id:"c4", bucket:"yesterday", title:"Vi voice samples",         snippet:"Three drafts in plain-spoken register.",       model:"Gemma 4 E2B" },
-  { id:"c5", bucket:"week",      title:"Tokeniser benchmarks",     snippet:"PP throughput on M3 Pro vs M4 Air…",           model:"Gemma 4 E2B" },
-  { id:"c6", bucket:"week",      title:"Onboarding microcopy",     snippet:"Calm-presence voice across the welcome flow.", model:"Llama 3.2 3B" },
-];
-
-const TURNS_MULTI = [
-  { role:"you",   text:"Walk me through how this Go embed loop closes over its loop variable. The captured value is wrong on every iteration." },
-  { role:"model", text:"The loop variable is shared across iterations — every closure captures the same address, so by the time the goroutines fire, they all see the final value.\n\nGo 1.22 changed this so each iteration gets its own copy. If you're on 1.21 or earlier, you need to shadow the variable explicitly.",
-    code:{ lang:"go", text:"for _, item := range items {\n    item := item // shadow for the closure\n    go func() {\n        process(item)\n    }()\n}" } },
-  { role:"you",   text:"Right, so just `item := item` before the goroutine. Why does the runtime not see this as a redundant assignment?" },
-  { role:"model", text:"Because it isn't redundant — it creates a new variable in the inner scope. The compiler treats the inner `item` as a distinct binding; the closure captures THAT one. The optimiser can't elide it because the goroutine outlives the iteration.",
-    citations:["go.dev/ref/spec#Variable_scope", "go.dev/blog/loopvar-preview"] },
-];
-
-const TURNS_GEN = [
-  ...TURNS_MULTI.slice(0, 2),
-  { role:"you",   text:"Now write the test that would have caught this." },
-  { role:"model", text:"A table-driven test that fires each goroutine and asserts the captured value matches the iteration — running it under `-race` proves the closure capture rather than just timing luck.\n\n" },
-];
-
-/* ── per-state derived props ──────────────────────────────────────── */
 function chatStateData(state) {
   const railData = {
     empty:            { toksLive:"—",    watts:"—",      kvHit:"—",   tokens:"—",              ctx:"—" },
@@ -77,7 +38,6 @@ function chatStateData(state) {
   return { railData, turns, banner, composer, toolbarModel };
 }
 
-/* ── <lthn-chat-window> ───────────────────────────────────────────── */
 class LthnChatWindow extends LitElement {
   static properties = {
     state:     { type: String, reflect: true },
@@ -472,5 +432,3 @@ class LthnChatWindow extends LitElement {
   }
 }
 customElements.define("lthn-chat-window", LthnChatWindow);
-
-window.LthnChatWindow = LthnChatWindow;

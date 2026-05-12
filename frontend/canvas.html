@@ -253,11 +253,7 @@
 
   </main>
 
-  <!-- Lit components are loaded as ES modules -->
-  <script type="module" src="./src/lit/lit-chrome.js"></script>
-  <script type="module" src="./src/lit/lit-chat-window.js"></script>
-  <script type="module" src="./src/lit/lit-ops-windows.js"></script>
-  <script type="module" src="./src/lit/lit-obs-windows.js"></script>
-  <script type="module" src="./src/lit/lit-ext-windows.js"></script>
+  <!-- Lit components — single import registers all 12 custom elements -->
+  <script type="module" src="./src/lit/index.js"></script>
 </body>
 </html>

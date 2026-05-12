@@ -10,11 +10,8 @@
  */
 
 import { html, render } from "lit";
-import { renderChrome } from "./lit/lit-chrome.js";
-import "./lit/lit-chat-window.js";
-import "./lit/lit-ops-windows.js";
-import "./lit/lit-obs-windows.js";
-import "./lit/lit-ext-windows.js";
+import { renderChrome } from "./lit/index.js";
+import "./lit/index.js";
 
 const app = document.getElementById("app");
 const params = new URLSearchParams(location.search);

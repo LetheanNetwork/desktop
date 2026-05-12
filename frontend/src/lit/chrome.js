@@ -18,7 +18,7 @@
  *   <lthn-sparkline data="..." color width height fill>
  */
 
-import { LitElement, html, nothing } from "https://esm.run/lit@3.1.4";
+import { LitElement, html, nothing } from "lit";
 
 /* ────────────────────────────────── <lthn-glyph> ────────────────── */
 class LthnGlyph extends LitElement {
