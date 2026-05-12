@@ -244,6 +244,11 @@ func (s *Service) Run() core.Result {
 	// data; the originating Lit element dispatches accordingly.
 	registerContextMenus(s.app)
 
+	// Global keyboard shortcuts. Each emits "lthn:key:<verb>" with
+	// the active window's name. Cmd+J toggle popover / Cmd+N new
+	// session / Cmd+, settings / etc. See keybindings.go.
+	registerKeyBindings(s.app)
+
 	window := s.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:            "tray",
 		Title:           "Lethean Desktop",
