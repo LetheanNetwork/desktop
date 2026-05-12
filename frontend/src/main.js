@@ -9,7 +9,8 @@
  * the Go-side core/gui wrapper spawns them via Wails window APIs.
  */
 
-import "./lit/lit-chrome.js";
+import { html, render } from "lit";
+import { renderChrome } from "./lit/lit-chrome.js";
 import "./lit/lit-chat-window.js";
 import "./lit/lit-ops-windows.js";
 import "./lit/lit-obs-windows.js";
@@ -20,6 +21,53 @@ const params = new URLSearchParams(location.search);
 const surface = params.get("surface") || "canvas";
 
 switch (surface) {
+  case "tray": {
+    /* P0 tray popover — 400×560, composed inline from Lit primitives
+     * (lit-chrome.js). No bespoke custom element — only renderChrome +
+     * status-dot + btn + sparkline + label + state-pill. */
+    render(renderChrome({
+      title: "lthn",
+      subtitle: "local · ready",
+      w: 400, h: 560,
+      body: html`
+        <div style="display:flex; flex-direction:column; gap:14px; padding:14px; flex:1; min-height:0; overflow-y:auto;">
+          <section style="display:flex; align-items:center; gap:10px; padding:10px 12px;
+                          background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.06); border-radius:8px;">
+            <lthn-status-dot variant="ok" pulse></lthn-status-dot>
+            <div style="display:flex; flex-direction:column; gap:2px; min-width:0; flex:1;">
+              <div style="font-size:12.5px; font-weight:500; color:var(--fg-0);">Gemma 4 E2B</div>
+              <div style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);">2,041 / 4,096 tokens · 1 runner</div>
+            </div>
+            <lthn-state-pill variant="running">live</lthn-state-pill>
+          </section>
+
+          <section style="display:flex; flex-direction:column; gap:6px;">
+            <lthn-label>Open</lthn-label>
+            <lthn-btn tone="ghost" size="md" @click=${() => location.assign("?surface=chat")}>Chat</lthn-btn>
+            <lthn-btn tone="ghost" size="md" @click=${() => location.assign("?surface=models")}>Models</lthn-btn>
+            <lthn-btn tone="ghost" size="md" @click=${() => location.assign("?surface=settings")}>Settings</lthn-btn>
+          </section>
+
+          <section style="display:flex; flex-direction:column; gap:8px; padding:10px 12px;
+                          background:rgba(255,255,255,0.018); border:1px solid rgba(255,255,255,0.05); border-radius:8px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <lthn-label>Activity</lthn-label>
+              <span style="flex:1"></span>
+              <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--brand-300);">42 tok/s</span>
+            </div>
+            <lthn-sparkline width="372" height="32" fill></lthn-sparkline>
+          </section>
+        </div>
+      `,
+      footer: html`
+        <span style="opacity:0.7;">lthn v0.1.0</span>
+        <span style="flex:1"></span>
+        <lthn-status-dot variant="active"></lthn-status-dot>
+        <span style="opacity:0.7;">connected</span>
+      `,
+    }), app);
+    break;
+  }
   case "chat": {
     const state = params.get("state") || "multi-turn";
     app.innerHTML = `<lthn-chat-window state="${state}"></lthn-chat-window>`;
