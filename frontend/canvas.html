@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en" data-brand="lethean" data-platform="darwin">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Lethean Desktop · Lit components</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="./src/tokens.css">
+  <script>
+    // Defer ResizeObserver callbacks to next frame — kills the benign loop warning Lit triggers
+    const _RO = window.ResizeObserver;
+    if (_RO) {
+      window.ResizeObserver = class extends _RO {
+        constructor(cb) { super((...a) => requestAnimationFrame(() => cb(...a))); }
+      };
+    }
+    window.addEventListener("error", (e) => {
+      if (e.message && e.message.includes("ResizeObserver loop")) {
+        e.stopImmediatePropagation(); e.preventDefault();
+      }
+    }, true);
+    const _ce = console.error;
+    console.error = function(...a) {
+      if (a.some(x => typeof x === 'string' && x.includes('ResizeObserver loop'))) return;
+      return _ce.apply(console, a);
+    };
+  </script>
+  <style>
+    html, body { margin: 0; background: #0c0b10; color: var(--fg-1); font-family: var(--font-sans); }
+    body { min-height: 100vh; padding: 56px 40px 120px; }
+    .lit-header {
+      max-width: 1280px; margin: 0 auto 40px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .lit-header h1 {
+      margin: 0; font-size: 32px; font-weight: 600; letter-spacing: -0.02em; color: var(--fg-0);
+    }
+    .lit-header p {
+      margin: 0; max-width: 720px; font-size: 14px; line-height: 1.6; color: var(--fg-2);
+    }
+    .lit-header code {
+      font-family: var(--font-mono); font-size: 12px;
+      padding: 1px 6px; border-radius: 4px;
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+      color: var(--brand-300);
+    }
+    .lit-grid {
+      max-width: 1280px; margin: 0 auto;
+      display: flex; flex-direction: column; gap: 48px;
+    }
+    .lit-section h2 {
+      margin: 0 0 6px;
+      font-size: 12px; font-weight: 600;
+      color: var(--fg-3); letter-spacing: 0.10em;
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+    }
+    .lit-section p {
+      margin: 0 0 20px; max-width: 720px;
+      font-size: 13px; line-height: 1.6; color: var(--fg-2);
+    }
+    .lit-frame {
+      display: flex;
+      padding: 32px;
+      background:
+        radial-gradient(1200px 600px at 50% 40%, rgba(64,193,197,0.04), transparent 60%),
+        var(--surface-0);
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.05);
+      overflow: auto;
+    }
+  </style>
+</head>
+<body>
+  <header class="lit-header">
+    <div style="display:flex; align-items:center; gap:14px;">
+      <lthn-glyph size="22" color="var(--brand-300)" active></lthn-glyph>
+      <h1>Lethean Desktop · Lit components</h1>
+    </div>
+    <p>
+      Web-Components port of the desktop window catalogue. Each window is a single
+      <code>customElement</code> with a reactive <code>state</code> attribute —
+      change it in DevTools and the window re-renders. Designed for handoff to
+      Claude Code: one custom-element file per window, the template structure
+      mirrors what a SwiftUI <code>View</code> or Tauri component would look like.
+    </p>
+    <p style="color:var(--fg-3); font-size:12px;">
+      All phases complete — E0 chat · E1 welcome / settings / model browser · E2 benchmark / logs / telemetry · E3 integrations / tools · E4 network / fine-tune / fleet.
+    </p>
+  </header>
+
+  <main class="lit-grid">
+
+    <section class="lit-section">
+      <h2>E0 · &lt;lthn-chat-window state="multi-turn"&gt;</h2>
+      <p>Default state. Conversation rail · transcript with code + citations · right rail with live tok/s, watts, KV-cache, sampling, sources.</p>
+      <div class="lit-frame">
+        <lthn-chat-window state="multi-turn" w="1100" h="700"></lthn-chat-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E0 · &lt;lthn-chat-window state="generating"&gt;</h2>
+      <p>Mid-generation. Streaming cursor on the last turn, footer flips to live t/s, composer Send is replaced with Stop, sparkline animates.</p>
+      <div class="lit-frame">
+        <lthn-chat-window state="generating" w="1100" h="700"></lthn-chat-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E0 · &lt;lthn-chat-window state="switched-model"&gt;</h2>
+      <p>Banner explains the KV-cache reset when a different model was loaded mid-conversation. Restore action offered.</p>
+      <div class="lit-frame">
+        <lthn-chat-window state="switched-model" w="1100" h="700"></lthn-chat-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E0 · &lt;lthn-chat-window state="empty"&gt;</h2>
+      <p>First-conversation hero. Glyph, calm-presence headline, four starter chips. Local-only privacy note reinforced.</p>
+      <div class="lit-frame">
+        <lthn-chat-window state="empty" rail="empty" w="1100" h="700"></lthn-chat-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E0 · &lt;lthn-chat-window state="no-model"&gt;</h2>
+      <p>No model loaded. Composer disabled with explainer copy, toolbar dot greys, footer reads idle. Banner offers Open-tray action.</p>
+      <div class="lit-frame">
+        <lthn-chat-window state="no-model" rail="empty" w="1100" h="700"></lthn-chat-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E1.1 · &lt;lthn-welcome-window step="1"&gt;</h2>
+      <p>Three-step first-run. Step 1 picks the model directory — dashed brand-tinted dropzone showing default <code>~/.lthn/models/</code> and free-space.</p>
+      <div class="lit-frame">
+        <lthn-welcome-window step="1"></lthn-welcome-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E1.1 · &lt;lthn-welcome-window step="2"&gt;</h2>
+      <p>Step 2 picks a starter model. Three small Apple-Silicon-friendly options, Gemma 4 E2B recommended.</p>
+      <div class="lit-frame">
+        <lthn-welcome-window step="2"></lthn-welcome-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E1.1 · &lt;lthn-welcome-window step="3"&gt;</h2>
+      <p>Step 3 wires up CLIs — Claude Code, OpenCode, Codex. The only outbound action lthn ever takes without you asking.</p>
+      <div class="lit-frame">
+        <lthn-welcome-window step="3"></lthn-welcome-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E1.2 · &lt;lthn-settings-window open="models"&gt;</h2>
+      <p>Sectioned scroll. Models open · Runner collapsed · API open with HTTP server toggled on, endpoint shown, key masked.</p>
+      <div class="lit-frame">
+        <lthn-settings-window open="models"></lthn-settings-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E1.3 · &lt;lthn-model-browser-window&gt;</h2>
+      <p>List + search + detail. Local rail with status dots (loaded · downloading · idle), Hugging Face search with chip filters, right rail with rich metadata + file manifest.</p>
+      <div class="lit-frame">
+        <lthn-model-browser-window selected="gemma-4-e2b"></lthn-model-browser-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E2.1 · &lt;lthn-benchmark-window&gt;</h2>
+      <p>Run · compare · export. History table at top with two runs selected for overlay; tok/s vs context-length chart below with current run in teal and a previous run in dashed violet.</p>
+      <div class="lit-frame">
+        <lthn-benchmark-window></lthn-benchmark-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E2.2 · &lt;lthn-logs-window tab="live"&gt;</h2>
+      <p>Streaming log with component + severity rails. Pulse dot at the bottom signals live tail. Severity colouring on warns.</p>
+      <div class="lit-frame">
+        <lthn-logs-window tab="live"></lthn-logs-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E2.2 · &lt;lthn-logs-window tab="history"&gt;</h2>
+      <p>Recent generations, each row a re-openable transcript. All local — never leaves this Mac.</p>
+      <div class="lit-frame">
+        <lthn-logs-window tab="history"></lthn-logs-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E2.2 · &lt;lthn-logs-window tab="power"&gt;</h2>
+      <p>24h watts chart with three KPI cards (24h average, 24h total, peak today). Fridge / christmas-bulb comparison footnote.</p>
+      <div class="lit-frame">
+        <lthn-logs-window tab="power"></lthn-logs-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E2.3 · &lt;lthn-telemetry-window&gt;</h2>
+      <p>The demo surface. Two giant readouts (tok/s, watts) with glow + sparklines, metadata band, glyph corner mark. Designed to put on a second screen during a demo.</p>
+      <div class="lit-frame">
+        <lthn-telemetry-window></lthn-telemetry-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E3.1 · &lt;lthn-integrations-window&gt;</h2>
+      <p>Client rail with status dots · detail pane with metadata grid · config-preview block showing only the keys lthn writes (apiBase / apiKey / model). Disconnect lives quiet on the right.</p>
+      <div class="lit-frame">
+        <lthn-integrations-window></lthn-integrations-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E3.2 · &lt;lthn-tools-window&gt;</h2>
+      <p>Three-column MCP browser — servers + tool list rail, schema + recent-calls in the centre, try-it pane on the right with OK/14 ms result. Subtitle counts servers · tools · today’s calls.</p>
+      <div class="lit-frame">
+        <lthn-tools-window></lthn-tools-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E4.1 · &lt;lthn-network-window&gt;</h2>
+      <p>LetherNet preview — radial peer graph with animated packets along live edges, idle peer dashed, self in brand teal. Right rail shows session metadata, privacy note, ledger preview.</p>
+      <div class="lit-frame">
+        <lthn-network-window></lthn-network-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E4.2 · &lt;lthn-distillation-window&gt;</h2>
+      <p>Five-step LoRA wizard — stepper across the toolbar, recipe rail · KPI grid + loss curve · sample comparison · output adapter actions on the right.</p>
+      <div class="lit-frame">
+        <lthn-distillation-window></lthn-distillation-window>
+      </div>
+    </section>
+
+    <section class="lit-section">
+      <h2>E4.3 · &lt;lthn-fleet-window&gt;</h2>
+      <p>Multi-machine routing preview — drag-reorderable machine cards with status · model · load · tok/s, live queue at the bottom showing per-caller route + elapsed.</p>
+      <div class="lit-frame">
+        <lthn-fleet-window></lthn-fleet-window>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Lit components are loaded as ES modules -->
+  <script type="module" src="./src/lit/lit-chrome.js"></script>
+  <script type="module" src="./src/lit/lit-chat-window.js"></script>
+  <script type="module" src="./src/lit/lit-ops-windows.js"></script>
+  <script type="module" src="./src/lit/lit-obs-windows.js"></script>
+  <script type="module" src="./src/lit/lit-ext-windows.js"></script>
+</body>
+</html>

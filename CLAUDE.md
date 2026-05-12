@@ -30,18 +30,32 @@ lthn/desktop/
 ├── pkg/tray/             — NSStatusItem + popover anchor + window-spawn router
 ├── pkg/runner/           — go-mlx adapter (start/stop/generate + signals)
 ├── pkg/telemetry/        — powermetrics/IOReport sampler
-├── frontend/src/lit/     — Lit windows (from Lethean-5)
-└── frontend/src/main.js  — mounts windows by ?surface=... URL param
+├── frontend/
+│   ├── index.html        — app entry (single-window mount via ?surface=)
+│   ├── canvas.html       — design canvas (every window side-by-side)
+│   └── src/
+│       ├── tokens.css    — Lethean-4 OKLCH tokens, Vi-anchored
+│       ├── main.js       — surface router for index.html
+│       └── lit/          — Lit primitives + windows from Lethean-5
+└── docs/design/
+    ├── HANDOVER.md       — Lethean-5 Lit handover (architecture + SwiftUI/Tauri translation notes)
+    └── lethean-4-react-reference/  — original React/JSX visual source (animated; reference only, not built)
 ```
 
 ## Frontend dev
 
 ```bash
 cd frontend && npm install && npm run dev
-# → http://127.0.0.1:5173/?surface=chat
+# → http://127.0.0.1:5173/canvas.html   ← every window side-by-side (the design canvas)
+# → http://127.0.0.1:5173/?surface=chat ← single-window mount (app entry)
 ```
 
-Mount any window for design review:
+### Two viewing surfaces
+
+- **`canvas.html`** — the design canvas from the Lethean-5 handover. Every window rendered side-by-side with section captions. Drop-in from `frontend/src/lit/lit-desktop.html`-origin (now at `frontend/canvas.html`). Open in a browser; pan around; review what's shipped.
+- **`index.html`** — the app entry. Mounts one window at a time via `?surface=` URL param. This is the surface Wails serves at production runtime.
+
+Mount any single window for review:
 - `?surface=tray` — popover (TODO: port from Lethean-4)
 - `?surface=chat&state=multi-turn|generating|switched-model|empty|no-model`
 - `?surface=welcome&step=1|2|3`

@@ -15,6 +15,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: "index.html",
+        canvas: "canvas.html",
       },
     },
   },
