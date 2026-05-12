@@ -114,17 +114,29 @@ tasks:
     summary: Packages the application for Linux
     deps:
       - task: build
+        vars:
+          ARCH: '{{.ARCH | default ARCH}}'
     cmds:
       - task: create:appimage
+        vars:
+          ARCH: '{{.ARCH | default ARCH}}'
       - task: create:deb
+        vars:
+          ARCH: '{{.ARCH | default ARCH}}'
       - task: create:rpm
+        vars:
+          ARCH: '{{.ARCH | default ARCH}}'
       - task: create:aur
+        vars:
+          ARCH: '{{.ARCH | default ARCH}}'
 
   create:appimage:
     summary: Creates an AppImage
     dir: build/linux/appimage
     deps:
       - task: build
+        vars:
+          ARCH: '{{.ARCH | default ARCH}}'
       - task: generate:dotdesktop
     cmds:
       - cp "{{.APP_BINARY}}" "{{.APP_NAME}}"
@@ -141,6 +153,8 @@ tasks:
     summary: Creates a deb package
     deps:
       - task: build
+        vars:
+          ARCH: '{{.ARCH | default ARCH}}'
     cmds:
       - task: generate:dotdesktop
       - task: generate:deb
@@ -149,6 +163,8 @@ tasks:
     summary: Creates a rpm package
     deps:
       - task: build
+        vars:
+          ARCH: '{{.ARCH | default ARCH}}'
     cmds:
       - task: generate:dotdesktop
       - task: generate:rpm
@@ -157,6 +173,8 @@ tasks:
     summary: Creates a arch linux packager package
     deps:
       - task: build
+        vars:
+          ARCH: '{{.ARCH | default ARCH}}'
     cmds:
       - task: generate:dotdesktop
       - task: generate:aur

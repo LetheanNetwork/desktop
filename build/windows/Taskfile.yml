@@ -105,6 +105,8 @@ tasks:
     summary: Packages the application
     cmds:
       - task: '{{if eq (.FORMAT | default "nsis") "msix"}}create:msix:package{{else}}create:nsis:installer{{end}}'
+        vars:
+          ARCH: '{{.ARCH | default ARCH}}'
     vars:
       FORMAT: '{{.FORMAT | default "nsis"}}'
 
@@ -124,6 +126,8 @@ tasks:
     dir: build/windows/nsis
     deps:
       - task: build
+        vars:
+          ARCH: '{{.ARCH | default ARCH}}'
     cmds:
       # Create the Microsoft WebView2 bootstrapper if it doesn't exist
       - wails3 generate webview2bootstrapper -dir "{{.ROOT_DIR}}/build/windows/nsis"
@@ -141,6 +145,8 @@ tasks:
     summary: Creates an MSIX package
     deps:
       - task: build
+        vars:
+          ARCH: '{{.ARCH | default ARCH}}'
     cmds:
       - |-
         wails3 tool msix \
