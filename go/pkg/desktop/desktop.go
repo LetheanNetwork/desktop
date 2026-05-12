@@ -331,7 +331,14 @@ func (s *Service) Run() core.Result {
 	// frontend listens for, so navigation goes through the same
 	// Lit router whether triggered by tray or by an in-popover link.
 	menu := s.app.Menu.New()
-	menu.Add("Lethean Desktop").SetEnabled(false)
+	// Open Lethean Desktop is the headline menu item — the same action
+	// the popover's screen-icon button triggers. Used to be a disabled
+	// label; promoted to the primary verb so the systray right-click
+	// menu has parity with the in-popover surface.
+	menu.Add("Open Lethean Desktop").OnClick(func(_ *application.Context) {
+		openWindow(s.app, "app")
+		s.app.Event.Emit("lthn:tray:open", "app")
+	})
 	menu.AddSeparator()
 	menu.Add("Open Chat…").OnClick(func(_ *application.Context) {
 		openWindow(s.app, "chat")

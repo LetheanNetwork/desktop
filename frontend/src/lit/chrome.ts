@@ -31,6 +31,12 @@ export interface ChromeOptions {
   toolbar?:  LitContent;
   body?:     LitContent;
   footer?:   LitContent;
+  // actions: optional right-side titlebar content — typically a row of
+  // small icon buttons (settings cog, open-in-app, etc.). Sits in the
+  // titlebar after the flex spacer so it's flush to the right edge.
+  // Caller is responsible for opting out of drag via --wails-draggable:
+  // no-drag on any interactive children.
+  actions?:  LitContent;
   // embedded: when true (set by <lthn-app-shell> when it mounts a
   // child window), skip the titlebar / footer / rounded-card frame
   // and just render the body filling the parent. Standalone use
@@ -307,7 +313,7 @@ customElements.define("lthn-sparkline", LthnSparkline);
  *     footer:  html`...`,    // optional 28px status row
  *   })
  */
-export function renderChrome({ title, subtitle, w = 900, h = 600, toolbar, body, footer, embedded = false }: ChromeOptions = {}) {
+export function renderChrome({ title, subtitle, w = 900, h = 600, toolbar, body, footer, actions, embedded = false }: ChromeOptions = {}) {
   // Embedded mode — mounted inside <lthn-app-shell>. The shell paints
   // its own titlebar / status bar and we fill its body slot. No card
   // frame, no rounded edges (the shell already has those), no titlebar
@@ -378,6 +384,7 @@ export function renderChrome({ title, subtitle, w = 900, h = 600, toolbar, body,
           ${subtitle ? html`<div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); letter-spacing:0.02em;">· ${subtitle}</div>` : nothing}
         </div>
         <div style="flex:1"></div>
+        ${actions ? html`<div style="display:flex; align-items:center; gap:4px; --wails-draggable: no-drag;">${actions}</div>` : nothing}
       </header>
 
       ${toolbar ? html`

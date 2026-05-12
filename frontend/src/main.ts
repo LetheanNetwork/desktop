@@ -9,7 +9,7 @@
  * the Go-side core/gui wrapper spawns them via Wails window APIs.
  */
 
-import { html, render } from "lit";
+import { html, nothing, render } from "lit";
 import { renderChrome } from "./lit/index";
 import "./lit/index";
 
@@ -40,6 +40,7 @@ switch (surface) {
         });
       };
 
+      type TrayTab = "system" | "runner" | "activity";
       interface TrayState {
         model:     string;
         uptime:    number;
@@ -47,6 +48,7 @@ switch (surface) {
         samples:   number[];   // rolling heap_alloc_mb window
         connected: boolean;
         err:       string | null;
+        tab:       TrayTab;    // active info-card tab
       }
       const state: TrayState = {
         model: "…",
@@ -55,7 +57,10 @@ switch (surface) {
         samples: [],
         connected: false,
         err: null,
+        tab: "system",
       };
+
+      const setTab = (t: TrayTab) => () => { state.tab = t; draw(); };
 
       const fmtUptime = (s: number) => {
         if (s < 60) return `${s | 0}s`;
@@ -70,43 +75,208 @@ switch (surface) {
           ? state.samples.join(",")
           : "";
         const sparkMax = Math.max(1, ...state.samples) * 1.2;
+        const hasModel = state.connected && state.model && state.model !== "no model loaded";
+
+        // Hero card — model status as the headline, mini-stats row, and a
+        // thin inline sparkline strip. Replaces the prior verbose three-line
+        // status row + separate "Heap (MB)" card at the bottom of the panel.
+        const heroCard = html`
+          <section style="display:flex; flex-direction:column; gap:10px;
+                          padding:12px 14px;
+                          background:rgba(255,255,255,0.025);
+                          border:1px solid rgba(255,255,255,0.06);
+                          border-radius:9px;">
+            <!-- Row 1: status dot + model name headline + state pill only when offline -->
+            <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+              <lthn-status-dot variant=${variant} ?pulse=${state.connected}></lthn-status-dot>
+              <div style="font-size:14px; font-weight:600; letter-spacing:-0.005em;
+                          color:${hasModel ? "var(--fg-0)" : "var(--fg-2)"};
+                          flex:1; min-width:0;
+                          overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                ${state.connected ? state.model : (state.err ? "Offline" : "Connecting…")}
+              </div>
+              ${state.err
+                ? html`<lthn-state-pill variant="disconnected">${stateLabel}</lthn-state-pill>`
+                : nothing}
+            </div>
+
+            <!-- Row 2: mini-stats. When no model is loaded, an inviting
+                 hint replaces the stats so the empty state reads as an
+                 opportunity rather than a deficiency. -->
+            ${hasModel ? html`
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                <div>
+                  <div style="font-family:var(--font-mono); font-size:9.5px;
+                              color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase;">Heap</div>
+                  <div style="font-family:var(--font-mono); font-size:13px;
+                              color:var(--fg-0); margin-top:2px;">${state.heapMb.toFixed(1)} <span style="color:var(--fg-3); font-size:10.5px;">MB</span></div>
+                </div>
+                <div>
+                  <div style="font-family:var(--font-mono); font-size:9.5px;
+                              color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase;">Uptime</div>
+                  <div style="font-family:var(--font-mono); font-size:13px;
+                              color:var(--fg-0); margin-top:2px;">${fmtUptime(state.uptime)}</div>
+                </div>
+              </div>
+            ` : state.connected ? html`
+              <div style="display:flex; align-items:center; gap:10px;
+                          padding:8px 10px; border-radius:6px;
+                          background:rgba(64,193,197,0.06);
+                          border:1px dashed rgba(64,193,197,0.22);">
+                <i class="fa-solid fa-cube" style="font-size:11px; color:var(--brand-300);"></i>
+                <div style="flex:1; font-size:11.5px; color:var(--fg-1);">Pick a model to start</div>
+                <lthn-btn tone="quiet" size="sm" @click=${openWindow("models")}>Browse →</lthn-btn>
+              </div>
+            ` : nothing}
+
+            <!-- Row 3: thin inline sparkline. Only renders when there's
+                 enough sample history to draw a meaningful trace; below
+                 that threshold the hero card simply omits the strip so
+                 we don't show a flat ghost line. -->
+            ${state.samples.length > 1 ? html`
+              <lthn-sparkline width="340" height="20" data=${sparkData} max=${sparkMax} fill></lthn-sparkline>
+            ` : nothing}
+          </section>
+        `;
+
+        // Open section — Lethean Desktop moved to the systray right-click
+        // menu (canonical macOS pattern) + the screen icon in the titlebar
+        // right side. Settings moved to the cog icon in the titlebar.
+        // The remaining three windows (Chat / Models / Telemetry) live as
+        // a 2-column grid; the third row stretches to fill so the layout
+        // still feels balanced with an odd count.
+        const openSection = html`
+          <section style="display:flex; flex-direction:column; gap:8px;">
+            <lthn-label>Open</lthn-label>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
+              <lthn-btn tone="ghost" size="md" @click=${openWindow("chat")}>
+                <i class="fa-regular fa-comment" style="font-size:11px;"></i>
+                Chat
+              </lthn-btn>
+              <lthn-btn tone="ghost" size="md" @click=${openWindow("models")}>
+                <i class="fa-solid fa-cube" style="font-size:11px;"></i>
+                Models
+              </lthn-btn>
+              <lthn-btn tone="ghost" size="md" @click=${openWindow("telemetry")}
+                style="grid-column: 1 / -1;">
+                <i class="fa-solid fa-wave-square" style="font-size:11px;"></i>
+                Telemetry
+              </lthn-btn>
+            </div>
+          </section>
+        `;
+
+        // Info-card tab panel — sits under the hero. Tabs show
+        // base info today; each panel is a placeholder for richer
+        // charts/stats as the surfaces wire to real bindings.
+        const tabBtn = (id: TrayTab, label: string, icon: string) => {
+          const on = state.tab === id;
+          return html`
+            <button
+              @click=${setTab(id)}
+              style="
+                flex:1;
+                display:inline-flex; align-items:center; justify-content:center; gap:6px;
+                padding:6px 8px;
+                font-size:11px; font-weight:${on ? 600 : 500};
+                color:${on ? "var(--fg-0)" : "var(--fg-2)"};
+                background:${on ? "rgba(255,255,255,0.06)" : "transparent"};
+                border:1px solid ${on ? "rgba(64,193,197,0.22)" : "transparent"};
+                border-radius:6px;
+                cursor:pointer;
+                --wails-draggable: no-drag;
+              ">
+              <i class="fa-solid ${icon}" style="font-size:10px; color:${on ? "var(--brand-300)" : "var(--fg-3)"};"></i>
+              ${label}
+            </button>
+          `;
+        };
+
+        // Tiny key/value row used inside every tab panel.
+        const kv = (k: string, v: string | number, mono = true) => html`
+          <div style="display:flex; align-items:baseline; justify-content:space-between; gap:10px; padding:4px 0;">
+            <span style="font-size:11px; color:var(--fg-3);">${k}</span>
+            <span style="font-family:${mono ? "var(--font-mono)" : "var(--font-sans)"}; font-size:11.5px; color:var(--fg-1);">${v}</span>
+          </div>
+        `;
+
+        const systemPanel = html`
+          ${kv("Heap", `${state.heapMb.toFixed(1)} MB`)}
+          ${kv("Uptime", fmtUptime(state.uptime))}
+          ${kv("Connection", state.err ? "offline" : state.connected ? "live" : "connecting")}
+          ${kv("Samples", `${state.samples.length} / 24`)}
+        `;
+
+        const runnerPanel = html`
+          ${kv("Model", hasModel ? state.model : "—", false)}
+          ${kv("Status", hasModel ? "loaded" : "idle")}
+          ${kv("Throughput", "—")}
+          ${kv("KV cache", "—")}
+        `;
+
+        const activityPanel = html`
+          ${kv("Sessions today", "—")}
+          ${kv("Tokens generated", "—")}
+          ${kv("Last interaction", "—")}
+          ${kv("Recent errors", state.err ? "1" : "0")}
+        `;
+
+        const infoCard = html`
+          <section style="display:flex; flex-direction:column; gap:8px;
+                          padding:8px 10px 10px;
+                          background:rgba(255,255,255,0.018);
+                          border:1px solid rgba(255,255,255,0.05);
+                          border-radius:8px;">
+            <div style="display:flex; gap:4px;">
+              ${tabBtn("system",   "System",   "fa-microchip")}
+              ${tabBtn("runner",   "Runner",   "fa-bolt")}
+              ${tabBtn("activity", "Activity", "fa-clock-rotate-left")}
+            </div>
+            <div style="padding:2px 4px;">
+              ${state.tab === "system"   ? systemPanel   : nothing}
+              ${state.tab === "runner"   ? runnerPanel   : nothing}
+              ${state.tab === "activity" ? activityPanel : nothing}
+            </div>
+          </section>
+        `;
+
+        // Titlebar right-side icon row — cog (settings) + screen (open app).
+        // Both opt out of drag explicitly (the parent slot is already
+        // marked no-drag at the chrome level, this is belt-and-braces).
+        const titlebarAction = (icon: string, title: string, onClick: () => void) => html`
+          <button
+            @click=${onClick}
+            title=${title}
+            style="
+              display:inline-flex; align-items:center; justify-content:center;
+              width:24px; height:24px;
+              background:transparent;
+              border:1px solid transparent;
+              border-radius:5px;
+              color:var(--fg-2);
+              cursor:pointer;
+              --wails-draggable: no-drag;
+            "
+            onmouseover="this.style.background='rgba(255,255,255,0.05)'; this.style.color='var(--fg-0)';"
+            onmouseout="this.style.background='transparent'; this.style.color='var(--fg-2)';">
+            <i class="fa-solid ${icon}" style="font-size:11px;"></i>
+          </button>
+        `;
+        const titlebarActions = html`
+          ${titlebarAction("fa-display", "Open Lethean Desktop", openWindow("app"))}
+          ${titlebarAction("fa-gear",    "Settings",             openWindow("settings"))}
+        `;
 
         render(renderChrome({
           title: "lthn",
           subtitle: state.err ? "local · offline" : "local · ready",
           w: 400, h: 560,
+          actions: titlebarActions,
           body: html`
             <div style="display:flex; flex-direction:column; gap:14px; padding:14px; flex:1; min-height:0; overflow-y:auto; overscroll-behavior: none;">
-              <section style="display:flex; align-items:center; gap:10px; padding:10px 12px;
-                              background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.06); border-radius:8px;">
-                <lthn-status-dot variant=${variant} ?pulse=${state.connected}></lthn-status-dot>
-                <div style="display:flex; flex-direction:column; gap:2px; min-width:0; flex:1;">
-                  <div style="font-size:12.5px; font-weight:500; color:var(--fg-0);">${state.model}</div>
-                  <div style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);">
-                    ${state.connected ? `heap ${state.heapMb.toFixed(1)} MB · up ${fmtUptime(state.uptime)}` : (state.err || "polling…")}
-                  </div>
-                </div>
-                <lthn-state-pill variant=${state.err ? "disconnected" : "running"}>${stateLabel}</lthn-state-pill>
-              </section>
-
-              <section style="display:flex; flex-direction:column; gap:6px;">
-                <lthn-label>Open</lthn-label>
-                <lthn-btn tone="primary" size="md" @click=${openWindow("app")}>Lethean Desktop</lthn-btn>
-                <lthn-btn tone="ghost" size="md" @click=${openWindow("chat")}>Chat</lthn-btn>
-                <lthn-btn tone="ghost" size="md" @click=${openWindow("models")}>Models</lthn-btn>
-                <lthn-btn tone="ghost" size="md" @click=${openWindow("settings")}>Settings</lthn-btn>
-                <lthn-btn tone="ghost" size="md" @click=${openWindow("telemetry")}>Telemetry</lthn-btn>
-              </section>
-
-              <section style="display:flex; flex-direction:column; gap:8px; padding:10px 12px;
-                              background:rgba(255,255,255,0.018); border:1px solid rgba(255,255,255,0.05); border-radius:8px;">
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <lthn-label>Heap (MB)</lthn-label>
-                  <span style="flex:1"></span>
-                  <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--brand-300);">${state.heapMb.toFixed(1)} MB</span>
-                </div>
-                <lthn-sparkline width="340" height="32" data=${sparkData} max=${sparkMax} fill></lthn-sparkline>
-              </section>
+              ${heroCard}
+              ${infoCard}
+              ${openSection}
             </div>
           `,
           footer: html`
