@@ -22,3 +22,4 @@ coverage.out
 # macOS bundle artefacts
 *.app/
 *.dmg
+/lthn
