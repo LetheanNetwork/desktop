@@ -85,15 +85,18 @@ Wiring against:
 - `dappco.re/go/store` (KV persistence)
 - `dappco.re/go/inference/state` (portable KV state primitive)
 
+## Resolved decisions
+
+- **Bundle ID:** `ai.lthn.desktop` (Snider 2026-05-12)
+
 ## Open decisions (need Snider's call)
 
 Tracked at [`plans/project/lthn/desktop/RFC.first-release.md`](../../host-uk/core/plans/project/lthn/desktop/RFC.first-release.md) §7:
 
 1. Telemetry source — `powermetrics` (sudo) vs `IOReport` (no sudo) vs XPC helper
-2. Bundle ID — `sh.lthn.desktop` / `ai.lthn.desktop` / `com.lethean.desktop`
-3. First-release version number — `0.1.0` vs `0.0.1`
-4. Model directory convention — `~/.lthn/models/` (proposed; not yet confirmed)
-5. First-launch flow when no model present
+2. First-release version number — `0.1.0` vs `0.0.1`
+3. Model directory convention — `~/.lthn/models/` (proposed; not yet confirmed)
+4. First-launch flow when no model present
 
 ## Parallel sub-tasks for multi-agent direction
 
