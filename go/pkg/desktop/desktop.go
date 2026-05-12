@@ -249,6 +249,12 @@ func (s *Service) Run() core.Result {
 	// session / Cmd+, settings / etc. See keybindings.go.
 	registerKeyBindings(s.app)
 
+	// System event re-broadcasts. Wails' ApplicationStarted /
+	// OpenedWithFile / LaunchedWithUrl get republished as lthn:app:*
+	// so the frontend has one event-bus contract for everything.
+	// See sysevents.go for the table.
+	registerSystemEvents(s.app)
+
 	window := s.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:            "tray",
 		Title:           "Lethean Desktop",
@@ -271,6 +277,10 @@ func (s *Service) Run() core.Result {
 		window.Hide()
 		e.Cancel()
 	})
+
+	// Per-window lthn:window:* event re-broadcasts (ready / focus /
+	// blur / hide / show / resize / files-dropped). See sysevents.go.
+	registerWindowEvents(s.app, window)
 
 	systray.AttachWindow(window).WindowOffset(5)
 
