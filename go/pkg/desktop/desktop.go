@@ -187,6 +187,18 @@ func (s *Service) Run() core.Result {
 		s.app.Event.Emit("lthn:notification:response", result.Response)
 	})
 
+	// Application menu — macOS-only. Accessory apps still get a
+	// menubar when their windows are focused, and standard roles
+	// give us Cmd+Q / Cmd+W / Cmd+M / Cmd+H / Edit menu shortcuts
+	// for free. Without AddRole(AppMenu) we'd lose those.
+	if runtime.GOOS == "darwin" {
+		appMenu := s.app.Menu.New()
+		appMenu.AddRole(application.AppMenu)
+		appMenu.AddRole(application.EditMenu)
+		appMenu.AddRole(application.WindowMenu)
+		s.app.Menu.Set(appMenu)
+	}
+
 	systray := s.app.SystemTray.New()
 	if runtime.GOOS == "darwin" {
 		if s.opts.TrayIcon != nil {
@@ -198,13 +210,39 @@ func (s *Service) Run() core.Result {
 		systray.SetIcon(s.opts.TrayIcon)
 	}
 
+	// Systray menu — quick-access verbs that match the popover
+	// surfaces. The "open" entries emit window-open events the
+	// frontend listens for, so navigation goes through the same
+	// Lit router whether triggered by tray or by an in-popover link.
 	menu := s.app.Menu.New()
 	menu.Add("Lethean Desktop").SetEnabled(false)
+	menu.AddSeparator()
+	menu.Add("Open Chat…").OnClick(func(_ *application.Context) {
+		s.app.Event.Emit("lthn:tray:open", "chat")
+	})
+	menu.Add("Models…").OnClick(func(_ *application.Context) {
+		s.app.Event.Emit("lthn:tray:open", "models")
+	})
+	menu.Add("Settings…").OnClick(func(_ *application.Context) {
+		s.app.Event.Emit("lthn:tray:open", "settings")
+	})
+	menu.AddSeparator()
+	menu.Add("About lthn").OnClick(func(_ *application.Context) {
+		s.app.Event.Emit("lthn:tray:open", "about")
+	})
 	menu.AddSeparator()
 	menu.Add("Quit lthn").OnClick(func(_ *application.Context) {
 		s.app.Quit()
 	})
 	systray.SetMenu(menu)
+
+	// Context menus — right-click surfaces for the chat UI. Lit
+	// elements declare `style="--custom-contextmenu: lthn-message"`
+	// (etc.) plus `--custom-contextmenu-data: <message-id>` so the
+	// click handler knows WHICH message was right-clicked. Each
+	// action emits an "lthn:context:<menu>:<action>" event with the
+	// data; the originating Lit element dispatches accordingly.
+	registerContextMenus(s.app)
 
 	window := s.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:            "tray",
