@@ -15,6 +15,7 @@ class LthnSettingsWindow extends LitElement {
   declare open: string;
   declare w: number;
   declare h: number;
+  declare embedded: boolean;
   constructor() { super(); this.open = "models"; this.w = 760; this.h = 600; }
   createRenderRoot() { return this; }
 
@@ -62,6 +63,7 @@ class LthnSettingsWindow extends LitElement {
       subtitle: "lthn · v0.2.0-rc1",
       w: this.w, h: this.h, body,
       footer: html`Changes apply immediately · ⌘W to close · the runner keeps running`,
+      embedded: this.embedded,
     });
   }
 

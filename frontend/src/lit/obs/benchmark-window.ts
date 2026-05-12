@@ -9,6 +9,7 @@ class LthnBenchmarkWindow extends LitElement {
   static properties = { w: { type: Number }, h: { type: Number } };
   declare w: number;
   declare h: number;
+  declare embedded: boolean;
   constructor() { super(); this.w = 1000; this.h = 660; }
   createRenderRoot() { return this; }
 
@@ -108,6 +109,7 @@ class LthnBenchmarkWindow extends LitElement {
       title: "Benchmark", subtitle: "run · compare · export",
       w: this.w, h: this.h, toolbar, body,
       footer: html`5 runs on file · ~/.lthn/bench/results.jsonl · last run 47.2 tok/s · 8.4 W`,
+      embedded: this.embedded,
     });
   }
 }

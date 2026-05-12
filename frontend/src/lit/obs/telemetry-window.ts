@@ -10,6 +10,7 @@ class LthnTelemetryWindow extends LitElement {
   declare w: number;
   declare h: number;
   declare fullscreen: boolean;
+  declare embedded: boolean;
   constructor() { super(); this.w = 880; this.h = 560; this.fullscreen = false; }
   createRenderRoot() { return this; }
 
@@ -55,6 +56,7 @@ class LthnTelemetryWindow extends LitElement {
       subtitle: this.fullscreen ? "fullscreen · ⎋ to exit" : "demo surface",
       w: this.w, h: this.h, body,
       footer: html`model · gemma-4-e2b · context 142 / 8192 · airplane-mode OK · ⌥⌘F for fullscreen`,
+      embedded: this.embedded,
     });
   }
 }

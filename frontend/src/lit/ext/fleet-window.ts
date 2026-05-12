@@ -9,6 +9,7 @@ class LthnFleetWindow extends LitElement {
   static properties = { w: { type: Number }, h: { type: Number } };
   declare w: number;
   declare h: number;
+  declare embedded: boolean;
   constructor() { super(); this.w = 1080; this.h = 700; }
   createRenderRoot() { return this; }
 
@@ -93,6 +94,7 @@ class LthnFleetWindow extends LitElement {
       title: "Fleet", subtitle: "multi-machine · v1.0 preview",
       w: this.w, h: this.h, toolbar, body,
       footer: html`4 of 5 online · routing latency-aware · ⌘R reroute · ⌘S snapshot`,
+      embedded: this.embedded,
     });
   }
 }

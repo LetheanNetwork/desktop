@@ -10,6 +10,7 @@ class LthnLogsWindow extends LitElement {
   declare w: number;
   declare h: number;
   declare tab: string;
+  declare embedded: boolean;
   constructor() { super(); this.w = 1000; this.h = 660; this.tab = "live"; }
   createRenderRoot() { return this; }
 
@@ -44,6 +45,7 @@ class LthnLogsWindow extends LitElement {
       title: "Activity", subtitle: "logs · history · power",
       w: this.w, h: this.h, toolbar, body,
       footer: html`${footers[this.tab as keyof typeof footers]}`,
+      embedded: this.embedded,
     });
   }
 

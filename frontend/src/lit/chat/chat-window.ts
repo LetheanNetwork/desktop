@@ -94,13 +94,14 @@ class LthnChatWindow extends LitElement {
   declare rightRail: RightRailMode;
   declare w:         number;
   declare h:         number;
+  declare embedded: boolean;
   constructor() {
     super();
     this.state = "multi-turn";
     this.rail = "filled";
     this.rightRail = "expanded";
     this.w = 1100;
-    this.h = 740;
+    this.h = 740; this.embedded = false;
   }
   createRenderRoot() { return this; }
 
@@ -151,6 +152,7 @@ class LthnChatWindow extends LitElement {
       subtitle: "conversation · local",
       w: this.w, h: this.h,
       toolbar, body, footer,
+      embedded: this.embedded,
     });
   }
 

@@ -15,6 +15,7 @@ class LthnModelBrowserWindow extends LitElement {
   declare selected: string;
   declare w: number;
   declare h: number;
+  declare embedded: boolean;
   constructor() { super(); this.selected = "gemma-4-e2b"; this.w = 1040; this.h = 700; }
   createRenderRoot() { return this; }
 
@@ -150,6 +151,7 @@ class LthnModelBrowserWindow extends LitElement {
       w: this.w, h: this.h,
       toolbar, body,
       footer: html`4 local · 312 GB free · ~/.lthn/models/ · airplane-mode OK (browsing requires network)`,
+      embedded: this.embedded,
     });
   }
 

@@ -9,6 +9,7 @@ class LthnToolsWindow extends LitElement {
   static properties = { w: { type: Number }, h: { type: Number } };
   declare w: number;
   declare h: number;
+  declare embedded: boolean;
   constructor() { super(); this.w = 1040; this.h = 700; }
   createRenderRoot() { return this; }
 
@@ -143,6 +144,7 @@ class LthnToolsWindow extends LitElement {
       title: "Tools · MCP", subtitle: "2 servers · 12 tools · 648 calls today",
       w: this.w, h: this.h, toolbar, body,
       footer: html`~/.lthn/mcp.json · 5 servers configured · 3 enabled · 648 calls today · 99.4 % ok`,
+      embedded: this.embedded,
     });
   }
 }

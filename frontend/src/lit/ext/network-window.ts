@@ -9,6 +9,7 @@ class LthnNetworkWindow extends LitElement {
   static properties = { w: { type: Number }, h: { type: Number } };
   declare w: number;
   declare h: number;
+  declare embedded: boolean;
   constructor() { super(); this.w = 1080; this.h = 720; }
   createRenderRoot() { return this; }
 
@@ -108,6 +109,7 @@ class LthnNetworkWindow extends LitElement {
       title: "Network", subtitle: "LetherNet · v0.7 preview",
       w: this.w, h: this.h, toolbar, body,
       footer: html`Disaggregated · 4 peers · session privacy-preserved · no PII shared · always opt-in`,
+      embedded: this.embedded,
     });
   }
 }

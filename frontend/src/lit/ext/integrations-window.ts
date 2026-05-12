@@ -9,6 +9,7 @@ class LthnIntegrationsWindow extends LitElement {
   static properties = { w: { type: Number }, h: { type: Number } };
   declare w: number;
   declare h: number;
+  declare embedded: boolean;
   constructor() { super(); this.w = 880; this.h = 660; }
   createRenderRoot() { return this; }
 
@@ -92,6 +93,7 @@ class LthnIntegrationsWindow extends LitElement {
       title: "Integrations", subtitle: "clients · MCP · webhooks",
       w: this.w, h: this.h, body,
       footer: html`2 connected · 1 endpoint · http://localhost:8000/v1 · only outbound action lthn ever takes`,
+      embedded: this.embedded,
     });
   }
 }

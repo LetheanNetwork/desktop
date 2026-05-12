@@ -41,6 +41,7 @@ class LthnWelcomeWindow extends LitElement {
   declare step: number;
   declare w: number;
   declare h: number;
+  declare embedded: boolean;
   constructor() { super(); this.step = 1; this.w = 760; this.h = 580; }
   createRenderRoot() { return this; }
 
@@ -126,6 +127,7 @@ class LthnWelcomeWindow extends LitElement {
       w: this.w, h: this.h,
       body,
       footer: html`British English · dark default · accessibility light in Settings · v0.2.0-rc1`,
+      embedded: this.embedded,
     });
   }
 

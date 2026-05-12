@@ -31,6 +31,12 @@ export interface ChromeOptions {
   toolbar?:  LitContent;
   body?:     LitContent;
   footer?:   LitContent;
+  // embedded: when true (set by <lthn-app-shell> when it mounts a
+  // child window), skip the titlebar / footer / rounded-card frame
+  // and just render the body filling the parent. Standalone use
+  // (systray-spawned "lite" windows) leaves embedded=false and gets
+  // the full Lethean-5 cute card chrome.
+  embedded?: boolean;
 }
 
 declare global {
@@ -72,12 +78,38 @@ customElements.define("lthn-glyph", LthnGlyph);
 /* ────────────────────────────────── <lthn-traffic-lights> ───────── */
 class LthnTrafficLights extends LitElement {
   createRenderRoot() { return this; }
+  // Wire the macOS-style buttons to the live Wails Window API. Red =
+  // Close (Wails handles the WindowClosing event; our windows are
+  // hide-on-close so the side-effect is hide). Yellow = Minimise.
+  // Green = Fullscreen toggle (Maximise on Windows/Linux semantics).
+  // Dynamic import keeps the runtime out of the non-Wails canvas
+  // preview's hot-path.
+  private async _act(verb: "close" | "minimise" | "fullscreen") {
+    try {
+      const { Window } = await import("@wailsio/runtime");
+      if (verb === "close") await Window.Close();
+      else if (verb === "minimise") await Window.Minimise();
+      else if (verb === "fullscreen") {
+        const fs = await Window.IsFullscreen();
+        if (fs) await Window.UnFullscreen(); else await Window.Fullscreen();
+      }
+    } catch (err) {
+      console.error(`traffic-light ${verb} failed:`, err);
+    }
+  }
   render() {
+    const btn = (color: string, verb: "close" | "minimise" | "fullscreen") => html`
+      <span
+        @click=${() => this._act(verb)}
+        title=${verb}
+        style="width:12px; height:12px; border-radius:50%; background:${color}; cursor:pointer; --wails-draggable: no-drag;"
+      ></span>
+    `;
     return html`
       <div style="display:flex; gap:8px; align-items:center; --wails-draggable: no-drag;">
-        <span style="width:12px; height:12px; border-radius:50%; background:#ff5f57;"></span>
-        <span style="width:12px; height:12px; border-radius:50%; background:#febc2e;"></span>
-        <span style="width:12px; height:12px; border-radius:50%; background:#28c840;"></span>
+        ${btn("#ff5f57", "close")}
+        ${btn("#febc2e", "minimise")}
+        ${btn("#28c840", "fullscreen")}
       </div>
     `;
   }
@@ -131,6 +163,7 @@ class LthnBtn extends LitElement {
     const t = tones[this.tone] || tones.ghost;
     return html`
       <button style="
+        --wails-draggable: no-drag;
         display:inline-flex; align-items:center; gap:${s.gap}px;
         padding:${s.pad}; border-radius:6px;
         font-size:${s.font}px; font-weight:500;
@@ -274,7 +307,36 @@ customElements.define("lthn-sparkline", LthnSparkline);
  *     footer:  html`...`,    // optional 28px status row
  *   })
  */
-export function renderChrome({ title, subtitle, w = 900, h = 600, toolbar, body, footer }: ChromeOptions = {}) {
+export function renderChrome({ title, subtitle, w = 900, h = 600, toolbar, body, footer, embedded = false }: ChromeOptions = {}) {
+  // Embedded mode — mounted inside <lthn-app-shell>. The shell paints
+  // its own titlebar / status bar and we fill its body slot. No card
+  // frame, no rounded edges (the shell already has those), no titlebar
+  // (the shell already has one). Toolbar still ships because it's a
+  // window-local concern (e.g. chat's "model · ctx · 1 runner" row).
+  if (embedded) {
+    return html`
+      <div class="lthn-window lthn-window--embedded" style="
+        width:100%; height:100%;
+        display:flex; flex-direction:column;
+        color: var(--fg-1);
+        font-family: var(--font-sans);
+        --wails-draggable: drag;
+      ">
+        ${toolbar ? html`
+          <div style="
+            display:flex; align-items:center; gap:8px;
+            min-height:44px; padding:8px 14px;
+            background: rgba(0,0,0,0.12);
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            flex-shrink:0;
+          ">${toolbar}</div>
+        ` : nothing}
+        <div style="flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden;">
+          ${body}
+        </div>
+      </div>
+    `;
+  }
   return html`
     <div class="lthn-window" style="
       width:${w}px; height:${h}px;
@@ -291,6 +353,12 @@ export function renderChrome({ title, subtitle, w = 900, h = 600, toolbar, body,
         inset 0 1px 0 rgba(255,255,255,0.04);
       color: var(--fg-1);
       font-family: var(--font-sans);
+      /* Default-drag: the whole frameless card acts like a native macOS
+         window background. Interactive children (buttons, traffic lights,
+         inputs, scrollable lists) opt out via --wails-draggable: no-drag.
+         Native-macOS-equivalent behaviour without users needing to find
+         the narrow title strip. */
+      --wails-draggable: drag;
     ">
       <!-- titlebar — Wails3 frameless drag region via --wails-draggable.
            Interactive children should override with --wails-draggable: no-drag. -->

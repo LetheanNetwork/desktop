@@ -114,6 +114,7 @@ class LthnAppShell extends LitElement {
             @click=${() => this._select(n.id)}
             title=${this.collapsed ? n.label : ""}
             style="
+              --wails-draggable: no-drag;
               display:flex; align-items:center; gap:12px;
               margin:1px 8px; padding:${this.collapsed ? "8px 0" : "8px 12px"};
               ${this.collapsed ? "justify-content:center;" : ""}
@@ -141,18 +142,23 @@ class LthnAppShell extends LitElement {
     if (node) return html`<slot name="body"></slot>`;
     const entry = NAV.find(n => n.id === this.active);
     if (!entry) return html`<div style="padding:40px; color:var(--fg-3);">No window for "${this.active}"</div>`;
-    // Dynamically render the matching custom element
-    return html`${document.createElement(entry.tag)
-      ? html`<div style="flex:1; min-height:0; display:flex; align-items:flex-start; justify-content:center; padding:24px; overflow:auto; background:radial-gradient(1200px 600px at 50% 30%, rgba(64,193,197,0.03), transparent 60%);">
-          ${this._instantiate(entry.tag)}
-        </div>`
-      : nothing
-    }`;
+    // Dynamically render the matching custom element. With embedded
+    // mode (set in _instantiate), the child fills the body slot
+    // 100% — no padding, no centring. Background gradient kept so the
+    // body area still feels distinct from the side-nav rail.
+    return html`<div style="flex:1; min-height:0; display:flex; overflow:hidden; background:radial-gradient(1200px 600px at 50% 30%, rgba(64,193,197,0.03), transparent 60%);">
+      ${this._instantiate(entry.tag)}
+    </div>`;
   }
 
   _instantiate(tag: string) {
     // Use unsafeHTML-free path: create element imperatively, lit-html will mount it
     const el = document.createElement(tag);
+    // Two-shell pattern: mark every child as embedded so renderChrome
+    // skips its standalone card chrome and fills our body slot. The
+    // shell already paints the titlebar / side-nav / status bar.
+    // See memory design_two_shell_pattern.md.
+    el.setAttribute("embedded", "");
     // Pass through some sensible defaults so the windows look populated
     if (tag === "lthn-chat-window") el.setAttribute("state", "multi-turn");
     if (tag === "lthn-logs-window") el.setAttribute("tab", "live");
@@ -177,6 +183,9 @@ class LthnAppShell extends LitElement {
         color: var(--fg-1);
         font-family: var(--font-sans);
         overflow: hidden;
+        /* Default-drag the whole shell — interactive children
+           (side-nav buttons, traffic-lights, Search) opt out. */
+        --wails-draggable: drag;
       ">
         <!-- TITLEBAR (drag region) -->
         <header style="
@@ -188,12 +197,10 @@ class LthnAppShell extends LitElement {
           --wails-draggable: drag;
           user-select: none;
         ">
-          <!-- traffic lights (non-functional in browser; real shell calls window APIs) -->
-          <div style="--wails-draggable: no-drag; display:flex; gap:8px;">
-            <span style="width:12px; height:12px; border-radius:50%; background:#ff5f57; cursor:pointer;"></span>
-            <span style="width:12px; height:12px; border-radius:50%; background:#febc2e; cursor:pointer;"></span>
-            <span style="width:12px; height:12px; border-radius:50%; background:#28c840; cursor:pointer;"></span>
-          </div>
+          <!-- Real traffic-lights — wired to Wails Window API. See
+               chrome.ts <lthn-traffic-lights> for Close/Minimise/Fullscreen
+               click handlers. -->
+          <lthn-traffic-lights></lthn-traffic-lights>
           <div style="display:flex; align-items:center; gap:8px;">
             <lthn-glyph size="14" color="var(--fg-1)" ?active=${this.running}></lthn-glyph>
             <span style="font-family:var(--font-mono); font-size:12px; color:var(--fg-0); letter-spacing:-0.005em; font-weight:600;">lthn</span>

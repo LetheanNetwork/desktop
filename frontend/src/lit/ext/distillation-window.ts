@@ -9,6 +9,7 @@ class LthnDistillationWindow extends LitElement {
   static properties = { w: { type: Number }, h: { type: Number } };
   declare w: number;
   declare h: number;
+  declare embedded: boolean;
   constructor() { super(); this.w = 1100; this.h = 740; }
   createRenderRoot() { return this; }
 
@@ -153,6 +154,7 @@ class LthnDistillationWindow extends LitElement {
       title: "Fine-tune", subtitle: "LoRA · SFT · distill · merge",
       w: this.w, h: this.h, toolbar, body,
       footer: html`step 4 of 5 · running · epoch 2/3 · loss 0.84 · ETA 14 min · 9.8 W`,
+      embedded: this.embedded,
     });
   }
 }
