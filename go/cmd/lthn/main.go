@@ -26,10 +26,13 @@
 package main
 
 import (
+	"os"
+
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/desktop"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
+	"golang.org/x/term"
 )
 
 // version is the lthn binary's release tag. Updated per Mantis ticket.
@@ -84,23 +87,37 @@ func main() {
 }
 
 // cmdDefault is invoked when `lthn` is run without a subcommand.
-// Today: prints the banner pointing at help. When the GUI is wired,
-// this will launch the tray + popover.
+// Routes based on stdin TTY:
+//
+//   - TTY attached (user typed `lthn` in a terminal) → CLI banner
+//     pointing at subcommands.
+//   - No TTY (double-clicked .app, wails3 dev launch, launchd /
+//     systemd / NSSM service) → launch the systray + GUI.
+//
+// Canonical Unix dual-mode idiom — terminal users get help, GUI
+// launchers get GUI. CLI subcommands (serve / ai / config / etc.)
+// bypass this check and dispatch directly.
 //
 // Usage example:
 //
 //	core.Exit(cmdDefault(core.Args()[1:]))
 func cmdDefault(args []string) int {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return cmdGUI(args)
+	}
 	core.Println("lthn — Lethean unified binary")
 	core.Println("")
-	core.Println("This is the default mode. The GUI is not yet wired in the scaffold.")
-	core.Println("Available subcommands:")
+	core.Println("Run without arguments from a GUI launcher (Finder / wails3 dev / launchd)")
+	core.Println("to start the systray + GUI. From a terminal, pick a subcommand:")
+	core.Println("")
+	core.Println("  lthn gui           — explicit GUI launch")
+	core.Println("  lthn tray          — tray-only (no popover window)")
+	core.Println("  lthn serve         — HTTP API server")
+	core.Println("  lthn ai            — AI subsystem (chat / generate / models)")
+	core.Println("  lthn config        — config inspection")
+	core.Println("  lthn state         — state surface")
 	core.Println("  lthn version       — print version")
 	core.Println("  lthn help          — full subcommand list")
-	core.Println("  lthn serve         — HTTP API server (stub)")
-	core.Println("  lthn ai            — AI subsystem")
-	core.Println("")
-	core.Println("See `lthn help` or plans/project/lthn/desktop/RFC.first-release.md")
 	return 0
 }
 

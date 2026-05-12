@@ -41,6 +41,12 @@ dev_mode:
       - node_modules
       - frontend
       - bin
+      # Vite output gets copied into go/cmd/lthn/dist on every
+      # build:frontend step (so go:embed picks it up). Without
+      # excluding it the watcher trips on its own staging copy
+      # and we get an infinite rebuild loop.
+      - go/cmd/lthn/dist
+      - dist
     file:
       - .DS_Store
       - .gitignore
