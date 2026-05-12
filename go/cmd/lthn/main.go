@@ -54,6 +54,12 @@ func main() {
 		core.Exit(cmdServe(args[1:]))
 	case "ai":
 		core.Exit(cmdAI(args[1:]))
+	case "state":
+		core.Exit(cmdState(args[1:]))
+	case "events":
+		core.Exit(cmdEvents(args[1:]))
+	case "process":
+		core.Exit(cmdProcess(args[1:]))
 	default:
 		core.Print(core.Stderr(), "lthn: unknown subcommand %q\nrun `lthn help` for available commands\n", args[0])
 		core.Exit(2)
@@ -109,6 +115,9 @@ func cmdHelp(args []string) int {
 		core.Println("  tray                 Tray-only mode (NSStatusItem, no popover pre-open)")
 		core.Println("  serve [--port PORT]  HTTP API server (OpenAI-compatible)")
 		core.Println("  ai <verb> [args...]  AI subsystem — chat, generate, models")
+		core.Println("  state <verb>         KV store (get / set / delete / list / groups)")
+		core.Println("  events <verb>        Event bus (stats / publish / config / running)")
+		core.Println("  process <verb>       Subsystem supervisor (list / get)")
 		core.Println("")
 		core.Println("Address handler: lthn:// URIs route through the same dispatch")
 		core.Println("(see plans/project/lthn/RFC.md §7 — the unified namespace canon)")
