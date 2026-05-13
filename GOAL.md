@@ -322,3 +322,174 @@ When this goal hits 0, two follow-ups unlock:
    surface Wails windows we just landed (editor, git, build, lint,
    containers, repos, php, marketplace, plugin) remember their
    on-screen positions across restarts.
+
+---
+
+## Phase 7 — UI element wiring (parallel to audit phases)
+
+Surveyed 2026-05-13. The Lit windows have a large surface of buttons,
+tabs and toggles that render but do nothing. The backend services
+exist for many of them; the rest need a Snider-class call on whether
+to invent a new backend or remove the dead element.
+
+**Discipline rule:** these tasks are PARALLEL to the audit phases.
+Codex may interleave them with audit work — each task commits on its
+own with `feat(ui): wire <element> in <window>`. Tasks that need a
+new backend get a `TODO(snider)` block on the unwired element in the
+TS file pointing at the task ID here, then move on.
+
+Per-task done criteria: button works end-to-end OR (for tasks needing
+new backend) `TODO(snider): GOAL.md task 7.X.Y — <reason>` comment is
+in the TS file and the file still compiles.
+
+### 7.1 — chat-window.ts (decorative buttons)
+
+| ID | Element | Action | Backend |
+|----|---------|--------|---------|
+| 7.1.1 | Settings icon (toolbar) | `import("@desktop/desktop/windowservice").then(w => w.Open("settings"))` | exists |
+| 7.1.2 | Metrics chart toggle (toolbar) | toggle `this.showMetrics` state; conditionally render telemetry sparkline below composer | `@desktop/telemetry/service.CurrentSample()` exists |
+| 7.1.3 | Ellipsis menu (conversation row) | open a context menu with Rename / Delete / Export — first cut: `Delete` calls `@desktop/sessions/wailsservice.Delete(id)` | **NEW BACKEND** — `sessions.Service` needs `Delete(id)` + `Rename(id, title)` methods |
+| 7.1.4 | Attach icon (composer) | wire to file picker; selected files become assistant context attachments | **NEW BACKEND** — sessions need `AppendAttachment(id, path)` + storage |
+| 7.1.5 | Slash commands icon (composer) | open a slash-command picker overlay; first cut: hardcoded `/reset`, `/model`, `/save` — pure frontend | no backend needed |
+| 7.1.6 | Stop button (active while streaming) | wire to runner's stream-cancel — `@desktop/runner/service.WCancel(streamID)` | **NEW BACKEND** — `runner.Service` needs `Cancel(streamID)` exposed |
+| 7.1.7 | Copy code button (assistant msg) | `navigator.clipboard.writeText(message.content)` | no backend needed |
+| 7.1.8 | Regenerate button (assistant msg) | replay last user message via `_send()` after dropping the assistant turn | partial backend — needs `sessions.PopLast(id)` |
+| 7.1.9 | Copy code-block button (per fenced block) | `navigator.clipboard.writeText(codeText)` | no backend needed |
+
+### 7.2 — logs-window.ts (tab + filter wiring)
+
+| ID | Element | Action | Backend |
+|----|---------|--------|---------|
+| 7.2.1 | "Live log" tab button | set `this.tab = "live"` + show bridge console stream | partial — `@desktop/bridge/service` already polled |
+| 7.2.2 | "Generation history" tab button | set `this.tab = "history"` + render past completions from sessions | uses `@desktop/sessions/wailsservice.List()` |
+| 7.2.3 | "Power history" tab button | set `this.tab = "power"` + render telemetry power samples | **NEW BACKEND** — `telemetry.Service` needs `PowerHistory()` returning power-draw samples |
+| 7.2.4 | Component filter checkbox | filter shown rows by component label; pure local filter on current data | no backend needed |
+| 7.2.5 | Severity filter checkbox | filter shown rows by severity; pure local filter | no backend needed |
+
+### 7.3 — benchmark-window.ts (whole window stub)
+
+| ID | Element | Action | Backend |
+|----|---------|--------|---------|
+| 7.3.1 | "PP only" / "TG only" / "Both" mode buttons | set `this.mode = "pp" \| "tg" \| "both"` local state | no backend needed |
+| 7.3.2 | "Run" button | dispatch benchmark — `@desktop/runner/service.WBench({prompt, mode, model})` | **NEW BACKEND** — `runner.Service` needs a `Bench(opts)` method that exercises the loaded model with a fixed prompt and reports PP (prompt-eval) + TG (token-gen) tokens/sec |
+| 7.3.3 | "Export" button | dump bench result table as CSV via clipboard or save dialog | depends on 7.3.2 landing |
+
+### 7.4 — distillation-window.ts (preview UI, no backend)
+
+All four buttons (Stop / Test in chat / Merge into base / Push to
+HuggingFace) need a complete distillation training subsystem that
+doesn't exist in lthn-desktop today. The native training path lives
+in `core/go-mlx` (see memory: `project_go_mlx_research_grade.md`).
+
+| ID | Element | Action | Backend |
+|----|---------|--------|---------|
+| 7.4.1 | "Stop" button | mark TODO + add `TODO(snider): GOAL.md 7.4 — distillation backend pending` block | **DEFERRED** — go-mlx integration arc |
+| 7.4.2 | "Test in chat" button | same | **DEFERRED** |
+| 7.4.3 | "Merge into base" button | same | **DEFERRED** |
+| 7.4.4 | "Push to HuggingFace" button | same | **DEFERRED** |
+
+**Action for 7.4.x:** add the TODO comment + commit as
+`chore(ui): mark distillation buttons as deferred — see GOAL 7.4`.
+
+### 7.5 — fleet-window.ts (preview UI, no backend)
+
+| ID | Element | Action | Backend |
+|----|---------|--------|---------|
+| 7.5.1 | "Machines" / "Routing rules" / "Snapshots" tabs | tab state is pure local — `this.tab = ...` | no backend needed |
+| 7.5.2 | Ellipsis (per machine row) | context menu — Remove / Inspect | **DEFERRED** — fleet backend arc |
+
+**Action for 7.5.2:** add the TODO comment + commit.
+
+### 7.6 — network-window.ts (preview UI, no backend)
+
+| ID | Element | Action | Backend |
+|----|---------|--------|---------|
+| 7.6.1 | "This session" / "Available peers" / "Ledger" tabs | tab state — `this.tab = ...` | no backend needed |
+| 7.6.2 | "Leave session" button | wire to network leave | **DEFERRED** — P2P backend arc |
+
+### 7.7 — tools-window.ts (MCP surface)
+
+| ID | Element | Action | Backend |
+|----|---------|--------|---------|
+| 7.7.1 | "Add server" button | open file picker to load a `.mcp.json` config or text input for stdio server command | **NEW BACKEND** — `tools.Service` needs `RegisterServer(spec)` to mount a new MCP server at runtime |
+| 7.7.2 | "Reload" button | re-invoke `@desktop/tools/wailsservice.List()` | exists |
+| 7.7.3 | Server enable/disable toggle | call `tools.SetEnabled(serverID, bool)` | **NEW BACKEND** — `tools.Service` needs `SetEnabled` |
+| 7.7.4 | "Invoke" button (try-it panel) | `tools.Invoke(toolName, JSON.parse(argsField))` | **NEW BACKEND** — `tools.Service` needs an `Invoke` method (currently only `List`) |
+
+### 7.8 — model-browser-window.ts
+
+| ID | Element | Action | Backend |
+|----|---------|--------|---------|
+| 7.8.1 | "Filters" button | open a filter overlay (Family / Quant / Size) — local state only | no backend needed |
+| 7.8.2 | "Import GGUF…" button | file picker → copy chosen .gguf into models dir | **NEW BACKEND** — `models.Service` needs `Import(srcPath)` |
+| 7.8.3 | Search result "Download" button | fetch from HF / canonical mirror → write to models dir | **NEW BACKEND** — `models.Service` needs `Download(id, dest)` with progress events |
+| 7.8.4 | "Open in chat" button | navigate to chat surface preloaded with that model: `windowservice.Open("chat")` + emit `lthn:chat:set-model` event | uses `windowservice` (exists) + event bus |
+| 7.8.5 | Pin icon button (per model row) | toggle pin state — local + persisted to config | partial — `@lthn/config/service.Set()` exists |
+
+### 7.9 — welcome-window.ts
+
+| ID | Element | Action | Backend |
+|----|---------|--------|---------|
+| 7.9.1 | "Choose folder…" button (Step 1) | open native folder picker; on choose, call `@desktop/firstlaunch/wailsservice.SetModelDir(path)` | **NEW BACKEND** — `firstlaunch.Service` needs `SetModelDir(path)` |
+| 7.9.2 | Model radio button (Step 2) | set `this.selectedModel = m.id` local state; persist to config on Continue | uses `@lthn/config/service.Set()` |
+| 7.9.3 | Client checkbox (Step 3) | toggle integration enable per client; on Finish, call `@desktop/integrations/wailsservice.SetEnabled(clientID, bool)` | **NEW BACKEND** — `integrations.Service` needs `SetEnabled(id, bool)` |
+
+### 7.10 — app-shell.ts
+
+| ID | Element | Action | Backend |
+|----|---------|--------|---------|
+| 7.10.1 | Search bar | open command palette overlay; first cut: filter the side-nav items by typed query — pure local | no backend needed |
+| 7.10.2 | Vi mode icon | toggle Vi-mode hint flag — emit `lthn:vi:set` event for the editor + composer to subscribe | no backend needed for the toggle; consumers are 7.10's responsibility |
+
+### 7.11 — chrome.ts primitives audit
+
+Confirm every `<lthn-*>` slot-consumer in chrome.ts is reachable from
+at least one window. If a primitive is defined but unused, add a
+`TODO(snider): GOAL 7.11 — orphan primitive` and ship a follow-up
+cleanup commit removing it.
+
+Specifically verify:
+- `<lthn-toggle>` — used in settings (7.10.1 is the only doubt)
+- `<lthn-status-dot>` — used in chat / app-shell
+- `<lthn-state-pill>` — used in fleet / network
+- `<lthn-sparkline>` — used in telemetry / chat (post 7.1.2)
+
+Action: grep for each primitive's tag name. If zero non-test
+consumers, file as 7.11.X TODO. Otherwise mark verified.
+
+### Phase 7 done criteria
+
+Three categories of completion:
+
+1. **Wireable now** (7.1.1, 7.1.2, 7.1.5, 7.1.7, 7.1.9, 7.2.1, 7.2.2,
+   7.2.4, 7.2.5, 7.3.1, 7.5.1, 7.6.1, 7.7.2, 7.8.1, 7.8.4, 7.8.5,
+   7.9.2, 7.10.1, 7.10.2) — these have backends or need none. Codex
+   ships them as `feat(ui): wire <element>` commits, one per task.
+
+2. **TODO-marked** (7.1.3, 7.1.4, 7.1.6, 7.1.8, 7.2.3, 7.3.2, 7.3.3,
+   7.4.*, 7.5.2, 7.6.2, 7.7.1, 7.7.3, 7.7.4, 7.8.2, 7.8.3, 7.9.1,
+   7.9.3) — these need new Go services or methods. Codex adds a
+   `// TODO(snider): GOAL.md task 7.X.Y — <reason>` comment on the
+   unwired element in the TS file. Commit as
+   `chore(ui): mark <element> with task pointer`.
+
+3. **Verified** (7.11) — primitives audit reports per item.
+
+Final commit: `feat(ui): Phase 7 complete — every unwired button
+either wired or task-tagged`.
+
+### Snider-class backlog after Phase 7
+
+These TODO-marked items become the next-up Go work after Codex
+completes Phase 7:
+
+- `sessions.Service.{Delete, Rename, AppendAttachment, PopLast}`
+- `runner.Service.{Cancel, Bench}`
+- `telemetry.Service.PowerHistory`
+- `tools.Service.{RegisterServer, SetEnabled, Invoke}`
+- `models.Service.{Import, Download}`
+- `firstlaunch.Service.SetModelDir`
+- `integrations.Service.SetEnabled`
+
+Plus the deferred-arc work (distillation, fleet, network) which is
+backend-first not UI-first.
