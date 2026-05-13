@@ -12,6 +12,11 @@ import (
 	"dappco.re/lthn/desktop/pkg/plugin"
 )
 
+const (
+	codeRequiredMessage = "code is required"
+	installOp           = "marketplace.Install"
+)
+
 // SearchOutput is the shape returned to the Lit window.
 type SearchOutput struct {
 	Packages []Package `json:"packages"`
@@ -31,7 +36,7 @@ type InfoOutput struct {
 // Info returns the full record for one plugin by code.
 func (s *Service) Info(code string) core.Result {
 	if core.Trim(code) == "" {
-		return core.Fail(core.E("marketplace.Info", "code is required", nil))
+		return core.Fail(core.E("marketplace.Info", codeRequiredMessage, nil))
 	}
 	pkg, ok := findByCode(code)
 	if !ok {
@@ -83,15 +88,15 @@ func (s *Service) Installed() core.Result {
 // surfaces a clean error rather than a nil-pointer panic.
 func (s *Service) Install(code string) core.Result {
 	if core.Trim(code) == "" {
-		return core.Fail(core.E("marketplace.Install", "code is required", nil))
+		return core.Fail(core.E(installOp, codeRequiredMessage, nil))
 	}
 	pkg, ok := findByCode(code)
 	if !ok {
-		return core.Fail(core.E("marketplace.Install", "plugin not found in catalogue: "+code, nil))
+		return core.Fail(core.E(installOp, "plugin not found in catalogue: "+code, nil))
 	}
 	host, ok := core.ServiceFor[*plugin.Service](s.core, "plugin")
 	if !ok || host == nil {
-		return core.Fail(core.E("marketplace.Install",
+		return core.Fail(core.E(installOp,
 			"plugin host not registered — Install requires pkg/plugin to be wired", nil))
 	}
 	r := host.Install(plugin.InstallInput{
@@ -111,7 +116,7 @@ func (s *Service) Install(code string) core.Result {
 // plugin. Same host-discovery dance as Install.
 func (s *Service) Remove(code string) core.Result {
 	if core.Trim(code) == "" {
-		return core.Fail(core.E("marketplace.Remove", "code is required", nil))
+		return core.Fail(core.E("marketplace.Remove", codeRequiredMessage, nil))
 	}
 	host, ok := core.ServiceFor[*plugin.Service](s.core, "plugin")
 	if !ok || host == nil {
