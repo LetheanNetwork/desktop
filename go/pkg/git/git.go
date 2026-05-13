@@ -22,6 +22,8 @@ import (
 	"dappco.re/go/process"
 )
 
+const runGitOp = "git.runGit"
+
 // Service owns the git surface. Holds a *core.Core ref so it can
 // reach the process service at call time (the process service may
 // not have been resolved yet at construction time, depending on
@@ -54,17 +56,17 @@ func Register(c *core.Core) core.Result {
 // pair so the porcelain parsers below can stay byte-identical.
 func (s *Service) runGit(repo string, args ...string) core.Result {
 	if s == nil || s.core == nil {
-		return core.Fail(core.E("git.runGit", "core not bound", nil))
+		return core.Fail(core.E(runGitOp, "core not bound", nil))
 	}
 	proc, ok := core.ServiceFor[*process.Service](s.core, "process")
 	if !ok || proc == nil {
-		return core.Fail(core.E("git.runGit", "process service unavailable", nil))
+		return core.Fail(core.E(runGitOp, "process service unavailable", nil))
 	}
 	full := append([]string{"-C", repo}, args...)
 	r := proc.Run(context.Background(), "git", full...)
 	out, _ := r.Value.(string)
 	if !r.OK {
-		return core.Fail(core.E("git.runGit", r.Error(), nil))
+		return core.Fail(core.E(runGitOp, r.Error(), nil))
 	}
 	return core.Ok(out)
 }
