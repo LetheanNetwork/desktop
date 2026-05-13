@@ -63,6 +63,7 @@ func TestServices_Lookup_Good(t *core.T) {
 func TestServices_Lookup_Bad_Unknown(t *core.T) {
 	r := services.Lookup("not-a-real-service")
 	core.AssertFalse(t, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestServices_Names_Good(t *core.T) {
@@ -80,31 +81,37 @@ func TestServices_Names_Good(t *core.T) {
 func TestServices_Install_Bad_UnknownName(t *core.T) {
 	r := services.Install("not-real")
 	core.AssertFalse(t, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestServices_Uninstall_Bad_UnknownName(t *core.T) {
 	r := services.Uninstall("not-real")
 	core.AssertFalse(t, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestServices_Start_Bad_UnknownName(t *core.T) {
 	r := services.Start("not-real")
 	core.AssertFalse(t, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestServices_Stop_Bad_UnknownName(t *core.T) {
 	r := services.Stop("not-real")
 	core.AssertFalse(t, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestServices_Restart_Bad_UnknownName(t *core.T) {
 	r := services.Restart("not-real")
 	core.AssertFalse(t, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestServices_Status_Bad_UnknownName(t *core.T) {
 	r := services.Status("not-real")
 	core.AssertFalse(t, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
 
 // Status against a known but never-installed service returns

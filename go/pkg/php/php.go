@@ -37,7 +37,20 @@ type Service struct {
 // NewService constructs the php surface against a Core container.
 // Wired via application.NewService(php.NewService(c)) in
 // pkg/desktop/desktop.go.
+//
+// Usage example:
+//
+//	svc := php.NewService(c)
 func NewService(c *core.Core) *Service { return &Service{core: c} }
+
+// Register constructs the php service for Core registration.
+//
+// Usage example:
+//
+//	core.New(core.WithService(php.Register))
+func Register(c *core.Core) core.Result {
+	return core.Ok(NewService(c))
+}
 
 // proc resolves the process service at call time. Returns nil
 // when the service isn't registered.
@@ -134,7 +147,7 @@ func (s *Service) detect(roots []string, maxDepth int) []ProjectSummary {
 	}
 	out := []ProjectSummary{}
 	for _, root := range roots {
-		_ = core.PathWalkDir(root, func(path string, d core.FsDirEntry, err error) error {
+		if err := core.PathWalkDir(root, func(path string, d core.FsDirEntry, err error) error {
 			if err != nil {
 				return nil
 			}
@@ -165,7 +178,9 @@ func (s *Service) detect(roots []string, maxDepth int) []ProjectSummary {
 				FrankenPHP: php.IsFrankenPHPProject(path),
 			})
 			return core.PathSkipDir
-		})
+		}); err != nil {
+			core.Warn("php project detection walk failed", "root", root, "err", err)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out

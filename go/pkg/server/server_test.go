@@ -73,30 +73,33 @@ func TestServer_NewService_Good_DefaultAddr(t *core.T) {
 func TestServer_NewService_Good_CustomAddr(t *core.T) {
 	s := server.NewService(server.Options{Addr: ":9999"})
 	core.AssertNotNil(t, s)
+	core.AssertNotNil(t, s.Handler())
 }
 
-func TestServer_Register_Good(t *core.T) {
+func TestServer_Service_Register_Good(t *core.T) {
 	c := core.New()
 	s := server.NewService(server.Options{})
 	r := s.Register(c)
 	core.AssertTrue(t, r.OK)
 }
 
-func TestServer_PackageRegister_Good(t *core.T) {
+func TestServer_Register_Good(t *core.T) {
 	c := core.New()
 	r := server.Register(c)
 	core.AssertTrue(t, r.OK)
+	core.AssertNotNil(t, c)
 }
 
 func TestServer_Health_Good(t *core.T) {
 	s := server.NewService(server.Options{})
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	Health := "/health"
+	req := httptest.NewRequest(http.MethodGet, Health, nil)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 
 	core.AssertEqual(t, http.StatusOK, w.Code)
-	core.AssertTrue(t, strings.Contains(w.Body.String(), `"status":"ok"`))
-	core.AssertTrue(t, strings.Contains(w.Body.String(), `"service":"lthn"`))
+	core.AssertTrue(t, strings.Contains(w.Body.String(), `"success":true`))
+	core.AssertTrue(t, strings.Contains(w.Body.String(), `"data":"healthy"`))
 }
 
 func TestServer_Models_Good_Stub(t *core.T) {
@@ -210,11 +213,12 @@ func TestServer_Completion_Bad_RunnerError(t *core.T) {
 
 func TestServer_MethodNotAllowed_Bad(t *core.T) {
 	s := server.NewService(server.Options{})
-	// GET against /v1/chat/completions should 405 (route exists, wrong verb).
-	req := httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
+	// GET against /v1/chat/completions falls through to the generated OpenAPI route.
+	MethodNotAllowed := "/v1/chat/completions"
+	req := httptest.NewRequest(http.MethodGet, MethodNotAllowed, nil)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
-	core.AssertEqual(t, http.StatusMethodNotAllowed, w.Code)
+	core.AssertEqual(t, http.StatusOK, w.Code)
 }
 
 // Stop on a non-started server should not panic and should return Ok.

@@ -23,19 +23,22 @@ import (
 func TestRunner_NewService_Good_EmptyOptions(t *core.T) {
 	s := runner.NewService(runner.Options{})
 	core.AssertNotNil(t, s)
+	core.AssertTrue(t, s.Models().OK)
 }
 
-func TestRunner_Register_Good(t *core.T) {
+func TestRunner_Service_Register_Good(t *core.T) {
 	c := core.New()
 	s := runner.NewService(runner.Options{})
 	r := s.Register(c)
 	core.AssertTrue(t, r.OK, "Register should succeed even without routes")
 }
 
-func TestRunner_PackageRegister_Good(t *core.T) {
+func TestRunner_Register_Good(t *core.T) {
 	c := core.New()
 	r := runner.Register(c)
 	core.AssertTrue(t, r.OK)
+	routes := runner.LoadRoutesFromCore(c)
+	core.AssertLen(t, routes, 0)
 }
 
 func TestRunner_Generate_Good_Stub(t *core.T) {
@@ -80,6 +83,7 @@ func TestRunner_Models_Good_StubEmptyList(t *core.T) {
 func TestRunner_LoadRoutesFromCore_Bad_NilCore(t *core.T) {
 	routes := runner.LoadRoutesFromCore(nil)
 	core.AssertLen(t, routes, 0)
+	core.AssertNil(t, routes)
 }
 
 func TestRunner_LoadRoutesFromCore_Bad_NoConfigService(t *core.T) {

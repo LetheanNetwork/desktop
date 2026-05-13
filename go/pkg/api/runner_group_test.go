@@ -120,6 +120,7 @@ func TestRunnerGroup_Register_NilRunnerFails(t *core.T) {
 func TestRunnerGroup_Register_NilCoreFails(t *core.T) {
 	r := lthnapi.Register(nil, runner.NewService(runner.Options{}))
 	core.AssertEqual(t, false, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestRunnerGroup_Register_NoAPIServiceIsOk(t *core.T) {

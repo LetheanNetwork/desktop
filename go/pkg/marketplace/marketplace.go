@@ -31,7 +31,20 @@ type Service struct {
 // NewService constructs the marketplace surface against a Core
 // container. Wired via application.NewService(marketplace.NewService(c))
 // in pkg/desktop/desktop.go.
+//
+// Usage example:
+//
+//	svc := marketplace.NewService(c)
 func NewService(c *core.Core) *Service { return &Service{core: c} }
+
+// Register constructs the marketplace service for Core registration.
+//
+// Usage example:
+//
+//	core.New(core.WithService(marketplace.Register))
+func Register(c *core.Core) core.Result {
+	return core.Ok(NewService(c))
+}
 
 // Package is the catalogue record returned by Search. Mirrors
 // core/ide's marketplace.IdeModule shape — code is the stable

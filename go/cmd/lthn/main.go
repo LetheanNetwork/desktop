@@ -29,7 +29,6 @@ import (
 	"os"
 
 	core "dappco.re/go"
-	"dappco.re/go/i18n"
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/desktop"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
@@ -110,26 +109,39 @@ func cmdDefault(args []string) int {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return cmdGUI(args)
 	}
-	// Boot the Core (and therefore the i18n service) so the welcome
-	// banner reads from pkg/i18n/locales/*.json. Without this the
-	// global i18n.T() helper falls back to the literal messageID
-	// strings, which would still render but bypass localisation.
+	// Boot the Core so the welcome banner reads from
+	// pkg/i18n/locales/*.json instead of falling back to literal
+	// message IDs.
 	c := newAppCore()
 	if c != nil {
 		defer c.ServiceShutdown(core.Background())
 	}
-	core.Println(i18n.T("cli.welcome.title"))
+	tr := func(key string) string {
+		if c == nil {
+			return key
+		}
+		r := c.I18n().Translate(key)
+		if !r.OK {
+			return key
+		}
+		value, ok := r.Value.(string)
+		if !ok {
+			return key
+		}
+		return value
+	}
+	core.Println(tr("cli.welcome.title"))
 	core.Println("")
-	core.Println(i18n.T("cli.welcome.subtitle"))
+	core.Println(tr("cli.welcome.subtitle"))
 	core.Println("")
-	core.Println("  lthn gui           — " + i18n.T("cli.subcommands.gui"))
-	core.Println("  lthn tray          — " + i18n.T("cli.subcommands.tray"))
-	core.Println("  lthn serve         — " + i18n.T("cli.subcommands.serve"))
-	core.Println("  lthn ai            — " + i18n.T("cli.subcommands.ai"))
-	core.Println("  lthn config        — " + i18n.T("cli.subcommands.config"))
-	core.Println("  lthn state         — " + i18n.T("cli.subcommands.state"))
-	core.Println("  lthn version       — " + i18n.T("cli.subcommands.version"))
-	core.Println("  lthn help          — " + i18n.T("cli.subcommands.help"))
+	core.Println("  lthn gui           — " + tr("cli.subcommands.gui"))
+	core.Println("  lthn tray          — " + tr("cli.subcommands.tray"))
+	core.Println("  lthn serve         — " + tr("cli.subcommands.serve"))
+	core.Println("  lthn ai            — " + tr("cli.subcommands.ai"))
+	core.Println("  lthn config        — " + tr("cli.subcommands.config"))
+	core.Println("  lthn state         — " + tr("cli.subcommands.state"))
+	core.Println("  lthn version       — " + tr("cli.subcommands.version"))
+	core.Println("  lthn help          — " + tr("cli.subcommands.help"))
 	return 0
 }
 

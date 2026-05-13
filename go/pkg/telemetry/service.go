@@ -29,14 +29,14 @@ import (
 // Reading is a single telemetry sample.
 type Reading struct {
 	// Process metrics — always available.
-	HeapAllocMB    float64 `json:"heap_alloc_mb"`
-	HeapSysMB      float64 `json:"heap_sys_mb"`
-	StackInUseMB   float64 `json:"stack_in_use_mb"`
-	NumGoroutines  int     `json:"num_goroutines"`
-	NumCgoCalls    int64   `json:"num_cgo_calls"`
-	UptimeSeconds  float64 `json:"uptime_seconds"`
-	NumGC          uint32  `json:"num_gc"`
-	LastGCPauseMs  float64 `json:"last_gc_pause_ms"`
+	HeapAllocMB   float64 `json:"heap_alloc_mb"`
+	HeapSysMB     float64 `json:"heap_sys_mb"`
+	StackInUseMB  float64 `json:"stack_in_use_mb"`
+	NumGoroutines int     `json:"num_goroutines"`
+	NumCgoCalls   int64   `json:"num_cgo_calls"`
+	UptimeSeconds float64 `json:"uptime_seconds"`
+	NumGC         uint32  `json:"num_gc"`
+	LastGCPauseMs float64 `json:"last_gc_pause_ms"`
 
 	// Power metrics — zero today, populated when the XPC helper
 	// lands. See RFC.first-release.md §7.

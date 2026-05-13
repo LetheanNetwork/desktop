@@ -31,7 +31,20 @@ type Service struct {
 // NewService constructs the build surface against a Core container.
 // Wired via application.NewService(build.NewService(c)) in
 // pkg/desktop/desktop.go.
+//
+// Usage example:
+//
+//	svc := build.NewService(c)
 func NewService(c *core.Core) *Service { return &Service{core: c} }
+
+// Register constructs the build service for Core registration.
+//
+// Usage example:
+//
+//	core.New(core.WithService(build.Register))
+func Register(c *core.Core) core.Result {
+	return core.Ok(NewService(c))
+}
 
 // proc resolves the process service at call time. Returns nil when
 // the service isn't registered — every caller checks and surfaces

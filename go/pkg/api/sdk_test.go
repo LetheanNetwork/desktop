@@ -42,6 +42,7 @@ func newSpecCore() *core.Core {
 func TestSDK_ExportSpec_NilCoreFails(t *core.T) {
 	r := lthnapi.ExportSpec(nil, "yaml", "/tmp/x.yaml", lthnapi.DefaultSpecInfo())
 	core.AssertEqual(t, false, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestSDK_ExportSpec_EmptyPathFails(t *core.T) {

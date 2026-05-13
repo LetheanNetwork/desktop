@@ -20,8 +20,8 @@ package plugin
 type MenuEntry struct {
 	Code      string `json:"code"`
 	Label     string `json:"label"`
-	Icon      string `json:"icon,omitempty"`     // Font Awesome class
-	Surface   string `json:"surface"`             // "plugin-<code>"
+	Icon      string `json:"icon,omitempty"` // Font Awesome class
+	Surface   string `json:"surface"`        // "plugin-<code>"
 	Namespace string `json:"namespace"`
 	EntryURL  string `json:"entry_url,omitempty"` // "/v1/api/plugin/<ns>/<ui.entrypoint>"
 	Running   bool   `json:"running"`

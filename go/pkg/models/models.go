@@ -22,10 +22,10 @@ import (
 // file name plus byte size. Architecture / quant / params will land
 // when pkg/modelmeta wires the header parsers.
 type Entry struct {
-	Name   string `json:"name"`
-	Path   string `json:"path"`
-	Size   int64  `json:"size"`
-	IsDir  bool   `json:"is_dir"`
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	Size  int64  `json:"size"`
+	IsDir bool   `json:"is_dir"`
 }
 
 // List scans ~/Lethean/conf/models/ and returns one Entry per

@@ -33,7 +33,20 @@ type Service struct {
 // NewService constructs the repos surface against a Core container.
 // Wired via application.NewService(repos.NewService(c)) in
 // pkg/desktop/desktop.go.
+//
+// Usage example:
+//
+//	svc := repos.NewService(c)
 func NewService(c *core.Core) *Service { return &Service{core: c} }
+
+// Register constructs the repos service for Core registration.
+//
+// Usage example:
+//
+//	core.New(core.WithService(repos.Register))
+func Register(c *core.Core) core.Result {
+	return core.Ok(NewService(c))
+}
 
 // Status describes one repo's git state — branch, ahead/behind
 // counts, dirty file counts. JSON-shaped for the Lit window.

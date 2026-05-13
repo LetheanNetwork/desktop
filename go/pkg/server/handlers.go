@@ -22,7 +22,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-
 // modelEntry mirrors the OpenAI /v1/models entry shape.
 type modelEntry struct {
 	ID      string `json:"id"`

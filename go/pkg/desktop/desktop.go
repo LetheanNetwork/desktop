@@ -37,11 +37,11 @@ import (
 	core "dappco.re/go"
 	"dappco.re/go/config"
 	coreI18n "dappco.re/go/i18n"
-	"dappco.re/lthn/desktop/pkg/bridge"
-	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/apikey"
+	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/build"
 	"dappco.re/lthn/desktop/pkg/container"
+	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/git"
 	"dappco.re/lthn/desktop/pkg/integrations"
 	"dappco.re/lthn/desktop/pkg/lint"
@@ -52,8 +52,8 @@ import (
 	"dappco.re/lthn/desktop/pkg/repos"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
-	"dappco.re/lthn/desktop/pkg/sessions"
 	lthnservices "dappco.re/lthn/desktop/pkg/services"
+	"dappco.re/lthn/desktop/pkg/sessions"
 	"dappco.re/lthn/desktop/pkg/telemetry"
 	"dappco.re/lthn/desktop/pkg/tools"
 	"dappco.re/lthn/desktop/pkg/validator"
@@ -125,6 +125,15 @@ func NewService(opts Options) *Service {
 		opts.FrontendRoot = "dist"
 	}
 	return &Service{opts: opts}
+}
+
+// Register constructs the desktop service for Core registration.
+//
+// Usage example:
+//
+//	core.New(core.WithService(desktop.Register))
+func Register(c *core.Core) core.Result {
+	return core.Ok(NewService(Options{Core: c}))
 }
 
 // Run launches the Wails event loop. Blocks until the user picks
@@ -310,7 +319,9 @@ func (s *Service) Run() core.Result {
 		// into the event loop (HTTP server, store, runner).
 		PostShutdown: func() {
 			if s.opts.Server != nil {
-				_ = s.opts.Server.Stop(core.Background())
+				if r := s.opts.Server.Stop(core.Background()); !r.OK {
+					core.Warn("desktop server shutdown failed", "err", r.Error())
+				}
 			}
 		},
 		// PanicHandler captures uncaught panics from Go-side service

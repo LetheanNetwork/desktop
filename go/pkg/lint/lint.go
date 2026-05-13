@@ -27,7 +27,20 @@ type Service struct {
 // NewService constructs the lint surface against a Core container.
 // Wired via application.NewService(lint.NewService(c)) in
 // pkg/desktop/desktop.go.
+//
+// Usage example:
+//
+//	svc := lint.NewService(c)
 func NewService(c *core.Core) *Service { return &Service{core: c} }
+
+// Register constructs the lint service for Core registration.
+//
+// Usage example:
+//
+//	core.New(core.WithService(lint.Register))
+func Register(c *core.Core) core.Result {
+	return core.Ok(NewService(c))
+}
 
 // proc resolves the process service at call time.
 func (s *Service) proc() *process.Service {

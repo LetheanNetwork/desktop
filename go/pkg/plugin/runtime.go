@@ -25,9 +25,9 @@ import (
 // separate from the broader pluginState so the mutation surface
 // for the supervisor (future phase) is narrow.
 type processHandle struct {
-	proc    *process.Process
-	target  string // http://127.0.0.1:<port>
-	port    int
+	proc   *process.Process
+	target string // http://127.0.0.1:<port>
+	port   int
 }
 
 // proc resolves the process service at call time. Returns nil
@@ -144,7 +144,10 @@ func (s *Service) startPlugin(ctx context.Context, code, token string) core.Resu
 	}
 	if r := waitForHealth(ctx, port, m.Health.Path, timeout); !r.OK {
 		// Kill the unhealthy process; surface the error to the caller.
-		_ = ps.Kill(proc.ID)
+		if kill := ps.Kill(proc.ID); !kill.OK {
+			ps2.lastError = core.Concat(r.Error(), "; kill: ", kill.Error())
+			return r
+		}
 		ps2.state = "dead"
 		ps2.lastError = r.Error()
 		return r
@@ -171,7 +174,9 @@ func (s *Service) stopPlugin(code string) core.Result {
 	}
 	ps := s.proc()
 	if ps != nil && ps2.proc.proc != nil {
-		_ = ps.Kill(ps2.proc.proc.ID)
+		if r := ps.Kill(ps2.proc.proc.ID); !r.OK {
+			return r
+		}
 	}
 	s.proxy.Delete(code)
 	ps2.state = "stopped"

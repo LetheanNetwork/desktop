@@ -51,6 +51,8 @@ func TestTelemetry_Sample_Good_UptimeMonotonic(t *core.T) {
 func TestTelemetry_NewService_Good_DefaultOptions(t *core.T) {
 	svc := telemetry.NewService(telemetry.Options{})
 	core.AssertNotNil(t, svc)
+	r := svc.Register(core.New())
+	core.AssertTrue(t, r.OK)
 }
 
 func TestTelemetry_Register_Good(t *core.T) {

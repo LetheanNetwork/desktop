@@ -70,11 +70,14 @@ func TestPermissions_ResolveEntitlement_Good_Int64Quota(t *core.T) {
 func TestPermissions_ResolveEntitlement_Ugly_UnknownValueDefaultsAllow(t *core.T) {
 	e := resolveEntitlement([]string{"weird", "shape"}, 0)
 	core.AssertTrue(t, e.Allowed, "unknown shapes should default to allowed")
+	core.AssertTrue(t, e.Unlimited)
 }
 
 // Install is safe to call with nil Core — no panic, no-op.
 func TestPermissions_Install_Ugly_NilCore(t *core.T) {
-	core.AssertNotPanics(t, func() { Install(nil) })
+	called := false
+	core.AssertNotPanics(t, func() { Install(nil); called = true })
+	core.AssertTrue(t, called)
 }
 
 // Install on a Core without a config service should leave Entitled()

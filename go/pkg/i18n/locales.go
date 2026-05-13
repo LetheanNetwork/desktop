@@ -5,20 +5,20 @@
 // Source() function that hands the embedded FS over as an
 // coreI18n.FSSource — drop the result into
 // i18n.ServiceOptions.ExtraFS at Core construction time and the
-// rest of the app reads translations through i18n.T(key, args...).
+// rest of the app reads translations through c.I18n().Translate(key, args...).
 //
 // First-rate locales today:
 //
-//   en        UK English — Snider canon (colour, organisation, centre).
-//             The OG English; en_GB resolves here via the loader's
-//             base-language fallback.
-//   en_au     Australian English — meeting-audience polish. Tracks
-//             en for vocabulary (Australia inherits UK spelling),
-//             diverges on greetings (g'day) where it adds warmth.
-//   fr        French — full WebView vocabulary translated.
-//   zh        Chinese (Simplified) — full WebView vocabulary translated;
-//             zh-CN / zh-TW resolve here via the loader's base-language
-//             fallback. Plural rule is OTHER for all integers.
+//	en        UK English — Snider canon (colour, organisation, centre).
+//	          The OG English; en_GB resolves here via the loader's
+//	          base-language fallback.
+//	en_au     Australian English — meeting-audience polish. Tracks
+//	          en for vocabulary (Australia inherits UK spelling),
+//	          diverges on greetings (g'day) where it adds warmth.
+//	fr        French — full WebView vocabulary translated.
+//	zh        Chinese (Simplified) — full WebView vocabulary translated;
+//	          zh-CN / zh-TW resolve here via the loader's base-language
+//	          fallback. Plural rule is OTHER for all integers.
 //
 // Add a new locale by dropping en_xx.json (or any BCP-47 tag) in
 // locales/ — the embed glob picks it up at compile time, no further

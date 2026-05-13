@@ -84,7 +84,10 @@ func (s *Service) Install(input InstallInput) (InstallOutput, error) {
 			"checksum: "+r.Error(), nil)
 	}
 	s.mu.Lock()
-	_ = s.stopPlugin(validated.Code)
+	if r := s.stopPlugin(validated.Code); !r.OK {
+		s.mu.Unlock()
+		return InstallOutput{}, core.E("plugin.Install", "stop existing plugin: "+r.Error(), nil)
+	}
 	s.mu.Unlock()
 	dir, wres := writePlugin(validated, binary)
 	if !wres.OK {
@@ -103,7 +106,10 @@ func (s *Service) Install(input InstallInput) (InstallOutput, error) {
 // directory. After this the plugin is gone — no leftover state.
 func (s *Service) Remove(code string) error {
 	s.mu.Lock()
-	_ = s.stopPlugin(code)
+	if r := s.stopPlugin(code); !r.OK {
+		s.mu.Unlock()
+		return core.E("plugin.Remove", "stop plugin: "+r.Error(), nil)
+	}
 	delete(s.state, code)
 	s.mu.Unlock()
 	if r := removePlugin(code); !r.OK {

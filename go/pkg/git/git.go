@@ -33,7 +33,20 @@ type Service struct {
 // NewService constructs the git surface against a Core container.
 // Wired via application.NewService(git.NewService(c)) in
 // pkg/desktop/desktop.go.
+//
+// Usage example:
+//
+//	svc := git.NewService(c)
 func NewService(c *core.Core) *Service { return &Service{core: c} }
+
+// Register constructs the git service for Core registration.
+//
+// Usage example:
+//
+//	core.New(core.WithService(git.Register))
+func Register(c *core.Core) core.Result {
+	return core.Ok(NewService(c))
+}
 
 // runGit spawns `git -C <repo> <args...>`, returns the captured
 // stdout on success, the captured stderr+stdout combined inside a

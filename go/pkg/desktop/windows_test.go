@@ -19,6 +19,8 @@ import (
 func TestDesktop_NewService_Good_Defaults(t *core.T) {
 	s := desktop.NewService(desktop.Options{})
 	core.AssertNotNil(t, s, "NewService must always return a value")
+	r := s.Run()
+	core.AssertFalse(t, r.OK)
 }
 
 func TestDesktop_NewService_Good_AllOptionsSet(t *core.T) {

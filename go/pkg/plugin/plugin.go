@@ -45,6 +45,8 @@ type Service struct {
 
 // NewService returns the canonical Core service factory.
 //
+// Usage example:
+//
 //	core.WithName("plugin", plugin.NewService(plugin.Options{}))
 //
 // The factory shape is what core.New expects; the underlying
@@ -59,6 +61,15 @@ func NewService(opts Options) func(*core.Core) core.Result {
 		}
 		return core.Ok(svc)
 	}
+}
+
+// Register constructs the plugin service for Core registration.
+//
+// Usage example:
+//
+//	core.New(core.WithService(plugin.Register))
+func Register(c *core.Core) core.Result {
+	return NewService(Options{})(c)
 }
 
 // OnStartup is a no-op today — the plugin host registers no
@@ -80,7 +91,9 @@ func (s *Service) OnShutdown(context.Context) core.Result {
 	}
 	s.mu.Unlock()
 	for _, code := range codes {
-		_ = s.Stop(code)
+		if err := s.Stop(code); err != nil {
+			return core.Fail(core.E("plugin.OnShutdown", "stop plugin", err))
+		}
 	}
 	return core.Ok(nil)
 }
@@ -106,16 +119,16 @@ func (s *Service) ProxyGroup() *ProxyGroup { return s.proxy }
 // Status is the runtime state of one plugin. Returned by
 // Status / List so the UI can show running/stopped indicators.
 type Status struct {
-	Code       string    `json:"code"`
-	Name       string    `json:"name"`
-	Version    string    `json:"version"`
-	Namespace  string    `json:"namespace"`
-	State      string    `json:"state"` // "stopped" | "starting" | "running" | "dead"
-	Port       int       `json:"port,omitempty"`
-	PID        int       `json:"pid,omitempty"`
-	StartedAt  time.Time `json:"started_at,omitempty"`
-	StoppedAt  time.Time `json:"stopped_at,omitempty"`
-	LastError  string    `json:"last_error,omitempty"`
+	Code      string    `json:"code"`
+	Name      string    `json:"name"`
+	Version   string    `json:"version"`
+	Namespace string    `json:"namespace"`
+	State     string    `json:"state"` // "stopped" | "starting" | "running" | "dead"
+	Port      int       `json:"port,omitempty"`
+	PID       int       `json:"pid,omitempty"`
+	StartedAt time.Time `json:"started_at,omitempty"`
+	StoppedAt time.Time `json:"stopped_at,omitempty"`
+	LastError string    `json:"last_error,omitempty"`
 }
 
 // InstalledPlugin is the manifest-derived summary returned by

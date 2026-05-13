@@ -3,10 +3,11 @@
 package services
 
 import (
-	"os"
+	"context"
+	"runtime"
 
 	core "dappco.re/go"
-	nativeservice "github.com/kardianos/service"
+	"dappco.re/go/process"
 )
 
 // labelPrefix is prepended to the entry name to form the OS service
@@ -15,35 +16,349 @@ import (
 // "ai.lthn.serve" is the launchctl label.
 const labelPrefix = "ai.lthn."
 
-// noopProgram satisfies kardianos.service.Interface with no-ops.
-// Used only because nativeservice.New requires it; we never call
-// .Run() — the kardianos library uses the interface for the
-// `lthn service run` codepath which we don't expose (the binary
-// is already daemon-friendly through `lthn serve` etc).
-type noopProgram struct{}
+type controller struct {
+	entry Entry
+	label string
+	exe   string
+}
 
-func (noopProgram) Start(_ nativeservice.Service) error { return nil }
-func (noopProgram) Stop(_ nativeservice.Service) error  { return nil }
+// controllerFor returns the native-service controller data for entry,
+// configured to run THIS binary with entry.Arguments.
+func controllerFor(entry Entry) core.Result {
+	args := core.Args()
+	if len(args) == 0 {
+		return core.Fail(core.E("services.controllerFor", "process argv is empty", nil))
+	}
+	exe := args[0]
+	if r := core.PathAbs(exe); r.OK {
+		exe = r.Value.(string)
+	}
+	if exe == "" {
+		return core.Fail(core.E("services.controllerFor", "executable path is empty", nil))
+	}
+	return core.Ok(&controller{
+		entry: entry,
+		label: labelPrefix + entry.Name,
+		exe:   exe,
+	})
+}
 
-// controller returns a kardianos.Service for entry, configured to
-// run THIS binary with entry.Arguments.
-func controller(entry Entry) (nativeservice.Service, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return nil, err
+func (ctl *controller) install() core.Result {
+	switch runtime.GOOS {
+	case "darwin":
+		return ctl.installLaunchAgent()
+	case "linux":
+		return ctl.installSystemdUserUnit()
+	default:
+		return unsupportedServiceManager("Install")
 	}
-	cfg := &nativeservice.Config{
-		Name:        labelPrefix + entry.Name,
-		DisplayName: entry.DisplayName,
-		Description: entry.Description,
-		Executable:  exe,
-		Arguments:   append([]string{}, entry.Arguments...),
-		Option: nativeservice.KeyValue{
-			"KeepAlive": true,
-			"RunAtLoad": true,
-		},
+}
+
+func (ctl *controller) uninstall() core.Result {
+	switch runtime.GOOS {
+	case "darwin":
+		return ctl.uninstallLaunchAgent()
+	case "linux":
+		return ctl.uninstallSystemdUserUnit()
+	default:
+		return unsupportedServiceManager("Uninstall")
 	}
-	return nativeservice.New(noopProgram{}, cfg)
+}
+
+func (ctl *controller) start() core.Result {
+	switch runtime.GOOS {
+	case "darwin":
+		return ctl.launchctl("kickstart", "-k", ctl.launchctlTarget())
+	case "linux":
+		return ctl.systemctl("start", ctl.systemdUnitName())
+	default:
+		return unsupportedServiceManager("Start")
+	}
+}
+
+func (ctl *controller) stop() core.Result {
+	switch runtime.GOOS {
+	case "darwin":
+		return ctl.launchctl("kill", "TERM", ctl.launchctlTarget())
+	case "linux":
+		return ctl.systemctl("stop", ctl.systemdUnitName())
+	default:
+		return unsupportedServiceManager("Stop")
+	}
+}
+
+func (ctl *controller) restart() core.Result {
+	switch runtime.GOOS {
+	case "darwin":
+		return ctl.launchctl("kickstart", "-k", ctl.launchctlTarget())
+	case "linux":
+		return ctl.systemctl("restart", ctl.systemdUnitName())
+	default:
+		return unsupportedServiceManager("Restart")
+	}
+}
+
+func (ctl *controller) status() core.Result {
+	switch runtime.GOOS {
+	case "darwin":
+		return ctl.launchctlStatus()
+	case "linux":
+		return ctl.systemdStatus()
+	default:
+		return unsupportedServiceManager("Status")
+	}
+}
+
+func unsupportedServiceManager(operation string) core.Result {
+	return core.Fail(core.E(
+		"services."+operation,
+		core.Sprintf("service manager unsupported on %s", runtime.GOOS),
+		nil,
+	))
+}
+
+func (ctl *controller) launchAgentPath() core.Result {
+	home := core.UserHomeDir()
+	if !home.OK {
+		return core.Fail(core.E("services.launchAgentPath", "resolve home directory", home.Value.(error)))
+	}
+	return core.Ok(core.PathJoin(
+		home.Value.(string),
+		"Library",
+		"LaunchAgents",
+		ctl.label+".plist",
+	))
+}
+
+func (ctl *controller) launchctlDomain() core.Result {
+	current := core.UserCurrent()
+	if !current.OK {
+		return core.Fail(core.E("services.launchctlDomain", "resolve current user", current.Value.(error)))
+	}
+	user := current.Value.(*core.User)
+	return core.Ok(core.Concat("gui/", user.Uid))
+}
+
+func (ctl *controller) launchctlTarget() string {
+	domain := ctl.launchctlDomain()
+	if !domain.OK {
+		return ctl.label
+	}
+	return core.Concat(domain.Value.(string), "/", ctl.label)
+}
+
+func (ctl *controller) launchctl(args ...string) core.Result {
+	return process.Run(context.Background(), "launchctl", args...)
+}
+
+func (ctl *controller) installLaunchAgent() core.Result {
+	path := ctl.launchAgentPath()
+	if !path.OK {
+		return path
+	}
+	plistPath := path.Value.(string)
+	if r := core.MkdirAll(core.PathDir(plistPath), 0o755); !r.OK {
+		return core.Fail(core.E("services.installLaunchAgent", "create LaunchAgents directory", r.Value.(error)))
+	}
+	if r := core.WriteFile(plistPath, []byte(launchAgentPlist(ctl.entry, ctl.label, ctl.exe)), 0o644); !r.OK {
+		return core.Fail(core.E("services.installLaunchAgent", "write launch agent plist", r.Value.(error)))
+	}
+	domain := ctl.launchctlDomain()
+	if !domain.OK {
+		return domain
+	}
+	if r := ctl.launchctl("bootstrap", domain.Value.(string), plistPath); !r.OK && !core.Contains(r.Error(), "already") {
+		return core.Fail(core.E("services.installLaunchAgent", "bootstrap launch agent", r.Value.(error)))
+	}
+	return core.Ok(nil)
+}
+
+func (ctl *controller) uninstallLaunchAgent() core.Result {
+	path := ctl.launchAgentPath()
+	if !path.OK {
+		return path
+	}
+	plistPath := path.Value.(string)
+	domain := ctl.launchctlDomain()
+	if !domain.OK {
+		return domain
+	}
+	if r := ctl.launchctl("bootout", domain.Value.(string), plistPath); !r.OK && !serviceManagerMissing(r) {
+		return core.Fail(core.E("services.uninstallLaunchAgent", "bootout launch agent", r.Value.(error)))
+	}
+	if r := core.Remove(plistPath); !r.OK {
+		if err, ok := r.Value.(error); ok && core.IsNotExist(err) {
+			return core.Ok(nil)
+		}
+		return core.Fail(core.E("services.uninstallLaunchAgent", "remove launch agent plist", r.Value.(error)))
+	}
+	return core.Ok(nil)
+}
+
+func (ctl *controller) launchctlStatus() core.Result {
+	r := ctl.launchctl("print", ctl.launchctlTarget())
+	if r.OK {
+		output := r.Value.(string)
+		if core.Contains(output, "state = running") || core.Contains(output, "active count =") {
+			return core.Ok("running")
+		}
+		if core.Contains(output, "state = waiting") || core.Contains(output, "state = exited") {
+			return core.Ok("stopped")
+		}
+		return core.Ok("unknown")
+	}
+	path := ctl.launchAgentPath()
+	if !path.OK {
+		return path
+	}
+	stat := core.Stat(path.Value.(string))
+	if !stat.OK {
+		if err, ok := stat.Value.(error); ok && core.IsNotExist(err) {
+			return core.Ok("not_installed")
+		}
+		return core.Fail(core.E("services.launchctlStatus", "stat launch agent plist", stat.Value.(error)))
+	}
+	return core.Ok("stopped")
+}
+
+func (ctl *controller) systemdUnitDir() core.Result {
+	config := core.UserConfigDir()
+	if !config.OK {
+		return core.Fail(core.E("services.systemdUnitDir", "resolve user config directory", config.Value.(error)))
+	}
+	return core.Ok(core.PathJoin(config.Value.(string), "systemd", "user"))
+}
+
+func (ctl *controller) systemdUnitPath() core.Result {
+	dir := ctl.systemdUnitDir()
+	if !dir.OK {
+		return dir
+	}
+	return core.Ok(core.PathJoin(dir.Value.(string), ctl.systemdUnitName()))
+}
+
+func (ctl *controller) systemdUnitName() string {
+	return ctl.label + ".service"
+}
+
+func (ctl *controller) systemctl(args ...string) core.Result {
+	full := append([]string{"--user"}, args...)
+	return process.Run(context.Background(), "systemctl", full...)
+}
+
+func (ctl *controller) installSystemdUserUnit() core.Result {
+	dir := ctl.systemdUnitDir()
+	if !dir.OK {
+		return dir
+	}
+	if r := core.MkdirAll(dir.Value.(string), 0o755); !r.OK {
+		return core.Fail(core.E("services.installSystemdUserUnit", "create systemd user directory", r.Value.(error)))
+	}
+	path := ctl.systemdUnitPath()
+	if !path.OK {
+		return path
+	}
+	if r := core.WriteFile(path.Value.(string), []byte(systemdUnit(ctl.entry, ctl.label, ctl.exe)), 0o644); !r.OK {
+		return core.Fail(core.E("services.installSystemdUserUnit", "write systemd unit", r.Value.(error)))
+	}
+	if r := ctl.systemctl("daemon-reload"); !r.OK {
+		return core.Fail(core.E("services.installSystemdUserUnit", "reload systemd user units", r.Value.(error)))
+	}
+	if r := ctl.systemctl("enable", "--now", ctl.systemdUnitName()); !r.OK {
+		return core.Fail(core.E("services.installSystemdUserUnit", "enable systemd unit", r.Value.(error)))
+	}
+	return core.Ok(nil)
+}
+
+func (ctl *controller) uninstallSystemdUserUnit() core.Result {
+	if r := ctl.systemctl("disable", "--now", ctl.systemdUnitName()); !r.OK && !serviceManagerMissing(r) {
+		return core.Fail(core.E("services.uninstallSystemdUserUnit", "disable systemd unit", r.Value.(error)))
+	}
+	path := ctl.systemdUnitPath()
+	if !path.OK {
+		return path
+	}
+	if r := core.Remove(path.Value.(string)); !r.OK {
+		if err, ok := r.Value.(error); ok && core.IsNotExist(err) {
+			return core.Ok(nil)
+		}
+		return core.Fail(core.E("services.uninstallSystemdUserUnit", "remove systemd unit", r.Value.(error)))
+	}
+	if r := ctl.systemctl("daemon-reload"); !r.OK {
+		return core.Fail(core.E("services.uninstallSystemdUserUnit", "reload systemd user units", r.Value.(error)))
+	}
+	return core.Ok(nil)
+}
+
+func (ctl *controller) systemdStatus() core.Result {
+	r := ctl.systemctl("is-active", ctl.systemdUnitName())
+	if r.OK && core.Trim(r.Value.(string)) == "active" {
+		return core.Ok("running")
+	}
+	path := ctl.systemdUnitPath()
+	if !path.OK {
+		return path
+	}
+	stat := core.Stat(path.Value.(string))
+	if !stat.OK {
+		if err, ok := stat.Value.(error); ok && core.IsNotExist(err) {
+			return core.Ok("not_installed")
+		}
+		return core.Fail(core.E("services.systemdStatus", "stat systemd unit", stat.Value.(error)))
+	}
+	return core.Ok("stopped")
+}
+
+func launchAgentPlist(entry Entry, label, exe string) string {
+	args := []string{plistString(exe)}
+	for _, arg := range entry.Arguments {
+		args = append(args, plistString(arg))
+	}
+	return core.Concat(
+		`<?xml version="1.0" encoding="UTF-8"?>`+"\n",
+		`<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">`+"\n",
+		`<plist version="1.0">`+"\n",
+		"<dict>\n",
+		"\t<key>Label</key>\n",
+		"\t", plistString(label), "\n",
+		"\t<key>ProgramArguments</key>\n",
+		"\t<array>\n",
+		"\t\t", core.Join("\n\t\t", args...), "\n",
+		"\t</array>\n",
+		"\t<key>RunAtLoad</key>\n",
+		"\t<true/>\n",
+		"\t<key>KeepAlive</key>\n",
+		"\t<true/>\n",
+		"</dict>\n",
+		"</plist>\n",
+	)
+}
+
+func plistString(value string) string {
+	return core.Concat("<string>", core.HTMLEscape(value), "</string>")
+}
+
+func systemdUnit(entry Entry, label, exe string) string {
+	args := append([]string{exe}, entry.Arguments...)
+	return core.Concat(
+		"[Unit]\n",
+		"Description=", entry.Description, "\n\n",
+		"[Service]\n",
+		"Type=simple\n",
+		"ExecStart=", core.Join(" ", args...), "\n",
+		"Restart=always\n\n",
+		"[Install]\n",
+		"WantedBy=default.target\n",
+		"# Label=", label, "\n",
+	)
+}
+
+func serviceManagerMissing(result core.Result) bool {
+	msg := result.Error()
+	return core.Contains(msg, "No such file") ||
+		core.Contains(msg, "not found") ||
+		core.Contains(msg, "No such process") ||
+		core.Contains(msg, "Could not find domain")
 }
 
 // Install registers the service with the OS service manager. On
@@ -60,14 +375,11 @@ func Install(name string) core.Result {
 		return r
 	}
 	entry := r.Value.(Entry)
-	svc, err := controller(entry)
-	if err != nil {
-		return core.Fail(core.E("services.Install", "controller failed", err))
+	ctl := controllerFor(entry)
+	if !ctl.OK {
+		return ctl
 	}
-	if err := svc.Install(); err != nil {
-		return core.Fail(core.E("services.Install", "install failed", err))
-	}
-	return core.Ok(nil)
+	return ctl.Value.(*controller).install()
 }
 
 // Uninstall removes the service definition from the OS service
@@ -82,17 +394,11 @@ func Uninstall(name string) core.Result {
 		return r
 	}
 	entry := r.Value.(Entry)
-	svc, err := controller(entry)
-	if err != nil {
-		return core.Fail(core.E("services.Uninstall", "controller failed", err))
+	ctl := controllerFor(entry)
+	if !ctl.OK {
+		return ctl
 	}
-	// Best-effort stop before uninstall — ignore errors so users can
-	// uninstall services that are already stopped.
-	_ = svc.Stop()
-	if err := svc.Uninstall(); err != nil {
-		return core.Fail(core.E("services.Uninstall", "uninstall failed", err))
-	}
-	return core.Ok(nil)
+	return ctl.Value.(*controller).uninstall()
 }
 
 // Start asks the OS service manager to start the service. The
@@ -107,14 +413,11 @@ func Start(name string) core.Result {
 		return r
 	}
 	entry := r.Value.(Entry)
-	svc, err := controller(entry)
-	if err != nil {
-		return core.Fail(core.E("services.Start", "controller failed", err))
+	ctl := controllerFor(entry)
+	if !ctl.OK {
+		return ctl
 	}
-	if err := svc.Start(); err != nil {
-		return core.Fail(core.E("services.Start", "start failed", err))
-	}
-	return core.Ok(nil)
+	return ctl.Value.(*controller).start()
 }
 
 // Stop asks the OS service manager to stop the service. No-op when
@@ -129,14 +432,11 @@ func Stop(name string) core.Result {
 		return r
 	}
 	entry := r.Value.(Entry)
-	svc, err := controller(entry)
-	if err != nil {
-		return core.Fail(core.E("services.Stop", "controller failed", err))
+	ctl := controllerFor(entry)
+	if !ctl.OK {
+		return ctl
 	}
-	if err := svc.Stop(); err != nil {
-		return core.Fail(core.E("services.Stop", "stop failed", err))
-	}
-	return core.Ok(nil)
+	return ctl.Value.(*controller).stop()
 }
 
 // Restart stops then starts the service. Convenience for the common
@@ -151,14 +451,11 @@ func Restart(name string) core.Result {
 		return r
 	}
 	entry := r.Value.(Entry)
-	svc, err := controller(entry)
-	if err != nil {
-		return core.Fail(core.E("services.Restart", "controller failed", err))
+	ctl := controllerFor(entry)
+	if !ctl.OK {
+		return ctl
 	}
-	if err := svc.Restart(); err != nil {
-		return core.Fail(core.E("services.Restart", "restart failed", err))
-	}
-	return core.Ok(nil)
+	return ctl.Value.(*controller).restart()
 }
 
 // Status returns the OS service-manager view of the service —
@@ -174,24 +471,9 @@ func Status(name string) core.Result {
 		return r
 	}
 	entry := r.Value.(Entry)
-	svc, err := controller(entry)
-	if err != nil {
-		return core.Fail(core.E("services.Status", "controller failed", err))
+	ctl := controllerFor(entry)
+	if !ctl.OK {
+		return ctl
 	}
-	state, err := svc.Status()
-	if err != nil {
-		// Treat not-installed as a distinct state rather than failure.
-		if err == nativeservice.ErrNotInstalled {
-			return core.Ok("not_installed")
-		}
-		return core.Fail(core.E("services.Status", "status failed", err))
-	}
-	switch state {
-	case nativeservice.StatusRunning:
-		return core.Ok("running")
-	case nativeservice.StatusStopped:
-		return core.Ok("stopped")
-	default:
-		return core.Ok("unknown")
-	}
+	return ctl.Value.(*controller).status()
 }

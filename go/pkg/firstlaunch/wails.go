@@ -25,11 +25,11 @@ const Version = "0.1.0"
 // panel renders. JSON tags use snake_case so the generated TS
 // binding lands idiomatic.
 type BuildInfo struct {
-	Version    string `json:"version"`
-	GoVersion  string `json:"go_version"`
-	GoOS       string `json:"goos"`
-	GoArch     string `json:"goarch"`
-	NumCPU     int    `json:"num_cpu"`
+	Version   string `json:"version"`
+	GoVersion string `json:"go_version"`
+	GoOS      string `json:"goos"`
+	GoArch    string `json:"goarch"`
+	NumCPU    int    `json:"num_cpu"`
 }
 
 // LetheanPaths bundles the canonical ~/Lethean/ filesystem layout the

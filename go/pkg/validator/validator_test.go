@@ -66,6 +66,7 @@ func TestValidator_Endpoint_Bad_404(t *core.T) {
 func TestValidator_Endpoint_Bad_EmptyURL(t *core.T) {
 	r := validator.Endpoint("")
 	core.AssertFalse(t, r.OK, "empty URL must Fail")
+	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestValidator_Endpoint_Bad_Unreachable(t *core.T) {

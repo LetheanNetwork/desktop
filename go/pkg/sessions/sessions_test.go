@@ -104,19 +104,23 @@ func TestSessions_List_Good_MultipleSessions(t *core.T) {
 func TestSessions_Create_Bad_NilCore(t *core.T) {
 	r := sessions.Create(nil, "thread")
 	core.AssertFalse(t, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestSessions_Append_Bad_NilCore(t *core.T) {
 	r := sessions.Append(nil, "id", "user", "msg")
 	core.AssertFalse(t, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestSessions_Read_Bad_NilCore(t *core.T) {
 	r := sessions.Read(nil, "id")
 	core.AssertFalse(t, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestSessions_List_Bad_NilCore(t *core.T) {
 	r := sessions.List(nil)
 	core.AssertFalse(t, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
