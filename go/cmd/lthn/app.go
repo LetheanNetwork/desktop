@@ -36,24 +36,26 @@ import (
 //	defer c.ServiceShutdown(core.Background())
 //	r := c.Action("store.get").Run(core.Background(), opts)
 func newAppCore() *core.Core {
+	const appErrorFormat = "lthn: %s\n"
+
 	dbPath := paths.StoreDB()
 	if !dbPath.OK {
-		core.Print(core.Stderr(), "lthn: %s\n", dbPath.Error())
+		core.Print(core.Stderr(), appErrorFormat, dbPath.Error())
 		return nil
 	}
 	workspace := paths.WorkspaceDir()
 	if !workspace.OK {
-		core.Print(core.Stderr(), "lthn: %s\n", workspace.Error())
+		core.Print(core.Stderr(), appErrorFormat, workspace.Error())
 		return nil
 	}
 	dataDir := paths.DataDir()
 	if !dataDir.OK {
-		core.Print(core.Stderr(), "lthn: %s\n", dataDir.Error())
+		core.Print(core.Stderr(), appErrorFormat, dataDir.Error())
 		return nil
 	}
 	configFile := paths.ConfigFile()
 	if !configFile.OK {
-		core.Print(core.Stderr(), "lthn: %s\n", configFile.Error())
+		core.Print(core.Stderr(), appErrorFormat, configFile.Error())
 		return nil
 	}
 

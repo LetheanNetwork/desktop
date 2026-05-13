@@ -271,6 +271,8 @@ func cmdTray(args []string) int {
 //
 //	rc := cmdServe([]string{"--port=8000"}) // starts server when wired
 func cmdServe(args []string) int {
+	const serveErrorFormat = "lthn serve: %s\n"
+
 	port := "8000"
 	for i := 0; i < len(args); i++ {
 		k, v, valid := core.ParseFlag(args[i])
@@ -292,12 +294,12 @@ func cmdServe(args []string) int {
 	}
 	r := runner.NewServiceFromCore(c)
 	if rr := r.Register(c); !rr.OK {
-		core.Print(core.Stderr(), "lthn serve: %s\n", rr.Error())
+		core.Print(core.Stderr(), serveErrorFormat, rr.Error())
 		return 1
 	}
 	keyR := apikey.GenerateOrLoad(c)
 	if !keyR.OK {
-		core.Print(core.Stderr(), "lthn serve: %s\n", keyR.Error())
+		core.Print(core.Stderr(), serveErrorFormat, keyR.Error())
 		return 1
 	}
 	key, _ := keyR.Value.(string)
@@ -308,11 +310,11 @@ func cmdServe(args []string) int {
 		Brand:    server.Brand{Version: firstlaunch.Version},
 	})
 	if rr := s.Register(c); !rr.OK {
-		core.Print(core.Stderr(), "lthn serve: %s\n", rr.Error())
+		core.Print(core.Stderr(), serveErrorFormat, rr.Error())
 		return 1
 	}
 	if rr := s.Start(core.Background()); !rr.OK {
-		core.Print(core.Stderr(), "lthn serve: %s\n", rr.Error())
+		core.Print(core.Stderr(), serveErrorFormat, rr.Error())
 		return 1
 	}
 	return 0
