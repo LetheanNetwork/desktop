@@ -39,8 +39,9 @@ type SessionInfo struct {
 }
 
 const (
-	groupMessages = "sessions"
-	groupManifest = "sessions:manifest"
+	groupMessages  = "sessions"
+	groupManifest  = "sessions:manifest"
+	coreNilMessage = "core is nil"
 )
 
 // Create starts a new session with the given title. Returns the new
@@ -52,7 +53,7 @@ const (
 //	if r.OK { id := r.Value.(string); _ = id }
 func Create(c *core.Core, title string) core.Result {
 	if c == nil {
-		return core.Fail(core.E("sessions.Create", "core is nil", nil))
+		return core.Fail(core.E("sessions.Create", coreNilMessage, nil))
 	}
 	idResult := core.RandomString(16)
 	if !idResult.OK {
@@ -84,7 +85,7 @@ func Create(c *core.Core, title string) core.Result {
 //	sessions.Append(c, id, "user", "ping")
 func Append(c *core.Core, id, role, content string) core.Result {
 	if c == nil {
-		return core.Fail(core.E("sessions.Append", "core is nil", nil))
+		return core.Fail(core.E("sessions.Append", coreNilMessage, nil))
 	}
 	msgsR := readMessages(c, id)
 	if !msgsR.OK {
@@ -113,7 +114,7 @@ func Append(c *core.Core, id, role, content string) core.Result {
 //	if r.OK { msgs := r.Value.([]inference.Message); _ = msgs }
 func Read(c *core.Core, id string) core.Result {
 	if c == nil {
-		return core.Fail(core.E("sessions.Read", "core is nil", nil))
+		return core.Fail(core.E("sessions.Read", coreNilMessage, nil))
 	}
 	msgsR := readMessages(c, id)
 	if !msgsR.OK {
@@ -132,7 +133,7 @@ func Read(c *core.Core, id string) core.Result {
 //	if r.OK { infos := r.Value.([]SessionInfo); _ = infos }
 func List(c *core.Core) core.Result {
 	if c == nil {
-		return core.Fail(core.E("sessions.List", "core is nil", nil))
+		return core.Fail(core.E("sessions.List", coreNilMessage, nil))
 	}
 	r := c.Action("store.get_all").Run(context.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: groupManifest},
