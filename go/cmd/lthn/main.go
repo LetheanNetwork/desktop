@@ -29,6 +29,7 @@ import (
 	"os"
 
 	core "dappco.re/go"
+	"dappco.re/go/i18n"
 	"dappco.re/lthn/desktop/pkg/desktop"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
@@ -107,19 +108,26 @@ func cmdDefault(args []string) int {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return cmdGUI(args)
 	}
-	core.Println("lthn — Lethean unified binary")
+	// Boot the Core (and therefore the i18n service) so the welcome
+	// banner reads from pkg/i18n/locales/*.json. Without this the
+	// global i18n.T() helper falls back to the literal messageID
+	// strings, which would still render but bypass localisation.
+	c := newAppCore()
+	if c != nil {
+		defer c.ServiceShutdown(core.Background())
+	}
+	core.Println(i18n.T("cli.welcome.title"))
 	core.Println("")
-	core.Println("Run without arguments from a GUI launcher (Finder / wails3 dev / launchd)")
-	core.Println("to start the systray + GUI. From a terminal, pick a subcommand:")
+	core.Println(i18n.T("cli.welcome.subtitle"))
 	core.Println("")
-	core.Println("  lthn gui           — explicit GUI launch")
-	core.Println("  lthn tray          — tray-only (no popover window)")
-	core.Println("  lthn serve         — HTTP API server")
-	core.Println("  lthn ai            — AI subsystem (chat / generate / models)")
-	core.Println("  lthn config        — config inspection")
-	core.Println("  lthn state         — state surface")
-	core.Println("  lthn version       — print version")
-	core.Println("  lthn help          — full subcommand list")
+	core.Println("  lthn gui           — " + i18n.T("cli.subcommands.gui"))
+	core.Println("  lthn tray          — " + i18n.T("cli.subcommands.tray"))
+	core.Println("  lthn serve         — " + i18n.T("cli.subcommands.serve"))
+	core.Println("  lthn ai            — " + i18n.T("cli.subcommands.ai"))
+	core.Println("  lthn config        — " + i18n.T("cli.subcommands.config"))
+	core.Println("  lthn state         — " + i18n.T("cli.subcommands.state"))
+	core.Println("  lthn version       — " + i18n.T("cli.subcommands.version"))
+	core.Println("  lthn help          — " + i18n.T("cli.subcommands.help"))
 	return 0
 }
 

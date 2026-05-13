@@ -1,0 +1,43 @@
+{
+  "app": {
+    "tagline": "Lethean unified binary",
+    "version": "lthn v%s",
+    "address_handler": "Address handler: lthn:// URIs route through the same dispatch (see plans/project/lthn/RFC.md §7 — the unified namespace canon)"
+  },
+  "cli": {
+    "welcome": {
+      "title": "lthn — Lethean unified binary",
+      "subtitle": "Run without arguments from a GUI launcher (Finder / wails3 dev / launchd) to start the systray + GUI. From a terminal, pick a subcommand:"
+    },
+    "help": {
+      "title": "lthn — Lethean unified binary",
+      "usage": "Usage: lthn <subcommand> [args...]",
+      "subcommands_header": "Subcommands:"
+    },
+    "subcommands": {
+      "gui": "explicit GUI launch",
+      "tray": "tray-only (no popover window)",
+      "serve": "HTTP API server",
+      "ai": "AI subsystem (chat / generate / models)",
+      "config": "config inspection",
+      "state": "state surface",
+      "events": "event bus",
+      "process": "subsystem supervisor",
+      "sessions": "chat history",
+      "models": "local model snapshots",
+      "validate": "probe a remote OpenAI-compatible endpoint",
+      "firstlaunch": "detect fresh-install state",
+      "permissions": "entitlement checker",
+      "telemetry": "local process metrics",
+      "service": "OS daemon lifecycle",
+      "api": "OpenAPI gateway",
+      "version": "print version information",
+      "help": "show help for a subcommand"
+    },
+    "errors": {
+      "unknown_subcommand": "lthn: unknown subcommand %q",
+      "see_help": "run `lthn help` for available commands",
+      "missing_verb": "lthn %s: missing verb (%s)"
+    }
+  }
+}

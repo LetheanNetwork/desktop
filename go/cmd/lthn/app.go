@@ -14,6 +14,7 @@ import (
 	"dappco.re/go/process"
 	"dappco.re/go/store"
 	"dappco.re/go/stream"
+	lthni18n "dappco.re/lthn/desktop/pkg/i18n"
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
@@ -67,6 +68,15 @@ func newAppCore() *core.Core {
 		core.WithName("i18n", i18n.NewCoreService(i18n.ServiceOptions{
 			Language: "en-GB",
 			Fallback: "en",
+			ExtraFS: []i18n.FSSource{
+				// pkg/i18n/locales/{en,en_au,...}.json — embedded at
+				// compile time. en is the canonical UK English (Snider
+				// canon: colour / organisation / centre); en_au is the
+				// Australian variant. LC_ALL / LANGUAGE / LC_MESSAGES /
+				// LANG select at runtime; explicit Language above wins
+				// when set. See pkg/i18n/locales.go for the embed shape.
+				lthni18n.Source(),
+			},
 		})),
 		core.WithName("io", io.NewService(io.IOConfig{
 			Root: dataDir.Value.(string),
