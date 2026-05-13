@@ -62,13 +62,13 @@ func (s *Service) Install(input InstallInput) core.Result {
 	if core.Trim(input.LocalPath) != "" {
 		read := core.ReadFile(input.LocalPath)
 		if !read.OK {
-			return core.Fail(core.E("plugin.Install",
+			return core.Fail(core.E(installOp,
 				"read local: "+read.Error(), nil))
 		}
 		binary, _ = read.Value.([]byte)
 	} else {
 		if core.Trim(validated.BinaryURL) == "" {
-			return core.Fail(core.E("plugin.Install",
+			return core.Fail(core.E(installOp,
 				"binary_url or local_path required", nil))
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), downloadTimeout)
@@ -80,13 +80,13 @@ func (s *Service) Install(input InstallInput) core.Result {
 		binary, _ = fetchedR.Value.([]byte)
 	}
 	if r := verifyChecksum(binary, validated.Checksum); !r.OK {
-		return core.Fail(core.E("plugin.Install",
+		return core.Fail(core.E(installOp,
 			"checksum: "+r.Error(), nil))
 	}
 	s.mu.Lock()
 	if r := s.stopPlugin(validated.Code); !r.OK {
 		s.mu.Unlock()
-		return core.Fail(core.E("plugin.Install", "stop existing plugin: "+r.Error(), nil))
+		return core.Fail(core.E(installOp, "stop existing plugin: "+r.Error(), nil))
 	}
 	s.mu.Unlock()
 	dirR := writePlugin(validated, binary)

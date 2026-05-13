@@ -46,10 +46,10 @@ const downloadTimeout = 60 * time.Second
 func verifyURL(rawURL string) core.Result {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return core.Fail(core.E("plugin.verifyURL", "parse failed: "+err.Error(), nil))
+		return core.Fail(core.E(verifyURLOp, "parse failed: "+err.Error(), nil))
 	}
 	if u.Scheme != "https" {
-		return core.Fail(core.E("plugin.verifyURL", "https required, got "+u.Scheme, nil))
+		return core.Fail(core.E(verifyURLOp, "https required, got "+u.Scheme, nil))
 	}
 	hostAllowed := false
 	for _, h := range allowedHosts {
@@ -59,10 +59,10 @@ func verifyURL(rawURL string) core.Result {
 		}
 	}
 	if !hostAllowed {
-		return core.Fail(core.E("plugin.verifyURL", "host not on allowlist: "+u.Host, nil))
+		return core.Fail(core.E(verifyURLOp, "host not on allowlist: "+u.Host, nil))
 	}
 	if !core.HasPrefix(u.Path, allowedPathPrefix) {
-		return core.Fail(core.E("plugin.verifyURL",
+		return core.Fail(core.E(verifyURLOp,
 			"path must start with "+allowedPathPrefix+", got "+u.Path, nil))
 	}
 	return core.Ok(u)
@@ -79,23 +79,23 @@ func fetchBinary(ctx context.Context, rawURL string) core.Result {
 	defer cancel()
 	req, err := http.NewRequestWithContext(cctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return core.Fail(core.E("plugin.fetchBinary", "build request: "+err.Error(), nil))
+		return core.Fail(core.E(fetchBinaryOp, "build request: "+err.Error(), nil))
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return core.Fail(core.E("plugin.fetchBinary", "http: "+err.Error(), nil))
+		return core.Fail(core.E(fetchBinaryOp, "http: "+err.Error(), nil))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return core.Fail(core.E("plugin.fetchBinary",
+		return core.Fail(core.E(fetchBinaryOp,
 			"http status "+core.Itoa(resp.StatusCode)+" for "+rawURL, nil))
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBinarySize+1))
 	if err != nil {
-		return core.Fail(core.E("plugin.fetchBinary", "read body: "+err.Error(), nil))
+		return core.Fail(core.E(fetchBinaryOp, "read body: "+err.Error(), nil))
 	}
 	if len(body) > maxBinarySize {
-		return core.Fail(core.E("plugin.fetchBinary",
+		return core.Fail(core.E(fetchBinaryOp,
 			"binary exceeds "+core.Itoa(maxBinarySize)+" bytes", nil))
 	}
 	return core.Ok(body)
@@ -141,17 +141,17 @@ func writePlugin(m Manifest, binary []byte) core.Result {
 	}
 	dir, _ := dirR.Value.(string)
 	if r := core.MkdirAll(core.PathJoin(dir, "bin"), 0o755); !r.OK {
-		return core.Fail(core.E("plugin.writePlugin", "mkdir bin: "+r.Error(), nil))
+		return core.Fail(core.E(writePluginOp, "mkdir bin: "+r.Error(), nil))
 	}
 	if r := core.MkdirAll(core.PathJoin(dir, "data"), 0o755); !r.OK {
-		return core.Fail(core.E("plugin.writePlugin", "mkdir data: "+r.Error(), nil))
+		return core.Fail(core.E(writePluginOp, "mkdir data: "+r.Error(), nil))
 	}
 	binPath := core.PathJoin(dir, m.Binary)
 	if r := core.WriteFile(binPath, binary, 0o755); !r.OK {
-		return core.Fail(core.E("plugin.writePlugin", "write binary: "+r.Error(), nil))
+		return core.Fail(core.E(writePluginOp, "write binary: "+r.Error(), nil))
 	}
 	if r := saveManifest(dir, m); !r.OK {
-		return core.Fail(core.E("plugin.writePlugin", "write manifest: "+r.Error(), nil))
+		return core.Fail(core.E(writePluginOp, "write manifest: "+r.Error(), nil))
 	}
 	return core.Ok(dir)
 }

@@ -98,7 +98,7 @@ func (s *Service) startPlugin(ctx context.Context, code, token string) core.Resu
 	m, _ := manifestR.Value.(Manifest)
 	ps := s.proc()
 	if ps == nil {
-		return core.Fail(core.E("plugin.startPlugin", "process service unavailable", nil))
+		return core.Fail(core.E(startPluginOp, "process service unavailable", nil))
 	}
 	portR := pickFreePort()
 	if !portR.OK {
@@ -119,11 +119,11 @@ func (s *Service) startPlugin(ctx context.Context, code, token string) core.Resu
 	}
 	spawn := ps.StartWithOptions(ctx, opts)
 	if !spawn.OK {
-		return core.Fail(core.E("plugin.startPlugin", "spawn: "+spawn.Error(), nil))
+		return core.Fail(core.E(startPluginOp, "spawn: "+spawn.Error(), nil))
 	}
 	proc, ok := spawn.Value.(*process.Process)
 	if !ok || proc == nil {
-		return core.Fail(core.E("plugin.startPlugin", "process service returned non-process", nil))
+		return core.Fail(core.E(startPluginOp, "process service returned non-process", nil))
 	}
 	// Mark starting so List/Status reflects intent immediately.
 	ps2 := &pluginState{

@@ -56,13 +56,13 @@ type UI struct {
 // optional ones with defaults. Returns the normalised copy.
 func (m Manifest) validate() core.Result {
 	if core.Trim(m.Code) == "" {
-		return core.Fail(core.E("plugin.manifest.validate", "code is required", nil))
+		return core.Fail(core.E(manifestValidateOp, "code is required", nil))
 	}
 	if core.Trim(m.Name) == "" {
-		return core.Fail(core.E("plugin.manifest.validate", "name is required", nil))
+		return core.Fail(core.E(manifestValidateOp, "name is required", nil))
 	}
 	if core.Trim(m.Binary) == "" {
-		return core.Fail(core.E("plugin.manifest.validate", "binary path is required", nil))
+		return core.Fail(core.E(manifestValidateOp, "binary path is required", nil))
 	}
 	// Namespace defaults to code when omitted.
 	if core.Trim(m.Namespace) == "" {
