@@ -91,7 +91,7 @@ dev_mode:
 
 # File Associations
 # More information at: https://v3.wails.io/noit/done/yet
-fileAssociations:
+fileAssociations: []
 #  - ext: wails
 #    name: Wails
 #    description: Wails Application File
