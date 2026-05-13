@@ -73,6 +73,9 @@ MANIFEST=(
   "dart|dart|Dart client (basic HTTP)."
   "dart-dio|dart-dio|Dart with Dio HTTP — Flutter community canon."
   "clojure|clojure|JVM functional Lisp client."
+  # ── Scripting / server-side ────────────────────────────────────────
+  "php|php|Guzzle-based PHP client. Composer-installable via @lthn/sdk-php."
+  "python|python|urllib3-based Python client. pip-installable via @lthn/sdk-python."
 )
 
 # Filter to selected ids if any were passed as args.
