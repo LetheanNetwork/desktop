@@ -53,3 +53,6 @@ build/sdk/*/
 !build/sdk/openapi.yaml
 !build/sdk/openapi.json
 !build/sdk/publish.sh
+
+# Sonar scanner local cache
+.scannerwork/
