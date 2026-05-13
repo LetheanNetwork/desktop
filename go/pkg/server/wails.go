@@ -46,3 +46,19 @@ func (s *Service) WAddr() (string, error) {
 	}
 	return s.opts.Addr, nil
 }
+
+// WListening reports whether Start() is actively serving on Addr.
+// False in desktop mode (the gin engine is mounted on Wails'
+// AssetServer instead — the configured Addr is never bound), true
+// inside `lthn serve`.
+//
+// Usage example (TS):
+//
+//	import { WListening } from "@desktop/server/service";
+//	const on = await WListening();
+func (s *Service) WListening() (bool, error) {
+	if s == nil {
+		return false, nil
+	}
+	return s.listening, nil
+}

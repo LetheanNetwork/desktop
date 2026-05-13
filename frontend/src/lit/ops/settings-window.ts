@@ -35,6 +35,7 @@ class LthnSettingsWindow extends LitElement {
     heapSamples: { state: true },
     routes: { state: true },
     endpoint: { state: true },
+    httpListening: { state: true },
   };
   declare open: string;
   declare w: number;
@@ -51,6 +52,7 @@ class LthnSettingsWindow extends LitElement {
   declare heapSamples: string;
   declare routes: RouteView[];
   declare endpoint: string;
+  declare httpListening: boolean;
   constructor() {
     super();
     this.open = "general"; this.w = 760; this.h = 600; this.embedded = false;
@@ -71,6 +73,7 @@ class LthnSettingsWindow extends LitElement {
     this.heapSamples    = localStorage.getItem("lthn.telemetry.samples")  || "24";
     this.routes = [];
     this.endpoint = "http://localhost:8000/v1";
+    this.httpListening = false;
   }
 
   _setSampleInterval(v: string) {
@@ -111,7 +114,7 @@ class LthnSettingsWindow extends LitElement {
       import("@desktop/runner/service"),
       import("@desktop/server/service"),
     ]);
-    const [title, subtitleTpl, locales, currentLang, paths, routes, routeViews, build, addr] = await Promise.all([
+    const [title, subtitleTpl, locales, currentLang, paths, routes, routeViews, build, addr, listening] = await Promise.all([
       i18n.T("window.settings.title"),
       i18n.T("window.settings.subtitle"),
       i18n.AvailableLanguages(),
@@ -121,6 +124,7 @@ class LthnSettingsWindow extends LitElement {
       runner.WRoutes().catch((): RouteView[] => []),
       fl.Build().catch(() => null),
       server.WAddr().catch((): string => ""),
+      server.WListening().catch((): boolean => false),
     ]);
     this.locales = locales;
     this.currentLang = currentLang;
@@ -136,6 +140,7 @@ class LthnSettingsWindow extends LitElement {
       const a = addr.startsWith(":") ? `localhost${addr}` : addr;
       this.endpoint = `http://${a}/v1`;
     }
+    this.httpListening = !!listening;
     // Rebuild the subtitle with the real version so the chrome
     // reflects the running binary rather than the locale fixture.
     const subtitle = this.build.version
@@ -398,7 +403,7 @@ class LthnSettingsWindow extends LitElement {
       title: "API",
       desc: "HTTP server for OpenAI-compatible clients. Off by default; nothing leaves this Mac unless you turn it on.",
       content: html`
-        ${this._row("HTTP server", null, html`<lthn-toggle on></lthn-toggle>`)}
+        ${this._row("HTTP server", null, html`<lthn-toggle ?on=${this.httpListening}></lthn-toggle>`)}
         ${this._row("Endpoint", null, html`
           <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">${this.endpoint}</span>
         `)}

@@ -65,6 +65,12 @@ type Service struct {
 	opts   Options
 	engine *gin.Engine
 	http   *http.Server
+	// listening tracks whether Start() has an active ListenAndServe
+	// running. Read by the Wails surface (WListening()) so the WebView
+	// can show the "HTTP server" toggle in its real state — false in
+	// desktop mode (the gin engine is mounted on Wails' AssetServer
+	// instead), true after `lthn serve` is invoked.
+	listening bool
 }
 
 // NewService constructs the server with the canonical shape.
@@ -138,7 +144,9 @@ func (s *Service) Engine() *gin.Engine {
 //	go func() { _ = s.Start(core.Background()) }()
 func (s *Service) Start(_ core.Context) core.Result {
 	core.Print(core.Stdout(), "lthn serve: listening on %s\n", s.opts.Addr)
+	s.listening = true
 	err := s.http.ListenAndServe()
+	s.listening = false
 	if err == nil || err == http.ErrServerClosed {
 		return core.Ok(nil)
 	}
