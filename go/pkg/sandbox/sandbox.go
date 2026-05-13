@@ -94,6 +94,12 @@ type SpawnInput struct {
 	Runtime string `json:"runtime,omitempty"`
 	// Timeout caps the container's wall-clock lifetime; 0 = 60s default.
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+	// Memory is the container memory budget in MB; 0 uses runtime defaults.
+	Memory int `json:"memory,omitempty"`
+	// CPUs is the container CPU budget; 0 uses runtime defaults.
+	CPUs int `json:"cpus,omitempty"`
+	// StorageOpt is passed to runtimes that support `--storage-opt`.
+	StorageOpt string `json:"storage_opt,omitempty"`
 }
 
 // SpawnOutput is the one-shot result of a Spawn call.
@@ -142,6 +148,13 @@ func (s *Service) prepareSpawnInput(input SpawnInput) core.Result {
 	if core.Trim(input.Image) == "" {
 		input.Image = s.resolveDefaultImage()
 	}
+	if input.Memory < 0 {
+		return core.Fail(core.E("sandbox.Spawn", "memory must be >= 0", nil))
+	}
+	if input.CPUs < 0 {
+		return core.Fail(core.E("sandbox.Spawn", "cpus must be >= 0", nil))
+	}
+	input.StorageOpt = core.Trim(input.StorageOpt)
 	if core.Trim(input.Command) == "" {
 		return core.Fail(core.E("sandbox.Spawn", "command is required", nil))
 	}
@@ -173,9 +186,19 @@ func (s *Service) spawnApple(input SpawnInput, timeout time.Duration) core.Resul
 	// EntryPoint args via Args (verified against external/container's
 	// apple.go). For now we encode command+args by prepending the
 	// command into image.Path style — proof-of-life only.
-	ctr, err := provider.Run(img,
+	if input.StorageOpt != "" {
+		return core.Fail(core.E("sandbox.spawnApple", "storage_opt is not supported by AppleProvider", nil))
+	}
+	runOpts := []container.RunOption{
 		container.WithName(core.Sprintf("lthn-sandbox-%d", started.UnixNano())),
-	)
+	}
+	if input.Memory > 0 {
+		runOpts = append(runOpts, container.WithMemory(input.Memory))
+	}
+	if input.CPUs > 0 {
+		runOpts = append(runOpts, container.WithCPUs(input.CPUs))
+	}
+	ctr, err := provider.Run(img, runOpts...)
 	if err != nil {
 		return core.Fail(core.E("sandbox.spawnApple", "run failed", err))
 	}
@@ -271,6 +294,19 @@ type runCommand struct {
 	Args   []string
 }
 
+func appendResourceArgs(cmd []string, input SpawnInput, storageOpt bool) []string {
+	if input.Memory > 0 {
+		cmd = append(cmd, "--memory", core.Sprintf("%dM", input.Memory))
+	}
+	if input.CPUs > 0 {
+		cmd = append(cmd, "--cpus", core.Sprintf("%d", input.CPUs))
+	}
+	if storageOpt && input.StorageOpt != "" {
+		cmd = append(cmd, "--storage-opt", input.StorageOpt)
+	}
+	return cmd
+}
+
 // buildRunArgs constructs the `<runtime> run --rm <image> <cmd> <args...>`
 // invocation. Each runtime has slightly different flag shape; we
 // only need the lowest common denominator for proof-of-life.
@@ -279,15 +315,21 @@ func (s *Service) buildRunArgs(rt container.RuntimeType, input SpawnInput) core.
 	switch rt {
 	case container.RuntimeDocker:
 		// Docker's `--rm` auto-removes after exit. Good for one-shot.
+		cmd = appendResourceArgs(cmd, input, true)
 		cmd = append(cmd, input.Image, input.Command)
 		cmd = append(cmd, input.Args...)
 		return core.Ok(runCommand{Binary: "docker", Args: cmd})
 	case container.RuntimePodman:
+		cmd = appendResourceArgs(cmd, input, true)
 		cmd = append(cmd, input.Image, input.Command)
 		cmd = append(cmd, input.Args...)
 		return core.Ok(runCommand{Binary: "podman", Args: cmd})
 	case container.RuntimeApple:
 		// Apple Container CLI mirrors Docker run semantics.
+		if input.StorageOpt != "" {
+			return core.Fail(core.E("sandbox.buildRunArgs", "storage_opt is not supported by Apple runtime", nil))
+		}
+		cmd = appendResourceArgs(cmd, input, false)
 		cmd = append(cmd, input.Image, input.Command)
 		cmd = append(cmd, input.Args...)
 		return core.Ok(runCommand{Binary: "container", Args: cmd})

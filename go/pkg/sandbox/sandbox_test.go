@@ -2,7 +2,10 @@
 
 package sandbox
 
-import core "dappco.re/go"
+import (
+	core "dappco.re/go"
+	"dappco.re/go/container"
+)
 
 func newTestService(opts Options) *Service {
 	r := NewService(opts)(core.New())
@@ -107,6 +110,43 @@ func TestSandbox_Service_Spawn_Ugly(t *core.T) {
 	core.AssertTrue(t, r.OK)
 	input := r.Value.(SpawnInput)
 	core.AssertEqual(t, "call/override:latest", input.Image)
+}
+
+func TestSandbox_buildRunArgs_Good(t *core.T) {
+	svc := newTestService(Options{})
+	r := svc.buildRunArgs(container.RuntimeDocker, SpawnInput{
+		Image:      "alpine:3.21",
+		Command:    "echo",
+		Args:       []string{"hi"},
+		Memory:     2048,
+		CPUs:       4,
+		StorageOpt: "size=10G",
+	})
+	core.AssertTrue(t, r.OK)
+	run := r.Value.(runCommand)
+	core.AssertEqual(t, "docker", run.Binary)
+	core.AssertEqual(t, []string{
+		"run", "--rm",
+		"--memory", "2048M",
+		"--cpus", "4",
+		"--storage-opt", "size=10G",
+		"alpine:3.21", "echo", "hi",
+	}, run.Args)
+}
+
+func TestSandbox_prepareSpawnInput_Bad(t *core.T) {
+	svc := newTestService(Options{})
+	r := svc.prepareSpawnInput(SpawnInput{Command: "echo", Memory: -1})
+	core.AssertFalse(t, r.OK)
+	core.AssertContains(t, r.Error(), "memory must be >= 0")
+}
+
+func TestSandbox_prepareSpawnInput_Ugly(t *core.T) {
+	svc := newTestService(Options{})
+	r := svc.prepareSpawnInput(SpawnInput{Command: "echo", StorageOpt: "   "})
+	core.AssertTrue(t, r.OK)
+	input := r.Value.(SpawnInput)
+	core.AssertEqual(t, "", input.StorageOpt)
 }
 
 func TestSandbox_Service_Detect_Good(t *core.T) {
