@@ -161,6 +161,7 @@ switch (surface) {
         err:          string | null;
         tab:          TrayTab;    // active info-card tab
         sessionsToday: number;    // count of sessions created since midnight
+        lastInteract: number;     // max updated_at across sessions (unix sec)
       }
       const state: TrayState = {
         model: "…",
@@ -171,6 +172,7 @@ switch (surface) {
         err: null,
         tab: "system",
         sessionsToday: 0,
+        lastInteract: 0,
       };
 
       const setTab = (t: TrayTab) => () => { state.tab = t; draw(); };
@@ -179,6 +181,18 @@ switch (surface) {
         if (s < 60) return `${s | 0}s`;
         if (s < 3600) return `${(s / 60) | 0}m ${(s % 60) | 0}s`;
         return `${(s / 3600) | 0}h ${((s % 3600) / 60) | 0}m`;
+      };
+
+      /** "5m ago" / "2h ago" / "3d ago" from a unix-second timestamp.
+       *  Drives the Activity tab's "Last interact" slot — mirrors the
+       *  chat-window left rail's age-bucket reasoning, but in a compact
+       *  relative form the tray panel can fit. */
+      const fmtRel = (ts: number) => {
+        const ageSec = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+        if (ageSec < 60)    return `${ageSec}s ago`;
+        if (ageSec < 3600)  return `${(ageSec / 60) | 0}m ago`;
+        if (ageSec < 86400) return `${(ageSec / 3600) | 0}h ago`;
+        return `${(ageSec / 86400) | 0}d ago`;
       };
 
       const draw = () => {
@@ -330,7 +344,7 @@ switch (surface) {
         const activityPanel = html`
           ${kv(t.kvSessionsToday, state.sessionsToday > 0 ? state.sessionsToday : t.valDash)}
           ${kv(t.kvTokens, t.valDash)}
-          ${kv(t.kvLastInteract, t.valDash)}
+          ${kv(t.kvLastInteract, state.lastInteract > 0 ? fmtRel(state.lastInteract) : t.valDash)}
           ${kv(t.kvRecentErrors, state.err ? "1" : "0")}
         `;
 
@@ -453,6 +467,16 @@ switch (surface) {
             (s: unknown) => (s as { created_at?: number }).created_at !== undefined
               && ((s as { created_at: number }).created_at >= startSec),
           ).length;
+          // Activity-panel "Last interact" — max updated_at across all
+          // sessions, regardless of bucket. Drawing falls back to the
+          // design "—" when no sessions exist.
+          state.lastInteract = (sessionList || []).reduce(
+            (max: number, s: unknown) => {
+              const u = (s as { updated_at?: number }).updated_at || 0;
+              return u > max ? u : max;
+            },
+            0,
+          );
         } catch (e: unknown) {
           state.connected = false;
           state.err = e instanceof Error ? e.message : String(e);
