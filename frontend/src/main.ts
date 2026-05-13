@@ -153,13 +153,14 @@ switch (surface) {
 
       type TrayTab = "system" | "runner" | "activity";
       interface TrayState {
-        model:     string;
-        uptime:    number;
-        heapMb:    number;
-        samples:   number[];   // rolling heap_alloc_mb window
-        connected: boolean;
-        err:       string | null;
-        tab:       TrayTab;    // active info-card tab
+        model:        string;
+        uptime:       number;
+        heapMb:       number;
+        samples:      number[];   // rolling heap_alloc_mb window
+        connected:    boolean;
+        err:          string | null;
+        tab:          TrayTab;    // active info-card tab
+        sessionsToday: number;    // count of sessions created since midnight
       }
       const state: TrayState = {
         model: "…",
@@ -169,6 +170,7 @@ switch (surface) {
         connected: false,
         err: null,
         tab: "system",
+        sessionsToday: 0,
       };
 
       const setTab = (t: TrayTab) => () => { state.tab = t; draw(); };
@@ -326,7 +328,7 @@ switch (surface) {
         `;
 
         const activityPanel = html`
-          ${kv(t.kvSessionsToday, t.valDash)}
+          ${kv(t.kvSessionsToday, state.sessionsToday > 0 ? state.sessionsToday : t.valDash)}
           ${kv(t.kvTokens, t.valDash)}
           ${kv(t.kvLastInteract, t.valDash)}
           ${kv(t.kvRecentErrors, state.err ? "1" : "0")}
@@ -428,9 +430,11 @@ switch (surface) {
 
       const poll = async () => {
         try {
-          const [reading, models] = await Promise.all([
+          const sessions = await import("@desktop/sessions/wailsservice");
+          const [reading, models, sessionList] = await Promise.all([
             TelemetryService.CurrentSample(),
             RunnerService.WModels().catch((): string[] => []),
+            sessions.List().catch((): unknown[] => []),
           ]);
           state.connected = true;
           state.err = null;
@@ -439,6 +443,16 @@ switch (surface) {
           state.model = (models && models[0]) || "no model loaded";
           state.samples.push(state.heapMb);
           if (state.samples.length > 24) state.samples.shift();
+          // Activity-panel "Sessions today" count — sessions created
+          // since midnight local time. SessionInfo.created_at is a
+          // Unix second (matches go-store).
+          const midnight = new Date();
+          midnight.setHours(0, 0, 0, 0);
+          const startSec = Math.floor(midnight.getTime() / 1000);
+          state.sessionsToday = (sessionList || []).filter(
+            (s: unknown) => (s as { created_at?: number }).created_at !== undefined
+              && ((s as { created_at: number }).created_at >= startSec),
+          ).length;
         } catch (e: unknown) {
           state.connected = false;
           state.err = e instanceof Error ? e.message : String(e);
