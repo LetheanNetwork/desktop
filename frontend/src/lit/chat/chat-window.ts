@@ -98,6 +98,10 @@ class LthnChatWindow extends LitElement {
     conversations: { state: true },
     activeConversationId: { state: true },
     railErr: { state: true },
+    liveTurns: { state: true },
+    composerValue: { state: true },
+    sending: { state: true },
+    sendErr: { state: true },
   };
   declare state:     ChatState;
   declare rail:      RailMode;
@@ -109,6 +113,10 @@ class LthnChatWindow extends LitElement {
   declare conversations: Conversation[];
   declare activeConversationId: string | null;
   declare railErr: string;
+  declare liveTurns: ChatTurn[] | null;
+  declare composerValue: string;
+  declare sending: boolean;
+  declare sendErr: string;
   constructor() {
     super();
     this.state = "multi-turn";
@@ -120,6 +128,10 @@ class LthnChatWindow extends LitElement {
     this.conversations = [];
     this.activeConversationId = null;
     this.railErr = "";
+    this.liveTurns = null;
+    this.composerValue = "";
+    this.sending = false;
+    this.sendErr = "";
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -130,6 +142,75 @@ class LthnChatWindow extends LitElement {
     ]);
     this.chrome = { title, subtitle };
     await this._reloadRail();
+  }
+
+  /** Lit lifecycle — when activeConversationId changes, reload
+   *  the live turns from sessions.Read so the transcript matches
+   *  the selected conversation. */
+  updated(changed: Map<string, unknown>) {
+    if (changed.has("activeConversationId")) {
+      void this._loadTurns();
+    }
+  }
+
+  /** Load messages for the active session and map inference.Message
+   *  → ChatTurn for rendering. Empty array when no active session
+   *  or the session has no messages yet. */
+  async _loadTurns() {
+    if (!this.activeConversationId) {
+      this.liveTurns = null;
+      return;
+    }
+    try {
+      const svc = await import("@desktop/sessions/wailsservice");
+      const msgs = await svc.Read(this.activeConversationId);
+      this.liveTurns = (msgs || []).map(messageToTurn);
+    } catch (err: unknown) {
+      this.sendErr = err instanceof Error ? err.message : String(err);
+      this.liveTurns = [];
+    }
+  }
+
+  /** Send the composer's current value to the active session.
+   *  Round-trip: append user → runner.WChat(history) → append
+   *  assistant → reload turns. Errors surface inline via sendErr. */
+  async _send() {
+    const text = this.composerValue.trim();
+    if (!text || this.sending) return;
+    if (!this.activeConversationId) {
+      // Auto-create on first send if no session is selected.
+      await this._newConversation();
+      if (!this.activeConversationId) return;
+    }
+    const id = this.activeConversationId;
+    this.sending = true;
+    this.sendErr = "";
+    this.composerValue = "";
+    try {
+      const [sessions, runner] = await Promise.all([
+        import("@desktop/sessions/wailsservice"),
+        import("@desktop/runner/service"),
+      ]);
+      await sessions.Append(id, "user", text);
+      const history = await sessions.Read(id);
+      const reply = await runner.WChat(history || []);
+      await sessions.Append(id, "assistant", reply || "");
+      await this._loadTurns();
+      await this._reloadRail();
+    } catch (err: unknown) {
+      this.sendErr = err instanceof Error ? err.message : String(err);
+    } finally {
+      this.sending = false;
+    }
+  }
+
+  /** Composer keydown — ⌘↵ / Ctrl+↵ sends; plain Enter inserts a
+   *  newline (textarea default). */
+  _composerKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      void this._send();
+    }
   }
 
   /** Create a fresh session via sessions.Create + select it.
@@ -168,7 +249,17 @@ class LthnChatWindow extends LitElement {
   }
 
   render() {
-    const { railData, turns, banner, composer, toolbarModel } = chatStateData(this.state);
+    const fixture = chatStateData(this.state);
+    const { railData, banner, toolbarModel } = fixture;
+    // When a real session is selected, use its live turns instead of
+    // the demo fixtures. Live empty (session with no messages yet)
+    // also wins so we don't fall back to demo turns mid-session.
+    const turns = this.activeConversationId !== null ? this.liveTurns : fixture.turns;
+    const composer = {
+      ...fixture.composer,
+      value: this.composerValue,
+      sending: this.sending,
+    };
 
     /* — footer per state — */
     const footer =
@@ -426,14 +517,15 @@ class LthnChatWindow extends LitElement {
 
   /* — composer — */
   _renderComposer({ value, disabled, sending, error, hint }: ChatComposer & { error?: string }) {
+    const liveErr = error || this.sendErr;
     return html`
       <div style="padding:14px 22px 16px; border-top:1px solid rgba(255,255,255,0.05);
                   background:rgba(0,0,0,0.12); display:flex; flex-direction:column; gap:8px;">
-        ${error ? html`
+        ${liveErr ? html`
           <div style="display:flex; align-items:center; gap:8px; padding:7px 11px;
                       background:rgba(255,76,76,0.08); border:1px solid rgba(255,76,76,0.18);
                       border-radius:6px; font-size:11.5px; color:var(--err-300, #ffb4b4);">
-            <i class="fa-solid fa-triangle-exclamation" style="font-size:11px;"></i>${error}
+            <i class="fa-solid fa-triangle-exclamation" style="font-size:11px;"></i>${liveErr}
           </div>
         ` : nothing}
         <div style="position:relative;
@@ -441,13 +533,21 @@ class LthnChatWindow extends LitElement {
                     border:1px solid rgba(255,255,255,0.07); border-radius:10px;
                     min-height:78px; padding:12px 14px 38px;
                     opacity:${disabled ? 0.55 : 1};">
-          <div style="font-size:13px; line-height:1.5;
-                      color:${value ? "var(--fg-0)" : "var(--fg-3)"};
-                      font-family:var(--font-sans); white-space:pre-wrap;">
-            ${value || (disabled
+          <textarea
+            .value=${value}
+            ?disabled=${disabled || sending}
+            @input=${(e: Event) => { this.composerValue = (e.target as HTMLTextAreaElement).value; }}
+            @keydown=${(e: KeyboardEvent) => this._composerKeydown(e)}
+            placeholder=${disabled
               ? "Load a model from the tray to start composing."
-              : "Ask anything — runs locally on this Mac.")}
-          </div>
+              : "Ask anything — runs locally on this Mac. ⌘↵ to send."}
+            style="width:100%; min-height:52px; resize:vertical;
+                   background:transparent; border:none; outline:none;
+                   font-family:var(--font-sans); font-size:13px;
+                   line-height:1.5; color:var(--fg-0);
+                   --wails-draggable: no-drag;
+                   ${value ? "color:var(--fg-0);" : ""}"
+          ></textarea>
           <div style="position:absolute; left:12px; right:12px; bottom:8px;
                       display:flex; align-items:center; gap:8px;">
             <lthn-btn tone="quiet" size="sm" ?dim=${disabled}>
@@ -464,7 +564,8 @@ class LthnChatWindow extends LitElement {
                 <i class="fa-solid fa-stop" style="font-size:10px;"></i> Stop
               </lthn-btn>
             ` : html`
-              <lthn-btn tone="primary" size="sm" ?dim=${disabled}>
+              <lthn-btn tone="primary" size="sm" ?dim=${disabled}
+                @click=${() => void this._send()}>
                 <i class="fa-solid fa-arrow-up" style="font-size:11px;"></i> Send
               </lthn-btn>
             `}
@@ -550,6 +651,17 @@ class LthnChatWindow extends LitElement {
 customElements.define("lthn-chat-window", LthnChatWindow);
 
 // ─── helpers ────────────────────────────────────────────────────────
+
+/** inference.Message → ChatTurn shape the existing transcript
+ *  template expects. role: "user" → "you"; everything else maps
+ *  to "model" so the assistant + future system / tool messages
+ *  render with the assistant pill until we surface richer roles. */
+function messageToTurn(msg: { role: string; content: string }): ChatTurn {
+  return {
+    role: msg.role === "user" ? "you" : "model",
+    text: msg.content || "",
+  };
+}
 
 interface SessionInfoShape {
   id: string;
