@@ -48,13 +48,11 @@ switch (surface) {
         });
       };
 
-      /* Locale strings — bulk-resolved once at tray boot via the
-       * Wails I18nService binding. The bridge is in-process so the
-       * calls are µs-fast; serial awaits in a single batch are
-       * cheaper than `until(...)` per render slot. Store the
-       * resolved strings as plain consts and read them inside
-       * draw() — sync, no Promise plumbing in templates. */
-      const t = {
+      /* Locale strings — bulk-resolved via the Wails I18nService
+       * binding. The bridge is in-process so the calls are µs-fast.
+       * Wrapped in loadStrings() so the flag-button switcher can
+       * recall it after SetLanguage() to refresh the tray in-place. */
+      const loadStrings = async () => ({
         chromeTitle:      await i18n.T("tray.chrome.title"),
         chromeReady:      await i18n.T("tray.chrome.subtitle_ready"),
         chromeOffline:    await i18n.T("tray.chrome.subtitle_offline"),
@@ -90,6 +88,28 @@ switch (surface) {
         tbOpenApp:        await i18n.T("tray.titlebar.open_app"),
         tbSettings:       await i18n.T("tray.titlebar.settings"),
         footerVersion:    (await i18n.T("tray.footer.version")).replace("%s", "0.1.0"),
+      });
+      let t = await loadStrings();
+
+      /* Locale state for the flag-button switcher. Available locales
+       * come from the binding's AvailableLanguages — for the demo
+       * surface today that's en + en-au; the flag cycles through
+       * them. Persisting the choice is a follow-up (config service). */
+      let currentLang = await i18n.Language();
+      const availableLangs = await i18n.AvailableLanguages();
+      const flagFor = (lang: string): string => {
+        const l = lang.toLowerCase();
+        if (l === "en-au" || l === "en_au") return "🇦🇺";
+        return "🇬🇧";  // en, en-gb, en_gb default to UK
+      };
+      const cycleLanguage = async () => {
+        if (!availableLangs.length) return;
+        const idx = availableLangs.indexOf(currentLang);
+        const next = availableLangs[(idx + 1) % availableLangs.length];
+        await i18n.SetLanguage(next);
+        currentLang = next;
+        t = await loadStrings();
+        draw();
       };
 
       type TrayTab = "system" | "runner" | "activity";
@@ -314,9 +334,36 @@ switch (surface) {
             <i class="fa-solid ${icon}" style="font-size:11px;"></i>
           </button>
         `;
+        /* Flag-button locale switch — clicks cycle the active
+         * locale through availableLangs and rebuild the tray's
+         * string cache via loadStrings(). Emoji flag picks the
+         * current locale's national glyph; no FA dependency since
+         * we want real flag colours. --wails-draggable opt-out
+         * matches the other titlebar actions. */
+        const flagAction = html`
+          <button
+            @click=${cycleLanguage}
+            title=${currentLang}
+            style="
+              display:inline-flex; align-items:center; justify-content:center;
+              width:24px; height:24px;
+              background:transparent;
+              border:1px solid transparent;
+              border-radius:5px;
+              cursor:pointer;
+              font-size:13px;
+              line-height:1;
+              --wails-draggable: no-drag;
+            "
+            onmouseover="this.style.background='rgba(255,255,255,0.05)';"
+            onmouseout="this.style.background='transparent';">
+            ${flagFor(currentLang)}
+          </button>
+        `;
         const titlebarActions = html`
           ${titlebarAction("fa-display", t.tbOpenApp,  openWindow("app"))}
           ${titlebarAction("fa-gear",    t.tbSettings, openWindow("settings"))}
+          ${flagAction}
         `;
 
         render(renderChrome({
