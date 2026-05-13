@@ -12,22 +12,70 @@ class LthnNetworkWindow extends LitElement {
     h: { type: Number },
     embedded: { type: Boolean, reflect: true },
     chrome: { state: true },
+    t: { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare chrome: { title: string; subtitle: string };
+  declare t: {
+    tabThisSession: string; tabAvailable: string; tabLedger: string;
+    pillPreview: string; sessionStrap: string;
+    labelActive: string; activeSplit: string;
+    rowYouServe: string; rowPeersServe: string; rowMedianLat: string;
+    rowPrivacy: string; rowLedger: string;
+    privacyLabel: string; privacyBody: string;
+    motto: string; btnLeave: string; footer: string;
+  };
   constructor() {
     super();
     this.w = 1080; this.h = 720; this.embedded = false;
     this.chrome = { title: "Network", subtitle: "LetherNet · v0.7 preview" };
+    this.t = {
+      tabThisSession: "This session", tabAvailable: "Available peers", tabLedger: "Ledger",
+      pillPreview: "Preview · v0.7",
+      sessionStrap: "session · sora-1 · 142 tokens served · 14 ms median round-trip",
+      labelActive: "Active session",
+      activeSplit: "Split across 4 machines · 1 of which is yours",
+      rowYouServe: "You serve", rowPeersServe: "Peers serve",
+      rowMedianLat: "Median latency", rowPrivacy: "Privacy", rowLedger: "Ledger",
+      privacyLabel: "Privacy",
+      privacyBody: "Peers see model layers, not your prompts. Prompts are split + masked client-side before any layer leaves this Mac.",
+      motto: "\"Sovereign first. Federated when you opt in. Never the other way round.\"",
+      btnLeave: "Leave session",
+      footer: "Disaggregated · 4 peers · session privacy-preserved · no PII shared · always opt-in",
+    };
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    this.chrome = {
-      title: await T("window.network.title"),
-      subtitle: await T("window.network.subtitle"),
+    const [
+      title, subtitle,
+      ts, av, lg, pp, ss, la, as,
+      ry, rp, rl, rv, rld,
+      pl, pb, mo, bl, fo,
+    ] = await Promise.all([
+      T("window.network.title"), T("window.network.subtitle"),
+      T("window.network.tab_this_session"), T("window.network.tab_available"),
+      T("window.network.tab_ledger"), T("window.network.pill_preview"),
+      T("window.network.session_strap"), T("window.network.label_active"),
+      T("window.network.active_split"),
+      T("window.network.row_you_serve"), T("window.network.row_peers_serve"),
+      T("window.network.row_median_lat"), T("window.network.row_privacy"),
+      T("window.network.row_ledger"),
+      T("window.network.privacy_label"), T("window.network.privacy_body"),
+      T("window.network.motto"), T("window.network.btn_leave"),
+      T("window.network.footer"),
+    ]);
+    this.chrome = { title, subtitle };
+    this.t = {
+      tabThisSession: ts, tabAvailable: av, tabLedger: lg,
+      pillPreview: pp, sessionStrap: ss,
+      labelActive: la, activeSplit: as,
+      rowYouServe: ry, rowPeersServe: rp,
+      rowMedianLat: rl, rowPrivacy: rv, rowLedger: rld,
+      privacyLabel: pl, privacyBody: pb,
+      motto: mo, btnLeave: bl, footer: fo,
     };
   }
 
@@ -41,11 +89,11 @@ class LthnNetworkWindow extends LitElement {
     ];
 
     const toolbar = html`
-      <lthn-btn tone="primary" size="sm" active>This session</lthn-btn>
-      <lthn-btn tone="ghost" size="sm">Available peers</lthn-btn>
-      <lthn-btn tone="ghost" size="sm">Ledger</lthn-btn>
+      <lthn-btn tone="primary" size="sm" active>${this.t.tabThisSession}</lthn-btn>
+      <lthn-btn tone="ghost" size="sm">${this.t.tabAvailable}</lthn-btn>
+      <lthn-btn tone="ghost" size="sm">${this.t.tabLedger}</lthn-btn>
       <div style="flex:1"></div>
-      <lthn-state-pill variant="preview">Preview · v0.7</lthn-state-pill>
+      <lthn-state-pill variant="preview">${this.t.pillPreview}</lthn-state-pill>
     `;
 
     const body = html`
@@ -91,34 +139,34 @@ class LthnNetworkWindow extends LitElement {
             })}
           </svg>
           <div style="position:absolute; top:14px; left:16px; font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); letter-spacing:0.06em;">
-            session · sora-1 · 142 tokens served · 14 ms median round-trip
+            ${this.t.sessionStrap}
           </div>
         </main>
 
         <aside style="background:rgba(0,0,0,0.18); border-left:1px solid rgba(255,255,255,0.05); padding:20px; overflow:auto; display:flex; flex-direction:column; gap:16px;">
           <div>
-            <lthn-label>Active session</lthn-label>
+            <lthn-label>${this.t.labelActive}</lthn-label>
             <div style="font-family:var(--font-mono); font-size:13px; color:var(--fg-0); margin-top:6px;">sora-1 · 70B</div>
-            <div style="font-size:11px; color:var(--fg-3); margin-top:3px;">Split across 4 machines · 1 of which is yours</div>
+            <div style="font-size:11px; color:var(--fg-3); margin-top:3px;">${this.t.activeSplit}</div>
           </div>
           <div style="display:flex; flex-direction:column; gap:6px; font-size:11.5px;">
-            <lthn-rail-row k="You serve"      v="Embeddings · L0–3"></lthn-rail-row>
-            <lthn-rail-row k="Peers serve"    v="Attention · FFN · KV"></lthn-rail-row>
-            <lthn-rail-row k="Median latency" v="14 ms"></lthn-rail-row>
-            <lthn-rail-row k="Privacy"        v="prompts split client-side"></lthn-rail-row>
-            <lthn-rail-row k="Ledger"         v="0.0142 LTHN earned"></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowYouServe}    v="Embeddings · L0–3"></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowPeersServe}  v="Attention · FFN · KV"></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowMedianLat}   v="14 ms"></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowPrivacy}     v="prompts split client-side"></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowLedger}      v="0.0142 LTHN earned"></lthn-rail-row>
           </div>
           <div style="padding:12px; border-radius:6px; background:rgba(64,193,197,0.06); border:1px solid rgba(64,193,197,0.18); font-size:11.5px; color:var(--fg-1); line-height:1.55;">
             <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
               <i class="fa-solid fa-shield-halved" style="color:var(--brand-300); font-size:11px;"></i>
-              <span style="color:var(--brand-300); font-family:var(--font-mono); font-size:10px; letter-spacing:0.06em; text-transform:uppercase;">Privacy</span>
+              <span style="color:var(--brand-300); font-family:var(--font-mono); font-size:10px; letter-spacing:0.06em; text-transform:uppercase;">${this.t.privacyLabel}</span>
             </div>
-            Peers see model layers, not your prompts. Prompts are split + masked client-side before any layer leaves this Mac.
+            ${this.t.privacyBody}
           </div>
           <div style="font-size:11px; color:var(--fg-3); line-height:1.55; font-style:italic;">
-            "Sovereign first. Federated when you opt in. Never the other way round."
+            ${this.t.motto}
           </div>
-          <lthn-btn tone="quiet" size="md">Leave session</lthn-btn>
+          <lthn-btn tone="quiet" size="md">${this.t.btnLeave}</lthn-btn>
         </aside>
       </div>
     `;
@@ -126,7 +174,7 @@ class LthnNetworkWindow extends LitElement {
     return renderChrome({
       title: this.chrome.title, subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, toolbar, body,
-      footer: html`Disaggregated · 4 peers · session privacy-preserved · no PII shared · always opt-in`,
+      footer: html`${this.t.footer}`,
       embedded: this.embedded,
     });
   }
