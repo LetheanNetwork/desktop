@@ -105,6 +105,11 @@ switch (surface) {
         valLoaded:        await i18n.T("tray.value.loaded"),
         valIdle:          await i18n.T("tray.value.idle"),
         valDash:          await i18n.T("tray.value.dash"),
+        valNoModel:       await i18n.T("tray.value.no_model_loaded"),
+        relSec:           await i18n.T("tray.rel.sec"),
+        relMin:           await i18n.T("tray.rel.min"),
+        relHr:            await i18n.T("tray.rel.hr"),
+        relDay:           await i18n.T("tray.rel.day"),
         tbOpenApp:        await i18n.T("tray.titlebar.open_app"),
         tbSettings:       await i18n.T("tray.titlebar.settings"),
         // Footer version reads from firstlaunch.Build().version when
@@ -189,10 +194,10 @@ switch (surface) {
        *  relative form the tray panel can fit. */
       const fmtRel = (ts: number) => {
         const ageSec = Math.max(0, Math.floor(Date.now() / 1000) - ts);
-        if (ageSec < 60)    return `${ageSec}s ago`;
-        if (ageSec < 3600)  return `${(ageSec / 60) | 0}m ago`;
-        if (ageSec < 86400) return `${(ageSec / 3600) | 0}h ago`;
-        return `${(ageSec / 86400) | 0}d ago`;
+        if (ageSec < 60)    return t.relSec.replace("%d", String(ageSec));
+        if (ageSec < 3600)  return t.relMin.replace("%d", String((ageSec / 60) | 0));
+        if (ageSec < 86400) return t.relHr.replace("%d", String((ageSec / 3600) | 0));
+        return t.relDay.replace("%d", String((ageSec / 86400) | 0));
       };
 
       const draw = () => {
@@ -202,7 +207,7 @@ switch (surface) {
           ? state.samples.join(",")
           : "";
         const sparkMax = Math.max(1, ...state.samples) * 1.2;
-        const hasModel = state.connected && state.model && state.model !== "no model loaded";
+        const hasModel = state.connected && state.model && state.model !== t.valNoModel;
 
         // Hero card — model status as the headline, mini-stats row, and a
         // thin inline sparkline strip. Replaces the prior verbose three-line
@@ -454,7 +459,7 @@ switch (surface) {
           state.err = null;
           state.uptime = reading.uptime_seconds || 0;
           state.heapMb = reading.heap_alloc_mb || 0;
-          state.model = (models && models[0]) || "no model loaded";
+          state.model = (models && models[0]) || t.valNoModel;
           state.samples.push(state.heapMb);
           if (state.samples.length > 24) state.samples.shift();
           // Activity-panel "Sessions today" count — sessions created

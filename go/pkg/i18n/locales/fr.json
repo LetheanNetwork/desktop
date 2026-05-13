@@ -85,7 +85,14 @@
       "connecting": "connexion",
       "loaded": "chargé",
       "idle": "inactif",
-      "dash": "—"
+      "dash": "—",
+      "no_model_loaded": "aucun modèle chargé"
+    },
+    "rel": {
+      "sec": "il y a %d s",
+      "min": "il y a %d min",
+      "hr":  "il y a %d h",
+      "day": "il y a %d j"
     },
     "titlebar": {
       "open_app": "Ouvrir Lethean Desktop",
