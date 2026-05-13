@@ -23,6 +23,7 @@
 - Audit script starts with a stray `yea` token on line 1 — known quirk, ignore the resulting shell warning. The script still produces correct counts.
 - Network creds (HF tokens, GitHub push, etc.) are NOT available. Any task needing them: leave a `TODO(snider)` and move on.
 - Single commit per logical change with conventional-commit prefix (`feat:` / `fix:` / `test:` / `chore:` / `docs:`). NO commit-spam batching.
+- Externals (`external/<name>/`) are real git clones of `github.com/dappcore/<name>` on the `dev` branch (verified 2026-05-13, all 14 at tip-of-dev). Codex CAN commit inside an external when the audit fix lives upstream (e.g. err-shape funcs in `external/api/go/`). Commit message stays inside the submodule's history. Snider pushes upstream in the morning with `cd external/<name> && git push github HEAD:dev`.
 
 ---
 
