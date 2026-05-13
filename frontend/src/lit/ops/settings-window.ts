@@ -14,24 +14,70 @@ class LthnSettingsWindow extends LitElement {
     h:    { type: Number },
     embedded: { type: Boolean, reflect: true },
     chrome: { state: true },
+    locales: { state: true },
+    currentLang: { state: true },
+    startWithWindow: { state: true },
   };
   declare open: string;
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare chrome: { title: string; subtitle: string };
+  declare locales: string[];
+  declare currentLang: string;
+  declare startWithWindow: boolean;
   constructor() {
     super();
-    this.open = "models"; this.w = 760; this.h = 600; this.embedded = false;
+    this.open = "general"; this.w = 760; this.h = 600; this.embedded = false;
     this.chrome = { title: "Settings", subtitle: "lthn · v0.2.0-rc1" };
+    this.locales = [];
+    this.currentLang = "";
+    // Persisted via localStorage["lthn.boot.window"] — Go-side
+    // application boot will read this to decide whether to spawn the
+    // unified app shell at launch, or leave the binary tray-only.
+    this.startWithWindow = localStorage.getItem("lthn.boot.window") === "true";
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    this.chrome = {
-      title: await T("window.settings.title"),
-      subtitle: await T("window.settings.subtitle"),
-    };
+    const i18n = await import("@lthn/i18n/coreservice");
+    const [title, subtitle, locales, currentLang] = await Promise.all([
+      i18n.T("window.settings.title"),
+      i18n.T("window.settings.subtitle"),
+      i18n.AvailableLanguages(),
+      i18n.Language(),
+    ]);
+    this.chrome = { title, subtitle };
+    this.locales = locales;
+    this.currentLang = currentLang;
+  }
+
+  /** Side-menu click handler — highlight + scroll-into-view. */
+  _openSection(id: string) {
+    this.open = id;
+    const target = this.querySelector(`#setting-${id}`);
+    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  /** Locale picker — flag + tag label. Click writes localStorage + calls SetLanguage. */
+  async _setLang(lang: string) {
+    const i18n = await import("@lthn/i18n/coreservice");
+    await i18n.SetLanguage(lang);
+    localStorage.setItem("lthn.locale", lang);
+    this.currentLang = lang;
+  }
+
+  /** Boot mode toggle — write-through to localStorage. */
+  _setStartWithWindow(on: boolean) {
+    this.startWithWindow = on;
+    localStorage.setItem("lthn.boot.window", on ? "true" : "false");
+  }
+
+  /** Flag for a given locale tag — keeps the picker visually intuitive. */
+  _flag(lang: string): string {
+    const l = lang.toLowerCase();
+    if (l === "en-au" || l === "en_au") return "🇦🇺";
+    return "🇬🇧";
   }
 
   render() {
@@ -51,12 +97,15 @@ class LthnSettingsWindow extends LitElement {
         <aside style="background:rgba(0,0,0,0.18); border-right:1px solid rgba(255,255,255,0.05);
                       padding:12px 8px; display:flex; flex-direction:column; gap:1px;">
           ${sections.map(s => html`
-            <div style="padding:8px 12px; border-radius:6px;
-                        background:${s.id === this.open ? "rgba(255,255,255,0.07)" : "transparent"};
-                        display:flex; align-items:center; gap:10px;
-                        font-size:12.5px;
-                        color:${s.id === this.open ? "var(--fg-0)" : "var(--fg-2)"};
-                        cursor:pointer;">
+            <div
+              @click=${() => this._openSection(s.id)}
+              style="padding:8px 12px; border-radius:6px;
+                     background:${s.id === this.open ? "rgba(255,255,255,0.07)" : "transparent"};
+                     display:flex; align-items:center; gap:10px;
+                     font-size:12.5px;
+                     color:${s.id === this.open ? "var(--fg-0)" : "var(--fg-2)"};
+                     cursor:pointer;
+                     --wails-draggable: no-drag;">
               <i class="fa-solid ${s.icon}" style="font-size:11px; width:14px; text-align:center;
                   color:${s.id === this.open ? "var(--brand-300)" : "var(--fg-3)"};"></i>
               ${s.label}
@@ -65,10 +114,14 @@ class LthnSettingsWindow extends LitElement {
         </aside>
 
         <!-- body -->
-        <main style="padding:28px 32px; overflow:auto; display:flex; flex-direction:column; gap:22px;">
+        <main id="settings-body" style="padding:28px 32px; overflow:auto; display:flex; flex-direction:column; gap:22px;">
+          ${this._sectionGeneral()}
           ${this._sectionModels()}
           ${this._sectionRunner()}
           ${this._sectionApi()}
+          ${this._sectionTelemetry()}
+          ${this._sectionIntegrations()}
+          ${this._sectionAbout()}
         </main>
       </div>
     `;
@@ -138,8 +191,42 @@ class LthnSettingsWindow extends LitElement {
     `;
   }
 
+  _sectionGeneral() {
+    return html`<div id="setting-general">${this._section({
+      title: "General", open: true,
+      desc: "App-wide defaults — what to show at launch, which language to speak, theme.",
+      content: html`
+        ${this._row("Start with window", "If on, the unified app shell opens at launch alongside the tray. Off = tray-only until you click in.", html`
+          <lthn-toggle ?on=${this.startWithWindow}
+            @click=${() => this._setStartWithWindow(!this.startWithWindow)}>
+          </lthn-toggle>
+        `)}
+        ${this._row("Default language", "Sets the language for the WebView surfaces. Stored locally; persists across restarts.", html`
+          <div style="display:inline-flex; border-radius:6px;
+                      background:rgba(0,0,0,0.18); border:1px solid rgba(255,255,255,0.06); padding:2px; gap:2px;">
+            ${this.locales.map(l => html`
+              <button
+                @click=${() => this._setLang(l)}
+                style="padding:4px 10px; border-radius:4px; border:none; cursor:pointer;
+                       background:${l === this.currentLang ? "rgba(255,255,255,0.08)" : "transparent"};
+                       color:${l === this.currentLang ? "var(--fg-0)" : "var(--fg-3)"};
+                       font-family:var(--font-mono); font-size:10.5px;
+                       --wails-draggable: no-drag;
+                       display:inline-flex; align-items:center; gap:6px;">
+                <span style="font-size:13px; line-height:1;">${this._flag(l)}</span>
+                ${l}
+              </button>
+            `)}
+          </div>
+        `)}
+        ${this._row("Theme", "Follows the OS by default. Force light or dark to override.",
+          this._segment("auto", ["auto", "dark", "light"]))}
+      `,
+    })}</div>`;
+  }
+
   _sectionModels() {
-    return this._section({
+    return html`<div id="setting-models">${this._section({
       title: "Models", open: true,
       desc: "Where lthn looks for models and which one loads at startup.",
       content: html`
@@ -164,19 +251,19 @@ class LthnSettingsWindow extends LitElement {
           </div>
         `)}
       `,
-    });
+    })}</div>`;
   }
 
   _sectionRunner() {
-    return this._section({
+    return html`<div id="setting-runner">${this._section({
       title: "Runner", open: false,
       desc: "How the inference process behaves. Don't change these unless you're sure.",
       content: nothing,
-    });
+    })}</div>`;
   }
 
   _sectionApi() {
-    return this._section({
+    return html`<div id="setting-api">${this._section({
       title: "API", open: true,
       desc: "HTTP server for OpenAI-compatible clients. Off by default; nothing leaves this Mac unless you turn it on.",
       content: html`
@@ -192,7 +279,67 @@ class LthnSettingsWindow extends LitElement {
           </div>
         `)}
       `,
-    });
+    })}</div>`;
+  }
+
+  _sectionTelemetry() {
+    return html`<div id="setting-telemetry">${this._section({
+      title: "Telemetry", open: false,
+      desc: "Process metrics shown in the tray + live-telemetry window. Local only; nothing leaves the device.",
+      content: html`
+        ${this._row("Sample interval", "How often the tray polls the runner. 2s is the calm-presence default.",
+          this._segment("2s", ["1s", "2s", "5s", "off"]))}
+        ${this._row("Heap samples", "Rolling window the sparkline draws from.",
+          this._segment("24", ["12", "24", "48", "96"]))}
+        ${this._row("Power metrics", "Requires the XPC helper (planned). Off today.", html`
+          <lthn-toggle></lthn-toggle>
+        `)}
+      `,
+    })}</div>`;
+  }
+
+  _sectionIntegrations() {
+    return html`<div id="setting-integrations">${this._section({
+      title: "Integrations", open: false,
+      desc: "Connected clients reading from the local lthn API. Full surface lives in the dedicated Integrations window.",
+      content: html`
+        ${this._row("Open Integrations window", "Manage Claude Code / OpenCode / Codex / Copilot / Raycast wiring.", html`
+          <lthn-btn tone="quiet" size="sm"
+            @click=${() => import("@desktop/desktop/windowservice").then(w => w.Open("integrations"))}>
+            <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px;"></i> Open
+          </lthn-btn>
+        `)}
+      `,
+    })}</div>`;
+  }
+
+  _sectionAbout() {
+    return html`<div id="setting-about">${this._section({
+      title: "About", open: true,
+      desc: "What's running.",
+      content: html`
+        ${this._row("Version", null, html`
+          <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">v0.2.0-rc1</span>
+        `)}
+        ${this._row("Licence", null, html`
+          <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">EUPL-1.2</span>
+        `)}
+        ${this._row("Source", null, html`
+          <a href="https://github.com/LetheanNetwork/desktop" target="_blank" rel="noopener"
+             style="font-family:var(--font-mono); font-size:11.5px; color:var(--brand-300);
+                    text-decoration:none; --wails-draggable: no-drag;">
+            github.com/LetheanNetwork/desktop
+          </a>
+        `)}
+        ${this._row("Project", null, html`
+          <a href="https://lthn.ai" target="_blank" rel="noopener"
+             style="font-family:var(--font-mono); font-size:11.5px; color:var(--brand-300);
+                    text-decoration:none; --wails-draggable: no-drag;">
+            lthn.ai
+          </a>
+        `)}
+      `,
+    })}</div>`;
   }
 }
 customElements.define("lthn-settings-window", LthnSettingsWindow);
