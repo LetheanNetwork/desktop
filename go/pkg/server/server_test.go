@@ -22,6 +22,14 @@ import (
 	"dappco.re/lthn/desktop/pkg/server"
 )
 
+const (
+	contentTypeHeader       = "Content-Type"
+	applicationJSON         = "application/json"
+	modelsEndpoint          = "/v1/models"
+	chatCompletionsEndpoint = "/v1/chat/completions"
+	completionsEndpoint     = "/v1/completions"
+)
+
 // stubRunner is a minimal Runner that records the last prompt + returns
 // configurable model lists. Lets tests assert on what reached Generate.
 type stubRunner struct {
@@ -55,7 +63,7 @@ func post(t *core.T, h http.Handler, path string, body any) *httptest.ResponseRe
 	core.AssertTrue(t, marshalled.OK)
 	b := marshalled.Value.([]byte)
 	req := httptest.NewRequest(http.MethodPost, path, core.NewBufferReader(b))
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	return w
@@ -103,7 +111,7 @@ func TestServer_Health_Good(t *core.T) {
 func TestServer_Models_Good_Stub(t *core.T) {
 	// No runner — handler falls back to ["lthn-stub"].
 	s := server.NewService(server.Options{})
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req := httptest.NewRequest(http.MethodGet, modelsEndpoint, nil)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 
@@ -114,7 +122,7 @@ func TestServer_Models_Good_Stub(t *core.T) {
 func TestServer_Models_Good_FromRunner(t *core.T) {
 	r := &stubRunner{models: []string{"gemma-4-e2b", "llama-3.2-3b"}}
 	s := server.NewService(server.Options{Runner: r})
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req := httptest.NewRequest(http.MethodGet, modelsEndpoint, nil)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 
@@ -126,7 +134,7 @@ func TestServer_Models_Good_FromRunner(t *core.T) {
 
 func TestServer_Models_Bad_RunnerError(t *core.T) {
 	s := server.NewService(server.Options{Runner: failingRunner{}})
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req := httptest.NewRequest(http.MethodGet, modelsEndpoint, nil)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 
@@ -136,7 +144,7 @@ func TestServer_Models_Bad_RunnerError(t *core.T) {
 
 func TestServer_Chat_Good_StubEcho(t *core.T) {
 	s := server.NewService(server.Options{})
-	w := post(t, s.Handler(), "/v1/chat/completions", map[string]any{
+	w := post(t, s.Handler(), chatCompletionsEndpoint, map[string]any{
 		"model": "lthn-stub",
 		"messages": []map[string]string{
 			{"role": "system", "content": "be brief"},
@@ -153,7 +161,7 @@ func TestServer_Chat_Good_StubEcho(t *core.T) {
 func TestServer_Chat_Good_PicksLastUserTurn(t *core.T) {
 	r := &stubRunner{reply: "ack"}
 	s := server.NewService(server.Options{Runner: r})
-	w := post(t, s.Handler(), "/v1/chat/completions", map[string]any{
+	w := post(t, s.Handler(), chatCompletionsEndpoint, map[string]any{
 		"messages": []map[string]string{
 			{"role": "user", "content": "first"},
 			{"role": "assistant", "content": "ignored"},
@@ -166,9 +174,9 @@ func TestServer_Chat_Good_PicksLastUserTurn(t *core.T) {
 
 func TestServer_Chat_Bad_MalformedJSON(t *core.T) {
 	s := server.NewService(server.Options{})
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+	req := httptest.NewRequest(http.MethodPost, chatCompletionsEndpoint,
 		core.NewReader(`{"messages": not-json}`))
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 
@@ -178,7 +186,7 @@ func TestServer_Chat_Bad_MalformedJSON(t *core.T) {
 
 func TestServer_Completion_Good_StubEcho(t *core.T) {
 	s := server.NewService(server.Options{})
-	w := post(t, s.Handler(), "/v1/completions", map[string]any{
+	w := post(t, s.Handler(), completionsEndpoint, map[string]any{
 		"prompt": "say hi",
 	})
 	core.AssertEqual(t, http.StatusOK, w.Code)
@@ -189,9 +197,9 @@ func TestServer_Completion_Good_StubEcho(t *core.T) {
 
 func TestServer_Completion_Bad_MalformedJSON(t *core.T) {
 	s := server.NewService(server.Options{})
-	req := httptest.NewRequest(http.MethodPost, "/v1/completions",
+	req := httptest.NewRequest(http.MethodPost, completionsEndpoint,
 		core.NewReader(`{"prompt": broken}`))
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 
@@ -200,7 +208,7 @@ func TestServer_Completion_Bad_MalformedJSON(t *core.T) {
 
 func TestServer_Completion_Bad_RunnerError(t *core.T) {
 	s := server.NewService(server.Options{Runner: failingRunner{}})
-	w := post(t, s.Handler(), "/v1/completions", map[string]any{
+	w := post(t, s.Handler(), completionsEndpoint, map[string]any{
 		"prompt": "die",
 	})
 	// generate() swallows the runner error into the reply text, so the
@@ -212,7 +220,7 @@ func TestServer_Completion_Bad_RunnerError(t *core.T) {
 func TestServer_MethodNotAllowed_Bad(t *core.T) {
 	s := server.NewService(server.Options{})
 	// GET against /v1/chat/completions falls through to the generated OpenAPI route.
-	MethodNotAllowed := "/v1/chat/completions"
+	MethodNotAllowed := chatCompletionsEndpoint
 	req := httptest.NewRequest(http.MethodGet, MethodNotAllowed, nil)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
