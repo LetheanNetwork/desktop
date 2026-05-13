@@ -30,7 +30,41 @@ import (
 	"dappco.re/go/ai/ai"
 	"dappco.re/go/ai/providers/openai"
 	"dappco.re/go/config"
+	"dappco.re/go/ratelimit"
+
+	"dappco.re/lthn/desktop/pkg/paths"
 )
+
+// outboundLimiter is constructed once per process and shared across
+// every provider backend so per-provider / per-model quotas survive
+// route reloads. SQLite-backed at ~/Lethean/data/ratelimits.db so
+// counter state persists across launches.
+//
+// Nil is a valid value — the openai.Backend treats a nil Limiter
+// as "no quota tracking" and the rest of the binary keeps working
+// (useful in tests + CI where the path isn't writable).
+var outboundLimiter openai.Limiter
+
+// resolveOutboundLimiter lazily constructs the per-process limiter.
+// Called by buildRoute the first time a real route is being wired —
+// avoids spinning up the SQLite file in test paths that never touch
+// providers.
+func resolveOutboundLimiter() openai.Limiter {
+	if outboundLimiter != nil {
+		return outboundLimiter
+	}
+	dirR := paths.DataDir()
+	if !dirR.OK {
+		return nil
+	}
+	dir, _ := dirR.Value.(string)
+	rl, err := ratelimit.NewWithSQLite(core.PathJoin(dir, "ratelimits.db"))
+	if err != nil {
+		return nil
+	}
+	outboundLimiter = rl
+	return outboundLimiter
+}
 
 // RouteConfig is one entry in the `routes:` map.
 type RouteConfig struct {
@@ -89,6 +123,7 @@ func buildRoute(name string, rc RouteConfig) *ai.ProviderRoute {
 			BaseURL:      rc.BaseURL,
 			APIKey:       rc.APIKey,
 			DefaultModel: rc.Model,
+			Limiter:      resolveOutboundLimiter(),
 		})
 		model, err := backend.LoadModel(rc.Model)
 		if err != nil {
