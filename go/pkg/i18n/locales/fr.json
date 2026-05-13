@@ -152,7 +152,24 @@
       "label_sources":    "Sources",
       "sources_empty":    "Aucune ce tour. Les citations apparaissent ici quand le modèle ancre une réponse."
     },
-    "fleet":        { "title": "Flotte",              "subtitle": "multi-machines · aperçu v1.0" },
+    "fleet":        {
+      "title": "Flotte", "subtitle": "multi-machines · aperçu v1.0",
+      "tab_machines":     "Machines",
+      "tab_routing":      "Règles de routage",
+      "tab_snapshots":    "Instantanés",
+      "pill_preview":     "Aperçu · v1.0",
+      "label_machines":   "Machines · faites glisser pour définir la priorité de route",
+      "label_queue":      "File d'attente en direct",
+      "pill_you":         "Vous",
+      "row_load":         "charge",
+      "col_state":        "État",
+      "col_caller":       "Appelant",
+      "col_model":        "Modèle",
+      "col_routed":       "Routé vers",
+      "col_started":      "Démarré",
+      "col_elapsed":      "Écoulé",
+      "footer":           "4 sur 5 en ligne · routage sensible à la latence · ⌘R re-router · ⌘S instantané"
+    },
     "distillation": { "title": "Affinage",            "subtitle": "LoRA · SFT · distillation · fusion" },
     "network":      {
       "title": "Réseau", "subtitle": "LetherNet · aperçu v0.7",

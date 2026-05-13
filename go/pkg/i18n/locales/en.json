@@ -152,7 +152,24 @@
       "label_sources":    "Sources",
       "sources_empty":    "None this turn. Citations appear here when the model grounds an answer."
     },
-    "fleet":        { "title": "Fleet",         "subtitle": "multi-machine · v1.0 preview" },
+    "fleet":        {
+      "title": "Fleet", "subtitle": "multi-machine · v1.0 preview",
+      "tab_machines":     "Machines",
+      "tab_routing":      "Routing rules",
+      "tab_snapshots":    "Snapshots",
+      "pill_preview":     "Preview · v1.0",
+      "label_machines":   "Machines · drag-reorder to set route priority",
+      "label_queue":      "Live queue",
+      "pill_you":         "You",
+      "row_load":         "load",
+      "col_state":        "State",
+      "col_caller":       "Caller",
+      "col_model":        "Model",
+      "col_routed":       "Routed to",
+      "col_started":      "Started",
+      "col_elapsed":      "Elapsed",
+      "footer":           "4 of 5 online · routing latency-aware · ⌘R reroute · ⌘S snapshot"
+    },
     "distillation": { "title": "Fine-tune",     "subtitle": "LoRA · SFT · distill · merge" },
     "network":      {
       "title": "Network", "subtitle": "LetherNet · v0.7 preview",

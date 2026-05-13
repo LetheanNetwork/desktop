@@ -12,22 +12,63 @@ class LthnFleetWindow extends LitElement {
     h: { type: Number },
     embedded: { type: Boolean, reflect: true },
     chrome: { state: true },
+    t: { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare chrome: { title: string; subtitle: string };
+  declare t: {
+    tabMachines: string; tabRouting: string; tabSnapshots: string;
+    pillPreview: string;
+    labelMachines: string; labelQueue: string;
+    pillYou: string; rowLoad: string;
+    colState: string; colCaller: string; colModel: string;
+    colRouted: string; colStarted: string; colElapsed: string;
+    footer: string;
+  };
   constructor() {
     super();
     this.w = 1080; this.h = 700; this.embedded = false;
     this.chrome = { title: "Fleet", subtitle: "multi-machine · v1.0 preview" };
+    this.t = {
+      tabMachines: "Machines", tabRouting: "Routing rules", tabSnapshots: "Snapshots",
+      pillPreview: "Preview · v1.0",
+      labelMachines: "Machines · drag-reorder to set route priority",
+      labelQueue: "Live queue",
+      pillYou: "You", rowLoad: "load",
+      colState: "State", colCaller: "Caller", colModel: "Model",
+      colRouted: "Routed to", colStarted: "Started", colElapsed: "Elapsed",
+      footer: "4 of 5 online · routing latency-aware · ⌘R reroute · ⌘S snapshot",
+    };
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    this.chrome = {
-      title: await T("window.fleet.title"),
-      subtitle: await T("window.fleet.subtitle"),
+    const [
+      title, subtitle,
+      tM, tR, tS, pP, lM, lQ, pY, rL,
+      cSt, cC, cMo, cRo, cStrt, cEl, fo,
+    ] = await Promise.all([
+      T("window.fleet.title"), T("window.fleet.subtitle"),
+      T("window.fleet.tab_machines"), T("window.fleet.tab_routing"),
+      T("window.fleet.tab_snapshots"), T("window.fleet.pill_preview"),
+      T("window.fleet.label_machines"), T("window.fleet.label_queue"),
+      T("window.fleet.pill_you"), T("window.fleet.row_load"),
+      T("window.fleet.col_state"), T("window.fleet.col_caller"),
+      T("window.fleet.col_model"), T("window.fleet.col_routed"),
+      T("window.fleet.col_started"), T("window.fleet.col_elapsed"),
+      T("window.fleet.footer"),
+    ]);
+    this.chrome = { title, subtitle };
+    this.t = {
+      tabMachines: tM, tabRouting: tR, tabSnapshots: tS,
+      pillPreview: pP,
+      labelMachines: lM, labelQueue: lQ,
+      pillYou: pY, rowLoad: rL,
+      colState: cSt, colCaller: cC, colModel: cMo,
+      colRouted: cRo, colStarted: cStrt, colElapsed: cEl,
+      footer: fo,
     };
   }
 
@@ -46,17 +87,17 @@ class LthnFleetWindow extends LitElement {
     ];
 
     const toolbar = html`
-      <lthn-btn tone="primary" size="sm" active>Machines</lthn-btn>
-      <lthn-btn tone="ghost" size="sm">Routing rules</lthn-btn>
-      <lthn-btn tone="ghost" size="sm">Snapshots</lthn-btn>
+      <lthn-btn tone="primary" size="sm" active>${this.t.tabMachines}</lthn-btn>
+      <lthn-btn tone="ghost" size="sm">${this.t.tabRouting}</lthn-btn>
+      <lthn-btn tone="ghost" size="sm">${this.t.tabSnapshots}</lthn-btn>
       <div style="flex:1"></div>
-      <lthn-state-pill variant="preview">Preview · v1.0</lthn-state-pill>
+      <lthn-state-pill variant="preview">${this.t.pillPreview}</lthn-state-pill>
     `;
 
     const body = html`
       <div style="flex:1; display:flex; flex-direction:column; min-height:0; overflow:auto;">
         <div style="padding:16px 22px 8px;">
-          <lthn-label>Machines · drag-reorder to set route priority</lthn-label>
+          <lthn-label>${this.t.labelMachines}</lthn-label>
         </div>
         <div style="padding:0 22px; display:flex; flex-direction:column; gap:8px;">
           ${machines.map(m => html`
@@ -66,7 +107,7 @@ class LthnFleetWindow extends LitElement {
                 <div style="display:flex; align-items:center; gap:8px;">
                   <lthn-status-dot variant=${m.offline ? "idle" : "ok"}></lthn-status-dot>
                   <span style="font-size:13px; color:var(--fg-0); font-weight:500;">${m.name}</span>
-                  ${m.you ? html`<lthn-state-pill variant="latest">You</lthn-state-pill>` : nothing}
+                  ${m.you ? html`<lthn-state-pill variant="latest">${this.t.pillYou}</lthn-state-pill>` : nothing}
                 </div>
                 <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); margin-top:3px;">${m.arch}</div>
               </div>
@@ -74,7 +115,7 @@ class LthnFleetWindow extends LitElement {
               <div style="font-family:var(--font-mono); font-size:11px; color:var(--fg-1);">${m.model}</div>
               <div>
                 <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--fg-3); margin-bottom:3px;">
-                  <span>load</span>
+                  <span>${this.t.rowLoad}</span>
                   <span style="font-family:var(--font-mono); color:var(--fg-1);">${m.load}%</span>
                 </div>
                 <div style="height:4px; background:rgba(255,255,255,0.06); border-radius:2px; overflow:hidden;">
@@ -88,11 +129,11 @@ class LthnFleetWindow extends LitElement {
         </div>
 
         <div style="padding:20px 22px 8px;">
-          <lthn-label>Live queue</lthn-label>
+          <lthn-label>${this.t.labelQueue}</lthn-label>
         </div>
         <div style="margin:0 22px 22px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.06); border-radius:8px; font-family:var(--font-mono); font-size:11.5px;">
           <div style="display:grid; grid-template-columns:100px 1fr 1fr 1fr 0.8fr 0.8fr; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.05); color:var(--fg-3); font-size:10px; letter-spacing:0.04em; text-transform:uppercase;">
-            <span>State</span><span>Caller</span><span>Model</span><span>Routed to</span><span>Started</span><span>Elapsed</span>
+            <span>${this.t.colState}</span><span>${this.t.colCaller}</span><span>${this.t.colModel}</span><span>${this.t.colRouted}</span><span>${this.t.colStarted}</span><span>${this.t.colElapsed}</span>
           </div>
           ${queue.map(q => html`
             <div style="display:grid; grid-template-columns:100px 1fr 1fr 1fr 0.8fr 0.8fr; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.04); align-items:center;">
@@ -111,7 +152,7 @@ class LthnFleetWindow extends LitElement {
     return renderChrome({
       title: this.chrome.title, subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, toolbar, body,
-      footer: html`4 of 5 online · routing latency-aware · ⌘R reroute · ⌘S snapshot`,
+      footer: html`${this.t.footer}`,
       embedded: this.embedded,
     });
   }
