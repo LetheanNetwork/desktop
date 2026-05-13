@@ -14,6 +14,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 
 	core "dappco.re/go"
 	mcpsvc "dappco.re/go/mcp/pkg/mcp"
@@ -21,13 +22,20 @@ import (
 )
 
 // ToolView is the lean shape the WebView consumes. Mirrors the
-// fields the tools-window actually renders today; richer fields
-// (schemas, REST handler URL) can layer on later via a Detail
-// method when the UI needs them.
+// fields the tools-window renders. InputSchema is pre-marshalled
+// to a JSON string here — the upstream ToolRecord carries it as a
+// map[string]any that Wails' binding generator can't type-check
+// cleanly, so the boundary converts to a string the WebView's
+// schema viewer can render verbatim.
 type ToolView struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Group       string `json:"group"`
+	// InputSchema is the JSON-marshalled tool input schema. Empty
+	// string when the upstream tool has no declared schema. Pretty-
+	// printed (2-space indent) so the WebView can drop it straight
+	// into a <pre> block.
+	InputSchema string `json:"input_schema"`
 }
 
 // WailsService is the bindable service. Bound by
@@ -62,9 +70,26 @@ func (s *WailsService) List() []ToolView {
 			Name:        t.Name,
 			Description: t.Description,
 			Group:       t.Group,
+			InputSchema: marshalSchema(t.InputSchema),
 		})
 	}
 	return out
+}
+
+// marshalSchema converts the upstream map[string]any input schema
+// into a pretty-printed JSON string the WebView can render in a
+// <pre> block. Returns the empty string when the schema is nil or
+// the marshal fails — both cases let the WebView fall back to a
+// "no schema declared" placeholder.
+func marshalSchema(schema map[string]any) string {
+	if len(schema) == 0 {
+		return ""
+	}
+	b, err := json.MarshalIndent(schema, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // Register constructs and returns the tools service for Core

@@ -10,6 +10,7 @@ interface ToolView {
   name: string;
   description: string;
   group: string;
+  input_schema: string;
 }
 
 class LthnToolsWindow extends LitElement {
@@ -78,9 +79,14 @@ class LthnToolsWindow extends LitElement {
       server: t.group || "ungrouped",
       name: t.name,
       desc: t.description,
+      schema: t.input_schema,
       sel: t.name === this.selectedTool,
     }));
     const sel = tools.find(t => t.sel) || tools[0];
+    // Selected-tool schema — live JSON from the MCP registry. Empty
+    // string when the upstream tool didn't declare one, in which case
+    // the panel renders a "no schema" placeholder instead.
+    const selSchema = sel ? sel.schema : "";
 
     const toolbar = html`
       <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-plus" style="font-size:10px;"></i> Add server</lthn-btn>
@@ -145,16 +151,15 @@ class LthnToolsWindow extends LitElement {
           `}
           <div>
             <lthn-label>Schema</lthn-label>
-            <div style="margin-top:8px; background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:12px 14px; font-family:var(--font-mono); font-size:11.5px; line-height:1.6; color:var(--fg-1); white-space:pre;">${`{
-  "name": "write_file",
-  "description": "Write content to a file...",
-  "parameters": {
-    "path":     { "type": "string",  "required": true },
-    "content":  { "type": "string",  "required": true },
-    "encoding": { "type": "string",  "default":  "utf-8" },
-    "create":   { "type": "boolean", "default":  true }
-  }
-}`}</div>
+            ${selSchema ? html`
+              <div style="margin-top:8px; background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:12px 14px; font-family:var(--font-mono); font-size:11.5px; line-height:1.6; color:var(--fg-1); white-space:pre; overflow:auto; max-height:280px;">${selSchema}</div>
+            ` : html`
+              <div style="margin-top:8px; padding:12px 14px; border-radius:8px;
+                          background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05);
+                          font-size:12px; color:var(--fg-3); font-style:italic;">
+                No input schema declared. The tool accepts an empty object.
+              </div>
+            `}
           </div>
           <div>
             <lthn-label>Recent calls</lthn-label>
