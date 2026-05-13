@@ -18,15 +18,6 @@ interface ClientStatus {
   state:       string;
 }
 
-/** Shape returned by models.List() — kept aligned with
- *  go/pkg/models.Entry. */
-interface ModelEntry {
-  name:   string;
-  path:   string;
-  size:   number;
-  is_dir: boolean;
-}
-
 /* Step 3 "Finish" handler — marks onboarding complete, opens the
  * settings window so the user can change their mind, and closes
  * the wizard. Dynamic import so a Lit unit test or canvas preview
@@ -67,8 +58,6 @@ class LthnWelcomeWindow extends LitElement {
     modelsDir: { state: true },
     fresh:     { state: true },
     clients:   { state: true },
-    localModels: { state: true },
-    pickedModel: { state: true },
   };
   declare step: number;
   declare w: number;
@@ -78,8 +67,6 @@ class LthnWelcomeWindow extends LitElement {
   declare modelsDir: string;
   declare fresh: boolean;
   declare clients: ClientStatus[];
-  declare localModels: ModelEntry[];
-  declare pickedModel: string;
   constructor() {
     super();
     this.step = 1; this.w = 760; this.h = 580; this.embedded = false;
@@ -87,8 +74,6 @@ class LthnWelcomeWindow extends LitElement {
     this.modelsDir = "~/Lethean/conf/models/";
     this.fresh = true;
     this.clients = [];
-    this.localModels = [];
-    this.pickedModel = "";
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -124,21 +109,6 @@ class LthnWelcomeWindow extends LitElement {
     } catch (err) {
       console.error("welcome: integrations lookup failed", err);
       this.clients = [];
-    }
-    // Step 2 "First model" — list whatever is actually on disk; the
-    // download / Hugging Face path is offline today (see model-browser
-    // window). Pre-select the first entry so "Next" lands on a real
-    // model name when the user keeps the default.
-    try {
-      const svc = await import("@desktop/models/wailsservice");
-      const list = await svc.List();
-      this.localModels = (list || []) as ModelEntry[];
-      if (this.localModels.length > 0) {
-        this.pickedModel = this.localModels[0].name;
-      }
-    } catch (err) {
-      console.error("welcome: models lookup failed", err);
-      this.localModels = [];
     }
   }
 
@@ -263,53 +233,47 @@ class LthnWelcomeWindow extends LitElement {
   }
 
   _step2() {
-    const models = this.localModels;
-    const empty = models.length === 0;
+    const models = [
+      { name:"Gemma 4 E2B (-assistant)", author:"Google",    size:"2.1 GB", ram:"4 GB", desc:"Best balance for first run · Lethean-recommended", rec:true },
+      { name:"Llama 3.2 3B Instruct",    author:"Meta",      size:"3.4 GB", ram:"6 GB", desc:"Solid general-purpose · longer context window" },
+      { name:"Phi 3.5 Mini Instruct",    author:"Microsoft", size:"2.6 GB", ram:"5 GB", desc:"Punches above its weight on reasoning" },
+    ];
     return html`
       <div style="display:flex; flex-direction:column; gap:16px; min-height:0;">
         <div>
           <div style="font-size:24px; font-weight:600; color:var(--fg-0); letter-spacing:-0.018em;">
-            ${empty ? "No models yet." : "Pick a model to start with."}
+            Pick a model to start with.
           </div>
           <div style="font-size:13px; color:var(--fg-2); margin-top:8px; line-height:1.55; max-width:460px;">
-            ${empty
-              ? html`Drop a <code style="color:var(--fg-1);">.gguf</code> or model folder into
-                     <code style="color:var(--fg-1);">${this.modelsDir}</code>
-                     and lthn picks it up on the next launch. Live discovery + in-app
-                     download lands when the catalogue service ships.`
-              : html`These are the models already in
-                     <code style="color:var(--fg-1);">${this.modelsDir}</code>.
-                     The first one loads when you finish onboarding.`}
+            Three small models that run comfortably on Apple Silicon.
+            You can add more from the model browser anytime.
           </div>
         </div>
-        ${empty ? nothing : html`
         <div style="display:flex; flex-direction:column; gap:8px;">
-          ${models.map(m => {
-            const picked = m.name === this.pickedModel;
-            return html`
-            <div
-              @click=${() => { this.pickedModel = m.name; }}
-              style="display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:10px;
-                     cursor:pointer; --wails-draggable: no-drag;
-                     background:${picked ? "rgba(64,193,197,0.06)" : "rgba(255,255,255,0.03)"};
-                     border:1px solid ${picked ? "rgba(64,193,197,0.22)" : "rgba(255,255,255,0.06)"};">
+          ${models.map(m => html`
+            <div style="display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:10px;
+                        background:${m.rec ? "rgba(64,193,197,0.06)" : "rgba(255,255,255,0.03)"};
+                        border:1px solid ${m.rec ? "rgba(64,193,197,0.22)" : "rgba(255,255,255,0.06)"};">
               <div style="width:18px; height:18px; border-radius:50%;
-                          border:1.5px solid ${picked ? "var(--brand-400)" : "rgba(255,255,255,0.18)"};
+                          border:1.5px solid ${m.rec ? "var(--brand-400)" : "rgba(255,255,255,0.18)"};
                           display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                ${picked ? html`<div style="width:8px; height:8px; border-radius:50%; background:var(--brand-400);"></div>` : nothing}
+                ${m.rec ? html`<div style="width:8px; height:8px; border-radius:50%; background:var(--brand-400);"></div>` : nothing}
               </div>
-              <div style="flex:1; min-width:0;">
+              <div style="flex:1;">
                 <div style="display:flex; align-items:baseline; gap:8px;">
-                  <span style="font-size:13.5px; font-weight:500; color:var(--fg-0); letter-spacing:-0.005em; word-break:break-all;">${m.name}</span>
-                  <span style="font-size:11px; color:var(--fg-3);">· ${m.is_dir ? "folder" : "file"}</span>
-                  ${picked ? html`<lthn-state-pill variant="latest">First load</lthn-state-pill>` : nothing}
+                  <span style="font-size:13.5px; font-weight:500; color:var(--fg-0); letter-spacing:-0.005em;">${m.name}</span>
+                  <span style="font-size:11px; color:var(--fg-3);">· ${m.author}</span>
+                  ${m.rec ? html`<lthn-state-pill variant="latest">Recommended</lthn-state-pill>` : nothing}
                 </div>
-                <div style="font-size:11.5px; color:var(--fg-2); margin-top:3px;">${fmtSize(m.size)} on disk</div>
+                <div style="font-size:11.5px; color:var(--fg-2); margin-top:3px;">${m.desc}</div>
               </div>
-            </div>`;
-          })}
+              <div style="text-align:right; font-family:var(--font-mono); font-size:11px; color:var(--fg-3); letter-spacing:0.02em;">
+                <div>${m.size}</div>
+                <div style="margin-top:2px;">${m.ram} RAM</div>
+              </div>
+            </div>
+          `)}
         </div>
-        `}
       </div>
     `;
   }
@@ -379,19 +343,4 @@ function displayHome(absPath: string): string {
     return "~/" + absPath.slice(m[0].length);
   }
   return absPath;
-}
-
-/** Format a byte count for the wizard's first-load picker. Mirrors
- *  the model-browser's fmtBytes — duplicated rather than imported so
- *  step 2 doesn't reach across to model-browser internals. */
-function fmtSize(bytes: number): string {
-  if (!bytes || bytes < 0) return "—";
-  const units = ["B", "kB", "MB", "GB", "TB"];
-  let v = bytes;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v < 10 && i > 0 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
 }
