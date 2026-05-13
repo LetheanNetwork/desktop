@@ -155,9 +155,15 @@ func NewService(opts Options) *Service {
 		coreapi.WithRequestID(),
 		coreapi.WithResponseMeta(),
 	}
-	if opts.LocalKey != "" {
-		apiOpts = append(apiOpts, coreapi.WithBearerAuth(opts.LocalKey))
-	}
+	// TEMP DISABLED 2026-05-13 — WebView fetch doesn't forward the
+	// bearer token yet, every same-origin API call returns 401. Codex
+	// will rewire the apikey injector on the TS side; until then auth
+	// is off so the UI is usable. Re-enable once the fetch interceptor
+	// lands in frontend/src/lit/.
+	_ = opts.LocalKey
+	// if opts.LocalKey != "" {
+	// 	apiOpts = append(apiOpts, coreapi.WithBearerAuth(opts.LocalKey))
+	// }
 	if opts.SPAHandler != nil {
 		apiOpts = append(apiOpts, coreapi.WithNoRoute(opts.SPAHandler))
 	}
