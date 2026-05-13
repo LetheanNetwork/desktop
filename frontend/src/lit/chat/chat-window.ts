@@ -131,6 +131,7 @@ class LthnChatWindow extends LitElement {
     emptyTitle: string; emptyBody: string;
     composerDisabled: string; composerReady: string;
     composerAttach: string; composerSlash: string;
+    btnSend: string; btnStop: string;
   };
   constructor() {
     super();
@@ -161,6 +162,8 @@ class LthnChatWindow extends LitElement {
       composerReady:    "Ask anything — runs locally on this Mac. ⌘↵ to send.",
       composerAttach:   "Attach",
       composerSlash:    "Slash commands",
+      btnSend:          "Send",
+      btnStop:          "Stop",
     };
   }
   createRenderRoot() { return this; }
@@ -168,7 +171,7 @@ class LthnChatWindow extends LitElement {
     super.connectedCallback();
     const [
       title, subtitle, rs, bt, by, bw, re, rn,
-      et, eb, cd, cr, ca, cs,
+      et, eb, cd, cr, ca, cs, bSend, bStop,
     ] = await Promise.all([
       T("window.chat.title"),
       T("window.chat.subtitle"),
@@ -184,6 +187,8 @@ class LthnChatWindow extends LitElement {
       T("window.chat.composer_ready"),
       T("window.chat.composer_attach"),
       T("window.chat.composer_slash"),
+      T("window.chat.btn_send"),
+      T("window.chat.btn_stop"),
     ]);
     this.chrome = { title, subtitle };
     this.t = {
@@ -191,6 +196,7 @@ class LthnChatWindow extends LitElement {
       emptyTitle: et, emptyBody: eb,
       composerDisabled: cd, composerReady: cr,
       composerAttach: ca, composerSlash: cs,
+      btnSend: bSend, btnStop: bStop,
     };
     await Promise.all([this._reloadRail(), this._reloadModel(), this._reloadBuild()]);
   }
@@ -643,12 +649,12 @@ class LthnChatWindow extends LitElement {
                           color:var(--fg-3); letter-spacing:0.02em;">${hint}</span>` : nothing}
             ${sending ? html`
               <lthn-btn tone="danger" size="sm">
-                <i class="fa-solid fa-stop" style="font-size:10px;"></i> Stop
+                <i class="fa-solid fa-stop" style="font-size:10px;"></i> ${this.t.btnStop}
               </lthn-btn>
             ` : html`
               <lthn-btn tone="primary" size="sm" ?dim=${disabled}
                 @click=${() => void this._send()}>
-                <i class="fa-solid fa-arrow-up" style="font-size:11px;"></i> Send
+                <i class="fa-solid fa-arrow-up" style="font-size:11px;"></i> ${this.t.btnSend}
               </lthn-btn>
             `}
           </div>

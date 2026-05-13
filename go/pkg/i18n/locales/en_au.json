@@ -136,7 +136,9 @@
       "composer_disabled":"Load a model from the tray to start composing.",
       "composer_ready":   "Ask anything — runs locally on this Mac. ⌘↵ to send.",
       "composer_attach":  "Attach",
-      "composer_slash":   "Slash commands"
+      "composer_slash":   "Slash commands",
+      "btn_send":         "Send",
+      "btn_stop":         "Stop"
     },
     "fleet":        { "title": "Fleet",         "subtitle": "multi-machine · v1.0 preview" },
     "distillation": { "title": "Fine-tune",     "subtitle": "LoRA · SFT · distill · merge" },
@@ -207,6 +209,8 @@
       "row_modeldir_hint":      "Canonical Lethean layout — visible in Finder, safe to inspect.",
       "btn_browse":             "Browse…",
       "row_defaultmodel_label": "Default model",
+      "row_defaultmodel_hint":  "Configured runner route — picked first when the runner starts.",
+      "row_defaultmodel_empty": "No routes configured. Add one via lthn config routes.NAME.kind=…",
       "row_quantisation_label": "Quantisation preference",
       "row_quantisation_hint":  "Pick the smallest quant your hardware comfortably runs. Applied when the runner loads a fresh model.",
       "row_sampling_label":     "Default sampling",

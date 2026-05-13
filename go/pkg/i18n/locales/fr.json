@@ -136,7 +136,9 @@
       "composer_disabled":"Chargez un modèle depuis la zone système pour commencer à composer.",
       "composer_ready":   "Demandez n'importe quoi — exécuté localement sur ce Mac. ⌘↵ pour envoyer.",
       "composer_attach":  "Joindre",
-      "composer_slash":   "Commandes slash"
+      "composer_slash":   "Commandes slash",
+      "btn_send":         "Envoyer",
+      "btn_stop":         "Arrêter"
     },
     "fleet":        { "title": "Flotte",              "subtitle": "multi-machines · aperçu v1.0" },
     "distillation": { "title": "Affinage",            "subtitle": "LoRA · SFT · distillation · fusion" },
@@ -207,6 +209,8 @@
       "row_modeldir_hint":      "Disposition Lethean canonique — visible dans le Finder, sûr à inspecter.",
       "btn_browse":             "Parcourir…",
       "row_defaultmodel_label": "Modèle par défaut",
+      "row_defaultmodel_hint":  "Route de runner configurée — choisie en premier quand le runner démarre.",
+      "row_defaultmodel_empty": "Aucune route configurée. Ajoutez-en une via lthn config routes.NAME.kind=…",
       "row_quantisation_label": "Préférence de quantification",
       "row_quantisation_hint":  "Choisissez la plus petite quantification que votre matériel exécute confortablement. Appliquée quand le runner charge un nouveau modèle.",
       "row_sampling_label":     "Échantillonnage par défaut",

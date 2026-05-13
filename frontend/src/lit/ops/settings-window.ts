@@ -68,7 +68,7 @@ class LthnSettingsWindow extends LitElement {
     startWindowL: string; startWindowH: string;
     languageL: string; languageH: string;
     modelDirL: string; modelDirH: string; btnBrowse: string;
-    defaultModelL: string;
+    defaultModelL: string; defaultModelHint: string; defaultModelEmpty: string;
     quantL: string; quantH: string;
     samplingL: string; samplingH: string;
     httpServerL: string; endpointL: string;
@@ -127,6 +127,8 @@ class LthnSettingsWindow extends LitElement {
       modelDirH: "Canonical Lethean layout — visible in Finder, safe to inspect.",
       btnBrowse: "Browse…",
       defaultModelL: "Default model",
+      defaultModelHint:  "Configured runner route — picked first when the runner starts.",
+      defaultModelEmpty: "No routes configured. Add one via lthn config routes.NAME.kind=…",
       quantL: "Quantisation preference",
       quantH: "Pick the smallest quant your hardware comfortably runs. Applied when the runner loads a fresh model.",
       samplingL: "Default sampling",
@@ -196,7 +198,7 @@ class LthnSettingsWindow extends LitElement {
       title, subtitleTpl, locales, currentLang, paths, routes, routeViews, build, addr, listening,
       pGT, pGD, pMT, pMD, pRT, pRD, pAT, pAD, pTT, pTD, pIT, pID, pAbT, pAbD,
       rSwL, rSwH, rLgL, rLgH, rMdL, rMdH, rBrw,
-      rDmL, rQuL, rQuH, rSmL, rSmH,
+      rDmL, rDmH, rDmE, rQuL, rQuH, rSmL, rSmH,
       rHsL, rEpL, rAkL, rAkH,
       rItL, rItH, rHpL, rHpH, rPwL, rPwH,
       rOiL, rOiH, rOpn,
@@ -235,6 +237,8 @@ class LthnSettingsWindow extends LitElement {
       i18n.T("window.settings.row_modeldir_hint"),
       i18n.T("window.settings.btn_browse"),
       i18n.T("window.settings.row_defaultmodel_label"),
+      i18n.T("window.settings.row_defaultmodel_hint"),
+      i18n.T("window.settings.row_defaultmodel_empty"),
       i18n.T("window.settings.row_quantisation_label"),
       i18n.T("window.settings.row_quantisation_hint"),
       i18n.T("window.settings.row_sampling_label"),
@@ -273,7 +277,7 @@ class LthnSettingsWindow extends LitElement {
       startWindowL: rSwL, startWindowH: rSwH,
       languageL: rLgL, languageH: rLgH,
       modelDirL: rMdL, modelDirH: rMdH, btnBrowse: rBrw,
-      defaultModelL: rDmL,
+      defaultModelL: rDmL, defaultModelHint: rDmH, defaultModelEmpty: rDmE,
       quantL: rQuL, quantH: rQuH,
       samplingL: rSmL, samplingH: rSmH,
       httpServerL: rHsL, endpointL: rEpL,
@@ -504,9 +508,7 @@ class LthnSettingsWindow extends LitElement {
           </div>
         `)}
         ${this._row(this.row.defaultModelL,
-          this.routeNames.length > 0
-            ? `Configured runner route — picked first when the runner starts.`
-            : "No routes configured. Add one via lthn config routes.NAME.kind=…",
+          this.routeNames.length > 0 ? this.row.defaultModelHint : this.row.defaultModelEmpty,
           this._select(defaultModel))}
         ${this._row(this.row.quantL, this.row.quantH,
           this._segment("q4_k_m", ["q4_0", "q4_k_m", "q5_k_m", "q8_0"]))}
