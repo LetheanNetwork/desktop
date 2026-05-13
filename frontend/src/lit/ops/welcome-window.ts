@@ -43,24 +43,47 @@ class LthnWelcomeWindow extends LitElement {
     h:    { type: Number },
     embedded: { type: Boolean, reflect: true },
     chrome: { state: true },
+    modelsDir: { state: true },
+    fresh:     { state: true },
   };
   declare step: number;
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare chrome: { title: string; subtitleFmt: string };
+  declare modelsDir: string;
+  declare fresh: boolean;
   constructor() {
     super();
     this.step = 1; this.w = 760; this.h = 580; this.embedded = false;
     this.chrome = { title: "Welcome to lthn", subtitleFmt: "step %s of 3" };
+    this.modelsDir = "~/Lethean/conf/models/";
+    this.fresh = true;
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    this.chrome = {
-      title: await T("window.welcome.title"),
-      subtitleFmt: await T("window.welcome.subtitle"),
-    };
+    const [title, subtitleFmt] = await Promise.all([
+      T("window.welcome.title"),
+      T("window.welcome.subtitle"),
+    ]);
+    this.chrome = { title, subtitleFmt };
+    // Pull the canonical Lethean paths + the fresh-install flag
+    // from the firstlaunch service. The wizard's "Where shall we
+    // keep your models?" step shows the real directory the runner
+    // will scan; the fresh flag lets a future cmd/lthn handler skip
+    // welcome on subsequent launches.
+    try {
+      const fl = await import("@desktop/firstlaunch/wailsservice");
+      const [paths, state] = await Promise.all([fl.Paths(), fl.Detect()]);
+      if (paths?.models_dir) {
+        this.modelsDir = displayHome(paths.models_dir);
+      }
+      this.fresh = !!state?.fresh;
+    } catch (err) {
+      // Non-fatal — keep the default ~/Lethean placeholder.
+      console.error("welcome: firstlaunch lookup failed", err);
+    }
   }
 
   render() {
@@ -171,10 +194,10 @@ class LthnWelcomeWindow extends LitElement {
           </div>
           <div style="flex:1;">
             <div style="font-family:var(--font-mono); font-size:13px; color:var(--fg-0); letter-spacing:-0.005em;">
-              ~/.lthn/models/
+              ${this.modelsDir}
             </div>
             <div style="font-size:11px; color:var(--fg-3); margin-top:2px;">
-              312 GB free on this volume · default location
+              Canonical Lethean layout · visible in Finder · safe to inspect
             </div>
           </div>
           <lthn-btn tone="ghost" size="md">Choose folder…</lthn-btn>
@@ -266,3 +289,16 @@ class LthnWelcomeWindow extends LitElement {
   }
 }
 customElements.define("lthn-welcome-window", LthnWelcomeWindow);
+
+/** Collapse the leading $HOME into "~/" so the wizard shows the
+ *  same short form a terminal user is used to. Falls back to the
+ *  raw absolute path when $HOME isn't known (web preview, etc.). */
+function displayHome(absPath: string): string {
+  if (!absPath) return absPath;
+  // No browser API for $HOME — match common macOS / Linux user dirs.
+  const m = absPath.match(/^\/(Users|home)\/[^/]+\//);
+  if (m) {
+    return "~/" + absPath.slice(m[0].length);
+  }
+  return absPath;
+}
