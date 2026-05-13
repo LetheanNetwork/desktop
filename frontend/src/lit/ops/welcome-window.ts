@@ -11,10 +11,13 @@ import { renderChrome } from "../chrome";
  * doesn't pull the Wails runtime at module load. */
 async function completeOnboarding(): Promise<void> {
   try {
-    const { ConfigService, WindowService } = await import("@service");
-    await ConfigService.Set("welcome.completed", "true");
-    await WindowService.Open("settings");
-    await WindowService.Hide("welcome");
+    const [config, windowSvc] = await Promise.all([
+      import("@lthn/config/service"),
+      import("@desktop/desktop/windowservice"),
+    ]);
+    await config.Set("welcome.completed", "true");
+    await windowSvc.Open("settings");
+    await windowSvc.Hide("welcome");
   } catch (err) {
     console.error("welcome: completeOnboarding failed", err);
   }

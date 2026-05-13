@@ -31,9 +31,14 @@ switch (surface) {
      *   - connection dot  ← Sample() throwing → err; success → ok
      */
     Promise.all([
-      import("@service"),
+      import("@desktop/telemetry/service"),
+      import("@desktop/runner/service"),
+      import("@desktop/desktop/windowservice"),
       import("@lthn/i18n/coreservice"),
-    ]).then(async ([{ TelemetryService, RunnerService, WindowService }, i18n]) => {
+    ]).then(async ([telemetry, runner, windowSvc, i18n]) => {
+      const TelemetryService = telemetry;
+      const RunnerService = runner;
+      const WindowService = windowSvc;
       /* Open a named window via the Go-side WindowService. Names are
        * the same keys in pkg/desktop/windows.go's registry — chat,
        * models, settings, welcome, about. */
@@ -338,8 +343,8 @@ switch (surface) {
       const poll = async () => {
         try {
           const [reading, models] = await Promise.all([
-            TelemetryService.Sample(),
-            RunnerService.Models().catch((): string[] => []),
+            TelemetryService.CurrentSample(),
+            RunnerService.WModels().catch((): string[] => []),
           ]);
           state.connected = true;
           state.err = null;

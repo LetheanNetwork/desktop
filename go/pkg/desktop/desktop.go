@@ -35,10 +35,16 @@ import (
 	"strings"
 
 	core "dappco.re/go"
+	"dappco.re/go/config"
 	coreI18n "dappco.re/go/i18n"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
+	"dappco.re/lthn/desktop/pkg/models"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
+	"dappco.re/lthn/desktop/pkg/sessions"
+	lthnservices "dappco.re/lthn/desktop/pkg/services"
+	"dappco.re/lthn/desktop/pkg/telemetry"
+	"dappco.re/lthn/desktop/pkg/validator"
 	"github.com/gin-gonic/gin"
 	"github.com/leaanthony/u"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -152,41 +158,46 @@ func (s *Service) Run() core.Result {
 	// surfacing the app in the Dock when chat is active (so users
 	// can ⌘-Tab to it), then hiding back to tray-only when chat
 	// closes.
-	envSvc := NewEnvService()
-	clipboardSvc := NewClipboardService()
-	screenSvc := NewScreenService()
-	windowSvc := NewWindowService()
-	browserSvc := NewBrowserService()
-	dialogSvc := NewDialogService()
 	notifier := notifications.New()
 	// Dock service captured so windows.go can elevate/demote the macOS
 	// activation policy when the unified app shell opens / closes. See
 	// policy.go for the routing.
 	dockSvc := dock.New()
 	attachDock(dockSvc)
-	// i18n — register the real dappco.re/go/i18n.CoreService that
-	// Core already constructed. Wails generates bindings directly
-	// from the package, so the TS lands at
-	// frontend/bindings/dappco.re/go/i18n/ instead of being wrapped
-	// in a desktop-side adapter.
+	// Window service stays as a thin wrapper today — it dispatches
+	// against the in-process openWindow registry rather than wrapping
+	// any single Go package. Once windows.go grows into a real
+	// package this becomes a direct registration like the others.
+	windowSvc := NewWindowService()
+
+	// Fetch the Core-registered upstream services and register them
+	// directly with Wails so bindings land at dappco.re/go/<pkg>/.
+	// No adapter layer — Wails generates straight from the package.
 	i18nSvc, _ := core.ServiceFor[*coreI18n.CoreService](s.opts.Core, "i18n")
+	configSvc, _ := core.ServiceFor[*config.Service](s.opts.Core, "config")
 
 	wailsServices := []application.Service{
-		application.NewService(NewRunnerService(s.opts.Runner)),
-		application.NewService(NewSessionsService(s.opts.Core)),
-		application.NewService(NewConfigService(s.opts.Core)),
-		application.NewService(NewModelsService()),
-		application.NewService(NewFirstLaunchService()),
-		application.NewService(NewValidatorService()),
-		application.NewService(NewTelemetryService()),
+		// In-this-repo packages — each ships its own *WailsService /
+		// *Service with Wails3 lifecycle + (T, error) methods. Bindings
+		// land at frontend/bindings/dappco.re/lthn/desktop/pkg/<pkg>/.
+		application.NewService(s.opts.Runner),
+		application.NewService(sessions.NewWailsService(s.opts.Core)),
+		application.NewService(models.NewWailsService()),
+		application.NewService(firstlaunch.NewWailsService()),
+		application.NewService(validator.NewWailsService()),
+		application.NewService(telemetry.NewService(telemetry.Options{})),
+		application.NewService(lthnservices.NewWailsService()),
+		// Upstream dappco.re/go services — register the Core-built
+		// instances directly. Bindings land at frontend/bindings/
+		// dappco.re/go/<pkg>/.
 		application.NewService(i18nSvc),
-		application.NewService(NewLifecycleService()),
-		application.NewService(envSvc),
-		application.NewService(clipboardSvc),
-		application.NewService(screenSvc),
+		application.NewService(configSvc),
+		// Window registry — see note above.
 		application.NewService(windowSvc),
-		application.NewService(browserSvc),
-		application.NewService(dialogSvc),
+		// Wails3 native services — dock + notifications ship from
+		// upstream wails/v3/pkg/services. Frontend env / dialog /
+		// browser / screen / clipboard come straight from
+		// @wailsio/runtime — no Go wrapper.
 		application.NewService(dockSvc),
 		application.NewService(notifier),
 	}
@@ -317,14 +328,12 @@ func (s *Service) Run() core.Result {
 	})
 
 	// Attach the constructed app to services that need app refs
-	// post-construction (app.Env / app.Clipboard / app.Screen
-	// aren't available pre-application.New()).
-	envSvc.app = s.app
-	clipboardSvc.app = s.app
-	screenSvc.app = s.app
+	// post-construction (the Wails App reference isn't available
+	// pre-application.New()). Today only WindowService still
+	// depends on this — env / clipboard / screen / browser / dialog
+	// previously wrapped here are now consumed by the frontend
+	// directly from @wailsio/runtime.
 	windowSvc.app = s.app
-	browserSvc.app = s.app
-	dialogSvc.app = s.app
 
 	// Re-broadcast OS theme changes to the WebView as "lthn:theme".
 	// Lit elements subscribe via @wailsio/runtime's Events.On.

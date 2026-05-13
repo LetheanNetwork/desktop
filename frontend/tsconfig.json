@@ -24,11 +24,9 @@
       "@/*":          ["src/*"],
       "@ui/*":        ["src/lit/*"],
       "@types":       ["src/lit/types"],
-      "@service":     ["bindings/dappco.re/lthn/desktop/pkg/desktop/index"],
-      "@service/*":   ["bindings/dappco.re/lthn/desktop/pkg/desktop/*"],
-      "@models/*":    ["bindings/dappco.re/lthn/desktop/pkg/*/models"],
       "@inference/*": ["bindings/dappco.re/go/inference/*"],
       "@lthn/*":      ["bindings/dappco.re/go/*"],
+      "@desktop/*":   ["bindings/dappco.re/lthn/desktop/pkg/*"],
       "@bindings/*":  ["bindings/*"]
     }
   },

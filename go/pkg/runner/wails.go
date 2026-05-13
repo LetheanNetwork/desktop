@@ -1,0 +1,70 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Wails3 Service shape for the runner package — extends the
+// existing *Service with the Wails lifecycle hooks plus
+// (T, error) methods so Wails3's binding generator emits clean
+// TypeScript at frontend/bindings/dappco.re/lthn/desktop/pkg/
+// runner/. The package's core.Result-returning Generate / Chat /
+// Models methods stay on the type for Action-bus and CLI callers;
+// the W-prefixed methods below are what the WebView binding
+// surfaces (W = Wails — picks the (T, error) shape).
+
+package runner
+
+import (
+	"context"
+	"errors"
+
+	"dappco.re/go/inference"
+	"github.com/wailsapp/wails/v3/pkg/application"
+)
+
+// ServiceName / Startup / Shutdown — Wails3 lifecycle. Service was
+// already constructed as a Core service; Wails just wraps the same
+// instance through application.NewService.
+
+func (s *Service) ServiceName() string { return "Runner" }
+func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	return nil
+}
+func (s *Service) ServiceShutdown() error { return nil }
+
+// WGenerate is the WebView-binding-friendly Generate. Returns the
+// assistant reply as a plain string, or an error if the router
+// failed. The unprefixed Generate(prompt) core.Result is preserved
+// for Action-bus and CLI callers — see service.go.
+//
+// Usage example (from TS):
+//
+//	import { WGenerate } from "@desktop/runner/service";
+//	const reply = await WGenerate("hello");
+func (s *Service) WGenerate(prompt string) (string, error) {
+	r := s.Generate(prompt)
+	if !r.OK {
+		return "", errors.New(r.Error())
+	}
+	text, _ := r.Value.(string)
+	return text, nil
+}
+
+// WChat is the WebView-binding-friendly Chat — full message
+// history in, assistant reply out.
+func (s *Service) WChat(messages []inference.Message) (string, error) {
+	r := s.Chat(messages)
+	if !r.OK {
+		return "", errors.New(r.Error())
+	}
+	text, _ := r.Value.(string)
+	return text, nil
+}
+
+// WModels is the WebView-binding-friendly Models — returns the
+// list of configured route names.
+func (s *Service) WModels() ([]string, error) {
+	r := s.Models()
+	if !r.OK {
+		return nil, errors.New(r.Error())
+	}
+	names, _ := r.Value.([]string)
+	return names, nil
+}

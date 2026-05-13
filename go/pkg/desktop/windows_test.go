@@ -81,26 +81,7 @@ func TestDesktop_WindowService_Hide_Bad_NotAttached(t *core.T) {
 	core.AssertError(t, err)
 }
 
-// The other binding-service constructors all share the same shape —
-// instantiate and confirm ServiceName / Startup smoke.
-func TestDesktop_BindingServices_Good_Construct(t *core.T) {
-	cases := []struct {
-		name string
-		svc  interface{ ServiceName() string }
-	}{
-		{"Env", desktop.NewEnvService()},
-		{"Clipboard", desktop.NewClipboardService()},
-		{"Screen", desktop.NewScreenService()},
-		{"Browser", desktop.NewBrowserService()},
-		{"Dialog", desktop.NewDialogService()},
-		{"Lifecycle", desktop.NewLifecycleService()},
-		{"Validator", desktop.NewValidatorService()},
-		{"FirstLaunch", desktop.NewFirstLaunchService()},
-		{"Telemetry", desktop.NewTelemetryService()},
-		{"Models", desktop.NewModelsService()},
-	}
-	for _, c := range cases {
-		core.AssertNotNil(t, c.svc, c.name+" constructor must return non-nil")
-		core.AssertNotEqual(t, "", c.svc.ServiceName(), c.name+" must declare a ServiceName")
-	}
-}
+// The package-level Wails services that used to live in bindings.go
+// have moved into their owning packages — exercising them lives next
+// to each package's own test file now. The desktop layer only owns
+// WindowService today (smoke-tested above).

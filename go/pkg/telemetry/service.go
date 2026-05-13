@@ -17,10 +17,13 @@
 package telemetry
 
 import (
+	"context"
+	"errors"
 	"runtime"
 	"time"
 
 	core "dappco.re/go"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // Reading is a single telemetry sample.
@@ -130,4 +133,47 @@ func (s *Service) Register(c *core.Core) core.Result {
 //	}
 func Register(c *core.Core) core.Result {
 	return NewService(Options{}).Register(c)
+}
+
+// ----- Wails3 Service shape ----------------------------------------
+//
+// Implements application.Service so Wails generates a TS binding
+// at frontend/bindings/dappco.re/lthn/desktop/pkg/telemetry/service.ts.
+// The Sample method below is what the WebView calls; the package-level
+// Sample()  / Core action above stay for non-WebView callers.
+
+// ServiceName labels the binding namespace exposed to JS.
+func (s *Service) ServiceName() string { return "Telemetry" }
+
+// ServiceStartup runs at app boot. No-op today; reserved for the
+// powermetrics / IOReport / XPC helper handshake when that lands.
+func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	return nil
+}
+
+// ServiceShutdown runs at app exit. No-op today.
+func (s *Service) ServiceShutdown() error { return nil }
+
+// CurrentSample returns one process telemetry reading in the
+// idiomatic (T, error) shape Wails3 generates clean TS for. The
+// package-level Sample() returns core.Result for Action-bus
+// callers; this method wraps it for the WebView binding. Named
+// CurrentSample to avoid name-collision with the package-level
+// Sample function in method-set resolution.
+//
+// Usage example (from TS):
+//
+//	import { CurrentSample } from "@desktop/telemetry/service";
+//	const r = await CurrentSample();
+//	console.log(r.heap_alloc_mb);
+func (s *Service) CurrentSample() (Reading, error) {
+	r := Sample()
+	if !r.OK {
+		return Reading{}, errors.New(r.Error())
+	}
+	reading, ok := r.Value.(Reading)
+	if !ok {
+		return Reading{}, errors.New("telemetry: Sample returned unexpected value type")
+	}
+	return reading, nil
 }
