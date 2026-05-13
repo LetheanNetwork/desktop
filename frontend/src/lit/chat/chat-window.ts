@@ -102,6 +102,7 @@ class LthnChatWindow extends LitElement {
     composerValue: { state: true },
     sending: { state: true },
     sendErr: { state: true },
+    activeModel: { state: true },
   };
   declare state:     ChatState;
   declare rail:      RailMode;
@@ -117,6 +118,7 @@ class LthnChatWindow extends LitElement {
   declare composerValue: string;
   declare sending: boolean;
   declare sendErr: string;
+  declare activeModel: string;
   constructor() {
     super();
     this.state = "multi-turn";
@@ -132,6 +134,7 @@ class LthnChatWindow extends LitElement {
     this.composerValue = "";
     this.sending = false;
     this.sendErr = "";
+    this.activeModel = "";
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -141,7 +144,20 @@ class LthnChatWindow extends LitElement {
       T("window.chat.subtitle"),
     ]);
     this.chrome = { title, subtitle };
-    await this._reloadRail();
+    await Promise.all([this._reloadRail(), this._reloadModel()]);
+  }
+
+  /** Pull the runner's loaded model list and pick the first one for
+   *  the toolbar + footer. Empty list → blank string so the render
+   *  falls back to the fixture label ("No model" / etc.). */
+  async _reloadModel() {
+    try {
+      const svc = await import("@desktop/runner/service");
+      const models = await svc.WModels().catch((): string[] => []);
+      this.activeModel = (models && models[0]) || "";
+    } catch {
+      this.activeModel = "";
+    }
   }
 
   /** Lit lifecycle — when activeConversationId changes, reload
@@ -250,7 +266,11 @@ class LthnChatWindow extends LitElement {
 
   render() {
     const fixture = chatStateData(this.state);
-    const { railData, banner, toolbarModel } = fixture;
+    const { railData, banner } = fixture;
+    // Toolbar + footer prefer the live model name when the runner has
+    // one loaded; fall back to the per-state fixture label so canvas
+    // previews + the "no-model" state still read coherently.
+    const toolbarModel = this.activeModel || fixture.toolbarModel;
     // When a real session is selected, use its live turns instead of
     // the demo fixtures. Live empty (session with no messages yet)
     // also wins so we don't fall back to demo turns mid-session.
