@@ -377,3 +377,86 @@ When this goal hits 0, two follow-ups unlock:
 - welcome-window.ts: Client checkbox (Step 3) — unwired
 - app-shell.ts: Search bar — unwired
 - app-shell.ts: Vi mode icon — unwired
+
+## Missing Go methods (needed to wire UI)
+
+- sessions.Service: Delete(id string) — remove a conversation
+- sessions.Service: Rename(id, title string) — change conversation title
+- sessions.Service: AppendAttachment(id, path string) — attach file to conversation
+- sessions.Service: PopLast(id string) — drop last turn (regen support)
+- sessions.Service: Export(id, format string) — export conversation to disk
+- runner.Service: Cancel(streamID string) — cancel in-flight completion stream
+- runner.Service: Bench(opts BenchOptions) — PP/TG benchmark on loaded model
+- runner.Service: SetModel(name string) — switch active model
+- runner.Service: StreamID() — return current active stream id for cancel
+- telemetry.Service: PowerHistory(window time.Duration) — historical power-draw samples
+- telemetry.Service: GenerationHistory(window time.Duration) — past completion stats
+- tools.Service: RegisterServer(spec MCPServerSpec) — mount a new MCP server at runtime
+- tools.Service: UnregisterServer(id string) — drop an MCP server
+- tools.Service: SetEnabled(id string, enabled bool) — toggle MCP server on/off
+- tools.Service: Invoke(name string, args map[string]any) — invoke a tool by name
+- models.Service: Import(srcPath string) — copy a local .gguf into models dir
+- models.Service: Download(id, dest string) — fetch from HF/mirror with progress events
+- models.Service: Delete(id string) — remove a model from models dir
+- models.Service: Pin(id string, pinned bool) — toggle pin state, persisted
+- firstlaunch.Service: SetModelDir(path string) — change canonical models dir
+- firstlaunch.Service: PickFolder() — native folder picker, returns chosen path
+- firstlaunch.Service: PickFile(filter string) — native file picker (e.g. *.gguf)
+- integrations.Service: SetEnabled(clientID string, enabled bool) — toggle client wiring
+- integrations.Service: WriteConfig(clientID string) — write the OAI-compat config to the client's expected path
+- bridge.Service: Cancel() — cancel an in-flight bridge call
+- dialog (NEW pkg): OpenFile(filter string) — wrap Wails file picker
+- dialog (NEW pkg): OpenDirectory() — wrap Wails directory picker
+- dialog (NEW pkg): SaveFile(default string) — wrap Wails save dialog
+
+## Deferred subsystems (whole packages need to land before UI works)
+
+- distillation.Service — wraps core/go-mlx SFT/LoRA/GRPO/distill; needs go-mlx submodule
+- fleet.Service — multi-machine controller; needs design + new package
+- network.Service — P2P session + ledger; needs design + new package (or core/go-p2p submodule if it exists)
+- benchmark backend — runner.Bench + result storage; could live inside runner pkg
+
+## New submodules required
+
+- core/go-mlx — distillation + native inference (memory: project_go_mlx_research_grade.md)
+- core/go-p2p — IF P2P backend lands here (vs. lthn/lemma or similar)
+- core/gui (already planned in core/gui/GOAL.md) — window-position-remember + dialog helpers may live here
+
+## AX + CoreGO adoption (per the audit)
+
+- AX-7 _Good/_Bad/_Ugly triplets for every public symbol (567 gaps — see Phase 5)
+- Example<Symbol> in <file>_example_test.go for every public symbol (567 gaps — see Phase 5)
+- Replace stdlib calls with CoreGO wrappers: fmt → core.Sprintf/E, errors → core.E/NewError, strings → core.Contains/Split/Trim, path → core.PathJoin, os → core.ReadFile/WriteFile/MkdirAll/RemoveAll/Stat, log → core.Warn/Error, json → core.JSONMarshal/Unmarshal, bytes → core.NewReader (Phase 2 covers — 90 sites)
+- Convert `func ... error` → `func ... core.Result` (Phase 3 — 167 sites)
+- Collapse `(*T, error)` tuples → single `core.Result` with value in r.Value (Phase 3 — 128 sites)
+- Every `NewService` companion `Register(c *core.Core) core.Result` (Phase 1.5 — 9 packages)
+- Every `NewService` doc-block contains `// Usage example:` marker (Phase 1.4 — 8 sites)
+- Replace `i18n.T()` etc. with `c.I18n().Translate(...)` through Core (Phase 1.3 — 12 sites)
+- Migrate testify away in favour of core.AssertX / RequireX (Phase 1.1 — 2 files)
+
+## UI test coverage (canonical pattern: frontend/src/lit/chrome.test.ts)
+
+- chat-window.test.ts — already exists; verify it runs + covers send/receive paths
+- build-window.test.ts — MISSING; add Good/Bad/Ugly per public state transition
+- container-window.test.ts — MISSING
+- editor-window.test.ts — MISSING
+- git-window.test.ts — MISSING
+- lint-window.test.ts — MISSING
+- marketplace-window.test.ts — MISSING
+- php-window.test.ts — MISSING
+- plugin-window.test.ts — MISSING
+- repos-window.test.ts — MISSING
+- benchmark-window.test.ts — MISSING
+- model-browser-window.test.ts — MISSING
+- settings-window.test.ts — MISSING
+- welcome-window.test.ts — MISSING
+- distillation-window.test.ts — exists; verify
+- fleet-window.test.ts — exists; verify
+- integrations-window.test.ts — exists; verify
+- logs-window.test.ts — exists; verify
+- network-window.test.ts — exists; verify
+- telemetry-window.test.ts — exists; verify
+- tools-window.test.ts — exists; verify
+- chrome.test.ts — exists, canonical (19 tests passing)
+- app-shell.test.ts — exists; verify
+- Codecov target: 70% across frontend/src/lit/ and go/pkg/
