@@ -18,6 +18,7 @@ import (
 	lthni18n "dappco.re/lthn/desktop/pkg/i18n"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/plugin"
+	"dappco.re/lthn/desktop/pkg/sandbox"
 )
 
 // newAppCore constructs the shared *core.Core for any lthn CLI verb
@@ -111,6 +112,10 @@ func newAppCore() *core.Core {
 		// mounts a reverse-proxy on the coreapi.Engine at
 		// /v1/api/plugin/<code>/*. See docs/plugin-host-scope.md.
 		core.WithName("plugin", plugin.NewService(plugin.Options{})),
+		// sandbox — spawn OCI containers via dappco.re/go/container
+		// (AppleProvider) or runtime CLI (docker/podman). Proof-of-life
+		// today: Spawn() runs a one-shot command and returns stdout.
+		core.WithName("sandbox", sandbox.NewService(sandbox.Options{})),
 	)
 
 	if r := c.ServiceStartup(context.Background(), nil); !r.OK {

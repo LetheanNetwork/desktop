@@ -49,6 +49,7 @@ import (
 	lthnphp "dappco.re/lthn/desktop/pkg/php"
 	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/repos"
+	"dappco.re/lthn/desktop/pkg/sandbox"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
 	lthnservices "dappco.re/lthn/desktop/pkg/services"
@@ -197,6 +198,7 @@ func (s *Service) Run() core.Result {
 	configSvc, _ := core.ServiceFor[*config.Service](s.opts.Core, "config")
 	bridgeSvc, _ := core.ServiceFor[*bridge.Service](s.opts.Core, "bridge")
 	pluginSvc, _ := core.ServiceFor[*plugin.Service](s.opts.Core, "plugin")
+	sandboxSvc, _ := core.ServiceFor[*sandbox.Service](s.opts.Core, "sandbox")
 
 	wailsServices := []application.Service{
 		// In-this-repo packages — each ships its own *WailsService /
@@ -216,6 +218,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(marketplace.NewService(s.opts.Core)),
 		application.NewService(lthnphp.NewService(s.opts.Core)),
 		application.NewService(pluginSvc),
+		application.NewService(sandboxSvc),
 		application.NewService(repos.NewService(s.opts.Core)),
 		application.NewService(tools.NewWailsService(s.opts.Core)),
 		application.NewService(validator.NewWailsService()),

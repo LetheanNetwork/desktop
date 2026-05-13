@@ -25,6 +25,7 @@ use (
 	./external/api/external/go-scm/go
 	./external/api/go
 	./external/config/go
+	./external/container/go
 	./external/go
 	./external/i18n/go
 	./external/inference/go

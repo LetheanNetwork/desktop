@@ -230,6 +230,8 @@ func toolCatalogue() []map[string]any {
 		{"name": "lang_list", "desc": "Return the catalogue of supported language names."},
 		{"name": "theme_get", "desc": "Return the WebView's prefers-color-scheme (dark/light). params: { window? }"},
 		{"name": "focus_set", "desc": "Alias for window_focus. params: { name }"},
+		{"name": "sandbox_detect", "desc": "List available container runtimes (docker / podman / apple)."},
+		{"name": "sandbox_spawn", "desc": "Run a one-shot container, return stdout. params: { image, command, args?, runtime?, timeout_seconds? }"},
 	}
 }
 
@@ -393,6 +395,10 @@ func (s *Service) dispatch(ctx context.Context, tool string, params map[string]a
 		return s.toolThemeGet(ctx, params)
 	case "focus_set":
 		return s.toolFocusSet(params)
+	case "sandbox_detect":
+		return s.toolSandboxDetect()
+	case "sandbox_spawn":
+		return s.toolSandboxSpawn(params)
 	default:
 		return map[string]any{"ok": false, "error": "unknown tool: " + tool}
 	}

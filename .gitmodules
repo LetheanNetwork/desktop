@@ -54,3 +54,7 @@
 	path = external/php
 	url = https://github.com/dappcore/php.git
 	branch = dev
+[submodule "external/container"]
+	path = external/container
+	url = https://github.com/dappcore/go-container.git
+	branch = dev
