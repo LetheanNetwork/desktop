@@ -39,5 +39,60 @@
       "see_help": "run `lthn help` for available commands",
       "missing_verb": "lthn %s: missing verb (%s)"
     }
+  },
+  "tray": {
+    "chrome": {
+      "title": "lthn",
+      "subtitle_ready": "local · ready",
+      "subtitle_offline": "local · offline"
+    },
+    "status": {
+      "offline": "Offline",
+      "connecting": "Connecting…",
+      "pick_model": "Pick a model to start",
+      "browse": "Browse →"
+    },
+    "heap": "Heap",
+    "uptime": "Uptime",
+    "section": {
+      "open": "Open"
+    },
+    "open": {
+      "chat": "Chat",
+      "models": "Models",
+      "telemetry": "Telemetry"
+    },
+    "tab": {
+      "system": "System",
+      "runner": "Runner",
+      "activity": "Activity"
+    },
+    "kv": {
+      "connection": "Connection",
+      "samples": "Samples",
+      "model": "Model",
+      "status": "Status",
+      "throughput": "Throughput",
+      "kv_cache": "KV cache",
+      "sessions_today": "Sessions today",
+      "tokens_generated": "Tokens generated",
+      "last_interaction": "Last interaction",
+      "recent_errors": "Recent errors"
+    },
+    "value": {
+      "offline": "offline",
+      "live": "live",
+      "connecting": "connecting",
+      "loaded": "loaded",
+      "idle": "idle",
+      "dash": "—"
+    },
+    "titlebar": {
+      "open_app": "Open Lethean Desktop",
+      "settings": "Settings"
+    },
+    "footer": {
+      "version": "lthn v%s"
+    }
   }
 }

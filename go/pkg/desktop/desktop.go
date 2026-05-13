@@ -35,6 +35,7 @@ import (
 	"strings"
 
 	core "dappco.re/go"
+	coreI18n "dappco.re/go/i18n"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
@@ -163,6 +164,13 @@ func (s *Service) Run() core.Result {
 	// policy.go for the routing.
 	dockSvc := dock.New()
 	attachDock(dockSvc)
+	// i18n — register the real dappco.re/go/i18n.CoreService that
+	// Core already constructed. Wails generates bindings directly
+	// from the package, so the TS lands at
+	// frontend/bindings/dappco.re/go/i18n/ instead of being wrapped
+	// in a desktop-side adapter.
+	i18nSvc, _ := core.ServiceFor[*coreI18n.CoreService](s.opts.Core, "i18n")
+
 	wailsServices := []application.Service{
 		application.NewService(NewRunnerService(s.opts.Runner)),
 		application.NewService(NewSessionsService(s.opts.Core)),
@@ -171,7 +179,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(NewFirstLaunchService()),
 		application.NewService(NewValidatorService()),
 		application.NewService(NewTelemetryService()),
-		application.NewService(NewI18nService()),
+		application.NewService(i18nSvc),
 		application.NewService(NewLifecycleService()),
 		application.NewService(envSvc),
 		application.NewService(clipboardSvc),

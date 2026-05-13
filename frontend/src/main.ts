@@ -30,7 +30,10 @@ switch (surface) {
      *   - sparkline data  ← heap_alloc_mb samples (last 24)
      *   - connection dot  ← Sample() throwing → err; success → ok
      */
-    import("@service").then(({ TelemetryService, RunnerService, WindowService }) => {
+    Promise.all([
+      import("@service"),
+      import("@lthn/i18n/coreservice"),
+    ]).then(async ([{ TelemetryService, RunnerService, WindowService }, i18n]) => {
       /* Open a named window via the Go-side WindowService. Names are
        * the same keys in pkg/desktop/windows.go's registry — chat,
        * models, settings, welcome, about. */
@@ -38,6 +41,50 @@ switch (surface) {
         WindowService.Open(name).catch((err: unknown) => {
           console.error(`open ${name} failed:`, err);
         });
+      };
+
+      /* Locale strings — bulk-resolved once at tray boot via the
+       * Wails I18nService binding. The bridge is in-process so the
+       * calls are µs-fast; serial awaits in a single batch are
+       * cheaper than `until(...)` per render slot. Store the
+       * resolved strings as plain consts and read them inside
+       * draw() — sync, no Promise plumbing in templates. */
+      const t = {
+        chromeTitle:      await i18n.T("tray.chrome.title"),
+        chromeReady:      await i18n.T("tray.chrome.subtitle_ready"),
+        chromeOffline:    await i18n.T("tray.chrome.subtitle_offline"),
+        statusOffline:    await i18n.T("tray.status.offline"),
+        statusConnecting: await i18n.T("tray.status.connecting"),
+        statusPickModel:  await i18n.T("tray.status.pick_model"),
+        statusBrowse:     await i18n.T("tray.status.browse"),
+        heap:             await i18n.T("tray.heap"),
+        uptime:           await i18n.T("tray.uptime"),
+        sectionOpen:      await i18n.T("tray.section.open"),
+        openChat:         await i18n.T("tray.open.chat"),
+        openModels:       await i18n.T("tray.open.models"),
+        openTelemetry:    await i18n.T("tray.open.telemetry"),
+        tabSystem:        await i18n.T("tray.tab.system"),
+        tabRunner:        await i18n.T("tray.tab.runner"),
+        tabActivity:      await i18n.T("tray.tab.activity"),
+        kvConnection:     await i18n.T("tray.kv.connection"),
+        kvSamples:        await i18n.T("tray.kv.samples"),
+        kvModel:          await i18n.T("tray.kv.model"),
+        kvStatus:         await i18n.T("tray.kv.status"),
+        kvThroughput:     await i18n.T("tray.kv.throughput"),
+        kvCache:          await i18n.T("tray.kv.kv_cache"),
+        kvSessionsToday:  await i18n.T("tray.kv.sessions_today"),
+        kvTokens:         await i18n.T("tray.kv.tokens_generated"),
+        kvLastInteract:   await i18n.T("tray.kv.last_interaction"),
+        kvRecentErrors:   await i18n.T("tray.kv.recent_errors"),
+        valOffline:       await i18n.T("tray.value.offline"),
+        valLive:          await i18n.T("tray.value.live"),
+        valConnecting:    await i18n.T("tray.value.connecting"),
+        valLoaded:        await i18n.T("tray.value.loaded"),
+        valIdle:          await i18n.T("tray.value.idle"),
+        valDash:          await i18n.T("tray.value.dash"),
+        tbOpenApp:        await i18n.T("tray.titlebar.open_app"),
+        tbSettings:       await i18n.T("tray.titlebar.settings"),
+        footerVersion:    await i18n.T("tray.footer.version", "0.1.0"),
       };
 
       type TrayTab = "system" | "runner" | "activity";
@@ -70,7 +117,7 @@ switch (surface) {
 
       const draw = () => {
         const variant = state.err ? "err" : state.connected ? "ok" : "idle";
-        const stateLabel = state.err ? "offline" : state.connected ? "live" : "connecting";
+        const stateLabel = state.err ? t.valOffline : state.connected ? t.valLive : t.valConnecting;
         const sparkData = state.samples.length
           ? state.samples.join(",")
           : "";
@@ -93,7 +140,7 @@ switch (surface) {
                           color:${hasModel ? "var(--fg-0)" : "var(--fg-2)"};
                           flex:1; min-width:0;
                           overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                ${state.connected ? state.model : (state.err ? "Offline" : "Connecting…")}
+                ${state.connected ? state.model : (state.err ? t.statusOffline : t.statusConnecting)}
               </div>
               ${state.err
                 ? html`<lthn-state-pill variant="disconnected">${stateLabel}</lthn-state-pill>`
@@ -107,13 +154,13 @@ switch (surface) {
               <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
                 <div>
                   <div style="font-family:var(--font-mono); font-size:9.5px;
-                              color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase;">Heap</div>
+                              color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase;">${t.heap}</div>
                   <div style="font-family:var(--font-mono); font-size:13px;
                               color:var(--fg-0); margin-top:2px;">${state.heapMb.toFixed(1)} <span style="color:var(--fg-3); font-size:10.5px;">MB</span></div>
                 </div>
                 <div>
                   <div style="font-family:var(--font-mono); font-size:9.5px;
-                              color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase;">Uptime</div>
+                              color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase;">${t.uptime}</div>
                   <div style="font-family:var(--font-mono); font-size:13px;
                               color:var(--fg-0); margin-top:2px;">${fmtUptime(state.uptime)}</div>
                 </div>
@@ -124,8 +171,8 @@ switch (surface) {
                           background:rgba(64,193,197,0.06);
                           border:1px dashed rgba(64,193,197,0.22);">
                 <i class="fa-solid fa-cube" style="font-size:11px; color:var(--brand-300);"></i>
-                <div style="flex:1; font-size:11.5px; color:var(--fg-1);">Pick a model to start</div>
-                <lthn-btn tone="quiet" size="sm" @click=${openWindow("models")}>Browse →</lthn-btn>
+                <div style="flex:1; font-size:11.5px; color:var(--fg-1);">${t.statusPickModel}</div>
+                <lthn-btn tone="quiet" size="sm" @click=${openWindow("models")}>${t.statusBrowse}</lthn-btn>
               </div>
             ` : nothing}
 
@@ -147,20 +194,20 @@ switch (surface) {
         // still feels balanced with an odd count.
         const openSection = html`
           <section style="display:flex; flex-direction:column; gap:8px;">
-            <lthn-label>Open</lthn-label>
+            <lthn-label>${t.sectionOpen}</lthn-label>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
               <lthn-btn tone="ghost" size="md" @click=${openWindow("chat")}>
                 <i class="fa-regular fa-comment" style="font-size:11px;"></i>
-                Chat
+                ${t.openChat}
               </lthn-btn>
               <lthn-btn tone="ghost" size="md" @click=${openWindow("models")}>
                 <i class="fa-solid fa-cube" style="font-size:11px;"></i>
-                Models
+                ${t.openModels}
               </lthn-btn>
               <lthn-btn tone="ghost" size="md" @click=${openWindow("telemetry")}
                 style="grid-column: 1 / -1;">
                 <i class="fa-solid fa-wave-square" style="font-size:11px;"></i>
-                Telemetry
+                ${t.openTelemetry}
               </lthn-btn>
             </div>
           </section>
@@ -201,24 +248,24 @@ switch (surface) {
         `;
 
         const systemPanel = html`
-          ${kv("Heap", `${state.heapMb.toFixed(1)} MB`)}
-          ${kv("Uptime", fmtUptime(state.uptime))}
-          ${kv("Connection", state.err ? "offline" : state.connected ? "live" : "connecting")}
-          ${kv("Samples", `${state.samples.length} / 24`)}
+          ${kv(t.heap, `${state.heapMb.toFixed(1)} MB`)}
+          ${kv(t.uptime, fmtUptime(state.uptime))}
+          ${kv(t.kvConnection, state.err ? t.valOffline : state.connected ? t.valLive : t.valConnecting)}
+          ${kv(t.kvSamples, `${state.samples.length} / 24`)}
         `;
 
         const runnerPanel = html`
-          ${kv("Model", hasModel ? state.model : "—", false)}
-          ${kv("Status", hasModel ? "loaded" : "idle")}
-          ${kv("Throughput", "—")}
-          ${kv("KV cache", "—")}
+          ${kv(t.kvModel, hasModel ? state.model : t.valDash, false)}
+          ${kv(t.kvStatus, hasModel ? t.valLoaded : t.valIdle)}
+          ${kv(t.kvThroughput, t.valDash)}
+          ${kv(t.kvCache, t.valDash)}
         `;
 
         const activityPanel = html`
-          ${kv("Sessions today", "—")}
-          ${kv("Tokens generated", "—")}
-          ${kv("Last interaction", "—")}
-          ${kv("Recent errors", state.err ? "1" : "0")}
+          ${kv(t.kvSessionsToday, t.valDash)}
+          ${kv(t.kvTokens, t.valDash)}
+          ${kv(t.kvLastInteract, t.valDash)}
+          ${kv(t.kvRecentErrors, state.err ? "1" : "0")}
         `;
 
         const infoCard = html`
@@ -228,9 +275,9 @@ switch (surface) {
                           border:1px solid rgba(255,255,255,0.05);
                           border-radius:8px;">
             <div style="display:flex; gap:4px;">
-              ${tabBtn("system",   "System",   "fa-microchip")}
-              ${tabBtn("runner",   "Runner",   "fa-bolt")}
-              ${tabBtn("activity", "Activity", "fa-clock-rotate-left")}
+              ${tabBtn("system",   t.tabSystem,   "fa-microchip")}
+              ${tabBtn("runner",   t.tabRunner,   "fa-bolt")}
+              ${tabBtn("activity", t.tabActivity, "fa-clock-rotate-left")}
             </div>
             <div style="padding:2px 4px;">
               ${state.tab === "system"   ? systemPanel   : nothing}
@@ -263,13 +310,13 @@ switch (surface) {
           </button>
         `;
         const titlebarActions = html`
-          ${titlebarAction("fa-display", "Open Lethean Desktop", openWindow("app"))}
-          ${titlebarAction("fa-gear",    "Settings",             openWindow("settings"))}
+          ${titlebarAction("fa-display", t.tbOpenApp,  openWindow("app"))}
+          ${titlebarAction("fa-gear",    t.tbSettings, openWindow("settings"))}
         `;
 
         render(renderChrome({
-          title: "lthn",
-          subtitle: state.err ? "local · offline" : "local · ready",
+          title: t.chromeTitle,
+          subtitle: state.err ? t.chromeOffline : t.chromeReady,
           w: 400, h: 560,
           actions: titlebarActions,
           body: html`
@@ -280,7 +327,7 @@ switch (surface) {
             </div>
           `,
           footer: html`
-            <span style="opacity:0.7;">lthn v0.1.0</span>
+            <span style="opacity:0.7;">${t.footerVersion}</span>
             <span style="flex:1"></span>
             <lthn-status-dot variant=${variant}></lthn-status-dot>
             <span style="opacity:0.7;">${stateLabel}</span>

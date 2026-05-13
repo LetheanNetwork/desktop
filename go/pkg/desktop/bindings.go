@@ -29,7 +29,6 @@ import (
 	"errors"
 
 	core "dappco.re/go"
-	coreI18n "dappco.re/go/i18n"
 	"dappco.re/go/inference"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/models"
@@ -244,107 +243,6 @@ func (s *TelemetryService) ServiceShutdown() error { return nil }
 
 func (s *TelemetryService) Sample() (telemetry.Reading, error) {
 	return resultToError[telemetry.Reading](telemetry.Sample())
-}
-
-// ---------------------------------------------------------------------
-// I18nService — locale lookup for the WebView at in-process speed.
-//
-// Wails generates a TS binding for every method here; the Lit
-// frontend imports it and calls T("cli.welcome.title") directly
-// through the JS bridge — no HTTP round-trip through /api/, no
-// JSON parse per call, no FS hit per render. Same locale bundle
-// the Go side reads (pkg/i18n/locales/*.json embed).
-//
-// Runtime locale switching: SetLanguage flips the active language
-// for both the Go AND the JS side (they share the same Default()
-// service instance). Pair with a "lthn:locale:changed" event on
-// the bus so windows can re-render after a switch.
-// ---------------------------------------------------------------------
-
-type I18nService struct{}
-
-func NewI18nService() *I18nService { return &I18nService{} }
-
-func (s *I18nService) ServiceName() string { return "I18n" }
-func (s *I18nService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
-}
-func (s *I18nService) ServiceShutdown() error { return nil }
-
-// T translates messageID through the active locale. Returns the
-// messageID itself when no translation matches — safe for UI
-// callers (never empty, never panics).
-//
-// Usage from TS:
-//
-//	import { T } from '@bindings/.../i18nservice';
-//	const label = await T("cli.welcome.title");
-func (s *I18nService) T(messageID string) string {
-	return coreI18n.T(messageID)
-}
-
-// Tf is the variadic-argument flavour of T — for strings carrying
-// %s / %d placeholders. The args slice is forwarded into the
-// underlying T(id, args...) call. String-typed for clean Wails
-// binding generation; cast on the caller side if you need numbers.
-//
-// Usage from TS:
-//
-//	const msg = await Tf("cli.errors.unknown_subcommand", ["help"]);
-func (s *I18nService) Tf(messageID string, args []string) string {
-	iargs := make([]any, len(args))
-	for i, a := range args {
-		iargs[i] = a
-	}
-	return coreI18n.T(messageID, iargs...)
-}
-
-// Language returns the active locale tag, e.g. "en-GB" or "en-AU".
-// Defaults to the env-detected locale at boot if no SetLanguage
-// override has been called yet.
-func (s *I18nService) Language() string {
-	svc := coreI18n.Default()
-	if svc == nil {
-		return ""
-	}
-	return svc.Language()
-}
-
-// SetLanguage flips the active locale for both Go and JS callers.
-// Returns an error if lang isn't one of the loaded locales — call
-// Available() first to discover what's shippable.
-func (s *I18nService) SetLanguage(lang string) error {
-	svc := coreI18n.Default()
-	if svc == nil {
-		return errors.New("i18n service not initialised")
-	}
-	r := svc.SetLanguage(lang)
-	if !r.OK {
-		return errors.New(r.Error())
-	}
-	return nil
-}
-
-// Available returns every locale tag the embedded bundle could
-// resolve at boot. Driven from pkg/i18n/locales/*.json by way of
-// the FSLoader's directory scan.
-func (s *I18nService) Available() []string {
-	svc := coreI18n.Default()
-	if svc == nil {
-		return []string{}
-	}
-	return svc.AvailableLanguages()
-}
-
-// Fallback returns the locale used when a key is missing from the
-// active language — e.g. "en" when the user is on "en-AU" but a
-// key only exists in the canonical en bundle.
-func (s *I18nService) Fallback() string {
-	svc := coreI18n.Default()
-	if svc == nil {
-		return ""
-	}
-	return svc.Fallback()
 }
 
 // ---------------------------------------------------------------------

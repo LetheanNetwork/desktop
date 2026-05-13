@@ -25,6 +25,7 @@ export default defineConfig({
       { find: /^@service\/(.*)$/,   replacement: root("bindings/dappco.re/lthn/desktop/pkg/desktop/$1") },
       { find: /^@models\/(.*)$/,    replacement: root("bindings/dappco.re/lthn/desktop/pkg/$1/models.ts") },
       { find: /^@inference\/(.*)$/, replacement: root("bindings/dappco.re/go/inference/$1") },
+      { find: /^@lthn\/(.*)$/,      replacement: root("bindings/dappco.re/go/$1") },
       { find: /^@bindings\/(.*)$/,  replacement: root("bindings/$1") },
     ],
   },
