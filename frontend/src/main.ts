@@ -530,6 +530,21 @@ switch (surface) {
     app.innerHTML = `<lthn-model-browser-window></lthn-model-browser-window>`;
     break;
   }
+  case "editor": {
+    await import("./lit/ide/editor-window");
+    const path = params.get("path") || "scratch.ts";
+    const lang = params.get("lang") || "typescript";
+    const ro = params.get("readonly") === "1";
+    const el = document.createElement("lthn-editor-window") as HTMLElement & {
+      path: string; language: string; readonly: boolean;
+    };
+    el.path = path;
+    el.language = lang;
+    el.readonly = ro;
+    app.innerHTML = "";
+    app.appendChild(el);
+    break;
+  }
   case "benchmark": {
     app.innerHTML = `<lthn-benchmark-window></lthn-benchmark-window>`;
     break;
@@ -572,7 +587,7 @@ switch (surface) {
         <ul style="opacity:0.7;font-size:13px;font-family:var(--font-mono,monospace);">
           <li><a href="?surface=chat">chat</a> · <a href="?surface=welcome">welcome</a> · <a href="?surface=settings">settings</a> · <a href="?surface=models">models</a></li>
           <li><a href="?surface=benchmark">benchmark</a> · <a href="?surface=logs">logs</a> · <a href="?surface=telemetry">telemetry</a></li>
-          <li><a href="?surface=integrations">integrations</a> · <a href="?surface=tools">tools</a></li>
+          <li><a href="?surface=integrations">integrations</a> · <a href="?surface=tools">tools</a> · <a href="?surface=editor">editor</a></li>
           <li><a href="?surface=network">network</a> · <a href="?surface=distillation">distillation</a> · <a href="?surface=fleet">fleet</a></li>
         </ul>
         <lthn-chat-window state="multi-turn"></lthn-chat-window>

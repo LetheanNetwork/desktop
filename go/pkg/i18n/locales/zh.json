@@ -392,6 +392,7 @@
       "btn_download":    "下载",
       "footer":          "%d 本地 · %s 可用 · %s · 飞行模式正常（浏览需要网络）"
     },
+    "editor":       { "title": "编辑器", "subtitle": "monaco · 语法高亮 · 查找 · 多光标" },
     "welcome":      {
       "title": "欢迎使用 lthn", "subtitle": "步骤 %s / 3",
       "step1_label": "模型目录", "step1_hint": "模型存储位置",

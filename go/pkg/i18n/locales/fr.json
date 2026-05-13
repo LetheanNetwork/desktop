@@ -392,6 +392,7 @@
       "btn_download":    "Télécharger",
       "footer":          "%d local · %s libre · %s · mode avion OK (la navigation nécessite le réseau)"
     },
+    "editor":       { "title": "Éditeur", "subtitle": "monaco · syntaxe · recherche · multi-curseur" },
     "welcome":      {
       "title": "Bienvenue sur lthn", "subtitle": "étape %s sur 3",
       "step1_label": "Dossier des modèles", "step1_hint": "Où vivent les modèles",
