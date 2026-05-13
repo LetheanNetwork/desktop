@@ -16,6 +16,7 @@ class LthnModelBrowserWindow extends LitElement {
     chrome:   { state: true },
     local:    { state: true },
     loadErr:  { state: true },
+    modelsDir:{ state: true },
   };
   declare selected: string;
   declare w: number;
@@ -24,12 +25,14 @@ class LthnModelBrowserWindow extends LitElement {
   declare chrome: { title: string; subtitle: string };
   declare local: LocalModel[];
   declare loadErr: string;
+  declare modelsDir: string;
   constructor() {
     super();
     this.selected = ""; this.w = 1040; this.h = 700; this.embedded = false;
     this.chrome = { title: "Models", subtitle: "local · — · huggingface" };
     this.local = [];
     this.loadErr = "";
+    this.modelsDir = "~/.lthn/models/";
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -53,6 +56,14 @@ class LthnModelBrowserWindow extends LitElement {
       this.loadErr = err instanceof Error ? err.message : String(err);
       this.local = [];
     }
+    // Real models-dir path for the footer + empty-state slot. Same
+    // source the welcome wizard + Settings → Models bind against;
+    // collapses /Users/<name>/... to ~/ so the footer reads coherently.
+    try {
+      const fl = await import("@desktop/firstlaunch/wailsservice");
+      const paths = await fl.Paths();
+      if (paths?.models_dir) this.modelsDir = collapseHome(paths.models_dir);
+    } catch { /* keep fallback */ }
     // Rebuild the subtitle with the live count — the locale string
     // is "local · 4 · huggingface" today; swap the "4" for the
     // real count so the chrome reflects what's actually on disk.
@@ -205,7 +216,7 @@ class LthnModelBrowserWindow extends LitElement {
       subtitle: this.chrome.subtitle,
       w: this.w, h: this.h,
       toolbar, body,
-      footer: html`4 local · 312 GB free · ~/.lthn/models/ · airplane-mode OK (browsing requires network)`,
+      footer: html`${local.length || 4} local · 312 GB free · ${this.modelsDir} · airplane-mode OK (browsing requires network)`,
       embedded: this.embedded,
     });
   }
@@ -269,6 +280,15 @@ function modelFamily(name: string): string {
 function modelSlug(name: string): string {
   const s = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return s || "model";
+}
+
+/** Collapse the leading $HOME into "~/" so the footer + empty-state
+ *  hint match the terminal short-form a user would type. No browser
+ *  API for $HOME — matches common macOS / Linux user dirs. */
+function collapseHome(absPath: string): string {
+  if (!absPath) return absPath;
+  const m = absPath.match(/^\/(Users|home)\/[^/]+\//);
+  return m ? "~/" + absPath.slice(m[0].length) : absPath;
 }
 
 /** Human-readable size from byte count. Matches the units the rail
