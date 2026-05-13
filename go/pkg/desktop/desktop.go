@@ -39,6 +39,7 @@ import (
 	coreI18n "dappco.re/go/i18n"
 	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
+	"dappco.re/lthn/desktop/pkg/integrations"
 	"dappco.re/lthn/desktop/pkg/models"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
@@ -186,6 +187,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(sessions.NewWailsService(s.opts.Core)),
 		application.NewService(models.NewWailsService()),
 		application.NewService(firstlaunch.NewWailsService()),
+		application.NewService(integrations.NewWailsService()),
 		application.NewService(validator.NewWailsService()),
 		application.NewService(telemetry.NewService(telemetry.Options{})),
 		application.NewService(lthnservices.NewWailsService()),
