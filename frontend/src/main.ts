@@ -89,14 +89,25 @@ switch (surface) {
         tbSettings:       await i18n.T("tray.titlebar.settings"),
         footerVersion:    (await i18n.T("tray.footer.version")).replace("%s", "0.1.0"),
       });
-      let t = await loadStrings();
-
       /* Locale state for the flag-button switcher. Available locales
        * come from the binding's AvailableLanguages — for the demo
        * surface today that's en + en-au; the flag cycles through
-       * them. Persisting the choice is a follow-up (config service). */
-      let currentLang = await i18n.Language();
+       * them. Choice persists across restarts via localStorage under
+       * "lthn.locale"; config-service-backed persistence is the next
+       * step once we want sync across surfaces.
+       *
+       * MUST run before the first loadStrings() so the prefetched
+       * cache reflects the user's chosen locale, not the env-default. */
+      const LOCALE_KEY = "lthn.locale";
       const availableLangs = await i18n.AvailableLanguages();
+      let currentLang = await i18n.Language();
+      const saved = localStorage.getItem(LOCALE_KEY);
+      if (saved && availableLangs.includes(saved) && saved !== currentLang) {
+        await i18n.SetLanguage(saved);
+        currentLang = saved;
+      }
+
+      let t = await loadStrings();
       const flagFor = (lang: string): string => {
         const l = lang.toLowerCase();
         if (l === "en-au" || l === "en_au") return "🇦🇺";
@@ -108,6 +119,7 @@ switch (surface) {
         const next = availableLangs[(idx + 1) % availableLangs.length];
         await i18n.SetLanguage(next);
         currentLang = next;
+        localStorage.setItem(LOCALE_KEY, next);
         t = await loadStrings();
         draw();
       };
