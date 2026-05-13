@@ -11,6 +11,8 @@ import (
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 )
 
+const lthnYAML = "lthn.yaml"
+
 // flFixture rebinds $HOME and pre-creates the ~/Lethean/conf and data
 // dirs so each test can selectively populate them.
 func flFixture(t *core.T) (homeDir, confDir, dataDir string) {
@@ -38,7 +40,7 @@ func TestFirstLaunch_Detect_Good_Fresh(t *core.T) {
 func TestFirstLaunch_Detect_Good_ConfigFilePresent(t *core.T) {
 	_, conf, _ := flFixture(t)
 	// Config exists but has no `routes:` key.
-	core.AssertTrue(t, core.WriteFile(core.PathJoin(conf, "lthn.yaml"), []byte("name: lthn\n"), 0o644).OK)
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(conf, lthnYAML), []byte("name: lthn\n"), 0o644).OK)
 
 	r := firstlaunch.Detect(nil)
 	state := r.Value.(firstlaunch.State)
@@ -50,7 +52,7 @@ func TestFirstLaunch_Detect_Good_ConfigFilePresent(t *core.T) {
 func TestFirstLaunch_Detect_Good_RoutesConfigured(t *core.T) {
 	_, conf, _ := flFixture(t)
 	yaml := []byte("routes:\n  default:\n    base_url: http://localhost:11434/v1\n")
-	core.AssertTrue(t, core.WriteFile(core.PathJoin(conf, "lthn.yaml"), yaml, 0o644).OK)
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(conf, lthnYAML), yaml, 0o644).OK)
 
 	r := firstlaunch.Detect(nil)
 	state := r.Value.(firstlaunch.State)
@@ -73,7 +75,7 @@ func TestFirstLaunch_Detect_Good_StateDBPresent(t *core.T) {
 // stay false rather than propagating an error.
 func TestFirstLaunch_Detect_Ugly_CorruptYAML(t *core.T) {
 	_, conf, _ := flFixture(t)
-	core.AssertTrue(t, core.WriteFile(core.PathJoin(conf, "lthn.yaml"), []byte(":::not yaml:::"), 0o644).OK)
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(conf, lthnYAML), []byte(":::not yaml:::"), 0o644).OK)
 
 	r := firstlaunch.Detect(nil)
 	state := r.Value.(firstlaunch.State)
