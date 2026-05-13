@@ -17,6 +17,7 @@ class LthnModelBrowserWindow extends LitElement {
     local:    { state: true },
     loadErr:  { state: true },
     modelsDir:{ state: true },
+    diskFree: { state: true },
   };
   declare selected: string;
   declare w: number;
@@ -26,6 +27,7 @@ class LthnModelBrowserWindow extends LitElement {
   declare local: LocalModel[];
   declare loadErr: string;
   declare modelsDir: string;
+  declare diskFree: number;
   constructor() {
     super();
     this.selected = ""; this.w = 1040; this.h = 700; this.embedded = false;
@@ -33,6 +35,7 @@ class LthnModelBrowserWindow extends LitElement {
     this.local = [];
     this.loadErr = "";
     this.modelsDir = "~/.lthn/models/";
+    this.diskFree = 0;
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -47,11 +50,15 @@ class LthnModelBrowserWindow extends LitElement {
     // surfaced from the runner yet.
     try {
       const ms = await import("@desktop/models/wailsservice");
-      const entries = await ms.List();
+      const [entries, free] = await Promise.all([
+        ms.List(),
+        ms.DiskFree().catch((): number => 0),
+      ]);
       this.local = (entries || []).map(deriveLocalModel);
       if (this.local.length > 0 && !this.selected) {
         this.selected = this.local[0].id;
       }
+      if (free && free > 0) this.diskFree = free;
     } catch (err: unknown) {
       this.loadErr = err instanceof Error ? err.message : String(err);
       this.local = [];
@@ -216,7 +223,7 @@ class LthnModelBrowserWindow extends LitElement {
       subtitle: this.chrome.subtitle,
       w: this.w, h: this.h,
       toolbar, body,
-      footer: html`${local.length || 4} local · 312 GB free · ${this.modelsDir} · airplane-mode OK (browsing requires network)`,
+      footer: html`${local.length || 4} local · ${this.diskFree > 0 ? fmtBytes(this.diskFree) : "312 GB"} free · ${this.modelsDir} · airplane-mode OK (browsing requires network)`,
       embedded: this.embedded,
     });
   }

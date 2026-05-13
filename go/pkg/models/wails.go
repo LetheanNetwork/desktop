@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 
+	"dappco.re/lthn/desktop/pkg/paths"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -35,4 +36,23 @@ func (s *WailsService) List() ([]Entry, error) {
 	}
 	entries, _ := r.Value.([]Entry)
 	return entries, nil
+}
+
+// DiskFree returns the free bytes available at the models
+// directory. Drives the model-browser footer's "free" slot so the
+// number reflects the real disk underneath ~/Lethean/conf/models/.
+// Returns 0 when the syscall errors or the platform isn't wired —
+// the WebView falls back to its design literal in that case.
+//
+// Usage example (TS):
+//
+//	import { DiskFree } from "@desktop/models/wailsservice";
+//	const bytes = await DiskFree();
+func (s *WailsService) DiskFree() (int64, error) {
+	dirR := paths.ModelsDir()
+	if !dirR.OK {
+		return 0, nil
+	}
+	dir, _ := dirR.Value.(string)
+	return diskFreeBytes(dir), nil
 }
