@@ -9,6 +9,11 @@ import (
 	coreapi "dappco.re/go/api"
 )
 
+const (
+	exportSpecOp  = "api.ExportSpec"
+	generateSDKOp = "api.GenerateSDK"
+)
+
 // SpecInfo describes the OpenAPI document we generate from registered
 // RouteGroups. Static today — bumped manually when the API surface
 // breaks compatibility.
@@ -50,18 +55,18 @@ func DefaultSpecInfo() SpecInfo {
 //	}
 func ExportSpec(c *core.Core, format, path string, info SpecInfo) core.Result {
 	if c == nil {
-		return core.Fail(core.E("api.ExportSpec", "core is nil", nil))
+		return core.Fail(core.E(exportSpecOp, "core is nil", nil))
 	}
 	if path == "" {
-		return core.Fail(core.E("api.ExportSpec", "path is required", nil))
+		return core.Fail(core.E(exportSpecOp, "path is required", nil))
 	}
 	if format != "yaml" && format != "json" {
-		return core.Fail(core.E("api.ExportSpec", "format must be yaml or json", nil))
+		return core.Fail(core.E(exportSpecOp, "format must be yaml or json", nil))
 	}
 
 	apiSvc, ok := core.ServiceFor[*coreapi.Service](c, "api")
 	if !ok || apiSvc == nil || apiSvc.Engine == nil {
-		return core.Fail(core.E("api.ExportSpec", "api service not registered on core", nil))
+		return core.Fail(core.E(exportSpecOp, "api service not registered on core", nil))
 	}
 
 	builder := &coreapi.SpecBuilder{
@@ -71,7 +76,7 @@ func ExportSpec(c *core.Core, format, path string, info SpecInfo) core.Result {
 	}
 
 	if err := coreapi.ExportSpecToFile(path, format, builder, apiSvc.Engine.Groups()); err != nil {
-		return core.Fail(core.E("api.ExportSpec", "export failed", err))
+		return core.Fail(core.E(exportSpecOp, "export failed", err))
 	}
 	return core.Ok(path)
 }
@@ -92,13 +97,13 @@ func ExportSpec(c *core.Core, format, path string, info SpecInfo) core.Result {
 //	}
 func GenerateSDK(ctx context.Context, specPath, outputDir, language, packageName string) core.Result {
 	if specPath == "" {
-		return core.Fail(core.E("api.GenerateSDK", "specPath is required", nil))
+		return core.Fail(core.E(generateSDKOp, "specPath is required", nil))
 	}
 	if outputDir == "" {
-		return core.Fail(core.E("api.GenerateSDK", "outputDir is required", nil))
+		return core.Fail(core.E(generateSDKOp, "outputDir is required", nil))
 	}
 	if language == "" {
-		return core.Fail(core.E("api.GenerateSDK", "language is required", nil))
+		return core.Fail(core.E(generateSDKOp, "language is required", nil))
 	}
 
 	gen := &coreapi.SDKGenerator{
@@ -107,12 +112,12 @@ func GenerateSDK(ctx context.Context, specPath, outputDir, language, packageName
 		PackageName: packageName,
 	}
 	if !gen.Available() {
-		return core.Fail(core.E("api.GenerateSDK",
+		return core.Fail(core.E(generateSDKOp,
 			"openapi-generator-cli not on PATH — install via `npm i -g @openapitools/openapi-generator-cli`",
 			nil))
 	}
 	if err := gen.Generate(ctx, language); err != nil {
-		return core.Fail(core.E("api.GenerateSDK", "generation failed", err))
+		return core.Fail(core.E(generateSDKOp, "generation failed", err))
 	}
 	return core.Ok(outputDir)
 }

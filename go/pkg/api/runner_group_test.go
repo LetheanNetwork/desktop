@@ -18,6 +18,11 @@ import (
 	"dappco.re/lthn/desktop/pkg/runner"
 )
 
+const (
+	contentTypeHeader = "Content-Type"
+	applicationJSON   = "application/json"
+)
+
 // newTestEngine constructs a bare gin engine and registers the
 // RunnerGroup on its root RouterGroup. Mirrors what core/api's
 // Engine does internally for full coverage.
@@ -51,7 +56,7 @@ func TestRunnerGroup_Generate_EchoesPromptViaStub(t *core.T) {
 	engine := newTestEngine(t)
 	req, _ := http.NewRequest(http.MethodPost, "/v1/runner/generate",
 		core.NewReader(`{"prompt":"hello"}`))
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
@@ -66,7 +71,7 @@ func TestRunnerGroup_Generate_400OnMissingPrompt(t *core.T) {
 	engine := newTestEngine(t)
 	req, _ := http.NewRequest(http.MethodPost, "/v1/runner/generate",
 		core.NewReader(`{}`))
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
@@ -77,7 +82,7 @@ func TestRunnerGroup_Chat_RoundTripsLastUserMessage(t *core.T) {
 	engine := newTestEngine(t)
 	req, _ := http.NewRequest(http.MethodPost, "/v1/runner/chat",
 		core.NewReader(`{"messages":[{"role":"user","content":"ping"}]}`))
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
