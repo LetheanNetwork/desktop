@@ -21,6 +21,7 @@ class LthnToolsWindow extends LitElement {
     chrome: { state: true },
     toolList: { state: true },
     selectedTool: { state: true },
+    activeModel: { state: true },
   };
   declare w: number;
   declare h: number;
@@ -28,12 +29,14 @@ class LthnToolsWindow extends LitElement {
   declare chrome: { title: string; subtitle: string };
   declare toolList: ToolView[];
   declare selectedTool: string;
+  declare activeModel: string;
   constructor() {
     super();
     this.w = 1040; this.h = 700; this.embedded = false;
-    this.chrome = { title: "Tools · MCP", subtitle: "2 servers · 12 tools · 648 calls today" };
+    this.chrome = { title: "Tools · MCP", subtitle: "" };
     this.toolList = [];
     this.selectedTool = "";
+    this.activeModel = "";
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -50,6 +53,15 @@ class LthnToolsWindow extends LitElement {
     } catch (err) {
       console.error("tools: list failed", err);
       this.toolList = [];
+    }
+    // Active model — same pattern as chat-window. Empty string when
+    // the runner has no model loaded.
+    try {
+      const runner = await import("@desktop/runner/service");
+      const models = await runner.WModels().catch((): string[] => []);
+      this.activeModel = (models && models[0]) || "";
+    } catch {
+      this.activeModel = "";
     }
     // Build the subtitle from real counts — N servers (distinct
     // groups) · M tools. Falls back to the locale string when the
@@ -88,12 +100,14 @@ class LthnToolsWindow extends LitElement {
     // the panel renders a "no schema" placeholder instead.
     const selSchema = sel ? sel.schema : "";
 
+    // Toolbar shows the live active model so the user knows which
+    // model decides whether the tool list below is actually reachable
+    // via chat. "Add server" / "Reload" buttons are deliberately
+    // absent — neither has a binding behind it yet.
     const toolbar = html`
-      <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-plus" style="font-size:10px;"></i> Add server</lthn-btn>
-      <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-arrows-rotate" style="font-size:10px;"></i> Reload</lthn-btn>
       <div style="flex:1"></div>
       <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3);">
-        tool-use availability depends on model · current model: gemma-4-e2b · ✓ supports tools
+        tool-use availability depends on model · current model: ${this.activeModel || "—"}
       </span>
     `;
 
@@ -163,51 +177,37 @@ class LthnToolsWindow extends LitElement {
           </div>
           <div>
             <lthn-label>Recent calls</lthn-label>
-            <div style="margin-top:8px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05); border-radius:8px; font-family:var(--font-mono); font-size:11px;">
-              ${[
-                { t: "14:32:21", p: '{ "path": "./notes/draft.md", "content": "..." }', ms: 14, ok: true },
-                { t: "13:18:04", p: '{ "path": "./tmp/out.json", "content": "..." }', ms: 11, ok: true },
-                { t: "12:08:42", p: '{ "path": "./.cache/lock", "create": false }',    ms: 0,  ok: false },
-              ].map((c, i) => html`
-                <div style="display:grid; grid-template-columns:70px 1fr 50px 18px; padding:8px 14px; gap:10px; border-bottom:${i < 2 ? "1px solid rgba(255,255,255,0.04)" : "none"}; align-items:center;">
-                  <span style="color:var(--fg-3);">${c.t}</span>
-                  <span style="color:var(--fg-1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${c.p}</span>
-                  <span style="color:${c.ok ? "var(--fg-1)" : "var(--err-400)"}; text-align:right;">${c.ms} ms</span>
-                  <i class="fa-solid ${c.ok ? "fa-check" : "fa-xmark"}" style="font-size:10px; color:${c.ok ? "var(--success-400)" : "var(--err-400)"};"></i>
-                </div>
-              `)}
+            <div style="margin-top:8px; padding:12px 14px; border-radius:8px;
+                        background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05);
+                        font-size:12px; color:var(--fg-3); font-style:italic;">
+              Call history lands when the MCP service grows a per-tool log.
             </div>
           </div>
         </main>
 
-        <!-- try-it rail -->
+        <!-- right rail · placeholder for try-it (invoke path is not wired) -->
         <aside style="background:rgba(0,0,0,0.18); border-left:1px solid rgba(255,255,255,0.05); padding:18px; overflow:auto; display:flex; flex-direction:column; gap:12px;">
-          <lthn-label>Try it · craft a test call</lthn-label>
-          <div style="background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:10px; font-family:var(--font-mono); font-size:11.5px; line-height:1.6; color:var(--fg-1); white-space:pre; min-height:110px;">${`{
-  "path":    "./scratch/hello.txt",
-  "content": "hello, world\\n"
-}`}</div>
-          <lthn-btn tone="primary" size="md"><i class="fa-solid fa-play" style="font-size:10px;"></i> Invoke</lthn-btn>
-          <div style="padding:10px 12px; border-radius:6px; background:rgba(34,197,94,0.06); border:1px solid rgba(34,197,94,0.18); font-size:11.5px; color:var(--fg-1); line-height:1.55;">
-            <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
-              <i class="fa-solid fa-check" style="color:var(--success-400); font-size:10px;"></i>
-              <span style="color:var(--success-400); font-family:var(--font-mono); font-size:10px; letter-spacing:0.06em;">OK · 14 ms</span>
-            </div>
-            <div style="font-family:var(--font-mono); color:var(--fg-2); font-size:11px;">
-              wrote 13 bytes to ./scratch/hello.txt
-            </div>
-          </div>
-          <div style="font-size:10.5px; color:var(--fg-3); line-height:1.55;">
-            Test calls bypass the model — useful for sanity-checking a server before plumbing it into a tool-using chat.
+          <lthn-label>Try it</lthn-label>
+          <div style="padding:12px 14px; border-radius:8px;
+                      background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05);
+                      font-size:12px; color:var(--fg-3); line-height:1.55;">
+            Tool invocation from this window isn't wired yet. Tools run today through the model — pick a tool-capable model in chat and ask for the action it should take.
           </div>
         </aside>
       </div>
     `;
 
+    // Footer reflects what's actually known: group + tool counts from the
+    // live registry. "calls today" / "% ok" wait on the call log.
+    const groupCount = new Set(this.toolList.map(t => t.group)).size;
+    const footer = this.toolList.length === 0
+      ? html`No MCP tools registered`
+      : html`${groupCount} ${groupCount === 1 ? "group" : "groups"} · ${this.toolList.length} ${this.toolList.length === 1 ? "tool" : "tools"} · sourced from the MCP registry`;
+
     return renderChrome({
       title: this.chrome.title, subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, toolbar, body,
-      footer: html`~/.lthn/mcp.json · 5 servers configured · 3 enabled · 648 calls today · 99.4 % ok`,
+      footer,
       embedded: this.embedded,
     });
   }
