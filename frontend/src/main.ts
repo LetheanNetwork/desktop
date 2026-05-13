@@ -478,7 +478,7 @@ switch (surface) {
           state.lastInteract = (sessionList || []).reduce(
             (max: number, s: unknown) => {
               const u = (s as { updated_at?: number }).updated_at || 0;
-              return u > max ? u : max;
+              return Math.max(u, max);
             },
             0,
           );
