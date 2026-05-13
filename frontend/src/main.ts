@@ -511,7 +511,9 @@ switch (surface) {
       // Tray polling cadence reads from the same localStorage key
       // Settings → Telemetry writes. "off" → fixed first-sample only.
       const v = localStorage.getItem("lthn.telemetry.interval") || "2s";
-      const ms = v === "off" ? 0 : (parseInt((/^(\d+)s$/.exec(v) || [, "2"])[1], 10) * 1000);
+      const intervalMatch = /^(\d+)s$/.exec(v);
+      const intervalSeconds = intervalMatch?.[1] || "2";
+      const ms = v === "off" ? 0 : (parseInt(intervalSeconds, 10) * 1000);
       if (ms > 0) {
         const id = setInterval(poll, ms);
         window.addEventListener("beforeunload", () => clearInterval(id));
