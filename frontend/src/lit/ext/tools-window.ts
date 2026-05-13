@@ -21,6 +21,7 @@ class LthnToolsWindow extends LitElement {
     chrome: { state: true },
     toolList: { state: true },
     selectedTool: { state: true },
+    activeModel: { state: true },
   };
   declare w: number;
   declare h: number;
@@ -28,12 +29,14 @@ class LthnToolsWindow extends LitElement {
   declare chrome: { title: string; subtitle: string };
   declare toolList: ToolView[];
   declare selectedTool: string;
+  declare activeModel: string;
   constructor() {
     super();
     this.w = 1040; this.h = 700; this.embedded = false;
     this.chrome = { title: "Tools · MCP", subtitle: "2 servers · 12 tools · 648 calls today" };
     this.toolList = [];
     this.selectedTool = "";
+    this.activeModel = "gemma-4-e2b";
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -51,6 +54,14 @@ class LthnToolsWindow extends LitElement {
       console.error("tools: list failed", err);
       this.toolList = [];
     }
+    // Toolbar's "current model: X" slot — same source-of-truth as
+    // chat-window. Keeps the gemma-4-e2b fallback so the design
+    // string still reads coherently if WModels() returns empty.
+    try {
+      const runner = await import("@desktop/runner/service");
+      const models = await runner.WModels().catch((): string[] => []);
+      if (models && models[0]) this.activeModel = models[0];
+    } catch { /* keep fallback */ }
     // Build the subtitle from real counts — N servers (distinct
     // groups) · M tools. Falls back to the locale string when the
     // list is empty.
@@ -93,7 +104,7 @@ class LthnToolsWindow extends LitElement {
       <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-arrows-rotate" style="font-size:10px;"></i> Reload</lthn-btn>
       <div style="flex:1"></div>
       <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3);">
-        tool-use availability depends on model · current model: gemma-4-e2b · ✓ supports tools
+        tool-use availability depends on model · current model: ${this.activeModel} · ✓ supports tools
       </span>
     `;
 
