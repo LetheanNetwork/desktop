@@ -7,6 +7,11 @@
 **Branch:** `main`
 **Spawned:** 2026-05-13
 
+> Please use TDD. You can test the UI with `bun run test` (vitest +
+> happy-dom; see `frontend/src/lit/chrome.test.ts` for the canonical
+> pattern). Use the AX `_Good` / `_Bad` / `_Ugly` triplet pattern for
+> Go tests. Keep codecov over 70%.
+
 ---
 
 ## Objective
