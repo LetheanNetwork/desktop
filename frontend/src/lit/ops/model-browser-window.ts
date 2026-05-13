@@ -191,9 +191,9 @@ class LthnModelBrowserWindow extends LitElement {
             <lthn-btn tone="ghost" size="md"><i class="fa-solid fa-thumbtack" style="font-size:10px;"></i></lthn-btn>
           </div>
           <div style="display:flex; flex-direction:column; gap:8px; font-size:11.5px;">
-            <lthn-rail-row k="Family"        v="Gemma 4"></lthn-rail-row>
-            <lthn-rail-row k="Parameters"    v="2 B"></lthn-rail-row>
-            <lthn-rail-row k="Quantisation"  v="q4_k_m"></lthn-rail-row>
+            <lthn-rail-row k="Family"        v=${selected ? selFamily : "Gemma 4"}></lthn-rail-row>
+            <lthn-rail-row k="Parameters"    v=${selected ? modelParams(selected.name) : "2 B"}></lthn-rail-row>
+            <lthn-rail-row k="Quantisation"  v=${selected ? modelQuant(selected.name) : "q4_k_m"}></lthn-rail-row>
             <lthn-rail-row k="Context"       v="8,192"></lthn-rail-row>
             <lthn-rail-row k="Vocabulary"    v="262,144"></lthn-rail-row>
             <lthn-rail-row k="Architecture"  v="MoE · 4-expert"></lthn-rail-row>
@@ -284,6 +284,22 @@ function modelFamily(name: string): string {
   if (n.startsWith("mixtral")) return "Mistral";
   if (n.startsWith("granite")) return "Granite";
   return "Local";
+}
+
+/** Pull a parameter-count tag from the filename — best-effort regex.
+ *  Matches patterns like "7B", "2b", "0.5B", "70b-instruct". Returns
+ *  "—" when no match so the detail-rail slot reads honestly. */
+function modelParams(name: string): string {
+  const m = name.match(/(\d+(?:\.\d+)?)\s*[Bb](?:[-._]|$)/);
+  return m ? `${m[1]} B` : "—";
+}
+
+/** Pull a quantisation tag from the filename — q4_k_m, Q4_K_M, q8_0,
+ *  fp16, bf16, etc. Returns "—" when nothing matches. */
+function modelQuant(name: string): string {
+  const n = name.toLowerCase();
+  const m = n.match(/(q\d+_[a-z0-9_]+|q\d+_\d+|fp16|fp32|bf16|int8|int4|nf4)/);
+  return m ? m[1] : "—";
 }
 
 /** Slug for the LocalModel.id field — lowercase, kebab-case. Falls
