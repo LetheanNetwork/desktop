@@ -92,6 +92,50 @@ MANIFEST=(
   "rust-axum|rust-axum|Axum server stub — scaffold a Rust service implementing the lthn API surface."
 )
 
+# Per-flavour --additional-properties layered ON TOP OF the TS/JS
+# defaults (npmName / supportsES6) the generator block sets up below.
+# These knobs are what actually make each SDK feel idiomatic for its
+# ecosystem — modern HTTP libraries, async/await variants, framework
+# version targets, namespace conventions, etc.
+#
+# Keys MISSING from this map leave the generator with its built-in
+# defaults. See https://openapi-generator.tech/docs/generators/<name>
+# for the full per-generator option catalogue.
+declare -A PROPS=(
+  # ── TypeScript / JavaScript ────────────────────────────────────────
+  [typescript-fetch]="withInterfaces=true,useSingleRequestParameter=true,stringEnums=true,nullSafeAdditionalProps=true"
+  [typescript-axios]="withInterfaces=true,withSeparateModelsAndApi=true,apiPackage=apis,modelPackage=models,stringEnums=true"
+  [typescript-angular]="providedInRoot=true,useSingleRequestParameter=true,stringEnums=true"
+  [typescript-rxjs]="withInterfaces=true"
+  [typescript-node]="stringEnums=true"
+  [javascript]="usePromises=true,useES6=true"
+  # ── Apple ──────────────────────────────────────────────────────────
+  [swift5]="responseAs=AsyncAwait,useSPMFileStructure=true,projectName=LthnApi,podName=LthnApi"
+  [swift-combine]="responseAs=Combine,useSPMFileStructure=true,projectName=LthnApi,podName=LthnApi"
+  [objc]="classPrefix=LTN,podName=LthnApi"
+  # ── Android / JVM ──────────────────────────────────────────────────
+  [kotlin]="library=jvm-retrofit2,serializationLibrary=kotlinx_serialization,groupId=ai.lthn,packageName=ai.lthn.sdk,artifactId=sdk-kotlin"
+  [java]="library=okhttp-gson,useJakartaEe=true,dateLibrary=java8,groupId=ai.lthn,artifactId=sdk-java,invokerPackage=ai.lthn.sdk,apiPackage=ai.lthn.sdk.api,modelPackage=ai.lthn.sdk.model"
+  # ── .NET ───────────────────────────────────────────────────────────
+  [csharp]="targetFramework=net8.0,library=httpclient,useDateTimeOffset=true,nullableReferenceTypes=true,packageName=Lthn.Api"
+  # ── Server / scripting ─────────────────────────────────────────────
+  [python]="packageName=lthn_api,projectName=lthn-api,library=urllib3"
+  [php]="composerVendorName=lthn,composerProjectName=sdk,invokerPackage=Lthn\\\\Api,srcBasePath=src,packageName=Lthn\\\\Api"
+  [ruby]="gemName=lthn_api,moduleName=LthnApi,library=faraday,gemVersion=0.1.0"
+  [go]="packageName=lthnapi,withGoMod=true,generateInterfaces=true,withGoCodegenComment=true,isGoSubmodule=false"
+  # ── Native ─────────────────────────────────────────────────────────
+  [rust]="packageName=lthn-api,supportAsync=true,useSingleRequestParameter=true,bestFitInt=true"
+  [rust-axum]="packageName=lthn-api-server"
+  [c]="packageName=lthn_api"
+  [cpp-restsdk]="packageName=lthn::api,modelNamePrefix=Lthn"
+  [cpp-qt]="cppNamespace=lthn"
+  [cpp-tiny]="packageName=lthn_api"
+  [cpp-ue4]="packageName=lthn_api"
+  # ── Flutter / Dart ─────────────────────────────────────────────────
+  [dart]="pubName=lthn_api,pubLibrary=lthn_api.api,pubVersion=0.1.0"
+  [dart-dio]="pubName=lthn_api,pubLibrary=lthn_api.api,pubVersion=0.1.0"
+)
+
 # Filter to selected ids if any were passed as args.
 select_ids=("$@")
 should_skip() {
@@ -125,17 +169,27 @@ for row in "${MANIFEST[@]}"; do
   echo "  $id  →  $remote_url"
   echo "═══════════════════════════════════════════════════════════════"
 
-  # Per-generator --additional-properties. TS/JS generators consume
-  # npmName + npmVersion; other generators have their own knobs
-  # (Swift's projectName, Rust's packageName, ObjC's classPrefix, …).
-  # We let the native generators use their defaults rather than pass
-  # a one-size-fits-all key that they'd warn about and ignore.
-  props=""
+  # Per-generator --additional-properties. Two layers:
+  #
+  #   1. base — TS/JS get the npm-shaped defaults (npmName, supportsES6).
+  #      Other generators don't have an equivalent floor.
+  #   2. per-flavour — the PROPS map above. High-impact knobs that
+  #      pick the right HTTP library, modern language features, idiomatic
+  #      package naming, etc. Layered ON TOP OF the base.
+  #
+  # Both are merged into a single comma-separated string the CLI accepts
+  # via --additional-properties. Missing entries in PROPS leave the
+  # generator on its built-in defaults — a deliberate quiet zone.
+  base=""
   case "$gen" in
     typescript*|javascript*)
-      props="npmName=$npm_name,npmVersion=0.1.0,supportsES6=true"
+      base="npmName=$npm_name,npmVersion=0.1.0,supportsES6=true"
       ;;
   esac
+  extra="${PROPS[$id]:-}"
+  props=""
+  [ -n "$base" ] && props="$base"
+  [ -n "$extra" ] && props="${props:+$props,}$extra"
 
   # Global properties — applied to every generator. Forces uniform
   # output across the family:
