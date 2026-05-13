@@ -46,6 +46,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/integrations"
 	"dappco.re/lthn/desktop/pkg/lint"
 	"dappco.re/lthn/desktop/pkg/models"
+	"dappco.re/lthn/desktop/pkg/repos"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
 	"dappco.re/lthn/desktop/pkg/sessions"
@@ -200,6 +201,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(build.NewService(s.opts.Core)),
 		application.NewService(container.NewService(s.opts.Core)),
 		application.NewService(lint.NewService(s.opts.Core)),
+		application.NewService(repos.NewService(s.opts.Core)),
 		application.NewService(tools.NewWailsService(s.opts.Core)),
 		application.NewService(validator.NewWailsService()),
 		application.NewService(telemetry.NewService(telemetry.Options{})),

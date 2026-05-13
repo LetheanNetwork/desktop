@@ -195,6 +195,13 @@ func windowRegistry() []WindowSpec {
 			DisableNativeContextMenu: true,
 		},
 		{
+			Name: "repos", Title: "Repos",
+			Width: 1180, Height: 760, MinWidth: 720, MinHeight: 460,
+			Frameless: true, HideOnClose: true, EnableFileDrop: false,
+			InvisibleTitleBarHeight:  titleBarH,
+			DisableNativeContextMenu: true,
+		},
+		{
 			Name: "about", Title: "About Lethean Desktop",
 			// Genuinely fixed size — Min == Max == Width/Height +
 			// DisableResize for the splash-card feel.

@@ -397,6 +397,7 @@
     "build":        { "title": "构建",  "subtitle": "检测 · 运行 · 流式输出" },
     "lint":         { "title": "Lint",  "subtitle": "规则 · 严重性 · 文件 · 行号" },
     "containers":   { "title": "容器",  "subtitle": "运行时 · 镜像 · 状态 · 日志" },
+    "repos":        { "title": "仓库",  "subtitle": "分支 · 领先 · 落后 · 脏" },
     "welcome":      {
       "title": "欢迎使用 lthn", "subtitle": "步骤 %s / 3",
       "step1_label": "模型目录", "step1_hint": "模型存储位置",
