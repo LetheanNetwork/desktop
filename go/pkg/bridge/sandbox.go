@@ -30,11 +30,11 @@ func (s *Service) toolSandboxDetect() map[string]any {
 	if sb == nil {
 		return map[string]any{"ok": false, "error": "sandbox service unavailable"}
 	}
-	out, err := sb.Detect()
-	if err != nil {
-		return map[string]any{"ok": false, "error": err.Error()}
+	r := sb.Detect()
+	if !r.OK {
+		return map[string]any{"ok": false, "error": r.Error()}
 	}
-	return map[string]any{"ok": true, "value": out}
+	return map[string]any{"ok": true, "value": r.Value}
 }
 
 // toolSandboxSpawn fires a one-shot container via sandbox.Spawn.
@@ -51,9 +51,9 @@ func (s *Service) toolSandboxSpawn(params map[string]any) map[string]any {
 		Runtime:        paramString(params, "runtime", ""),
 		TimeoutSeconds: paramInt(params, "timeout_seconds", 0),
 	}
-	out, err := sb.Spawn(input)
-	if err != nil {
-		return map[string]any{"ok": false, "error": err.Error()}
+	r := sb.Spawn(input)
+	if !r.OK {
+		return map[string]any{"ok": false, "error": r.Error()}
 	}
-	return map[string]any{"ok": true, "value": out}
+	return map[string]any{"ok": true, "value": r.Value}
 }

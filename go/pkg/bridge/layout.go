@@ -29,15 +29,15 @@ import (
 
 // WindowState is the serialised shape of one window in a layout.
 type WindowState struct {
-	Name         string `json:"name"`
-	X            int    `json:"x"`
-	Y            int    `json:"y"`
-	Width        int    `json:"width"`
-	Height       int    `json:"height"`
-	Visible      bool   `json:"visible"`
-	Maximised    bool   `json:"maximised,omitempty"`
-	Fullscreen   bool   `json:"fullscreen,omitempty"`
-	AlwaysOnTop  bool   `json:"always_on_top,omitempty"`
+	Name        string `json:"name"`
+	X           int    `json:"x"`
+	Y           int    `json:"y"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	Visible     bool   `json:"visible"`
+	Maximised   bool   `json:"maximised,omitempty"`
+	Fullscreen  bool   `json:"fullscreen,omitempty"`
+	AlwaysOnTop bool   `json:"always_on_top,omitempty"`
 }
 
 // Layout is the serialised shape of a saved layout file.
@@ -49,16 +49,16 @@ type Layout struct {
 
 // layoutsRoot returns $HOME/Lethean/conf/layouts. Mirrors the
 // pkg/plugin install-root pattern — visible under ~/Lethean/.
-func layoutsRoot() (string, core.Result) {
+func layoutsRoot() core.Result {
 	home := core.UserHomeDir()
 	if !home.OK {
-		return "", core.Fail(core.E("bridge.layoutsRoot", "home dir unavailable", nil))
+		return core.Fail(core.E("bridge.layoutsRoot", "home dir unavailable", nil))
 	}
 	homeDir, _ := home.Value.(string)
 	if homeDir == "" {
-		return "", core.Fail(core.E("bridge.layoutsRoot", "home dir empty", nil))
+		return core.Fail(core.E("bridge.layoutsRoot", "home dir empty", nil))
 	}
-	return core.PathJoin(homeDir, "Lethean", "conf", "layouts"), core.Ok(nil)
+	return core.Ok(core.PathJoin(homeDir, "Lethean", "conf", "layouts"))
 }
 
 // captureLayout snapshots every Wails-registered window into a Layout.
@@ -161,10 +161,11 @@ func (s *Service) toolLayoutSave(params map[string]any) map[string]any {
 	if errResp != nil {
 		return errResp
 	}
-	root, res := layoutsRoot()
-	if !res.OK {
-		return map[string]any{"ok": false, "error": res.Error()}
+	rootResult := layoutsRoot()
+	if !rootResult.OK {
+		return map[string]any{"ok": false, "error": rootResult.Error()}
 	}
+	root := rootResult.Value.(string)
 	if r := core.MkdirAll(root, 0o755); !r.OK {
 		return map[string]any{"ok": false, "error": "mkdir " + root + ": " + r.Error()}
 	}
@@ -213,10 +214,11 @@ func (s *Service) toolLayoutGet(params map[string]any) map[string]any {
 
 // toolLayoutList enumerates every saved layout.
 func (s *Service) toolLayoutList() map[string]any {
-	root, res := layoutsRoot()
-	if !res.OK {
-		return map[string]any{"ok": false, "error": res.Error()}
+	rootResult := layoutsRoot()
+	if !rootResult.OK {
+		return map[string]any{"ok": false, "error": rootResult.Error()}
 	}
+	root := rootResult.Value.(string)
 	listing := core.ReadDir(core.DirFS(root), ".")
 	if !listing.OK {
 		// Empty dir is fine — return an empty list.
@@ -253,10 +255,11 @@ func (s *Service) toolLayoutDelete(params map[string]any) map[string]any {
 	if name == "" {
 		return map[string]any{"ok": false, "error": "name param required"}
 	}
-	root, res := layoutsRoot()
-	if !res.OK {
-		return map[string]any{"ok": false, "error": res.Error()}
+	rootResult := layoutsRoot()
+	if !rootResult.OK {
+		return map[string]any{"ok": false, "error": rootResult.Error()}
 	}
+	root := rootResult.Value.(string)
 	path := core.PathJoin(root, name+".json")
 	if r := core.RemoveAll(path); !r.OK {
 		return map[string]any{"ok": false, "error": "remove " + path + ": " + r.Error()}
@@ -597,10 +600,11 @@ func (s *Service) toolLayoutWorkflow(params map[string]any) map[string]any {
 
 // loadLayout reads + parses a saved layout file.
 func (s *Service) loadLayout(name string) (*Layout, map[string]any) {
-	root, res := layoutsRoot()
-	if !res.OK {
-		return nil, map[string]any{"ok": false, "error": res.Error()}
+	rootResult := layoutsRoot()
+	if !rootResult.OK {
+		return nil, map[string]any{"ok": false, "error": rootResult.Error()}
 	}
+	root := rootResult.Value.(string)
 	path := core.PathJoin(root, name+".json")
 	read := core.ReadFile(path)
 	if !read.OK {

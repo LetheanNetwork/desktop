@@ -45,6 +45,8 @@ type Service struct {
 
 // NewService returns the canonical Core service factory.
 //
+// Usage example:
+//
 //	core.WithName("sandbox", sandbox.NewService(sandbox.Options{}))
 func NewService(opts Options) func(*core.Core) core.Result {
 	return func(c *core.Core) core.Result {
@@ -53,6 +55,15 @@ func NewService(opts Options) func(*core.Core) core.Result {
 		}
 		return core.Ok(svc)
 	}
+}
+
+// Register constructs the sandbox service for Core registration.
+//
+// Usage example:
+//
+//	core.New(core.WithService(sandbox.Register))
+func Register(c *core.Core) core.Result {
+	return NewService(Options{})(c)
 }
 
 // ServiceName labels the binding namespace exposed to JS.
@@ -106,17 +117,17 @@ type SpawnOutput struct {
 //   - Docker / Podman: shells out via process.Service. A real
 //     DockerProvider / PodmanProvider belongs upstream in
 //     go-container; lthn-desktop ships the placeholder until then.
-func (s *Service) Spawn(input SpawnInput) (SpawnOutput, error) {
-	if core.Trim(input.Image) == "" {
-		input.Image = s.resolveDefaultImage()
+func (s *Service) Spawn(input SpawnInput) core.Result {
+	prepared := s.prepareSpawnInput(input)
+	if !prepared.OK {
+		return prepared
 	}
-	if core.Trim(input.Command) == "" {
-		return SpawnOutput{}, core.E("sandbox.Spawn", "command is required", nil)
+	input = prepared.Value.(SpawnInput)
+	rtResult := s.resolveRuntime(input.Runtime)
+	if !rtResult.OK {
+		return rtResult
 	}
-	rt, err := s.resolveRuntime(input.Runtime)
-	if err != nil {
-		return SpawnOutput{}, err
-	}
+	rt := rtResult.Value.(container.RuntimeType)
 	timeout := time.Duration(input.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 60 * time.Second
@@ -127,15 +138,25 @@ func (s *Service) Spawn(input SpawnInput) (SpawnOutput, error) {
 	return s.spawnViaCLI(rt, input, timeout)
 }
 
+func (s *Service) prepareSpawnInput(input SpawnInput) core.Result {
+	if core.Trim(input.Image) == "" {
+		input.Image = s.resolveDefaultImage()
+	}
+	if core.Trim(input.Command) == "" {
+		return core.Fail(core.E("sandbox.Spawn", "command is required", nil))
+	}
+	return core.Ok(input)
+}
+
 // spawnApple routes through dappco.re/go/container.AppleProvider —
 // the canonical Provider implementation for macOS 26+ native
 // containers. Bundles the EntryPoint into a ContainerConfig + waits
 // for exit via the provider's Wait machinery.
-func (s *Service) spawnApple(input SpawnInput, timeout time.Duration) (SpawnOutput, error) {
+func (s *Service) spawnApple(input SpawnInput, timeout time.Duration) core.Result {
 	provider := container.NewAppleProvider()
 	if !provider.Available() {
-		return SpawnOutput{}, core.E("sandbox.spawnApple",
-			"AppleProvider not available — install Apple Container CLI on macOS 26+", nil)
+		return core.Fail(core.E("sandbox.spawnApple",
+			"AppleProvider not available - install Apple Container CLI on macOS 26+", nil))
 	}
 	// For proof-of-life we treat the image string as an already-
 	// pulled OCI tag; AppleProvider's Build() expects a Containerfile
@@ -156,10 +177,10 @@ func (s *Service) spawnApple(input SpawnInput, timeout time.Duration) (SpawnOutp
 		container.WithName(core.Sprintf("lthn-sandbox-%d", started.UnixNano())),
 	)
 	if err != nil {
-		return SpawnOutput{}, core.E("sandbox.spawnApple", "run: "+err.Error(), nil)
+		return core.Fail(core.E("sandbox.spawnApple", "run failed", err))
 	}
 	if waitErr := provider.Wait(ctx, ctr.ID); waitErr != nil {
-		return SpawnOutput{}, core.E("sandbox.spawnApple", "wait: "+waitErr.Error(), nil)
+		return core.Fail(core.E("sandbox.spawnApple", "wait failed", waitErr))
 	}
 	dur := time.Since(started).Milliseconds()
 	// AppleProvider's Container struct has Status but no ExitCode
@@ -169,49 +190,51 @@ func (s *Service) spawnApple(input SpawnInput, timeout time.Duration) (SpawnOutp
 	if ctr.Status == container.StatusError {
 		exit = -1
 	}
-	return SpawnOutput{
+	return core.Ok(SpawnOutput{
 		Runtime:    string(container.RuntimeApple),
 		Image:      input.Image,
 		Command:    input.Command,
-		Stdout:     "(AppleProvider doesn't surface stdout for one-shot Run today — extend its Logs() to capture for proof-of-life)",
+		Stdout:     "(AppleProvider doesn't surface stdout for one-shot Run today - extend its Logs() to capture for proof-of-life)",
 		ExitCode:   exit,
 		DurationMs: dur,
-	}, nil
+	})
 }
 
 // spawnViaCLI is the proof-of-life path for Docker / Podman until
 // go-container ships real providers for them. process.Service runs
 // `<runtime> run --rm <image> <command> <args...>` and captures
 // combined stdout.
-func (s *Service) spawnViaCLI(rt container.RuntimeType, input SpawnInput, timeout time.Duration) (SpawnOutput, error) {
+func (s *Service) spawnViaCLI(rt container.RuntimeType, input SpawnInput, timeout time.Duration) core.Result {
 	ps := s.proc()
 	if ps == nil {
-		return SpawnOutput{}, core.E("sandbox.spawnViaCLI", "process service unavailable", nil)
+		return core.Fail(core.E("sandbox.spawnViaCLI", "process service unavailable", nil))
 	}
-	binary, runArgs, err := s.buildRunArgs(rt, input)
-	if err != nil {
-		return SpawnOutput{}, err
+	argsResult := s.buildRunArgs(rt, input)
+	if !argsResult.OK {
+		return argsResult
 	}
+	run := argsResult.Value.(runCommand)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	started := time.Now()
-	r := ps.Run(ctx, binary, runArgs...)
+	r := ps.Run(ctx, run.Binary, run.Args...)
 	dur := time.Since(started).Milliseconds()
 	exit := 0
+	out, _ := r.Value.(string)
 	if !r.OK {
 		// process.Service surfaces non-zero exit as Fail; treat as
 		// partial success — the container ran, just exited non-zero.
 		exit = -1
+		out = r.Error()
 	}
-	out, _ := r.Value.(string)
-	return SpawnOutput{
+	return core.Ok(SpawnOutput{
 		Runtime:    string(rt),
 		Image:      input.Image,
 		Command:    input.Command,
 		Stdout:     out,
 		ExitCode:   exit,
 		DurationMs: dur,
-	}, nil
+	})
 }
 
 // resolveDefaultImage returns Options.DefaultImage when set, else
@@ -228,47 +251,48 @@ func (s *Service) resolveDefaultImage() string {
 // resolveRuntime picks a container runtime. If `prefer` is set we
 // require that specific runtime; otherwise we ask
 // dappco.re/go/container.Detect() for the highest-priority alive.
-func (s *Service) resolveRuntime(prefer string) (container.RuntimeType, error) {
+func (s *Service) resolveRuntime(prefer string) core.Result {
 	if prefer != "" {
 		rt := container.RuntimeType(prefer)
 		if !container.HasRuntime(rt) {
-			return "", core.E("sandbox.resolveRuntime", "requested runtime not available: "+prefer, nil)
+			return core.Fail(core.E("sandbox.resolveRuntime", "requested runtime not available: "+prefer, nil))
 		}
-		return rt, nil
+		return core.Ok(rt)
 	}
 	detected := container.Detect()
 	if detected.Type == container.RuntimeNone {
-		return "", core.E("sandbox.resolveRuntime", "no container runtime detected", nil)
+		return core.Fail(core.E("sandbox.resolveRuntime", "no container runtime detected", nil))
 	}
-	return detected.Type, nil
+	return core.Ok(detected.Type)
+}
+
+type runCommand struct {
+	Binary string
+	Args   []string
 }
 
 // buildRunArgs constructs the `<runtime> run --rm <image> <cmd> <args...>`
 // invocation. Each runtime has slightly different flag shape; we
 // only need the lowest common denominator for proof-of-life.
-func (s *Service) buildRunArgs(rt container.RuntimeType, input SpawnInput) (
-	string,
-	[]string,
-	error,
-) {
+func (s *Service) buildRunArgs(rt container.RuntimeType, input SpawnInput) core.Result {
 	cmd := []string{"run", "--rm"}
 	switch rt {
 	case container.RuntimeDocker:
 		// Docker's `--rm` auto-removes after exit. Good for one-shot.
 		cmd = append(cmd, input.Image, input.Command)
 		cmd = append(cmd, input.Args...)
-		return "docker", cmd, nil
+		return core.Ok(runCommand{Binary: "docker", Args: cmd})
 	case container.RuntimePodman:
 		cmd = append(cmd, input.Image, input.Command)
 		cmd = append(cmd, input.Args...)
-		return "podman", cmd, nil
+		return core.Ok(runCommand{Binary: "podman", Args: cmd})
 	case container.RuntimeApple:
 		// Apple Container CLI mirrors Docker run semantics.
 		cmd = append(cmd, input.Image, input.Command)
 		cmd = append(cmd, input.Args...)
-		return "container", cmd, nil
+		return core.Ok(runCommand{Binary: "container", Args: cmd})
 	default:
-		return "", nil, core.E("sandbox.buildRunArgs", "runtime not supported for spawn: "+string(rt), nil)
+		return core.Fail(core.E("sandbox.buildRunArgs", "runtime not supported for spawn: "+string(rt), nil))
 	}
 }
 
@@ -281,12 +305,12 @@ type DetectOutput struct {
 
 // Detect surfaces what runtimes the host has, with `preferred`
 // pointing at the highest-priority alive one (or empty when none).
-func (s *Service) Detect() (DetectOutput, error) {
+func (s *Service) Detect() core.Result {
 	all := container.DetectAll()
 	preferred := ""
 	chosen := container.Detect()
 	if chosen.Type != container.RuntimeNone {
 		preferred = string(chosen.Type)
 	}
-	return DetectOutput{Available: all, Preferred: preferred}, nil
+	return core.Ok(DetectOutput{Available: all, Preferred: preferred})
 }
