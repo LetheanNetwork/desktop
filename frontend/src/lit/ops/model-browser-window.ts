@@ -129,7 +129,7 @@ class LthnModelBrowserWindow extends LitElement {
               <i class="fa-solid fa-magnifying-glass" style="font-size:11px; color:var(--fg-3);"></i>
               <span style="font-size:12.5px; color:var(--fg-1);">coder · gguf · q4_k_m</span>
               <div style="flex:1"></div>
-              <span style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);">5 results · huggingface.co</span>
+              <span style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);">${results.length} results · huggingface.co</span>
             </div>
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
               ${["Gemma","Llama","Phi","Qwen","Mistral","≤ 5 GB","≤ 10 GB","Has vision","Has tools"].map((f, i) => html`

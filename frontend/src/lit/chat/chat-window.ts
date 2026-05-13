@@ -507,7 +507,7 @@ class LthnChatWindow extends LitElement {
               : html`<lthn-glyph size="12" color="var(--brand-200)"></lthn-glyph>`}
           </div>
           <div style="font-size:12px; font-weight:600; color:var(--fg-0); letter-spacing:-0.005em;">
-            ${isYou ? "You" : "Gemma 4 E2B"}
+            ${isYou ? "You" : (this.activeModel || "Gemma 4 E2B")}
           </div>
           <div style="flex:1"></div>
           ${!streaming ? html`
