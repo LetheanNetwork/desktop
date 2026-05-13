@@ -70,6 +70,8 @@ export interface LocalModel {
   family: string;            // "Gemma" / "Llama" / "Phi" / "Qwen"
   size:   string;            // human-readable "2.1 GB"
   status: LocalModelStatus;
+  path?:  string;            // absolute on-disk path from models.Entry
+  isDir?: boolean;           // true when the entry is a folder, false for a single .gguf
 }
 
 /* ── chrome primitives (lit-chrome) ────────────────────────────── */
