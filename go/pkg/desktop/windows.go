@@ -347,3 +347,53 @@ func openWindow(app *application.App, name string) {
 	w.Show()
 	w.Focus()
 }
+
+// openPluginWindow creates (or re-shows) a Wails window for one
+// installed plugin. Each plugin code keys its own window — clicking
+// the same plugin twice focuses the existing window rather than
+// opening a duplicate, but plugins A and B can be open at the same
+// time. Multi-window matches the rest of lthn's tray-driven UX.
+//
+// The URL is /?surface=plugin&code=<code>; main.ts dispatches into
+// the plugin-window Lit element which renders an iframe pointed at
+// /v1/api/plugin/<namespace>/<ui.entrypoint> when the manifest
+// declares a UI surface, or a status card otherwise.
+func openPluginWindow(app *application.App, code string) {
+	wName := "plugin-" + code
+	if w, ok := app.Window.GetByName(wName); ok {
+		w.Show()
+		w.Focus()
+		return
+	}
+	titleBarH := 36 // matches every other Lethean-5 chromed window
+	w := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:                       wName,
+		Title:                      "Plugin · " + code,
+		Width:                      1180,
+		Height:                     760,
+		MinWidth:                   720,
+		MinHeight:                  460,
+		Frameless:                  true,
+		Hidden:                     true,
+		EnableFileDrop:             false,
+		URL:                        "/?surface=plugin&code=" + code,
+		BackgroundColour:           application.NewRGBA(0, 0, 0, 0),
+		DefaultContextMenuDisabled: true,
+		Mac: application.MacWindow{
+			InvisibleTitleBarHeight: titleBarH,
+			WebviewPreferences: application.MacWebviewPreferences{
+				AllowsBackForwardNavigationGestures: u.False,
+			},
+		},
+	})
+	// Plugin windows hide on close — the plugin keeps running in
+	// the background. Stop+Remove kills the process; closing the
+	// window just hides the UI.
+	w.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		w.Hide()
+		e.Cancel()
+	})
+	registerWindowEvents(app, w)
+	w.Show()
+	w.Focus()
+}

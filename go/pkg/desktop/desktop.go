@@ -429,6 +429,30 @@ func (s *Service) Run() core.Result {
 		openWindow(s.app, "settings")
 		s.app.Event.Emit("lthn:tray:open", "settings")
 	})
+
+	// Plugins — dynamic per-plugin menu entries surfaced from
+	// the running plugin host. Each installed plugin with a
+	// manifest.menu block gets one entry; clicking opens a
+	// generic "plugin" window with ?code=<code> so the Lit
+	// router can mount the plugin's UI (iframe via
+	// ui.entrypoint when declared).
+	if pluginSvc != nil {
+		if entries, err := pluginSvc.Menus(); err == nil && len(entries) > 0 {
+			menu.AddSeparator()
+			for _, e := range entries {
+				code := e.Code
+				label := e.Label
+				if !e.Running {
+					label = label + " · stopped"
+				}
+				menu.Add(label).OnClick(func(_ *application.Context) {
+					openPluginWindow(s.app, code)
+					s.app.Event.Emit("lthn:tray:open", "plugin:"+code)
+				})
+			}
+		}
+	}
+
 	menu.AddSeparator()
 	menu.Add("About lthn").OnClick(func(_ *application.Context) {
 		openWindow(s.app, "about")
