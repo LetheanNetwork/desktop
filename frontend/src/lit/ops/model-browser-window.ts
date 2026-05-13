@@ -374,7 +374,7 @@ function modelQuant(name: string): string {
 /** Slug for the LocalModel.id field — lowercase, kebab-case. Falls
  *  back to "model" when the source name is empty. */
 function modelSlug(name: string): string {
-  const s = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const s = name.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/^-+|-+$/g, "");
   return s || "model";
 }
 
