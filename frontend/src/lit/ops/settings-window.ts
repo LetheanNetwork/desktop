@@ -80,6 +80,7 @@ class LthnSettingsWindow extends LitElement {
     versionL: string; versionH: string;
     goToolchainL: string; platformL: string; cpusL: string; cpusH: string;
     emptyRoutes: string;
+    footer: string;
   };
   constructor() {
     super();
@@ -153,6 +154,7 @@ class LthnSettingsWindow extends LitElement {
       cpusL: "CPUs",
       cpusH: "Logical cores Go's runtime sees.",
       emptyRoutes: "No routes configured. The runner falls back to an echo stub — useful for sanity checks but nothing real will answer.",
+      footer: "Changes apply immediately · ⌘W to close · the runner keeps running",
     };
   }
 
@@ -203,7 +205,7 @@ class LthnSettingsWindow extends LitElement {
       rItL, rItH, rHpL, rHpH, rPwL, rPwH,
       rOiL, rOiH, rOpn,
       rVrL, rVrH, rGoL, rPlL, rCpL, rCpH,
-      emRt,
+      emRt, foot,
     ] = await Promise.all([
       i18n.T("window.settings.title"),
       i18n.T("window.settings.subtitle"),
@@ -263,6 +265,7 @@ class LthnSettingsWindow extends LitElement {
       i18n.T("window.settings.row_cpus_label"),
       i18n.T("window.settings.row_cpus_hint"),
       i18n.T("window.settings.empty_routes"),
+      i18n.T("window.settings.footer"),
     ]);
     this.panel = {
       generalT: pGT, generalD: pGD,
@@ -289,6 +292,7 @@ class LthnSettingsWindow extends LitElement {
       versionL: rVrL, versionH: rVrH,
       goToolchainL: rGoL, platformL: rPlL, cpusL: rCpL, cpusH: rCpH,
       emptyRoutes: emRt,
+      footer: foot,
     };
     this.locales = locales;
     this.currentLang = currentLang;
@@ -400,7 +404,7 @@ class LthnSettingsWindow extends LitElement {
       title: this.chrome.title,
       subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, body,
-      footer: html`Changes apply immediately · ⌘W to close · the runner keeps running`,
+      footer: html`${this.row.footer}`,
       embedded: this.embedded,
     });
   }

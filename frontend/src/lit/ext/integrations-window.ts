@@ -41,6 +41,7 @@ class LthnIntegrationsWindow extends LitElement {
     rowConfigPath: string; rowOnDisk: string; rowEndpoint: string; rowDefaultModel: string;
     snippetLabel: string; snippetHelp: string;
     yes: string; no: string;
+    noClient: string;
   };
   constructor() {
     super();
@@ -58,12 +59,13 @@ class LthnIntegrationsWindow extends LitElement {
       snippetLabel: "Config snippet · drop this into %s",
       snippetHelp:  "Only the apiBase, apiKey and model keys are lthn-managed. Anything else you set in this file is left alone.",
       yes: "yes", no: "no",
+      noClient: "No client selected.",
     };
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const [title, subtitle, rl, re, rcp, rod, rep, rdm, sl, sh, yes, no] = await Promise.all([
+    const [title, subtitle, rl, re, rcp, rod, rep, rdm, sl, sh, yes, no, nc] = await Promise.all([
       T("window.integrations.title"),
       T("window.integrations.subtitle"),
       T("window.integrations.rail_label"),
@@ -76,13 +78,14 @@ class LthnIntegrationsWindow extends LitElement {
       T("window.integrations.snippet_help"),
       T("window.integrations.yes"),
       T("window.integrations.no"),
+      T("window.integrations.no_client"),
     ]);
     this.chrome = { title, subtitle };
     this.t = {
       railLabel: rl, railEmpty: re,
       rowConfigPath: rcp, rowOnDisk: rod, rowEndpoint: rep, rowDefaultModel: rdm,
       snippetLabel: sl, snippetHelp: sh,
-      yes, no,
+      yes, no, noClient: nc,
     };
     try {
       const [integrations, runner, server] = await Promise.all([
@@ -167,7 +170,7 @@ class LthnIntegrationsWindow extends LitElement {
               </div>
             </div>
           ` : html`
-            <div style="font-size:13px; color:var(--fg-3); padding:24px 0;">No client selected.</div>
+            <div style="font-size:13px; color:var(--fg-3); padding:24px 0;">${this.t.noClient}</div>
           `}
         </main>
       </div>

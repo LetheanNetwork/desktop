@@ -38,6 +38,7 @@ class LthnModelBrowserWindow extends LitElement {
     rowContext: string; rowVocabulary: string; rowArchitecture: string;
     rowLastLoaded: string; rowAvgTps: string;
     labelFiles: string; btnDownload: string;
+    footer: string;
   };
   constructor() {
     super();
@@ -59,6 +60,7 @@ class LthnModelBrowserWindow extends LitElement {
       rowContext: "Context", rowVocabulary: "Vocabulary", rowArchitecture: "Architecture",
       rowLastLoaded: "Last loaded", rowAvgTps: "Average tok/s",
       labelFiles: "Files", btnDownload: "Download",
+      footer: "%d local · %s free · %s · airplane-mode OK (browsing requires network)",
     };
   }
   createRenderRoot() { return this; }
@@ -69,7 +71,7 @@ class LthnModelBrowserWindow extends LitElement {
       bf, big, rl, re, reh, rf, rfoot,
       ls, boc,
       rFam, rPar, rQua, rCtx, rVoc, rArc, rLL, rTps,
-      lFiles, bDl,
+      lFiles, bDl, foot,
     ] = await Promise.all([
       T("window.models.title"),
       T("window.models.subtitle"),
@@ -92,6 +94,7 @@ class LthnModelBrowserWindow extends LitElement {
       T("window.models.row_avg_tps"),
       T("window.models.label_files"),
       T("window.models.btn_download"),
+      T("window.models.footer"),
     ]);
     this.t = {
       btnFilters: bf, btnImportGguf: big,
@@ -102,6 +105,7 @@ class LthnModelBrowserWindow extends LitElement {
       rowContext: rCtx, rowVocabulary: rVoc, rowArchitecture: rArc,
       rowLastLoaded: rLL, rowAvgTps: rTps,
       labelFiles: lFiles, btnDownload: bDl,
+      footer: foot,
     };
     // Pull real model entries from pkg/models.List(); maps each
     // Entry → LocalModel via deriveLocalModel below. Status defaults
@@ -289,7 +293,10 @@ class LthnModelBrowserWindow extends LitElement {
       subtitle: this.chrome.subtitle,
       w: this.w, h: this.h,
       toolbar, body,
-      footer: html`${local.length || 4} local · ${this.diskFree > 0 ? fmtBytes(this.diskFree) : "312 GB"} free · ${this.modelsDir} · airplane-mode OK (browsing requires network)`,
+      footer: html`${this.t.footer
+        .replace("%d", String(local.length || 4))
+        .replace("%s", this.diskFree > 0 ? fmtBytes(this.diskFree) : "312 GB")
+        .replace("%s", this.modelsDir)}`,
       embedded: this.embedded,
     });
   }

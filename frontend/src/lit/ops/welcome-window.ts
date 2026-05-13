@@ -79,6 +79,7 @@ class LthnWelcomeWindow extends LitElement {
     s2Title: string; s2Body: string; s2Recommended: string;
     s3Title: string; s3Body: string; s3Empty: string; s3Wired: string;
     btnBack: string; btnSkip: string; btnUse: string; btnDownload: string; btnFinish: string;
+    footer: string;
   };
   constructor() {
     super();
@@ -111,6 +112,7 @@ class LthnWelcomeWindow extends LitElement {
       btnUse:     "Use this folder",
       btnDownload:"Download & continue",
       btnFinish:  "Finish",
+      footer:     "British English · dark default · accessibility light in Settings · v%s",
     };
   }
   createRenderRoot() { return this; }
@@ -121,7 +123,7 @@ class LthnWelcomeWindow extends LitElement {
       s1Title, s1Body, s1Lh, s1Choose,
       s2Title, s2Body, s2Rec,
       s3Title, s3Body, s3Empty, s3Wired,
-      bBack, bSkip, bUse, bDownload, bFinish,
+      bBack, bSkip, bUse, bDownload, bFinish, foot,
     ] = await Promise.all([
       T("window.welcome.title"),
       T("window.welcome.subtitle"),
@@ -137,6 +139,7 @@ class LthnWelcomeWindow extends LitElement {
       T("window.welcome.btn_back"), T("window.welcome.btn_skip"),
       T("window.welcome.btn_use"), T("window.welcome.btn_download"),
       T("window.welcome.btn_finish"),
+      T("window.welcome.footer"),
     ]);
     this.chrome = { title, subtitleFmt };
     this.stepLabels = [
@@ -150,6 +153,7 @@ class LthnWelcomeWindow extends LitElement {
       s3Title, s3Body, s3Empty, s3Wired,
       btnBack: bBack, btnSkip: bSkip, btnUse: bUse,
       btnDownload: bDownload, btnFinish: bFinish,
+      footer: foot,
     };
     // Pull the canonical Lethean paths + the fresh-install flag
     // from the firstlaunch service. The wizard's "Where shall we
@@ -278,7 +282,7 @@ class LthnWelcomeWindow extends LitElement {
       subtitle: this.chrome.subtitleFmt.replace("%s", String(this.step)),
       w: this.w, h: this.h,
       body,
-      footer: html`British English · dark default · accessibility light in Settings · v${this.version}`,
+      footer: html`${this.t.footer.replace("%s", this.version)}`,
       embedded: this.embedded,
     });
   }

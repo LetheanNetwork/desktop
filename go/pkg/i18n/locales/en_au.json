@@ -252,7 +252,8 @@
       "snippet_label":   "Config snippet · drop this into %s",
       "snippet_help":    "Only the apiBase, apiKey and model keys are lthn-managed. Anything else you set in this file is left alone.",
       "yes":             "yes",
-      "no":              "no"
+      "no":              "no",
+      "no_client":       "No client selected."
     },
     "tools":        {
       "title": "Tools · MCP", "subtitle": "2 servers · 12 tools · 648 calls today",
@@ -365,7 +366,8 @@
       "row_platform_label":     "Platform",
       "row_cpus_label":         "CPUs",
       "row_cpus_hint":          "Logical cores Go's runtime sees.",
-      "empty_routes":           "No routes configured. The runner falls back to an echo stub — useful for sanity checks but nothing real will answer."
+      "empty_routes":           "No routes configured. The runner falls back to an echo stub — useful for sanity checks but nothing real will answer.",
+      "footer":                 "Changes apply immediately · ⌘W to close · the runner keeps running"
     },
     "models":       {
       "title": "Models", "subtitle": "local · 4 · huggingface",
@@ -387,7 +389,8 @@
       "row_last_loaded": "Last loaded",
       "row_avg_tps":     "Average tok/s",
       "label_files":     "Files",
-      "btn_download":    "Download"
+      "btn_download":    "Download",
+      "footer":          "%d local · %s free · %s · airplane-mode OK (browsing requires network)"
     },
     "welcome":      {
       "title": "Welcome to lthn", "subtitle": "step %s of 3",
@@ -409,7 +412,8 @@
       "btn_skip":    "Skip for now",
       "btn_use":     "Use this folder",
       "btn_download":"Download & continue",
-      "btn_finish":  "Finish"
+      "btn_finish":  "Finish",
+      "footer":      "British English · dark default · accessibility light in Settings · v%s"
     }
   }
 }

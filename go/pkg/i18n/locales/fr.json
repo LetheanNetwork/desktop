@@ -252,7 +252,8 @@
       "snippet_label":   "Extrait de configuration · à déposer dans %s",
       "snippet_help":    "Seules les clés apiBase, apiKey et model sont gérées par lthn. Le reste du fichier est laissé tel quel.",
       "yes":             "oui",
-      "no":              "non"
+      "no":              "non",
+      "no_client":       "Aucun client sélectionné."
     },
     "tools":        {
       "title": "Outils · MCP", "subtitle": "2 serveurs · 12 outils · 648 appels aujourd'hui",
@@ -365,7 +366,8 @@
       "row_platform_label":     "Plateforme",
       "row_cpus_label":         "CPU",
       "row_cpus_hint":          "Cœurs logiques que voit le runtime de Go.",
-      "empty_routes":           "Aucune route configurée. Le runner se rabat sur un stub écho — utile pour des vérifications de cohérence mais rien de réel ne répondra."
+      "empty_routes":           "Aucune route configurée. Le runner se rabat sur un stub écho — utile pour des vérifications de cohérence mais rien de réel ne répondra.",
+      "footer":                 "Les changements s'appliquent immédiatement · ⌘W pour fermer · le runner continue de tourner"
     },
     "models":       {
       "title": "Modèles", "subtitle": "local · 4 · huggingface",
@@ -387,7 +389,8 @@
       "row_last_loaded": "Dernier chargement",
       "row_avg_tps":     "Tok/s moyen",
       "label_files":     "Fichiers",
-      "btn_download":    "Télécharger"
+      "btn_download":    "Télécharger",
+      "footer":          "%d local · %s libre · %s · mode avion OK (la navigation nécessite le réseau)"
     },
     "welcome":      {
       "title": "Bienvenue sur lthn", "subtitle": "étape %s sur 3",
@@ -409,7 +412,8 @@
       "btn_skip":    "Passer pour l'instant",
       "btn_use":     "Utiliser ce dossier",
       "btn_download":"Télécharger et continuer",
-      "btn_finish":  "Terminer"
+      "btn_finish":  "Terminer",
+      "footer":      "Anglais britannique · sombre par défaut · accessibilité claire dans Réglages · v%s"
     }
   }
 }
