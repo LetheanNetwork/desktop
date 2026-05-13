@@ -105,3 +105,19 @@ tasks:
     summary: Frontend coverage report (v8 → HTML in frontend/coverage/)
     cmds:
       - cd frontend && npm run test:coverage
+
+  api:spec:
+    summary: Generate OpenAPI 3.1 spec from registered RouteGroups
+      → build/sdk/openapi.yaml. Built from the live api.Engine
+      so what ships in the binary is what the spec describes.
+    cmds:
+      - cd "{{.GO_DIR}}" && go run ./cmd/lthn api spec --format yaml --out ../build/sdk/openapi.yaml
+
+  api:sdk:typescript:
+    summary: Regenerate the @lthn/api TypeScript SDK from the live spec
+      → build/sdk/typescript-fetch/. Requires openapi-generator-cli
+      on PATH (`npm i -g @openapitools/openapi-generator-cli`) and a
+      JDK (`brew install openjdk` on macOS).
+    deps: [api:spec]
+    cmds:
+      - cd "{{.GO_DIR}}" && go run ./cmd/lthn api sdk typescript-fetch --out ../build/sdk --package lthn-api --spec ../build/sdk/openapi.yaml

@@ -161,6 +161,30 @@ Both ceilings are documented in their test files.
 - `frontend/src/lit/chrome.ts` — non-embedded card uses `width:100%; height:100%` instead of fixed `${w}px/${h}px`. The OS window from `pkg/desktop/windows.go` is the authoritative size; the card fills it. `ChromeOptions` gains optional `actions` slot for titlebar right-side icons (cog + screen on the tray today).
 - `frontend/src/tokens.css` — global rules give every `<lthn-*-window>` custom element `display:flex; width:100%; height:100%` so the 100% chrome has somewhere to grow.
 
+## OpenAPI + @lthn/api TypeScript SDK pipeline (2026-05-13)
+
+The HTTP gateway surface lives at `pkg/api/`. Each RouteGroup
+implements `coreapi.RouteGroup` + `coreapi.DescribableGroup` so the
+spec generator can build a complete OpenAPI 3.1 document straight off
+the live `api.Engine`. RouteGroups today: `RunnerGroup` (GET /v1/runner/models, POST /v1/runner/generate, POST /v1/runner/chat).
+
+**Two consumers, same surface:**
+- **Wails3 bindings** — same-process Service access from the Lit windows; auto-generated under `frontend/bindings/`. Zero network hop.
+- **`@lthn/api` SDK** — external clients (Claude Code, Codex, OpenCode, Raycast extensions, future plugins) and Lethean fleet peers. Generated under `build/sdk/typescript-fetch/` from the same registered groups; npm namespace is `@lthn/*` (snider owns it). Java + `openapi-generator-cli` only needed at SDK-gen time, not at runtime.
+
+**Verbs:**
+
+```bash
+lthn api spec --format yaml --out build/sdk/openapi.yaml
+lthn api sdk typescript-fetch --out build/sdk --package lthn-api
+wails3 task api:spec
+wails3 task api:sdk:typescript   # regenerates spec then SDK
+```
+
+`pkg/desktop/mountSubsystems` registers the lthn RouteGroups on the api.Engine BEFORE wrapping its `Handler()` (handler snapshots the gin tree on first call). The Wails WebView reaches `/api/v1/*` same-origin; standalone clients hit the same paths over TCP via `lthn serve`.
+
+`pkg/api` coverage: 75.7% (9 tests). SDK-gen itself is a shell-out to openapi-generator-cli — covered by argument validation tests; full chain is run by the Taskfile / CI.
+
 ## Tray popover redesign (committed 2026-05-13)
 
 `main.ts` tray surface refactored into three logical sections under `renderChrome`:

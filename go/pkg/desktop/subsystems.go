@@ -27,8 +27,11 @@ import (
 	"net/http"
 
 	core "dappco.re/go"
-	"dappco.re/go/api"
+	coreapi "dappco.re/go/api"
 	"github.com/gin-gonic/gin"
+
+	lthnapi "dappco.re/lthn/desktop/pkg/api"
+	"dappco.re/lthn/desktop/pkg/runner"
 )
 
 // mountSubsystems attaches the dappco.re/go/api + dappco.re/go/mcp HTTP
@@ -43,15 +46,24 @@ import (
 //
 // Usage example:
 //
-//	if r := mountSubsystems(s.opts.Core, s.opts.Server.Engine()); !r.OK {
+//	if r := mountSubsystems(s.opts.Core, s.opts.Server.Engine(), s.opts.Runner); !r.OK {
 //	    return r
 //	}
-func mountSubsystems(c *core.Core, engine *gin.Engine) core.Result {
+func mountSubsystems(c *core.Core, engine *gin.Engine, r *runner.Service) core.Result {
 	if c == nil {
 		return core.Fail(core.E("desktop.mountSubsystems", "core is nil", nil))
 	}
 	if engine == nil {
 		return core.Fail(core.E("desktop.mountSubsystems", "engine is nil", nil))
+	}
+
+	// Register lthn-owned RouteGroups on the api.Service Engine BEFORE
+	// wrapping its handler — group registration mutates the underlying
+	// gin tree, and Handler() snapshots that tree on first call.
+	if r != nil {
+		if rr := lthnapi.Register(c, r); !rr.OK {
+			return rr
+		}
 	}
 
 	// api — Gin-based polyglot gateway. Its Engine exposes Handler()
@@ -60,7 +72,7 @@ func mountSubsystems(c *core.Core, engine *gin.Engine) core.Result {
 	// can register at /api/*. http.StripPrefix peels the /api segment
 	// so the inner Engine sees the same paths it would as a standalone
 	// server.
-	if apiSvc, ok := core.ServiceFor[*api.Service](c, "api"); ok && apiSvc != nil && apiSvc.Engine != nil {
+	if apiSvc, ok := core.ServiceFor[*coreapi.Service](c, "api"); ok && apiSvc != nil && apiSvc.Engine != nil {
 		engine.Any("/api/*proxyPath", gin.WrapH(http.StripPrefix("/api", apiSvc.Engine.Handler())))
 	}
 

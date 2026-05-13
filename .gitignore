@@ -38,3 +38,9 @@ go/tests/cli/bin/
 # Task runner cache
 .task/
 go/lthn
+
+# openapi-generator-cli drops this where it's invoked from. Version
+# pinning lives in package.json / `task api:sdk:typescript` — this
+# file is a per-tree side effect, not configuration we own.
+openapitools.json
+go/openapitools.json

@@ -80,6 +80,8 @@ func main() {
 		core.Exit(cmdTelemetry(args[1:]))
 	case "service":
 		core.Exit(cmdService(args[1:]))
+	case "api":
+		core.Exit(cmdAPI(args[1:]))
 	default:
 		core.Print(core.Stderr(), "lthn: unknown subcommand %q\nrun `lthn help` for available commands\n", args[0])
 		core.Exit(2)
@@ -160,6 +162,7 @@ func cmdHelp(args []string) int {
 		core.Println("  permissions <verb>   Entitlement checker (check / set / list)")
 		core.Println("  telemetry <verb>     Local process metrics (sample)")
 		core.Println("  service <verb>       OS daemon lifecycle (install / start / stop / status / list)")
+		core.Println("  api <verb>           OpenAPI gateway (spec / sdk LANGUAGE)")
 		core.Println("")
 		core.Println("Address handler: lthn:// URIs route through the same dispatch")
 		core.Println("(see plans/project/lthn/RFC.md §7 — the unified namespace canon)")

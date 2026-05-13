@@ -126,7 +126,7 @@ func (s *Service) Run() core.Result {
 	// our gin engine BEFORE the SPA fallback — pkg/server's NoRoute
 	// fallback catches anything not handled by registered routes, so
 	// these prefixed handlers need to be in place first.
-	if r := mountSubsystems(s.opts.Core, s.opts.Server.Engine()); !r.OK {
+	if r := mountSubsystems(s.opts.Core, s.opts.Server.Engine(), s.opts.Runner); !r.OK {
 		return r
 	}
 

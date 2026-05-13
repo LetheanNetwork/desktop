@@ -19,6 +19,7 @@ Canonical Lethean Go repo shape:
 - `go/pkg/tray/tray.go` — NSStatusItem + popover anchor + window-spawn router (consumed by `lthn gui`).
 - `go/pkg/runner/service.go` — go-mlx adapter signals contract (consumed by `lthn ai` and `lthn serve`).
 - `go/pkg/telemetry/service.go` — `powermetrics` / `IOReport` sampler.
+- `go/pkg/api/` — HTTP gateway RouteGroups + spec/SDK helpers. `RunnerGroup` implements `coreapi.DescribableGroup` exposing `/v1/runner/*`. `lthn api spec` + `lthn api sdk typescript-fetch` emit `build/sdk/{openapi.yaml,typescript-fetch/}` consumed as `@lthn/api` on npm.
 - `external/go/` — submodule of `dappco.re/go` (the Core primitives module) on its `dev` branch.
 - `frontend/` — Vite + Lit. Lethean-5 components in `src/lit/`. `index.html` is the app entry; `canvas.html` is the design canvas.
 - `docs/design/lethean-4-react-reference/` — animated React/JSX visual source for design review only; not built.
@@ -49,6 +50,9 @@ wails3 task test:frontend        # Vitest only
 wails3 task test:cover           # both with coverage reports
 wails3 task test:cover:go        # → go/coverage.{out,html} + func table
 wails3 task test:cover:frontend  # → frontend/coverage/index.html
+
+wails3 task api:spec             # → build/sdk/openapi.yaml
+wails3 task api:sdk:typescript   # regenerates spec then TS SDK → build/sdk/typescript-fetch/
 ```
 
 `test:cover` prints the report paths + parse recipes (`go tool cover -func=coverage.out` for the table; `open` for the HTML viewer).
