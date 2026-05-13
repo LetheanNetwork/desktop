@@ -46,6 +46,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/sessions"
 	lthnservices "dappco.re/lthn/desktop/pkg/services"
 	"dappco.re/lthn/desktop/pkg/telemetry"
+	"dappco.re/lthn/desktop/pkg/tools"
 	"dappco.re/lthn/desktop/pkg/validator"
 	"github.com/gin-gonic/gin"
 	"github.com/leaanthony/u"
@@ -188,6 +189,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(models.NewWailsService()),
 		application.NewService(firstlaunch.NewWailsService()),
 		application.NewService(integrations.NewWailsService()),
+		application.NewService(tools.NewWailsService(s.opts.Core)),
 		application.NewService(validator.NewWailsService()),
 		application.NewService(telemetry.NewService(telemetry.Options{})),
 		application.NewService(lthnservices.NewWailsService()),

@@ -6,48 +6,81 @@ import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
 import { T } from "@lthn/i18n/coreservice";
 
+interface ToolView {
+  name: string;
+  description: string;
+  group: string;
+}
+
 class LthnToolsWindow extends LitElement {
   static properties = {
     w: { type: Number },
     h: { type: Number },
     embedded: { type: Boolean, reflect: true },
     chrome: { state: true },
+    toolList: { state: true },
+    selectedTool: { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare chrome: { title: string; subtitle: string };
+  declare toolList: ToolView[];
+  declare selectedTool: string;
   constructor() {
     super();
     this.w = 1040; this.h = 700; this.embedded = false;
     this.chrome = { title: "Tools · MCP", subtitle: "2 servers · 12 tools · 648 calls today" };
+    this.toolList = [];
+    this.selectedTool = "";
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    this.chrome = {
-      title: await T("window.tools.title"),
-      subtitle: await T("window.tools.subtitle"),
-    };
+    const [title, subtitleTpl] = await Promise.all([
+      T("window.tools.title"),
+      T("window.tools.subtitle"),
+    ]);
+    try {
+      const svc = await import("@desktop/tools/wailsservice");
+      const list = await svc.List();
+      this.toolList = (list || []) as ToolView[];
+      if (this.toolList.length > 0) this.selectedTool = this.toolList[0].name;
+    } catch (err) {
+      console.error("tools: list failed", err);
+      this.toolList = [];
+    }
+    // Build the subtitle from real counts — N servers (distinct
+    // groups) · M tools. Falls back to the locale string when the
+    // list is empty.
+    const groupCount = new Set(this.toolList.map(t => t.group)).size;
+    const subtitle = this.toolList.length > 0
+      ? `${groupCount} ${groupCount === 1 ? "server" : "servers"} · ${this.toolList.length} ${this.toolList.length === 1 ? "tool" : "tools"}`
+      : subtitleTpl;
+    this.chrome = { title, subtitle };
   }
 
   render() {
-    const servers = [
-      { id: "fs",     name: "filesystem", tools: 4, on: true },
-      { id: "git",    name: "git",        tools: 6, on: true },
-      { id: "fetch",  name: "fetch",      tools: 2, on: true },
-      { id: "sqlite", name: "sqlite",     tools: 5, on: false },
-      { id: "shell",  name: "shell",      tools: 1, on: false },
-    ];
-    const tools = [
-      { server: "filesystem", name: "read_file",   desc: "Read a UTF-8 file at the given path",                  uses: 184, ms: 12, ok: 100 },
-      { server: "filesystem", name: "write_file",  desc: "Write content to a file, creating it if missing",       uses: 62,  ms: 18, ok: 100, sel: true },
-      { server: "filesystem", name: "list_dir",    desc: "List entries in a directory",                           uses: 218, ms: 8,  ok: 100 },
-      { server: "filesystem", name: "search_text", desc: "Regex search across files",                             uses: 44,  ms: 84, ok: 97.7 },
-      { server: "git",        name: "status",      desc: "Show working-tree status",                              uses: 92,  ms: 22, ok: 100 },
-      { server: "git",        name: "diff",        desc: "Show diff for a path or commit range",                  uses: 48,  ms: 38, ok: 100 },
-    ];
-    const sel = tools[1];
+    // Group the live tool list by Group → server view. on:true today
+    // for every group since the MCP service has no per-group disable
+    // toggle yet; the toggle UI stays so the future enable/disable
+    // path has a UI seat already.
+    const byGroup = new Map<string, ToolView[]>();
+    for (const t of this.toolList) {
+      const g = t.group || "ungrouped";
+      if (!byGroup.has(g)) byGroup.set(g, []);
+      byGroup.get(g)!.push(t);
+    }
+    const servers = Array.from(byGroup.entries()).map(([g, ts]) => ({
+      id: g, name: g, tools: ts.length, on: true,
+    }));
+    const tools = this.toolList.map(t => ({
+      server: t.group || "ungrouped",
+      name: t.name,
+      desc: t.description,
+      sel: t.name === this.selectedTool,
+    }));
+    const sel = tools.find(t => t.sel) || tools[0];
 
     const toolbar = html`
       <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-plus" style="font-size:10px;"></i> Add server</lthn-btn>
@@ -73,7 +106,9 @@ class LthnToolsWindow extends LitElement {
               ${s.on ? html`
                 <div style="margin-top:4px; display:flex; flex-direction:column;">
                   ${tools.filter(t => t.server === s.name).map(t => html`
-                    <div style="padding:5px 14px 5px 22px; font-family:var(--font-mono); font-size:11px; border-radius:4px; background:${t.sel ? "rgba(255,255,255,0.06)" : "transparent"}; color:${t.sel ? "var(--fg-0)" : "var(--fg-2)"}; cursor:pointer;">${t.name}</div>
+                    <div
+                      @click=${() => { this.selectedTool = t.name; }}
+                      style="padding:5px 14px 5px 22px; font-family:var(--font-mono); font-size:11px; border-radius:4px; background:${t.sel ? "rgba(255,255,255,0.06)" : "transparent"}; color:${t.sel ? "var(--fg-0)" : "var(--fg-2)"}; cursor:pointer; --wails-draggable: no-drag;">${t.name}</div>
                   `)}
                 </div>
               ` : nothing}
@@ -83,25 +118,31 @@ class LthnToolsWindow extends LitElement {
 
         <!-- schema + calls -->
         <main style="padding:22px 26px; overflow:auto; display:flex; flex-direction:column; gap:18px;">
-          <div>
-            <div style="display:flex; align-items:baseline; gap:10px;">
-              <span style="font-family:var(--font-mono); font-size:18px; color:var(--fg-0); letter-spacing:-0.005em;">filesystem.write_file</span>
-              <span style="font-size:11px; color:var(--fg-3);">· enabled</span>
-            </div>
-            <div style="font-size:12.5px; color:var(--fg-2); margin-top:5px; line-height:1.55;">${sel.desc}</div>
-          </div>
-          <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px;">
-            ${[
-              { k: "Calls today",  v: sel.uses },
-              { k: "Avg latency",  v: sel.ms + " ms" },
-              { k: "Success rate", v: sel.ok + " %" },
-            ].map(m => html`
-              <div style="padding:10px 14px; border-radius:6px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05);">
-                <div style="font-size:10.5px; color:var(--fg-3); letter-spacing:0.04em; text-transform:uppercase;">${m.k}</div>
-                <div style="font-family:var(--font-mono); font-size:18px; color:var(--fg-0); margin-top:4px;">${m.v}</div>
+          ${sel ? html`
+            <div>
+              <div style="display:flex; align-items:baseline; gap:10px;">
+                <span style="font-family:var(--font-mono); font-size:18px; color:var(--fg-0); letter-spacing:-0.005em;">${sel.server}.${sel.name}</span>
+                <span style="font-size:11px; color:var(--fg-3);">· registered</span>
               </div>
-            `)}
-          </div>
+              <div style="font-size:12.5px; color:var(--fg-2); margin-top:5px; line-height:1.55;">${sel.desc}</div>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px;">
+              ${[
+                { k: "Server", v: sel.server },
+                { k: "Tool name", v: sel.name },
+                { k: "Source", v: "mcp registry" },
+              ].map(m => html`
+                <div style="padding:10px 14px; border-radius:6px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05);">
+                  <div style="font-size:10.5px; color:var(--fg-3); letter-spacing:0.04em; text-transform:uppercase;">${m.k}</div>
+                  <div style="font-family:var(--font-mono); font-size:14px; color:var(--fg-0); margin-top:4px;">${m.v}</div>
+                </div>
+              `)}
+            </div>
+          ` : html`
+            <div style="font-size:13px; color:var(--fg-3); padding:24px 0;">
+              No MCP tools registered yet.
+            </div>
+          `}
           <div>
             <lthn-label>Schema</lthn-label>
             <div style="margin-top:8px; background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:12px 14px; font-family:var(--font-mono); font-size:11.5px; line-height:1.6; color:var(--fg-1); white-space:pre;">${`{
