@@ -15,9 +15,11 @@ import (
 	"dappco.re/lthn/desktop/pkg/validator"
 )
 
+const modelsPath = "/models"
+
 func TestValidator_Endpoint_Good_2xx(t *core.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		core.AssertEqual(t, "/models", req.URL.Path)
+		core.AssertEqual(t, modelsPath, req.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":[{"id":"gemma-4-e2b"}]}`))
 	}))
@@ -29,12 +31,12 @@ func TestValidator_Endpoint_Good_2xx(t *core.T) {
 	core.AssertTrue(t, info.OK, "2xx should mark info.OK=true")
 	core.AssertEqual(t, 200, info.Status)
 	core.AssertTrue(t, core.Contains(info.Body, "gemma-4-e2b"))
-	core.AssertTrue(t, core.HasSuffix(info.URL, "/models"))
+	core.AssertTrue(t, core.HasSuffix(info.URL, modelsPath))
 }
 
 func TestValidator_Endpoint_Good_TrailingSlashStripped(t *core.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		core.AssertEqual(t, "/models", req.URL.Path)
+		core.AssertEqual(t, modelsPath, req.URL.Path)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
