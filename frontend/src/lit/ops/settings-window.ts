@@ -52,11 +52,25 @@ class LthnSettingsWindow extends LitElement {
     this.currentLang = currentLang;
   }
 
-  /** Side-menu click handler — highlight + scroll-into-view. */
+  /** Side-menu click handler — swap the body to the selected section. */
   _openSection(id: string) {
     this.open = id;
-    const target = this.querySelector(`#setting-${id}`);
-    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  /** Picks the section body to render based on this.open. Single
+   *  section visible at a time; the side rail is the only chrome
+   *  carrying which one is active. */
+  _activeSection() {
+    switch (this.open) {
+      case "general":      return this._sectionGeneral();
+      case "models":       return this._sectionModels();
+      case "runner":       return this._sectionRunner();
+      case "api":          return this._sectionApi();
+      case "telemetry":    return this._sectionTelemetry();
+      case "integrations": return this._sectionIntegrations();
+      case "about":        return this._sectionAbout();
+      default:             return this._sectionGeneral();
+    }
   }
 
   /** Locale picker — flag + tag label. Click writes localStorage + calls SetLanguage. */
@@ -113,15 +127,9 @@ class LthnSettingsWindow extends LitElement {
           `)}
         </aside>
 
-        <!-- body -->
+        <!-- body — single section at a time, picked by this.open -->
         <main id="settings-body" style="padding:28px 32px; overflow:auto; display:flex; flex-direction:column; gap:22px;">
-          ${this._sectionGeneral()}
-          ${this._sectionModels()}
-          ${this._sectionRunner()}
-          ${this._sectionApi()}
-          ${this._sectionTelemetry()}
-          ${this._sectionIntegrations()}
-          ${this._sectionAbout()}
+          ${this._activeSection()}
         </main>
       </div>
     `;
@@ -135,21 +143,17 @@ class LthnSettingsWindow extends LitElement {
     });
   }
 
-  _section({ title, desc, open, content }: { title: string; desc?: string; open: boolean; content: LitContent }) {
+  _section({ title, desc, content }: { title: string; desc?: string; content: LitContent }) {
     return html`
       <div style="display:flex; flex-direction:column; gap:14px;">
         <div style="display:flex; align-items:center; gap:8px;">
-          <i class="fa-solid ${open ? "fa-angle-down" : "fa-angle-right"}"
-             style="font-size:11px; color:var(--fg-3);"></i>
           <div style="font-size:14.5px; font-weight:600; color:var(--fg-0); letter-spacing:-0.015em;">${title}</div>
         </div>
-        ${desc ? html`<div style="font-size:11.5px; color:var(--fg-3); line-height:1.55; margin-left:20px;">${desc}</div>` : nothing}
-        ${open ? html`
-          <div style="margin-left:20px; display:flex; flex-direction:column; gap:14px;
-                      padding:8px 0; border-top:1px solid rgba(255,255,255,0.05);">
-            ${content}
-          </div>
-        ` : nothing}
+        ${desc ? html`<div style="font-size:11.5px; color:var(--fg-3); line-height:1.55;">${desc}</div>` : nothing}
+        <div style="display:flex; flex-direction:column; gap:14px;
+                    padding:8px 0; border-top:1px solid rgba(255,255,255,0.05);">
+          ${content}
+        </div>
       </div>
     `;
   }
@@ -192,8 +196,8 @@ class LthnSettingsWindow extends LitElement {
   }
 
   _sectionGeneral() {
-    return html`<div id="setting-general">${this._section({
-      title: "General", open: true,
+    return this._section({
+      title: "General",
       desc: "App-wide defaults — what to show at launch, which language to speak, theme.",
       content: html`
         ${this._row("Start with window", "If on, the unified app shell opens at launch alongside the tray. Off = tray-only until you click in.", html`
@@ -222,12 +226,12 @@ class LthnSettingsWindow extends LitElement {
         ${this._row("Theme", "Follows the OS by default. Force light or dark to override.",
           this._segment("auto", ["auto", "dark", "light"]))}
       `,
-    })}</div>`;
+    });
   }
 
   _sectionModels() {
-    return html`<div id="setting-models">${this._section({
-      title: "Models", open: true,
+    return this._section({
+      title: "Models",
       desc: "Where lthn looks for models and which one loads at startup.",
       content: html`
         ${this._row("Model directory", null, html`
@@ -251,20 +255,20 @@ class LthnSettingsWindow extends LitElement {
           </div>
         `)}
       `,
-    })}</div>`;
+    });
   }
 
   _sectionRunner() {
-    return html`<div id="setting-runner">${this._section({
-      title: "Runner", open: false,
+    return this._section({
+      title: "Runner",
       desc: "How the inference process behaves. Don't change these unless you're sure.",
       content: nothing,
-    })}</div>`;
+    });
   }
 
   _sectionApi() {
-    return html`<div id="setting-api">${this._section({
-      title: "API", open: true,
+    return this._section({
+      title: "API",
       desc: "HTTP server for OpenAI-compatible clients. Off by default; nothing leaves this Mac unless you turn it on.",
       content: html`
         ${this._row("HTTP server", null, html`<lthn-toggle on></lthn-toggle>`)}
@@ -279,12 +283,12 @@ class LthnSettingsWindow extends LitElement {
           </div>
         `)}
       `,
-    })}</div>`;
+    });
   }
 
   _sectionTelemetry() {
-    return html`<div id="setting-telemetry">${this._section({
-      title: "Telemetry", open: false,
+    return this._section({
+      title: "Telemetry",
       desc: "Process metrics shown in the tray + live-telemetry window. Local only; nothing leaves the device.",
       content: html`
         ${this._row("Sample interval", "How often the tray polls the runner. 2s is the calm-presence default.",
@@ -295,12 +299,12 @@ class LthnSettingsWindow extends LitElement {
           <lthn-toggle></lthn-toggle>
         `)}
       `,
-    })}</div>`;
+    });
   }
 
   _sectionIntegrations() {
-    return html`<div id="setting-integrations">${this._section({
-      title: "Integrations", open: false,
+    return this._section({
+      title: "Integrations",
       desc: "Connected clients reading from the local lthn API. Full surface lives in the dedicated Integrations window.",
       content: html`
         ${this._row("Open Integrations window", "Manage Claude Code / OpenCode / Codex / Copilot / Raycast wiring.", html`
@@ -310,12 +314,12 @@ class LthnSettingsWindow extends LitElement {
           </lthn-btn>
         `)}
       `,
-    })}</div>`;
+    });
   }
 
   _sectionAbout() {
-    return html`<div id="setting-about">${this._section({
-      title: "About", open: true,
+    return this._section({
+      title: "About",
       desc: "What's running.",
       content: html`
         ${this._row("Version", null, html`
@@ -339,7 +343,7 @@ class LthnSettingsWindow extends LitElement {
           </a>
         `)}
       `,
-    })}</div>`;
+    });
   }
 }
 customElements.define("lthn-settings-window", LthnSettingsWindow);

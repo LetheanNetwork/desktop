@@ -14,6 +14,7 @@ import (
 	"dappco.re/go/process"
 	"dappco.re/go/store"
 	"dappco.re/go/stream"
+	"dappco.re/lthn/desktop/pkg/bridge"
 	lthni18n "dappco.re/lthn/desktop/pkg/i18n"
 	"dappco.re/lthn/desktop/pkg/paths"
 )
@@ -97,6 +98,13 @@ func newAppCore() *core.Core {
 		core.WithName("mcp", mcp.NewService(mcp.Options{
 			WorkspaceRoot: dataDir.Value.(string),
 		})),
+		// bridge — local MCP HTTP server on 127.0.0.1:9879 letting an
+		// external agent (Cladius / Codex / any MCP client) drive +
+		// observe the WebView. Console + error capture via the JS
+		// shim in frontend/index.html, webview_eval with fetch-back
+		// via /internal/eval-reply. Dev-mode focused — bound to
+		// localhost so it never leaves this Mac. See pkg/bridge/.
+		core.WithName("bridge", bridge.RegisterService(bridge.Options{})),
 	)
 
 	if r := c.ServiceStartup(context.Background(), nil); !r.OK {

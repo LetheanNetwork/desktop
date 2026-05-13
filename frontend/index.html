@@ -44,6 +44,71 @@
     }
     #app { height: 100%; overscroll-behavior: none; }
   </style>
+  <!-- Bridge shim — forwards console + window.error + unhandledrejection
+       events to the local MCP bridge HTTP server at 127.0.0.1:9876 so
+       Cladius / Codex / any MCP-speaking agent can observe what's
+       happening in the WebView. Silent when the bridge isn't running
+       (fetch swallows the connection refused). See pkg/bridge/. -->
+  <script>
+    (function () {
+      var BRIDGE = 'http://127.0.0.1:9879';
+      var post = function (path, payload) {
+        try {
+          fetch(BRIDGE + path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            keepalive: true,
+          }).catch(function () {});
+        } catch (e) { /* bridge unreachable — silent */ }
+      };
+      var fmt = function (args) {
+        return Array.prototype.map.call(args, function (a) {
+          if (a === null || a === undefined) return String(a);
+          if (typeof a === 'string') return a;
+          if (a instanceof Error) {
+            return (a.name || 'Error') + ': ' + (a.message || '(no message)') +
+              (a.stack ? '\n' + a.stack : '');
+          }
+          if (typeof a === 'object' && (a.stack || a.message)) {
+            return (a.name || 'object') + ': ' + (a.message || '') +
+              (a.stack ? '\n' + a.stack : '');
+          }
+          try { return JSON.stringify(a); } catch (e) { return String(a); }
+        }).join(' ');
+      };
+      ['log', 'info', 'warn', 'error', 'debug'].forEach(function (level) {
+        var orig = console[level].bind(console);
+        console[level] = function () {
+          orig.apply(console, arguments);
+          post('/internal/console', {
+            level: level,
+            message: fmt(arguments),
+            source: 'console',
+            at: new Date().toISOString(),
+          });
+        };
+      });
+      window.addEventListener('error', function (e) {
+        post('/internal/error', {
+          message: e.message || 'unknown error',
+          source: e.filename || '',
+          line: e.lineno || 0,
+          col: e.colno || 0,
+          stack: (e.error && e.error.stack) || '',
+          at: new Date().toISOString(),
+        });
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        var reason = e.reason;
+        post('/internal/error', {
+          message: 'unhandled promise rejection: ' + (reason && reason.message ? reason.message : String(reason)),
+          stack: (reason && reason.stack) || '',
+          at: new Date().toISOString(),
+        });
+      });
+    })();
+  </script>
 </head>
 <body>
   <div id="app"></div>
