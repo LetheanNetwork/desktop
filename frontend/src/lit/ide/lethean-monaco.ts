@@ -31,6 +31,11 @@ declare global {
 
 let monacoLoadingPromise: Promise<typeof monacoTypes> | null = null;
 
+const editorOptionKeys = [
+  "fontSize", "tabSize", "wordWrap", "lineNumbers", "minimap",
+  "renderWhitespace", "readonly", "theme",
+] as const;
+
 function ensureMonacoLoaded(): Promise<typeof monacoTypes> {
   if (window.monaco) return Promise.resolve(window.monaco);
   if (monacoLoadingPromise) return monacoLoadingPromise;
@@ -269,57 +274,63 @@ class LetheanMonaco extends LitElement {
     this.activePath = path;
   }
 
-  updated(changed: PropertyValues) {
-    if (!this.editor || !window.monaco) return;
+  private editorOptions() {
+    return {
+      fontSize: this.fontSize,
+      tabSize: this.tabSize,
+      wordWrap: this.wordWrap,
+      lineNumbers: this.lineNumbers,
+      minimap: { enabled: this.minimap },
+      renderWhitespace: this.renderWhitespace,
+      readOnly: this.readonly,
+      theme: this.theme,
+    };
+  }
 
-    // Live-apply editor option changes without re-creating the editor.
-    const optionKeys = [
-      "fontSize", "tabSize", "wordWrap", "lineNumbers", "minimap",
-      "renderWhitespace", "readonly", "theme",
-    ];
-    if (optionKeys.some(k => changed.has(k))) {
-      this.editor.updateOptions({
-        fontSize: this.fontSize,
-        tabSize: this.tabSize,
-        wordWrap: this.wordWrap,
-        lineNumbers: this.lineNumbers,
-        minimap: { enabled: this.minimap },
-        renderWhitespace: this.renderWhitespace,
-        readOnly: this.readonly,
-        theme: this.theme,
-      });
-      // tabSize is also a model option — Monaco needs it set on the
-      // model itself for tab insertions.
-      const model = this.editor.getModel();
-      if (model && changed.has("tabSize")) {
-        model.updateOptions({ tabSize: this.tabSize });
-      }
-    }
+  private applyEditorOptionChanges(changed: PropertyValues) {
+    if (!editorOptionKeys.some(k => changed.has(k))) return;
+    this.editor?.updateOptions(this.editorOptions());
+    this.applyModelTabSize(changed);
+  }
 
+  private applyModelTabSize(changed: PropertyValues) {
+    if (!changed.has("tabSize")) return;
+    this.editor?.getModel()?.updateOptions({ tabSize: this.tabSize });
+  }
+
+  private applyPathChange(changed: PropertyValues) {
     if (changed.has("path") && this.path) {
       this.switchToPath(this.path);
     }
-    // After path-switch the model already has the right value (it
-    // was created with `this.value`). Only reset value when path
-    // didn't change but the host pushed new content (external file
-    // reload).
-    if (changed.has("value") && !changed.has("path")) {
-      const model = this.editor.getModel();
-      if (model && model.getValue() !== this.value) {
-        this.suppressNextChangeEvent = true;
-        model.setValue(this.value);
-      }
-    }
-    if (changed.has("language")) {
-      const model = this.editor.getModel();
-      if (model) window.monaco.editor.setModelLanguage(model, this.language);
-    }
-    if (changed.has("readonly")) {
-      this.editor.updateOptions({ readOnly: this.readonly });
-    }
+  }
+
+  private syncValueChange(changed: PropertyValues) {
+    if (!changed.has("value") || changed.has("path")) return;
+    const model = this.editor?.getModel();
+    if (!model || model.getValue() === this.value) return;
+    this.suppressNextChangeEvent = true;
+    model.setValue(this.value);
+  }
+
+  private applyLanguageChange(changed: PropertyValues) {
+    if (!changed.has("language")) return;
+    const model = this.editor?.getModel();
+    if (model) window.monaco?.editor.setModelLanguage(model, this.language);
+  }
+
+  private applyThemeChange(changed: PropertyValues) {
     if (changed.has("theme")) {
-      window.monaco.editor.setTheme(this.theme);
+      window.monaco?.editor.setTheme(this.theme);
     }
+  }
+
+  updated(changed: PropertyValues) {
+    if (!this.editor || !window.monaco) return;
+    this.applyEditorOptionChanges(changed);
+    this.applyPathChange(changed);
+    this.syncValueChange(changed);
+    this.applyLanguageChange(changed);
+    this.applyThemeChange(changed);
   }
 
   render() {
