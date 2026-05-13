@@ -37,6 +37,7 @@ class LthnSettingsWindow extends LitElement {
     endpoint: { state: true },
     httpListening: { state: true },
     panel: { state: true },
+    row:   { state: true },
   };
   declare open: string;
   declare w: number;
@@ -62,6 +63,23 @@ class LthnSettingsWindow extends LitElement {
     telemetryT: string; telemetryD: string;
     integrationsT: string; integrationsD: string;
     aboutT: string; aboutD: string;
+  };
+  declare row: {
+    startWindowL: string; startWindowH: string;
+    languageL: string; languageH: string;
+    modelDirL: string; modelDirH: string; btnBrowse: string;
+    defaultModelL: string;
+    quantL: string; quantH: string;
+    samplingL: string; samplingH: string;
+    httpServerL: string; endpointL: string;
+    apiKeyL: string; apiKeyH: string;
+    intervalL: string; intervalH: string;
+    heapL: string; heapH: string;
+    powerL: string; powerH: string;
+    openIntL: string; openIntH: string; btnOpen: string;
+    versionL: string; versionH: string;
+    goToolchainL: string; platformL: string; cpusL: string; cpusH: string;
+    emptyRoutes: string;
   };
   constructor() {
     super();
@@ -99,6 +117,40 @@ class LthnSettingsWindow extends LitElement {
       integrationsD: "Connected clients reading from the local lthn API. Full surface lives in the dedicated Integrations window.",
       aboutT:   "About",
       aboutD:   "What's running — version, runtime, and where the source lives.",
+    };
+    this.row = {
+      startWindowL: "Start with window",
+      startWindowH: "If on, the unified app shell opens at launch alongside the tray. Off = tray-only until you click in.",
+      languageL: "Default language",
+      languageH: "Sets the language for the WebView surfaces. Stored locally; persists across restarts.",
+      modelDirL: "Model directory",
+      modelDirH: "Canonical Lethean layout — visible in Finder, safe to inspect.",
+      btnBrowse: "Browse…",
+      defaultModelL: "Default model",
+      quantL: "Quantisation preference",
+      quantH: "Pick the smallest quant your hardware comfortably runs. Applied when the runner loads a fresh model.",
+      samplingL: "Default sampling",
+      samplingH: "Per-model overrides live in the model browser.",
+      httpServerL: "HTTP server",
+      endpointL: "Endpoint",
+      apiKeyL: "API key",
+      apiKeyH: "Required for any client connecting to the local server.",
+      intervalL: "Sample interval",
+      intervalH: "How often the tray polls the runner. 2s is the calm-presence default.",
+      heapL: "Heap samples",
+      heapH: "Rolling window the sparkline draws from.",
+      powerL: "Power metrics",
+      powerH: "Requires the XPC helper (planned). Off today.",
+      openIntL: "Open Integrations window",
+      openIntH: "Manage Claude Code / OpenCode / Codex / Copilot / Raycast wiring.",
+      btnOpen: "Open",
+      versionL: "Version",
+      versionH: "Binary release tag baked at build time.",
+      goToolchainL: "Go toolchain",
+      platformL: "Platform",
+      cpusL: "CPUs",
+      cpusH: "Logical cores Go's runtime sees.",
+      emptyRoutes: "No routes configured. The runner falls back to an echo stub — useful for sanity checks but nothing real will answer.",
     };
   }
 
@@ -143,6 +195,13 @@ class LthnSettingsWindow extends LitElement {
     const [
       title, subtitleTpl, locales, currentLang, paths, routes, routeViews, build, addr, listening,
       pGT, pGD, pMT, pMD, pRT, pRD, pAT, pAD, pTT, pTD, pIT, pID, pAbT, pAbD,
+      rSwL, rSwH, rLgL, rLgH, rMdL, rMdH, rBrw,
+      rDmL, rQuL, rQuH, rSmL, rSmH,
+      rHsL, rEpL, rAkL, rAkH,
+      rItL, rItH, rHpL, rHpH, rPwL, rPwH,
+      rOiL, rOiH, rOpn,
+      rVrL, rVrH, rGoL, rPlL, rCpL, rCpH,
+      emRt,
     ] = await Promise.all([
       i18n.T("window.settings.title"),
       i18n.T("window.settings.subtitle"),
@@ -168,6 +227,38 @@ class LthnSettingsWindow extends LitElement {
       i18n.T("window.settings.panel_integrations_desc"),
       i18n.T("window.settings.panel_about_title"),
       i18n.T("window.settings.panel_about_desc"),
+      i18n.T("window.settings.row_startwindow_label"),
+      i18n.T("window.settings.row_startwindow_hint"),
+      i18n.T("window.settings.row_language_label"),
+      i18n.T("window.settings.row_language_hint"),
+      i18n.T("window.settings.row_modeldir_label"),
+      i18n.T("window.settings.row_modeldir_hint"),
+      i18n.T("window.settings.btn_browse"),
+      i18n.T("window.settings.row_defaultmodel_label"),
+      i18n.T("window.settings.row_quantisation_label"),
+      i18n.T("window.settings.row_quantisation_hint"),
+      i18n.T("window.settings.row_sampling_label"),
+      i18n.T("window.settings.row_sampling_hint"),
+      i18n.T("window.settings.row_httpserver_label"),
+      i18n.T("window.settings.row_endpoint_label"),
+      i18n.T("window.settings.row_apikey_label"),
+      i18n.T("window.settings.row_apikey_hint"),
+      i18n.T("window.settings.row_interval_label"),
+      i18n.T("window.settings.row_interval_hint"),
+      i18n.T("window.settings.row_heap_label"),
+      i18n.T("window.settings.row_heap_hint"),
+      i18n.T("window.settings.row_power_label"),
+      i18n.T("window.settings.row_power_hint"),
+      i18n.T("window.settings.row_openint_label"),
+      i18n.T("window.settings.row_openint_hint"),
+      i18n.T("window.settings.btn_open"),
+      i18n.T("window.settings.row_version_label"),
+      i18n.T("window.settings.row_version_hint"),
+      i18n.T("window.settings.row_gotoolchain_label"),
+      i18n.T("window.settings.row_platform_label"),
+      i18n.T("window.settings.row_cpus_label"),
+      i18n.T("window.settings.row_cpus_hint"),
+      i18n.T("window.settings.empty_routes"),
     ]);
     this.panel = {
       generalT: pGT, generalD: pGD,
@@ -177,6 +268,23 @@ class LthnSettingsWindow extends LitElement {
       telemetryT: pTT, telemetryD: pTD,
       integrationsT: pIT, integrationsD: pID,
       aboutT: pAbT, aboutD: pAbD,
+    };
+    this.row = {
+      startWindowL: rSwL, startWindowH: rSwH,
+      languageL: rLgL, languageH: rLgH,
+      modelDirL: rMdL, modelDirH: rMdH, btnBrowse: rBrw,
+      defaultModelL: rDmL,
+      quantL: rQuL, quantH: rQuH,
+      samplingL: rSmL, samplingH: rSmH,
+      httpServerL: rHsL, endpointL: rEpL,
+      apiKeyL: rAkL, apiKeyH: rAkH,
+      intervalL: rItL, intervalH: rItH,
+      heapL: rHpL, heapH: rHpH,
+      powerL: rPwL, powerH: rPwH,
+      openIntL: rOiL, openIntH: rOiH, btnOpen: rOpn,
+      versionL: rVrL, versionH: rVrH,
+      goToolchainL: rGoL, platformL: rPlL, cpusL: rCpL, cpusH: rCpH,
+      emptyRoutes: emRt,
     };
     this.locales = locales;
     this.currentLang = currentLang;
@@ -350,12 +458,12 @@ class LthnSettingsWindow extends LitElement {
       title: this.panel.generalT,
       desc:  this.panel.generalD,
       content: html`
-        ${this._row("Start with window", "If on, the unified app shell opens at launch alongside the tray. Off = tray-only until you click in.", html`
+        ${this._row(this.row.startWindowL, this.row.startWindowH, html`
           <lthn-toggle ?on=${this.startWithWindow}
             @click=${() => this._setStartWithWindow(!this.startWithWindow)}>
           </lthn-toggle>
         `)}
-        ${this._row("Default language", "Sets the language for the WebView surfaces. Stored locally; persists across restarts.", html`
+        ${this._row(this.row.languageL, this.row.languageH, html`
           <div style="display:inline-flex; border-radius:6px;
                       background:rgba(0,0,0,0.18); border:1px solid rgba(255,255,255,0.06); padding:2px; gap:2px;">
             ${this.locales.map(l => html`
@@ -383,7 +491,7 @@ class LthnSettingsWindow extends LitElement {
       title: this.panel.modelsT,
       desc:  this.panel.modelsD,
       content: html`
-        ${this._row("Model directory", "Canonical Lethean layout — visible in Finder, safe to inspect.", html`
+        ${this._row(this.row.modelDirL, this.row.modelDirH, html`
           <div style="display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:6px;
                       background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07);
                       font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">
@@ -391,18 +499,18 @@ class LthnSettingsWindow extends LitElement {
             ${this.modelsDir}
             <lthn-btn tone="quiet" size="sm" style="margin-left:4px;"
               @click=${() => import("@desktop/desktop/windowservice").then(w => w.Open("models"))}>
-              Browse…
+              ${this.row.btnBrowse}
             </lthn-btn>
           </div>
         `)}
-        ${this._row("Default model",
+        ${this._row(this.row.defaultModelL,
           this.routeNames.length > 0
             ? `Configured runner route — picked first when the runner starts.`
             : "No routes configured. Add one via lthn config routes.NAME.kind=…",
           this._select(defaultModel))}
-        ${this._row("Quantisation preference", "Pick the smallest quant your hardware comfortably runs. Applied when the runner loads a fresh model.",
+        ${this._row(this.row.quantL, this.row.quantH,
           this._segment("q4_k_m", ["q4_0", "q4_k_m", "q5_k_m", "q8_0"]))}
-        ${this._row("Default sampling", "Per-model overrides live in the model browser.", html`
+        ${this._row(this.row.samplingL, this.row.samplingH, html`
           <div style="display:flex; gap:18px; font-size:11.5px; color:var(--fg-2);">
             <span>Temp <span style="color:var(--fg-0); font-family:var(--font-mono);">0.7</span></span>
             <span>Top-p <span style="color:var(--fg-0); font-family:var(--font-mono);">0.95</span></span>
@@ -420,8 +528,7 @@ class LthnSettingsWindow extends LitElement {
       content: this.routes.length === 0 ? html`
         <div style="padding:14px 16px; border-radius:8px; background:rgba(255,255,255,0.025);
                     border:1px solid rgba(255,255,255,0.05); font-size:12px; color:var(--fg-3); line-height:1.55;">
-          No routes configured. The runner falls back to an echo stub
-          — useful for sanity checks but nothing real will answer.
+          ${this.row.emptyRoutes}
         </div>
       ` : html`
         <div style="display:flex; flex-direction:column; gap:8px;">
@@ -455,11 +562,11 @@ class LthnSettingsWindow extends LitElement {
       title: this.panel.apiT,
       desc:  this.panel.apiD,
       content: html`
-        ${this._row("HTTP server", null, html`<lthn-toggle ?on=${this.httpListening}></lthn-toggle>`)}
-        ${this._row("Endpoint", null, html`
+        ${this._row(this.row.httpServerL, null, html`<lthn-toggle ?on=${this.httpListening}></lthn-toggle>`)}
+        ${this._row(this.row.endpointL, null, html`
           <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">${this.endpoint}</span>
         `)}
-        ${this._row("API key", "Required for any client connecting to the local server.", html`
+        ${this._row(this.row.apiKeyL, this.row.apiKeyH, html`
           <div style="display:flex; align-items:center; gap:6px;">
             <span style="font-family:var(--font-mono); font-size:11px; color:var(--fg-1);">sk-lthn-••••••••••••••••2qB7</span>
             <lthn-btn tone="quiet" size="sm"><i class="fa-regular fa-copy" style="font-size:10px;"></i></lthn-btn>
@@ -475,11 +582,11 @@ class LthnSettingsWindow extends LitElement {
       title: this.panel.telemetryT,
       desc:  this.panel.telemetryD,
       content: html`
-        ${this._row("Sample interval", "How often the tray polls the runner. 2s is the calm-presence default.",
+        ${this._row(this.row.intervalL, this.row.intervalH,
           this._segmentPick(this.sampleInterval, ["1s", "2s", "5s", "off"], v => this._setSampleInterval(v)))}
-        ${this._row("Heap samples", "Rolling window the sparkline draws from.",
+        ${this._row(this.row.heapL, this.row.heapH,
           this._segmentPick(this.heapSamples, ["12", "24", "48", "96"], v => this._setHeapSamples(v)))}
-        ${this._row("Power metrics", "Requires the XPC helper (planned). Off today.", html`
+        ${this._row(this.row.powerL, this.row.powerH, html`
           <lthn-toggle></lthn-toggle>
         `)}
       `,
@@ -491,10 +598,10 @@ class LthnSettingsWindow extends LitElement {
       title: this.panel.integrationsT,
       desc:  this.panel.integrationsD,
       content: html`
-        ${this._row("Open Integrations window", "Manage Claude Code / OpenCode / Codex / Copilot / Raycast wiring.", html`
+        ${this._row(this.row.openIntL, this.row.openIntH, html`
           <lthn-btn tone="quiet" size="sm"
             @click=${() => import("@desktop/desktop/windowservice").then(w => w.Open("integrations"))}>
-            <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px;"></i> Open
+            <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px;"></i> ${this.row.btnOpen}
           </lthn-btn>
         `)}
       `,
@@ -507,11 +614,11 @@ class LthnSettingsWindow extends LitElement {
       title: this.panel.aboutT,
       desc:  this.panel.aboutD,
       content: html`
-        ${this._row("Version", "Binary release tag baked at build time.",
+        ${this._row(this.row.versionL, this.row.versionH,
           mono(`v${this.build.version || "—"}`))}
-        ${this._row("Go toolchain", null, mono(this.build.go_version || "—"))}
-        ${this._row("Platform", null, mono(this.build.goos && this.build.goarch ? `${this.build.goos} · ${this.build.goarch}` : "—"))}
-        ${this._row("CPUs", "Logical cores Go's runtime sees.", mono(String(this.build.num_cpu || "—")))}
+        ${this._row(this.row.goToolchainL, null, mono(this.build.go_version || "—"))}
+        ${this._row(this.row.platformL, null, mono(this.build.goos && this.build.goarch ? `${this.build.goos} · ${this.build.goarch}` : "—"))}
+        ${this._row(this.row.cpusL, this.row.cpusH, mono(String(this.build.num_cpu || "—")))}
         ${this._row("Licence", null, mono("EUPL-1.2"))}
         ${this._row("Source", null, html`
           <a href="https://github.com/LetheanNetwork/desktop" target="_blank" rel="noopener"
