@@ -49,8 +49,8 @@ import (
 	lthnphp "dappco.re/lthn/desktop/pkg/php"
 	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/repos"
-	"dappco.re/lthn/desktop/pkg/sandbox"
 	"dappco.re/lthn/desktop/pkg/runner"
+	"dappco.re/lthn/desktop/pkg/sandbox"
 	"dappco.re/lthn/desktop/pkg/server"
 	lthnservices "dappco.re/lthn/desktop/pkg/services"
 	"dappco.re/lthn/desktop/pkg/sessions"
@@ -65,6 +65,8 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/services/dock"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
+
+const trayOpenEvent = "lthn:tray:open"
 
 // Options configures the desktop service.
 type Options struct {
@@ -427,20 +429,20 @@ func (s *Service) Run() core.Result {
 	// menu has parity with the in-popover surface.
 	menu.Add("Open Lethean Desktop").OnClick(func(_ *application.Context) {
 		openWindow(s.app, "app")
-		s.app.Event.Emit("lthn:tray:open", "app")
+		s.app.Event.Emit(trayOpenEvent, "app")
 	})
 	menu.AddSeparator()
 	menu.Add("Open Chat…").OnClick(func(_ *application.Context) {
 		openWindow(s.app, "chat")
-		s.app.Event.Emit("lthn:tray:open", "chat")
+		s.app.Event.Emit(trayOpenEvent, "chat")
 	})
 	menu.Add("Models…").OnClick(func(_ *application.Context) {
 		openWindow(s.app, "models")
-		s.app.Event.Emit("lthn:tray:open", "models")
+		s.app.Event.Emit(trayOpenEvent, "models")
 	})
 	menu.Add("Settings…").OnClick(func(_ *application.Context) {
 		openWindow(s.app, "settings")
-		s.app.Event.Emit("lthn:tray:open", "settings")
+		s.app.Event.Emit(trayOpenEvent, "settings")
 	})
 
 	// Plugins — dynamic per-plugin menu entries surfaced from
@@ -463,7 +465,7 @@ func (s *Service) Run() core.Result {
 					}
 					menu.Add(label).OnClick(func(_ *application.Context) {
 						openPluginWindow(s.app, code)
-						s.app.Event.Emit("lthn:tray:open", "plugin:"+code)
+						s.app.Event.Emit(trayOpenEvent, "plugin:"+code)
 					})
 				}
 			}
@@ -473,7 +475,7 @@ func (s *Service) Run() core.Result {
 	menu.AddSeparator()
 	menu.Add("About lthn").OnClick(func(_ *application.Context) {
 		openWindow(s.app, "about")
-		s.app.Event.Emit("lthn:tray:open", "about")
+		s.app.Event.Emit(trayOpenEvent, "about")
 	})
 	menu.AddSeparator()
 	menu.Add("Quit lthn").OnClick(func(_ *application.Context) {
