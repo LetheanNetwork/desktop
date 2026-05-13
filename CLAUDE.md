@@ -122,11 +122,58 @@ Wiring against:
 - `dappco.re/go/store` (KV persistence)
 - `dappco.re/go/inference/state` (portable KV state primitive)
 
+## Tests + coverage
+
+Foundation in place on both sides. Coverage target ≥70% per package; lifting from there toward 80%+ is an open agent workstream. Full details in `AGENTS.md` § Testing.
+
+**One-shot entrypoints:**
+
+```bash
+wails3 task test                 # Go + frontend
+wails3 task test:cover           # both with coverage reports
+wails3 task test:cover:go        # → go/coverage.{out,html}
+wails3 task test:cover:frontend  # → frontend/coverage/
+```
+
+**Go side** — 12 packages tested, 10 over 70%. Tests use the `core/go` framework: external `_test` package, alias-import `dappco.re/go` for `core.T`/`AssertEqual`/`AssertTrue`/etc, no separate `"testing"` import, AX `Good/Bad/Ugly` naming, HOME-isolated fixtures via `t.TempDir()` + `t.Cleanup`.
+
+**Frontend side** — vitest@^3 + happy-dom + @vitest/coverage-v8. 14 spec files, 70 tests, ~600ms wall time. Per-window tests use the shared `frontend/src/test/window-fixture.ts` (`mountWindow`, `expectChromeTitle`, `isEmbedded`, `findCard`). Canonical 4-section pattern: smoke / embedded-sweep / content-presence / reactive-prop.
+
+**Coverage outliers (ceilinged, not bugs):**
+- `pkg/services` 49.4% — kardianos writes to `~/Library/LaunchAgents/` etc; integration-suite work, not unit.
+- `pkg/desktop` 9.3% — `Service.Run()` boots Wails; headless integration is its own workstream.
+
+Both ceilings are documented in their test files.
+
+## Wails canonical surface (committed 2026-05-12)
+
+`pkg/desktop` wires the full alpha.91 surface so the same codebase targets iOS/Android later (UI just needs media-query responsiveness):
+
+- **Per-window** — `Mac.InvisibleTitleBarHeight` (native drag region), `Mac.WindowLevel`, `Mac.CollectionBehavior` (tray over fullscreen / all Spaces / out of Cmd+`), `Mac.Backdrop`, `Mac.WebviewPreferences.AllowsBackForwardNavigationGestures: u.False` (swipe-back was breaking SPA routes), `Linux.Icon`, `ContentProtectionEnabled`, `DefaultContextMenuDisabled`.
+- **App-level** — `SingleInstance` with 32-byte `EncryptionKey` for AES-256-GCM auth on the inter-instance channel (without it second-instance args are untrusted per Wails docs), `AdditionalData: app/version`, `ShouldQuit`, `OnShutdown`, `PostShutdown`, `PanicHandler`, `Windows.EnabledFeatures: msWebView2EnableDraggableRegions`.
+- **Dock policy** — Routed through Wails3's canonical `services/dock.HideAppIcon / ShowAppIcon` (not a custom cgo shim). App boots in Accessory (tray-only); opening the unified `app` shell elevates to Regular (Dock icon + Cmd+Tab); close demotes. Code lives in `pkg/desktop/policy.go`.
+- **Window events** — `WindowDidMove`, `WindowMaximise/UnMaximise`, `WindowMinimise/UnMinimise` re-broadcast onto the `lthn:window:*` bus for the frontend.
+- **Build** — Taskfile ARCH propagation fixed across `package` → `create:*` → `build` chains for all three platforms. Custom `darwin:create:dmg` mirror-implementing Wails' `dmg.Creator` (the alpha.91 dispatch is disabled but the Go package ships). `Linux.Icon` wired through `preCreateWindows`.
+
+## UI polish — retina + window 100%/100%
+
+- `frontend/index.html` — `-webkit-font-smoothing: antialiased` + `-moz-osx-font-smoothing: grayscale` + `text-rendering: optimizeLegibility` + `font-feature-settings: kern/liga/calt`. Without these the macOS WebView falls back to subpixel-antialiased which makes thin light-on-dark text feel cramped. `color-scheme: dark` meta tells WebView's native form controls + scrollbars + dialogs to render with dark defaults. Viewport meta gains `viewport-fit=cover` for mobile-ready future.
+- `frontend/src/lit/chrome.ts` — non-embedded card uses `width:100%; height:100%` instead of fixed `${w}px/${h}px`. The OS window from `pkg/desktop/windows.go` is the authoritative size; the card fills it. `ChromeOptions` gains optional `actions` slot for titlebar right-side icons (cog + screen on the tray today).
+- `frontend/src/tokens.css` — global rules give every `<lthn-*-window>` custom element `display:flex; width:100%; height:100%` so the 100% chrome has somewhere to grow.
+
+## Tray popover redesign (committed 2026-05-13)
+
+`main.ts` tray surface refactored into three logical sections under `renderChrome`:
+- **Hero card** — model status as a 14px headline, mini-stats grid (HEAP / UPTIME) when a model is loaded, inviting "Pick a model → Browse" dashed card when none, thin inline sparkline strip.
+- **Tabbed info card** — System / Runner / Activity tabs, each renders 4 key/value rows. Placeholder surfaces today; built to grow charts + richer stats per tab.
+- **Open section** — 2-col grid for Chat / Models / Telemetry (Lethean Desktop moved to systray right-click menu + titlebar screen icon; Settings moved to titlebar cog icon).
+
 ## Resolved decisions
 
 - **Bundle ID:** `ai.lthn.desktop` (Snider 2026-05-12)
 - **First version:** `v0.1.0` (Snider 2026-05-12)
 - **User-data root:** `~/Lethean/` — visible in Finder, no hidden dot-dirs. **Never** `~/.lthn/`. Sub-layout: `~/Lethean/{cli, data, conf, wallets}`. Models live at `~/Lethean/conf/models/`. Per the "no hidden user bloat" principle (Snider 2026-05-12 — memory `design_no_hidden_user_bloat.md`). Uniform with the blockchain app's existing convention.
+- **App shell size:** 1440×900 (min 1000×680). Bumped from 1200×800 because the four-column chat layout (nav + conversations + chat body + right rail) was cramped at the prior default.
 
 ## Open decisions (need Snider's call)
 
