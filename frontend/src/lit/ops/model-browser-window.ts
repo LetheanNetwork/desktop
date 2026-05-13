@@ -205,9 +205,13 @@ class LthnModelBrowserWindow extends LitElement {
             <lthn-label>Files</lthn-label>
             <div style="margin-top:6px; display:flex; flex-direction:column; gap:4px;
                         font-family:var(--font-mono); font-size:10.5px; color:var(--fg-2);">
-              <div style="display:flex; justify-content:space-between;"><span>gemma-4-e2b-q4_k_m.gguf</span><span style="color:var(--fg-3);">1.9 GB</span></div>
-              <div style="display:flex; justify-content:space-between;"><span>tokenizer.json</span><span style="color:var(--fg-3);">4.2 MB</span></div>
-              <div style="display:flex; justify-content:space-between;"><span>config.json</span><span style="color:var(--fg-3);">1.1 KB</span></div>
+              ${selected && selected.isDir === false ? html`
+                <div style="display:flex; justify-content:space-between;"><span>${selected.name}</span><span style="color:var(--fg-3);">${selected.size}</span></div>
+              ` : html`
+                <div style="display:flex; justify-content:space-between;"><span>gemma-4-e2b-q4_k_m.gguf</span><span style="color:var(--fg-3);">1.9 GB</span></div>
+                <div style="display:flex; justify-content:space-between;"><span>tokenizer.json</span><span style="color:var(--fg-3);">4.2 MB</span></div>
+                <div style="display:flex; justify-content:space-between;"><span>config.json</span><span style="color:var(--fg-3);">1.1 KB</span></div>
+              `}
             </div>
           </div>
           <div style="font-size:11px; color:var(--fg-3); line-height:1.55;">
@@ -320,5 +324,7 @@ function deriveLocalModel(e: { name: string; size: number; path: string; is_dir:
     family: modelFamily(e.name),
     size:   fmtBytes(e.size || 0),
     status: "available",
+    path:   e.path,
+    isDir:  e.is_dir,
   };
 }
