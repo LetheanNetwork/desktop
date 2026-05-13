@@ -153,43 +153,59 @@ func (s *Service) detect(roots []string, maxDepth int) []ProjectSummary {
 	}
 	out := []ProjectSummary{}
 	for _, root := range roots {
-		if err := core.PathWalkDir(root, func(path string, d core.FsDirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if !d.IsDir() {
-				return nil
-			}
-			rel := "."
-			if relResult := core.PathRel(root, path); relResult.OK {
-				rel = relResult.Value.(string)
-			}
-			depth := len(core.Split(rel, string(core.PathSeparator))) - 1
-			name := d.Name()
-			if name == "node_modules" || name == "vendor" || name == ".git" || name == "build" || name == "external" {
-				return core.PathSkipDir
-			}
-			if depth > maxDepth {
-				return core.PathSkipDir
-			}
-			if !php.IsLaravelProject(path) {
-				return nil
-			}
-			out = append(out, ProjectSummary{
-				Path:       path,
-				Name:       core.PathBase(path),
-				AppName:    php.GetLaravelAppName(path),
-				AppURL:     php.GetLaravelAppURL(path),
-				PackageMgr: php.DetectPackageManager(path),
-				FrankenPHP: php.IsFrankenPHPProject(path),
-			})
-			return core.PathSkipDir
-		}); err != nil {
-			core.Warn("php project detection walk failed", "root", root, "err", err)
-		}
+		s.detectRoot(root, maxDepth, &out)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
+}
+
+func (s *Service) detectRoot(root string, maxDepth int, out *[]ProjectSummary) {
+	if err := core.PathWalkDir(root, func(path string, d core.FsDirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		if skipDetectDir(d.Name()) {
+			return core.PathSkipDir
+		}
+		if detectDepth(root, path) > maxDepth {
+			return core.PathSkipDir
+		}
+		if !php.IsLaravelProject(path) {
+			return nil
+		}
+		*out = append(*out, summaryForProject(path))
+		return core.PathSkipDir
+	}); err != nil {
+		core.Warn("php project detection walk failed", "root", root, "err", err)
+	}
+}
+
+func detectDepth(root, path string) int {
+	rel := "."
+	if relResult := core.PathRel(root, path); relResult.OK {
+		rel = relResult.Value.(string)
+	}
+	return len(core.Split(rel, string(core.PathSeparator))) - 1
+}
+
+func skipDetectDir(name string) bool {
+	switch name {
+	case "node_modules", "vendor", ".git", "build", "external":
+		return true
+	default:
+		return false
+	}
+}
+
+func summaryForProject(path string) ProjectSummary {
+	return ProjectSummary{
+		Path:       path,
+		Name:       core.PathBase(path),
+		AppName:    php.GetLaravelAppName(path),
+		AppURL:     php.GetLaravelAppURL(path),
+		PackageMgr: php.DetectPackageManager(path),
+		FrankenPHP: php.IsFrankenPHPProject(path),
+	}
 }
 
 // fileExists reports whether `path` resolves to a regular file.
