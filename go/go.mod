@@ -11,8 +11,10 @@ require (
 )
 
 require (
+	dappco.re/go/api v0.14.0 // indirect
 	dappco.re/go/core v0.8.0-alpha.1 // indirect
 	dappco.re/go/log v0.8.0-alpha.1 // indirect
+	dappco.re/go/mcp v0.17.0 // indirect
 	dappco.re/go/rag v0.8.0-alpha.1 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect

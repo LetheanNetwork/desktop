@@ -42,3 +42,11 @@
 	path = external/config
 	url = https://github.com/dappcore/config.git
 	branch = dev
+[submodule "external/api"]
+	path = external/api
+	url = https://github.com/dappcore/api.git
+	branch = dev
+[submodule "external/mcp"]
+	path = external/mcp
+	url = https://github.com/dappcore/mcp.git
+	branch = dev

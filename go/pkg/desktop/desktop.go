@@ -122,6 +122,14 @@ func (s *Service) Run() core.Result {
 		return core.Fail(core.E("desktop.Run", "Server is required", nil))
 	}
 
+	// Mount the dappco.re/go/api + dappco.re/go/mcp HTTP surfaces onto
+	// our gin engine BEFORE the SPA fallback — pkg/server's NoRoute
+	// fallback catches anything not handled by registered routes, so
+	// these prefixed handlers need to be in place first.
+	if r := mountSubsystems(s.opts.Core, s.opts.Server.Engine()); !r.OK {
+		return r
+	}
+
 	// Mount the SPA fallback on the gin engine — every request that
 	// doesn't match a registered API route falls through to the
 	// embedded dist.

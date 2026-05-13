@@ -16,11 +16,23 @@ use (
 	./external/ai/external/go-rag/go
 	./external/ai/external/go-ratelimit/go
 	./external/ai/go
+	./external/api/go
+	// api's nested submodules — scm + proxy aren't at our top level
+	// so they need to come from the api submodule's tree. The other
+	// nested ones (go-ws, go-log, go-io, go-inference, go-process)
+	// are already covered by our top-level entries; first-listed wins
+	// in workspace resolution, so the top-level pins take precedence.
+	./external/api/external/go-scm/go
+	./external/api/external/go-proxy/go
 	./external/config/go
 	./external/go
 	./external/i18n/go
 	./external/inference/go
 	./external/io/go
+	./external/mcp/go
+	// mcp's nested rag is dropped — our top-level
+	// external/ai/external/go-rag/go already provides dappco.re/go/rag
+	// and Go workspace mode refuses duplicate module paths.
 	./external/orm/go
 	./external/process/go
 	./external/store/go

@@ -2,6 +2,8 @@ dappco.re/go v0.9.0 h1:4ruZRNqKDDva8o6g65tYggjGVe42E6/lMZfVKXtr3p0=
 dappco.re/go v0.9.0/go.mod h1:xapr7fLK4/9Pu2iSCr4qZuIuatmtx1j56zS/oPDbGyQ=
 dappco.re/go/ai v0.8.0-alpha.1 h1:f2Z2oG8OSmNk8HyLi8Sfd+joaIO0MlJD0a/ZRwfJavY=
 dappco.re/go/ai v0.8.0-alpha.1/go.mod h1:joZ8OU7Gv68/jFVVPJccmx95IwO3GP1hfhGQowEX1n4=
+dappco.re/go/api v0.14.0 h1:Pn1ftsb4MGPVHvciYuZO8H/8couBE1W65mnEqkAu1RM=
+dappco.re/go/api v0.14.0/go.mod h1:Pr62kJ6aYD6G7N3Y9q9/3krFte8zRonZBn21ZHONros=
 dappco.re/go/core v0.8.0-alpha.1 h1:gj7+Scv+L63Z7wMxbJYHhaRFkHJo2u4MMPuUSv/Dhtk=
 dappco.re/go/core v0.8.0-alpha.1/go.mod h1:f2/tBZ3+3IqDrg2F5F598llv0nmb/4gJVCFzM5geE4A=
 dappco.re/go/i18n v0.8.0-alpha.1 h1:9LI/PrF41XeQu69eOaBTz3LMrXTJ08O2f1EEATq9k5A=
@@ -10,6 +12,8 @@ dappco.re/go/inference v0.9.0/go.mod h1:eu0je5UqOQyoG6eaJ1IqY5eORev+PfmsRXSNCanq
 dappco.re/go/io v0.8.0-alpha.1 h1:tIJ/Nd6lGr2DFEUj2HzGM8dPglS5bEAI4h2RAgzGCNE=
 dappco.re/go/log v0.8.0-alpha.1 h1:eXTdrt88Ovbdm0KJkJDaEpgLUHUZgJ2xYEu2uN3eV4I=
 dappco.re/go/log v0.8.0-alpha.1/go.mod h1:IC04Em9SfVTcXiWc1BqZDQfa1MtOuMDEermZkQcTz9c=
+dappco.re/go/mcp v0.17.0 h1:XoORkjCsgAqIp7q9SDeaWKsZ6/LMWDjy/2H6lb47fKA=
+dappco.re/go/mcp v0.17.0/go.mod h1:PVncSqyGPMICcIM8gCg+7ugt76Y5oNuihsIaa5+ITYU=
 dappco.re/go/rag v0.8.0-alpha.1 h1:zmwOPHdf6voifKBpqAqeLW+EnAP4/V7A1ceKmTJjeNk=
 dappco.re/go/rag v0.8.0-alpha.1/go.mod h1:OJgmSJ8lctK/bVPGWWRiAtG8EhDKY6Hm+Y2tFxBTs0k=
 dario.cat/mergo v1.0.2 h1:85+piFYR1tMbRrLcDwR18y4UKJ3aH1Tbzi24VRW1TK8=

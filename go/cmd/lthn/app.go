@@ -6,9 +6,11 @@ import (
 	"context"
 
 	core "dappco.re/go"
+	"dappco.re/go/api"
 	"dappco.re/go/config"
 	"dappco.re/go/i18n"
 	"dappco.re/go/io"
+	"dappco.re/go/mcp/pkg/mcp"
 	"dappco.re/go/process"
 	"dappco.re/go/store"
 	"dappco.re/go/stream"
@@ -68,6 +70,22 @@ func newAppCore() *core.Core {
 		})),
 		core.WithName("io", io.NewService(io.IOConfig{
 			Root: dataDir.Value.(string),
+		})),
+		// api — the Gin-based polyglot HTTP gateway. Its Engine
+		// drives route-group registration (api.Engine.Register(grp)).
+		// pkg/desktop mounts the Engine's http.Handler at /api/*
+		// so the same surface that runs standalone via `lthn serve`
+		// also lights up inside the Wails WebView's same-origin
+		// context. See pkg/desktop/subsystems.go.
+		core.WithName("api", api.NewService(api.ApiConfig{})),
+		// mcp — the Model Context Protocol service. Registered on
+		// the Core today but NOT yet HTTP-mounted (the upstream
+		// Service exposes ServeHTTP as an entry point rather than
+		// an http.Handler accessor). Reachable via stdio in the
+		// meantime; HTTP mount lands when we add an upstream
+		// Handler() accessor on *mcp.Service.
+		core.WithName("mcp", mcp.NewService(mcp.Options{
+			WorkspaceRoot: dataDir.Value.(string),
 		})),
 	)
 
