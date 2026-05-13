@@ -174,7 +174,12 @@ class LthnAppShell extends LitElement {
         runner.WModels().catch((): string[] => []),
         fl.Build().catch(() => null),
       ]);
-      if (models && models[0]) this.model = models[0];
+      if (models && models[0]) {
+        this.model = models[0];
+        this.running = true;
+      } else {
+        this.running = false;
+      }
       if (build?.version) this.version = `v${build.version}`;
     } catch { /* keep design fallbacks */ }
   }
