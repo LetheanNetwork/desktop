@@ -55,6 +55,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # go.work pins several nested paths under external/*/external/
+          # (e.g. external/ai/external/go-log/go) — top-level only is
+          # not enough; the workspace fails to resolve dappco.re/go-*
+          # without the nested checkout.
+          submodules: recursive
 
       - name: Set up Go
         uses: actions/setup-go@v5
