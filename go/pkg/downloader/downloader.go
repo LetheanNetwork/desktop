@@ -33,6 +33,8 @@ import (
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
+const fetchOp = "downloader.Fetch"
+
 // Fetch downloads url and writes it to ~/Lethean/conf/models/<name>.
 // Overwrites any existing file at the destination. Returns the
 // absolute destination path on success.
@@ -43,10 +45,10 @@ import (
 //	if r.OK { dest := r.Value.(string); _ = dest }
 func Fetch(url, name string) core.Result {
 	if url == "" {
-		return core.Fail(core.E("downloader.Fetch", "url is required", nil))
+		return core.Fail(core.E(fetchOp, "url is required", nil))
 	}
 	if name == "" {
-		return core.Fail(core.E("downloader.Fetch", "name is required", nil))
+		return core.Fail(core.E(fetchOp, "name is required", nil))
 	}
 	dirR := paths.ModelsDir()
 	if !dirR.OK {
@@ -61,7 +63,7 @@ func Fetch(url, name string) core.Result {
 	resp := getR.Value.(*core.Response)
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return core.Fail(core.E("downloader.Fetch",
+		return core.Fail(core.E(fetchOp,
 			core.Concat("HTTP ", core.Sprintf("%d", resp.StatusCode), " from ", url),
 			nil))
 	}
@@ -74,7 +76,7 @@ func Fetch(url, name string) core.Result {
 	defer file.Close()
 
 	if _, err := io.Copy(file, resp.Body); err != nil {
-		return core.Fail(core.E("downloader.Fetch", "stream copy failed", err))
+		return core.Fail(core.E(fetchOp, "stream copy failed", err))
 	}
 	return core.Ok(dest)
 }

@@ -16,6 +16,8 @@ import (
 	"dappco.re/lthn/desktop/pkg/downloader"
 )
 
+const modelGGUF = "model.gguf"
+
 // homeFixture sandboxes $HOME into a t.TempDir so the downloader's
 // paths.ModelsDir() resolves under a disposable tree.
 func homeFixture(t *core.T) string {
@@ -33,10 +35,10 @@ func TestDownloader_Fetch_Good(t *core.T) {
 	}))
 	defer srv.Close()
 
-	r := downloader.Fetch(srv.URL, "model.gguf")
+	r := downloader.Fetch(srv.URL, modelGGUF)
 	core.AssertTrue(t, r.OK)
 	dest := r.Value.(string)
-	core.AssertEqual(t, core.PathJoin(home, "Lethean", "conf", "models", "model.gguf"), dest)
+	core.AssertEqual(t, core.PathJoin(home, "Lethean", "conf", "models", modelGGUF), dest)
 
 	read := core.ReadFile(dest)
 	core.AssertTrue(t, read.OK)
@@ -64,7 +66,7 @@ func TestDownloader_Fetch_Good_Overwrite(t *core.T) {
 
 func TestDownloader_Fetch_Bad_EmptyURL(t *core.T) {
 	homeFixture(t)
-	r := downloader.Fetch("", "model.gguf")
+	r := downloader.Fetch("", modelGGUF)
 	core.AssertFalse(t, r.OK)
 }
 
