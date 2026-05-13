@@ -134,6 +134,11 @@
     "logs":         { "title": "Activity",      "subtitle": "logs · history · power" },
     "settings":     { "title": "Settings",      "subtitle": "lthn · v0.2.0-rc1" },
     "models":       { "title": "Models",        "subtitle": "local · 4 · huggingface" },
-    "welcome":      { "title": "Welcome to lthn", "subtitle": "step %s of 3" }
+    "welcome":      {
+      "title": "Welcome to lthn", "subtitle": "step %s of 3",
+      "step1_label": "Model directory", "step1_hint": "Where models live",
+      "step2_label": "First model",     "step2_hint": "Pick a starter",
+      "step3_label": "Connect",         "step3_hint": "Wire up clients"
+    }
   }
 }

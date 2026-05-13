@@ -134,6 +134,11 @@
     "logs":         { "title": "Activité",            "subtitle": "journaux · historique · alimentation" },
     "settings":     { "title": "Paramètres",          "subtitle": "lthn · v0.2.0-rc1" },
     "models":       { "title": "Modèles",             "subtitle": "local · 4 · huggingface" },
-    "welcome":      { "title": "Bienvenue sur lthn",  "subtitle": "étape %s sur 3" }
+    "welcome":      {
+      "title": "Bienvenue sur lthn", "subtitle": "étape %s sur 3",
+      "step1_label": "Dossier des modèles", "step1_hint": "Où vivent les modèles",
+      "step2_label": "Premier modèle",      "step2_hint": "Choisissez un démarreur",
+      "step3_label": "Connexion",           "step3_hint": "Branchez vos clients"
+    }
   }
 }

@@ -60,6 +60,7 @@ class LthnWelcomeWindow extends LitElement {
     clients:   { state: true },
     endpoint:  { state: true },
     version:   { state: true },
+    stepLabels:{ state: true },
   };
   declare step: number;
   declare w: number;
@@ -71,6 +72,7 @@ class LthnWelcomeWindow extends LitElement {
   declare clients: ClientStatus[];
   declare endpoint: string;
   declare version: string;
+  declare stepLabels: { l: string; h: string }[];
   constructor() {
     super();
     this.step = 1; this.w = 760; this.h = 580; this.embedded = false;
@@ -80,15 +82,28 @@ class LthnWelcomeWindow extends LitElement {
     this.clients = [];
     this.endpoint = "http://localhost:8000/v1";
     this.version = "0.2.0-rc1";
+    this.stepLabels = [
+      { l: "Model directory", h: "Where models live" },
+      { l: "First model",     h: "Pick a starter" },
+      { l: "Connect",         h: "Wire up clients" },
+    ];
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const [title, subtitleFmt] = await Promise.all([
+    const [title, subtitleFmt, s1l, s1h, s2l, s2h, s3l, s3h] = await Promise.all([
       T("window.welcome.title"),
       T("window.welcome.subtitle"),
+      T("window.welcome.step1_label"), T("window.welcome.step1_hint"),
+      T("window.welcome.step2_label"), T("window.welcome.step2_hint"),
+      T("window.welcome.step3_label"), T("window.welcome.step3_hint"),
     ]);
     this.chrome = { title, subtitleFmt };
+    this.stepLabels = [
+      { l: s1l, h: s1h },
+      { l: s2l, h: s2h },
+      { l: s3l, h: s3h },
+    ];
     // Pull the canonical Lethean paths + the fresh-install flag
     // from the firstlaunch service. The wizard's "Where shall we
     // keep your models?" step shows the real directory the runner
@@ -137,9 +152,9 @@ class LthnWelcomeWindow extends LitElement {
 
   render() {
     const steps = [
-      { n: 1, label: "Model directory", hint: "Where models live" },
-      { n: 2, label: "First model",     hint: "Pick a starter" },
-      { n: 3, label: "Connect",         hint: "Wire up clients" },
+      { n: 1, label: this.stepLabels[0].l, hint: this.stepLabels[0].h },
+      { n: 2, label: this.stepLabels[1].l, hint: this.stepLabels[1].h },
+      { n: 3, label: this.stepLabels[2].l, hint: this.stepLabels[2].h },
     ];
 
     const body = html`
