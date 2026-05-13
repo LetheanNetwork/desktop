@@ -14,33 +14,57 @@ class LthnModelBrowserWindow extends LitElement {
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },
     chrome:   { state: true },
+    local:    { state: true },
+    loadErr:  { state: true },
   };
   declare selected: string;
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare chrome: { title: string; subtitle: string };
+  declare local: LocalModel[];
+  declare loadErr: string;
   constructor() {
     super();
-    this.selected = "gemma-4-e2b"; this.w = 1040; this.h = 700; this.embedded = false;
-    this.chrome = { title: "Models", subtitle: "local · 4 · huggingface" };
+    this.selected = ""; this.w = 1040; this.h = 700; this.embedded = false;
+    this.chrome = { title: "Models", subtitle: "local · — · huggingface" };
+    this.local = [];
+    this.loadErr = "";
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
+    const [title, subtitleTpl] = await Promise.all([
+      T("window.models.title"),
+      T("window.models.subtitle"),
+    ]);
+    // Pull real model entries from pkg/models.List(); maps each
+    // Entry → LocalModel via deriveLocalModel below. Status defaults
+    // to "available" since there's no per-model loaded indicator
+    // surfaced from the runner yet.
+    try {
+      const ms = await import("@desktop/models/wailsservice");
+      const entries = await ms.List();
+      this.local = (entries || []).map(deriveLocalModel);
+      if (this.local.length > 0 && !this.selected) {
+        this.selected = this.local[0].id;
+      }
+    } catch (err: unknown) {
+      this.loadErr = err instanceof Error ? err.message : String(err);
+      this.local = [];
+    }
+    // Rebuild the subtitle with the live count — the locale string
+    // is "local · 4 · huggingface" today; swap the "4" for the
+    // real count so the chrome reflects what's actually on disk.
     this.chrome = {
-      title: await T("window.models.title"),
-      subtitle: await T("window.models.subtitle"),
+      title,
+      subtitle: subtitleTpl.replace(/·\s*\d+\s*·/, `· ${this.local.length} ·`)
+                           .replace(/·\s*—\s*·/, `· ${this.local.length} ·`),
     };
   }
 
   render() {
-    const local: LocalModel[] = [
-      { id:"gemma-4-e2b",  name:"gemma-4-e2b",  family:"Gemma", size:"2.1 GB", status:"loaded" },
-      { id:"llama-3.2-3b", name:"llama-3.2-3b", family:"Llama", size:"3.4 GB", status:"available" },
-      { id:"phi-3.5-mini", name:"phi-3.5-mini", family:"Phi",   size:"2.6 GB", status:"available" },
-      { id:"qwen-2.5-7b",  name:"qwen-2.5-7b",  family:"Qwen",  size:"4.8 GB", status:"downloading" },
-    ];
+    const local: LocalModel[] = this.local;
     const results = [
       { name:"Qwen2.5-Coder-7B-Instruct",     author:"Qwen",       size:"4.8 GB", q:"q4_k_m", family:"Coder",   tools:true,  vision:false, downloads:"1.2M" },
       { name:"Mistral-Nemo-12B-Instruct",     author:"MistralAI",  size:"8.4 GB", q:"q4_k_m", family:"Mistral", tools:true,  vision:false, downloads:"420k" },
@@ -59,9 +83,15 @@ class LthnModelBrowserWindow extends LitElement {
         <!-- local rail -->
         <aside style="background:rgba(0,0,0,0.18); border-right:1px solid rgba(255,255,255,0.05);
                       display:flex; flex-direction:column; min-height:0;">
-          <lthn-label style="display:block; padding:12px 14px 6px;">Local · 4</lthn-label>
+          <lthn-label style="display:block; padding:12px 14px 6px;">Local · ${local.length}</lthn-label>
           <div style="padding:0 6px; display:flex; flex-direction:column; gap:1px;">
-            ${local.map(m => this._localItem(m))}
+            ${local.length === 0 ? html`
+              <div style="padding:18px 14px; font-size:11.5px; color:var(--fg-3); line-height:1.55;">
+                ${this.loadErr
+                  ? html`<span style="color:var(--error-400);">Failed to list models:</span><br>${this.loadErr}`
+                  : html`No models found in <code style="color:var(--fg-2);">~/Lethean/conf/models/</code>.<br>Import a GGUF or pull from Hugging Face to get started.`}
+              </div>
+            ` : local.map(m => this._localItem(m))}
           </div>
           <div style="flex:1"></div>
           <div style="padding:10px 12px; border-top:1px solid rgba(255,255,255,0.05);
@@ -199,3 +229,56 @@ class LthnModelBrowserWindow extends LitElement {
   }
 }
 customElements.define("lthn-model-browser-window", LthnModelBrowserWindow);
+
+// ─── helpers ────────────────────────────────────────────────────────
+
+/** Common LLM family parsed from the file/dir name. Best-effort —
+ *  matches the prefix conventions Hugging Face / lthn use. Falls
+ *  back to "Local" so the rail entry always renders something. */
+function modelFamily(name: string): string {
+  const n = name.toLowerCase();
+  if (n.startsWith("gemma"))   return "Gemma";
+  if (n.startsWith("llama"))   return "Llama";
+  if (n.startsWith("phi"))     return "Phi";
+  if (n.startsWith("qwen"))    return "Qwen";
+  if (n.startsWith("mistral")) return "Mistral";
+  if (n.startsWith("nemo"))    return "Mistral";
+  if (n.startsWith("deepseek"))return "DeepSeek";
+  if (n.startsWith("yi"))      return "Yi";
+  if (n.startsWith("falcon"))  return "Falcon";
+  if (n.startsWith("mixtral")) return "Mistral";
+  if (n.startsWith("granite")) return "Granite";
+  return "Local";
+}
+
+/** Slug for the LocalModel.id field — lowercase, kebab-case. Falls
+ *  back to "model" when the source name is empty. */
+function modelSlug(name: string): string {
+  const s = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return s || "model";
+}
+
+/** Human-readable size from byte count. Matches the units the rail
+ *  already uses; precision tracks magnitude so a 2.1 GB model
+ *  doesn't render as 2.1234 GB. */
+function fmtBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let v = bytes;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+  return v >= 100 || i === 0 ? `${v.toFixed(0)} ${units[i]}` : `${v.toFixed(1)} ${units[i]}`;
+}
+
+/** Maps a pkg/models Entry → LocalModel. Status default is
+ *  "available" — no runtime "loaded" signal yet (would need a
+ *  runner cross-check). */
+function deriveLocalModel(e: { name: string; size: number; path: string; is_dir: boolean }): LocalModel {
+  return {
+    id:     modelSlug(e.name),
+    name:   e.name,
+    family: modelFamily(e.name),
+    size:   fmtBytes(e.size || 0),
+    status: "available",
+  };
+}
