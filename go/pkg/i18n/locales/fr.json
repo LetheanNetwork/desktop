@@ -157,7 +157,15 @@
     "tools":        { "title": "Outils · MCP",        "subtitle": "2 serveurs · 12 outils · 648 appels aujourd'hui" },
     "benchmark":    { "title": "Banc d'essai",        "subtitle": "exécuter · comparer · exporter" },
     "telemetry":    { "title": "Télémétrie en direct","subtitle_normal": "surface de démonstration", "subtitle_fullscreen": "plein écran · ⎋ pour quitter" },
-    "logs":         { "title": "Activité",            "subtitle": "journaux · historique · alimentation" },
+    "logs":         {
+      "title": "Activité", "subtitle": "journaux · historique · alimentation",
+      "tab_live":    "Journal en direct",
+      "tab_history": "Historique de génération",
+      "tab_power":   "Historique d'alimentation",
+      "btn_clear":   "Effacer",
+      "btn_pause":   "Pause",
+      "btn_resume":  "Reprendre"
+    },
     "settings":     { "title": "Paramètres",          "subtitle": "lthn · v0.2.0-rc1" },
     "models":       { "title": "Modèles",             "subtitle": "local · 4 · huggingface" },
     "welcome":      {

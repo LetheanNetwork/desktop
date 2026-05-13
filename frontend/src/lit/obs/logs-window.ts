@@ -22,6 +22,7 @@ class LthnLogsWindow extends LitElement {
     chrome: { state: true },
     liveLines: { state: true },
     paused: { state: true },
+    t: { state: true },
   };
   declare w: number;
   declare h: number;
@@ -30,6 +31,10 @@ class LthnLogsWindow extends LitElement {
   declare chrome: { title: string; subtitle: string };
   declare liveLines: LiveLine[];
   declare paused: boolean;
+  declare t: {
+    tabLive: string; tabHistory: string; tabPower: string;
+    btnClear: string; btnPause: string; btnResume: string;
+  };
 
   private _pollTimer: number | null = null;
 
@@ -52,15 +57,29 @@ class LthnLogsWindow extends LitElement {
     this.chrome = { title: "Activity", subtitle: "logs · history · power" };
     this.liveLines = [];
     this.paused = false;
+    this.t = {
+      tabLive: "Live log", tabHistory: "Generation history", tabPower: "Power history",
+      btnClear: "Clear", btnPause: "Pause", btnResume: "Resume",
+    };
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const [title, subtitle] = await Promise.all([
+    const [title, subtitle, tl, th, tp, bc, bp, br] = await Promise.all([
       T("window.logs.title"),
       T("window.logs.subtitle"),
+      T("window.logs.tab_live"),
+      T("window.logs.tab_history"),
+      T("window.logs.tab_power"),
+      T("window.logs.btn_clear"),
+      T("window.logs.btn_pause"),
+      T("window.logs.btn_resume"),
     ]);
     this.chrome = { title, subtitle };
+    this.t = {
+      tabLive: tl, tabHistory: th, tabPower: tp,
+      btnClear: bc, btnPause: bp, btnResume: br,
+    };
     void this._pollLive();
     this._pollTimer = window.setInterval(() => void this._pollLive(), 1500);
   }
@@ -121,9 +140,9 @@ class LthnLogsWindow extends LitElement {
 
   render() {
     const tabs = [
-      { id: "live",    label: "Live log",            icon: "fa-wave-square" },
-      { id: "history", label: "Generation history",  icon: "fa-clock-rotate-left" },
-      { id: "power",   label: "Power history",       icon: "fa-bolt" },
+      { id: "live",    label: this.t.tabLive,    icon: "fa-wave-square" },
+      { id: "history", label: this.t.tabHistory, icon: "fa-clock-rotate-left" },
+      { id: "power",   label: this.t.tabPower,   icon: "fa-bolt" },
     ];
     const toolbar = html`
       ${tabs.map(t => html`
@@ -135,12 +154,12 @@ class LthnLogsWindow extends LitElement {
       ${this.tab === "live" ? html`
         <lthn-btn tone="ghost" size="sm"
           @click=${() => this._clear()}>
-          <i class="fa-solid fa-trash" style="font-size:10px;"></i> Clear
+          <i class="fa-solid fa-trash" style="font-size:10px;"></i> ${this.t.btnClear}
         </lthn-btn>
         <lthn-btn tone=${this.paused ? "primary" : "ghost"} size="sm"
           @click=${() => { this.paused = !this.paused; }}>
           <i class="fa-solid ${this.paused ? "fa-play" : "fa-pause"}" style="font-size:10px;"></i>
-          ${this.paused ? "Resume" : "Pause"}
+          ${this.paused ? this.t.btnResume : this.t.btnPause}
         </lthn-btn>
       ` : nothing}
     `;

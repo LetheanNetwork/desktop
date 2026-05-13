@@ -157,7 +157,15 @@
     "tools":        { "title": "Tools · MCP",   "subtitle": "2 servers · 12 tools · 648 calls today" },
     "benchmark":    { "title": "Benchmark",     "subtitle": "run · compare · export" },
     "telemetry":    { "title": "Live telemetry","subtitle_normal": "demo surface", "subtitle_fullscreen": "fullscreen · ⎋ to exit" },
-    "logs":         { "title": "Activity",      "subtitle": "logs · history · power" },
+    "logs":         {
+      "title": "Activity", "subtitle": "logs · history · power",
+      "tab_live":    "Live log",
+      "tab_history": "Generation history",
+      "tab_power":   "Power history",
+      "btn_clear":   "Clear",
+      "btn_pause":   "Pause",
+      "btn_resume":  "Resume"
+    },
     "settings":     { "title": "Settings",      "subtitle": "lthn · v0.2.0-rc1" },
     "models":       { "title": "Models",        "subtitle": "local · 4 · huggingface" },
     "welcome":      {
