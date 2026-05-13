@@ -296,12 +296,8 @@ func (s *Service) Run() core.Result {
 				// before Focus() handles the case where the window
 				// was minimised — Wails docs canon for the second-
 				// instance UX.
-				if w, ok := s.app.Window.GetByName("app"); ok {
-					w.Restore()
-					w.Focus()
-				} else if w, ok := s.app.Window.GetByName("tray"); ok {
-					w.Restore()
-					w.Focus()
+				if !restoreFocusedWindow(s.app, "app") {
+					restoreFocusedWindow(s.app, "tray")
 				}
 			},
 		},
@@ -585,6 +581,15 @@ func (s *Service) Run() core.Result {
 		return core.Fail(err)
 	}
 	return core.Ok(nil)
+}
+
+func restoreFocusedWindow(app *application.App, name string) bool {
+	if w, ok := app.Window.GetByName(name); ok {
+		w.Restore()
+		w.Focus()
+		return true
+	}
+	return false
 }
 
 // attachSPA mounts the embedded frontend as the coreapi.Engine's
