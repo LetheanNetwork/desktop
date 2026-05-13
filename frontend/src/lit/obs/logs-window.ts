@@ -33,6 +33,19 @@ class LthnLogsWindow extends LitElement {
 
   private _pollTimer: number | null = null;
 
+  /** History tab generations — fixture today (real history needs a
+   *  per-turn log; tracked separately). Lifted to a class field so
+   *  the footer in render() and the body in _renderHistory() share
+   *  one source — the "N generations" count stays in sync with what
+   *  the body actually shows. */
+  private _gens = [
+    { ts: "14:32:14",  model: "gemma-4-e2b",  tok: 158, tg: 47.2, w: 8.4,  prompt: "Rewrite this function to use streams instead of arrays…" },
+    { ts: "12:08:42",  model: "gemma-4-e2b",  tok: 384, tg: 46.8, w: 8.3,  prompt: "Summarise the changes between v0.1 and v0.2-rc1 of the runner…" },
+    { ts: "11:55:18",  model: "llama-3.2-3b", tok: 220, tg: 32.6, w: 11.8, prompt: "What's the difference between LoRA rank 8 and rank 16?" },
+    { ts: "09:42:01",  model: "gemma-4-e2b",  tok: 642, tg: 45.9, w: 8.5,  prompt: "Draft a release note for the new model browser…" },
+    { ts: "08:18:33",  model: "phi-3.5-mini", tok: 184, tg: 38.4, w: 9.6,  prompt: "Translate the following help-centre article to British English…" },
+  ];
+
   constructor() {
     super();
     this.w = 1000; this.h = 660; this.tab = "live"; this.embedded = false;
@@ -131,9 +144,13 @@ class LthnLogsWindow extends LitElement {
         </lthn-btn>
       ` : nothing}
     `;
+    // History "N generations" derives from the rendered list so the
+    // footer count stays in sync with the body. "1.42M tokens · 142.6
+    // Wh · last 7 days" stay as design canon — no per-turn telemetry
+    // log yet to aggregate from.
     const footers = {
       live:    `streaming · ${this.liveLines.length} lines · webview bridge${this.paused ? " · paused" : ""}`,
-      history: "27 generations · last 7 days · 1.42M tokens · 142.6 Wh",
+      history: `${this._gens.length} generations · last 7 days · 1.42M tokens · 142.6 Wh`,
       power:   "showing last 24h · sample 1 s · powermetrics backend",
     };
     const body =
@@ -215,13 +232,7 @@ class LthnLogsWindow extends LitElement {
   }
 
   _renderHistory() {
-    const gens = [
-      { ts: "14:32:14",  model: "gemma-4-e2b",  tok: 158, tg: 47.2, w: 8.4,  prompt: "Rewrite this function to use streams instead of arrays…" },
-      { ts: "12:08:42",  model: "gemma-4-e2b",  tok: 384, tg: 46.8, w: 8.3,  prompt: "Summarise the changes between v0.1 and v0.2-rc1 of the runner…" },
-      { ts: "11:55:18",  model: "llama-3.2-3b", tok: 220, tg: 32.6, w: 11.8, prompt: "What's the difference between LoRA rank 8 and rank 16?" },
-      { ts: "09:42:01",  model: "gemma-4-e2b",  tok: 642, tg: 45.9, w: 8.5,  prompt: "Draft a release note for the new model browser…" },
-      { ts: "08:18:33",  model: "phi-3.5-mini", tok: 184, tg: 38.4, w: 9.6,  prompt: "Translate the following help-centre article to British English…" },
-    ];
+    const gens = this._gens;
     return html`
       <div style="flex:1; padding:12px 22px 18px; overflow:auto;">
         <div style="background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.06); border-radius:8px; font-family:var(--font-mono); font-size:11.5px;">
