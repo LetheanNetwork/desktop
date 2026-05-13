@@ -6,6 +6,18 @@ import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
 import { T } from "@lthn/i18n/coreservice";
 
+/** Shape returned by integrations.List() — mirrored here so the
+ *  wizard doesn't pull a hard dependency on the bindings module
+ *  graph at type-check time. Kept aligned with go/pkg/integrations. */
+interface ClientStatus {
+  id:          string;
+  name:        string;
+  description: string;
+  config_path: string;
+  exists:      boolean;
+  state:       string;
+}
+
 /* Step 3 "Finish" handler — marks onboarding complete, opens the
  * settings window so the user can change their mind, and closes
  * the wizard. Dynamic import so a Lit unit test or canvas preview
@@ -45,6 +57,7 @@ class LthnWelcomeWindow extends LitElement {
     chrome: { state: true },
     modelsDir: { state: true },
     fresh:     { state: true },
+    clients:   { state: true },
   };
   declare step: number;
   declare w: number;
@@ -53,12 +66,14 @@ class LthnWelcomeWindow extends LitElement {
   declare chrome: { title: string; subtitleFmt: string };
   declare modelsDir: string;
   declare fresh: boolean;
+  declare clients: ClientStatus[];
   constructor() {
     super();
     this.step = 1; this.w = 760; this.h = 580; this.embedded = false;
     this.chrome = { title: "Welcome to lthn", subtitleFmt: "step %s of 3" };
     this.modelsDir = "~/Lethean/conf/models/";
     this.fresh = true;
+    this.clients = [];
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -83,6 +98,17 @@ class LthnWelcomeWindow extends LitElement {
     } catch (err) {
       // Non-fatal — keep the default ~/Lethean placeholder.
       console.error("welcome: firstlaunch lookup failed", err);
+    }
+    // Step 3 "Connect" — the integrations service already inspects
+    // each client's config file on disk; the wizard reuses the same
+    // surface so the catalogue stays single-sourced.
+    try {
+      const svc = await import("@desktop/integrations/wailsservice");
+      const list = await svc.List();
+      this.clients = (list || []) as ClientStatus[];
+    } catch (err) {
+      console.error("welcome: integrations lookup failed", err);
+      this.clients = [];
     }
   }
 
@@ -253,11 +279,19 @@ class LthnWelcomeWindow extends LitElement {
   }
 
   _step3() {
-    const clients = [
-      { name:"Claude Code", desc:"Anthropic's CLI · drop-in OpenAI-compatible endpoint", path:"~/.config/claude/config.json", checked:true },
-      { name:"OpenCode",    desc:"Open-source coding agent",                              path:"~/.config/opencode/config.toml" },
-      { name:"Codex",       desc:"OpenAI Codex CLI",                                      path:"~/.codex/config.yaml" },
-    ];
+    // Map live ClientStatus → step 3's compact row shape. Default-check
+    // clients that have a config file we could write to (state ===
+    // "available"); already-wired clients ("configured") show wired but
+    // unchecked since they don't need re-wiring; "n/a" hides.
+    const clients = (this.clients || [])
+      .filter(c => c.state !== "n/a")
+      .map(c => ({
+        name:    c.name,
+        desc:    c.description,
+        path:    displayHome(c.config_path),
+        checked: c.state === "available",
+        wired:   c.state === "configured",
+      }));
     return html`
       <div style="display:flex; flex-direction:column; gap:16px;">
         <div>
@@ -271,12 +305,20 @@ class LthnWelcomeWindow extends LitElement {
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:6px;">
-          ${clients.map(c => html`
+          ${clients.length === 0 ? html`
+            <div style="padding:14px 16px; border-radius:8px; background:rgba(255,255,255,0.025);
+                        border:1px solid rgba(255,255,255,0.05); font-size:12px; color:var(--fg-3); line-height:1.55;">
+              No supported clients detected on this Mac. You can always wire one up later from Settings → Integrations.
+            </div>
+          ` : clients.map(c => html`
             <div style="display:flex; align-items:center; gap:14px; padding:12px 14px; border-radius:8px;
                         background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06);">
-              <input type="checkbox" ?checked=${c.checked} style="accent-color:var(--brand-400);" />
+              <input type="checkbox" ?checked=${c.checked} ?disabled=${c.wired} style="accent-color:var(--brand-400);" />
               <div style="flex:1;">
-                <div style="font-size:12.5px; font-weight:500; color:var(--fg-0);">${c.name}</div>
+                <div style="display:flex; align-items:baseline; gap:8px;">
+                  <span style="font-size:12.5px; font-weight:500; color:var(--fg-0);">${c.name}</span>
+                  ${c.wired ? html`<lthn-state-pill variant="latest">Already wired</lthn-state-pill>` : nothing}
+                </div>
                 <div style="font-size:11px; color:var(--fg-3); margin-top:1px;
                             font-family:var(--font-mono); letter-spacing:0.01em;">${c.path}</div>
               </div>
