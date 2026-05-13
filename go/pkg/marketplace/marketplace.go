@@ -1,0 +1,129 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Package marketplace is the lthn-side plugin marketplace surface.
+// Browses available plugins, lists installed ones, dispatches
+// install/remove against the (forthcoming) plugin host.
+//
+// The plugin runtime — start binary on a random port + reverse-
+// proxy mount at /v1/api/plugin/<ns>/* — isn't built yet. This
+// package ships the catalogue + UI surface so the slot is wired
+// for when the runtime lands; Install/Remove return a "plugin
+// host not running" Result until then.
+//
+// Ported from core/ide's marketplacebridge.go + pkg_bridge.go.
+// The MCP-tool indirection there existed for AI-tool dual-mount;
+// lthn goes direct because the Wails GUI is the only consumer
+// today. The DuckDB-backed cache from core/ide is dropped —
+// the fixture catalogue is in-memory and small.
+
+package marketplace
+
+import (
+	core "dappco.re/go"
+)
+
+// Service owns the marketplace surface. Holds *core.Core for
+// late resolution of any plugin-host service that lands later.
+type Service struct {
+	core *core.Core
+}
+
+// NewService constructs the marketplace surface against a Core
+// container. Wired via application.NewService(marketplace.NewService(c))
+// in pkg/desktop/desktop.go.
+func NewService(c *core.Core) *Service { return &Service{core: c} }
+
+// Package is the catalogue record returned by Search. Mirrors
+// core/ide's marketplace.IdeModule shape — code is the stable
+// identifier, entrypoint is the URL the future plugin host will
+// reverse-proxy to.
+type Package struct {
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Version     string `json:"version,omitempty"`
+	Repo        string `json:"repo,omitempty"`
+	Category    string `json:"category,omitempty"`
+	Entrypoint  string `json:"entrypoint,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// InstalledPackage is what Installed returns — slimmer than
+// Package because the catalogue metadata is already on disk.
+type InstalledPackage struct {
+	Code       string `json:"code"`
+	Name       string `json:"name"`
+	Version    string `json:"version"`
+	EntryPoint string `json:"entry_point,omitempty"`
+}
+
+// fixture is the in-memory catalogue lthn ships with. Once a
+// remote registry endpoint is wired (config.Marketplace.Endpoint
+// in core/ide's pattern) the loader falls back to HTTP; until
+// then this is the only source of truth so the UI lights up out
+// of the box. Keep entries focused on plugins that make sense
+// for lthn-desktop specifically — no IDE-only items like
+// formatters or snippet packs.
+var fixture = []Package{
+	{
+		Code: "coreagent", Name: "CoreAgent",
+		Version:  "0.1.0",
+		Repo:     "lthn/coreagent",
+		Category: "agents",
+		Description: "First-party agent plugin — chat, brain, sessions, tools. " +
+			"Will ship as the canonical example of the plugin runtime " +
+			"(binary + --namespace + reverse-proxy mount).",
+	},
+	{
+		Code: "lemma-runner", Name: "Lemma local runner",
+		Version:  "0.3.1",
+		Repo:     "lthn/lemma-runner",
+		Category: "agents",
+		Description: "Run Lemma / Gemma 4 / Qwen 3 locally via go-mlx. " +
+			"Browse models, generate, fine-tune. Pairs with lthn's " +
+			"native inference sidecar.",
+	},
+	{
+		Code: "vi", Name: "Vi — local companion",
+		Version:  "0.1.0",
+		Repo:     "lthn/vi",
+		Category: "agents",
+		Description: "Vi is your local companion — watches your sites, " +
+			"surfaces alerts, runs local agents. Already shipping in " +
+			"lthn-desktop as a built-in; the plugin variant will be " +
+			"the sandboxed external-process form.",
+	},
+}
+
+// search filters the in-memory catalogue by query + category.
+// query is matched case-insensitively against code/name/category/
+// description; category is exact (case-insensitive) match.
+func search(query, category string) []Package {
+	queryLower := core.Lower(core.Trim(query))
+	categoryLower := core.Lower(core.Trim(category))
+	out := make([]Package, 0, len(fixture))
+	for _, p := range fixture {
+		if categoryLower != "" && core.Lower(p.Category) != categoryLower {
+			continue
+		}
+		if queryLower != "" {
+			hay := core.Lower(p.Code + " " + p.Name + " " + p.Category + " " + p.Description)
+			if !core.Contains(hay, queryLower) {
+				continue
+			}
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// findByCode looks one entry up by code. Used by Info-style
+// callers that want the full record for a known plugin.
+func findByCode(code string) (Package, bool) {
+	target := core.Lower(core.Trim(code))
+	for _, p := range fixture {
+		if core.Lower(p.Code) == target {
+			return p, true
+		}
+	}
+	return Package{}, false
+}
