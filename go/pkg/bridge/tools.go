@@ -168,6 +168,10 @@ func toolCatalogue() []map[string]any {
 		{"name": "layout_list", "desc": "List every saved layout (name + saved_at + window count)."},
 		{"name": "layout_delete", "desc": "Remove a saved layout file. params: { name }"},
 		{"name": "layout_get", "desc": "Return one saved layout's full contents without applying. params: { name }"},
+		{"name": "layout_tile", "desc": "Tile windows by mode: left, right, top, bottom, halves, thirds, quadrants, grid. params: { mode, windows? }"},
+		{"name": "layout_snap", "desc": "Snap window to screen edge/corner. params: { name, position: top|bottom|left|right|top-left|top-right|bottom-left|bottom-right|centre }"},
+		{"name": "layout_stack", "desc": "Cascade windows from top-left with constant pixel offsets. params: { windows?, offsetX?, offsetY?, width?, height? }"},
+		{"name": "layout_workflow", "desc": "Apply preset workflow arrangement: default, coding, review, ops, single. params: { workflow, name? (for single) }"},
 		{"name": "webview_hover", "desc": "Dispatch mouseover/mouseenter events on selector. params: { selector, window? }"},
 		{"name": "webview_type", "desc": "Set input/textarea value + dispatch input+change events. params: { selector, value, window? }"},
 		{"name": "webview_check", "desc": "Set checkbox/radio checked state. params: { selector, checked, window? }"},
@@ -265,6 +269,14 @@ func (s *Service) dispatch(ctx context.Context, tool string, params map[string]a
 		return s.toolLayoutDelete(params)
 	case "layout_get":
 		return s.toolLayoutGet(params)
+	case "layout_tile":
+		return s.toolLayoutTile(params)
+	case "layout_snap":
+		return s.toolLayoutSnap(params)
+	case "layout_stack":
+		return s.toolLayoutStack(params)
+	case "layout_workflow":
+		return s.toolLayoutWorkflow(params)
 	case "webview_hover":
 		return s.toolWebviewHover(ctx, params)
 	case "webview_type":
