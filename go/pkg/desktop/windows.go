@@ -202,6 +202,13 @@ func windowRegistry() []WindowSpec {
 			DisableNativeContextMenu: true,
 		},
 		{
+			Name: "php", Title: "PHP",
+			Width: 1200, Height: 780, MinWidth: 760, MinHeight: 480,
+			Frameless: true, HideOnClose: true, EnableFileDrop: false,
+			InvisibleTitleBarHeight:  titleBarH,
+			DisableNativeContextMenu: true,
+		},
+		{
 			Name: "about", Title: "About Lethean Desktop",
 			// Genuinely fixed size — Min == Max == Width/Height +
 			// DisableResize for the splash-card feel.

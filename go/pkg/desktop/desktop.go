@@ -46,6 +46,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/integrations"
 	"dappco.re/lthn/desktop/pkg/lint"
 	"dappco.re/lthn/desktop/pkg/models"
+	lthnphp "dappco.re/lthn/desktop/pkg/php"
 	"dappco.re/lthn/desktop/pkg/repos"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
@@ -201,6 +202,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(build.NewService(s.opts.Core)),
 		application.NewService(container.NewService(s.opts.Core)),
 		application.NewService(lint.NewService(s.opts.Core)),
+		application.NewService(lthnphp.NewService(s.opts.Core)),
 		application.NewService(repos.NewService(s.opts.Core)),
 		application.NewService(tools.NewWailsService(s.opts.Core)),
 		application.NewService(validator.NewWailsService()),

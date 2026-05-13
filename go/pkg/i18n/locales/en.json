@@ -398,6 +398,7 @@
     "lint":         { "title": "Lint",   "subtitle": "rule · severity · file · line" },
     "containers":   { "title": "Containers", "subtitle": "runtime · image · status · logs" },
     "repos":        { "title": "Repos",  "subtitle": "branch · ahead · behind · dirty" },
+    "php":          { "title": "PHP",    "subtitle": "laravel · composer · artisan" },
     "welcome":      {
       "title": "Welcome to lthn", "subtitle": "step %s of 3",
       "step1_label": "Model directory", "step1_hint": "Where models live",

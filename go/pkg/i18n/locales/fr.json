@@ -398,6 +398,7 @@
     "lint":         { "title": "Lint",    "subtitle": "règle · sévérité · fichier · ligne" },
     "containers":   { "title": "Conteneurs", "subtitle": "runtime · image · statut · journaux" },
     "repos":        { "title": "Dépôts", "subtitle": "branche · en avance · en retard · sale" },
+    "php":          { "title": "PHP",    "subtitle": "laravel · composer · artisan" },
     "welcome":      {
       "title": "Bienvenue sur lthn", "subtitle": "étape %s sur 3",
       "step1_label": "Dossier des modèles", "step1_hint": "Où vivent les modèles",
