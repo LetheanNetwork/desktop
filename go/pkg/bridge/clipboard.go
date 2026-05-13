@@ -9,7 +9,7 @@ package bridge
 func (s *Service) toolClipboardRead() map[string]any {
 	app := s.app()
 	if app == nil || app.Clipboard == nil {
-		return map[string]any{"ok": false, "error": "clipboard manager unavailable"}
+		return map[string]any{"ok": false, "error": clipboardManagerUnavailable}
 	}
 	text, ok := app.Clipboard.Text()
 	if !ok {
@@ -22,7 +22,7 @@ func (s *Service) toolClipboardRead() map[string]any {
 func (s *Service) toolClipboardWrite(params map[string]any) map[string]any {
 	app := s.app()
 	if app == nil || app.Clipboard == nil {
-		return map[string]any{"ok": false, "error": "clipboard manager unavailable"}
+		return map[string]any{"ok": false, "error": clipboardManagerUnavailable}
 	}
 	text := paramString(params, "text", "")
 	if !app.Clipboard.SetText(text) {
@@ -35,7 +35,7 @@ func (s *Service) toolClipboardWrite(params map[string]any) map[string]any {
 func (s *Service) toolClipboardHas() map[string]any {
 	app := s.app()
 	if app == nil || app.Clipboard == nil {
-		return map[string]any{"ok": false, "error": "clipboard manager unavailable"}
+		return map[string]any{"ok": false, "error": clipboardManagerUnavailable}
 	}
 	text, ok := app.Clipboard.Text()
 	return map[string]any{"ok": true, "has_content": ok && text != ""}
@@ -45,7 +45,7 @@ func (s *Service) toolClipboardHas() map[string]any {
 func (s *Service) toolClipboardClear() map[string]any {
 	app := s.app()
 	if app == nil || app.Clipboard == nil {
-		return map[string]any{"ok": false, "error": "clipboard manager unavailable"}
+		return map[string]any{"ok": false, "error": clipboardManagerUnavailable}
 	}
 	app.Clipboard.SetText("")
 	return map[string]any{"ok": true, "cleared": "clipboard"}

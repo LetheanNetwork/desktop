@@ -65,7 +65,7 @@ func layoutsRoot() core.Result {
 func (s *Service) captureLayout(name string) (*Layout, map[string]any) {
 	app := s.app()
 	if app == nil {
-		return nil, map[string]any{"ok": false, "error": "wails application not initialised yet"}
+		return nil, map[string]any{"ok": false, "error": wailsAppUnavailable}
 	}
 	all := app.Window.GetAll()
 	out := make([]WindowState, 0, len(all))
@@ -101,7 +101,7 @@ func (s *Service) captureLayout(name string) (*Layout, map[string]any) {
 func (s *Service) applyLayout(layout *Layout) map[string]any {
 	app := s.app()
 	if app == nil {
-		return map[string]any{"ok": false, "error": "wails application not initialised yet"}
+		return map[string]any{"ok": false, "error": wailsAppUnavailable}
 	}
 	applied := 0
 	skipped := 0
@@ -155,7 +155,7 @@ func (s *Service) applyLayout(layout *Layout) map[string]any {
 func (s *Service) toolLayoutSave(params map[string]any) map[string]any {
 	name := core.Trim(paramString(params, "name", ""))
 	if name == "" {
-		return map[string]any{"ok": false, "error": "name param required"}
+		return map[string]any{"ok": false, "error": nameParamRequired}
 	}
 	layout, errResp := s.captureLayout(name)
 	if errResp != nil {
@@ -190,7 +190,7 @@ func (s *Service) toolLayoutSave(params map[string]any) map[string]any {
 func (s *Service) toolLayoutRestore(params map[string]any) map[string]any {
 	name := core.Trim(paramString(params, "name", ""))
 	if name == "" {
-		return map[string]any{"ok": false, "error": "name param required"}
+		return map[string]any{"ok": false, "error": nameParamRequired}
 	}
 	layout, errResp := s.loadLayout(name)
 	if errResp != nil {
@@ -203,7 +203,7 @@ func (s *Service) toolLayoutRestore(params map[string]any) map[string]any {
 func (s *Service) toolLayoutGet(params map[string]any) map[string]any {
 	name := core.Trim(paramString(params, "name", ""))
 	if name == "" {
-		return map[string]any{"ok": false, "error": "name param required"}
+		return map[string]any{"ok": false, "error": nameParamRequired}
 	}
 	layout, errResp := s.loadLayout(name)
 	if errResp != nil {
@@ -253,7 +253,7 @@ func (s *Service) toolLayoutList() map[string]any {
 func (s *Service) toolLayoutDelete(params map[string]any) map[string]any {
 	name := core.Trim(paramString(params, "name", ""))
 	if name == "" {
-		return map[string]any{"ok": false, "error": "name param required"}
+		return map[string]any{"ok": false, "error": nameParamRequired}
 	}
 	rootResult := layoutsRoot()
 	if !rootResult.OK {
@@ -276,7 +276,7 @@ func (s *Service) toolLayoutDelete(params map[string]any) map[string]any {
 func (s *Service) activeWorkArea(name string) (int, int, int, int, map[string]any) {
 	app := s.app()
 	if app == nil {
-		return 0, 0, 0, 0, map[string]any{"ok": false, "error": "wails application not initialised yet"}
+		return 0, 0, 0, 0, map[string]any{"ok": false, "error": wailsAppUnavailable}
 	}
 	if name != "" {
 		if w, ok := app.Window.GetByName(name); ok && w != nil {
@@ -288,7 +288,7 @@ func (s *Service) activeWorkArea(name string) (int, int, int, int, map[string]an
 		}
 	}
 	if app.Screen == nil {
-		return 0, 0, 0, 0, map[string]any{"ok": false, "error": "screen manager unavailable"}
+		return 0, 0, 0, 0, map[string]any{"ok": false, "error": screenManagerUnavailable}
 	}
 	sc := app.Screen.GetPrimary()
 	if sc == nil {
@@ -304,7 +304,7 @@ func (s *Service) activeWorkArea(name string) (int, int, int, int, map[string]an
 func (s *Service) pickWindows(params map[string]any) ([]*application.WebviewWindow, map[string]any) {
 	app := s.app()
 	if app == nil {
-		return nil, map[string]any{"ok": false, "error": "wails application not initialised yet"}
+		return nil, map[string]any{"ok": false, "error": wailsAppUnavailable}
 	}
 	names := stringSliceParam(params, "windows")
 	out := []*application.WebviewWindow{}
@@ -520,7 +520,7 @@ func (s *Service) toolLayoutWorkflow(params map[string]any) map[string]any {
 	workflow := core.Lower(paramString(params, "workflow", "default"))
 	app := s.app()
 	if app == nil {
-		return map[string]any{"ok": false, "error": "wails application not initialised yet"}
+		return map[string]any{"ok": false, "error": wailsAppUnavailable}
 	}
 	x, y, w, h, errResp := s.activeWorkArea("")
 	if errResp != nil {

@@ -20,7 +20,7 @@ import (
 func (s *Service) toolFileRead(params map[string]any) map[string]any {
 	path := paramString(params, "path", "")
 	if path == "" {
-		return map[string]any{"ok": false, "error": "path param required"}
+		return map[string]any{"ok": false, "error": pathParamRequired}
 	}
 	r := core.ReadFile(path)
 	if !r.OK {
@@ -35,7 +35,7 @@ func (s *Service) toolFileRead(params map[string]any) map[string]any {
 func (s *Service) toolFileWrite(params map[string]any) map[string]any {
 	path := paramString(params, "path", "")
 	if path == "" {
-		return map[string]any{"ok": false, "error": "path param required"}
+		return map[string]any{"ok": false, "error": pathParamRequired}
 	}
 	content := paramString(params, "content", "")
 	mode := core.FileMode(paramInt(params, "mode", 0o644))
@@ -82,7 +82,7 @@ func (s *Service) toolFileEdit(params map[string]any) map[string]any {
 func (s *Service) toolFileDelete(params map[string]any) map[string]any {
 	path := paramString(params, "path", "")
 	if path == "" {
-		return map[string]any{"ok": false, "error": "path param required"}
+		return map[string]any{"ok": false, "error": pathParamRequired}
 	}
 	if r := core.RemoveAll(path); !r.OK {
 		return map[string]any{"ok": false, "error": r.Error()}
@@ -94,7 +94,7 @@ func (s *Service) toolFileDelete(params map[string]any) map[string]any {
 func (s *Service) toolFileExists(params map[string]any) map[string]any {
 	path := paramString(params, "path", "")
 	if path == "" {
-		return map[string]any{"ok": false, "error": "path param required"}
+		return map[string]any{"ok": false, "error": pathParamRequired}
 	}
 	stat := core.Stat(path)
 	if !stat.OK {
@@ -123,7 +123,7 @@ func (s *Service) toolFileRename(params map[string]any) map[string]any {
 func (s *Service) toolDirList(params map[string]any) map[string]any {
 	path := paramString(params, "path", "")
 	if path == "" {
-		return map[string]any{"ok": false, "error": "path param required"}
+		return map[string]any{"ok": false, "error": pathParamRequired}
 	}
 	listing := core.ReadDir(core.DirFS(path), ".")
 	if !listing.OK {
@@ -144,7 +144,7 @@ func (s *Service) toolDirList(params map[string]any) map[string]any {
 func (s *Service) toolDirCreate(params map[string]any) map[string]any {
 	path := paramString(params, "path", "")
 	if path == "" {
-		return map[string]any{"ok": false, "error": "path param required"}
+		return map[string]any{"ok": false, "error": pathParamRequired}
 	}
 	mode := core.FileMode(paramInt(params, "mode", 0o755))
 	if r := core.MkdirAll(path, mode); !r.OK {

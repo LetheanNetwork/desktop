@@ -32,7 +32,7 @@ func screenInfo(sc *application.Screen) map[string]any {
 func (s *Service) toolScreenList() map[string]any {
 	app := s.app()
 	if app == nil || app.Screen == nil {
-		return map[string]any{"ok": false, "error": "screen manager unavailable"}
+		return map[string]any{"ok": false, "error": screenManagerUnavailable}
 	}
 	screens := app.Screen.GetAll()
 	out := make([]map[string]any, 0, len(screens))
@@ -46,7 +46,7 @@ func (s *Service) toolScreenList() map[string]any {
 func (s *Service) toolScreenPrimary() map[string]any {
 	app := s.app()
 	if app == nil || app.Screen == nil {
-		return map[string]any{"ok": false, "error": "screen manager unavailable"}
+		return map[string]any{"ok": false, "error": screenManagerUnavailable}
 	}
 	sc := app.Screen.GetPrimary()
 	if sc == nil {
@@ -59,11 +59,11 @@ func (s *Service) toolScreenPrimary() map[string]any {
 func (s *Service) toolScreenGet(params map[string]any) map[string]any {
 	app := s.app()
 	if app == nil || app.Screen == nil {
-		return map[string]any{"ok": false, "error": "screen manager unavailable"}
+		return map[string]any{"ok": false, "error": screenManagerUnavailable}
 	}
 	id := paramString(params, "id", "")
 	if id == "" {
-		return map[string]any{"ok": false, "error": "id param required"}
+		return map[string]any{"ok": false, "error": idParamRequired}
 	}
 	sc := app.Screen.GetByID(id)
 	if sc == nil {
@@ -79,7 +79,7 @@ func (s *Service) toolScreenGet(params map[string]any) map[string]any {
 func (s *Service) toolScreenAtPoint(params map[string]any) map[string]any {
 	app := s.app()
 	if app == nil || app.Screen == nil {
-		return map[string]any{"ok": false, "error": "screen manager unavailable"}
+		return map[string]any{"ok": false, "error": screenManagerUnavailable}
 	}
 	x := paramInt(params, "x", 0)
 	y := paramInt(params, "y", 0)
@@ -111,7 +111,7 @@ func (s *Service) toolScreenForWindow(params map[string]any) map[string]any {
 func (s *Service) toolScreenWorkAreas() map[string]any {
 	app := s.app()
 	if app == nil || app.Screen == nil {
-		return map[string]any{"ok": false, "error": "screen manager unavailable"}
+		return map[string]any{"ok": false, "error": screenManagerUnavailable}
 	}
 	screens := app.Screen.GetAll()
 	out := make([]map[string]any, 0, len(screens))

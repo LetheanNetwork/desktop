@@ -438,7 +438,7 @@ func (s *Service) toolErrors(params map[string]any) map[string]any {
 func (s *Service) toolWindows() map[string]any {
 	app := s.app()
 	if app == nil {
-		return map[string]any{"ok": false, "error": "wails application not initialised yet"}
+		return map[string]any{"ok": false, "error": wailsAppUnavailable}
 	}
 	// Wails3's Window.GetAll returns []application.Window; map each to
 	// its name + class for the agent's window-pick decisions.
@@ -461,7 +461,7 @@ func (s *Service) eval(ctx context.Context, windowName, body string) map[string]
 	}
 	app := s.app()
 	if app == nil {
-		return map[string]any{"ok": false, "error": "wails application not initialised yet"}
+		return map[string]any{"ok": false, "error": wailsAppUnavailable}
 	}
 	w, ok := app.Window.GetByName(windowName)
 	if !ok || w == nil {

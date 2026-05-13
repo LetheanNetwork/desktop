@@ -14,7 +14,7 @@ import (
 func (s *Service) windowOrErr(name string) (*application.WebviewWindow, map[string]any) {
 	app := s.app()
 	if app == nil {
-		return nil, map[string]any{"ok": false, "error": "wails application not initialised yet"}
+		return nil, map[string]any{"ok": false, "error": wailsAppUnavailable}
 	}
 	w, ok := app.Window.GetByName(name)
 	if !ok || w == nil {
@@ -52,7 +52,7 @@ func windowInfo(wv *application.WebviewWindow) map[string]any {
 func (s *Service) toolWindowList() map[string]any {
 	app := s.app()
 	if app == nil {
-		return map[string]any{"ok": false, "error": "wails application not initialised yet"}
+		return map[string]any{"ok": false, "error": wailsAppUnavailable}
 	}
 	all := app.Window.GetAll()
 	out := make([]map[string]any, 0, len(all))
@@ -170,7 +170,7 @@ func (s *Service) toolWindowFocus(params map[string]any) map[string]any {
 func (s *Service) toolWindowFocused() map[string]any {
 	app := s.app()
 	if app == nil {
-		return map[string]any{"ok": false, "error": "wails application not initialised yet"}
+		return map[string]any{"ok": false, "error": wailsAppUnavailable}
 	}
 	for _, w := range app.Window.GetAll() {
 		wv, ok := w.(*application.WebviewWindow)

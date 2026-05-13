@@ -36,7 +36,7 @@ func (s *Service) procSvc() *process.Service {
 func (s *Service) toolProcessStart(ctx context.Context, params map[string]any) map[string]any {
 	ps := s.procSvc()
 	if ps == nil {
-		return map[string]any{"ok": false, "error": "process service unavailable"}
+		return map[string]any{"ok": false, "error": processServiceUnavailable}
 	}
 	command := paramString(params, "command", "")
 	if command == "" {
@@ -66,11 +66,11 @@ func (s *Service) toolProcessStart(ctx context.Context, params map[string]any) m
 func (s *Service) toolProcessKill(params map[string]any) map[string]any {
 	ps := s.procSvc()
 	if ps == nil {
-		return map[string]any{"ok": false, "error": "process service unavailable"}
+		return map[string]any{"ok": false, "error": processServiceUnavailable}
 	}
 	id := paramString(params, "id", "")
 	if id == "" {
-		return map[string]any{"ok": false, "error": "id param required"}
+		return map[string]any{"ok": false, "error": idParamRequired}
 	}
 	r := ps.Kill(id)
 	if !r.OK {
@@ -89,7 +89,7 @@ func (s *Service) toolProcessStop(params map[string]any) map[string]any {
 func (s *Service) toolProcessList() map[string]any {
 	ps := s.procSvc()
 	if ps == nil {
-		return map[string]any{"ok": false, "error": "process service unavailable"}
+		return map[string]any{"ok": false, "error": processServiceUnavailable}
 	}
 	procs := ps.List()
 	out := make([]map[string]any, 0, len(procs))
@@ -114,11 +114,11 @@ func (s *Service) toolProcessList() map[string]any {
 func (s *Service) toolProcessOutput(params map[string]any) map[string]any {
 	ps := s.procSvc()
 	if ps == nil {
-		return map[string]any{"ok": false, "error": "process service unavailable"}
+		return map[string]any{"ok": false, "error": processServiceUnavailable}
 	}
 	id := paramString(params, "id", "")
 	if id == "" {
-		return map[string]any{"ok": false, "error": "id param required"}
+		return map[string]any{"ok": false, "error": idParamRequired}
 	}
 	r := ps.Output(id)
 	if !r.OK {
@@ -133,12 +133,12 @@ func (s *Service) toolProcessOutput(params map[string]any) map[string]any {
 func (s *Service) toolProcessInput(params map[string]any) map[string]any {
 	ps := s.procSvc()
 	if ps == nil {
-		return map[string]any{"ok": false, "error": "process service unavailable"}
+		return map[string]any{"ok": false, "error": processServiceUnavailable}
 	}
 	id := paramString(params, "id", "")
 	input := paramString(params, "input", "")
 	if id == "" {
-		return map[string]any{"ok": false, "error": "id param required"}
+		return map[string]any{"ok": false, "error": idParamRequired}
 	}
 	r := ps.Input(id, input)
 	if !r.OK {
@@ -168,4 +168,3 @@ func stringSliceParam(params map[string]any, key string) []string {
 	}
 	return out
 }
-
