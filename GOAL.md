@@ -390,6 +390,7 @@ When this goal hits 0, two follow-ups unlock:
 - welcome-window.ts: Client checkbox (Step 3) — unwired
 - app-shell.ts: Search bar — unwired
 - app-shell.ts: Vi mode icon — unwired
+- AUTH 401 handler: bearer auth is the correct production behaviour (currently TEMP-DISABLED in `pkg/server/service.go` to unblock overnight work). The proper wiring: (1) a fetch wrapper that pulls the user's saved key from `apikey.Reveal()` on each `/v1/*` call, (2) on 401 response, surface an "Unlock / Setup API key" card in the chrome footer that opens settings → API Key with focus on the field. Re-enable `coreapi.WithBearerAuth(opts.LocalKey)` in pkg/server once the unlock UX lands.
 
 ## Missing Go methods (needed to wire UI)
 
