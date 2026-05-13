@@ -60,6 +60,7 @@ type Options struct {
 type Service struct {
 	opts   Options
 	router *ai.ProviderRouter
+	core   *core.Core
 }
 
 // NewService constructs the runner with the canonical Mantis #1336

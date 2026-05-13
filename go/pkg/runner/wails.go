@@ -15,9 +15,21 @@ import (
 	"context"
 	"errors"
 
+	core "dappco.re/go"
+	"dappco.re/go/config"
 	"dappco.re/go/inference"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+// RouteView is the lean read-only shape Settings → Runner consumes.
+// Mirrors RouteConfig minus APIKey — credentials never cross the
+// Wails binding boundary, even on localhost.
+type RouteView struct {
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	BaseURL string `json:"base_url"`
+	Model   string `json:"model"`
+}
 
 // ServiceName / Startup / Shutdown — Wails3 lifecycle. Service was
 // already constructed as a Core service; Wails just wraps the same
@@ -67,4 +79,43 @@ func (s *Service) WModels() ([]string, error) {
 	}
 	names, _ := r.Value.([]string)
 	return names, nil
+}
+
+// WRoutes returns the configured provider routes for the Settings →
+// Runner panel. Re-reads the config service so a config rewrite +
+// reload surfaces immediately. Empty slice when no Core ref is set
+// (NewService path — runner constructed without config). APIKey is
+// never returned.
+//
+// Usage example (TS):
+//
+//	import { WRoutes } from "@desktop/runner/service";
+//	const routes = await WRoutes();
+//	routes.forEach(r => console.log(r.name, r.kind, r.base_url));
+func (s *Service) WRoutes() ([]RouteView, error) {
+	out := []RouteView{}
+	if s == nil || s.core == nil {
+		return out, nil
+	}
+	cfg, ok := core.ServiceFor[*config.Service](s.core, "config")
+	if !ok || cfg == nil {
+		return out, nil
+	}
+	var raw map[string]RouteConfig
+	if r := cfg.Get("routes", &raw); !r.OK {
+		return out, nil
+	}
+	for name, rc := range raw {
+		kind := rc.Kind
+		if kind == "" {
+			kind = "openai"
+		}
+		out = append(out, RouteView{
+			Name:    name,
+			Kind:    kind,
+			BaseURL: rc.BaseURL,
+			Model:   rc.Model,
+		})
+	}
+	return out, nil
 }

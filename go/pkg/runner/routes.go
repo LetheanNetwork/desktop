@@ -115,5 +115,7 @@ func buildRoute(name string, rc RouteConfig) *ai.ProviderRoute {
 //	r := runner.NewServiceFromCore(c)
 //	reply := r.Generate("hello")
 func NewServiceFromCore(c *core.Core) *Service {
-	return NewService(Options{Routes: LoadRoutesFromCore(c)})
+	s := NewService(Options{Routes: LoadRoutesFromCore(c)})
+	s.core = c
+	return s
 }

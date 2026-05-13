@@ -7,6 +7,17 @@ import { renderChrome } from "../chrome";
 import { T } from "@lthn/i18n/coreservice";
 import type { LitContent } from "../types";
 
+/** Shape returned by runner.WRoutes() — mirrored here so the
+ *  settings shell doesn't force a module-graph dependency on the
+ *  bindings model at type-check time. Kept aligned with the Go
+ *  RouteView. */
+interface RouteView {
+  name:     string;
+  kind:     string;
+  base_url: string;
+  model:    string;
+}
+
 class LthnSettingsWindow extends LitElement {
   static properties = {
     open: { type: String, reflect: true },
@@ -22,6 +33,7 @@ class LthnSettingsWindow extends LitElement {
     build: { state: true },
     sampleInterval: { state: true },
     heapSamples: { state: true },
+    routes: { state: true },
   };
   declare open: string;
   declare w: number;
@@ -36,6 +48,7 @@ class LthnSettingsWindow extends LitElement {
   declare build: { version: string; go_version: string; goos: string; goarch: string; num_cpu: number };
   declare sampleInterval: string;
   declare heapSamples: string;
+  declare routes: RouteView[];
   constructor() {
     super();
     this.open = "general"; this.w = 760; this.h = 600; this.embedded = false;
@@ -54,6 +67,7 @@ class LthnSettingsWindow extends LitElement {
     // values at their connectedCallback.
     this.sampleInterval = localStorage.getItem("lthn.telemetry.interval") || "2s";
     this.heapSamples    = localStorage.getItem("lthn.telemetry.samples")  || "24";
+    this.routes = [];
   }
 
   _setSampleInterval(v: string) {
@@ -93,13 +107,14 @@ class LthnSettingsWindow extends LitElement {
       import("@desktop/firstlaunch/wailsservice"),
       import("@desktop/runner/service"),
     ]);
-    const [title, subtitleTpl, locales, currentLang, paths, routes, build] = await Promise.all([
+    const [title, subtitleTpl, locales, currentLang, paths, routes, routeViews, build] = await Promise.all([
       i18n.T("window.settings.title"),
       i18n.T("window.settings.subtitle"),
       i18n.AvailableLanguages(),
       i18n.Language(),
       fl.Paths().catch(() => null),
       runner.WModels().catch((): string[] => []),
+      runner.WRoutes().catch((): RouteView[] => []),
       fl.Build().catch(() => null),
     ]);
     this.locales = locales;
@@ -108,6 +123,7 @@ class LthnSettingsWindow extends LitElement {
       this.modelsDir = collapseHome(paths.models_dir);
     }
     this.routeNames = routes || [];
+    this.routes = (routeViews || []) as RouteView[];
     if (build) {
       this.build = build;
     }
@@ -291,8 +307,6 @@ class LthnSettingsWindow extends LitElement {
             `)}
           </div>
         `)}
-        ${this._row("Theme", "Follows the OS by default. Force light or dark to override.",
-          this._segment("auto", ["auto", "dark", "light"]))}
       `,
     });
   }
@@ -336,8 +350,37 @@ class LthnSettingsWindow extends LitElement {
   _sectionRunner() {
     return this._section({
       title: "Runner",
-      desc: "How the inference process behaves. Don't change these unless you're sure.",
-      content: nothing,
+      desc: "Provider routes the runner serves. Read-only; edit ~/Lethean/conf/lthn.yaml to add or change a route, then restart lthn.",
+      content: this.routes.length === 0 ? html`
+        <div style="padding:14px 16px; border-radius:8px; background:rgba(255,255,255,0.025);
+                    border:1px solid rgba(255,255,255,0.05); font-size:12px; color:var(--fg-3); line-height:1.55;">
+          No routes configured. The runner falls back to an echo stub
+          — useful for sanity checks but nothing real will answer.
+        </div>
+      ` : html`
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          ${this.routes.map(r => html`
+            <div style="padding:12px 14px; border-radius:8px; background:rgba(255,255,255,0.025);
+                        border:1px solid rgba(255,255,255,0.06); display:flex; flex-direction:column; gap:6px;">
+              <div style="display:flex; align-items:baseline; gap:8px;">
+                <span style="font-family:var(--font-mono); font-size:13px; color:var(--fg-0); font-weight:500;">
+                  ${r.name}
+                </span>
+                <span style="font-size:10.5px; color:var(--fg-3); letter-spacing:0.04em; text-transform:uppercase;">
+                  · ${r.kind}
+                </span>
+              </div>
+              <div style="display:grid; grid-template-columns:auto 1fr; gap:4px 12px;
+                          font-family:var(--font-mono); font-size:11px; color:var(--fg-2);">
+                <span style="color:var(--fg-3);">model</span>
+                <span>${r.model || "—"}</span>
+                <span style="color:var(--fg-3);">endpoint</span>
+                <span>${r.base_url || "—"}</span>
+              </div>
+            </div>
+          `)}
+        </div>
+      `,
     });
   }
 
