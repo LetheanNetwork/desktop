@@ -15,6 +15,8 @@ import (
 	"dappco.re/go/process"
 )
 
+const composerSource = "composer"
+
 // DetectOutput is the shape returned to the Lit window — the
 // list of Laravel projects discovered, plus the roots walked
 // for "why isn't my project here?" debugging.
@@ -99,64 +101,90 @@ func (s *Service) Scripts(path string) core.Result {
 		return core.Fail(core.E("php.Scripts", "path required", nil))
 	}
 	composerPath := core.PathJoin(path, "composer.json")
-	composerScripts := []ScriptEntry{}
-	if read := core.ReadFile(composerPath); read.OK {
-		var manifest struct {
-			Scripts core.RawMessage `json:"scripts"`
-		}
-		bytes, _ := read.Value.([]byte)
-		if result := core.JSONUnmarshal(bytes, &manifest); result.OK && len(manifest.Scripts) > 0 {
-			var parsed map[string]core.RawMessage
-			if result := core.JSONUnmarshal(manifest.Scripts, &parsed); result.OK {
-				names := make([]string, 0, len(parsed))
-				for n := range parsed {
-					names = append(names, n)
-				}
-				sort.Strings(names)
-				for _, name := range names {
-					raw := parsed[name]
-					entry := ScriptEntry{Name: name, Source: "composer"}
-					var asString string
-					if result := core.JSONUnmarshal(raw, &asString); result.OK {
-						entry.Command = asString
-						entry.Lines = 1
-					} else {
-						var asArray []string
-						if result := core.JSONUnmarshal(raw, &asArray); result.OK {
-							entry.Lines = len(asArray)
-							for _, line := range asArray {
-								// pseudo-directive lines (Composer\\Config::...) skipped
-								if core.Contains(line, "::") {
-									continue
-								}
-								entry.Command = line
-								break
-							}
-							if entry.Command == "" && len(asArray) > 0 {
-								entry.Command = asArray[0]
-							}
-						}
-					}
-					if entry.Command == "" {
-						continue
-					}
-					composerScripts = append(composerScripts, entry)
-				}
-			}
-		}
-	}
 	hasArtisan := fileExists(core.PathJoin(path, "artisan"))
-	canonical := []ScriptEntry{}
-	if hasArtisan {
-		canonical = append(canonical, canonicalArtisan...)
-	}
 	return core.Ok(ScriptsOutput{
 		Path:            path,
-		ComposerScripts: composerScripts,
-		ArtisanScripts:  canonical,
+		ComposerScripts: composerScriptEntries(composerPath),
+		ArtisanScripts:  artisanScriptEntries(hasArtisan),
 		HasArtisan:      hasArtisan,
 		HasComposer:     fileExists(composerPath),
 	})
+}
+
+func composerScriptEntries(composerPath string) []ScriptEntry {
+	if read := core.ReadFile(composerPath); read.OK {
+		bytes, _ := read.Value.([]byte)
+		return parseComposerScripts(bytes)
+	}
+	return []ScriptEntry{}
+}
+
+func parseComposerScripts(bytes []byte) []ScriptEntry {
+	var manifest struct {
+		Scripts core.RawMessage `json:"scripts"`
+	}
+	if result := core.JSONUnmarshal(bytes, &manifest); !result.OK || len(manifest.Scripts) == 0 {
+		return []ScriptEntry{}
+	}
+	var parsed map[string]core.RawMessage
+	if result := core.JSONUnmarshal(manifest.Scripts, &parsed); !result.OK {
+		return []ScriptEntry{}
+	}
+	return sortedComposerScripts(parsed)
+}
+
+func sortedComposerScripts(parsed map[string]core.RawMessage) []ScriptEntry {
+	names := make([]string, 0, len(parsed))
+	for name := range parsed {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	entries := []ScriptEntry{}
+	for _, name := range names {
+		entry := composerScriptEntry(name, parsed[name])
+		if entry.Command != "" {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}
+
+func composerScriptEntry(name string, raw core.RawMessage) ScriptEntry {
+	entry := ScriptEntry{Name: name, Source: composerSource}
+	var asString string
+	if result := core.JSONUnmarshal(raw, &asString); result.OK {
+		entry.Command = asString
+		entry.Lines = 1
+		return entry
+	}
+	var asArray []string
+	if result := core.JSONUnmarshal(raw, &asArray); result.OK {
+		entry.Command = firstComposerCommand(asArray)
+		entry.Lines = len(asArray)
+	}
+	return entry
+}
+
+func firstComposerCommand(lines []string) string {
+	for _, line := range lines {
+		// Composer pseudo-directives are metadata, not runnable shell commands.
+		if core.Contains(line, "::") {
+			continue
+		}
+		return line
+	}
+	if len(lines) > 0 {
+		return lines[0]
+	}
+	return ""
+}
+
+func artisanScriptEntries(hasArtisan bool) []ScriptEntry {
+	if !hasArtisan {
+		return []ScriptEntry{}
+	}
+	return append([]ScriptEntry{}, canonicalArtisan...)
 }
 
 // RunInput drives the Run method.
