@@ -154,7 +154,24 @@
       "yes":             "oui",
       "no":              "non"
     },
-    "tools":        { "title": "Outils · MCP",        "subtitle": "2 serveurs · 12 outils · 648 appels aujourd'hui" },
+    "tools":        {
+      "title": "Outils · MCP", "subtitle": "2 serveurs · 12 outils · 648 appels aujourd'hui",
+      "btn_add_server":   "Ajouter un serveur",
+      "btn_reload":       "Recharger",
+      "toolbar_model":    "la disponibilité des outils dépend du modèle · modèle actuel : %s · ✓ prend en charge les outils",
+      "tag_registered":   "enregistré",
+      "row_server":       "Serveur",
+      "row_tool_name":    "Nom de l'outil",
+      "row_source":       "Source",
+      "row_source_value": "registre mcp",
+      "label_schema":     "Schéma",
+      "schema_empty":     "Aucun schéma d'entrée déclaré. L'outil accepte un objet vide.",
+      "label_recent":     "Appels récents",
+      "label_tryit":      "Essayer · concevoir un appel test",
+      "btn_invoke":       "Invoquer",
+      "tryit_help":       "Les appels test contournent le modèle — utile pour vérifier un serveur avant de le brancher à un chat utilisant des outils.",
+      "empty_registry":   "Aucun outil MCP enregistré pour le moment."
+    },
     "benchmark":    { "title": "Banc d'essai",        "subtitle": "exécuter · comparer · exporter" },
     "telemetry":    { "title": "Télémétrie en direct","subtitle_normal": "surface de démonstration", "subtitle_fullscreen": "plein écran · ⎋ pour quitter" },
     "logs":         {

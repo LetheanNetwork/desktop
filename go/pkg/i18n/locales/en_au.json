@@ -154,7 +154,24 @@
       "yes":             "yes",
       "no":              "no"
     },
-    "tools":        { "title": "Tools · MCP",   "subtitle": "2 servers · 12 tools · 648 calls today" },
+    "tools":        {
+      "title": "Tools · MCP", "subtitle": "2 servers · 12 tools · 648 calls today",
+      "btn_add_server":   "Add server",
+      "btn_reload":       "Reload",
+      "toolbar_model":    "tool-use availability depends on model · current model: %s · ✓ supports tools",
+      "tag_registered":   "registered",
+      "row_server":       "Server",
+      "row_tool_name":    "Tool name",
+      "row_source":       "Source",
+      "row_source_value": "mcp registry",
+      "label_schema":     "Schema",
+      "schema_empty":     "No input schema declared. The tool accepts an empty object.",
+      "label_recent":     "Recent calls",
+      "label_tryit":      "Try it · craft a test call",
+      "btn_invoke":       "Invoke",
+      "tryit_help":       "Test calls bypass the model — useful for sanity-checking a server before plumbing it into a tool-using chat.",
+      "empty_registry":   "No MCP tools registered yet."
+    },
     "benchmark":    { "title": "Benchmark",     "subtitle": "run · compare · export" },
     "telemetry":    { "title": "Live telemetry","subtitle_normal": "demo surface", "subtitle_fullscreen": "fullscreen · ⎋ to exit" },
     "logs":         {

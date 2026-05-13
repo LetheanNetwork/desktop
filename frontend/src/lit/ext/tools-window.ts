@@ -22,6 +22,7 @@ class LthnToolsWindow extends LitElement {
     toolList: { state: true },
     selectedTool: { state: true },
     activeModel: { state: true },
+    t: { state: true },
   };
   declare w: number;
   declare h: number;
@@ -30,6 +31,15 @@ class LthnToolsWindow extends LitElement {
   declare toolList: ToolView[];
   declare selectedTool: string;
   declare activeModel: string;
+  declare t: {
+    btnAddServer: string; btnReload: string; toolbarModel: string;
+    tagRegistered: string;
+    rowServer: string; rowToolName: string; rowSource: string; rowSourceValue: string;
+    labelSchema: string; schemaEmpty: string;
+    labelRecent: string; labelTryit: string;
+    btnInvoke: string; tryitHelp: string;
+    emptyRegistry: string;
+  };
   constructor() {
     super();
     this.w = 1040; this.h = 700; this.embedded = false;
@@ -37,14 +47,57 @@ class LthnToolsWindow extends LitElement {
     this.toolList = [];
     this.selectedTool = "";
     this.activeModel = "gemma-4-e2b";
+    this.t = {
+      btnAddServer: "Add server", btnReload: "Reload",
+      toolbarModel: "tool-use availability depends on model · current model: %s · ✓ supports tools",
+      tagRegistered: "registered",
+      rowServer: "Server", rowToolName: "Tool name",
+      rowSource: "Source", rowSourceValue: "mcp registry",
+      labelSchema: "Schema",
+      schemaEmpty: "No input schema declared. The tool accepts an empty object.",
+      labelRecent: "Recent calls",
+      labelTryit:  "Try it · craft a test call",
+      btnInvoke:   "Invoke",
+      tryitHelp:   "Test calls bypass the model — useful for sanity-checking a server before plumbing it into a tool-using chat.",
+      emptyRegistry: "No MCP tools registered yet.",
+    };
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const [title, subtitleTpl] = await Promise.all([
+    const [
+      title, subtitleTpl,
+      bas, br, tm,
+      tr, rs, rtn, rsrc, rsv,
+      ls, se, lr, lt, bi, th, er,
+    ] = await Promise.all([
       T("window.tools.title"),
       T("window.tools.subtitle"),
+      T("window.tools.btn_add_server"),
+      T("window.tools.btn_reload"),
+      T("window.tools.toolbar_model"),
+      T("window.tools.tag_registered"),
+      T("window.tools.row_server"),
+      T("window.tools.row_tool_name"),
+      T("window.tools.row_source"),
+      T("window.tools.row_source_value"),
+      T("window.tools.label_schema"),
+      T("window.tools.schema_empty"),
+      T("window.tools.label_recent"),
+      T("window.tools.label_tryit"),
+      T("window.tools.btn_invoke"),
+      T("window.tools.tryit_help"),
+      T("window.tools.empty_registry"),
     ]);
+    this.t = {
+      btnAddServer: bas, btnReload: br, toolbarModel: tm,
+      tagRegistered: tr,
+      rowServer: rs, rowToolName: rtn, rowSource: rsrc, rowSourceValue: rsv,
+      labelSchema: ls, schemaEmpty: se,
+      labelRecent: lr, labelTryit: lt,
+      btnInvoke: bi, tryitHelp: th,
+      emptyRegistry: er,
+    };
     try {
       const svc = await import("@desktop/tools/wailsservice");
       const list = await svc.List();
@@ -100,11 +153,11 @@ class LthnToolsWindow extends LitElement {
     const selSchema = sel ? sel.schema : "";
 
     const toolbar = html`
-      <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-plus" style="font-size:10px;"></i> Add server</lthn-btn>
-      <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-arrows-rotate" style="font-size:10px;"></i> Reload</lthn-btn>
+      <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-plus" style="font-size:10px;"></i> ${this.t.btnAddServer}</lthn-btn>
+      <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-arrows-rotate" style="font-size:10px;"></i> ${this.t.btnReload}</lthn-btn>
       <div style="flex:1"></div>
       <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3);">
-        tool-use availability depends on model · current model: ${this.activeModel} · ✓ supports tools
+        ${this.t.toolbarModel.replace("%s", this.activeModel)}
       </span>
     `;
 
@@ -139,15 +192,15 @@ class LthnToolsWindow extends LitElement {
             <div>
               <div style="display:flex; align-items:baseline; gap:10px;">
                 <span style="font-family:var(--font-mono); font-size:18px; color:var(--fg-0); letter-spacing:-0.005em;">${sel.server}.${sel.name}</span>
-                <span style="font-size:11px; color:var(--fg-3);">· registered</span>
+                <span style="font-size:11px; color:var(--fg-3);">· ${this.t.tagRegistered}</span>
               </div>
               <div style="font-size:12.5px; color:var(--fg-2); margin-top:5px; line-height:1.55;">${sel.desc}</div>
             </div>
             <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px;">
               ${[
-                { k: "Server", v: sel.server },
-                { k: "Tool name", v: sel.name },
-                { k: "Source", v: "mcp registry" },
+                { k: this.t.rowServer,    v: sel.server },
+                { k: this.t.rowToolName,  v: sel.name },
+                { k: this.t.rowSource,    v: this.t.rowSourceValue },
               ].map(m => html`
                 <div style="padding:10px 14px; border-radius:6px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05);">
                   <div style="font-size:10.5px; color:var(--fg-3); letter-spacing:0.04em; text-transform:uppercase;">${m.k}</div>
@@ -157,23 +210,23 @@ class LthnToolsWindow extends LitElement {
             </div>
           ` : html`
             <div style="font-size:13px; color:var(--fg-3); padding:24px 0;">
-              No MCP tools registered yet.
+              ${this.t.emptyRegistry}
             </div>
           `}
           <div>
-            <lthn-label>Schema</lthn-label>
+            <lthn-label>${this.t.labelSchema}</lthn-label>
             ${selSchema ? html`
               <div style="margin-top:8px; background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:12px 14px; font-family:var(--font-mono); font-size:11.5px; line-height:1.6; color:var(--fg-1); white-space:pre; overflow:auto; max-height:280px;">${selSchema}</div>
             ` : html`
               <div style="margin-top:8px; padding:12px 14px; border-radius:8px;
                           background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05);
                           font-size:12px; color:var(--fg-3); font-style:italic;">
-                No input schema declared. The tool accepts an empty object.
+                ${this.t.schemaEmpty}
               </div>
             `}
           </div>
           <div>
-            <lthn-label>Recent calls</lthn-label>
+            <lthn-label>${this.t.labelRecent}</lthn-label>
             <div style="margin-top:8px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05); border-radius:8px; font-family:var(--font-mono); font-size:11px;">
               ${[
                 { t: "14:32:21", p: '{ "path": "./notes/draft.md", "content": "..." }', ms: 14, ok: true },
@@ -193,12 +246,12 @@ class LthnToolsWindow extends LitElement {
 
         <!-- try-it rail -->
         <aside style="background:rgba(0,0,0,0.18); border-left:1px solid rgba(255,255,255,0.05); padding:18px; overflow:auto; display:flex; flex-direction:column; gap:12px;">
-          <lthn-label>Try it · craft a test call</lthn-label>
+          <lthn-label>${this.t.labelTryit}</lthn-label>
           <div style="background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:10px; font-family:var(--font-mono); font-size:11.5px; line-height:1.6; color:var(--fg-1); white-space:pre; min-height:110px;">${`{
   "path":    "./scratch/hello.txt",
   "content": "hello, world\\n"
 }`}</div>
-          <lthn-btn tone="primary" size="md"><i class="fa-solid fa-play" style="font-size:10px;"></i> Invoke</lthn-btn>
+          <lthn-btn tone="primary" size="md"><i class="fa-solid fa-play" style="font-size:10px;"></i> ${this.t.btnInvoke}</lthn-btn>
           <div style="padding:10px 12px; border-radius:6px; background:rgba(34,197,94,0.06); border:1px solid rgba(34,197,94,0.18); font-size:11.5px; color:var(--fg-1); line-height:1.55;">
             <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
               <i class="fa-solid fa-check" style="color:var(--success-400); font-size:10px;"></i>
@@ -209,7 +262,7 @@ class LthnToolsWindow extends LitElement {
             </div>
           </div>
           <div style="font-size:10.5px; color:var(--fg-3); line-height:1.55;">
-            Test calls bypass the model — useful for sanity-checking a server before plumbing it into a tool-using chat.
+            ${this.t.tryitHelp}
           </div>
         </aside>
       </div>
