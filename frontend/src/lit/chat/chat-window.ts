@@ -103,6 +103,7 @@ class LthnChatWindow extends LitElement {
     sending: { state: true },
     sendErr: { state: true },
     activeModel: { state: true },
+    version: { state: true },
   };
   declare state:     ChatState;
   declare rail:      RailMode;
@@ -119,6 +120,7 @@ class LthnChatWindow extends LitElement {
   declare sending: boolean;
   declare sendErr: string;
   declare activeModel: string;
+  declare version: string;
   constructor() {
     super();
     this.state = "multi-turn";
@@ -135,6 +137,7 @@ class LthnChatWindow extends LitElement {
     this.sending = false;
     this.sendErr = "";
     this.activeModel = "";
+    this.version = "0.2.0-rc1";
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -144,7 +147,19 @@ class LthnChatWindow extends LitElement {
       T("window.chat.subtitle"),
     ]);
     this.chrome = { title, subtitle };
-    await Promise.all([this._reloadRail(), this._reloadModel()]);
+    await Promise.all([this._reloadRail(), this._reloadModel(), this._reloadBuild()]);
+  }
+
+  /** Pull the binary version from firstlaunch.Build() so the footer
+   *  status line reflects the running binary instead of the design's
+   *  v0.2.0-rc1 literal. Errors stay silent — the fallback string
+   *  already covers the canvas-preview case. */
+  async _reloadBuild() {
+    try {
+      const svc = await import("@desktop/firstlaunch/wailsservice");
+      const b = await svc.Build();
+      if (b?.version) this.version = b.version;
+    } catch { /* keep fallback */ }
   }
 
   /** Pull the runner's loaded model list and pick the first one for
@@ -288,7 +303,7 @@ class LthnChatWindow extends LitElement {
       : this.state === "generating" ? html`
         <lthn-status-dot variant="ok"></lthn-status-dot>Generating · 47.2 t/s · 12.4 W · Airplane-mode OK`
       : html`
-        <lthn-status-dot variant="ok"></lthn-status-dot>Model ready · Airplane-mode OK · 1 runner · v0.2.0-rc1`;
+        <lthn-status-dot variant="ok"></lthn-status-dot>Model ready · Airplane-mode OK · 1 runner · v${this.version}`;
 
     /* — toolbar — */
     const toolbar = html`
