@@ -41,6 +41,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/build"
+	"dappco.re/lthn/desktop/pkg/container"
 	"dappco.re/lthn/desktop/pkg/git"
 	"dappco.re/lthn/desktop/pkg/integrations"
 	"dappco.re/lthn/desktop/pkg/lint"
@@ -197,6 +198,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(apikey.NewWailsService(s.opts.Core)),
 		application.NewService(git.NewService(s.opts.Core)),
 		application.NewService(build.NewService(s.opts.Core)),
+		application.NewService(container.NewService(s.opts.Core)),
 		application.NewService(lint.NewService(s.opts.Core)),
 		application.NewService(tools.NewWailsService(s.opts.Core)),
 		application.NewService(validator.NewWailsService()),
