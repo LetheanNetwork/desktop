@@ -393,6 +393,7 @@
       "footer":          "%d local · %s free · %s · airplane-mode OK (browsing requires network)"
     },
     "editor":       { "title": "Editor", "subtitle": "monaco · syntax · find · multi-cursor" },
+    "git":          { "title": "Git",    "subtitle": "branch · status · diff · commit" },
     "welcome":      {
       "title": "Welcome to lthn", "subtitle": "step %s of 3",
       "step1_label": "Model directory", "step1_hint": "Where models live",
