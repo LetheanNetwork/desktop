@@ -416,11 +416,28 @@ When this goal hits 0, two follow-ups unlock:
 - network.Service — P2P session + ledger; needs design + new package (or core/go-p2p submodule if it exists)
 - benchmark backend — runner.Bench + result storage; could live inside runner pkg
 
-## New submodules required
+## New submodules required (verified upstream 2026-05-13)
 
-- core/go-mlx — distillation + native inference (memory: project_go_mlx_research_grade.md)
-- core/go-p2p — IF P2P backend lands here (vs. lthn/lemma or similar)
-- core/gui (already planned in core/gui/GOAL.md) — window-position-remember + dialog helpers may live here
+- core/gui (`dappco.re/go/gui`) — supplies `pkg/dialog.Service` (OpenFile/OpenDirectory/SaveFile) + window.Service LayoutManager (positions remember). Also unblocks the window-position port. Gated on core/gui/GOAL.md wails-91 upgrade landing first.
+- core/go-mlx (`dappco.re/go/mlx`) — supplies `hf.RemoteSource` (HF metadata + search), `gguf.Info` parser, `LoadModelFromMedium`, `SFTConfig`, `LoRA`, `DistillConfig`, `DistillRunner`. macOS arm64 Metal build tag. Covers distillation + GGUF import + HF download metadata.
+- core/go-p2p (`dappco.re/go/p2p`) — supplies `node.Service` for peer discovery + session management. Covers the network-window backend. libp2p-based.
+- core/mcp (`dappco.re/go/mcp/pkg/mcp`) — already in workspace via external/mcp. Supplies `AddToolRecorded`, `MCPToolCall`, `RESTHandler`. Tools.Invoke + RegisterServer use this directly (no submodule add needed, just wire).
+
+## Upstream verified (use these, don't reinvent)
+
+- File pickers — `dappco.re/go/gui/pkg/dialog.Service` exposes openFile/openDirectory/saveFile as Core commands. lthn-desktop dialog pkg becomes a thin wrapper over this.
+- GGUF import — `dappco.re/go/mlx/gguf` parses metadata + `mlx.LoadModelFromMedium(medium, path)` does the load. models.Import becomes "copy file via core.Medium then call LoadModelFromMedium".
+- HF download — `dappco.re/go/mlx/hf.RemoteSource` + `SearchModels()` + `ModelMetadata()`. Full streaming via `dappco.re/go/io.Medium`. models.Download wires these together.
+- MCP invoke — `mcp.Server` typed handlers via `AddToolRecorded`; tools.Invoke wraps a `tools/call` to the registered server.
+- MCP register-at-runtime — `mcp.Service.Options{Subsystems: []Subsystem}` accepts pluggable subsystems. tools.RegisterServer mounts a new Subsystem.
+- Distillation — `mlx.SFTConfig` + `mlx.DistillConfig` + `mlx.DistillRunner`. distillation.Service is a thin Wails wrapper over these.
+- Stream cancellation — `inference.TextModel.Generate(ctx, ...)` honours context cancel. runner.Cancel(streamID) needs lthn-side: track stream → context map, cancel by id.
+- P2P / network — `p2p.NewService(options)` registered via `core.WithService`. network.Service is a Wails wrapper over `p2p.node.Service`.
+
+## Still needs fresh-write (no upstream)
+
+- Fleet controller — no canonical lib found. lthn-desktop fleet.Service is greenfield: machine inventory + routing rules + snapshots. Design-first.
+- Power telemetry — no upstream Go binding for macOS powermetrics/IOReport. telemetry.PowerHistory needs cgo to IOReport.framework OR shelling out to /usr/bin/powermetrics (root-only — separate-binary supervisor like the plugin host).
 
 ## AX + CoreGO adoption (per the audit)
 
