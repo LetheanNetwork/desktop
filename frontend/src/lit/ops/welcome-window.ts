@@ -59,6 +59,7 @@ class LthnWelcomeWindow extends LitElement {
     fresh:     { state: true },
     clients:   { state: true },
     endpoint:  { state: true },
+    version:   { state: true },
   };
   declare step: number;
   declare w: number;
@@ -69,6 +70,7 @@ class LthnWelcomeWindow extends LitElement {
   declare fresh: boolean;
   declare clients: ClientStatus[];
   declare endpoint: string;
+  declare version: string;
   constructor() {
     super();
     this.step = 1; this.w = 760; this.h = 580; this.embedded = false;
@@ -77,6 +79,7 @@ class LthnWelcomeWindow extends LitElement {
     this.fresh = true;
     this.clients = [];
     this.endpoint = "http://localhost:8000/v1";
+    this.version = "0.2.0-rc1";
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -93,11 +96,16 @@ class LthnWelcomeWindow extends LitElement {
     // welcome on subsequent launches.
     try {
       const fl = await import("@desktop/firstlaunch/wailsservice");
-      const [paths, state] = await Promise.all([fl.Paths(), fl.Detect()]);
+      const [paths, state, build] = await Promise.all([
+        fl.Paths(),
+        fl.Detect(),
+        fl.Build().catch(() => null),
+      ]);
       if (paths?.models_dir) {
         this.modelsDir = displayHome(paths.models_dir);
       }
       this.fresh = !!state?.fresh;
+      if (build?.version) this.version = build.version;
     } catch (err) {
       // Non-fatal — keep the default ~/Lethean placeholder.
       console.error("welcome: firstlaunch lookup failed", err);
@@ -208,7 +216,7 @@ class LthnWelcomeWindow extends LitElement {
       subtitle: this.chrome.subtitleFmt.replace("%s", String(this.step)),
       w: this.w, h: this.h,
       body,
-      footer: html`British English · dark default · accessibility light in Settings · v0.2.0-rc1`,
+      footer: html`British English · dark default · accessibility light in Settings · v${this.version}`,
       embedded: this.embedded,
     });
   }
