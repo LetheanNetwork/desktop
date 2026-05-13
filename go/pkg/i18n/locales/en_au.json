@@ -183,7 +183,23 @@
       "btn_pause":   "Pause",
       "btn_resume":  "Resume"
     },
-    "settings":     { "title": "Settings",      "subtitle": "lthn · v0.2.0-rc1" },
+    "settings":     {
+      "title": "Settings", "subtitle": "lthn · v0.2.0-rc1",
+      "panel_general_title": "General",
+      "panel_general_desc":  "App-wide defaults — what to show at launch, which language to speak, theme.",
+      "panel_models_title":  "Models",
+      "panel_models_desc":   "Where lthn looks for models and which one loads at startup.",
+      "panel_runner_title":  "Runner",
+      "panel_runner_desc":   "Provider routes the runner serves. Read-only; edit ~/Lethean/conf/lthn.yaml to add or change a route, then restart lthn.",
+      "panel_api_title":     "API",
+      "panel_api_desc":      "HTTP server for OpenAI-compatible clients. Off by default; nothing leaves this Mac unless you turn it on.",
+      "panel_telemetry_title": "Telemetry",
+      "panel_telemetry_desc":  "Process metrics shown in the tray + live-telemetry window. Local only; nothing leaves the device.",
+      "panel_integrations_title": "Integrations",
+      "panel_integrations_desc":  "Connected clients reading from the local lthn API. Full surface lives in the dedicated Integrations window.",
+      "panel_about_title":   "About",
+      "panel_about_desc":    "What's running — version, runtime, and where the source lives."
+    },
     "models":       {
       "title": "Models", "subtitle": "local · 4 · huggingface",
       "btn_filters":     "Filters",

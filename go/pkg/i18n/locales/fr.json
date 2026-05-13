@@ -183,7 +183,23 @@
       "btn_pause":   "Pause",
       "btn_resume":  "Reprendre"
     },
-    "settings":     { "title": "Paramètres",          "subtitle": "lthn · v0.2.0-rc1" },
+    "settings":     {
+      "title": "Paramètres", "subtitle": "lthn · v0.2.0-rc1",
+      "panel_general_title": "Général",
+      "panel_general_desc":  "Réglages par défaut — ce qui s'affiche au lancement, la langue, le thème.",
+      "panel_models_title":  "Modèles",
+      "panel_models_desc":   "Où lthn cherche les modèles et lequel charger au démarrage.",
+      "panel_runner_title":  "Runner",
+      "panel_runner_desc":   "Routes de fournisseur servies par le runner. Lecture seule ; éditez ~/Lethean/conf/lthn.yaml pour ajouter ou modifier une route, puis redémarrez lthn.",
+      "panel_api_title":     "API",
+      "panel_api_desc":      "Serveur HTTP pour clients compatibles OpenAI. Désactivé par défaut ; rien ne sort de ce Mac tant que vous ne l'activez pas.",
+      "panel_telemetry_title": "Télémétrie",
+      "panel_telemetry_desc":  "Métriques de processus affichées dans la zone système + la fenêtre de télémétrie en direct. Local uniquement ; rien ne quitte l'appareil.",
+      "panel_integrations_title": "Intégrations",
+      "panel_integrations_desc":  "Clients connectés lisant depuis l'API locale lthn. La surface complète vit dans la fenêtre Intégrations dédiée.",
+      "panel_about_title":   "À propos",
+      "panel_about_desc":    "Ce qui tourne — version, runtime, et où vit la source."
+    },
     "models":       {
       "title": "Modèles", "subtitle": "local · 4 · huggingface",
       "btn_filters":     "Filtres",

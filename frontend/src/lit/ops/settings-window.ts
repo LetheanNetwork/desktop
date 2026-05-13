@@ -36,6 +36,7 @@ class LthnSettingsWindow extends LitElement {
     routes: { state: true },
     endpoint: { state: true },
     httpListening: { state: true },
+    panel: { state: true },
   };
   declare open: string;
   declare w: number;
@@ -53,6 +54,15 @@ class LthnSettingsWindow extends LitElement {
   declare routes: RouteView[];
   declare endpoint: string;
   declare httpListening: boolean;
+  declare panel: {
+    generalT: string; generalD: string;
+    modelsT: string; modelsD: string;
+    runnerT: string; runnerD: string;
+    apiT: string; apiD: string;
+    telemetryT: string; telemetryD: string;
+    integrationsT: string; integrationsD: string;
+    aboutT: string; aboutD: string;
+  };
   constructor() {
     super();
     this.open = "general"; this.w = 760; this.h = 600; this.embedded = false;
@@ -74,6 +84,22 @@ class LthnSettingsWindow extends LitElement {
     this.routes = [];
     this.endpoint = "http://localhost:8000/v1";
     this.httpListening = false;
+    this.panel = {
+      generalT: "General",
+      generalD: "App-wide defaults — what to show at launch, which language to speak, theme.",
+      modelsT:  "Models",
+      modelsD:  "Where lthn looks for models and which one loads at startup.",
+      runnerT:  "Runner",
+      runnerD:  "Provider routes the runner serves. Read-only; edit ~/Lethean/conf/lthn.yaml to add or change a route, then restart lthn.",
+      apiT:     "API",
+      apiD:     "HTTP server for OpenAI-compatible clients. Off by default; nothing leaves this Mac unless you turn it on.",
+      telemetryT: "Telemetry",
+      telemetryD: "Process metrics shown in the tray + live-telemetry window. Local only; nothing leaves the device.",
+      integrationsT: "Integrations",
+      integrationsD: "Connected clients reading from the local lthn API. Full surface lives in the dedicated Integrations window.",
+      aboutT:   "About",
+      aboutD:   "What's running — version, runtime, and where the source lives.",
+    };
   }
 
   _setSampleInterval(v: string) {
@@ -114,7 +140,10 @@ class LthnSettingsWindow extends LitElement {
       import("@desktop/runner/service"),
       import("@desktop/server/service"),
     ]);
-    const [title, subtitleTpl, locales, currentLang, paths, routes, routeViews, build, addr, listening] = await Promise.all([
+    const [
+      title, subtitleTpl, locales, currentLang, paths, routes, routeViews, build, addr, listening,
+      pGT, pGD, pMT, pMD, pRT, pRD, pAT, pAD, pTT, pTD, pIT, pID, pAbT, pAbD,
+    ] = await Promise.all([
       i18n.T("window.settings.title"),
       i18n.T("window.settings.subtitle"),
       i18n.AvailableLanguages(),
@@ -125,7 +154,30 @@ class LthnSettingsWindow extends LitElement {
       fl.Build().catch(() => null),
       server.WAddr().catch((): string => ""),
       server.WListening().catch((): boolean => false),
+      i18n.T("window.settings.panel_general_title"),
+      i18n.T("window.settings.panel_general_desc"),
+      i18n.T("window.settings.panel_models_title"),
+      i18n.T("window.settings.panel_models_desc"),
+      i18n.T("window.settings.panel_runner_title"),
+      i18n.T("window.settings.panel_runner_desc"),
+      i18n.T("window.settings.panel_api_title"),
+      i18n.T("window.settings.panel_api_desc"),
+      i18n.T("window.settings.panel_telemetry_title"),
+      i18n.T("window.settings.panel_telemetry_desc"),
+      i18n.T("window.settings.panel_integrations_title"),
+      i18n.T("window.settings.panel_integrations_desc"),
+      i18n.T("window.settings.panel_about_title"),
+      i18n.T("window.settings.panel_about_desc"),
     ]);
+    this.panel = {
+      generalT: pGT, generalD: pGD,
+      modelsT: pMT, modelsD: pMD,
+      runnerT: pRT, runnerD: pRD,
+      apiT: pAT, apiD: pAD,
+      telemetryT: pTT, telemetryD: pTD,
+      integrationsT: pIT, integrationsD: pID,
+      aboutT: pAbT, aboutD: pAbD,
+    };
     this.locales = locales;
     this.currentLang = currentLang;
     if (paths?.models_dir) {
@@ -295,8 +347,8 @@ class LthnSettingsWindow extends LitElement {
 
   _sectionGeneral() {
     return this._section({
-      title: "General",
-      desc: "App-wide defaults — what to show at launch, which language to speak, theme.",
+      title: this.panel.generalT,
+      desc:  this.panel.generalD,
       content: html`
         ${this._row("Start with window", "If on, the unified app shell opens at launch alongside the tray. Off = tray-only until you click in.", html`
           <lthn-toggle ?on=${this.startWithWindow}
@@ -328,8 +380,8 @@ class LthnSettingsWindow extends LitElement {
   _sectionModels() {
     const defaultModel = this.routeNames.length > 0 ? this.routeNames[0] : "no routes configured";
     return this._section({
-      title: "Models",
-      desc: "Where lthn looks for models and which one loads at startup.",
+      title: this.panel.modelsT,
+      desc:  this.panel.modelsD,
       content: html`
         ${this._row("Model directory", "Canonical Lethean layout — visible in Finder, safe to inspect.", html`
           <div style="display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:6px;
@@ -363,8 +415,8 @@ class LthnSettingsWindow extends LitElement {
 
   _sectionRunner() {
     return this._section({
-      title: "Runner",
-      desc: "Provider routes the runner serves. Read-only; edit ~/Lethean/conf/lthn.yaml to add or change a route, then restart lthn.",
+      title: this.panel.runnerT,
+      desc:  this.panel.runnerD,
       content: this.routes.length === 0 ? html`
         <div style="padding:14px 16px; border-radius:8px; background:rgba(255,255,255,0.025);
                     border:1px solid rgba(255,255,255,0.05); font-size:12px; color:var(--fg-3); line-height:1.55;">
@@ -400,8 +452,8 @@ class LthnSettingsWindow extends LitElement {
 
   _sectionApi() {
     return this._section({
-      title: "API",
-      desc: "HTTP server for OpenAI-compatible clients. Off by default; nothing leaves this Mac unless you turn it on.",
+      title: this.panel.apiT,
+      desc:  this.panel.apiD,
       content: html`
         ${this._row("HTTP server", null, html`<lthn-toggle ?on=${this.httpListening}></lthn-toggle>`)}
         ${this._row("Endpoint", null, html`
@@ -420,8 +472,8 @@ class LthnSettingsWindow extends LitElement {
 
   _sectionTelemetry() {
     return this._section({
-      title: "Telemetry",
-      desc: "Process metrics shown in the tray + live-telemetry window. Local only; nothing leaves the device.",
+      title: this.panel.telemetryT,
+      desc:  this.panel.telemetryD,
       content: html`
         ${this._row("Sample interval", "How often the tray polls the runner. 2s is the calm-presence default.",
           this._segmentPick(this.sampleInterval, ["1s", "2s", "5s", "off"], v => this._setSampleInterval(v)))}
@@ -436,8 +488,8 @@ class LthnSettingsWindow extends LitElement {
 
   _sectionIntegrations() {
     return this._section({
-      title: "Integrations",
-      desc: "Connected clients reading from the local lthn API. Full surface lives in the dedicated Integrations window.",
+      title: this.panel.integrationsT,
+      desc:  this.panel.integrationsD,
       content: html`
         ${this._row("Open Integrations window", "Manage Claude Code / OpenCode / Codex / Copilot / Raycast wiring.", html`
           <lthn-btn tone="quiet" size="sm"
@@ -452,8 +504,8 @@ class LthnSettingsWindow extends LitElement {
   _sectionAbout() {
     const mono = (v: string) => html`<span style="font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">${v}</span>`;
     return this._section({
-      title: "About",
-      desc: "What's running — version, runtime, and where the source lives.",
+      title: this.panel.aboutT,
+      desc:  this.panel.aboutD,
       content: html`
         ${this._row("Version", "Binary release tag baked at build time.",
           mono(`v${this.build.version || "—"}`))}
