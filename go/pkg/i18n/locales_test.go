@@ -14,6 +14,11 @@ import (
 	lthni18n "dappco.re/lthn/desktop/pkg/i18n"
 )
 
+const (
+	cliWelcomeTitleKey   = "cli.welcome.title"
+	cliWelcomeTitleValue = "lthn — Lethean unified binary"
+)
+
 // newServiceWithSource builds an i18n service rigged to load
 // translations from the lthn locale bundle — matches what
 // newAppCore does at boot, minus the rest of the Core.
@@ -36,8 +41,8 @@ func newServiceWithSource(t *core.T, lang string) {
 
 func TestLocales_Source_EnglishLoads(t *core.T) {
 	newServiceWithSource(t, "en")
-	got := coreI18n.T("cli.welcome.title")
-	core.AssertEqual(t, "lthn — Lethean unified binary", got)
+	got := coreI18n.T(cliWelcomeTitleKey)
+	core.AssertEqual(t, cliWelcomeTitleValue, got)
 }
 
 func TestLocales_Source_EnGBResolvesViaBaseLanguageFallback(t *core.T) {
@@ -45,8 +50,8 @@ func TestLocales_Source_EnGBResolvesViaBaseLanguageFallback(t *core.T) {
 	// resolves it to en.json. This is the Snider canon: UK English
 	// IS the OG English, no separate file needed.
 	newServiceWithSource(t, "en-GB")
-	got := coreI18n.T("cli.welcome.title")
-	core.AssertEqual(t, "lthn — Lethean unified binary", got)
+	got := coreI18n.T(cliWelcomeTitleKey)
+	core.AssertEqual(t, cliWelcomeTitleValue, got)
 }
 
 func TestLocales_Source_EnAULoadsAsDistinctLocale(t *core.T) {
@@ -56,8 +61,8 @@ func TestLocales_Source_EnAULoadsAsDistinctLocale(t *core.T) {
 	// so the locale tag is recognised; visible diffs land when we
 	// add user-facing copy with words that vary.
 	newServiceWithSource(t, "en-AU")
-	got := coreI18n.T("cli.welcome.title")
-	core.AssertEqual(t, "lthn — Lethean unified binary", got)
+	got := coreI18n.T(cliWelcomeTitleKey)
+	core.AssertEqual(t, cliWelcomeTitleValue, got)
 }
 
 func TestLocales_Source_MissingKeyReturnsMessageID(t *core.T) {
