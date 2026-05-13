@@ -24,8 +24,18 @@ import (
 	"dappco.re/go/process"
 )
 
-// Options configures the sandbox host. Empty today.
-type Options struct{}
+// Options configures the sandbox host.
+type Options struct {
+	// DefaultImage is used when SpawnInput.Image is empty. The shipped
+	// default is `lthn/dev:latest` — the Lethean developer image with
+	// gh/codex/claude/go/php/node/python preinstalled. Override per-call
+	// via SpawnInput.Image, or per-host by passing Options{DefaultImage: ...}.
+	DefaultImage string
+}
+
+// defaultImage is the canonical fallback when neither Options.DefaultImage
+// nor SpawnInput.Image is set.
+const defaultImage = "lthn/dev:latest"
 
 // Service is the sandbox host. Embeds *core.ServiceRuntime so
 // process.Service can be resolved at call time.
@@ -98,7 +108,7 @@ type SpawnOutput struct {
 //     go-container; lthn-desktop ships the placeholder until then.
 func (s *Service) Spawn(input SpawnInput) (SpawnOutput, error) {
 	if core.Trim(input.Image) == "" {
-		return SpawnOutput{}, core.E("sandbox.Spawn", "image is required", nil)
+		input.Image = s.resolveDefaultImage()
 	}
 	if core.Trim(input.Command) == "" {
 		return SpawnOutput{}, core.E("sandbox.Spawn", "command is required", nil)
@@ -202,6 +212,17 @@ func (s *Service) spawnViaCLI(rt container.RuntimeType, input SpawnInput, timeou
 		ExitCode:   exit,
 		DurationMs: dur,
 	}, nil
+}
+
+// resolveDefaultImage returns Options.DefaultImage when set, else
+// the package-level default (lthn/dev:latest).
+func (s *Service) resolveDefaultImage() string {
+	if s != nil && s.ServiceRuntime != nil {
+		if img := core.Trim(s.Options().DefaultImage); img != "" {
+			return img
+		}
+	}
+	return defaultImage
 }
 
 // resolveRuntime picks a container runtime. If `prefer` is set we
