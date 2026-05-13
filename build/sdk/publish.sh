@@ -76,6 +76,20 @@ MANIFEST=(
   # ── Scripting / server-side ────────────────────────────────────────
   "php|php|Guzzle-based PHP client. Composer-installable via @lthn/sdk-php."
   "python|python|urllib3-based Python client. pip-installable via @lthn/sdk-python."
+  "ruby|ruby|Faraday-based Ruby client. Bundler / gem distribution."
+  "java|java|JVM Java client. Maven Central distribution."
+  "go|go|Go client (alternative to dappco.re/go for non-dappcore consumers)."
+  "powershell|powershell|PowerShell client. Windows admin / scripting consumers."
+  "bash|bash|Bash client. Shell-only environments — embedded systems, ops scripts."
+  # ── Specialty / extended-reach ─────────────────────────────────────
+  "swift-combine|swift-combine|Swift Combine framework flavour — modern reactive iOS / macOS."
+  "cpp-ue4|cpp-ue4|Unreal Engine 4 C++ integration. Gaming-side lthn plugins."
+  "cpp-tiny|cpp-tiny|Embedded C++ with no STL dependency. Microcontroller-friendly."
+  # rust-axum is a SERVER stub, not a client — it scaffolds an Axum
+  # service that implements the lthn API surface. Useful for the
+  # third-party plugin story ("implement the lthn protocol in Rust"),
+  # distinct in shape from sdk-rust which consumes it.
+  "rust-axum|rust-axum|Axum server stub — scaffold a Rust service implementing the lthn API surface."
 )
 
 # Filter to selected ids if any were passed as args.
