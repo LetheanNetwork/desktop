@@ -39,6 +39,7 @@ import (
 	coreI18n "dappco.re/go/i18n"
 	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
+	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/integrations"
 	"dappco.re/lthn/desktop/pkg/models"
 	"dappco.re/lthn/desktop/pkg/runner"
@@ -190,6 +191,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(models.NewWailsService()),
 		application.NewService(firstlaunch.NewWailsService()),
 		application.NewService(integrations.NewWailsService()),
+		application.NewService(apikey.NewWailsService(s.opts.Core)),
 		application.NewService(tools.NewWailsService(s.opts.Core)),
 		application.NewService(validator.NewWailsService()),
 		application.NewService(telemetry.NewService(telemetry.Options{})),
@@ -525,16 +527,18 @@ func (s *Service) Run() core.Result {
 	return core.Ok(nil)
 }
 
-// attachSPA mounts the embedded frontend on the gin engine's
-// NoRoute handler. Anything that doesn't match an API route gets
-// served from the embedded dist — index.html, assets/*, etc.
+// attachSPA mounts the embedded frontend as the coreapi.Engine's
+// no-route fallback. Anything that doesn't match an explicit lthn /
+// subsystem route gets served from the embedded dist — index.html,
+// assets/*, etc. The handler inherits the canonical middleware chain
+// (auth, sunset, cache, tracing) just like any other route.
 func (s *Service) attachSPA() error {
 	sub, err := fs.Sub(s.opts.Frontend, s.opts.FrontendRoot)
 	if err != nil {
 		return core.E("desktop.attachSPA", "frontend root not found", err)
 	}
 	fileServer := http.FileServer(http.FS(sub))
-	s.opts.Server.Engine().NoRoute(func(c *gin.Context) {
+	s.opts.Server.Engine().SetNoRoute(func(c *gin.Context) {
 		fileServer.ServeHTTP(c.Writer, c.Request)
 	})
 	return nil

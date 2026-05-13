@@ -26,6 +26,7 @@ class LthnIntegrationsWindow extends LitElement {
     selectedId: { state: true },
     endpoint: { state: true },
     defaultModel: { state: true },
+    apiKey: { state: true },
     t: { state: true },
   };
   declare w: number;
@@ -36,6 +37,7 @@ class LthnIntegrationsWindow extends LitElement {
   declare selectedId: string;
   declare endpoint: string;
   declare defaultModel: string;
+  declare apiKey: string;
   declare t: {
     railLabel: string; railEmpty: string;
     rowConfigPath: string; rowOnDisk: string; rowEndpoint: string; rowDefaultModel: string;
@@ -51,6 +53,7 @@ class LthnIntegrationsWindow extends LitElement {
     this.selectedId = "";
     this.endpoint = "http://localhost:8000/v1";
     this.defaultModel = "—";
+    this.apiKey = "sk-lthn-•••• (managed by lthn)";
     this.t = {
       railLabel: "Clients",
       railEmpty: "No clients enumerated yet. The integrations service is the source of truth.",
@@ -88,20 +91,23 @@ class LthnIntegrationsWindow extends LitElement {
       yes, no, noClient: nc,
     };
     try {
-      const [integrations, runner, server] = await Promise.all([
+      const [integrations, runner, server, ak] = await Promise.all([
         import("@desktop/integrations/wailsservice"),
         import("@desktop/runner/service"),
         import("@desktop/server/service"),
+        import("@desktop/apikey/wailsservice"),
       ]);
-      const [list, models, addr] = await Promise.all([
+      const [list, models, addr, masked] = await Promise.all([
         integrations.List(),
         runner.WModels().catch((): string[] => []),
         server.WAddr().catch((): string => ""),
+        ak.Masked().catch((): string => ""),
       ]);
       this.clients = (list || []) as ClientView[];
       if (this.clients.length > 0) this.selectedId = this.clients[0].id;
       if (models && models.length > 0) this.defaultModel = models[0];
       if (addr) this.endpoint = endpointFromAddr(addr);
+      if (masked) this.apiKey = masked;
     } catch (err) {
       console.error("integrations: lookup failed", err);
     }
@@ -161,7 +167,7 @@ class LthnIntegrationsWindow extends LitElement {
               <lthn-label>${this.t.snippetLabel.replace("%s", selected.config_path_raw)}</lthn-label>
               <div style="margin-top:8px; background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:12px 14px; font-family:var(--font-mono); font-size:11.5px; line-height:1.6; color:var(--fg-1); white-space:pre;">${`{
   "apiBase":  "${this.endpoint}",
-  "apiKey":   "sk-lthn-•••• (managed by lthn)",
+  "apiKey":   "${this.apiKey}",
   "model":    "${this.defaultModel}",
   "stream":   true
 }`}</div>

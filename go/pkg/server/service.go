@@ -1,11 +1,12 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-// Package server exposes lthn's HTTP API surface. OpenAI-compatible
-// endpoints (/v1/chat/completions, /v1/completions, /v1/models) plus
-// a liveness probe (/health), built on Gin per the Lethean design
-// canon — core/api is Gin-based, lthn services follow.
+// Package server exposes lthn's HTTP API surface as a thin wrapper
+// around *coreapi.Engine — every byte that enters or leaves the
+// lthn binary passes through the same middleware chain core/api
+// applies upstream: bearer-auth, SSRF guard, sunset, cache, tracing,
+// codegen.
 //
-// The Service holds a *gin.Engine. Same engine is exposed two ways:
+// Two ways the same engine is used:
 //
 //	Start(ctx)      → standalone HTTP listener on opts.Addr (lthn serve)
 //	Handler()       → http.Handler for Wails Asset.Handler (lthn gui)
@@ -15,16 +16,20 @@
 // set, requests are routed through the runner subsystem for real
 // inference.
 //
+// Auth: when Options.LocalKey is non-empty, every request must
+// present `Authorization: Bearer <localKey>`. Health and Swagger
+// remain public (core/api's WithBearerAuth handles the skip list).
+//
 // Usage example:
 //
 //	c := core.New()
-//	s := server.NewService(server.Options{Addr: ":8000"})
-//	if r := s.Register(c); !r.OK {
-//		return r
-//	}
-//	if r := s.Start(core.Background()); !r.OK {
-//		return r
-//	}
+//	s := server.NewService(server.Options{
+//	    Addr:     ":8000",
+//	    Runner:   r,
+//	    LocalKey: "sk-lthn-…",  // set after pkg/apikey resolves
+//	})
+//	if r := s.Register(c); !r.OK { return r }
+//	if r := s.Start(core.Background()); !r.OK { return r }
 package server
 
 import (
@@ -32,6 +37,7 @@ import (
 	"net/http"
 
 	core "dappco.re/go"
+	coreapi "dappco.re/go/api"
 	"github.com/gin-gonic/gin"
 )
 
@@ -58,12 +64,24 @@ type Options struct {
 	// fall back to the echo stub so the binary still serves something
 	// useful before go-mlx is wired.
 	Runner Runner
+
+	// LocalKey is the per-Mac bearer token clients must present on
+	// every request. Empty means auth is disabled (open server —
+	// only safe in dev or behind a trusted reverse proxy).
+	LocalKey string
+
+	// SPAHandler is invoked when no registered route matches the
+	// incoming request. Typically rewrites unknown GETs to the
+	// embedded SPA index.html. Nil means gin's default 404.
+	SPAHandler gin.HandlerFunc
 }
 
-// Service is the HTTP API subsystem.
+// Service is the HTTP API subsystem. Wraps a *coreapi.Engine so the
+// canonical middleware chain (auth, SSRF, sunset, cache, tracing,
+// codegen) applies to every route lthn registers.
 type Service struct {
 	opts   Options
-	engine *gin.Engine
+	engine *coreapi.Engine
 	http   *http.Server
 	// listening tracks whether Start() has an active ListenAndServe
 	// running. Read by the Wails surface (WListening()) so the WebView
@@ -77,19 +95,28 @@ type Service struct {
 //
 // Usage example:
 //
-//	s := server.NewService(server.Options{Addr: ":8000"})
+//	s := server.NewService(server.Options{Addr: ":8000", LocalKey: key})
 //	s.Register(c)
 func NewService(opts Options) *Service {
 	if opts.Addr == "" {
 		opts.Addr = ":8000"
 	}
 	gin.SetMode(gin.ReleaseMode)
-	engine := gin.New()
-	engine.HandleMethodNotAllowed = true // return 405 (not 404) on POST/GET mismatch
-	engine.Use(gin.Recovery())
+
+	apiOpts := []coreapi.Option{
+		coreapi.WithAddr(opts.Addr),
+	}
+	if opts.LocalKey != "" {
+		apiOpts = append(apiOpts, coreapi.WithBearerAuth(opts.LocalKey))
+	}
+	if opts.SPAHandler != nil {
+		apiOpts = append(apiOpts, coreapi.WithNoRoute(opts.SPAHandler))
+	}
+
+	engine, _ := coreapi.New(apiOpts...) // current New always returns nil err
 	s := &Service{opts: opts, engine: engine}
-	s.routes()
-	s.http = &http.Server{Addr: opts.Addr, Handler: engine}
+	engine.Register(newLthnRoutes(s))
+	s.http = &http.Server{Addr: opts.Addr, Handler: engine.Handler()}
 	return s
 }
 
@@ -120,18 +147,19 @@ func (s *Service) Register(c *core.Core) core.Result {
 //	    Assets: application.AssetOptions{Handler: s.Handler()},
 //	})
 func (s *Service) Handler() http.Handler {
-	return s.engine
+	return s.engine.Handler()
 }
 
-// Engine returns the underlying *gin.Engine for callers that need to
-// register additional routes (frontend SPA fallback, custom verbs).
-// pkg/desktop uses this to attach the SPA static handler.
+// Engine returns the underlying *coreapi.Engine for callers that need
+// to register additional RouteGroups, StreamGroups, or attach a
+// fallback. pkg/desktop uses this to mount subsystem routes onto the
+// same canonical engine.
 //
 // Usage example:
 //
 //	s := server.NewService(server.Options{})
-//	s.Engine().NoRoute(spaHandler)
-func (s *Service) Engine() *gin.Engine {
+//	s.Engine().Register(myRouteGroup{})
+func (s *Service) Engine() *coreapi.Engine {
 	return s.engine
 }
 

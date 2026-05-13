@@ -35,12 +35,13 @@ import (
 )
 
 // mountSubsystems attaches the dappco.re/go/api + dappco.re/go/mcp HTTP
-// surfaces to the pkg/server gin engine. Idempotent — safe to call
-// twice, the second registration shadows the first (Gin allows route
-// overrides on the same path + method).
+// surfaces to the coreapi-spined pkg/server. The spine engine is itself
+// a *coreapi.Engine, so subsystem routes mount as RouteGroups that
+// inherit the canonical middleware chain (auth, SSRF, sunset, cache,
+// tracing).
 //
 // Returns the same Result shape as everything else on the desktop
-// service — Ok if both mounts wired, Fail with the offending subsystem
+// service — Ok if all mounts wired, Fail with the offending subsystem
 // name otherwise. A missing service is treated as Ok (the subsystem
 // just isn't enabled in this build) rather than Fail.
 //
@@ -49,7 +50,7 @@ import (
 //	if r := mountSubsystems(s.opts.Core, s.opts.Server.Engine(), s.opts.Runner); !r.OK {
 //	    return r
 //	}
-func mountSubsystems(c *core.Core, engine *gin.Engine, r *runner.Service) core.Result {
+func mountSubsystems(c *core.Core, engine *coreapi.Engine, r *runner.Service) core.Result {
 	if c == nil {
 		return core.Fail(core.E("desktop.mountSubsystems", "core is nil", nil))
 	}
@@ -66,20 +67,24 @@ func mountSubsystems(c *core.Core, engine *gin.Engine, r *runner.Service) core.R
 		}
 	}
 
-	// api — Gin-based polyglot gateway. Its Engine exposes Handler()
-	// which is the underlying *gin.Engine wrapped as http.Handler.
-	// gin.WrapH() lifts that into a gin.HandlerFunc the parent engine
-	// can register at /api/*. http.StripPrefix peels the /api segment
-	// so the inner Engine sees the same paths it would as a standalone
-	// server.
+	// api (sub-engine sub-mount) — the standalone *coreapi.Service
+	// registered on Core has its own Engine with separate routes;
+	// expose those at /api/* so consumers can reach them without
+	// colliding with our root surface. Wrapped as a RouteGroup so the
+	// outer engine's middleware chain still applies. Stripping /api
+	// peels the prefix before the inner engine sees the request.
 	if apiSvc, ok := core.ServiceFor[*coreapi.Service](c, "api"); ok && apiSvc != nil && apiSvc.Engine != nil {
-		engine.Any("/api/*proxyPath", gin.WrapH(http.StripPrefix("/api", apiSvc.Engine.Handler())))
+		engine.Register(&subEngineGroup{
+			name:     "subapi",
+			basePath: "/api",
+			handler:  http.StripPrefix("/api", apiSvc.Engine.Handler()),
+		})
 	}
 
 	// mcp — Model Context Protocol. The current dappco.re/go/mcp
 	// Service exposes ServeHTTP(ctx, addr) as an entry point (starts
 	// a standalone HTTP server) rather than an http.Handler accessor.
-	// Mounting under our gin engine needs an upstream `Handler()
+	// Mounting under our coreapi engine needs an upstream `Handler()
 	// http.Handler` accessor on *mcp.Service — pending a small PR.
 	// Until then, an MCP client can still connect via the stdio
 	// transport or by running `lthn mcp serve` standalone, just not
@@ -88,4 +93,20 @@ func mountSubsystems(c *core.Core, engine *gin.Engine, r *runner.Service) core.R
 	// (intentionally no /mcp/* route registered here)
 
 	return core.Ok(nil)
+}
+
+// subEngineGroup is a coreapi.RouteGroup that proxies every request
+// under basePath to an inner http.Handler — used to mount the
+// standalone dappco.re/go/api Service's Engine at /api/* on our
+// outer engine.
+type subEngineGroup struct {
+	name     string
+	basePath string
+	handler  http.Handler
+}
+
+func (g *subEngineGroup) Name() string     { return g.name }
+func (g *subEngineGroup) BasePath() string { return g.basePath }
+func (g *subEngineGroup) RegisterRoutes(rg *gin.RouterGroup) {
+	rg.Any("/*proxyPath", gin.WrapH(g.handler))
 }

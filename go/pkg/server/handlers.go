@@ -22,11 +22,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// healthResponse is the /health endpoint payload.
-type healthResponse struct {
-	Status  string `json:"status"`
-	Service string `json:"service"`
-}
 
 // modelEntry mirrors the OpenAI /v1/models entry shape.
 type modelEntry struct {
@@ -104,18 +99,33 @@ type errorBody struct {
 	Type    string `json:"type"`
 }
 
-// routes wires the OpenAI-compatible surface onto s.engine. Called
-// from NewService.
-func (s *Service) routes() {
-	s.engine.GET("/health", s.handleHealth)
-	s.engine.GET("/v1/models", s.handleModels)
-	s.engine.POST("/v1/chat/completions", s.handleChat)
-	s.engine.POST("/v1/completions", s.handleCompletion)
+// lthnRoutes implements coreapi.RouteGroup for the OpenAI-compatible
+// endpoints lthn ships. Registered on the *coreapi.Engine at
+// construction time so the routes pick up the canonical middleware
+// chain (auth, SSRF, sunset, cache, tracing) instead of bypassing it.
+type lthnRoutes struct {
+	server *Service
 }
 
-// handleHealth returns the liveness probe response. Always 200 OK.
-func (s *Service) handleHealth(c *gin.Context) {
-	c.JSON(http.StatusOK, healthResponse{Status: "ok", Service: "lthn"})
+func newLthnRoutes(s *Service) *lthnRoutes { return &lthnRoutes{server: s} }
+
+// Name reports the human-readable group identifier.
+func (g *lthnRoutes) Name() string { return "lthn" }
+
+// BasePath returns the URL prefix every route in this group shares.
+// Empty string mounts at the engine root; the routes carry their own
+// /v1/* prefix so the OpenAI-compat client paths match exactly.
+func (g *lthnRoutes) BasePath() string { return "" }
+
+// RegisterRoutes wires the OpenAI-compatible surface onto rg.
+// core/api's WithBearerAuth + WithCacheControl + WithSunset etc.
+// already attached when this fires, so every handler below inherits
+// the middleware chain. /health is provided by coreapi itself —
+// no need to register it here.
+func (g *lthnRoutes) RegisterRoutes(rg *gin.RouterGroup) {
+	rg.GET("/v1/models", g.server.handleModels)
+	rg.POST("/v1/chat/completions", g.server.handleChat)
+	rg.POST("/v1/completions", g.server.handleCompletion)
 }
 
 // handleModels returns the OpenAI /v1/models list. Routes through the

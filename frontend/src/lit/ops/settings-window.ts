@@ -38,6 +38,8 @@ class LthnSettingsWindow extends LitElement {
     httpListening: { state: true },
     panel: { state: true },
     row:   { state: true },
+    apiKey: { state: true },
+    apiKeyRevealed: { state: true },
   };
   declare open: string;
   declare w: number;
@@ -55,6 +57,8 @@ class LthnSettingsWindow extends LitElement {
   declare routes: RouteView[];
   declare endpoint: string;
   declare httpListening: boolean;
+  declare apiKey: string;
+  declare apiKeyRevealed: boolean;
   declare panel: {
     generalT: string; generalD: string;
     modelsT: string; modelsD: string;
@@ -103,6 +107,8 @@ class LthnSettingsWindow extends LitElement {
     this.routes = [];
     this.endpoint = "http://localhost:8000/v1";
     this.httpListening = false;
+    this.apiKey = "sk-lthn-••••••••••••••••2qB7";
+    this.apiKeyRevealed = false;
     this.panel = {
       generalT: "General",
       generalD: "App-wide defaults — what to show at launch, which language to speak, theme.",
@@ -166,6 +172,55 @@ class LthnSettingsWindow extends LitElement {
   _setHeapSamples(v: string) {
     this.heapSamples = v;
     localStorage.setItem("lthn.telemetry.samples", v);
+  }
+
+  /** Toggle Reveal/Hide for the API key. Reveal fetches the full
+   *  token via Wails (in-process, no network); Hide flips back to
+   *  the masked form. */
+  async _toggleApiKey() {
+    try {
+      const ak = await import("@desktop/apikey/wailsservice");
+      if (this.apiKeyRevealed) {
+        const masked = await ak.Masked();
+        if (masked) this.apiKey = masked;
+        this.apiKeyRevealed = false;
+      } else {
+        const full = await ak.Reveal();
+        if (full) this.apiKey = full;
+        this.apiKeyRevealed = true;
+      }
+    } catch (err) {
+      console.error("settings: apikey reveal toggle failed", err);
+    }
+  }
+
+  /** Copy the currently-shown apiKey value to the clipboard. */
+  async _copyApiKey() {
+    try {
+      // If the value is masked, fetch the real one for the copy —
+      // there's no use in copying bullets.
+      const ak = await import("@desktop/apikey/wailsservice");
+      const full = this.apiKeyRevealed ? this.apiKey : await ak.Reveal();
+      await navigator.clipboard.writeText(full);
+    } catch (err) {
+      console.error("settings: apikey copy failed", err);
+    }
+  }
+
+  /** Rotate the API key — generates a new one, persists it, and
+   *  reveals the new value. Old key keeps working until the server
+   *  is restarted (it's baked into the bearer middleware at boot). */
+  async _rotateApiKey() {
+    try {
+      const ak = await import("@desktop/apikey/wailsservice");
+      const fresh = await ak.WRotate();
+      if (fresh) {
+        this.apiKey = fresh;
+        this.apiKeyRevealed = true;
+      }
+    } catch (err) {
+      console.error("settings: apikey rotate failed", err);
+    }
   }
 
   /** Interactive segment — same chip shape as _segment but each
@@ -309,6 +364,14 @@ class LthnSettingsWindow extends LitElement {
       this.endpoint = `http://${a}/v1`;
     }
     this.httpListening = !!listening;
+    // Pull the masked form of the local bearer token. Settings → API
+    // renders the masked value by default; the Reveal toggle swaps
+    // it for the full string via the apikey.Reveal binding.
+    try {
+      const ak = await import("@desktop/apikey/wailsservice");
+      const masked = await ak.Masked().catch((): string => "");
+      if (masked) this.apiKey = masked;
+    } catch { /* keep design fallback */ }
     // Rebuild the subtitle with the real version so the chrome
     // reflects the running binary rather than the locale fixture.
     const subtitle = this.build.version
@@ -574,9 +637,16 @@ class LthnSettingsWindow extends LitElement {
         `)}
         ${this._row(this.row.apiKeyL, this.row.apiKeyH, html`
           <div style="display:flex; align-items:center; gap:6px;">
-            <span style="font-family:var(--font-mono); font-size:11px; color:var(--fg-1);">sk-lthn-••••••••••••••••2qB7</span>
-            <lthn-btn tone="quiet" size="sm"><i class="fa-regular fa-copy" style="font-size:10px;"></i></lthn-btn>
-            <lthn-btn tone="quiet" size="sm"><i class="fa-solid fa-rotate-right" style="font-size:10px;"></i></lthn-btn>
+            <span style="font-family:var(--font-mono); font-size:11px; color:var(--fg-1); word-break:break-all;">${this.apiKey}</span>
+            <lthn-btn tone="quiet" size="sm" @click=${() => this._toggleApiKey()}>
+              <i class="fa-regular ${this.apiKeyRevealed ? "fa-eye-slash" : "fa-eye"}" style="font-size:10px;"></i>
+            </lthn-btn>
+            <lthn-btn tone="quiet" size="sm" @click=${() => this._copyApiKey()}>
+              <i class="fa-regular fa-copy" style="font-size:10px;"></i>
+            </lthn-btn>
+            <lthn-btn tone="quiet" size="sm" @click=${() => this._rotateApiKey()}>
+              <i class="fa-solid fa-rotate-right" style="font-size:10px;"></i>
+            </lthn-btn>
           </div>
         `)}
       `,
