@@ -123,7 +123,15 @@
     }
   },
   "window": {
-    "chat":         { "title": "lthn · discussion",   "subtitle": "conversation · locale" },
+    "chat":         {
+      "title": "lthn · discussion", "subtitle": "conversation · locale",
+      "rail_search":      "Rechercher des conversations",
+      "rail_bucket_today":     "Aujourd'hui",
+      "rail_bucket_yesterday": "Hier",
+      "rail_bucket_week":      "Cette semaine",
+      "rail_empty":       "Aucune conversation pour le moment. Démarrez-en une depuis le compositeur.",
+      "rail_new":         "Nouvelle conversation"
+    },
     "fleet":        { "title": "Flotte",              "subtitle": "multi-machines · aperçu v1.0" },
     "distillation": { "title": "Affinage",            "subtitle": "LoRA · SFT · distillation · fusion" },
     "network":      { "title": "Réseau",              "subtitle": "LetherNet · aperçu v0.7" },

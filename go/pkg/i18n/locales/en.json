@@ -123,7 +123,15 @@
     }
   },
   "window": {
-    "chat":         { "title": "lthn · chat",   "subtitle": "conversation · local" },
+    "chat":         {
+      "title": "lthn · chat", "subtitle": "conversation · local",
+      "rail_search":      "Search conversations",
+      "rail_bucket_today":     "Today",
+      "rail_bucket_yesterday": "Yesterday",
+      "rail_bucket_week":      "This week",
+      "rail_empty":       "No conversations yet. Start one from the composer.",
+      "rail_new":         "New conversation"
+    },
     "fleet":        { "title": "Fleet",         "subtitle": "multi-machine · v1.0 preview" },
     "distillation": { "title": "Fine-tune",     "subtitle": "LoRA · SFT · distill · merge" },
     "network":      { "title": "Network",       "subtitle": "LetherNet · v0.7 preview" },

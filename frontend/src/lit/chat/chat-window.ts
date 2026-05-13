@@ -105,6 +105,7 @@ class LthnChatWindow extends LitElement {
     activeModel: { state: true },
     version: { state: true },
     runnerCount: { state: true },
+    t: { state: true },
   };
   declare state:     ChatState;
   declare rail:      RailMode;
@@ -123,6 +124,7 @@ class LthnChatWindow extends LitElement {
   declare activeModel: string;
   declare version: string;
   declare runnerCount: number;
+  declare t: { railSearch: string; bToday: string; bYesterday: string; bWeek: string; railEmpty: string; railNew: string };
   constructor() {
     super();
     this.state = "multi-turn";
@@ -141,15 +143,28 @@ class LthnChatWindow extends LitElement {
     this.activeModel = "";
     this.version = "0.2.0-rc1";
     this.runnerCount = 1;
+    this.t = {
+      railSearch: "Search conversations",
+      bToday: "Today", bYesterday: "Yesterday", bWeek: "This week",
+      railEmpty: "No conversations yet. Start one from the composer.",
+      railNew: "New conversation",
+    };
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const [title, subtitle] = await Promise.all([
+    const [title, subtitle, rs, bt, by, bw, re, rn] = await Promise.all([
       T("window.chat.title"),
       T("window.chat.subtitle"),
+      T("window.chat.rail_search"),
+      T("window.chat.rail_bucket_today"),
+      T("window.chat.rail_bucket_yesterday"),
+      T("window.chat.rail_bucket_week"),
+      T("window.chat.rail_empty"),
+      T("window.chat.rail_new"),
     ]);
     this.chrome = { title, subtitle };
+    this.t = { railSearch: rs, bToday: bt, bYesterday: by, bWeek: bw, railEmpty: re, railNew: rn };
     await Promise.all([this._reloadRail(), this._reloadModel(), this._reloadBuild()]);
   }
 
@@ -259,7 +274,7 @@ class LthnChatWindow extends LitElement {
   async _newConversation() {
     try {
       const svc = await import("@desktop/sessions/wailsservice");
-      const id = await svc.Create("New conversation");
+      const id = await svc.Create(this.t.railNew);
       await this._reloadRail();
       this.activeConversationId = id;
     } catch (err: unknown) {
@@ -356,9 +371,9 @@ class LthnChatWindow extends LitElement {
   _renderRail() {
     const empty = this.conversations.length === 0;
     const buckets = [
-      { label: "Today",      key: "today" },
-      { label: "Yesterday",  key: "yesterday" },
-      { label: "This week",  key: "week" },
+      { label: this.t.bToday,     key: "today" },
+      { label: this.t.bYesterday, key: "yesterday" },
+      { label: this.t.bWeek,      key: "week" },
     ];
     const activeId = this.activeConversationId;
     return html`
@@ -369,7 +384,7 @@ class LthnChatWindow extends LitElement {
                       background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06);
                       border-radius:6px;">
             <i class="fa-solid fa-magnifying-glass" style="font-size:10px; color:var(--fg-3);"></i>
-            <span style="font-size:11.5px; color:var(--fg-3);">Search conversations</span>
+            <span style="font-size:11.5px; color:var(--fg-3);">${this.t.railSearch}</span>
             <div style="flex:1"></div>
             <span style="font-family:var(--font-mono); font-size:9.5px; color:var(--fg-3);
                          padding:1px 4px; border:1px solid rgba(255,255,255,0.08); border-radius:3px;">⌘K</span>
@@ -383,7 +398,7 @@ class LthnChatWindow extends LitElement {
                           background:rgba(255,255,255,0.04); display:flex; align-items:center; justify-content:center;">
                 <i class="fa-regular fa-comment" style="font-size:14px; color:var(--fg-3);"></i>
               </div>
-              No conversations yet.<br>Start one from the composer.
+              ${this.t.railEmpty}
             </div>
           ` : html`
             <div style="display:flex; flex-direction:column; gap:1px;">
@@ -398,7 +413,7 @@ class LthnChatWindow extends LitElement {
         <div style="padding:8px 10px; border-top:1px solid rgba(255,255,255,0.05); display:flex; gap:6px;">
           <lthn-btn tone="ghost" size="md" style="flex:1; justify-content:center;"
             @click=${() => this._newConversation()}>
-            <i class="fa-solid fa-plus" style="font-size:10px;"></i> New conversation
+            <i class="fa-solid fa-plus" style="font-size:10px;"></i> ${this.t.railNew}
           </lthn-btn>
           <lthn-btn tone="quiet" size="md"><i class="fa-solid fa-ellipsis" style="font-size:11px;"></i></lthn-btn>
         </div>
