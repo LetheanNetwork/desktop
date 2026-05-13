@@ -13,12 +13,25 @@ class LthnTelemetryWindow extends LitElement {
     fullscreen: { type: Boolean },
     embedded: { type: Boolean, reflect: true },
     chrome: { state: true },
+    sample: { state: true },
+    heapHistory: { state: true },
+    goHistory: { state: true },
+    model: { state: true },
+    err: { state: true },
   };
   declare w: number;
   declare h: number;
   declare fullscreen: boolean;
   declare embedded: boolean;
   declare chrome: { title: string; subtitleNormal: string; subtitleFullscreen: string };
+  declare sample: { heap_alloc_mb: number; uptime_seconds: number; num_goroutines: number; num_cgo_calls: number };
+  declare heapHistory: number[];
+  declare goHistory: number[];
+  declare model: string;
+  declare err: string;
+
+  private _pollTimer: number | null = null;
+
   constructor() {
     super();
     this.w = 880; this.h = 560; this.fullscreen = false; this.embedded = false;
@@ -27,20 +40,74 @@ class LthnTelemetryWindow extends LitElement {
       subtitleNormal: "demo surface",
       subtitleFullscreen: "fullscreen · ⎋ to exit",
     };
+    this.sample = { heap_alloc_mb: 0, uptime_seconds: 0, num_goroutines: 0, num_cgo_calls: 0 };
+    this.heapHistory = [];
+    this.goHistory = [];
+    this.model = "—";
+    this.err = "";
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    this.chrome = {
-      title: await T("window.telemetry.title"),
-      subtitleNormal: await T("window.telemetry.subtitle_normal"),
-      subtitleFullscreen: await T("window.telemetry.subtitle_fullscreen"),
-    };
+    const [title, subN, subF] = await Promise.all([
+      T("window.telemetry.title"),
+      T("window.telemetry.subtitle_normal"),
+      T("window.telemetry.subtitle_fullscreen"),
+    ]);
+    this.chrome = { title, subtitleNormal: subN, subtitleFullscreen: subF };
+    void this._poll();
+    this._pollTimer = window.setInterval(() => void this._poll(), 2000);
+  }
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this._pollTimer !== null) {
+      clearInterval(this._pollTimer);
+      this._pollTimer = null;
+    }
+  }
+
+  /** One telemetry tick + model refresh. Pushes onto the rolling
+   *  history arrays the big-number sparklines read from. 24 samples
+   *  × 2s ≈ a 48-second rolling window — same cadence as the tray. */
+  async _poll() {
+    try {
+      const [tel, runner] = await Promise.all([
+        import("@desktop/telemetry/service"),
+        import("@desktop/runner/service"),
+      ]);
+      const reading = await tel.CurrentSample();
+      const models = await runner.WModels().catch((): string[] => []);
+      this.sample = {
+        heap_alloc_mb: reading.heap_alloc_mb || 0,
+        uptime_seconds: reading.uptime_seconds || 0,
+        num_goroutines: reading.num_goroutines || 0,
+        num_cgo_calls: reading.num_cgo_calls || 0,
+      };
+      const heapNext = [...this.heapHistory, this.sample.heap_alloc_mb];
+      const goNext = [...this.goHistory, this.sample.num_goroutines];
+      this.heapHistory = heapNext.length > 24 ? heapNext.slice(-24) : heapNext;
+      this.goHistory = goNext.length > 24 ? goNext.slice(-24) : goNext;
+      this.model = (models && models[0]) || "no model loaded";
+      this.err = "";
+    } catch (e: unknown) {
+      this.err = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  /** Format an uptime in seconds the way the tray does, but with
+   *  enough headroom to read long sessions cleanly in the big-number
+   *  display. < 60s → "Ns"; < 1h → "Nm Ms"; otherwise "Nh Mm". */
+  _fmtUptime(s: number): string {
+    if (s < 60) return `${(s | 0)}s`;
+    if (s < 3600) return `${(s / 60) | 0}m ${((s % 60) | 0)}s`;
+    return `${(s / 3600) | 0}h ${(((s % 3600) / 60) | 0)}m`;
   }
 
   render() {
-    const tokSpark  = "38,41,44,45,46,47.2,47,46.8,47.1,47.4,47.2,47.0,47.3,47.2,47.4,47.2,47.1,47.3,47.2,47.0";
-    const wattSpark = "0.6,0.8,4.2,7.8,8.2,8.4,8.3,8.4,8.5,8.4,8.3,8.4,8.4,8.5,8.4,8.3,8.4,8.4,8.3,8.2";
+    const heapSpark = this.heapHistory.length > 1 ? this.heapHistory.join(",") : "";
+    const goSpark   = this.goHistory.length > 1 ? this.goHistory.join(",") : "";
+    const heapMax = Math.max(1, ...this.heapHistory) * 1.2;
+    const goMax   = Math.max(1, ...this.goHistory) * 1.2;
 
     const big = (label: string, value: string, sub: string, glow: string, data: string, max: number) => html`
       <div style="display:flex; flex-direction:column; align-items:center; gap:10px;">
@@ -54,19 +121,19 @@ class LthnTelemetryWindow extends LitElement {
     const body = html`
       <div style="flex:1; background:radial-gradient(circle at 50% 35%, rgba(64,193,197,0.10) 0%, rgba(11,16,22,0) 60%), var(--surf-0); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px 60px; gap:36px; position:relative; overflow:hidden;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:64px; width:100%;">
-          ${big("tok/s", "47.2", "generation speed", "var(--brand-400)", tokSpark, 60)}
-          ${big("watts", "8.4",  "peak this turn",   "#a78bfa",          wattSpark, 12)}
+          ${big("heap · MB", this.sample.heap_alloc_mb.toFixed(1), "Go runtime · live", "var(--brand-400)", heapSpark, heapMax)}
+          ${big("uptime",    this._fmtUptime(this.sample.uptime_seconds), "since process start", "#a78bfa", goSpark, goMax)}
         </div>
         <div style="display:flex; gap:28px; align-items:center; font-family:var(--font-mono); font-size:12px; color:var(--fg-2); padding-top:8px; border-top:1px solid rgba(255,255,255,0.05); width:100%; justify-content:center;">
-          <div><span style="color:var(--fg-3);">model </span><span style="color:var(--fg-0);">gemma-4-e2b</span></div>
+          <div><span style="color:var(--fg-3);">model </span><span style="color:var(--fg-0);">${this.model}</span></div>
           <div style="width:1px; height:14px; background:rgba(255,255,255,0.06);"></div>
-          <div><span style="color:var(--fg-3);">context </span><span style="color:var(--fg-0);">142 / 8,192</span></div>
+          <div><span style="color:var(--fg-3);">goroutines </span><span style="color:var(--fg-0);">${this.sample.num_goroutines}</span></div>
           <div style="width:1px; height:14px; background:rgba(255,255,255,0.06);"></div>
-          <div><span style="color:var(--fg-3);">quant </span><span style="color:var(--fg-0);">q4_k_m</span></div>
+          <div><span style="color:var(--fg-3);">cgo calls </span><span style="color:var(--fg-0);">${this.sample.num_cgo_calls}</span></div>
           <div style="width:1px; height:14px; background:rgba(255,255,255,0.06);"></div>
           <div style="display:flex; align-items:center; gap:6px;">
-            <lthn-status-dot variant="ok"></lthn-status-dot>
-            <span style="color:var(--success-400);">airplane-mode OK</span>
+            <lthn-status-dot variant=${this.err ? "err" : "ok"}></lthn-status-dot>
+            <span style="color:${this.err ? "var(--error-400)" : "var(--success-400)"};">${this.err ? "telemetry error" : "airplane-mode OK"}</span>
           </div>
         </div>
         <div style="position:absolute; bottom:18px; right:24px; display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:10px; color:var(--fg-3); letter-spacing:0.06em;">
@@ -79,7 +146,7 @@ class LthnTelemetryWindow extends LitElement {
       title: this.chrome.title,
       subtitle: this.fullscreen ? this.chrome.subtitleFullscreen : this.chrome.subtitleNormal,
       w: this.w, h: this.h, body,
-      footer: html`model · gemma-4-e2b · context 142 / 8192 · airplane-mode OK · ⌥⌘F for fullscreen`,
+      footer: html`model · ${this.model} · goroutines ${this.sample.num_goroutines} · airplane-mode OK · ⌥⌘F for fullscreen`,
       embedded: this.embedded,
     });
   }
