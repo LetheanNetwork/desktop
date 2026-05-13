@@ -6,6 +6,13 @@ import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
 import { T } from "@lthn/i18n/coreservice";
 
+interface LiveLine {
+  t: string;
+  c: string;
+  s: string;
+  m: string;
+}
+
 class LthnLogsWindow extends LitElement {
   static properties = {
     w: { type: Number },
@@ -13,24 +20,90 @@ class LthnLogsWindow extends LitElement {
     tab: { type: String },
     embedded: { type: Boolean, reflect: true },
     chrome: { state: true },
+    liveLines: { state: true },
+    paused: { state: true },
   };
   declare w: number;
   declare h: number;
   declare tab: string;
   declare embedded: boolean;
   declare chrome: { title: string; subtitle: string };
+  declare liveLines: LiveLine[];
+  declare paused: boolean;
+
+  private _pollTimer: number | null = null;
+
   constructor() {
     super();
     this.w = 1000; this.h = 660; this.tab = "live"; this.embedded = false;
     this.chrome = { title: "Activity", subtitle: "logs · history · power" };
+    this.liveLines = [];
+    this.paused = false;
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    this.chrome = {
-      title: await T("window.logs.title"),
-      subtitle: await T("window.logs.subtitle"),
-    };
+    const [title, subtitle] = await Promise.all([
+      T("window.logs.title"),
+      T("window.logs.subtitle"),
+    ]);
+    this.chrome = { title, subtitle };
+    void this._pollLive();
+    this._pollTimer = window.setInterval(() => void this._pollLive(), 1500);
+  }
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this._pollTimer !== null) {
+      clearInterval(this._pollTimer);
+      this._pollTimer = null;
+    }
+  }
+
+  /** Poll bridge.Console for live console events the JS shim
+   *  forwards from every window. Maps each ConsoleEntry → LiveLine
+   *  shape the existing grid template renders. */
+  async _pollLive() {
+    if (this.paused) return;
+    try {
+      const [bridge] = await Promise.all([
+        import("@desktop/bridge/service"),
+      ]);
+      const [con, errs] = await Promise.all([
+        bridge.Console("", 200),
+        bridge.Errors(50),
+      ]);
+      const lines: LiveLine[] = [];
+      for (const e of con || []) {
+        lines.push({
+          t: fmtTime(e.at),
+          c: e.source || "webview",
+          s: e.level === "log" ? "info" : e.level,
+          m: e.message,
+        });
+      }
+      for (const e of errs || []) {
+        lines.push({
+          t: fmtTime(e.at),
+          c: "webview",
+          s: "error",
+          m: e.message + (e.stack ? "\n" + e.stack : ""),
+        });
+      }
+      lines.sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
+      this.liveLines = lines;
+    } catch (err) {
+      console.error("logs: poll failed", err);
+    }
+  }
+
+  async _clear() {
+    try {
+      const bridge = await import("@desktop/bridge/service");
+      await Promise.all([bridge.ClearConsole(), bridge.ClearErrors()]);
+      this.liveLines = [];
+    } catch (err) {
+      console.error("logs: clear failed", err);
+    }
   }
 
   render() {
@@ -47,12 +120,19 @@ class LthnLogsWindow extends LitElement {
       `)}
       <div style="flex:1"></div>
       ${this.tab === "live" ? html`
-        <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-magnifying-glass" style="font-size:10px;"></i> Filter</lthn-btn>
-        <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-pause" style="font-size:10px;"></i> Pause</lthn-btn>
+        <lthn-btn tone="ghost" size="sm"
+          @click=${() => this._clear()}>
+          <i class="fa-solid fa-trash" style="font-size:10px;"></i> Clear
+        </lthn-btn>
+        <lthn-btn tone=${this.paused ? "primary" : "ghost"} size="sm"
+          @click=${() => { this.paused = !this.paused; }}>
+          <i class="fa-solid ${this.paused ? "fa-play" : "fa-pause"}" style="font-size:10px;"></i>
+          ${this.paused ? "Resume" : "Pause"}
+        </lthn-btn>
       ` : nothing}
     `;
     const footers = {
-      live:    "streaming · 1,284 lines · 4 components · debug verbose=off",
+      live:    `streaming · ${this.liveLines.length} lines · webview bridge${this.paused ? " · paused" : ""}`,
       history: "27 generations · last 7 days · 1.42M tokens · 142.6 Wh",
       power:   "showing last 24h · sample 1 s · powermetrics backend",
     };
@@ -69,32 +149,23 @@ class LthnLogsWindow extends LitElement {
   }
 
   _renderLive() {
-    const lines = [
-      { t: "14:32:08.412", c: "runner",  s: "info",  m: "loaded gemma-4-e2b-q4_k_m.gguf (2.1 GB) into Metal heap" },
-      { t: "14:32:08.418", c: "runner",  s: "info",  m: "kv-cache allocated · 8192 ctx · 384 MB" },
-      { t: "14:32:08.421", c: "api",     s: "info",  m: "HTTP server listening on 127.0.0.1:8000" },
-      { t: "14:32:14.802", c: "api",     s: "info",  m: "POST /v1/chat/completions · model=gemma-4-e2b · stream=true" },
-      { t: "14:32:14.804", c: "runner",  s: "debug", m: "tokenize · 142 tokens · cache hit @ prefix(64)" },
-      { t: "14:32:14.811", c: "runner",  s: "info",  m: "prefill · 78 new tok · 4820 tok/s · 8.2 W" },
-      { t: "14:32:14.831", c: "runner",  s: "info",  m: "decode · streaming · target 47.2 tok/s" },
-      { t: "14:32:18.106", c: "telem",   s: "debug", m: "powermetrics sample · cpu 4.2 W · gpu 4.1 W · ane 0.1 W" },
-      { t: "14:32:21.488", c: "runner",  s: "info",  m: "decode complete · 158 tok in 3.35s · 47.2 tok/s · finish=stop" },
-      { t: "14:32:21.491", c: "api",     s: "info",  m: "response sent · 4.687s e2e · 8.4 W peak" },
-      { t: "14:32:24.002", c: "tray",    s: "debug", m: "sparkline frame · 60 samples · idle 0.4 W" },
-      { t: "14:33:02.114", c: "api",     s: "warn",  m: "rate-limit · 127.0.0.1 · 12 req/s · soft cap 8 — backing off" },
-      { t: "14:33:08.802", c: "telem",   s: "debug", m: "powermetrics sample · cpu 0.3 W · gpu 0.0 W · ane 0.0 W" },
-      { t: "14:34:11.502", c: "kernel",  s: "info",  m: "metal command-buffer · 142 ops · 18.4 ms" },
-    ];
+    const lines = this.liveLines;
     const sevColor = { info: "var(--fg-2)", debug: "var(--fg-3)", warn: "var(--warning-400)", error: "var(--err-400)" };
-    const comps = [
-      { k: "runner", n: 428, on: true }, { k: "api", n: 612, on: true },
-      { k: "telem", n: 144, on: true }, { k: "tray", n: 62, on: true }, { k: "kernel", n: 38, on: true },
-    ];
+    // Derive component + severity counts from the live lines so the
+    // rail's filter chips show real counts (matches the live data
+    // shape exactly — no fixture drift).
+    const compCounts = new Map<string, number>();
+    for (const l of lines) compCounts.set(l.c, (compCounts.get(l.c) || 0) + 1);
+    const comps = Array.from(compCounts.entries()).map(([k, n]) => ({ k, n, on: true }));
+    const sevCounts = { error: 0, warn: 0, info: 0, debug: 0 } as Record<string, number>;
+    for (const l of lines) {
+      if (l.s in sevCounts) sevCounts[l.s] += 1;
+    }
     const sevs = [
-      { k: "error", c: "var(--err-400)",     on: true,  n: 0 },
-      { k: "warn",  c: "var(--warning-400)", on: true,  n: 1 },
-      { k: "info",  c: "var(--brand-300)",   on: true,  n: 8 },
-      { k: "debug", c: "var(--fg-3)",        on: false, n: 5 },
+      { k: "error", c: "var(--err-400)",     on: true, n: sevCounts.error },
+      { k: "warn",  c: "var(--warning-400)", on: true, n: sevCounts.warn  },
+      { k: "info",  c: "var(--brand-300)",   on: true, n: sevCounts.info  },
+      { k: "debug", c: "var(--fg-3)",        on: true, n: sevCounts.debug },
     ];
     return html`
       <div style="flex:1; display:grid; grid-template-columns:180px 1fr; min-height:0;">
@@ -223,3 +294,13 @@ class LthnLogsWindow extends LitElement {
   }
 }
 customElements.define("lthn-logs-window", LthnLogsWindow);
+
+/** RFC3339-ish "2026-05-13T07:14:32Z" → "07:14:32" so the time
+ *  column stays compact. Falls back to the raw value when the
+ *  format doesn't match (defensive — the bridge timestamps via
+ *  time.Now().UTC() so they should always parse). */
+function fmtTime(at: string): string {
+  if (!at) return "";
+  const m = at.match(/T(\d{2}:\d{2}:\d{2})/);
+  return m ? m[1] : at;
+}

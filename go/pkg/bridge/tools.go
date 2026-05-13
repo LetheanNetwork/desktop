@@ -307,6 +307,87 @@ func (s *Service) eval(ctx context.Context, windowName, body string) map[string]
 	}
 }
 
+// ─── Wails3 Service shape ───────────────────────────────────────────
+//
+// Wails generates TS bindings for every exported method on the
+// registered service instance — these mirror the MCP tool surface
+// so the WebView (logs window, activity surface, future obs tools)
+// can read the bridge's ring buffers directly via in-process
+// bindings, no HTTP round-trip.
+//
+// The bridge stays registered in Core for its OnStartup/OnShutdown
+// lifecycle; the wailsServices array in pkg/desktop/desktop.go also
+// adds it via application.NewService so these methods are bindable.
+
+// ServiceName labels the binding namespace exposed to JS.
+func (s *Service) ServiceName() string { return "Bridge" }
+
+// ServiceStartup is a no-op for the Wails lifecycle — the bridge's
+// HTTP listener boots via the Core OnStartup hook. Wails calls this
+// once per session after application.New returns.
+func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	return nil
+}
+
+// ServiceShutdown is a no-op for the Wails lifecycle. The HTTP
+// listener tears down via the Core OnShutdown hook.
+func (s *Service) ServiceShutdown() error { return nil }
+
+// Console returns the recent console entries the JS shim has POSTed
+// to /internal/console. limit caps the slice length from the tail
+// (0 = no cap, returns the whole buffer). level filters by
+// "log" / "info" / "warn" / "error" / "debug" — empty matches all.
+//
+// Usage example (TS):
+//
+//	import { Console } from "@desktop/bridge/service";
+//	const entries = await Console("", 50);
+//	for (const e of entries) console.log(e.level, e.message);
+func (s *Service) Console(level string, limit int) []ConsoleEntry {
+	s.consoleMu.Lock()
+	defer s.consoleMu.Unlock()
+	out := make([]ConsoleEntry, 0, len(s.consoleBuf))
+	for _, e := range s.consoleBuf {
+		if level != "" && e.Level != level {
+			continue
+		}
+		out = append(out, e)
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out
+}
+
+// Errors returns the recent uncaught exceptions + unhandled
+// rejections the JS shim has POSTed to /internal/error. limit
+// trims from the tail.
+func (s *Service) Errors(limit int) []ErrorEntry {
+	s.errorMu.Lock()
+	defer s.errorMu.Unlock()
+	out := append([]ErrorEntry(nil), s.errorBuf...)
+	if limit > 0 && len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out
+}
+
+// ClearConsole empties the console ring buffer. The logs window's
+// "Clear" button calls this; useful when investigating a fresh
+// repro without older noise.
+func (s *Service) ClearConsole() {
+	s.consoleMu.Lock()
+	s.consoleBuf = nil
+	s.consoleMu.Unlock()
+}
+
+// ClearErrors empties the error ring buffer.
+func (s *Service) ClearErrors() {
+	s.errorMu.Lock()
+	s.errorBuf = nil
+	s.errorMu.Unlock()
+}
+
 // ─── HTTP helpers ───────────────────────────────────────────────────
 
 func corsJSON(w http.ResponseWriter) {

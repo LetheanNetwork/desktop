@@ -37,6 +37,7 @@ import (
 	core "dappco.re/go"
 	"dappco.re/go/config"
 	coreI18n "dappco.re/go/i18n"
+	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/models"
 	"dappco.re/lthn/desktop/pkg/runner"
@@ -175,6 +176,7 @@ func (s *Service) Run() core.Result {
 	// No adapter layer — Wails generates straight from the package.
 	i18nSvc, _ := core.ServiceFor[*coreI18n.CoreService](s.opts.Core, "i18n")
 	configSvc, _ := core.ServiceFor[*config.Service](s.opts.Core, "config")
+	bridgeSvc, _ := core.ServiceFor[*bridge.Service](s.opts.Core, "bridge")
 
 	wailsServices := []application.Service{
 		// In-this-repo packages — each ships its own *WailsService /
@@ -192,6 +194,7 @@ func (s *Service) Run() core.Result {
 		// dappco.re/go/<pkg>/.
 		application.NewService(i18nSvc),
 		application.NewService(configSvc),
+		application.NewService(bridgeSvc),
 		// Window registry — see note above.
 		application.NewService(windowSvc),
 		// Wails3 native services — dock + notifications ship from
