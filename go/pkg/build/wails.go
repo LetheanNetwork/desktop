@@ -16,6 +16,12 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
+const (
+	detectOp        = "build.Detect"
+	processOutputOp = "build.ProcessOutput"
+	processKillOp   = "build.ProcessKill"
+)
+
 // ServiceName / Startup / Shutdown — Wails3 lifecycle.
 func (s *Service) ServiceName() string { return "Build" }
 func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
@@ -33,15 +39,15 @@ func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }
 //	console.log(d.project_type, d.command, d.args);
 func (s *Service) Detect(path string) core.Result {
 	if core.Trim(path) == "" {
-		return core.Fail(core.E("build.Detect", "path required", nil))
+		return core.Fail(core.E(detectOp, "path required", nil))
 	}
 	stat := core.Stat(path)
 	if !stat.OK {
-		return core.Fail(core.E("build.Detect", "path is not a directory: "+path, nil))
+		return core.Fail(core.E(detectOp, "path is not a directory: "+path, nil))
 	}
 	info, ok := stat.Value.(interface{ IsDir() bool })
 	if !ok || !info.IsDir() {
-		return core.Fail(core.E("build.Detect", "path is not a directory: "+path, nil))
+		return core.Fail(core.E(detectOp, "path is not a directory: "+path, nil))
 	}
 	return core.Ok(detectProject(path))
 }
@@ -103,15 +109,15 @@ func (s *Service) Run(path, command string, args []string) core.Result {
 func (s *Service) ProcessOutput(id string) core.Result {
 	ps := s.proc()
 	if ps == nil {
-		return core.Fail(core.E("build.ProcessOutput", "process service unavailable", nil))
+		return core.Fail(core.E(processOutputOp, processServiceUnavailable, nil))
 	}
 	r := ps.Get(id)
 	if !r.OK {
-		return core.Fail(core.E("build.ProcessOutput", r.Error(), nil))
+		return core.Fail(core.E(processOutputOp, r.Error(), nil))
 	}
 	p, ok := r.Value.(*process.Process)
 	if !ok || p == nil {
-		return core.Fail(core.E("build.ProcessOutput", "process not found: "+id, nil))
+		return core.Fail(core.E(processOutputOp, "process not found: "+id, nil))
 	}
 	return core.Ok(p.Output())
 }
@@ -125,18 +131,18 @@ func (s *Service) ProcessOutput(id string) core.Result {
 func (s *Service) ProcessKill(id string) core.Result {
 	ps := s.proc()
 	if ps == nil {
-		return core.Fail(core.E("build.ProcessKill", "process service unavailable", nil))
+		return core.Fail(core.E(processKillOp, processServiceUnavailable, nil))
 	}
 	r := ps.Get(id)
 	if !r.OK {
-		return core.Fail(core.E("build.ProcessKill", r.Error(), nil))
+		return core.Fail(core.E(processKillOp, r.Error(), nil))
 	}
 	p, ok := r.Value.(*process.Process)
 	if !ok || p == nil {
-		return core.Fail(core.E("build.ProcessKill", "process not found: "+id, nil))
+		return core.Fail(core.E(processKillOp, "process not found: "+id, nil))
 	}
 	if kr := p.Kill(); !kr.OK {
-		return core.Fail(core.E("build.ProcessKill", kr.Error(), nil))
+		return core.Fail(core.E(processKillOp, kr.Error(), nil))
 	}
 	return core.Ok(nil)
 }
@@ -160,7 +166,7 @@ type ProcessEntry struct {
 func (s *Service) ProcessList() core.Result {
 	ps := s.proc()
 	if ps == nil {
-		return core.Fail(core.E("build.ProcessList", "process service unavailable", nil))
+		return core.Fail(core.E("build.ProcessList", processServiceUnavailable, nil))
 	}
 	out := []ProcessEntry{}
 	for _, p := range ps.List() {

@@ -22,6 +22,12 @@ import (
 	"dappco.re/go/process"
 )
 
+const (
+	goBuildNoOutputSuffix     = " && go build -o /dev/null ./..."
+	startProcOp               = "build.startProc"
+	processServiceUnavailable = "process service unavailable"
+)
+
 // Service owns the build surface. Holds *core.Core for late
 // resolution of the process service (boot order).
 type Service struct {
@@ -117,7 +123,7 @@ func detectProject(root string) Detection {
 			d.ProjectType, d.Command, d.Args = "go", "core", []string{"build"}
 		} else {
 			d.ProjectType, d.Command, d.Args = "go", "sh", []string{
-				"-c", "cd " + shellQuote(root) + " && go build -o /dev/null ./...",
+				"-c", "cd " + shellQuote(root) + goBuildNoOutputSuffix,
 			}
 		}
 	case exists(core.PathJoin(root, "go", "go.mod")):
@@ -125,7 +131,7 @@ func detectProject(root string) Detection {
 			d.ProjectType, d.Command, d.Args = "go-subdir", "core", []string{"build"}
 		} else {
 			d.ProjectType, d.Command, d.Args = "go-subdir", "sh", []string{
-				"-c", "cd " + shellQuote(core.PathJoin(root, "go")) + " && go build -o /dev/null ./...",
+				"-c", "cd " + shellQuote(core.PathJoin(root, "go")) + goBuildNoOutputSuffix,
 			}
 		}
 	case exists(core.PathJoin(root, "go.work")):
@@ -133,7 +139,7 @@ func detectProject(root string) Detection {
 			d.ProjectType, d.Command, d.Args = "go-work", "core", []string{"build"}
 		} else {
 			d.ProjectType, d.Command, d.Args = "go-work", "sh", []string{
-				"-c", "cd " + shellQuote(root) + " && go build -o /dev/null ./...",
+				"-c", "cd " + shellQuote(root) + goBuildNoOutputSuffix,
 			}
 		}
 	case exists(core.PathJoin(root, "Dockerfile")):
@@ -163,7 +169,7 @@ func detectProject(root string) Detection {
 func (s *Service) startProc(cwd, command string, args []string) core.Result {
 	ps := s.proc()
 	if ps == nil {
-		return core.Fail(core.E("build.startProc", "process service unavailable", nil))
+		return core.Fail(core.E(startProcOp, processServiceUnavailable, nil))
 	}
 	opts := process.RunOptions{
 		Command: command,
@@ -172,11 +178,11 @@ func (s *Service) startProc(cwd, command string, args []string) core.Result {
 	}
 	r := ps.StartWithOptions(context.Background(), opts)
 	if !r.OK {
-		return core.Fail(core.E("build.startProc", r.Error(), nil))
+		return core.Fail(core.E(startProcOp, r.Error(), nil))
 	}
 	p, ok := r.Value.(*process.Process)
 	if !ok || p == nil {
-		return core.Fail(core.E("build.startProc", "process service returned non-process", nil))
+		return core.Fail(core.E(startProcOp, "process service returned non-process", nil))
 	}
 	return core.Ok(p)
 }
