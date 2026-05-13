@@ -35,7 +35,8 @@ switch (surface) {
       import("@desktop/runner/service"),
       import("@desktop/desktop/windowservice"),
       import("@lthn/i18n/coreservice"),
-    ]).then(async ([telemetry, runner, windowSvc, i18n]) => {
+      import("@desktop/firstlaunch/wailsservice"),
+    ]).then(async ([telemetry, runner, windowSvc, i18n, fl]) => {
       const TelemetryService = telemetry;
       const RunnerService = runner;
       const WindowService = windowSvc;
@@ -106,7 +107,13 @@ switch (surface) {
         valDash:          await i18n.T("tray.value.dash"),
         tbOpenApp:        await i18n.T("tray.titlebar.open_app"),
         tbSettings:       await i18n.T("tray.titlebar.settings"),
-        footerVersion:    (await i18n.T("tray.footer.version")).replace("%s", "0.1.0"),
+        // Footer version reads from firstlaunch.Build().version when
+        // present so the tray reflects the running binary; falls back
+        // to the design literal so canvas preview reads coherently.
+        footerVersion:    (await i18n.T("tray.footer.version")).replace(
+          "%s",
+          await fl.Build().then(b => b?.version || "0.1.0").catch(() => "0.1.0"),
+        ),
       });
       /* Locale state for the flag-button switcher. Available locales
        * come from the binding's AvailableLanguages — for the demo
