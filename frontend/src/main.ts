@@ -351,7 +351,7 @@ switch (surface) {
               border:1px solid transparent;
               border-radius:5px;
               cursor:pointer;
-              font-size:13px;
+              font-size:16px;
               line-height:1;
               --wails-draggable: no-drag;
             "
