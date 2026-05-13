@@ -65,6 +65,16 @@ class LthnModelBrowserWindow extends LitElement {
 
   render() {
     const local: LocalModel[] = this.local;
+    // The actually-selected local model for the detail rail's
+    // "Selected" header. Falls back to the design literal so the
+    // detail rail still reads coherently in canvas preview (no
+    // local entries scanned, or pre-selection settles).
+    const selected = local.find(m => m.id === this.selected);
+    const selName   = selected?.name   || "gemma-4-e2b";
+    const selFamily = selected?.family || "Google";
+    const selSize   = selected?.size   || "2.1 GB";
+    const selStatus = selected?.status === "loaded" ? "loaded"
+                    : selected ? selected.status : "loaded";
     const results = [
       { name:"Qwen2.5-Coder-7B-Instruct",     author:"Qwen",       size:"4.8 GB", q:"q4_k_m", family:"Coder",   tools:true,  vision:false, downloads:"1.2M" },
       { name:"Mistral-Nemo-12B-Instruct",     author:"MistralAI",  size:"8.4 GB", q:"q4_k_m", family:"Mistral", tools:true,  vision:false, downloads:"420k" },
@@ -153,8 +163,8 @@ class LthnModelBrowserWindow extends LitElement {
                       padding:18px; overflow:auto; display:flex; flex-direction:column; gap:14px;">
           <div>
             <lthn-label>Selected</lthn-label>
-            <div style="font-family:var(--font-mono); font-size:13px; color:var(--fg-0); margin-top:6px; letter-spacing:-0.005em;">gemma-4-e2b</div>
-            <div style="font-size:11px; color:var(--fg-3); margin-top:3px;">by Google · loaded · 2.1 GB on disk</div>
+            <div style="font-family:var(--font-mono); font-size:13px; color:var(--fg-0); margin-top:6px; letter-spacing:-0.005em; word-break:break-all;">${selName}</div>
+            <div style="font-size:11px; color:var(--fg-3); margin-top:3px;">by ${selFamily} · ${selStatus} · ${selSize} on disk</div>
           </div>
           <div style="display:flex; gap:6px;">
             <lthn-btn tone="primary" size="md" style="flex:1; justify-content:center;">
@@ -206,10 +216,13 @@ class LthnModelBrowserWindow extends LitElement {
                : m.status === "downloading" ? "var(--warning-400)"
                : "var(--fg-3)";
     return html`
-      <div style="padding:9px 10px; border-radius:6px;
+      <div
+        @click=${() => { this.selected = m.id; }}
+        style="padding:9px 10px; border-radius:6px;
                   background:${active ? "rgba(255,255,255,0.07)" : "transparent"};
                   border-left:${active ? "2px solid var(--brand-400)" : "2px solid transparent"};
-                  display:flex; flex-direction:column; gap:3px; cursor:pointer;">
+                  display:flex; flex-direction:column; gap:3px; cursor:pointer;
+                  --wails-draggable: no-drag;">
         <div style="display:flex; align-items:center; gap:8px;">
           <span style="width:6px; height:6px; border-radius:50%; background:${tone};
                        box-shadow:${m.status === "loaded" ? `0 0 4px ${tone}` : "none"};"></span>
