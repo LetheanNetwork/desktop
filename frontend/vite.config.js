@@ -30,7 +30,13 @@ export default defineConfig({
   server: {
     port,
     strictPort: true,
-    host: "localhost",
+    // macOS Node binds "localhost" IPv6-only ([::1]) — Wails's
+    // AssetServer + the WebView HMR client try IPv4 first and silently
+    // fail to receive HMR pushes. Force the IPv4 loopback so the WS
+    // handshake lands. Same loopback semantics, just the right address
+    // family.
+    host: "127.0.0.1",
+    hmr: { host: "127.0.0.1", port },
   },
   build: {
     outDir: "dist",
