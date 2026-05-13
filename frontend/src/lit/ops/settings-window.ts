@@ -34,6 +34,7 @@ class LthnSettingsWindow extends LitElement {
     sampleInterval: { state: true },
     heapSamples: { state: true },
     routes: { state: true },
+    endpoint: { state: true },
   };
   declare open: string;
   declare w: number;
@@ -49,6 +50,7 @@ class LthnSettingsWindow extends LitElement {
   declare sampleInterval: string;
   declare heapSamples: string;
   declare routes: RouteView[];
+  declare endpoint: string;
   constructor() {
     super();
     this.open = "general"; this.w = 760; this.h = 600; this.embedded = false;
@@ -68,6 +70,7 @@ class LthnSettingsWindow extends LitElement {
     this.sampleInterval = localStorage.getItem("lthn.telemetry.interval") || "2s";
     this.heapSamples    = localStorage.getItem("lthn.telemetry.samples")  || "24";
     this.routes = [];
+    this.endpoint = "http://localhost:8000/v1";
   }
 
   _setSampleInterval(v: string) {
@@ -102,12 +105,13 @@ class LthnSettingsWindow extends LitElement {
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const [i18n, fl, runner] = await Promise.all([
+    const [i18n, fl, runner, server] = await Promise.all([
       import("@lthn/i18n/coreservice"),
       import("@desktop/firstlaunch/wailsservice"),
       import("@desktop/runner/service"),
+      import("@desktop/server/service"),
     ]);
-    const [title, subtitleTpl, locales, currentLang, paths, routes, routeViews, build] = await Promise.all([
+    const [title, subtitleTpl, locales, currentLang, paths, routes, routeViews, build, addr] = await Promise.all([
       i18n.T("window.settings.title"),
       i18n.T("window.settings.subtitle"),
       i18n.AvailableLanguages(),
@@ -116,6 +120,7 @@ class LthnSettingsWindow extends LitElement {
       runner.WModels().catch((): string[] => []),
       runner.WRoutes().catch((): RouteView[] => []),
       fl.Build().catch(() => null),
+      server.WAddr().catch((): string => ""),
     ]);
     this.locales = locales;
     this.currentLang = currentLang;
@@ -126,6 +131,10 @@ class LthnSettingsWindow extends LitElement {
     this.routes = (routeViews || []) as RouteView[];
     if (build) {
       this.build = build;
+    }
+    if (addr) {
+      const a = addr.startsWith(":") ? `localhost${addr}` : addr;
+      this.endpoint = `http://${a}/v1`;
     }
     // Rebuild the subtitle with the real version so the chrome
     // reflects the running binary rather than the locale fixture.
@@ -391,7 +400,7 @@ class LthnSettingsWindow extends LitElement {
       content: html`
         ${this._row("HTTP server", null, html`<lthn-toggle on></lthn-toggle>`)}
         ${this._row("Endpoint", null, html`
-          <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">http://localhost:8000/v1</span>
+          <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">${this.endpoint}</span>
         `)}
         ${this._row("API key", "Required for any client connecting to the local server.", html`
           <div style="display:flex; align-items:center; gap:6px;">

@@ -53,17 +53,20 @@ class LthnIntegrationsWindow extends LitElement {
     ]);
     this.chrome = { title, subtitle };
     try {
-      const [integrations, runner] = await Promise.all([
+      const [integrations, runner, server] = await Promise.all([
         import("@desktop/integrations/wailsservice"),
         import("@desktop/runner/service"),
+        import("@desktop/server/service"),
       ]);
-      const [list, models] = await Promise.all([
+      const [list, models, addr] = await Promise.all([
         integrations.List(),
         runner.WModels().catch((): string[] => []),
+        server.WAddr().catch((): string => ""),
       ]);
       this.clients = (list || []) as ClientView[];
       if (this.clients.length > 0) this.selectedId = this.clients[0].id;
       if (models && models.length > 0) this.defaultModel = models[0];
+      if (addr) this.endpoint = endpointFromAddr(addr);
     } catch (err) {
       console.error("integrations: lookup failed", err);
     }
@@ -147,3 +150,12 @@ class LthnIntegrationsWindow extends LitElement {
   }
 }
 customElements.define("lthn-integrations-window", LthnIntegrationsWindow);
+
+/** Compose the OpenAI-compatible endpoint URL from the server's raw
+ *  bind address. ":8000" → "http://localhost:8000/v1"; an explicit
+ *  host already in the addr ("127.0.0.1:8000") passes through. */
+function endpointFromAddr(addr: string): string {
+  if (!addr) return "http://localhost:8000/v1";
+  const a = addr.startsWith(":") ? `localhost${addr}` : addr;
+  return `http://${a}/v1`;
+}

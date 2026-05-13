@@ -185,6 +185,7 @@ func (s *Service) Run() core.Result {
 		// *Service with Wails3 lifecycle + (T, error) methods. Bindings
 		// land at frontend/bindings/dappco.re/lthn/desktop/pkg/<pkg>/.
 		application.NewService(s.opts.Runner),
+		application.NewService(s.opts.Server),
 		application.NewService(sessions.NewWailsService(s.opts.Core)),
 		application.NewService(models.NewWailsService()),
 		application.NewService(firstlaunch.NewWailsService()),
