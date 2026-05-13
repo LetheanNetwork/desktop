@@ -247,9 +247,9 @@ class LthnToolsWindow extends LitElement {
         <!-- try-it rail -->
         <aside style="background:rgba(0,0,0,0.18); border-left:1px solid rgba(255,255,255,0.05); padding:18px; overflow:auto; display:flex; flex-direction:column; gap:12px;">
           <lthn-label>${this.t.labelTryit}</lthn-label>
-          <div style="background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:10px; font-family:var(--font-mono); font-size:11.5px; line-height:1.6; color:var(--fg-1); white-space:pre; min-height:110px;">${`{
+          <div style="background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:10px; font-family:var(--font-mono); font-size:11.5px; line-height:1.6; color:var(--fg-1); white-space:pre; min-height:110px;">${String.raw`{
   "path":    "./scratch/hello.txt",
-  "content": "hello, world\\n"
+  "content": "hello, world\n"
 }`}</div>
           <lthn-btn tone="primary" size="md"><i class="fa-solid fa-play" style="font-size:10px;"></i> ${this.t.btnInvoke}</lthn-btn>
           <div style="padding:10px 12px; border-radius:6px; background:rgba(34,197,94,0.06); border:1px solid rgba(34,197,94,0.18); font-size:11.5px; color:var(--fg-1); line-height:1.55;">
