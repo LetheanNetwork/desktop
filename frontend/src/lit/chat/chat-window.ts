@@ -95,6 +95,9 @@ class LthnChatWindow extends LitElement {
     // fires and the window double-renders inside the shell.
     embedded:  { type: Boolean, reflect: true },
     chrome:    { state: true },
+    conversations: { state: true },
+    activeConversationId: { state: true },
+    railErr: { state: true },
   };
   declare state:     ChatState;
   declare rail:      RailMode;
@@ -103,6 +106,9 @@ class LthnChatWindow extends LitElement {
   declare h:         number;
   declare embedded: boolean;
   declare chrome:    { title: string; subtitle: string };
+  declare conversations: Conversation[];
+  declare activeConversationId: string | null;
+  declare railErr: string;
   constructor() {
     super();
     this.state = "multi-turn";
@@ -111,14 +117,54 @@ class LthnChatWindow extends LitElement {
     this.w = 1100;
     this.h = 740; this.embedded = false;
     this.chrome = { title: "lthn · chat", subtitle: "conversation · local" };
+    this.conversations = [];
+    this.activeConversationId = null;
+    this.railErr = "";
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    this.chrome = {
-      title: await T("window.chat.title"),
-      subtitle: await T("window.chat.subtitle"),
-    };
+    const [title, subtitle] = await Promise.all([
+      T("window.chat.title"),
+      T("window.chat.subtitle"),
+    ]);
+    this.chrome = { title, subtitle };
+    await this._reloadRail();
+  }
+
+  /** Create a fresh session via sessions.Create + select it.
+   *  Title is left as "New conversation" until the user names it
+   *  or the first message lands (future polish — rename based on
+   *  first user turn). */
+  async _newConversation() {
+    try {
+      const svc = await import("@desktop/sessions/wailsservice");
+      const id = await svc.Create("New conversation");
+      await this._reloadRail();
+      this.activeConversationId = id;
+    } catch (err: unknown) {
+      this.railErr = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  /** Pull the session catalogue from sessions.WailsService.List()
+   *  and map each SessionInfo → Conversation. Bucket falls out of
+   *  the updated_at timestamp; snippet is intentionally blank for
+   *  now (would require sessions.Read per id — N+1, defer until
+   *  the service surfaces a last-message preview natively). */
+  async _reloadRail() {
+    try {
+      const svc = await import("@desktop/sessions/wailsservice");
+      const list = await svc.List();
+      this.conversations = (list || []).map(deriveConversation).filter(Boolean) as Conversation[];
+      if (this.conversations.length > 0 && !this.activeConversationId) {
+        this.activeConversationId = this.conversations[0].id;
+      }
+      this.railErr = "";
+    } catch (err: unknown) {
+      this.railErr = err instanceof Error ? err.message : String(err);
+      this.conversations = [];
+    }
   }
 
   render() {
@@ -174,13 +220,13 @@ class LthnChatWindow extends LitElement {
 
   /* — left rail (conversation list) — */
   _renderRail() {
-    const empty = this.rail === "empty";
+    const empty = this.conversations.length === 0;
     const buckets = [
       { label: "Today",      key: "today" },
       { label: "Yesterday",  key: "yesterday" },
       { label: "This week",  key: "week" },
     ];
-    const activeId = this.state === "empty" ? null : "c1";
+    const activeId = this.activeConversationId;
     return html`
       <aside style="width:240px; flex-shrink:0; border-right:1px solid rgba(255,255,255,0.05);
                     background:rgba(0,0,0,0.18); display:flex; flex-direction:column; min-height:0;">
@@ -209,14 +255,15 @@ class LthnChatWindow extends LitElement {
             <div style="display:flex; flex-direction:column; gap:1px;">
               ${buckets.map(b => html`
                 <lthn-label style="display:block; padding:8px 8px 4px;">${b.label}</lthn-label>
-                ${CONVERSATIONS.filter(c => c.bucket === b.key).map(c =>
+                ${this.conversations.filter(c => c.bucket === b.key).map(c =>
                   this._renderRailItem(c, c.id === activeId))}
               `)}
             </div>
           `}
         </div>
         <div style="padding:8px 10px; border-top:1px solid rgba(255,255,255,0.05); display:flex; gap:6px;">
-          <lthn-btn tone="ghost" size="md" style="flex:1; justify-content:center;">
+          <lthn-btn tone="ghost" size="md" style="flex:1; justify-content:center;"
+            @click=${() => this._newConversation()}>
             <i class="fa-solid fa-plus" style="font-size:10px;"></i> New conversation
           </lthn-btn>
           <lthn-btn tone="quiet" size="md"><i class="fa-solid fa-ellipsis" style="font-size:11px;"></i></lthn-btn>
@@ -227,16 +274,19 @@ class LthnChatWindow extends LitElement {
 
   _renderRailItem(c: Conversation, active: boolean) {
     return html`
-      <div style="padding:8px 10px; border-radius:6px;
-                  background:${active ? "rgba(255,255,255,0.07)" : "transparent"};
-                  border-left:${active ? "2px solid var(--brand-400)" : "2px solid transparent"};
-                  display:flex; flex-direction:column; gap:2px; cursor:pointer;">
+      <div
+        @click=${() => { this.activeConversationId = c.id; }}
+        style="padding:8px 10px; border-radius:6px;
+               background:${active ? "rgba(255,255,255,0.07)" : "transparent"};
+               border-left:${active ? "2px solid var(--brand-400)" : "2px solid transparent"};
+               display:flex; flex-direction:column; gap:2px; cursor:pointer;
+               --wails-draggable: no-drag;">
         <div style="font-size:12px; font-weight:500; color:var(--fg-0); white-space:nowrap;
                     overflow:hidden; text-overflow:ellipsis; letter-spacing:-0.005em;">${c.title}</div>
-        <div style="font-size:10.5px; color:var(--fg-3); white-space:nowrap;
-                    overflow:hidden; text-overflow:ellipsis;">${c.snippet}</div>
-        <div style="font-family:var(--font-mono); font-size:9px; color:var(--fg-3);
-                    letter-spacing:0.02em; margin-top:1px;">${c.model}</div>
+        ${c.snippet ? html`<div style="font-size:10.5px; color:var(--fg-3); white-space:nowrap;
+                    overflow:hidden; text-overflow:ellipsis;">${c.snippet}</div>` : nothing}
+        ${c.model ? html`<div style="font-family:var(--font-mono); font-size:9px; color:var(--fg-3);
+                    letter-spacing:0.02em; margin-top:1px;">${c.model}</div>` : nothing}
       </div>
     `;
   }
@@ -498,3 +548,34 @@ class LthnChatWindow extends LitElement {
   }
 }
 customElements.define("lthn-chat-window", LthnChatWindow);
+
+// ─── helpers ────────────────────────────────────────────────────────
+
+interface SessionInfoShape {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  messages: number;
+}
+
+/** SessionInfo → Conversation. Returns null when the timestamp is
+ *  outside the rail's "today / yesterday / week" buckets so older
+ *  sessions stay out of the immediate view (a "view all" surface
+ *  reveals them later). */
+function deriveConversation(info: SessionInfoShape): Conversation | null {
+  const updatedSec = info.updated_at || info.created_at || 0;
+  const ageSec = Math.max(0, Math.floor(Date.now() / 1000) - updatedSec);
+  let bucket: Conversation["bucket"];
+  if (ageSec < 86400)        bucket = "today";       // < 24 h
+  else if (ageSec < 172800)  bucket = "yesterday";   // 24–48 h
+  else if (ageSec < 604800)  bucket = "week";        // < 7 d
+  else                       return null;            // older — out of rail
+  return {
+    id: info.id,
+    bucket,
+    title: info.title || "(untitled)",
+    snippet: info.messages > 0 ? `${info.messages} messages` : "",
+    model: "",
+  };
+}
