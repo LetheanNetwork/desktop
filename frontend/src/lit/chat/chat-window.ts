@@ -132,6 +132,11 @@ class LthnChatWindow extends LitElement {
     composerDisabled: string; composerReady: string;
     composerAttach: string; composerSlash: string;
     btnSend: string; btnStop: string;
+    railMeta: string;
+    statTps: string; statWatts: string; statKv: string; statTokens: string;
+    labelSampling: string;
+    sampTemp: string; sampTopP: string; sampMaxTok: string; sampContext: string;
+    labelSources: string; sourcesEmpty: string;
   };
   constructor() {
     super();
@@ -164,6 +169,18 @@ class LthnChatWindow extends LitElement {
       composerSlash:    "Slash commands",
       btnSend:          "Send",
       btnStop:          "Stop",
+      railMeta:         "Turn metadata",
+      statTps:          "Tok/s · live",
+      statWatts:        "Watts · this turn",
+      statKv:           "KV cache hit",
+      statTokens:       "Tokens used",
+      labelSampling:    "Sampling",
+      sampTemp:         "Temperature",
+      sampTopP:         "Top-p",
+      sampMaxTok:       "Max tokens",
+      sampContext:      "Context",
+      labelSources:     "Sources",
+      sourcesEmpty:     "None this turn. Citations appear here when the model grounds an answer.",
     };
   }
   createRenderRoot() { return this; }
@@ -172,6 +189,9 @@ class LthnChatWindow extends LitElement {
     const [
       title, subtitle, rs, bt, by, bw, re, rn,
       et, eb, cd, cr, ca, cs, bSend, bStop,
+      rMeta, sTps, sWatts, sKv, sTokens,
+      lSamp, sT, sP, sMax, sCtx,
+      lSrc, sEmpty,
     ] = await Promise.all([
       T("window.chat.title"),
       T("window.chat.subtitle"),
@@ -189,6 +209,18 @@ class LthnChatWindow extends LitElement {
       T("window.chat.composer_slash"),
       T("window.chat.btn_send"),
       T("window.chat.btn_stop"),
+      T("window.chat.rail_meta"),
+      T("window.chat.stat_tps_live"),
+      T("window.chat.stat_watts"),
+      T("window.chat.stat_kv_hit"),
+      T("window.chat.stat_tokens"),
+      T("window.chat.label_sampling"),
+      T("window.chat.samp_temperature"),
+      T("window.chat.samp_top_p"),
+      T("window.chat.samp_max_tokens"),
+      T("window.chat.samp_context"),
+      T("window.chat.label_sources"),
+      T("window.chat.sources_empty"),
     ]);
     this.chrome = { title, subtitle };
     this.t = {
@@ -197,6 +229,11 @@ class LthnChatWindow extends LitElement {
       composerDisabled: cd, composerReady: cr,
       composerAttach: ca, composerSlash: cs,
       btnSend: bSend, btnStop: bStop,
+      railMeta: rMeta,
+      statTps: sTps, statWatts: sWatts, statKv: sKv, statTokens: sTokens,
+      labelSampling: lSamp,
+      sampTemp: sT, sampTopP: sP, sampMaxTok: sMax, sampContext: sCtx,
+      labelSources: lSrc, sourcesEmpty: sEmpty,
     };
     await Promise.all([this._reloadRail(), this._reloadModel(), this._reloadBuild()]);
   }
@@ -681,25 +718,25 @@ class LthnChatWindow extends LitElement {
                     background:rgba(0,0,0,0.18); display:flex; flex-direction:column;
                     min-height:0; overflow:hidden;">
         <div style="padding:14px 18px 8px; display:flex; align-items:center; gap:8px;">
-          <lthn-label>Turn metadata</lthn-label>
+          <lthn-label>${this.t.railMeta}</lthn-label>
           <div style="flex:1"></div>
           <lthn-btn tone="quiet" size="sm"><i class="fa-solid fa-angle-right" style="font-size:10px;"></i></lthn-btn>
         </div>
         <div style="padding:0 18px 16px; display:flex; flex-direction:column; gap:14px; overflow:auto;">
-          ${this._renderRailStat("Tok/s · live", data.toksLive, data.sparkline)}
-          ${this._renderRailStat("Watts · this turn", data.watts)}
-          ${this._renderRailStat("KV cache hit", data.kvHit)}
-          ${this._renderRailStat("Tokens used", data.tokens)}
+          ${this._renderRailStat(this.t.statTps, data.toksLive, data.sparkline)}
+          ${this._renderRailStat(this.t.statWatts, data.watts)}
+          ${this._renderRailStat(this.t.statKv, data.kvHit)}
+          ${this._renderRailStat(this.t.statTokens, data.tokens)}
 
-          <lthn-label style="margin-top:4px;">Sampling</lthn-label>
+          <lthn-label style="margin-top:4px;">${this.t.labelSampling}</lthn-label>
           <div style="display:flex; flex-direction:column; gap:6px; font-size:11.5px;">
-            <lthn-rail-row k="Temperature" v="0.7"></lthn-rail-row>
-            <lthn-rail-row k="Top-p"       v="0.95"></lthn-rail-row>
-            <lthn-rail-row k="Max tokens"  v="1024"></lthn-rail-row>
-            <lthn-rail-row k="Context"     v=${data.ctx || "—"}></lthn-rail-row>
+            <lthn-rail-row k=${this.t.sampTemp}    v="0.7"></lthn-rail-row>
+            <lthn-rail-row k=${this.t.sampTopP}    v="0.95"></lthn-rail-row>
+            <lthn-rail-row k=${this.t.sampMaxTok}  v="1024"></lthn-rail-row>
+            <lthn-rail-row k=${this.t.sampContext} v=${data.ctx || "—"}></lthn-rail-row>
           </div>
 
-          <lthn-label style="margin-top:4px;">Sources</lthn-label>
+          <lthn-label style="margin-top:4px;">${this.t.labelSources}</lthn-label>
           ${data.sources ? data.sources.map(s => html`
             <div style="padding:8px 10px; border-radius:6px;
                         background:rgba(255,255,255,0.03);
@@ -711,7 +748,7 @@ class LthnChatWindow extends LitElement {
             </div>
           `) : html`
             <div style="font-size:11px; color:var(--fg-3); font-style:italic;">
-              None this turn. Citations appear here when the model grounds an answer.
+              ${this.t.sourcesEmpty}
             </div>
           `}
         </div>
