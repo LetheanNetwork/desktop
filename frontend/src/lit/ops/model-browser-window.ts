@@ -117,7 +117,7 @@ class LthnModelBrowserWindow extends LitElement {
               <div style="padding:18px 14px; font-size:11.5px; color:var(--fg-3); line-height:1.55;">
                 ${this.loadErr
                   ? html`<span style="color:var(--error-400);">Failed to list models:</span><br>${this.loadErr}`
-                  : html`No models found in <code style="color:var(--fg-2);">~/Lethean/conf/models/</code>.<br>Import a GGUF or pull from Hugging Face to get started.`}
+                  : html`No models found in <code style="color:var(--fg-2);">${this.modelsDir}</code>.<br>Import a GGUF or pull from Hugging Face to get started.`}
               </div>
             ` : local.map(m => this._localItem(m))}
           </div>
