@@ -186,7 +186,27 @@
       "tryit_help":       "Test calls bypass the model — useful for sanity-checking a server before plumbing it into a tool-using chat.",
       "empty_registry":   "No MCP tools registered yet."
     },
-    "benchmark":    { "title": "Benchmark",     "subtitle": "run · compare · export" },
+    "benchmark":    {
+      "title": "Benchmark", "subtitle": "run · compare · export",
+      "btn_pp_only":     "PP only",
+      "btn_tg_only":     "TG only",
+      "btn_both":        "Both",
+      "btn_run":         "Run",
+      "btn_export":      "Export",
+      "label_recent":    "Recent runs · click to overlay on chart",
+      "label_compare":   "2 selected · compare mode",
+      "col_timestamp":   "Timestamp",
+      "col_model":       "Model",
+      "col_pp":          "PP tok/s",
+      "col_tg":          "TG tok/s",
+      "col_peak_w":      "Peak W",
+      "col_mem":         "Mem",
+      "pill_latest":     "Latest",
+      "label_chart":     "tok/s vs context length",
+      "label_log_x":     "· log scale on x",
+      "y_axis":          "tok/s",
+      "footer":          "5 runs on file · ~/.lthn/bench/results.jsonl · last run 47.2 tok/s · 8.4 W"
+    },
     "telemetry":    {
       "title": "Live telemetry", "subtitle_normal": "demo surface", "subtitle_fullscreen": "fullscreen · ⎋ to exit",
       "big_heap_label":   "heap · MB",

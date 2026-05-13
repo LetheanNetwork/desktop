@@ -12,22 +12,68 @@ class LthnBenchmarkWindow extends LitElement {
     h: { type: Number },
     embedded: { type: Boolean, reflect: true },
     chrome: { state: true },
+    t: { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare chrome: { title: string; subtitle: string };
+  declare t: {
+    btnPp: string; btnTg: string; btnBoth: string; btnRun: string; btnExport: string;
+    labelRecent: string; labelCompare: string;
+    colTs: string; colModel: string; colPp: string; colTg: string; colPeakW: string; colMem: string;
+    pillLatest: string;
+    labelChart: string; labelLogX: string;
+    yAxis: string; footer: string;
+  };
   constructor() {
     super();
     this.w = 1000; this.h = 660; this.embedded = false;
     this.chrome = { title: "Benchmark", subtitle: "run · compare · export" };
+    this.t = {
+      btnPp: "PP only", btnTg: "TG only", btnBoth: "Both",
+      btnRun: "Run", btnExport: "Export",
+      labelRecent: "Recent runs · click to overlay on chart",
+      labelCompare: "2 selected · compare mode",
+      colTs: "Timestamp", colModel: "Model",
+      colPp: "PP tok/s", colTg: "TG tok/s",
+      colPeakW: "Peak W", colMem: "Mem",
+      pillLatest: "Latest",
+      labelChart: "tok/s vs context length",
+      labelLogX: "· log scale on x",
+      yAxis: "tok/s",
+      footer: "5 runs on file · ~/.lthn/bench/results.jsonl · last run 47.2 tok/s · 8.4 W",
+    };
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    this.chrome = {
-      title: await T("window.benchmark.title"),
-      subtitle: await T("window.benchmark.subtitle"),
+    const [
+      title, subtitle, bPp, bTg, bBoth, bRun, bExport,
+      lRecent, lCompare,
+      cTs, cModel, cPp, cTg, cPeakW, cMem,
+      pLatest, lChart, lLogX, yAx, foot,
+    ] = await Promise.all([
+      T("window.benchmark.title"), T("window.benchmark.subtitle"),
+      T("window.benchmark.btn_pp_only"), T("window.benchmark.btn_tg_only"),
+      T("window.benchmark.btn_both"), T("window.benchmark.btn_run"),
+      T("window.benchmark.btn_export"),
+      T("window.benchmark.label_recent"), T("window.benchmark.label_compare"),
+      T("window.benchmark.col_timestamp"), T("window.benchmark.col_model"),
+      T("window.benchmark.col_pp"), T("window.benchmark.col_tg"),
+      T("window.benchmark.col_peak_w"), T("window.benchmark.col_mem"),
+      T("window.benchmark.pill_latest"),
+      T("window.benchmark.label_chart"), T("window.benchmark.label_log_x"),
+      T("window.benchmark.y_axis"), T("window.benchmark.footer"),
+    ]);
+    this.chrome = { title, subtitle };
+    this.t = {
+      btnPp: bPp, btnTg: bTg, btnBoth: bBoth, btnRun: bRun, btnExport: bExport,
+      labelRecent: lRecent, labelCompare: lCompare,
+      colTs: cTs, colModel: cModel, colPp: cPp, colTg: cTg, colPeakW: cPeakW, colMem: cMem,
+      pillLatest: pLatest,
+      labelChart: lChart, labelLogX: lLogX,
+      yAxis: yAx, footer: foot,
     };
   }
 
@@ -52,12 +98,12 @@ class LthnBenchmarkWindow extends LitElement {
         gemma-4-e2b · q4_k_m
         <i class="fa-solid fa-chevron-down" style="font-size:8px; color:var(--fg-3); margin-left:4px;"></i>
       </div>
-      <lthn-btn tone="ghost" size="sm">PP only</lthn-btn>
-      <lthn-btn tone="ghost" size="sm">TG only</lthn-btn>
-      <lthn-btn tone="ghost" size="sm" active>Both</lthn-btn>
+      <lthn-btn tone="ghost" size="sm">${this.t.btnPp}</lthn-btn>
+      <lthn-btn tone="ghost" size="sm">${this.t.btnTg}</lthn-btn>
+      <lthn-btn tone="ghost" size="sm" active>${this.t.btnBoth}</lthn-btn>
       <div style="flex:1"></div>
-      <lthn-btn tone="primary" size="sm"><i class="fa-solid fa-play" style="font-size:9px;"></i> Run</lthn-btn>
-      <lthn-btn tone="ghost" size="sm"><i class="fa-regular fa-file-arrow-down" style="font-size:10px;"></i> Export</lthn-btn>
+      <lthn-btn tone="primary" size="sm"><i class="fa-solid fa-play" style="font-size:9px;"></i> ${this.t.btnRun}</lthn-btn>
+      <lthn-btn tone="ghost" size="sm"><i class="fa-regular fa-file-arrow-down" style="font-size:10px;"></i> ${this.t.btnExport}</lthn-btn>
     `;
 
     const body = html`
@@ -65,12 +111,12 @@ class LthnBenchmarkWindow extends LitElement {
         <!-- history table -->
         <div style="padding:14px 22px 8px; display:flex; flex-direction:column; gap:6px;">
           <div style="display:flex; align-items:center; justify-content:space-between;">
-            <lthn-label>Recent runs · click to overlay on chart</lthn-label>
-            <div style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);">2 selected · compare mode</div>
+            <lthn-label>${this.t.labelRecent}</lthn-label>
+            <div style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);">${this.t.labelCompare}</div>
           </div>
           <div style="background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.06); border-radius:8px; font-family:var(--font-mono); font-size:11px;">
             <div style="display:grid; grid-template-columns:20px 1.4fr 1.4fr 0.8fr 0.9fr 0.8fr 0.8fr 60px; padding:8px 14px; border-bottom:1px solid rgba(255,255,255,0.05); color:var(--fg-3); font-size:10px; letter-spacing:0.04em; text-transform:uppercase;">
-              <span></span><span>Timestamp</span><span>Model</span><span>PP tok/s</span><span>TG tok/s</span><span>Peak W</span><span>Mem</span><span></span>
+              <span></span><span>${this.t.colTs}</span><span>${this.t.colModel}</span><span>${this.t.colPp}</span><span>${this.t.colTg}</span><span>${this.t.colPeakW}</span><span>${this.t.colMem}</span><span></span>
             </div>
             ${runs.map((r, i) => {
               const sel = i < 2;
@@ -83,7 +129,7 @@ class LthnBenchmarkWindow extends LitElement {
                   <span style="color:${r.here ? "var(--brand-300)" : "var(--fg-0)"};">${r.tg.toFixed(1)}</span>
                   <span>${r.w} W</span>
                   <span style="color:var(--fg-2);">${r.mem}</span>
-                  <span style="text-align:right;">${r.here ? html`<lthn-state-pill variant="latest">Latest</lthn-state-pill>` : nothing}</span>
+                  <span style="text-align:right;">${r.here ? html`<lthn-state-pill variant="latest">${this.t.pillLatest}</lthn-state-pill>` : nothing}</span>
                 </div>
               `;
             })}
@@ -93,8 +139,8 @@ class LthnBenchmarkWindow extends LitElement {
         <!-- chart -->
         <div style="flex:1; padding:8px 22px 18px; display:flex; flex-direction:column; min-height:0;">
           <div style="display:flex; align-items:baseline; gap:14px; margin-bottom:6px;">
-            <lthn-label>tok/s vs context length</lthn-label>
-            <span style="font-size:10.5px; color:var(--fg-3);">· log scale on x</span>
+            <lthn-label>${this.t.labelChart}</lthn-label>
+            <span style="font-size:10.5px; color:var(--fg-3);">${this.t.labelLogX}</span>
           </div>
           <div style="flex:1; background:rgba(0,0,0,0.20); border:1px solid rgba(255,255,255,0.05); border-radius:8px; padding:8px;">
             <svg viewBox="0 0 ${cw} ${ch}" width="100%" height="100%" preserveAspectRatio="none">
@@ -116,7 +162,7 @@ class LthnBenchmarkWindow extends LitElement {
                 <circle cx="14" cy="30" r="4" fill="#a78bfa" fill-opacity="0.6"></circle>
                 <text x="26" y="34" fill="rgba(255,255,255,0.65)" font-size="10" font-family="ui-monospace, monospace">llama-3.2-3b · -2 d</text>
               </g>
-              <text x="8" y=${pad.t + 4} fill="rgba(255,255,255,0.45)" font-size="9.5" font-family="ui-monospace, monospace" transform="rotate(-90 10 ${pad.t + 4})">tok/s</text>
+              <text x="8" y=${pad.t + 4} fill="rgba(255,255,255,0.45)" font-size="9.5" font-family="ui-monospace, monospace" transform="rotate(-90 10 ${pad.t + 4})">${this.t.yAxis}</text>
             </svg>
           </div>
         </div>
@@ -126,7 +172,7 @@ class LthnBenchmarkWindow extends LitElement {
     return renderChrome({
       title: this.chrome.title, subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, toolbar, body,
-      footer: html`5 runs on file · ~/.lthn/bench/results.jsonl · last run 47.2 tok/s · 8.4 W`,
+      footer: html`${this.t.footer}`,
       embedded: this.embedded,
     });
   }

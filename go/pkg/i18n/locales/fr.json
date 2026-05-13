@@ -186,7 +186,27 @@
       "tryit_help":       "Les appels test contournent le modèle — utile pour vérifier un serveur avant de le brancher à un chat utilisant des outils.",
       "empty_registry":   "Aucun outil MCP enregistré pour le moment."
     },
-    "benchmark":    { "title": "Banc d'essai",        "subtitle": "exécuter · comparer · exporter" },
+    "benchmark":    {
+      "title": "Banc d'essai", "subtitle": "exécuter · comparer · exporter",
+      "btn_pp_only":     "PP seul",
+      "btn_tg_only":     "TG seul",
+      "btn_both":        "Les deux",
+      "btn_run":         "Exécuter",
+      "btn_export":      "Exporter",
+      "label_recent":    "Runs récents · cliquez pour superposer sur le graphique",
+      "label_compare":   "2 sélectionnés · mode comparaison",
+      "col_timestamp":   "Horodatage",
+      "col_model":       "Modèle",
+      "col_pp":          "PP tok/s",
+      "col_tg":          "TG tok/s",
+      "col_peak_w":      "W pic",
+      "col_mem":         "Mém",
+      "pill_latest":     "Le plus récent",
+      "label_chart":     "tok/s vs longueur de contexte",
+      "label_log_x":     "· échelle log sur x",
+      "y_axis":          "tok/s",
+      "footer":          "5 runs en fichier · ~/.lthn/bench/results.jsonl · dernier run 47.2 tok/s · 8.4 W"
+    },
     "telemetry":    {
       "title": "Télémétrie en direct", "subtitle_normal": "surface de démonstration", "subtitle_fullscreen": "plein écran · ⎋ pour quitter",
       "big_heap_label":   "heap · Mo",
