@@ -89,7 +89,7 @@ switch (surface) {
         valDash:          await i18n.T("tray.value.dash"),
         tbOpenApp:        await i18n.T("tray.titlebar.open_app"),
         tbSettings:       await i18n.T("tray.titlebar.settings"),
-        footerVersion:    await i18n.T("tray.footer.version", "0.1.0"),
+        footerVersion:    (await i18n.T("tray.footer.version")).replace("%s", "0.1.0"),
       };
 
       type TrayTab = "system" | "runner" | "activity";
