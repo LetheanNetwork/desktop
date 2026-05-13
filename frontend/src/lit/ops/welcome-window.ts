@@ -58,6 +58,7 @@ class LthnWelcomeWindow extends LitElement {
     modelsDir: { state: true },
     fresh:     { state: true },
     clients:   { state: true },
+    endpoint:  { state: true },
   };
   declare step: number;
   declare w: number;
@@ -67,6 +68,7 @@ class LthnWelcomeWindow extends LitElement {
   declare modelsDir: string;
   declare fresh: boolean;
   declare clients: ClientStatus[];
+  declare endpoint: string;
   constructor() {
     super();
     this.step = 1; this.w = 760; this.h = 580; this.embedded = false;
@@ -74,6 +76,7 @@ class LthnWelcomeWindow extends LitElement {
     this.modelsDir = "~/Lethean/conf/models/";
     this.fresh = true;
     this.clients = [];
+    this.endpoint = "http://localhost:8000/v1";
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -101,11 +104,23 @@ class LthnWelcomeWindow extends LitElement {
     }
     // Step 3 "Connect" — the integrations service already inspects
     // each client's config file on disk; the wizard reuses the same
-    // surface so the catalogue stays single-sourced.
+    // surface so the catalogue stays single-sourced. The endpoint
+    // string in the same step reads from server.WAddr() so the
+    // wizard, Settings → API and Integrations all agree.
     try {
-      const svc = await import("@desktop/integrations/wailsservice");
-      const list = await svc.List();
+      const [int, server] = await Promise.all([
+        import("@desktop/integrations/wailsservice"),
+        import("@desktop/server/service"),
+      ]);
+      const [list, addr] = await Promise.all([
+        int.List(),
+        server.WAddr().catch((): string => ""),
+      ]);
       this.clients = (list || []) as ClientStatus[];
+      if (addr) {
+        const a = addr.startsWith(":") ? `localhost${addr}` : addr;
+        this.endpoint = `http://${a}/v1`;
+      }
     } catch (err) {
       console.error("welcome: integrations lookup failed", err);
       this.clients = [];
@@ -300,7 +315,7 @@ class LthnWelcomeWindow extends LitElement {
           </div>
           <div style="font-size:13px; color:var(--fg-2); margin-top:8px; line-height:1.55; max-width:460px;">
             lthn speaks the OpenAI-compatible API on
-            <span style="font-family:var(--font-mono); color:var(--fg-1);">http://localhost:8000/v1</span>.
+            <span style="font-family:var(--font-mono); color:var(--fg-1);">${this.endpoint}</span>.
             We can drop the endpoint into these configs for you. The only outbound action lthn ever takes without you asking.
           </div>
         </div>
