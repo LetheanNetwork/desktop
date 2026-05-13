@@ -18,6 +18,12 @@ import (
 	"dappco.re/go/process"
 )
 
+const (
+	coreLintBinary = "core-lint"
+	runLintOp      = "lint.runLint"
+	runOp          = "lint.Run"
+)
+
 // Service owns the lint surface. Holds *core.Core for late
 // resolution of the process service.
 type Service struct {
@@ -55,18 +61,18 @@ func (s *Service) proc() *process.Service {
 // short list of canonical workstation paths Snider uses. Returns
 // "" when no candidate resolves.
 func findLintBinary() string {
-	if found := (core.App{}).Find("core-lint", "core-lint"); found.OK {
+	if found := (core.App{}).Find(coreLintBinary, coreLintBinary); found.OK {
 		if app, ok := found.Value.(*core.App); ok && app != nil {
 			return app.Path
 		}
 	}
 	candidates := []string{
-		"/Users/snider/Code/core/lint/bin/core-lint",
+		core.PathJoin("/Users", "snider", "Code", "core", "lint", "bin", coreLintBinary),
 	}
 	if home := core.UserHomeDir(); home.OK {
 		if h, ok := home.Value.(string); ok && h != "" {
-			candidates = append(candidates, core.PathJoin(h, "Code", "core", "lint", "bin", "core-lint"))
-			candidates = append(candidates, core.PathJoin(h, "bin", "core-lint"))
+			candidates = append(candidates, core.PathJoin(h, "Code", "core", "lint", "bin", coreLintBinary))
+			candidates = append(candidates, core.PathJoin(h, "bin", coreLintBinary))
 		}
 	}
 	for _, p := range candidates {
@@ -89,12 +95,12 @@ func findLintBinary() string {
 func (s *Service) runLint(binary string, args ...string) core.Result {
 	ps := s.proc()
 	if ps == nil {
-		return core.Fail(core.E("lint.runLint", "process service unavailable", nil))
+		return core.Fail(core.E(runLintOp, "process service unavailable", nil))
 	}
 	r := ps.Run(context.Background(), binary, args...)
 	out, _ := r.Value.(string)
 	if !r.OK && out == "" {
-		return core.Fail(core.E("lint.runLint", r.Error(), nil))
+		return core.Fail(core.E(runLintOp, r.Error(), nil))
 	}
 	return core.Ok(out)
 }

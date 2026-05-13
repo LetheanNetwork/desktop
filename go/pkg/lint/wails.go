@@ -52,18 +52,18 @@ type RunOutput struct {
 //	const { issues, counts, total } = await Run("/path", "", "");
 func (s *Service) Run(path, severity, lang string) core.Result {
 	if core.Trim(path) == "" {
-		return core.Fail(core.E("lint.Run", "path required", nil))
+		return core.Fail(core.E(runOp, "path required", nil))
 	}
 	stat := core.Stat(path)
 	if !stat.OK {
-		return core.Fail(core.E("lint.Run", "path is not a directory: "+path, nil))
+		return core.Fail(core.E(runOp, "path is not a directory: "+path, nil))
 	}
 	if info, ok := stat.Value.(interface{ IsDir() bool }); !ok || !info.IsDir() {
-		return core.Fail(core.E("lint.Run", "path is not a directory: "+path, nil))
+		return core.Fail(core.E(runOp, "path is not a directory: "+path, nil))
 	}
 	binary := findLintBinary()
 	if binary == "" {
-		return core.Fail(core.E("lint.Run",
+		return core.Fail(core.E(runOp,
 			"core-lint binary not found on PATH or canonical locations", nil))
 	}
 	args := []string{"lint", "check", path, "--format", "json"}
@@ -82,7 +82,7 @@ func (s *Service) Run(path, severity, lang string) core.Result {
 	out, _ := outR.Value.(string)
 	var issues []Issue
 	if r := core.JSONUnmarshal([]byte(out), &issues); !r.OK {
-		return core.Fail(core.E("lint.Run", "parse json: "+r.Error(), nil))
+		return core.Fail(core.E(runOp, "parse json: "+r.Error(), nil))
 	}
 	counts := map[string]int{}
 	for _, iss := range issues {
