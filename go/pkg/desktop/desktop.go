@@ -171,6 +171,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(NewFirstLaunchService()),
 		application.NewService(NewValidatorService()),
 		application.NewService(NewTelemetryService()),
+		application.NewService(NewI18nService()),
 		application.NewService(NewLifecycleService()),
 		application.NewService(envSvc),
 		application.NewService(clipboardSvc),
