@@ -30,13 +30,13 @@ switch (surface) {
      *   - sparkline data  ← heap_alloc_mb samples (last 24)
      *   - connection dot  ← Sample() throwing → err; success → ok
      */
-    Promise.all([
+    const [telemetry, runner, windowSvc, i18n, fl] = await Promise.all([
       import("@desktop/telemetry/service"),
       import("@desktop/runner/service"),
       import("@desktop/desktop/windowservice"),
       import("@lthn/i18n/coreservice"),
       import("@desktop/firstlaunch/wailsservice"),
-    ]).then(async ([telemetry, runner, windowSvc, i18n, fl]) => {
+    ]);
       const TelemetryService = telemetry;
       const RunnerService = runner;
       const WindowService = windowSvc;
@@ -518,7 +518,6 @@ switch (surface) {
         const id = setInterval(poll, ms);
         window.addEventListener("beforeunload", () => clearInterval(id));
       }
-    });
     break;
   }
   case "chat": {
