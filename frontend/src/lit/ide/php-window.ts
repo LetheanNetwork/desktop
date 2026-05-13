@@ -105,7 +105,7 @@ class LthnPhpWindow extends LitElement {
       this.projects = r.projects || [];
       if (!this.selected && this.projects.length > 0) {
         await this._select(this.projects[0].path);
-      } else if (this.selected && !this.projects.find(p => p.path === this.selected)) {
+      } else if (this.selected && !this.projects.some(p => p.path === this.selected)) {
         this.selected = "";
         this.detail = null;
         this.scripts = null;

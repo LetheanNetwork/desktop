@@ -110,7 +110,7 @@ class LthnGitWindow extends LitElement {
       this.branch = b as BranchInfo;
       this.entries = (st || []) as StatusEntry[];
       this.log = (lg || []) as LogEntry[];
-      if (this.selected && !this.entries.find(e => e.path === this.selected)) {
+      if (this.selected && !this.entries.some(e => e.path === this.selected)) {
         this.selected = "";
         this.diff = "";
       }
