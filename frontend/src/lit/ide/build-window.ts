@@ -187,7 +187,7 @@ class LthnBuildWindow extends LitElement {
           <i class="fa-solid fa-stop" style="font-size:10px;"></i> Stop
         </lthn-btn>
       ` : html`
-        <lthn-btn tone="primary" size="sm" ?dim=${!d || !d.command}
+        <lthn-btn tone="primary" size="sm" ?dim=${!d?.command}
           @click=${() => void this._run()}>
           <i class="fa-solid fa-play" style="font-size:10px;"></i> Run build
         </lthn-btn>

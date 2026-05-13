@@ -261,8 +261,8 @@ class LthnChatWindow extends LitElement {
         svc.WModels().catch((): string[] => []),
         svc.WRoutes().catch((): unknown[] => []),
       ]);
-      this.activeModel = (models && models[0]) || "";
-      if (routes && routes.length > 0) this.runnerCount = routes.length;
+      this.activeModel = models?.[0] || "";
+      if ((routes?.length ?? 0) > 0) this.runnerCount = routes.length;
     } catch {
       this.activeModel = "";
     }

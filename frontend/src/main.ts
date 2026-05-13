@@ -476,7 +476,7 @@ switch (surface) {
           state.err = null;
           state.uptime = reading.uptime_seconds || 0;
           state.heapMb = reading.heap_alloc_mb || 0;
-          state.model = (models && models[0]) || t.valNoModel;
+          state.model = models?.[0] || t.valNoModel;
           state.samples.push(state.heapMb);
           if (state.samples.length > 24) state.samples.shift();
           // Activity-panel "Sessions today" count — sessions created

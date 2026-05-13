@@ -113,7 +113,7 @@ class LthnToolsWindow extends LitElement {
     try {
       const runner = await import("@desktop/runner/service");
       const models = await runner.WModels().catch((): string[] => []);
-      if (models && models[0]) this.activeModel = models[0];
+      if (models?.[0]) this.activeModel = models[0];
     } catch { /* keep fallback */ }
     // Build the subtitle from real counts — N servers (distinct
     // groups) · M tools. Falls back to the locale string when the

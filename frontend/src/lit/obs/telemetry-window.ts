@@ -141,7 +141,7 @@ class LthnTelemetryWindow extends LitElement {
       const cap = Math.max(4, parseInt(localStorage.getItem("lthn.telemetry.samples") || "24", 10) || 24);
       this.heapHistory = heapNext.length > cap ? heapNext.slice(-cap) : heapNext;
       this.goHistory = goNext.length > cap ? goNext.slice(-cap) : goNext;
-      this.model = (models && models[0]) || "no model loaded";
+      this.model = models?.[0] || "no model loaded";
       this.err = "";
     } catch (e: unknown) {
       this.err = e instanceof Error ? e.message : String(e);
