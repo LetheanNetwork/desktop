@@ -26,6 +26,7 @@ class LthnIntegrationsWindow extends LitElement {
     selectedId: { state: true },
     endpoint: { state: true },
     defaultModel: { state: true },
+    t: { state: true },
   };
   declare w: number;
   declare h: number;
@@ -35,6 +36,12 @@ class LthnIntegrationsWindow extends LitElement {
   declare selectedId: string;
   declare endpoint: string;
   declare defaultModel: string;
+  declare t: {
+    railLabel: string; railEmpty: string;
+    rowConfigPath: string; rowOnDisk: string; rowEndpoint: string; rowDefaultModel: string;
+    snippetLabel: string; snippetHelp: string;
+    yes: string; no: string;
+  };
   constructor() {
     super();
     this.w = 880; this.h = 660; this.embedded = false;
@@ -43,15 +50,40 @@ class LthnIntegrationsWindow extends LitElement {
     this.selectedId = "";
     this.endpoint = "http://localhost:8000/v1";
     this.defaultModel = "—";
+    this.t = {
+      railLabel: "Clients",
+      railEmpty: "No clients enumerated yet. The integrations service is the source of truth.",
+      rowConfigPath: "Config path", rowOnDisk: "On disk",
+      rowEndpoint: "Endpoint", rowDefaultModel: "Default model",
+      snippetLabel: "Config snippet · drop this into %s",
+      snippetHelp:  "Only the apiBase, apiKey and model keys are lthn-managed. Anything else you set in this file is left alone.",
+      yes: "yes", no: "no",
+    };
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const [title, subtitle] = await Promise.all([
+    const [title, subtitle, rl, re, rcp, rod, rep, rdm, sl, sh, yes, no] = await Promise.all([
       T("window.integrations.title"),
       T("window.integrations.subtitle"),
+      T("window.integrations.rail_label"),
+      T("window.integrations.rail_empty"),
+      T("window.integrations.row_config_path"),
+      T("window.integrations.row_on_disk"),
+      T("window.integrations.row_endpoint"),
+      T("window.integrations.row_default_model"),
+      T("window.integrations.snippet_label"),
+      T("window.integrations.snippet_help"),
+      T("window.integrations.yes"),
+      T("window.integrations.no"),
     ]);
     this.chrome = { title, subtitle };
+    this.t = {
+      railLabel: rl, railEmpty: re,
+      rowConfigPath: rcp, rowOnDisk: rod, rowEndpoint: rep, rowDefaultModel: rdm,
+      snippetLabel: sl, snippetHelp: sh,
+      yes, no,
+    };
     try {
       const [integrations, runner, server] = await Promise.all([
         import("@desktop/integrations/wailsservice"),
@@ -79,10 +111,10 @@ class LthnIntegrationsWindow extends LitElement {
     const body = html`
       <div style="flex:1; display:grid; grid-template-columns:260px 1fr; min-height:0;">
         <aside style="background:rgba(0,0,0,0.18); border-right:1px solid rgba(255,255,255,0.05); padding:12px 8px; display:flex; flex-direction:column; gap:1px;">
-          <lthn-label style="padding:4px 10px 8px;">Clients</lthn-label>
+          <lthn-label style="padding:4px 10px 8px;">${this.t.railLabel}</lthn-label>
           ${clients.length === 0 ? html`
             <div style="padding:14px 12px; font-size:11.5px; color:var(--fg-3); line-height:1.55;">
-              No clients enumerated yet. The integrations service is the source of truth.
+              ${this.t.railEmpty}
             </div>
           ` : clients.map((c) => {
             const active = c.id === this.selectedId;
@@ -111,10 +143,10 @@ class LthnIntegrationsWindow extends LitElement {
             </div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
               ${[
-                { k: "Config path",   v: selected.config_path_raw },
-                { k: "On disk",       v: selected.exists ? "yes" : "no" },
-                { k: "Endpoint",      v: this.endpoint },
-                { k: "Default model", v: this.defaultModel },
+                { k: this.t.rowConfigPath,   v: selected.config_path_raw },
+                { k: this.t.rowOnDisk,       v: selected.exists ? this.t.yes : this.t.no },
+                { k: this.t.rowEndpoint,     v: this.endpoint },
+                { k: this.t.rowDefaultModel, v: this.defaultModel },
               ].map(row => html`
                 <div style="padding:10px 14px; border-radius:6px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05);">
                   <div style="font-size:10.5px; color:var(--fg-3); letter-spacing:0.04em; text-transform:uppercase;">${row.k}</div>
@@ -123,7 +155,7 @@ class LthnIntegrationsWindow extends LitElement {
               `)}
             </div>
             <div>
-              <lthn-label>Config snippet · drop this into ${selected.config_path_raw}</lthn-label>
+              <lthn-label>${this.t.snippetLabel.replace("%s", selected.config_path_raw)}</lthn-label>
               <div style="margin-top:8px; background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:12px 14px; font-family:var(--font-mono); font-size:11.5px; line-height:1.6; color:var(--fg-1); white-space:pre;">${`{
   "apiBase":  "${this.endpoint}",
   "apiKey":   "sk-lthn-•••• (managed by lthn)",
@@ -131,7 +163,7 @@ class LthnIntegrationsWindow extends LitElement {
   "stream":   true
 }`}</div>
               <div style="margin-top:10px; font-size:11px; color:var(--fg-3); line-height:1.55;">
-                Only the <code>apiBase</code>, <code>apiKey</code> and <code>model</code> keys are lthn-managed. Anything else you set in this file is left alone.
+                ${this.t.snippetHelp}
               </div>
             </div>
           ` : html`
