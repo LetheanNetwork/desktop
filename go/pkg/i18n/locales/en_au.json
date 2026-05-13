@@ -94,5 +94,46 @@
     "footer": {
       "version": "lthn v%s"
     }
+  },
+  "shell": {
+    "brand": "lthn",
+    "search": "Search",
+    "settings_tooltip": "Settings",
+    "preview_tag": "PREVIEW",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "group": {
+      "primary": "Workspace",
+      "observe": "Observe",
+      "extend": "Extend",
+      "preview": "Preview"
+    },
+    "nav": {
+      "chat": "Chat",
+      "models": "Models",
+      "benchmark": "Benchmark",
+      "logs": "Activity",
+      "telemetry": "Telemetry",
+      "integrations": "Integrations",
+      "tools": "Tools · MCP",
+      "network": "Network",
+      "distillation": "Fine-tune",
+      "fleet": "Fleet",
+      "settings": "Settings"
+    }
+  },
+  "window": {
+    "chat":         { "title": "lthn · chat",   "subtitle": "conversation · local" },
+    "fleet":        { "title": "Fleet",         "subtitle": "multi-machine · v1.0 preview" },
+    "distillation": { "title": "Fine-tune",     "subtitle": "LoRA · SFT · distill · merge" },
+    "network":      { "title": "Network",       "subtitle": "LetherNet · v0.7 preview" },
+    "integrations": { "title": "Integrations",  "subtitle": "clients · MCP · webhooks" },
+    "tools":        { "title": "Tools · MCP",   "subtitle": "2 servers · 12 tools · 648 calls today" },
+    "benchmark":    { "title": "Benchmark",     "subtitle": "run · compare · export" },
+    "telemetry":    { "title": "Live telemetry","subtitle_normal": "demo surface", "subtitle_fullscreen": "fullscreen · ⎋ to exit" },
+    "logs":         { "title": "Activity",      "subtitle": "logs · history · power" },
+    "settings":     { "title": "Settings",      "subtitle": "lthn · v0.2.0-rc1" },
+    "models":       { "title": "Models",        "subtitle": "local · 4 · huggingface" },
+    "welcome":      { "title": "Welcome to lthn", "subtitle": "step %s of 3" }
   }
 }

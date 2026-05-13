@@ -4,14 +4,32 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
+import { T } from "@lthn/i18n/coreservice";
 
 class LthnBenchmarkWindow extends LitElement {
-  static properties = { w: { type: Number }, h: { type: Number }, embedded: { type: Boolean, reflect: true } };
+  static properties = {
+    w: { type: Number },
+    h: { type: Number },
+    embedded: { type: Boolean, reflect: true },
+    chrome: { state: true },
+  };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
-  constructor() { super(); this.w = 1000; this.h = 660; this.embedded = false; }
+  declare chrome: { title: string; subtitle: string };
+  constructor() {
+    super();
+    this.w = 1000; this.h = 660; this.embedded = false;
+    this.chrome = { title: "Benchmark", subtitle: "run · compare · export" };
+  }
   createRenderRoot() { return this; }
+  async connectedCallback() {
+    super.connectedCallback();
+    this.chrome = {
+      title: await T("window.benchmark.title"),
+      subtitle: await T("window.benchmark.subtitle"),
+    };
+  }
 
   render() {
     const runs = [
@@ -106,7 +124,7 @@ class LthnBenchmarkWindow extends LitElement {
     `;
 
     return renderChrome({
-      title: "Benchmark", subtitle: "run · compare · export",
+      title: this.chrome.title, subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, toolbar, body,
       footer: html`5 runs on file · ~/.lthn/bench/results.jsonl · last run 47.2 tok/s · 8.4 W`,
       embedded: this.embedded,

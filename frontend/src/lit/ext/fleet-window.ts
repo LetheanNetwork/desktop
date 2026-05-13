@@ -4,14 +4,32 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
+import { T } from "@lthn/i18n/coreservice";
 
 class LthnFleetWindow extends LitElement {
-  static properties = { w: { type: Number }, h: { type: Number }, embedded: { type: Boolean, reflect: true } };
+  static properties = {
+    w: { type: Number },
+    h: { type: Number },
+    embedded: { type: Boolean, reflect: true },
+    chrome: { state: true },
+  };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
-  constructor() { super(); this.w = 1080; this.h = 700; this.embedded = false; }
+  declare chrome: { title: string; subtitle: string };
+  constructor() {
+    super();
+    this.w = 1080; this.h = 700; this.embedded = false;
+    this.chrome = { title: "Fleet", subtitle: "multi-machine · v1.0 preview" };
+  }
   createRenderRoot() { return this; }
+  async connectedCallback() {
+    super.connectedCallback();
+    this.chrome = {
+      title: await T("window.fleet.title"),
+      subtitle: await T("window.fleet.subtitle"),
+    };
+  }
 
   render() {
     const machines = [
@@ -91,7 +109,7 @@ class LthnFleetWindow extends LitElement {
     `;
 
     return renderChrome({
-      title: "Fleet", subtitle: "multi-machine · v1.0 preview",
+      title: this.chrome.title, subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, toolbar, body,
       footer: html`4 of 5 online · routing latency-aware · ⌘R reroute · ⌘S snapshot`,
       embedded: this.embedded,

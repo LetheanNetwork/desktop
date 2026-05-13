@@ -4,14 +4,32 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
+import { T } from "@lthn/i18n/coreservice";
 
 class LthnToolsWindow extends LitElement {
-  static properties = { w: { type: Number }, h: { type: Number }, embedded: { type: Boolean, reflect: true } };
+  static properties = {
+    w: { type: Number },
+    h: { type: Number },
+    embedded: { type: Boolean, reflect: true },
+    chrome: { state: true },
+  };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
-  constructor() { super(); this.w = 1040; this.h = 700; this.embedded = false; }
+  declare chrome: { title: string; subtitle: string };
+  constructor() {
+    super();
+    this.w = 1040; this.h = 700; this.embedded = false;
+    this.chrome = { title: "Tools · MCP", subtitle: "2 servers · 12 tools · 648 calls today" };
+  }
   createRenderRoot() { return this; }
+  async connectedCallback() {
+    super.connectedCallback();
+    this.chrome = {
+      title: await T("window.tools.title"),
+      subtitle: await T("window.tools.subtitle"),
+    };
+  }
 
   render() {
     const servers = [
@@ -141,7 +159,7 @@ class LthnToolsWindow extends LitElement {
     `;
 
     return renderChrome({
-      title: "Tools · MCP", subtitle: "2 servers · 12 tools · 648 calls today",
+      title: this.chrome.title, subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, toolbar, body,
       footer: html`~/.lthn/mcp.json · 5 servers configured · 3 enabled · 648 calls today · 99.4 % ok`,
       embedded: this.embedded,

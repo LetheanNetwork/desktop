@@ -4,15 +4,34 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
+import { T } from "@lthn/i18n/coreservice";
 
 class LthnLogsWindow extends LitElement {
-  static properties = { w: { type: Number }, h: { type: Number }, tab: { type: String }, embedded: { type: Boolean, reflect: true } };
+  static properties = {
+    w: { type: Number },
+    h: { type: Number },
+    tab: { type: String },
+    embedded: { type: Boolean, reflect: true },
+    chrome: { state: true },
+  };
   declare w: number;
   declare h: number;
   declare tab: string;
   declare embedded: boolean;
-  constructor() { super(); this.w = 1000; this.h = 660; this.tab = "live"; this.embedded = false; }
+  declare chrome: { title: string; subtitle: string };
+  constructor() {
+    super();
+    this.w = 1000; this.h = 660; this.tab = "live"; this.embedded = false;
+    this.chrome = { title: "Activity", subtitle: "logs · history · power" };
+  }
   createRenderRoot() { return this; }
+  async connectedCallback() {
+    super.connectedCallback();
+    this.chrome = {
+      title: await T("window.logs.title"),
+      subtitle: await T("window.logs.subtitle"),
+    };
+  }
 
   render() {
     const tabs = [
@@ -42,7 +61,7 @@ class LthnLogsWindow extends LitElement {
       this.tab === "history" ? this._renderHistory() :
                                this._renderPower();
     return renderChrome({
-      title: "Activity", subtitle: "logs · history · power",
+      title: this.chrome.title, subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, toolbar, body,
       footer: html`${footers[this.tab as keyof typeof footers]}`,
       embedded: this.embedded,

@@ -4,6 +4,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
+import { T } from "@lthn/i18n/coreservice";
 
 /* Step 3 "Finish" handler — marks onboarding complete, opens the
  * settings window so the user can change their mind, and closes
@@ -41,13 +42,26 @@ class LthnWelcomeWindow extends LitElement {
     w:    { type: Number },
     h:    { type: Number },
     embedded: { type: Boolean, reflect: true },
+    chrome: { state: true },
   };
   declare step: number;
   declare w: number;
   declare h: number;
   declare embedded: boolean;
-  constructor() { super(); this.step = 1; this.w = 760; this.h = 580; this.embedded = false; }
+  declare chrome: { title: string; subtitleFmt: string };
+  constructor() {
+    super();
+    this.step = 1; this.w = 760; this.h = 580; this.embedded = false;
+    this.chrome = { title: "Welcome to lthn", subtitleFmt: "step %s of 3" };
+  }
   createRenderRoot() { return this; }
+  async connectedCallback() {
+    super.connectedCallback();
+    this.chrome = {
+      title: await T("window.welcome.title"),
+      subtitleFmt: await T("window.welcome.subtitle"),
+    };
+  }
 
   render() {
     const steps = [
@@ -126,8 +140,8 @@ class LthnWelcomeWindow extends LitElement {
     `;
 
     return renderChrome({
-      title: "Welcome to lthn",
-      subtitle: `step ${this.step} of 3`,
+      title: this.chrome.title,
+      subtitle: this.chrome.subtitleFmt.replace("%s", String(this.step)),
       w: this.w, h: this.h,
       body,
       footer: html`British English · dark default · accessibility light in Settings · v0.2.0-rc1`,

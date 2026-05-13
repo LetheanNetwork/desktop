@@ -4,6 +4,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
+import { T } from "@lthn/i18n/coreservice";
 import type {
   ChatState, ChatStateData, ChatTurn, ChatBanner, ChatComposer,
   Conversation, RailData, RailMode, RightRailMode,
@@ -93,6 +94,7 @@ class LthnChatWindow extends LitElement {
     // on the child element, so renderChrome's embedded branch never
     // fires and the window double-renders inside the shell.
     embedded:  { type: Boolean, reflect: true },
+    chrome:    { state: true },
   };
   declare state:     ChatState;
   declare rail:      RailMode;
@@ -100,6 +102,7 @@ class LthnChatWindow extends LitElement {
   declare w:         number;
   declare h:         number;
   declare embedded: boolean;
+  declare chrome:    { title: string; subtitle: string };
   constructor() {
     super();
     this.state = "multi-turn";
@@ -107,8 +110,16 @@ class LthnChatWindow extends LitElement {
     this.rightRail = "expanded";
     this.w = 1100;
     this.h = 740; this.embedded = false;
+    this.chrome = { title: "lthn · chat", subtitle: "conversation · local" };
   }
   createRenderRoot() { return this; }
+  async connectedCallback() {
+    super.connectedCallback();
+    this.chrome = {
+      title: await T("window.chat.title"),
+      subtitle: await T("window.chat.subtitle"),
+    };
+  }
 
   render() {
     const { railData, turns, banner, composer, toolbarModel } = chatStateData(this.state);
@@ -153,8 +164,8 @@ class LthnChatWindow extends LitElement {
     `;
 
     return renderChrome({
-      title: "lthn · chat",
-      subtitle: "conversation · local",
+      title: this.chrome.title,
+      subtitle: this.chrome.subtitle,
       w: this.w, h: this.h,
       toolbar, body, footer,
       embedded: this.embedded,

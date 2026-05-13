@@ -4,14 +4,32 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
+import { T } from "@lthn/i18n/coreservice";
 
 class LthnIntegrationsWindow extends LitElement {
-  static properties = { w: { type: Number }, h: { type: Number }, embedded: { type: Boolean, reflect: true } };
+  static properties = {
+    w: { type: Number },
+    h: { type: Number },
+    embedded: { type: Boolean, reflect: true },
+    chrome: { state: true },
+  };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
-  constructor() { super(); this.w = 880; this.h = 660; this.embedded = false; }
+  declare chrome: { title: string; subtitle: string };
+  constructor() {
+    super();
+    this.w = 880; this.h = 660; this.embedded = false;
+    this.chrome = { title: "Integrations", subtitle: "clients · MCP · webhooks" };
+  }
   createRenderRoot() { return this; }
+  async connectedCallback() {
+    super.connectedCallback();
+    this.chrome = {
+      title: await T("window.integrations.title"),
+      subtitle: await T("window.integrations.subtitle"),
+    };
+  }
 
   render() {
     const clients = [
@@ -90,7 +108,7 @@ class LthnIntegrationsWindow extends LitElement {
       </div>
     `;
     return renderChrome({
-      title: "Integrations", subtitle: "clients · MCP · webhooks",
+      title: this.chrome.title, subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, body,
       footer: html`2 connected · 1 endpoint · http://localhost:8000/v1 · only outbound action lthn ever takes`,
       embedded: this.embedded,

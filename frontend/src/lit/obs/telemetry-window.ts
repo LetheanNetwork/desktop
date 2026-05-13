@@ -4,15 +4,39 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
+import { T } from "@lthn/i18n/coreservice";
 
 class LthnTelemetryWindow extends LitElement {
-  static properties = { w: { type: Number }, h: { type: Number }, fullscreen: { type: Boolean }, embedded: { type: Boolean, reflect: true } };
+  static properties = {
+    w: { type: Number },
+    h: { type: Number },
+    fullscreen: { type: Boolean },
+    embedded: { type: Boolean, reflect: true },
+    chrome: { state: true },
+  };
   declare w: number;
   declare h: number;
   declare fullscreen: boolean;
   declare embedded: boolean;
-  constructor() { super(); this.w = 880; this.h = 560; this.fullscreen = false; this.embedded = false; }
+  declare chrome: { title: string; subtitleNormal: string; subtitleFullscreen: string };
+  constructor() {
+    super();
+    this.w = 880; this.h = 560; this.fullscreen = false; this.embedded = false;
+    this.chrome = {
+      title: "Live telemetry",
+      subtitleNormal: "demo surface",
+      subtitleFullscreen: "fullscreen · ⎋ to exit",
+    };
+  }
   createRenderRoot() { return this; }
+  async connectedCallback() {
+    super.connectedCallback();
+    this.chrome = {
+      title: await T("window.telemetry.title"),
+      subtitleNormal: await T("window.telemetry.subtitle_normal"),
+      subtitleFullscreen: await T("window.telemetry.subtitle_fullscreen"),
+    };
+  }
 
   render() {
     const tokSpark  = "38,41,44,45,46,47.2,47,46.8,47.1,47.4,47.2,47.0,47.3,47.2,47.4,47.2,47.1,47.3,47.2,47.0";
@@ -52,8 +76,8 @@ class LthnTelemetryWindow extends LitElement {
       </div>
     `;
     return renderChrome({
-      title: "Live telemetry",
-      subtitle: this.fullscreen ? "fullscreen · ⎋ to exit" : "demo surface",
+      title: this.chrome.title,
+      subtitle: this.fullscreen ? this.chrome.subtitleFullscreen : this.chrome.subtitleNormal,
       w: this.w, h: this.h, body,
       footer: html`model · gemma-4-e2b · context 142 / 8192 · airplane-mode OK · ⌥⌘F for fullscreen`,
       embedded: this.embedded,

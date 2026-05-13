@@ -43,6 +43,7 @@
  */
 
 import { LitElement, html, nothing } from "lit";
+import { T } from "@lthn/i18n/coreservice";
 
 /* Side-nav item registry — id, label, icon, which window element to render */
 const NAV: NavEntry[] = [
@@ -77,6 +78,7 @@ class LthnAppShell extends LitElement {
     tps:       { type: String },
     watts:     { type: String },
     version:   { type: String },
+    t:         { state: true },
   };
   declare active:    string;
   declare collapsed: boolean;
@@ -85,6 +87,16 @@ class LthnAppShell extends LitElement {
   declare tps:       string;
   declare watts:     string;
   declare version:   string;
+  declare t: {
+    brand: string;
+    search: string;
+    settingsTip: string;
+    preview: string;
+    expand: string;
+    collapse: string;
+    group: Record<string, string>;
+    nav: Record<string, string>;
+  };
   constructor() {
     super();
     this.active = "chat";
@@ -94,8 +106,48 @@ class LthnAppShell extends LitElement {
     this.tps = "47.2";
     this.watts = "8.4";
     this.version = "v0.2.0-rc1";
+    // English fallback so the first render isn't blank while
+    // connectedCallback resolves T() from the binding.
+    this.t = {
+      brand: "lthn",
+      search: "Search",
+      settingsTip: "Settings",
+      preview: "PREVIEW",
+      expand: "Expand",
+      collapse: "Collapse",
+      group: { primary: "Workspace", observe: "Observe", extend: "Extend", preview: "Preview" },
+      nav: {
+        chat: "Chat", models: "Models", benchmark: "Benchmark", logs: "Activity",
+        telemetry: "Telemetry", integrations: "Integrations", tools: "Tools · MCP",
+        network: "Network", distillation: "Fine-tune", fleet: "Fleet", settings: "Settings",
+      },
+    };
   }
   createRenderRoot() { return this; }
+  async connectedCallback() {
+    super.connectedCallback();
+    const [
+      brand, search, settingsTip, preview, expand, collapse,
+      gPrimary, gObserve, gExtend, gPreview,
+      nChat, nModels, nBenchmark, nLogs, nTelemetry, nIntegrations, nTools, nNetwork, nDistillation, nFleet, nSettings,
+    ] = await Promise.all([
+      T("shell.brand"), T("shell.search"), T("shell.settings_tooltip"),
+      T("shell.preview_tag"), T("shell.expand"), T("shell.collapse"),
+      T("shell.group.primary"), T("shell.group.observe"), T("shell.group.extend"), T("shell.group.preview"),
+      T("shell.nav.chat"), T("shell.nav.models"), T("shell.nav.benchmark"), T("shell.nav.logs"),
+      T("shell.nav.telemetry"), T("shell.nav.integrations"), T("shell.nav.tools"),
+      T("shell.nav.network"), T("shell.nav.distillation"), T("shell.nav.fleet"), T("shell.nav.settings"),
+    ]);
+    this.t = {
+      brand, search, settingsTip, preview, expand, collapse,
+      group:  { primary: gPrimary, observe: gObserve, extend: gExtend, preview: gPreview },
+      nav: {
+        chat: nChat, models: nModels, benchmark: nBenchmark, logs: nLogs,
+        telemetry: nTelemetry, integrations: nIntegrations, tools: nTools,
+        network: nNetwork, distillation: nDistillation, fleet: nFleet, settings: nSettings,
+      },
+    };
+  }
 
   _select(id: string) { this.active = id; }
   _toggleCollapse() { this.collapsed = !this.collapsed; }
@@ -109,10 +161,11 @@ class LthnAppShell extends LitElement {
       ` : html`<div style="height:8px;"></div>`}
       ${items.map(n => {
         const active = n.id === this.active;
+        const label = this.t.nav[n.id] ?? n.label;
         return html`
           <button
             @click=${() => this._select(n.id)}
-            title=${this.collapsed ? n.label : ""}
+            title=${this.collapsed ? label : ""}
             style="
               --wails-draggable: no-drag;
               display:flex; align-items:center; gap:12px;
@@ -128,8 +181,8 @@ class LthnAppShell extends LitElement {
           >
             <i class="fa-solid ${n.icon}" style="font-size:13px; width:14px; text-align:center; color:${active ? "var(--brand-300)" : "var(--fg-3)"};"></i>
             ${!this.collapsed ? html`
-              <span style="flex:1;">${n.label}</span>
-              ${n.preview ? html`<span style="font-family:var(--font-mono); font-size:8.5px; padding:1px 5px; border-radius:999px; background:rgba(245,158,11,0.10); border:1px solid rgba(245,158,11,0.22); color:var(--warning-400); letter-spacing:0.06em;">PREVIEW</span>` : nothing}
+              <span style="flex:1;">${label}</span>
+              ${n.preview ? html`<span style="font-family:var(--font-mono); font-size:8.5px; padding:1px 5px; border-radius:999px; background:rgba(245,158,11,0.10); border:1px solid rgba(245,158,11,0.22); color:var(--warning-400); letter-spacing:0.06em;">${this.t.preview}</span>` : nothing}
             ` : nothing}
           </button>
         `;
@@ -203,18 +256,18 @@ class LthnAppShell extends LitElement {
           <lthn-traffic-lights></lthn-traffic-lights>
           <div style="display:flex; align-items:center; gap:8px;">
             <lthn-glyph size="14" color="var(--fg-1)" ?active=${this.running}></lthn-glyph>
-            <span style="font-family:var(--font-mono); font-size:12px; color:var(--fg-0); letter-spacing:-0.005em; font-weight:600;">lthn</span>
+            <span style="font-family:var(--font-mono); font-size:12px; color:var(--fg-0); letter-spacing:-0.005em; font-weight:600;">${this.t.brand}</span>
             <span style="font-family:var(--font-mono); font-size:11px; color:var(--fg-3);">·</span>
-            <span style="font-size:12.5px; color:var(--fg-1); font-weight:500;">${active?.label ?? ""}</span>
+            <span style="font-size:12.5px; color:var(--fg-1); font-weight:500;">${active ? (this.t.nav[active.id] ?? active.label) : ""}</span>
           </div>
           <div style="flex:1"></div>
           <div style="--wails-draggable: no-drag; display:flex; align-items:center; gap:6px;">
             <button style="display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:6px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); color:var(--fg-2); font-family:var(--font-sans); font-size:11.5px; cursor:pointer;">
               <i class="fa-solid fa-magnifying-glass" style="font-size:10px;"></i>
-              <span>Search</span>
+              <span>${this.t.search}</span>
               <span style="font-family:var(--font-mono); font-size:9.5px; padding:0 4px; border-left:1px solid rgba(255,255,255,0.10); margin-left:4px; padding-left:8px; color:var(--fg-3);">⌘K</span>
             </button>
-            <button @click=${() => this._select("settings")} title="Settings" style="width:26px; height:26px; border-radius:6px; background:transparent; border:1px solid transparent; color:var(--fg-3); cursor:pointer;">
+            <button @click=${() => this._select("settings")} title=${this.t.settingsTip} style="width:26px; height:26px; border-radius:6px; background:transparent; border:1px solid transparent; color:var(--fg-3); cursor:pointer;">
               <i class="fa-solid fa-sliders" style="font-size:11px;"></i>
             </button>
             <button title="Vi" style="width:26px; height:26px; border-radius:6px; background:rgba(64,193,197,0.10); border:1px solid rgba(64,193,197,0.22); color:var(--brand-300); cursor:pointer;">
@@ -239,15 +292,15 @@ class LthnAppShell extends LitElement {
                 <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.model}</span>
               </div>
             ` : html`<lthn-status-dot variant=${this.running ? "ok" : "idle"} ?pulse=${this.running}></lthn-status-dot>`}
-            <button @click=${this._toggleCollapse} title=${this.collapsed ? "Expand" : "Collapse"} style="width:22px; height:22px; border-radius:5px; background:transparent; border:1px solid rgba(255,255,255,0.07); color:var(--fg-3); cursor:pointer; display:flex; align-items:center; justify-content:center;">
+            <button @click=${this._toggleCollapse} title=${this.collapsed ? this.t.expand : this.t.collapse} style="width:22px; height:22px; border-radius:5px; background:transparent; border:1px solid rgba(255,255,255,0.07); color:var(--fg-3); cursor:pointer; display:flex; align-items:center; justify-content:center;">
               <i class="fa-solid ${this.collapsed ? "fa-angles-right" : "fa-angles-left"}" style="font-size:9px;"></i>
             </button>
           </div>
 
-          ${this._renderNavGroup("primary",  "Workspace")}
-          ${this._renderNavGroup("observe",  "Observe")}
-          ${this._renderNavGroup("extend",   "Extend")}
-          ${this._renderNavGroup("preview",  "Preview")}
+          ${this._renderNavGroup("primary",  this.t.group.primary)}
+          ${this._renderNavGroup("observe",  this.t.group.observe)}
+          ${this._renderNavGroup("extend",   this.t.group.extend)}
+          ${this._renderNavGroup("preview",  this.t.group.preview)}
           <div style="flex:1"></div>
           ${this._renderNavGroup("bottom",   null)}
         </aside>

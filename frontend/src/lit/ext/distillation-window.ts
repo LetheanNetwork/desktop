@@ -4,14 +4,32 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
+import { T } from "@lthn/i18n/coreservice";
 
 class LthnDistillationWindow extends LitElement {
-  static properties = { w: { type: Number }, h: { type: Number }, embedded: { type: Boolean, reflect: true } };
+  static properties = {
+    w: { type: Number },
+    h: { type: Number },
+    embedded: { type: Boolean, reflect: true },
+    chrome: { state: true },
+  };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
-  constructor() { super(); this.w = 1100; this.h = 740; this.embedded = false; }
+  declare chrome: { title: string; subtitle: string };
+  constructor() {
+    super();
+    this.w = 1100; this.h = 740; this.embedded = false;
+    this.chrome = { title: "Fine-tune", subtitle: "LoRA · SFT · distill · merge" };
+  }
   createRenderRoot() { return this; }
+  async connectedCallback() {
+    super.connectedCallback();
+    this.chrome = {
+      title: await T("window.distillation.title"),
+      subtitle: await T("window.distillation.subtitle"),
+    };
+  }
 
   render() {
     // Deterministic-ish loss curve so the screenshot is stable
@@ -151,7 +169,7 @@ class LthnDistillationWindow extends LitElement {
     `;
 
     return renderChrome({
-      title: "Fine-tune", subtitle: "LoRA · SFT · distill · merge",
+      title: this.chrome.title, subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, toolbar, body,
       footer: html`step 4 of 5 · running · epoch 2/3 · loss 0.84 · ETA 14 min · 9.8 W`,
       embedded: this.embedded,
