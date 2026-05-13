@@ -6,6 +6,16 @@ import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
 import { T } from "@lthn/i18n/coreservice";
 
+/** Parse the "1s" / "2s" / "5s" / "off" picker value into a setInterval
+ *  delay in ms. "off" → 0 so the caller can skip scheduling. Unknown
+ *  values fall back to 2s — same default the tray + Settings ship. */
+function parseInterval(v: string): number {
+  if (v === "off") return 0;
+  const m = /^(\d+)s$/.exec(v);
+  if (!m) return 2000;
+  return parseInt(m[1], 10) * 1000;
+}
+
 class LthnTelemetryWindow extends LitElement {
   static properties = {
     w: { type: Number },
@@ -56,7 +66,13 @@ class LthnTelemetryWindow extends LitElement {
     ]);
     this.chrome = { title, subtitleNormal: subN, subtitleFullscreen: subF };
     void this._poll();
-    this._pollTimer = window.setInterval(() => void this._poll(), 2000);
+    // Cadence + rolling-window size live in localStorage, written by
+    // Settings → Telemetry. "off" disables polling outright — the
+    // sample stays fixed on whatever the first read returned.
+    const interval = parseInterval(localStorage.getItem("lthn.telemetry.interval") || "2s");
+    if (interval > 0) {
+      this._pollTimer = window.setInterval(() => void this._poll(), interval);
+    }
   }
   disconnectedCallback() {
     super.disconnectedCallback();
@@ -85,8 +101,9 @@ class LthnTelemetryWindow extends LitElement {
       };
       const heapNext = [...this.heapHistory, this.sample.heap_alloc_mb];
       const goNext = [...this.goHistory, this.sample.num_goroutines];
-      this.heapHistory = heapNext.length > 24 ? heapNext.slice(-24) : heapNext;
-      this.goHistory = goNext.length > 24 ? goNext.slice(-24) : goNext;
+      const cap = Math.max(4, parseInt(localStorage.getItem("lthn.telemetry.samples") || "24", 10) || 24);
+      this.heapHistory = heapNext.length > cap ? heapNext.slice(-cap) : heapNext;
+      this.goHistory = goNext.length > cap ? goNext.slice(-cap) : goNext;
       this.model = (models && models[0]) || "no model loaded";
       this.err = "";
     } catch (e: unknown) {

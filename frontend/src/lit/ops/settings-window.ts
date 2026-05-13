@@ -20,6 +20,8 @@ class LthnSettingsWindow extends LitElement {
     modelsDir: { state: true },
     routeNames: { state: true },
     build: { state: true },
+    sampleInterval: { state: true },
+    heapSamples: { state: true },
   };
   declare open: string;
   declare w: number;
@@ -32,6 +34,8 @@ class LthnSettingsWindow extends LitElement {
   declare modelsDir: string;
   declare routeNames: string[];
   declare build: { version: string; go_version: string; goos: string; goarch: string; num_cpu: number };
+  declare sampleInterval: string;
+  declare heapSamples: string;
   constructor() {
     super();
     this.open = "general"; this.w = 760; this.h = 600; this.embedded = false;
@@ -45,6 +49,41 @@ class LthnSettingsWindow extends LitElement {
     this.modelsDir = "~/Lethean/conf/models/";
     this.routeNames = [];
     this.build = { version: "0.1.0", go_version: "", goos: "", goarch: "", num_cpu: 0 };
+    // Telemetry poll cadence + sparkline window. Persisted via
+    // localStorage so the tray + telemetry-window read the same
+    // values at their connectedCallback.
+    this.sampleInterval = localStorage.getItem("lthn.telemetry.interval") || "2s";
+    this.heapSamples    = localStorage.getItem("lthn.telemetry.samples")  || "24";
+  }
+
+  _setSampleInterval(v: string) {
+    this.sampleInterval = v;
+    localStorage.setItem("lthn.telemetry.interval", v);
+  }
+
+  _setHeapSamples(v: string) {
+    this.heapSamples = v;
+    localStorage.setItem("lthn.telemetry.samples", v);
+  }
+
+  /** Interactive segment — same chip shape as _segment but each
+   *  option fires onPick. Used by the telemetry sample-interval +
+   *  heap-window pickers so settings actually persists. */
+  _segmentPick(value: string, options: string[], onPick: (v: string) => void) {
+    return html`
+      <div style="display:inline-flex; border-radius:6px;
+                  background:rgba(0,0,0,0.18); border:1px solid rgba(255,255,255,0.06); padding:2px;">
+        ${options.map(o => html`
+          <button @click=${() => onPick(o)}
+            style="padding:4px 10px; font-family:var(--font-mono); font-size:10.5px;
+                   border:none; cursor:pointer;
+                   color:${o === value ? "var(--fg-0)" : "var(--fg-3)"};
+                   background:${o === value ? "rgba(255,255,255,0.08)" : "transparent"};
+                   border-radius:4px; letter-spacing:0.02em;
+                   --wails-draggable: no-drag;">${o}</button>
+        `)}
+      </div>
+    `;
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -328,9 +367,9 @@ class LthnSettingsWindow extends LitElement {
       desc: "Process metrics shown in the tray + live-telemetry window. Local only; nothing leaves the device.",
       content: html`
         ${this._row("Sample interval", "How often the tray polls the runner. 2s is the calm-presence default.",
-          this._segment("2s", ["1s", "2s", "5s", "off"]))}
+          this._segmentPick(this.sampleInterval, ["1s", "2s", "5s", "off"], v => this._setSampleInterval(v)))}
         ${this._row("Heap samples", "Rolling window the sparkline draws from.",
-          this._segment("24", ["12", "24", "48", "96"]))}
+          this._segmentPick(this.heapSamples, ["12", "24", "48", "96"], v => this._setHeapSamples(v)))}
         ${this._row("Power metrics", "Requires the XPC helper (planned). Off today.", html`
           <lthn-toggle></lthn-toggle>
         `)}
