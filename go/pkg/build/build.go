@@ -102,6 +102,24 @@ type Detection struct {
 	HasCoreBin  bool     `json:"has_core_bin"`
 }
 
+func (d Detection) withCommand(projectType, command string, args []string) Detection {
+	d.ProjectType = projectType
+	d.Command = command
+	d.Args = args
+	return d
+}
+
+func (d Detection) withCoreFallback(projectType, command string, args []string) Detection {
+	if d.HasCoreBin {
+		return d.withCommand(projectType, "core", []string{"build"})
+	}
+	return d.withCommand(projectType, command, args)
+}
+
+func goBuildArgs(root string) []string {
+	return []string{"-c", "cd " + shellQuote(root) + goBuildNoOutputSuffix}
+}
+
 // detectProject mirrors core/ide's projectdetect logic. Marker
 // priority: .core/build.yaml → wails.json → go.mod (root then
 // go/ subdir) → go.work → Dockerfile → CMakeLists.txt →
@@ -111,51 +129,25 @@ func detectProject(root string) Detection {
 	hasConfig := exists(core.PathJoin(root, ".core", "build.yaml"))
 	switch {
 	case hasConfig && d.HasCoreBin:
-		d.ProjectType, d.Command, d.Args = "config", "core", []string{"build"}
+		d = d.withCommand("config", "core", []string{"build"})
 	case exists(core.PathJoin(root, "wails.json")):
-		if d.HasCoreBin {
-			d.ProjectType, d.Command, d.Args = "wails", "core", []string{"build"}
-		} else {
-			d.ProjectType, d.Command, d.Args = "wails", "wails", []string{"build"}
-		}
+		d = d.withCoreFallback("wails", "wails", []string{"build"})
 	case exists(core.PathJoin(root, "go.mod")):
-		if d.HasCoreBin {
-			d.ProjectType, d.Command, d.Args = "go", "core", []string{"build"}
-		} else {
-			d.ProjectType, d.Command, d.Args = "go", "sh", []string{
-				"-c", "cd " + shellQuote(root) + goBuildNoOutputSuffix,
-			}
-		}
+		d = d.withCoreFallback("go", "sh", goBuildArgs(root))
 	case exists(core.PathJoin(root, "go", "go.mod")):
-		if d.HasCoreBin {
-			d.ProjectType, d.Command, d.Args = "go-subdir", "core", []string{"build"}
-		} else {
-			d.ProjectType, d.Command, d.Args = "go-subdir", "sh", []string{
-				"-c", "cd " + shellQuote(core.PathJoin(root, "go")) + goBuildNoOutputSuffix,
-			}
-		}
+		d = d.withCoreFallback("go-subdir", "sh", goBuildArgs(core.PathJoin(root, "go")))
 	case exists(core.PathJoin(root, "go.work")):
-		if d.HasCoreBin {
-			d.ProjectType, d.Command, d.Args = "go-work", "core", []string{"build"}
-		} else {
-			d.ProjectType, d.Command, d.Args = "go-work", "sh", []string{
-				"-c", "cd " + shellQuote(root) + goBuildNoOutputSuffix,
-			}
-		}
+		d = d.withCoreFallback("go-work", "sh", goBuildArgs(root))
 	case exists(core.PathJoin(root, "Dockerfile")):
-		if d.HasCoreBin {
-			d.ProjectType, d.Command, d.Args = "docker", "core", []string{"build"}
-		} else {
-			d.ProjectType, d.Command, d.Args = "docker", "docker", []string{"build", "."}
-		}
+		d = d.withCoreFallback("docker", "docker", []string{"build", "."})
 	case exists(core.PathJoin(root, "CMakeLists.txt")):
-		d.ProjectType, d.Command, d.Args = "cpp", "cmake", []string{"--build", "build"}
+		d = d.withCommand("cpp", "cmake", []string{"--build", "build"})
 	case exists(core.PathJoin(root, "Taskfile.yaml")), exists(core.PathJoin(root, "Taskfile.yml")):
-		d.ProjectType, d.Command, d.Args = "taskfile", "task", []string{"build"}
+		d = d.withCommand("taskfile", "task", []string{"build"})
 	case exists(core.PathJoin(root, "composer.json")):
-		d.ProjectType, d.Command, d.Args = "php", "composer", []string{"install"}
+		d = d.withCommand("php", "composer", []string{"install"})
 	case exists(core.PathJoin(root, "package.json")):
-		d.ProjectType, d.Command, d.Args = "node", "npm", []string{"run", "build"}
+		d = d.withCommand("node", "npm", []string{"run", "build"})
 	case hasConfig:
 		d.ProjectType = "config" // .core/build.yaml exists but no core binary
 	default:
