@@ -2,7 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- viewport — Wails WebView lives inside a native OS window so the
+       mobile-style viewport meta doesn't matter for layout, but
+       initial-scale=1.0 + viewport-fit=cover keep DevTools-on-iOS
+       behaviour sane and stop any user-zoom drift if the embedded
+       WebView ever inherits a pinch gesture from the host. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!-- colour-scheme: dark — hints to the WebView's form controls,
+       scrollbars, and native dialog chrome that this is a dark app
+       so they render with dark defaults instead of light. -->
+  <meta name="color-scheme" content="dark" />
   <title>lthn</title>
   <link rel="stylesheet" href="/src/tokens.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
@@ -12,6 +21,20 @@
       background: var(--surf-0, #0a0a0e);
       color: var(--fg-0, #f0f0f5);
       font-family: var(--font-sans, "Geist", system-ui);
+      font-size: 14px;
+      line-height: 1.45;
+
+      /* Retina text rendering — the macOS WebView defaults to
+         subpixel-antialiased which makes thin light-on-dark text
+         look heavier and slightly blurry. The `antialiased` /
+         `grayscale` pair plus `optimizeLegibility` gives crisp,
+         even strokes at 2× and 3× DPR. Without these the chat
+         body + sidebar labels feel cramped on retina displays. */
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+
       /* Kill the macOS WebKit rubber-band overscroll — every named
          lthn window has internal scrolling where needed; the OS
          shouldn't bounce the whole page when content fits. */

@@ -345,3 +345,36 @@
 
 /* Currency/number alignment helper */
 .surface .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+/* ─────────────────────────────────────────────────────────
+   Window-shaped Lit custom elements fill their parent. The
+   chrome inside paints at 100% × 100% (so the card matches
+   the OS window declared in pkg/desktop/windows.go), which
+   requires the host custom element to be a block-level box
+   with an explicit height. Without these rules the inline
+   default collapses to content height + the chrome's 100%
+   has nothing to grow into.
+
+   Future mobile breakpoints layer on top of the 100% layout
+   via media queries inside individual window bodies.
+   ─────────────────────────────────────────────────────── */
+lthn-app-shell,
+lthn-chat-window,
+lthn-welcome-window,
+lthn-settings-window,
+lthn-model-browser-window,
+lthn-telemetry-window,
+lthn-benchmark-window,
+lthn-logs-window,
+lthn-integrations-window,
+lthn-tools-window,
+lthn-network-window,
+lthn-distillation-window,
+lthn-fleet-window {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}

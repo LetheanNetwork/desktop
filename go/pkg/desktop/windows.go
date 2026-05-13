@@ -121,7 +121,12 @@ func windowRegistry() []WindowSpec {
 		// ?pane=<id> set; the side-nav swaps panes internally thereafter.
 		{
 			Name: "app", Title: "Lethean Desktop",
-			Width: 1200, Height: 800, MinWidth: 900, MinHeight: 600,
+			// Bumped from 1200×800 — four-column chat layout (nav +
+			// conversation list + chat body + right rail) felt cramped
+			// at the previous default. 1440×900 is the standard MBP 14"+
+			// retina viewport so the unified shell breathes on most
+			// modern Macs without spilling off small displays.
+			Width: 1440, Height: 900, MinWidth: 1000, MinHeight: 680,
 			Frameless: true, HideOnClose: true, EnableFileDrop: true,
 			InvisibleTitleBarHeight:  titleBarH,
 			DisableNativeContextMenu: true,

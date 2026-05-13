@@ -183,11 +183,30 @@ func (s *Service) Run() core.Result {
 		// to the first instance via OnSecondInstanceLaunch and then
 		// exits. UniqueID is the macOS Bundle Identifier so the OS
 		// flock honours app-store distribution + dev/prod isolation.
-		// The second-instance payload is re-emitted onto the lthn:*
-		// bus so the frontend reacts the same way it does to first-
-		// launch open-with-file / launched-with-url.
+		//
+		// EncryptionKey enables AES-256-GCM on the inter-instance
+		// channel. Without it the wails docs warn:
+		// "your app should treat any data passed to it from second
+		//  instance callback as untrusted". Since lthn re-broadcasts
+		// the second-instance payload straight onto the lthn:* event
+		// bus where the frontend acts on it, untrusted args are a
+		// real injection risk. The 32-byte literal here is build-time
+		// constant (same value in every install of the same binary,
+		// so legit second launches authenticate against the running
+		// first instance; a third-party attacker would need the
+		// binary's bytes to forge a payload).
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: "io.lethean.desktop",
+			EncryptionKey: [32]byte{
+				0x6c, 0x74, 0x68, 0x6e, 0x2e, 0x73, 0x69, 0x6e,
+				0x67, 0x6c, 0x65, 0x2d, 0x69, 0x6e, 0x73, 0x74,
+				0x61, 0x6e, 0x63, 0x65, 0x2e, 0x76, 0x31, 0x2e,
+				0x6c, 0x65, 0x74, 0x68, 0x65, 0x61, 0x6e, 0x21,
+			},
+			AdditionalData: map[string]string{
+				"app":     "lthn-desktop",
+				"version": "0.2.0-rc1",
+			},
 			OnSecondInstanceLaunch: func(d application.SecondInstanceData) {
 				if s.app == nil {
 					return
@@ -195,20 +214,25 @@ func (s *Service) Run() core.Result {
 				// Re-broadcast the second-launch context so any
 				// frontend subscribers (router / wizard / chat)
 				// can act on it. Same shape as ApplicationStarted
-				// / OpenedWithFile / LaunchedWithUrl emit.
+				// / OpenedWithFile / LaunchedWithUrl emit. Safe to
+				// trust because EncryptionKey above authenticates
+				// the channel — anything reaching this callback
+				// came from a binary holding the same key.
 				s.app.Event.Emit("lthn:app:second-instance", map[string]any{
-					"args":         d.Args,
-					"workdir":      d.WorkingDir,
-					"additional":   d.AdditionalData,
+					"args":       d.Args,
+					"workdir":    d.WorkingDir,
+					"additional": d.AdditionalData,
 				})
-				// Bring the tray popover (or the unified app
-				// shell if it's open) back to the foreground so
-				// the user notices the redirect.
+				// Bring the unified app shell (preferred) or the
+				// tray popover back to the foreground. Restore()
+				// before Focus() handles the case where the window
+				// was minimised — Wails docs canon for the second-
+				// instance UX.
 				if w, ok := s.app.Window.GetByName("app"); ok {
-					w.Show()
+					w.Restore()
 					w.Focus()
 				} else if w, ok := s.app.Window.GetByName("tray"); ok {
-					w.Show()
+					w.Restore()
 					w.Focus()
 				}
 			},

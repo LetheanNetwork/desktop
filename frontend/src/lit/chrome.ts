@@ -343,9 +343,18 @@ export function renderChrome({ title, subtitle, w = 900, h = 600, toolbar, body,
       </div>
     `;
   }
+  // Wails windows ARE the size container — the OS window is sized by
+  // pkg/desktop/windows.go's registry. The card should fill that
+  // container (100% × 100%) rather than paint a fixed-pixel card at
+  // each component's self-declared w/h, which previously caused the
+  // inner card to either clip past the OS window edge or leave gaps.
+  // The w / h ChromeOptions stay as canvas-preview hints (used by the
+  // ?surface=canvas dev route, which can wrap windows in fixed-sized
+  // containers). Future mobile breakpoints can layer on top of the
+  // 100% layout via media queries inside the body content.
   return html`
     <div class="lthn-window" style="
-      width:${w}px; height:${h}px;
+      width:100%; height:100%;
       display:flex; flex-direction:column;
       background: linear-gradient(180deg, rgba(20,18,26,0.92) 0%, rgba(12,11,16,0.94) 100%);
       backdrop-filter: blur(20px) saturate(180%);
