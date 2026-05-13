@@ -16,6 +16,12 @@ import (
 // "ai.lthn.serve" is the launchctl label.
 const labelPrefix = "ai.lthn."
 
+const (
+	installLaunchAgentOp       = "services.installLaunchAgent"
+	installSystemdUserUnitOp   = "services.installSystemdUserUnit"
+	uninstallSystemdUserUnitOp = "services.uninstallSystemdUserUnit"
+)
+
 type controller struct {
 	entry Entry
 	label string
@@ -158,17 +164,17 @@ func (ctl *controller) installLaunchAgent() core.Result {
 	}
 	plistPath := path.Value.(string)
 	if r := core.MkdirAll(core.PathDir(plistPath), 0o755); !r.OK {
-		return core.Fail(core.E("services.installLaunchAgent", "create LaunchAgents directory", r.Value.(error)))
+		return core.Fail(core.E(installLaunchAgentOp, "create LaunchAgents directory", r.Value.(error)))
 	}
 	if r := core.WriteFile(plistPath, []byte(launchAgentPlist(ctl.entry, ctl.label, ctl.exe)), 0o644); !r.OK {
-		return core.Fail(core.E("services.installLaunchAgent", "write launch agent plist", r.Value.(error)))
+		return core.Fail(core.E(installLaunchAgentOp, "write launch agent plist", r.Value.(error)))
 	}
 	domain := ctl.launchctlDomain()
 	if !domain.OK {
 		return domain
 	}
 	if r := ctl.launchctl("bootstrap", domain.Value.(string), plistPath); !r.OK && !core.Contains(r.Error(), "already") {
-		return core.Fail(core.E("services.installLaunchAgent", "bootstrap launch agent", r.Value.(error)))
+		return core.Fail(core.E(installLaunchAgentOp, "bootstrap launch agent", r.Value.(error)))
 	}
 	return core.Ok(nil)
 }
@@ -252,27 +258,27 @@ func (ctl *controller) installSystemdUserUnit() core.Result {
 		return dir
 	}
 	if r := core.MkdirAll(dir.Value.(string), 0o755); !r.OK {
-		return core.Fail(core.E("services.installSystemdUserUnit", "create systemd user directory", r.Value.(error)))
+		return core.Fail(core.E(installSystemdUserUnitOp, "create systemd user directory", r.Value.(error)))
 	}
 	path := ctl.systemdUnitPath()
 	if !path.OK {
 		return path
 	}
 	if r := core.WriteFile(path.Value.(string), []byte(systemdUnit(ctl.entry, ctl.label, ctl.exe)), 0o644); !r.OK {
-		return core.Fail(core.E("services.installSystemdUserUnit", "write systemd unit", r.Value.(error)))
+		return core.Fail(core.E(installSystemdUserUnitOp, "write systemd unit", r.Value.(error)))
 	}
 	if r := ctl.systemctl("daemon-reload"); !r.OK {
-		return core.Fail(core.E("services.installSystemdUserUnit", "reload systemd user units", r.Value.(error)))
+		return core.Fail(core.E(installSystemdUserUnitOp, "reload systemd user units", r.Value.(error)))
 	}
 	if r := ctl.systemctl("enable", "--now", ctl.systemdUnitName()); !r.OK {
-		return core.Fail(core.E("services.installSystemdUserUnit", "enable systemd unit", r.Value.(error)))
+		return core.Fail(core.E(installSystemdUserUnitOp, "enable systemd unit", r.Value.(error)))
 	}
 	return core.Ok(nil)
 }
 
 func (ctl *controller) uninstallSystemdUserUnit() core.Result {
 	if r := ctl.systemctl("disable", "--now", ctl.systemdUnitName()); !r.OK && !serviceManagerMissing(r) {
-		return core.Fail(core.E("services.uninstallSystemdUserUnit", "disable systemd unit", r.Value.(error)))
+		return core.Fail(core.E(uninstallSystemdUserUnitOp, "disable systemd unit", r.Value.(error)))
 	}
 	path := ctl.systemdUnitPath()
 	if !path.OK {
@@ -282,10 +288,10 @@ func (ctl *controller) uninstallSystemdUserUnit() core.Result {
 		if err, ok := r.Value.(error); ok && core.IsNotExist(err) {
 			return core.Ok(nil)
 		}
-		return core.Fail(core.E("services.uninstallSystemdUserUnit", "remove systemd unit", r.Value.(error)))
+		return core.Fail(core.E(uninstallSystemdUserUnitOp, "remove systemd unit", r.Value.(error)))
 	}
 	if r := ctl.systemctl("daemon-reload"); !r.OK {
-		return core.Fail(core.E("services.uninstallSystemdUserUnit", "reload systemd user units", r.Value.(error)))
+		return core.Fail(core.E(uninstallSystemdUserUnitOp, "reload systemd user units", r.Value.(error)))
 	}
 	return core.Ok(nil)
 }

@@ -27,6 +27,8 @@ import (
 	"dappco.re/lthn/desktop/pkg/services"
 )
 
+const unknownServiceName = "not-real"
+
 func TestServices_Registry_Good_HasKnownEntries(t *core.T) {
 	entries := services.Registry()
 	core.AssertGreater(t, len(entries), 0, "registry must not be empty")
@@ -77,37 +79,37 @@ func TestServices_Names_Good(t *core.T) {
 // defensive path is covered.
 
 func TestServices_Install_Bad_UnknownName(t *core.T) {
-	r := services.Install("not-real")
+	r := services.Install(unknownServiceName)
 	core.AssertFalse(t, r.OK)
 	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestServices_Uninstall_Bad_UnknownName(t *core.T) {
-	r := services.Uninstall("not-real")
+	r := services.Uninstall(unknownServiceName)
 	core.AssertFalse(t, r.OK)
 	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestServices_Start_Bad_UnknownName(t *core.T) {
-	r := services.Start("not-real")
+	r := services.Start(unknownServiceName)
 	core.AssertFalse(t, r.OK)
 	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestServices_Stop_Bad_UnknownName(t *core.T) {
-	r := services.Stop("not-real")
+	r := services.Stop(unknownServiceName)
 	core.AssertFalse(t, r.OK)
 	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestServices_Restart_Bad_UnknownName(t *core.T) {
-	r := services.Restart("not-real")
+	r := services.Restart(unknownServiceName)
 	core.AssertFalse(t, r.OK)
 	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestServices_Status_Bad_UnknownName(t *core.T) {
-	r := services.Status("not-real")
+	r := services.Status(unknownServiceName)
 	core.AssertFalse(t, r.OK)
 	core.AssertNotEmpty(t, r.Error())
 }
