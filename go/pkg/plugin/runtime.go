@@ -152,6 +152,11 @@ func (s *Service) startPlugin(ctx context.Context, code, token string) core.Resu
 	// Wire the proxy mount + flip state to running.
 	s.proxy.Set(code, ps2.proc.target)
 	ps2.state = "running"
+	// Attach the supervisor — on unexpected exit it decides
+	// restart-vs-die. User-initiated Stop sets state to
+	// "stopped" first so the watcher knows the exit was
+	// expected and skips the restart path.
+	go s.watchProcess(code, proc)
 	return core.Ok(nil)
 }
 

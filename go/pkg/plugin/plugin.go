@@ -141,6 +141,12 @@ type pluginState struct {
 	startedAt time.Time
 	stoppedAt time.Time
 	lastError string
+	// crashAt records timestamps of recent unexpected exits.
+	// The supervisor (supervisor.go) trims this to a rolling
+	// window and uses len() to decide restart-vs-give-up. v1
+	// of the data structure is intentionally a flat slice —
+	// at the 3-crash threshold the slice never grows past 4.
+	crashAt []time.Time
 }
 
 // statusFor projects the current pluginState into the wire-shape
