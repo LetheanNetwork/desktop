@@ -172,10 +172,12 @@ the live `api.Engine`. RouteGroups today: `RunnerGroup` (GET /v1/runner/models, 
 - **Wails3 bindings** — same-process Service access from the Lit windows; auto-generated under `frontend/bindings/`. Zero network hop.
 - **`@lthn/sdk-*` family on npm** — external clients (Claude Code, Codex, OpenCode, Raycast extensions, future plugins) and Lethean fleet peers. Each flavour lives in its own GitHub repo (`LetheanNetwork/sdk-<flavour>`) and publishes to npm separately. The flavour list is in `build/sdk/publish.sh`'s MANIFEST.
 
-**Published flavours** (`LetheanNetwork/sdk-<id>` → `@lthn/sdk-<id>` on npm):
+**Published flavours** (`LetheanNetwork/sdk-<id>` → `@lthn/sdk-<id>` on the matching package registry):
 - TypeScript: `typescript-fetch`, `typescript-axios`, `typescript`, `typescript-angular`, `typescript-rxjs`, `typescript-node`, `typescript-redux-query`, `typescript-inversify`, `typescript-aurelia`, `typescript-jquery`
-- JavaScript: `javascript`, `javascript-flowtyped`, `javascript-closure-angular`
-- Deferred: `javascript-apollo` (openapi-generator 7.22.0 errors out before emitting files; revisit upstream)
+- JavaScript: `javascript`, `javascript-flowtyped`, `javascript-closure-angular`, `javascript-apollo` (generator name carries `-deprecated` suffix in 7.x; we still publish since the repo exists)
+- Native: `c` (libcurl), `cpp-restsdk` (Casablanca), `cpp-qt` (Qt; formerly `cpp-qt5-client`), `csharp` (multi-target .NET), `objc`, `swift5`, `kotlin`, `rust`, `dart`, `dart-dio`, `clojure`
+
+Generator-name aliases handled in the MANIFEST: openapi-generator 7.x dropped `cpp-qt5-client` → `cpp-qt-client`, dropped `swift4` (use `swift5`), dropped `csharp-netcore` (rolled into `csharp` via `targetFramework=` additional-property), renamed `javascript-apollo` → `javascript-apollo-deprecated`. The MANIFEST keeps a stable repo id while routing to the live generator name; `--additional-properties npmName=... npmVersion=...` is applied only to TS/JS generators, natives use their own package-naming conventions.
 
 **Workflow** (regen on spec change):
 

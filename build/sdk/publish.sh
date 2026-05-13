@@ -31,7 +31,13 @@ DESC="lthn HTTP gateway SDK — auto-generated from the live api.Engine. See htt
 # id|generator|description-suffix. apollo is excluded — its
 # openapi-generator-cli 7.22.0 backend currently errors out before
 # emitting files; revisit when upstream fixes it.
+#
+# id == the LetheanNetwork repo suffix (LetheanNetwork/sdk-<id>) AND
+# the npm-shaped package name (@lthn/sdk-<id>). generator == the
+# openapi-generator-cli -g argument; they differ in one place today:
+# cpp-qt5 (id) → cpp-qt5-client (generator).
 MANIFEST=(
+  # ── TypeScript family ──────────────────────────────────────────────
   "typescript-fetch|typescript-fetch|Zero-dependency fetch() client. Default for Lit / Wails WebView / vanilla TS apps."
   "typescript-axios|typescript-axios|axios client — Node + browser, the de-facto ergonomic REST shape."
   "typescript|typescript|Configurable backend (fetch / axios / jquery) selected via --additional-properties."
@@ -42,9 +48,31 @@ MANIFEST=(
   "typescript-inversify|typescript-inversify|InversifyJS DI containers."
   "typescript-aurelia|typescript-aurelia|Aurelia framework client."
   "typescript-jquery|typescript-jquery|jQuery \$.ajax client — legacy support."
+  # ── JavaScript family ──────────────────────────────────────────────
   "javascript|javascript|Plain ES6 client without TypeScript."
   "javascript-flowtyped|javascript-flowtyped|JS + Flow type annotations."
   "javascript-closure-angular|javascript-closure-angular|Google Closure Compiler + AngularJS."
+  "javascript-apollo|javascript-apollo-deprecated|Apollo GraphQL client (deprecated by upstream — name carries the -deprecated suffix in 7.x)."
+  # ── C / C++ ────────────────────────────────────────────────────────
+  "c|c|libcurl-based ANSI C client. Embedded, kernel-adjacent, FFI bridge target."
+  "cpp-restsdk|cpp-restsdk|Microsoft cpprestsdk (Casablanca). Classic modern-C++ REST client."
+  "cpp-qt|cpp-qt-client|Qt client (formerly cpp-qt5-client; renamed to cpp-qt-client in 7.x). QNetworkAccessManager-backed."
+  # ── .NET family ────────────────────────────────────────────────────
+  "csharp|csharp|Newer C# generator. Multi-target — net8.0 / net6.0 / net47 / net48 / netstandard2.0+."
+  # csharp-netcore generator was removed in openapi-generator 7.x —
+  # the unified csharp generator handles every .NET target via
+  # --additional-properties targetFramework=...
+  # ── Apple platforms ────────────────────────────────────────────────
+  "objc|objc|Objective-C client (NSURLConnection / AFNetworking). Cocoa / iOS-legacy lane."
+  "swift5|swift5|Swift 5+ URLSession client. iOS / macOS / SwiftUI consumers."
+  # swift4 generator was removed in openapi-generator 7.x —
+  # swift5 is the only Swift client generator.
+  # ── Android / JVM / native ─────────────────────────────────────────
+  "kotlin|kotlin|Kotlin client for Android + general JVM ecosystems."
+  "rust|rust|Rust reqwest-based async client."
+  "dart|dart|Dart client (basic HTTP)."
+  "dart-dio|dart-dio|Dart with Dio HTTP — Flutter community canon."
+  "clojure|clojure|JVM functional Lisp client."
 )
 
 # Filter to selected ids if any were passed as args.
@@ -80,13 +108,23 @@ for row in "${MANIFEST[@]}"; do
   echo "  $id  →  $remote_url"
   echo "═══════════════════════════════════════════════════════════════"
 
+  # Per-generator --additional-properties. TS/JS generators consume
+  # npmName + npmVersion; other generators have their own knobs
+  # (Swift's projectName, Rust's packageName, ObjC's classPrefix, …).
+  # We let the native generators use their defaults rather than pass
+  # a one-size-fits-all key that they'd warn about and ignore.
+  props=""
+  case "$gen" in
+    typescript*|javascript*)
+      props="npmName=$npm_name,npmVersion=0.1.0,supportsES6=true"
+      ;;
+  esac
+
   rm -rf "$out_dir"
-  if ! openapi-generator-cli generate \
-      -i "$SPEC_PATH" \
-      -g "$gen" \
-      -o "$out_dir" \
-      --additional-properties "npmName=$npm_name,npmVersion=0.1.0,supportsES6=true" \
-      >/dev/null 2>&1; then
+  gen_args=( generate -i "$SPEC_PATH" -g "$gen" -o "$out_dir" )
+  [ -n "$props" ] && gen_args+=( --additional-properties "$props" )
+
+  if ! openapi-generator-cli "${gen_args[@]}" >/dev/null 2>&1; then
     echo "✗ openapi-generator-cli failed for $id — skipping"
     failures+=("$id")
     continue
