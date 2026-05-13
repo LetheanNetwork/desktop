@@ -104,6 +104,7 @@ class LthnChatWindow extends LitElement {
     sendErr: { state: true },
     activeModel: { state: true },
     version: { state: true },
+    runnerCount: { state: true },
   };
   declare state:     ChatState;
   declare rail:      RailMode;
@@ -121,6 +122,7 @@ class LthnChatWindow extends LitElement {
   declare sendErr: string;
   declare activeModel: string;
   declare version: string;
+  declare runnerCount: number;
   constructor() {
     super();
     this.state = "multi-turn";
@@ -138,6 +140,7 @@ class LthnChatWindow extends LitElement {
     this.sendErr = "";
     this.activeModel = "";
     this.version = "0.2.0-rc1";
+    this.runnerCount = 1;
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -164,12 +167,17 @@ class LthnChatWindow extends LitElement {
 
   /** Pull the runner's loaded model list and pick the first one for
    *  the toolbar + footer. Empty list → blank string so the render
-   *  falls back to the fixture label ("No model" / etc.). */
+   *  falls back to the fixture label ("No model" / etc.). Also reads
+   *  the configured route count for the toolbar's "N runner" slot. */
   async _reloadModel() {
     try {
       const svc = await import("@desktop/runner/service");
-      const models = await svc.WModels().catch((): string[] => []);
+      const [models, routes] = await Promise.all([
+        svc.WModels().catch((): string[] => []),
+        svc.WRoutes().catch((): unknown[] => []),
+      ]);
       this.activeModel = (models && models[0]) || "";
+      if (routes && routes.length > 0) this.runnerCount = routes.length;
     } catch {
       this.activeModel = "";
     }
@@ -303,7 +311,7 @@ class LthnChatWindow extends LitElement {
       : this.state === "generating" ? html`
         <lthn-status-dot variant="ok"></lthn-status-dot>Generating · 47.2 t/s · 12.4 W · Airplane-mode OK`
       : html`
-        <lthn-status-dot variant="ok"></lthn-status-dot>Model ready · Airplane-mode OK · 1 runner · v${this.version}`;
+        <lthn-status-dot variant="ok"></lthn-status-dot>Model ready · Airplane-mode OK · ${this.runnerCount} runner · v${this.version}`;
 
     /* — toolbar — */
     const toolbar = html`
@@ -315,7 +323,7 @@ class LthnChatWindow extends LitElement {
         <i class="fa-solid fa-angle-down" style="font-size:9px; color:var(--fg-3); margin-left:2px;"></i>
       </div>
       <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); letter-spacing:0.02em; padding:0 4px;">
-        ${railData.ctx} · 1 runner
+        ${railData.ctx} · ${this.runnerCount} runner
       </div>
       <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-sliders" style="font-size:10px;"></i></lthn-btn>
       <lthn-btn tone="ghost" size="sm" ?active=${this.rightRail === "expanded"}>
