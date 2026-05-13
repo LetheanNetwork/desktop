@@ -12,6 +12,18 @@
 > pattern). Use the AX `_Good` / `_Bad` / `_Ugly` triplet pattern for
 > Go tests. Keep codecov over 70%.
 
+## Codex housekeeping
+
+- Do NOT push. Commit locally; Snider reviews + pushes in the morning.
+- Do NOT run `wails3 dev` or `wails3 build` or launch the `lthn` binary — compile-only iterations are 10× faster.
+- Iteration loop is: `go vet ./go/...` + `go build ./go/cmd/lthn` + `go test ./go/...` + `cd frontend && bun run build` + `bun run test`. Nothing else.
+- After ANY new method on a Wails-exported `*Service`: re-run `cd go && wails3 generate bindings -ts -d ../frontend/bindings -clean=true ./pkg/desktop/...` so the TS side gets typed.
+- NO `replace` directives in any `go.mod`. Workspace mode + `external/<dep>` submodules handle resolution. If a version tag doesn't exist, leave the require at `v0.0.0` and let go.work pick the local source.
+- Adding a submodule: `git submodule add -b dev https://github.com/dappcore/<repo>.git external/<name>` then add `./external/<name>/go` to `go.work`'s `use ()` block. No replace.
+- Audit script starts with a stray `yea` token on line 1 — known quirk, ignore the resulting shell warning. The script still produces correct counts.
+- Network creds (HF tokens, GitHub push, etc.) are NOT available. Any task needing them: leave a `TODO(snider)` and move on.
+- Single commit per logical change with conventional-commit prefix (`feat:` / `fix:` / `test:` / `chore:` / `docs:`). NO commit-spam batching.
+
 ---
 
 ## Objective
