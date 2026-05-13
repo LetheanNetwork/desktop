@@ -189,7 +189,23 @@
       "title": "Welcome to lthn", "subtitle": "step %s of 3",
       "step1_label": "Model directory", "step1_hint": "Where models live",
       "step2_label": "First model",     "step2_hint": "Pick a starter",
-      "step3_label": "Connect",         "step3_hint": "Wire up clients"
+      "step3_label": "Connect",         "step3_hint": "Wire up clients",
+      "step1_title": "Where shall we keep your models?",
+      "step1_body":  "A folder on this Mac. Models can be big — pick somewhere with room. We default to your home directory; change it if you have a faster volume.",
+      "step1_layout_hint": "Canonical Lethean layout · visible in Finder · safe to inspect",
+      "step1_choose": "Choose folder…",
+      "step2_title": "Pick a model to start with.",
+      "step2_body":  "Three small models that run comfortably on Apple Silicon. You can add more from the model browser anytime.",
+      "step2_recommended": "Recommended",
+      "step3_title": "Want to wire it into your tools?",
+      "step3_body":  "lthn speaks the OpenAI-compatible API on %s. We can drop the endpoint into these configs for you. The only outbound action lthn ever takes without you asking.",
+      "step3_empty": "No supported clients detected on this Mac. You can always wire one up later from Settings → Integrations.",
+      "step3_wired": "Already wired",
+      "btn_back":    "Back",
+      "btn_skip":    "Skip for now",
+      "btn_use":     "Use this folder",
+      "btn_download":"Download & continue",
+      "btn_finish":  "Finish"
     }
   }
 }

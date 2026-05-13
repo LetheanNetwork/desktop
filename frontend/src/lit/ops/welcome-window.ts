@@ -61,6 +61,7 @@ class LthnWelcomeWindow extends LitElement {
     endpoint:  { state: true },
     version:   { state: true },
     stepLabels:{ state: true },
+    t:         { state: true },
   };
   declare step: number;
   declare w: number;
@@ -73,6 +74,12 @@ class LthnWelcomeWindow extends LitElement {
   declare endpoint: string;
   declare version: string;
   declare stepLabels: { l: string; h: string }[];
+  declare t: {
+    s1Title: string; s1Body: string; s1LayoutHint: string; s1Choose: string;
+    s2Title: string; s2Body: string; s2Recommended: string;
+    s3Title: string; s3Body: string; s3Empty: string; s3Wired: string;
+    btnBack: string; btnSkip: string; btnUse: string; btnDownload: string; btnFinish: string;
+  };
   constructor() {
     super();
     this.step = 1; this.w = 760; this.h = 580; this.embedded = false;
@@ -87,16 +94,49 @@ class LthnWelcomeWindow extends LitElement {
       { l: "First model",     h: "Pick a starter" },
       { l: "Connect",         h: "Wire up clients" },
     ];
+    this.t = {
+      s1Title: "Where shall we keep your models?",
+      s1Body:  "A folder on this Mac. Models can be big — pick somewhere with room. We default to your home directory; change it if you have a faster volume.",
+      s1LayoutHint: "Canonical Lethean layout · visible in Finder · safe to inspect",
+      s1Choose: "Choose folder…",
+      s2Title: "Pick a model to start with.",
+      s2Body:  "Three small models that run comfortably on Apple Silicon. You can add more from the model browser anytime.",
+      s2Recommended: "Recommended",
+      s3Title: "Want to wire it into your tools?",
+      s3Body:  "lthn speaks the OpenAI-compatible API on %s. We can drop the endpoint into these configs for you. The only outbound action lthn ever takes without you asking.",
+      s3Empty: "No supported clients detected on this Mac. You can always wire one up later from Settings → Integrations.",
+      s3Wired: "Already wired",
+      btnBack:    "Back",
+      btnSkip:    "Skip for now",
+      btnUse:     "Use this folder",
+      btnDownload:"Download & continue",
+      btnFinish:  "Finish",
+    };
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const [title, subtitleFmt, s1l, s1h, s2l, s2h, s3l, s3h] = await Promise.all([
+    const [
+      title, subtitleFmt, s1l, s1h, s2l, s2h, s3l, s3h,
+      s1Title, s1Body, s1Lh, s1Choose,
+      s2Title, s2Body, s2Rec,
+      s3Title, s3Body, s3Empty, s3Wired,
+      bBack, bSkip, bUse, bDownload, bFinish,
+    ] = await Promise.all([
       T("window.welcome.title"),
       T("window.welcome.subtitle"),
       T("window.welcome.step1_label"), T("window.welcome.step1_hint"),
       T("window.welcome.step2_label"), T("window.welcome.step2_hint"),
       T("window.welcome.step3_label"), T("window.welcome.step3_hint"),
+      T("window.welcome.step1_title"), T("window.welcome.step1_body"),
+      T("window.welcome.step1_layout_hint"), T("window.welcome.step1_choose"),
+      T("window.welcome.step2_title"), T("window.welcome.step2_body"),
+      T("window.welcome.step2_recommended"),
+      T("window.welcome.step3_title"), T("window.welcome.step3_body"),
+      T("window.welcome.step3_empty"), T("window.welcome.step3_wired"),
+      T("window.welcome.btn_back"), T("window.welcome.btn_skip"),
+      T("window.welcome.btn_use"), T("window.welcome.btn_download"),
+      T("window.welcome.btn_finish"),
     ]);
     this.chrome = { title, subtitleFmt };
     this.stepLabels = [
@@ -104,6 +144,13 @@ class LthnWelcomeWindow extends LitElement {
       { l: s2l, h: s2h },
       { l: s3l, h: s3h },
     ];
+    this.t = {
+      s1Title, s1Body, s1LayoutHint: s1Lh, s1Choose,
+      s2Title, s2Body, s2Recommended: s2Rec,
+      s3Title, s3Body, s3Empty, s3Wired,
+      btnBack: bBack, btnSkip: bSkip, btnUse: bUse,
+      btnDownload: bDownload, btnFinish: bFinish,
+    };
     // Pull the canonical Lethean paths + the fresh-install flag
     // from the firstlaunch service. The wizard's "Where shall we
     // keep your models?" step shows the real directory the runner
@@ -210,16 +257,16 @@ class LthnWelcomeWindow extends LitElement {
           <div style="flex:1"></div>
           <div style="display:flex; align-items:center; gap:10px; padding-top:18px;">
             ${this.step > 1
-              ? html`<lthn-btn tone="ghost" size="lg" @click=${() => advance(this, -1)}>Back</lthn-btn>`
+              ? html`<lthn-btn tone="ghost" size="lg" @click=${() => advance(this, -1)}>${this.t.btnBack}</lthn-btn>`
               : nothing}
-            <lthn-btn tone="quiet" size="lg" @click=${completeOnboarding}>Skip for now</lthn-btn>
+            <lthn-btn tone="quiet" size="lg" @click=${completeOnboarding}>${this.t.btnSkip}</lthn-btn>
             <div style="flex:1"></div>
             <lthn-btn tone="primary" size="lg" @click=${() => advance(this, 1)}>
               ${this.step === 3
-                ? html`<i class="fa-solid fa-check"></i> Finish`
+                ? html`<i class="fa-solid fa-check"></i> ${this.t.btnFinish}`
                 : this.step === 1
-                ? html`<i class="fa-solid fa-arrow-right"></i> Use this folder`
-                : html`<i class="fa-solid fa-arrow-right"></i> Download & continue`}
+                ? html`<i class="fa-solid fa-arrow-right"></i> ${this.t.btnUse}`
+                : html`<i class="fa-solid fa-arrow-right"></i> ${this.t.btnDownload}`}
             </lthn-btn>
           </div>
         </main>
@@ -241,11 +288,10 @@ class LthnWelcomeWindow extends LitElement {
       <div style="display:flex; flex-direction:column; gap:18px;">
         <div>
           <div style="font-size:24px; font-weight:600; color:var(--fg-0); letter-spacing:-0.018em;">
-            Where shall we keep your models?
+            ${this.t.s1Title}
           </div>
           <div style="font-size:13px; color:var(--fg-2); margin-top:8px; line-height:1.55; max-width:440px;">
-            A folder on this Mac. Models can be big — pick somewhere with room.
-            We default to your home directory; change it if you have a faster volume.
+            ${this.t.s1Body}
           </div>
         </div>
         <div style="margin-top:4px; padding:20px 22px; border:1.5px dashed rgba(64,193,197,0.30);
@@ -261,10 +307,10 @@ class LthnWelcomeWindow extends LitElement {
               ${this.modelsDir}
             </div>
             <div style="font-size:11px; color:var(--fg-3); margin-top:2px;">
-              Canonical Lethean layout · visible in Finder · safe to inspect
+              ${this.t.s1LayoutHint}
             </div>
           </div>
-          <lthn-btn tone="ghost" size="md">Choose folder…</lthn-btn>
+          <lthn-btn tone="ghost" size="md">${this.t.s1Choose}</lthn-btn>
         </div>
       </div>
     `;
@@ -280,11 +326,10 @@ class LthnWelcomeWindow extends LitElement {
       <div style="display:flex; flex-direction:column; gap:16px; min-height:0;">
         <div>
           <div style="font-size:24px; font-weight:600; color:var(--fg-0); letter-spacing:-0.018em;">
-            Pick a model to start with.
+            ${this.t.s2Title}
           </div>
           <div style="font-size:13px; color:var(--fg-2); margin-top:8px; line-height:1.55; max-width:460px;">
-            Three small models that run comfortably on Apple Silicon.
-            You can add more from the model browser anytime.
+            ${this.t.s2Body}
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:8px;">
@@ -301,7 +346,7 @@ class LthnWelcomeWindow extends LitElement {
                 <div style="display:flex; align-items:baseline; gap:8px;">
                   <span style="font-size:13.5px; font-weight:500; color:var(--fg-0); letter-spacing:-0.005em;">${m.name}</span>
                   <span style="font-size:11px; color:var(--fg-3);">· ${m.author}</span>
-                  ${m.rec ? html`<lthn-state-pill variant="latest">Recommended</lthn-state-pill>` : nothing}
+                  ${m.rec ? html`<lthn-state-pill variant="latest">${this.t.s2Recommended}</lthn-state-pill>` : nothing}
                 </div>
                 <div style="font-size:11.5px; color:var(--fg-2); margin-top:3px;">${m.desc}</div>
               </div>
@@ -334,19 +379,20 @@ class LthnWelcomeWindow extends LitElement {
       <div style="display:flex; flex-direction:column; gap:16px;">
         <div>
           <div style="font-size:24px; font-weight:600; color:var(--fg-0); letter-spacing:-0.018em;">
-            Want to wire it into your tools?
+            ${this.t.s3Title}
           </div>
           <div style="font-size:13px; color:var(--fg-2); margin-top:8px; line-height:1.55; max-width:460px;">
-            lthn speaks the OpenAI-compatible API on
-            <span style="font-family:var(--font-mono); color:var(--fg-1);">${this.endpoint}</span>.
-            We can drop the endpoint into these configs for you. The only outbound action lthn ever takes without you asking.
+            ${(() => {
+              const parts = this.t.s3Body.split("%s");
+              return html`${parts[0]}<span style="font-family:var(--font-mono); color:var(--fg-1);">${this.endpoint}</span>${parts[1] || ""}`;
+            })()}
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:6px;">
           ${clients.length === 0 ? html`
             <div style="padding:14px 16px; border-radius:8px; background:rgba(255,255,255,0.025);
                         border:1px solid rgba(255,255,255,0.05); font-size:12px; color:var(--fg-3); line-height:1.55;">
-              No supported clients detected on this Mac. You can always wire one up later from Settings → Integrations.
+              ${this.t.s3Empty}
             </div>
           ` : clients.map(c => html`
             <div style="display:flex; align-items:center; gap:14px; padding:12px 14px; border-radius:8px;
@@ -355,7 +401,7 @@ class LthnWelcomeWindow extends LitElement {
               <div style="flex:1;">
                 <div style="display:flex; align-items:baseline; gap:8px;">
                   <span style="font-size:12.5px; font-weight:500; color:var(--fg-0);">${c.name}</span>
-                  ${c.wired ? html`<lthn-state-pill variant="latest">Already wired</lthn-state-pill>` : nothing}
+                  ${c.wired ? html`<lthn-state-pill variant="latest">${this.t.s3Wired}</lthn-state-pill>` : nothing}
                 </div>
                 <div style="font-size:11px; color:var(--fg-3); margin-top:1px;
                             font-family:var(--font-mono); letter-spacing:0.01em;">${c.path}</div>

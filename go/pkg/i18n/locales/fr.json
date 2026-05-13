@@ -189,7 +189,23 @@
       "title": "Bienvenue sur lthn", "subtitle": "étape %s sur 3",
       "step1_label": "Dossier des modèles", "step1_hint": "Où vivent les modèles",
       "step2_label": "Premier modèle",      "step2_hint": "Choisissez un démarreur",
-      "step3_label": "Connexion",           "step3_hint": "Branchez vos clients"
+      "step3_label": "Connexion",           "step3_hint": "Branchez vos clients",
+      "step1_title": "Où conservons-nous vos modèles ?",
+      "step1_body":  "Un dossier sur ce Mac. Les modèles peuvent être volumineux — choisissez un endroit avec de la place. Par défaut, votre dossier utilisateur ; changez-le si vous avez un volume plus rapide.",
+      "step1_layout_hint": "Disposition Lethean canonique · visible dans le Finder · sûr à inspecter",
+      "step1_choose": "Choisir un dossier…",
+      "step2_title": "Choisissez un modèle pour démarrer.",
+      "step2_body":  "Trois petits modèles qui tournent confortablement sur Apple Silicon. Vous pouvez en ajouter d'autres depuis le navigateur de modèles à tout moment.",
+      "step2_recommended": "Recommandé",
+      "step3_title": "Envie de le brancher à vos outils ?",
+      "step3_body":  "lthn parle l'API compatible OpenAI sur %s. Nous pouvons déposer le point de terminaison dans ces configurations pour vous. La seule action sortante que lthn effectue sans vous demander.",
+      "step3_empty": "Aucun client compatible détecté sur ce Mac. Vous pouvez toujours en brancher un plus tard depuis Réglages → Intégrations.",
+      "step3_wired": "Déjà branché",
+      "btn_back":    "Retour",
+      "btn_skip":    "Passer pour l'instant",
+      "btn_use":     "Utiliser ce dossier",
+      "btn_download":"Télécharger et continuer",
+      "btn_finish":  "Terminer"
     }
   }
 }
