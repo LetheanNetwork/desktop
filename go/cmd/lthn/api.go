@@ -49,15 +49,7 @@ func cmdAPI(args []string) int {
 func apiSpec(args []string) int {
 	format := "yaml"
 	out := ""
-	for i := 0; i < len(args); i++ {
-		k, v, valid := core.ParseFlag(args[i])
-		if !valid {
-			continue
-		}
-		if (k == "format" || k == "out") && v == "" && i+1 < len(args) {
-			i++
-			v = args[i]
-		}
+	for k, v := range apiFlagValues(args, map[string]bool{"format": true, "out": true}) {
 		switch k {
 		case "format":
 			format = v
@@ -70,11 +62,7 @@ func apiSpec(args []string) int {
 		return 2
 	}
 	if out == "" {
-		if format == "json" {
-			out = "openapi.json"
-		} else {
-			out = "openapi.yaml"
-		}
+		out = defaultSpecOutput(format)
 	}
 
 	c, runner := bootAPICore()
@@ -110,15 +98,7 @@ func apiSDK(args []string) int {
 	out := "build/sdk"
 	pkg := "lthn-api"
 	specPath := ""
-	for i := 0; i < len(rest); i++ {
-		k, v, valid := core.ParseFlag(rest[i])
-		if !valid {
-			continue
-		}
-		if (k == "out" || k == "package" || k == "spec") && v == "" && i+1 < len(rest) {
-			i++
-			v = rest[i]
-		}
+	for k, v := range apiFlagValues(rest, map[string]bool{"out": true, "package": true, "spec": true}) {
 		switch k {
 		case "out":
 			out = v
@@ -158,6 +138,29 @@ func apiSDK(args []string) int {
 	}
 	core.Println("generated", language, "SDK at", out)
 	return 0
+}
+
+func apiFlagValues(args []string, allowed map[string]bool) map[string]string {
+	values := map[string]string{}
+	for i := 0; i < len(args); i++ {
+		k, v, valid := core.ParseFlag(args[i])
+		if !valid || !allowed[k] {
+			continue
+		}
+		if v == "" && i+1 < len(args) {
+			i++
+			v = args[i]
+		}
+		values[k] = v
+	}
+	return values
+}
+
+func defaultSpecOutput(format string) string {
+	if format == "json" {
+		return "openapi.json"
+	}
+	return "openapi.yaml"
 }
 
 // bootAPICore builds the *core.Core and a runner.Service the API
