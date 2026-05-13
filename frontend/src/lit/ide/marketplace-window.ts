@@ -144,7 +144,7 @@ class LthnMarketplaceWindow extends LitElement {
   _categories(): string[] {
     const cats = new Set<string>();
     for (const p of this.catalogue) if (p.category) cats.add(p.category);
-    return Array.from(cats).sort();
+    return Array.from(cats).sort((a, b) => a.localeCompare(b));
   }
 
   _isInstalled(code: string): boolean {
