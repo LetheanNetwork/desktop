@@ -52,19 +52,19 @@ func Register(c *core.Core) core.Result {
 // stdout on success, the captured stderr+stdout combined inside a
 // failure value otherwise. Mirrors core/ide's runGit / gitRunOutput
 // pair so the porcelain parsers below can stay byte-identical.
-func (s *Service) runGit(repo string, args ...string) (string, error) {
+func (s *Service) runGit(repo string, args ...string) core.Result {
 	if s == nil || s.core == nil {
-		return "", core.E("git.runGit", "core not bound", nil)
+		return core.Fail(core.E("git.runGit", "core not bound", nil))
 	}
 	proc, ok := core.ServiceFor[*process.Service](s.core, "process")
 	if !ok || proc == nil {
-		return "", core.E("git.runGit", "process service unavailable", nil)
+		return core.Fail(core.E("git.runGit", "process service unavailable", nil))
 	}
 	full := append([]string{"-C", repo}, args...)
 	r := proc.Run(context.Background(), "git", full...)
 	out, _ := r.Value.(string)
 	if !r.OK {
-		return out, core.E("git.runGit", r.Error(), nil)
+		return core.Fail(core.E("git.runGit", r.Error(), nil))
 	}
-	return out, nil
+	return core.Ok(out)
 }

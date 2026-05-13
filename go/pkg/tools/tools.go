@@ -47,10 +47,10 @@ type WailsService struct {
 func NewWailsService(c *core.Core) *WailsService { return &WailsService{core: c} }
 
 func (s *WailsService) ServiceName() string { return "Tools" }
-func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
-func (s *WailsService) ServiceShutdown() error { return nil }
+func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // List returns one ToolView per tool the MCP service has registered.
 // Returns an empty slice (not nil) when the MCP service isn't on

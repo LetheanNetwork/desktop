@@ -18,10 +18,10 @@ import (
 
 // ServiceName / Startup / Shutdown — Wails3 lifecycle.
 func (s *Service) ServiceName() string { return "Build" }
-func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
-func (s *Service) ServiceShutdown() error { return nil }
+func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // Detect probes path for marker files and returns the canonical
 // build invocation. Pure file-system probe, no spawn.
@@ -31,19 +31,19 @@ func (s *Service) ServiceShutdown() error { return nil }
 //	import { Detect } from "@desktop/build/service";
 //	const d = await Detect("/path/to/project");
 //	console.log(d.project_type, d.command, d.args);
-func (s *Service) Detect(path string) (Detection, error) {
+func (s *Service) Detect(path string) core.Result {
 	if core.Trim(path) == "" {
-		return Detection{}, core.E("build.Detect", "path required", nil)
+		return core.Fail(core.E("build.Detect", "path required", nil))
 	}
 	stat := core.Stat(path)
 	if !stat.OK {
-		return Detection{}, core.E("build.Detect", "path is not a directory: "+path, nil)
+		return core.Fail(core.E("build.Detect", "path is not a directory: "+path, nil))
 	}
 	info, ok := stat.Value.(interface{ IsDir() bool })
 	if !ok || !info.IsDir() {
-		return Detection{}, core.E("build.Detect", "path is not a directory: "+path, nil)
+		return core.Fail(core.E("build.Detect", "path is not a directory: "+path, nil))
 	}
-	return detectProject(path), nil
+	return core.Ok(detectProject(path))
 }
 
 // RunResult describes the spawned build process. Callers poll
@@ -65,9 +65,9 @@ type RunResult struct {
 //	const { process_id, build_command } = await Run("/path", "", []);
 //	// then poll:
 //	const out = await ProcessOutput(process_id);
-func (s *Service) Run(path, command string, args []string) (RunResult, error) {
+func (s *Service) Run(path, command string, args []string) core.Result {
 	if core.Trim(path) == "" {
-		return RunResult{}, core.E("build.Run", "path required", nil)
+		return core.Fail(core.E("build.Run", "path required", nil))
 	}
 	detected := detectProject(path)
 	if command == "" {
@@ -77,18 +77,19 @@ func (s *Service) Run(path, command string, args []string) (RunResult, error) {
 		}
 	}
 	if command == "" {
-		return RunResult{}, core.E("build.Run", "could not detect a build command for: "+path, nil)
+		return core.Fail(core.E("build.Run", "could not detect a build command for: "+path, nil))
 	}
-	proc, err := s.startProc(path, command, args)
-	if err != nil {
-		return RunResult{}, err
+	procR := s.startProc(path, command, args)
+	if !procR.OK {
+		return procR
 	}
-	return RunResult{
+	proc := procR.Value.(*process.Process)
+	return core.Ok(RunResult{
 		ProcessID:    proc.ID,
 		BuildCommand: command,
 		BuildArgs:    args,
 		ProjectType:  detected.ProjectType,
-	}, nil
+	})
 }
 
 // ProcessOutput returns the accumulated stdout+stderr for a
@@ -99,20 +100,20 @@ func (s *Service) Run(path, command string, args []string) (RunResult, error) {
 // Usage example (TS):
 //
 //	const text = await ProcessOutput(processID);
-func (s *Service) ProcessOutput(id string) (string, error) {
+func (s *Service) ProcessOutput(id string) core.Result {
 	ps := s.proc()
 	if ps == nil {
-		return "", core.E("build.ProcessOutput", "process service unavailable", nil)
+		return core.Fail(core.E("build.ProcessOutput", "process service unavailable", nil))
 	}
 	r := ps.Get(id)
 	if !r.OK {
-		return "", core.E("build.ProcessOutput", r.Error(), nil)
+		return core.Fail(core.E("build.ProcessOutput", r.Error(), nil))
 	}
 	p, ok := r.Value.(*process.Process)
 	if !ok || p == nil {
-		return "", core.E("build.ProcessOutput", "process not found: "+id, nil)
+		return core.Fail(core.E("build.ProcessOutput", "process not found: "+id, nil))
 	}
-	return p.Output(), nil
+	return core.Ok(p.Output())
 }
 
 // ProcessKill terminates a running process. Idempotent — killing
@@ -121,23 +122,23 @@ func (s *Service) ProcessOutput(id string) (string, error) {
 // Usage example (TS):
 //
 //	await ProcessKill(processID);
-func (s *Service) ProcessKill(id string) error {
+func (s *Service) ProcessKill(id string) core.Result {
 	ps := s.proc()
 	if ps == nil {
-		return core.E("build.ProcessKill", "process service unavailable", nil)
+		return core.Fail(core.E("build.ProcessKill", "process service unavailable", nil))
 	}
 	r := ps.Get(id)
 	if !r.OK {
-		return core.E("build.ProcessKill", r.Error(), nil)
+		return core.Fail(core.E("build.ProcessKill", r.Error(), nil))
 	}
 	p, ok := r.Value.(*process.Process)
 	if !ok || p == nil {
-		return core.E("build.ProcessKill", "process not found: "+id, nil)
+		return core.Fail(core.E("build.ProcessKill", "process not found: "+id, nil))
 	}
 	if kr := p.Kill(); !kr.OK {
-		return core.E("build.ProcessKill", kr.Error(), nil)
+		return core.Fail(core.E("build.ProcessKill", kr.Error(), nil))
 	}
-	return nil
+	return core.Ok(nil)
 }
 
 // ProcessEntry is the lean shape ProcessList returns — enough for
@@ -156,10 +157,10 @@ type ProcessEntry struct {
 // Usage example (TS):
 //
 //	const procs = await ProcessList();
-func (s *Service) ProcessList() ([]ProcessEntry, error) {
+func (s *Service) ProcessList() core.Result {
 	ps := s.proc()
 	if ps == nil {
-		return nil, core.E("build.ProcessList", "process service unavailable", nil)
+		return core.Fail(core.E("build.ProcessList", "process service unavailable", nil))
 	}
 	out := []ProcessEntry{}
 	for _, p := range ps.List() {
@@ -174,5 +175,5 @@ func (s *Service) ProcessList() ([]ProcessEntry, error) {
 			ExitCode: info.ExitCode,
 		})
 	}
-	return out, nil
+	return core.Ok(out)
 }

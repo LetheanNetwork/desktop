@@ -18,17 +18,17 @@ type WailsService struct{}
 func NewWailsService() *WailsService { return &WailsService{} }
 
 func (s *WailsService) ServiceName() string { return "Validator" }
-func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
-func (s *WailsService) ServiceShutdown() error { return nil }
+func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // Endpoint probes <baseURL>/models and reports status. 2xx → OK.
-func (s *WailsService) Endpoint(baseURL string) (EndpointInfo, error) {
+func (s *WailsService) Endpoint(baseURL string) core.Result {
 	r := Endpoint(baseURL)
 	if !r.OK {
-		return EndpointInfo{}, core.E("validator.WailsService.Endpoint", "validate endpoint failed", r.Value.(error))
+		return core.Fail(core.E("validator.WailsService.Endpoint", "validate endpoint failed", r.Value.(error)))
 	}
 	info, _ := r.Value.(EndpointInfo)
-	return info, nil
+	return core.Ok(info)
 }

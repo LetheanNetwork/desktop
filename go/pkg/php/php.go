@@ -215,10 +215,10 @@ func dirExists(path string) bool {
 // runProc invokes process.Service.Start at the project root with
 // the named command + args. Returns the spawned Process so the
 // caller can grab its ID.
-func (s *Service) runProc(cwd, command string, args []string) (*process.Process, error) {
+func (s *Service) runProc(cwd, command string, args []string) core.Result {
 	ps := s.proc()
 	if ps == nil {
-		return nil, core.E("php.runProc", "process service unavailable", nil)
+		return core.Fail(core.E("php.runProc", "process service unavailable", nil))
 	}
 	opts := process.RunOptions{
 		Command: command,
@@ -227,11 +227,11 @@ func (s *Service) runProc(cwd, command string, args []string) (*process.Process,
 	}
 	r := ps.StartWithOptions(context.Background(), opts)
 	if !r.OK {
-		return nil, core.E("php.runProc", r.Error(), nil)
+		return core.Fail(core.E("php.runProc", r.Error(), nil))
 	}
 	p, ok := r.Value.(*process.Process)
 	if !ok || p == nil {
-		return nil, core.E("php.runProc", "process service returned non-process", nil)
+		return core.Fail(core.E("php.runProc", "process service returned non-process", nil))
 	}
-	return p, nil
+	return core.Ok(p)
 }

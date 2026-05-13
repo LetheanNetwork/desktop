@@ -12,6 +12,7 @@ import (
 
 	core "dappco.re/go"
 	"dappco.re/go/php/pkg/php"
+	"dappco.re/go/process"
 )
 
 // DetectOutput is the shape returned to the Lit window — the
@@ -26,16 +27,16 @@ type DetectOutput struct {
 // Detect walks the user's canonical Code/* roots looking for
 // Laravel projects. roots overrides the canonical set when
 // non-empty.
-func (s *Service) Detect(roots []string, maxDepth int) (DetectOutput, error) {
+func (s *Service) Detect(roots []string, maxDepth int) core.Result {
 	if len(roots) == 0 {
 		roots = defaultRoots()
 	}
 	projects := s.detect(roots, maxDepth)
-	return DetectOutput{
+	return core.Ok(DetectOutput{
 		Roots:    roots,
 		Projects: projects,
 		Count:    len(projects),
-	}, nil
+	})
 }
 
 // ProjectOutput wraps a single ProjectDetail for the rich
@@ -47,19 +48,19 @@ type ProjectOutput struct {
 // Project returns rich detail for one project — services + .env
 // presence + storage perms. Drives the right-pane card on
 // /php's selected project.
-func (s *Service) Project(path string) (ProjectOutput, error) {
+func (s *Service) Project(path string) core.Result {
 	if path == "" {
-		return ProjectOutput{}, core.E("php.Project", "path is required", nil)
+		return core.Fail(core.E("php.Project", "path is required", nil))
 	}
 	if !php.IsLaravelProject(path) {
-		return ProjectOutput{}, core.E("php.Project", "not a Laravel project: "+path, nil)
+		return core.Fail(core.E("php.Project", "not a Laravel project: "+path, nil))
 	}
 	services := php.DetectServices(path)
 	svcOut := make([]string, 0, len(services))
 	for _, sv := range services {
 		svcOut = append(svcOut, string(sv))
 	}
-	return ProjectOutput{
+	return core.Ok(ProjectOutput{
 		Detail: ProjectDetail{
 			Path:            path,
 			Name:            core.PathBase(path),
@@ -76,7 +77,7 @@ func (s *Service) Project(path string) (ProjectOutput, error) {
 			HasNodeModules:  dirExists(core.PathJoin(path, "node_modules")),
 			HasPackageLock:  fileExists(core.PathJoin(path, "package-lock.json")),
 		},
-	}, nil
+	})
 }
 
 // ScriptsOutput is the shape returned to the Lit window — the
@@ -92,10 +93,10 @@ type ScriptsOutput struct {
 // Scripts reads composer.json's scripts section + emits the
 // canonical artisan command set. Gives the UI a clickable grid
 // of "things you can run in this Laravel project".
-func (s *Service) Scripts(path string) (ScriptsOutput, error) {
+func (s *Service) Scripts(path string) core.Result {
 	path = core.Trim(path)
 	if path == "" {
-		return ScriptsOutput{}, core.E("php.Scripts", "path required", nil)
+		return core.Fail(core.E("php.Scripts", "path required", nil))
 	}
 	composerPath := core.PathJoin(path, "composer.json")
 	composerScripts := []ScriptEntry{}
@@ -149,13 +150,13 @@ func (s *Service) Scripts(path string) (ScriptsOutput, error) {
 	if hasArtisan {
 		canonical = append(canonical, canonicalArtisan...)
 	}
-	return ScriptsOutput{
+	return core.Ok(ScriptsOutput{
 		Path:            path,
 		ComposerScripts: composerScripts,
 		ArtisanScripts:  canonical,
 		HasArtisan:      hasArtisan,
 		HasComposer:     fileExists(composerPath),
-	}, nil
+	})
 }
 
 // RunInput drives the Run method.
@@ -179,11 +180,11 @@ type RunOutput struct {
 // Run spawns a composer / artisan / raw invocation via
 // process.Service in the project's cwd. Returns the new
 // process ID so the UI can subscribe to its output.
-func (s *Service) Run(input RunInput) (RunOutput, error) {
+func (s *Service) Run(input RunInput) core.Result {
 	path := core.Trim(input.Path)
 	mode := core.Lower(core.Trim(input.Mode))
 	if path == "" || mode == "" {
-		return RunOutput{}, core.E("php.Run", "path and mode required", nil)
+		return core.Fail(core.E("php.Run", "path and mode required", nil))
 	}
 	var command string
 	var args []string
@@ -191,29 +192,30 @@ func (s *Service) Run(input RunInput) (RunOutput, error) {
 	case "composer":
 		name := core.Trim(input.Name)
 		if name == "" {
-			return RunOutput{}, core.E("php.Run", "name required for composer mode", nil)
+			return core.Fail(core.E("php.Run", "name required for composer mode", nil))
 		}
 		command = "composer"
 		args = []string{"run-script", name}
 	case "artisan":
 		if len(input.Args) == 0 {
-			return RunOutput{}, core.E("php.Run", "args required for artisan mode", nil)
+			return core.Fail(core.E("php.Run", "args required for artisan mode", nil))
 		}
 		command = "php"
 		args = append([]string{"artisan"}, input.Args...)
 	case "raw":
 		cmd := core.Trim(input.Command)
 		if cmd == "" {
-			return RunOutput{}, core.E("php.Run", "command required for raw mode", nil)
+			return core.Fail(core.E("php.Run", "command required for raw mode", nil))
 		}
 		command = "sh"
 		args = []string{"-c", cmd}
 	default:
-		return RunOutput{}, core.E("php.Run", "unknown mode "+mode, nil)
+		return core.Fail(core.E("php.Run", "unknown mode "+mode, nil))
 	}
-	p, err := s.runProc(path, command, args)
-	if err != nil {
-		return RunOutput{}, err
+	procR := s.runProc(path, command, args)
+	if !procR.OK {
+		return procR
 	}
-	return RunOutput{ID: p.ID, Command: command, Args: args}, nil
+	p := procR.Value.(*process.Process)
+	return core.Ok(RunOutput{ID: p.ID, Command: command, Args: args})
 }

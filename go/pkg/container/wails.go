@@ -42,7 +42,7 @@ type LogsOutput struct {
 // the available subset. Force is accepted for API parity with
 // core/ide's cached version, but lthn doesn't cache today — every
 // call re-probes.
-func (s *Service) Detect(force bool) (Detection, error) {
+func (s *Service) Detect(force bool) core.Result {
 	_ = force
 	runtimes := s.detectAll()
 	available := make([]Runtime, 0, len(runtimes))
@@ -51,13 +51,13 @@ func (s *Service) Detect(force bool) (Detection, error) {
 			available = append(available, r)
 		}
 	}
-	return Detection{Runtimes: runtimes, Available: available}, nil
+	return core.Ok(Detection{Runtimes: runtimes, Available: available})
 }
 
 // List enumerates running containers. When runtime is empty the
 // service queries every runtime it knows how to talk to; otherwise
 // only the named one.
-func (s *Service) List(runtime string) (ListOutput, error) {
+func (s *Service) List(runtime string) core.Result {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	out := ListOutput{}
@@ -68,15 +68,15 @@ func (s *Service) List(runtime string) (ListOutput, error) {
 		out.Containers = append(out.Containers, s.listPodman(ctx)...)
 	}
 	out.Count = len(out.Containers)
-	return out, nil
+	return core.Ok(out)
 }
 
 // Logs streams the last N lines for the named container via the
 // runtime's native logs command. Bounded — for live tailing the
 // frontend should poll. tail<=0 defaults to 200 lines.
-func (s *Service) Logs(id, runtime string, tail int) (LogsOutput, error) {
+func (s *Service) Logs(id, runtime string, tail int) core.Result {
 	if id == "" {
-		return LogsOutput{}, core.E("container.Logs", "id is required", nil)
+		return core.Fail(core.E("container.Logs", "id is required", nil))
 	}
 	if runtime == "" {
 		runtime = "docker"
@@ -86,7 +86,7 @@ func (s *Service) Logs(id, runtime string, tail int) (LogsOutput, error) {
 	}
 	ps := s.proc()
 	if ps == nil {
-		return LogsOutput{}, core.E("container.Logs", "process service unavailable", nil)
+		return core.Fail(core.E("container.Logs", "process service unavailable", nil))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -98,11 +98,11 @@ func (s *Service) Logs(id, runtime string, tail int) (LogsOutput, error) {
 	case "podman":
 		r = ps.Run(ctx, "podman", "logs", "--tail", tailArg, id)
 	default:
-		return LogsOutput{}, core.E("container.Logs", "unsupported runtime: "+runtime, nil)
+		return core.Fail(core.E("container.Logs", "unsupported runtime: "+runtime, nil))
 	}
 	if !r.OK {
-		return LogsOutput{}, core.E("container.Logs", r.Error(), nil)
+		return core.Fail(core.E("container.Logs", r.Error(), nil))
 	}
 	logs, _ := r.Value.(string)
-	return LogsOutput{ID: id, Runtime: runtime, Logs: logs}, nil
+	return core.Ok(LogsOutput{ID: id, Runtime: runtime, Logs: logs})
 }

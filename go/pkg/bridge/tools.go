@@ -52,9 +52,9 @@ func (s *Service) handleCall(w http.ResponseWriter, r *http.Request) {
 		Tool   string         `json:"tool"`
 		Params map[string]any `json:"params"`
 	}
-	if err := readJSON(r, &req); err != nil {
+	if rr := readJSON(r, &req); !rr.OK {
 		w.WriteHeader(http.StatusBadRequest)
-		writeJSON(w, map[string]any{"error": "invalid json: " + err.Error(), "ok": false})
+		writeJSON(w, map[string]any{"error": "invalid json: " + rr.Error(), "ok": false})
 		return
 	}
 	resp := s.dispatch(r.Context(), req.Tool, req.Params)
@@ -72,9 +72,9 @@ func (s *Service) handleInternalConsole(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var entry ConsoleEntry
-	if err := readJSON(r, &entry); err != nil {
+	if rr := readJSON(r, &entry); !rr.OK {
 		w.WriteHeader(http.StatusBadRequest)
-		writeJSON(w, map[string]any{"error": err.Error()})
+		writeJSON(w, map[string]any{"error": rr.Error()})
 		return
 	}
 	if entry.At.IsZero() {
@@ -100,9 +100,9 @@ func (s *Service) handleInternalError(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var entry ErrorEntry
-	if err := readJSON(r, &entry); err != nil {
+	if rr := readJSON(r, &entry); !rr.OK {
 		w.WriteHeader(http.StatusBadRequest)
-		writeJSON(w, map[string]any{"error": err.Error()})
+		writeJSON(w, map[string]any{"error": rr.Error()})
 		return
 	}
 	if entry.At.IsZero() {
@@ -128,9 +128,9 @@ func (s *Service) handleInternalEvalReply(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var reply evalReply
-	if err := readJSON(r, &reply); err != nil {
+	if rr := readJSON(r, &reply); !rr.OK {
 		w.WriteHeader(http.StatusBadRequest)
-		writeJSON(w, map[string]any{"error": err.Error()})
+		writeJSON(w, map[string]any{"error": rr.Error()})
 		return
 	}
 	s.evalMu.Lock()
@@ -324,13 +324,13 @@ func (s *Service) ServiceName() string { return "Bridge" }
 // ServiceStartup is a no-op for the Wails lifecycle — the bridge's
 // HTTP listener boots via the Core OnStartup hook. Wails calls this
 // once per session after application.New returns.
-func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
 
 // ServiceShutdown is a no-op for the Wails lifecycle. The HTTP
 // listener tears down via the Core OnShutdown hook.
-func (s *Service) ServiceShutdown() error { return nil }
+func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // Console returns the recent console entries the JS shim has POSTed
 // to /internal/console. limit caps the slice length from the tail
@@ -406,16 +406,16 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_, _ = w.Write(enc)
 }
 
-func readJSON(r *http.Request, dst any) error {
+func readJSON(r *http.Request, dst any) core.Result {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
-		return err
+		return core.Fail(core.E("bridge.readJSON", "read request JSON failed", err))
 	}
 	decoded := core.JSONUnmarshal(body, dst)
 	if !decoded.OK {
-		return core.E("bridge.readJSON", "decode request JSON failed", decoded.Value.(error))
+		return core.Fail(core.E("bridge.readJSON", "decode request JSON failed", decoded.Value.(error)))
 	}
-	return nil
+	return core.Ok(nil)
 }
 
 // ─── Param helpers ──────────────────────────────────────────────────

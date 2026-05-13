@@ -91,8 +91,8 @@ func (s *Service) OnShutdown(context.Context) core.Result {
 	}
 	s.mu.Unlock()
 	for _, code := range codes {
-		if err := s.Stop(code); err != nil {
-			return core.Fail(core.E("plugin.OnShutdown", "stop plugin", err))
+		if r := s.Stop(code); !r.OK {
+			return core.Fail(core.E("plugin.OnShutdown", "stop plugin", r.Value.(error)))
 		}
 	}
 	return core.Ok(nil)
@@ -187,23 +187,24 @@ func (s *Service) statusFor(code string) Status {
 // $HOME/Lethean/conf/plugins. Per the no-hidden-bloat principle
 // (memory: design_no_hidden_user_bloat.md), plugins live in the
 // visible Lethean tree, not under ~/.config or similar.
-func installRoot() (string, core.Result) {
+func installRoot() core.Result {
 	home := core.UserHomeDir()
 	if !home.OK {
-		return "", core.Fail(core.E("plugin.installRoot", "home dir unavailable", nil))
+		return core.Fail(core.E("plugin.installRoot", "home dir unavailable", nil))
 	}
 	homeDir, _ := home.Value.(string)
 	if homeDir == "" {
-		return "", core.Fail(core.E("plugin.installRoot", "home dir empty", nil))
+		return core.Fail(core.E("plugin.installRoot", "home dir empty", nil))
 	}
-	return core.PathJoin(homeDir, "Lethean", "conf", "plugins"), core.Ok(nil)
+	return core.Ok(core.PathJoin(homeDir, "Lethean", "conf", "plugins"))
 }
 
 // pluginDir returns the install directory for one plugin.
-func pluginDir(code string) (string, core.Result) {
-	root, res := installRoot()
-	if !res.OK {
-		return "", res
+func pluginDir(code string) core.Result {
+	rootR := installRoot()
+	if !rootR.OK {
+		return rootR
 	}
-	return core.PathJoin(root, code), core.Ok(nil)
+	root, _ := rootR.Value.(string)
+	return core.Ok(core.PathJoin(root, code))
 }

@@ -19,8 +19,8 @@ type SearchOutput struct {
 
 // Search browses the catalogue. Empty query returns everything;
 // query + category narrow the result set.
-func (s *Service) Search(query, category string) (SearchOutput, error) {
-	return SearchOutput{Packages: search(query, category)}, nil
+func (s *Service) Search(query, category string) core.Result {
+	return core.Ok(SearchOutput{Packages: search(query, category)})
 }
 
 // InfoOutput wraps a single Package for the rich detail view.
@@ -29,15 +29,15 @@ type InfoOutput struct {
 }
 
 // Info returns the full record for one plugin by code.
-func (s *Service) Info(code string) (InfoOutput, error) {
+func (s *Service) Info(code string) core.Result {
 	if core.Trim(code) == "" {
-		return InfoOutput{}, core.E("marketplace.Info", "code is required", nil)
+		return core.Fail(core.E("marketplace.Info", "code is required", nil))
 	}
 	pkg, ok := findByCode(code)
 	if !ok {
-		return InfoOutput{}, core.E("marketplace.Info", "plugin not found: "+code, nil)
+		return core.Fail(core.E("marketplace.Info", "plugin not found: "+code, nil))
 	}
-	return InfoOutput{Package: pkg}, nil
+	return core.Ok(InfoOutput{Package: pkg})
 }
 
 // InstalledOutput is the shape returned to the Lit window — the
@@ -51,15 +51,16 @@ type InstalledOutput struct {
 // plugin host. Empty until at least one Install completes; the
 // host's on-disk scan keeps this consistent with what's actually
 // present in ~/Lethean/conf/plugins/.
-func (s *Service) Installed() (InstalledOutput, error) {
+func (s *Service) Installed() core.Result {
 	host, ok := core.ServiceFor[*plugin.Service](s.core, "plugin")
 	if !ok || host == nil {
-		return InstalledOutput{Packages: []InstalledPackage{}}, nil
+		return core.Ok(InstalledOutput{Packages: []InstalledPackage{}})
 	}
-	listing, err := host.List()
-	if err != nil {
-		return InstalledOutput{Packages: []InstalledPackage{}}, err
+	listingR := host.List()
+	if !listingR.OK {
+		return listingR
 	}
+	listing := listingR.Value.(plugin.ListOutput)
 	out := make([]InstalledPackage, 0, len(listing.Plugins))
 	for _, p := range listing.Plugins {
 		entry := InstalledPackage{
@@ -72,7 +73,7 @@ func (s *Service) Installed() (InstalledOutput, error) {
 		}
 		out = append(out, entry)
 	}
-	return InstalledOutput{Packages: out}, nil
+	return core.Ok(InstalledOutput{Packages: out})
 }
 
 // Install resolves a catalogue entry, hands the manifest to the
@@ -80,39 +81,42 @@ func (s *Service) Installed() (InstalledOutput, error) {
 // plugin host is wired via pkg/plugin and registered at boot in
 // pkg/desktop; if it's missing (degenerate dev build) the call
 // surfaces a clean error rather than a nil-pointer panic.
-func (s *Service) Install(code string) error {
+func (s *Service) Install(code string) core.Result {
 	if core.Trim(code) == "" {
-		return core.E("marketplace.Install", "code is required", nil)
+		return core.Fail(core.E("marketplace.Install", "code is required", nil))
 	}
 	pkg, ok := findByCode(code)
 	if !ok {
-		return core.E("marketplace.Install", "plugin not found in catalogue: "+code, nil)
+		return core.Fail(core.E("marketplace.Install", "plugin not found in catalogue: "+code, nil))
 	}
 	host, ok := core.ServiceFor[*plugin.Service](s.core, "plugin")
 	if !ok || host == nil {
-		return core.E("marketplace.Install",
-			"plugin host not registered — Install requires pkg/plugin to be wired", nil)
+		return core.Fail(core.E("marketplace.Install",
+			"plugin host not registered — Install requires pkg/plugin to be wired", nil))
 	}
-	_, err := host.Install(plugin.InstallInput{
+	r := host.Install(plugin.InstallInput{
 		Code:      pkg.Code,
 		Name:      pkg.Name,
 		Version:   pkg.Version,
 		Namespace: pkg.Code,
 		BinaryURL: pkg.Entrypoint, // catalogue points at release asset
 	})
-	return err
+	if !r.OK {
+		return r
+	}
+	return core.Ok(nil)
 }
 
 // Remove asks the plugin host to stop + clean up the named
 // plugin. Same host-discovery dance as Install.
-func (s *Service) Remove(code string) error {
+func (s *Service) Remove(code string) core.Result {
 	if core.Trim(code) == "" {
-		return core.E("marketplace.Remove", "code is required", nil)
+		return core.Fail(core.E("marketplace.Remove", "code is required", nil))
 	}
 	host, ok := core.ServiceFor[*plugin.Service](s.core, "plugin")
 	if !ok || host == nil {
-		return core.E("marketplace.Remove",
-			"plugin host not registered — Remove requires pkg/plugin to be wired", nil)
+		return core.Fail(core.E("marketplace.Remove",
+			"plugin host not registered — Remove requires pkg/plugin to be wired", nil))
 	}
 	return host.Remove(code)
 }

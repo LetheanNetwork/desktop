@@ -16,10 +16,10 @@ import (
 
 // ServiceName / Startup / Shutdown — Wails3 lifecycle.
 func (s *Service) ServiceName() string { return "Git" }
-func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
-func (s *Service) ServiceShutdown() error { return nil }
+func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // BranchInfo describes the current branch + its upstream-relative
 // state. Ahead/Behind are 0 when no upstream is configured.
@@ -35,18 +35,20 @@ type BranchInfo struct {
 //
 //	import { Branch } from "@desktop/git/service";
 //	const { branch, ahead, behind } = await Branch("/path/to/repo");
-func (s *Service) Branch(repo string) (BranchInfo, error) {
-	out, err := s.runGit(repo, "branch", "--show-current")
-	if err != nil {
-		return BranchInfo{}, err
+func (s *Service) Branch(repo string) core.Result {
+	outR := s.runGit(repo, "branch", "--show-current")
+	if !outR.OK {
+		return outR
 	}
+	out, _ := outR.Value.(string)
 	info := BranchInfo{Branch: core.Trim(out)}
 	if info.Branch == "" {
-		return info, nil
+		return core.Ok(info)
 	}
-	counts, err := s.runGit(repo, "rev-list", "--left-right", "--count", "@{u}...HEAD")
-	if err == nil {
+	countsR := s.runGit(repo, "rev-list", "--left-right", "--count", "@{u}...HEAD")
+	if countsR.OK {
 		// `--count` emits "<behind>\t<ahead>" on a single line.
+		counts, _ := countsR.Value.(string)
 		parts := core.Split(core.Trim(counts), "\t")
 		if len(parts) == 2 {
 			if r := core.Atoi(parts[0]); r.OK {
@@ -57,7 +59,7 @@ func (s *Service) Branch(repo string) (BranchInfo, error) {
 			}
 		}
 	}
-	return info, nil
+	return core.Ok(info)
 }
 
 // StatusEntry is one row of `git status --porcelain=v1 -z`. The
@@ -79,11 +81,12 @@ type StatusEntry struct {
 //
 //	import { Status } from "@desktop/git/service";
 //	const entries = await Status("/path/to/repo");
-func (s *Service) Status(repo string) ([]StatusEntry, error) {
-	out, err := s.runGit(repo, "status", "--porcelain=v1", "-z")
-	if err != nil && out == "" {
-		return nil, err
+func (s *Service) Status(repo string) core.Result {
+	outR := s.runGit(repo, "status", "--porcelain=v1", "-z")
+	if !outR.OK {
+		return outR
 	}
+	out, _ := outR.Value.(string)
 	entries := []StatusEntry{}
 	tokens := core.Split(out, "\x00")
 	for i := 0; i < len(tokens); i++ {
@@ -109,7 +112,7 @@ func (s *Service) Status(repo string) ([]StatusEntry, error) {
 			Untracked:      idx == "?" && wt == "?",
 		})
 	}
-	return entries, nil
+	return core.Ok(entries)
 }
 
 // Diff returns the unified diff for `file` against the index
@@ -119,7 +122,7 @@ func (s *Service) Status(repo string) ([]StatusEntry, error) {
 // Usage example (TS):
 //
 //	const diff = await Diff("/path", "main.go", false);
-func (s *Service) Diff(repo, file string, staged bool) (string, error) {
+func (s *Service) Diff(repo, file string, staged bool) core.Result {
 	args := []string{"diff"}
 	if staged {
 		args = append(args, "--staged")
@@ -127,11 +130,11 @@ func (s *Service) Diff(repo, file string, staged bool) (string, error) {
 	if file != "" {
 		args = append(args, "--", file)
 	}
-	out, err := s.runGit(repo, args...)
-	if err != nil && out == "" {
-		return "", err
+	outR := s.runGit(repo, args...)
+	if !outR.OK {
+		return outR
 	}
-	return out, nil
+	return outR
 }
 
 // Add stages files. When `all` is true or `files` is empty, runs
@@ -141,7 +144,7 @@ func (s *Service) Diff(repo, file string, staged bool) (string, error) {
 //
 //	await Add("/path", ["main.go"], false);  // stage one file
 //	await Add("/path", [],          true);   // stage all
-func (s *Service) Add(repo string, files []string, all bool) error {
+func (s *Service) Add(repo string, files []string, all bool) core.Result {
 	args := []string{"add"}
 	if all || len(files) == 0 {
 		args = append(args, "-A")
@@ -149,8 +152,11 @@ func (s *Service) Add(repo string, files []string, all bool) error {
 		args = append(args, "--")
 		args = append(args, files...)
 	}
-	_, err := s.runGit(repo, args...)
-	return err
+	r := s.runGit(repo, args...)
+	if !r.OK {
+		return r
+	}
+	return core.Ok(nil)
 }
 
 // Unstage removes paths from the index (keeps worktree changes).
@@ -159,7 +165,7 @@ func (s *Service) Add(repo string, files []string, all bool) error {
 // Usage example (TS):
 //
 //	await Unstage("/path", ["accidentally-staged.go"]);
-func (s *Service) Unstage(repo string, files []string) error {
+func (s *Service) Unstage(repo string, files []string) core.Result {
 	args := []string{"restore", "--staged"}
 	if len(files) == 0 {
 		args = append(args, ".")
@@ -167,8 +173,11 @@ func (s *Service) Unstage(repo string, files []string) error {
 		args = append(args, "--")
 		args = append(args, files...)
 	}
-	_, err := s.runGit(repo, args...)
-	return err
+	r := s.runGit(repo, args...)
+	if !r.OK {
+		return r
+	}
+	return core.Ok(nil)
 }
 
 // CommitResult carries the SHA of the new commit so the WebView
@@ -182,19 +191,20 @@ type CommitResult struct {
 // Usage example (TS):
 //
 //	const { sha } = await Commit("/path", "feat: …");
-func (s *Service) Commit(repo, message string) (CommitResult, error) {
+func (s *Service) Commit(repo, message string) core.Result {
 	if core.Trim(message) == "" {
-		return CommitResult{}, core.E("git.Commit", "message required", nil)
+		return core.Fail(core.E("git.Commit", "message required", nil))
 	}
-	_, err := s.runGit(repo, "commit", "-m", message)
-	if err != nil {
-		return CommitResult{}, err
+	commitR := s.runGit(repo, "commit", "-m", message)
+	if !commitR.OK {
+		return commitR
 	}
-	out, err := s.runGit(repo, "rev-parse", "HEAD")
-	if err != nil {
-		return CommitResult{}, err
+	outR := s.runGit(repo, "rev-parse", "HEAD")
+	if !outR.OK {
+		return outR
 	}
-	return CommitResult{SHA: core.Trim(out)}, nil
+	out, _ := outR.Value.(string)
+	return core.Ok(CommitResult{SHA: core.Trim(out)})
 }
 
 // LogEntry is one parsed line of `git log --pretty=format:...`.
@@ -211,18 +221,19 @@ type LogEntry struct {
 // Usage example (TS):
 //
 //	const commits = await Log("/path", 50);
-func (s *Service) Log(repo string, limit int) ([]LogEntry, error) {
+func (s *Service) Log(repo string, limit int) core.Result {
 	if limit <= 0 {
 		limit = 20
 	}
-	out, err := s.runGit(repo, "log",
+	outR := s.runGit(repo, "log",
 		core.Sprintf("--max-count=%d", limit),
 		"--pretty=format:%H%x09%h%x09%an%x09%ad%x09%s",
 		"--date=short",
 	)
-	if err != nil {
-		return nil, err
+	if !outR.OK {
+		return outR
 	}
+	out, _ := outR.Value.(string)
 	commits := []LogEntry{}
 	for _, line := range core.Split(out, "\n") {
 		fields := core.Split(line, "\t")
@@ -237,5 +248,5 @@ func (s *Service) Log(repo string, limit int) ([]LogEntry, error) {
 			Subject:  fields[4],
 		})
 	}
-	return commits, nil
+	return core.Ok(commits)
 }

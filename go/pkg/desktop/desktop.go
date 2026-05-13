@@ -160,8 +160,8 @@ func (s *Service) Run() core.Result {
 	// Mount the SPA fallback on the gin engine — every request that
 	// doesn't match a registered API route falls through to the
 	// embedded dist.
-	if err := s.attachSPA(); err != nil {
-		return core.Fail(err)
+	if r := s.attachSPA(); !r.OK {
+		return r
 	}
 
 	engine := s.opts.Server.Handler()
@@ -447,18 +447,22 @@ func (s *Service) Run() core.Result {
 	// router can mount the plugin's UI (iframe via
 	// ui.entrypoint when declared).
 	if pluginSvc != nil {
-		if entries, err := pluginSvc.Menus(); err == nil && len(entries) > 0 {
-			menu.AddSeparator()
-			for _, e := range entries {
-				code := e.Code
-				label := e.Label
-				if !e.Running {
-					label = label + " · stopped"
+		entriesR := pluginSvc.Menus()
+		if entriesR.OK {
+			entries, _ := entriesR.Value.([]plugin.MenuEntry)
+			if len(entries) > 0 {
+				menu.AddSeparator()
+				for _, e := range entries {
+					code := e.Code
+					label := e.Label
+					if !e.Running {
+						label = label + " · stopped"
+					}
+					menu.Add(label).OnClick(func(_ *application.Context) {
+						openPluginWindow(s.app, code)
+						s.app.Event.Emit("lthn:tray:open", "plugin:"+code)
+					})
 				}
-				menu.Add(label).OnClick(func(_ *application.Context) {
-					openPluginWindow(s.app, code)
-					s.app.Event.Emit("lthn:tray:open", "plugin:"+code)
-				})
 			}
 		}
 	}
@@ -583,16 +587,16 @@ func (s *Service) Run() core.Result {
 // subsystem route gets served from the embedded dist — index.html,
 // assets/*, etc. The handler inherits the canonical middleware chain
 // (auth, sunset, cache, tracing) just like any other route.
-func (s *Service) attachSPA() error {
+func (s *Service) attachSPA() core.Result {
 	sub, err := fs.Sub(s.opts.Frontend, s.opts.FrontendRoot)
 	if err != nil {
-		return core.E("desktop.attachSPA", "frontend root not found", err)
+		return core.Fail(core.E("desktop.attachSPA", "frontend root not found", err))
 	}
 	fileServer := http.FileServer(http.FS(sub))
 	s.opts.Server.Engine().SetNoRoute(func(c *gin.Context) {
 		fileServer.ServeHTTP(c.Writer, c.Request)
 	})
-	return nil
+	return core.Ok(nil)
 }
 
 // ginMiddleware delegates /wails/* requests back to Wails, hands

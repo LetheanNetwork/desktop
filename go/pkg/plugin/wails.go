@@ -43,7 +43,7 @@ type InstallOutput struct {
 // ~/Lethean/conf/plugins/<code>/, then starts it. If the plugin
 // is already installed the existing copy is overwritten (Stop
 // first if running, then redeploy + Start).
-func (s *Service) Install(input InstallInput) (InstallOutput, error) {
+func (s *Service) Install(input InstallInput) core.Result {
 	m := Manifest{
 		Code:      input.Code,
 		Name:      input.Name,
@@ -53,78 +53,81 @@ func (s *Service) Install(input InstallInput) (InstallOutput, error) {
 		Checksum:  input.Checksum,
 		Binary:    "bin/" + input.Code,
 	}
-	validated, res := m.validate()
-	if !res.OK {
-		return InstallOutput{}, core.E("plugin.Install", res.Error(), nil)
+	validatedR := m.validate()
+	if !validatedR.OK {
+		return validatedR
 	}
+	validated, _ := validatedR.Value.(Manifest)
 	var binary []byte
 	if core.Trim(input.LocalPath) != "" {
 		read := core.ReadFile(input.LocalPath)
 		if !read.OK {
-			return InstallOutput{}, core.E("plugin.Install",
-				"read local: "+read.Error(), nil)
+			return core.Fail(core.E("plugin.Install",
+				"read local: "+read.Error(), nil))
 		}
 		binary, _ = read.Value.([]byte)
 	} else {
 		if core.Trim(validated.BinaryURL) == "" {
-			return InstallOutput{}, core.E("plugin.Install",
-				"binary_url or local_path required", nil)
+			return core.Fail(core.E("plugin.Install",
+				"binary_url or local_path required", nil))
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), downloadTimeout)
 		defer cancel()
-		fetched, fres := fetchBinary(ctx, validated.BinaryURL)
-		if !fres.OK {
-			return InstallOutput{}, core.E("plugin.Install",
-				"fetch: "+fres.Error(), nil)
+		fetchedR := fetchBinary(ctx, validated.BinaryURL)
+		if !fetchedR.OK {
+			return fetchedR
 		}
-		binary = fetched
+		binary, _ = fetchedR.Value.([]byte)
 	}
 	if r := verifyChecksum(binary, validated.Checksum); !r.OK {
-		return InstallOutput{}, core.E("plugin.Install",
-			"checksum: "+r.Error(), nil)
+		return core.Fail(core.E("plugin.Install",
+			"checksum: "+r.Error(), nil))
 	}
 	s.mu.Lock()
 	if r := s.stopPlugin(validated.Code); !r.OK {
 		s.mu.Unlock()
-		return InstallOutput{}, core.E("plugin.Install", "stop existing plugin: "+r.Error(), nil)
+		return core.Fail(core.E("plugin.Install", "stop existing plugin: "+r.Error(), nil))
 	}
 	s.mu.Unlock()
-	dir, wres := writePlugin(validated, binary)
-	if !wres.OK {
-		return InstallOutput{}, core.E("plugin.Install",
-			"write: "+wres.Error(), nil)
+	dirR := writePlugin(validated, binary)
+	if !dirR.OK {
+		return dirR
 	}
-	startErr := s.Start(validated.Code)
-	return InstallOutput{
+	dir, _ := dirR.Value.(string)
+	startR := s.Start(validated.Code)
+	if !startR.OK {
+		return startR
+	}
+	return core.Ok(InstallOutput{
 		Code:   validated.Code,
 		Dir:    dir,
 		Status: s.snapshotStatus(validated.Code),
-	}, startErr
+	})
 }
 
 // Remove stops the plugin (if running) and deletes the install
 // directory. After this the plugin is gone — no leftover state.
-func (s *Service) Remove(code string) error {
+func (s *Service) Remove(code string) core.Result {
 	s.mu.Lock()
 	if r := s.stopPlugin(code); !r.OK {
 		s.mu.Unlock()
-		return core.E("plugin.Remove", "stop plugin: "+r.Error(), nil)
+		return core.Fail(core.E("plugin.Remove", "stop plugin: "+r.Error(), nil))
 	}
 	delete(s.state, code)
 	s.mu.Unlock()
 	if r := removePlugin(code); !r.OK {
-		return core.E("plugin.Remove", r.Error(), nil)
+		return core.Fail(core.E("plugin.Remove", r.Error(), nil))
 	}
-	return nil
+	return core.Ok(nil)
 }
 
 // Start spawns the plugin binary. Idempotent — calling Start on
 // a running plugin is a no-op.
-func (s *Service) Start(code string) error {
+func (s *Service) Start(code string) core.Result {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if ps, ok := s.state[code]; ok && ps.state == "running" {
-		return nil
+		return core.Ok(nil)
 	}
 	// Generous outer timeout — health gating happens with its
 	// own narrower window inside startPlugin. This is just the
@@ -132,20 +135,20 @@ func (s *Service) Start(code string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	if r := s.startPlugin(ctx, code, s.resolveToken()); !r.OK {
-		return core.E("plugin.Start", r.Error(), nil)
+		return core.Fail(core.E("plugin.Start", r.Error(), nil))
 	}
-	return nil
+	return core.Ok(nil)
 }
 
 // Stop terminates the plugin process + tears down the proxy
 // mount. Idempotent — stopping a stopped plugin is a no-op.
-func (s *Service) Stop(code string) error {
+func (s *Service) Stop(code string) core.Result {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if r := s.stopPlugin(code); !r.OK {
-		return core.E("plugin.Stop", r.Error(), nil)
+		return core.Fail(core.E("plugin.Stop", r.Error(), nil))
 	}
-	return nil
+	return core.Ok(nil)
 }
 
 // ListOutput wraps the InstalledPlugin slice for a JSON-friendly
@@ -156,14 +159,14 @@ type ListOutput struct {
 
 // List enumerates every plugin currently installed on disk,
 // running or not. Drives the marketplace "Installed" tab.
-func (s *Service) List() (ListOutput, error) {
-	return ListOutput{Plugins: s.scanInstalled()}, nil
+func (s *Service) List() core.Result {
+	return core.Ok(ListOutput{Plugins: s.scanInstalled()})
 }
 
 // Status returns the runtime state for one plugin by code.
 // Returns a stopped-stub when the plugin isn't tracked yet.
-func (s *Service) Status(code string) (Status, error) {
-	return s.snapshotStatus(code), nil
+func (s *Service) Status(code string) core.Result {
+	return core.Ok(s.snapshotStatus(code))
 }
 
 // snapshotStatus is the locked variant used internally — picks

@@ -59,16 +59,17 @@ const keyEntropyBytes = 16
 //
 // Usage example:
 //
-//	key, r := apikey.GenerateOrLoad(c)
+//	r := apikey.GenerateOrLoad(c)
 //	if !r.OK { return r }
-func GenerateOrLoad(c *core.Core) (string, core.Result) {
+//	key := r.Value.(string)
+func GenerateOrLoad(c *core.Core) core.Result {
 	cfg, ok := core.ServiceFor[*config.Service](c, "config")
 	if !ok || cfg == nil {
-		return "", core.Fail(core.E("apikey.GenerateOrLoad", "config service not registered", nil))
+		return core.Fail(core.E("apikey.GenerateOrLoad", "config service not registered", nil))
 	}
 	var existing string
 	if r := cfg.Get(ConfigKey, &existing); r.OK && existing != "" {
-		return existing, core.Ok(existing)
+		return core.Ok(existing)
 	}
 	return generateAndStore(cfg)
 }
@@ -79,13 +80,14 @@ func GenerateOrLoad(c *core.Core) (string, core.Result) {
 //
 // Usage example:
 //
-//	newKey, r := apikey.Rotate(c)
+//	r := apikey.Rotate(c)
 //	if !r.OK { return r }
+//	newKey := r.Value.(string)
 //	// surface newKey to the user; next restart applies it
-func Rotate(c *core.Core) (string, core.Result) {
+func Rotate(c *core.Core) core.Result {
 	cfg, ok := core.ServiceFor[*config.Service](c, "config")
 	if !ok || cfg == nil {
-		return "", core.Fail(core.E("apikey.Rotate", "config service not registered", nil))
+		return core.Fail(core.E("apikey.Rotate", "config service not registered", nil))
 	}
 	return generateAndStore(cfg)
 }
@@ -93,30 +95,31 @@ func Rotate(c *core.Core) (string, core.Result) {
 // generateAndStore mints a fresh key, writes it to config, commits.
 // Shared by GenerateOrLoad's first-launch path and Rotate's
 // regeneration path so the persistence shape stays single-source.
-func generateAndStore(cfg *config.Service) (string, core.Result) {
-	key, err := generate()
-	if err != nil {
-		return "", core.Fail(core.E("apikey.generateAndStore", "entropy read failed", err))
+func generateAndStore(cfg *config.Service) core.Result {
+	keyR := generate()
+	if !keyR.OK {
+		return keyR
 	}
+	key := keyR.Value.(string)
 	if r := cfg.Set(ConfigKey, key); !r.OK {
-		return "", r
+		return r
 	}
 	if r := cfg.Commit(); !r.OK {
-		return "", r
+		return r
 	}
-	return key, core.Ok(key)
+	return core.Ok(key)
 }
 
 // generate builds a fresh sk-lthn-<32 hex> string from crypto/rand.
 // 16 random bytes hex-encoded = 32 chars, prepended with the
 // keyPrefix. Returns an error only if the underlying entropy read
 // fails — extremely rare on a healthy system.
-func generate() (string, error) {
+func generate() core.Result {
 	buf := make([]byte, keyEntropyBytes)
 	if _, err := rand.Read(buf); err != nil {
-		return "", err
+		return core.Fail(core.E("apikey.generate", "entropy read failed", err))
 	}
-	return keyPrefix + hex.EncodeToString(buf), nil
+	return core.Ok(keyPrefix + hex.EncodeToString(buf))
 }
 
 // Mask returns a UI-safe form of the key — full prefix + first 4

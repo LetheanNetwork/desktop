@@ -47,43 +47,43 @@ type WindowService struct {
 func NewWindowService() *WindowService { return &WindowService{} }
 
 func (s *WindowService) ServiceName() string { return "Window" }
-func (s *WindowService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *WindowService) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
-func (s *WindowService) ServiceShutdown() error { return nil }
+func (s *WindowService) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // Open shows + focuses the named window (chat / models / settings /
 // about). No-op if the name isn't in the windows.go registry.
-func (s *WindowService) Open(name string) error {
+func (s *WindowService) Open(name string) core.Result {
 	if s.app == nil {
-		return core.NewError("window service not yet attached to wails app")
+		return core.Fail(core.NewError("window service not yet attached to wails app"))
 	}
 	openWindow(s.app, name)
-	return nil
+	return core.Ok(nil)
 }
 
 // Hide hides the named window. Steady-state windows (chat / models
 // / settings) hide-on-close anyway; this lets the frontend dismiss
 // programmatically without waiting for a close click.
-func (s *WindowService) Hide(name string) error {
+func (s *WindowService) Hide(name string) core.Result {
 	if s.app == nil {
-		return core.NewError("window service not yet attached to wails app")
+		return core.Fail(core.NewError("window service not yet attached to wails app"))
 	}
 	w, ok := s.app.Window.GetByName(name)
 	if !ok {
-		return core.NewError("no window named: " + name)
+		return core.Fail(core.NewError("no window named: " + name))
 	}
 	w.Hide()
-	return nil
+	return core.Ok(nil)
 }
 
 // List returns the names of every registered window. Frontend can
 // render a "window switcher" or jump-list from this.
-func (s *WindowService) List() ([]string, error) {
+func (s *WindowService) List() core.Result {
 	registry := windowRegistry()
 	names := make([]string, len(registry))
 	for i, spec := range registry {
 		names[i] = spec.Name
 	}
-	return names, nil
+	return core.Ok(names)
 }

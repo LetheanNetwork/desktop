@@ -160,10 +160,10 @@ func detectProject(root string) Detection {
 
 // startProc invokes process.Service.Start at the workspace root.
 // Returns the spawned *Process so callers can grab the ID.
-func (s *Service) startProc(cwd, command string, args []string) (*process.Process, error) {
+func (s *Service) startProc(cwd, command string, args []string) core.Result {
 	ps := s.proc()
 	if ps == nil {
-		return nil, core.E("build.startProc", "process service unavailable", nil)
+		return core.Fail(core.E("build.startProc", "process service unavailable", nil))
 	}
 	opts := process.RunOptions{
 		Command: command,
@@ -172,11 +172,11 @@ func (s *Service) startProc(cwd, command string, args []string) (*process.Proces
 	}
 	r := ps.StartWithOptions(context.Background(), opts)
 	if !r.OK {
-		return nil, core.E("build.startProc", r.Error(), nil)
+		return core.Fail(core.E("build.startProc", r.Error(), nil))
 	}
 	p, ok := r.Value.(*process.Process)
 	if !ok || p == nil {
-		return nil, core.E("build.startProc", "process service returned non-process", nil)
+		return core.Fail(core.E("build.startProc", "process service returned non-process", nil))
 	}
-	return p, nil
+	return core.Ok(p)
 }

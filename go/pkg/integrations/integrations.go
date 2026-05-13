@@ -55,10 +55,10 @@ type WailsService struct{}
 func NewWailsService() *WailsService { return &WailsService{} }
 
 func (s *WailsService) ServiceName() string { return "Integrations" }
-func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
-func (s *WailsService) ServiceShutdown() error { return nil }
+func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // catalogue lists every known client. Adding a new integration is a
 // one-entry addition here — the rest of the wiring is mechanical.

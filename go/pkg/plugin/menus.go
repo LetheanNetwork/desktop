@@ -11,6 +11,8 @@
 
 package plugin
 
+import core "dappco.re/go"
+
 // MenuEntry is the wire shape of one plugin menu item.
 // Surface is "plugin-<code>" so the main.ts router can resolve
 // it back to "render the plugin window for <code>". When the
@@ -29,17 +31,22 @@ type MenuEntry struct {
 
 // Menus returns one entry per installed plugin that declared a
 // manifest.menu block. Plugins without a menu are skipped.
-func (s *Service) Menus() ([]MenuEntry, error) {
+func (s *Service) Menus() core.Result {
 	installed := s.scanInstalled()
 	out := make([]MenuEntry, 0, len(installed))
 	for _, p := range installed {
-		dir, dres := pluginDir(p.Code)
-		if !dres.OK {
+		dirR := pluginDir(p.Code)
+		if !dirR.OK {
 			continue
 		}
-		manifestPath := pathJoin(dir, "plugin.json")
-		m, mres := loadManifest(manifestPath)
-		if !mres.OK || m.Menu == nil {
+		dir, _ := dirR.Value.(string)
+		manifestPath := core.PathJoin(dir, "plugin.json")
+		manifestR := loadManifest(manifestPath)
+		if !manifestR.OK {
+			continue
+		}
+		m, _ := manifestR.Value.(Manifest)
+		if m.Menu == nil {
 			continue
 		}
 		entry := MenuEntry{
@@ -58,18 +65,5 @@ func (s *Service) Menus() ([]MenuEntry, error) {
 		}
 		out = append(out, entry)
 	}
-	return out, nil
-}
-
-// pathJoin avoids the core import noise in this file —
-// menus.go has no other deps on core.
-func pathJoin(parts ...string) string {
-	out := ""
-	for i, p := range parts {
-		if i > 0 && out != "" && out[len(out)-1] != '/' {
-			out += "/"
-		}
-		out += p
-	}
-	return out
+	return core.Ok(out)
 }

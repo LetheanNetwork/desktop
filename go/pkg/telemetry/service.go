@@ -146,33 +146,31 @@ func (s *Service) ServiceName() string { return "Telemetry" }
 
 // ServiceStartup runs at app boot. No-op today; reserved for the
 // powermetrics / IOReport / XPC helper handshake when that lands.
-func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
 
 // ServiceShutdown runs at app exit. No-op today.
-func (s *Service) ServiceShutdown() error { return nil }
+func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // CurrentSample returns one process telemetry reading in the
-// idiomatic (T, error) shape Wails3 generates clean TS for. The
-// package-level Sample() returns core.Result for Action-bus
-// callers; this method wraps it for the WebView binding. Named
-// CurrentSample to avoid name-collision with the package-level
-// Sample function in method-set resolution.
+// package-level Sample() value. Named CurrentSample to avoid
+// name-collision with the package-level Sample function in
+// method-set resolution.
 //
 // Usage example (from TS):
 //
 //	import { CurrentSample } from "@desktop/telemetry/service";
 //	const r = await CurrentSample();
 //	console.log(r.heap_alloc_mb);
-func (s *Service) CurrentSample() (Reading, error) {
+func (s *Service) CurrentSample() core.Result {
 	r := Sample()
 	if !r.OK {
-		return Reading{}, core.E("telemetry.Service.CurrentSample", "sample telemetry failed", r.Value.(error))
+		return core.Fail(core.E("telemetry.Service.CurrentSample", "sample telemetry failed", r.Value.(error)))
 	}
 	reading, ok := r.Value.(Reading)
 	if !ok {
-		return Reading{}, core.NewError("telemetry: Sample returned unexpected value type")
+		return core.Fail(core.NewError("telemetry: Sample returned unexpected value type"))
 	}
-	return reading, nil
+	return core.Ok(reading)
 }

@@ -45,13 +45,13 @@ func (s *Service) proc() *process.Service {
 // free. Yes there's a TOCTOU race between Close() and the
 // plugin binding — accept it for now; collisions in practice
 // are rare and v2 can move to socket-activation if needed.
-func pickFreePort() (int, error) {
+func pickFreePort() core.Result {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return 0, err
+		return core.Fail(core.E("plugin.pickFreePort", "listen failed", err))
 	}
 	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port, nil
+	return core.Ok(l.Addr().(*net.TCPAddr).Port)
 }
 
 // waitForHealth polls http://127.0.0.1:<port><healthPath> until
@@ -86,22 +86,25 @@ func waitForHealth(ctx context.Context, port int, path string, timeout time.Dura
 // waits for health, then registers the reverse-proxy mount.
 // Caller holds s.mu.
 func (s *Service) startPlugin(ctx context.Context, code, token string) core.Result {
-	dir, res := pluginDir(code)
-	if !res.OK {
-		return res
+	dirR := pluginDir(code)
+	if !dirR.OK {
+		return dirR
 	}
-	m, res := loadManifest(core.PathJoin(dir, "plugin.json"))
-	if !res.OK {
-		return res
+	dir, _ := dirR.Value.(string)
+	manifestR := loadManifest(core.PathJoin(dir, "plugin.json"))
+	if !manifestR.OK {
+		return manifestR
 	}
+	m, _ := manifestR.Value.(Manifest)
 	ps := s.proc()
 	if ps == nil {
 		return core.Fail(core.E("plugin.startPlugin", "process service unavailable", nil))
 	}
-	port, err := pickFreePort()
-	if err != nil {
-		return core.Fail(core.E("plugin.startPlugin", "pick port: "+err.Error(), nil))
+	portR := pickFreePort()
+	if !portR.OK {
+		return portR
 	}
+	port, _ := portR.Value.(int)
 	binPath := core.PathJoin(dir, m.Binary)
 	args := []string{
 		"--namespace=" + m.Namespace,
@@ -199,13 +202,14 @@ func (s *Service) resolveToken() string {
 	// into plugin's deps. The runner already calls into apikey
 	// the same way (see pkg/runner/routes.go for the pattern).
 	type tokenSource interface {
-		Reveal() (string, error)
+		Reveal() core.Result
 	}
 	for _, name := range []string{"apikey", "api_key"} {
 		raw, ok := core.ServiceFor[tokenSource](c, name)
 		if ok && raw != nil {
-			tok, err := raw.Reveal()
-			if err == nil && tok != "" {
+			tokR := raw.Reveal()
+			tok, _ := tokR.Value.(string)
+			if tokR.OK && tok != "" {
 				return tok
 			}
 		}

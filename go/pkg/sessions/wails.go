@@ -34,49 +34,49 @@ type WailsService struct {
 func NewWailsService(c *core.Core) *WailsService { return &WailsService{core: c} }
 
 func (s *WailsService) ServiceName() string { return "Sessions" }
-func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
-func (s *WailsService) ServiceShutdown() error { return nil }
+func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // Create starts a new session with the given title and returns its
 // id. The id is a content-derived string suitable for filesystem
 // paths.
-func (s *WailsService) Create(title string) (string, error) {
+func (s *WailsService) Create(title string) core.Result {
 	r := Create(s.core, title)
 	if !r.OK {
-		return "", core.E("sessions.WailsService.Create", "create session failed", r.Value.(error))
+		return core.Fail(core.E("sessions.WailsService.Create", "create session failed", r.Value.(error)))
 	}
 	id, _ := r.Value.(string)
-	return id, nil
+	return core.Ok(id)
 }
 
 // Append adds a single message to an existing session's history.
-func (s *WailsService) Append(id, role, content string) error {
+func (s *WailsService) Append(id, role, content string) core.Result {
 	r := Append(s.core, id, role, content)
 	if !r.OK {
-		return core.E("sessions.WailsService.Append", "append session message failed", r.Value.(error))
+		return core.Fail(core.E("sessions.WailsService.Append", "append session message failed", r.Value.(error)))
 	}
-	return nil
+	return core.Ok(nil)
 }
 
 // Read returns every message in the session in chronological order.
-func (s *WailsService) Read(id string) ([]inference.Message, error) {
+func (s *WailsService) Read(id string) core.Result {
 	r := Read(s.core, id)
 	if !r.OK {
-		return nil, core.E("sessions.WailsService.Read", "read session failed", r.Value.(error))
+		return core.Fail(core.E("sessions.WailsService.Read", "read session failed", r.Value.(error)))
 	}
 	msgs, _ := r.Value.([]inference.Message)
-	return msgs, nil
+	return core.Ok(msgs)
 }
 
 // List returns the session catalogue — one entry per stored
 // session, with id / title / timestamps / message count.
-func (s *WailsService) List() ([]SessionInfo, error) {
+func (s *WailsService) List() core.Result {
 	r := List(s.core)
 	if !r.OK {
-		return nil, core.E("sessions.WailsService.List", "list sessions failed", r.Value.(error))
+		return core.Fail(core.E("sessions.WailsService.List", "list sessions failed", r.Value.(error)))
 	}
 	infos, _ := r.Value.([]SessionInfo)
-	return infos, nil
+	return core.Ok(infos)
 }

@@ -224,11 +224,12 @@ func cmdGUI(args []string) int {
 		return 1
 	}
 	r := runner.NewServiceFromCore(c)
-	key, kr := apikey.GenerateOrLoad(c)
-	if !kr.OK {
-		core.Print(core.Stderr(), "lthn gui: %s\n", kr.Error())
+	keyR := apikey.GenerateOrLoad(c)
+	if !keyR.OK {
+		core.Print(core.Stderr(), "lthn gui: %s\n", keyR.Error())
 		return 1
 	}
+	key, _ := keyR.Value.(string)
 	s := server.NewService(server.Options{
 		Runner:   r,
 		LocalKey: key,
@@ -294,11 +295,12 @@ func cmdServe(args []string) int {
 		core.Print(core.Stderr(), "lthn serve: %s\n", rr.Error())
 		return 1
 	}
-	key, kr := apikey.GenerateOrLoad(c)
-	if !kr.OK {
-		core.Print(core.Stderr(), "lthn serve: %s\n", kr.Error())
+	keyR := apikey.GenerateOrLoad(c)
+	if !keyR.OK {
+		core.Print(core.Stderr(), "lthn serve: %s\n", keyR.Error())
 		return 1
 	}
+	key, _ := keyR.Value.(string)
 	s := server.NewService(server.Options{
 		Addr:     core.Concat(":", port),
 		Runner:   r,

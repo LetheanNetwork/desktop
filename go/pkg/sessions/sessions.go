@@ -86,18 +86,20 @@ func Append(c *core.Core, id, role, content string) core.Result {
 	if c == nil {
 		return core.Fail(core.E("sessions.Append", "core is nil", nil))
 	}
-	msgs, r := readMessages(c, id)
-	if !r.OK {
-		return r
+	msgsR := readMessages(c, id)
+	if !msgsR.OK {
+		return msgsR
 	}
+	msgs := msgsR.Value.([]inference.Message)
 	msgs = append(msgs, inference.Message{Role: role, Content: content})
 	if r := writeMessages(c, id, msgs); !r.OK {
 		return r
 	}
-	info, r := readManifest(c, id)
-	if !r.OK {
-		return r
+	infoR := readManifest(c, id)
+	if !infoR.OK {
+		return infoR
 	}
+	info := infoR.Value.(SessionInfo)
 	info.UpdatedAt = core.UnixNow()
 	info.Messages = len(msgs)
 	return writeManifest(c, info)
@@ -113,11 +115,11 @@ func Read(c *core.Core, id string) core.Result {
 	if c == nil {
 		return core.Fail(core.E("sessions.Read", "core is nil", nil))
 	}
-	msgs, r := readMessages(c, id)
-	if !r.OK {
-		return r
+	msgsR := readMessages(c, id)
+	if !msgsR.OK {
+		return msgsR
 	}
-	return core.Ok(msgs)
+	return msgsR
 }
 
 // List returns the manifest entries for every session. Order is
@@ -169,23 +171,23 @@ func writeMessages(c *core.Core, id string, msgs []inference.Message) core.Resul
 	))
 }
 
-func readMessages(c *core.Core, id string) ([]inference.Message, core.Result) {
+func readMessages(c *core.Core, id string) core.Result {
 	r := c.Action("store.get").Run(context.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: groupMessages},
 		core.Option{Key: "key", Value: id},
 	))
 	if !r.OK {
-		return nil, r
+		return r
 	}
 	encoded, ok := r.Value.(string)
 	if !ok || encoded == "" {
-		return []inference.Message{}, core.Ok(nil)
+		return core.Ok([]inference.Message{})
 	}
 	var msgs []inference.Message
 	if ur := core.JSONUnmarshalString(encoded, &msgs); !ur.OK {
-		return nil, ur
+		return ur
 	}
-	return msgs, core.Ok(nil)
+	return core.Ok(msgs)
 }
 
 func writeManifest(c *core.Core, info SessionInfo) core.Result {
@@ -204,21 +206,21 @@ func writeManifest(c *core.Core, info SessionInfo) core.Result {
 	))
 }
 
-func readManifest(c *core.Core, id string) (SessionInfo, core.Result) {
+func readManifest(c *core.Core, id string) core.Result {
 	r := c.Action("store.get").Run(context.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: groupManifest},
 		core.Option{Key: "key", Value: id},
 	))
 	if !r.OK {
-		return SessionInfo{}, r
+		return r
 	}
 	encoded, ok := r.Value.(string)
 	if !ok || encoded == "" {
-		return SessionInfo{}, core.Fail(core.E("sessions.readManifest", "not found", nil))
+		return core.Fail(core.E("sessions.readManifest", "not found", nil))
 	}
 	var info SessionInfo
 	if ur := core.JSONUnmarshalString(encoded, &info); !ur.OK {
-		return SessionInfo{}, ur
+		return ur
 	}
-	return info, core.Ok(nil)
+	return core.Ok(info)
 }

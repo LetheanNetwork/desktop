@@ -16,10 +16,10 @@ import (
 
 // ServiceName / Startup / Shutdown — Wails3 lifecycle.
 func (s *Service) ServiceName() string { return "Lint" }
-func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
-func (s *Service) ServiceShutdown() error { return nil }
+func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // Issue mirrors one row of `core-lint lint check --format json`.
 type Issue struct {
@@ -50,21 +50,21 @@ type RunOutput struct {
 //
 //	import { Run } from "@desktop/lint/service";
 //	const { issues, counts, total } = await Run("/path", "", "");
-func (s *Service) Run(path, severity, lang string) (RunOutput, error) {
+func (s *Service) Run(path, severity, lang string) core.Result {
 	if core.Trim(path) == "" {
-		return RunOutput{}, core.E("lint.Run", "path required", nil)
+		return core.Fail(core.E("lint.Run", "path required", nil))
 	}
 	stat := core.Stat(path)
 	if !stat.OK {
-		return RunOutput{}, core.E("lint.Run", "path is not a directory: "+path, nil)
+		return core.Fail(core.E("lint.Run", "path is not a directory: "+path, nil))
 	}
 	if info, ok := stat.Value.(interface{ IsDir() bool }); !ok || !info.IsDir() {
-		return RunOutput{}, core.E("lint.Run", "path is not a directory: "+path, nil)
+		return core.Fail(core.E("lint.Run", "path is not a directory: "+path, nil))
 	}
 	binary := findLintBinary()
 	if binary == "" {
-		return RunOutput{}, core.E("lint.Run",
-			"core-lint binary not found on PATH or canonical locations", nil)
+		return core.Fail(core.E("lint.Run",
+			"core-lint binary not found on PATH or canonical locations", nil))
 	}
 	args := []string{"lint", "check", path, "--format", "json"}
 	if severity != "" {
@@ -74,14 +74,15 @@ func (s *Service) Run(path, severity, lang string) (RunOutput, error) {
 		args = append(args, "--lang", lang)
 	}
 	start := time.Now()
-	out, err := s.runLint(binary, args...)
+	outR := s.runLint(binary, args...)
 	dur := time.Since(start).Milliseconds()
-	if err != nil && out == "" {
-		return RunOutput{}, err
+	if !outR.OK {
+		return outR
 	}
+	out, _ := outR.Value.(string)
 	var issues []Issue
 	if r := core.JSONUnmarshal([]byte(out), &issues); !r.OK {
-		return RunOutput{}, core.E("lint.Run", "parse json: "+r.Error(), nil)
+		return core.Fail(core.E("lint.Run", "parse json: "+r.Error(), nil))
 	}
 	counts := map[string]int{}
 	for _, iss := range issues {
@@ -90,14 +91,14 @@ func (s *Service) Run(path, severity, lang string) (RunOutput, error) {
 	if issues == nil {
 		issues = []Issue{}
 	}
-	return RunOutput{
+	return core.Ok(RunOutput{
 		Path:       path,
 		Issues:     issues,
 		Counts:     counts,
 		Total:      len(issues),
 		BinaryPath: binary,
 		DurationMs: dur,
-	}, nil
+	})
 }
 
 // CatalogEntry mirrors one rule emitted by `core-lint lint catalog list`.
@@ -115,21 +116,22 @@ type CatalogEntry struct {
 // Usage example (TS):
 //
 //	const rules = await Catalog();
-func (s *Service) Catalog() ([]CatalogEntry, error) {
+func (s *Service) Catalog() core.Result {
 	binary := findLintBinary()
 	if binary == "" {
-		return []CatalogEntry{}, nil
+		return core.Ok([]CatalogEntry{})
 	}
-	out, err := s.runLint(binary, "lint", "catalog", "list", "--format", "json")
-	if err != nil && out == "" {
-		return nil, err
+	outR := s.runLint(binary, "lint", "catalog", "list", "--format", "json")
+	if !outR.OK {
+		return outR
 	}
+	out, _ := outR.Value.(string)
 	var entries []CatalogEntry
 	if r := core.JSONUnmarshal([]byte(out), &entries); !r.OK {
-		return nil, core.E("lint.Catalog", "parse json: "+r.Error(), nil)
+		return core.Fail(core.E("lint.Catalog", "parse json: "+r.Error(), nil))
 	}
 	if entries == nil {
 		entries = []CatalogEntry{}
 	}
-	return entries, nil
+	return core.Ok(entries)
 }

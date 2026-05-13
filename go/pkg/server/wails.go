@@ -13,6 +13,7 @@ package server
 import (
 	"context"
 
+	core "dappco.re/go"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -23,13 +24,13 @@ func (s *Service) ServiceName() string { return "Server" }
 // ServiceStartup runs on Wails boot. Returns nil unconditionally —
 // the gin engine is constructed in NewService, before the Wails
 // application takes ownership.
-func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
 
 // ServiceShutdown runs on Wails teardown. No-op — pkg/desktop's
 // shutdown path calls Stop on the underlying *Service directly.
-func (s *Service) ServiceShutdown() error { return nil }
+func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // WAddr returns the configured bind address for the OpenAI-compat
 // HTTP surface. Default is ":8000"; the WebView display slots add
@@ -40,11 +41,11 @@ func (s *Service) ServiceShutdown() error { return nil }
 //
 //	import { WAddr } from "@desktop/server/service";
 //	const addr = await WAddr();   // ":8000"
-func (s *Service) WAddr() (string, error) {
+func (s *Service) WAddr() core.Result {
 	if s == nil {
-		return ":8000", nil
+		return core.Ok(":8000")
 	}
-	return s.opts.Addr, nil
+	return core.Ok(s.opts.Addr)
 }
 
 // WListening reports whether Start() is actively serving on Addr.
@@ -56,9 +57,9 @@ func (s *Service) WAddr() (string, error) {
 //
 //	import { WListening } from "@desktop/server/service";
 //	const on = await WListening();
-func (s *Service) WListening() (bool, error) {
+func (s *Service) WListening() core.Result {
 	if s == nil {
-		return false, nil
+		return core.Ok(false)
 	}
-	return s.listening, nil
+	return core.Ok(s.listening)
 }

@@ -34,10 +34,10 @@ func NewWailsService(c *core.Core) *WailsService {
 
 // ServiceName / Startup / Shutdown — Wails3 lifecycle.
 func (s *WailsService) ServiceName() string { return "ApiKey" }
-func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
-func (s *WailsService) ServiceShutdown() error { return nil }
+func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // Reveal returns the full local bearer token. The Settings → API
 // "Show" toggle calls this when the user explicitly clicks to
@@ -48,15 +48,16 @@ func (s *WailsService) ServiceShutdown() error { return nil }
 //
 //	import { Reveal } from "@desktop/apikey/wailsservice";
 //	const key = await Reveal();
-func (s *WailsService) Reveal() (string, error) {
+func (s *WailsService) Reveal() core.Result {
 	if s == nil || s.core == nil {
-		return "", nil
+		return core.Ok("")
 	}
-	key, r := GenerateOrLoad(s.core)
+	r := GenerateOrLoad(s.core)
 	if !r.OK {
-		return "", nil
+		return core.Ok("")
 	}
-	return key, nil
+	key, _ := r.Value.(string)
+	return core.Ok(key)
 }
 
 // Masked returns the UI-safe form — prefix + first/last 4 chars +
@@ -68,15 +69,16 @@ func (s *WailsService) Reveal() (string, error) {
 //	import { Masked } from "@desktop/apikey/wailsservice";
 //	const display = await Masked();
 //	// → "sk-lthn-0011••••••••••••••••eeff"
-func (s *WailsService) Masked() (string, error) {
+func (s *WailsService) Masked() core.Result {
 	if s == nil || s.core == nil {
-		return "", nil
+		return core.Ok("")
 	}
-	key, r := GenerateOrLoad(s.core)
+	r := GenerateOrLoad(s.core)
 	if !r.OK {
-		return "", nil
+		return core.Ok("")
 	}
-	return Mask(key), nil
+	key, _ := r.Value.(string)
+	return core.Ok(Mask(key))
 }
 
 // WRotate generates a fresh key, persists it, and returns the new
@@ -87,13 +89,14 @@ func (s *WailsService) Masked() (string, error) {
 //
 //	import { WRotate } from "@desktop/apikey/wailsservice";
 //	const newKey = await WRotate();
-func (s *WailsService) WRotate() (string, error) {
+func (s *WailsService) WRotate() core.Result {
 	if s == nil || s.core == nil {
-		return "", nil
+		return core.Ok("")
 	}
-	key, r := Rotate(s.core)
+	r := Rotate(s.core)
 	if !r.OK {
-		return "", nil
+		return core.Ok("")
 	}
-	return key, nil
+	key, _ := r.Value.(string)
+	return core.Ok(key)
 }

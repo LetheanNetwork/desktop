@@ -50,20 +50,20 @@ type WailsService struct{}
 func NewWailsService() *WailsService { return &WailsService{} }
 
 func (s *WailsService) ServiceName() string { return "FirstLaunch" }
-func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
-func (s *WailsService) ServiceShutdown() error { return nil }
+func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // Detect inspects on-disk state and reports whether this is a
 // fresh install.
-func (s *WailsService) Detect() (State, error) {
+func (s *WailsService) Detect() core.Result {
 	r := Detect(nil)
 	if !r.OK {
-		return State{}, core.E("firstlaunch.WailsService.Detect", "detect first launch state failed", r.Value.(error))
+		return core.Fail(core.E("firstlaunch.WailsService.Detect", "detect first launch state failed", r.Value.(error)))
 	}
 	state, _ := r.Value.(State)
-	return state, nil
+	return core.Ok(state)
 }
 
 // Build returns version + runtime metadata for the About panel.
@@ -75,14 +75,14 @@ func (s *WailsService) Detect() (State, error) {
 //	import { Build } from "@desktop/firstlaunch/wailsservice";
 //	const b = await Build();
 //	console.log(b.version, b.go_version, b.goos, b.goarch);
-func (s *WailsService) Build() (BuildInfo, error) {
-	return BuildInfo{
+func (s *WailsService) Build() core.Result {
+	return core.Ok(BuildInfo{
 		Version:   Version,
 		GoVersion: runtime.Version(),
 		GoOS:      runtime.GOOS,
 		GoArch:    runtime.GOARCH,
 		NumCPU:    runtime.NumCPU(),
-	}, nil
+	})
 }
 
 // Paths returns the canonical ~/Lethean/ layout. Driven by
@@ -95,7 +95,7 @@ func (s *WailsService) Build() (BuildInfo, error) {
 //	import { Paths } from "@desktop/firstlaunch/wailsservice";
 //	const p = await Paths();
 //	console.log(p.models_dir);   // "/Users/<name>/Lethean/conf/models"
-func (s *WailsService) Paths() (LetheanPaths, error) {
+func (s *WailsService) Paths() core.Result {
 	out := LetheanPaths{}
 	if r := paths.Root(); r.OK {
 		out.Root, _ = r.Value.(string)
@@ -115,5 +115,5 @@ func (s *WailsService) Paths() (LetheanPaths, error) {
 	if r := paths.ConfigFile(); r.OK {
 		out.ConfigFile, _ = r.Value.(string)
 	}
-	return out, nil
+	return core.Ok(out)
 }

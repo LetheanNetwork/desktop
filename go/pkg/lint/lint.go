@@ -86,15 +86,15 @@ func findLintBinary() string {
 // stdout. Non-zero exit codes are NOT treated as error when the
 // binary still emitted JSON — core-lint exits non-zero when issues
 // exist, which is the normal happy-path.
-func (s *Service) runLint(binary string, args ...string) (string, error) {
+func (s *Service) runLint(binary string, args ...string) core.Result {
 	ps := s.proc()
 	if ps == nil {
-		return "", core.E("lint.runLint", "process service unavailable", nil)
+		return core.Fail(core.E("lint.runLint", "process service unavailable", nil))
 	}
 	r := ps.Run(context.Background(), binary, args...)
 	out, _ := r.Value.(string)
 	if !r.OK && out == "" {
-		return "", core.E("lint.runLint", r.Error(), nil)
+		return core.Fail(core.E("lint.runLint", r.Error(), nil))
 	}
-	return out, nil
+	return core.Ok(out)
 }

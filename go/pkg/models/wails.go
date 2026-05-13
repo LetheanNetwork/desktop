@@ -22,20 +22,20 @@ type WailsService struct{}
 func NewWailsService() *WailsService { return &WailsService{} }
 
 func (s *WailsService) ServiceName() string { return "Models" }
-func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
-func (s *WailsService) ServiceShutdown() error { return nil }
+func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // List scans the local model snapshot directory and returns one
 // Entry per direct child.
-func (s *WailsService) List() ([]Entry, error) {
+func (s *WailsService) List() core.Result {
 	r := List()
 	if !r.OK {
-		return nil, core.E("models.WailsService.List", "list models failed", r.Value.(error))
+		return core.Fail(core.E("models.WailsService.List", "list models failed", r.Value.(error)))
 	}
 	entries, _ := r.Value.([]Entry)
-	return entries, nil
+	return core.Ok(entries)
 }
 
 // DiskFree returns the free bytes available at the models
@@ -48,11 +48,11 @@ func (s *WailsService) List() ([]Entry, error) {
 //
 //	import { DiskFree } from "@desktop/models/wailsservice";
 //	const bytes = await DiskFree();
-func (s *WailsService) DiskFree() (int64, error) {
+func (s *WailsService) DiskFree() core.Result {
 	dirR := paths.ModelsDir()
 	if !dirR.OK {
-		return 0, nil
+		return core.Ok(int64(0))
 	}
 	dir, _ := dirR.Value.(string)
-	return diskFreeBytes(dir), nil
+	return core.Ok(diskFreeBytes(dir))
 }

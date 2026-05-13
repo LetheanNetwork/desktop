@@ -1,13 +1,9 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
 // Wails3 Service shape for the runner package — extends the
-// existing *Service with the Wails lifecycle hooks plus
-// (T, error) methods so Wails3's binding generator emits clean
-// TypeScript at frontend/bindings/dappco.re/lthn/desktop/pkg/
-// runner/. The package's core.Result-returning Generate / Chat /
-// Models methods stay on the type for Action-bus and CLI callers;
-// the W-prefixed methods below are what the WebView binding
-// surfaces (W = Wails — picks the (T, error) shape).
+// existing *Service with lifecycle hooks plus WebView-friendly
+// wrappers. The package's core.Result-returning Generate / Chat /
+// Models methods stay on the type for Action-bus and CLI callers.
 
 package runner
 
@@ -35,10 +31,10 @@ type RouteView struct {
 // instance through application.NewService.
 
 func (s *Service) ServiceName() string { return "Runner" }
-func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	return nil
+func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+	return core.Ok(nil)
 }
-func (s *Service) ServiceShutdown() error { return nil }
+func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }
 
 // WGenerate is the WebView-binding-friendly Generate. Returns the
 // assistant reply as a plain string, or an error if the router
@@ -49,35 +45,35 @@ func (s *Service) ServiceShutdown() error { return nil }
 //
 //	import { WGenerate } from "@desktop/runner/service";
 //	const reply = await WGenerate("hello");
-func (s *Service) WGenerate(prompt string) (string, error) {
+func (s *Service) WGenerate(prompt string) core.Result {
 	r := s.Generate(prompt)
 	if !r.OK {
-		return "", core.E("runner.Service.WGenerate", "generate failed", r.Value.(error))
+		return core.Fail(core.E("runner.Service.WGenerate", "generate failed", r.Value.(error)))
 	}
 	text, _ := r.Value.(string)
-	return text, nil
+	return core.Ok(text)
 }
 
 // WChat is the WebView-binding-friendly Chat — full message
 // history in, assistant reply out.
-func (s *Service) WChat(messages []inference.Message) (string, error) {
+func (s *Service) WChat(messages []inference.Message) core.Result {
 	r := s.Chat(messages)
 	if !r.OK {
-		return "", core.E("runner.Service.WChat", "chat failed", r.Value.(error))
+		return core.Fail(core.E("runner.Service.WChat", "chat failed", r.Value.(error)))
 	}
 	text, _ := r.Value.(string)
-	return text, nil
+	return core.Ok(text)
 }
 
 // WModels is the WebView-binding-friendly Models — returns the
 // list of configured route names.
-func (s *Service) WModels() ([]string, error) {
+func (s *Service) WModels() core.Result {
 	r := s.Models()
 	if !r.OK {
-		return nil, core.E("runner.Service.WModels", "list models failed", r.Value.(error))
+		return core.Fail(core.E("runner.Service.WModels", "list models failed", r.Value.(error)))
 	}
 	names, _ := r.Value.([]string)
-	return names, nil
+	return core.Ok(names)
 }
 
 // WRoutes returns the configured provider routes for the Settings →
@@ -91,18 +87,18 @@ func (s *Service) WModels() ([]string, error) {
 //	import { WRoutes } from "@desktop/runner/service";
 //	const routes = await WRoutes();
 //	routes.forEach(r => console.log(r.name, r.kind, r.base_url));
-func (s *Service) WRoutes() ([]RouteView, error) {
+func (s *Service) WRoutes() core.Result {
 	out := []RouteView{}
 	if s == nil || s.core == nil {
-		return out, nil
+		return core.Ok(out)
 	}
 	cfg, ok := core.ServiceFor[*config.Service](s.core, "config")
 	if !ok || cfg == nil {
-		return out, nil
+		return core.Ok(out)
 	}
 	var raw map[string]RouteConfig
 	if r := cfg.Get("routes", &raw); !r.OK {
-		return out, nil
+		return core.Ok(out)
 	}
 	for name, rc := range raw {
 		kind := rc.Kind
@@ -116,5 +112,5 @@ func (s *Service) WRoutes() ([]RouteView, error) {
 			Model:   rc.Model,
 		})
 	}
-	return out, nil
+	return core.Ok(out)
 }

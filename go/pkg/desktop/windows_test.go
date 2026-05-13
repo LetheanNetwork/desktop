@@ -52,8 +52,9 @@ func TestDesktop_NewWindowService_Good(t *core.T) {
 // straight from the static windowRegistry() table.
 func TestDesktop_WindowService_List_Good(t *core.T) {
 	w := desktop.NewWindowService()
-	names, err := w.List()
-	core.AssertNoError(t, err)
+	r := w.List()
+	core.AssertTrue(t, r.OK)
+	names := r.Value.([]string)
 	core.AssertGreater(t, len(names), 0, "registry must not be empty")
 
 	// Every window we shipped this session should be in the list.
@@ -71,14 +72,16 @@ func TestDesktop_WindowService_List_Good(t *core.T) {
 // here, so no substring is given.
 func TestDesktop_WindowService_Open_Bad_NotAttached(t *core.T) {
 	w := desktop.NewWindowService()
-	err := w.Open("chat")
-	core.AssertError(t, err)
+	r := w.Open("chat")
+	core.AssertFalse(t, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
 
 func TestDesktop_WindowService_Hide_Bad_NotAttached(t *core.T) {
 	w := desktop.NewWindowService()
-	err := w.Hide("chat")
-	core.AssertError(t, err)
+	r := w.Hide("chat")
+	core.AssertFalse(t, r.OK)
+	core.AssertNotEmpty(t, r.Error())
 }
 
 // The package-level Wails services that used to live in bindings.go

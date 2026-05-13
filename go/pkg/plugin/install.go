@@ -43,13 +43,13 @@ const downloadTimeout = 60 * time.Second
 
 // verifyURL checks the URL against the host allowlist + path
 // prefix. Returns the parsed URL on success.
-func verifyURL(rawURL string) (*url.URL, core.Result) {
+func verifyURL(rawURL string) core.Result {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return nil, core.Fail(core.E("plugin.verifyURL", "parse failed: "+err.Error(), nil))
+		return core.Fail(core.E("plugin.verifyURL", "parse failed: "+err.Error(), nil))
 	}
 	if u.Scheme != "https" {
-		return nil, core.Fail(core.E("plugin.verifyURL", "https required, got "+u.Scheme, nil))
+		return core.Fail(core.E("plugin.verifyURL", "https required, got "+u.Scheme, nil))
 	}
 	hostAllowed := false
 	for _, h := range allowedHosts {
@@ -59,46 +59,46 @@ func verifyURL(rawURL string) (*url.URL, core.Result) {
 		}
 	}
 	if !hostAllowed {
-		return nil, core.Fail(core.E("plugin.verifyURL", "host not on allowlist: "+u.Host, nil))
+		return core.Fail(core.E("plugin.verifyURL", "host not on allowlist: "+u.Host, nil))
 	}
 	if !core.HasPrefix(u.Path, allowedPathPrefix) {
-		return nil, core.Fail(core.E("plugin.verifyURL",
+		return core.Fail(core.E("plugin.verifyURL",
 			"path must start with "+allowedPathPrefix+", got "+u.Path, nil))
 	}
-	return u, core.Ok(nil)
+	return core.Ok(u)
 }
 
 // fetchBinary downloads `rawURL` (after allowlist check) up to
 // maxBinarySize bytes. Returns the raw bytes for verifyChecksum
 // to inspect before they hit disk.
-func fetchBinary(ctx context.Context, rawURL string) ([]byte, core.Result) {
-	if _, res := verifyURL(rawURL); !res.OK {
-		return nil, res
+func fetchBinary(ctx context.Context, rawURL string) core.Result {
+	if res := verifyURL(rawURL); !res.OK {
+		return res
 	}
 	cctx, cancel := context.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(cctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, core.Fail(core.E("plugin.fetchBinary", "build request: "+err.Error(), nil))
+		return core.Fail(core.E("plugin.fetchBinary", "build request: "+err.Error(), nil))
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, core.Fail(core.E("plugin.fetchBinary", "http: "+err.Error(), nil))
+		return core.Fail(core.E("plugin.fetchBinary", "http: "+err.Error(), nil))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, core.Fail(core.E("plugin.fetchBinary",
+		return core.Fail(core.E("plugin.fetchBinary",
 			"http status "+core.Itoa(resp.StatusCode)+" for "+rawURL, nil))
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBinarySize+1))
 	if err != nil {
-		return nil, core.Fail(core.E("plugin.fetchBinary", "read body: "+err.Error(), nil))
+		return core.Fail(core.E("plugin.fetchBinary", "read body: "+err.Error(), nil))
 	}
 	if len(body) > maxBinarySize {
-		return nil, core.Fail(core.E("plugin.fetchBinary",
+		return core.Fail(core.E("plugin.fetchBinary",
 			"binary exceeds "+core.Itoa(maxBinarySize)+" bytes", nil))
 	}
-	return body, core.Ok(nil)
+	return core.Ok(body)
 }
 
 // verifyChecksum compares the SHA-256 of `data` against the
@@ -134,36 +134,38 @@ func verifyChecksum(data []byte, checksum string) core.Result {
 //	└── data/         (created empty; plugin writes here)
 //
 // Returns the install directory path on success.
-func writePlugin(m Manifest, binary []byte) (string, core.Result) {
-	dir, res := pluginDir(m.Code)
-	if !res.OK {
-		return "", res
+func writePlugin(m Manifest, binary []byte) core.Result {
+	dirR := pluginDir(m.Code)
+	if !dirR.OK {
+		return dirR
 	}
+	dir, _ := dirR.Value.(string)
 	if r := core.MkdirAll(core.PathJoin(dir, "bin"), 0o755); !r.OK {
-		return "", core.Fail(core.E("plugin.writePlugin", "mkdir bin: "+r.Error(), nil))
+		return core.Fail(core.E("plugin.writePlugin", "mkdir bin: "+r.Error(), nil))
 	}
 	if r := core.MkdirAll(core.PathJoin(dir, "data"), 0o755); !r.OK {
-		return "", core.Fail(core.E("plugin.writePlugin", "mkdir data: "+r.Error(), nil))
+		return core.Fail(core.E("plugin.writePlugin", "mkdir data: "+r.Error(), nil))
 	}
 	binPath := core.PathJoin(dir, m.Binary)
 	if r := core.WriteFile(binPath, binary, 0o755); !r.OK {
-		return "", core.Fail(core.E("plugin.writePlugin", "write binary: "+r.Error(), nil))
+		return core.Fail(core.E("plugin.writePlugin", "write binary: "+r.Error(), nil))
 	}
 	if r := saveManifest(dir, m); !r.OK {
-		return "", core.Fail(core.E("plugin.writePlugin", "write manifest: "+r.Error(), nil))
+		return core.Fail(core.E("plugin.writePlugin", "write manifest: "+r.Error(), nil))
 	}
-	return dir, core.Ok(nil)
+	return core.Ok(dir)
 }
 
 // removePlugin deletes the plugin's install directory + every
 // file under it. Caller must Stop the plugin first.
 func removePlugin(code string) core.Result {
-	dir, res := pluginDir(code)
-	if !res.OK {
-		return res
+	dirR := pluginDir(code)
+	if !dirR.OK {
+		return dirR
 	}
-	if r := core.RemoveAll(dir); !r.OK {
-		return core.Fail(core.E("plugin.removePlugin", "remove "+dir+": "+r.Error(), nil))
+	installDir, _ := dirR.Value.(string)
+	if r := core.RemoveAll(installDir); !r.OK {
+		return core.Fail(core.E("plugin.removePlugin", "remove "+installDir+": "+r.Error(), nil))
 	}
 	return core.Ok(nil)
 }
@@ -173,10 +175,11 @@ func removePlugin(code string) core.Result {
 // Plugins with corrupt manifests are skipped (not surfaced as
 // errors) so a single bad install doesn't break the whole list.
 func (s *Service) scanInstalled() []InstalledPlugin {
-	root, res := installRoot()
-	if !res.OK {
+	rootR := installRoot()
+	if !rootR.OK {
 		return nil
 	}
+	root, _ := rootR.Value.(string)
 	listing := core.ReadDir(core.DirFS(root), ".")
 	if !listing.OK {
 		return nil
@@ -189,10 +192,11 @@ func (s *Service) scanInstalled() []InstalledPlugin {
 		}
 		code := entry.Name()
 		dir := core.PathJoin(root, code)
-		m, mres := loadManifest(core.PathJoin(dir, "plugin.json"))
-		if !mres.OK {
+		mr := loadManifest(core.PathJoin(dir, "plugin.json"))
+		if !mr.OK {
 			continue
 		}
+		m, _ := mr.Value.(Manifest)
 		s.mu.RLock()
 		status := s.statusFor(code)
 		s.mu.RUnlock()

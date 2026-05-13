@@ -10,6 +10,8 @@ package repos
 import (
 	"context"
 	"time"
+
+	core "dappco.re/go"
 )
 
 // StatusInput drives the Status method. Paths overrides the default
@@ -33,7 +35,7 @@ type StatusOutput struct {
 // Status enumerates the user's repos and returns each one's git
 // state. When Paths is empty the service scans Roots (or the
 // canonical default roots when those are empty too).
-func (s *Service) Status(input StatusInput) (StatusOutput, error) {
+func (s *Service) Status(input StatusInput) core.Result {
 	paths := input.Paths
 	if len(paths) == 0 {
 		if len(input.Roots) > 0 {
@@ -43,15 +45,15 @@ func (s *Service) Status(input StatusInput) (StatusOutput, error) {
 		}
 	}
 	if len(paths) == 0 {
-		return StatusOutput{Repos: []Status{}, Scanned: 0}, nil
+		return core.Ok(StatusOutput{Repos: []Status{}, Scanned: 0})
 	}
 	// 30s ceiling — git status across the canonical roots takes
 	// well under a second on a healthy SSD, but pathological cases
 	// (slow network FS mounts, hung git auth helpers) need a cap.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return StatusOutput{
+	return core.Ok(StatusOutput{
 		Repos:   s.statuses(ctx, paths),
 		Scanned: len(paths),
-	}, nil
+	})
 }

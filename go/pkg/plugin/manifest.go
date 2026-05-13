@@ -54,15 +54,15 @@ type UI struct {
 
 // validate checks the manifest's required fields + normalises
 // optional ones with defaults. Returns the normalised copy.
-func (m Manifest) validate() (Manifest, core.Result) {
+func (m Manifest) validate() core.Result {
 	if core.Trim(m.Code) == "" {
-		return m, core.Fail(core.E("plugin.manifest.validate", "code is required", nil))
+		return core.Fail(core.E("plugin.manifest.validate", "code is required", nil))
 	}
 	if core.Trim(m.Name) == "" {
-		return m, core.Fail(core.E("plugin.manifest.validate", "name is required", nil))
+		return core.Fail(core.E("plugin.manifest.validate", "name is required", nil))
 	}
 	if core.Trim(m.Binary) == "" {
-		return m, core.Fail(core.E("plugin.manifest.validate", "binary path is required", nil))
+		return core.Fail(core.E("plugin.manifest.validate", "binary path is required", nil))
 	}
 	// Namespace defaults to code when omitted.
 	if core.Trim(m.Namespace) == "" {
@@ -83,19 +83,19 @@ func (m Manifest) validate() (Manifest, core.Result) {
 	if m.Health.Timeout <= 0 {
 		m.Health.Timeout = 5
 	}
-	return m, core.Ok(nil)
+	return core.Ok(m)
 }
 
 // loadManifest reads + validates a plugin.json from disk.
-func loadManifest(path string) (Manifest, core.Result) {
+func loadManifest(path string) core.Result {
 	read := core.ReadFile(path)
 	if !read.OK {
-		return Manifest{}, core.Fail(core.E("plugin.loadManifest", "read failed: "+path, nil))
+		return core.Fail(core.E("plugin.loadManifest", "read failed: "+path, nil))
 	}
 	bytes, _ := read.Value.([]byte)
 	var m Manifest
 	if r := core.JSONUnmarshal(bytes, &m); !r.OK {
-		return Manifest{}, core.Fail(core.E("plugin.loadManifest", "parse failed: "+path, nil))
+		return core.Fail(core.E("plugin.loadManifest", "parse failed: "+path, nil))
 	}
 	return m.validate()
 }
