@@ -28,6 +28,7 @@ class LthnTelemetryWindow extends LitElement {
     goHistory: { state: true },
     model: { state: true },
     err: { state: true },
+    t: { state: true },
   };
   declare w: number;
   declare h: number;
@@ -39,6 +40,13 @@ class LthnTelemetryWindow extends LitElement {
   declare goHistory: number[];
   declare model: string;
   declare err: string;
+  declare t: {
+    bigHeapL: string; bigHeapS: string;
+    bigUptimeL: string; bigUptimeS: string;
+    rowModel: string; rowGoroutines: string; rowCgo: string;
+    statusOk: string; statusErr: string;
+    tagline: string; footerNormal: string;
+  };
 
   private _pollTimer: number | null = null;
 
@@ -55,16 +63,45 @@ class LthnTelemetryWindow extends LitElement {
     this.goHistory = [];
     this.model = "—";
     this.err = "";
+    this.t = {
+      bigHeapL: "heap · MB", bigHeapS: "Go runtime · live",
+      bigUptimeL: "uptime", bigUptimeS: "since process start",
+      rowModel: "model", rowGoroutines: "goroutines", rowCgo: "cgo calls",
+      statusOk: "airplane-mode OK", statusErr: "telemetry error",
+      tagline: "lthn · sovereign · single-watt",
+      footerNormal: "model · %s · goroutines %d · airplane-mode OK · ⌥⌘F for fullscreen",
+    };
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const [title, subN, subF] = await Promise.all([
+    const [
+      title, subN, subF,
+      bhL, bhS, buL, buS, rMo, rGo, rCg, sOk, sErr, tag, fNorm,
+    ] = await Promise.all([
       T("window.telemetry.title"),
       T("window.telemetry.subtitle_normal"),
       T("window.telemetry.subtitle_fullscreen"),
+      T("window.telemetry.big_heap_label"),
+      T("window.telemetry.big_heap_sub"),
+      T("window.telemetry.big_uptime_label"),
+      T("window.telemetry.big_uptime_sub"),
+      T("window.telemetry.row_model"),
+      T("window.telemetry.row_goroutines"),
+      T("window.telemetry.row_cgo"),
+      T("window.telemetry.status_ok"),
+      T("window.telemetry.status_err"),
+      T("window.telemetry.tagline"),
+      T("window.telemetry.footer_normal"),
     ]);
     this.chrome = { title, subtitleNormal: subN, subtitleFullscreen: subF };
+    this.t = {
+      bigHeapL: bhL, bigHeapS: bhS,
+      bigUptimeL: buL, bigUptimeS: buS,
+      rowModel: rMo, rowGoroutines: rGo, rowCgo: rCg,
+      statusOk: sOk, statusErr: sErr,
+      tagline: tag, footerNormal: fNorm,
+    };
     void this._poll();
     // Cadence + rolling-window size live in localStorage, written by
     // Settings → Telemetry. "off" disables polling outright — the
@@ -138,24 +175,24 @@ class LthnTelemetryWindow extends LitElement {
     const body = html`
       <div style="flex:1; background:radial-gradient(circle at 50% 35%, rgba(64,193,197,0.10) 0%, rgba(11,16,22,0) 60%), var(--surf-0); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px 60px; gap:36px; position:relative; overflow:hidden;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:64px; width:100%;">
-          ${big("heap · MB", this.sample.heap_alloc_mb.toFixed(1), "Go runtime · live", "var(--brand-400)", heapSpark, heapMax)}
-          ${big("uptime",    this._fmtUptime(this.sample.uptime_seconds), "since process start", "#a78bfa", goSpark, goMax)}
+          ${big(this.t.bigHeapL, this.sample.heap_alloc_mb.toFixed(1), this.t.bigHeapS, "var(--brand-400)", heapSpark, heapMax)}
+          ${big(this.t.bigUptimeL, this._fmtUptime(this.sample.uptime_seconds), this.t.bigUptimeS, "#a78bfa", goSpark, goMax)}
         </div>
         <div style="display:flex; gap:28px; align-items:center; font-family:var(--font-mono); font-size:12px; color:var(--fg-2); padding-top:8px; border-top:1px solid rgba(255,255,255,0.05); width:100%; justify-content:center;">
-          <div><span style="color:var(--fg-3);">model </span><span style="color:var(--fg-0);">${this.model}</span></div>
+          <div><span style="color:var(--fg-3);">${this.t.rowModel} </span><span style="color:var(--fg-0);">${this.model}</span></div>
           <div style="width:1px; height:14px; background:rgba(255,255,255,0.06);"></div>
-          <div><span style="color:var(--fg-3);">goroutines </span><span style="color:var(--fg-0);">${this.sample.num_goroutines}</span></div>
+          <div><span style="color:var(--fg-3);">${this.t.rowGoroutines} </span><span style="color:var(--fg-0);">${this.sample.num_goroutines}</span></div>
           <div style="width:1px; height:14px; background:rgba(255,255,255,0.06);"></div>
-          <div><span style="color:var(--fg-3);">cgo calls </span><span style="color:var(--fg-0);">${this.sample.num_cgo_calls}</span></div>
+          <div><span style="color:var(--fg-3);">${this.t.rowCgo} </span><span style="color:var(--fg-0);">${this.sample.num_cgo_calls}</span></div>
           <div style="width:1px; height:14px; background:rgba(255,255,255,0.06);"></div>
           <div style="display:flex; align-items:center; gap:6px;">
             <lthn-status-dot variant=${this.err ? "err" : "ok"}></lthn-status-dot>
-            <span style="color:${this.err ? "var(--error-400)" : "var(--success-400)"};">${this.err ? "telemetry error" : "airplane-mode OK"}</span>
+            <span style="color:${this.err ? "var(--error-400)" : "var(--success-400)"};">${this.err ? this.t.statusErr : this.t.statusOk}</span>
           </div>
         </div>
         <div style="position:absolute; bottom:18px; right:24px; display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:10px; color:var(--fg-3); letter-spacing:0.06em;">
           <lthn-glyph size="12" color="var(--fg-3)"></lthn-glyph>
-          lthn · sovereign · single-watt
+          ${this.t.tagline}
         </div>
       </div>
     `;
@@ -163,7 +200,7 @@ class LthnTelemetryWindow extends LitElement {
       title: this.chrome.title,
       subtitle: this.fullscreen ? this.chrome.subtitleFullscreen : this.chrome.subtitleNormal,
       w: this.w, h: this.h, body,
-      footer: html`model · ${this.model} · goroutines ${this.sample.num_goroutines} · airplane-mode OK · ⌥⌘F for fullscreen`,
+      footer: html`${this.t.footerNormal.replace("%s", this.model).replace("%d", String(this.sample.num_goroutines))}`,
       embedded: this.embedded,
     });
   }

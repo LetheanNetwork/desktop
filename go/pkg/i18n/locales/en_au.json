@@ -187,7 +187,20 @@
       "empty_registry":   "No MCP tools registered yet."
     },
     "benchmark":    { "title": "Benchmark",     "subtitle": "run · compare · export" },
-    "telemetry":    { "title": "Live telemetry","subtitle_normal": "demo surface", "subtitle_fullscreen": "fullscreen · ⎋ to exit" },
+    "telemetry":    {
+      "title": "Live telemetry", "subtitle_normal": "demo surface", "subtitle_fullscreen": "fullscreen · ⎋ to exit",
+      "big_heap_label":   "heap · MB",
+      "big_heap_sub":     "Go runtime · live",
+      "big_uptime_label": "uptime",
+      "big_uptime_sub":   "since process start",
+      "row_model":        "model",
+      "row_goroutines":   "goroutines",
+      "row_cgo":          "cgo calls",
+      "status_ok":        "airplane-mode OK",
+      "status_err":       "telemetry error",
+      "tagline":          "lthn · sovereign · single-watt",
+      "footer_normal":    "model · %s · goroutines %d · airplane-mode OK · ⌥⌘F for fullscreen"
+    },
     "logs":         {
       "title": "Activity", "subtitle": "logs · history · power",
       "tab_live":    "Live log",

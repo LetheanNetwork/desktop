@@ -187,7 +187,20 @@
       "empty_registry":   "Aucun outil MCP enregistré pour le moment."
     },
     "benchmark":    { "title": "Banc d'essai",        "subtitle": "exécuter · comparer · exporter" },
-    "telemetry":    { "title": "Télémétrie en direct","subtitle_normal": "surface de démonstration", "subtitle_fullscreen": "plein écran · ⎋ pour quitter" },
+    "telemetry":    {
+      "title": "Télémétrie en direct", "subtitle_normal": "surface de démonstration", "subtitle_fullscreen": "plein écran · ⎋ pour quitter",
+      "big_heap_label":   "heap · Mo",
+      "big_heap_sub":     "runtime Go · en direct",
+      "big_uptime_label": "uptime",
+      "big_uptime_sub":   "depuis le démarrage du processus",
+      "row_model":        "modèle",
+      "row_goroutines":   "goroutines",
+      "row_cgo":          "appels cgo",
+      "status_ok":        "mode avion OK",
+      "status_err":       "erreur de télémétrie",
+      "tagline":          "lthn · souverain · single-watt",
+      "footer_normal":    "modèle · %s · goroutines %d · mode avion OK · ⌥⌘F pour le plein écran"
+    },
     "logs":         {
       "title": "Activité", "subtitle": "journaux · historique · alimentation",
       "tab_live":    "Journal en direct",
