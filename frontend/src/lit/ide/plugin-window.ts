@@ -124,35 +124,54 @@ class LthnPluginWindow extends LitElement {
     }
   }
 
-  render() {
-    const running = this.status && this.status.state === "running";
-    const hasUI = !!(this.entry && this.entry.entry_url);
+  private isRunning() {
+    return this.status?.state === "running";
+  }
 
-    const toolbar = html`
-      <span style="font-family:var(--font-mono); font-size:11px; color:var(--fg-3);
-                   padding:0 6px;">
-        ${this.status
-          ? this.status.state +
-            (this.status.port ? " · :" + this.status.port : "") +
-            (this.status.pid ? " · pid " + this.status.pid : "")
-          : "loading…"}
-      </span>
-      <div style="flex:1"></div>
-      ${running ? html`
+  private hasUI() {
+    return Boolean(this.entry?.entry_url);
+  }
+
+  private statusLine() {
+    if (!this.status) return "loading…";
+    const parts = [this.status.state];
+    if (this.status.port) parts.push(":" + this.status.port);
+    if (this.status.pid) parts.push("pid " + this.status.pid);
+    return parts.join(" · ");
+  }
+
+  private renderRunButton(running: boolean) {
+    if (running) {
+      return html`
         <lthn-btn tone="ghost" size="sm" @click=${() => void this._stop()}>
           <i class="fa-solid fa-stop" style="font-size:10px;"></i> Stop
         </lthn-btn>
-      ` : html`
-        <lthn-btn tone="primary" size="sm" @click=${() => void this._start()}>
-          <i class="fa-solid fa-play" style="font-size:10px;"></i> Start
-        </lthn-btn>
-      `}
+      `;
+    }
+    return html`
+      <lthn-btn tone="primary" size="sm" @click=${() => void this._start()}>
+        <i class="fa-solid fa-play" style="font-size:10px;"></i> Start
+      </lthn-btn>
+    `;
+  }
+
+  private renderToolbar(running: boolean) {
+    return html`
+      <span style="font-family:var(--font-mono); font-size:11px; color:var(--fg-3);
+                   padding:0 6px;">
+        ${this.statusLine()}
+      </span>
+      <div style="flex:1"></div>
+      ${this.renderRunButton(running)}
       <lthn-btn tone="ghost" size="sm" @click=${() => void this._refresh()}>
         <i class="fa-solid fa-rotate" style="font-size:10px;"></i>
       </lthn-btn>
     `;
+  }
 
-    const banner = this.err ? html`
+  private renderBanner() {
+    if (!this.err) return nothing;
+    return html`
       <div style="padding:10px 14px; color:var(--err-400);
                   background:rgba(255,76,76,0.06);
                   border:1px solid rgba(255,76,76,0.18);
@@ -160,98 +179,137 @@ class LthnPluginWindow extends LitElement {
                   line-height:1.55; margin:14px 18px 0;">
         ${this.err}
       </div>
-    ` : nothing;
+    `;
+  }
 
-    let inner;
-    if (!this.status) {
-      inner = html`
-        <div style="padding:40px; text-align:center; color:var(--fg-3);
-                    font-size:12px;">
-          ${this.loading ? "Loading…" : "no plugin selected"}
-        </div>
-      `;
-    } else if (running && hasUI) {
-      // Iframe mount — plugin owns the surface from here. Same-origin
-      // (lthn reverse-proxies /v1/api/plugin/<ns>/* under its own
-      // host) so cookies, fetch + bearer auth, EventSource, all
-      // work without CORS dance.
-      inner = html`
-        <iframe src=${this.entry!.entry_url!}
-          style="flex:1; width:100%; border:none;
-                 background:rgba(0,0,0,0.18);"
-          sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
-          referrerpolicy="same-origin"></iframe>
-      `;
-    } else {
-      // Status card — running plugin with no UI, or stopped plugin.
-      const cell = (label: string, value: unknown) => html`
-        <div style="display:flex; flex-direction:column; gap:2px;
-                    padding:8px 10px; background:rgba(0,0,0,0.18);
-                    border:1px solid rgba(255,255,255,0.05);
-                    border-radius:4px;">
-          <span style="font-size:10px; text-transform:uppercase;
-                       letter-spacing:0.06em; color:var(--fg-3);">${label}</span>
-          <span style="font-size:12px; color:var(--fg-0);
-                       font-family:var(--font-mono);">${value || "—"}</span>
-        </div>
-      `;
-      inner = html`
-        <div style="flex:1; padding:18px; overflow-y:auto;">
-          <h3 style="font-size:16px; color:var(--fg-0); margin:0 0 4px;">
-            ${this.status.name || this.code}</h3>
-          <code style="font-family:var(--font-mono); font-size:11px;
-                       color:var(--fg-3); display:block; margin-bottom:14px;">
-            ${this.status.namespace} · v${this.status.version}</code>
+  private renderEmptyState() {
+    return html`
+      <div style="padding:40px; text-align:center; color:var(--fg-3);
+                  font-size:12px;">
+        ${this.loading ? "Loading…" : "no plugin selected"}
+      </div>
+    `;
+  }
 
-          <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));
-                      gap:8px; margin-bottom:14px;">
-            ${cell("state", this.status.state)}
-            ${cell("port", this.status.port)}
-            ${cell("pid", this.status.pid)}
-            ${cell("started", this.status.started_at && this.status.started_at !== "0001-01-01T00:00:00Z"
-              ? this.status.started_at.replace("T", " ").slice(0, 19)
-              : "—")}
-          </div>
+  private renderPluginFrame(entryUrl: string) {
+    return html`
+      <iframe src=${entryUrl}
+        style="flex:1; width:100%; border:none;
+               background:rgba(0,0,0,0.18);"
+        sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
+        referrerpolicy="same-origin"></iframe>
+    `;
+  }
 
-          ${this.status.last_error ? html`
-            <h4 style="font-size:11px; text-transform:uppercase;
-                       letter-spacing:0.06em; color:var(--fg-3);
-                       margin:18px 0 8px;">Last error</h4>
-            <pre style="background:rgba(255,76,76,0.06);
-                        border:1px solid rgba(255,76,76,0.18);
-                        border-radius:6px; padding:10px 14px;
-                        font-family:var(--font-mono); font-size:11px;
-                        color:var(--err-400); white-space:pre-wrap;
-                        line-height:1.55; margin:0;">${this.status.last_error}</pre>
-          ` : nothing}
+  private renderCell(label: string, value: unknown) {
+    return html`
+      <div style="display:flex; flex-direction:column; gap:2px;
+                  padding:8px 10px; background:rgba(0,0,0,0.18);
+                  border:1px solid rgba(255,255,255,0.05);
+                  border-radius:4px;">
+        <span style="font-size:10px; text-transform:uppercase;
+                     letter-spacing:0.06em; color:var(--fg-3);">${label}</span>
+        <span style="font-size:12px; color:var(--fg-0);
+                     font-family:var(--font-mono);">${value || "—"}</span>
+      </div>
+    `;
+  }
 
-          ${!running ? html`
-            <div style="padding:18px; text-align:center; color:var(--fg-3);
-                        font-style:italic; font-size:12px; margin-top:18px;
-                        background:rgba(0,0,0,0.18); border-radius:6px;
-                        border:1px solid rgba(255,255,255,0.05);">
-              plugin is ${this.status.state} — click Start to launch it
-            </div>
-          ` : !hasUI ? html`
-            <div style="padding:18px; text-align:center; color:var(--fg-3);
-                        font-style:italic; font-size:12px; margin-top:18px;
-                        background:rgba(0,0,0,0.18); border-radius:6px;
-                        border:1px solid rgba(255,255,255,0.05);">
-              this plugin has no UI surface · use HTTP at
-              <code>/v1/api/plugin/${this.status.namespace}/*</code>
-            </div>
-          ` : nothing}
-        </div>
-      `;
+  private formattedStartedAt(status: Status) {
+    if (!status.started_at || status.started_at === "0001-01-01T00:00:00Z") {
+      return "—";
     }
+    return status.started_at.replace("T", " ").slice(0, 19);
+  }
 
+  private renderLastError(status: Status) {
+    if (!status.last_error) return nothing;
+    return html`
+      <h4 style="font-size:11px; text-transform:uppercase;
+                 letter-spacing:0.06em; color:var(--fg-3);
+                 margin:18px 0 8px;">Last error</h4>
+      <pre style="background:rgba(255,76,76,0.06);
+                  border:1px solid rgba(255,76,76,0.18);
+                  border-radius:6px; padding:10px 14px;
+                  font-family:var(--font-mono); font-size:11px;
+                  color:var(--err-400); white-space:pre-wrap;
+                  line-height:1.55; margin:0;">${status.last_error}</pre>
+    `;
+  }
+
+  private renderStoppedNotice(status: Status) {
+    return html`
+      <div style="padding:18px; text-align:center; color:var(--fg-3);
+                  font-style:italic; font-size:12px; margin-top:18px;
+                  background:rgba(0,0,0,0.18); border-radius:6px;
+                  border:1px solid rgba(255,255,255,0.05);">
+        plugin is ${status.state} — click Start to launch it
+      </div>
+    `;
+  }
+
+  private renderNoUiNotice(status: Status) {
+    return html`
+      <div style="padding:18px; text-align:center; color:var(--fg-3);
+                  font-style:italic; font-size:12px; margin-top:18px;
+                  background:rgba(0,0,0,0.18); border-radius:6px;
+                  border:1px solid rgba(255,255,255,0.05);">
+        this plugin has no UI surface · use HTTP at
+        <code>/v1/api/plugin/${status.namespace}/*</code>
+      </div>
+    `;
+  }
+
+  private renderRuntimeNotice(status: Status, running: boolean, hasUI: boolean) {
+    if (!running) return this.renderStoppedNotice(status);
+    if (!hasUI) return this.renderNoUiNotice(status);
+    return nothing;
+  }
+
+  private renderStatusCard(status: Status, running: boolean, hasUI: boolean) {
+    return html`
+      <div style="flex:1; padding:18px; overflow-y:auto;">
+        <h3 style="font-size:16px; color:var(--fg-0); margin:0 0 4px;">
+          ${status.name || this.code}</h3>
+        <code style="font-family:var(--font-mono); font-size:11px;
+                     color:var(--fg-3); display:block; margin-bottom:14px;">
+          ${status.namespace} · v${status.version}</code>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));
+                    gap:8px; margin-bottom:14px;">
+          ${this.renderCell("state", status.state)}
+          ${this.renderCell("port", status.port)}
+          ${this.renderCell("pid", status.pid)}
+          ${this.renderCell("started", this.formattedStartedAt(status))}
+        </div>
+
+        ${this.renderLastError(status)}
+        ${this.renderRuntimeNotice(status, running, hasUI)}
+      </div>
+    `;
+  }
+
+  private renderInner(running: boolean, hasUI: boolean) {
+    if (!this.status) return this.renderEmptyState();
+    if (running && hasUI && this.entry?.entry_url) {
+      return this.renderPluginFrame(this.entry.entry_url);
+    }
+    return this.renderStatusCard(this.status, running, hasUI);
+  }
+
+  private renderFooter() {
+    if (!this.status) return this.code;
+    return "/v1/api/plugin/" + this.status.namespace;
+  }
+
+  render() {
+    const running = this.isRunning();
+    const hasUI = this.hasUI();
     return renderChrome({
       title: this.chrome.title, subtitle: this.chrome.subtitle,
-      w: this.w, h: this.h, toolbar,
-      body: html`${banner}${inner}`,
-      footer: html`${this.status
-        ? "/v1/api/plugin/" + this.status.namespace
-        : this.code}`,
+      w: this.w, h: this.h, toolbar: this.renderToolbar(running),
+      body: html`${this.renderBanner()}${this.renderInner(running, hasUI)}`,
+      footer: html`${this.renderFooter()}`,
       embedded: this.embedded,
     });
   }
