@@ -8,6 +8,7 @@ describe("lthn-tools-window — smoke", () => {
   it("mounts with the Tools · MCP titlebar", async () => {
     const { host } = await mountWindow("lthn-tools-window");
     expectChromeTitle(host, "Tools");
+    expect(host.querySelector("header")).not.toBeNull();
   });
 });
 

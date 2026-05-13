@@ -8,6 +8,7 @@ describe("lthn-model-browser-window — smoke", () => {
   it("mounts with the Models titlebar", async () => {
     const { host } = await mountWindow("lthn-model-browser-window");
     expectChromeTitle(host, "Models");
+    expect(host.querySelector("header")).not.toBeNull();
   });
 
   it("renders the Local rail header", async () => {

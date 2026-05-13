@@ -8,6 +8,7 @@ describe("lthn-logs-window — smoke", () => {
   it("mounts with the Activity titlebar", async () => {
     const { host } = await mountWindow("lthn-logs-window");
     expectChromeTitle(host, "Activity");
+    expect(host.querySelector("header")).not.toBeNull();
   });
 
   it("tab prop controls which body section renders", async () => {

@@ -8,6 +8,7 @@ describe("lthn-integrations-window — smoke", () => {
   it("mounts with the Integrations titlebar", async () => {
     const { host } = await mountWindow("lthn-integrations-window");
     expectChromeTitle(host, "Integrations");
+    expect(host.querySelector("header")).not.toBeNull();
   });
 });
 

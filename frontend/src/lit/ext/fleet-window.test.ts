@@ -8,6 +8,7 @@ describe("lthn-fleet-window — smoke", () => {
   it("mounts with the Fleet titlebar", async () => {
     const { host } = await mountWindow("lthn-fleet-window");
     expectChromeTitle(host, "Fleet");
+    expect(host.querySelector("header")).not.toBeNull();
   });
 });
 

@@ -26,6 +26,7 @@ describe("lthn-chat-window — smoke", () => {
   it("mounts + renders the chrome titlebar with 'Lethean Chat'", async () => {
     const { host } = await mountWindow("lthn-chat-window");
     expectChromeTitle(host, "lthn · chat");
+    expect(host.querySelector("header")).not.toBeNull();
   });
 
   it("renders the conversation list rail by default", async () => {

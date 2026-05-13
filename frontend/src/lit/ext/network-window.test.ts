@@ -8,6 +8,7 @@ describe("lthn-network-window — smoke", () => {
   it("mounts with the Network titlebar", async () => {
     const { host } = await mountWindow("lthn-network-window");
     expectChromeTitle(host, "Network");
+    expect(host.querySelector("header")).not.toBeNull();
   });
 });
 

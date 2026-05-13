@@ -8,6 +8,7 @@ describe("lthn-distillation-window — smoke", () => {
   it("mounts with the Fine-tune titlebar", async () => {
     const { host } = await mountWindow("lthn-distillation-window");
     expectChromeTitle(host, "Fine-tune");
+    expect(host.querySelector("header")).not.toBeNull();
   });
 });
 

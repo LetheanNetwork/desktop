@@ -8,6 +8,7 @@ describe("lthn-telemetry-window — smoke", () => {
   it("mounts with the Live telemetry titlebar", async () => {
     const { host } = await mountWindow("lthn-telemetry-window");
     expectChromeTitle(host, "Live telemetry");
+    expect(host.querySelector("header")).not.toBeNull();
   });
 
   it("fullscreen prop reflects on the host element", async () => {

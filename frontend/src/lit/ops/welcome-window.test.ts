@@ -8,6 +8,7 @@ describe("lthn-welcome-window — smoke", () => {
   it("mounts with the Welcome titlebar", async () => {
     const { host } = await mountWindow("lthn-welcome-window");
     expectChromeTitle(host, "Welcome to lthn");
+    expect(host.querySelector("header")).not.toBeNull();
   });
 
   it("renders the steps rail with all three wizard steps", async () => {

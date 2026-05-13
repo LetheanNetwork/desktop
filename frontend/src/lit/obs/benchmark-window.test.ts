@@ -8,6 +8,7 @@ describe("lthn-benchmark-window — smoke", () => {
   it("mounts with the Benchmark titlebar", async () => {
     const { host } = await mountWindow("lthn-benchmark-window");
     expectChromeTitle(host, "Benchmark");
+    expect(host.querySelector("header")).not.toBeNull();
   });
 
   it("renders the results table with at least one historical run", async () => {

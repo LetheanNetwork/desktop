@@ -8,6 +8,7 @@ describe("lthn-settings-window — smoke", () => {
   it("mounts with the Settings titlebar", async () => {
     const { host } = await mountWindow("lthn-settings-window");
     expectChromeTitle(host, "Settings");
+    expect(host.querySelector("header")).not.toBeNull();
   });
 
   it("renders the section rail (General, Models, Runner, API, Telemetry, Integrations, About)", async () => {
