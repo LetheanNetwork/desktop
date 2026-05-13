@@ -113,6 +113,12 @@ class LthnIntegrationsWindow extends LitElement {
     }
   }
 
+  _statusVariant(state: string) {
+    if (state === "configured") return "ok";
+    if (state === "available") return "warn";
+    return "idle";
+  }
+
   render() {
     const clients = this.clients;
     const selected = clients.find(c => c.id === this.selectedId) || clients[0] || null;
@@ -127,7 +133,7 @@ class LthnIntegrationsWindow extends LitElement {
             </div>
           ` : clients.map((c) => {
             const active = c.id === this.selectedId;
-            const variant = c.state === "configured" ? "ok" : c.state === "available" ? "warn" : c.state === "n/a" ? "idle" : "idle";
+            const variant = this._statusVariant(c.state);
             return html`
               <div
                 @click=${() => { this.selectedId = c.id; }}
