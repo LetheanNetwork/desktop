@@ -19,7 +19,7 @@ Canonical Lethean Go repo shape:
 - `go/pkg/tray/tray.go` — NSStatusItem + popover anchor + window-spawn router (consumed by `lthn gui`).
 - `go/pkg/runner/service.go` — go-mlx adapter signals contract (consumed by `lthn ai` and `lthn serve`).
 - `go/pkg/telemetry/service.go` — `powermetrics` / `IOReport` sampler.
-- `go/pkg/api/` — HTTP gateway RouteGroups + spec/SDK helpers. `RunnerGroup` implements `coreapi.DescribableGroup` exposing `/v1/runner/*`. `lthn api spec` + `lthn api sdk typescript-fetch` emit `build/sdk/{openapi.yaml,typescript-fetch/}` consumed as `@lthn/api` on npm.
+- `go/pkg/api/` — HTTP gateway RouteGroups + spec/SDK helpers. `RunnerGroup` implements `coreapi.DescribableGroup` exposing `/v1/runner/*`. `lthn api spec` emits `build/sdk/openapi.yaml`; `build/sdk/publish.sh` regenerates 13 `@lthn/sdk-*` flavours and force-pushes each to `LetheanNetwork/sdk-<flavour>`. Per-flavour SDK content is gitignored — lthn/desktop tracks only the spec + driver.
 - `external/go/` — submodule of `dappco.re/go` (the Core primitives module) on its `dev` branch.
 - `frontend/` — Vite + Lit. Lethean-5 components in `src/lit/`. `index.html` is the app entry; `canvas.html` is the design canvas.
 - `docs/design/lethean-4-react-reference/` — animated React/JSX visual source for design review only; not built.

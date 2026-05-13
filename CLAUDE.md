@@ -168,22 +168,36 @@ implements `coreapi.RouteGroup` + `coreapi.DescribableGroup` so the
 spec generator can build a complete OpenAPI 3.1 document straight off
 the live `api.Engine`. RouteGroups today: `RunnerGroup` (GET /v1/runner/models, POST /v1/runner/generate, POST /v1/runner/chat).
 
-**Two consumers, same surface:**
+**Two consumer paths, one surface:**
 - **Wails3 bindings** — same-process Service access from the Lit windows; auto-generated under `frontend/bindings/`. Zero network hop.
-- **`@lthn/api` SDK** — external clients (Claude Code, Codex, OpenCode, Raycast extensions, future plugins) and Lethean fleet peers. Generated under `build/sdk/typescript-fetch/` from the same registered groups; npm namespace is `@lthn/*` (snider owns it). Java + `openapi-generator-cli` only needed at SDK-gen time, not at runtime.
+- **`@lthn/sdk-*` family on npm** — external clients (Claude Code, Codex, OpenCode, Raycast extensions, future plugins) and Lethean fleet peers. Each flavour lives in its own GitHub repo (`LetheanNetwork/sdk-<flavour>`) and publishes to npm separately. The flavour list is in `build/sdk/publish.sh`'s MANIFEST.
 
-**Verbs:**
+**Published flavours** (`LetheanNetwork/sdk-<id>` → `@lthn/sdk-<id>` on npm):
+- TypeScript: `typescript-fetch`, `typescript-axios`, `typescript`, `typescript-angular`, `typescript-rxjs`, `typescript-node`, `typescript-redux-query`, `typescript-inversify`, `typescript-aurelia`, `typescript-jquery`
+- JavaScript: `javascript`, `javascript-flowtyped`, `javascript-closure-angular`
+- Deferred: `javascript-apollo` (openapi-generator 7.22.0 errors out before emitting files; revisit upstream)
+
+**Workflow** (regen on spec change):
 
 ```bash
+# Generate spec only — written to build/sdk/openapi.yaml
 lthn api spec --format yaml --out build/sdk/openapi.yaml
-lthn api sdk typescript-fetch --out build/sdk --package lthn-api
+
+# Generate + push every flavour to its LetheanNetwork remote
+./build/sdk/publish.sh
+
+# Or just a subset:
+./build/sdk/publish.sh typescript-fetch typescript-axios
+
+# Taskfile entrypoint for the local-only generation lane
 wails3 task api:spec
-wails3 task api:sdk:typescript   # regenerates spec then SDK
 ```
+
+The publish driver is idempotent — force-pushes per flavour so the SDK content stays in lockstep with the spec. Per-flavour repos contain ONLY generated code; lthn/desktop tracks the spec + the driver, not the SDK bodies (gitignored under `build/sdk/*/`).
 
 `pkg/desktop/mountSubsystems` registers the lthn RouteGroups on the api.Engine BEFORE wrapping its `Handler()` (handler snapshots the gin tree on first call). The Wails WebView reaches `/api/v1/*` same-origin; standalone clients hit the same paths over TCP via `lthn serve`.
 
-`pkg/api` coverage: 75.7% (9 tests). SDK-gen itself is a shell-out to openapi-generator-cli — covered by argument validation tests; full chain is run by the Taskfile / CI.
+`pkg/api` coverage: 75.7% (9 tests). SDK-gen itself is a shell-out to openapi-generator-cli — covered by argument validation tests; full chain is run by `publish.sh` / CI. Requires Java JDK + openapi-generator-cli on PATH at SDK-gen time, not at runtime.
 
 ## Tray popover redesign (committed 2026-05-13)
 

@@ -44,3 +44,12 @@ go/lthn
 # file is a per-tree side effect, not configuration we own.
 openapitools.json
 go/openapitools.json
+
+# Generated SDK flavour trees live in build/sdk/<flavour>/ and are
+# their own LetheanNetwork/sdk-<flavour> git repos. lthn/desktop
+# only keeps the spec + publish driver in tree; per-flavour content
+# lives upstream.
+build/sdk/*/
+!build/sdk/openapi.yaml
+!build/sdk/openapi.json
+!build/sdk/publish.sh
