@@ -137,8 +137,21 @@ for row in "${MANIFEST[@]}"; do
       ;;
   esac
 
+  # Global properties — applied to every generator. Forces uniform
+  # output across the family:
+  #   apiDocs / modelDocs    → per-endpoint + per-model Markdown that
+  #                            renders inline on the GitHub repo home
+  #   apiTests / modelTests  → test scaffolding the consumer can fill
+  #                            in; CI-ready stubs even when the
+  #                            generator skips them by default
+  #   generateAliasAsModel   → primitive-aliased types (UserId etc.)
+  #                            become proper model classes; cleaner
+  #                            typing in Swift / Kotlin / Rust
+  # See https://openapi-generator.tech/docs/globals for the full list.
+  globals="apiDocs=true,modelDocs=true,apiTests=true,modelTests=true,generateAliasAsModel=true"
+
   rm -rf "$out_dir"
-  gen_args=( generate -i "$SPEC_PATH" -g "$gen" -o "$out_dir" )
+  gen_args=( generate -i "$SPEC_PATH" -g "$gen" -o "$out_dir" --global-property "$globals" )
   [ -n "$props" ] && gen_args+=( --additional-properties "$props" )
 
   if ! openapi-generator-cli "${gen_args[@]}" >/dev/null 2>&1; then
@@ -146,6 +159,12 @@ for row in "${MANIFEST[@]}"; do
     failures+=("$id")
     continue
   fi
+
+  # Strip noise files the generators emit that don't belong in a
+  # published SDK repo:
+  #   git_push.sh         — boilerplate "create a repo + push" helper;
+  #                         we own the publish flow.
+  find "$out_dir" -maxdepth 2 -name "git_push.sh" -delete 2>/dev/null || true
 
   # README — present on every flavour for consistent landing experience.
   cat > "$out_dir/README.md" <<README
