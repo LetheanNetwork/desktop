@@ -43,7 +43,7 @@ class LthnLogsWindow extends LitElement {
    *  the footer in render() and the body in _renderHistory() share
    *  one source — the "N generations" count stays in sync with what
    *  the body actually shows. */
-  private _gens = [
+  private readonly _gens = [
     { ts: "14:32:14",  model: "gemma-4-e2b",  tok: 158, tg: 47.2, w: 8.4,  prompt: "Rewrite this function to use streams instead of arrays…" },
     { ts: "12:08:42",  model: "gemma-4-e2b",  tok: 384, tg: 46.8, w: 8.3,  prompt: "Summarise the changes between v0.1 and v0.2-rc1 of the runner…" },
     { ts: "11:55:18",  model: "llama-3.2-3b", tok: 220, tg: 32.6, w: 11.8, prompt: "What's the difference between LoRA rank 8 and rank 16?" },

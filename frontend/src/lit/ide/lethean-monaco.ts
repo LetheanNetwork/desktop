@@ -135,7 +135,7 @@ class LetheanMonaco extends LitElement {
   // One model per path → each tab keeps its own undo stack, cursor,
   // scroll position. Models live until closeModel() is called or
   // the element disconnects.
-  private models = new Map<string, monacoTypes.editor.ITextModel>();
+  private readonly models = new Map<string, monacoTypes.editor.ITextModel>();
   private activePath?: string;
   private suppressNextChangeEvent = false;
 
