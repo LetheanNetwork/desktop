@@ -200,250 +200,267 @@ switch (surface) {
         return t.relDay.replace("%d", String((ageSec / 86400) | 0));
       };
 
-      const draw = () => {
-        const variant = state.err ? "err" : state.connected ? "ok" : "idle";
-        const stateLabel = state.err ? t.valOffline : state.connected ? t.valLive : t.valConnecting;
-        const sparkData = state.samples.length
-          ? state.samples.join(",")
-          : "";
-        const sparkMax = Math.max(1, ...state.samples) * 1.2;
-        const hasModel = state.connected && state.model && state.model !== t.valNoModel;
+      const connectionVariant = () => {
+        if (state.err) return "err";
+        if (state.connected) return "ok";
+        return "idle";
+      };
 
-        // Hero card — model status as the headline, mini-stats row, and a
-        // thin inline sparkline strip. Replaces the prior verbose three-line
-        // status row + separate "Heap (MB)" card at the bottom of the panel.
-        const heroCard = html`
-          <section style="display:flex; flex-direction:column; gap:10px;
-                          padding:12px 14px;
-                          background:rgba(255,255,255,0.025);
-                          border:1px solid rgba(255,255,255,0.06);
-                          border-radius:9px;">
-            <!-- Row 1: status dot + model name headline + state pill only when offline -->
-            <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-              <lthn-status-dot variant=${variant} ?pulse=${state.connected}></lthn-status-dot>
-              <div style="font-size:14px; font-weight:600; letter-spacing:-0.005em;
-                          color:${hasModel ? "var(--fg-0)" : "var(--fg-2)"};
-                          flex:1; min-width:0;
-                          overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                ${state.connected ? state.model : (state.err ? t.statusOffline : t.statusConnecting)}
-              </div>
-              ${state.err
-                ? html`<lthn-state-pill variant="disconnected">${stateLabel}</lthn-state-pill>`
-                : nothing}
-            </div>
+      const connectionLabel = () => {
+        if (state.err) return t.valOffline;
+        if (state.connected) return t.valLive;
+        return t.valConnecting;
+      };
 
-            <!-- Row 2: mini-stats. When no model is loaded, an inviting
-                 hint replaces the stats so the empty state reads as an
-                 opportunity rather than a deficiency. -->
-            ${hasModel ? html`
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                <div>
-                  <div style="font-family:var(--font-mono); font-size:9.5px;
-                              color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase;">${t.heap}</div>
-                  <div style="font-family:var(--font-mono); font-size:13px;
-                              color:var(--fg-0); margin-top:2px;">${state.heapMb.toFixed(1)} <span style="color:var(--fg-3); font-size:10.5px;">MB</span></div>
-                </div>
-                <div>
-                  <div style="font-family:var(--font-mono); font-size:9.5px;
-                              color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase;">${t.uptime}</div>
-                  <div style="font-family:var(--font-mono); font-size:13px;
-                              color:var(--fg-0); margin-top:2px;">${fmtUptime(state.uptime)}</div>
-                </div>
-              </div>
-            ` : state.connected ? html`
-              <div style="display:flex; align-items:center; gap:10px;
-                          padding:8px 10px; border-radius:6px;
-                          background:rgba(64,193,197,0.06);
-                          border:1px dashed rgba(64,193,197,0.22);">
-                <i class="fa-solid fa-cube" style="font-size:11px; color:var(--brand-300);"></i>
-                <div style="flex:1; font-size:11.5px; color:var(--fg-1);">${t.statusPickModel}</div>
-                <lthn-btn tone="quiet" size="sm" @click=${openAppPane("models")}>${t.statusBrowse}</lthn-btn>
-              </div>
-            ` : nothing}
+      const headlineLabel = () => {
+        if (state.connected) return state.model;
+        if (state.err) return t.statusOffline;
+        return t.statusConnecting;
+      };
 
-            <!-- Row 3: thin inline sparkline. Only renders when there's
-                 enough sample history to draw a meaningful trace; below
-                 that threshold the hero card simply omits the strip so
-                 we don't show a flat ghost line. -->
-            ${state.samples.length > 1 ? html`
-              <lthn-sparkline width="340" height="20" data=${sparkData} max=${sparkMax} fill></lthn-sparkline>
-            ` : nothing}
-          </section>
-        `;
-
-        // Open section — Lethean Desktop moved to the systray right-click
-        // menu (canonical macOS pattern) + the screen icon in the titlebar
-        // right side. Settings moved to the cog icon in the titlebar.
-        // The remaining three windows (Chat / Models / Telemetry) live as
-        // a 2-column grid; the third row stretches to fill so the layout
-        // still feels balanced with an odd count.
-        const openSection = html`
-          <section style="display:flex; flex-direction:column; gap:8px;">
-            <lthn-label>${t.sectionOpen}</lthn-label>
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
-              <lthn-btn tone="ghost" size="md" @click=${openAppPane("chat")}>
-                <i class="fa-regular fa-comment" style="font-size:11px;"></i>
-                ${t.openChat}
-              </lthn-btn>
-              <lthn-btn tone="ghost" size="md" @click=${openAppPane("models")}>
-                <i class="fa-solid fa-cube" style="font-size:11px;"></i>
-                ${t.openModels}
-              </lthn-btn>
-              <lthn-btn tone="ghost" size="md" @click=${openAppPane("telemetry")}
-                style="grid-column: 1 / -1;">
-                <i class="fa-solid fa-wave-square" style="font-size:11px;"></i>
-                ${t.openTelemetry}
-              </lthn-btn>
-            </div>
-          </section>
-        `;
-
-        // Info-card tab panel — sits under the hero. Tabs show
-        // base info today; each panel is a placeholder for richer
-        // charts/stats as the surfaces wire to real bindings.
-        const tabBtn = (id: TrayTab, label: string, icon: string) => {
-          const on = state.tab === id;
+      const renderHeroStats = (hasModel: boolean) => {
+        if (hasModel) {
           return html`
-            <button
-              @click=${setTab(id)}
-              style="
-                flex:1;
-                display:inline-flex; align-items:center; justify-content:center; gap:6px;
-                padding:6px 8px;
-                font-size:11px; font-weight:${on ? 600 : 500};
-                color:${on ? "var(--fg-0)" : "var(--fg-2)"};
-                background:${on ? "rgba(255,255,255,0.06)" : "transparent"};
-                border:1px solid ${on ? "rgba(64,193,197,0.22)" : "transparent"};
-                border-radius:6px;
-                cursor:pointer;
-                --wails-draggable: no-drag;
-              ">
-              <i class="fa-solid ${icon}" style="font-size:10px; color:${on ? "var(--brand-300)" : "var(--fg-3)"};"></i>
-              ${label}
-            </button>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+              <div>
+                <div style="font-family:var(--font-mono); font-size:9.5px;
+                            color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase;">${t.heap}</div>
+                <div style="font-family:var(--font-mono); font-size:13px;
+                            color:var(--fg-0); margin-top:2px;">${state.heapMb.toFixed(1)} <span style="color:var(--fg-3); font-size:10.5px;">MB</span></div>
+              </div>
+              <div>
+                <div style="font-family:var(--font-mono); font-size:9.5px;
+                            color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase;">${t.uptime}</div>
+                <div style="font-family:var(--font-mono); font-size:13px;
+                            color:var(--fg-0); margin-top:2px;">${fmtUptime(state.uptime)}</div>
+              </div>
+            </div>
           `;
-        };
-
-        // Tiny key/value row used inside every tab panel.
-        const kv = (k: string, v: string | number, mono = true) => html`
-          <div style="display:flex; align-items:baseline; justify-content:space-between; gap:10px; padding:4px 0;">
-            <span style="font-size:11px; color:var(--fg-3);">${k}</span>
-            <span style="font-family:${mono ? "var(--font-mono)" : "var(--font-sans)"}; font-size:11.5px; color:var(--fg-1);">${v}</span>
+        }
+        if (!state.connected) return nothing;
+        return html`
+          <div style="display:flex; align-items:center; gap:10px;
+                      padding:8px 10px; border-radius:6px;
+                      background:rgba(64,193,197,0.06);
+                      border:1px dashed rgba(64,193,197,0.22);">
+            <i class="fa-solid fa-cube" style="font-size:11px; color:var(--brand-300);"></i>
+            <div style="flex:1; font-size:11.5px; color:var(--fg-1);">${t.statusPickModel}</div>
+            <lthn-btn tone="quiet" size="sm" @click=${openAppPane("models")}>${t.statusBrowse}</lthn-btn>
           </div>
         `;
+      };
 
-        const systemPanel = html`
-          ${kv(t.heap, `${state.heapMb.toFixed(1)} MB`)}
-          ${kv(t.uptime, fmtUptime(state.uptime))}
-          ${kv(t.kvConnection, state.err ? t.valOffline : state.connected ? t.valLive : t.valConnecting)}
-          ${kv(t.kvSamples, `${state.samples.length} / 24`)}
-        `;
+      const renderSparkline = (sparkData: string, sparkMax: number) => {
+        if (state.samples.length <= 1) return nothing;
+        return html`<lthn-sparkline width="340" height="20" data=${sparkData} max=${sparkMax} fill></lthn-sparkline>`;
+      };
 
-        const runnerPanel = html`
-          ${kv(t.kvModel, hasModel ? state.model : t.valDash, false)}
-          ${kv(t.kvStatus, hasModel ? t.valLoaded : t.valIdle)}
-          ${kv(t.kvThroughput, t.valDash)}
-          ${kv(t.kvCache, t.valDash)}
-        `;
-
-        const activityPanel = html`
-          ${kv(t.kvSessionsToday, state.sessionsToday > 0 ? state.sessionsToday : t.valDash)}
-          ${kv(t.kvTokens, t.valDash)}
-          ${kv(t.kvLastInteract, state.lastInteract > 0 ? fmtRel(state.lastInteract) : t.valDash)}
-          ${kv(t.kvRecentErrors, state.err ? "1" : "0")}
-        `;
-
-        const infoCard = html`
-          <section style="display:flex; flex-direction:column; gap:8px;
-                          padding:8px 10px 10px;
-                          background:rgba(255,255,255,0.018);
-                          border:1px solid rgba(255,255,255,0.05);
-                          border-radius:8px;">
-            <div style="display:flex; gap:4px;">
-              ${tabBtn("system",   t.tabSystem,   "fa-microchip")}
-              ${tabBtn("runner",   t.tabRunner,   "fa-bolt")}
-              ${tabBtn("activity", t.tabActivity, "fa-clock-rotate-left")}
+      const renderHeroCard = (
+        variant: string,
+        stateLabel: string,
+        hasModel: boolean,
+        sparkData: string,
+        sparkMax: number,
+      ) => html`
+        <section style="display:flex; flex-direction:column; gap:10px;
+                        padding:12px 14px;
+                        background:rgba(255,255,255,0.025);
+                        border:1px solid rgba(255,255,255,0.06);
+                        border-radius:9px;">
+          <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+            <lthn-status-dot variant=${variant} ?pulse=${state.connected}></lthn-status-dot>
+            <div style="font-size:14px; font-weight:600; letter-spacing:-0.005em;
+                        color:${hasModel ? "var(--fg-0)" : "var(--fg-2)"};
+                        flex:1; min-width:0;
+                        overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              ${headlineLabel()}
             </div>
-            <div style="padding:2px 4px;">
-              ${state.tab === "system"   ? systemPanel   : nothing}
-              ${state.tab === "runner"   ? runnerPanel   : nothing}
-              ${state.tab === "activity" ? activityPanel : nothing}
-            </div>
-          </section>
-        `;
+            ${state.err
+              ? html`<lthn-state-pill variant="disconnected">${stateLabel}</lthn-state-pill>`
+              : nothing}
+          </div>
 
-        // Titlebar right-side icon row — cog (settings) + screen (open app).
-        // Both opt out of drag explicitly (the parent slot is already
-        // marked no-drag at the chrome level, this is belt-and-braces).
-        const titlebarAction = (icon: string, title: string, onClick: () => void) => html`
+          ${renderHeroStats(hasModel)}
+          ${renderSparkline(sparkData, sparkMax)}
+        </section>
+      `;
+
+      const renderOpenSection = () => html`
+        <section style="display:flex; flex-direction:column; gap:8px;">
+          <lthn-label>${t.sectionOpen}</lthn-label>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
+            <lthn-btn tone="ghost" size="md" @click=${openAppPane("chat")}>
+              <i class="fa-regular fa-comment" style="font-size:11px;"></i>
+              ${t.openChat}
+            </lthn-btn>
+            <lthn-btn tone="ghost" size="md" @click=${openAppPane("models")}>
+              <i class="fa-solid fa-cube" style="font-size:11px;"></i>
+              ${t.openModels}
+            </lthn-btn>
+            <lthn-btn tone="ghost" size="md" @click=${openAppPane("telemetry")}
+              style="grid-column: 1 / -1;">
+              <i class="fa-solid fa-wave-square" style="font-size:11px;"></i>
+              ${t.openTelemetry}
+            </lthn-btn>
+          </div>
+        </section>
+      `;
+
+      const tabBtn = (id: TrayTab, label: string, icon: string) => {
+        const on = state.tab === id;
+        return html`
           <button
-            @click=${onClick}
-            title=${title}
+            @click=${setTab(id)}
             style="
-              display:inline-flex; align-items:center; justify-content:center;
-              width:24px; height:24px;
-              background:transparent;
-              border:1px solid transparent;
-              border-radius:5px;
-              color:var(--fg-2);
+              flex:1;
+              display:inline-flex; align-items:center; justify-content:center; gap:6px;
+              padding:6px 8px;
+              font-size:11px; font-weight:${on ? 600 : 500};
+              color:${on ? "var(--fg-0)" : "var(--fg-2)"};
+              background:${on ? "rgba(255,255,255,0.06)" : "transparent"};
+              border:1px solid ${on ? "rgba(64,193,197,0.22)" : "transparent"};
+              border-radius:6px;
               cursor:pointer;
               --wails-draggable: no-drag;
-            "
-            onmouseover="this.style.background='rgba(255,255,255,0.05)'; this.style.color='var(--fg-0)';"
-            onmouseout="this.style.background='transparent'; this.style.color='var(--fg-2)';">
-            <i class="fa-solid ${icon}" style="font-size:11px;"></i>
+            ">
+            <i class="fa-solid ${icon}" style="font-size:10px; color:${on ? "var(--brand-300)" : "var(--fg-3)"};"></i>
+            ${label}
           </button>
         `;
-        /* Flag-button locale switch — clicks cycle the active
-         * locale through availableLangs and rebuild the tray's
-         * string cache via loadStrings(). Emoji flag picks the
-         * current locale's national glyph; no FA dependency since
-         * we want real flag colours. --wails-draggable opt-out
-         * matches the other titlebar actions. */
-        const flagAction = html`
-          <button
-            @click=${cycleLanguage}
-            title=${currentLang}
-            style="
-              display:inline-flex; align-items:center; justify-content:center;
-              width:24px; height:24px;
-              background:transparent;
-              border:1px solid transparent;
-              border-radius:5px;
-              cursor:pointer;
-              font-size:16px;
-              line-height:1;
-              --wails-draggable: no-drag;
-            "
-            onmouseover="this.style.background='rgba(255,255,255,0.05)';"
-            onmouseout="this.style.background='transparent';">
-            ${flagFor(currentLang)}
-          </button>
-        `;
-        const titlebarActions = html`
-          ${titlebarAction("fa-display", t.tbOpenApp,  openWindow("app"))}
-          ${titlebarAction("fa-gear",    t.tbSettings, openWindow("settings"))}
-          ${flagAction}
-        `;
+      };
+
+      const kv = (k: string, v: string | number, mono = true) => html`
+        <div style="display:flex; align-items:baseline; justify-content:space-between; gap:10px; padding:4px 0;">
+          <span style="font-size:11px; color:var(--fg-3);">${k}</span>
+          <span style="font-family:${mono ? "var(--font-mono)" : "var(--font-sans)"}; font-size:11.5px; color:var(--fg-1);">${v}</span>
+        </div>
+      `;
+
+      const renderSystemPanel = (stateLabel: string) => html`
+        ${kv(t.heap, `${state.heapMb.toFixed(1)} MB`)}
+        ${kv(t.uptime, fmtUptime(state.uptime))}
+        ${kv(t.kvConnection, stateLabel)}
+        ${kv(t.kvSamples, `${state.samples.length} / 24`)}
+      `;
+
+      const renderRunnerPanel = (hasModel: boolean) => html`
+        ${kv(t.kvModel, hasModel ? state.model : t.valDash, false)}
+        ${kv(t.kvStatus, hasModel ? t.valLoaded : t.valIdle)}
+        ${kv(t.kvThroughput, t.valDash)}
+        ${kv(t.kvCache, t.valDash)}
+      `;
+
+      const renderActivityPanel = () => html`
+        ${kv(t.kvSessionsToday, state.sessionsToday > 0 ? state.sessionsToday : t.valDash)}
+        ${kv(t.kvTokens, t.valDash)}
+        ${kv(t.kvLastInteract, state.lastInteract > 0 ? fmtRel(state.lastInteract) : t.valDash)}
+        ${kv(t.kvRecentErrors, state.err ? "1" : "0")}
+      `;
+
+      const renderActivePanel = (hasModel: boolean, stateLabel: string) => {
+        if (state.tab === "system") return renderSystemPanel(stateLabel);
+        if (state.tab === "runner") return renderRunnerPanel(hasModel);
+        return renderActivityPanel();
+      };
+
+      const renderInfoCard = (hasModel: boolean, stateLabel: string) => html`
+        <section style="display:flex; flex-direction:column; gap:8px;
+                        padding:8px 10px 10px;
+                        background:rgba(255,255,255,0.018);
+                        border:1px solid rgba(255,255,255,0.05);
+                        border-radius:8px;">
+          <div style="display:flex; gap:4px;">
+            ${tabBtn("system",   t.tabSystem,   "fa-microchip")}
+            ${tabBtn("runner",   t.tabRunner,   "fa-bolt")}
+            ${tabBtn("activity", t.tabActivity, "fa-clock-rotate-left")}
+          </div>
+          <div style="padding:2px 4px;">
+            ${renderActivePanel(hasModel, stateLabel)}
+          </div>
+        </section>
+      `;
+
+      const titlebarAction = (icon: string, title: string, onClick: () => void) => html`
+        <button
+          @click=${onClick}
+          title=${title}
+          style="
+            display:inline-flex; align-items:center; justify-content:center;
+            width:24px; height:24px;
+            background:transparent;
+            border:1px solid transparent;
+            border-radius:5px;
+            color:var(--fg-2);
+            cursor:pointer;
+            --wails-draggable: no-drag;
+          "
+          onmouseover="this.style.background='rgba(255,255,255,0.05)'; this.style.color='var(--fg-0)';"
+          onmouseout="this.style.background='transparent'; this.style.color='var(--fg-2)';">
+          <i class="fa-solid ${icon}" style="font-size:11px;"></i>
+        </button>
+      `;
+
+      const renderFlagAction = () => html`
+        <button
+          @click=${cycleLanguage}
+          title=${currentLang}
+          style="
+            display:inline-flex; align-items:center; justify-content:center;
+            width:24px; height:24px;
+            background:transparent;
+            border:1px solid transparent;
+            border-radius:5px;
+            cursor:pointer;
+            font-size:16px;
+            line-height:1;
+            --wails-draggable: no-drag;
+          "
+          onmouseover="this.style.background='rgba(255,255,255,0.05)';"
+          onmouseout="this.style.background='transparent';">
+          ${flagFor(currentLang)}
+        </button>
+      `;
+
+      const renderTitlebarActions = () => html`
+        ${titlebarAction("fa-display", t.tbOpenApp,  openWindow("app"))}
+        ${titlebarAction("fa-gear",    t.tbSettings, openWindow("settings"))}
+        ${renderFlagAction()}
+      `;
+
+      const renderTrayBody = (heroCard: unknown, infoCard: unknown, openSection: unknown) => html`
+        <div style="display:flex; flex-direction:column; gap:14px; padding:14px; flex:1; min-height:0; overflow-y:auto; overscroll-behavior: none;">
+          ${heroCard}
+          ${infoCard}
+          ${openSection}
+        </div>
+      `;
+
+      const renderTrayFooter = (variant: string, stateLabel: string) => html`
+        <span style="opacity:0.7;">${t.footerVersion}</span>
+        <span style="flex:1"></span>
+        <lthn-status-dot variant=${variant}></lthn-status-dot>
+        <span style="opacity:0.7;">${stateLabel}</span>
+      `;
+
+      const draw = () => {
+        const variant = connectionVariant();
+        const stateLabel = connectionLabel();
+        const sparkData = state.samples.length ? state.samples.join(",") : "";
+        const sparkMax = Math.max(1, ...state.samples) * 1.2;
+        const hasModel = state.connected && state.model && state.model !== t.valNoModel;
+        const heroCard = renderHeroCard(variant, stateLabel, hasModel, sparkData, sparkMax);
+
+        const openSection = renderOpenSection();
+
+        const infoCard = renderInfoCard(hasModel, stateLabel);
 
         render(renderChrome({
           title: t.chromeTitle,
           subtitle: state.err ? t.chromeOffline : t.chromeReady,
           w: 400, h: 560,
-          actions: titlebarActions,
-          body: html`
-            <div style="display:flex; flex-direction:column; gap:14px; padding:14px; flex:1; min-height:0; overflow-y:auto; overscroll-behavior: none;">
-              ${heroCard}
-              ${infoCard}
-              ${openSection}
-            </div>
-          `,
-          footer: html`
-            <span style="opacity:0.7;">${t.footerVersion}</span>
-            <span style="flex:1"></span>
-            <lthn-status-dot variant=${variant}></lthn-status-dot>
-            <span style="opacity:0.7;">${stateLabel}</span>
-          `,
+          actions: renderTitlebarActions(),
+          body: renderTrayBody(heroCard, infoCard, openSection),
+          footer: renderTrayFooter(variant, stateLabel),
         }), app);
       };
 
