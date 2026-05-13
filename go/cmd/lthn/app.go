@@ -17,6 +17,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/bridge"
 	lthni18n "dappco.re/lthn/desktop/pkg/i18n"
 	"dappco.re/lthn/desktop/pkg/paths"
+	"dappco.re/lthn/desktop/pkg/plugin"
 )
 
 // newAppCore constructs the shared *core.Core for any lthn CLI verb
@@ -105,6 +106,11 @@ func newAppCore() *core.Core {
 		// via /internal/eval-reply. Dev-mode focused — bound to
 		// localhost so it never leaves this Mac. See pkg/bridge/.
 		core.WithName("bridge", bridge.RegisterService(bridge.Options{})),
+		// plugin — the plugin host. Owns ~/Lethean/conf/plugins/,
+		// supervises plugin binaries via process.Service, and
+		// mounts a reverse-proxy on the coreapi.Engine at
+		// /v1/api/plugin/<code>/*. See docs/plugin-host-scope.md.
+		core.WithName("plugin", plugin.NewService(plugin.Options{})),
 	)
 
 	if r := c.ServiceStartup(context.Background(), nil); !r.OK {

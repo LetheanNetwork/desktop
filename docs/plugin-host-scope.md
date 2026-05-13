@@ -328,18 +328,17 @@ once the runtime is proven.
 
 ---
 
-## Decision points needed before implementation
+## Decision points — resolved 2026-05-13
 
-- [ ] **Path stripping** — preserve or strip namespace prefix?
-- [ ] **Default `~/Lethean/conf/plugins/` location** — confirms `conf/` is the
-  right tier (vs `data/` which holds wallets + caches). Memory says
-  conf/models/ for model files; conf/plugins/ is consistent.
-- [ ] **Binary hosting** — forge.lthn.sh/releases vs github.com/dappcore
-  releases for the canonical hosting source. Fixture allowlist follows.
-- [ ] **CoreAgent repo scaffolding** — separate repo at
-  `forge.lthn.sh/lthn/coreagent` with its own go.mod / Dockerfile / release
-  workflow? Or first iteration as a sibling package inside lthn-desktop
-  proven, then split?
+- [x] **Path stripping** — **preserve** the namespace prefix. Host strips
+  only `/v1/api/plugin/` on the way out. Plugin sees `/<namespace>/...`.
+- [x] **Plugin install dir** — `~/Lethean/conf/plugins/<code>/`. Sits next
+  to `conf/models/` per the visible-bloat principle.
+- [x] **Binary hosting** — `github.com/dappcore/*` releases. Phase 1
+  allowlist is exactly `github.com/dappcore/<repo>/releases/download/...`.
+  Configurable allowlist comes later.
+- [x] **CoreAgent scaffolding** — **deferred.** Build the host so it's
+  ready; CoreAgent's repo + first ship is a separate arc.
 
 ---
 

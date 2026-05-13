@@ -34,6 +34,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	lthnapi "dappco.re/lthn/desktop/pkg/api"
+	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/runner"
 )
 
@@ -107,6 +108,15 @@ func mountSubsystems(c *core.Core, engine *coreapi.Engine, r *runner.Service) co
 			}, adaptMCPRest(t.RESTHandler))
 		}
 		engine.Register(bridge)
+	}
+
+	// plugin — reverse-proxy mount under /v1/api/plugin/<code>/*.
+	// The ProxyGroup is registered exactly once; the plugin host
+	// service mutates the internal targets map on Start/Stop so
+	// route registration doesn't need to be dynamic. See
+	// docs/plugin-host-scope.md for the contract.
+	if pluginSvc, ok := core.ServiceFor[*plugin.Service](c, "plugin"); ok && pluginSvc != nil {
+		engine.Register(pluginSvc.ProxyGroup())
 	}
 
 	return core.Ok(nil)

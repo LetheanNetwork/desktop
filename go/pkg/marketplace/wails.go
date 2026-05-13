@@ -9,6 +9,7 @@ package marketplace
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/plugin"
 )
 
 // SearchOutput is the shape returned to the Lit window.
@@ -47,36 +48,71 @@ type InstalledOutput struct {
 }
 
 // Installed enumerates plugins the user has installed via the
-// runtime. Returns empty until the plugin host is wired —
-// installed state is owned by the runtime, not this catalogue.
+// plugin host. Empty until at least one Install completes; the
+// host's on-disk scan keeps this consistent with what's actually
+// present in ~/Lethean/conf/plugins/.
 func (s *Service) Installed() (InstalledOutput, error) {
-	return InstalledOutput{Packages: []InstalledPackage{}}, nil
+	host, ok := core.ServiceFor[*plugin.Service](s.core, "plugin")
+	if !ok || host == nil {
+		return InstalledOutput{Packages: []InstalledPackage{}}, nil
+	}
+	listing, err := host.List()
+	if err != nil {
+		return InstalledOutput{Packages: []InstalledPackage{}}, err
+	}
+	out := make([]InstalledPackage, 0, len(listing.Plugins))
+	for _, p := range listing.Plugins {
+		entry := InstalledPackage{
+			Code:    p.Code,
+			Name:    p.Name,
+			Version: p.Version,
+		}
+		if p.Status.Port > 0 {
+			entry.EntryPoint = "/v1/api/plugin/" + p.Namespace + "/"
+		}
+		out = append(out, entry)
+	}
+	return InstalledOutput{Packages: out}, nil
 }
 
-// Install requests the plugin host to fetch + spawn the named
-// plugin. Today returns "plugin host not running" because the
-// runtime hasn't landed yet; the UI surfaces this as an info
-// banner rather than an error.
+// Install resolves a catalogue entry, hands the manifest to the
+// plugin host, and lets it fetch + write + start the binary. The
+// plugin host is wired via pkg/plugin and registered at boot in
+// pkg/desktop; if it's missing (degenerate dev build) the call
+// surfaces a clean error rather than a nil-pointer panic.
 func (s *Service) Install(code string) error {
 	if core.Trim(code) == "" {
 		return core.E("marketplace.Install", "code is required", nil)
 	}
-	if _, ok := findByCode(code); !ok {
-		return core.E("marketplace.Install", "plugin not found: "+code, nil)
+	pkg, ok := findByCode(code)
+	if !ok {
+		return core.E("marketplace.Install", "plugin not found in catalogue: "+code, nil)
 	}
-	return core.E("marketplace.Install",
-		"plugin host not running — Install will activate when the "+
-			"plugin runtime (binary + --namespace + reverse-proxy) lands", nil)
+	host, ok := core.ServiceFor[*plugin.Service](s.core, "plugin")
+	if !ok || host == nil {
+		return core.E("marketplace.Install",
+			"plugin host not registered — Install requires pkg/plugin to be wired", nil)
+	}
+	_, err := host.Install(plugin.InstallInput{
+		Code:      pkg.Code,
+		Name:      pkg.Name,
+		Version:   pkg.Version,
+		Namespace: pkg.Code,
+		BinaryURL: pkg.Entrypoint, // catalogue points at release asset
+	})
+	return err
 }
 
 // Remove asks the plugin host to stop + clean up the named
-// plugin. Returns the same not-yet-running error as Install
-// until the runtime is wired.
+// plugin. Same host-discovery dance as Install.
 func (s *Service) Remove(code string) error {
 	if core.Trim(code) == "" {
 		return core.E("marketplace.Remove", "code is required", nil)
 	}
-	return core.E("marketplace.Remove",
-		"plugin host not running — Remove will activate when the "+
-			"plugin runtime (binary + --namespace + reverse-proxy) lands", nil)
+	host, ok := core.ServiceFor[*plugin.Service](s.core, "plugin")
+	if !ok || host == nil {
+		return core.E("marketplace.Remove",
+			"plugin host not registered — Remove requires pkg/plugin to be wired", nil)
+	}
+	return host.Remove(code)
 }
