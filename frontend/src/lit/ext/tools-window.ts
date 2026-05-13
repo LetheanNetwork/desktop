@@ -215,10 +215,17 @@ class LthnToolsWindow extends LitElement {
       </div>
     `;
 
+    // Footer counts come from the live registry — "configured" + "enabled"
+    // are equal today since the MCP service has no per-group disable
+    // toggle. "648 calls today · 99.4 % ok" stays as design canon —
+    // no call-log service yet. Fall back to the design literals (5/3)
+    // when the list is empty so canvas preview reads coherently.
+    const sc = servers.length || 5;
+    const se = servers.length || 3;
     return renderChrome({
       title: this.chrome.title, subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, toolbar, body,
-      footer: html`~/.lthn/mcp.json · 5 servers configured · 3 enabled · 648 calls today · 99.4 % ok`,
+      footer: html`~/.lthn/mcp.json · ${sc} servers configured · ${se} enabled · 648 calls today · 99.4 % ok`,
       embedded: this.embedded,
     });
   }
