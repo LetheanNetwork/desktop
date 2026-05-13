@@ -184,7 +184,7 @@ func (s *Service) Run(input RunInput) core.Result {
 	path := core.Trim(input.Path)
 	mode := core.Lower(core.Trim(input.Mode))
 	if path == "" || mode == "" {
-		return core.Fail(core.E("php.Run", "path and mode required", nil))
+		return core.Fail(core.E(runOp, "path and mode required", nil))
 	}
 	var command string
 	var args []string
@@ -192,25 +192,25 @@ func (s *Service) Run(input RunInput) core.Result {
 	case "composer":
 		name := core.Trim(input.Name)
 		if name == "" {
-			return core.Fail(core.E("php.Run", "name required for composer mode", nil))
+			return core.Fail(core.E(runOp, "name required for composer mode", nil))
 		}
 		command = "composer"
 		args = []string{"run-script", name}
 	case "artisan":
 		if len(input.Args) == 0 {
-			return core.Fail(core.E("php.Run", "args required for artisan mode", nil))
+			return core.Fail(core.E(runOp, "args required for artisan mode", nil))
 		}
 		command = "php"
 		args = append([]string{"artisan"}, input.Args...)
 	case "raw":
 		cmd := core.Trim(input.Command)
 		if cmd == "" {
-			return core.Fail(core.E("php.Run", "command required for raw mode", nil))
+			return core.Fail(core.E(runOp, "command required for raw mode", nil))
 		}
 		command = "sh"
 		args = []string{"-c", cmd}
 	default:
-		return core.Fail(core.E("php.Run", "unknown mode "+mode, nil))
+		return core.Fail(core.E(runOp, "unknown mode "+mode, nil))
 	}
 	procR := s.runProc(path, command, args)
 	if !procR.OK {

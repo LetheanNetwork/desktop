@@ -34,6 +34,12 @@ type Service struct {
 	core *core.Core
 }
 
+const (
+	artisanCanonicalSource = "artisan-canonical"
+	runProcOp              = "php.runProc"
+	runOp                  = "php.Run"
+)
+
 // NewService constructs the php surface against a Core container.
 // Wired via application.NewService(php.NewService(c)) in
 // pkg/desktop/desktop.go.
@@ -107,16 +113,16 @@ type ScriptEntry struct {
 // every Laravel project — dev-time + ops-time defaults so the
 // user doesn't have to scan composer.json to find them.
 var canonicalArtisan = []ScriptEntry{
-	{Name: "serve", Command: "php artisan serve", Source: "artisan-canonical", ArtisanArgs: []string{"serve"}},
-	{Name: "tinker", Command: "php artisan tinker", Source: "artisan-canonical", ArtisanArgs: []string{"tinker"}},
-	{Name: "migrate", Command: "php artisan migrate", Source: "artisan-canonical", ArtisanArgs: []string{"migrate"}},
-	{Name: "migrate:fresh", Command: "php artisan migrate:fresh --seed", Source: "artisan-canonical", ArtisanArgs: []string{"migrate:fresh", "--seed"}},
-	{Name: "route:list", Command: "php artisan route:list", Source: "artisan-canonical", ArtisanArgs: []string{"route:list"}},
-	{Name: "cache:clear", Command: "php artisan cache:clear", Source: "artisan-canonical", ArtisanArgs: []string{"cache:clear"}},
-	{Name: "config:cache", Command: "php artisan config:cache", Source: "artisan-canonical", ArtisanArgs: []string{"config:cache"}},
-	{Name: "queue:work", Command: "php artisan queue:work", Source: "artisan-canonical", ArtisanArgs: []string{"queue:work"}},
-	{Name: "pail", Command: "php artisan pail", Source: "artisan-canonical", ArtisanArgs: []string{"pail"}},
-	{Name: "horizon", Command: "php artisan horizon", Source: "artisan-canonical", ArtisanArgs: []string{"horizon"}},
+	{Name: "serve", Command: "php artisan serve", Source: artisanCanonicalSource, ArtisanArgs: []string{"serve"}},
+	{Name: "tinker", Command: "php artisan tinker", Source: artisanCanonicalSource, ArtisanArgs: []string{"tinker"}},
+	{Name: "migrate", Command: "php artisan migrate", Source: artisanCanonicalSource, ArtisanArgs: []string{"migrate"}},
+	{Name: "migrate:fresh", Command: "php artisan migrate:fresh --seed", Source: artisanCanonicalSource, ArtisanArgs: []string{"migrate:fresh", "--seed"}},
+	{Name: "route:list", Command: "php artisan route:list", Source: artisanCanonicalSource, ArtisanArgs: []string{"route:list"}},
+	{Name: "cache:clear", Command: "php artisan cache:clear", Source: artisanCanonicalSource, ArtisanArgs: []string{"cache:clear"}},
+	{Name: "config:cache", Command: "php artisan config:cache", Source: artisanCanonicalSource, ArtisanArgs: []string{"config:cache"}},
+	{Name: "queue:work", Command: "php artisan queue:work", Source: artisanCanonicalSource, ArtisanArgs: []string{"queue:work"}},
+	{Name: "pail", Command: "php artisan pail", Source: artisanCanonicalSource, ArtisanArgs: []string{"pail"}},
+	{Name: "horizon", Command: "php artisan horizon", Source: artisanCanonicalSource, ArtisanArgs: []string{"horizon"}},
 }
 
 // defaultRoots returns the user's canonical Code/* roots —
@@ -218,7 +224,7 @@ func dirExists(path string) bool {
 func (s *Service) runProc(cwd, command string, args []string) core.Result {
 	ps := s.proc()
 	if ps == nil {
-		return core.Fail(core.E("php.runProc", "process service unavailable", nil))
+		return core.Fail(core.E(runProcOp, "process service unavailable", nil))
 	}
 	opts := process.RunOptions{
 		Command: command,
@@ -227,11 +233,11 @@ func (s *Service) runProc(cwd, command string, args []string) core.Result {
 	}
 	r := ps.StartWithOptions(context.Background(), opts)
 	if !r.OK {
-		return core.Fail(core.E("php.runProc", r.Error(), nil))
+		return core.Fail(core.E(runProcOp, r.Error(), nil))
 	}
 	p, ok := r.Value.(*process.Process)
 	if !ok || p == nil {
-		return core.Fail(core.E("php.runProc", "process service returned non-process", nil))
+		return core.Fail(core.E(runProcOp, "process service returned non-process", nil))
 	}
 	return core.Ok(p)
 }
