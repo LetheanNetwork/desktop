@@ -33,9 +33,13 @@ type Options struct {
 	DefaultImage string
 }
 
-// defaultImage is the canonical fallback when neither Options.DefaultImage
-// nor SpawnInput.Image is set.
-const defaultImage = "lthn/dev:latest"
+const (
+	// defaultImage is the canonical fallback when neither Options.DefaultImage
+	// nor SpawnInput.Image is set.
+	defaultImage = "lthn/dev:latest"
+	spawnOp      = "sandbox.Spawn"
+	spawnAppleOp = "sandbox.spawnApple"
+)
 
 // Service is the sandbox host. Embeds *core.ServiceRuntime so
 // process.Service can be resolved at call time.
@@ -149,14 +153,14 @@ func (s *Service) prepareSpawnInput(input SpawnInput) core.Result {
 		input.Image = s.resolveDefaultImage()
 	}
 	if input.Memory < 0 {
-		return core.Fail(core.E("sandbox.Spawn", "memory must be >= 0", nil))
+		return core.Fail(core.E(spawnOp, "memory must be >= 0", nil))
 	}
 	if input.CPUs < 0 {
-		return core.Fail(core.E("sandbox.Spawn", "cpus must be >= 0", nil))
+		return core.Fail(core.E(spawnOp, "cpus must be >= 0", nil))
 	}
 	input.StorageOpt = core.Trim(input.StorageOpt)
 	if core.Trim(input.Command) == "" {
-		return core.Fail(core.E("sandbox.Spawn", "command is required", nil))
+		return core.Fail(core.E(spawnOp, "command is required", nil))
 	}
 	return core.Ok(input)
 }
@@ -168,7 +172,7 @@ func (s *Service) prepareSpawnInput(input SpawnInput) core.Result {
 func (s *Service) spawnApple(input SpawnInput, timeout time.Duration) core.Result {
 	provider := container.NewAppleProvider()
 	if !provider.Available() {
-		return core.Fail(core.E("sandbox.spawnApple",
+		return core.Fail(core.E(spawnAppleOp,
 			"AppleProvider not available - install Apple Container CLI on macOS 26+", nil))
 	}
 	// For proof-of-life we treat the image string as an already-
@@ -187,7 +191,7 @@ func (s *Service) spawnApple(input SpawnInput, timeout time.Duration) core.Resul
 	// apple.go). For now we encode command+args by prepending the
 	// command into image.Path style — proof-of-life only.
 	if input.StorageOpt != "" {
-		return core.Fail(core.E("sandbox.spawnApple", "storage_opt is not supported by AppleProvider", nil))
+		return core.Fail(core.E(spawnAppleOp, "storage_opt is not supported by AppleProvider", nil))
 	}
 	runOpts := []container.RunOption{
 		container.WithName(core.Sprintf("lthn-sandbox-%d", started.UnixNano())),
@@ -200,10 +204,10 @@ func (s *Service) spawnApple(input SpawnInput, timeout time.Duration) core.Resul
 	}
 	ctr, err := provider.Run(img, runOpts...)
 	if err != nil {
-		return core.Fail(core.E("sandbox.spawnApple", "run failed", err))
+		return core.Fail(core.E(spawnAppleOp, "run failed", err))
 	}
 	if waitErr := provider.Wait(ctx, ctr.ID); waitErr != nil {
-		return core.Fail(core.E("sandbox.spawnApple", "wait failed", waitErr))
+		return core.Fail(core.E(spawnAppleOp, "wait failed", waitErr))
 	}
 	dur := time.Since(started).Milliseconds()
 	// AppleProvider's Container struct has Status but no ExitCode
