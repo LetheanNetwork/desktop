@@ -163,6 +163,11 @@ func toolCatalogue() []map[string]any {
 		{"name": "webview_click", "desc": "Click element matching selector. params: { selector, window? }"},
 		{"name": "webview_navigate", "desc": "Navigate to URL. params: { url, window? }"},
 		{"name": "webview_windows", "desc": "List registered Wails window names."},
+		{"name": "layout_save", "desc": "Snapshot every window's pos/size/state to ~/Lethean/conf/layouts/<name>.json. params: { name }"},
+		{"name": "layout_restore", "desc": "Apply a saved layout to current windows. params: { name }"},
+		{"name": "layout_list", "desc": "List every saved layout (name + saved_at + window count)."},
+		{"name": "layout_delete", "desc": "Remove a saved layout file. params: { name }"},
+		{"name": "layout_get", "desc": "Return one saved layout's full contents without applying. params: { name }"},
 	}
 }
 
@@ -192,6 +197,16 @@ func (s *Service) dispatch(ctx context.Context, tool string, params map[string]a
 			core.Sprintf(`window.location.href=%s;return {navigatedTo:%s};`, url, url))
 	case "webview_windows":
 		return s.toolWindows()
+	case "layout_save":
+		return s.toolLayoutSave(params)
+	case "layout_restore":
+		return s.toolLayoutRestore(params)
+	case "layout_list":
+		return s.toolLayoutList()
+	case "layout_delete":
+		return s.toolLayoutDelete(params)
+	case "layout_get":
+		return s.toolLayoutGet(params)
 	default:
 		return map[string]any{"ok": false, "error": "unknown tool: " + tool}
 	}
