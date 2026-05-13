@@ -48,6 +48,25 @@ switch (surface) {
         });
       };
 
+      /* Open the unified app shell ("app" window) and tell it which
+       * pane to activate. The mini single-purpose windows
+       * (chat / models / telemetry / etc.) stay registered for the
+       * systray right-click menu — this just routes the popover-panel
+       * Open buttons through the full shell instead.
+       *
+       * lthn-app-shell subscribes to "lthn:app:setpane" and assigns
+       * the data to its `active` property. Open is awaited so the
+       * Wails event lands AFTER the shell mounts. */
+      const openAppPane = (pane: string) => async () => {
+        try {
+          await WindowService.Open("app");
+          const events = await import("@wailsio/runtime").then(m => m.Events);
+          events.Emit("lthn:app:setpane", pane);
+        } catch (err: unknown) {
+          console.error(`open app pane ${pane} failed:`, err);
+        }
+      };
+
       /* Locale strings — bulk-resolved via the Wails I18nService
        * binding. The bridge is in-process so the calls are µs-fast.
        * Wrapped in loadStrings() so the flag-button switcher can
@@ -210,7 +229,7 @@ switch (surface) {
                           border:1px dashed rgba(64,193,197,0.22);">
                 <i class="fa-solid fa-cube" style="font-size:11px; color:var(--brand-300);"></i>
                 <div style="flex:1; font-size:11.5px; color:var(--fg-1);">${t.statusPickModel}</div>
-                <lthn-btn tone="quiet" size="sm" @click=${openWindow("models")}>${t.statusBrowse}</lthn-btn>
+                <lthn-btn tone="quiet" size="sm" @click=${openAppPane("models")}>${t.statusBrowse}</lthn-btn>
               </div>
             ` : nothing}
 
@@ -234,15 +253,15 @@ switch (surface) {
           <section style="display:flex; flex-direction:column; gap:8px;">
             <lthn-label>${t.sectionOpen}</lthn-label>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
-              <lthn-btn tone="ghost" size="md" @click=${openWindow("chat")}>
+              <lthn-btn tone="ghost" size="md" @click=${openAppPane("chat")}>
                 <i class="fa-regular fa-comment" style="font-size:11px;"></i>
                 ${t.openChat}
               </lthn-btn>
-              <lthn-btn tone="ghost" size="md" @click=${openWindow("models")}>
+              <lthn-btn tone="ghost" size="md" @click=${openAppPane("models")}>
                 <i class="fa-solid fa-cube" style="font-size:11px;"></i>
                 ${t.openModels}
               </lthn-btn>
-              <lthn-btn tone="ghost" size="md" @click=${openWindow("telemetry")}
+              <lthn-btn tone="ghost" size="md" @click=${openAppPane("telemetry")}
                 style="grid-column: 1 / -1;">
                 <i class="fa-solid fa-wave-square" style="font-size:11px;"></i>
                 ${t.openTelemetry}

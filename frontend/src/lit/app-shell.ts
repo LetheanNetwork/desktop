@@ -147,7 +147,31 @@ class LthnAppShell extends LitElement {
         network: nNetwork, distillation: nDistillation, fleet: nFleet, settings: nSettings,
       },
     };
+
+    // Subscribe to "lthn:app:setpane" — the tray panel's Open
+    // buttons emit this with a NAV id (chat / models / telemetry /
+    // …) after spawning the app window. This lets the popover steer
+    // which pane the unified shell lands on without baking it into
+    // the window URL.
+    const { Events } = await import("@wailsio/runtime");
+    this._unsubSetPane = Events.On("lthn:app:setpane", (ev) => {
+      const id = typeof ev?.data === "string" ? ev.data : null;
+      if (id && NAV.some(n => n.id === id)) {
+        this.active = id;
+      }
+    });
   }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this._unsubSetPane) {
+      this._unsubSetPane();
+      this._unsubSetPane = null;
+    }
+  }
+
+  /** Returned by Events.On to detach the listener on element teardown. */
+  private _unsubSetPane: (() => void) | null = null;
 
   _select(id: string) { this.active = id; }
   _toggleCollapse() { this.collapsed = !this.collapsed; }
