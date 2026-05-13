@@ -18,6 +18,29 @@ interface RouteView {
   model:    string;
 }
 
+function storedSetting(key: string, fallback = ""): string {
+  try {
+    const storage = globalThis.localStorage;
+    if (storage && typeof storage.getItem === "function") {
+      return storage.getItem(key) || fallback;
+    }
+  } catch {
+    // Keep settings renderable in storage-less shells and tests.
+  }
+  return fallback;
+}
+
+function writeStoredSetting(key: string, value: string): void {
+  try {
+    const storage = globalThis.localStorage;
+    if (storage && typeof storage.setItem === "function") {
+      storage.setItem(key, value);
+    }
+  } catch {
+    // Settings state still updates even if host storage is unavailable.
+  }
+}
+
 class LthnSettingsWindow extends LitElement {
   static properties = {
     open: { type: String, reflect: true },
@@ -95,15 +118,15 @@ class LthnSettingsWindow extends LitElement {
     // Persisted via localStorage["lthn.boot.window"] — Go-side
     // application boot will read this to decide whether to spawn the
     // unified app shell at launch, or leave the binary tray-only.
-    this.startWithWindow = localStorage.getItem("lthn.boot.window") === "true";
+    this.startWithWindow = storedSetting("lthn.boot.window") === "true";
     this.modelsDir = "~/Lethean/conf/models/";
     this.routeNames = [];
     this.build = { version: "0.1.0", go_version: "", goos: "", goarch: "", num_cpu: 0 };
     // Telemetry poll cadence + sparkline window. Persisted via
     // localStorage so the tray + telemetry-window read the same
     // values at their connectedCallback.
-    this.sampleInterval = localStorage.getItem("lthn.telemetry.interval") || "2s";
-    this.heapSamples    = localStorage.getItem("lthn.telemetry.samples")  || "24";
+    this.sampleInterval = storedSetting("lthn.telemetry.interval", "2s");
+    this.heapSamples    = storedSetting("lthn.telemetry.samples", "24");
     this.routes = [];
     this.endpoint = "http://localhost:8000/v1";
     this.httpListening = false;
@@ -166,12 +189,12 @@ class LthnSettingsWindow extends LitElement {
 
   _setSampleInterval(v: string) {
     this.sampleInterval = v;
-    localStorage.setItem("lthn.telemetry.interval", v);
+    writeStoredSetting("lthn.telemetry.interval", v);
   }
 
   _setHeapSamples(v: string) {
     this.heapSamples = v;
-    localStorage.setItem("lthn.telemetry.samples", v);
+    writeStoredSetting("lthn.telemetry.samples", v);
   }
 
   /** Toggle Reveal/Hide for the API key. Reveal fetches the full
@@ -405,14 +428,14 @@ class LthnSettingsWindow extends LitElement {
   async _setLang(lang: string) {
     const i18n = await import("@lthn/i18n/coreservice");
     await i18n.SetLanguage(lang);
-    localStorage.setItem("lthn.locale", lang);
+    writeStoredSetting("lthn.locale", lang);
     this.currentLang = lang;
   }
 
   /** Boot mode toggle — write-through to localStorage. */
   _setStartWithWindow(on: boolean) {
     this.startWithWindow = on;
-    localStorage.setItem("lthn.boot.window", on ? "true" : "false");
+    writeStoredSetting("lthn.boot.window", on ? "true" : "false");
   }
 
   /** Flag for a given locale tag — keeps the picker visually intuitive. */

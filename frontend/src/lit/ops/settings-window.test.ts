@@ -18,10 +18,10 @@ describe("lthn-settings-window — smoke", () => {
     }
   });
 
-  it("Models section is open by default — shows model-directory row", async () => {
-    const { host } = await mountWindow("lthn-settings-window");
+  it("Models section shows the model-directory row", async () => {
+    const { host } = await mountWindow("lthn-settings-window", { attrs: { open: "models" } });
     expect(host.textContent).toContain("Model directory");
-    expect(host.textContent).toContain("~/.lthn/models/");
+    expect(host.textContent).toContain("~/Lethean/conf/models/");
   });
 
   it("footer shows the keep-running reassurance", async () => {
