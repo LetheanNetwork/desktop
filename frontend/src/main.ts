@@ -553,6 +553,22 @@ switch (surface) {
     app.appendChild(el);
     break;
   }
+  case "build": {
+    await import("./lit/ide/build-window");
+    const el = document.createElement("lthn-build-window") as HTMLElement & { path: string };
+    el.path = params.get("path") || "";
+    app.innerHTML = "";
+    app.appendChild(el);
+    break;
+  }
+  case "lint": {
+    await import("./lit/ide/lint-window");
+    const el = document.createElement("lthn-lint-window") as HTMLElement & { path: string };
+    el.path = params.get("path") || "";
+    app.innerHTML = "";
+    app.appendChild(el);
+    break;
+  }
   case "benchmark": {
     app.innerHTML = `<lthn-benchmark-window></lthn-benchmark-window>`;
     break;
@@ -596,6 +612,7 @@ switch (surface) {
           <li><a href="?surface=chat">chat</a> · <a href="?surface=welcome">welcome</a> · <a href="?surface=settings">settings</a> · <a href="?surface=models">models</a></li>
           <li><a href="?surface=benchmark">benchmark</a> · <a href="?surface=logs">logs</a> · <a href="?surface=telemetry">telemetry</a></li>
           <li><a href="?surface=integrations">integrations</a> · <a href="?surface=tools">tools</a> · <a href="?surface=editor">editor</a> · <a href="?surface=git">git</a></li>
+          <li><a href="?surface=build">build</a> · <a href="?surface=lint">lint</a></li>
           <li><a href="?surface=network">network</a> · <a href="?surface=distillation">distillation</a> · <a href="?surface=fleet">fleet</a></li>
         </ul>
         <lthn-chat-window state="multi-turn"></lthn-chat-window>
