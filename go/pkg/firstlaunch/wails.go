@@ -9,10 +9,28 @@ package firstlaunch
 import (
 	"context"
 	"errors"
+	"runtime"
 
 	"dappco.re/lthn/desktop/pkg/paths"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+// Version is the lthn binary release tag. Kept here so the
+// firstlaunch service can surface it to the About panel via the
+// Wails binding without depending on cmd/lthn (which would create
+// an import cycle).
+const Version = "0.1.0"
+
+// BuildInfo bundles the runtime + build identification the About
+// panel renders. JSON tags use snake_case so the generated TS
+// binding lands idiomatic.
+type BuildInfo struct {
+	Version    string `json:"version"`
+	GoVersion  string `json:"go_version"`
+	GoOS       string `json:"goos"`
+	GoArch     string `json:"goarch"`
+	NumCPU     int    `json:"num_cpu"`
+}
 
 // LetheanPaths bundles the canonical ~/Lethean/ filesystem layout the
 // welcome wizard surfaces during onboarding. Mirrors the no-hidden-
@@ -46,6 +64,25 @@ func (s *WailsService) Detect() (State, error) {
 	}
 	state, _ := r.Value.(State)
 	return state, nil
+}
+
+// Build returns version + runtime metadata for the About panel.
+// Pure-Go reflection of the running process; no IO, no allocations
+// beyond the struct.
+//
+// Usage example (TS):
+//
+//	import { Build } from "@desktop/firstlaunch/wailsservice";
+//	const b = await Build();
+//	console.log(b.version, b.go_version, b.goos, b.goarch);
+func (s *WailsService) Build() (BuildInfo, error) {
+	return BuildInfo{
+		Version:   Version,
+		GoVersion: runtime.Version(),
+		GoOS:      runtime.GOOS,
+		GoArch:    runtime.GOARCH,
+		NumCPU:    runtime.NumCPU(),
+	}, nil
 }
 
 // Paths returns the canonical ~/Lethean/ layout. Driven by

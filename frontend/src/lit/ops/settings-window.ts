@@ -19,6 +19,7 @@ class LthnSettingsWindow extends LitElement {
     startWithWindow: { state: true },
     modelsDir: { state: true },
     routeNames: { state: true },
+    build: { state: true },
   };
   declare open: string;
   declare w: number;
@@ -30,6 +31,7 @@ class LthnSettingsWindow extends LitElement {
   declare startWithWindow: boolean;
   declare modelsDir: string;
   declare routeNames: string[];
+  declare build: { version: string; go_version: string; goos: string; goarch: string; num_cpu: number };
   constructor() {
     super();
     this.open = "general"; this.w = 760; this.h = 600; this.embedded = false;
@@ -42,6 +44,7 @@ class LthnSettingsWindow extends LitElement {
     this.startWithWindow = localStorage.getItem("lthn.boot.window") === "true";
     this.modelsDir = "~/Lethean/conf/models/";
     this.routeNames = [];
+    this.build = { version: "0.1.0", go_version: "", goos: "", goarch: "", num_cpu: 0 };
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -51,21 +54,30 @@ class LthnSettingsWindow extends LitElement {
       import("@desktop/firstlaunch/wailsservice"),
       import("@desktop/runner/service"),
     ]);
-    const [title, subtitle, locales, currentLang, paths, routes] = await Promise.all([
+    const [title, subtitleTpl, locales, currentLang, paths, routes, build] = await Promise.all([
       i18n.T("window.settings.title"),
       i18n.T("window.settings.subtitle"),
       i18n.AvailableLanguages(),
       i18n.Language(),
       fl.Paths().catch(() => null),
       runner.WModels().catch((): string[] => []),
+      fl.Build().catch(() => null),
     ]);
-    this.chrome = { title, subtitle };
     this.locales = locales;
     this.currentLang = currentLang;
     if (paths?.models_dir) {
       this.modelsDir = collapseHome(paths.models_dir);
     }
     this.routeNames = routes || [];
+    if (build) {
+      this.build = build;
+    }
+    // Rebuild the subtitle with the real version so the chrome
+    // reflects the running binary rather than the locale fixture.
+    const subtitle = this.build.version
+      ? `lthn · v${this.build.version}`
+      : subtitleTpl;
+    this.chrome = { title, subtitle };
   }
 
   /** Side-menu click handler — swap the body to the selected section. */
@@ -342,16 +354,17 @@ class LthnSettingsWindow extends LitElement {
   }
 
   _sectionAbout() {
+    const mono = (v: string) => html`<span style="font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">${v}</span>`;
     return this._section({
       title: "About",
-      desc: "What's running.",
+      desc: "What's running — version, runtime, and where the source lives.",
       content: html`
-        ${this._row("Version", null, html`
-          <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">v0.2.0-rc1</span>
-        `)}
-        ${this._row("Licence", null, html`
-          <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">EUPL-1.2</span>
-        `)}
+        ${this._row("Version", "Binary release tag baked at build time.",
+          mono(`v${this.build.version || "—"}`))}
+        ${this._row("Go toolchain", null, mono(this.build.go_version || "—"))}
+        ${this._row("Platform", null, mono(this.build.goos && this.build.goarch ? `${this.build.goos} · ${this.build.goarch}` : "—"))}
+        ${this._row("CPUs", "Logical cores Go's runtime sees.", mono(String(this.build.num_cpu || "—")))}
+        ${this._row("Licence", null, mono("EUPL-1.2"))}
         ${this._row("Source", null, html`
           <a href="https://github.com/LetheanNetwork/desktop" target="_blank" rel="noopener"
              style="font-family:var(--font-mono); font-size:11.5px; color:var(--brand-300);
