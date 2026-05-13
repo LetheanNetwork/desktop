@@ -106,40 +106,12 @@ func (s *Service) applyLayout(layout *Layout) map[string]any {
 	applied := 0
 	skipped := 0
 	for _, ws := range layout.Windows {
-		w, ok := app.Window.GetByName(ws.Name)
-		if !ok || w == nil {
-			skipped++
-			continue
-		}
-		wv, ok := w.(*application.WebviewWindow)
+		wv, ok := webviewByName(app, ws.Name)
 		if !ok {
 			skipped++
 			continue
 		}
-		// Order matters: unmaximise + unfullscreen FIRST so SetPosition + SetSize land in
-		// the right frame; the saved state then re-applies the chrome flags.
-		if wv.IsMaximised() {
-			wv.UnMaximise()
-		}
-		if wv.IsFullscreen() {
-			wv.UnFullscreen()
-		}
-		wv.SetPosition(ws.X, ws.Y)
-		wv.SetSize(ws.Width, ws.Height)
-		if ws.Visible {
-			wv.Show()
-		} else {
-			wv.Hide()
-		}
-		if ws.Maximised {
-			wv.Maximise()
-		}
-		if ws.Fullscreen {
-			wv.Fullscreen()
-		}
-		if ws.AlwaysOnTop {
-			wv.SetAlwaysOnTop(true)
-		}
+		applyWindowState(wv, ws)
 		applied++
 	}
 	return map[string]any{
@@ -147,6 +119,45 @@ func (s *Service) applyLayout(layout *Layout) map[string]any {
 		"applied": applied,
 		"skipped": skipped,
 		"name":    layout.Name,
+	}
+}
+
+func webviewByName(app *application.App, name string) (*application.WebviewWindow, bool) {
+	if app == nil {
+		return nil, false
+	}
+	w, ok := app.Window.GetByName(name)
+	if !ok || w == nil {
+		return nil, false
+	}
+	wv, ok := w.(*application.WebviewWindow)
+	return wv, ok && wv != nil
+}
+
+func applyWindowState(wv *application.WebviewWindow, ws WindowState) {
+	// Order matters: unmaximise + unfullscreen FIRST so SetPosition + SetSize land in
+	// the right frame; the saved state then re-applies the chrome flags.
+	if wv.IsMaximised() {
+		wv.UnMaximise()
+	}
+	if wv.IsFullscreen() {
+		wv.UnFullscreen()
+	}
+	wv.SetPosition(ws.X, ws.Y)
+	wv.SetSize(ws.Width, ws.Height)
+	if ws.Visible {
+		wv.Show()
+	} else {
+		wv.Hide()
+	}
+	if ws.Maximised {
+		wv.Maximise()
+	}
+	if ws.Fullscreen {
+		wv.Fullscreen()
+	}
+	if ws.AlwaysOnTop {
+		wv.SetAlwaysOnTop(true)
 	}
 }
 
@@ -278,14 +289,8 @@ func (s *Service) activeWorkArea(name string) (int, int, int, int, map[string]an
 	if app == nil {
 		return 0, 0, 0, 0, map[string]any{"ok": false, "error": wailsAppUnavailable}
 	}
-	if name != "" {
-		if w, ok := app.Window.GetByName(name); ok && w != nil {
-			if wv, ok := w.(*application.WebviewWindow); ok {
-				if sc, err := wv.GetScreen(); err == nil && sc != nil {
-					return sc.WorkArea.X, sc.WorkArea.Y, sc.WorkArea.Width, sc.WorkArea.Height, nil
-				}
-			}
-		}
+	if x, y, w, h, ok := windowScreenWorkArea(app, name); ok {
+		return x, y, w, h, nil
 	}
 	if app.Screen == nil {
 		return 0, 0, 0, 0, map[string]any{"ok": false, "error": screenManagerUnavailable}
@@ -295,6 +300,21 @@ func (s *Service) activeWorkArea(name string) (int, int, int, int, map[string]an
 		return 0, 0, 0, 0, map[string]any{"ok": false, "error": "no primary screen"}
 	}
 	return sc.WorkArea.X, sc.WorkArea.Y, sc.WorkArea.Width, sc.WorkArea.Height, nil
+}
+
+func windowScreenWorkArea(app *application.App, name string) (int, int, int, int, bool) {
+	if name == "" {
+		return 0, 0, 0, 0, false
+	}
+	wv, ok := webviewByName(app, name)
+	if !ok {
+		return 0, 0, 0, 0, false
+	}
+	sc, err := wv.GetScreen()
+	if err != nil || sc == nil {
+		return 0, 0, 0, 0, false
+	}
+	return sc.WorkArea.X, sc.WorkArea.Y, sc.WorkArea.Width, sc.WorkArea.Height, true
 }
 
 // pickWindows resolves a "windows" param (string array of names)
@@ -307,30 +327,31 @@ func (s *Service) pickWindows(params map[string]any) ([]*application.WebviewWind
 		return nil, map[string]any{"ok": false, "error": wailsAppUnavailable}
 	}
 	names := stringSliceParam(params, "windows")
-	out := []*application.WebviewWindow{}
 	if len(names) == 0 {
-		// Default: every visible window.
-		for _, w := range app.Window.GetAll() {
-			wv, ok := w.(*application.WebviewWindow)
-			if !ok || wv == nil {
-				continue
-			}
-			if wv.IsVisible() {
-				out = append(out, wv)
-			}
-		}
-		return out, nil
+		return visibleWebviewWindows(app), nil
 	}
-	for _, n := range names {
-		w, ok := app.Window.GetByName(n)
-		if !ok || w == nil {
-			continue
-		}
-		if wv, ok := w.(*application.WebviewWindow); ok {
+	return namedWebviewWindows(app, names), nil
+}
+
+func visibleWebviewWindows(app *application.App) []*application.WebviewWindow {
+	out := []*application.WebviewWindow{}
+	for _, w := range app.Window.GetAll() {
+		wv, ok := w.(*application.WebviewWindow)
+		if ok && wv != nil && wv.IsVisible() {
 			out = append(out, wv)
 		}
 	}
-	return out, nil
+	return out
+}
+
+func namedWebviewWindows(app *application.App, names []string) []*application.WebviewWindow {
+	out := []*application.WebviewWindow{}
+	for _, n := range names {
+		if wv, ok := webviewByName(app, n); ok {
+			out = append(out, wv)
+		}
+	}
+	return out
 }
 
 // toolLayoutTile places windows into a tiled grid. modes:
@@ -526,76 +547,77 @@ func (s *Service) toolLayoutWorkflow(params map[string]any) map[string]any {
 	if errResp != nil {
 		return errResp
 	}
-	apply := func(name string, px, py, pw, ph int, show bool) bool {
-		win, ok := app.Window.GetByName(name)
-		if !ok || win == nil {
-			return false
-		}
-		wv, ok := win.(*application.WebviewWindow)
-		if !ok {
-			return false
-		}
-		if show {
-			wv.Show()
-			wv.SetPosition(px, py)
-			wv.SetSize(pw, ph)
-		} else {
-			wv.Hide()
-		}
-		return true
-	}
-	hideAllExcept := func(keep ...string) int {
-		keepSet := map[string]bool{}
-		for _, k := range keep {
-			keepSet[k] = true
-		}
-		hidden := 0
-		for _, win := range app.Window.GetAll() {
-			wv, ok := win.(*application.WebviewWindow)
-			if !ok || wv == nil {
-				continue
-			}
-			if keepSet[wv.Name()] {
-				continue
-			}
-			if wv.IsVisible() {
-				wv.Hide()
-				hidden++
-			}
-		}
-		return hidden
-	}
 	switch workflow {
 	case "default":
-		hidden := hideAllExcept("tray")
+		hidden := hideWorkflowWindows(app, "tray")
 		return map[string]any{"ok": true, "workflow": "default", "hidden": hidden}
 	case "coding":
-		hideAllExcept("tray", "editor", "git")
-		apply("editor", x, y, w*2/3, h, true)
-		apply("git", x+w*2/3, y, w/3, h, true)
+		hideWorkflowWindows(app, "tray", "editor", "git")
+		applyWorkflowWindow(app, "editor", x, y, w*2/3, h, true)
+		applyWorkflowWindow(app, "git", x+w*2/3, y, w/3, h, true)
 		return map[string]any{"ok": true, "workflow": "coding"}
 	case "review":
-		hideAllExcept("tray", "chat", "models")
-		apply("chat", x, y, w/2, h, true)
-		apply("models", x+w/2, y, w/2, h, true)
+		hideWorkflowWindows(app, "tray", "chat", "models")
+		applyWorkflowWindow(app, "chat", x, y, w/2, h, true)
+		applyWorkflowWindow(app, "models", x+w/2, y, w/2, h, true)
 		return map[string]any{"ok": true, "workflow": "review"}
 	case "ops":
-		hideAllExcept("tray", "telemetry", "logs", "containers")
-		apply("telemetry", x, y, w, h/2, true)
-		apply("logs", x, y+h/2, w/2, h/2, true)
-		apply("containers", x+w/2, y+h/2, w/2, h/2, true)
+		hideWorkflowWindows(app, "tray", "telemetry", "logs", "containers")
+		applyWorkflowWindow(app, "telemetry", x, y, w, h/2, true)
+		applyWorkflowWindow(app, "logs", x, y+h/2, w/2, h/2, true)
+		applyWorkflowWindow(app, "containers", x+w/2, y+h/2, w/2, h/2, true)
 		return map[string]any{"ok": true, "workflow": "ops"}
 	case "single":
 		name := paramString(params, "name", "")
 		if name == "" {
 			return map[string]any{"ok": false, "error": "single workflow needs a name param"}
 		}
-		hideAllExcept("tray", name)
-		apply(name, x, y, w, h, true)
+		hideWorkflowWindows(app, "tray", name)
+		applyWorkflowWindow(app, name, x, y, w, h, true)
 		return map[string]any{"ok": true, "workflow": "single", "focused": name}
 	default:
 		return map[string]any{"ok": false, "error": "unknown workflow: " + workflow + " (try: default, coding, review, ops, single)"}
 	}
+}
+
+func applyWorkflowWindow(app *application.App, name string, px, py, pw, ph int, show bool) bool {
+	wv, ok := webviewByName(app, name)
+	if !ok {
+		return false
+	}
+	if show {
+		wv.Show()
+		wv.SetPosition(px, py)
+		wv.SetSize(pw, ph)
+	} else {
+		wv.Hide()
+	}
+	return true
+}
+
+func hideWorkflowWindows(app *application.App, keep ...string) int {
+	keepSet := workflowKeepSet(keep...)
+	hidden := 0
+	for _, win := range app.Window.GetAll() {
+		wv, ok := win.(*application.WebviewWindow)
+		if shouldHideWorkflowWindow(wv, ok, keepSet) {
+			wv.Hide()
+			hidden++
+		}
+	}
+	return hidden
+}
+
+func workflowKeepSet(keep ...string) map[string]bool {
+	keepSet := map[string]bool{}
+	for _, k := range keep {
+		keepSet[k] = true
+	}
+	return keepSet
+}
+
+func shouldHideWorkflowWindow(wv *application.WebviewWindow, ok bool, keepSet map[string]bool) bool {
+	return ok && wv != nil && !keepSet[wv.Name()] && wv.IsVisible()
 }
 
 // loadLayout reads + parses a saved layout file.
