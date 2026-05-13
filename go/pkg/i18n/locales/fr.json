@@ -130,7 +130,13 @@
       "rail_bucket_yesterday": "Hier",
       "rail_bucket_week":      "Cette semaine",
       "rail_empty":       "Aucune conversation pour le moment. Démarrez-en une depuis le compositeur.",
-      "rail_new":         "Nouvelle conversation"
+      "rail_new":         "Nouvelle conversation",
+      "empty_title":      "Que regardons-nous ?",
+      "empty_body":       "Les conversations restent sur ce Mac. Rien ne sort sauf si vous activez le serveur API dans les Réglages et qu'un client s'y connecte.",
+      "composer_disabled":"Chargez un modèle depuis la zone système pour commencer à composer.",
+      "composer_ready":   "Demandez n'importe quoi — exécuté localement sur ce Mac. ⌘↵ pour envoyer.",
+      "composer_attach":  "Joindre",
+      "composer_slash":   "Commandes slash"
     },
     "fleet":        { "title": "Flotte",              "subtitle": "multi-machines · aperçu v1.0" },
     "distillation": { "title": "Affinage",            "subtitle": "LoRA · SFT · distillation · fusion" },

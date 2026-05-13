@@ -130,7 +130,13 @@
       "rail_bucket_yesterday": "Yesterday",
       "rail_bucket_week":      "This week",
       "rail_empty":       "No conversations yet. Start one from the composer.",
-      "rail_new":         "New conversation"
+      "rail_new":         "New conversation",
+      "empty_title":      "What shall we look at?",
+      "empty_body":       "Conversations stay on this Mac. Nothing leaves unless you flip on the API server in Settings and a client connects.",
+      "composer_disabled":"Load a model from the tray to start composing.",
+      "composer_ready":   "Ask anything — runs locally on this Mac. ⌘↵ to send.",
+      "composer_attach":  "Attach",
+      "composer_slash":   "Slash commands"
     },
     "fleet":        { "title": "Fleet",         "subtitle": "multi-machine · v1.0 preview" },
     "distillation": { "title": "Fine-tune",     "subtitle": "LoRA · SFT · distill · merge" },

@@ -124,7 +124,14 @@ class LthnChatWindow extends LitElement {
   declare activeModel: string;
   declare version: string;
   declare runnerCount: number;
-  declare t: { railSearch: string; bToday: string; bYesterday: string; bWeek: string; railEmpty: string; railNew: string };
+  declare t: {
+    railSearch: string;
+    bToday: string; bYesterday: string; bWeek: string;
+    railEmpty: string; railNew: string;
+    emptyTitle: string; emptyBody: string;
+    composerDisabled: string; composerReady: string;
+    composerAttach: string; composerSlash: string;
+  };
   constructor() {
     super();
     this.state = "multi-turn";
@@ -148,12 +155,21 @@ class LthnChatWindow extends LitElement {
       bToday: "Today", bYesterday: "Yesterday", bWeek: "This week",
       railEmpty: "No conversations yet. Start one from the composer.",
       railNew: "New conversation",
+      emptyTitle: "What shall we look at?",
+      emptyBody:  "Conversations stay on this Mac. Nothing leaves unless you flip on the API server in Settings and a client connects.",
+      composerDisabled: "Load a model from the tray to start composing.",
+      composerReady:    "Ask anything — runs locally on this Mac. ⌘↵ to send.",
+      composerAttach:   "Attach",
+      composerSlash:    "Slash commands",
     };
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const [title, subtitle, rs, bt, by, bw, re, rn] = await Promise.all([
+    const [
+      title, subtitle, rs, bt, by, bw, re, rn,
+      et, eb, cd, cr, ca, cs,
+    ] = await Promise.all([
       T("window.chat.title"),
       T("window.chat.subtitle"),
       T("window.chat.rail_search"),
@@ -162,9 +178,20 @@ class LthnChatWindow extends LitElement {
       T("window.chat.rail_bucket_week"),
       T("window.chat.rail_empty"),
       T("window.chat.rail_new"),
+      T("window.chat.empty_title"),
+      T("window.chat.empty_body"),
+      T("window.chat.composer_disabled"),
+      T("window.chat.composer_ready"),
+      T("window.chat.composer_attach"),
+      T("window.chat.composer_slash"),
     ]);
     this.chrome = { title, subtitle };
-    this.t = { railSearch: rs, bToday: bt, bYesterday: by, bWeek: bw, railEmpty: re, railNew: rn };
+    this.t = {
+      railSearch: rs, bToday: bt, bYesterday: by, bWeek: bw, railEmpty: re, railNew: rn,
+      emptyTitle: et, emptyBody: eb,
+      composerDisabled: cd, composerReady: cr,
+      composerAttach: ca, composerSlash: cs,
+    };
     await Promise.all([this._reloadRail(), this._reloadModel(), this._reloadBuild()]);
   }
 
@@ -484,11 +511,10 @@ class LthnChatWindow extends LitElement {
         </div>
         <div style="text-align:center; display:flex; flex-direction:column; gap:8px;">
           <div style="font-size:22px; font-weight:600; color:var(--fg-0); letter-spacing:-0.015em;">
-            What shall we look at?
+            ${this.t.emptyTitle}
           </div>
           <div style="font-size:13px; color:var(--fg-2); max-width:420px; line-height:1.55;">
-            Conversations stay on this Mac. Nothing leaves unless you flip
-            on the API server in Settings and a client connects.
+            ${this.t.emptyBody}
           </div>
         </div>
         <div style="display:grid; grid-template-columns:repeat(2, 220px); gap:8px; margin-top:6px;">
@@ -596,9 +622,7 @@ class LthnChatWindow extends LitElement {
             ?disabled=${disabled || sending}
             @input=${(e: Event) => { this.composerValue = (e.target as HTMLTextAreaElement).value; }}
             @keydown=${(e: KeyboardEvent) => this._composerKeydown(e)}
-            placeholder=${disabled
-              ? "Load a model from the tray to start composing."
-              : "Ask anything — runs locally on this Mac. ⌘↵ to send."}
+            placeholder=${disabled ? this.t.composerDisabled : this.t.composerReady}
             style="width:100%; min-height:52px; resize:vertical;
                    background:transparent; border:none; outline:none;
                    font-family:var(--font-sans); font-size:13px;
@@ -609,10 +633,10 @@ class LthnChatWindow extends LitElement {
           <div style="position:absolute; left:12px; right:12px; bottom:8px;
                       display:flex; align-items:center; gap:8px;">
             <lthn-btn tone="quiet" size="sm" ?dim=${disabled}>
-              <i class="fa-regular fa-paperclip" style="font-size:11px;"></i> Attach
+              <i class="fa-regular fa-paperclip" style="font-size:11px;"></i> ${this.t.composerAttach}
             </lthn-btn>
             <lthn-btn tone="quiet" size="sm" ?dim=${disabled}>
-              <i class="fa-solid fa-slash-forward" style="font-size:10px;"></i> Slash commands
+              <i class="fa-solid fa-slash-forward" style="font-size:10px;"></i> ${this.t.composerSlash}
             </lthn-btn>
             <div style="flex:1"></div>
             ${hint ? html`<span style="font-family:var(--font-mono); font-size:10px;
