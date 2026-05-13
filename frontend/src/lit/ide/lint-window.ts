@@ -106,10 +106,13 @@ class LthnLintWindow extends LitElement {
       ? issues.filter(i => i.severity.toLowerCase() === this.filter.toLowerCase())
       : issues;
     const severities = r ? Object.entries(r.counts).sort((a, b) => b[1] - a[1]) : [];
+    const runSummary = r ? r.total + " issues · " + r.duration_ms + " ms" : "no run yet";
+    const issueLocation = (iss: Issue) => iss.line > 0 ? `${iss.file}:${iss.line}` : iss.file;
+    const footerScope = r ? `${r.path} · ${r.binary_path}` : this.path || "no workspace";
 
     const toolbar = html`
       <span style="font-family:var(--font-mono); font-size:11px; color:var(--fg-3);
-                   padding:0 6px;">${r ? `${r.total} issues · ${r.duration_ms} ms` : "no run yet"}</span>
+                   padding:0 6px;">${runSummary}</span>
       <div style="display:inline-flex; border-radius:6px; padding:2px;
                   background:rgba(0,0,0,0.18); border:1px solid rgba(255,255,255,0.06); gap:2px;">
         <button @click=${() => { this.filter = ""; void this._run(); }}
@@ -175,7 +178,7 @@ class LthnLintWindow extends LitElement {
                 </div>
                 <span style="color:var(--fg-2); font-size:10.5px;
                              white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                  ${iss.file}${iss.line > 0 ? `:${iss.line}` : ""}
+                  ${issueLocation(iss)}
                 </span>
               </div>
             `)}
@@ -187,7 +190,7 @@ class LthnLintWindow extends LitElement {
     return renderChrome({
       title: this.chrome.title, subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, toolbar, body,
-      footer: html`${r ? `${r.path} · ${r.binary_path}` : this.path || "no workspace"} · ${filtered.length}/${issues.length} shown`,
+      footer: html`${footerScope} · ${filtered.length}/${issues.length} shown`,
       embedded: this.embedded,
     });
   }

@@ -384,6 +384,7 @@ class LthnPhpWindow extends LitElement {
 
   private renderScripts(detail: ProjectDetail) {
     if (!this.scripts) return nothing;
+    const artisanCount = this.scripts.artisan_scripts.length + " canonical";
     return html`
       ${this.renderScriptSection(
         "Composer scripts",
@@ -394,7 +395,7 @@ class LthnPhpWindow extends LitElement {
 
       ${this.renderScriptSection(
         "Artisan",
-        `${this.scripts.artisan_scripts.length} canonical`,
+        artisanCount,
         "artisan",
         this.scripts.artisan_scripts,
       )}
