@@ -57,3 +57,51 @@ tasks:
     summary: Wails3 dev mode (hot reload)
     cmds:
       - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
+
+  test:
+    summary: Run every test suite — Go pkg/* + frontend Vitest
+    deps: [test:go, test:frontend]
+
+  test:go:
+    summary: Run the Go unit-test suite under go/pkg/...
+    cmds:
+      - cd "{{.GO_DIR}}" && go test ./pkg/...
+
+  test:frontend:
+    summary: Run the frontend Vitest suite (Lit + chrome + windows)
+    cmds:
+      - cd frontend && npm test
+
+  test:cover:
+    summary: Run both suites with coverage + emit reports an agent can read
+    deps: [test:cover:go, test:cover:frontend]
+    cmds:
+      # Single-quoted so backticks aren't interpreted as command
+      # substitution by the shell that Task forks to run cmds.
+      - cmd: |-
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════"
+          echo "  Coverage reports written to:"
+          echo "    go/coverage.out          per-statement, go-tool format"
+          echo "    go/coverage.html         line-by-line HTML"
+          echo "    frontend/coverage/       HTML report — open index.html"
+          echo ""
+          echo "  Inspect via:"
+          echo "    go tool cover -func=go/coverage.out      # per-function table"
+          echo "    open go/coverage.html                    # macOS HTML viewer"
+          echo "    open frontend/coverage/index.html        # frontend report"
+          echo "═══════════════════════════════════════════════════════════════"
+
+  test:cover:go:
+    summary: Go coverage profile + HTML report for go/pkg/... — leaves the
+      profile at go/coverage.out so an agent can parse it with
+      `go tool cover -func=coverage.out` or feed it to codecov.
+    cmds:
+      - cd "{{.GO_DIR}}" && go test -coverprofile=coverage.out ./pkg/...
+      - cd "{{.GO_DIR}}" && go tool cover -html=coverage.out -o coverage.html
+      - cd "{{.GO_DIR}}" && go tool cover -func=coverage.out
+
+  test:cover:frontend:
+    summary: Frontend coverage report (v8 → HTML in frontend/coverage/)
+    cmds:
+      - cd frontend && npm run test:coverage

@@ -10,10 +10,16 @@ dist/
 frontend/bindings/
 frontend/dist/
 
-# Go build cache
+# Go build cache + test artefacts
 *.test
 *.prof
 coverage.out
+coverage.html
+go/coverage.out
+go/coverage.html
+
+# Frontend coverage report
+frontend/coverage/
 
 # IDE
 .idea/
