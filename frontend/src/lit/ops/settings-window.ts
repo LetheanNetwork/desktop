@@ -17,6 +17,8 @@ class LthnSettingsWindow extends LitElement {
     locales: { state: true },
     currentLang: { state: true },
     startWithWindow: { state: true },
+    modelsDir: { state: true },
+    routeNames: { state: true },
   };
   declare open: string;
   declare w: number;
@@ -26,6 +28,8 @@ class LthnSettingsWindow extends LitElement {
   declare locales: string[];
   declare currentLang: string;
   declare startWithWindow: boolean;
+  declare modelsDir: string;
+  declare routeNames: string[];
   constructor() {
     super();
     this.open = "general"; this.w = 760; this.h = 600; this.embedded = false;
@@ -36,20 +40,32 @@ class LthnSettingsWindow extends LitElement {
     // application boot will read this to decide whether to spawn the
     // unified app shell at launch, or leave the binary tray-only.
     this.startWithWindow = localStorage.getItem("lthn.boot.window") === "true";
+    this.modelsDir = "~/Lethean/conf/models/";
+    this.routeNames = [];
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const i18n = await import("@lthn/i18n/coreservice");
-    const [title, subtitle, locales, currentLang] = await Promise.all([
+    const [i18n, fl, runner] = await Promise.all([
+      import("@lthn/i18n/coreservice"),
+      import("@desktop/firstlaunch/wailsservice"),
+      import("@desktop/runner/service"),
+    ]);
+    const [title, subtitle, locales, currentLang, paths, routes] = await Promise.all([
       i18n.T("window.settings.title"),
       i18n.T("window.settings.subtitle"),
       i18n.AvailableLanguages(),
       i18n.Language(),
+      fl.Paths().catch(() => null),
+      runner.WModels().catch((): string[] => []),
     ]);
     this.chrome = { title, subtitle };
     this.locales = locales;
     this.currentLang = currentLang;
+    if (paths?.models_dir) {
+      this.modelsDir = collapseHome(paths.models_dir);
+    }
+    this.routeNames = routes || [];
   }
 
   /** Side-menu click handler — swap the body to the selected section. */
@@ -231,22 +247,29 @@ class LthnSettingsWindow extends LitElement {
   }
 
   _sectionModels() {
+    const defaultModel = this.routeNames.length > 0 ? this.routeNames[0] : "no routes configured";
     return this._section({
       title: "Models",
       desc: "Where lthn looks for models and which one loads at startup.",
       content: html`
-        ${this._row("Model directory", null, html`
+        ${this._row("Model directory", "Canonical Lethean layout — visible in Finder, safe to inspect.", html`
           <div style="display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:6px;
                       background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07);
                       font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">
             <i class="fa-regular fa-folder" style="font-size:11px; color:var(--fg-3);"></i>
-            ~/.lthn/models/
-            <lthn-btn tone="quiet" size="sm" style="margin-left:4px;">Change…</lthn-btn>
+            ${this.modelsDir}
+            <lthn-btn tone="quiet" size="sm" style="margin-left:4px;"
+              @click=${() => import("@desktop/desktop/windowservice").then(w => w.Open("models"))}>
+              Browse…
+            </lthn-btn>
           </div>
         `)}
-        ${this._row("Default model", "Auto-loads when the runner starts. Empty = no auto-load.",
-          this._select("Gemma 4 E2B"))}
-        ${this._row("Quantisation preference", "Pick the smallest quant your hardware comfortably runs.",
+        ${this._row("Default model",
+          this.routeNames.length > 0
+            ? `Configured runner route — picked first when the runner starts.`
+            : "No routes configured. Add one via lthn config routes.NAME.kind=…",
+          this._select(defaultModel))}
+        ${this._row("Quantisation preference", "Pick the smallest quant your hardware comfortably runs. Applied when the runner loads a fresh model.",
           this._segment("q4_k_m", ["q4_0", "q4_k_m", "q5_k_m", "q8_0"]))}
         ${this._row("Default sampling", "Per-model overrides live in the model browser.", html`
           <div style="display:flex; gap:18px; font-size:11.5px; color:var(--fg-2);">
@@ -348,3 +371,11 @@ class LthnSettingsWindow extends LitElement {
   }
 }
 customElements.define("lthn-settings-window", LthnSettingsWindow);
+
+/** Same shape as welcome-window's displayHome — collapses the
+ *  leading $HOME segment into "~/" for compact display. */
+function collapseHome(absPath: string): string {
+  if (!absPath) return absPath;
+  const m = absPath.match(/^\/(Users|home)\/[^/]+\//);
+  return m ? "~/" + absPath.slice(m[0].length) : absPath;
+}
