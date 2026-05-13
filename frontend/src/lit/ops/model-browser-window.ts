@@ -18,6 +18,7 @@ class LthnModelBrowserWindow extends LitElement {
     loadErr:  { state: true },
     modelsDir:{ state: true },
     diskFree: { state: true },
+    t:        { state: true },
   };
   declare selected: string;
   declare w: number;
@@ -28,6 +29,16 @@ class LthnModelBrowserWindow extends LitElement {
   declare loadErr: string;
   declare modelsDir: string;
   declare diskFree: number;
+  declare t: {
+    btnFilters: string; btnImportGguf: string;
+    railLabel: string; railEmpty: string; railEmptyHint: string;
+    railFailed: string; railFooter: string;
+    labelSelected: string; btnOpenChat: string;
+    rowFamily: string; rowParameters: string; rowQuantisation: string;
+    rowContext: string; rowVocabulary: string; rowArchitecture: string;
+    rowLastLoaded: string; rowAvgTps: string;
+    labelFiles: string; btnDownload: string;
+  };
   constructor() {
     super();
     this.selected = ""; this.w = 1040; this.h = 700; this.embedded = false;
@@ -36,14 +47,62 @@ class LthnModelBrowserWindow extends LitElement {
     this.loadErr = "";
     this.modelsDir = "~/.lthn/models/";
     this.diskFree = 0;
+    this.t = {
+      btnFilters: "Filters", btnImportGguf: "Import GGUF…",
+      railLabel: "Local",
+      railEmpty: "No models found in %s.",
+      railEmptyHint: "Import a GGUF or pull from Hugging Face to get started.",
+      railFailed: "Failed to list models:",
+      railFooter: "Right-click for pin · open in chat · delete.",
+      labelSelected: "Selected", btnOpenChat: "Open in chat",
+      rowFamily: "Family", rowParameters: "Parameters", rowQuantisation: "Quantisation",
+      rowContext: "Context", rowVocabulary: "Vocabulary", rowArchitecture: "Architecture",
+      rowLastLoaded: "Last loaded", rowAvgTps: "Average tok/s",
+      labelFiles: "Files", btnDownload: "Download",
+    };
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const [title, subtitleTpl] = await Promise.all([
+    const [
+      title, subtitleTpl,
+      bf, big, rl, re, reh, rf, rfoot,
+      ls, boc,
+      rFam, rPar, rQua, rCtx, rVoc, rArc, rLL, rTps,
+      lFiles, bDl,
+    ] = await Promise.all([
       T("window.models.title"),
       T("window.models.subtitle"),
+      T("window.models.btn_filters"),
+      T("window.models.btn_import_gguf"),
+      T("window.models.rail_label"),
+      T("window.models.rail_empty"),
+      T("window.models.rail_empty_hint"),
+      T("window.models.rail_failed"),
+      T("window.models.rail_footer"),
+      T("window.models.label_selected"),
+      T("window.models.btn_open_chat"),
+      T("window.models.row_family"),
+      T("window.models.row_parameters"),
+      T("window.models.row_quantisation"),
+      T("window.models.row_context"),
+      T("window.models.row_vocabulary"),
+      T("window.models.row_architecture"),
+      T("window.models.row_last_loaded"),
+      T("window.models.row_avg_tps"),
+      T("window.models.label_files"),
+      T("window.models.btn_download"),
     ]);
+    this.t = {
+      btnFilters: bf, btnImportGguf: big,
+      railLabel: rl, railEmpty: re, railEmptyHint: reh,
+      railFailed: rf, railFooter: rfoot,
+      labelSelected: ls, btnOpenChat: boc,
+      rowFamily: rFam, rowParameters: rPar, rowQuantisation: rQua,
+      rowContext: rCtx, rowVocabulary: rVoc, rowArchitecture: rArc,
+      rowLastLoaded: rLL, rowAvgTps: rTps,
+      labelFiles: lFiles, btnDownload: bDl,
+    };
     // Pull real model entries from pkg/models.List(); maps each
     // Entry → LocalModel via deriveLocalModel below. Status defaults
     // to "available" since there's no per-model loaded indicator
@@ -102,8 +161,8 @@ class LthnModelBrowserWindow extends LitElement {
     ];
 
     const toolbar = html`
-      <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-filter" style="font-size:10px;"></i> Filters</lthn-btn>
-      <lthn-btn tone="primary" size="sm"><i class="fa-solid fa-arrow-down" style="font-size:10px;"></i> Import GGUF…</lthn-btn>
+      <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-filter" style="font-size:10px;"></i> ${this.t.btnFilters}</lthn-btn>
+      <lthn-btn tone="primary" size="sm"><i class="fa-solid fa-arrow-down" style="font-size:10px;"></i> ${this.t.btnImportGguf}</lthn-btn>
     `;
 
     const body = html`
@@ -111,20 +170,23 @@ class LthnModelBrowserWindow extends LitElement {
         <!-- local rail -->
         <aside style="background:rgba(0,0,0,0.18); border-right:1px solid rgba(255,255,255,0.05);
                       display:flex; flex-direction:column; min-height:0;">
-          <lthn-label style="display:block; padding:12px 14px 6px;">Local · ${local.length}</lthn-label>
+          <lthn-label style="display:block; padding:12px 14px 6px;">${this.t.railLabel} · ${local.length}</lthn-label>
           <div style="padding:0 6px; display:flex; flex-direction:column; gap:1px;">
             ${local.length === 0 ? html`
               <div style="padding:18px 14px; font-size:11.5px; color:var(--fg-3); line-height:1.55;">
                 ${this.loadErr
-                  ? html`<span style="color:var(--error-400);">Failed to list models:</span><br>${this.loadErr}`
-                  : html`No models found in <code style="color:var(--fg-2);">${this.modelsDir}</code>.<br>Import a GGUF or pull from Hugging Face to get started.`}
+                  ? html`<span style="color:var(--error-400);">${this.t.railFailed}</span><br>${this.loadErr}`
+                  : (() => {
+                      const parts = this.t.railEmpty.split("%s");
+                      return html`${parts[0]}<code style="color:var(--fg-2);">${this.modelsDir}</code>${parts[1] || ""}<br>${this.t.railEmptyHint}`;
+                    })()}
               </div>
             ` : local.map(m => this._localItem(m))}
           </div>
           <div style="flex:1"></div>
           <div style="padding:10px 12px; border-top:1px solid rgba(255,255,255,0.05);
                       font-size:10.5px; color:var(--fg-3); line-height:1.5;">
-            Right-click for pin · open in chat · delete.
+            ${this.t.railFooter}
           </div>
         </aside>
 
@@ -169,7 +231,7 @@ class LthnModelBrowserWindow extends LitElement {
                 </div>
                 <div style="text-align:right; font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">${r.size}</div>
                 <lthn-btn tone=${i === 0 ? "primary" : "ghost"} size="sm">
-                  <i class="fa-solid fa-arrow-down" style="font-size:10px;"></i> Download
+                  <i class="fa-solid fa-arrow-down" style="font-size:10px;"></i> ${this.t.btnDownload}
                 </lthn-btn>
               </div>
             `)}
@@ -180,29 +242,29 @@ class LthnModelBrowserWindow extends LitElement {
         <aside style="background:rgba(0,0,0,0.18); border-left:1px solid rgba(255,255,255,0.05);
                       padding:18px; overflow:auto; display:flex; flex-direction:column; gap:14px;">
           <div>
-            <lthn-label>Selected</lthn-label>
+            <lthn-label>${this.t.labelSelected}</lthn-label>
             <div style="font-family:var(--font-mono); font-size:13px; color:var(--fg-0); margin-top:6px; letter-spacing:-0.005em; word-break:break-all;">${selName}</div>
             <div style="font-size:11px; color:var(--fg-3); margin-top:3px;">by ${selFamily} · ${selStatus} · ${selSize} on disk</div>
           </div>
           <div style="display:flex; gap:6px;">
             <lthn-btn tone="primary" size="md" style="flex:1; justify-content:center;">
-              <i class="fa-regular fa-comment"></i> Open in chat
+              <i class="fa-regular fa-comment"></i> ${this.t.btnOpenChat}
             </lthn-btn>
             <lthn-btn tone="ghost" size="md"><i class="fa-solid fa-thumbtack" style="font-size:10px;"></i></lthn-btn>
           </div>
           <div style="display:flex; flex-direction:column; gap:8px; font-size:11.5px;">
-            <lthn-rail-row k="Family"        v=${selected ? selFamily : "Gemma 4"}></lthn-rail-row>
-            <lthn-rail-row k="Parameters"    v=${selected ? modelParams(selected.name) : "2 B"}></lthn-rail-row>
-            <lthn-rail-row k="Quantisation"  v=${selected ? modelQuant(selected.name) : "q4_k_m"}></lthn-rail-row>
-            <lthn-rail-row k="Context"       v="8,192"></lthn-rail-row>
-            <lthn-rail-row k="Vocabulary"    v="262,144"></lthn-rail-row>
-            <lthn-rail-row k="Architecture"  v="MoE · 4-expert"></lthn-rail-row>
-            <lthn-rail-row k="Last loaded"   v="2 minutes ago"></lthn-rail-row>
-            <lthn-rail-row k="Average tok/s" v="47.2 · last 100 runs"></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowFamily}       v=${selected ? selFamily : "Gemma 4"}></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowParameters}   v=${selected ? modelParams(selected.name) : "2 B"}></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowQuantisation} v=${selected ? modelQuant(selected.name) : "q4_k_m"}></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowContext}      v="8,192"></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowVocabulary}   v="262,144"></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowArchitecture} v="MoE · 4-expert"></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowLastLoaded}   v="2 minutes ago"></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowAvgTps}       v="47.2 · last 100 runs"></lthn-rail-row>
           </div>
           <div style="padding:10px; border-radius:6px;
                       background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06);">
-            <lthn-label>Files</lthn-label>
+            <lthn-label>${this.t.labelFiles}</lthn-label>
             <div style="margin-top:6px; display:flex; flex-direction:column; gap:4px;
                         font-family:var(--font-mono); font-size:10.5px; color:var(--fg-2);">
               ${selected && selected.isDir === false ? html`
