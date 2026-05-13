@@ -24,6 +24,7 @@
 - Network creds (HF tokens, GitHub push, etc.) are NOT available. Any task needing them: leave a `TODO(snider)` and move on.
 - Single commit per logical change with conventional-commit prefix (`feat:` / `fix:` / `test:` / `chore:` / `docs:`). NO commit-spam batching.
 - Externals (`external/<name>/`) are real git clones of `github.com/dappcore/<name>` on the `dev` branch (verified 2026-05-13, all 14 at tip-of-dev). Codex CAN commit inside an external when the audit fix lives upstream (e.g. err-shape funcs in `external/api/go/`). Commit message stays inside the submodule's history. Snider pushes upstream in the morning with `cd external/<name> && git push github HEAD:dev`.
+- NO `git submodule update --recursive` / `git submodule foreach --recursive`. Recursive submodule ops cascade through nested .git/modules/ trees and leave orphan `index.lock` files when any nested op fails (verified 2026-05-13 — left 8 stale locks across nested modules). If you need to update one submodule, name it explicitly: `git submodule update --remote external/<name>`. If you ever see "Unable to create '.git/.../index.lock': File exists", purge with `find .git -name '*.lock' -delete`.
 
 ---
 
