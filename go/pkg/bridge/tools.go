@@ -168,6 +168,64 @@ func toolCatalogue() []map[string]any {
 		{"name": "layout_list", "desc": "List every saved layout (name + saved_at + window count)."},
 		{"name": "layout_delete", "desc": "Remove a saved layout file. params: { name }"},
 		{"name": "layout_get", "desc": "Return one saved layout's full contents without applying. params: { name }"},
+		{"name": "webview_hover", "desc": "Dispatch mouseover/mouseenter events on selector. params: { selector, window? }"},
+		{"name": "webview_type", "desc": "Set input/textarea value + dispatch input+change events. params: { selector, value, window? }"},
+		{"name": "webview_check", "desc": "Set checkbox/radio checked state. params: { selector, checked, window? }"},
+		{"name": "webview_select", "desc": "Pick an option in a <select>. params: { selector, value, window? }"},
+		{"name": "webview_scroll", "desc": "Scroll to element (selector) or coords (x, y). params: { selector?, x?, y?, behavior?, window? }"},
+		{"name": "webview_dom_tree", "desc": "Return DOM tree from selector down to maxDepth. params: { selector?, maxDepth?, window? }"},
+		{"name": "webview_source", "desc": "Return document.documentElement.outerHTML. params: { window? }"},
+		{"name": "webview_computed_style", "desc": "Return getComputedStyle entries (optionally narrowed by props list). params: { selector, props?, window? }"},
+		{"name": "webview_element_info", "desc": "Rich descriptor: tag, attrs, bounds, computed display, text snippet. params: { selector, window? }"},
+		{"name": "webview_highlight", "desc": "Temporary outline + scroll-into-view for visual locate. params: { selector, duration?, window? }"},
+		{"name": "webview_console_clear", "desc": "Empty the bridge's console ring buffer."},
+		{"name": "webview_performance", "desc": "Return performance.timing + memory + navigation entry. params: { window? }"},
+		{"name": "window_list", "desc": "List every registered window with full state (pos, size, visible, maximised, focused…)."},
+		{"name": "window_get", "desc": "One window's full state. params: { name }"},
+		{"name": "window_position", "desc": "Move a window. params: { name, x, y }"},
+		{"name": "window_size", "desc": "Resize a window. params: { name, width, height }"},
+		{"name": "window_bounds", "desc": "Set position + size in one call. params: { name, x, y, width, height }"},
+		{"name": "window_maximise", "desc": "Maximise a window. params: { name }"},
+		{"name": "window_minimise", "desc": "Minimise a window. params: { name }"},
+		{"name": "window_restore", "desc": "Restore from minimised/maximised/fullscreen. params: { name }"},
+		{"name": "window_focus", "desc": "Bring window to front. params: { name }"},
+		{"name": "window_focused", "desc": "Return the currently focused window (or null)."},
+		{"name": "window_visibility", "desc": "Show or hide a window. params: { name, visible }"},
+		{"name": "window_always_on_top", "desc": "Pin window above others. params: { name, enabled }"},
+		{"name": "window_title", "desc": "Set the window title. params: { name, title }"},
+		{"name": "window_title_get", "desc": "Read the window title (hint: prefer webview_title for live document.title). params: { name }"},
+		{"name": "window_fullscreen", "desc": "Toggle fullscreen. params: { name, enabled? }"},
+		{"name": "window_close", "desc": "Close a window. params: { name }"},
+		{"name": "window_center", "desc": "Centre a window on its current screen. params: { name }"},
+		{"name": "window_background_colour", "desc": "Set window background RGBA. params: { name, r, g, b, a }"},
+		{"name": "screen_list", "desc": "List every connected display."},
+		{"name": "screen_primary", "desc": "Return the primary display."},
+		{"name": "screen_get", "desc": "Return one display by id. params: { id }"},
+		{"name": "screen_at_point", "desc": "Return the screen containing (x, y). params: { x, y }"},
+		{"name": "screen_for_window", "desc": "Return the screen a named window is on. params: { name }"},
+		{"name": "screen_work_areas", "desc": "Return per-screen work_area Rect (excluding dock/menubar)."},
+		{"name": "file_read", "desc": "Read a file. params: { path }"},
+		{"name": "file_write", "desc": "Write content to a file (creates parent dirs). params: { path, content, mode? }"},
+		{"name": "file_edit", "desc": "Replace every occurrence of find with replace. params: { path, find, replace }"},
+		{"name": "file_delete", "desc": "Remove a file. params: { path }"},
+		{"name": "file_exists", "desc": "Check existence + is_dir. params: { path }"},
+		{"name": "file_rename", "desc": "Rename/move a file. params: { from, to }"},
+		{"name": "dir_list", "desc": "Enumerate a directory's entries. params: { path }"},
+		{"name": "dir_create", "desc": "Make a directory tree. params: { path, mode? }"},
+		{"name": "process_start", "desc": "Spawn a process via dappco.re/go/process. params: { command, args?, dir?, env? }"},
+		{"name": "process_kill", "desc": "Kill a managed process. params: { id }"},
+		{"name": "process_stop", "desc": "Alias for process_kill. params: { id }"},
+		{"name": "process_list", "desc": "Enumerate every managed process."},
+		{"name": "process_output", "desc": "Read ring-buffered stdout/stderr. params: { id }"},
+		{"name": "process_input", "desc": "Write to a managed process's stdin. params: { id, input }"},
+		{"name": "clipboard_read", "desc": "Return the current clipboard text."},
+		{"name": "clipboard_write", "desc": "Set the clipboard text. params: { text }"},
+		{"name": "clipboard_has", "desc": "Report whether the clipboard has non-empty text."},
+		{"name": "clipboard_clear", "desc": "Empty the clipboard."},
+		{"name": "lang_detect", "desc": "Map a file path's extension to a language name. params: { path }"},
+		{"name": "lang_list", "desc": "Return the catalogue of supported language names."},
+		{"name": "theme_get", "desc": "Return the WebView's prefers-color-scheme (dark/light). params: { window? }"},
+		{"name": "focus_set", "desc": "Alias for window_focus. params: { name }"},
 	}
 }
 
@@ -207,6 +265,122 @@ func (s *Service) dispatch(ctx context.Context, tool string, params map[string]a
 		return s.toolLayoutDelete(params)
 	case "layout_get":
 		return s.toolLayoutGet(params)
+	case "webview_hover":
+		return s.toolWebviewHover(ctx, params)
+	case "webview_type":
+		return s.toolWebviewType(ctx, params)
+	case "webview_check":
+		return s.toolWebviewCheck(ctx, params)
+	case "webview_select":
+		return s.toolWebviewSelect(ctx, params)
+	case "webview_scroll":
+		return s.toolWebviewScroll(ctx, params)
+	case "webview_dom_tree":
+		return s.toolWebviewDOMTree(ctx, params)
+	case "webview_source":
+		return s.toolWebviewSource(ctx, params)
+	case "webview_computed_style":
+		return s.toolWebviewComputedStyle(ctx, params)
+	case "webview_element_info":
+		return s.toolWebviewElementInfo(ctx, params)
+	case "webview_highlight":
+		return s.toolWebviewHighlight(ctx, params)
+	case "webview_console_clear":
+		return s.toolWebviewConsoleClear()
+	case "webview_performance":
+		return s.toolWebviewPerformance(ctx, params)
+	case "window_list":
+		return s.toolWindowList()
+	case "window_get":
+		return s.toolWindowGet(params)
+	case "window_position":
+		return s.toolWindowPosition(params)
+	case "window_size":
+		return s.toolWindowSize(params)
+	case "window_bounds":
+		return s.toolWindowBounds(params)
+	case "window_maximise", "window_maximize":
+		return s.toolWindowMaximise(params)
+	case "window_minimise", "window_minimize":
+		return s.toolWindowMinimise(params)
+	case "window_restore":
+		return s.toolWindowRestore(params)
+	case "window_focus":
+		return s.toolWindowFocus(params)
+	case "window_focused":
+		return s.toolWindowFocused()
+	case "window_visibility":
+		return s.toolWindowVisibility(params)
+	case "window_always_on_top":
+		return s.toolWindowAlwaysOnTop(params)
+	case "window_title":
+		return s.toolWindowSetTitle(params)
+	case "window_title_get":
+		return s.toolWindowGetTitle(params)
+	case "window_fullscreen":
+		return s.toolWindowFullscreen(params)
+	case "window_close":
+		return s.toolWindowClose(params)
+	case "window_center", "window_centre":
+		return s.toolWindowCenter(params)
+	case "window_background_colour", "window_background_color":
+		return s.toolWindowBackgroundColour(params)
+	case "screen_list":
+		return s.toolScreenList()
+	case "screen_primary":
+		return s.toolScreenPrimary()
+	case "screen_get":
+		return s.toolScreenGet(params)
+	case "screen_at_point":
+		return s.toolScreenAtPoint(params)
+	case "screen_for_window":
+		return s.toolScreenForWindow(params)
+	case "screen_work_areas":
+		return s.toolScreenWorkAreas()
+	case "file_read":
+		return s.toolFileRead(params)
+	case "file_write":
+		return s.toolFileWrite(params)
+	case "file_edit":
+		return s.toolFileEdit(params)
+	case "file_delete":
+		return s.toolFileDelete(params)
+	case "file_exists":
+		return s.toolFileExists(params)
+	case "file_rename":
+		return s.toolFileRename(params)
+	case "dir_list":
+		return s.toolDirList(params)
+	case "dir_create":
+		return s.toolDirCreate(params)
+	case "process_start":
+		return s.toolProcessStart(ctx, params)
+	case "process_kill":
+		return s.toolProcessKill(params)
+	case "process_stop":
+		return s.toolProcessStop(params)
+	case "process_list":
+		return s.toolProcessList()
+	case "process_output":
+		return s.toolProcessOutput(params)
+	case "process_input":
+		return s.toolProcessInput(params)
+	case "clipboard_read":
+		return s.toolClipboardRead()
+	case "clipboard_write":
+		return s.toolClipboardWrite(params)
+	case "clipboard_has":
+		return s.toolClipboardHas()
+	case "clipboard_clear":
+		return s.toolClipboardClear()
+	case "lang_detect":
+		return s.toolLangDetect(params)
+	case "lang_list":
+		return s.toolLangList()
+	case "theme_get", "theme_system":
+		return s.toolThemeGet(ctx, params)
+	case "focus_set":
+		return s.toolFocusSet(params)
 	default:
 		return map[string]any{"ok": false, "error": "unknown tool: " + tool}
 	}
@@ -442,6 +616,15 @@ func paramString(params map[string]any, key, dflt string) string {
 	if v, ok := params[key]; ok {
 		if s, ok := v.(string); ok && s != "" {
 			return s
+		}
+	}
+	return dflt
+}
+
+func paramBool(params map[string]any, key string, dflt bool) bool {
+	if v, ok := params[key]; ok {
+		if b, ok := v.(bool); ok {
+			return b
 		}
 	}
 	return dflt
