@@ -160,6 +160,23 @@ class LthnAppShell extends LitElement {
         this.active = id;
       }
     });
+
+    // Status-bar live data — same sources chat-window, tray, and
+    // Settings → About all bind against. Falls back to the design
+    // literals so the bar reads coherently before bindings resolve
+    // (canvas preview, slow boot).
+    try {
+      const [runner, fl] = await Promise.all([
+        import("@desktop/runner/service"),
+        import("@desktop/firstlaunch/wailsservice"),
+      ]);
+      const [models, build] = await Promise.all([
+        runner.WModels().catch((): string[] => []),
+        fl.Build().catch(() => null),
+      ]);
+      if (models && models[0]) this.model = models[0];
+      if (build?.version) this.version = `v${build.version}`;
+    } catch { /* keep design fallbacks */ }
   }
 
   disconnectedCallback() {
