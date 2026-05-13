@@ -1,0 +1,139 @@
+{
+  "app": {
+    "tagline": "Binaire unifié Lethean",
+    "version": "lthn v%s",
+    "address_handler": "Gestionnaire d'adresses : les URI lthn:// passent par la même expédition (voir plans/project/lthn/RFC.md §7 — l'espace de noms unifié canonique)"
+  },
+  "cli": {
+    "welcome": {
+      "title": "lthn — binaire unifié Lethean",
+      "subtitle": "Exécutez sans argument depuis un lanceur GUI (Finder / wails3 dev / launchd) pour démarrer le menu + GUI. Depuis un terminal, choisissez une sous-commande :"
+    },
+    "help": {
+      "title": "lthn — binaire unifié Lethean",
+      "usage": "Utilisation : lthn <sous-commande> [args...]",
+      "subcommands_header": "Sous-commandes :"
+    },
+    "subcommands": {
+      "gui": "lancement explicite de l'interface graphique",
+      "tray": "menu uniquement (pas de fenêtre flottante)",
+      "serve": "serveur API HTTP",
+      "ai": "sous-système IA (discussion / génération / modèles)",
+      "config": "inspection de la configuration",
+      "state": "surface d'état",
+      "events": "bus d'événements",
+      "process": "superviseur des sous-systèmes",
+      "sessions": "historique des discussions",
+      "models": "instantanés de modèles locaux",
+      "validate": "tester un point de terminaison compatible OpenAI",
+      "firstlaunch": "détecter l'état d'installation initiale",
+      "permissions": "vérificateur de droits",
+      "telemetry": "métriques de processus local",
+      "service": "cycle de vie du démon OS",
+      "api": "passerelle OpenAPI",
+      "version": "afficher les informations de version",
+      "help": "afficher l'aide d'une sous-commande"
+    },
+    "errors": {
+      "unknown_subcommand": "lthn : sous-commande inconnue %q",
+      "see_help": "exécutez `lthn help` pour voir les commandes disponibles",
+      "missing_verb": "lthn %s : verbe manquant (%s)"
+    }
+  },
+  "tray": {
+    "chrome": {
+      "title": "lthn",
+      "subtitle_ready": "local · prêt",
+      "subtitle_offline": "local · hors ligne"
+    },
+    "status": {
+      "offline": "Hors ligne",
+      "connecting": "Connexion…",
+      "pick_model": "Choisir un modèle pour démarrer",
+      "browse": "Parcourir →"
+    },
+    "heap": "Mémoire",
+    "uptime": "Durée",
+    "section": {
+      "open": "Ouvrir"
+    },
+    "open": {
+      "chat": "Discussion",
+      "models": "Modèles",
+      "telemetry": "Télémétrie"
+    },
+    "tab": {
+      "system": "Système",
+      "runner": "Exécuteur",
+      "activity": "Activité"
+    },
+    "kv": {
+      "connection": "Connexion",
+      "samples": "Échantillons",
+      "model": "Modèle",
+      "status": "État",
+      "throughput": "Débit",
+      "kv_cache": "Cache KV",
+      "sessions_today": "Sessions aujourd'hui",
+      "tokens_generated": "Tokens générés",
+      "last_interaction": "Dernière interaction",
+      "recent_errors": "Erreurs récentes"
+    },
+    "value": {
+      "offline": "hors ligne",
+      "live": "en direct",
+      "connecting": "connexion",
+      "loaded": "chargé",
+      "idle": "inactif",
+      "dash": "—"
+    },
+    "titlebar": {
+      "open_app": "Ouvrir Lethean Desktop",
+      "settings": "Paramètres"
+    },
+    "footer": {
+      "version": "lthn v%s"
+    }
+  },
+  "shell": {
+    "brand": "lthn",
+    "search": "Rechercher",
+    "settings_tooltip": "Paramètres",
+    "preview_tag": "APERÇU",
+    "expand": "Développer",
+    "collapse": "Réduire",
+    "group": {
+      "primary": "Espace de travail",
+      "observe": "Observer",
+      "extend": "Étendre",
+      "preview": "Aperçu"
+    },
+    "nav": {
+      "chat": "Discussion",
+      "models": "Modèles",
+      "benchmark": "Banc d'essai",
+      "logs": "Activité",
+      "telemetry": "Télémétrie",
+      "integrations": "Intégrations",
+      "tools": "Outils · MCP",
+      "network": "Réseau",
+      "distillation": "Affinage",
+      "fleet": "Flotte",
+      "settings": "Paramètres"
+    }
+  },
+  "window": {
+    "chat":         { "title": "lthn · discussion",   "subtitle": "conversation · locale" },
+    "fleet":        { "title": "Flotte",              "subtitle": "multi-machines · aperçu v1.0" },
+    "distillation": { "title": "Affinage",            "subtitle": "LoRA · SFT · distillation · fusion" },
+    "network":      { "title": "Réseau",              "subtitle": "LetherNet · aperçu v0.7" },
+    "integrations": { "title": "Intégrations",        "subtitle": "clients · MCP · webhooks" },
+    "tools":        { "title": "Outils · MCP",        "subtitle": "2 serveurs · 12 outils · 648 appels aujourd'hui" },
+    "benchmark":    { "title": "Banc d'essai",        "subtitle": "exécuter · comparer · exporter" },
+    "telemetry":    { "title": "Télémétrie en direct","subtitle_normal": "surface de démonstration", "subtitle_fullscreen": "plein écran · ⎋ pour quitter" },
+    "logs":         { "title": "Activité",            "subtitle": "journaux · historique · alimentation" },
+    "settings":     { "title": "Paramètres",          "subtitle": "lthn · v0.2.0-rc1" },
+    "models":       { "title": "Modèles",             "subtitle": "local · 4 · huggingface" },
+    "welcome":      { "title": "Bienvenue sur lthn",  "subtitle": "étape %s sur 3" }
+  }
+}

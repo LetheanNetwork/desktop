@@ -110,6 +110,7 @@ switch (surface) {
       let t = await loadStrings();
       const flagFor = (lang: string): string => {
         const l = lang.toLowerCase();
+        if (l === "fr" || l.startsWith("fr-") || l.startsWith("fr_")) return "🇫🇷";
         if (l === "en-au" || l === "en_au") return "🇦🇺";
         return "🇬🇧";  // en, en-gb, en_gb default to UK
       };
