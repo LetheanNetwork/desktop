@@ -76,7 +76,7 @@ func (s *Service) List(runtime string) core.Result {
 // frontend should poll. tail<=0 defaults to 200 lines.
 func (s *Service) Logs(id, runtime string, tail int) core.Result {
 	if id == "" {
-		return core.Fail(core.E("container.Logs", "id is required", nil))
+		return core.Fail(core.E(logsOp, "id is required", nil))
 	}
 	if runtime == "" {
 		runtime = "docker"
@@ -86,7 +86,7 @@ func (s *Service) Logs(id, runtime string, tail int) core.Result {
 	}
 	ps := s.proc()
 	if ps == nil {
-		return core.Fail(core.E("container.Logs", "process service unavailable", nil))
+		return core.Fail(core.E(logsOp, "process service unavailable", nil))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -98,10 +98,10 @@ func (s *Service) Logs(id, runtime string, tail int) core.Result {
 	case "podman":
 		r = ps.Run(ctx, "podman", "logs", "--tail", tailArg, id)
 	default:
-		return core.Fail(core.E("container.Logs", "unsupported runtime: "+runtime, nil))
+		return core.Fail(core.E(logsOp, "unsupported runtime: "+runtime, nil))
 	}
 	if !r.OK {
-		return core.Fail(core.E("container.Logs", r.Error(), nil))
+		return core.Fail(core.E(logsOp, r.Error(), nil))
 	}
 	logs, _ := r.Value.(string)
 	return core.Ok(LogsOutput{ID: id, Runtime: runtime, Logs: logs})

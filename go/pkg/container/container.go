@@ -22,6 +22,11 @@ import (
 	"dappco.re/go/process"
 )
 
+const (
+	logsOp             = "container.Logs"
+	runtimeVersionFlag = "--version"
+)
+
 // Service owns the container surface. Holds *core.Core for late
 // resolution of the process service (boot order).
 type Service struct {
@@ -119,13 +124,13 @@ func (s *Service) probeRuntime(bin, label, versionFlag string, info Runtime) Run
 // stable order (so the UI doesn't shuffle on re-scan).
 func (s *Service) detectAll() []Runtime {
 	return []Runtime{
-		s.probeRuntime("docker", "docker", "--version", Runtime{
+		s.probeRuntime("docker", "docker", runtimeVersionFlag, Runtime{
 			Name:                "docker",
 			Description:         "Docker — OCI containers via Docker daemon",
 			HasNetworkIsolation: true,
 			HasVolumeMounts:     true,
 		}),
-		s.probeRuntime("podman", "podman", "--version", Runtime{
+		s.probeRuntime("podman", "podman", runtimeVersionFlag, Runtime{
 			Name:                "podman",
 			Description:         "Podman — daemonless OCI containers (rootless capable)",
 			HasNetworkIsolation: true,
@@ -138,7 +143,7 @@ func (s *Service) detectAll() []Runtime {
 			HasVolumeMounts:     true,
 			HardwareIsolated:    true,
 		}),
-		s.probeRuntime("qemu-system-x86_64", "QEMU", "--version", Runtime{
+		s.probeRuntime("qemu-system-x86_64", "QEMU", runtimeVersionFlag, Runtime{
 			Name:                "qemu",
 			Description:         "QEMU — full machine emulator + virtualiser",
 			HasGPU:              true,
@@ -146,7 +151,7 @@ func (s *Service) detectAll() []Runtime {
 			HasVolumeMounts:     true,
 			HardwareIsolated:    true,
 		}),
-		s.probeRuntime("container", "Apple Container", "--version", Runtime{
+		s.probeRuntime("container", "Apple Container", runtimeVersionFlag, Runtime{
 			Name:                "apple",
 			Description:         "Apple Native Containers — macOS 15.4+ Container.framework",
 			HasNetworkIsolation: true,
