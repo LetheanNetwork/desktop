@@ -97,9 +97,7 @@ class LthnLogsWindow extends LitElement {
   async _pollLive() {
     if (this.paused) return;
     try {
-      const [bridge] = await Promise.all([
-        import("@desktop/bridge/service"),
-      ]);
+      const bridge = await import("@desktop/bridge/service");
       const [con, errs] = await Promise.all([
         bridge.Console("", 200),
         bridge.Errors(50),
