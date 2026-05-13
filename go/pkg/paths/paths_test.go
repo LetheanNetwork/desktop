@@ -15,29 +15,16 @@
 package paths_test
 
 import (
-	"os"
-	"strings"
-
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // homeFixture rebinds $HOME to a t-scoped temp dir for the duration of
-// the test. The deferred restore runs at t.Cleanup so nested t.Run
-// children share the same isolated home unless they call homeFixture
-// themselves.
+// the test. t.Setenv restores the prior value during cleanup.
 func homeFixture(t *core.T) string {
 	t.Helper()
 	tmp := t.TempDir()
-	prev, hadPrev := os.LookupEnv("HOME")
-	core.AssertNoError(t, os.Setenv("HOME", tmp))
-	t.Cleanup(func() {
-		if hadPrev {
-			_ = os.Setenv("HOME", prev)
-		} else {
-			_ = os.Unsetenv("HOME")
-		}
-	})
+	t.Setenv("HOME", tmp)
 	return tmp
 }
 
@@ -48,8 +35,9 @@ func TestPaths_Root_Good(t *core.T) {
 	got := r.Value.(string)
 	core.AssertEqual(t, core.PathJoin(home, "Lethean"), got)
 	// MkdirAll side effect: directory exists after the call.
-	info, err := os.Stat(got)
-	core.AssertNoError(t, err)
+	stat := core.Stat(got)
+	core.AssertTrue(t, stat.OK)
+	info := stat.Value.(core.FsFileInfo)
 	core.AssertTrue(t, info.IsDir(), "Root path should be a directory")
 }
 
@@ -58,8 +46,9 @@ func TestPaths_ConfDir_Good(t *core.T) {
 	r := paths.ConfDir()
 	core.AssertTrue(t, r.OK)
 	core.AssertEqual(t, core.PathJoin(home, "Lethean", "conf"), r.Value.(string))
-	info, err := os.Stat(r.Value.(string))
-	core.AssertNoError(t, err)
+	stat := core.Stat(r.Value.(string))
+	core.AssertTrue(t, stat.OK)
+	info := stat.Value.(core.FsFileInfo)
 	core.AssertTrue(t, info.IsDir())
 }
 
@@ -89,8 +78,9 @@ func TestPaths_ModelsDir_Good(t *core.T) {
 	r := paths.ModelsDir()
 	core.AssertTrue(t, r.OK)
 	core.AssertEqual(t, core.PathJoin(home, "Lethean", "conf", "models"), r.Value.(string))
-	info, err := os.Stat(r.Value.(string))
-	core.AssertNoError(t, err)
+	stat := core.Stat(r.Value.(string))
+	core.AssertTrue(t, stat.OK)
+	info := stat.Value.(core.FsFileInfo)
 	core.AssertTrue(t, info.IsDir())
 }
 
@@ -100,8 +90,8 @@ func TestPaths_ConfigFile_Good(t *core.T) {
 	core.AssertTrue(t, r.OK)
 	core.AssertEqual(t, core.PathJoin(home, "Lethean", "conf", "lthn.yaml"), r.Value.(string))
 	// ConfigFile is path-only — the file should NOT exist after the call.
-	_, err := os.Stat(r.Value.(string))
-	core.AssertTrue(t, os.IsNotExist(err), "ConfigFile should not create the file itself")
+	stat := core.Stat(r.Value.(string))
+	core.AssertTrue(t, core.IsNotExist(stat.Value.(error)), "ConfigFile should not create the file itself")
 }
 
 func TestPaths_StoreDB_Good(t *core.T) {
@@ -110,8 +100,8 @@ func TestPaths_StoreDB_Good(t *core.T) {
 	core.AssertTrue(t, r.OK)
 	core.AssertEqual(t, core.PathJoin(home, "Lethean", "data", "lthn.db"), r.Value.(string))
 	// Path-only: file should not exist after the call.
-	_, err := os.Stat(r.Value.(string))
-	core.AssertTrue(t, os.IsNotExist(err), "StoreDB should not create the file itself")
+	stat := core.Stat(r.Value.(string))
+	core.AssertTrue(t, core.IsNotExist(stat.Value.(error)), "StoreDB should not create the file itself")
 }
 
 func TestPaths_WorkspaceDir_Good(t *core.T) {
@@ -119,8 +109,9 @@ func TestPaths_WorkspaceDir_Good(t *core.T) {
 	r := paths.WorkspaceDir()
 	core.AssertTrue(t, r.OK)
 	core.AssertEqual(t, core.PathJoin(home, "Lethean", "data", "workspace"), r.Value.(string))
-	info, err := os.Stat(r.Value.(string))
-	core.AssertNoError(t, err)
+	stat := core.Stat(r.Value.(string))
+	core.AssertTrue(t, stat.OK)
+	info := stat.Value.(core.FsFileInfo)
 	core.AssertTrue(t, info.IsDir())
 }
 
@@ -130,16 +121,8 @@ func TestPaths_WorkspaceDir_Good(t *core.T) {
 func TestPaths_Root_Bad_HomeIsFile(t *core.T) {
 	tmp := t.TempDir()
 	filePath := core.PathJoin(tmp, "not-a-dir")
-	core.AssertNoError(t, os.WriteFile(filePath, []byte("blocker"), 0o644))
-	prev, hadPrev := os.LookupEnv("HOME")
-	core.AssertNoError(t, os.Setenv("HOME", filePath))
-	t.Cleanup(func() {
-		if hadPrev {
-			_ = os.Setenv("HOME", prev)
-		} else {
-			_ = os.Unsetenv("HOME")
-		}
-	})
+	core.AssertTrue(t, core.WriteFile(filePath, []byte("blocker"), 0o644).OK)
+	t.Setenv("HOME", filePath)
 
 	r := paths.Root()
 	core.AssertFalse(t, r.OK, "Root() must Fail when HOME is a regular file")
@@ -152,16 +135,8 @@ func TestPaths_Root_Bad_HomeIsFile(t *core.T) {
 func TestPaths_Subdir_Bad_PropagatesRootFail(t *core.T) {
 	tmp := t.TempDir()
 	filePath := core.PathJoin(tmp, "blocker")
-	core.AssertNoError(t, os.WriteFile(filePath, []byte("x"), 0o644))
-	prev, hadPrev := os.LookupEnv("HOME")
-	core.AssertNoError(t, os.Setenv("HOME", filePath))
-	t.Cleanup(func() {
-		if hadPrev {
-			_ = os.Setenv("HOME", prev)
-		} else {
-			_ = os.Unsetenv("HOME")
-		}
-	})
+	core.AssertTrue(t, core.WriteFile(filePath, []byte("x"), 0o644).OK)
+	t.Setenv("HOME", filePath)
 
 	calls := []struct {
 		name string
@@ -209,6 +184,6 @@ func TestPaths_Idempotent(t *core.T) {
 		core.AssertTrue(t, r2.OK, c.name+" second call")
 		core.AssertEqual(t, r1.Value, r2.Value, c.name+" should be idempotent")
 		path := r1.Value.(string)
-		core.AssertTrue(t, strings.Contains(path, "Lethean"), c.name+" path should contain 'Lethean'")
+		core.AssertTrue(t, core.Contains(path, "Lethean"), c.name+" path should contain 'Lethean'")
 	}
 }

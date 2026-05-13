@@ -11,8 +11,8 @@ package models
 
 import (
 	"context"
-	"errors"
 
+	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -32,7 +32,7 @@ func (s *WailsService) ServiceShutdown() error { return nil }
 func (s *WailsService) List() ([]Entry, error) {
 	r := List()
 	if !r.OK {
-		return nil, errors.New(r.Error())
+		return nil, core.E("models.WailsService.List", "list models failed", r.Value.(error))
 	}
 	entries, _ := r.Value.([]Entry)
 	return entries, nil

@@ -7,7 +7,6 @@ package bridge
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"time"
@@ -398,11 +397,12 @@ func corsJSON(w http.ResponseWriter) {
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
-	enc, err := json.Marshal(v)
-	if err != nil {
+	r := core.JSONMarshal(v)
+	if !r.OK {
 		http.Error(w, `{"error":"json encode failed"}`, http.StatusInternalServerError)
 		return
 	}
+	enc, _ := r.Value.([]byte)
 	_, _ = w.Write(enc)
 }
 
@@ -411,7 +411,11 @@ func readJSON(r *http.Request, dst any) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(body, dst)
+	decoded := core.JSONUnmarshal(body, dst)
+	if !decoded.OK {
+		return core.E("bridge.readJSON", "decode request JSON failed", decoded.Value.(error))
+	}
+	return nil
 }
 
 // ─── Param helpers ──────────────────────────────────────────────────
@@ -446,9 +450,5 @@ func paramInt(params map[string]any, key string, dflt int) int {
 // jsonLit returns a JSON-quoted string literal suitable for inline
 // embedding in a JS template. Keeps quoting / escaping consistent.
 func jsonLit(s string) string {
-	enc, err := json.Marshal(s)
-	if err != nil {
-		return `""`
-	}
-	return string(enc)
+	return core.JSONMarshalString(s)
 }

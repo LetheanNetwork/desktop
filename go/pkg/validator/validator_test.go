@@ -10,7 +10,6 @@ package validator_test
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/validator"
@@ -29,8 +28,8 @@ func TestValidator_Endpoint_Good_2xx(t *core.T) {
 	info := r.Value.(validator.EndpointInfo)
 	core.AssertTrue(t, info.OK, "2xx should mark info.OK=true")
 	core.AssertEqual(t, 200, info.Status)
-	core.AssertTrue(t, strings.Contains(info.Body, "gemma-4-e2b"))
-	core.AssertTrue(t, strings.HasSuffix(info.URL, "/models"))
+	core.AssertTrue(t, core.Contains(info.Body, "gemma-4-e2b"))
+	core.AssertTrue(t, core.HasSuffix(info.URL, "/models"))
 }
 
 func TestValidator_Endpoint_Good_TrailingSlashStripped(t *core.T) {

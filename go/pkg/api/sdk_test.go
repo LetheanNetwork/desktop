@@ -9,8 +9,6 @@
 package api_test
 
 import (
-	"strings"
-
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
 
@@ -80,7 +78,7 @@ func TestSDK_ExportSpec_RunnerRoutesAppearInYAML(t *core.T) {
 	}
 	body, _ := read.Value.(string)
 	for _, want := range []string{"/v1/runner/models", "/v1/runner/generate", "/v1/runner/chat"} {
-		if !strings.Contains(body, want) {
+		if !core.Contains(body, want) {
 			t.Fatalf("exported spec missing %s — got:\n%s", want, body)
 		}
 	}

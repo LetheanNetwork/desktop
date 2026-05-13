@@ -10,8 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 
 	core "dappco.re/go"
 
@@ -23,15 +21,7 @@ import (
 func homeFixture(t *core.T) string {
 	t.Helper()
 	tmp := t.TempDir()
-	prev, hadPrev := os.LookupEnv("HOME")
-	core.AssertNoError(t, os.Setenv("HOME", tmp))
-	t.Cleanup(func() {
-		if hadPrev {
-			_ = os.Setenv("HOME", prev)
-		} else {
-			_ = os.Unsetenv("HOME")
-		}
-	})
+	t.Setenv("HOME", tmp)
 	return tmp
 }
 
@@ -46,10 +36,11 @@ func TestDownloader_Fetch_Good(t *core.T) {
 	r := downloader.Fetch(srv.URL, "model.gguf")
 	core.AssertTrue(t, r.OK)
 	dest := r.Value.(string)
-	core.AssertEqual(t, filepath.Join(home, "Lethean", "conf", "models", "model.gguf"), dest)
+	core.AssertEqual(t, core.PathJoin(home, "Lethean", "conf", "models", "model.gguf"), dest)
 
-	got, err := os.ReadFile(dest)
-	core.AssertNoError(t, err)
+	read := core.ReadFile(dest)
+	core.AssertTrue(t, read.OK)
+	got := read.Value.([]byte)
 	core.AssertEqual(t, string(payload), string(got))
 }
 
@@ -60,14 +51,14 @@ func TestDownloader_Fetch_Good_Overwrite(t *core.T) {
 	}))
 	defer srv.Close()
 
-	dest := filepath.Join(home, "Lethean", "conf", "models", "m.bin")
-	core.AssertNoError(t, os.MkdirAll(filepath.Dir(dest), 0o755))
-	core.AssertNoError(t, os.WriteFile(dest, []byte("v1-existing"), 0o644))
+	dest := core.PathJoin(home, "Lethean", "conf", "models", "m.bin")
+	core.AssertTrue(t, core.MkdirAll(core.PathDir(dest), 0o755).OK)
+	core.AssertTrue(t, core.WriteFile(dest, []byte("v1-existing"), 0o644).OK)
 
 	r := downloader.Fetch(srv.URL, "m.bin")
 	core.AssertTrue(t, r.OK)
 
-	got, _ := os.ReadFile(dest)
+	got := core.ReadFile(dest).Value.([]byte)
 	core.AssertEqual(t, "v2", string(got), "Fetch should overwrite existing file")
 }
 
@@ -97,17 +88,9 @@ func TestDownloader_Fetch_Bad_HTTPError(t *core.T) {
 
 func TestDownloader_Fetch_Bad_HomeUnusable(t *core.T) {
 	tmp := t.TempDir()
-	blocker := filepath.Join(tmp, "blocker")
-	core.AssertNoError(t, os.WriteFile(blocker, []byte("x"), 0o644))
-	prev, hadPrev := os.LookupEnv("HOME")
-	core.AssertNoError(t, os.Setenv("HOME", blocker))
-	t.Cleanup(func() {
-		if hadPrev {
-			_ = os.Setenv("HOME", prev)
-		} else {
-			_ = os.Unsetenv("HOME")
-		}
-	})
+	blocker := core.PathJoin(tmp, "blocker")
+	core.AssertTrue(t, core.WriteFile(blocker, []byte("x"), 0o644).OK)
+	t.Setenv("HOME", blocker)
 
 	r := downloader.Fetch("https://example.com/m.gguf", "m.gguf")
 	core.AssertFalse(t, r.OK, "ModelsDir() failure must propagate")

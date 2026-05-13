@@ -13,7 +13,6 @@ package runner
 
 import (
 	"context"
-	"errors"
 
 	core "dappco.re/go"
 	"dappco.re/go/config"
@@ -53,7 +52,7 @@ func (s *Service) ServiceShutdown() error { return nil }
 func (s *Service) WGenerate(prompt string) (string, error) {
 	r := s.Generate(prompt)
 	if !r.OK {
-		return "", errors.New(r.Error())
+		return "", core.E("runner.Service.WGenerate", "generate failed", r.Value.(error))
 	}
 	text, _ := r.Value.(string)
 	return text, nil
@@ -64,7 +63,7 @@ func (s *Service) WGenerate(prompt string) (string, error) {
 func (s *Service) WChat(messages []inference.Message) (string, error) {
 	r := s.Chat(messages)
 	if !r.OK {
-		return "", errors.New(r.Error())
+		return "", core.E("runner.Service.WChat", "chat failed", r.Value.(error))
 	}
 	text, _ := r.Value.(string)
 	return text, nil
@@ -75,7 +74,7 @@ func (s *Service) WChat(messages []inference.Message) (string, error) {
 func (s *Service) WModels() ([]string, error) {
 	r := s.Models()
 	if !r.OK {
-		return nil, errors.New(r.Error())
+		return nil, core.E("runner.Service.WModels", "list models failed", r.Value.(error))
 	}
 	names, _ := r.Value.([]string)
 	return names, nil

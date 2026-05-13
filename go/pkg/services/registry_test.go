@@ -23,8 +23,6 @@
 package services_test
 
 import (
-	"strings"
-
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/services"
 )
@@ -69,7 +67,7 @@ func TestServices_Lookup_Bad_Unknown(t *core.T) {
 func TestServices_Names_Good(t *core.T) {
 	names := services.Names()
 	core.AssertGreater(t, len(names), 0)
-	joined := strings.Join(names, ",")
+	joined := core.Join(",", names...)
 	core.AssertContains(t, joined, "serve")
 	core.AssertContains(t, joined, "tray")
 }

@@ -8,8 +8,8 @@ package validator
 
 import (
 	"context"
-	"errors"
 
+	core "dappco.re/go"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -27,7 +27,7 @@ func (s *WailsService) ServiceShutdown() error { return nil }
 func (s *WailsService) Endpoint(baseURL string) (EndpointInfo, error) {
 	r := Endpoint(baseURL)
 	if !r.OK {
-		return EndpointInfo{}, errors.New(r.Error())
+		return EndpointInfo{}, core.E("validator.WailsService.Endpoint", "validate endpoint failed", r.Value.(error))
 	}
 	info, _ := r.Value.(EndpointInfo)
 	return info, nil

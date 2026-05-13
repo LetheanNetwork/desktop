@@ -8,9 +8,9 @@ package firstlaunch
 
 import (
 	"context"
-	"errors"
 	"runtime"
 
+	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -60,7 +60,7 @@ func (s *WailsService) ServiceShutdown() error { return nil }
 func (s *WailsService) Detect() (State, error) {
 	r := Detect(nil)
 	if !r.OK {
-		return State{}, errors.New(r.Error())
+		return State{}, core.E("firstlaunch.WailsService.Detect", "detect first launch state failed", r.Value.(error))
 	}
 	state, _ := r.Value.(State)
 	return state, nil

@@ -7,9 +7,6 @@
 package firstlaunch_test
 
 import (
-	"os"
-	"path/filepath"
-
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 )
@@ -19,19 +16,11 @@ import (
 func flFixture(t *core.T) (homeDir, confDir, dataDir string) {
 	t.Helper()
 	tmp := t.TempDir()
-	prev, hadPrev := os.LookupEnv("HOME")
-	core.AssertNoError(t, os.Setenv("HOME", tmp))
-	t.Cleanup(func() {
-		if hadPrev {
-			_ = os.Setenv("HOME", prev)
-		} else {
-			_ = os.Unsetenv("HOME")
-		}
-	})
-	confDir = filepath.Join(tmp, "Lethean", "conf")
-	dataDir = filepath.Join(tmp, "Lethean", "data")
-	core.AssertNoError(t, os.MkdirAll(confDir, 0o755))
-	core.AssertNoError(t, os.MkdirAll(dataDir, 0o755))
+	t.Setenv("HOME", tmp)
+	confDir = core.PathJoin(tmp, "Lethean", "conf")
+	dataDir = core.PathJoin(tmp, "Lethean", "data")
+	core.AssertTrue(t, core.MkdirAll(confDir, 0o755).OK)
+	core.AssertTrue(t, core.MkdirAll(dataDir, 0o755).OK)
 	return tmp, confDir, dataDir
 }
 
@@ -49,7 +38,7 @@ func TestFirstLaunch_Detect_Good_Fresh(t *core.T) {
 func TestFirstLaunch_Detect_Good_ConfigFilePresent(t *core.T) {
 	_, conf, _ := flFixture(t)
 	// Config exists but has no `routes:` key.
-	core.AssertNoError(t, os.WriteFile(filepath.Join(conf, "lthn.yaml"), []byte("name: lthn\n"), 0o644))
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(conf, "lthn.yaml"), []byte("name: lthn\n"), 0o644).OK)
 
 	r := firstlaunch.Detect(nil)
 	state := r.Value.(firstlaunch.State)
@@ -61,7 +50,7 @@ func TestFirstLaunch_Detect_Good_ConfigFilePresent(t *core.T) {
 func TestFirstLaunch_Detect_Good_RoutesConfigured(t *core.T) {
 	_, conf, _ := flFixture(t)
 	yaml := []byte("routes:\n  default:\n    base_url: http://localhost:11434/v1\n")
-	core.AssertNoError(t, os.WriteFile(filepath.Join(conf, "lthn.yaml"), yaml, 0o644))
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(conf, "lthn.yaml"), yaml, 0o644).OK)
 
 	r := firstlaunch.Detect(nil)
 	state := r.Value.(firstlaunch.State)
@@ -72,7 +61,7 @@ func TestFirstLaunch_Detect_Good_RoutesConfigured(t *core.T) {
 
 func TestFirstLaunch_Detect_Good_StateDBPresent(t *core.T) {
 	_, _, data := flFixture(t)
-	core.AssertNoError(t, os.WriteFile(filepath.Join(data, "lthn.db"), []byte("sqlite"), 0o644))
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(data, "lthn.db"), []byte("sqlite"), 0o644).OK)
 
 	r := firstlaunch.Detect(nil)
 	state := r.Value.(firstlaunch.State)
@@ -84,7 +73,7 @@ func TestFirstLaunch_Detect_Good_StateDBPresent(t *core.T) {
 // stay false rather than propagating an error.
 func TestFirstLaunch_Detect_Ugly_CorruptYAML(t *core.T) {
 	_, conf, _ := flFixture(t)
-	core.AssertNoError(t, os.WriteFile(filepath.Join(conf, "lthn.yaml"), []byte(":::not yaml:::"), 0o644))
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(conf, "lthn.yaml"), []byte(":::not yaml:::"), 0o644).OK)
 
 	r := firstlaunch.Detect(nil)
 	state := r.Value.(firstlaunch.State)

@@ -1,42 +1,43 @@
 package main
 
 import (
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"runtime"
-	"strings"
+
+	core "dappco.re/go"
+	command "dappco.re/go/process/exec"
 )
 
 func main() {
-	fmt.Println("Checking Android development dependencies...")
-	fmt.Println()
+	core.Println("Checking Android development dependencies...")
+	core.Println()
 
-	errors := []string{}
+	errs := []string{}
 
 	// Check Go
 	if !checkCommand("go", "version") {
-		errors = append(errors, "Go is not installed. Install from https://go.dev/dl/")
+		errs = append(errs, "Go is not installed. Install from https://go.dev/dl/")
 	} else {
-		fmt.Println("✓ Go is installed")
+		core.Println("✓ Go is installed")
 	}
 
 	// Check ANDROID_HOME
-	androidHome := os.Getenv("ANDROID_HOME")
+	androidHome := core.Getenv("ANDROID_HOME")
 	if androidHome == "" {
-		androidHome = os.Getenv("ANDROID_SDK_ROOT")
+		androidHome = core.Getenv("ANDROID_SDK_ROOT")
 	}
 	if androidHome == "" {
 		// Try common default locations
-		home, _ := os.UserHomeDir()
+		home := ""
+		if r := core.UserHomeDir(); r.OK {
+			home, _ = r.Value.(string)
+		}
 		possiblePaths := []string{
-			filepath.Join(home, "Android", "Sdk"),
-			filepath.Join(home, "Library", "Android", "sdk"),
+			core.PathJoin(home, "Android", "Sdk"),
+			core.PathJoin(home, "Library", "Android", "sdk"),
 			"/usr/local/share/android-sdk",
 		}
 		for _, p := range possiblePaths {
-			if _, err := os.Stat(p); err == nil {
+			if core.Stat(p).OK {
 				androidHome = p
 				break
 			}
@@ -44,44 +45,45 @@ func main() {
 	}
 
 	if androidHome == "" {
-		errors = append(errors, "ANDROID_HOME not set. Install Android Studio and set ANDROID_HOME environment variable")
+		errs = append(errs, "ANDROID_HOME not set. Install Android Studio and set ANDROID_HOME environment variable")
 	} else {
-		fmt.Printf("✓ ANDROID_HOME: %s\n", androidHome)
+		core.Print(core.Stdout(), "✓ ANDROID_HOME: %s", androidHome)
 	}
 
 	// Check adb
 	if !checkCommand("adb", "version") {
 		if androidHome != "" {
-			platformTools := filepath.Join(androidHome, "platform-tools")
-			errors = append(errors, fmt.Sprintf("adb not found. Add %s to PATH", platformTools))
+			platformTools := core.PathJoin(androidHome, "platform-tools")
+			errs = append(errs, core.Sprintf("adb not found. Add %s to PATH", platformTools))
 		} else {
-			errors = append(errors, "adb not found. Install Android SDK Platform-Tools")
+			errs = append(errs, "adb not found. Install Android SDK Platform-Tools")
 		}
 	} else {
-		fmt.Println("✓ adb is installed")
+		core.Println("✓ adb is installed")
 	}
 
 	// Check emulator
 	if !checkCommand("emulator", "-list-avds") {
 		if androidHome != "" {
-			emulatorPath := filepath.Join(androidHome, "emulator")
-			errors = append(errors, fmt.Sprintf("emulator not found. Add %s to PATH", emulatorPath))
+			emulatorPath := core.PathJoin(androidHome, "emulator")
+			errs = append(errs, core.Sprintf("emulator not found. Add %s to PATH", emulatorPath))
 		} else {
-			errors = append(errors, "emulator not found. Install Android Emulator via SDK Manager")
+			errs = append(errs, "emulator not found. Install Android Emulator via SDK Manager")
 		}
 	} else {
-		fmt.Println("✓ Android Emulator is installed")
+		core.Println("✓ Android Emulator is installed")
 	}
 
 	// Check NDK
-	ndkHome := os.Getenv("ANDROID_NDK_HOME")
+	ndkHome := core.Getenv("ANDROID_NDK_HOME")
 	if ndkHome == "" && androidHome != "" {
 		// Look for NDK in default location
-		ndkDir := filepath.Join(androidHome, "ndk")
-		if entries, err := os.ReadDir(ndkDir); err == nil {
+		ndkDir := core.PathJoin(androidHome, "ndk")
+		if listing := core.ReadDir(core.DirFS(ndkDir), "."); listing.OK {
+			entries, _ := listing.Value.([]core.FsDirEntry)
 			for _, entry := range entries {
 				if entry.IsDir() {
-					ndkHome = filepath.Join(ndkDir, entry.Name())
+					ndkHome = core.PathJoin(ndkDir, entry.Name())
 					break
 				}
 			}
@@ -89,63 +91,59 @@ func main() {
 	}
 
 	if ndkHome == "" {
-		errors = append(errors, "Android NDK not found. Install NDK via Android Studio > SDK Manager > SDK Tools > NDK (Side by side)")
+		errs = append(errs, "Android NDK not found. Install NDK via Android Studio > SDK Manager > SDK Tools > NDK (Side by side)")
 	} else {
-		fmt.Printf("✓ Android NDK: %s\n", ndkHome)
+		core.Print(core.Stdout(), "✓ Android NDK: %s", ndkHome)
 	}
 
 	// Check Java
 	if !checkCommand("java", "-version") {
-		errors = append(errors, "Java not found. Install JDK 11+ (OpenJDK recommended)")
+		errs = append(errs, "Java not found. Install JDK 11+ (OpenJDK recommended)")
 	} else {
-		fmt.Println("✓ Java is installed")
+		core.Println("✓ Java is installed")
 	}
 
 	// Check for AVD (Android Virtual Device)
 	if checkCommand("emulator", "-list-avds") {
-		cmd := exec.Command("emulator", "-list-avds")
-		output, err := cmd.Output()
-		if err == nil && len(strings.TrimSpace(string(output))) > 0 {
-			avds := strings.Split(strings.TrimSpace(string(output)), "\n")
-			fmt.Printf("✓ Found %d Android Virtual Device(s)\n", len(avds))
+		result := command.Command(core.Background(), "emulator", "-list-avds").Output()
+		if result.OK && len(core.Trim(string(result.Value.([]byte)))) > 0 {
+			avds := core.Split(core.Trim(string(result.Value.([]byte))), "\n")
+			core.Print(core.Stdout(), "✓ Found %d Android Virtual Device(s)", len(avds))
 		} else {
-			fmt.Println("⚠ No Android Virtual Devices found. Create one via Android Studio > Tools > Device Manager")
+			core.Println("⚠ No Android Virtual Devices found. Create one via Android Studio > Tools > Device Manager")
 		}
 	}
 
-	fmt.Println()
+	core.Println()
 
-	if len(errors) > 0 {
-		fmt.Println("❌ Missing dependencies:")
-		for _, err := range errors {
-			fmt.Printf("   - %s\n", err)
+	if len(errs) > 0 {
+		core.Println("❌ Missing dependencies:")
+		for _, err := range errs {
+			core.Print(core.Stdout(), "   - %s", err)
 		}
-		fmt.Println()
-		fmt.Println("Setup instructions:")
-		fmt.Println("1. Install Android Studio: https://developer.android.com/studio")
-		fmt.Println("2. Open SDK Manager and install:")
-		fmt.Println("   - Android SDK Platform (API 34)")
-		fmt.Println("   - Android SDK Build-Tools")
-		fmt.Println("   - Android SDK Platform-Tools")
-		fmt.Println("   - Android Emulator")
-		fmt.Println("   - NDK (Side by side)")
-		fmt.Println("3. Set environment variables:")
+		core.Println()
+		core.Println("Setup instructions:")
+		core.Println("1. Install Android Studio: https://developer.android.com/studio")
+		core.Println("2. Open SDK Manager and install:")
+		core.Println("   - Android SDK Platform (API 34)")
+		core.Println("   - Android SDK Build-Tools")
+		core.Println("   - Android SDK Platform-Tools")
+		core.Println("   - Android Emulator")
+		core.Println("   - NDK (Side by side)")
+		core.Println("3. Set environment variables:")
 		if runtime.GOOS == "darwin" {
-			fmt.Println("   export ANDROID_HOME=$HOME/Library/Android/sdk")
+			core.Println("   export ANDROID_HOME=$HOME/Library/Android/sdk")
 		} else {
-			fmt.Println("   export ANDROID_HOME=$HOME/Android/Sdk")
+			core.Println("   export ANDROID_HOME=$HOME/Android/Sdk")
 		}
-		fmt.Println("   export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator")
-		fmt.Println("4. Create an AVD via Android Studio > Tools > Device Manager")
-		os.Exit(1)
+		core.Println("   export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator")
+		core.Println("4. Create an AVD via Android Studio > Tools > Device Manager")
+		core.Exit(1)
 	}
 
-	fmt.Println("✓ All Android development dependencies are installed!")
+	core.Println("✓ All Android development dependencies are installed!")
 }
 
 func checkCommand(name string, args ...string) bool {
-	cmd := exec.Command(name, args...)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run() == nil
+	return command.Command(core.Background(), name, args...).Run().OK
 }

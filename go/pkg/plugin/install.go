@@ -14,7 +14,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	core "dappco.re/go"
@@ -62,7 +61,7 @@ func verifyURL(rawURL string) (*url.URL, core.Result) {
 	if !hostAllowed {
 		return nil, core.Fail(core.E("plugin.verifyURL", "host not on allowlist: "+u.Host, nil))
 	}
-	if !strings.HasPrefix(u.Path, allowedPathPrefix) {
+	if !core.HasPrefix(u.Path, allowedPathPrefix) {
 		return nil, core.Fail(core.E("plugin.verifyURL",
 			"path must start with "+allowedPathPrefix+", got "+u.Path, nil))
 	}
@@ -113,11 +112,11 @@ func verifyChecksum(data []byte, checksum string) core.Result {
 		return core.Ok(nil)
 	}
 	const prefix = "sha256:"
-	if !strings.HasPrefix(checksum, prefix) {
+	if !core.HasPrefix(checksum, prefix) {
 		return core.Fail(core.E("plugin.verifyChecksum",
 			"unsupported algorithm in "+checksum+" (need sha256:)", nil))
 	}
-	want := strings.ToLower(checksum[len(prefix):])
+	want := core.Lower(checksum[len(prefix):])
 	sum := sha256.Sum256(data)
 	got := hex.EncodeToString(sum[:])
 	if got != want {

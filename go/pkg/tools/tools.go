@@ -14,7 +14,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 
 	core "dappco.re/go"
 	mcpsvc "dappco.re/go/mcp/pkg/mcp"
@@ -85,10 +84,11 @@ func marshalSchema(schema map[string]any) string {
 	if len(schema) == 0 {
 		return ""
 	}
-	b, err := json.MarshalIndent(schema, "", "  ")
-	if err != nil {
+	r := core.JSONMarshalIndent(schema, "", "  ")
+	if !r.OK {
 		return ""
 	}
+	b, _ := r.Value.([]byte)
 	return string(b)
 }
 

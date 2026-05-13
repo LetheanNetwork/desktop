@@ -12,8 +12,8 @@ package services
 
 import (
 	"context"
-	"errors"
 
+	core "dappco.re/go"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -34,7 +34,7 @@ func (s *WailsService) Registry() []Entry { return Registry() }
 func (s *WailsService) Install(name string) error {
 	r := Install(name)
 	if !r.OK {
-		return errors.New(r.Error())
+		return core.E("services.WailsService.Install", "install service failed", r.Value.(error))
 	}
 	return nil
 }
@@ -43,7 +43,7 @@ func (s *WailsService) Install(name string) error {
 func (s *WailsService) Uninstall(name string) error {
 	r := Uninstall(name)
 	if !r.OK {
-		return errors.New(r.Error())
+		return core.E("services.WailsService.Uninstall", "uninstall service failed", r.Value.(error))
 	}
 	return nil
 }
@@ -52,7 +52,7 @@ func (s *WailsService) Uninstall(name string) error {
 func (s *WailsService) Start(name string) error {
 	r := Start(name)
 	if !r.OK {
-		return errors.New(r.Error())
+		return core.E("services.WailsService.Start", "start service failed", r.Value.(error))
 	}
 	return nil
 }
@@ -61,7 +61,7 @@ func (s *WailsService) Start(name string) error {
 func (s *WailsService) Stop(name string) error {
 	r := Stop(name)
 	if !r.OK {
-		return errors.New(r.Error())
+		return core.E("services.WailsService.Stop", "stop service failed", r.Value.(error))
 	}
 	return nil
 }
@@ -70,7 +70,7 @@ func (s *WailsService) Stop(name string) error {
 func (s *WailsService) Restart(name string) error {
 	r := Restart(name)
 	if !r.OK {
-		return errors.New(r.Error())
+		return core.E("services.WailsService.Restart", "restart service failed", r.Value.(error))
 	}
 	return nil
 }
@@ -80,7 +80,7 @@ func (s *WailsService) Restart(name string) error {
 func (s *WailsService) Status(name string) (string, error) {
 	r := Status(name)
 	if !r.OK {
-		return "", errors.New(r.Error())
+		return "", core.E("services.WailsService.Status", "read service status failed", r.Value.(error))
 	}
 	status, _ := r.Value.(string)
 	return status, nil

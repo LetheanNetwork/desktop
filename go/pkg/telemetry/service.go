@@ -18,7 +18,6 @@ package telemetry
 
 import (
 	"context"
-	"errors"
 	"runtime"
 	"time"
 
@@ -169,11 +168,11 @@ func (s *Service) ServiceShutdown() error { return nil }
 func (s *Service) CurrentSample() (Reading, error) {
 	r := Sample()
 	if !r.OK {
-		return Reading{}, errors.New(r.Error())
+		return Reading{}, core.E("telemetry.Service.CurrentSample", "sample telemetry failed", r.Value.(error))
 	}
 	reading, ok := r.Value.(Reading)
 	if !ok {
-		return Reading{}, errors.New("telemetry: Sample returned unexpected value type")
+		return Reading{}, core.NewError("telemetry: Sample returned unexpected value type")
 	}
 	return reading, nil
 }

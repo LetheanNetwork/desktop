@@ -11,10 +11,9 @@ package main
 
 import (
 	"bufio"
-	"fmt"
-	"os"
-	"os/exec"
-	"strings"
+
+	core "dappco.re/go"
+	command "dappco.re/go/process/exec"
 )
 
 type Dependency struct {
@@ -28,9 +27,9 @@ type Dependency struct {
 }
 
 func main() {
-	fmt.Println("Checking iOS development dependencies...")
-	fmt.Println("=" + strings.Repeat("=", 50))
-	fmt.Println()
+	core.Println("Checking iOS development dependencies...")
+	core.Println("===================================================")
+	core.Println()
 
 	hasErrors := false
 	dependencies := []Dependency{
@@ -42,13 +41,13 @@ func main() {
 					return false, ""
 				}
 				// Get version info
-				out, err := exec.Command("xcodebuild", "-version").Output()
-				if err != nil {
+				out, ok := commandOutput("xcodebuild", "-version")
+				if !ok {
 					return false, ""
 				}
-				lines := strings.Split(string(out), "\n")
+				lines := core.Split(string(out), "\n")
 				if len(lines) > 0 {
-					return true, strings.TrimSpace(lines[0])
+					return true, core.Trim(lines[0])
 				}
 				return true, ""
 			},
@@ -61,20 +60,20 @@ func main() {
 			Name: "Xcode Developer Path",
 			CheckFunc: func() (bool, string) {
 				// Check if xcode-select points to a valid Xcode path
-				out, err := exec.Command("xcode-select", "-p").Output()
-				if err != nil {
+				out, ok := commandOutput("xcode-select", "-p")
+				if !ok {
 					return false, "xcode-select not configured"
 				}
-				path := strings.TrimSpace(string(out))
+				path := core.Trim(string(out))
 
 				// Check if path exists and is in Xcode.app
-				if _, err := os.Stat(path); err != nil {
+				if !core.Stat(path).OK {
 					return false, "Invalid Xcode path"
 				}
 
 				// Verify it's pointing to Xcode.app (not just Command Line Tools)
-				if !strings.Contains(path, "Xcode.app") {
-					return false, fmt.Sprintf("Points to %s (should be Xcode.app)", path)
+				if !core.Contains(path, "Xcode.app") {
+					return false, core.Sprintf("Points to %s (should be Xcode.app)", path)
 				}
 
 				return true, path
@@ -89,30 +88,28 @@ func main() {
 			Name: "iOS SDK",
 			CheckFunc: func() (bool, string) {
 				// Get the iOS Simulator SDK path
-				cmd := exec.Command("xcrun", "--sdk", "iphonesimulator", "--show-sdk-path")
-				output, err := cmd.Output()
-				if err != nil {
+				output, ok := commandOutput("xcrun", "--sdk", "iphonesimulator", "--show-sdk-path")
+				if !ok {
 					return false, "Cannot find iOS SDK"
 				}
-				sdkPath := strings.TrimSpace(string(output))
+				sdkPath := core.Trim(string(output))
 
 				// Check if the SDK path exists
-				if _, err := os.Stat(sdkPath); err != nil {
+				if !core.Stat(sdkPath).OK {
 					return false, "iOS SDK path not found"
 				}
 
 				// Check for UIKit framework (essential for iOS development)
-				uikitPath := fmt.Sprintf("%s/System/Library/Frameworks/UIKit.framework", sdkPath)
-				if _, err := os.Stat(uikitPath); err != nil {
+				uikitPath := core.Sprintf("%s/System/Library/Frameworks/UIKit.framework", sdkPath)
+				if !core.Stat(uikitPath).OK {
 					return false, "UIKit.framework not found"
 				}
 
 				// Get SDK version
-				versionCmd := exec.Command("xcrun", "--sdk", "iphonesimulator", "--show-sdk-version")
-				versionOut, _ := versionCmd.Output()
-				version := strings.TrimSpace(string(versionOut))
+				versionOut, _ := commandOutput("xcrun", "--sdk", "iphonesimulator", "--show-sdk-version")
+				version := core.Trim(string(versionOut))
 
-				return true, fmt.Sprintf("iOS %s SDK", version)
+				return true, core.Sprintf("iOS %s SDK", version)
 			},
 			Required:   true,
 			InstallMsg: "iOS SDK comes with Xcode. Please ensure Xcode is properly installed.",
@@ -126,22 +123,22 @@ func main() {
 					return false, ""
 				}
 				// Check if we can list runtimes
-				out, err := exec.Command("xcrun", "simctl", "list", "runtimes").Output()
-				if err != nil {
+				out, ok := commandOutput("xcrun", "simctl", "list", "runtimes")
+				if !ok {
 					return false, "Cannot access simulator"
 				}
 				// Count iOS runtimes
-				lines := strings.Split(string(out), "\n")
+				lines := core.Split(string(out), "\n")
 				count := 0
 				var versions []string
 				for _, line := range lines {
-					if strings.Contains(line, "iOS") && !strings.Contains(line, "unavailable") {
+					if core.Contains(line, "iOS") && !core.Contains(line, "unavailable") {
 						count++
 						// Extract version number
-						if parts := strings.Fields(line); len(parts) > 2 {
+						if parts := fields(line); len(parts) > 2 {
 							for _, part := range parts {
-								if strings.HasPrefix(part, "(") && strings.HasSuffix(part, ")") {
-									versions = append(versions, strings.Trim(part, "()"))
+								if core.HasPrefix(part, "(") && core.HasSuffix(part, ")") {
+									versions = append(versions, core.TrimCutset(part, "()"))
 									break
 								}
 							}
@@ -149,7 +146,7 @@ func main() {
 					}
 				}
 				if count > 0 {
-					return true, fmt.Sprintf("%d runtime(s): %s", count, strings.Join(versions, ", "))
+					return true, core.Sprintf("%d runtime(s): %s", count, core.Join(", ", versions...))
 				}
 				return false, "No iOS runtimes installed"
 			},
@@ -166,67 +163,63 @@ func main() {
 		if success {
 			msg := dep.SuccessMsg
 			if details != "" {
-				msg = fmt.Sprintf("%s (%s)", dep.SuccessMsg, details)
+				msg = core.Sprintf("%s (%s)", dep.SuccessMsg, details)
 			}
-			fmt.Println(msg)
+			core.Println(msg)
 		} else {
-			fmt.Println(dep.FailureMsg)
+			core.Println(dep.FailureMsg)
 			if details != "" {
-				fmt.Printf("   Details: %s\n", details)
+				core.Print(core.Stdout(), "   Details: %s", details)
 			}
 			if dep.Required {
 				hasErrors = true
 				if len(dep.InstallCmd) > 0 {
-					fmt.Println()
-					fmt.Println("   " + dep.InstallMsg)
-					fmt.Printf("   Fix command: %s\n", strings.Join(dep.InstallCmd, " "))
+					core.Println()
+					core.Println("   " + dep.InstallMsg)
+					core.Print(core.Stdout(), "   Fix command: %s", core.Join(" ", dep.InstallCmd...))
 					if promptUser("Do you want to run this command?") {
-						fmt.Println("Running command...")
-						cmd := exec.Command(dep.InstallCmd[0], dep.InstallCmd[1:]...)
-						cmd.Stdout = os.Stdout
-						cmd.Stderr = os.Stderr
-						cmd.Stdin = os.Stdin
-						if err := cmd.Run(); err != nil {
-							fmt.Printf("Command failed: %v\n", err)
-							os.Exit(1)
+						core.Println("Running command...")
+						if r := runInteractive(dep.InstallCmd); !r.OK {
+							core.Print(core.Stdout(), "Command failed: %v", r.Value)
+							core.Exit(1)
 						}
-						fmt.Println("✅ Command completed. Please run this check again.")
+						core.Println("✅ Command completed. Please run this check again.")
 					} else {
-						fmt.Printf("   Please run manually: %s\n", strings.Join(dep.InstallCmd, " "))
+						core.Print(core.Stdout(), "   Please run manually: %s", core.Join(" ", dep.InstallCmd...))
 					}
 				} else {
-					fmt.Println("   " + dep.InstallMsg)
+					core.Println("   " + dep.InstallMsg)
 				}
 			}
 		}
 	}
 
 	// Check for iPhone simulators
-	fmt.Println()
-	fmt.Println("Checking for iPhone simulator devices...")
+	core.Println()
+	core.Println("Checking for iPhone simulator devices...")
 	if !checkCommand([]string{"xcrun", "simctl", "list", "devices"}) {
-		fmt.Println("❌ Cannot check for iPhone simulators")
+		core.Println("❌ Cannot check for iPhone simulators")
 		hasErrors = true
 	} else {
-		out, err := exec.Command("xcrun", "simctl", "list", "devices").Output()
-		if err != nil {
-			fmt.Println("❌ Failed to list simulator devices")
+		out, ok := commandOutput("xcrun", "simctl", "list", "devices")
+		if !ok {
+			core.Println("❌ Failed to list simulator devices")
 			hasErrors = true
-		} else if !strings.Contains(string(out), "iPhone") {
-			fmt.Println("⚠️  No iPhone simulator devices found")
-			fmt.Println()
+		} else if !core.Contains(string(out), "iPhone") {
+			core.Println("⚠️  No iPhone simulator devices found")
+			core.Println()
 
 			// Get the latest iOS runtime
-			runtimeOut, err := exec.Command("xcrun", "simctl", "list", "runtimes").Output()
-			if err != nil {
-				fmt.Println("   Failed to get iOS runtimes:", err)
+			runtimeOut, ok := commandOutput("xcrun", "simctl", "list", "runtimes")
+			if !ok {
+				core.Println("   Failed to get iOS runtimes")
 			} else {
-				lines := strings.Split(string(runtimeOut), "\n")
+				lines := core.Split(string(runtimeOut), "\n")
 				var latestRuntime string
 				for _, line := range lines {
-					if strings.Contains(line, "iOS") && !strings.Contains(line, "unavailable") {
+					if core.Contains(line, "iOS") && !core.Contains(line, "unavailable") {
 						// Extract runtime identifier
-						parts := strings.Fields(line)
+						parts := fields(line)
 						if len(parts) > 0 {
 							latestRuntime = parts[len(parts)-1]
 						}
@@ -234,57 +227,54 @@ func main() {
 				}
 
 				if latestRuntime == "" {
-					fmt.Println("   No iOS runtime found. Please install iOS simulators in Xcode:")
-					fmt.Println("   Xcode → Settings → Platforms → iOS")
+					core.Println("   No iOS runtime found. Please install iOS simulators in Xcode:")
+					core.Println("   Xcode → Settings → Platforms → iOS")
 				} else {
-					fmt.Println("   Would you like to create an iPhone 15 Pro simulator?")
+					core.Println("   Would you like to create an iPhone 15 Pro simulator?")
 					createCmd := []string{"xcrun", "simctl", "create", "iPhone 15 Pro", "iPhone 15 Pro", latestRuntime}
-					fmt.Printf("   Command: %s\n", strings.Join(createCmd, " "))
+					core.Print(core.Stdout(), "   Command: %s", core.Join(" ", createCmd...))
 					if promptUser("Create simulator?") {
-						cmd := exec.Command(createCmd[0], createCmd[1:]...)
-						cmd.Stdout = os.Stdout
-						cmd.Stderr = os.Stderr
-						if err := cmd.Run(); err != nil {
-							fmt.Printf("   Failed to create simulator: %v\n", err)
+						if r := runInteractive(createCmd); !r.OK {
+							core.Print(core.Stdout(), "   Failed to create simulator: %v", r.Value)
 						} else {
-							fmt.Println("   ✅ iPhone 15 Pro simulator created")
+							core.Println("   ✅ iPhone 15 Pro simulator created")
 						}
 					} else {
-						fmt.Println("   Skipping simulator creation")
-						fmt.Printf("   Create manually: %s\n", strings.Join(createCmd, " "))
+						core.Println("   Skipping simulator creation")
+						core.Print(core.Stdout(), "   Create manually: %s", core.Join(" ", createCmd...))
 					}
 				}
 			}
 		} else {
 			// Count iPhone devices
 			count := 0
-			lines := strings.Split(string(out), "\n")
+			lines := core.Split(string(out), "\n")
 			for _, line := range lines {
-				if strings.Contains(line, "iPhone") && !strings.Contains(line, "unavailable") {
+				if core.Contains(line, "iPhone") && !core.Contains(line, "unavailable") {
 					count++
 				}
 			}
-			fmt.Printf("✅ %d iPhone simulator device(s) available\n", count)
+			core.Print(core.Stdout(), "✅ %d iPhone simulator device(s) available", count)
 		}
 	}
 
 	// Final summary
-	fmt.Println()
-	fmt.Println("=" + strings.Repeat("=", 50))
+	core.Println()
+	core.Println("===================================================")
 	if hasErrors {
-		fmt.Println("❌ Some required dependencies are missing or misconfigured.")
-		fmt.Println()
-		fmt.Println("Quick setup guide:")
-		fmt.Println("1. Install Xcode from Mac App Store (if not installed)")
-		fmt.Println("2. Open Xcode once and agree to the license")
-		fmt.Println("3. Install additional components when prompted")
-		fmt.Println("4. Run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer")
-		fmt.Println("5. Download iOS simulators: Xcode → Settings → Platforms → iOS")
-		fmt.Println("6. Run this check again")
-		os.Exit(1)
+		core.Println("❌ Some required dependencies are missing or misconfigured.")
+		core.Println()
+		core.Println("Quick setup guide:")
+		core.Println("1. Install Xcode from Mac App Store (if not installed)")
+		core.Println("2. Open Xcode once and agree to the license")
+		core.Println("3. Install additional components when prompted")
+		core.Println("4. Run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer")
+		core.Println("5. Download iOS simulators: Xcode → Settings → Platforms → iOS")
+		core.Println("6. Run this check again")
+		core.Exit(1)
 	} else {
-		fmt.Println("✅ All required dependencies are installed!")
-		fmt.Println("   You're ready for iOS development with Wails!")
+		core.Println("✅ All required dependencies are installed!")
+		core.Println("   You're ready for iOS development with Wails!")
 	}
 }
 
@@ -292,28 +282,56 @@ func checkCommand(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	err := cmd.Run()
-	return err == nil
+	return command.Command(core.Background(), args[0], args[1:]...).Run().OK
 }
 
 func promptUser(question string) bool {
 	// Check if we're in a non-interactive environment
-	if os.Getenv("CI") != "" || os.Getenv("TASK_FORCE_YES") == "true" {
-		fmt.Printf("%s [y/N]: y (auto-accepted)\n", question)
+	if core.Getenv("CI") != "" || core.Getenv("TASK_FORCE_YES") == "true" {
+		core.Print(core.Stdout(), "%s [y/N]: y (auto-accepted)", question)
 		return true
 	}
 
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Printf("%s [y/N]: ", question)
+	reader := bufio.NewReader(core.Stdin())
+	core.Print(core.Stdout(), "%s [y/N]: ", question)
 
 	response, err := reader.ReadString('\n')
 	if err != nil {
 		return false
 	}
 
-	response = strings.ToLower(strings.TrimSpace(response))
+	response = core.Lower(core.Trim(response))
 	return response == "y" || response == "yes"
+}
+
+func commandOutput(name string, args ...string) ([]byte, bool) {
+	r := command.Command(core.Background(), name, args...).Output()
+	if !r.OK {
+		return nil, false
+	}
+	out, _ := r.Value.([]byte)
+	return out, true
+}
+
+func runInteractive(args []string) core.Result {
+	if len(args) == 0 {
+		return core.Fail(core.E("install_deps.runInteractive", "empty command", nil))
+	}
+	return command.Command(core.Background(), args[0], args[1:]...).
+		WithStdout(core.Stdout()).
+		WithStderr(core.Stderr()).
+		WithStdin(core.Stdin()).
+		Run()
+}
+
+func fields(line string) []string {
+	raw := core.Split(core.Trim(line), " ")
+	out := make([]string, 0, len(raw))
+	for _, part := range raw {
+		part = core.Trim(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

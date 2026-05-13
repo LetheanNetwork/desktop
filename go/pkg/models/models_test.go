@@ -7,30 +7,19 @@
 package models_test
 
 import (
-	"os"
-	"path/filepath"
-
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/models"
 )
 
 // modelsFixture rebinds $HOME to a tempdir, creates an isolated
 // ~/Lethean/conf/models/ layout, and returns the models directory
-// path so tests can populate it. The Cleanup hook restores $HOME.
+// path so tests can populate it. t.Setenv restores $HOME.
 func modelsFixture(t *core.T) string {
 	t.Helper()
 	tmp := t.TempDir()
-	prev, hadPrev := os.LookupEnv("HOME")
-	core.AssertNoError(t, os.Setenv("HOME", tmp))
-	t.Cleanup(func() {
-		if hadPrev {
-			_ = os.Setenv("HOME", prev)
-		} else {
-			_ = os.Unsetenv("HOME")
-		}
-	})
-	dir := filepath.Join(tmp, "Lethean", "conf", "models")
-	core.AssertNoError(t, os.MkdirAll(dir, 0o755))
+	t.Setenv("HOME", tmp)
+	dir := core.PathJoin(tmp, "Lethean", "conf", "models")
+	core.AssertTrue(t, core.MkdirAll(dir, 0o755).OK)
 	return dir
 }
 
@@ -45,8 +34,8 @@ func TestModels_List_Good_WithEntries(t *core.T) {
 	dir := modelsFixture(t)
 	// Plant two model artefacts — one directory (a HF-style snapshot),
 	// one regular file (a single-file .gguf).
-	core.AssertNoError(t, os.Mkdir(filepath.Join(dir, "gemma-4-e2b"), 0o755))
-	core.AssertNoError(t, os.WriteFile(filepath.Join(dir, "llama-3.2-3b.gguf"), []byte("xxxx"), 0o644))
+	core.AssertTrue(t, core.Mkdir(core.PathJoin(dir, "gemma-4-e2b"), 0o755).OK)
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, "llama-3.2-3b.gguf"), []byte("xxxx"), 0o644).OK)
 
 	r := models.List()
 	core.AssertTrue(t, r.OK)
@@ -71,17 +60,9 @@ func TestModels_List_Good_WithEntries(t *core.T) {
 // Bad: HOME unusable → ModelsDir() fails → List() propagates.
 func TestModels_List_Bad_HomeIsFile(t *core.T) {
 	tmp := t.TempDir()
-	blocker := filepath.Join(tmp, "blocker")
-	core.AssertNoError(t, os.WriteFile(blocker, []byte("x"), 0o644))
-	prev, hadPrev := os.LookupEnv("HOME")
-	core.AssertNoError(t, os.Setenv("HOME", blocker))
-	t.Cleanup(func() {
-		if hadPrev {
-			_ = os.Setenv("HOME", prev)
-		} else {
-			_ = os.Unsetenv("HOME")
-		}
-	})
+	blocker := core.PathJoin(tmp, "blocker")
+	core.AssertTrue(t, core.WriteFile(blocker, []byte("x"), 0o644).OK)
+	t.Setenv("HOME", blocker)
 
 	r := models.List()
 	core.AssertFalse(t, r.OK, "List() must Fail when ModelsDir() fails")

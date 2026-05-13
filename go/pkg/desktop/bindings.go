@@ -31,8 +31,8 @@ package desktop
 
 import (
 	"context"
-	"errors"
 
+	core "dappco.re/go"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -56,7 +56,7 @@ func (s *WindowService) ServiceShutdown() error { return nil }
 // about). No-op if the name isn't in the windows.go registry.
 func (s *WindowService) Open(name string) error {
 	if s.app == nil {
-		return errors.New("window service not yet attached to wails app")
+		return core.NewError("window service not yet attached to wails app")
 	}
 	openWindow(s.app, name)
 	return nil
@@ -67,11 +67,11 @@ func (s *WindowService) Open(name string) error {
 // programmatically without waiting for a close click.
 func (s *WindowService) Hide(name string) error {
 	if s.app == nil {
-		return errors.New("window service not yet attached to wails app")
+		return core.NewError("window service not yet attached to wails app")
 	}
 	w, ok := s.app.Window.GetByName(name)
 	if !ok {
-		return errors.New("no window named: " + name)
+		return core.NewError("no window named: " + name)
 	}
 	w.Hide()
 	return nil

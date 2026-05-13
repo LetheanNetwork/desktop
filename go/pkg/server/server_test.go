@@ -14,11 +14,8 @@
 package server_test
 
 import (
-	"bytes"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 
 	core "dappco.re/go"
 
@@ -54,9 +51,10 @@ func (failingRunner) Models() core.Result {
 // gin engine, return the recorded response.
 func post(t *core.T, h http.Handler, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
-	b, err := json.Marshal(body)
-	core.AssertNoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(b))
+	marshalled := core.JSONMarshal(body)
+	core.AssertTrue(t, marshalled.OK)
+	b := marshalled.Value.([]byte)
+	req := httptest.NewRequest(http.MethodPost, path, core.NewBufferReader(b))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -98,8 +96,8 @@ func TestServer_Health_Good(t *core.T) {
 	s.Handler().ServeHTTP(w, req)
 
 	core.AssertEqual(t, http.StatusOK, w.Code)
-	core.AssertTrue(t, strings.Contains(w.Body.String(), `"success":true`))
-	core.AssertTrue(t, strings.Contains(w.Body.String(), `"data":"healthy"`))
+	core.AssertTrue(t, core.Contains(w.Body.String(), `"success":true`))
+	core.AssertTrue(t, core.Contains(w.Body.String(), `"data":"healthy"`))
 }
 
 func TestServer_Models_Good_Stub(t *core.T) {
@@ -110,7 +108,7 @@ func TestServer_Models_Good_Stub(t *core.T) {
 	s.Handler().ServeHTTP(w, req)
 
 	core.AssertEqual(t, http.StatusOK, w.Code)
-	core.AssertTrue(t, strings.Contains(w.Body.String(), "lthn-stub"))
+	core.AssertTrue(t, core.Contains(w.Body.String(), "lthn-stub"))
 }
 
 func TestServer_Models_Good_FromRunner(t *core.T) {
@@ -122,8 +120,8 @@ func TestServer_Models_Good_FromRunner(t *core.T) {
 
 	core.AssertEqual(t, http.StatusOK, w.Code)
 	body := w.Body.String()
-	core.AssertTrue(t, strings.Contains(body, "gemma-4-e2b"))
-	core.AssertTrue(t, strings.Contains(body, "llama-3.2-3b"))
+	core.AssertTrue(t, core.Contains(body, "gemma-4-e2b"))
+	core.AssertTrue(t, core.Contains(body, "llama-3.2-3b"))
 }
 
 func TestServer_Models_Bad_RunnerError(t *core.T) {
@@ -133,7 +131,7 @@ func TestServer_Models_Bad_RunnerError(t *core.T) {
 	s.Handler().ServeHTTP(w, req)
 
 	core.AssertEqual(t, http.StatusInternalServerError, w.Code)
-	core.AssertTrue(t, strings.Contains(w.Body.String(), "runner_error"))
+	core.AssertTrue(t, core.Contains(w.Body.String(), "runner_error"))
 }
 
 func TestServer_Chat_Good_StubEcho(t *core.T) {
@@ -147,9 +145,9 @@ func TestServer_Chat_Good_StubEcho(t *core.T) {
 	})
 	core.AssertEqual(t, http.StatusOK, w.Code)
 	body := w.Body.String()
-	core.AssertTrue(t, strings.Contains(body, "chat.completion"))
-	core.AssertTrue(t, strings.Contains(body, "lthn stub"))
-	core.AssertTrue(t, strings.Contains(body, "hello"), "stub echoes the last user message")
+	core.AssertTrue(t, core.Contains(body, "chat.completion"))
+	core.AssertTrue(t, core.Contains(body, "lthn stub"))
+	core.AssertTrue(t, core.Contains(body, "hello"), "stub echoes the last user message")
 }
 
 func TestServer_Chat_Good_PicksLastUserTurn(t *core.T) {
@@ -169,13 +167,13 @@ func TestServer_Chat_Good_PicksLastUserTurn(t *core.T) {
 func TestServer_Chat_Bad_MalformedJSON(t *core.T) {
 	s := server.NewService(server.Options{})
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-		strings.NewReader(`{"messages": not-json}`))
+		core.NewReader(`{"messages": not-json}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 
 	core.AssertEqual(t, http.StatusBadRequest, w.Code)
-	core.AssertTrue(t, strings.Contains(w.Body.String(), "invalid_request_error"))
+	core.AssertTrue(t, core.Contains(w.Body.String(), "invalid_request_error"))
 }
 
 func TestServer_Completion_Good_StubEcho(t *core.T) {
@@ -185,14 +183,14 @@ func TestServer_Completion_Good_StubEcho(t *core.T) {
 	})
 	core.AssertEqual(t, http.StatusOK, w.Code)
 	body := w.Body.String()
-	core.AssertTrue(t, strings.Contains(body, "text_completion"))
-	core.AssertTrue(t, strings.Contains(body, "say hi"))
+	core.AssertTrue(t, core.Contains(body, "text_completion"))
+	core.AssertTrue(t, core.Contains(body, "say hi"))
 }
 
 func TestServer_Completion_Bad_MalformedJSON(t *core.T) {
 	s := server.NewService(server.Options{})
 	req := httptest.NewRequest(http.MethodPost, "/v1/completions",
-		strings.NewReader(`{"prompt": broken}`))
+		core.NewReader(`{"prompt": broken}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
@@ -208,7 +206,7 @@ func TestServer_Completion_Bad_RunnerError(t *core.T) {
 	// generate() swallows the runner error into the reply text, so the
 	// HTTP response is still 200 — but body carries the error marker.
 	core.AssertEqual(t, http.StatusOK, w.Code)
-	core.AssertTrue(t, strings.Contains(w.Body.String(), "lthn error"))
+	core.AssertTrue(t, core.Contains(w.Body.String(), "lthn error"))
 }
 
 func TestServer_MethodNotAllowed_Bad(t *core.T) {

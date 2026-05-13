@@ -11,7 +11,6 @@ package sessions
 
 import (
 	"context"
-	"errors"
 
 	core "dappco.re/go"
 	"dappco.re/go/inference"
@@ -46,7 +45,7 @@ func (s *WailsService) ServiceShutdown() error { return nil }
 func (s *WailsService) Create(title string) (string, error) {
 	r := Create(s.core, title)
 	if !r.OK {
-		return "", errors.New(r.Error())
+		return "", core.E("sessions.WailsService.Create", "create session failed", r.Value.(error))
 	}
 	id, _ := r.Value.(string)
 	return id, nil
@@ -56,7 +55,7 @@ func (s *WailsService) Create(title string) (string, error) {
 func (s *WailsService) Append(id, role, content string) error {
 	r := Append(s.core, id, role, content)
 	if !r.OK {
-		return errors.New(r.Error())
+		return core.E("sessions.WailsService.Append", "append session message failed", r.Value.(error))
 	}
 	return nil
 }
@@ -65,7 +64,7 @@ func (s *WailsService) Append(id, role, content string) error {
 func (s *WailsService) Read(id string) ([]inference.Message, error) {
 	r := Read(s.core, id)
 	if !r.OK {
-		return nil, errors.New(r.Error())
+		return nil, core.E("sessions.WailsService.Read", "read session failed", r.Value.(error))
 	}
 	msgs, _ := r.Value.([]inference.Message)
 	return msgs, nil
@@ -76,7 +75,7 @@ func (s *WailsService) Read(id string) ([]inference.Message, error) {
 func (s *WailsService) List() ([]SessionInfo, error) {
 	r := List(s.core)
 	if !r.OK {
-		return nil, errors.New(r.Error())
+		return nil, core.E("sessions.WailsService.List", "list sessions failed", r.Value.(error))
 	}
 	infos, _ := r.Value.([]SessionInfo)
 	return infos, nil

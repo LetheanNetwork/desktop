@@ -32,7 +32,6 @@ import (
 	"io/fs"
 	"net/http"
 	"runtime"
-	"strings"
 
 	core "dappco.re/go"
 	"dappco.re/go/config"
@@ -614,7 +613,7 @@ func ginMiddleware(engine http.Handler) application.Middleware {
 				_, _ = w.Write([]byte("/* no user overrides */\n"))
 				return
 			}
-			if strings.HasPrefix(r.URL.Path, "/wails") {
+			if core.HasPrefix(r.URL.Path, "/wails") {
 				next.ServeHTTP(w, r)
 				return
 			}

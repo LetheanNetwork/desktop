@@ -26,8 +26,6 @@
 package main
 
 import (
-	"os"
-
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/desktop"
@@ -106,7 +104,8 @@ func main() {
 //
 //	core.Exit(cmdDefault(core.Args()[1:]))
 func cmdDefault(args []string) int {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	stdin, ok := core.Stdin().(*core.OSFile)
+	if !ok || !term.IsTerminal(int(stdin.Fd())) {
 		return cmdGUI(args)
 	}
 	// Boot the Core so the welcome banner reads from

@@ -9,8 +9,6 @@
 package desktop_test
 
 import (
-	"strings"
-
 	core "dappco.re/go"
 
 	"dappco.re/lthn/desktop/pkg/desktop"
@@ -60,7 +58,7 @@ func TestDesktop_WindowService_List_Good(t *core.T) {
 
 	// Every window we shipped this session should be in the list.
 	expected := []string{"welcome", "app", "chat", "models", "settings", "telemetry", "about"}
-	joined := strings.Join(names, ",")
+	joined := core.Join(",", names...)
 	for _, want := range expected {
 		core.AssertContains(t, joined, want, "registry should include "+want)
 	}

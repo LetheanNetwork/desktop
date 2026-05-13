@@ -10,7 +10,6 @@ package api_test
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 
 	core "dappco.re/go"
 	"github.com/gin-gonic/gin"
@@ -43,7 +42,7 @@ func TestRunnerGroup_Models_ReturnsStubEmptyList(t *core.T) {
 
 	core.AssertEqual(t, http.StatusOK, w.Code)
 	body := w.Body.String()
-	if !strings.Contains(body, `"models"`) {
+	if !core.Contains(body, `"models"`) {
 		t.Fatalf("expected models key in body, got %q", body)
 	}
 }
@@ -51,14 +50,14 @@ func TestRunnerGroup_Models_ReturnsStubEmptyList(t *core.T) {
 func TestRunnerGroup_Generate_EchoesPromptViaStub(t *core.T) {
 	engine := newTestEngine(t)
 	req, _ := http.NewRequest(http.MethodPost, "/v1/runner/generate",
-		strings.NewReader(`{"prompt":"hello"}`))
+		core.NewReader(`{"prompt":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
 	core.AssertEqual(t, http.StatusOK, w.Code)
 	body := w.Body.String()
-	if !strings.Contains(body, "[lthn stub] received: hello") {
+	if !core.Contains(body, "[lthn stub] received: hello") {
 		t.Fatalf("expected stub reply in body, got %q", body)
 	}
 }
@@ -66,7 +65,7 @@ func TestRunnerGroup_Generate_EchoesPromptViaStub(t *core.T) {
 func TestRunnerGroup_Generate_400OnMissingPrompt(t *core.T) {
 	engine := newTestEngine(t)
 	req, _ := http.NewRequest(http.MethodPost, "/v1/runner/generate",
-		strings.NewReader(`{}`))
+		core.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
@@ -77,14 +76,14 @@ func TestRunnerGroup_Generate_400OnMissingPrompt(t *core.T) {
 func TestRunnerGroup_Chat_RoundTripsLastUserMessage(t *core.T) {
 	engine := newTestEngine(t)
 	req, _ := http.NewRequest(http.MethodPost, "/v1/runner/chat",
-		strings.NewReader(`{"messages":[{"role":"user","content":"ping"}]}`))
+		core.NewReader(`{"messages":[{"role":"user","content":"ping"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
 	core.AssertEqual(t, http.StatusOK, w.Code)
 	body := w.Body.String()
-	if !strings.Contains(body, "[lthn stub] received: ping") {
+	if !core.Contains(body, "[lthn stub] received: ping") {
 		t.Fatalf("expected stub reply in body, got %q", body)
 	}
 }

@@ -18,8 +18,6 @@ package integrations
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 
 	core "dappco.re/go"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -88,7 +86,8 @@ var catalogue = []clientDef{
 // List returns the full catalogue with each entry's filesystem state
 // resolved against $HOME.
 func (s *WailsService) List() []ClientStatus {
-	home, err := os.UserHomeDir()
+	homeR := core.UserHomeDir()
+	home, _ := homeR.Value.(string)
 	out := make([]ClientStatus, 0, len(catalogue))
 	for _, c := range catalogue {
 		entry := ClientStatus{
@@ -105,12 +104,12 @@ func (s *WailsService) List() []ClientStatus {
 		// Expand a leading "~" only when $HOME resolves. If err is
 		// non-nil we leave ConfigPath unset; the UI displays the
 		// raw form and shows the integration as "available".
-		if err == nil && len(c.ConfigPathRaw) > 0 && c.ConfigPathRaw[0] == '~' {
-			entry.ConfigPath = filepath.Join(home, c.ConfigPathRaw[1:])
+		if homeR.OK && len(c.ConfigPathRaw) > 0 && c.ConfigPathRaw[0] == '~' {
+			entry.ConfigPath = core.PathJoin(home, c.ConfigPathRaw[1:])
 		} else {
 			entry.ConfigPath = c.ConfigPathRaw
 		}
-		if _, statErr := os.Stat(entry.ConfigPath); statErr == nil {
+		if stat := core.Stat(entry.ConfigPath); stat.OK {
 			entry.Exists = true
 			entry.State = "configured"
 		} else {

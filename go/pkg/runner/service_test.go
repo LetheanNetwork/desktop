@@ -9,9 +9,6 @@ package runner_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"strings"
 
 	core "dappco.re/go"
 	"dappco.re/go/config"
@@ -46,8 +43,8 @@ func TestRunner_Generate_Good_Stub(t *core.T) {
 	r := s.Generate("hello")
 	core.AssertTrue(t, r.OK)
 	out := r.Value.(string)
-	core.AssertTrue(t, strings.Contains(out, "hello"), "stub echoes the input")
-	core.AssertTrue(t, strings.Contains(out, "lthn stub"), "stub identifies itself")
+	core.AssertTrue(t, core.Contains(out, "hello"), "stub echoes the input")
+	core.AssertTrue(t, core.Contains(out, "lthn stub"), "stub identifies itself")
 }
 
 func TestRunner_Chat_Good_StubFindsLastUserMessage(t *core.T) {
@@ -60,7 +57,7 @@ func TestRunner_Chat_Good_StubFindsLastUserMessage(t *core.T) {
 	})
 	core.AssertTrue(t, r.OK)
 	out := r.Value.(string)
-	core.AssertTrue(t, strings.Contains(out, "second"), "stub picks the most recent user message")
+	core.AssertTrue(t, core.Contains(out, "second"), "stub picks the most recent user message")
 }
 
 func TestRunner_Chat_Good_StubNoUserMessage(t *core.T) {
@@ -99,7 +96,7 @@ func TestRunner_NewServiceFromCore_Good_NoConfig(t *core.T) {
 	// Falls back to stub since no config service was registered.
 	r := s.Generate("ping")
 	core.AssertTrue(t, r.OK)
-	core.AssertTrue(t, strings.Contains(r.Value.(string), "lthn stub"))
+	core.AssertTrue(t, core.Contains(r.Value.(string), "lthn stub"))
 }
 
 // configCoreWithRoutes builds a Core with the config service registered
@@ -108,8 +105,8 @@ func TestRunner_NewServiceFromCore_Good_NoConfig(t *core.T) {
 func configCoreWithRoutes(t *core.T, yaml string) *core.Core {
 	t.Helper()
 	tmp := t.TempDir()
-	cfgFile := filepath.Join(tmp, "lthn.yaml")
-	core.AssertNoError(t, os.WriteFile(cfgFile, []byte(yaml), 0o644))
+	cfgFile := core.PathJoin(tmp, "lthn.yaml")
+	core.AssertTrue(t, core.WriteFile(cfgFile, []byte(yaml), 0o644).OK)
 
 	c := core.New(
 		core.WithName("config", config.NewConfigServiceWith(config.ServiceOptions{

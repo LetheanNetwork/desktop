@@ -12,9 +12,9 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
 	"sync"
 
+	core "dappco.re/go"
 	"github.com/gin-gonic/gin"
 )
 
@@ -96,7 +96,7 @@ func (g *ProxyGroup) Has(code string) bool {
 // the plugin receives e.g. /coreagent/api/chat — namespace
 // preserved.
 func (g *ProxyGroup) dispatch(c *gin.Context) {
-	code := strings.Trim(c.Param("code"), "/ ")
+	code := core.TrimCutset(c.Param("code"), "/ ")
 	g.mu.RLock()
 	rp, ok := g.targets[code]
 	g.mu.RUnlock()
