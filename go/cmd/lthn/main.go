@@ -32,6 +32,7 @@ import (
 	"dappco.re/go/i18n"
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/desktop"
+	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
 	"golang.org/x/term"
@@ -217,7 +218,11 @@ func cmdGUI(args []string) int {
 		core.Print(core.Stderr(), "lthn gui: %s\n", kr.Error())
 		return 1
 	}
-	s := server.NewService(server.Options{Runner: r, LocalKey: key})
+	s := server.NewService(server.Options{
+		Runner:   r,
+		LocalKey: key,
+		Brand:    server.Brand{Version: firstlaunch.Version},
+	})
 	d := desktop.NewService(desktop.Options{
 		Name:        "lthn",
 		Description: "Lethean Desktop",
@@ -287,6 +292,7 @@ func cmdServe(args []string) int {
 		Addr:     core.Concat(":", port),
 		Runner:   r,
 		LocalKey: key,
+		Brand:    server.Brand{Version: firstlaunch.Version},
 	})
 	if rr := s.Register(c); !rr.OK {
 		core.Print(core.Stderr(), "lthn serve: %s\n", rr.Error())

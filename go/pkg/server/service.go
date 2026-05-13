@@ -54,6 +54,14 @@ type Runner interface {
 	Models() core.Result
 }
 
+// Brand describes the API surface for Swagger / OpenAPI consumers.
+// Used by Options.Brand to populate the spec metadata block.
+type Brand struct {
+	Title       string // e.g. "lthn API"
+	Description string // e.g. "Local Lethean surface — chat, MCP tools, integrations"
+	Version     string // e.g. "0.2.0-rc1" — typically firstlaunch.Version
+}
+
 // Options configures the server at construction time.
 type Options struct {
 	// Addr is the bind address passed to ListenAndServe. Defaults to
@@ -74,6 +82,34 @@ type Options struct {
 	// incoming request. Typically rewrites unknown GETs to the
 	// embedded SPA index.html. Nil means gin's default 404.
 	SPAHandler gin.HandlerFunc
+
+	// Brand seeds the Swagger / OpenAPI metadata block. Empty fields
+	// fall back to "lthn API" / "Local Lethean surface" / "0.0.0".
+	Brand Brand
+
+	// DisableSpec disables the /openapi.json endpoint. On by default
+	// because spec exposure is the prerequisite for SDK clients to
+	// auto-discover the surface.
+	DisableSpec bool
+
+	// DisableSDKGen disables the /sdk/* codegen endpoints. On by
+	// default — coreapi.WithSDKGen mounts the multi-language codegen
+	// surface so SDK clients can be generated from the live spec.
+	DisableSDKGen bool
+
+	// DisableSwagger disables the /swagger/* UI. On by default
+	// because the human-discoverable surface is one of the v0.8
+	// release's headline wins.
+	DisableSwagger bool
+
+	// RateLimit caps requests per second per client when > 0. 0 (the
+	// default) leaves rate limiting off — fine for desktop where
+	// only the user's clients connect; web-host builds set this.
+	RateLimit int
+
+	// TracingName enables OpenTelemetry tracing under the given
+	// service name when non-empty. "" means tracing is off.
+	TracingName string
 }
 
 // Service is the HTTP API subsystem. Wraps a *coreapi.Engine so the
@@ -103,14 +139,44 @@ func NewService(opts Options) *Service {
 	}
 	gin.SetMode(gin.ReleaseMode)
 
+	brand := opts.Brand
+	if brand.Title == "" {
+		brand.Title = "lthn API"
+	}
+	if brand.Description == "" {
+		brand.Description = "Local Lethean surface — chat, MCP tools, integrations"
+	}
+	if brand.Version == "" {
+		brand.Version = "0.0.0"
+	}
+
 	apiOpts := []coreapi.Option{
 		coreapi.WithAddr(opts.Addr),
+		coreapi.WithRequestID(),
+		coreapi.WithResponseMeta(),
 	}
 	if opts.LocalKey != "" {
 		apiOpts = append(apiOpts, coreapi.WithBearerAuth(opts.LocalKey))
 	}
 	if opts.SPAHandler != nil {
 		apiOpts = append(apiOpts, coreapi.WithNoRoute(opts.SPAHandler))
+	}
+	if !opts.DisableSpec {
+		apiOpts = append(apiOpts, coreapi.WithOpenAPISpec())
+	}
+	if !opts.DisableSDKGen {
+		apiOpts = append(apiOpts, coreapi.WithSDKGen())
+	}
+	if !opts.DisableSwagger {
+		apiOpts = append(apiOpts,
+			coreapi.WithSwagger(brand.Title, brand.Description, brand.Version),
+		)
+	}
+	if opts.RateLimit > 0 {
+		apiOpts = append(apiOpts, coreapi.WithRateLimit(opts.RateLimit))
+	}
+	if opts.TracingName != "" {
+		apiOpts = append(apiOpts, coreapi.WithTracing(opts.TracingName))
 	}
 
 	engine, _ := coreapi.New(apiOpts...) // current New always returns nil err
