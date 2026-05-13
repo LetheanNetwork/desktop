@@ -183,9 +183,9 @@ switch (surface) {
       const setTab = (t: TrayTab) => () => { state.tab = t; draw(); };
 
       const fmtUptime = (s: number) => {
-        if (s < 60) return `${s | 0}s`;
-        if (s < 3600) return `${(s / 60) | 0}m ${(s % 60) | 0}s`;
-        return `${(s / 3600) | 0}h ${((s % 3600) / 60) | 0}m`;
+        if (s < 60) return `${Math.trunc(s)}s`;
+        if (s < 3600) return `${Math.trunc(s / 60)}m ${Math.trunc(s % 60)}s`;
+        return `${Math.trunc(s / 3600)}h ${Math.trunc((s % 3600) / 60)}m`;
       };
 
       /** "5m ago" / "2h ago" / "3d ago" from a unix-second timestamp.
@@ -195,9 +195,9 @@ switch (surface) {
       const fmtRel = (ts: number) => {
         const ageSec = Math.max(0, Math.floor(Date.now() / 1000) - ts);
         if (ageSec < 60)    return t.relSec.replace("%d", String(ageSec));
-        if (ageSec < 3600)  return t.relMin.replace("%d", String((ageSec / 60) | 0));
-        if (ageSec < 86400) return t.relHr.replace("%d", String((ageSec / 3600) | 0));
-        return t.relDay.replace("%d", String((ageSec / 86400) | 0));
+        if (ageSec < 3600)  return t.relMin.replace("%d", String(Math.trunc(ageSec / 60)));
+        if (ageSec < 86400) return t.relHr.replace("%d", String(Math.trunc(ageSec / 3600)));
+        return t.relDay.replace("%d", String(Math.trunc(ageSec / 86400)));
       };
 
       const connectionVariant = () => {

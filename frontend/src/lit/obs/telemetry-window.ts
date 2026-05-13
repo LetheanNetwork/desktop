@@ -152,9 +152,9 @@ class LthnTelemetryWindow extends LitElement {
    *  enough headroom to read long sessions cleanly in the big-number
    *  display. < 60s → "Ns"; < 1h → "Nm Ms"; otherwise "Nh Mm". */
   _fmtUptime(s: number): string {
-    if (s < 60) return `${(s | 0)}s`;
-    if (s < 3600) return `${(s / 60) | 0}m ${((s % 60) | 0)}s`;
-    return `${(s / 3600) | 0}h ${(((s % 3600) / 60) | 0)}m`;
+    if (s < 60) return `${Math.trunc(s)}s`;
+    if (s < 3600) return `${Math.trunc(s / 60)}m ${Math.trunc(s % 60)}s`;
+    return `${Math.trunc(s / 3600)}h ${Math.trunc((s % 3600) / 60)}m`;
   }
 
   render() {
