@@ -106,6 +106,7 @@ class LthnSettingsWindow extends LitElement {
     menuLinksOptHybrid: string; menuLinksOptInWindow: string; menuLinksOptCollapsed: string;
     menuLayoutL: string; menuLayoutH: string;
     menuLayoutOptToggle: string; menuLayoutOptOpen: string; menuLayoutOptClosed: string; menuLayoutOptHover: string;
+    btnReplayMenuTour: string; menuReplayH: string;
     modelDirL: string; modelDirH: string; btnBrowse: string;
     defaultModelL: string; defaultModelHint: string; defaultModelEmpty: string;
     quantL: string; quantH: string;
@@ -183,6 +184,8 @@ class LthnSettingsWindow extends LitElement {
       menuLayoutOptOpen:   "Always open",
       menuLayoutOptClosed: "Always closed",
       menuLayoutOptHover:  "Hover open",
+      btnReplayMenuTour:   "Replay menu tour",
+      menuReplayH:         "Re-open the welcome wizard at the menu-behaviours step.",
       modelDirL: "Model directory",
       modelDirH: "Canonical Lethean layout — visible in Finder, safe to inspect.",
       btnBrowse: "Browse…",
@@ -313,6 +316,7 @@ class LthnSettingsWindow extends LitElement {
       rSwL, rSwH, rLgL, rLgH,
       rMlL, rMlH, rMlOH, rMlOI, rMlOC,
       rMyL, rMyH, rMyOT, rMyOO, rMyOX, rMyOV,
+      rMtBtn, rMtHint,
       rMdL, rMdH, rBrw,
       rDmL, rDmH, rDmE, rQuL, rQuH, rSmL, rSmH,
       rHsL, rEpL, rAkL, rAkH,
@@ -361,6 +365,8 @@ class LthnSettingsWindow extends LitElement {
       i18n.T("window.settings.row_menulayout_opt_open"),
       i18n.T("window.settings.row_menulayout_opt_closed"),
       i18n.T("window.settings.row_menulayout_opt_hover"),
+      i18n.T("window.settings.btn_replay_menu_tour"),
+      i18n.T("window.settings.row_menu_replay_hint"),
       i18n.T("window.settings.row_modeldir_label"),
       i18n.T("window.settings.row_modeldir_hint"),
       i18n.T("window.settings.btn_browse"),
@@ -410,6 +416,7 @@ class LthnSettingsWindow extends LitElement {
       menuLinksOptHybrid: rMlOH, menuLinksOptInWindow: rMlOI, menuLinksOptCollapsed: rMlOC,
       menuLayoutL: rMyL, menuLayoutH: rMyH,
       menuLayoutOptToggle: rMyOT, menuLayoutOptOpen: rMyOO, menuLayoutOptClosed: rMyOX, menuLayoutOptHover: rMyOV,
+      btnReplayMenuTour: rMtBtn, menuReplayH: rMtHint,
       modelDirL: rMdL, modelDirH: rMdH, btnBrowse: rBrw,
       defaultModelL: rDmL, defaultModelHint: rDmH, defaultModelEmpty: rDmE,
       quantL: rQuL, quantH: rQuH,
@@ -510,6 +517,23 @@ class LthnSettingsWindow extends LitElement {
     import("@wailsio/runtime")
       .then(({ Events }) => (Events.Emit as (name: string, data: unknown) => Promise<boolean>)("lthn:menu:changed", { setting, value }))
       .catch(() => { /* events unavailable in test/canvas — settings still persist */ });
+  }
+
+  /** Re-open the welcome wizard at step 4 (Menu Behaviours tour).
+   *  Hands the target step off via localStorage so a single Open()
+   *  call is enough — the welcome window's constructor reads + clears
+   *  the key on mount. Also clears the tour-completed flag so the
+   *  Finish click writes it fresh. See plans/project/lthn/desktop/
+   *  RFC.menu-behaviours.md § 6. */
+  async _replayMenuTour() {
+    try {
+      writeStoredSetting("lthn.welcome.start-step", "4");
+      writeStoredSetting("lthn.menu.tour-completed", "");
+      const ws = await import("@desktop/desktop/windowservice");
+      await ws.Open("welcome");
+    } catch (err) {
+      console.error("settings: replay menu tour failed", err);
+    }
   }
 
   /** Flag for a given locale tag — keeps the picker visually intuitive. */
@@ -666,6 +690,12 @@ class LthnSettingsWindow extends LitElement {
           this._segmentPickKeyed(this.menuLinks, linksOptions, v => this._setMenuLinks(v)))}
         ${this._row(this.row.menuLayoutL, this.row.menuLayoutH,
           this._segmentPickKeyed(this.menuLayout, layoutOptions, v => this._setMenuLayout(v)))}
+        ${this._row(this.row.btnReplayMenuTour, this.row.menuReplayH, html`
+          <lthn-btn tone="quiet" size="sm" @click=${() => this._replayMenuTour()}>
+            <i class="fa-regular fa-circle-play" style="font-size:10px; margin-right:4px;"></i>
+            ${this.row.btnReplayMenuTour}
+          </lthn-btn>
+        `)}
       `,
     });
   }

@@ -92,4 +92,9 @@ describe("lthn-settings-window — Menu Behaviours subsection (General)", () => 
     await el.updateComplete;
     expect(el.menuLayout).toBe("hover");
   });
+
+  it("renders the Replay menu tour control under Menu Behaviours", async () => {
+    const { host } = await mountWindow("lthn-settings-window", { attrs: { open: "general" } });
+    expect(host.textContent).toContain("Replay menu tour");
+  });
 });

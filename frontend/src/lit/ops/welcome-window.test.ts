@@ -11,11 +11,12 @@ describe("lthn-welcome-window — smoke", () => {
     expect(host.querySelector("header")).not.toBeNull();
   });
 
-  it("renders the steps rail with all three wizard steps", async () => {
+  it("renders the steps rail with all four wizard steps", async () => {
     const { host } = await mountWindow("lthn-welcome-window");
     expect(host.textContent).toContain("Model directory");
     expect(host.textContent).toContain("First model");
     expect(host.textContent).toContain("Connect");
+    expect(host.textContent).toContain("Menu tour");
   });
 
   it("step 1 by default — shows the model directory question", async () => {
@@ -32,6 +33,17 @@ describe("lthn-welcome-window — smoke", () => {
     el.step = 3;
     await el.updateComplete;
     expect(host.textContent).toContain("Want to wire it into your tools");
+  });
+
+  it("step 4 — renders the Menu Behaviours tour content", async () => {
+    const { host } = await mountWindow<HTMLElement & { step: number }>(
+      "lthn-welcome-window",
+      { props: { step: 4 } },
+    );
+    expect(host.textContent).toContain("Two clicks, two outcomes");
+    expect(host.textContent).toContain("click → switch here");
+    expect(host.textContent).toContain("click → new window");
+    expect(host.textContent).toContain("⌘ + click works anywhere on the row");
   });
 });
 

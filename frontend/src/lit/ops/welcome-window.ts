@@ -18,10 +18,16 @@ interface ClientStatus {
   state:       string;
 }
 
-/* Step 3 "Finish" handler — marks onboarding complete, opens the
- * settings window so the user can change their mind, and closes
- * the wizard. Dynamic import so a Lit unit test or canvas preview
- * doesn't pull the Wails runtime at module load. */
+/** Total number of steps in the welcome wizard. Step 4 is the Menu
+ *  Behaviours tour — see plans/project/lthn/desktop/RFC.menu-behaviours.md.
+ *  Replay-from-Settings opens the welcome window with start-step=4 via
+ *  localStorage["lthn.welcome.start-step"]. */
+const MAX_STEP = 4;
+
+/* Final-step handler — marks onboarding complete, marks the menu
+ * tour seen, opens the settings window so the user can change their
+ * mind, and closes the wizard. Dynamic import so a Lit unit test or
+ * canvas preview doesn't pull the Wails runtime at module load. */
 async function completeOnboarding(): Promise<void> {
   try {
     const [config, windowSvc] = await Promise.all([
@@ -29,6 +35,11 @@ async function completeOnboarding(): Promise<void> {
       import("@desktop/desktop/windowservice"),
     ]);
     await config.Set("welcome.completed", "true");
+    // Mark the menu tour as seen — the Settings → Menu Behaviours
+    // "Replay menu tour" button clears this flag and re-opens the
+    // wizard at step 4 to surface it again.
+    try { globalThis.localStorage?.setItem("lthn.menu.tour-completed", "true"); }
+    catch { /* localStorage unavailable — replay still works via Open */ }
     await windowSvc.Open("settings");
     await windowSvc.Hide("welcome");
   } catch (err) {
@@ -41,7 +52,7 @@ async function completeOnboarding(): Promise<void> {
 function advance(host: LthnWelcomeWindow, delta: number): void {
   const next = host.step + delta;
   if (next < 1) return;
-  if (next > 3) {
+  if (next > MAX_STEP) {
     void completeOnboarding();
     return;
   }
@@ -78,13 +89,30 @@ class LthnWelcomeWindow extends LitElement {
     s1Title: string; s1Body: string; s1LayoutHint: string; s1Choose: string;
     s2Title: string; s2Body: string; s2Recommended: string;
     s3Title: string; s3Body: string; s3Empty: string; s3Wired: string;
-    btnBack: string; btnSkip: string; btnUse: string; btnDownload: string; btnFinish: string;
+    s4Title: string; s4Body: string;
+    s4WordLabel: string; s4IconLabel: string;
+    s4Modifier: string; s4SettingsHint: string;
+    btnBack: string; btnSkip: string; btnUse: string; btnDownload: string;
+    btnContinue: string; btnFinish: string;
     footer: string;
   };
   constructor() {
     super();
-    this.step = 1; this.w = 760; this.h = 580; this.embedded = false;
-    this.chrome = { title: "Welcome to lthn", subtitleFmt: "step %s of 3" };
+    // Honour the replay-from-Settings hand-off: if the Settings
+    // panel wrote a start-step before calling WindowService.Open,
+    // land on that step instead of 1 and clear the key so a later
+    // first-launch path doesn't inherit it.
+    let initialStep = 1;
+    try {
+      const saved = globalThis.localStorage?.getItem("lthn.welcome.start-step");
+      if (saved) {
+        const parsed = Number(saved);
+        if (Number.isInteger(parsed) && parsed >= 1 && parsed <= MAX_STEP) initialStep = parsed;
+        globalThis.localStorage?.removeItem("lthn.welcome.start-step");
+      }
+    } catch { /* localStorage unavailable — fall through to step 1 */ }
+    this.step = initialStep; this.w = 760; this.h = 580; this.embedded = false;
+    this.chrome = { title: "Welcome to lthn", subtitleFmt: "step %s of 4" };
     this.modelsDir = "~/Lethean/conf/models/";
     this.fresh = true;
     this.clients = [];
@@ -94,6 +122,7 @@ class LthnWelcomeWindow extends LitElement {
       { l: "Model directory", h: "Where models live" },
       { l: "First model",     h: "Pick a starter" },
       { l: "Connect",         h: "Wire up clients" },
+      { l: "Menu tour",       h: "How clicks behave" },
     ];
     this.t = {
       s1Title: "Where shall we keep your models?",
@@ -107,10 +136,17 @@ class LthnWelcomeWindow extends LitElement {
       s3Body:  "lthn speaks the OpenAI-compatible API on %s. We can drop the endpoint into these configs for you. The only outbound action lthn ever takes without you asking.",
       s3Empty: "No supported clients detected on this Mac. You can always wire one up later from Settings → Integrations.",
       s3Wired: "Already wired",
+      s4Title: "Two clicks, two outcomes.",
+      s4Body:  "Click the word to switch view here. Click the icon to pop the surface out into a new window. Or hold ⌘ (Ctrl on PC) and click anywhere on the row — that always pops out.",
+      s4WordLabel: "click → switch here",
+      s4IconLabel: "click → new window",
+      s4Modifier:  "⌘ + click works anywhere on the row",
+      s4SettingsHint: "Change defaults later in Settings → General → Menu Behaviours.",
       btnBack:    "Back",
       btnSkip:    "Skip for now",
       btnUse:     "Use this folder",
       btnDownload:"Download & continue",
+      btnContinue:"Continue",
       btnFinish:  "Finish",
       footer:     "British English · dark default · accessibility light in Settings · v%s",
     };
@@ -119,26 +155,31 @@ class LthnWelcomeWindow extends LitElement {
   async connectedCallback() {
     super.connectedCallback();
     const [
-      title, subtitleFmt, s1l, s1h, s2l, s2h, s3l, s3h,
+      title, subtitleFmt, s1l, s1h, s2l, s2h, s3l, s3h, s4l, s4h,
       s1Title, s1Body, s1Lh, s1Choose,
       s2Title, s2Body, s2Rec,
       s3Title, s3Body, s3Empty, s3Wired,
-      bBack, bSkip, bUse, bDownload, bFinish, foot,
+      s4Title, s4Body, s4Word, s4Icon, s4Mod, s4Set,
+      bBack, bSkip, bUse, bDownload, bCont, bFinish, foot,
     ] = await Promise.all([
       T("window.welcome.title"),
       T("window.welcome.subtitle"),
       T("window.welcome.step1_label"), T("window.welcome.step1_hint"),
       T("window.welcome.step2_label"), T("window.welcome.step2_hint"),
       T("window.welcome.step3_label"), T("window.welcome.step3_hint"),
+      T("window.welcome.step4_label"), T("window.welcome.step4_hint"),
       T("window.welcome.step1_title"), T("window.welcome.step1_body"),
       T("window.welcome.step1_layout_hint"), T("window.welcome.step1_choose"),
       T("window.welcome.step2_title"), T("window.welcome.step2_body"),
       T("window.welcome.step2_recommended"),
       T("window.welcome.step3_title"), T("window.welcome.step3_body"),
       T("window.welcome.step3_empty"), T("window.welcome.step3_wired"),
+      T("window.welcome.step4_title"), T("window.welcome.step4_body"),
+      T("window.welcome.step4_word_label"), T("window.welcome.step4_icon_label"),
+      T("window.welcome.step4_modifier"), T("window.welcome.step4_settings_hint"),
       T("window.welcome.btn_back"), T("window.welcome.btn_skip"),
       T("window.welcome.btn_use"), T("window.welcome.btn_download"),
-      T("window.welcome.btn_finish"),
+      T("window.welcome.btn_continue"), T("window.welcome.btn_finish"),
       T("window.welcome.footer"),
     ]);
     this.chrome = { title, subtitleFmt };
@@ -146,13 +187,16 @@ class LthnWelcomeWindow extends LitElement {
       { l: s1l, h: s1h },
       { l: s2l, h: s2h },
       { l: s3l, h: s3h },
+      { l: s4l, h: s4h },
     ];
     this.t = {
       s1Title, s1Body, s1LayoutHint: s1Lh, s1Choose,
       s2Title, s2Body, s2Recommended: s2Rec,
       s3Title, s3Body, s3Empty, s3Wired,
+      s4Title, s4Body, s4WordLabel: s4Word, s4IconLabel: s4Icon,
+      s4Modifier: s4Mod, s4SettingsHint: s4Set,
       btnBack: bBack, btnSkip: bSkip, btnUse: bUse,
-      btnDownload: bDownload, btnFinish: bFinish,
+      btnDownload: bDownload, btnContinue: bCont, btnFinish: bFinish,
       footer: foot,
     };
     // Pull the canonical Lethean paths + the fresh-install flag
@@ -207,6 +251,7 @@ class LthnWelcomeWindow extends LitElement {
       { n: 1, label: this.stepLabels[0].l, hint: this.stepLabels[0].h },
       { n: 2, label: this.stepLabels[1].l, hint: this.stepLabels[1].h },
       { n: 3, label: this.stepLabels[2].l, hint: this.stepLabels[2].h },
+      { n: 4, label: this.stepLabels[3].l, hint: this.stepLabels[3].h },
     ];
 
     const body = html`
@@ -258,7 +303,10 @@ class LthnWelcomeWindow extends LitElement {
 
         <!-- step body -->
         <main style="padding:32px 40px; display:flex; flex-direction:column; min-height:0;">
-          ${this.step === 1 ? this._step1() : this.step === 2 ? this._step2() : this._step3()}
+          ${this.step === 1 ? this._step1()
+            : this.step === 2 ? this._step2()
+            : this.step === 3 ? this._step3()
+            : this._step4()}
           <div style="flex:1"></div>
           <div style="display:flex; align-items:center; gap:10px; padding-top:18px;">
             ${this.step > 1
@@ -267,11 +315,13 @@ class LthnWelcomeWindow extends LitElement {
             <lthn-btn tone="quiet" size="lg" @click=${completeOnboarding}>${this.t.btnSkip}</lthn-btn>
             <div style="flex:1"></div>
             <lthn-btn tone="primary" size="lg" @click=${() => advance(this, 1)}>
-              ${this.step === 3
+              ${this.step === MAX_STEP
                 ? html`<i class="fa-solid fa-check"></i> ${this.t.btnFinish}`
                 : this.step === 1
                 ? html`<i class="fa-solid fa-arrow-right"></i> ${this.t.btnUse}`
-                : html`<i class="fa-solid fa-arrow-right"></i> ${this.t.btnDownload}`}
+                : this.step === 2
+                ? html`<i class="fa-solid fa-arrow-right"></i> ${this.t.btnDownload}`
+                : html`<i class="fa-solid fa-arrow-right"></i> ${this.t.btnContinue}`}
             </lthn-btn>
           </div>
         </main>
@@ -414,6 +464,67 @@ class LthnWelcomeWindow extends LitElement {
               <div style="font-size:11px; color:var(--fg-3);">${c.desc}</div>
             </div>
           `)}
+        </div>
+      </div>
+    `;
+  }
+
+  /** Step 4 — Menu Behaviours tour. Single step, single illustration:
+   *  a mock rail row with two callouts (word vs icon) and a footer
+   *  reminding users that ⌘-click works anywhere on the row. See
+   *  plans/project/lthn/desktop/RFC.menu-behaviours.md § 6. */
+  _step4() {
+    return html`
+      <div style="display:flex; flex-direction:column; gap:18px;">
+        <div>
+          <div style="font-size:24px; font-weight:600; color:var(--fg-0); letter-spacing:-0.018em;">
+            ${this.t.s4Title}
+          </div>
+          <div style="font-size:13px; color:var(--fg-2); margin-top:8px; line-height:1.55; max-width:480px;">
+            ${this.t.s4Body}
+          </div>
+        </div>
+        <!-- Mock rail row — a single illustrative <button> identical
+             in shape to the live <lthn-app-shell> rail, with callout
+             arrows pointing at icon vs word. Non-interactive. -->
+        <div style="display:flex; align-items:center; gap:24px; padding:24px 22px;
+                    background:rgba(64,193,197,0.04);
+                    border:1.5px dashed rgba(64,193,197,0.30);
+                    border-radius:10px;">
+          <div style="position:relative;">
+            <div style="display:flex; align-items:center; gap:12px;
+                        padding:8px 12px; border-radius:6px;
+                        background:rgba(64,193,197,0.10);
+                        border:1px solid rgba(64,193,197,0.22);
+                        font-family:var(--font-sans); font-size:12.5px; font-weight:500;
+                        color:var(--brand-300); min-width:180px;">
+              <i class="fa-solid fa-comments" style="font-size:13px; width:14px; text-align:center; color:var(--brand-300);"></i>
+              <span style="flex:1;">Chat</span>
+            </div>
+            <!-- Word callout (right side) -->
+            <div style="position:absolute; left:108%; top:50%; transform:translateY(-50%);
+                        display:flex; align-items:center; gap:6px; white-space:nowrap;">
+              <div style="width:18px; height:1px; background:var(--brand-300);"></div>
+              <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--brand-300); letter-spacing:0.02em;">
+                ${this.t.s4WordLabel}
+              </div>
+            </div>
+            <!-- Icon callout (left side) -->
+            <div style="position:absolute; right:108%; top:50%; transform:translateY(-50%);
+                        display:flex; align-items:center; gap:6px; white-space:nowrap;">
+              <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-2); letter-spacing:0.02em;">
+                ${this.t.s4IconLabel}
+              </div>
+              <div style="width:18px; height:1px; background:var(--fg-2);"></div>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--fg-3);">
+          <i class="fa-solid fa-keyboard" style="font-size:12px; color:var(--fg-3);"></i>
+          <span>${this.t.s4Modifier}</span>
+        </div>
+        <div style="font-size:11px; color:var(--fg-3); line-height:1.5; margin-top:-4px;">
+          ${this.t.s4SettingsHint}
         </div>
       </div>
     `;
