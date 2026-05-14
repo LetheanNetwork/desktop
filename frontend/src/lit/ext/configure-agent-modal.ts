@@ -38,6 +38,7 @@ interface ProviderSpec {
   defaultModel: string;
   defaultBase:  string;
   needsKey:     boolean;
+  needsBaseUrl: boolean;  // hide Base URL field entirely when false
   modelHint:    string;
 }
 
@@ -55,37 +56,43 @@ const PROVIDERS: ProviderSpec[] = [
     id: "openai", label: "OpenAI", kind: "remote", icon: "fa-circle",
     blurb: "Official OpenAI API — GPT-5 / GPT-5-pro / o-series.",
     defaultModel: "gpt-5", defaultBase: "https://api.openai.com/v1",
-    needsKey: true, modelHint: "gpt-5 / gpt-5-pro / o3",
+    needsKey: true, needsBaseUrl: false,
+    modelHint: "gpt-5 / gpt-5-pro / o3",
   },
   {
     id: "anthropic", label: "Anthropic", kind: "remote", icon: "fa-mountain",
     blurb: "Claude — Opus 4.7, Sonnet 4.6, Haiku 4.5.",
     defaultModel: "claude-opus-4-7", defaultBase: "https://api.anthropic.com/v1",
-    needsKey: true, modelHint: "claude-opus-4-7 / sonnet-4-6",
+    needsKey: true, needsBaseUrl: false,
+    modelHint: "claude-opus-4-7 / sonnet-4-6",
   },
   {
     id: "opencode-go", label: "OpenCode Go", kind: "remote", icon: "fa-code-branch",
     blurb: "OpenCode subscription — DeepSeek v4 Pro, GLM, Qwen-Coder.",
     defaultModel: "deepseek-v4-pro", defaultBase: "https://opencode.com/api/v1",
-    needsKey: true, modelHint: "deepseek-v4-pro / glm-4.6",
+    needsKey: true, needsBaseUrl: true,
+    modelHint: "deepseek-v4-pro / glm-4.6",
   },
   {
     id: "openai-compat", label: "OpenAI-compatible", kind: "remote", icon: "fa-plug",
     blurb: "Any OpenAI-API-compatible endpoint — Groq, Cerebras, Together, custom.",
     defaultModel: "", defaultBase: "",
-    needsKey: true, modelHint: "model name as listed by the provider",
+    needsKey: true, needsBaseUrl: true,
+    modelHint: "model name as listed by the provider",
   },
   {
-    id: "ollama", label: "Ollama (local)", kind: "local", icon: "fa-llama",
+    id: "ollama", label: "Ollama (local)", kind: "local", icon: "fa-laptop-code",
     blurb: "Local Ollama daemon on this machine or the fleet.",
     defaultModel: "gemma-4-e2b", defaultBase: "http://localhost:11434",
-    needsKey: false, modelHint: "ollama list",
+    needsKey: false, needsBaseUrl: true,
+    modelHint: "ollama list",
   },
   {
     id: "lemma-local", label: "Lemma (local)", kind: "local", icon: "fa-cube",
     blurb: "Native Lethean inference via lthn-mlx / go-mlx on the fleet.",
     defaultModel: "lemma-q8", defaultBase: "",
-    needsKey: false, modelHint: "lemma-q8 / gemma-3-27b-q4",
+    needsKey: false, needsBaseUrl: false,
+    modelHint: "lemma-q8 / gemma-3-27b-q4",
   },
 ];
 
@@ -367,7 +374,7 @@ class LthnConfigureAgentModal extends LitElement {
             style=${this.inputStyle()}>
         `, p.modelHint ? `Examples: ${p.modelHint}` : undefined)}
 
-        ${p.id !== "openai" && p.id !== "anthropic"
+        ${p.needsBaseUrl
           ? this.renderField("Base URL", html`
               <input type="text" .value=${this.baseUrl}
                 @input=${(e: Event) => { this.baseUrl = (e.target as HTMLInputElement).value; }}
