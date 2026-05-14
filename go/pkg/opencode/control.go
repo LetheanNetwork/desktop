@@ -76,6 +76,25 @@ func (g *ControlGroup) RegisterRoutes(rg *gin.RouterGroup) {
 	// (so the frontend hides the button when the app isn't there).
 	rg.GET("/studio", g.studio)
 	rg.POST("/studio", g.openStudio)
+
+	// Upgrade — RFC.opencode.md §7 "Image bump". Pulls the
+	// configured image + restarts running sandboxes on the new
+	// digest. User-driven; auto-detect notification is v2.
+	rg.POST("/upgrade", g.upgrade)
+}
+
+// upgrade POST /v1/api/opencode/upgrade → pulls lthn/dev:latest +
+// restarts any running sandboxes on the new image when the digest
+// changed. Returns UpgradeResult (updated flag + new digest +
+// list of restarted sandbox ids).
+func (g *ControlGroup) upgrade(c *gin.Context) {
+	r := g.svc.Upgrade()
+	if !r.OK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		return
+	}
+	res, _ := r.Value.(UpgradeResult)
+	c.JSON(http.StatusOK, res)
 }
 
 // openTUI POST /v1/api/opencode/sandbox/:id/tui → spawns the user's

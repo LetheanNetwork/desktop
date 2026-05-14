@@ -271,7 +271,12 @@
       "oc_snippet_help":       "Adds the lthn provider alongside any others you have configured. Non-destructive — your existing providers are untouched.",
       "oc_open_tui":           "Open in terminal",
       "oc_open_tui_failed":    "Couldn't open the terminal — see logs for details.",
-      "oc_open_studio":        "Open desktop app"
+      "oc_open_studio":        "Open desktop app",
+      "oc_check_updates":      "Check for updates",
+      "oc_upgrading":          "Checking…",
+      "oc_upgrade_no_change":  "Already up to date.",
+      "oc_upgrade_updated":    "Updated. Sandbox restarted on the new image.",
+      "oc_upgrade_failed":     "Update check failed — see logs for details."
     },
     "tools":        {
       "title": "Tools · MCP", "subtitle": "2 servers · 12 tools · 648 calls today",

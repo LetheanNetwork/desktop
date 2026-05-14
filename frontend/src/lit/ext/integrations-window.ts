@@ -36,6 +36,8 @@ class LthnIntegrationsWindow extends LitElement {
     mergeStatus: { state: true },
     busyStart: { state: true },
     studioInstalled: { state: true },
+    upgradeBusy: { state: true },
+    upgradeStatus: { state: true },
     t: { state: true },
   };
   declare w: number;
@@ -54,6 +56,8 @@ class LthnIntegrationsWindow extends LitElement {
   declare mergeStatus: { kind: "ok" | "err"; text: string } | null;
   declare busyStart: boolean;
   declare studioInstalled: boolean;
+  declare upgradeBusy: boolean;
+  declare upgradeStatus: { kind: "ok" | "err"; text: string } | null;
   declare t: {
     railLabel: string; railEmpty: string;
     rowConfigPath: string; rowOnDisk: string; rowEndpoint: string; rowDefaultModel: string;
@@ -68,6 +72,9 @@ class LthnIntegrationsWindow extends LitElement {
     ocSnippetHelp: string;
     ocOpenTUI: string; ocOpenTUIFailed: string;
     ocOpenStudio: string;
+    ocCheckUpdates: string; ocUpgrading: string;
+    ocUpgradeNoChange: string; ocUpgradeUpdated: string;
+    ocUpgradeFailed: string;
   };
   /* Poll handle for sandbox state — cleared on disconnect. */
   private pollId: number | null = null;
@@ -89,6 +96,8 @@ class LthnIntegrationsWindow extends LitElement {
     this.mergeStatus = null;
     this.busyStart = false;
     this.studioInstalled = false;
+    this.upgradeBusy = false;
+    this.upgradeStatus = null;
     this.t = {
       railLabel: "Clients",
       railEmpty: "No clients enumerated yet. The integrations service is the source of truth.",
@@ -112,6 +121,11 @@ class LthnIntegrationsWindow extends LitElement {
       ocOpenTUI: "Open in terminal",
       ocOpenTUIFailed: "Couldn't open the terminal — see logs for details.",
       ocOpenStudio: "Open desktop app",
+      ocCheckUpdates: "Check for updates",
+      ocUpgrading: "Checking…",
+      ocUpgradeNoChange: "Already up to date.",
+      ocUpgradeUpdated: "Updated. Sandbox restarted on the new image.",
+      ocUpgradeFailed: "Update check failed — see logs for details.",
     };
   }
   createRenderRoot() { return this; }
@@ -272,6 +286,7 @@ class LthnIntegrationsWindow extends LitElement {
       ocSL, ocSStop, ocSStart, ocSReady, ocSErr, ocStartL, ocStopL,
       ocML, ocCopy, ocMerge, ocMOk, ocMConflict, ocMForce, ocSHelp,
       ocTUI, ocTUIFail, ocStudio,
+      ocCheck, ocUpgring, ocUpNoCh, ocUpUpd, ocUpFail,
     ] = await Promise.all([
       T("window.integrations.title"),
       T("window.integrations.subtitle"),
@@ -303,6 +318,11 @@ class LthnIntegrationsWindow extends LitElement {
       T("window.integrations.oc_open_tui"),
       T("window.integrations.oc_open_tui_failed"),
       T("window.integrations.oc_open_studio"),
+      T("window.integrations.oc_check_updates"),
+      T("window.integrations.oc_upgrading"),
+      T("window.integrations.oc_upgrade_no_change"),
+      T("window.integrations.oc_upgrade_updated"),
+      T("window.integrations.oc_upgrade_failed"),
     ]);
     this.chrome = { title, subtitle };
     this.t = {
@@ -319,6 +339,9 @@ class LthnIntegrationsWindow extends LitElement {
       ocMergeForce: ocMForce, ocSnippetHelp: ocSHelp,
       ocOpenTUI: ocTUI, ocOpenTUIFailed: ocTUIFail,
       ocOpenStudio: ocStudio,
+      ocCheckUpdates: ocCheck, ocUpgrading: ocUpgring,
+      ocUpgradeNoChange: ocUpNoCh, ocUpgradeUpdated: ocUpUpd,
+      ocUpgradeFailed: ocUpFail,
     };
     try {
       const [integrations, runner, server, ak, resultMod] = await Promise.all([
@@ -355,6 +378,32 @@ class LthnIntegrationsWindow extends LitElement {
       this.studioInstalled = (r as any)?.OK === true && (r as any)?.Value === true;
     } catch {
       this.studioInstalled = false;
+    }
+  }
+
+  private async checkForUpdates() {
+    if (this.upgradeBusy) return;
+    this.upgradeBusy = true;
+    this.upgradeStatus = null;
+    try {
+      const oc = await import("@desktop/opencode/wailsservice");
+      const r = await oc.WUpgrade();
+      const ok = (r as any)?.OK === true;
+      if (!ok) {
+        this.upgradeStatus = { kind: "err", text: this.t.ocUpgradeFailed };
+        console.error("opencode WUpgrade failed", r);
+      } else {
+        const updated = !!(r as any)?.Value?.updated;
+        this.upgradeStatus = {
+          kind: "ok",
+          text: updated ? this.t.ocUpgradeUpdated : this.t.ocUpgradeNoChange,
+        };
+      }
+    } catch (err) {
+      this.upgradeStatus = { kind: "err", text: this.t.ocUpgradeFailed };
+      console.error("opencode WUpgrade threw", err);
+    } finally {
+      this.upgradeBusy = false;
     }
   }
 
@@ -462,7 +511,22 @@ class LthnIntegrationsWindow extends LitElement {
       </div>
 
       <div>
-        <lthn-label>${this.t.ocSandboxLabel}</lthn-label>
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <lthn-label>${this.t.ocSandboxLabel}</lthn-label>
+          <div style="display:flex; align-items:center; gap:8px;">
+            ${this.upgradeStatus ? html`
+              <span style="font-size:10.5px; color:${this.upgradeStatus.kind === "ok" ? "var(--ok-300, #6cb)" : "var(--warn-300, #d99)"};">
+                ${this.upgradeStatus.text}
+              </span>
+            ` : nothing}
+            <button
+              ?disabled=${this.upgradeBusy}
+              @click=${() => void this.checkForUpdates()}
+              style="padding:4px 10px; font-size:10.5px; background:transparent; border:1px solid rgba(255,255,255,0.10); border-radius:5px; color:var(--fg-2); cursor:${this.upgradeBusy ? "default" : "pointer"}; opacity:${this.upgradeBusy ? 0.6 : 1}; --wails-draggable: no-drag;">
+              ${this.upgradeBusy ? this.t.ocUpgrading : this.t.ocCheckUpdates}
+            </button>
+          </div>
+        </div>
         <div style="margin-top:8px; padding:14px 16px; border-radius:8px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05); display:flex; flex-direction:column; gap:10px;">
           <div style="display:flex; align-items:center; gap:10px;">
             <lthn-status-dot variant=${this._sandboxPillVariant()}></lthn-status-dot>

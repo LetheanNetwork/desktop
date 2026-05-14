@@ -122,6 +122,17 @@ func (w *WailsService) WDeleteProfile(name string) core.Result {
 	return w.svc.DeleteProfile(name)
 }
 
+// WUpgrade pulls the configured image (lthn/dev:latest) and
+// restarts any running sandbox if the digest changed. UI button
+// "Check for updates / Upgrade" calls this. Returns UpgradeResult
+// in Value when successful.
+func (w *WailsService) WUpgrade() core.Result {
+	if w == nil || w.svc == nil {
+		return core.Fail(core.E("opencode.WUpgrade", "service not bound", nil))
+	}
+	return w.svc.Upgrade()
+}
+
 // WIsStudioInstalled reports whether OpenCode's native desktop
 // app is installed on the host. Frontend uses this to decide
 // whether to render the "Open Studio" button.
