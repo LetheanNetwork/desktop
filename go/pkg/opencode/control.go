@@ -70,6 +70,12 @@ func (g *ControlGroup) RegisterRoutes(rg *gin.RouterGroup) {
 	// Open TUI — RFC.opencode.md §6. Spawn opencode inside the
 	// user's default terminal, attached to the named sandbox.
 	rg.POST("/sandbox/:id/tui", g.openTUI)
+
+	// Open Studio — RFC.opencode.md §6. Launches OpenCode's native
+	// desktop app if installed on the host. GET reports presence
+	// (so the frontend hides the button when the app isn't there).
+	rg.GET("/studio", g.studio)
+	rg.POST("/studio", g.openStudio)
 }
 
 // openTUI POST /v1/api/opencode/sandbox/:id/tui → spawns the user's
@@ -82,6 +88,29 @@ func (g *ControlGroup) openTUI(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"opened": id})
+}
+
+// studio GET /v1/api/opencode/studio → reports whether the host's
+// OpenCode native app is installed.
+func (g *ControlGroup) studio(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"installed": g.svc.IsStudioInstalled()})
+}
+
+// openStudio POST /v1/api/opencode/studio → launches the host's
+// OpenCode native app. 4xx when not installed.
+func (g *ControlGroup) openStudio(c *gin.Context) {
+	if !g.svc.IsStudioInstalled() {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "OpenCode native app is not installed on this host",
+		})
+		return
+	}
+	r := g.svc.OpenStudio()
+	if !r.OK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"opened": true})
 }
 
 // enable POST /v1/api/opencode/enable → persists the enabled flag

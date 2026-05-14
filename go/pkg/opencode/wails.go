@@ -122,6 +122,25 @@ func (w *WailsService) WDeleteProfile(name string) core.Result {
 	return w.svc.DeleteProfile(name)
 }
 
+// WIsStudioInstalled reports whether OpenCode's native desktop
+// app is installed on the host. Frontend uses this to decide
+// whether to render the "Open Studio" button.
+func (w *WailsService) WIsStudioInstalled() core.Result {
+	if w == nil || w.svc == nil {
+		return core.Ok(false)
+	}
+	return core.Ok(w.svc.IsStudioInstalled())
+}
+
+// WOpenStudio launches the host's OpenCode native app. Fails when
+// the app isn't installed — frontend gates on WIsStudioInstalled.
+func (w *WailsService) WOpenStudio() core.Result {
+	if w == nil || w.svc == nil {
+		return core.Fail(core.E("opencode.WOpenStudio", "service not bound", nil))
+	}
+	return w.svc.OpenStudio()
+}
+
 // WOpenTUI spawns `<runtime> exec -it <container> opencode` in
 // the user's default terminal — macOS Terminal.app via osascript,
 // Linux $TERMINAL / x-terminal-emulator / gnome-terminal etc.,

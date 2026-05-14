@@ -35,6 +35,7 @@ class LthnIntegrationsWindow extends LitElement {
     mergeBusy: { state: true },
     mergeStatus: { state: true },
     busyStart: { state: true },
+    studioInstalled: { state: true },
     t: { state: true },
   };
   declare w: number;
@@ -52,6 +53,7 @@ class LthnIntegrationsWindow extends LitElement {
   declare mergeBusy: boolean;
   declare mergeStatus: { kind: "ok" | "err"; text: string } | null;
   declare busyStart: boolean;
+  declare studioInstalled: boolean;
   declare t: {
     railLabel: string; railEmpty: string;
     rowConfigPath: string; rowOnDisk: string; rowEndpoint: string; rowDefaultModel: string;
@@ -65,6 +67,7 @@ class LthnIntegrationsWindow extends LitElement {
     ocMergedOk: string; ocMergedConflict: string; ocMergeForce: string;
     ocSnippetHelp: string;
     ocOpenTUI: string; ocOpenTUIFailed: string;
+    ocOpenStudio: string;
   };
   /* Poll handle for sandbox state — cleared on disconnect. */
   private pollId: number | null = null;
@@ -85,6 +88,7 @@ class LthnIntegrationsWindow extends LitElement {
     this.mergeBusy = false;
     this.mergeStatus = null;
     this.busyStart = false;
+    this.studioInstalled = false;
     this.t = {
       railLabel: "Clients",
       railEmpty: "No clients enumerated yet. The integrations service is the source of truth.",
@@ -107,6 +111,7 @@ class LthnIntegrationsWindow extends LitElement {
         "Adds the lthn provider alongside any others you have configured. Non-destructive — your existing providers are untouched.",
       ocOpenTUI: "Open in terminal",
       ocOpenTUIFailed: "Couldn't open the terminal — see logs for details.",
+      ocOpenStudio: "Open desktop app",
     };
   }
   createRenderRoot() { return this; }
@@ -266,7 +271,7 @@ class LthnIntegrationsWindow extends LitElement {
       title, subtitle, rl, re, rcp, rod, rep, rdm, sl, sh, yes, no, nc,
       ocSL, ocSStop, ocSStart, ocSReady, ocSErr, ocStartL, ocStopL,
       ocML, ocCopy, ocMerge, ocMOk, ocMConflict, ocMForce, ocSHelp,
-      ocTUI, ocTUIFail,
+      ocTUI, ocTUIFail, ocStudio,
     ] = await Promise.all([
       T("window.integrations.title"),
       T("window.integrations.subtitle"),
@@ -297,6 +302,7 @@ class LthnIntegrationsWindow extends LitElement {
       T("window.integrations.oc_snippet_help"),
       T("window.integrations.oc_open_tui"),
       T("window.integrations.oc_open_tui_failed"),
+      T("window.integrations.oc_open_studio"),
     ]);
     this.chrome = { title, subtitle };
     this.t = {
@@ -312,6 +318,7 @@ class LthnIntegrationsWindow extends LitElement {
       ocMergedOk: ocMOk, ocMergedConflict: ocMConflict,
       ocMergeForce: ocMForce, ocSnippetHelp: ocSHelp,
       ocOpenTUI: ocTUI, ocOpenTUIFailed: ocTUIFail,
+      ocOpenStudio: ocStudio,
     };
     try {
       const [integrations, runner, server, ak, resultMod] = await Promise.all([
@@ -340,6 +347,27 @@ class LthnIntegrationsWindow extends LitElement {
     // whether opencode is currently selected.
     await this.pollOpencode();
     this.pollId = window.setInterval(() => { void this.pollOpencode(); }, LthnIntegrationsWindow.POLL_MS);
+    // One-shot host-app detection — the install state doesn't
+    // change mid-session frequently enough to justify polling.
+    try {
+      const oc = await import("@desktop/opencode/wailsservice");
+      const r = await oc.WIsStudioInstalled();
+      this.studioInstalled = (r as any)?.OK === true && (r as any)?.Value === true;
+    } catch {
+      this.studioInstalled = false;
+    }
+  }
+
+  private async openStudio() {
+    try {
+      const oc = await import("@desktop/opencode/wailsservice");
+      const r = await oc.WOpenStudio();
+      if ((r as any)?.OK !== true) {
+        console.error("opencode WOpenStudio failed", r);
+      }
+    } catch (err) {
+      console.error("opencode WOpenStudio threw", err);
+    }
   }
 
   /** Reset transient merge feedback when the user navigates between
@@ -443,7 +471,7 @@ class LthnIntegrationsWindow extends LitElement {
               <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3);">${this.sandboxId}</span>
             ` : nothing}
           </div>
-          <div style="display:flex; gap:8px;">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
             ${sandboxRunning ? html`
               <button
                 ?disabled=${sandboxBusy}
@@ -465,6 +493,13 @@ class LthnIntegrationsWindow extends LitElement {
                 ${this.t.ocStart}
               </button>
             `}
+            ${this.studioInstalled ? html`
+              <button
+                @click=${() => void this.openStudio()}
+                style="padding:6px 12px; font-size:11.5px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.10); border-radius:6px; color:var(--fg-0); cursor:pointer; --wails-draggable: no-drag;">
+                <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px; margin-right:6px;"></i>${this.t.ocOpenStudio}
+              </button>
+            ` : nothing}
           </div>
         </div>
       </div>
