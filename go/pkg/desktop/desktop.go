@@ -423,8 +423,20 @@ func (s *Service) Run() core.Result {
 			core.Option{Key: "task", Value: iconTask},
 		))
 	}
+	// macOS renders SetTooltip as the menu-bar title text next to the
+	// icon — there is no separate hover-tooltip surface. Tray is
+	// icon-only, so clear it on darwin; keep it as a real tooltip on
+	// other platforms.
+	trayTooltip := "Lethean Desktop"
+	if runtime.GOOS == "darwin" {
+		trayTooltip = ""
+	}
 	s.opts.Core.Action("systray.set_tooltip").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guisystray.TaskSetTrayTooltip{Tooltip: "Lethean Desktop"}},
+		core.Option{Key: "task", Value: guisystray.TaskSetTrayTooltip{Tooltip: trayTooltip}},
+	))
+	// Clear the menu-bar label — core/gui's Setup defaults it to "Core".
+	s.opts.Core.Action("systray.set_label").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guisystray.TaskSetTrayLabel{Label: ""}},
 	))
 
 	// Tray menu — built as a []TrayMenuItem with ActionIDs. Click
