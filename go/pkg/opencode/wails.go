@@ -122,6 +122,17 @@ func (w *WailsService) WDeleteProfile(name string) core.Result {
 	return w.svc.DeleteProfile(name)
 }
 
+// WProviderList returns opencode-serve's /provider response for a
+// running sandbox. The Fleet → Agents window consumes this to
+// render the "OpenCode-routed providers" cards. Returned as a raw
+// JSON string — caller parses to the opencode shape.
+func (w *WailsService) WProviderList(id string) core.Result {
+	if w == nil || w.svc == nil {
+		return core.Fail(core.E("opencode.WProviderList", "service not bound", nil))
+	}
+	return w.svc.ProviderList(id)
+}
+
 // WMergeHostConfig merges the named profile's provider block into
 // the user's host-side ~/.config/opencode/opencode.json. Returns
 // HostConfigConflict (in Result.Code()) when provider.lthn already

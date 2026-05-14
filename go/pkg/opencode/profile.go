@@ -79,6 +79,25 @@ type Profile struct {
 	MCP map[string]any `json:"mcp,omitempty"`
 }
 
+// ToOpenCodeWire serialises the profile to the wire shape opencode
+// expects — strips lthn-only metadata fields (Name, Description)
+// that aren't part of the upstream Config schema. opencode-serve
+// rejects unrecognised keys via ConfigInvalidError, so the strip
+// is load-bearing for OPENCODE_CONFIG_CONTENT + PATCH /global/config.
+//
+// Usage example:
+//
+//	wire := p.ToOpenCodeWire()
+//	env := "OPENCODE_CONFIG_CONTENT=" + wire
+func (p Profile) ToOpenCodeWire() string {
+	raw := core.JSONMarshalString(p)
+	var m map[string]any
+	_ = core.JSONUnmarshalString(raw, &m)
+	delete(m, "name")
+	delete(m, "description")
+	return core.JSONMarshalString(m)
+}
+
 // DefaultLthnProfile returns the baseline profile seeded at first
 // boot — points opencode at the local lthn runner via
 // host.docker.internal:8000/v1 so the in-container opencode can

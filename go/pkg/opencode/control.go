@@ -55,6 +55,24 @@ func (g *ControlGroup) RegisterRoutes(rg *gin.RouterGroup) {
 	// POSTs into ~/.config/opencode/opencode.json so users running
 	// opencode directly on the host pick up the lthn provider.
 	rg.POST("/host-config", g.hostConfigMerge)
+
+	// Provider enumeration — RFC.opencode.md §4.3 + §5.1. Returns
+	// opencode-serve's /provider response for the named sandbox.
+	// Fleet → Agents renders cards from this.
+	rg.GET("/sandbox/:id/providers", g.providerList)
+}
+
+// providerList GET /v1/api/opencode/sandbox/:id/providers → returns
+// opencode-serve's /provider response (raw JSON pass-through).
+func (g *ControlGroup) providerList(c *gin.Context) {
+	id := core.TrimCutset(c.Param("id"), "/ ")
+	r := g.svc.ProviderList(id)
+	if !r.OK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		return
+	}
+	body, _ := r.Value.(string)
+	c.Data(http.StatusOK, "application/json", []byte(body))
 }
 
 // hostConfigMerge POST /v1/api/opencode/host-config → merges the

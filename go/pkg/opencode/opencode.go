@@ -186,7 +186,7 @@ func (s *Service) Start(profileName string) core.Result {
 	args := []string{
 		"run", "-d",
 		"-p", core.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort),
-		"-e", "OPENCODE_CONFIG_CONTENT=" + core.JSONMarshalString(profile),
+		"-e", "OPENCODE_CONFIG_CONTENT=" + profile.ToOpenCodeWire(),
 		"-e", "OPENCODE_SERVER_PASSWORD=" + password,
 		"--name", ContainerName(id),
 		s.image(),
@@ -276,7 +276,7 @@ func waitHealthy(target, authHeader string, timeout time.Duration) core.Result {
 // authHeader is the Basic Auth credential lthn injects when
 // OPENCODE_SERVER_PASSWORD is set (always set by Start).
 func applyProfile(target, authHeader string, p Profile) core.Result {
-	body := bytes.NewBufferString(core.JSONMarshalString(p))
+	body := bytes.NewBufferString(p.ToOpenCodeWire())
 	req, err := http.NewRequest(http.MethodPatch, target+"/global/config", body)
 	if err != nil {
 		return core.Fail(core.E("opencode.applyProfile", "request build failed", err))

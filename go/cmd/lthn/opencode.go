@@ -27,7 +27,7 @@ import (
 //	inspect ID         print one sandbox's record
 func cmdOpenCode(args []string) int {
 	if len(args) == 0 {
-		core.Print(core.Stderr(), "lthn opencode: missing verb (start / stop / status / inspect / profile / merge-host-config)\n")
+		core.Print(core.Stderr(), "lthn opencode: missing verb (start / stop / status / inspect / profile / merge-host-config / providers)\n")
 		return 2
 	}
 	switch args[0] {
@@ -43,6 +43,8 @@ func cmdOpenCode(args []string) int {
 		return opencodeProfile(args[1:])
 	case "merge-host-config":
 		return opencodeMergeHostConfig(args[1:])
+	case "providers":
+		return opencodeProviders(args[1:])
 	default:
 		core.Print(core.Stderr(), "lthn opencode: unknown verb %q\n", args[0])
 		return 2
@@ -308,6 +310,32 @@ func opencodeMergeHostConfig(args []string) int {
 	}
 	if code != http.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode merge-host-config: HTTP %d — %s\n", code, body)
+		return 1
+	}
+	core.Print(core.Stdout(), "%s\n", body)
+	return 0
+}
+
+// opencodeProviders returns the loaded provider list for a running
+// sandbox — pass-through of opencode-serve's /provider response.
+//
+// Usage example:
+//
+//	lthn opencode providers oc-1735843891234
+func opencodeProviders(args []string) int {
+	if len(args) < 1 {
+		core.Print(core.Stderr(), "lthn opencode providers: usage: lthn opencode providers ID\n")
+		return 2
+	}
+	req, _ := http.NewRequest(http.MethodGet, opencodeBase+"/"+args[0]+"/providers", nil)
+	body, code, err := doRequest(req)
+	if err != nil {
+		core.Print(core.Stderr(), "lthn opencode providers: %s\n", err)
+		core.Print(core.Stderr(), "hint: is `lthn serve` running on :8000?\n")
+		return 1
+	}
+	if code != http.StatusOK {
+		core.Print(core.Stderr(), "lthn opencode providers: HTTP %d — %s\n", code, body)
 		return 1
 	}
 	core.Print(core.Stdout(), "%s\n", body)
