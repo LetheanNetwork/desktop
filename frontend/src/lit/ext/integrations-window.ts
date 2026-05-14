@@ -64,6 +64,7 @@ class LthnIntegrationsWindow extends LitElement {
     ocMergeLabel: string; ocCopy: string; ocMerge: string;
     ocMergedOk: string; ocMergedConflict: string; ocMergeForce: string;
     ocSnippetHelp: string;
+    ocOpenTUI: string; ocOpenTUIFailed: string;
   };
   /* Poll handle for sandbox state — cleared on disconnect. */
   private pollId: number | null = null;
@@ -104,6 +105,8 @@ class LthnIntegrationsWindow extends LitElement {
       ocMergeForce: "Overwrite",
       ocSnippetHelp:
         "Adds the lthn provider alongside any others you have configured. Non-destructive — your existing providers are untouched.",
+      ocOpenTUI: "Open in terminal",
+      ocOpenTUIFailed: "Couldn't open the terminal — see logs for details.",
     };
   }
   createRenderRoot() { return this; }
@@ -217,6 +220,24 @@ class LthnIntegrationsWindow extends LitElement {
     }
   }
 
+  private async openTUI() {
+    if (!this.sandboxId) return;
+    try {
+      const oc = await import("@desktop/opencode/wailsservice");
+      const r = await oc.WOpenTUI(this.sandboxId);
+      const ok = (r as any)?.OK === true;
+      if (!ok) {
+        console.error("opencode WOpenTUI failed", r);
+        // Reuse the merge-status surface for transient TUI feedback —
+        // single-error-line slot keeps the card density consistent.
+        this.mergeStatus = { kind: "err", text: this.t.ocOpenTUIFailed };
+      }
+    } catch (err) {
+      console.error("opencode WOpenTUI threw", err);
+      this.mergeStatus = { kind: "err", text: this.t.ocOpenTUIFailed };
+    }
+  }
+
   /** JSONC snippet matching DefaultLthnProfile.Provider["lthn"]. Users
    *  see this in the card AND it's what Merge writes. Static for now;
    *  if the default profile gains baseURL knobs the snippet should
@@ -245,6 +266,7 @@ class LthnIntegrationsWindow extends LitElement {
       title, subtitle, rl, re, rcp, rod, rep, rdm, sl, sh, yes, no, nc,
       ocSL, ocSStop, ocSStart, ocSReady, ocSErr, ocStartL, ocStopL,
       ocML, ocCopy, ocMerge, ocMOk, ocMConflict, ocMForce, ocSHelp,
+      ocTUI, ocTUIFail,
     ] = await Promise.all([
       T("window.integrations.title"),
       T("window.integrations.subtitle"),
@@ -273,6 +295,8 @@ class LthnIntegrationsWindow extends LitElement {
       T("window.integrations.oc_merged_conflict"),
       T("window.integrations.oc_merge_force"),
       T("window.integrations.oc_snippet_help"),
+      T("window.integrations.oc_open_tui"),
+      T("window.integrations.oc_open_tui_failed"),
     ]);
     this.chrome = { title, subtitle };
     this.t = {
@@ -287,6 +311,7 @@ class LthnIntegrationsWindow extends LitElement {
       ocMergeLabel: ocML, ocCopy: ocCopy, ocMerge: ocMerge,
       ocMergedOk: ocMOk, ocMergedConflict: ocMConflict,
       ocMergeForce: ocMForce, ocSnippetHelp: ocSHelp,
+      ocOpenTUI: ocTUI, ocOpenTUIFailed: ocTUIFail,
     };
     try {
       const [integrations, runner, server, ak, resultMod] = await Promise.all([
@@ -425,6 +450,12 @@ class LthnIntegrationsWindow extends LitElement {
                 @click=${() => void this.stopSandbox()}
                 style="padding:6px 12px; font-size:11.5px; background:rgba(217,153,153,0.10); border:1px solid rgba(217,153,153,0.35); border-radius:6px; color:var(--warn-300, #d99); cursor:${sandboxBusy ? "default" : "pointer"}; opacity:${sandboxBusy ? 0.6 : 1}; --wails-draggable: no-drag;">
                 ${this.t.ocStop}
+              </button>
+              <button
+                ?disabled=${sandboxBusy}
+                @click=${() => void this.openTUI()}
+                style="padding:6px 12px; font-size:11.5px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.10); border-radius:6px; color:var(--fg-0); cursor:${sandboxBusy ? "default" : "pointer"}; opacity:${sandboxBusy ? 0.6 : 1}; --wails-draggable: no-drag;">
+                <i class="fa-solid fa-terminal" style="font-size:10px; margin-right:6px;"></i>${this.t.ocOpenTUI}
               </button>
             ` : html`
               <button

@@ -122,6 +122,18 @@ func (w *WailsService) WDeleteProfile(name string) core.Result {
 	return w.svc.DeleteProfile(name)
 }
 
+// WOpenTUI spawns `<runtime> exec -it <container> opencode` in
+// the user's default terminal — macOS Terminal.app via osascript,
+// Linux $TERMINAL / x-terminal-emulator / gnome-terminal etc.,
+// Windows wt.exe or cmd.exe. Frontend's Integrations card "Open
+// TUI" button calls this when sandbox state == ready.
+func (w *WailsService) WOpenTUI(id string) core.Result {
+	if w == nil || w.svc == nil {
+		return core.Fail(core.E("opencode.WOpenTUI", "service not bound", nil))
+	}
+	return w.svc.OpenTUI(id)
+}
+
 // WEnable persists `opencode.serve.enabled = true` and spawns a
 // sandbox if none is running. Idempotent. Empty profile = default.
 // Frontend uses this on the integrations card as a "remember my

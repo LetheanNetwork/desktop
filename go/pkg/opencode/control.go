@@ -66,6 +66,22 @@ func (g *ControlGroup) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/enable", g.enable)
 	rg.POST("/disable", g.disable)
 	rg.GET("/enabled", g.enabled)
+
+	// Open TUI — RFC.opencode.md §6. Spawn opencode inside the
+	// user's default terminal, attached to the named sandbox.
+	rg.POST("/sandbox/:id/tui", g.openTUI)
+}
+
+// openTUI POST /v1/api/opencode/sandbox/:id/tui → spawns the user's
+// default terminal running `<runtime> exec -it <container> opencode`.
+func (g *ControlGroup) openTUI(c *gin.Context) {
+	id := core.TrimCutset(c.Param("id"), "/ ")
+	r := g.svc.OpenTUI(id)
+	if !r.OK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"opened": id})
 }
 
 // enable POST /v1/api/opencode/enable → persists the enabled flag

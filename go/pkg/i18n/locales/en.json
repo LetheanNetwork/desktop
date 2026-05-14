@@ -268,7 +268,9 @@
       "oc_merged_ok":          "Merged. Restart opencode to pick up the lthn provider.",
       "oc_merged_conflict":    "provider.lthn already exists with a different baseURL.",
       "oc_merge_force":        "Overwrite",
-      "oc_snippet_help":       "Adds the lthn provider alongside any others you have configured. Non-destructive — your existing providers are untouched."
+      "oc_snippet_help":       "Adds the lthn provider alongside any others you have configured. Non-destructive — your existing providers are untouched.",
+      "oc_open_tui":           "Open in terminal",
+      "oc_open_tui_failed":    "Couldn't open the terminal — see logs for details."
     },
     "tools":        {
       "title": "Tools · MCP", "subtitle": "2 servers · 12 tools · 648 calls today",

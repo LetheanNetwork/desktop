@@ -27,7 +27,7 @@ import (
 //	inspect ID         print one sandbox's record
 func cmdOpenCode(args []string) int {
 	if len(args) == 0 {
-		core.Print(core.Stderr(), "lthn opencode: missing verb (start / stop / status / inspect / profile / merge-host-config / providers / enable / disable / enabled)\n")
+		core.Print(core.Stderr(), "lthn opencode: missing verb (start / stop / status / inspect / profile / merge-host-config / providers / enable / disable / enabled / tui)\n")
 		return 2
 	}
 	switch args[0] {
@@ -51,6 +51,8 @@ func cmdOpenCode(args []string) int {
 		return opencodeDisable()
 	case "enabled":
 		return opencodeEnabled()
+	case "tui":
+		return opencodeTUI(args[1:])
 	default:
 		core.Print(core.Stderr(), "lthn opencode: unknown verb %q\n", args[0])
 		return 2
@@ -345,6 +347,32 @@ func opencodeProviders(args []string) int {
 	}
 	if code != http.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode providers: HTTP %d — %s\n", code, body)
+		return 1
+	}
+	core.Print(core.Stdout(), "%s\n", body)
+	return 0
+}
+
+// opencodeTUI spawns `<runtime> exec -it <container> opencode` in
+// the user's default terminal — macOS / Linux / Windows aware.
+//
+// Usage example:
+//
+//	lthn opencode tui oc-1735843891234
+func opencodeTUI(args []string) int {
+	if len(args) < 1 {
+		core.Print(core.Stderr(), "lthn opencode tui: usage: lthn opencode tui ID\n")
+		return 2
+	}
+	req, _ := http.NewRequest(http.MethodPost, opencodeBase+"/"+args[0]+"/tui", nil)
+	body, code, err := doRequest(req)
+	if err != nil {
+		core.Print(core.Stderr(), "lthn opencode tui: %s\n", err)
+		core.Print(core.Stderr(), "hint: is `lthn serve` running on :8000?\n")
+		return 1
+	}
+	if code != http.StatusOK {
+		core.Print(core.Stderr(), "lthn opencode tui: HTTP %d — %s\n", code, body)
 		return 1
 	}
 	core.Print(core.Stdout(), "%s\n", body)
