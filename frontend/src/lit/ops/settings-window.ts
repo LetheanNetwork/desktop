@@ -778,7 +778,7 @@ class LthnSettingsWindow extends LitElement {
           Lethean Desktop is <em>physically unable</em> to remove the
           ${path(home)} folder. Open it in Finder, browse what's there,
           delete at your leisure. There's no "delete account" button
-          because there's no account.
+          because there's no account.<sup style="color:var(--brand-300); margin-left:1px;">*</sup>
         `)}
 
         <div style="display:flex; flex-direction:column; gap:8px;
@@ -847,9 +847,23 @@ class LthnSettingsWindow extends LitElement {
         <div style="margin-top:6px; padding-top:14px;
                     border-top:1px solid rgba(255,255,255,0.05);
                     font-size:11.5px; color:var(--fg-3); line-height:1.7;">
-          No phone home. No cloud sync we control. No "are you sure you
-          want to leave?" funnel. Just files you own, in folders you can
-          see.
+          No phone home. No cloud sync we control.<sup style="color:var(--brand-300); margin-left:1px;">*</sup>
+          No "are you sure you want to leave?" funnel. Just files you own,
+          in folders you can see.
+        </div>
+
+        <div style="font-size:10.5px; color:var(--fg-3); line-height:1.65;
+                    padding:10px 12px;
+                    background:rgba(255,255,255,0.018);
+                    border-left:2px solid rgba(64,193,197,0.3);
+                    border-radius:0 6px 6px 0;">
+          <span style="color:var(--brand-300); font-weight:600;">*</span>
+          If you install our Agentic plugin, this one gets nuanced:
+          managed runners and inter-fleet sync use a lightweight account
+          ref so your own bastions can pass sealed blobs between each
+          other. We still don't hold the keys, the blobs stay sealed,
+          the data stays yours — the ref just tells your machines which
+          other machines are also yours.
         </div>
 
       </div>
