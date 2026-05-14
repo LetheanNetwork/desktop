@@ -340,8 +340,31 @@ func cmdServe(args []string) int {
 		opencodeSvc.SetOnSandboxChange(func() {
 			_ = r.SetDynamicRoutes(opencodeSvc.Routes())
 		})
-		// Pick up any sandboxes already running (e.g. restart of
-		// `lthn serve` against a still-alive opencode container).
+		// Reconcile FIRST — sweep the host runtime for surviving
+		// lthn-opencode-* containers and re-register them in the
+		// orm + reverse-proxy. The orm is in-memory (Memium), so
+		// records from the previous serve invocation are gone;
+		// the containers themselves persist on the docker daemon.
+		// Without this sweep, the auto-resume path below would see
+		// "nothing running" and spawn duplicates.
+		if rr := opencodeSvc.Reconcile(); !rr.OK {
+			core.Print(core.Stderr(),
+				"lthn serve: opencode reconcile failed: %s\n", rr.Error())
+		}
+		// Auto-resume — RFC.opencode.md §7 "Restart". If the user
+		// previously called Enable, the persisted flag is still
+		// true; ensure a sandbox is running. Idempotent via Enable's
+		// already-running short-circuit, which now sees the just-
+		// reconciled records and skips re-spawn.
+		if opencodeSvc.IsEnabled() {
+			if rr := opencodeSvc.Enable(""); !rr.OK {
+				core.Print(core.Stderr(),
+					"lthn serve: opencode auto-resume failed: %s\n", rr.Error())
+				// Continue startup — opencode is optional.
+			}
+		}
+		// Pick up any sandboxes already running (whether resumed
+		// just now or surviving from a previous serve invocation).
 		_ = r.SetDynamicRoutes(opencodeSvc.Routes())
 	}
 	if pluginSvc, _ := core.ServiceFor[*plugin.Service](c, "plugin"); pluginSvc != nil {

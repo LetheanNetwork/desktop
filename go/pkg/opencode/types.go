@@ -66,6 +66,12 @@ type Sandbox struct {
 	CreatedAt time.Time
 }
 
+// containerPrefix is the canonical name prefix for lthn-owned
+// opencode-serve containers. Reconcile() filters docker output on
+// this prefix to identify which containers to recover after a
+// serve restart.
+const containerPrefix = "lthn-opencode-"
+
 // ContainerName returns the docker container name for a given
 // sandbox ID. Deterministic so callers don't need to persist it
 // separately — `docker stop lthn-opencode-<id>` always finds the
@@ -76,7 +82,7 @@ type Sandbox struct {
 //	name := opencode.ContainerName("oc-1735843891234")
 //	// → "lthn-opencode-oc-1735843891234"
 func ContainerName(id string) string {
-	return "lthn-opencode-" + id
+	return containerPrefix + id
 }
 
 // Schema declares the orm shape for Sandbox. Consumed by

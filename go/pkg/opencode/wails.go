@@ -122,6 +122,35 @@ func (w *WailsService) WDeleteProfile(name string) core.Result {
 	return w.svc.DeleteProfile(name)
 }
 
+// WEnable persists `opencode.serve.enabled = true` and spawns a
+// sandbox if none is running. Idempotent. Empty profile = default.
+// Frontend uses this on the integrations card as a "remember my
+// preference" alternative to one-shot Start.
+func (w *WailsService) WEnable(profile string) core.Result {
+	if w == nil || w.svc == nil {
+		return core.Fail(core.E("opencode.WEnable", "service not bound", nil))
+	}
+	return w.svc.Enable(profile)
+}
+
+// WDisable persists the disabled flag + stops any running sandboxes.
+func (w *WailsService) WDisable() core.Result {
+	if w == nil || w.svc == nil {
+		return core.Fail(core.E("opencode.WDisable", "service not bound", nil))
+	}
+	return w.svc.Disable()
+}
+
+// WIsEnabled returns the persisted enabled flag. Useful for the
+// frontend to render the toggle's initial state without waiting
+// for WStatus to return.
+func (w *WailsService) WIsEnabled() core.Result {
+	if w == nil || w.svc == nil {
+		return core.Ok(false)
+	}
+	return core.Ok(w.svc.IsEnabled())
+}
+
 // WProviderList returns opencode-serve's /provider response for a
 // running sandbox. The Fleet → Agents window consumes this to
 // render the "OpenCode-routed providers" cards. Returned as a raw

@@ -27,7 +27,7 @@ import (
 //	inspect ID         print one sandbox's record
 func cmdOpenCode(args []string) int {
 	if len(args) == 0 {
-		core.Print(core.Stderr(), "lthn opencode: missing verb (start / stop / status / inspect / profile / merge-host-config / providers)\n")
+		core.Print(core.Stderr(), "lthn opencode: missing verb (start / stop / status / inspect / profile / merge-host-config / providers / enable / disable / enabled)\n")
 		return 2
 	}
 	switch args[0] {
@@ -45,6 +45,12 @@ func cmdOpenCode(args []string) int {
 		return opencodeMergeHostConfig(args[1:])
 	case "providers":
 		return opencodeProviders(args[1:])
+	case "enable":
+		return opencodeEnable(args[1:])
+	case "disable":
+		return opencodeDisable()
+	case "enabled":
+		return opencodeEnabled()
 	default:
 		core.Print(core.Stderr(), "lthn opencode: unknown verb %q\n", args[0])
 		return 2
@@ -56,6 +62,9 @@ const (
 	opencodeBase           = "http://localhost:8000/v1/api/opencode/sandbox"
 	opencodeProfBase       = "http://localhost:8000/v1/api/opencode/profile"
 	opencodeHostConfigBase = "http://localhost:8000/v1/api/opencode/host-config"
+	opencodeEnableBase     = "http://localhost:8000/v1/api/opencode/enable"
+	opencodeDisableBase    = "http://localhost:8000/v1/api/opencode/disable"
+	opencodeEnabledBase    = "http://localhost:8000/v1/api/opencode/enabled"
 )
 
 // httpClient is the shared client for control calls. Generous timeout —
@@ -336,6 +345,78 @@ func opencodeProviders(args []string) int {
 	}
 	if code != http.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode providers: HTTP %d — %s\n", code, body)
+		return 1
+	}
+	core.Print(core.Stdout(), "%s\n", body)
+	return 0
+}
+
+// opencodeEnable persists `opencode.serve.enabled = true` + spawns
+// a sandbox if none is running. Idempotent.
+//
+// Usage example:
+//
+//	lthn opencode enable                # default profile
+//	lthn opencode enable --profile code-review
+func opencodeEnable(args []string) int {
+	profile := ""
+	for i := 0; i < len(args); i++ {
+		k, v, valid := core.ParseFlag(args[i])
+		if !valid {
+			continue
+		}
+		if k == "profile" {
+			if v == "" && i+1 < len(args) {
+				i++
+				v = args[i]
+			}
+			profile = v
+		}
+	}
+	payload := core.JSONMarshalString(map[string]string{"profile": profile})
+	req, _ := http.NewRequest(http.MethodPost, opencodeEnableBase, strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	body, code, err := doRequest(req)
+	if err != nil {
+		core.Print(core.Stderr(), "lthn opencode enable: %s\n", err)
+		core.Print(core.Stderr(), "hint: is `lthn serve` running on :8000?\n")
+		return 1
+	}
+	if code != http.StatusOK {
+		core.Print(core.Stderr(), "lthn opencode enable: HTTP %d — %s\n", code, body)
+		return 1
+	}
+	core.Print(core.Stdout(), "%s\n", body)
+	return 0
+}
+
+// opencodeDisable persists `opencode.serve.enabled = false` + stops
+// any running sandboxes.
+func opencodeDisable() int {
+	req, _ := http.NewRequest(http.MethodPost, opencodeDisableBase, nil)
+	body, code, err := doRequest(req)
+	if err != nil {
+		core.Print(core.Stderr(), "lthn opencode disable: %s\n", err)
+		return 1
+	}
+	if code != http.StatusOK {
+		core.Print(core.Stderr(), "lthn opencode disable: HTTP %d — %s\n", code, body)
+		return 1
+	}
+	core.Print(core.Stdout(), "%s\n", body)
+	return 0
+}
+
+// opencodeEnabled prints the persisted enabled flag.
+func opencodeEnabled() int {
+	req, _ := http.NewRequest(http.MethodGet, opencodeEnabledBase, nil)
+	body, code, err := doRequest(req)
+	if err != nil {
+		core.Print(core.Stderr(), "lthn opencode enabled: %s\n", err)
+		return 1
+	}
+	if code != http.StatusOK {
+		core.Print(core.Stderr(), "lthn opencode enabled: HTTP %d — %s\n", code, body)
 		return 1
 	}
 	core.Print(core.Stdout(), "%s\n", body)

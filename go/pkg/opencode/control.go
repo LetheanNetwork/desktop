@@ -60,6 +60,45 @@ func (g *ControlGroup) RegisterRoutes(rg *gin.RouterGroup) {
 	// opencode-serve's /provider response for the named sandbox.
 	// Fleet → Agents renders cards from this.
 	rg.GET("/sandbox/:id/providers", g.providerList)
+
+	// Enable / Disable — RFC.opencode.md §4.3 + §7. Persist the
+	// "should opencode-serve be running" flag + drive lifecycle.
+	rg.POST("/enable", g.enable)
+	rg.POST("/disable", g.disable)
+	rg.GET("/enabled", g.enabled)
+}
+
+// enable POST /v1/api/opencode/enable → persists the enabled flag
+// + spawns a sandbox if none is running. Optional body {profile}.
+func (g *ControlGroup) enable(c *gin.Context) {
+	var req struct {
+		Profile string `json:"profile"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	r := g.svc.Enable(req.Profile)
+	if !r.OK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		return
+	}
+	id, _ := r.Value.(string)
+	c.JSON(http.StatusOK, gin.H{"id": id, "enabled": true})
+}
+
+// disable POST /v1/api/opencode/disable → persists the disabled
+// flag + stops any running sandboxes.
+func (g *ControlGroup) disable(c *gin.Context) {
+	r := g.svc.Disable()
+	if !r.OK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"enabled": false})
+}
+
+// enabled GET /v1/api/opencode/enabled → returns the persisted
+// flag. Cheap — no upstream call.
+func (g *ControlGroup) enabled(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"enabled": g.svc.IsEnabled()})
 }
 
 // providerList GET /v1/api/opencode/sandbox/:id/providers → returns
