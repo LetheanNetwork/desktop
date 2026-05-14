@@ -54,14 +54,11 @@ class LthnProvidersWindow extends LitElement {
 
   private renderProviderCard(p: ServiceProvider) {
     const isExternal = p.status === "external";
-    const isComingSoon = p.status === "coming-soon";
     const isLive = p.status === "live";
 
     const statusPill = isLive
       ? html`<lthn-state-pill variant="ok">integrated</lthn-state-pill>`
-      : isComingSoon
-        ? html`<lthn-state-pill variant="preview">coming soon</lthn-state-pill>`
-        : nothing;
+      : nothing;
 
     const partyPill = p.firstParty
       ? html`<lthn-state-pill variant="latest">Lethean</lthn-state-pill>`
@@ -129,9 +126,6 @@ class LthnProvidersWindow extends LitElement {
               </a>
             `
             : nothing}
-          ${isComingSoon
-            ? html`<span style="font-size:10.5px; color:var(--fg-3);">surface lands in a follow-up</span>`
-            : nothing}
           <div style="flex:1"></div>
           ${p.affiliate
             ? html`
@@ -175,7 +169,7 @@ class LthnProvidersWindow extends LitElement {
     // Order of sections — VPS first (the Provision Remote target),
     // then infra, then first-party services + marketplace.
     const order: ProviderCategory[] = [
-      "vps", "cdn", "dns", "ssl", "comms", "analytics", "marketplace",
+      "vps", "services", "marketplace",
     ];
 
     const body = html`

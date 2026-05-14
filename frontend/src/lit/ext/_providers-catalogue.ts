@@ -17,17 +17,12 @@
 
 export type ProviderCategory =
   | "vps"          // virtual servers — where Provision Remote sends users
-  | "cdn"          // content delivery
-  | "dns"          // domain + DNS
-  | "ssl"          // certificates
-  | "marketplace"  // first-party apps (CoreAgent, etc.)
-  | "comms"        // social / push / messaging surfaces
-  | "analytics";   // tracking / observability
+  | "services"     // first-party Lethean SaaS bundle — host.uk.com/services/*
+  | "marketplace"; // first-party apps (CoreAgent, etc.)
 
 export type ProviderStatus =
-  | "live"         // integrated + working
-  | "coming-soon"  // surface exists, integration in flight
-  | "external";    // link-only, no integration (yet)
+  | "live"         // first-party product running; or third-party we integrate
+  | "external";    // link-only redirect (e.g. VPS affiliate row)
 
 export interface ServiceProvider {
   id:        string;          // stable slug — matches ref.lthn.ai path
@@ -58,49 +53,59 @@ export const PROVIDERS: ServiceProvider[] = [
     blurb: "Wide region coverage including odd corners — Mumbai, Tel Aviv, Seoul.",
   },
 
-  // --- CDN / DNS / SSL — third-party integrations ---
+  // --- First-party Lethean SaaS bundle (host.uk.com/services/*) ---
+  // Each ships with both an MCP surface (consumed by Lethean Desktop for
+  // project data) and a direct REST API (consumed by the user's own apps).
   {
-    id: "cdn/bunny", name: "BunnyCDN", category: "cdn",
-    status: "live", icon: "fa-rabbit", affiliate: false, firstParty: false,
-    blurb: "Edge CDN we integrate against for hosted-app delivery.",
+    id: "services/social", name: "Social", category: "services",
+    status: "live", icon: "fa-share-nodes", affiliate: false, firstParty: true,
+    blurb: "Agency-grade multi-platform social posting + scheduling from one panel — cheap, API-first. social.host.uk.com.",
   },
   {
-    id: "dns/cloudns", name: "ClouDNS", category: "dns",
-    status: "live", icon: "fa-cloud", affiliate: false, firstParty: false,
-    blurb: "Programmable DNS — what we drive when you point a domain at a Lethean app.",
+    id: "services/bio", name: "Bio", category: "services",
+    status: "live", icon: "fa-link", affiliate: false, firstParty: true,
+    blurb: "Link-in-bio pages, custom domains, attribution-tracked CTAs. link.host.uk.com.",
   },
   {
-    id: "ssl/gogetssl", name: "GoGetSSL", category: "ssl",
-    status: "live", icon: "fa-lock", affiliate: false, firstParty: false,
-    blurb: "Cheap commercial SSL when Let's Encrypt isn't enough.",
-  },
-
-  // --- First-party HostUK / Lethean services ---
-  {
-    id: "comms/social", name: "Social", category: "comms",
-    status: "coming-soon", icon: "fa-share-nodes", affiliate: false, firstParty: true,
-    blurb: "Social-media posting, scheduling, multi-account from one panel. social.host.uk.com.",
+    id: "services/mail", name: "Mail", category: "services",
+    status: "live", icon: "fa-envelope", affiliate: false, firstParty: true,
+    blurb: "Transactional + marketing email, SMTP relay, deliverability monitoring. mail.host.uk.com.",
   },
   {
-    id: "analytics/track", name: "Analytics", category: "analytics",
-    status: "coming-soon", icon: "fa-chart-line", affiliate: false, firstParty: true,
+    id: "services/notify", name: "Notify", category: "services",
+    status: "live", icon: "fa-bell", affiliate: false, firstParty: true,
+    blurb: "Web push, in-app, and broadcast notifications for your sites and apps. notify.host.uk.com.",
+  },
+  {
+    id: "services/trust", name: "Trust", category: "services",
+    status: "live", icon: "fa-handshake", affiliate: false, firstParty: true,
+    blurb: "Social proof + FOMO campaigns — recent-activity tickers, scarcity, credibility signals. trust.host.uk.com.",
+  },
+  {
+    id: "services/analytics", name: "Analytics", category: "services",
+    status: "live", icon: "fa-chart-line", affiliate: false, firstParty: true,
     blurb: "Privacy-respecting web + app analytics. analytics.host.uk.com.",
   },
   {
-    id: "comms/push", name: "Push & FOMO", category: "comms",
-    status: "coming-soon", icon: "fa-bell", affiliate: false, firstParty: true,
-    blurb: "Web push notifications + FOMO campaign primitives for your apps.",
+    id: "services/dns", name: "DNS", category: "services",
+    status: "live", icon: "fa-globe", affiliate: false, firstParty: true,
+    blurb: "$9.99/yr per zone — DNS hosting, API, control panel, dynamic DNS, free Lethean subdomain. dns.host.uk.com.",
+  },
+  {
+    id: "services/ssl", name: "SSL", category: "services",
+    status: "live", icon: "fa-certificate", affiliate: false, firstParty: true,
+    blurb: "IP SAN certs from $25/yr, multi-domain SAN bundles, OV/EV options. ssl.host.uk.com.",
   },
 
   // --- Marketplace apps (first-party) ---
   {
-    id: "marketplace/coreagent", name: "CoreAgent", category: "marketplace",
-    status: "coming-soon", icon: "fa-user-astronaut", affiliate: false, firstParty: true,
-    blurb: "Headless agent runtime — runs on any paired machine, takes work from the fleet.",
+    id: "marketplace/agentic", name: "Agentic", category: "marketplace",
+    status: "live", icon: "fa-user-astronaut", affiliate: false, firstParty: true,
+    blurb: "Hand-holding automation — scheduled jobs, event-driven workflows, agent orchestration. Open-source. lthn.sh.",
   },
   {
     id: "marketplace/lthn-agent", name: "Lethean Agent", category: "marketplace",
-    status: "coming-soon", icon: "fa-shield-halved", affiliate: false, firstParty: true,
+    status: "live", icon: "fa-shield-halved", affiliate: false, firstParty: true,
     blurb: "Bastion-ready agent binary. SSH-installed by Provision Remote.",
   },
 ];
@@ -130,20 +135,12 @@ export function vpsProviders(): ServiceProvider[] {
 
 export const CATEGORY_LABELS: Record<ProviderCategory, string> = {
   vps:         "Virtual servers",
-  cdn:         "Content delivery",
-  dns:         "DNS & domains",
-  ssl:         "Certificates",
+  services:    "Lethean services",
   marketplace: "Lethean apps",
-  comms:       "Communications",
-  analytics:   "Analytics",
 };
 
 export const CATEGORY_BLURBS: Record<ProviderCategory, string> = {
   vps:         "Where Provision Remote sends your fleet expansion.",
-  cdn:         "Edge delivery we drive for hosted Lethean apps.",
-  dns:         "Programmable DNS for domain routing.",
-  ssl:         "Cheap commercial certs when Let's Encrypt isn't the right fit.",
+  services:    "First-party Lethean SaaS — API-first, MCP-integrated, composable into your own projects.",
   marketplace: "First-party Lethean apps you can install on the fleet.",
-  comms:       "Social posting, push notifications, campaign primitives.",
-  analytics:   "Privacy-respecting tracking for your apps and sites.",
 };
