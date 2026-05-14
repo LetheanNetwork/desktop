@@ -110,6 +110,14 @@ type Options struct {
 	// TracingName enables OpenTelemetry tracing under the given
 	// service name when non-empty. "" means tracing is off.
 	TracingName string
+
+	// ExtraGroups are coreapi.RouteGroup implementations to register
+	// onto the engine before its Handler is materialised. Required
+	// for late registrations (e.g. plugin proxy, opencode proxy +
+	// control) since Engine.Handler() snapshots the route tree at
+	// construction time — appending groups after NewService has
+	// no effect on the live http.Server.
+	ExtraGroups []coreapi.RouteGroup
 }
 
 // Service is the HTTP API subsystem. Wraps a *coreapi.Engine so the
@@ -188,6 +196,9 @@ func NewService(opts Options) *Service {
 	engine, _ := coreapi.New(apiOpts...) // current New always returns nil err
 	s := &Service{opts: opts, engine: engine}
 	engine.Register(newLthnRoutes(s))
+	for _, g := range opts.ExtraGroups {
+		engine.Register(g)
+	}
 	s.http = &http.Server{Addr: opts.Addr, Handler: engine.Handler()}
 	return s
 }

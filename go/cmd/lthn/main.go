@@ -27,11 +27,14 @@ package main
 
 import (
 	core "dappco.re/go"
+	coreapi "dappco.re/go/api"
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/desktop"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/lthn/desktop/pkg/opencode"
+	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
 	"golang.org/x/term"
@@ -86,6 +89,8 @@ func main() {
 		core.Exit(cmdAPI(args[1:]))
 	case "fleet":
 		core.Exit(cmdFleet(args[1:]))
+	case "opencode":
+		core.Exit(cmdOpenCode(args[1:]))
 	default:
 		core.Print(core.Stderr(), "lthn: unknown subcommand %q\nrun `lthn help` for available commands\n", args[0])
 		core.Exit(2)
@@ -322,11 +327,22 @@ func cmdServe(args []string) int {
 		return 1
 	}
 	key, _ := keyR.Value.(string)
+	// Build the ExtraGroups slice before NewService — engine.Handler()
+	// snapshots routes at construction time, so late .Engine().Register
+	// calls don't reach the live http.Server.
+	var extras []coreapi.RouteGroup
+	if opencodeSvc, _ := core.ServiceFor[*opencode.Service](c, "opencode"); opencodeSvc != nil {
+		extras = append(extras, opencodeSvc.ProxyGroup(), opencode.NewControlGroup(opencodeSvc))
+	}
+	if pluginSvc, _ := core.ServiceFor[*plugin.Service](c, "plugin"); pluginSvc != nil {
+		extras = append(extras, pluginSvc.ProxyGroup())
+	}
 	s := server.NewService(server.Options{
-		Addr:     core.Concat(":", port),
-		Runner:   r,
-		LocalKey: key,
-		Brand:    server.Brand{Version: firstlaunch.Version},
+		Addr:        core.Concat(":", port),
+		Runner:      r,
+		LocalKey:    key,
+		Brand:       server.Brand{Version: firstlaunch.Version},
+		ExtraGroups: extras,
 	})
 	if rr := s.Register(c); !rr.OK {
 		core.Print(core.Stderr(), serveErrorFormat, rr.Error())

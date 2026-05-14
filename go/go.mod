@@ -12,7 +12,6 @@ require (
 	dappco.re/go/io v0.9.0
 	dappco.re/go/scm v0.8.0-alpha.1
 	github.com/gin-gonic/gin v1.12.0
-	github.com/leaanthony/u v1.1.1
 	github.com/wailsapp/wails/v3 v3.0.0-alpha.91
 	golang.org/x/term v0.42.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -20,10 +19,9 @@ require (
 
 require (
 	dappco.re/go/core v0.8.0-alpha.1 // indirect
-	dappco.re/go/log v0.8.0-alpha.1 // indirect
+	dappco.re/go/log v0.9.0 // indirect
 	dappco.re/go/rag v0.8.0-alpha.1 // indirect
 	dario.cat/mergo v1.0.2 // indirect
-	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
 	github.com/99designs/gqlgen v0.17.88 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -100,6 +98,7 @@ require (
 	github.com/kevinburke/ssh_config v1.4.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/leaanthony/go-ansi-parser v1.6.1 // indirect
+	github.com/leaanthony/u v1.1.1 // indirect
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/lmittmann/tint v1.1.2 // indirect
@@ -146,7 +145,6 @@ require (
 	golang.org/x/arch v0.25.0 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90 // indirect
-	golang.org/x/image v0.35.0 // indirect
 	golang.org/x/mod v0.34.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect

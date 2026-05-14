@@ -11,11 +11,13 @@ import (
 	"dappco.re/go/i18n"
 	"dappco.re/go/io"
 	"dappco.re/go/mcp/pkg/mcp"
+	"dappco.re/go/orm"
 	"dappco.re/go/process"
 	"dappco.re/go/store"
 	"dappco.re/go/stream"
 	"dappco.re/lthn/desktop/pkg/bridge"
 	lthni18n "dappco.re/lthn/desktop/pkg/i18n"
+	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/sandbox"
@@ -118,11 +120,39 @@ func newAppCore() *core.Core {
 		// (AppleProvider) or runtime CLI (docker/podman). Proof-of-life
 		// today: Spawn() runs a one-shot command and returns stdout.
 		core.WithName("sandbox", sandbox.NewService(sandbox.Options{})),
+		// opencode — long-running opencode-serve containers (one per
+		// sandbox-id), reachable via the reverse-proxy mount at
+		// /v1/api/sandbox/<id>/*. Container lifecycle via go-process
+		// + docker; persistence via dappco.re/go/orm (typed Sandbox
+		// record). ProxyGroup is registered with the api.Engine in
+		// pkg/desktop/subsystems.go alongside the plugin proxy.
+		core.WithName("opencode", opencode.NewService(opencode.Options{})),
 	)
 
 	if r := c.ServiceStartup(context.Background(), nil); !r.OK {
 		core.Print(core.Stderr(), "lthn: startup failed: %s\n", r.Error())
 		return nil
 	}
+
+	// orm bootstrap — lib not service. Register + mount the default
+	// Memium + register schemas for every subsystem that uses orm-backed
+	// records. Pattern mirrors core/ide's pkg/server/orm_init.go.
+	if r := orm.Register(c); !r.OK {
+		core.Print(core.Stderr(), "lthn: orm register failed: %s\n", r.Error())
+		return nil
+	}
+	memium := orm.NewMemium()
+	if r := orm.Mount(c, "default", memium); !r.OK {
+		core.Print(core.Stderr(), "lthn: orm mount failed: %s\n", r.Error())
+		return nil
+	}
+	for _, schema := range []orm.Schema{opencode.Sandbox{}.Schema()} {
+		if r := orm.RegisterSchema(c, schema); !r.OK {
+			core.Print(core.Stderr(), "lthn: orm schema %s failed: %s\n", schema.Name, r.Error())
+			return nil
+		}
+		memium.RegisterTable(schema.Name, schema)
+	}
+
 	return c
 }

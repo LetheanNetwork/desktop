@@ -62,3 +62,12 @@
 	path = external/gui
 	url = https://github.com/dappcore/gui.git
 	branch = dev
+[submodule "external/borg"]
+	path = external/borg
+	url = https://forge.lthn.ai/Snider/Borg.git
+[submodule "external/enchantrix"]
+	path = external/enchantrix
+	url = https://forge.lthn.ai/Snider/Enchantrix.git
+[submodule "external/poindexter"]
+	path = external/poindexter
+	url = https://forge.lthn.ai/Snider/Poindexter.git

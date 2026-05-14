@@ -34,6 +34,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	lthnapi "dappco.re/lthn/desktop/pkg/api"
+	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/runner"
 )
@@ -117,6 +118,16 @@ func mountSubsystems(c *core.Core, engine *coreapi.Engine, r *runner.Service) co
 	// docs/plugin-host-scope.md for the contract.
 	if pluginSvc, ok := core.ServiceFor[*plugin.Service](c, "plugin"); ok && pluginSvc != nil {
 		engine.Register(pluginSvc.ProxyGroup())
+	}
+
+	// opencode — reverse-proxy mount under /v1/api/sandbox/<id>/*.
+	// Same shape as the plugin proxy: one RouteGroup registered
+	// once; the opencode service mutates the targets map on
+	// Start/Stop. The container sees clean paths (/global/health,
+	// /session, /provider) because the proxy strips the sandbox-id
+	// prefix entirely. See plans/project/lthn/desktop/RFC.opencode.md.
+	if opencodeSvc, ok := core.ServiceFor[*opencode.Service](c, "opencode"); ok && opencodeSvc != nil {
+		engine.Register(opencodeSvc.ProxyGroup())
 	}
 
 	return core.Ok(nil)
