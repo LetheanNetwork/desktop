@@ -88,8 +88,9 @@ type Profile struct {
 // Users / tasks layer narrower profiles on top via SaveProfile.
 func DefaultLthnProfile() Profile {
 	return Profile{
-		Name:        DefaultProfile,
-		Description: "Baseline — local lthn runner only; opt into other providers per task.",
+		Name: DefaultProfile,
+		Description: "Baseline — local lthn runner; full tools + permissions inside the sandbox " +
+			"(the container is the safety boundary, not the permission system).",
 		Provider: map[string]any{
 			"lthn": map[string]any{
 				"npm":  "@ai-sdk/openai-compatible",
@@ -105,6 +106,23 @@ func DefaultLthnProfile() Profile {
 			},
 		},
 		EnabledProviders: []string{"lthn"},
+		// All tools enabled — the sandbox isolates the host from
+		// whatever the agent does inside.
+		Tools: map[string]bool{
+			"bash":     true,
+			"edit":     true,
+			"webfetch": true,
+		},
+		// All permissions auto-allow — there's no operator-in-the-loop
+		// inside the sandbox; "ask" stalls non-interactive workflows.
+		// Tasks that want stricter behaviour ship their own profile.
+		Permission: map[string]any{
+			"bash":               "allow",
+			"edit":               "allow",
+			"webfetch":           "allow",
+			"doom_loop":          "allow",
+			"external_directory": "allow",
+		},
 	}
 }
 
