@@ -24,7 +24,8 @@ import (
 	"time"
 
 	core "dappco.re/go"
-	"github.com/wailsapp/wails/v3/pkg/application"
+	guiscreen "dappco.re/go/gui/pkg/screen"
+	guiwindow "dappco.re/go/gui/pkg/window"
 )
 
 // WindowState is the serialised shape of one window in a layout.
@@ -61,30 +62,25 @@ func layoutsRoot() core.Result {
 	return core.Ok(core.PathJoin(homeDir, "Lethean", "conf", "layouts"))
 }
 
-// captureLayout snapshots every Wails-registered window into a Layout.
+// captureLayout snapshots every core/gui-registered window into a Layout.
 func (s *Service) captureLayout(name string) (*Layout, map[string]any) {
-	app := s.app()
-	if app == nil {
-		return nil, map[string]any{"ok": false, "error": wailsAppUnavailable}
+	all, errResp := s.coreGUIWindowList()
+	if errResp != nil {
+		return nil, errResp
 	}
-	all := app.Window.GetAll()
 	out := make([]WindowState, 0, len(all))
-	for _, w := range all {
-		wv, ok := w.(*application.WebviewWindow)
-		if !ok || wv == nil {
-			continue
-		}
-		x, y := wv.Position()
-		ww, hh := wv.Size()
+	for _, info := range all {
+		// TODO(snider): core/gui needs visibility/fullscreen/always-on-top
+		// in WindowInfo so lthn layout snapshots can preserve those fields
+		// without direct Wails access.
 		out = append(out, WindowState{
-			Name:       wv.Name(),
-			X:          x,
-			Y:          y,
-			Width:      ww,
-			Height:     hh,
-			Visible:    wv.IsVisible(),
-			Maximised:  wv.IsMaximised(),
-			Fullscreen: wv.IsFullscreen(),
+			Name:      info.Name,
+			X:         info.X,
+			Y:         info.Y,
+			Width:     info.Width,
+			Height:    info.Height,
+			Visible:   true,
+			Maximised: info.Maximized,
 		})
 	}
 	return &Layout{
@@ -94,24 +90,21 @@ func (s *Service) captureLayout(name string) (*Layout, map[string]any) {
 	}, nil
 }
 
-// applyLayout reads a Layout and pushes each WindowState onto the
-// matching Wails window. Windows in the layout that no longer exist
+// applyLayout reads a Layout and pushes each WindowState through the
+// core/gui window framework. Windows in the layout that no longer exist
 // are skipped; windows present today but absent from the layout are
 // left alone.
 func (s *Service) applyLayout(layout *Layout) map[string]any {
-	app := s.app()
-	if app == nil {
-		return map[string]any{"ok": false, "error": wailsAppUnavailable}
-	}
 	applied := 0
 	skipped := 0
 	for _, ws := range layout.Windows {
-		wv, ok := webviewByName(app, ws.Name)
-		if !ok {
+		if _, errResp := s.coreGUIWindowInfo(ws.Name); errResp != nil {
 			skipped++
 			continue
 		}
-		applyWindowState(wv, ws)
+		if errResp := s.applyWindowState(ws); errResp != nil {
+			return errResp
+		}
 		applied++
 	}
 	return map[string]any{
@@ -122,43 +115,37 @@ func (s *Service) applyLayout(layout *Layout) map[string]any {
 	}
 }
 
-func webviewByName(app *application.App, name string) (*application.WebviewWindow, bool) {
-	if app == nil {
-		return nil, false
+func (s *Service) applyWindowState(ws WindowState) map[string]any {
+	// Order matters: restore + leave fullscreen first so SetBounds lands in
+	// the right frame; the saved state then re-applies chrome flags.
+	if errResp := s.runCoreGUIWindowTask("window.restore", guiwindow.TaskRestore{Name: ws.Name}); errResp != nil {
+		return errResp
 	}
-	w, ok := app.Window.GetByName(name)
-	if !ok || w == nil {
-		return nil, false
+	if errResp := s.runCoreGUIWindowTask("window.fullscreen", guiwindow.TaskFullscreen{Name: ws.Name, Fullscreen: false}); errResp != nil {
+		return errResp
 	}
-	wv, ok := w.(*application.WebviewWindow)
-	return wv, ok && wv != nil
-}
-
-func applyWindowState(wv *application.WebviewWindow, ws WindowState) {
-	// Order matters: unmaximise + unfullscreen FIRST so SetPosition + SetSize land in
-	// the right frame; the saved state then re-applies the chrome flags.
-	if wv.IsMaximised() {
-		wv.UnMaximise()
+	if errResp := s.runCoreGUIWindowTask("window.set_bounds", guiwindow.TaskSetBounds{Name: ws.Name, X: ws.X, Y: ws.Y, Width: ws.Width, Height: ws.Height}); errResp != nil {
+		return errResp
 	}
-	if wv.IsFullscreen() {
-		wv.UnFullscreen()
-	}
-	wv.SetPosition(ws.X, ws.Y)
-	wv.SetSize(ws.Width, ws.Height)
-	if ws.Visible {
-		wv.Show()
-	} else {
-		wv.Hide()
+	if errResp := s.runCoreGUIWindowTask("window.set_visibility", guiwindow.TaskSetVisibility{Name: ws.Name, Visible: ws.Visible}); errResp != nil {
+		return errResp
 	}
 	if ws.Maximised {
-		wv.Maximise()
+		if errResp := s.runCoreGUIWindowTask("window.maximise", guiwindow.TaskMaximise{Name: ws.Name}); errResp != nil {
+			return errResp
+		}
 	}
 	if ws.Fullscreen {
-		wv.Fullscreen()
+		if errResp := s.runCoreGUIWindowTask("window.fullscreen", guiwindow.TaskFullscreen{Name: ws.Name, Fullscreen: true}); errResp != nil {
+			return errResp
+		}
 	}
 	if ws.AlwaysOnTop {
-		wv.SetAlwaysOnTop(true)
+		if errResp := s.runCoreGUIWindowTask("window.set_always_on_top", guiwindow.TaskSetAlwaysOnTop{Name: ws.Name, AlwaysOnTop: true}); errResp != nil {
+			return errResp
+		}
 	}
+	return nil
 }
 
 // toolLayoutSave snapshots current window state to disk under the
@@ -285,73 +272,77 @@ func (s *Service) toolLayoutDelete(params map[string]any) map[string]any {
 // Returns x, y, width, height of the usable region (excludes dock /
 // menubar).
 func (s *Service) activeWorkArea(name string) (int, int, int, int, map[string]any) {
-	app := s.app()
-	if app == nil {
-		return 0, 0, 0, 0, map[string]any{"ok": false, "error": wailsAppUnavailable}
-	}
-	if x, y, w, h, ok := windowScreenWorkArea(app, name); ok {
+	if x, y, w, h, ok := s.windowScreenWorkArea(name); ok {
 		return x, y, w, h, nil
 	}
-	if app.Screen == nil {
-		return 0, 0, 0, 0, map[string]any{"ok": false, "error": screenManagerUnavailable}
+	r := s.Core().QUERY(guiscreen.QueryPrimary{})
+	if !r.OK {
+		return 0, 0, 0, 0, map[string]any{"ok": false, "error": r.Error()}
 	}
-	sc := app.Screen.GetPrimary()
+	sc, _ := r.Value.(*guiscreen.Screen)
 	if sc == nil {
 		return 0, 0, 0, 0, map[string]any{"ok": false, "error": "no primary screen"}
 	}
 	return sc.WorkArea.X, sc.WorkArea.Y, sc.WorkArea.Width, sc.WorkArea.Height, nil
 }
 
-func windowScreenWorkArea(app *application.App, name string) (int, int, int, int, bool) {
+func (s *Service) windowScreenWorkArea(name string) (int, int, int, int, bool) {
 	if name == "" {
 		return 0, 0, 0, 0, false
 	}
-	wv, ok := webviewByName(app, name)
-	if !ok {
+	info, errResp := s.coreGUIWindowInfo(name)
+	if errResp != nil {
 		return 0, 0, 0, 0, false
 	}
-	sc, err := wv.GetScreen()
-	if err != nil || sc == nil {
+	r := s.Core().QUERY(guiscreen.QueryAtPoint{
+		X: info.X + info.Width/2,
+		Y: info.Y + info.Height/2,
+	})
+	if !r.OK {
+		return 0, 0, 0, 0, false
+	}
+	sc, _ := r.Value.(*guiscreen.Screen)
+	if sc == nil {
 		return 0, 0, 0, 0, false
 	}
 	return sc.WorkArea.X, sc.WorkArea.Y, sc.WorkArea.Width, sc.WorkArea.Height, true
 }
 
 // pickWindows resolves a "windows" param (string array of names)
-// into a list of WebviewWindows. Empty/missing → every visible
-// window currently registered. Caller decides what to do with the
-// returned slice.
-func (s *Service) pickWindows(params map[string]any) ([]*application.WebviewWindow, map[string]any) {
-	app := s.app()
-	if app == nil {
-		return nil, map[string]any{"ok": false, "error": wailsAppUnavailable}
-	}
+// into a list of core/gui window names. Empty/missing resolves to every
+// registered window because core/gui does not expose visibility yet.
+func (s *Service) pickWindows(params map[string]any) ([]string, map[string]any) {
 	names := stringSliceParam(params, "windows")
 	if len(names) == 0 {
-		return visibleWebviewWindows(app), nil
+		all, errResp := s.coreGUIWindowList()
+		if errResp != nil {
+			return nil, errResp
+		}
+		out := make([]string, 0, len(all))
+		for _, info := range all {
+			out = append(out, info.Name)
+		}
+		return out, nil
 	}
-	return namedWebviewWindows(app, names), nil
-}
-
-func visibleWebviewWindows(app *application.App) []*application.WebviewWindow {
-	out := []*application.WebviewWindow{}
-	for _, w := range app.Window.GetAll() {
-		wv, ok := w.(*application.WebviewWindow)
-		if ok && wv != nil && wv.IsVisible() {
-			out = append(out, wv)
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if _, errResp := s.coreGUIWindowInfo(name); errResp == nil {
+			out = append(out, name)
 		}
 	}
-	return out
+	return out, nil
 }
 
-func namedWebviewWindows(app *application.App, names []string) []*application.WebviewWindow {
-	out := []*application.WebviewWindow{}
-	for _, n := range names {
-		if wv, ok := webviewByName(app, n); ok {
-			out = append(out, wv)
-		}
-	}
-	return out
+func (s *Service) setLayoutWindowBounds(name string, x, y, w, h int) map[string]any {
+	return s.runCoreGUIWindowTask("window.set_bounds", guiwindow.TaskSetBounds{Name: name, X: x, Y: y, Width: w, Height: h})
+}
+
+func (s *Service) setLayoutWindowVisibility(name string, visible bool) map[string]any {
+	return s.runCoreGUIWindowTask("window.set_visibility", guiwindow.TaskSetVisibility{Name: name, Visible: visible})
+}
+
+func (s *Service) focusLayoutWindow(name string) map[string]any {
+	return s.runCoreGUIWindowTask("window.focus", guiwindow.TaskFocus{Name: name})
 }
 
 // toolLayoutTile places windows into a tiled grid. modes:
@@ -374,55 +365,65 @@ func (s *Service) toolLayoutTile(params map[string]any) map[string]any {
 	if len(wins) == 0 {
 		return map[string]any{"ok": false, "error": "no windows to tile"}
 	}
-	x, y, w, h, errResp := s.activeWorkArea(wins[0].Name())
+	x, y, w, h, errResp := s.activeWorkArea(wins[0])
 	if errResp != nil {
 		return errResp
 	}
 	applied := 0
 	switch mode {
 	case "left":
-		wins[0].SetPosition(x, y)
-		wins[0].SetSize(w/2, h)
+		if errResp := s.setLayoutWindowBounds(wins[0], x, y, w/2, h); errResp != nil {
+			return errResp
+		}
 		applied = 1
 	case "right":
-		wins[0].SetPosition(x+w/2, y)
-		wins[0].SetSize(w/2, h)
+		if errResp := s.setLayoutWindowBounds(wins[0], x+w/2, y, w/2, h); errResp != nil {
+			return errResp
+		}
 		applied = 1
 	case "top":
-		wins[0].SetPosition(x, y)
-		wins[0].SetSize(w, h/2)
+		if errResp := s.setLayoutWindowBounds(wins[0], x, y, w, h/2); errResp != nil {
+			return errResp
+		}
 		applied = 1
 	case "bottom":
-		wins[0].SetPosition(x, y+h/2)
-		wins[0].SetSize(w, h/2)
+		if errResp := s.setLayoutWindowBounds(wins[0], x, y+h/2, w, h/2); errResp != nil {
+			return errResp
+		}
 		applied = 1
 	case "halves":
 		if len(wins) < 2 {
 			return map[string]any{"ok": false, "error": "halves needs >= 2 windows"}
 		}
-		wins[0].SetPosition(x, y)
-		wins[0].SetSize(w/2, h)
-		wins[1].SetPosition(x+w/2, y)
-		wins[1].SetSize(w/2, h)
+		if errResp := s.setLayoutWindowBounds(wins[0], x, y, w/2, h); errResp != nil {
+			return errResp
+		}
+		if errResp := s.setLayoutWindowBounds(wins[1], x+w/2, y, w/2, h); errResp != nil {
+			return errResp
+		}
 		applied = 2
 	case "thirds":
 		if len(wins) < 3 {
 			return map[string]any{"ok": false, "error": "thirds needs >= 3 windows"}
 		}
 		third := w / 3
-		wins[0].SetPosition(x, y)
-		wins[0].SetSize(third, h)
-		wins[1].SetPosition(x+third, y)
-		wins[1].SetSize(third, h)
-		wins[2].SetPosition(x+2*third, y)
-		wins[2].SetSize(w-2*third, h)
+		if errResp := s.setLayoutWindowBounds(wins[0], x, y, third, h); errResp != nil {
+			return errResp
+		}
+		if errResp := s.setLayoutWindowBounds(wins[1], x+third, y, third, h); errResp != nil {
+			return errResp
+		}
+		if errResp := s.setLayoutWindowBounds(wins[2], x+2*third, y, w-2*third, h); errResp != nil {
+			return errResp
+		}
 		applied = 3
 	case "quadrants":
 		spots := []struct{ cx, cy int }{{0, 0}, {1, 0}, {0, 1}, {1, 1}}
 		hw, hh := w/2, h/2
 		for i := 0; i < len(wins) && i < 4; i++ {
-			wins[i].SetPosition(x+spots[i].cx*hw, y+spots[i].cy*hh)
-			wins[i].SetSize(hw, hh)
+			if errResp := s.setLayoutWindowBounds(wins[i], x+spots[i].cx*hw, y+spots[i].cy*hh, hw, hh); errResp != nil {
+				return errResp
+			}
 			applied++
 		}
 	case "grid":
@@ -437,8 +438,9 @@ func (s *Service) toolLayoutTile(params map[string]any) map[string]any {
 		for i, wn := range wins {
 			cx := i % cols
 			cy := i / cols
-			wn.SetPosition(x+cx*cw, y+cy*ch)
-			wn.SetSize(cw, ch)
+			if errResp := s.setLayoutWindowBounds(wn, x+cx*cw, y+cy*ch, cw, ch); errResp != nil {
+				return errResp
+			}
 			applied++
 		}
 	default:
@@ -452,53 +454,47 @@ func (s *Service) toolLayoutTile(params map[string]any) map[string]any {
 // bottom-left, bottom-right, centre.
 // params: { name, position }
 func (s *Service) toolLayoutSnap(params map[string]any) map[string]any {
-	wv, errResp := s.windowOrErr(paramString(params, "name", ""))
-	if errResp != nil {
-		return errResp
+	name := paramString(params, "name", "")
+	if name == "" {
+		return map[string]any{"ok": false, "error": nameParamRequired}
 	}
 	position := core.Lower(paramString(params, "position", ""))
 	if position == "" {
 		return map[string]any{"ok": false, "error": "position param required"}
 	}
-	x, y, w, h, errResp := s.activeWorkArea(wv.Name())
+	x, y, w, h, errResp := s.activeWorkArea(name)
 	if errResp != nil {
 		return errResp
 	}
 	switch position {
 	case "left":
-		wv.SetPosition(x, y)
-		wv.SetSize(w/2, h)
+		errResp = s.setLayoutWindowBounds(name, x, y, w/2, h)
 	case "right":
-		wv.SetPosition(x+w/2, y)
-		wv.SetSize(w/2, h)
+		errResp = s.setLayoutWindowBounds(name, x+w/2, y, w/2, h)
 	case "top":
-		wv.SetPosition(x, y)
-		wv.SetSize(w, h/2)
+		errResp = s.setLayoutWindowBounds(name, x, y, w, h/2)
 	case "bottom":
-		wv.SetPosition(x, y+h/2)
-		wv.SetSize(w, h/2)
+		errResp = s.setLayoutWindowBounds(name, x, y+h/2, w, h/2)
 	case "top-left", "topleft":
-		wv.SetPosition(x, y)
-		wv.SetSize(w/2, h/2)
+		errResp = s.setLayoutWindowBounds(name, x, y, w/2, h/2)
 	case "top-right", "topright":
-		wv.SetPosition(x+w/2, y)
-		wv.SetSize(w/2, h/2)
+		errResp = s.setLayoutWindowBounds(name, x+w/2, y, w/2, h/2)
 	case "bottom-left", "bottomleft":
-		wv.SetPosition(x, y+h/2)
-		wv.SetSize(w/2, h/2)
+		errResp = s.setLayoutWindowBounds(name, x, y+h/2, w/2, h/2)
 	case "bottom-right", "bottomright":
-		wv.SetPosition(x+w/2, y+h/2)
-		wv.SetSize(w/2, h/2)
+		errResp = s.setLayoutWindowBounds(name, x+w/2, y+h/2, w/2, h/2)
 	case "centre", "center":
 		// Roughly 60% size, centred.
 		cw := w * 6 / 10
 		ch := h * 6 / 10
-		wv.SetPosition(x+(w-cw)/2, y+(h-ch)/2)
-		wv.SetSize(cw, ch)
+		errResp = s.setLayoutWindowBounds(name, x+(w-cw)/2, y+(h-ch)/2, cw, ch)
 	default:
 		return map[string]any{"ok": false, "error": "unknown position: " + position}
 	}
-	return map[string]any{"ok": true, "position": position, "name": wv.Name()}
+	if errResp != nil {
+		return errResp
+	}
+	return map[string]any{"ok": true, "position": position, "name": name}
 }
 
 // toolLayoutStack cascades windows from the screen's top-left
@@ -512,7 +508,7 @@ func (s *Service) toolLayoutStack(params map[string]any) map[string]any {
 	if len(wins) == 0 {
 		return map[string]any{"ok": false, "error": "no windows to stack"}
 	}
-	x, y, w, h, errResp := s.activeWorkArea(wins[0].Name())
+	x, y, w, h, errResp := s.activeWorkArea(wins[0])
 	if errResp != nil {
 		return errResp
 	}
@@ -520,10 +516,13 @@ func (s *Service) toolLayoutStack(params map[string]any) map[string]any {
 	offY := paramInt(params, "offsetY", 30)
 	cw := paramInt(params, "width", w*70/100)
 	ch := paramInt(params, "height", h*70/100)
-	for i, wv := range wins {
-		wv.SetPosition(x+i*offX, y+i*offY)
-		wv.SetSize(cw, ch)
-		wv.Focus() // bring each to front in cascade order
+	for i, name := range wins {
+		if errResp := s.setLayoutWindowBounds(name, x+i*offX, y+i*offY, cw, ch); errResp != nil {
+			return errResp
+		}
+		if errResp := s.focusLayoutWindow(name); errResp != nil {
+			return errResp
+		}
 	}
 	return map[string]any{"ok": true, "stacked": len(wins), "offsetX": offX, "offsetY": offY}
 }
@@ -539,73 +538,86 @@ func (s *Service) toolLayoutStack(params map[string]any) map[string]any {
 // params: { workflow, name? }
 func (s *Service) toolLayoutWorkflow(params map[string]any) map[string]any {
 	workflow := core.Lower(paramString(params, "workflow", "default"))
-	app := s.app()
-	if app == nil {
-		return map[string]any{"ok": false, "error": wailsAppUnavailable}
-	}
 	x, y, w, h, errResp := s.activeWorkArea("")
 	if errResp != nil {
 		return errResp
 	}
 	switch workflow {
 	case "default":
-		hidden := hideWorkflowWindows(app, "tray")
+		hidden, errResp := s.hideWorkflowWindows("tray")
+		if errResp != nil {
+			return errResp
+		}
 		return map[string]any{"ok": true, "workflow": "default", "hidden": hidden}
 	case "coding":
-		hideWorkflowWindows(app, "tray", "editor", "git")
-		applyWorkflowWindow(app, "editor", x, y, w*2/3, h, true)
-		applyWorkflowWindow(app, "git", x+w*2/3, y, w/3, h, true)
+		if _, errResp := s.hideWorkflowWindows("tray", "editor", "git"); errResp != nil {
+			return errResp
+		}
+		s.applyWorkflowWindow("editor", x, y, w*2/3, h, true)
+		s.applyWorkflowWindow("git", x+w*2/3, y, w/3, h, true)
 		return map[string]any{"ok": true, "workflow": "coding"}
 	case "review":
-		hideWorkflowWindows(app, "tray", "chat", "models")
-		applyWorkflowWindow(app, "chat", x, y, w/2, h, true)
-		applyWorkflowWindow(app, "models", x+w/2, y, w/2, h, true)
+		if _, errResp := s.hideWorkflowWindows("tray", "chat", "models"); errResp != nil {
+			return errResp
+		}
+		s.applyWorkflowWindow("chat", x, y, w/2, h, true)
+		s.applyWorkflowWindow("models", x+w/2, y, w/2, h, true)
 		return map[string]any{"ok": true, "workflow": "review"}
 	case "ops":
-		hideWorkflowWindows(app, "tray", "telemetry", "logs", "containers")
-		applyWorkflowWindow(app, "telemetry", x, y, w, h/2, true)
-		applyWorkflowWindow(app, "logs", x, y+h/2, w/2, h/2, true)
-		applyWorkflowWindow(app, "containers", x+w/2, y+h/2, w/2, h/2, true)
+		if _, errResp := s.hideWorkflowWindows("tray", "telemetry", "logs", "containers"); errResp != nil {
+			return errResp
+		}
+		s.applyWorkflowWindow("telemetry", x, y, w, h/2, true)
+		s.applyWorkflowWindow("logs", x, y+h/2, w/2, h/2, true)
+		s.applyWorkflowWindow("containers", x+w/2, y+h/2, w/2, h/2, true)
 		return map[string]any{"ok": true, "workflow": "ops"}
 	case "single":
 		name := paramString(params, "name", "")
 		if name == "" {
 			return map[string]any{"ok": false, "error": "single workflow needs a name param"}
 		}
-		hideWorkflowWindows(app, "tray", name)
-		applyWorkflowWindow(app, name, x, y, w, h, true)
+		if _, errResp := s.hideWorkflowWindows("tray", name); errResp != nil {
+			return errResp
+		}
+		s.applyWorkflowWindow(name, x, y, w, h, true)
 		return map[string]any{"ok": true, "workflow": "single", "focused": name}
 	default:
 		return map[string]any{"ok": false, "error": "unknown workflow: " + workflow + " (try: default, coding, review, ops, single)"}
 	}
 }
 
-func applyWorkflowWindow(app *application.App, name string, px, py, pw, ph int, show bool) bool {
-	wv, ok := webviewByName(app, name)
-	if !ok {
+func (s *Service) applyWorkflowWindow(name string, px, py, pw, ph int, show bool) bool {
+	if _, errResp := s.coreGUIWindowInfo(name); errResp != nil {
 		return false
 	}
 	if show {
-		wv.Show()
-		wv.SetPosition(px, py)
-		wv.SetSize(pw, ph)
-	} else {
-		wv.Hide()
+		if errResp := s.setLayoutWindowVisibility(name, true); errResp != nil {
+			return false
+		}
+		if errResp := s.setLayoutWindowBounds(name, px, py, pw, ph); errResp != nil {
+			return false
+		}
+		return true
 	}
-	return true
+	return s.setLayoutWindowVisibility(name, false) == nil
 }
 
-func hideWorkflowWindows(app *application.App, keep ...string) int {
+func (s *Service) hideWorkflowWindows(keep ...string) (int, map[string]any) {
+	all, errResp := s.coreGUIWindowList()
+	if errResp != nil {
+		return 0, errResp
+	}
 	keepSet := workflowKeepSet(keep...)
 	hidden := 0
-	for _, win := range app.Window.GetAll() {
-		wv, ok := win.(*application.WebviewWindow)
-		if shouldHideWorkflowWindow(wv, ok, keepSet) {
-			wv.Hide()
+	for _, win := range all {
+		if !keepSet[win.Name] {
+			if errResp := s.setLayoutWindowVisibility(win.Name, false); errResp != nil {
+				return hidden, errResp
+			}
 			hidden++
 		}
 	}
-	return hidden
+	return hidden, nil
 }
 
 func workflowKeepSet(keep ...string) map[string]bool {
@@ -614,10 +626,6 @@ func workflowKeepSet(keep ...string) map[string]bool {
 		keepSet[k] = true
 	}
 	return keepSet
-}
-
-func shouldHideWorkflowWindow(wv *application.WebviewWindow, ok bool, keepSet map[string]bool) bool {
-	return ok && wv != nil && !keepSet[wv.Name()] && wv.IsVisible()
 }
 
 // loadLayout reads + parses a saved layout file.

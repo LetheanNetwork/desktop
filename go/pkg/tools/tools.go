@@ -17,7 +17,6 @@ import (
 
 	core "dappco.re/go"
 	mcpsvc "dappco.re/go/mcp/pkg/mcp"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // ToolView is the lean shape the WebView consumes. Mirrors the
@@ -47,7 +46,7 @@ type WailsService struct {
 func NewWailsService(c *core.Core) *WailsService { return &WailsService{core: c} }
 
 func (s *WailsService) ServiceName() string { return "Tools" }
-func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+func (s *WailsService) ServiceStartup(_ context.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }

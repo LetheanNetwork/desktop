@@ -33,21 +33,24 @@ import (
 	"context"
 
 	core "dappco.re/go"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+// TODO(snider): core/gui needs a bindable window-router service that can
+// open/hide/list the lthn pre-created windows without exposing Wails App
+// or Window values to this package.
 
 // ---------------------------------------------------------------------
 // WindowService — open / hide / focus named windows from the frontend.
 // ---------------------------------------------------------------------
 
 type WindowService struct {
-	app *application.App
+	app any
 }
 
 func NewWindowService() *WindowService { return &WindowService{} }
 
 func (s *WindowService) ServiceName() string { return "Window" }
-func (s *WindowService) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+func (s *WindowService) ServiceStartup(_ context.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 func (s *WindowService) ServiceShutdown() core.Result { return core.Ok(nil) }
@@ -58,7 +61,7 @@ func (s *WindowService) Open(name string) core.Result {
 	if s.app == nil {
 		return core.Fail(core.NewError("window service not yet attached to wails app"))
 	}
-	openWindow(s.app, name)
+	openWindowHandle(s.app, name)
 	return core.Ok(nil)
 }
 
@@ -69,11 +72,9 @@ func (s *WindowService) Hide(name string) core.Result {
 	if s.app == nil {
 		return core.Fail(core.NewError("window service not yet attached to wails app"))
 	}
-	w, ok := s.app.Window.GetByName(name)
-	if !ok {
+	if !hideWindowHandle(s.app, name) {
 		return core.Fail(core.NewError("no window named: " + name))
 	}
-	w.Hide()
 	return core.Ok(nil)
 }
 

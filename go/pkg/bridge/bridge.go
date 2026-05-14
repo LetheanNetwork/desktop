@@ -42,7 +42,6 @@ import (
 	"time"
 
 	core "dappco.re/go"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // DefaultPort is the bridge HTTP port. Picked to differ from
@@ -179,7 +178,3 @@ func (s *Service) OnShutdown(ctx context.Context) core.Result {
 // Port returns the bound bridge port — useful for the JS shim
 // template + health probes.
 func (s *Service) Port() int { return s.port }
-
-// app returns the running Wails application or nil if we're called
-// before application.New(). Kept terse since every tool needs it.
-func (s *Service) app() *application.App { return application.Get() }

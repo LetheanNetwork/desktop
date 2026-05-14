@@ -15,7 +15,6 @@ import (
 	"context"
 
 	core "dappco.re/go"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // WailsService is the bindable surface. Bound by
@@ -34,7 +33,7 @@ func NewWailsService(c *core.Core) *WailsService {
 
 // ServiceName / Startup / Shutdown — Wails3 lifecycle.
 func (s *WailsService) ServiceName() string { return "ApiKey" }
-func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+func (s *WailsService) ServiceStartup(_ context.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }

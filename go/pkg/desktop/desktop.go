@@ -1,13 +1,15 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-// Package desktop is the Wails v3 wrapper for the lthn GUI mode.
+// Package desktop is the CoreGUI-backed runtime for the lthn GUI mode.
+// Wails remains the private bootstrap substrate here only until CoreGUI
+// exposes the app-construction and tray-window surface.
 // Constructs the Application with:
 //
 //   - Assets.Handler = the same gin engine pkg/server exposes for
 //     `lthn serve`. The WebView reaches /v1/chat/completions etc.
 //     same-origin — no CORS, no port hunting.
 //   - Assets.Middleware = the Gin middleware pattern from
-//     wails/v3/examples/gin-routing: delegate /wails/* back to
+//     the native webview runtime: delegate /wails/* back to
 //     Wails internals, hand everything else to Gin.
 //   - A NoRoute fallback on the Gin engine that serves the embedded
 //     Vite frontend dist so the SPA loads at "/".
@@ -35,6 +37,10 @@ import (
 
 	core "dappco.re/go"
 	"dappco.re/go/config"
+	guilifecycle "dappco.re/go/gui/pkg/lifecycle"
+	guimenu "dappco.re/go/gui/pkg/menu"
+	guisystray "dappco.re/go/gui/pkg/systray"
+	guiwindow "dappco.re/go/gui/pkg/window"
 	coreI18n "dappco.re/go/i18n"
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/bridge"
@@ -58,15 +64,31 @@ import (
 	"dappco.re/lthn/desktop/pkg/tools"
 	"dappco.re/lthn/desktop/pkg/validator"
 	"github.com/gin-gonic/gin"
-	"github.com/leaanthony/u"
 	"github.com/wailsapp/wails/v3/pkg/application"
-	"github.com/wailsapp/wails/v3/pkg/events"
-	"github.com/wailsapp/wails/v3/pkg/icons"
-	"github.com/wailsapp/wails/v3/pkg/services/dock"
-	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
+// TODO(snider): core/gui needs an app-construction surface covering
+// application.Options, service binding registration, single-instance
+// callbacks, native systray bootstrap, tray-window options, and panic/
+// shutdown hooks. Until that exists, desktop.Run is the lthn-side Wails
+// boundary and all other packages route GUI behavior through CoreGUI.
+
 const trayOpenEvent = "lthn:tray:open"
+
+// Tray menu ActionIDs — these are the labels the core/gui systray
+// emits in ActionTrayMenuItemClicked when a tray menu entry is
+// clicked. The Run() handler below routes each one to openWindow +
+// emitCoreEvent. Plugin entries reuse the trayPluginPrefix and pack
+// the plugin code after the colon (e.g. "lthn:tray:plugin:my-code").
+const (
+	trayActionOpenApp      = "lthn:tray:open-app"
+	trayActionOpenChat     = "lthn:tray:open-chat"
+	trayActionOpenModels   = "lthn:tray:open-models"
+	trayActionOpenSettings = "lthn:tray:open-settings"
+	trayActionOpenAbout    = "lthn:tray:open-about"
+	trayActionQuit         = "lthn:tray:quit"
+	trayPluginPrefix       = "lthn:tray:plugin:"
+)
 
 // Options configures the desktop service.
 type Options struct {
@@ -92,8 +114,8 @@ type Options struct {
 	// Runner is the talk-surface used by the RunnerService binding.
 	// Required.
 	Runner *runner.Service
-	// TrayIcon is the light-mode systray icon bytes. Empty = use the
-	// Wails default macOS template glyph.
+	// TrayIcon is the light-mode systray icon bytes. Empty leaves the
+	// platform default tray glyph unchanged.
 	TrayIcon []byte
 	// AppIcon is the application icon shown in the default About box
 	// (application.Options.Icon). Empty = Wails-default 'W'. macOS
@@ -173,20 +195,10 @@ func (s *Service) Run() core.Result {
 	// Each adapter wraps one lthn domain package, translating
 	// core.Result → (T, error) for clean TS typing.
 	//
-	// dock.New() is the Wails-native dock/taskbar service — it
-	// ships in `(T, error)` shape already, no adapter needed. The
-	// generated TS bindings give the frontend SetBadge / RemoveBadge
-	// / HideAppIcon / ShowAppIcon. Useful for unread-count badges
-	// over the tray (macOS draws them on the menubar item) and for
-	// surfacing the app in the Dock when chat is active (so users
-	// can ⌘-Tab to it), then hiding back to tray-only when chat
-	// closes.
-	notifier := notifications.New()
-	// Dock service captured so windows.go can elevate/demote the macOS
-	// activation policy when the unified app shell opens / closes. See
-	// policy.go for the routing.
-	dockSvc := dock.New()
-	attachDock(dockSvc)
+	// CoreGUI owns native dock/taskbar and notification services. Wails
+	// remains its private substrate; lthn routes those behaviours through
+	// Core actions after registerCoreGUI wires the framework.
+	attachDock(s.opts.Core)
 	// Window service stays as a thin wrapper today — it dispatches
 	// against the in-process openWindow registry rather than wrapping
 	// any single Go package. Once windows.go grows into a real
@@ -234,12 +246,6 @@ func (s *Service) Run() core.Result {
 		application.NewService(bridgeSvc),
 		// Window registry — see note above.
 		application.NewService(windowSvc),
-		// Wails3 native services — dock + notifications ship from
-		// upstream wails/v3/pkg/services. Frontend env / dialog /
-		// browser / screen / clipboard come straight from
-		// @wailsio/runtime — no Go wrapper.
-		application.NewService(dockSvc),
-		application.NewService(notifier),
 	}
 
 	s.app = application.New(application.Options{
@@ -286,7 +292,7 @@ func (s *Service) Run() core.Result {
 				// trust because EncryptionKey above authenticates
 				// the channel — anything reaching this callback
 				// came from a binary holding the same key.
-				s.app.Event.Emit("lthn:app:second-instance", map[string]any{
+				emitCoreEvent(s.opts.Core,"lthn:app:second-instance", map[string]any{
 					"args":       d.Args,
 					"workdir":    d.WorkingDir,
 					"additional": d.AdditionalData,
@@ -296,8 +302,8 @@ func (s *Service) Run() core.Result {
 				// before Focus() handles the case where the window
 				// was minimised — Wails docs canon for the second-
 				// instance UX.
-				if !restoreFocusedWindow(s.app, "app") {
-					restoreFocusedWindow(s.app, "tray")
+				if !restoreFocusedWindow(s.opts.Core, "app") {
+					restoreFocusedWindow(s.opts.Core, "tray")
 				}
 			},
 		},
@@ -312,7 +318,7 @@ func (s *Service) Run() core.Result {
 		// belt-and-braces flush + a hook for any service that
 		// needs to drain in-flight work (runner / telemetry).
 		OnShutdown: func() {
-			s.app.Event.Emit("lthn:app:shutdown", nil)
+			emitCoreEvent(s.opts.Core,"lthn:app:shutdown", nil)
 		},
 		// PostShutdown runs after the Wails event loop has fully
 		// stopped. Last chance to close anything that held a ref
@@ -337,7 +343,7 @@ func (s *Service) Run() core.Result {
 			if details.Error != nil {
 				errStr = details.Error.Error()
 			}
-			s.app.Event.Emit("lthn:app:panic", map[string]any{
+			emitCoreEvent(s.opts.Core,"lthn:app:panic", map[string]any{
 				"error":      errStr,
 				"stack":      details.StackTrace,
 				"full_stack": details.FullStackTrace,
@@ -365,119 +371,141 @@ func (s *Service) Run() core.Result {
 		},
 	})
 
+	if r := s.registerCoreGUI(); !r.OK {
+		return r
+	}
+
 	// Attach the constructed app to services that need app refs
 	// post-construction (the Wails App reference isn't available
 	// pre-application.New()). Today only WindowService still
 	// depends on this — env / clipboard / screen / browser / dialog
 	// previously wrapped here are now consumed by the frontend
 	// directly from @wailsio/runtime.
-	windowSvc.app = s.app
+	windowSvc.app = s.opts.Core
 
-	// Re-broadcast OS theme changes to the WebView as "lthn:theme".
-	// Lit elements subscribe via @wailsio/runtime's Events.On.
-	s.app.Event.OnApplicationEvent(events.Common.ThemeChanged, func(_ *application.ApplicationEvent) {
-		mode := "light"
-		if s.app.Env.IsDarkMode() {
-			mode = "dark"
-		}
-		s.app.Event.Emit("lthn:theme", mode)
-	})
-
-	// Bridge notification-action callbacks back to the WebView as
-	// "lthn:notification:response". The Lit element that sent the
-	// notification subscribes via Events.On and dispatches per the
-	// response.ActionIdentifier (OPEN / REPLY / ARCHIVE / etc.).
-	notifier.OnNotificationResponse(func(result notifications.NotificationResult) {
-		s.app.Event.Emit("lthn:notification:response", result.Response)
-	})
+	// TODO(snider): core/gui needs notification response/action callbacks
+	// so native notification body clicks and action buttons can be
+	// forwarded as "lthn:notification:response" without lthn importing
+	// Wails notification services directly.
 
 	// Application menu — macOS-only. Accessory apps still get a
 	// menubar when their windows are focused, and standard roles
 	// give us Cmd+Q / Cmd+W / Cmd+M / Cmd+H / Edit menu shortcuts
 	// for free. Without AddRole(AppMenu) we'd lose those.
 	if runtime.GOOS == "darwin" {
-		appMenu := s.app.Menu.New()
-		appMenu.AddRole(application.AppMenu)
-		appMenu.AddRole(application.EditMenu)
-		appMenu.AddRole(application.WindowMenu)
-		s.app.Menu.Set(appMenu)
+		appRole := guimenu.RoleAppMenu
+		editRole := guimenu.RoleEditMenu
+		windowRole := guimenu.RoleWindowMenu
+		s.opts.Core.Action("menu.set_app_menu").Run(core.Background(), core.NewOptions(
+			core.Option{Key: "task", Value: guimenu.TaskSetAppMenu{Items: []guimenu.MenuItem{
+				{Role: &appRole},
+				{Role: &editRole},
+				{Role: &windowRole},
+			}}},
+		))
 	}
 
-	systray := s.app.SystemTray.New()
-	if runtime.GOOS == "darwin" {
-		if s.opts.TrayIcon != nil {
-			systray.SetTemplateIcon(s.opts.TrayIcon)
-		} else {
-			systray.SetTemplateIcon(icons.SystrayMacTemplate)
+	// Systray icon + tooltip + menu — driven entirely through core/gui
+	// actions. registerCoreGUI has already created the underlying tray
+	// (gui.systray.OnStartup runs Setup with a default icon and "Core"
+	// tooltip); these calls replace those defaults with the lthn-branded
+	// surface. The previous direct s.app.SystemTray.New() created a
+	// SECOND tray, leaving two icons in the macOS menu bar — fixed
+	// 2026-05-14.
+	if s.opts.TrayIcon != nil {
+		iconAction := "systray.set_icon"
+		iconTask := any(guisystray.TaskSetTrayIcon{Data: s.opts.TrayIcon})
+		if runtime.GOOS == "darwin" {
+			iconAction = "systray.set_template_icon"
+			iconTask = guisystray.TaskSetTrayTemplateIcon{Data: s.opts.TrayIcon}
 		}
-	} else if s.opts.TrayIcon != nil {
-		systray.SetIcon(s.opts.TrayIcon)
+		s.opts.Core.Action(iconAction).Run(core.Background(), core.NewOptions(
+			core.Option{Key: "task", Value: iconTask},
+		))
 	}
+	s.opts.Core.Action("systray.set_tooltip").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guisystray.TaskSetTrayTooltip{Tooltip: "Lethean Desktop"}},
+	))
 
-	// Systray menu — quick-access verbs that match the popover
-	// surfaces. The "open" entries emit window-open events the
-	// frontend listens for, so navigation goes through the same
-	// Lit router whether triggered by tray or by an in-popover link.
-	menu := s.app.Menu.New()
-	// Open Lethean Desktop is the headline menu item — the same action
-	// the popover's screen-icon button triggers. Used to be a disabled
-	// label; promoted to the primary verb so the systray right-click
-	// menu has parity with the in-popover surface.
-	menu.Add("Open Lethean Desktop").OnClick(func(_ *application.Context) {
-		openWindow(s.app, "app")
-		s.app.Event.Emit(trayOpenEvent, "app")
-	})
-	menu.AddSeparator()
-	menu.Add("Open Chat…").OnClick(func(_ *application.Context) {
-		openWindow(s.app, "chat")
-		s.app.Event.Emit(trayOpenEvent, "chat")
-	})
-	menu.Add("Models…").OnClick(func(_ *application.Context) {
-		openWindow(s.app, "models")
-		s.app.Event.Emit(trayOpenEvent, "models")
-	})
-	menu.Add("Settings…").OnClick(func(_ *application.Context) {
-		openWindow(s.app, "settings")
-		s.app.Event.Emit(trayOpenEvent, "settings")
-	})
-
-	// Plugins — dynamic per-plugin menu entries surfaced from
-	// the running plugin host. Each installed plugin with a
-	// manifest.menu block gets one entry; clicking opens a
-	// generic "plugin" window with ?code=<code> so the Lit
-	// router can mount the plugin's UI (iframe via
-	// ui.entrypoint when declared).
+	// Tray menu — built as a []TrayMenuItem with ActionIDs. Click
+	// routing lives in the RegisterAction handler below; this keeps
+	// the menu declaration declarative + survives the action-bus
+	// boundary (closures don't).
+	trayMenuItems := []guisystray.TrayMenuItem{
+		{Label: "Open Lethean Desktop", ActionID: trayActionOpenApp},
+		{Type: "separator"},
+		{Label: "Open Chat…", ActionID: trayActionOpenChat},
+		{Label: "Models…", ActionID: trayActionOpenModels},
+		{Label: "Settings…", ActionID: trayActionOpenSettings},
+	}
 	if pluginSvc != nil {
 		entriesR := pluginSvc.Menus()
 		if entriesR.OK {
 			entries, _ := entriesR.Value.([]plugin.MenuEntry)
 			if len(entries) > 0 {
-				menu.AddSeparator()
+				trayMenuItems = append(trayMenuItems, guisystray.TrayMenuItem{Type: "separator"})
 				for _, e := range entries {
-					code := e.Code
 					label := e.Label
 					if !e.Running {
 						label = label + " · stopped"
 					}
-					menu.Add(label).OnClick(func(_ *application.Context) {
-						openPluginWindow(s.app, code)
-						s.app.Event.Emit(trayOpenEvent, "plugin:"+code)
+					trayMenuItems = append(trayMenuItems, guisystray.TrayMenuItem{
+						Label:    label,
+						ActionID: trayPluginPrefix + e.Code,
 					})
 				}
 			}
 		}
 	}
+	trayMenuItems = append(trayMenuItems,
+		guisystray.TrayMenuItem{Type: "separator"},
+		guisystray.TrayMenuItem{Label: "About lthn", ActionID: trayActionOpenAbout},
+		guisystray.TrayMenuItem{Type: "separator"},
+		guisystray.TrayMenuItem{Label: "Quit lthn", ActionID: trayActionQuit},
+	)
+	s.opts.Core.Action("systray.set_menu").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guisystray.TaskSetTrayMenu{Items: trayMenuItems}},
+	))
 
-	menu.AddSeparator()
-	menu.Add("About lthn").OnClick(func(_ *application.Context) {
-		openWindow(s.app, "about")
-		s.app.Event.Emit(trayOpenEvent, "about")
+	// Click router — core/gui dispatches ActionTrayMenuItemClicked
+	// onto the action bus whenever a tray menu entry is clicked.
+	// Switch on ActionID; plugin entries route via the
+	// trayPluginPrefix suffix.
+	s.opts.Core.RegisterAction(func(_ *core.Core, msg core.Message) core.Result {
+		click, ok := msg.(guisystray.ActionTrayMenuItemClicked)
+		if !ok {
+			return core.Result{OK: true}
+		}
+		switch click.ActionID {
+		case trayActionOpenApp:
+			openWindow(s.opts.Core, "app")
+			emitCoreEvent(s.opts.Core, trayOpenEvent, "app")
+		case trayActionOpenChat:
+			openWindow(s.opts.Core, "chat")
+			emitCoreEvent(s.opts.Core, trayOpenEvent, "chat")
+		case trayActionOpenModels:
+			openWindow(s.opts.Core, "models")
+			emitCoreEvent(s.opts.Core, trayOpenEvent, "models")
+		case trayActionOpenSettings:
+			openWindow(s.opts.Core, "settings")
+			emitCoreEvent(s.opts.Core, trayOpenEvent, "settings")
+		case trayActionOpenAbout:
+			openWindow(s.opts.Core, "about")
+			emitCoreEvent(s.opts.Core, trayOpenEvent, "about")
+		case trayActionQuit:
+			s.opts.Core.Action("lifecycle.quit").Run(core.Background(), core.NewOptions(
+				core.Option{Key: "task", Value: guilifecycle.TaskQuit{}},
+			))
+		default:
+			if core.HasPrefix(click.ActionID, trayPluginPrefix) {
+				if code := core.TrimPrefix(click.ActionID, trayPluginPrefix); code != "" {
+					openPluginWindow(s.opts.Core, code)
+					emitCoreEvent(s.opts.Core, trayOpenEvent, "plugin:"+code)
+				}
+			}
+		}
+		return core.Result{OK: true}
 	})
-	menu.AddSeparator()
-	menu.Add("Quit lthn").OnClick(func(_ *application.Context) {
-		s.app.Quit()
-	})
-	systray.SetMenu(menu)
 
 	// Context menus — right-click surfaces for the chat UI. Lit
 	// elements declare `style="--custom-contextmenu: lthn-message"`
@@ -485,86 +513,85 @@ func (s *Service) Run() core.Result {
 	// click handler knows WHICH message was right-clicked. Each
 	// action emits an "lthn:context:<menu>:<action>" event with the
 	// data; the originating Lit element dispatches accordingly.
-	registerContextMenus(s.app)
+	registerContextMenus(s.opts.Core)
 
 	// Global keyboard shortcuts. Each emits "lthn:key:<verb>" with
 	// the active window's name. Cmd+J toggle popover / Cmd+N new
 	// session / Cmd+, settings / etc. See keybindings.go.
-	registerKeyBindings(s.app)
+	registerKeyBindings(s.opts.Core)
 
 	// System event re-broadcasts. Wails' ApplicationStarted /
 	// OpenedWithFile / LaunchedWithUrl get republished as lthn:app:*
 	// so the frontend has one event-bus contract for everything.
 	// See sysevents.go for the table.
-	registerSystemEvents(s.app)
+	registerSystemEvents(s.opts.Core)
 
-	window := s.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:            "tray",
-		Title:           "Lethean Desktop",
-		Width:           400,
-		Height:          560,
-		Frameless:       true,
-		AlwaysOnTop:     true,
-		Hidden:          true,
-		DisableResize:   true,
-		HideOnEscape:    true,
-		HideOnFocusLost: true,
-		URL:             "/?surface=tray",
-		// Transparent background so the rounded card corners render
-		// against the desktop, matching the rest of the windows.
-		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
-		// We ship our own context menus — the WebView's native menu
-		// would only confuse things on the tray popover.
-		DefaultContextMenuDisabled: true,
-		Mac: application.MacWindow{
-			// Floating keeps the popover above normal windows when
-			// AlwaysOnTop isn't enough (Lion+ raised the bar for
-			// "above-everything" — Floating is the menubar-utility
-			// level used by Bartender / Itsycal / 1Password Mini).
-			WindowLevel: application.MacWindowLevelFloating,
-			// CanJoinAllSpaces — the popover appears on every Space
-			// (no disappearing when the user swipes desktops).
-			// FullScreenAuxiliary — the popover can overlay
-			// fullscreen apps (otherwise it would vanish whenever
-			// the user enters Cmd+Ctrl+F on any app).
-			// IgnoresCycle — exclude from Cmd+` window cycling.
-			CollectionBehavior: application.MacWindowCollectionBehaviorCanJoinAllSpaces |
-				application.MacWindowCollectionBehaviorFullScreenAuxiliary |
-				application.MacWindowCollectionBehaviorIgnoresCycle,
-			// Top 40px = our renderChrome titlebar strip — declare
-			// it as the OS-native drag region so macOS picks up the
-			// drag without depending on the --wails-draggable CSS
-			// path alone.
-			InvisibleTitleBarHeight: 40,
-			WebviewPreferences: application.MacWebviewPreferences{
-				AllowsBackForwardNavigationGestures: u.False,
+	// Tray popover construction via core/gui. core/gui's window service
+	// creates the underlying wails window from this spec; we then look
+	// the wails handle up by name to register the close-hide hook
+	// (cancel-able window hooks are not yet exposed on the core/gui
+	// surface — that's the remaining direct wails seam).
+	s.opts.Core.Action("window.open").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guiwindow.TaskOpenWindow{Window: &guiwindow.Window{
+			Name:                       "tray",
+			Title:                      "Lethean Desktop",
+			Width:                      400,
+			Height:                     560,
+			Frameless:                  true,
+			AlwaysOnTop:                true,
+			Hidden:                     true,
+			DisableResize:              true,
+			HideOnEscape:               true,
+			HideOnFocusLost:            true,
+			URL:                        "/?surface=tray",
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			DefaultContextMenuDisabled: true,
+			Mac: guiwindow.MacWindow{
+				WindowLevel: guiwindow.MacWindowLevelFloating,
+				CollectionBehavior: guiwindow.MacCollectionBehaviorCanJoinAllSpaces |
+					guiwindow.MacCollectionBehaviorFullScreenAuxiliary |
+					guiwindow.MacCollectionBehaviorIgnoresCycle,
+				InvisibleTitleBarHeight: 40,
+				DisableBackForwardNav:   true,
 			},
-		},
-		Linux: application.LinuxWindow{
-			Icon: s.opts.AppIcon,
-		},
-		Windows: application.WindowsWindow{
-			HiddenOnTaskbar: true,
-		},
-	})
+			Linux: guiwindow.LinuxWindow{
+				Icon: s.opts.AppIcon,
+			},
+			Windows: guiwindow.WindowsWindow{
+				HiddenOnTaskbar: true,
+			},
+		}}},
+	))
 
+	// Look the wails handle up so the close-hide hook can fire on the
+	// real window. Cancel-able window hooks aren't on the core/gui
+	// surface yet, so this remains direct.
+	window, ok := s.app.Window.GetByName("tray")
+	if !ok || window == nil {
+		return core.Fail(core.E("desktop.Run", "tray window not registered after window.open", nil))
+	}
+	webview, _ := window.(*application.WebviewWindow)
+	if webview == nil {
+		return core.Fail(core.E("desktop.Run", "tray window is not a WebviewWindow", nil))
+	}
 	// Close-hides rather than destroys — tray-rooted lifecycle.
-	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
-		window.Hide()
+	const windowClosingEvent = 1028 // events.Common.WindowClosing
+	webview.RegisterHook(windowClosingEvent, func(e *application.WindowEvent) {
+		webview.Hide()
 		e.Cancel()
 	})
 
 	// Per-window lthn:window:* event re-broadcasts (ready / focus /
 	// blur / hide / show / resize / files-dropped). See sysevents.go.
-	registerWindowEvents(s.app, window)
-
 	// Pre-create welcome / chat / models / settings / about windows
 	// hidden, so first tray-menu open is instant. See windows.go.
 	// Options threaded through for Linux icon + future per-window
 	// opts that depend on s.opts (telemetry endpoint, brand, etc.).
-	preCreateWindows(s.app, s.opts)
+	preCreateWindows(s.opts.Core, s.opts)
 
-	systray.AttachWindow(window).WindowOffset(5)
+	s.opts.Core.Action("systray.attach_window").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guisystray.TaskAttachWindow{Name: "tray", OffsetY: 5}},
+	))
 
 	// First-launch detection — if ~/Lethean/conf/lthn.yaml and the
 	// state DB don't exist, open the welcome wizard on top of the
@@ -573,7 +600,7 @@ func (s *Service) Run() core.Result {
 	// settings window; firstlaunch.Detect flips fresh→false naturally.
 	if state := firstlaunch.Detect(nil); state.OK {
 		if fl, ok := state.Value.(firstlaunch.State); ok && fl.Fresh {
-			openWindow(s.app, "welcome")
+			openWindow(s.opts.Core, "welcome")
 		}
 	}
 
@@ -583,10 +610,9 @@ func (s *Service) Run() core.Result {
 	return core.Ok(nil)
 }
 
-func restoreFocusedWindow(app *application.App, name string) bool {
-	if w, ok := app.Window.GetByName(name); ok {
-		w.Restore()
-		w.Focus()
+func restoreFocusedWindow(c *core.Core, name string) bool {
+	if windowExists(c, name) {
+		openWindow(c, name)
 		return true
 	}
 	return false

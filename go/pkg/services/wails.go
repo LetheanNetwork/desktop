@@ -14,7 +14,6 @@ import (
 	"context"
 
 	core "dappco.re/go"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 type WailsService struct{}
@@ -22,7 +21,7 @@ type WailsService struct{}
 func NewWailsService() *WailsService { return &WailsService{} }
 
 func (s *WailsService) ServiceName() string { return "Lifecycle" }
-func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+func (s *WailsService) ServiceStartup(_ context.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }

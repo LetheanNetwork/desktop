@@ -14,7 +14,6 @@ import (
 
 	core "dappco.re/go"
 	"dappco.re/go/inference"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // WailsService is the WebView-facing handle on the sessions store.
@@ -34,7 +33,7 @@ type WailsService struct {
 func NewWailsService(c *core.Core) *WailsService { return &WailsService{core: c} }
 
 func (s *WailsService) ServiceName() string { return "Sessions" }
-func (s *WailsService) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+func (s *WailsService) ServiceStartup(_ context.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }

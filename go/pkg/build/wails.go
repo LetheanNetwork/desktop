@@ -13,7 +13,6 @@ import (
 
 	core "dappco.re/go"
 	"dappco.re/go/process"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 const (
@@ -24,7 +23,7 @@ const (
 
 // ServiceName / Startup / Shutdown — Wails3 lifecycle.
 func (s *Service) ServiceName() string { return "Build" }
-func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+func (s *Service) ServiceStartup(_ context.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }

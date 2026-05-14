@@ -14,7 +14,6 @@ import (
 	"context"
 
 	core "dappco.re/go"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // ServiceName is the Wails service name. Lower-case + plural to
@@ -24,7 +23,7 @@ func (s *Service) ServiceName() string { return "Server" }
 // ServiceStartup runs on Wails boot. Returns nil unconditionally —
 // the gin engine is constructed in NewService, before the Wails
 // application takes ownership.
-func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+func (s *Service) ServiceStartup(_ context.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 

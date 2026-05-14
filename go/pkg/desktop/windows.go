@@ -8,15 +8,20 @@
 // Lit element loading: each window opens at `/?surface=<name>` so
 // the index.html SPA router mounts the matching element. The
 // surface name is the same name used to retrieve the window
-// (app.GetWindowByName).
+// from CoreGUI's window registry.
 
 package desktop
 
 import (
-	"github.com/leaanthony/u"
-	"github.com/wailsapp/wails/v3/pkg/application"
-	"github.com/wailsapp/wails/v3/pkg/events"
+	core "dappco.re/go"
+	guiwindow "dappco.re/go/gui/pkg/window"
 )
+
+// TODO(snider): core/gui needs richer window creation options before this
+// registry can move fully to window.open: macOS window level/collection/
+// backdrop/webview preferences, hide-on-close hooks, content protection,
+// native context-menu disable, hide-on-focus-lost, hide-on-escape, and
+// plugin-window re-show semantics.
 
 // WindowSpec describes one named window the app can open.
 type WindowSpec struct {
@@ -40,7 +45,7 @@ type WindowSpec struct {
 	// settings) — re-opening just shows it again.
 	HideOnClose bool
 	// EnableFileDrop accepts files dragged from the OS onto the
-	// window. When true, Wails fires WindowFilesDropped with the
+	// window. When true, the backend fires file-drop events with the
 	// full filesystem paths + DropTargetDetails (which
 	// data-file-drop-target element received the drop). Off by
 	// default — chat and models surfaces opt in; settings/about
@@ -61,7 +66,7 @@ type WindowSpec struct {
 	// the native one doesn't double up.
 	DisableNativeContextMenu bool
 	// AlwaysOnTop pins the window above all others. Mirrors the
-	// Wails option of the same name; surfaced here so the registry
+	// native option of the same name; surfaced here so the registry
 	// is the single declaration site.
 	AlwaysOnTop bool
 	// HideOnFocusLost auto-hides the window when it loses focus.
@@ -77,16 +82,16 @@ type WindowSpec struct {
 	// MacWindowLevel sets the macOS window level — Floating for
 	// the tray popover so it stays above normal windows. Leave
 	// empty for the default Normal level.
-	MacWindowLevel application.MacWindowLevel
+	MacWindowLevel int
 	// MacCollectionBehavior sets the macOS Space + fullscreen
 	// behaviour. CanJoinAllSpaces | FullScreenAuxiliary is the
 	// canonical "menubar utility" combo — the popover appears on
 	// every Space and overlays fullscreen apps. Zero = default.
-	MacCollectionBehavior application.MacWindowCollectionBehavior
+	MacCollectionBehavior int
 	// MacBackdrop selects the macOS visual material behind the
 	// window. Translucent gives vibrancy depth behind our card.
 	// Zero = MacBackdropNormal (opaque).
-	MacBackdrop application.MacBackdrop
+	MacBackdrop int
 }
 
 // windowRegistry returns the named windows the app knows how to
@@ -234,94 +239,42 @@ func windowRegistry() []WindowSpec {
 // Called once from desktop.Run() AFTER the tray popover window is
 // constructed. opts carries the desktop service Options (currently
 // only AppIcon for the Linux icon binding); pass s.opts.
-func preCreateWindows(app *application.App, opts Options) {
-	for _, spec := range windowRegistry() {
-		w := app.Window.NewWithOptions(application.WebviewWindowOptions{
-			Name:           spec.Name,
-			Title:          spec.Title,
-			Width:          spec.Width,
-			Height:         spec.Height,
-			MinWidth:       spec.MinWidth,
-			MinHeight:      spec.MinHeight,
-			MaxWidth:       spec.MaxWidth,
-			MaxHeight:      spec.MaxHeight,
-			Frameless:      spec.Frameless,
-			Hidden:         true,
-			EnableFileDrop: spec.EnableFileDrop,
-			URL:            "/?surface=" + spec.Name,
-			// Transparent background so the rounded corners of the
-			// renderChrome()-painted lthn-window card aren't framed by
-			// an opaque OS rectangle. The Lit body has border-radius
-			// 11px (Lethean-6 canon); without alpha=0 here you'd see
-			// dark grey squares behind each rounded corner.
-			BackgroundColour: application.NewRGBA(0, 0, 0, 0),
-			// Always-on-top / hide-on-Esc / hide-on-focus-loss /
-			// fixed-size knobs surface from the spec so the registry
-			// is the single source of truth for window behaviour.
-			AlwaysOnTop:     spec.AlwaysOnTop,
-			HideOnFocusLost: spec.HideOnFocusLost,
-			HideOnEscape:    spec.HideOnEscape,
-			DisableResize:   spec.DisableResize,
-			// ContentProtection blocks OS screen capture (wallets,
-			// private chat). macOS + Windows 10+; no-op on Linux.
-			ContentProtectionEnabled: spec.ContentProtection,
-			// We ship our own context menus via contextmenus.go;
-			// surfaces that route right-click through the Lit
-			// element should disable the native WebView menu.
-			DefaultContextMenuDisabled: spec.DisableNativeContextMenu,
-			// macOS knobs — Wails packages every native NSWindow
-			// attribute we need; setting them here means the same
-			// codepath produces Floating-tray / FullScreenAuxiliary
-			// / vibrancy-backdrop behaviour without a platform
-			// switch in the spec or per-window cgo. iOS/Android
-			// inherit zero-value defaults from this same struct.
-			Mac: application.MacWindow{
-				InvisibleTitleBarHeight: spec.InvisibleTitleBarHeight,
-				WindowLevel:             spec.MacWindowLevel,
-				CollectionBehavior:      spec.MacCollectionBehavior,
-				Backdrop:                spec.MacBackdrop,
-				// Disable the WebView swipe-back/forward gesture
-				// app-wide — it breaks our SPA routing (the route
-				// state lives in ?surface= and ?pane= query params,
-				// not in the WebView's history stack). Same gesture
-				// behaviour on Windows lives under EnableSwipeGestures
-				// (default false) so this is the macOS-side mirror.
-				WebviewPreferences: application.MacWebviewPreferences{
-					AllowsBackForwardNavigationGestures: u.False,
-				},
-			},
-			// Linux icon — Wails uses this for the minimized window
-			// icon + GTK header bar. Same PNG as the macOS Dock /
-			// Windows taskbar so brand identity is uniform.
-			Linux: application.LinuxWindow{
-				Icon: opts.AppIcon,
-			},
-		})
-
-		if spec.HideOnClose {
-			// Steady-state windows hide on close; the surface state
-			// (chat history, settings form) persists in pkg/sessions
-			// + pkg/config so re-show is just a Show() call.
-			//
-			// The unified `app` shell also demotes the macOS activation
-			// policy back to Accessory on close so the Dock icon
-			// disappears and the app returns to its tray-only steady
-			// state. The close button AND the Dock-icon "close" path
-			// both flow through WindowClosing, so one hook covers both.
-			ws := w
-			isAppShell := spec.Name == "app"
-			ws.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
-				ws.Hide()
-				if isAppShell {
-					setPolicyAccessory()
-				}
-				e.Cancel()
-			})
-		}
-
-		// Per-window event re-broadcasts (lthn:window:ready etc.).
-		registerWindowEvents(app, w)
+func preCreateWindows(c *core.Core, opts Options) {
+	if c == nil {
+		return
 	}
+	for _, spec := range windowRegistry() {
+		openWindowSpec(c, spec, opts, true)
+	}
+}
+
+func openWindowSpec(c *core.Core, spec WindowSpec, _ Options, hidden bool) bool {
+	if c == nil {
+		return false
+	}
+	r := c.Action("window.open").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guiwindow.TaskOpenWindow{Window: &guiwindow.Window{
+			Name: spec.Name, Title: spec.Title,
+			Width: spec.Width, Height: spec.Height,
+			MinWidth: spec.MinWidth, MinHeight: spec.MinHeight,
+			MaxWidth: spec.MaxWidth, MaxHeight: spec.MaxHeight,
+			Frameless: spec.Frameless, Hidden: hidden,
+			AlwaysOnTop:      spec.AlwaysOnTop,
+			DisableResize:    spec.DisableResize,
+			EnableFileDrop:   spec.EnableFileDrop,
+			URL:              "/?surface=" + spec.Name,
+			BackgroundColour: [4]uint8{0, 0, 0, 0},
+		}}},
+	))
+	if !r.OK {
+		return false
+	}
+	if spec.ContentProtection {
+		c.Action("window.set_content_protection").Run(core.Background(), core.NewOptions(
+			core.Option{Key: "task", Value: guiwindow.TaskSetContentProtection{Name: spec.Name, Protection: true}},
+		))
+	}
+	return true
 }
 
 // openWindow shows + focuses the named window. Backend-driven so
@@ -331,9 +284,8 @@ func preCreateWindows(app *application.App, opts Options) {
 // If the name isn't in the registry, this is a no-op (returns
 // silently — the caller's tray menu shouldn't have offered the
 // option in the first place).
-func openWindow(app *application.App, name string) {
-	w, ok := app.Window.GetByName(name)
-	if !ok {
+func openWindow(c *core.Core, name string) {
+	if c == nil || !windowExists(c, name) {
 		return
 	}
 	// The unified `app` shell is the only window that warrants a Dock
@@ -344,11 +296,46 @@ func openWindow(app *application.App, name string) {
 	if name == "app" {
 		setPolicyRegular()
 	}
-	w.Show()
-	w.Focus()
+	c.Action("window.restore").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guiwindow.TaskRestore{Name: name}},
+	))
+	c.Action("window.set_visibility").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guiwindow.TaskSetVisibility{Name: name, Visible: true}},
+	))
+	c.Action("window.focus").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guiwindow.TaskFocus{Name: name}},
+	))
 }
 
-// openPluginWindow creates (or re-shows) a Wails window for one
+func openWindowHandle(app any, name string) {
+	if typed, ok := app.(*core.Core); ok {
+		openWindow(typed, name)
+	}
+}
+
+func hideWindowHandle(app any, name string) bool {
+	typed, ok := app.(*core.Core)
+	if !ok || typed == nil {
+		return false
+	}
+	if !windowExists(typed, name) {
+		return false
+	}
+	r := typed.Action("window.set_visibility").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guiwindow.TaskSetVisibility{Name: name, Visible: false}},
+	))
+	return r.OK
+}
+
+func windowExists(c *core.Core, name string) bool {
+	if c == nil || name == "" {
+		return false
+	}
+	r := c.QUERY(guiwindow.QueryWindowByName{Name: name})
+	return r.OK && r.Value != nil
+}
+
+// openPluginWindow creates (or re-shows) a CoreGUI window for one
 // installed plugin. Each plugin code keys its own window — clicking
 // the same plugin twice focuses the existing window rather than
 // opening a duplicate, but plugins A and B can be open at the same
@@ -358,42 +345,31 @@ func openWindow(app *application.App, name string) {
 // the plugin-window Lit element which renders an iframe pointed at
 // /v1/api/plugin/<namespace>/<ui.entrypoint> when the manifest
 // declares a UI surface, or a status card otherwise.
-func openPluginWindow(app *application.App, code string) {
+func openPluginWindow(c *core.Core, code string) {
 	wName := "plugin-" + code
-	if w, ok := app.Window.GetByName(wName); ok {
-		w.Show()
-		w.Focus()
+	if windowExists(c, wName) {
+		openWindow(c, wName)
 		return
 	}
 	titleBarH := 36 // matches every other Lethean-5 chromed window
-	w := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:                       wName,
-		Title:                      "Plugin · " + code,
-		Width:                      1180,
-		Height:                     760,
-		MinWidth:                   720,
-		MinHeight:                  460,
-		Frameless:                  true,
-		Hidden:                     true,
-		EnableFileDrop:             false,
-		URL:                        "/?surface=plugin&code=" + code,
-		BackgroundColour:           application.NewRGBA(0, 0, 0, 0),
-		DefaultContextMenuDisabled: true,
-		Mac: application.MacWindow{
-			InvisibleTitleBarHeight: titleBarH,
-			WebviewPreferences: application.MacWebviewPreferences{
-				AllowsBackForwardNavigationGestures: u.False,
-			},
-		},
-	})
-	// Plugin windows hide on close — the plugin keeps running in
-	// the background. Stop+Remove kills the process; closing the
-	// window just hides the UI.
-	w.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
-		w.Hide()
-		e.Cancel()
-	})
-	registerWindowEvents(app, w)
-	w.Show()
-	w.Focus()
+	_ = titleBarH
+	ok := openWindowSpec(c, WindowSpec{
+		Name: wName, Title: "Plugin · " + code,
+		Width: 1180, Height: 760, MinWidth: 720, MinHeight: 460,
+		Frameless: true, EnableFileDrop: false,
+		InvisibleTitleBarHeight:  titleBarH,
+		DisableNativeContextMenu: true,
+	}, Options{}, true)
+	if !ok {
+		return
+	}
+	c.Action("window.set_url").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guiwindow.TaskSetURL{Name: wName, URL: "/?surface=plugin&code=" + code}},
+	))
+	c.Action("window.set_visibility").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guiwindow.TaskSetVisibility{Name: wName, Visible: true}},
+	))
+	c.Action("window.focus").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guiwindow.TaskFocus{Name: wName}},
+	))
 }

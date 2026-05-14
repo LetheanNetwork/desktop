@@ -1,6 +1,6 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-// Context-menu registration for the Lit frontend. Wails routes
+// Context-menu registration for the Lit frontend. CoreGUI routes
 // right-clicks through CSS — any HTML element with
 // `style="--custom-contextmenu: <name>"` shows the menu registered
 // here under that name. Per-click context (which message, which
@@ -15,7 +15,11 @@
 package desktop
 
 import (
-	"github.com/wailsapp/wails/v3/pkg/application"
+	"context"
+
+	core "dappco.re/go"
+	guicontextmenu "dappco.re/go/gui/pkg/contextmenu"
+	guievents "dappco.re/go/gui/pkg/events"
 )
 
 // registerContextMenus mounts the standard right-click surfaces.
@@ -28,57 +32,82 @@ import (
 //	lthn-input    — chat textarea + any editable input (Cut / Copy / Paste / Select All)
 //	lthn-model    — model row in the models surface (Reveal in Finder / Remove / Info)
 //	lthn-route    — provider-route entry in settings (Edit / Test / Remove / Disable)
-func registerContextMenus(app *application.App) {
-	registerMessageMenu(app)
-	registerInputMenu(app)
-	registerModelMenu(app)
-	registerRouteMenu(app)
-}
-
-// emitContext is the shared handler shape — re-emits the right-click
-// as an app event the frontend can listen for.
-func emitContext(app *application.App, menu, action string) func(*application.Context) {
-	event := "lthn:context:" + menu + ":" + action
-	return func(ctx *application.Context) {
-		app.Event.Emit(event, ctx.ContextMenuData())
+func registerContextMenus(c *core.Core) {
+	if c == nil {
+		return
 	}
+	registerContextMenuRelay(c)
+	registerMessageMenu(c)
+	registerInputMenu(c)
+	registerModelMenu(c)
+	registerRouteMenu(c)
 }
 
-func registerMessageMenu(app *application.App) {
-	m := app.ContextMenu.New()
-	m.Add("Copy").OnClick(emitContext(app, "message", "copy"))
-	m.Add("Regenerate").OnClick(emitContext(app, "message", "regenerate"))
-	m.Add("Edit").OnClick(emitContext(app, "message", "edit"))
-	m.AddSeparator()
-	m.Add("Delete").OnClick(emitContext(app, "message", "delete"))
-	app.ContextMenu.Add("lthn-message", m)
+func registerContextMenuRelay(c *core.Core) {
+	c.RegisterAction(func(c *core.Core, msg core.Message) core.Result {
+		clicked, ok := msg.(guicontextmenu.ActionItemClicked)
+		if !ok {
+			return core.Ok(nil)
+		}
+		event := "lthn:context:" + core.TrimPrefix(clicked.MenuName, "lthn-") + ":" + clicked.ActionID
+		return c.Action("events.emit").Run(context.Background(), core.NewOptions(
+			core.Option{Key: "task", Value: guievents.TaskEmit{Name: event, Data: clicked.Data}},
+		))
+	})
 }
 
-func registerInputMenu(app *application.App) {
-	m := app.ContextMenu.New()
-	m.Add("Cut").OnClick(emitContext(app, "input", "cut"))
-	m.Add("Copy").OnClick(emitContext(app, "input", "copy"))
-	m.Add("Paste").OnClick(emitContext(app, "input", "paste"))
-	m.AddSeparator()
-	m.Add("Select All").OnClick(emitContext(app, "input", "selectall"))
-	app.ContextMenu.Add("lthn-input", m)
+func addContextMenu(c *core.Core, name string, items []guicontextmenu.MenuItemDef) {
+	c.Action("contextmenu.add").Run(context.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guicontextmenu.TaskAdd{
+			Name: name,
+			Menu: guicontextmenu.ContextMenuDef{Name: name, Items: items},
+		}},
+	))
 }
 
-func registerModelMenu(app *application.App) {
-	m := app.ContextMenu.New()
-	m.Add("Reveal in Finder").OnClick(emitContext(app, "model", "reveal"))
-	m.Add("Model Info").OnClick(emitContext(app, "model", "info"))
-	m.AddSeparator()
-	m.Add("Remove…").OnClick(emitContext(app, "model", "remove"))
-	app.ContextMenu.Add("lthn-model", m)
+func menuItem(label, action string) guicontextmenu.MenuItemDef {
+	return guicontextmenu.MenuItemDef{Label: label, ActionID: action}
 }
 
-func registerRouteMenu(app *application.App) {
-	m := app.ContextMenu.New()
-	m.Add("Edit").OnClick(emitContext(app, "route", "edit"))
-	m.Add("Test Connection").OnClick(emitContext(app, "route", "test"))
-	m.AddSeparator()
-	m.Add("Disable").OnClick(emitContext(app, "route", "disable"))
-	m.Add("Remove…").OnClick(emitContext(app, "route", "remove"))
-	app.ContextMenu.Add("lthn-route", m)
+func menuSeparator() guicontextmenu.MenuItemDef {
+	return guicontextmenu.MenuItemDef{Type: "separator"}
+}
+
+func registerMessageMenu(c *core.Core) {
+	addContextMenu(c, "lthn-message", []guicontextmenu.MenuItemDef{
+		menuItem("Copy", "copy"),
+		menuItem("Regenerate", "regenerate"),
+		menuItem("Edit", "edit"),
+		menuSeparator(),
+		menuItem("Delete", "delete"),
+	})
+}
+
+func registerInputMenu(c *core.Core) {
+	addContextMenu(c, "lthn-input", []guicontextmenu.MenuItemDef{
+		menuItem("Cut", "cut"),
+		menuItem("Copy", "copy"),
+		menuItem("Paste", "paste"),
+		menuSeparator(),
+		menuItem("Select All", "selectall"),
+	})
+}
+
+func registerModelMenu(c *core.Core) {
+	addContextMenu(c, "lthn-model", []guicontextmenu.MenuItemDef{
+		menuItem("Reveal in Finder", "reveal"),
+		menuItem("Model Info", "info"),
+		menuSeparator(),
+		menuItem("Remove...", "remove"),
+	})
+}
+
+func registerRouteMenu(c *core.Core) {
+	addContextMenu(c, "lthn-route", []guicontextmenu.MenuItemDef{
+		menuItem("Edit", "edit"),
+		menuItem("Test Connection", "test"),
+		menuSeparator(),
+		menuItem("Disable", "disable"),
+		menuItem("Remove...", "remove"),
+	})
 }

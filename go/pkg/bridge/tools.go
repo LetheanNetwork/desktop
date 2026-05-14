@@ -12,7 +12,7 @@ import (
 	"time"
 
 	core "dappco.re/go"
-	"github.com/wailsapp/wails/v3/pkg/application"
+	guiwindow "dappco.re/go/gui/pkg/window"
 )
 
 // ─── HTTP handlers ──────────────────────────────────────────────────
@@ -436,40 +436,25 @@ func (s *Service) toolErrors(params map[string]any) map[string]any {
 }
 
 func (s *Service) toolWindows() map[string]any {
-	app := s.app()
-	if app == nil {
-		return map[string]any{"ok": false, "error": wailsAppUnavailable}
+	all, errResp := s.coreGUIWindowList()
+	if errResp != nil {
+		return errResp
 	}
-	// Wails3's Window.GetAll returns []application.Window; map each to
-	// its name + class for the agent's window-pick decisions.
-	all := app.Window.GetAll()
 	out := make([]map[string]any, 0, len(all))
-	for _, w := range all {
-		out = append(out, map[string]any{"name": w.Name()})
+	for i := range all {
+		out = append(out, map[string]any{"name": all[i].Name})
 	}
 	return map[string]any{"ok": true, "value": out, "count": len(out)}
 }
 
 // ─── eval ───────────────────────────────────────────────────────────
 
-// eval ExecJS's the wrapped body in the named window and waits for
-// the fetch-back at /internal/eval-reply. 5s timeout — anything
+// eval dispatches the wrapped body through core/gui and waits for
+// the fetch-back at /internal/eval-reply. 5s timeout - anything
 // longer is almost certainly a hung script.
 func (s *Service) eval(ctx context.Context, windowName, body string) map[string]any {
 	if body == "" {
 		return map[string]any{"ok": false, "error": "script param required"}
-	}
-	app := s.app()
-	if app == nil {
-		return map[string]any{"ok": false, "error": wailsAppUnavailable}
-	}
-	w, ok := app.Window.GetByName(windowName)
-	if !ok || w == nil {
-		return map[string]any{"ok": false, "error": "window not found: " + windowName}
-	}
-	wv, ok := w.(*application.WebviewWindow)
-	if !ok {
-		return map[string]any{"ok": false, "error": "window is not a WebviewWindow: " + windowName}
 	}
 
 	s.evalMu.Lock()
@@ -498,7 +483,9 @@ func (s *Service) eval(ctx context.Context, windowName, body string) map[string]
   }
 })();`, jsonLit(reqID), s.port, body)
 
-	wv.ExecJS(wrapped)
+	if errResp := s.runCoreGUIWindowTask("window.exec_js", guiwindow.TaskExecJS{Name: windowName, JS: wrapped}); errResp != nil {
+		return errResp
+	}
 
 	select {
 	case reply := <-ch:
@@ -531,7 +518,7 @@ func (s *Service) ServiceName() string { return "Bridge" }
 // ServiceStartup is a no-op for the Wails lifecycle — the bridge's
 // HTTP listener boots via the Core OnStartup hook. Wails calls this
 // once per session after application.New returns.
-func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+func (s *Service) ServiceStartup(_ context.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 

@@ -1,16 +1,13 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-// Global keyboard shortcut registration. Wails routes accelerators
-// through `app.KeyBinding.Add(...)` — once registered, the shortcut
-// works from anywhere in the app (any window focused, or tray popover
-// visible).
+// Global keyboard shortcut registration through CoreGUI.
 //
 // Pattern: each binding emits an "lthn:key:<verb>" event with the
 // originating window's name. Lit elements subscribe via Events.On
 // and dispatch state — no shortcut handler needs to know about
 // the actual app state.
 //
-// macOS uses Cmd; Windows/Linux use Ctrl. Wails accepts both forms,
+// macOS uses Cmd; Windows/Linux use Ctrl. CoreGUI accepts both forms,
 // so we register both for cross-platform parity (the inactive
 // modifier is just dead key on each platform). Cmd+Q / Cmd+W /
 // Cmd+M / Cmd+H / clipboard shortcuts come from the AppMenu /
@@ -20,7 +17,11 @@
 package desktop
 
 import (
-	"github.com/wailsapp/wails/v3/pkg/application"
+	"context"
+
+	core "dappco.re/go"
+	guievents "dappco.re/go/gui/pkg/events"
+	guikeybinding "dappco.re/go/gui/pkg/keybinding"
 )
 
 // registerKeyBindings mounts the default Lethean Desktop accelerators.
@@ -38,13 +39,11 @@ import (
 //
 // All emit with the active window's name as the payload so a Lit
 // element scoped to one window doesn't react to another's key event.
-func registerKeyBindings(app *application.App) {
-	bind := func(accel, verb string) {
-		handler := emitKey(app, verb)
-		app.KeyBinding.Add(accel, handler)
+func registerKeyBindings(c *core.Core) {
+	if c == nil {
+		return
 	}
-
-	for _, b := range []struct{ accel, verb string }{
+	bindings := []struct{ accel, verb string }{
 		{"Cmd+J", "popover"},
 		{"Ctrl+J", "popover"},
 		{"Cmd+N", "new-session"},
@@ -58,21 +57,32 @@ func registerKeyBindings(app *application.App) {
 		{"Cmd+/", "help"},
 		{"Ctrl+/", "help"},
 		{"Escape", "dismiss"},
-	} {
-		bind(b.accel, b.verb)
 	}
-}
+	verbByAccelerator := map[string]string{}
+	for _, b := range bindings {
+		verbByAccelerator[b.accel] = b.verb
+		c.Action("keybinding.add").Run(context.Background(), core.NewOptions(
+			core.Option{Key: "task", Value: guikeybinding.TaskAdd{
+				Accelerator: b.accel,
+				Description: "lthn:" + b.verb,
+			}},
+		))
+	}
 
-// emitKey builds a key-handler that re-emits to the app event bus
-// with the active window's name. Lit elements filter by window in
-// their Events.On callbacks so cross-window keys don't bleed.
-func emitKey(app *application.App, verb string) func(application.Window) {
-	event := "lthn:key:" + verb
-	return func(window application.Window) {
-		name := ""
-		if window != nil {
-			name = window.Name()
+	c.RegisterAction(func(c *core.Core, msg core.Message) core.Result {
+		triggered, ok := msg.(guikeybinding.ActionTriggered)
+		if !ok {
+			return core.Ok(nil)
 		}
-		app.Event.Emit(event, name)
-	}
+		verb := verbByAccelerator[triggered.Accelerator]
+		if verb == "" {
+			return core.Ok(nil)
+		}
+		// TODO(snider): core/gui needs keybinding callbacks to include
+		// the originating window name. Until then the frontend receives
+		// an empty payload, matching the old type but not the full detail.
+		return c.Action("events.emit").Run(context.Background(), core.NewOptions(
+			core.Option{Key: "task", Value: guievents.TaskEmit{Name: "lthn:key:" + verb, Data: ""}},
+		))
+	})
 }

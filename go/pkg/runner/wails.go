@@ -13,7 +13,6 @@ import (
 	core "dappco.re/go"
 	"dappco.re/go/config"
 	"dappco.re/go/inference"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // RouteView is the lean read-only shape Settings → Runner consumes.
@@ -31,7 +30,7 @@ type RouteView struct {
 // instance through application.NewService.
 
 func (s *Service) ServiceName() string { return "Runner" }
-func (s *Service) ServiceStartup(_ context.Context, _ application.ServiceOptions) core.Result {
+func (s *Service) ServiceStartup(_ context.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }
