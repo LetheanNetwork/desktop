@@ -112,7 +112,8 @@ class LthnToolsWindow extends LitElement {
     // string still reads coherently if WModels() returns empty.
     try {
       const runner = await import("@desktop/runner/service");
-      const models = await runner.WModels().catch((): string[] => []);
+      const { unwrap } = await import("../result");
+      const models = await unwrap<string[]>(runner.WModels(), []);
       if (models?.[0]) this.activeModel = models[0];
     } catch { /* keep fallback */ }
     // Build the subtitle from real counts — N servers (distinct

@@ -128,8 +128,10 @@ class LthnTelemetryWindow extends LitElement {
         import("@desktop/telemetry/service"),
         import("@desktop/runner/service"),
       ]);
-      const reading = await tel.CurrentSample();
-      const models = await runner.WModels().catch((): string[] => []);
+      const { unwrap, demand } = await import("../result");
+      type Reading = { heap_alloc_mb?: number; uptime_seconds?: number; num_goroutines?: number; num_cgo_calls?: number };
+      const reading = await demand<Reading>(tel.CurrentSample());
+      const models = await unwrap<string[]>(runner.WModels(), []);
       this.sample = {
         heap_alloc_mb: reading.heap_alloc_mb || 0,
         uptime_seconds: reading.uptime_seconds || 0,

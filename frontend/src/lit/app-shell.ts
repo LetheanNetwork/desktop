@@ -170,8 +170,9 @@ class LthnAppShell extends LitElement {
         import("@desktop/runner/service"),
         import("@desktop/firstlaunch/wailsservice"),
       ]);
+      const { unwrap } = await import("./result");
       const [models, build] = await Promise.all([
-        runner.WModels().catch((): string[] => []),
+        unwrap<string[]>(runner.WModels(), []),
         fl.Build().catch(() => null),
       ]);
       const firstModel = models?.[0];

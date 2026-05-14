@@ -203,12 +203,13 @@ class LthnSettingsWindow extends LitElement {
   async _toggleApiKey() {
     try {
       const ak = await import("@desktop/apikey/wailsservice");
+      const { unwrap } = await import("../result");
       if (this.apiKeyRevealed) {
-        const masked = await ak.Masked();
+        const masked = await unwrap<string>(ak.Masked(), "");
         if (masked) this.apiKey = masked;
         this.apiKeyRevealed = false;
       } else {
-        const full = await ak.Reveal();
+        const full = await unwrap<string>(ak.Reveal(), "");
         if (full) this.apiKey = full;
         this.apiKeyRevealed = true;
       }
@@ -268,12 +269,14 @@ class LthnSettingsWindow extends LitElement {
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const [i18n, fl, runner, server] = await Promise.all([
+    const [i18n, fl, runner, server, resultMod] = await Promise.all([
       import("@lthn/i18n/coreservice"),
       import("@desktop/firstlaunch/wailsservice"),
       import("@desktop/runner/service"),
       import("@desktop/server/service"),
+      import("../result"),
     ]);
+    const { unwrap } = resultMod;
     const [
       title, subtitleTpl, locales, currentLang, paths, routes, routeViews, build, addr, listening,
       pGT, pGD, pMT, pMD, pRT, pRD, pAT, pAD, pTT, pTD, pIT, pID, pAbT, pAbD,
@@ -290,11 +293,11 @@ class LthnSettingsWindow extends LitElement {
       i18n.AvailableLanguages(),
       i18n.Language(),
       fl.Paths().catch(() => null),
-      runner.WModels().catch((): string[] => []),
-      runner.WRoutes().catch((): RouteView[] => []),
+      unwrap<string[]>(runner.WModels(), []),
+      unwrap<RouteView[]>(runner.WRoutes(), []),
       fl.Build().catch(() => null),
-      server.WAddr().catch((): string => ""),
-      server.WListening().catch((): boolean => false),
+      unwrap<string>(server.WAddr(), ""),
+      unwrap<boolean>(server.WListening(), false),
       i18n.T("window.settings.panel_general_title"),
       i18n.T("window.settings.panel_general_desc"),
       i18n.T("window.settings.panel_models_title"),
@@ -392,7 +395,7 @@ class LthnSettingsWindow extends LitElement {
     // it for the full string via the apikey.Reveal binding.
     try {
       const ak = await import("@desktop/apikey/wailsservice");
-      const masked = await ak.Masked().catch((): string => "");
+      const masked = await unwrap<string>(ak.Masked(), "");
       if (masked) this.apiKey = masked;
     } catch { /* keep design fallback */ }
     // Rebuild the subtitle with the real version so the chrome

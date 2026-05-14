@@ -467,10 +467,12 @@ switch (surface) {
       const poll = async () => {
         try {
           const sessions = await import("@desktop/sessions/wailsservice");
+          const { unwrap, demand } = await import("./lit/result");
+          type Reading = { uptime_seconds?: number; heap_alloc_mb?: number };
           const [reading, models, sessionList] = await Promise.all([
-            TelemetryService.CurrentSample(),
-            RunnerService.WModels().catch((): string[] => []),
-            sessions.List().catch((): unknown[] => []),
+            demand<Reading>(TelemetryService.CurrentSample()),
+            unwrap<string[]>(RunnerService.WModels(), []),
+            unwrap<unknown[]>(sessions.List(), []),
           ]);
           state.connected = true;
           state.err = null;

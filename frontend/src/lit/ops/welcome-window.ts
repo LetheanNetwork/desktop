@@ -186,9 +186,10 @@ class LthnWelcomeWindow extends LitElement {
         import("@desktop/integrations/wailsservice"),
         import("@desktop/server/service"),
       ]);
+      const { unwrap } = await import("../result");
       const [list, addr] = await Promise.all([
         int.List(),
-        server.WAddr().catch((): string => ""),
+        unwrap<string>(server.WAddr(), ""),
       ]);
       this.clients = (list || []) as ClientStatus[];
       if (addr) {

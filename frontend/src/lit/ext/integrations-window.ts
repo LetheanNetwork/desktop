@@ -91,17 +91,19 @@ class LthnIntegrationsWindow extends LitElement {
       yes, no, noClient: nc,
     };
     try {
-      const [integrations, runner, server, ak] = await Promise.all([
+      const [integrations, runner, server, ak, resultMod] = await Promise.all([
         import("@desktop/integrations/wailsservice"),
         import("@desktop/runner/service"),
         import("@desktop/server/service"),
         import("@desktop/apikey/wailsservice"),
+        import("../result"),
       ]);
+      const { unwrap } = resultMod;
       const [list, models, addr, masked] = await Promise.all([
         integrations.List(),
-        runner.WModels().catch((): string[] => []),
-        server.WAddr().catch((): string => ""),
-        ak.Masked().catch((): string => ""),
+        unwrap<string[]>(runner.WModels(), []),
+        unwrap<string>(server.WAddr(), ""),
+        unwrap<string>(ak.Masked(), ""),
       ]);
       this.clients = (list || []) as ClientView[];
       if (this.clients.length > 0) this.selectedId = this.clients[0].id;

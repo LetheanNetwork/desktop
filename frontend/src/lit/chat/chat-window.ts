@@ -257,9 +257,10 @@ class LthnChatWindow extends LitElement {
   async _reloadModel() {
     try {
       const svc = await import("@desktop/runner/service");
+      const { unwrap } = await import("../result");
       const [models, routes] = await Promise.all([
-        svc.WModels().catch((): string[] => []),
-        svc.WRoutes().catch((): unknown[] => []),
+        unwrap<string[]>(svc.WModels(), []),
+        unwrap<unknown[]>(svc.WRoutes(), []),
       ]);
       this.activeModel = models?.[0] || "";
       if ((routes?.length ?? 0) > 0) this.runnerCount = routes.length;
@@ -287,7 +288,9 @@ class LthnChatWindow extends LitElement {
     }
     try {
       const svc = await import("@desktop/sessions/wailsservice");
-      const msgs = await svc.Read(this.activeConversationId);
+      const { unwrap } = await import("../result");
+      type Msg = Parameters<typeof messageToTurn>[0];
+      const msgs = await unwrap<Msg[]>(svc.Read(this.activeConversationId), []);
       this.liveTurns = (msgs || []).map(messageToTurn);
     } catch (err: unknown) {
       this.sendErr = err instanceof Error ? err.message : String(err);
@@ -315,10 +318,12 @@ class LthnChatWindow extends LitElement {
         import("@desktop/sessions/wailsservice"),
         import("@desktop/runner/service"),
       ]);
-      await sessions.Append(id, "user", text);
-      const history = await sessions.Read(id);
-      const reply = await runner.WChat(history || []);
-      await sessions.Append(id, "assistant", reply || "");
+      const { demand, unwrap } = await import("../result");
+      type Msg = Parameters<typeof messageToTurn>[0];
+      await demand<unknown>(sessions.Append(id, "user", text));
+      const history = await unwrap<Msg[]>(sessions.Read(id), []);
+      const reply = await unwrap<string>(runner.WChat(history || []), "");
+      await demand<unknown>(sessions.Append(id, "assistant", reply || ""));
       await this._loadTurns();
       await this._reloadRail();
     } catch (err: unknown) {
@@ -344,7 +349,8 @@ class LthnChatWindow extends LitElement {
   async _newConversation() {
     try {
       const svc = await import("@desktop/sessions/wailsservice");
-      const id = await svc.Create(this.t.railNew);
+      const { demand } = await import("../result");
+      const id = await demand<string>(svc.Create(this.t.railNew));
       await this._reloadRail();
       this.activeConversationId = id;
     } catch (err: unknown) {
@@ -360,7 +366,9 @@ class LthnChatWindow extends LitElement {
   async _reloadRail() {
     try {
       const svc = await import("@desktop/sessions/wailsservice");
-      const list = await svc.List();
+      const { unwrap } = await import("../result");
+      type SessionInfo = Parameters<typeof deriveConversation>[0];
+      const list = await unwrap<SessionInfo[]>(svc.List(), []);
       this.conversations = (list || []).map(deriveConversation).filter(Boolean) as Conversation[];
       if (this.conversations.length > 0 && !this.activeConversationId) {
         this.activeConversationId = this.conversations[0].id;

@@ -102,7 +102,8 @@ class LthnBuildWindow extends LitElement {
     this.err = "";
     try {
       const svc = await import("@desktop/build/service");
-      this.detected = await svc.Detect(this.path) as Detection;
+      const { demand } = await import("../result");
+      this.detected = await demand<Detection>(svc.Detect(this.path));
     } catch (e: unknown) {
       this.err = e instanceof Error ? e.message : String(e);
       this.detected = null;
@@ -112,8 +113,9 @@ class LthnBuildWindow extends LitElement {
   async _reloadProcs() {
     try {
       const svc = await import("@desktop/build/service");
-      const list = await svc.ProcessList();
-      this.procs = (list || []) as ProcessEntry[];
+      const { unwrap } = await import("../result");
+      const list = await unwrap<ProcessEntry[]>(svc.ProcessList(), []);
+      this.procs = list;
     } catch { /* non-fatal */ }
   }
 
@@ -123,7 +125,8 @@ class LthnBuildWindow extends LitElement {
     this.output = "";
     try {
       const svc = await import("@desktop/build/service");
-      const r = await svc.Run(this.path, "", []) as RunResult;
+      const { demand } = await import("../result");
+      const r = await demand<RunResult>(svc.Run(this.path, "", []));
       this.procID = r.process_id;
       this.running = true;
       this.output = `$ ${r.build_command} ${r.build_args.join(" ")}\n\n`;
@@ -141,9 +144,10 @@ class LthnBuildWindow extends LitElement {
     if (!this.procID) return;
     try {
       const svc = await import("@desktop/build/service");
-      this.output = await svc.ProcessOutput(this.procID);
-      const list = await svc.ProcessList() as ProcessEntry[];
-      this.procs = list || [];
+      const { unwrap } = await import("../result");
+      this.output = await unwrap<string>(svc.ProcessOutput(this.procID), "");
+      const list = await unwrap<ProcessEntry[]>(svc.ProcessList(), []);
+      this.procs = list;
       const me = this.procs.find(p => p.id === this.procID);
       if (me && me.status !== "running" && me.status !== "starting") {
         this.running = false;
@@ -161,7 +165,8 @@ class LthnBuildWindow extends LitElement {
     if (!this.procID) return;
     try {
       const svc = await import("@desktop/build/service");
-      await svc.ProcessKill(this.procID);
+      const { demand } = await import("../result");
+      await demand<unknown>(svc.ProcessKill(this.procID));
       this.running = false;
       if (this._pollTimer !== null) {
         clearInterval(this._pollTimer);
