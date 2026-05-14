@@ -22,6 +22,7 @@ import "./ext/tools-window";
 import "./ext/network-window";
 import "./ext/distillation-window";
 import "./ext/fleet-window";
+import "./ext/providers-window";
 
 // Lethean-6 application shell — frameless single-window chrome that
 // auto-mounts the matching <lthn-*-window> by `active` attribute.
