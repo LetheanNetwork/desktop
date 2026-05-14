@@ -167,6 +167,16 @@ func (s *Service) Start(profileName string) core.Result {
 	}
 	hostPort := portR.Value.(int)
 
+	// Resolve (or generate-on-first-use) the per-install
+	// OPENCODE_SERVER_PASSWORD. Passed to the container via -e so
+	// opencode-serve enforces auth; lthn's reverse-proxy + outbound
+	// calls inject the matching Authorization header.
+	pwR := s.ServerPassword()
+	if !pwR.OK {
+		return pwR
+	}
+	password, _ := pwR.Value.(string)
+
 	// Inline-config via OPENCODE_CONFIG_CONTENT — opencode reads this
 	// at startup before any provider initialisation, so the narrowed
 	// profile (provider.lthn, tool/skill allow-lists, etc.) is the
@@ -177,6 +187,7 @@ func (s *Service) Start(profileName string) core.Result {
 		"run", "-d",
 		"-p", core.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort),
 		"-e", "OPENCODE_CONFIG_CONTENT=" + core.JSONMarshalString(profile),
+		"-e", "OPENCODE_SERVER_PASSWORD=" + password,
 		"--name", ContainerName(id),
 		s.image(),
 		"opencode", "serve",
@@ -207,18 +218,19 @@ func (s *Service) Start(profileName string) core.Result {
 	}
 
 	target := core.Sprintf("http://127.0.0.1:%d", hostPort)
-	s.proxy.Set(id, target)
+	authHeader := s.authHeader()
+	s.proxy.Set(id, target, authHeader)
 
 	// Wait for opencode-serve to bind + respond healthy, then apply
 	// the profile via PATCH /config. Failures to apply the profile
 	// don't fail Start — the sandbox is still usable with opencode's
 	// own default config; the patch is a narrowing optimisation.
-	if r := waitHealthy(target, 30*time.Second); !r.OK {
+	if r := waitHealthy(target, authHeader, 30*time.Second); !r.OK {
 		_ = ps.Run(context.Background(), s.runtime(), "rm", "-f", ContainerName(id))
 		s.proxy.Delete(id)
 		return r
 	}
-	if r := applyProfile(target, profile); !r.OK {
+	if r := applyProfile(target, authHeader, profile); !r.OK {
 		// Log the warning shape but don't propagate — sandbox is
 		// up, just running with un-narrowed config.
 		_ = r
@@ -228,18 +240,24 @@ func (s *Service) Start(profileName string) core.Result {
 }
 
 // waitHealthy polls opencode-serve's /global/health until it
-// returns 200 OK or the timeout fires. Used after spawn to wait
-// for the Bun runtime + opencode-serve to bind before patching
-// config.
-func waitHealthy(target string, timeout time.Duration) core.Result {
+// returns 200 OK or the timeout fires. authHeader is the Basic
+// Auth credential lthn injects on outbound calls — opencode-serve
+// will 401 otherwise when OPENCODE_SERVER_PASSWORD is set.
+func waitHealthy(target, authHeader string, timeout time.Duration) core.Result {
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 2 * time.Second}
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(target + "/global/health")
+		req, err := http.NewRequest(http.MethodGet, target+"/global/health", nil)
 		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return core.Ok(nil)
+			if authHeader != "" {
+				req.Header.Set("Authorization", authHeader)
+			}
+			resp, derr := client.Do(req)
+			if derr == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return core.Ok(nil)
+				}
 			}
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -254,13 +272,19 @@ func waitHealthy(target string, timeout time.Duration) core.Result {
 // and is consulted later in the resolution chain. Server-side this
 // goes through opencode's Config.update Effect, mergeDeep into
 // the existing config file, fs.writeFileString-persisted.
-func applyProfile(target string, p Profile) core.Result {
+//
+// authHeader is the Basic Auth credential lthn injects when
+// OPENCODE_SERVER_PASSWORD is set (always set by Start).
+func applyProfile(target, authHeader string, p Profile) core.Result {
 	body := bytes.NewBufferString(core.JSONMarshalString(p))
 	req, err := http.NewRequest(http.MethodPatch, target+"/global/config", body)
 	if err != nil {
 		return core.Fail(core.E("opencode.applyProfile", "request build failed", err))
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {

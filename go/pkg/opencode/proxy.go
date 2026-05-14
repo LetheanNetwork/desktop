@@ -62,10 +62,16 @@ func (g *SandboxProxyGroup) RegisterRoutes(rg *gin.RouterGroup) {
 // `http://127.0.0.1:<host-port>` where host-port is the dynamic
 // port allocated for this sandbox.
 //
+// authHeader is the optional Authorization header value injected on
+// every forwarded request — opencode-serve enforces HTTP Basic Auth
+// when OPENCODE_SERVER_PASSWORD is set, and the reverse-proxy is the
+// canonical place to attach the credential so callers (frontend +
+// CLI clients) don't need to know the password.
+//
 // Usage example:
 //
-//	g.Set("oc-7f3a2b1c", "http://127.0.0.1:51823")
-func (g *SandboxProxyGroup) Set(id, targetURL string) {
+//	g.Set("oc-7f3a2b1c", "http://127.0.0.1:51823", svc.authHeader())
+func (g *SandboxProxyGroup) Set(id, targetURL, authHeader string) {
 	u, err := url.Parse(targetURL)
 	if err != nil {
 		return
@@ -75,6 +81,15 @@ func (g *SandboxProxyGroup) Set(id, targetURL string) {
 	// flushes streaming responses (no Buffered field — flush happens
 	// when downstream Writer implements http.Flusher, which gin's
 	// ResponseWriter does). No customisation needed for SSE today.
+	if authHeader != "" {
+		// Wrap the default Director so the upstream-rewrite logic
+		// (Host, X-Forwarded-*) still runs, then inject auth.
+		defaultDir := rp.Director
+		rp.Director = func(req *http.Request) {
+			defaultDir(req)
+			req.Header.Set("Authorization", authHeader)
+		}
+	}
 	g.mu.Lock()
 	g.targets[id] = rp
 	g.mu.Unlock()
