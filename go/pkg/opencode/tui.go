@@ -1,8 +1,20 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-// OpenTUI — spawns `<runtime> exec -it <container> opencode` inside
-// the user's default terminal. Per RFC.opencode.md §6, this is the
-// "Open TUI" button on the integrations card.
+// OpenTUI — opens the user's host opencode TUI attached to the
+// running sandbox via `opencode attach <url>`. Per RFC.opencode.md
+// §6, this is the "Open TUI" button on the integrations card.
+//
+// Why `attach`, not `docker exec`: opencode 1.14+ ships an `attach`
+// subcommand that connects a host-side TUI to any reachable backend
+// (serve/web) over HTTP. The user's host opencode brings their own
+// theme, keybinds, auth profile, and history — strictly better UX
+// than shelling into the container. The container is the BACKEND
+// only; the TUI runs on the host.
+//
+// The container's bound `127.0.0.1:<host-port>` is the target URL.
+// Auth is the per-install OPENCODE_SERVER_PASSWORD, passed via env
+// to the spawned shell so it never lands on the command line / in
+// `ps` output / in shell history.
 //
 // Platform branching:
 //
@@ -43,9 +55,9 @@ func (s *Service) OpenTUI(id string) core.Result {
 	if core.Trim(id) == "" {
 		return core.Fail(core.E("opencode.OpenTUI", "id is required", nil))
 	}
-	// Confirm sandbox is running — opening a TUI on a stopped
-	// container produces a confusing "container not running" error
-	// inside the user's new terminal window.
+	// Confirm sandbox is running — attaching to a stopped backend
+	// produces a confusing connection-refused error inside the
+	// user's new terminal window.
 	infoR := s.Inspect(id)
 	if !infoR.OK {
 		return infoR
@@ -55,24 +67,36 @@ func (s *Service) OpenTUI(id string) core.Result {
 		return core.Fail(core.E("opencode.OpenTUI",
 			"sandbox is not running (status="+sb.Status+")", nil))
 	}
+	pwR := s.ServerPassword()
+	if !pwR.OK {
+		return pwR
+	}
+	password, _ := pwR.Value.(string)
 
 	ps := s.proc()
 	if ps == nil {
 		return core.Fail(core.E("opencode.OpenTUI", "process service unavailable", nil))
 	}
 
-	// The command typed into the user's terminal. `runtime exec -it`
-	// is the docker / podman idiom; both accept the same flags.
-	innerCmd := s.runtime() + " exec -it " + ContainerName(id) + " opencode"
+	// `opencode attach <url>` connects a host-side TUI to the
+	// container's backend. Password rides on env so it doesn't
+	// land in ps output or shell history; the upstream's --password
+	// flag defaults to $OPENCODE_SERVER_PASSWORD when set.
+	targetURL := core.Sprintf("http://127.0.0.1:%d/", sb.HostPort)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	switch goruntime.GOOS {
 	case "darwin":
-		// AppleScript escapes embedded quotes with backslash; our
-		// innerCmd has no quotes so direct concat is safe.
-		script := `tell application "Terminal" to do script "` + innerCmd + `"`
+		// AppleScript `do script` runs the string in a fresh
+		// Terminal shell, so POSIX env-prefix parses correctly:
+		// `VAR=val cmd args...`. Password is hex-only (no quotes
+		// / special chars from rand.Read + hex.EncodeToString) so
+		// direct concat into the AppleScript is safe.
+		shellCmd := "OPENCODE_SERVER_PASSWORD=" + password +
+			" opencode attach " + targetURL
+		script := `tell application "Terminal" to do script "` + shellCmd + `"`
 		runR := ps.Run(ctx, "osascript", "-e", script)
 		if !runR.OK {
 			return runR
@@ -84,9 +108,14 @@ func (s *Service) OpenTUI(id string) core.Result {
 		return core.Ok(nil)
 
 	case "linux":
-		// $TERMINAL takes priority — distros set it via system
-		// preferences. Fall through to x-terminal-emulator (the
-		// Debian / Ubuntu convention) then well-known emulators.
+		// Wrap in `sh -c` so env-prefix parses across emulators
+		// (xterm -e exec's argv directly; gnome-terminal -e parses
+		// shell). The `sh -c '...'` shape is the lowest common
+		// denominator. $TERMINAL takes priority for users who've
+		// configured a preferred emulator.
+		shellCmd := "OPENCODE_SERVER_PASSWORD=" + password +
+			" opencode attach " + targetURL
+		wrapped := "sh -c " + shellQuote(shellCmd)
 		candidates := []string{
 			core.Getenv("TERMINAL"),
 			"x-terminal-emulator",
@@ -98,7 +127,7 @@ func (s *Service) OpenTUI(id string) core.Result {
 			if core.Trim(term) == "" {
 				continue
 			}
-			runR := ps.Run(ctx, term, "-e", innerCmd)
+			runR := ps.Run(ctx, term, "-e", wrapped)
 			if runR.OK {
 				return core.Ok(nil)
 			}
@@ -107,12 +136,16 @@ func (s *Service) OpenTUI(id string) core.Result {
 			"no terminal emulator found (set $TERMINAL)", nil))
 
 	case "windows":
-		// Windows Terminal first; falls back to cmd.exe.
-		runR := ps.Run(ctx, "wt.exe", "new-tab", "cmd", "/k", innerCmd)
+		// cmd.exe needs `set VAR=val && cmd` rather than the POSIX
+		// `VAR=val cmd` env-prefix. Windows Terminal first; falls
+		// back to plain cmd.exe.
+		cmdLine := "set OPENCODE_SERVER_PASSWORD=" + password +
+			" && opencode attach " + targetURL
+		runR := ps.Run(ctx, "wt.exe", "new-tab", "cmd", "/k", cmdLine)
 		if runR.OK {
 			return core.Ok(nil)
 		}
-		runR = ps.Run(ctx, "cmd", "/c", "start", "cmd", "/k", innerCmd)
+		runR = ps.Run(ctx, "cmd", "/c", "start", "cmd", "/k", cmdLine)
 		if runR.OK {
 			return core.Ok(nil)
 		}
@@ -122,4 +155,23 @@ func (s *Service) OpenTUI(id string) core.Result {
 		return core.Fail(core.E("opencode.OpenTUI",
 			"unsupported platform: "+goruntime.GOOS, nil))
 	}
+}
+
+// shellQuote single-quotes a string for safe inclusion in `sh -c`.
+// Hex passwords don't need it but the helper protects against
+// future callers that build commands with metacharacters.
+func shellQuote(s string) string {
+	// Single-quote everything, escape any embedded single quote as
+	// '\''. Cheap; runs once per OpenTUI invocation.
+	var b []byte
+	b = append(b, '\'')
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\'' {
+			b = append(b, '\'', '\\', '\'', '\'')
+			continue
+		}
+		b = append(b, s[i])
+	}
+	b = append(b, '\'')
+	return string(b)
 }
