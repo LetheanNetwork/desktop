@@ -54,7 +54,9 @@ tasks:
       - task: "{{OS}}:run"
 
   dev:
-    summary: Wails3 dev mode (hot reload)
+    summary: Wails3 dev mode (hot reload) — LTHN_DEV=1 auto-opens the app window on launch
+    env:
+      LTHN_DEV: "1"
     cmds:
       - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
 
