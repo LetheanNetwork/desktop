@@ -20,6 +20,7 @@ import { Machines, Queue, RoutingRules, Agents } from "@desktop/fleet/service";
 import type * as fleetModels from "@desktop/fleet/models";
 import { unwrap } from "../result";
 import "./configure-agent-modal";
+import "./pair-machine-modal";
 
 type MachineRow = fleetModels.Machine;
 type QueueRow = fleetModels.QueueRow;
@@ -41,6 +42,7 @@ class LthnFleetWindow extends LitElement {
     rules: { state: true },
     err: { state: true },
     configureAgentOpen: { state: true },
+    pairMachineOpen: { state: true },
   };
   declare w: number;
   declare h: number;
@@ -53,6 +55,7 @@ class LthnFleetWindow extends LitElement {
   declare rules: RuleRow[];
   declare err: string | null;
   declare configureAgentOpen: boolean;
+  declare pairMachineOpen: boolean;
 
   /* Poll interval id — cleared on disconnect. */
   private pollId: number | null = null;
@@ -69,6 +72,7 @@ class LthnFleetWindow extends LitElement {
     this.rules = [];
     this.err = null;
     this.configureAgentOpen = false;
+    this.pairMachineOpen = false;
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -152,9 +156,19 @@ class LthnFleetWindow extends LitElement {
   }
 
   private emitPairMachine() {
+    this.pairMachineOpen = true;
     this.dispatchEvent(new CustomEvent("lthn:fleet:pair-machine", {
       bubbles: true, composed: true,
     }));
+  }
+
+  private async onMachineSaved() {
+    this.pairMachineOpen = false;
+    await this.poll();
+  }
+
+  private onPairCancel() {
+    this.pairMachineOpen = false;
   }
 
   /* Centred empty-state card. icon is a fontawesome glyph name
@@ -212,10 +226,23 @@ class LthnFleetWindow extends LitElement {
       <div style="display:grid; grid-template-columns:16px 1.3fr 1.2fr 1.2fr 1fr 0.8fr 60px; gap:14px; padding:12px 16px; border-radius:8px; background:${bg}; border:${border}; opacity:${opacity}; align-items:center;">
         <i class="fa-solid fa-grip-vertical" style="font-size:11px; color:var(--fg-3);"></i>
         <div>
-          <div style="display:flex; align-items:center; gap:8px;">
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
             <lthn-status-dot variant=${offline ? "idle" : "ok"}></lthn-status-dot>
             <span style="font-size:13px; color:var(--fg-0); font-weight:500;">${m.name}</span>
             ${m.is_self ? html`<lthn-state-pill variant="latest">You</lthn-state-pill>` : nothing}
+            ${(m.capabilities || []).map(cap => html`
+              <span style="display:inline-flex; align-items:center; gap:4px;
+                           padding:1px 6px; font-size:9.5px;
+                           color:var(--brand-300);
+                           background:rgba(64,193,197,0.06);
+                           border:1px solid rgba(64,193,197,0.18);
+                           border-radius:4px;
+                           letter-spacing:0.02em;
+                           text-transform:lowercase;">
+                <i class="fa-solid ${cap === "inference" ? "fa-microchip" : cap === "sandbox" ? "fa-cubes" : cap === "bastion" ? "fa-shield-halved" : "fa-tag"}" style="font-size:8px;"></i>
+                ${cap}
+              </span>
+            `)}
           </div>
           <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); margin-top:3px;">${m.arch || "—"}</div>
         </div>
@@ -395,6 +422,11 @@ class LthnFleetWindow extends LitElement {
         @lthn:fleet:agent-saved=${() => { void this.onAgentSaved(); }}
         @lthn:fleet:configure-cancel=${() => this.onConfigureCancel()}>
       </lthn-configure-agent-modal>
+      <lthn-pair-machine-modal
+        .open=${this.pairMachineOpen}
+        @lthn:fleet:machine-saved=${() => { void this.onMachineSaved(); }}
+        @lthn:fleet:pair-cancel=${() => this.onPairCancel()}>
+      </lthn-pair-machine-modal>
     `;
   }
 }

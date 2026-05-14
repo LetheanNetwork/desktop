@@ -366,6 +366,39 @@ func TestService_Service_UpsertMachine_Ugly(t *core.T) {
 	core.AssertEqual(t, "online", rows[0].Status)
 }
 
+// Capability round-trip — Upsert writes JSON, Machines reads back
+// as []string in the documented order, and empty/missing capabilities
+// surface as [] not nil so TS callers can always .map() safely.
+func TestService_Service_UpsertMachine_CapabilitiesRoundTrip(t *core.T) {
+	svc := homeFixture(t)
+	core.AssertTrue(t, svc.UpsertMachine(fleet.Machine{
+		ID: "shop", Name: "shop · 7950X",
+		Capabilities: []string{
+			fleet.CapabilityInference,
+			fleet.CapabilitySandbox,
+			fleet.CapabilityBastion,
+		},
+	}).OK)
+	// Machine with no capabilities → row exists with []string{} on read.
+	core.AssertTrue(t, svc.UpsertMachine(fleet.Machine{ID: "plain", Name: "plain"}).OK)
+	r := svc.Machines()
+	core.AssertTrue(t, r.OK)
+	rows := r.Value.([]fleet.Machine)
+	core.AssertEqual(t, 2, len(rows))
+	byID := map[string]fleet.Machine{}
+	for _, m := range rows {
+		byID[m.ID] = m
+	}
+	shop := byID["shop"]
+	core.AssertEqual(t, 3, len(shop.Capabilities))
+	core.AssertEqual(t, fleet.CapabilityInference, shop.Capabilities[0])
+	core.AssertEqual(t, fleet.CapabilitySandbox, shop.Capabilities[1])
+	core.AssertEqual(t, fleet.CapabilityBastion, shop.Capabilities[2])
+	plain := byID["plain"]
+	core.AssertNotNil(t, plain.Capabilities, "empty capabilities must be [] not nil")
+	core.AssertEqual(t, 0, len(plain.Capabilities))
+}
+
 // --- ServiceName / ServiceStartup / ServiceShutdown (Wails lifecycle) ---
 
 func TestService_Service_ServiceName_Good(t *core.T) {

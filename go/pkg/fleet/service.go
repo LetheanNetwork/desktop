@@ -36,22 +36,41 @@ import (
 //
 //	{ id: "this-mac", name: "this Mac", arch: "M3 Pro · 36 GB",
 //	  status: "online · loaded", model: "gemma-4-e2b",
-//	  load_pct: 32, tps: 47.2, is_self: true }
+//	  load_pct: 32, tps: 47.2, is_self: true,
+//	  capabilities: ["inference","sandbox","bastion"] }
+//
+// Capabilities is the set of roles this machine fulfils — discovered
+// automatically by the first-run wizard once that flow lands; the
+// pair-machine modal asks the user to pick them manually. Each value
+// is one of CapabilityInference / CapabilitySandbox / CapabilityBastion
+// (other values are accepted but won't drive any built-in routing
+// until they ship). Stored as DuckDB JSON for native validity + future
+// json_array_contains() routing predicates.
 type Machine struct {
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
-	Arch      string  `json:"arch"`
-	Host      string  `json:"host"`
-	Port      int     `json:"port"`
-	Status    string  `json:"status"`
-	Model     string  `json:"model"`
-	LoadPct   int     `json:"load_pct"`
-	TPS       float64 `json:"tps"`
-	IsSelf    bool    `json:"is_self"`
-	Tags      string  `json:"tags"`
-	CreatedAt int64   `json:"created_at"`
-	UpdatedAt int64   `json:"updated_at"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Arch         string   `json:"arch"`
+	Host         string   `json:"host"`
+	Port         int      `json:"port"`
+	Status       string   `json:"status"`
+	Model        string   `json:"model"`
+	LoadPct      int      `json:"load_pct"`
+	TPS          float64  `json:"tps"`
+	IsSelf       bool     `json:"is_self"`
+	Tags         string   `json:"tags"`
+	Capabilities []string `json:"capabilities"`
+	CreatedAt    int64    `json:"created_at"`
+	UpdatedAt    int64    `json:"updated_at"`
 }
+
+// Capability identifiers. New values can be added without a schema
+// migration — the column is JSON; routing predicates filter on
+// values they understand and ignore the rest.
+const (
+	CapabilityInference = "inference" // can run models
+	CapabilitySandbox   = "sandbox"   // executes containers / sandboxed code
+	CapabilityBastion   = "bastion"   // network ingress / SSH jump / TLS gateway
+)
 
 // QueueRow is one in-flight agent_activity row.
 //
@@ -202,6 +221,7 @@ func (s *Service) Machines() core.Result {
 	rows, err := s.db.Conn().Query(`
 		SELECT id, name, COALESCE(arch,''), COALESCE(host,''), COALESCE(port,0),
 		       status, COALESCE(model,''), load_pct, tps, is_self, COALESCE(tags,''),
+		       COALESCE(CAST(capabilities AS TEXT), '[]'),
 		       created_at, updated_at
 		FROM fleet_machines
 		ORDER BY is_self DESC, name ASC
@@ -212,12 +232,24 @@ func (s *Service) Machines() core.Result {
 	defer rows.Close()
 	out := []Machine{}
 	for rows.Next() {
-		var m Machine
+		var (
+			m       Machine
+			capJSON string
+		)
 		if err := rows.Scan(&m.ID, &m.Name, &m.Arch, &m.Host, &m.Port,
 			&m.Status, &m.Model, &m.LoadPct, &m.TPS, &m.IsSelf, &m.Tags,
-			&m.CreatedAt, &m.UpdatedAt); err != nil {
+			&capJSON, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			return core.Fail(core.E("fleet.Machines", "scan row", err))
 		}
+		// JSON parse via core wrapper — empty / null degrades to
+		// empty slice rather than nil so TS sees [], not undefined.
+		caps := []string{}
+		if capJSON != "" && capJSON != "null" {
+			if r := core.JSONUnmarshalString(capJSON, &caps); !r.OK {
+				caps = []string{}
+			}
+		}
+		m.Capabilities = caps
 		out = append(out, m)
 	}
 	return core.Ok(out)
@@ -412,12 +444,16 @@ func (s *Service) DeleteAgent(id string) core.Result {
 }
 
 // UpsertMachine inserts or updates a fleet_machines row. Used by the
-// future discovery / pairing flows when new machines join. id is the
-// stable identifier; updated_at is set to now.
+// pair-machine wizard and the future discovery flow when new
+// machines join. id is the stable identifier; updated_at is set to
+// now; capabilities are JSON-encoded for native DuckDB validity.
 //
 // Usage example:
 //
-//	r := svc.UpsertMachine(fleet.Machine{ID: "shop", Name: "shop · 7950X"})
+//	r := svc.UpsertMachine(fleet.Machine{
+//	    ID: "shop", Name: "shop · 7950X",
+//	    Capabilities: []string{fleet.CapabilityInference, fleet.CapabilitySandbox},
+//	})
 func (s *Service) UpsertMachine(m Machine) core.Result {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -428,19 +464,27 @@ func (s *Service) UpsertMachine(m Machine) core.Result {
 	if m.CreatedAt == 0 {
 		m.CreatedAt = now
 	}
+	// Encode capabilities as JSON text; DuckDB accepts JSON via TEXT
+	// at insert and validates the shape itself. Nil/empty slice →
+	// "[]" so readers always see a JSON array, never a SQL NULL.
+	capJSON := "[]"
+	if len(m.Capabilities) > 0 {
+		capJSON = core.JSONMarshalString(m.Capabilities)
+	}
 	return s.db.Exec(`
 		INSERT INTO fleet_machines
 			(id, name, arch, host, port, status, model, load_pct, tps,
-			 is_self, tags, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 is_self, tags, capabilities, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			name=excluded.name, arch=excluded.arch, host=excluded.host,
 			port=excluded.port, status=excluded.status, model=excluded.model,
 			load_pct=excluded.load_pct, tps=excluded.tps,
 			is_self=excluded.is_self, tags=excluded.tags,
+			capabilities=excluded.capabilities,
 			updated_at=excluded.updated_at
 	`, m.ID, m.Name, m.Arch, m.Host, m.Port, m.Status, m.Model,
-		m.LoadPct, m.TPS, m.IsSelf, m.Tags, m.CreatedAt, now)
+		m.LoadPct, m.TPS, m.IsSelf, m.Tags, capJSON, m.CreatedAt, now)
 }
 
 // ServiceName / ServiceStartup / ServiceShutdown — Wails3 lifecycle.

@@ -36,20 +36,26 @@ import (
 // idempotent, so calling Init() repeatedly is cheap.
 var schemaStatements = []string{
 	`CREATE TABLE IF NOT EXISTS fleet_machines (
-		id          TEXT PRIMARY KEY,
-		name        TEXT NOT NULL,
-		arch        TEXT,
-		host        TEXT,
-		port        INTEGER,
-		status      TEXT NOT NULL DEFAULT 'offline',
-		model       TEXT,
-		load_pct    INTEGER NOT NULL DEFAULT 0,
-		tps         REAL NOT NULL DEFAULT 0,
-		is_self     BOOLEAN NOT NULL DEFAULT FALSE,
-		tags        TEXT,
-		created_at  BIGINT NOT NULL,
-		updated_at  BIGINT NOT NULL
+		id           TEXT PRIMARY KEY,
+		name         TEXT NOT NULL,
+		arch         TEXT,
+		host         TEXT,
+		port         INTEGER,
+		status       TEXT NOT NULL DEFAULT 'offline',
+		model        TEXT,
+		load_pct     INTEGER NOT NULL DEFAULT 0,
+		tps          REAL NOT NULL DEFAULT 0,
+		is_self      BOOLEAN NOT NULL DEFAULT FALSE,
+		tags         TEXT,
+		capabilities JSON,
+		created_at   BIGINT NOT NULL,
+		updated_at   BIGINT NOT NULL
 	)`,
+	// Forward-compatible migration: pre-capabilities rows existed in
+	// the wild from the earlier schema. DuckDB ADD COLUMN IF NOT
+	// EXISTS is idempotent — first run on an old DB adds the column;
+	// every later run is a no-op.
+	`ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS capabilities JSON`,
 	`CREATE TABLE IF NOT EXISTS fleet_routing (
 		priority    INTEGER NOT NULL,
 		machine_id  TEXT NOT NULL,
