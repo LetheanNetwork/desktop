@@ -9,12 +9,12 @@
 		<key>CFBundleIconFile</key>
 		<string>icons</string>
 		<!--
-		  CFBundleIconName intentionally omitted — see Info.plist for the
-		  full reasoning. Short version: Assets.car was generated from the
-		  wails W scaffold SVG, so macOS preferring it puts the wails W in
-		  the Dock. Dropping CFBundleIconName falls back to icons.icns,
-		  which IS our Lethean logo.
+		  CFBundleIconName re-enabled — Assets.car now wraps our Lethean
+		  hoplite silhouette (traced from hoplite_white_trans.png, recoloured
+		  to Lethean violet #663399). See Info.plist for the full reasoning.
 		-->
+		<key>CFBundleIconName</key>
+		<string>appicon</string>
 		<key>CFBundleIdentifier</key>
 		<string>ai.lthn.desktop</string>
 		<key>CFBundleName</key>
