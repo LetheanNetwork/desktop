@@ -5,6 +5,12 @@
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
 import { T } from "@lthn/i18n/coreservice";
+import { Machines, Queue, RoutingRules } from "@desktop/fleet/service";
+import type * as fleetModels from "@desktop/fleet/models";
+
+type MachineRow = fleetModels.Machine;
+type QueueRow = fleetModels.QueueRow;
+type RuleRow = fleetModels.RoutingRule;
 
 class LthnFleetWindow extends LitElement {
   static readonly properties = {
@@ -13,6 +19,10 @@ class LthnFleetWindow extends LitElement {
     embedded: { type: Boolean, reflect: true },
     chrome: { state: true },
     t: { state: true },
+    machines: { state: true },
+    queue: { state: true },
+    rules: { state: true },
+    err: { state: true },
   };
   declare w: number;
   declare h: number;
@@ -27,6 +37,16 @@ class LthnFleetWindow extends LitElement {
     colRouted: string; colStarted: string; colElapsed: string;
     footer: string;
   };
+  declare machines: MachineRow[];
+  declare queue: QueueRow[];
+  declare rules: RuleRow[];
+  declare err: string | null;
+
+  /* Poll interval id — cleared on disconnect to stop the timer when
+   * the window is hidden / destroyed. */
+  private pollId: number | null = null;
+  private static readonly POLL_MS = 2000;
+
   constructor() {
     super();
     this.w = 1080; this.h = 700; this.embedded = false;
@@ -39,8 +59,12 @@ class LthnFleetWindow extends LitElement {
       pillYou: "You", rowLoad: "load",
       colState: "State", colCaller: "Caller", colModel: "Model",
       colRouted: "Routed to", colStarted: "Started", colElapsed: "Elapsed",
-      footer: "4 of 5 online · routing latency-aware · ⌘R reroute · ⌘S snapshot",
+      footer: "—",
     };
+    this.machines = [];
+    this.queue = [];
+    this.rules = [];
+    this.err = null;
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -48,7 +72,7 @@ class LthnFleetWindow extends LitElement {
     const [
       title, subtitle,
       tM, tR, tS, pP, lM, lQ, pY, rL,
-      cSt, cC, cMo, cRo, cStrt, cEl, fo,
+      cSt, cC, cMo, cRo, cStrt, cEl,
     ] = await Promise.all([
       T("window.fleet.title"), T("window.fleet.subtitle"),
       T("window.fleet.tab_machines"), T("window.fleet.tab_routing"),
@@ -58,34 +82,82 @@ class LthnFleetWindow extends LitElement {
       T("window.fleet.col_state"), T("window.fleet.col_caller"),
       T("window.fleet.col_model"), T("window.fleet.col_routed"),
       T("window.fleet.col_started"), T("window.fleet.col_elapsed"),
-      T("window.fleet.footer"),
     ]);
     this.chrome = { title, subtitle };
     this.t = {
+      ...this.t,
       tabMachines: tM, tabRouting: tR, tabSnapshots: tS,
       pillPreview: pP,
       labelMachines: lM, labelQueue: lQ,
       pillYou: pY, rowLoad: rL,
       colState: cSt, colCaller: cC, colModel: cMo,
       colRouted: cRo, colStarted: cStrt, colElapsed: cEl,
-      footer: fo,
     };
+    await this.poll();
+    this.pollId = window.setInterval(() => { void this.poll(); }, LthnFleetWindow.POLL_MS);
+  }
+
+  disconnectedCallback() {
+    if (this.pollId !== null) {
+      window.clearInterval(this.pollId);
+      this.pollId = null;
+    }
+    super.disconnectedCallback();
+  }
+
+  /* Pull machines + queue + routing rules from the FleetService. Any
+   * failure surfaces in `err`; partial success populates what came
+   * back. The Wails binding returns a single core.Result; the value
+   * is in r.Value (typed via the documented Machine[]/QueueRow[]/
+   * RoutingRule[] shape). */
+  private async poll() {
+    try {
+      const [mR, qR, rR] = await Promise.all([
+        Machines(),
+        Queue(20),
+        RoutingRules(),
+      ]);
+      this.machines = (mR.OK ? (mR.Value as MachineRow[]) : []) ?? [];
+      this.queue = (qR.OK ? (qR.Value as QueueRow[]) : []) ?? [];
+      this.rules = (rR.OK ? (rR.Value as RuleRow[]) : []) ?? [];
+      this.err = mR.OK ? null : (mR.Value && (mR.Value as { error?: string }).error) || "fleet: machines query failed";
+      const live = this.machines.filter(m => m.status && m.status !== "offline").length;
+      const total = this.machines.length;
+      this.t = { ...this.t, footer: total > 0
+        ? `${live} of ${total} online · ⌘R reroute · ⌘S snapshot`
+        : "no machines registered — pair a machine to populate the fleet" };
+    } catch (e: unknown) {
+      this.err = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  /* Look up a machine name by id, used to resolve queue.machine_id
+   * → human-readable route label. */
+  private machineNameOf(id: string): string {
+    if (!id) return "—";
+    const found = this.machines.find(m => m.id === id);
+    return found?.name || id;
+  }
+
+  /* Format a unix-second timestamp as HH:MM:SS local time. */
+  private static fmtStart(unixSec: number): string {
+    if (!unixSec) return "—";
+    const d = new Date(unixSec * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  /* Format elapsed seconds since started_at. */
+  private static fmtElapsed(unixSec: number): string {
+    if (!unixSec) return "—";
+    const ageMs = Date.now() - (unixSec * 1000);
+    if (ageMs < 0) return "—";
+    if (ageMs < 1000) return "<1 s";
+    if (ageMs < 60000) return `${(ageMs / 1000).toFixed(1)} s`;
+    return `${Math.trunc(ageMs / 60000)}m ${Math.trunc((ageMs % 60000) / 1000)}s`;
   }
 
   render() {
-    const machines = [
-      { id: "this-mac",   name: "this Mac",                arch: "M3 Pro · 36 GB",     status: "online · loaded", model: "gemma-4-e2b",   load: 32, tps: "47.2", you: true },
-      { id: "studio",     name: "vault · Studio M2",       arch: "M2 Ultra · 192 GB",  status: "online · idle",   model: "gemma-3-27b",   load: 4,  tps: "0" },
-      { id: "ws",         name: "shop · 7950X · RTX 4090", arch: "x86 · 24 GB VRAM",   status: "online · loaded", model: "llama-3.3-70b", load: 78, tps: "11.4" },
-      { id: "homeserver", name: "homeserver · 7900X",      arch: "x86 · 96 GB",        status: "online · idle",   model: "—",             load: 2,  tps: "0" },
-      { id: "ana-air",    name: "ana-air · M2",            arch: "M2 · 16 GB",         status: "offline",         model: "—",             load: 0,  tps: "—", offline: true },
-    ];
-    const queue = [
-      { id: "q1", who: "claude-code", model: "gemma-4-e2b",   route: "this Mac", state: "running", start: "14:32:14", elapsed: "3.2 s" },
-      { id: "q2", who: "raycast",     model: "gemma-4-e2b",   route: "this Mac", state: "queued",  start: "—",        elapsed: "—" },
-      { id: "q3", who: "opencode",    model: "llama-3.3-70b", route: "shop",     state: "running", start: "14:32:08", elapsed: "9.1 s" },
-    ];
-
     const toolbar = html`
       <lthn-btn tone="primary" size="sm" active>${this.t.tabMachines}</lthn-btn>
       <lthn-btn tone="ghost" size="sm">${this.t.tabRouting}</lthn-btn>
@@ -94,39 +166,78 @@ class LthnFleetWindow extends LitElement {
       <lthn-state-pill variant="preview">${this.t.pillPreview}</lthn-state-pill>
     `;
 
+    const renderEmptyMachines = () => html`
+      <div style="padding:24px 22px; color:var(--fg-3); font-size:12px;
+                  background:rgba(255,255,255,0.02);
+                  border:1px dashed rgba(255,255,255,0.08);
+                  border-radius:8px; margin:0 22px;">
+        No machines registered yet. Pair a machine to populate the fleet.
+      </div>
+    `;
+
+    const renderMachine = (m: MachineRow) => {
+      const offline = !m.status || m.status === "offline" || m.status.startsWith("offline");
+      const bg = offline ? "rgba(255,255,255,0.015)"
+               : m.is_self ? "rgba(64,193,197,0.06)"
+               : "rgba(255,255,255,0.03)";
+      const border = m.is_self ? "1px solid rgba(64,193,197,0.22)" : "1px solid rgba(255,255,255,0.05)";
+      const opacity = offline ? 0.55 : 1;
+      const loadBar = m.load_pct > 70 ? "var(--warning-400)" : "var(--brand-400)";
+      return html`
+        <div style="display:grid; grid-template-columns:16px 1.3fr 1.2fr 1.2fr 1fr 0.8fr 60px; gap:14px; padding:12px 16px; border-radius:8px; background:${bg}; border:${border}; opacity:${opacity}; align-items:center;">
+          <i class="fa-solid fa-grip-vertical" style="font-size:11px; color:var(--fg-3);"></i>
+          <div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <lthn-status-dot variant=${offline ? "idle" : "ok"}></lthn-status-dot>
+              <span style="font-size:13px; color:var(--fg-0); font-weight:500;">${m.name}</span>
+              ${m.is_self ? html`<lthn-state-pill variant="latest">${this.t.pillYou}</lthn-state-pill>` : nothing}
+            </div>
+            <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); margin-top:3px;">${m.arch || "—"}</div>
+          </div>
+          <div style="font-size:11.5px; color:${offline ? "var(--fg-3)" : "var(--fg-2)"};">${m.status || "—"}</div>
+          <div style="font-family:var(--font-mono); font-size:11px; color:var(--fg-1);">${m.model || "—"}</div>
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--fg-3); margin-bottom:3px;">
+              <span>${this.t.rowLoad}</span>
+              <span style="font-family:var(--font-mono); color:var(--fg-1);">${m.load_pct}%</span>
+            </div>
+            <div style="height:4px; background:rgba(255,255,255,0.06); border-radius:2px; overflow:hidden;">
+              <div style="width:${m.load_pct}%; height:100%; background:${loadBar};"></div>
+            </div>
+          </div>
+          <div style="font-family:var(--font-mono); font-size:11px; color:var(--fg-1); text-align:right;">${(m.tps || 0).toFixed(1)} tok/s</div>
+          <lthn-btn tone="quiet" size="sm"><i class="fa-solid fa-ellipsis"></i></lthn-btn>
+        </div>
+      `;
+    };
+
+    const renderEmptyQueue = () => html`
+      <div style="padding:14px; color:var(--fg-3); font-size:11px; text-align:center;">
+        queue is idle — no running agent activity
+      </div>
+    `;
+
+    const renderQueueRow = (q: QueueRow) => html`
+      <div style="display:grid; grid-template-columns:100px 1fr 1fr 1fr 0.8fr 0.8fr; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.04); align-items:center;">
+        <lthn-state-pill variant=${q.status || "idle"}>${q.status || "—"}</lthn-state-pill>
+        <span style="color:var(--fg-1);">${q.caller || q.agent || "—"}</span>
+        <span style="color:var(--fg-0);">${q.model || "—"}</span>
+        <span style="color:var(--brand-300);">${this.machineNameOf(q.machine_id || "")}</span>
+        <span style="color:var(--fg-2);">${LthnFleetWindow.fmtStart(q.started_at || 0)}</span>
+        <span style="color:var(--fg-1);">${LthnFleetWindow.fmtElapsed(q.started_at || 0)}</span>
+      </div>
+    `;
+
     const body = html`
       <div style="flex:1; display:flex; flex-direction:column; min-height:0; overflow:auto;">
         <div style="padding:16px 22px 8px;">
           <lthn-label>${this.t.labelMachines}</lthn-label>
         </div>
-        <div style="padding:0 22px; display:flex; flex-direction:column; gap:8px;">
-          ${machines.map(m => html`
-            <div style="display:grid; grid-template-columns:16px 1.3fr 1.2fr 1.2fr 1fr 0.8fr 60px; gap:14px; padding:12px 16px; border-radius:8px; background:${m.offline ? "rgba(255,255,255,0.015)" : m.you ? "rgba(64,193,197,0.06)" : "rgba(255,255,255,0.03)"}; border:${m.you ? "1px solid rgba(64,193,197,0.22)" : "1px solid rgba(255,255,255,0.05)"}; opacity:${m.offline ? 0.55 : 1}; align-items:center;">
-              <i class="fa-solid fa-grip-vertical" style="font-size:11px; color:var(--fg-3);"></i>
-              <div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <lthn-status-dot variant=${m.offline ? "idle" : "ok"}></lthn-status-dot>
-                  <span style="font-size:13px; color:var(--fg-0); font-weight:500;">${m.name}</span>
-                  ${m.you ? html`<lthn-state-pill variant="latest">${this.t.pillYou}</lthn-state-pill>` : nothing}
-                </div>
-                <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); margin-top:3px;">${m.arch}</div>
-              </div>
-              <div style="font-size:11.5px; color:${m.offline ? "var(--fg-3)" : "var(--fg-2)"};">${m.status}</div>
-              <div style="font-family:var(--font-mono); font-size:11px; color:var(--fg-1);">${m.model}</div>
-              <div>
-                <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--fg-3); margin-bottom:3px;">
-                  <span>${this.t.rowLoad}</span>
-                  <span style="font-family:var(--font-mono); color:var(--fg-1);">${m.load}%</span>
-                </div>
-                <div style="height:4px; background:rgba(255,255,255,0.06); border-radius:2px; overflow:hidden;">
-                  <div style="width:${m.load}%; height:100%; background:${m.load > 70 ? "var(--warning-400)" : "var(--brand-400)"};"></div>
-                </div>
-              </div>
-              <div style="font-family:var(--font-mono); font-size:11px; color:var(--fg-1); text-align:right;">${m.tps} tok/s</div>
-              <lthn-btn tone="quiet" size="sm"><i class="fa-solid fa-ellipsis"></i></lthn-btn>
-            </div>
-          `)}
-        </div>
+        ${this.machines.length === 0 ? renderEmptyMachines() : html`
+          <div style="padding:0 22px; display:flex; flex-direction:column; gap:8px;">
+            ${this.machines.map(m => renderMachine(m))}
+          </div>
+        `}
 
         <div style="padding:20px 22px 8px;">
           <lthn-label>${this.t.labelQueue}</lthn-label>
@@ -135,17 +246,18 @@ class LthnFleetWindow extends LitElement {
           <div style="display:grid; grid-template-columns:100px 1fr 1fr 1fr 0.8fr 0.8fr; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.05); color:var(--fg-3); font-size:10px; letter-spacing:0.04em; text-transform:uppercase;">
             <span>${this.t.colState}</span><span>${this.t.colCaller}</span><span>${this.t.colModel}</span><span>${this.t.colRouted}</span><span>${this.t.colStarted}</span><span>${this.t.colElapsed}</span>
           </div>
-          ${queue.map(q => html`
-            <div style="display:grid; grid-template-columns:100px 1fr 1fr 1fr 0.8fr 0.8fr; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.04); align-items:center;">
-              <lthn-state-pill variant=${q.state}>${q.state}</lthn-state-pill>
-              <span style="color:var(--fg-1);">${q.who}</span>
-              <span style="color:var(--fg-0);">${q.model}</span>
-              <span style="color:var(--brand-300);">${q.route}</span>
-              <span style="color:var(--fg-2);">${q.start}</span>
-              <span style="color:var(--fg-1);">${q.elapsed}</span>
-            </div>
-          `)}
+          ${this.queue.length === 0 ? renderEmptyQueue() : this.queue.map(q => renderQueueRow(q))}
         </div>
+
+        ${this.err ? html`
+          <div style="margin:0 22px 14px; padding:10px 14px;
+                      background:rgba(244,67,54,0.06);
+                      border:1px solid rgba(244,67,54,0.2);
+                      border-radius:6px;
+                      font-size:11px; color:var(--warning-400);">
+            ${this.err}
+          </div>
+        ` : nothing}
       </div>
     `;
 

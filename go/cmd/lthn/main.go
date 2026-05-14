@@ -30,6 +30,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/desktop"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
+	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
 	"golang.org/x/term"
@@ -235,15 +236,23 @@ func cmdGUI(args []string) int {
 		LocalKey: key,
 		Brand:    server.Brand{Version: firstlaunch.Version},
 	})
+	fleetR := fleet.New()
+	if !fleetR.OK {
+		core.Print(core.Stderr(), "lthn gui: %s\n", fleetR.Error())
+		return 1
+	}
+	fleetSvc := fleetR.Value.(*fleet.Service)
 	d := desktop.NewService(desktop.Options{
-		Name:        "lthn",
-		Description: "Lethean Desktop",
-		Frontend:    frontendDist,
-		Server:      s,
-		Core:        c,
-		Runner:      r,
-		TrayIcon:    trayIcon,
-		AppIcon:     appIcon,
+		Name:            "lthn",
+		Description:     "Lethean Desktop",
+		Frontend:        frontendDist,
+		Server:          s,
+		Core:            c,
+		Runner:          r,
+		Fleet:           fleetSvc,
+		TrayIcon:        trayIcon,
+		AppIcon:         appIcon,
+		ShowAppOnLaunch: core.Getenv("LTHN_DEV") == "1",
 	})
 	if rr := d.Run(); !rr.OK {
 		core.Print(core.Stderr(), "lthn gui: %s\n", rr.Error())

@@ -104,6 +104,27 @@ func TestPaths_StoreDB_Good(t *core.T) {
 	core.AssertTrue(t, core.IsNotExist(stat.Value.(error)), "StoreDB should not create the file itself")
 }
 
+func TestPaths_MasterDB_Good(t *core.T) {
+	home := homeFixture(t)
+	r := paths.MasterDB()
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, core.PathJoin(home, "Lethean", "data", "lthn.duckdb"), r.Value.(string))
+	// Path-only: file should not exist after the call (store.OpenDuckDB creates it).
+	stat := core.Stat(r.Value.(string))
+	core.AssertTrue(t, core.IsNotExist(stat.Value.(error)), "MasterDB should not create the file itself")
+}
+
+func TestPaths_KeysDir_Good(t *core.T) {
+	home := homeFixture(t)
+	r := paths.KeysDir()
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, core.PathJoin(home, "Lethean", "data", "keys"), r.Value.(string))
+	stat := core.Stat(r.Value.(string))
+	core.AssertTrue(t, stat.OK)
+	info := stat.Value.(core.FsFileInfo)
+	core.AssertTrue(t, info.IsDir())
+}
+
 func TestPaths_WorkspaceDir_Good(t *core.T) {
 	home := homeFixture(t)
 	r := paths.WorkspaceDir()

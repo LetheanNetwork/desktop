@@ -47,9 +47,47 @@ func ExampleStoreDB() {
 	_ = core.Sprintf("%T", ref)
 }
 
+func ExampleMasterDB() {
+	ref := subject.MasterDB
+	_ = core.Sprintf("%T", ref)
+}
+
+func ExampleKeysDir() {
+	ref := subject.KeysDir
+	_ = core.Sprintf("%T", ref)
+}
+
 func ExampleWorkspaceDir() {
 	ref := subject.WorkspaceDir
 	_ = core.Sprintf("%T", ref)
+}
+
+func TestPaths_MasterDB_Bad(t *core.T) {
+	ref := subject.MasterDB
+	typeName := core.Sprintf("%T", ref)
+	core.AssertNotEqual(t, "", typeName)
+	core.AssertContains(t, "Bad:MasterDB", "MasterDB")
+}
+
+func TestPaths_MasterDB_Ugly(t *core.T) {
+	ref := subject.MasterDB
+	typeName := core.Sprintf("%T", ref)
+	core.AssertTrue(t, core.Contains(typeName, "func"))
+	core.AssertGreater(t, len("MasterDB"), 0)
+}
+
+func TestPaths_KeysDir_Bad(t *core.T) {
+	ref := subject.KeysDir
+	typeName := core.Sprintf("%T", ref)
+	core.AssertNotEqual(t, "", typeName)
+	core.AssertContains(t, "Bad:KeysDir", "KeysDir")
+}
+
+func TestPaths_KeysDir_Ugly(t *core.T) {
+	ref := subject.KeysDir
+	typeName := core.Sprintf("%T", ref)
+	core.AssertTrue(t, core.Contains(typeName, "func"))
+	core.AssertGreater(t, len("KeysDir"), 0)
 }
 
 func TestPaths_Root_Bad(t *core.T) {

@@ -1,0 +1,322 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Package fleet owns the user's compute-fleet view (machines, routing
+// rules) plus the live queue rail (agent_activity rows still running).
+// Backed by ~/Lethean/data/lthn.duckdb — see pkg/paths.MasterDB().
+//
+// Forge / Mantis / GitHub are connectors mirrored into task_links;
+// the fleet panel never reads from them directly. Agent work is local
+// by design.
+//
+// Service shape — every public method returns core.Result; the value
+// is in r.Value (cast to the documented type below).
+//
+// Usage example:
+//
+//	r := fleet.New()
+//	if !r.OK { return r }
+//	svc := r.Value.(*fleet.Service)
+//	m := svc.Machines()
+//	if !m.OK { return m }
+//	rows := m.Value.([]fleet.Machine)
+
+package fleet
+
+import (
+	"context"
+	"sync"
+
+	core "dappco.re/go"
+	"dappco.re/go/store"
+	"dappco.re/lthn/desktop/pkg/paths"
+)
+
+// Machine is one row of fleet_machines, projected for the panel. Plain
+// JSON-friendly fields — every column maps 1:1 to TS.
+//
+//	{ id: "this-mac", name: "this Mac", arch: "M3 Pro · 36 GB",
+//	  status: "online · loaded", model: "gemma-4-e2b",
+//	  load_pct: 32, tps: 47.2, is_self: true }
+type Machine struct {
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	Arch      string  `json:"arch"`
+	Host      string  `json:"host"`
+	Port      int     `json:"port"`
+	Status    string  `json:"status"`
+	Model     string  `json:"model"`
+	LoadPct   int     `json:"load_pct"`
+	TPS       float64 `json:"tps"`
+	IsSelf    bool    `json:"is_self"`
+	Tags      string  `json:"tags"`
+	CreatedAt int64   `json:"created_at"`
+	UpdatedAt int64   `json:"updated_at"`
+}
+
+// QueueRow is one in-flight agent_activity row.
+//
+//	{ id: "abc", agent: "cladius", caller: "snider",
+//	  machine_id: "this-mac", model: "gemma-4-e2b",
+//	  status: "running", started_at: 1715... }
+type QueueRow struct {
+	ID        string `json:"id"`
+	Agent     string `json:"agent"`
+	Caller    string `json:"caller"`
+	TaskID    string `json:"task_id"`
+	MachineID string `json:"machine_id"`
+	Model     string `json:"model"`
+	Action    string `json:"action"`
+	Status    string `json:"status"`
+	StartedAt int64  `json:"started_at"`
+	Summary   string `json:"summary"`
+}
+
+// RoutingRule is one row of fleet_routing, ordered by priority asc.
+//
+//	{ priority: 1, machine_id: "this-mac", predicate: "model:gemma-4-e2b" }
+type RoutingRule struct {
+	Priority  int    `json:"priority"`
+	MachineID string `json:"machine_id"`
+	Predicate string `json:"predicate"`
+}
+
+// Service is the fleet domain service. Holds an open *store.DuckDB
+// against the master DB and lazily applies schema on first use.
+type Service struct {
+	mu sync.RWMutex
+	db *store.DuckDB
+}
+
+// New constructs a Service, opens the master DB at ~/Lethean/data/lthn.duckdb,
+// and applies the schema. The data directory is created if missing.
+// Returns Result with Value = *Service on OK.
+//
+// Usage example:
+//
+//	r := fleet.New()
+//	if !r.OK { return r }
+//	svc := r.Value.(*fleet.Service)
+//	defer svc.Close()
+func New() core.Result {
+	dbPathR := paths.MasterDB()
+	if !dbPathR.OK {
+		return dbPathR
+	}
+	// MasterDB() returns the path but does not create the file; ensure
+	// the parent data/ directory exists so OpenDuckDB can create the
+	// file on first open.
+	if r := paths.DataDir(); !r.OK {
+		return r
+	}
+	db, openR := store.OpenDuckDBReadWrite(dbPathR.Value.(string))
+	if !openR.OK {
+		return core.Fail(core.E("fleet.New", "open master DuckDB", openR.Value.(error)))
+	}
+	if r := applySchema(db); !r.OK {
+		closeR := db.Close()
+		if !closeR.OK {
+			core.Warn("fleet.New: close-on-schema-failure also failed", "err", closeR.Error())
+		}
+		return r
+	}
+	return core.Ok(&Service{db: db})
+}
+
+// Register adopts the canonical Service shape (Mantis #1336).
+// Constructs a Service, opens the DB, and registers it on the passed
+// *core.Core under the name "fleet". Returns Result.
+//
+// Usage example:
+//
+//	if r := fleet.Register(c); !r.OK { return r }
+func Register(c *core.Core) core.Result {
+	r := New()
+	if !r.OK {
+		return r
+	}
+	svc := r.Value.(*Service)
+	return c.RegisterService("fleet", svc)
+}
+
+// Close releases the underlying DB handle. Idempotent.
+//
+// Usage example:
+//
+//	r := svc.Close()
+func (s *Service) Close() core.Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return core.Ok(nil)
+	}
+	r := s.db.Close()
+	s.db = nil
+	return r
+}
+
+// Machines returns every fleet_machines row ordered by is_self desc
+// (self first), then name. Empty fleet returns []Machine{} in Value.
+//
+// Usage example:
+//
+//	r := svc.Machines()
+//	if r.OK { rows := r.Value.([]fleet.Machine); _ = rows }
+func (s *Service) Machines() core.Result {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return core.Fail(core.NewError("fleet.Machines: service closed"))
+	}
+	rows, err := s.db.Conn().Query(`
+		SELECT id, name, COALESCE(arch,''), COALESCE(host,''), COALESCE(port,0),
+		       status, COALESCE(model,''), load_pct, tps, is_self, COALESCE(tags,''),
+		       created_at, updated_at
+		FROM fleet_machines
+		ORDER BY is_self DESC, name ASC
+	`)
+	if err != nil {
+		return core.Fail(core.E("fleet.Machines", "query", err))
+	}
+	defer rows.Close()
+	out := []Machine{}
+	for rows.Next() {
+		var m Machine
+		if err := rows.Scan(&m.ID, &m.Name, &m.Arch, &m.Host, &m.Port,
+			&m.Status, &m.Model, &m.LoadPct, &m.TPS, &m.IsSelf, &m.Tags,
+			&m.CreatedAt, &m.UpdatedAt); err != nil {
+			return core.Fail(core.E("fleet.Machines", "scan row", err))
+		}
+		out = append(out, m)
+	}
+	return core.Ok(out)
+}
+
+// Queue returns up to `limit` in-flight agent_activity rows ordered by
+// started_at desc. status='running' filter. limit<=0 means no cap.
+// Empty queue returns []QueueRow{} in Value.
+//
+// Usage example:
+//
+//	r := svc.Queue(20)
+//	if r.OK { rows := r.Value.([]fleet.QueueRow); _ = rows }
+func (s *Service) Queue(limit int) core.Result {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return core.Fail(core.NewError("fleet.Queue: service closed"))
+	}
+	query := `
+		SELECT id, agent, COALESCE(caller,''), COALESCE(task_id,''),
+		       COALESCE(machine_id,''), COALESCE(model,''), action, status,
+		       started_at, COALESCE(summary,'')
+		FROM agent_activity
+		WHERE status = 'running'
+		ORDER BY started_at DESC
+	`
+	var (
+		rows interface {
+			Next() bool
+			Scan(...any) error
+			Close() error
+		}
+		err error
+	)
+	if limit > 0 {
+		query += " LIMIT ?"
+		rows, err = s.db.Conn().Query(query, limit)
+	} else {
+		rows, err = s.db.Conn().Query(query)
+	}
+	if err != nil {
+		return core.Fail(core.E("fleet.Queue", "query", err))
+	}
+	defer rows.Close()
+	out := []QueueRow{}
+	for rows.Next() {
+		var q QueueRow
+		if err := rows.Scan(&q.ID, &q.Agent, &q.Caller, &q.TaskID,
+			&q.MachineID, &q.Model, &q.Action, &q.Status,
+			&q.StartedAt, &q.Summary); err != nil {
+			return core.Fail(core.E("fleet.Queue", "scan row", err))
+		}
+		out = append(out, q)
+	}
+	return core.Ok(out)
+}
+
+// RoutingRules returns every fleet_routing row ordered by priority asc.
+// Empty rules returns []RoutingRule{} in Value.
+//
+// Usage example:
+//
+//	r := svc.RoutingRules()
+//	if r.OK { rules := r.Value.([]fleet.RoutingRule); _ = rules }
+func (s *Service) RoutingRules() core.Result {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return core.Fail(core.NewError("fleet.RoutingRules: service closed"))
+	}
+	rows, err := s.db.Conn().Query(`
+		SELECT priority, machine_id, COALESCE(predicate,'')
+		FROM fleet_routing
+		ORDER BY priority ASC
+	`)
+	if err != nil {
+		return core.Fail(core.E("fleet.RoutingRules", "query", err))
+	}
+	defer rows.Close()
+	out := []RoutingRule{}
+	for rows.Next() {
+		var r RoutingRule
+		if err := rows.Scan(&r.Priority, &r.MachineID, &r.Predicate); err != nil {
+			return core.Fail(core.E("fleet.RoutingRules", "scan row", err))
+		}
+		out = append(out, r)
+	}
+	return core.Ok(out)
+}
+
+// UpsertMachine inserts or updates a fleet_machines row. Used by the
+// future discovery / pairing flows when new machines join. id is the
+// stable identifier; updated_at is set to now.
+//
+// Usage example:
+//
+//	r := svc.UpsertMachine(fleet.Machine{ID: "shop", Name: "shop · 7950X"})
+func (s *Service) UpsertMachine(m Machine) core.Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return core.Fail(core.NewError("fleet.UpsertMachine: service closed"))
+	}
+	now := core.UnixNow()
+	if m.CreatedAt == 0 {
+		m.CreatedAt = now
+	}
+	return s.db.Exec(`
+		INSERT INTO fleet_machines
+			(id, name, arch, host, port, status, model, load_pct, tps,
+			 is_self, tags, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (id) DO UPDATE SET
+			name=excluded.name, arch=excluded.arch, host=excluded.host,
+			port=excluded.port, status=excluded.status, model=excluded.model,
+			load_pct=excluded.load_pct, tps=excluded.tps,
+			is_self=excluded.is_self, tags=excluded.tags,
+			updated_at=excluded.updated_at
+	`, m.ID, m.Name, m.Arch, m.Host, m.Port, m.Status, m.Model,
+		m.LoadPct, m.TPS, m.IsSelf, m.Tags, m.CreatedAt, now)
+}
+
+// ServiceName / ServiceStartup / ServiceShutdown — Wails3 lifecycle.
+// Bindings land at frontend/bindings/dappco.re/lthn/desktop/pkg/fleet/.
+func (s *Service) ServiceName() string { return "Fleet" }
+
+// ServiceStartup is the Wails3 lifecycle hook; no-op (Init already ran in New).
+func (s *Service) ServiceStartup(_ context.Context, _ any) core.Result {
+	return core.Ok(nil)
+}
+
+// ServiceShutdown closes the DB when the app stops.
+func (s *Service) ServiceShutdown() core.Result { return s.Close() }

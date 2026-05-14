@@ -55,6 +55,7 @@ import (
 	lthnphp "dappco.re/lthn/desktop/pkg/php"
 	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/repos"
+	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/sandbox"
 	"dappco.re/lthn/desktop/pkg/server"
@@ -114,6 +115,10 @@ type Options struct {
 	// Runner is the talk-surface used by the RunnerService binding.
 	// Required.
 	Runner *runner.Service
+	// Fleet owns the user's compute-fleet view (machines, routing
+	// rules) + the live agent_activity queue. Backed by the master
+	// DuckDB at ~/Lethean/data/lthn.duckdb. Required.
+	Fleet *fleet.Service
 	// TrayIcon is the light-mode systray icon bytes. Empty leaves the
 	// platform default tray glyph unchanged.
 	TrayIcon []byte
@@ -123,6 +128,12 @@ type Options struct {
 	// bundle separately; both should derive from the same source PNG
 	// to stay visually consistent.
 	AppIcon []byte
+	// ShowAppOnLaunch opens the main "app" window automatically after
+	// pre-create finishes. Useful in dev mode so iteration doesn't
+	// require clicking the tray every restart. Production builds
+	// leave it false — the tray IS the process; the user clicks in.
+	// Toggled in main.go from the LTHN_DEV env var.
+	ShowAppOnLaunch bool
 }
 
 // Service holds the Wails application and the SystemTray anchor.
@@ -234,6 +245,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(pluginSvc),
 		application.NewService(sandboxSvc),
 		application.NewService(repos.NewService(s.opts.Core)),
+		application.NewService(s.opts.Fleet),
 		application.NewService(tools.NewWailsService(s.opts.Core)),
 		application.NewService(validator.NewWailsService()),
 		application.NewService(telemetry.NewService(telemetry.Options{})),
@@ -614,6 +626,21 @@ func (s *Service) Run() core.Result {
 		if fl, ok := state.Value.(firstlaunch.State); ok && fl.Fresh {
 			openWindow(s.opts.Core, "welcome")
 		}
+	}
+
+	// Dev convenience — open the main app shell on launch so the
+	// iteration loop (edit → restart → see-it) doesn't require
+	// clicking the tray every time. Must fire AFTER ApplicationStarted
+	// — pre-Run() window operations on macOS SEGV inside AppKit
+	// because the NSApp run loop isn't up yet. Production leaves this
+	// off; the tray is the canonical entry point.
+	if s.opts.ShowAppOnLaunch {
+		s.opts.Core.RegisterAction(func(c *core.Core, msg core.Message) core.Result {
+			if _, ok := msg.(guilifecycle.ActionApplicationStarted); ok {
+				openWindow(c, "app")
+			}
+			return core.Ok(nil)
+		})
 	}
 
 	if err := s.app.Run(); err != nil {

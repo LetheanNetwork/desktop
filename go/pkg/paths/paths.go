@@ -136,6 +136,45 @@ func StoreDB() core.Result {
 	return core.Ok(core.PathJoin(data.Value.(string), "lthn.db"))
 }
 
+// MasterDB returns ~/Lethean/data/lthn.duckdb. The master relational
+// database — tasks, agent_activity, fleet machines/routing, connector
+// sync state, plugin state. Sits alongside lthn.db (SQLite KV) and
+// workspace/ (DuckDB scratch); this is the canonical relational store
+// for the desktop runtime. Path only — store.OpenDuckDB() creates the
+// file on first open.
+//
+// Usage example:
+//
+//	r := paths.MasterDB()
+//	if r.OK { _ = r.Value.(string) }
+func MasterDB() core.Result {
+	data := DataDir()
+	if !data.OK {
+		return data
+	}
+	return core.Ok(core.PathJoin(data.Value.(string), "lthn.duckdb"))
+}
+
+// KeysDir returns ~/Lethean/data/keys/. Encrypted-at-rest blobs
+// (sealed-box / age) — wallet seeds, API tokens, signing keys. Never
+// flat files. Mode 0700 (owner-only).
+//
+// Usage example:
+//
+//	r := paths.KeysDir()
+//	if r.OK { _ = r.Value.(string) }
+func KeysDir() core.Result {
+	data := DataDir()
+	if !data.OK {
+		return data
+	}
+	dir := core.PathJoin(data.Value.(string), "keys")
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
+		return r
+	}
+	return core.Ok(dir)
+}
+
 // WorkspaceDir returns ~/Lethean/data/workspace/. Used by go-store for
 // the DuckDB workspace buffer.
 //
