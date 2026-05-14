@@ -587,23 +587,16 @@ func (s *Service) Run() core.Result {
 		}}},
 	))
 
-	// Look the wails handle up so the close-hide hook can fire on the
-	// real window. Cancel-able window hooks aren't on the core/gui
-	// surface yet, so this remains direct.
-	window, ok := s.app.Window.GetByName("tray")
-	if !ok || window == nil {
-		return core.Fail(core.E("desktop.Run", "tray window not registered after window.open", nil))
-	}
-	webview, _ := window.(*application.WebviewWindow)
-	if webview == nil {
-		return core.Fail(core.E("desktop.Run", "tray window is not a WebviewWindow", nil))
-	}
-	// Close-hides rather than destroys — tray-rooted lifecycle.
-	const windowClosingEvent = 1028 // events.Common.WindowClosing
-	webview.RegisterHook(windowClosingEvent, func(e *application.WindowEvent) {
-		webview.Hide()
-		e.Cancel()
-	})
+	// Close-hides rather than destroys — tray-rooted lifecycle. The
+	// popover survives the user clicking its close button so the tray
+	// icon stays the canonical entry point. Driven through core/gui's
+	// window.set_close_behavior action; no direct wails seam needed.
+	s.opts.Core.Action("window.set_close_behavior").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guiwindow.TaskSetCloseBehavior{
+			Name:     "tray",
+			Behavior: guiwindow.CloseBehaviorHide,
+		}},
+	))
 
 	// Per-window lthn:window:* event re-broadcasts (ready / focus /
 	// blur / hide / show / resize / files-dropped). See sysevents.go.
