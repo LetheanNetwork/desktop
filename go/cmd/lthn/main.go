@@ -31,6 +31,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/desktop"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/fleet"
+	"dappco.re/lthn/desktop/pkg/keys"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
 	"golang.org/x/term"
@@ -242,6 +243,12 @@ func cmdGUI(args []string) int {
 		return 1
 	}
 	fleetSvc := fleetR.Value.(*fleet.Service)
+	keysR := keys.New()
+	if !keysR.OK {
+		core.Print(core.Stderr(), "lthn gui: %s\n", keysR.Error())
+		return 1
+	}
+	keysSvc := keysR.Value.(*keys.Service)
 	d := desktop.NewService(desktop.Options{
 		Name:            "lthn",
 		Description:     "Lethean Desktop",
@@ -250,6 +257,7 @@ func cmdGUI(args []string) int {
 		Core:            c,
 		Runner:          r,
 		Fleet:           fleetSvc,
+		Keys:            keysSvc,
 		TrayIcon:        trayIcon,
 		AppIcon:         appIcon,
 		ShowAppOnLaunch: core.Getenv("LTHN_DEV") == "1",

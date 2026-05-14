@@ -56,6 +56,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/repos"
 	"dappco.re/lthn/desktop/pkg/fleet"
+	"dappco.re/lthn/desktop/pkg/keys"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/sandbox"
 	"dappco.re/lthn/desktop/pkg/server"
@@ -119,6 +120,11 @@ type Options struct {
 	// rules) + the live agent_activity queue. Backed by the master
 	// DuckDB at ~/Lethean/data/lthn.duckdb. Required.
 	Fleet *fleet.Service
+	// Keys owns the encrypted-at-rest secrets store under
+	// ~/Lethean/data/keys/. Frontend writes provider API keys via
+	// the Wails binding; plaintext never crosses the WebView (Get
+	// is Go-side only). Required.
+	Keys *keys.Service
 	// TrayIcon is the light-mode systray icon bytes. Empty leaves the
 	// platform default tray glyph unchanged.
 	TrayIcon []byte
@@ -246,6 +252,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(sandboxSvc),
 		application.NewService(repos.NewService(s.opts.Core)),
 		application.NewService(s.opts.Fleet),
+		application.NewService(s.opts.Keys),
 		application.NewService(tools.NewWailsService(s.opts.Core)),
 		application.NewService(validator.NewWailsService()),
 		application.NewService(telemetry.NewService(telemetry.Options{})),

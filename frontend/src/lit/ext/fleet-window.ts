@@ -19,6 +19,7 @@ import { T } from "@lthn/i18n/coreservice";
 import { Machines, Queue, RoutingRules, Agents } from "@desktop/fleet/service";
 import type * as fleetModels from "@desktop/fleet/models";
 import { unwrap } from "../result";
+import "./configure-agent-modal";
 
 type MachineRow = fleetModels.Machine;
 type QueueRow = fleetModels.QueueRow;
@@ -39,6 +40,7 @@ class LthnFleetWindow extends LitElement {
     queue: { state: true },
     rules: { state: true },
     err: { state: true },
+    configureAgentOpen: { state: true },
   };
   declare w: number;
   declare h: number;
@@ -50,6 +52,7 @@ class LthnFleetWindow extends LitElement {
   declare queue: QueueRow[];
   declare rules: RuleRow[];
   declare err: string | null;
+  declare configureAgentOpen: boolean;
 
   /* Poll interval id — cleared on disconnect. */
   private pollId: number | null = null;
@@ -65,6 +68,7 @@ class LthnFleetWindow extends LitElement {
     this.queue = [];
     this.rules = [];
     this.err = null;
+    this.configureAgentOpen = false;
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -129,9 +133,22 @@ class LthnFleetWindow extends LitElement {
   private selectTab(t: Tab) { this.tab = t; }
 
   private emitConfigureAgent() {
+    this.configureAgentOpen = true;
     this.dispatchEvent(new CustomEvent("lthn:fleet:configure-agent", {
       bubbles: true, composed: true,
     }));
+  }
+
+  /** Modal callback — agent landed in the store. Force a fresh
+   *  poll so the new row appears in the list without waiting for
+   *  the 2s interval. */
+  private async onAgentSaved() {
+    this.configureAgentOpen = false;
+    await this.poll();
+  }
+
+  private onConfigureCancel() {
+    this.configureAgentOpen = false;
   }
 
   private emitPairMachine() {
@@ -365,12 +382,20 @@ class LthnFleetWindow extends LitElement {
       ? html`${this.machines.filter(m => m.status && m.status !== "offline").length} of ${this.machines.length} online`
       : html`${this.agents.length} agent${this.agents.length === 1 ? "" : "s"} configured`;
 
-    return renderChrome({
+    const chrome = renderChrome({
       title: this.chrome.title, subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, toolbar, body,
       footer,
       embedded: this.embedded,
     });
+    return html`
+      ${chrome}
+      <lthn-configure-agent-modal
+        .open=${this.configureAgentOpen}
+        @lthn:fleet:agent-saved=${() => { void this.onAgentSaved(); }}
+        @lthn:fleet:configure-cancel=${() => this.onConfigureCancel()}>
+      </lthn-configure-agent-modal>
+    `;
   }
 }
 customElements.define("lthn-fleet-window", LthnFleetWindow);
