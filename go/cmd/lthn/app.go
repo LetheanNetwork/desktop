@@ -146,7 +146,11 @@ func newAppCore() *core.Core {
 		core.Print(core.Stderr(), "lthn: orm mount failed: %s\n", r.Error())
 		return nil
 	}
-	for _, schema := range []orm.Schema{opencode.Sandbox{}.Schema()} {
+	for _, schema := range []orm.Schema{
+		opencode.Sandbox{}.Schema(),
+		opencode.ImportedProject{}.Schema(),
+		opencode.ImportedProvider{}.Schema(),
+	} {
 		if r := orm.RegisterSchema(c, schema); !r.OK {
 			core.Print(core.Stderr(), "lthn: orm schema %s failed: %s\n", schema.Name, r.Error())
 			return nil

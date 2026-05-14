@@ -88,6 +88,49 @@ func (g *ControlGroup) RegisterRoutes(rg *gin.RouterGroup) {
 	// GUI mode).
 	rg.GET("/sandbox/:id/web", g.webURL)
 	rg.POST("/sandbox/:id/web", g.openWebWindow)
+
+	// Import — datamine the user's HOST opencode for projects +
+	// provider credentials. Source-agnostic orm types so future
+	// codex/claude/pi imports reuse the same shape.
+	rg.POST("/import", g.importFromHost)
+	rg.GET("/imports", g.listImports)
+	rg.GET("/imports/providers", g.listImportedProviders)
+}
+
+// importFromHost POST /v1/api/opencode/import → spawns host
+// `opencode serve`, drains /project + /provider, persists rows.
+// Returns ImportSummary.
+func (g *ControlGroup) importFromHost(c *gin.Context) {
+	r := g.svc.ImportFromHost()
+	if !r.OK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, r.Value)
+}
+
+// listImports GET /v1/api/opencode/imports → every imported
+// project, most-recent first.
+func (g *ControlGroup) listImports(c *gin.Context) {
+	r := g.svc.ListImports()
+	if !r.OK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"projects": r.Value})
+}
+
+// listImportedProviders GET /v1/api/opencode/imports/providers →
+// every imported provider definition + auth metadata. The auth_key
+// field IS included (local-only surface) — the frontend MUST treat
+// it as sensitive and never render it in cleartext UI.
+func (g *ControlGroup) listImportedProviders(c *gin.Context) {
+	r := g.svc.ListImportedProviders()
+	if !r.OK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"providers": r.Value})
 }
 
 // webURL GET /v1/api/opencode/sandbox/:id/web → returns the direct

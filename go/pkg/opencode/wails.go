@@ -142,6 +142,35 @@ func (w *WailsService) WOpenWebWindow(id string) core.Result {
 	return w.svc.OpenWebWindow(id)
 }
 
+// WImportFromHost runs the host-opencode import cycle: spawns
+// `opencode serve` on a free port, drains /project + /provider,
+// reads auth.json for credentials, and persists rows. Returns
+// ImportSummary on success.
+func (w *WailsService) WImportFromHost() core.Result {
+	if w == nil || w.svc == nil {
+		return core.Fail(core.E("opencode.WImportFromHost", "service not bound", nil))
+	}
+	return w.svc.ImportFromHost()
+}
+
+// WListImports returns every imported project, newest first.
+// Used by the inbox UI to render the imported-project list.
+func (w *WailsService) WListImports() core.Result {
+	if w == nil || w.svc == nil {
+		return core.Fail(core.E("opencode.WListImports", "service not bound", nil))
+	}
+	return w.svc.ListImports()
+}
+
+// WListImportedProviders returns imported provider definitions +
+// auth metadata (auth_key included — handle as sensitive in UI).
+func (w *WailsService) WListImportedProviders() core.Result {
+	if w == nil || w.svc == nil {
+		return core.Fail(core.E("opencode.WListImportedProviders", "service not bound", nil))
+	}
+	return w.svc.ListImportedProviders()
+}
+
 // WUpgrade pulls the configured image (lthn/dev:latest) and
 // restarts any running sandbox if the digest changed. UI button
 // "Check for updates / Upgrade" calls this. Returns UpgradeResult

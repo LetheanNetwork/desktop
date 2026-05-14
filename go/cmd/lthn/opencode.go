@@ -27,7 +27,7 @@ import (
 //	inspect ID         print one sandbox's record
 func cmdOpenCode(args []string) int {
 	if len(args) == 0 {
-		core.Print(core.Stderr(), "lthn opencode: missing verb (start / stop / status / inspect / profile / merge-host-config / providers / enable / disable / enabled / tui / web / upgrade)\n")
+		core.Print(core.Stderr(), "lthn opencode: missing verb (start / stop / status / inspect / profile / merge-host-config / providers / enable / disable / enabled / tui / web / upgrade / import / imports)\n")
 		return 2
 	}
 	switch args[0] {
@@ -57,6 +57,10 @@ func cmdOpenCode(args []string) int {
 		return opencodeUpgrade()
 	case "web":
 		return opencodeWeb(args[1:])
+	case "import":
+		return opencodeImport()
+	case "imports":
+		return opencodeImports(args[1:])
 	default:
 		core.Print(core.Stderr(), "lthn opencode: unknown verb %q\n", args[0])
 		return 2
@@ -351,6 +355,56 @@ func opencodeProviders(args []string) int {
 	}
 	if code != http.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode providers: HTTP %d — %s\n", code, body)
+		return 1
+	}
+	core.Print(core.Stdout(), "%s\n", body)
+	return 0
+}
+
+// opencodeImport runs the host-opencode import cycle. Prints the
+// resulting summary (counts of projects + providers imported).
+//
+// Usage example:
+//
+//	lthn opencode import
+//	# {"projects":9,"providers":21,"providers_with_auth":1}
+func opencodeImport() int {
+	req, _ := http.NewRequest(http.MethodPost,
+		"http://localhost:8000/v1/api/opencode/import", nil)
+	body, code, err := doRequest(req)
+	if err != nil {
+		core.Print(core.Stderr(), "lthn opencode import: %s\n", err)
+		core.Print(core.Stderr(), "hint: is `lthn serve` running on :8000?\n")
+		return 1
+	}
+	if code != http.StatusOK {
+		core.Print(core.Stderr(), "lthn opencode import: HTTP %d — %s\n", code, body)
+		return 1
+	}
+	core.Print(core.Stdout(), "%s\n", body)
+	return 0
+}
+
+// opencodeImports lists imported rows. Default lists projects;
+// `lthn opencode imports providers` lists provider definitions.
+//
+// Usage example:
+//
+//	lthn opencode imports               # projects, newest first
+//	lthn opencode imports providers     # provider definitions
+func opencodeImports(args []string) int {
+	url := "http://localhost:8000/v1/api/opencode/imports"
+	if len(args) > 0 && args[0] == "providers" {
+		url += "/providers"
+	}
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	body, code, err := doRequest(req)
+	if err != nil {
+		core.Print(core.Stderr(), "lthn opencode imports: %s\n", err)
+		return 1
+	}
+	if code != http.StatusOK {
+		core.Print(core.Stderr(), "lthn opencode imports: HTTP %d — %s\n", code, body)
 		return 1
 	}
 	core.Print(core.Stdout(), "%s\n", body)
