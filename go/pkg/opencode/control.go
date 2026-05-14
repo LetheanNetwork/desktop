@@ -45,17 +45,32 @@ func (g *ControlGroup) RegisterRoutes(rg *gin.RouterGroup) {
 }
 
 // spawn POST /v1/api/opencode/sandbox → spawns a new container.
-// Returns the sandbox record + reachable URL on success.
+// Optional JSON body: {"profile": "<name>"} — selects the lthn-side
+// opencode profile to apply via PATCH /config after spawn. Empty
+// or missing body uses "default".
+//
+// Returns {id, url, profile} on success.
 func (g *ControlGroup) spawn(c *gin.Context) {
-	r := g.svc.Start()
+	var req struct {
+		Profile string `json:"profile"`
+	}
+	// Body is optional; bind failures (empty body / wrong shape)
+	// fall through to default profile.
+	_ = c.ShouldBindJSON(&req)
+	r := g.svc.Start(req.Profile)
 	if !r.OK {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
 	id, _ := r.Value.(string)
+	profile := req.Profile
+	if profile == "" {
+		profile = DefaultProfile
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"id":  id,
-		"url": "/v1/api/sandbox/" + id,
+		"id":      id,
+		"url":     "/v1/api/sandbox/" + id,
+		"profile": profile,
 	})
 }
 

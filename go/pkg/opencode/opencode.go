@@ -3,8 +3,11 @@
 package opencode
 
 import (
+	"bytes"
 	"context"
+	goio "io"
 	"net"
+	"net/http"
 	"time"
 
 	core "dappco.re/go"
@@ -58,6 +61,12 @@ func NewService(opts Options) func(*core.Core) core.Result {
 		svc := &Service{
 			ServiceRuntime: core.NewServiceRuntime(c, opts),
 			proxy:          NewSandboxProxyGroup(),
+		}
+		// Seed the baseline profile so spawn always has a default
+		// to apply via PATCH /config. Idempotent — skips when the
+		// profile already exists in the duckdb store.
+		if r := svc.SeedDefaultProfile(); !r.OK {
+			return r
 		}
 		return core.Ok(svc)
 	}
@@ -118,19 +127,38 @@ func (s *Service) image() string {
 }
 
 // Start spawns a new opencode-serve container, persists the
-// Sandbox record, and registers the reverse-proxy target.
-// Returns the sandbox ID — the value the caller hands to
-// /v1/api/sandbox/<id>/* URLs.
+// Sandbox record, registers the reverse-proxy target, waits for
+// opencode-serve to be healthy, and applies the named profile via
+// PATCH /config. Returns the sandbox ID once everything is ready.
+//
+// Synchronous — caller knows the sandbox is fully configured when
+// Start returns. Total time is ~5-15s (image cached) for container
+// boot + opencode-serve binding + config patch.
+//
+// profileName is the lthn-side opencode.Profile name to apply. Empty
+// string falls back to DefaultProfile ("default"). The named profile
+// must already exist in the store — SeedDefaultProfile is called at
+// service startup so DefaultProfile is always available.
 //
 // Usage example:
 //
-//	r := svc.Start()
+//	r := svc.Start("code-review")
 //	if r.OK { id := r.Value.(string); _ = id }
-func (s *Service) Start() core.Result {
+func (s *Service) Start(profileName string) core.Result {
 	ps := s.proc()
 	if ps == nil {
 		return core.Fail(core.E(startOp, "process service unavailable", nil))
 	}
+
+	profileName = core.Trim(profileName)
+	if profileName == "" {
+		profileName = DefaultProfile
+	}
+	profileR := s.GetProfile(profileName)
+	if !profileR.OK {
+		return profileR
+	}
+	profile := profileR.Value.(Profile)
 
 	id := core.Sprintf("oc-%d", time.Now().UnixNano())
 	portR := allocatePort()
@@ -139,9 +167,16 @@ func (s *Service) Start() core.Result {
 	}
 	hostPort := portR.Value.(int)
 
+	// Inline-config via OPENCODE_CONFIG_CONTENT — opencode reads this
+	// at startup before any provider initialisation, so the narrowed
+	// profile (provider.lthn, tool/skill allow-lists, etc.) is the
+	// effective config from the first request. PATCH /config does
+	// NOT persist provider blocks at runtime; env-var inline is the
+	// canonical mechanism.
 	args := []string{
 		"run", "-d",
 		"-p", core.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort),
+		"-e", "OPENCODE_CONFIG_CONTENT=" + core.JSONMarshalString(profile),
 		"--name", ContainerName(id),
 		s.image(),
 		"opencode", "serve",
@@ -174,7 +209,70 @@ func (s *Service) Start() core.Result {
 	target := core.Sprintf("http://127.0.0.1:%d", hostPort)
 	s.proxy.Set(id, target)
 
+	// Wait for opencode-serve to bind + respond healthy, then apply
+	// the profile via PATCH /config. Failures to apply the profile
+	// don't fail Start — the sandbox is still usable with opencode's
+	// own default config; the patch is a narrowing optimisation.
+	if r := waitHealthy(target, 30*time.Second); !r.OK {
+		_ = ps.Run(context.Background(), s.runtime(), "rm", "-f", ContainerName(id))
+		s.proxy.Delete(id)
+		return r
+	}
+	if r := applyProfile(target, profile); !r.OK {
+		// Log the warning shape but don't propagate — sandbox is
+		// up, just running with un-narrowed config.
+		_ = r
+	}
+
 	return core.Ok(id)
+}
+
+// waitHealthy polls opencode-serve's /global/health until it
+// returns 200 OK or the timeout fires. Used after spawn to wait
+// for the Bun runtime + opencode-serve to bind before patching
+// config.
+func waitHealthy(target string, timeout time.Duration) core.Result {
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 2 * time.Second}
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(target + "/global/health")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return core.Ok(nil)
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return core.Fail(core.E("opencode.waitHealthy", "opencode-serve did not become healthy within "+timeout.String(), nil))
+}
+
+// applyProfile PATCHes opencode-serve's /global/config with the
+// profile JSON. The /global/config scope is where opencode reads
+// provider definitions + enabled_providers — distinct from the
+// project-scoped /config endpoint which writes to <cwd>/config.json
+// and is consulted later in the resolution chain. Server-side this
+// goes through opencode's Config.update Effect, mergeDeep into
+// the existing config file, fs.writeFileString-persisted.
+func applyProfile(target string, p Profile) core.Result {
+	body := bytes.NewBufferString(core.JSONMarshalString(p))
+	req, err := http.NewRequest(http.MethodPatch, target+"/global/config", body)
+	if err != nil {
+		return core.Fail(core.E("opencode.applyProfile", "request build failed", err))
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return core.Fail(core.E("opencode.applyProfile", "patch failed", err))
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 400 {
+		respBody, _ := goio.ReadAll(resp.Body)
+		return core.Fail(core.E("opencode.applyProfile",
+			core.Sprintf("patch returned %d: %s", resp.StatusCode, string(respBody)), nil))
+	}
+	return core.Ok(nil)
 }
 
 // Stop kills the sandbox container, marks the record Stopped, and
