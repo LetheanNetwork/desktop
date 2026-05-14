@@ -30,6 +30,19 @@ type AgentRow = fleetModels.Agent;
 
 type Tab = "machines" | "agents";
 
+/** OpenCode provider shape — narrow projection of opencode-serve's
+ *  /provider response. Only the fields the card actually renders. */
+interface OpencodeProviderModel {
+  id?: string;
+  name?: string;
+}
+interface OpencodeProvider {
+  id: string;
+  name?: string;
+  source?: string;
+  models?: Record<string, OpencodeProviderModel>;
+}
+
 class LthnFleetWindow extends LitElement {
   static readonly properties = {
     w: { type: Number },
@@ -47,6 +60,8 @@ class LthnFleetWindow extends LitElement {
     provisionRemoteOpen: { state: true },
     editingAgent: { state: true },
     editingMachine: { state: true },
+    opencodeSandboxId: { state: true },
+    opencodeProviders: { state: true },
   };
   declare w: number;
   declare h: number;
@@ -63,6 +78,8 @@ class LthnFleetWindow extends LitElement {
   declare provisionRemoteOpen: boolean;
   declare editingAgent: AgentRow | null;
   declare editingMachine: MachineRow | null;
+  declare opencodeSandboxId: string;
+  declare opencodeProviders: OpencodeProvider[];
 
   /* Poll interval id — cleared on disconnect. */
   private pollId: number | null = null;
@@ -83,6 +100,8 @@ class LthnFleetWindow extends LitElement {
     this.provisionRemoteOpen = false;
     this.editingAgent = null;
     this.editingMachine = null;
+    this.opencodeSandboxId = "";
+    this.opencodeProviders = [];
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -119,6 +138,38 @@ class LthnFleetWindow extends LitElement {
       this.err = mR.OK ? null : "fleet: machines query failed";
     } catch (e: unknown) {
       this.err = e instanceof Error ? e.message : String(e);
+    }
+    // OpenCode-routed providers — flagged "via opencode" in their own
+    // section of the Agents tab. Source: WStatus → WProviderList.
+    // No-op when no sandbox is running.
+    try {
+      const oc = await import("@desktop/opencode/wailsservice");
+      const sR = await oc.WStatus();
+      const list = ((sR as any)?.OK ? ((sR as any)?.Value || []) : []) as Array<{ id: string; status?: string }>;
+      if (list.length === 0) {
+        this.opencodeSandboxId = "";
+        this.opencodeProviders = [];
+        return;
+      }
+      const sb = list[0];
+      this.opencodeSandboxId = sb.id;
+      const pR = await oc.WProviderList(sb.id);
+      if ((pR as any)?.OK) {
+        // The Go side returns the raw JSON string from opencode-serve.
+        const raw = (pR as any).Value as string;
+        try {
+          const parsed = JSON.parse(raw) as { all?: OpencodeProvider[] };
+          this.opencodeProviders = parsed.all || [];
+        } catch {
+          this.opencodeProviders = [];
+        }
+      } else {
+        this.opencodeProviders = [];
+      }
+    } catch {
+      // Silent — opencode bindings or sandbox aren't available.
+      this.opencodeSandboxId = "";
+      this.opencodeProviders = [];
     }
   }
 
@@ -346,6 +397,62 @@ class LthnFleetWindow extends LitElement {
     return html`
       <div style="padding:0 22px; display:flex; flex-direction:column; gap:8px;">
         ${this.agents.map(a => this.renderAgentRow(a))}
+      </div>
+      ${this.opencodeProviders.length > 0 ? this.renderOpencodeProvidersSection() : nothing}
+    `;
+  }
+
+  /** OpenCode-routed providers section — surfaces opencode-serve's
+   *  loaded providers as cards. Visible only when a sandbox is
+   *  running. Each card lists the provider id + its loaded models.
+   *  RFC.opencode.md §5.1.
+   */
+  private renderOpencodeProvidersSection() {
+    return html`
+      <div style="padding:22px 22px 8px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <lthn-label>OpenCode-routed providers</lthn-label>
+          <lthn-state-pill variant="preview">via opencode</lthn-state-pill>
+        </div>
+        <div style="font-size:11px; color:var(--fg-3); margin-top:4px; line-height:1.5;">
+          Providers loaded by the running sandbox. Reachable via lthn's
+          /v1/chat/completions as <span style="font-family:var(--font-mono);">opencode:&lt;provider&gt;/&lt;model&gt;</span>.
+        </div>
+      </div>
+      <div style="padding:0 22px 22px; display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:8px;">
+        ${this.opencodeProviders.map(p => this.renderOpencodeProviderCard(p))}
+      </div>
+    `;
+  }
+
+  private renderOpencodeProviderCard(p: OpencodeProvider) {
+    const modelIds = p.models ? Object.keys(p.models) : [];
+    return html`
+      <div style="padding:12px 14px; border-radius:8px;
+                  background:rgba(255,255,255,0.03);
+                  border:1px solid rgba(255,255,255,0.05);
+                  display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div style="width:28px; height:28px;
+                      display:flex; align-items:center; justify-content:center;
+                      background:rgba(64,193,197,0.08);
+                      border-radius:6px;">
+            <i class="fa-solid fa-bolt" style="font-size:11px; color:var(--brand-300);"></i>
+          </div>
+          <div style="font-size:12.5px; color:var(--fg-0); font-weight:500; flex:1;">${p.name || p.id}</div>
+          <span style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);">${p.id}</span>
+        </div>
+        ${modelIds.length === 0 ? html`
+          <div style="font-size:11px; color:var(--fg-3);">no models loaded</div>
+        ` : html`
+          <div style="display:flex; flex-direction:column; gap:3px;">
+            ${modelIds.map(mid => html`
+              <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-2);">
+                ${mid}
+              </div>
+            `)}
+          </div>
+        `}
       </div>
     `;
   }
