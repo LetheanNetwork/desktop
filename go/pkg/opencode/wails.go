@@ -122,6 +122,26 @@ func (w *WailsService) WDeleteProfile(name string) core.Result {
 	return w.svc.DeleteProfile(name)
 }
 
+// WWebURL returns the direct-bind URL (with Basic auth embedded)
+// for the named sandbox's opencode web UI. Frontend uses this to
+// build buttons that copy / share the URL.
+func (w *WailsService) WWebURL(id string) core.Result {
+	if w == nil || w.svc == nil {
+		return core.Fail(core.E("opencode.WWebURL", "service not bound", nil))
+	}
+	return w.svc.WebURL(id)
+}
+
+// WOpenWebWindow spawns an lthn Wails window with opencode's web
+// UI loaded. Only works in GUI mode (lthn gui / lthn tray) — the
+// window.open action isn't registered when running `lthn serve`.
+func (w *WailsService) WOpenWebWindow(id string) core.Result {
+	if w == nil || w.svc == nil {
+		return core.Fail(core.E("opencode.WOpenWebWindow", "service not bound", nil))
+	}
+	return w.svc.OpenWebWindow(id)
+}
+
 // WUpgrade pulls the configured image (lthn/dev:latest) and
 // restarts any running sandbox if the digest changed. UI button
 // "Check for updates / Upgrade" calls this. Returns UpgradeResult

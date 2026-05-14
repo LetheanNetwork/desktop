@@ -27,7 +27,7 @@ import (
 //	inspect ID         print one sandbox's record
 func cmdOpenCode(args []string) int {
 	if len(args) == 0 {
-		core.Print(core.Stderr(), "lthn opencode: missing verb (start / stop / status / inspect / profile / merge-host-config / providers / enable / disable / enabled / tui / upgrade)\n")
+		core.Print(core.Stderr(), "lthn opencode: missing verb (start / stop / status / inspect / profile / merge-host-config / providers / enable / disable / enabled / tui / web / upgrade)\n")
 		return 2
 	}
 	switch args[0] {
@@ -55,6 +55,8 @@ func cmdOpenCode(args []string) int {
 		return opencodeTUI(args[1:])
 	case "upgrade":
 		return opencodeUpgrade()
+	case "web":
+		return opencodeWeb(args[1:])
 	default:
 		core.Print(core.Stderr(), "lthn opencode: unknown verb %q\n", args[0])
 		return 2
@@ -352,6 +354,50 @@ func opencodeProviders(args []string) int {
 		return 1
 	}
 	core.Print(core.Stdout(), "%s\n", body)
+	return 0
+}
+
+// opencodeWeb prints the direct-bind URL for the named sandbox's
+// web UI (with Basic auth credentials embedded). Useful in serve
+// mode where the lthn-window path doesn't apply — paste the URL
+// into your browser. In GUI mode the same flow lands in an lthn
+// window via the "Open in window" button on the integrations card.
+//
+// Usage example:
+//
+//	lthn opencode web oc-1735843891234
+//	# → http://opencode:hex@127.0.0.1:61830/
+func opencodeWeb(args []string) int {
+	if len(args) < 1 {
+		core.Print(core.Stderr(), "lthn opencode web: usage: lthn opencode web ID\n")
+		return 2
+	}
+	req, _ := http.NewRequest(http.MethodGet, opencodeBase+"/"+args[0]+"/web", nil)
+	body, code, err := doRequest(req)
+	if err != nil {
+		core.Print(core.Stderr(), "lthn opencode web: %s\n", err)
+		return 1
+	}
+	if code != http.StatusOK {
+		core.Print(core.Stderr(), "lthn opencode web: HTTP %d — %s\n", code, body)
+		return 1
+	}
+	// Print the raw URL on its own line so iTerm2 / Terminal /
+	// VS Code / WezTerm etc. auto-detect it as a hyperlink (cmd-
+	// click in most terminals opens in the user's default browser).
+	// We avoid the JSON envelope here on purpose — clickability
+	// beats machine-parseable for an interactive `lthn opencode
+	// web` invocation.
+	var resp struct {
+		URL string `json:"url"`
+	}
+	if r := core.JSONUnmarshalString(body, &resp); !r.OK || resp.URL == "" {
+		// Unknown shape — fall back to printing the raw body so we
+		// don't swallow anything useful the server returned.
+		core.Print(core.Stdout(), "%s\n", body)
+		return 0
+	}
+	core.Print(core.Stdout(), "%s\n", resp.URL)
 	return 0
 }
 

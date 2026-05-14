@@ -81,6 +81,38 @@ func (g *ControlGroup) RegisterRoutes(rg *gin.RouterGroup) {
 	// configured image + restarts running sandboxes on the new
 	// digest. User-driven; auto-detect notification is v2.
 	rg.POST("/upgrade", g.upgrade)
+
+	// Web UI — opencode-web ships an SPA at root in addition to the
+	// JSON API endpoints. GET returns the direct-bind URL with Basic
+	// auth embedded; POST opens it in an lthn Wails window (requires
+	// GUI mode).
+	rg.GET("/sandbox/:id/web", g.webURL)
+	rg.POST("/sandbox/:id/web", g.openWebWindow)
+}
+
+// webURL GET /v1/api/opencode/sandbox/:id/web → returns the direct
+// container-port URL with Basic-auth credentials embedded.
+func (g *ControlGroup) webURL(c *gin.Context) {
+	id := core.TrimCutset(c.Param("id"), "/ ")
+	r := g.svc.WebURL(id)
+	if !r.OK {
+		c.JSON(http.StatusNotFound, gin.H{"error": r.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"url": r.Value})
+}
+
+// openWebWindow POST /v1/api/opencode/sandbox/:id/web → spawns an
+// lthn Wails window pointing at the web UI. Fails when not in
+// GUI mode (window.open action isn't registered in serve mode).
+func (g *ControlGroup) openWebWindow(c *gin.Context) {
+	id := core.TrimCutset(c.Param("id"), "/ ")
+	r := g.svc.OpenWebWindow(id)
+	if !r.OK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, r.Value)
 }
 
 // upgrade POST /v1/api/opencode/upgrade → pulls lthn/dev:latest +

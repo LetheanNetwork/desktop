@@ -75,6 +75,7 @@ class LthnIntegrationsWindow extends LitElement {
     ocCheckUpdates: string; ocUpgrading: string;
     ocUpgradeNoChange: string; ocUpgradeUpdated: string;
     ocUpgradeFailed: string;
+    ocOpenWeb: string; ocOpenWebFailed: string;
   };
   /* Poll handle for sandbox state — cleared on disconnect. */
   private pollId: number | null = null;
@@ -126,6 +127,8 @@ class LthnIntegrationsWindow extends LitElement {
       ocUpgradeNoChange: "Already up to date.",
       ocUpgradeUpdated: "Updated. Sandbox restarted on the new image.",
       ocUpgradeFailed: "Update check failed — see logs for details.",
+      ocOpenWeb: "Open in window",
+      ocOpenWebFailed: "Couldn't open the web window — see logs for details.",
     };
   }
   createRenderRoot() { return this; }
@@ -239,6 +242,21 @@ class LthnIntegrationsWindow extends LitElement {
     }
   }
 
+  private async openWebWindow() {
+    if (!this.sandboxId) return;
+    try {
+      const oc = await import("@desktop/opencode/wailsservice");
+      const r = await oc.WOpenWebWindow(this.sandboxId);
+      if ((r as any)?.OK !== true) {
+        console.error("opencode WOpenWebWindow failed", r);
+        this.mergeStatus = { kind: "err", text: this.t.ocOpenWebFailed };
+      }
+    } catch (err) {
+      console.error("opencode WOpenWebWindow threw", err);
+      this.mergeStatus = { kind: "err", text: this.t.ocOpenWebFailed };
+    }
+  }
+
   private async openTUI() {
     if (!this.sandboxId) return;
     try {
@@ -287,6 +305,7 @@ class LthnIntegrationsWindow extends LitElement {
       ocML, ocCopy, ocMerge, ocMOk, ocMConflict, ocMForce, ocSHelp,
       ocTUI, ocTUIFail, ocStudio,
       ocCheck, ocUpgring, ocUpNoCh, ocUpUpd, ocUpFail,
+      ocWeb, ocWebFail,
     ] = await Promise.all([
       T("window.integrations.title"),
       T("window.integrations.subtitle"),
@@ -323,6 +342,8 @@ class LthnIntegrationsWindow extends LitElement {
       T("window.integrations.oc_upgrade_no_change"),
       T("window.integrations.oc_upgrade_updated"),
       T("window.integrations.oc_upgrade_failed"),
+      T("window.integrations.oc_open_web"),
+      T("window.integrations.oc_open_web_failed"),
     ]);
     this.chrome = { title, subtitle };
     this.t = {
@@ -342,6 +363,7 @@ class LthnIntegrationsWindow extends LitElement {
       ocCheckUpdates: ocCheck, ocUpgrading: ocUpgring,
       ocUpgradeNoChange: ocUpNoCh, ocUpgradeUpdated: ocUpUpd,
       ocUpgradeFailed: ocUpFail,
+      ocOpenWeb: ocWeb, ocOpenWebFailed: ocWebFail,
     };
     try {
       const [integrations, runner, server, ak, resultMod] = await Promise.all([
@@ -542,6 +564,12 @@ class LthnIntegrationsWindow extends LitElement {
                 @click=${() => void this.stopSandbox()}
                 style="padding:6px 12px; font-size:11.5px; background:rgba(217,153,153,0.10); border:1px solid rgba(217,153,153,0.35); border-radius:6px; color:var(--warn-300, #d99); cursor:${sandboxBusy ? "default" : "pointer"}; opacity:${sandboxBusy ? 0.6 : 1}; --wails-draggable: no-drag;">
                 ${this.t.ocStop}
+              </button>
+              <button
+                ?disabled=${sandboxBusy}
+                @click=${() => void this.openWebWindow()}
+                style="padding:6px 12px; font-size:11.5px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.10); border-radius:6px; color:var(--fg-0); cursor:${sandboxBusy ? "default" : "pointer"}; opacity:${sandboxBusy ? 0.6 : 1}; --wails-draggable: no-drag;">
+                <i class="fa-solid fa-window-maximize" style="font-size:10px; margin-right:6px;"></i>${this.t.ocOpenWeb}
               </button>
               <button
                 ?disabled=${sandboxBusy}

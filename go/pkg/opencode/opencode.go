@@ -245,7 +245,12 @@ func (s *Service) Start(profileName string) core.Result {
 		"-e", "OPENCODE_SERVER_PASSWORD=" + password,
 		"--name", ContainerName(id),
 		s.image(),
-		"opencode", "serve",
+		// `opencode web` serves the same /global/*, /provider, /session
+		// API as `opencode serve` PLUS the browser-facing web UI at /.
+		// We swap to `web` so the user gets both surfaces from one
+		// container; the auto-open-browser behaviour silently no-ops
+		// inside the container (nothing to open).
+		"opencode", "web",
 		"--hostname", "0.0.0.0",
 		"--port", core.Sprintf("%d", containerPort),
 	}

@@ -276,7 +276,9 @@
       "oc_upgrading":          "Checking…",
       "oc_upgrade_no_change":  "Already up to date.",
       "oc_upgrade_updated":    "Updated. Sandbox restarted on the new image.",
-      "oc_upgrade_failed":     "Update check failed — see logs for details."
+      "oc_upgrade_failed":     "Update check failed — see logs for details.",
+      "oc_open_web":           "Open in window",
+      "oc_open_web_failed":    "Couldn't open the web window — see logs for details."
     },
     "tools":        {
       "title": "Tools · MCP", "subtitle": "2 servers · 12 tools · 648 calls today",
