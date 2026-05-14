@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=lthn
+Exec=lthn
+Icon=lthn
+Categories=Development;
+Terminal=false
+Keywords=wails
+Version=1.0
+StartupNotify=false

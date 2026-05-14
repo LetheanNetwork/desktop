@@ -2,52 +2,75 @@
 # lthn-desktop audit — run this before/after every commit.
 #
 # Usage:
-#   bash build/audit.sh
+#   bash build/audit.sh           # quiet — only failures surface
+#   bash build/audit.sh -v        # verbose — full output of every step
 #
-# Two passes, both must pass for a clean `verdict: COMPLIANT` exit.
+# Two passes, both must pass for a clean PASS exit:
 #
-#   1. v0.9.0 compliance — the canonical pattern check used across every
-#      consumer of dappco.re/go. 40+ dimensions: module path, banned stdlib
-#      imports, AX-7 triplets, anti-gaming patterns, docs structure, service
-#      shape, etc. Reference script lives in core/go's test tree.
+#   1. v0.9.0 compliance — canonical pattern check; reference script
+#      lives in core/go's test tree.
+#   2. Build + test — go vet, go build, go test, frontend build,
+#      frontend test.
 #
-#   2. Build + test — go vet, go build, go test, frontend build, frontend
-#      test. The v0.9.0 audit is a static analyser; this leg confirms the
-#      code actually compiles and the test suite passes.
-#
-# The v0.9.0 audit's stray `yea` token on line 1 is a known quirk — ignore
-# the "yea: command not found" line on stdout.
+# Quiet mode (default) prints one line per step (✓ or ✗) and only
+# the failing step's captured stdout/stderr on a ✗. For v0.9.0 it
+# surfaces just the verdict + any non-zero counters. Cuts ~1.2k lines
+# of green-path noise down to <30 lines.
 set -eu
 
 cd "$(dirname "$0")/.."
 
 V090_AUDIT="/Users/snider/Code/core/go/tests/cli/v090-upgrade/audit.sh"
 
-step() { printf '\n== %s ==\n' "$*"; }
+VERBOSE=0
+[ "${1:-}" = "-v" ] && VERBOSE=1
 
-if [ ! -f "$V090_AUDIT" ]; then
-  echo "WARN: $V090_AUDIT missing — v0.9.0 compliance leg skipped." >&2
-  echo "      Codex should report TODO(snider): wire core/go submodule for in-repo audit." >&2
-else
-  step "v0.9.0 compliance"
-  bash "$V090_AUDIT" .
-fi
+# step <name> <command...> — runs the command, captures output, prints
+# a one-liner; on failure prints the captured output and exits 1.
+step() {
+  local name="$1"
+  shift
+  local out
+  if out=$("$@" 2>&1); then
+    if [ "$VERBOSE" = "1" ]; then
+      printf '\n== %s ==\n%s\n' "$name" "$out"
+    fi
+    printf '✓ %s\n' "$name"
+    return 0
+  fi
+  printf '✗ %s\n' "$name"
+  echo "$out"
+  exit 1
+}
 
-step "go vet"
-go vet ./go/...
+# v0.9.0 audit's stray `yea` token on line 1 is filtered; only the
+# verdict + any non-zero counters surface in quiet mode.
+audit_v090() {
+  if [ ! -f "$V090_AUDIT" ]; then
+    printf '⚠ v0.9.0 compliance — script missing at %s (skipped)\n' "$V090_AUDIT"
+    return 0
+  fi
+  local out
+  out=$(bash "$V090_AUDIT" . 2>&1 || true)
+  if echo "$out" | grep -q 'verdict: .*COMPLIANT[^—]*$'; then
+    printf '✓ v0.9.0 compliance — COMPLIANT\n'
+    [ "$VERBOSE" = "1" ] && echo "$out"
+    return 0
+  fi
+  printf '✗ v0.9.0 compliance — non-compliant\n'
+  # Surface only non-zero counters and the verdict line; drop the
+  # green "0    (description)" rows so only real findings show.
+  echo "$out" | grep -E '^\s+[a-z][a-z-]+\s+[1-9]|verdict:' || true
+  exit 1
+}
 
-step "go build"
-go build -o /tmp/lthn-audit ./go/cmd/lthn
-rm -f /tmp/lthn-audit
+audit_v090
 
-step "go test"
-go test -count=1 ./go/...
-
-step "frontend build"
-( cd frontend && bun run build )
-
-step "frontend test"
-( cd frontend && bun run test )
+step "go vet"          go vet ./go/...
+step "go build"        bash -c 'go build -o /tmp/lthn-audit ./go/cmd/lthn && rm -f /tmp/lthn-audit'
+step "go test"         go test -count=1 ./go/...
+step "frontend build"  bash -c 'cd frontend && bun run build'
+step "frontend test"   bash -c 'cd frontend && bun run test'
 
 echo
-echo "PASS"
+echo PASS
