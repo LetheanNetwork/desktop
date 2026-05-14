@@ -9,8 +9,10 @@ vars:
   # KEYCHAIN_PROFILE: "my-notarize-profile"
   # ENTITLEMENTS: "build/darwin/entitlements.plist"
 
-  # Docker image for cross-compilation (used when building on non-macOS)
-  CROSS_IMAGE: wails-cross
+  # Docker image for cross-compilation (used when building on non-macOS).
+  # Renamed from the wails3-scaffold `wails-cross` so multiple wails3
+  # projects on one machine don't collide on the same Docker image tag.
+  CROSS_IMAGE: lthn-cross
 
 tasks:
   build:

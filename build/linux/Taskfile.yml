@@ -10,8 +10,10 @@ vars:
   #
   # Password is stored securely in system keychain. Run: wails3 setup signing
 
-  # Docker image for cross-compilation (used when building on non-Linux or no CC available)
-  CROSS_IMAGE: wails-cross
+  # Docker image for cross-compilation (used when building on non-Linux or no CC available).
+  # Renamed from the wails3-scaffold `wails-cross` so multiple wails3
+  # projects on one machine don't collide on the same Docker image tag.
+  CROSS_IMAGE: lthn-cross
 
 tasks:
   build:
@@ -77,11 +79,11 @@ tasks:
           Build it first: wails3 task setup:docker
     cmds:
       # GOTOOLCHAIN=auto lets the container fetch the Go version
-      # pinned in our go.work (currently 1.26.x). The wails-cross
+      # pinned in our go.work (currently 1.26.x). The lthn-cross
       # image ships a baseline Go (1.25.x at time of writing) which
       # is older than what we require — without auto-fetch the build
       # fails with "go.work requires go >= 1.26.x".
-      # Override the wails-cross entrypoint with our build/cross.sh so
+      # Override the lthn-cross entrypoint with our build/cross.sh so
       # the cross-compile happens inside go/ (our Go module lives in
       # the go/ subfolder, not at repo root like the scaffold default).
       - docker run --rm -v "{{.ROOT_DIR}}:/app" {{.GO_CACHE_MOUNT}} {{.REPLACE_MOUNTS}} -e GOTOOLCHAIN=auto -e APP_NAME="{{.APP_NAME}}" {{if .EXTRA_TAGS}}-e EXTRA_TAGS="{{.EXTRA_TAGS}}"{{end}} --entrypoint /app/build/cross.sh "{{.CROSS_IMAGE}}" linux {{.DOCKER_ARCH}}

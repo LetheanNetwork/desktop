@@ -8,8 +8,13 @@
 		<string>lthn — Lethean Desktop</string>
 		<key>CFBundleIconFile</key>
 		<string>icons</string>
-		<key>CFBundleIconName</key>
-		<string>appicon</string>
+		<!--
+		  CFBundleIconName intentionally omitted — see Info.plist for the
+		  full reasoning. Short version: Assets.car was generated from the
+		  wails W scaffold SVG, so macOS preferring it puts the wails W in
+		  the Dock. Dropping CFBundleIconName falls back to icons.icns,
+		  which IS our Lethean logo.
+		-->
 		<key>CFBundleIdentifier</key>
 		<string>ai.lthn.desktop</string>
 		<key>CFBundleName</key>

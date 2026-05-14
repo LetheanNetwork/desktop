@@ -23,13 +23,27 @@ tasks:
 
   build:frontend:
     label: build:frontend (DEV={{.DEV}})
-    summary: Build the Vite frontend + stage into go/cmd/lthn/dist for embed
+    summary: Build the Vite frontend + stage into go/cmd/lthn/dist for embed. Skips entirely when no frontend sources changed (sources/generates), so a Go-only edit in the wails3 dev cycle pays only the Go-build cost, not the vite-build tax.
     deps:
       - task: install:frontend:deps
       - task: generate:bindings
         vars:
           BUILD_FLAGS:
             ref: .BUILD_FLAGS
+    # Vite watches these inputs and embeds outputs into the Go binary
+    # via cmd/lthn/dist. go-task checksums the source files and skips
+    # the cmds block when nothing changed — the dev cycle's blocking
+    # `build` step becomes free on .go-only edits.
+    sources:
+      - frontend/src/**/*
+      - frontend/index.html
+      - frontend/vite.config.js
+      - frontend/tsconfig.json
+      - frontend/package.json
+      - frontend/public/**/*
+      - frontend/bindings/**/*
+    generates:
+      - "{{.GO_DIR}}/cmd/lthn/dist/index.html"
     cmds:
       - cd frontend && npm run {{.BUILD_COMMAND}} -q
       - rm -rf {{.GO_DIR}}/cmd/lthn/dist
@@ -146,7 +160,7 @@ tasks:
       Builds the Docker image needed for cross-compiling to any platform.
       Run this once to enable cross-platform builds from any OS.
     cmds:
-      - docker build -t wails-cross -f build/docker/Dockerfile.cross build/docker/
+      - docker build -t lthn-cross -f build/docker/Dockerfile.cross build/docker/
     preconditions:
       - sh: docker info > /dev/null 2>&1
         msg: "Docker is required. Please install Docker first."

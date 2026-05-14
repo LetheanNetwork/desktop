@@ -8,8 +8,19 @@
 		<string>lthn — Lethean Desktop</string>
 		<key>CFBundleIconFile</key>
 		<string>icons</string>
-		<key>CFBundleIconName</key>
-		<string>appicon</string>
+		<!--
+		  CFBundleIconName intentionally omitted. The wails3 scaffold ships
+		  build/appicon.icon/Assets/wails_icon_vector.svg (the wails W) and
+		  the generate:icons step builds Assets.car from that. Modern macOS
+		  prefers Assets.car (via CFBundleIconName) over icons.icns (via
+		  CFBundleIconFile) — so leaving CFBundleIconName=appicon makes the
+		  Dock show the wails W instead of our Lethean logo. Dropping the key
+		  forces the older CFBundleIconFile path, which IS regenerated from
+		  build/appicon.png (the Lethean logo).
+		  Long-term: replace appicon.icon/Assets/wails_icon_vector.svg with a
+		  Lethean SVG so Assets.car gets generated from the real brand asset,
+		  then re-add CFBundleIconName here.
+		-->
 		<key>CFBundleIdentifier</key>
 		<string>ai.lthn.desktop</string>
 		<key>CFBundleName</key>

@@ -11,8 +11,10 @@ vars:
   #
   # Password is stored securely in system keychain. Run: wails3 setup signing
 
-  # Docker image for cross-compilation with CGO (used when CGO_ENABLED=1 on non-Windows)
-  CROSS_IMAGE: wails-cross
+  # Docker image for cross-compilation with CGO (used when CGO_ENABLED=1 on non-Windows).
+  # Renamed from the wails3-scaffold `wails-cross` so multiple wails3
+  # projects on one machine don't collide on the same Docker image tag.
+  CROSS_IMAGE: lthn-cross
 
 tasks:
   build:
@@ -77,7 +79,7 @@ tasks:
         vars:
           ARCH: '{{.ARCH}}'
       # GOTOOLCHAIN=auto — see linux/Taskfile.yml for context.
-      # Override the wails-cross entrypoint — see linux/Taskfile.yml.
+      # Override the lthn-cross entrypoint — see linux/Taskfile.yml.
       - docker run --rm -v "{{.ROOT_DIR}}:/app" {{.GO_CACHE_MOUNT}} {{.REPLACE_MOUNTS}} -e GOTOOLCHAIN=auto -e APP_NAME="{{.APP_NAME}}" {{if .EXTRA_TAGS}}-e EXTRA_TAGS="{{.EXTRA_TAGS}}"{{end}} --entrypoint /app/build/cross.sh {{.CROSS_IMAGE}} windows {{.DOCKER_ARCH}}
       - docker run --rm -v "{{.ROOT_DIR}}:/app" alpine chown -R $(id -u):$(id -g) /app/bin
       - rm -f *.syso
