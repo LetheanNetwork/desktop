@@ -54,6 +54,7 @@ const NAV: NavEntry[] = [
   { id: "telemetry",     label: "Telemetry",     icon: "fa-bolt",             tag: "lthn-telemetry-window",     group: "observe" },
   { id: "integrations",  label: "Integrations",  icon: "fa-link",             tag: "lthn-integrations-window",  group: "extend" },
   { id: "tools",         label: "Tools · MCP",   icon: "fa-screwdriver-wrench", tag: "lthn-tools-window",       group: "extend" },
+  { id: "providers",     label: "Providers",     icon: "fa-store",            tag: "lthn-providers-window",     group: "extend" },
   { id: "network",       label: "Network",       icon: "fa-circle-nodes",     tag: "lthn-network-window",       group: "preview", preview: true },
   { id: "distillation",  label: "Fine-tune",     icon: "fa-flask",            tag: "lthn-distillation-window",  group: "preview", preview: true },
   { id: "fleet",         label: "Fleet",         icon: "fa-server",           tag: "lthn-fleet-window",         group: "preview", preview: true },

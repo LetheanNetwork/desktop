@@ -21,6 +21,7 @@ import type * as fleetModels from "@desktop/fleet/models";
 import { unwrap } from "../result";
 import "./configure-agent-modal";
 import "./pair-machine-modal";
+import "./provision-remote-modal";
 
 type MachineRow = fleetModels.Machine;
 type QueueRow = fleetModels.QueueRow;
@@ -43,6 +44,7 @@ class LthnFleetWindow extends LitElement {
     err: { state: true },
     configureAgentOpen: { state: true },
     pairMachineOpen: { state: true },
+    provisionRemoteOpen: { state: true },
     editingAgent: { state: true },
     editingMachine: { state: true },
   };
@@ -58,6 +60,7 @@ class LthnFleetWindow extends LitElement {
   declare err: string | null;
   declare configureAgentOpen: boolean;
   declare pairMachineOpen: boolean;
+  declare provisionRemoteOpen: boolean;
   declare editingAgent: AgentRow | null;
   declare editingMachine: MachineRow | null;
 
@@ -77,6 +80,7 @@ class LthnFleetWindow extends LitElement {
     this.err = null;
     this.configureAgentOpen = false;
     this.pairMachineOpen = false;
+    this.provisionRemoteOpen = false;
     this.editingAgent = null;
     this.editingMachine = null;
   }
@@ -218,10 +222,25 @@ class LthnFleetWindow extends LitElement {
     this.editingMachine = null;
   }
 
+  private openProvisionRemote() {
+    this.provisionRemoteOpen = true;
+  }
+
+  private onProvisionCancel() {
+    this.provisionRemoteOpen = false;
+  }
+
   /* Centred empty-state card. icon is a fontawesome glyph name
    * (without the "fa-" prefix). The card is the on-ramp — never
-   * just a placeholder; always has a primary action. */
-  private renderEmptyState(icon: string, headline: string, body: string, ctaLabel: string, onClick: () => void) {
+   * just a placeholder; always has a primary action. Optional
+   * secondary CTA renders as a ghost link below the primary —
+   * useful when a surface has two equivalent on-ramps (e.g. Pair
+   * a machine + Provision Remote on the Machines tab). */
+  private renderEmptyState(
+    icon: string, headline: string, body: string,
+    ctaLabel: string, onClick: () => void,
+    secondary?: { label: string; onClick: () => void; icon?: string },
+  ) {
     return html`
       <div style="flex:1; display:flex; align-items:center; justify-content:center; padding:32px;">
         <div style="max-width:380px; width:100%;
@@ -248,6 +267,12 @@ class LthnFleetWindow extends LitElement {
           <lthn-btn tone="primary" size="md" @click=${onClick}>
             ${ctaLabel}
           </lthn-btn>
+          ${secondary ? html`
+            <lthn-btn tone="ghost" size="sm" @click=${secondary.onClick}>
+              ${secondary.icon ? html`<i class="fa-solid ${secondary.icon}" style="font-size:10px;"></i>` : nothing}
+              ${secondary.label}
+            </lthn-btn>
+          ` : nothing}
         </div>
       </div>
     `;
@@ -421,6 +446,8 @@ class LthnFleetWindow extends LitElement {
               "Add this Mac to the fleet, or pair another machine over the network. Once paired, agents can route inference to whichever node is best-suited for the model.",
               "Pair a machine",
               () => this.emitPairMachine(),
+              { label: "Provision a remote via SSH", icon: "fa-bolt",
+                onClick: () => this.openProvisionRemote() },
             )
           : this.renderMachineList())
       : (showEmptyAgents
@@ -436,6 +463,31 @@ class LthnFleetWindow extends LitElement {
     const showFooterAction = (this.tab === "machines" && this.machines.length > 0)
                            || (this.tab === "agents"   && this.agents.length > 0);
 
+    // Header-right action(s) for populated lists. Machines tab gets
+    // two buttons: Pair (manual add) + Provision Remote (SSH-driven
+    // setup with affiliate VPS recommendations baked in). Agents tab
+    // gets a single Add agent button.
+    const renderHeaderActions = () => {
+      if (this.tab === "agents") {
+        return html`<lthn-btn tone="ghost" size="sm" @click=${() => this.emitConfigureAgent()}>
+          <i class="fa-solid fa-plus" style="font-size:10px;"></i>
+          Add agent
+        </lthn-btn>`;
+      }
+      return html`
+        <div style="display:flex; gap:6px;">
+          <lthn-btn tone="ghost" size="sm" @click=${() => this.emitPairMachine()}>
+            <i class="fa-solid fa-plus" style="font-size:10px;"></i>
+            Pair machine
+          </lthn-btn>
+          <lthn-btn tone="ghost" size="sm" @click=${() => this.openProvisionRemote()}>
+            <i class="fa-solid fa-bolt" style="font-size:10px;"></i>
+            Provision remote
+          </lthn-btn>
+        </div>
+      `;
+    };
+
     const body = html`
       <div style="flex:1; display:flex; flex-direction:column; min-height:0; overflow:auto;">
         ${(showEmptyMachines || showEmptyAgents)
@@ -443,13 +495,7 @@ class LthnFleetWindow extends LitElement {
           : html`
             <div style="padding:16px 22px 8px; display:flex; align-items:center; justify-content:space-between;">
               ${sectionLabel}
-              ${showFooterAction
-                ? html`<lthn-btn tone="ghost" size="sm"
-                          @click=${this.tab === "agents" ? () => this.emitConfigureAgent() : () => this.emitPairMachine()}>
-                          <i class="fa-solid fa-plus" style="font-size:10px;"></i>
-                          ${this.tab === "agents" ? "Add agent" : "Pair machine"}
-                        </lthn-btn>`
-                : nothing}
+              ${showFooterAction ? renderHeaderActions() : nothing}
             </div>
             ${tabBody}
             ${this.renderQueueRail()}
@@ -490,6 +536,10 @@ class LthnFleetWindow extends LitElement {
         @lthn:fleet:machine-saved=${() => { void this.onMachineSaved(); }}
         @lthn:fleet:pair-cancel=${() => this.onPairCancel()}>
       </lthn-pair-machine-modal>
+      <lthn-provision-remote-modal
+        .open=${this.provisionRemoteOpen}
+        @lthn:fleet:provision-cancel=${() => this.onProvisionCancel()}>
+      </lthn-provision-remote-modal>
     `;
   }
 }
