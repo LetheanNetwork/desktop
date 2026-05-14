@@ -50,6 +50,40 @@ func (g *ControlGroup) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/profile/:name", g.profileGet)
 	rg.POST("/profile", g.profileSave)
 	rg.DELETE("/profile/:name", g.profileDelete)
+
+	// Host-config merge — RFC.opencode.md §3.3 "easy mode" path.
+	// POSTs into ~/.config/opencode/opencode.json so users running
+	// opencode directly on the host pick up the lthn provider.
+	rg.POST("/host-config", g.hostConfigMerge)
+}
+
+// hostConfigMerge POST /v1/api/opencode/host-config → merges the
+// named profile's provider block into the user's global opencode
+// config. Body: MergeHostConfigOptions JSON. Returns
+// MergeHostConfigResult on success; 409 Conflict (with the conflict
+// code in the body) when provider.lthn already exists with a
+// different baseURL and force was not passed.
+func (g *ControlGroup) hostConfigMerge(c *gin.Context) {
+	var opts MergeHostConfigOptions
+	// Body is optional; empty body uses defaults (profile=default,
+	// force=false).
+	_ = c.ShouldBindJSON(&opts)
+	r := g.svc.MergeHostConfig(opts)
+	if !r.OK {
+		// Conflict surfaces as 409 so the frontend can distinguish
+		// "needs user confirmation" from "actually broken".
+		if r.Code() == HostConfigConflict {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": r.Error(),
+				"code":  HostConfigConflict,
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		return
+	}
+	res, _ := r.Value.(MergeHostConfigResult)
+	c.JSON(http.StatusOK, res)
 }
 
 // spawn POST /v1/api/opencode/sandbox → spawns a new container.

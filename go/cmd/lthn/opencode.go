@@ -27,7 +27,7 @@ import (
 //	inspect ID         print one sandbox's record
 func cmdOpenCode(args []string) int {
 	if len(args) == 0 {
-		core.Print(core.Stderr(), "lthn opencode: missing verb (start / stop / status / inspect / profile)\n")
+		core.Print(core.Stderr(), "lthn opencode: missing verb (start / stop / status / inspect / profile / merge-host-config)\n")
 		return 2
 	}
 	switch args[0] {
@@ -41,6 +41,8 @@ func cmdOpenCode(args []string) int {
 		return opencodeInspect(args[1:])
 	case "profile":
 		return opencodeProfile(args[1:])
+	case "merge-host-config":
+		return opencodeMergeHostConfig(args[1:])
 	default:
 		core.Print(core.Stderr(), "lthn opencode: unknown verb %q\n", args[0])
 		return 2
@@ -49,8 +51,9 @@ func cmdOpenCode(args []string) int {
 
 // opencodeBase is the control surface root on localhost.
 const (
-	opencodeBase    = "http://localhost:8000/v1/api/opencode/sandbox"
-	opencodeProfBase = "http://localhost:8000/v1/api/opencode/profile"
+	opencodeBase           = "http://localhost:8000/v1/api/opencode/sandbox"
+	opencodeProfBase       = "http://localhost:8000/v1/api/opencode/profile"
+	opencodeHostConfigBase = "http://localhost:8000/v1/api/opencode/host-config"
 )
 
 // httpClient is the shared client for control calls. Generous timeout —
@@ -250,6 +253,61 @@ func profileDelete(args []string) int {
 	}
 	if code != http.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode profile delete: HTTP %d — %s\n", code, body)
+		return 1
+	}
+	core.Print(core.Stdout(), "%s\n", body)
+	return 0
+}
+
+// opencodeMergeHostConfig writes the named profile's provider block
+// into ~/.config/opencode/opencode.json. Flags:
+//
+//	--profile NAME    profile to merge (default: "default")
+//	--force           overwrite existing provider.lthn block
+//
+// Usage example:
+//
+//	lthn opencode merge-host-config              # default profile
+//	lthn opencode merge-host-config --profile dev
+//	lthn opencode merge-host-config --force      # confirm overwrite
+func opencodeMergeHostConfig(args []string) int {
+	profile := ""
+	force := false
+	for i := 0; i < len(args); i++ {
+		k, v, valid := core.ParseFlag(args[i])
+		if !valid {
+			continue
+		}
+		switch k {
+		case "profile":
+			if v == "" && i+1 < len(args) {
+				i++
+				v = args[i]
+			}
+			profile = v
+		case "force":
+			force = true
+		}
+	}
+	payload := core.JSONMarshalString(map[string]any{
+		"profile": profile,
+		"force":   force,
+	})
+	req, _ := http.NewRequest(http.MethodPost, opencodeHostConfigBase, strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	body, code, err := doRequest(req)
+	if err != nil {
+		core.Print(core.Stderr(), "lthn opencode merge-host-config: %s\n", err)
+		core.Print(core.Stderr(), "hint: is `lthn serve` running on :8000?\n")
+		return 1
+	}
+	if code == http.StatusConflict {
+		core.Print(core.Stderr(), "lthn opencode merge-host-config: conflict — %s\n", body)
+		core.Print(core.Stderr(), "hint: pass --force to overwrite the existing provider.lthn block.\n")
+		return 2
+	}
+	if code != http.StatusOK {
+		core.Print(core.Stderr(), "lthn opencode merge-host-config: HTTP %d — %s\n", code, body)
 		return 1
 	}
 	core.Print(core.Stdout(), "%s\n", body)

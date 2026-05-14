@@ -121,3 +121,20 @@ func (w *WailsService) WDeleteProfile(name string) core.Result {
 	}
 	return w.svc.DeleteProfile(name)
 }
+
+// WMergeHostConfig merges the named profile's provider block into
+// the user's host-side ~/.config/opencode/opencode.json. Returns
+// HostConfigConflict (in Result.Code()) when provider.lthn already
+// exists with a different baseURL and force=false — the frontend
+// prompts the user before retrying with force=true.
+//
+// Usage example (TS):
+//
+//	const r = await OpenCodeWails.WMergeHostConfig({ profile: "default" })
+//	if (r.code === "opencode.host-config.conflict") { /* prompt user */ }
+func (w *WailsService) WMergeHostConfig(opts MergeHostConfigOptions) core.Result {
+	if w == nil || w.svc == nil {
+		return core.Fail(core.E("opencode.WMergeHostConfig", "service not bound", nil))
+	}
+	return w.svc.MergeHostConfig(opts)
+}
