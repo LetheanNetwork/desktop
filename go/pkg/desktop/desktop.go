@@ -233,6 +233,17 @@ func (s *Service) Run() core.Result {
 	pluginSvc, _ := core.ServiceFor[*plugin.Service](s.opts.Core, "plugin")
 	sandboxSvc, _ := core.ServiceFor[*sandbox.Service](s.opts.Core, "sandbox")
 	opencodeSvc, _ := core.ServiceFor[*opencode.Service](s.opts.Core, "opencode")
+	// Bridge opencode-serve's /global/event SSE stream → Wails event
+	// bus. The opencode side runs the SSE goroutine + parses; each
+	// event JSON is forwarded here, where emitCoreEvent ferries it
+	// onto the same bus the Fleet window already subscribes to.
+	// CLI/serve modes leave this unset so the SSE connections never
+	// open (no consumer = wasted work). See RFC.opencode.md §5.3.
+	if opencodeSvc != nil {
+		opencodeSvc.SetEventEmitter(func(eventJSON string) {
+			emitCoreEvent(s.opts.Core, "lthn:opencode:event", eventJSON)
+		})
+	}
 
 	wailsServices := []application.Service{
 		// In-this-repo packages — each ships its own *WailsService /

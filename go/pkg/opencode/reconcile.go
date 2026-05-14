@@ -94,6 +94,8 @@ func (s *Service) Reconcile() core.Result {
 			continue
 		}
 		s.proxy.Set(id, core.Sprintf("http://127.0.0.1:%d", hostPort), authHeader)
+		// Auto-subscribe — no-op when no emitter is installed.
+		_, _ = s.Subscribe(id)
 		recovered++
 	}
 

@@ -58,6 +58,17 @@ type Service struct {
 	// Held outside Options because Options is read-only at runtime.
 	mu              sync.RWMutex
 	onSandboxChange func()
+
+	// eventEmitter forwards opencode-serve's SSE /global/event
+	// stream to the host application's event bus. Installed by
+	// SetEventEmitter; nil = no consumer (CLI/serve modes), in
+	// which case Subscribe is a no-op.
+	eventEmitter EventEmitter
+
+	// subscriptions maps sandbox-id → SSE-goroutine cancel func.
+	// Created lazily by Subscribe so the zero-value Service is
+	// still safe to use without subscription support.
+	subscriptions map[string]func()
 }
 
 // NewService returns the canonical Core service factory.
@@ -280,6 +291,10 @@ func (s *Service) Start(profileName string) core.Result {
 		_ = r
 	}
 
+	// Auto-subscribe — opens an SSE stream if an event emitter is
+	// installed (GUI mode). No-op in CLI/serve modes.
+	_, _ = s.Subscribe(id)
+
 	// Notify subscribers (runner) that the sandbox set changed.
 	s.fireSandboxChange()
 
@@ -361,6 +376,11 @@ func (s *Service) Stop(id string) core.Result {
 	if ps == nil {
 		return core.Fail(core.E(stopOp, "process service unavailable", nil))
 	}
+
+	// Cancel the SSE subscription FIRST — the goroutine is reading
+	// from the soon-to-die container's /global/event; tearing it
+	// down here means no flap of reconnect-retry-fail noise.
+	s.Unsubscribe(id)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
