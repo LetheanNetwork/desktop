@@ -41,6 +41,17 @@ class LthnProvidersWindow extends LitElement {
   }
   createRenderRoot() { return this; }
 
+  /** Copy text to clipboard via the WebView's clipboard API. Used by
+   *  the per-provider "Search: <name>" affordance so users in a context
+   *  where ref.lthn.ai isn't reachable can grab the search term in one
+   *  click. Silent on failure; the clipboard API throws in some private
+   *  WebView contexts and we don't want to surface that as a UI error. */
+  private async _copyText(e: Event, text: string) {
+    e.preventDefault();
+    try { await navigator.clipboard?.writeText(text); }
+    catch { /* clipboard unavailable — silent */ }
+  }
+
   private renderProviderCard(p: ServiceProvider) {
     const isExternal = p.status === "external";
     const isComingSoon = p.status === "coming-soon";
@@ -76,17 +87,34 @@ class LthnProvidersWindow extends LitElement {
         <div style="font-size:11.5px; color:var(--fg-2); line-height:1.55;">
           ${p.blurb}
         </div>
-        <div style="display:flex; align-items:center; gap:10px; padding-top:4px;">
+        <div style="display:flex; align-items:center; gap:10px; padding-top:4px; flex-wrap:wrap;">
           ${isExternal
             ? html`
               <a href=${refURL(p.id)} target="_blank" rel="noopener"
                  style="font-size:11.5px; color:var(--brand-300);
                         text-decoration:none;
+                        font-family:var(--font-mono);
                         display:inline-flex; align-items:center; gap:6px;
                         --wails-draggable: no-drag;">
-                Visit
+                ref.lthn.ai/${p.id}
                 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:9px;"></i>
               </a>
+              <span style="display:inline-flex; align-items:center; gap:6px;
+                           font-size:10.5px; color:var(--fg-3);">
+                Search:
+                <code style="font-family:var(--font-mono); font-size:10.5px;
+                             padding:1px 6px; border-radius:4px;
+                             background:rgba(255,255,255,0.04);
+                             border:1px solid rgba(255,255,255,0.07);
+                             color:var(--fg-1);">${p.name}</code>
+                <button @click=${(e: Event) => this._copyText(e, p.name)}
+                        title="Copy search term to clipboard"
+                        style="background:transparent; border:none; cursor:pointer;
+                               color:var(--fg-3); padding:2px 4px; line-height:1;
+                               --wails-draggable: no-drag;">
+                  <i class="fa-regular fa-copy" style="font-size:11px;"></i>
+                </button>
+              </span>
             `
             : nothing}
           ${isLive && p.firstParty
@@ -153,26 +181,7 @@ class LthnProvidersWindow extends LitElement {
     const body = html`
       <div style="flex:1; overflow:auto; padding:20px 24px;
                   display:flex; flex-direction:column; gap:22px;">
-
-        <div style="display:flex; flex-direction:column; gap:6px;
-                    padding:14px 16px;
-                    background:rgba(64,193,197,0.04);
-                    border:1px solid rgba(64,193,197,0.15);
-                    border-radius:10px;">
-          <div style="font-size:13px; font-weight:600; color:var(--fg-0);">
-            Helpful, never salesy
-          </div>
-          <div style="font-size:11.5px; color:var(--fg-2); line-height:1.55;">
-            Curated providers we either integrate with or recommend
-            when the workflow calls for one. External links carrying
-            the <em>supports lthn</em> tag track via
-            <span style="font-family:var(--font-mono); color:var(--brand-300);">ref.lthn.ai</span>
-            so we earn on signup — that revenue funds the OSS work.
-          </div>
-        </div>
-
         ${order.map(cat => this.renderCategorySection(cat, grouped[cat]))}
-
       </div>
     `;
 
