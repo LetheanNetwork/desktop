@@ -423,6 +423,7 @@ class LthnSettingsWindow extends LitElement {
       case "telemetry":    return this._sectionTelemetry();
       case "integrations": return this._sectionIntegrations();
       case "about":        return this._sectionAbout();
+      case "leave":        return this._sectionLeave();
       default:             return this._sectionGeneral();
     }
   }
@@ -458,6 +459,7 @@ class LthnSettingsWindow extends LitElement {
       { id:"telemetry",    icon:"fa-wave-square",  label:"Telemetry" },
       { id:"integrations", icon:"fa-link",         label:"Integrations" },
       { id:"about",        icon:"fa-circle-info",  label:"About" },
+      { id:"leave",        icon:"fa-door-open",    label:"Leave App" },
     ];
 
     const body = html`
@@ -738,6 +740,120 @@ class LthnSettingsWindow extends LitElement {
         `)}
       `,
     });
+  }
+
+  /** The chill flex. Most people look here once and never again —
+   *  the goal is "oh, this place is trustworthy" in 5 seconds, not
+   *  a tech-spec listing. Lead with the data-ownership story; the
+   *  paths come second; the encrypted-data caveat third. */
+  _sectionLeave() {
+    const home = "~/Lethean";
+    const path = (p: string) => html`<span style="font-family:var(--font-mono); font-size:11.5px;
+      color:var(--brand-300);
+      background:rgba(64,193,197,0.06);
+      border:1px solid rgba(64,193,197,0.18);
+      border-radius:4px;
+      padding:1px 6px;">${p}</span>`;
+    const para = (children: unknown) => html`<p style="font-size:12.5px;
+      color:var(--fg-1); line-height:1.65; margin:0;">${children}</p>`;
+
+    return html`
+      <div style="display:flex; flex-direction:column; gap:18px; max-width:680px;">
+
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div style="width:40px; height:40px;
+                      display:flex; align-items:center; justify-content:center;
+                      background:rgba(64,193,197,0.08);
+                      border:1px solid rgba(64,193,197,0.18);
+                      border-radius:10px;">
+            <i class="fa-solid fa-door-open" style="font-size:16px; color:var(--brand-300);"></i>
+          </div>
+          <div style="font-size:18px; font-weight:600; color:var(--fg-0);
+                      letter-spacing:-0.01em;">
+            Good news — we never hid your data.
+          </div>
+        </div>
+
+        ${para(html`
+          Lethean Desktop is <em>physically unable</em> to remove the
+          ${path(home)} folder. Open it in Finder, browse what's there,
+          delete at your leisure. There's no "delete account" button
+          because there's no account.
+        `)}
+
+        <div style="display:flex; flex-direction:column; gap:8px;
+                    padding:14px 16px;
+                    background:rgba(255,255,255,0.025);
+                    border:1px solid rgba(255,255,255,0.06);
+                    border-radius:10px;">
+          <div style="font-size:11px; color:var(--fg-3);
+                      text-transform:uppercase; letter-spacing:0.06em;">
+            To purge desktop state, delete:
+          </div>
+          <div style="display:flex; flex-direction:column; gap:6px; padding-top:4px;">
+            <div style="display:flex; align-items:baseline; gap:10px;">
+              ${path("~/Lethean/data/lthn.duckdb")}
+              <span style="font-size:11px; color:var(--fg-3);">tasks · agents · fleet · agent activity</span>
+            </div>
+            <div style="display:flex; align-items:baseline; gap:10px;">
+              ${path("~/Lethean/data/lthn.db")}
+              <span style="font-size:11px; color:var(--fg-3);">key-value store</span>
+            </div>
+            <div style="display:flex; align-items:baseline; gap:10px;">
+              ${path("~/Lethean/data/keys/")}
+              <span style="font-size:11px; color:var(--fg-3);">encrypted API keys + secrets</span>
+            </div>
+            <div style="display:flex; align-items:baseline; gap:10px;">
+              ${path("~/Lethean/data/workspace/")}
+              <span style="font-size:11px; color:var(--fg-3);">DuckDB scratch / staging</span>
+            </div>
+            <div style="display:flex; align-items:baseline; gap:10px;">
+              ${path("~/Lethean/conf/")}
+              <span style="font-size:11px; color:var(--fg-3);">settings, window state, layouts</span>
+            </div>
+            <div style="display:flex; align-items:baseline; gap:10px;">
+              ${path("~/Lethean/wallets/")}
+              <span style="font-size:11px; color:var(--fg-3);">Lethean wallet keystores</span>
+            </div>
+          </div>
+        </div>
+
+        ${para(html`
+          Your encrypted data — we genuinely <em>can't tell you what's in
+          there</em>. It's sealed at rest with keys we don't hold. If you
+          want a cleartext export, you'll need your encryption keys
+          (multi-user setups need every participant's key) and the
+          Export Workspace tool, which decrypts whatever the supplied
+          keys can open.
+        `)}
+
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <lthn-btn tone="primary" size="md" disabled
+            title="Export Workspace ships in a follow-up — manual decrypt guide is live now.">
+            <i class="fa-solid fa-file-export" style="font-size:11px;"></i>
+            Export Workspace
+            <span style="font-size:9.5px; opacity:0.7; margin-left:4px;">(coming soon)</span>
+          </lthn-btn>
+          <a href="https://lthn.ai/help/leave/decrypt" target="_blank" rel="noopener"
+             style="font-size:12px; color:var(--brand-300); text-decoration:none;
+                    display:inline-flex; align-items:center; gap:6px;
+                    --wails-draggable: no-drag;">
+            <i class="fa-solid fa-book" style="font-size:11px;"></i>
+            Guide: decrypt with other tooling
+            <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:9px;"></i>
+          </a>
+        </div>
+
+        <div style="margin-top:6px; padding-top:14px;
+                    border-top:1px solid rgba(255,255,255,0.05);
+                    font-size:11.5px; color:var(--fg-3); line-height:1.7;">
+          No phone home. No cloud sync we control. No "are you sure you
+          want to leave?" funnel. Just files you own, in folders you can
+          see.
+        </div>
+
+      </div>
+    `;
   }
 }
 customElements.define("lthn-settings-window", LthnSettingsWindow);
