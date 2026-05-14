@@ -84,6 +84,8 @@ func main() {
 		core.Exit(cmdService(args[1:]))
 	case "api":
 		core.Exit(cmdAPI(args[1:]))
+	case "fleet":
+		core.Exit(cmdFleet(args[1:]))
 	default:
 		core.Print(core.Stderr(), "lthn: unknown subcommand %q\nrun `lthn help` for available commands\n", args[0])
 		core.Exit(2)
