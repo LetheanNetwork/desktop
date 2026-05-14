@@ -254,7 +254,21 @@
       "snippet_help":    "Only the apiBase, apiKey and model keys are lthn-managed. Anything else you set in this file is left alone.",
       "yes":             "yes",
       "no":              "no",
-      "no_client":       "No client selected."
+      "no_client":       "No client selected.",
+      "oc_sandbox_label":      "Sandbox",
+      "oc_state_stopped":      "not running",
+      "oc_state_starting":     "starting",
+      "oc_state_ready":        "running",
+      "oc_state_error":        "error",
+      "oc_start":              "Start",
+      "oc_stop":               "Stop",
+      "oc_merge_label":        "Host integration · merges into %s",
+      "oc_copy":               "Copy snippet",
+      "oc_merge":              "Merge into config",
+      "oc_merged_ok":          "Merged. Restart opencode to pick up the lthn provider.",
+      "oc_merged_conflict":    "provider.lthn already exists with a different baseURL.",
+      "oc_merge_force":        "Overwrite",
+      "oc_snippet_help":       "Adds the lthn provider alongside any others you have configured. Non-destructive — your existing providers are untouched."
     },
     "tools":        {
       "title": "Tools · MCP", "subtitle": "2 servers · 12 tools · 648 calls today",
