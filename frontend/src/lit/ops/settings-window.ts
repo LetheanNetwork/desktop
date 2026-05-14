@@ -541,6 +541,7 @@ class LthnSettingsWindow extends LitElement {
     const l = lang.toLowerCase();
     if (l === "fr" || l.startsWith("fr-") || l.startsWith("fr_")) return "🇫🇷";
     if (l === "en-au" || l === "en_au") return "🇦🇺";
+    if (l === "zh" || l.startsWith("zh-") || l.startsWith("zh_")) return "🇨🇳";
     return "🇬🇧";
   }
 
