@@ -18,16 +18,95 @@ package repos
 
 import (
 	"context"
+	"sync"
 
 	core "dappco.re/go"
 	scmgit "dappco.re/go/scm/git"
 )
+
+// SourceProvider is a callback that returns absolute paths to
+// candidate repo worktrees. Registered subsystems (opencode imports,
+// future codex/claude/pi imports, marketplace bundles, etc.) plug
+// into the Status scan via RegisterSource — keeps pkg/repos free of
+// per-source coupling. Each provider runs at Status time; cheap
+// implementations are expected (orm reads, in-memory caches).
+//
+// Usage example:
+//
+//	reposSvc.RegisterSource("opencode-imports", func(ctx context.Context) []string {
+//	    rows := orm.Of[opencode.ImportedProject](c).Where("worktree","!=","").Get()
+//	    return pathsFrom(rows)
+//	})
+type SourceProvider func(ctx context.Context) []string
 
 // Service owns the repos surface. Holds *core.Core for late
 // resolution of any future dependencies (currently scmgit is a
 // package-level static, no injection needed).
 type Service struct {
 	core *core.Core
+
+	// sourcesMu guards sources. Writers are package boots
+	// (RegisterSource); readers are Status() invocations.
+	sourcesMu sync.RWMutex
+	sources   []registeredSource
+}
+
+// registeredSource pairs a SourceProvider with its identifier so
+// future surfaces can attribute "this row came from <name>" — not
+// load-bearing for v1 but the slot is reserved.
+type registeredSource struct {
+	name string
+	fn   SourceProvider
+}
+
+// RegisterSource installs a candidate-path provider. Called by
+// subsystems that own repo lists outside the canonical scan roots
+// (opencode imports, future codex/claude imports, etc.).
+//
+// Safe to call before or after the service starts serving. Status
+// invocations re-read the registry on every call, so newly-added
+// sources show up in the next response without a restart.
+//
+// Usage example:
+//
+//	if reposSvc, _ := core.ServiceFor[*repos.Service](c, "repos"); reposSvc != nil {
+//	    reposSvc.RegisterSource("opencode-imports", openCodeImportsPaths(c))
+//	}
+func (s *Service) RegisterSource(name string, fn SourceProvider) {
+	if s == nil || fn == nil {
+		return
+	}
+	s.sourcesMu.Lock()
+	s.sources = append(s.sources, registeredSource{name: name, fn: fn})
+	s.sourcesMu.Unlock()
+}
+
+// collectSourcePaths drains every registered SourceProvider and
+// returns the deduped union. Order: providers fire in registration
+// order; duplicates within or across providers are dropped (first
+// occurrence wins).
+//
+// Used by Status() to merge external paths (opencode imports etc.)
+// into the canonical-roots scan.
+func (s *Service) collectSourcePaths(ctx context.Context) []string {
+	s.sourcesMu.RLock()
+	srcs := append([]registeredSource(nil), s.sources...)
+	s.sourcesMu.RUnlock()
+	if len(srcs) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, src := range srcs {
+		for _, p := range src.fn(ctx) {
+			if p == "" || seen[p] {
+				continue
+			}
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // NewService constructs the repos surface against a Core container.

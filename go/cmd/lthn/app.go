@@ -20,6 +20,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/plugin"
+	"dappco.re/lthn/desktop/pkg/repos"
 	"dappco.re/lthn/desktop/pkg/sandbox"
 )
 
@@ -127,6 +128,12 @@ func newAppCore() *core.Core {
 		// record). ProxyGroup is registered with the api.Engine in
 		// pkg/desktop/subsystems.go alongside the plugin proxy.
 		core.WithName("opencode", opencode.NewService(opencode.Options{})),
+		// repos — multi-repo dashboard. Scans canonical workspace
+		// roots ($HOME/Code/{core,lthn,host-uk,lab,snider}) for git
+		// children + accepts external paths via RegisterSource so
+		// imports (opencode + future codex/claude/pi) surface
+		// alongside scanned repos.
+		core.WithName("repos", repos.Register),
 	)
 
 	if r := c.ServiceStartup(context.Background(), nil); !r.OK {
@@ -156,6 +163,32 @@ func newAppCore() *core.Core {
 			return nil
 		}
 		memium.RegisterTable(schema.Name, schema)
+	}
+
+	// Wire imported worktrees into the repos surface — opencode
+	// imports show up in the multi-repo dashboard alongside scanned
+	// roots. Future codex/claude/pi imports plug in the same way.
+	if reposSvc, _ := core.ServiceFor[*repos.Service](c, "repos"); reposSvc != nil {
+		reposSvc.RegisterSource("opencode-imports", func(_ context.Context) []string {
+			r := orm.Of[opencode.ImportedProject](c).
+				Where("worktree", "!=", "").
+				Get()
+			if !r.OK {
+				return nil
+			}
+			rows, ok := r.Value.([]opencode.ImportedProject)
+			if !ok {
+				return nil
+			}
+			out := make([]string, 0, len(rows))
+			for _, p := range rows {
+				if p.Worktree == "" || p.Worktree == "/" {
+					continue
+				}
+				out = append(out, p.Worktree)
+			}
+			return out
+		})
 	}
 
 	return c

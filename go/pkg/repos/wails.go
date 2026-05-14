@@ -34,8 +34,16 @@ type StatusOutput struct {
 
 // Status enumerates the user's repos and returns each one's git
 // state. When Paths is empty the service scans Roots (or the
-// canonical default roots when those are empty too).
+// canonical default roots when those are empty too) AND merges
+// paths contributed by registered SourceProviders (opencode imports
+// etc.) so externally-tracked repos surface alongside scan results.
 func (s *Service) Status(input StatusInput) core.Result {
+	// 30s ceiling — git status across the canonical roots takes
+	// well under a second on a healthy SSD, but pathological cases
+	// (slow network FS mounts, hung git auth helpers) need a cap.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	paths := input.Paths
 	if len(paths) == 0 {
 		if len(input.Roots) > 0 {
@@ -44,14 +52,25 @@ func (s *Service) Status(input StatusInput) core.Result {
 			paths = s.scanDefaultRoots()
 		}
 	}
+
+	// Merge external sources (deduped against each other; deduped
+	// against scanned paths below). Imports surface even when
+	// `paths` is empty so the user always sees them.
+	seen := map[string]bool{}
+	for _, p := range paths {
+		seen[p] = true
+	}
+	for _, p := range s.collectSourcePaths(ctx) {
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		paths = append(paths, p)
+	}
+
 	if len(paths) == 0 {
 		return core.Ok(StatusOutput{Repos: []Status{}, Scanned: 0})
 	}
-	// 30s ceiling — git status across the canonical roots takes
-	// well under a second on a healthy SSD, but pathological cases
-	// (slow network FS mounts, hung git auth helpers) need a cap.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 	return core.Ok(StatusOutput{
 		Repos:   s.statuses(ctx, paths),
 		Scanned: len(paths),
