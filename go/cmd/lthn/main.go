@@ -333,6 +333,16 @@ func cmdServe(args []string) int {
 	var extras []coreapi.RouteGroup
 	if opencodeSvc, _ := core.ServiceFor[*opencode.Service](c, "opencode"); opencodeSvc != nil {
 		extras = append(extras, opencodeSvc.ProxyGroup(), opencode.NewControlGroup(opencodeSvc))
+		// Wire opencode → runner so the runner's dynamic-route set
+		// refreshes whenever an opencode sandbox starts or stops.
+		// /v1/chat/completions then transparently reaches opencode-
+		// routed providers without restarting lthn serve.
+		opencodeSvc.SetOnSandboxChange(func() {
+			_ = r.SetDynamicRoutes(opencodeSvc.Routes())
+		})
+		// Pick up any sandboxes already running (e.g. restart of
+		// `lthn serve` against a still-alive opencode container).
+		_ = r.SetDynamicRoutes(opencodeSvc.Routes())
 	}
 	if pluginSvc, _ := core.ServiceFor[*plugin.Service](c, "plugin"); pluginSvc != nil {
 		extras = append(extras, pluginSvc.ProxyGroup())

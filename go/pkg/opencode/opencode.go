@@ -8,6 +8,7 @@ import (
 	goio "io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	core "dappco.re/go"
@@ -41,6 +42,7 @@ type Options struct {
 	// Empty = "docker" (the v1 default; borg-run integration is a
 	// future iteration that adds "lthn-vm" as the canonical option).
 	Runtime string
+
 }
 
 // Service is the opencode host. Embeds *core.ServiceRuntime[Options]
@@ -49,6 +51,13 @@ type Options struct {
 type Service struct {
 	*core.ServiceRuntime[Options]
 	proxy *SandboxProxyGroup
+
+	// onSandboxChange fires after every Start success + every Stop
+	// success. Set via SetOnSandboxChange after the runner exists
+	// — the wire-up happens in cmd/lthn after newAppCore returns.
+	// Held outside Options because Options is read-only at runtime.
+	mu              sync.RWMutex
+	onSandboxChange func()
 }
 
 // NewService returns the canonical Core service factory.
@@ -83,6 +92,41 @@ func Register(c *core.Core) core.Result {
 
 // ServiceName labels the binding namespace exposed to JS.
 func (s *Service) ServiceName() string { return "OpenCode" }
+
+// SetOnSandboxChange swaps the post-Start / post-Stop callback at
+// runtime. cmd/lthn wires this from cmdServe after the runner
+// exists — at construction time (inside newAppCore) the runner
+// hasn't been built yet, so the callback can't be passed via
+// Options.OnSandboxChange directly.
+//
+// Usage example:
+//
+//	opencodeSvc.SetOnSandboxChange(func() {
+//	    runnerSvc.SetDynamicRoutes(opencodeSvc.Routes())
+//	})
+func (s *Service) SetOnSandboxChange(cb func()) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.onSandboxChange = cb
+	s.mu.Unlock()
+}
+
+// fireSandboxChange runs the registered callback (if any) under
+// the read lock so SetOnSandboxChange callers don't race with
+// Start / Stop notifications.
+func (s *Service) fireSandboxChange() {
+	if s == nil {
+		return
+	}
+	s.mu.RLock()
+	cb := s.onSandboxChange
+	s.mu.RUnlock()
+	if cb != nil {
+		cb()
+	}
+}
 
 // ProxyGroup exposes the reverse-proxy route group so pkg/desktop
 // can hand it to the coreapi.Engine at boot — mirrors the
@@ -236,6 +280,9 @@ func (s *Service) Start(profileName string) core.Result {
 		_ = r
 	}
 
+	// Notify subscribers (runner) that the sandbox set changed.
+	s.fireSandboxChange()
+
 	return core.Ok(id)
 }
 
@@ -331,6 +378,9 @@ func (s *Service) Stop(id string) core.Result {
 		sb.Status = StatusStopped
 		_ = orm.Of[Sandbox](s.Core()).Save(&sb)
 	}
+
+	// Notify subscribers (runner) that the sandbox set changed.
+	s.fireSandboxChange()
 
 	return core.Ok(nil)
 }

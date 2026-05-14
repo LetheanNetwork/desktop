@@ -58,9 +58,10 @@ type Options struct {
 // Service is the runner subsystem. Holds the ai.ProviderRouter (when
 // configured) and the lifecycle state the frontend observes.
 type Service struct {
-	opts   Options
-	router *ai.ProviderRouter
-	core   *core.Core
+	opts    Options
+	router  *ai.ProviderRouter
+	core    *core.Core
+	dynamic []ai.ProviderRoute
 }
 
 // NewService constructs the runner with the canonical Mantis #1336
@@ -96,6 +97,42 @@ func NewService(opts Options) *Service {
 //		return r
 //	}
 func (s *Service) Register(c *core.Core) core.Result {
+	return core.Ok(nil)
+}
+
+// SetDynamicRoutes replaces the runner's dynamic-route set and
+// rebuilds the ai.ProviderRouter against the merged list of static
+// (opts.Routes) + dynamic. Use for provider sources whose lifetime
+// is decoupled from process startup — opencode sandboxes start /
+// stop at runtime, and each transition triggers a SetDynamicRoutes
+// call from the cmdServe wire-up.
+//
+// Empty routes argument clears the dynamic set, leaving only the
+// static routes from construction. nil + nil router state is
+// allowed (the runner falls back to the echo stub).
+//
+// Usage example:
+//
+//	runnerSvc.SetDynamicRoutes(opencodeSvc.Routes())
+func (s *Service) SetDynamicRoutes(routes []ai.ProviderRoute) core.Result {
+	if s == nil {
+		return core.Fail(core.E("runner.SetDynamicRoutes", "service is nil", nil))
+	}
+	s.dynamic = routes
+	merged := make([]ai.ProviderRoute, 0, len(s.opts.Routes)+len(routes))
+	merged = append(merged, s.opts.Routes...)
+	merged = append(merged, routes...)
+	if len(merged) == 0 {
+		s.router = nil
+		return core.Ok(nil)
+	}
+	built := ai.NewProviderRouter(merged...)
+	if !built.OK {
+		return built
+	}
+	if router, ok := built.Value.(*ai.ProviderRouter); ok {
+		s.router = router
+	}
 	return core.Ok(nil)
 }
 
