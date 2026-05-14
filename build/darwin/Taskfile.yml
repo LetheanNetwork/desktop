@@ -184,7 +184,14 @@ tasks:
     cmds:
       - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
       - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources"
+      # Mirror the icon-asset state from build/ — see darwin:run for the
+      # same pattern. A stale Assets.car in the prod .app overrides
+      # icons.icns and surfaces the wrong icon in Dock / Launchpad.
+      - rm -f "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources/Assets.car"
       - cp build/darwin/icons.icns "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources"
+      # Assets.car is intentionally not generated — see build/Taskfile.yml
+      # `generate:icons` for why. The if-block stays so a future re-enable
+      # of the Icon Composer path doesn't need this site to change.
       - |
         if [ -f build/darwin/Assets.car ]; then
           cp build/darwin/Assets.car "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources"
@@ -209,6 +216,13 @@ tasks:
     cmds:
       - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS"
       - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/Resources"
+      # Mirror the icon-asset state from build/ — stale Assets.car
+      # leftovers from a previous Icon Composer cycle would otherwise
+      # outrank icons.icns and put the wrong icon in the Dock. If
+      # build/darwin/Assets.car comes back in a future cycle, the
+      # cp-block below picks it up; the unconditional rm here keeps
+      # both directions truthful.
+      - rm -f "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/Resources/Assets.car"
       - cp build/darwin/icons.icns "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/Resources"
       - |
         if [ -f build/darwin/Assets.car ]; then

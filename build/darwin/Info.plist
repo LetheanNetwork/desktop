@@ -9,18 +9,13 @@
 		<key>CFBundleIconFile</key>
 		<string>icons</string>
 		<!--
-		  CFBundleIconName re-enabled — appicon.icon/Assets/wails_icon_vector.svg
-		  was replaced with our Lethean hoplite silhouette (traced from
-		  hoplite_white_trans.png, recoloured to Lethean violet #663399 for
-		  light-mode rendering). Apple's Icon Composer .icon descriptor
-		  (appicon.icon/icon.json) defines automatic dark + tinted variants
-		  from this single silhouette. macOS now prefers Assets.car via this
-		  key, getting the proper themed Lethean icon across light / dark /
-		  tinted appearances. CFBundleIconFile = icons.icns is kept as the
-		  legacy fallback for pre-macOS-14 systems.
+		  CFBundleIconName intentionally omitted. The Icon Composer pipeline
+		  (appicon.icon + Assets.car) is dropped — see build/Taskfile.yml
+		  `generate:icons` for the rationale. Without Assets.car, macOS
+		  falls back to CFBundleIconFile = icons.icns, which is derived from
+		  build/appicon.png. Re-add this key when we have a proper Lethean
+		  .icon Composer descriptor and Assets.car comes back into play.
 		-->
-		<key>CFBundleIconName</key>
-		<string>appicon</string>
 		<key>CFBundleIdentifier</key>
 		<string>ai.lthn.desktop</string>
 		<key>CFBundleName</key>

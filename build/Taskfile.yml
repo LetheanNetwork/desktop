@@ -71,16 +71,26 @@ tasks:
       - wails3 generate bindings -ts -d ../frontend/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/...
 
   generate:icons:
-    summary: Generates Windows `.ico` and Mac `.icns` from an image; on macOS, `-iconcomposerinput appicon.icon -macassetdir darwin` also produces `Assets.car` from a `.icon` file (skipped on other platforms).
+    summary: Generates Windows `.ico` and Mac `.icns` from build/appicon.png.
+    desc: |
+      Single source: build/appicon.png (1024×1024 RGBA). wails3 derives every
+      size into the .icns + .ico containers. The Icon Composer pipeline
+      (-iconcomposerinput appicon.icon -macassetdir darwin) is intentionally
+      dropped — the wails3-scaffolded appicon.icon shipped a wails W vector
+      that macOS preferred over icons.icns via CFBundleIconName, putting the
+      wails brand in the Dock instead of ours. Keeping only the .icns path
+      means CFBundleIconFile=icons wins everywhere; the .icns content is
+      always derived from our appicon.png. Re-add the Icon Composer path
+      when we have a proper Lethean .icon descriptor (today's stand-in svg
+      doesn't crop cleanly for Apple's themed renditions).
     dir: build
     sources:
       - "appicon.png"
-      - "appicon.icon"
     generates:
       - "darwin/icons.icns"
       - "windows/icon.ico"
     cmds:
-      - wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico -iconcomposerinput appicon.icon -macassetdir darwin
+      - wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico
 
   dev:frontend:
     summary: Runs the frontend in development mode
