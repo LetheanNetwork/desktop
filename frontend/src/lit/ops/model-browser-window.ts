@@ -110,18 +110,24 @@ class LthnModelBrowserWindow extends LitElement {
     // Pull real model entries from pkg/models.List(); maps each
     // Entry → LocalModel via deriveLocalModel below. Status defaults
     // to "available" since there's no per-model loaded indicator
-    // surfaced from the runner yet.
+    // surfaced from the runner yet. Bindings return core.Result post
+    // the Mantis #1341 cascade — unwrap before reading .map / numeric
+    // comparison or every call silently corrupts state.
     try {
-      const ms = await import("@desktop/models/wailsservice");
-      const [entries, free] = await Promise.all([
-        ms.List(),
-        ms.DiskFree().catch((): number => 0),
+      const [ms, { unwrap }] = await Promise.all([
+        import("@desktop/models/wailsservice"),
+        import("../result"),
       ]);
-      this.local = (entries || []).map(deriveLocalModel);
+      type Entry = { name: string; size: number; path: string; is_dir: boolean };
+      const [entries, free] = await Promise.all([
+        unwrap<Entry[]>(ms.List(), []),
+        unwrap<number>(ms.DiskFree(), 0),
+      ]);
+      this.local = entries.map(deriveLocalModel);
       if (this.local.length > 0 && !this.selected) {
         this.selected = this.local[0].id;
       }
-      if (free && free > 0) this.diskFree = free;
+      if (free > 0) this.diskFree = free;
     } catch (err: unknown) {
       this.loadErr = err instanceof Error ? err.message : String(err);
       this.local = [];
@@ -130,9 +136,12 @@ class LthnModelBrowserWindow extends LitElement {
     // source the welcome wizard + Settings → Models bind against;
     // collapses /Users/<name>/... to ~/ so the footer reads coherently.
     try {
-      const fl = await import("@desktop/firstlaunch/wailsservice");
-      const paths = await fl.Paths();
-      if (paths?.models_dir) this.modelsDir = collapseHome(paths.models_dir);
+      const [fl, { unwrap }] = await Promise.all([
+        import("@desktop/firstlaunch/wailsservice"),
+        import("../result"),
+      ]);
+      const paths = await unwrap<{ models_dir?: string }>(fl.Paths(), {});
+      if (paths.models_dir) this.modelsDir = collapseHome(paths.models_dir);
     } catch { /* keep fallback */ }
     // Rebuild the subtitle with the live count — the locale string
     // is "local · 4 · huggingface" today; swap the "4" for the
