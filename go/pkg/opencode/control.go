@@ -42,6 +42,14 @@ func (g *ControlGroup) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/sandbox", g.list)
 	rg.DELETE("/sandbox/:id", g.stop)
 	rg.GET("/sandbox/:id", g.inspect)
+
+	// Profile CRUD — per-task config templates stored in the DuckDB
+	// profile store; applied to opencode-serve at spawn time via
+	// PATCH /global/config. See pkg/opencode/profile.go.
+	rg.GET("/profile", g.profileList)
+	rg.GET("/profile/:name", g.profileGet)
+	rg.POST("/profile", g.profileSave)
+	rg.DELETE("/profile/:name", g.profileDelete)
 }
 
 // spawn POST /v1/api/opencode/sandbox → spawns a new container.
@@ -106,4 +114,55 @@ func (g *ControlGroup) inspect(c *gin.Context) {
 	}
 	sb, _ := r.Value.(Sandbox)
 	c.JSON(http.StatusOK, sb)
+}
+
+// profileList GET /v1/api/opencode/profile → all stored profiles.
+func (g *ControlGroup) profileList(c *gin.Context) {
+	r := g.svc.ListProfiles()
+	if !r.OK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		return
+	}
+	list, _ := r.Value.([]Profile)
+	c.JSON(http.StatusOK, gin.H{"profiles": list})
+}
+
+// profileGet GET /v1/api/opencode/profile/:name → one profile record.
+func (g *ControlGroup) profileGet(c *gin.Context) {
+	name := core.TrimCutset(c.Param("name"), "/ ")
+	r := g.svc.GetProfile(name)
+	if !r.OK {
+		c.JSON(http.StatusNotFound, gin.H{"error": r.Error()})
+		return
+	}
+	p, _ := r.Value.(Profile)
+	c.JSON(http.StatusOK, p)
+}
+
+// profileSave POST /v1/api/opencode/profile → upsert. Body = Profile
+// JSON (must include "name"). Returns the saved record.
+func (g *ControlGroup) profileSave(c *gin.Context) {
+	var p Profile
+	if err := c.ShouldBindJSON(&p); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid profile JSON: " + err.Error()})
+		return
+	}
+	r := g.svc.SaveProfile(p)
+	if !r.OK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, p)
+}
+
+// profileDelete DELETE /v1/api/opencode/profile/:name → drop one.
+// "default" cannot be deleted (it's the safety floor for spawn).
+func (g *ControlGroup) profileDelete(c *gin.Context) {
+	name := core.TrimCutset(c.Param("name"), "/ ")
+	r := g.svc.DeleteProfile(name)
+	if !r.OK {
+		c.JSON(http.StatusBadRequest, gin.H{"error": r.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": name})
 }

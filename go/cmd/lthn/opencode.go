@@ -27,18 +27,20 @@ import (
 //	inspect ID         print one sandbox's record
 func cmdOpenCode(args []string) int {
 	if len(args) == 0 {
-		core.Print(core.Stderr(), "lthn opencode: missing verb (start / stop / status / inspect)\n")
+		core.Print(core.Stderr(), "lthn opencode: missing verb (start / stop / status / inspect / profile)\n")
 		return 2
 	}
 	switch args[0] {
 	case "start":
-		return opencodeStart()
+		return opencodeStart(args[1:])
 	case "stop":
 		return opencodeStop(args[1:])
 	case "status":
 		return opencodeStatus()
 	case "inspect":
 		return opencodeInspect(args[1:])
+	case "profile":
+		return opencodeProfile(args[1:])
 	default:
 		core.Print(core.Stderr(), "lthn opencode: unknown verb %q\n", args[0])
 		return 2
@@ -46,15 +48,39 @@ func cmdOpenCode(args []string) int {
 }
 
 // opencodeBase is the control surface root on localhost.
-const opencodeBase = "http://localhost:8000/v1/api/opencode/sandbox"
+const (
+	opencodeBase    = "http://localhost:8000/v1/api/opencode/sandbox"
+	opencodeProfBase = "http://localhost:8000/v1/api/opencode/profile"
+)
 
-// httpClient is the shared client for control calls. Short timeout —
-// spawn can take a moment for the docker pull, but lthn serve returns
-// once the container is created (not when opencode-serve is healthy).
-var httpClient = &http.Client{Timeout: 30 * time.Second}
+// httpClient is the shared client for control calls. Generous timeout —
+// spawn waits for health + applies PATCH /global/config synchronously.
+var httpClient = &http.Client{Timeout: 60 * time.Second}
 
-func opencodeStart() int {
-	req, _ := http.NewRequest(http.MethodPost, opencodeBase, nil)
+// opencodeStart accepts `--profile NAME` (or `--profile=NAME`).
+//
+// Usage example:
+//
+//	lthn opencode start                       # uses default profile
+//	lthn opencode start --profile code-review # uses named profile
+func opencodeStart(args []string) int {
+	profile := ""
+	for i := 0; i < len(args); i++ {
+		k, v, valid := core.ParseFlag(args[i])
+		if !valid {
+			continue
+		}
+		if k == "profile" {
+			if v == "" && i+1 < len(args) {
+				i++
+				v = args[i]
+			}
+			profile = v
+		}
+	}
+	payload := core.JSONMarshalString(map[string]string{"profile": profile})
+	req, _ := http.NewRequest(http.MethodPost, opencodeBase, strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode start: %s\n", err)
@@ -117,6 +143,113 @@ func opencodeInspect(args []string) int {
 	}
 	if code != http.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode inspect: HTTP %d — %s\n", code, body)
+		return 1
+	}
+	core.Print(core.Stdout(), "%s\n", body)
+	return 0
+}
+
+// opencodeProfile dispatches `lthn opencode profile <verb>`.
+//
+// Verbs:
+//
+//	list                list all stored profiles
+//	show NAME           show one profile
+//	save PATH           upsert a profile from a JSON file
+//	delete NAME         delete a profile (cannot delete "default")
+func opencodeProfile(args []string) int {
+	if len(args) == 0 {
+		core.Print(core.Stderr(), "lthn opencode profile: missing verb (list / show / save / delete)\n")
+		return 2
+	}
+	switch args[0] {
+	case "list":
+		return profileList()
+	case "show":
+		return profileShow(args[1:])
+	case "save":
+		return profileSave(args[1:])
+	case "delete":
+		return profileDelete(args[1:])
+	default:
+		core.Print(core.Stderr(), "lthn opencode profile: unknown verb %q\n", args[0])
+		return 2
+	}
+}
+
+func profileList() int {
+	req, _ := http.NewRequest(http.MethodGet, opencodeProfBase, nil)
+	body, code, err := doRequest(req)
+	if err != nil {
+		core.Print(core.Stderr(), "lthn opencode profile list: %s\n", err)
+		return 1
+	}
+	if code != http.StatusOK {
+		core.Print(core.Stderr(), "lthn opencode profile list: HTTP %d — %s\n", code, body)
+		return 1
+	}
+	core.Print(core.Stdout(), "%s\n", body)
+	return 0
+}
+
+func profileShow(args []string) int {
+	if len(args) < 1 {
+		core.Print(core.Stderr(), "lthn opencode profile show: usage: lthn opencode profile show NAME\n")
+		return 2
+	}
+	req, _ := http.NewRequest(http.MethodGet, opencodeProfBase+"/"+args[0], nil)
+	body, code, err := doRequest(req)
+	if err != nil {
+		core.Print(core.Stderr(), "lthn opencode profile show: %s\n", err)
+		return 1
+	}
+	if code != http.StatusOK {
+		core.Print(core.Stderr(), "lthn opencode profile show: HTTP %d — %s\n", code, body)
+		return 1
+	}
+	core.Print(core.Stdout(), "%s\n", body)
+	return 0
+}
+
+func profileSave(args []string) int {
+	if len(args) < 1 {
+		core.Print(core.Stderr(), "lthn opencode profile save: usage: lthn opencode profile save PATH (a JSON file)\n")
+		return 2
+	}
+	raw := core.ReadFile(args[0])
+	if !raw.OK {
+		core.Print(core.Stderr(), "lthn opencode profile save: %s\n", raw.Error())
+		return 1
+	}
+	data, _ := raw.Value.([]byte)
+	req, _ := http.NewRequest(http.MethodPost, opencodeProfBase, strings.NewReader(string(data)))
+	req.Header.Set("Content-Type", "application/json")
+	body, code, err := doRequest(req)
+	if err != nil {
+		core.Print(core.Stderr(), "lthn opencode profile save: %s\n", err)
+		return 1
+	}
+	if code != http.StatusOK {
+		core.Print(core.Stderr(), "lthn opencode profile save: HTTP %d — %s\n", code, body)
+		return 1
+	}
+	core.Print(core.Stdout(), "%s\n", body)
+	return 0
+}
+
+func profileDelete(args []string) int {
+	if len(args) < 1 {
+		core.Print(core.Stderr(), "lthn opencode profile delete: usage: lthn opencode profile delete NAME\n")
+		return 2
+	}
+	req, _ := http.NewRequest(http.MethodDelete, opencodeProfBase+"/"+args[0], nil)
+	body, code, err := doRequest(req)
+	if err != nil {
+		core.Print(core.Stderr(), "lthn opencode profile delete: %s\n", err)
+		return 1
+	}
+	if code != http.StatusOK {
+		core.Print(core.Stderr(), "lthn opencode profile delete: HTTP %d — %s\n", code, body)
 		return 1
 	}
 	core.Print(core.Stdout(), "%s\n", body)
