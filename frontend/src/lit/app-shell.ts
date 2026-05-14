@@ -70,7 +70,7 @@ interface NavEntry {
 }
 
 class LthnAppShell extends LitElement {
-  static properties = {
+  static readonly properties = {
     active:    { type: String,  reflect: true },
     collapsed: { type: Boolean, reflect: true },
     running:   { type: Boolean, reflect: true },

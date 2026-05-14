@@ -103,7 +103,7 @@ function ensureMonacoLoaded(): Promise<typeof monacoTypes> {
  *   lethean-editor-change — every edit, detail: { path, value }
  */
 class LetheanMonaco extends LitElement {
-  static properties = {
+  static readonly properties = {
     value:            { type: String },
     language:         { type: String },
     path:             { type: String },

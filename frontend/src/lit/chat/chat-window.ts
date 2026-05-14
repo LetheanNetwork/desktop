@@ -83,7 +83,7 @@ function chatStateData(state: ChatState): ChatStateData {
 }
 
 class LthnChatWindow extends LitElement {
-  static properties = {
+  static readonly properties = {
     state:     { type: String, reflect: true },
     rail:      { type: String, reflect: true },
     rightRail: { type: String, attribute: "right-rail", reflect: true },

@@ -17,7 +17,7 @@ function parseInterval(v: string): number {
 }
 
 class LthnTelemetryWindow extends LitElement {
-  static properties = {
+  static readonly properties = {
     w: { type: Number },
     h: { type: Number },
     fullscreen: { type: Boolean },

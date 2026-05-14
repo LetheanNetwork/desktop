@@ -8,7 +8,7 @@ import { T } from "@lthn/i18n/coreservice";
 import type { LocalModel } from "../types";
 
 class LthnModelBrowserWindow extends LitElement {
-  static properties = {
+  static readonly properties = {
     selected: { type: String, reflect: true },
     w:        { type: Number },
     h:        { type: Number },

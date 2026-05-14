@@ -19,7 +19,7 @@ import { T } from "@lthn/i18n/coreservice";
 import "./lethean-monaco";
 
 class LthnEditorWindow extends LitElement {
-  static properties = {
+  static readonly properties = {
     w:        { type: Number },
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },

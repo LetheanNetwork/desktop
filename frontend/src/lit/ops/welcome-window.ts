@@ -49,7 +49,7 @@ function advance(host: LthnWelcomeWindow, delta: number): void {
 }
 
 class LthnWelcomeWindow extends LitElement {
-  static properties = {
+  static readonly properties = {
     step: { type: Number, reflect: true },
     w:    { type: Number },
     h:    { type: Number },

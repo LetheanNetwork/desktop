@@ -54,7 +54,7 @@ declare global {
 
 /* ────────────────────────────────── <lthn-glyph> ────────────────── */
 class LthnGlyph extends LitElement {
-  static properties = {
+  static readonly properties = {
     size:   { type: Number },
     color:  { type: String },
     active: { type: Boolean, reflect: true },
@@ -137,7 +137,7 @@ customElements.define("lthn-label", LthnLabel);
 
 /* ────────────────────────────────── <lthn-btn> ──────────────────── */
 class LthnBtn extends LitElement {
-  static properties = {
+  static readonly properties = {
     tone:   { type: String, reflect: true },
     size:   { type: String, reflect: true },
     active: { type: Boolean, reflect: true },
@@ -187,7 +187,7 @@ customElements.define("lthn-btn", LthnBtn);
 
 /* ────────────────────────────────── <lthn-rail-row> ─────────────── */
 class LthnRailRow extends LitElement {
-  static properties = { k: { type: String }, v: { type: String } };
+  static readonly properties = { k: { type: String }, v: { type: String } };
   declare k: string;
   declare v: string;
   createRenderRoot() { return this; }
@@ -204,7 +204,7 @@ customElements.define("lthn-rail-row", LthnRailRow);
 
 /* ────────────────────────────────── <lthn-toggle> ───────────────── */
 class LthnToggle extends LitElement {
-  static properties = { on: { type: Boolean, reflect: true } };
+  static readonly properties = { on: { type: Boolean, reflect: true } };
   declare on: boolean;
   createRenderRoot() { return this; }
   render() {
@@ -219,7 +219,7 @@ customElements.define("lthn-toggle", LthnToggle);
 
 /* ────────────────────────────────── <lthn-status-dot> ───────────── */
 class LthnStatusDot extends LitElement {
-  static properties = { variant: { type: String, reflect: true }, pulse: { type: Boolean } };
+  static readonly properties = { variant: { type: String, reflect: true }, pulse: { type: Boolean } };
   declare variant: StatusDotVariant;
   declare pulse:   boolean;
   constructor() { super(); this.variant = "ok"; this.pulse = false; }
@@ -235,7 +235,7 @@ customElements.define("lthn-status-dot", LthnStatusDot);
 
 /* ────────────────────────────────── <lthn-state-pill> ───────────── */
 class LthnStatePill extends LitElement {
-  static properties = { variant: { type: String, reflect: true } };
+  static readonly properties = { variant: { type: String, reflect: true } };
   declare variant: StatePillVariant;
   constructor() { super(); this.variant = "connected"; }
   createRenderRoot() { return this; }
@@ -260,7 +260,7 @@ customElements.define("lthn-state-pill", LthnStatePill);
 
 /* ────────────────────────────────── <lthn-sparkline> ────────────── */
 class LthnSparkline extends LitElement {
-  static properties = {
+  static readonly properties = {
     data:  { type: String },
     max:   { type: Number },
     color: { type: String },

@@ -14,7 +14,7 @@ interface LiveLine {
 }
 
 class LthnLogsWindow extends LitElement {
-  static properties = {
+  static readonly properties = {
     w: { type: Number },
     h: { type: Number },
     tab: { type: String },

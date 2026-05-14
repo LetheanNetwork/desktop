@@ -49,7 +49,7 @@ interface Scripts {
 }
 
 class LthnPhpWindow extends LitElement {
-  static properties = {
+  static readonly properties = {
     w:           { type: Number },
     h:           { type: Number },
     embedded:    { type: Boolean, reflect: true },

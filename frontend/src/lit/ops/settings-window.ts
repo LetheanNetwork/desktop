@@ -42,7 +42,7 @@ function writeStoredSetting(key: string, value: string): void {
 }
 
 class LthnSettingsWindow extends LitElement {
-  static properties = {
+  static readonly properties = {
     open: { type: String, reflect: true },
     w:    { type: Number },
     h:    { type: Number },

@@ -7,7 +7,7 @@ import { renderChrome } from "../chrome";
 import { T } from "@lthn/i18n/coreservice";
 
 class LthnBenchmarkWindow extends LitElement {
-  static properties = {
+  static readonly properties = {
     w: { type: Number },
     h: { type: Number },
     embedded: { type: Boolean, reflect: true },
