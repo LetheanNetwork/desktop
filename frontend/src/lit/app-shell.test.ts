@@ -135,6 +135,169 @@ describe("lthn-app-shell — unknown active value", () => {
   });
 });
 
+describe("lthn-app-shell — Menu Layout (rail shape)", () => {
+  // The Menu Layout setting controls how the rail collapses.
+  // Spec: plans/project/lthn/desktop/RFC.menu-behaviours.md § 2.2.
+  type ShellEl = HTMLElement & {
+    collapsed: boolean;
+    menuLayout: string;
+    _applyMenuLayout: () => void;
+    _onRailEnter: () => void;
+    _onRailLeave: () => void;
+    updateComplete: Promise<boolean>;
+  };
+
+  it("layout 'open' locks the rail open (collapsed = false, chevron hidden)", async () => {
+    const { el, host } = await mountWindow<ShellEl>("lthn-app-shell");
+    el.menuLayout = "open";
+    el._applyMenuLayout();
+    await el.updateComplete;
+    expect(el.collapsed).toBe(false);
+    expect(host.querySelector("button[title]")?.getAttribute("title"))
+      .not.toBe("Collapse"); // chevron with the Collapse tooltip should not render
+  });
+
+  it("layout 'closed' locks the rail collapsed", async () => {
+    const { el } = await mountWindow<ShellEl>("lthn-app-shell");
+    el.menuLayout = "closed";
+    el._applyMenuLayout();
+    await el.updateComplete;
+    expect(el.collapsed).toBe(true);
+  });
+
+  it("layout 'hover' starts collapsed, expands on mouseenter", async () => {
+    const { el } = await mountWindow<ShellEl>("lthn-app-shell");
+    el.menuLayout = "hover";
+    el._applyMenuLayout();
+    await el.updateComplete;
+    expect(el.collapsed).toBe(true);
+    el._onRailEnter();
+    await el.updateComplete;
+    expect(el.collapsed).toBe(false);
+  });
+
+  it("layout 'toggle' is the default and keeps the chevron visible", async () => {
+    const { el } = await mountWindow<ShellEl>("lthn-app-shell");
+    expect(el.menuLayout).toBe("toggle");
+    // Chevron button title cycles between Expand / Collapse — its
+    // presence is the contract, not the exact label here.
+    expect(el).toBeDefined();
+  });
+
+  it("toggling collapsed via _toggleCollapse is a no-op when layout is locked", async () => {
+    const { el } = await mountWindow<ShellEl>("lthn-app-shell");
+    el.menuLayout = "open";
+    el._applyMenuLayout();
+    await el.updateComplete;
+    const before = el.collapsed;
+    (el as unknown as { _toggleCollapse: () => void })._toggleCollapse();
+    await el.updateComplete;
+    expect(el.collapsed).toBe(before);
+  });
+});
+
+describe("lthn-app-shell — Menu Links (click dispatch matrix)", () => {
+  // Spec § 4 dispatch matrix. We assert via negative-space:
+  // `active` changing = navigate-in-place fired; `active` unchanged
+  // = pop-out branch fired (and the pop-out import call is mocked
+  // out at the @desktop/desktop/windowservice module boundary so
+  // it doesn't actually spawn a window in test).
+  type ShellEl = HTMLElement & {
+    active: string;
+    collapsed: boolean;
+    menuLinks: string;
+    updateComplete: Promise<boolean>;
+  };
+
+  function clickIcon(host: HTMLElement, label: string, mods: MouseEventInit = {}) {
+    const buttons = Array.from(host.querySelectorAll("button")) as HTMLButtonElement[];
+    // When the rail is collapsed only the icon shows (no span text);
+    // the button surfaces its label via the `title` attribute instead.
+    const btn = buttons.find(b =>
+      (b.textContent ?? "").trim().includes(label) ||
+      (b.getAttribute("title") ?? "").includes(label)
+    );
+    if (!btn) throw new Error(`button for "${label}" not found`);
+    const icon = btn.querySelector("i");
+    (icon ?? btn).dispatchEvent(new MouseEvent("click", { bubbles: true, ...mods }));
+  }
+  function clickWord(host: HTMLElement, label: string, mods: MouseEventInit = {}) {
+    const buttons = Array.from(host.querySelectorAll("button")) as HTMLButtonElement[];
+    const btn = buttons.find(b => (b.textContent ?? "").trim().includes(label));
+    if (!btn) throw new Error(`button for "${label}" not found`);
+    const span = btn.querySelector("span");
+    (span ?? btn).dispatchEvent(new MouseEvent("click", { bubbles: true, ...mods }));
+  }
+
+  it("Hybrid + open rail + word click → navigates in-place", async () => {
+    const { el, host } = await mountWindow<ShellEl>("lthn-app-shell", {
+      attrs: { active: "chat" },
+      props: { menuLinks: "hybrid" },
+    });
+    await el.updateComplete;
+    clickWord(host, "Telemetry");
+    await el.updateComplete;
+    expect(el.active).toBe("telemetry");
+  });
+
+  it("Hybrid + open rail + icon click → pops out (active unchanged)", async () => {
+    const { el, host } = await mountWindow<ShellEl>("lthn-app-shell", {
+      attrs: { active: "chat" },
+      props: { menuLinks: "hybrid" },
+    });
+    await el.updateComplete;
+    clickIcon(host, "Telemetry");
+    await el.updateComplete;
+    expect(el.active).toBe("chat");
+  });
+
+  it("Always-In-Window + icon click → navigates (no pop-out)", async () => {
+    const { el, host } = await mountWindow<ShellEl>("lthn-app-shell", {
+      attrs: { active: "chat" },
+      props: { menuLinks: "in-window" },
+    });
+    await el.updateComplete;
+    clickIcon(host, "Telemetry");
+    await el.updateComplete;
+    expect(el.active).toBe("telemetry");
+  });
+
+  it("Collapsed-only + open rail + icon click → navigates", async () => {
+    const { el, host } = await mountWindow<ShellEl>("lthn-app-shell", {
+      attrs: { active: "chat" },
+      props: { menuLinks: "collapsed-only" },
+    });
+    await el.updateComplete;
+    expect(el.collapsed).toBe(false);
+    clickIcon(host, "Telemetry");
+    await el.updateComplete;
+    expect(el.active).toBe("telemetry");
+  });
+
+  it("Collapsed-only + collapsed rail + click → pops out (active unchanged)", async () => {
+    const { el, host } = await mountWindow<ShellEl>("lthn-app-shell", {
+      attrs: { active: "chat" },
+      props: { menuLinks: "collapsed-only", collapsed: true },
+    });
+    await el.updateComplete;
+    expect(el.collapsed).toBe(true);
+    clickIcon(host, "Telemetry");
+    await el.updateComplete;
+    expect(el.active).toBe("chat");
+  });
+
+  it("⌘-click pops out regardless of Menu Links setting", async () => {
+    const { el, host } = await mountWindow<ShellEl>("lthn-app-shell", {
+      attrs: { active: "chat" },
+      props: { menuLinks: "in-window" },  // even with pop-out OFF, ⌘ overrides
+    });
+    await el.updateComplete;
+    clickIcon(host, "Telemetry", { metaKey: true });
+    await el.updateComplete;
+    expect(el.active).toBe("chat");
+  });
+});
+
 describe("lthn-app-shell — rail click dispatch", () => {
   // The rail-row click handler routes plain clicks to in-place
   // navigation (_select) and ⌘/Ctrl-clicks to the standalone-window

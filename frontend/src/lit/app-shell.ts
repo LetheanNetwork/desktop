@@ -79,6 +79,8 @@ class LthnAppShell extends LitElement {
     tps:       { type: String },
     watts:     { type: String },
     version:   { type: String },
+    menuLinks:  { state: true },
+    menuLayout: { state: true },
     t:         { state: true },
   };
   declare active:    string;
@@ -88,6 +90,11 @@ class LthnAppShell extends LitElement {
   declare tps:       string;
   declare watts:     string;
   declare version:   string;
+  /** Menu Behaviours — see plans/project/lthn/desktop/RFC.menu-behaviours.md.
+   *  menuLinks  ∈ {"hybrid", "in-window", "collapsed-only"} — click dispatch
+   *  menuLayout ∈ {"toggle", "open", "closed", "hover"}    — rail shape */
+  declare menuLinks: string;
+  declare menuLayout: string;
   declare t: {
     brand: string;
     search: string;
@@ -103,6 +110,22 @@ class LthnAppShell extends LitElement {
    *  than the chat default. Written on every _select(). */
   private static readonly ACTIVE_PANE_KEY = "lthn.app.active-pane";
 
+  /** localStorage keys for the two Menu Behaviours preferences. The
+   *  Settings panel writes to these (see settings-window.ts
+   *  _setMenuLinks / _setMenuLayout) and emits "lthn:menu:changed"
+   *  so an open shell reacts without reload. */
+  private static readonly MENU_LINKS_KEY  = "lthn.menu.links";
+  private static readonly MENU_LAYOUT_KEY = "lthn.menu.layout";
+
+  /** Pending mouseleave-debounce timer for Hover Open mode — gives
+   *  the cursor 300ms grace to re-enter before the rail collapses. */
+  private _hoverCollapseTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private static _read(key: string, fallback: string): string {
+    try { return localStorage.getItem(key) || fallback; }
+    catch { return fallback; }
+  }
+
   constructor() {
     super();
     // Restore the last-active pane from localStorage if it's a known
@@ -113,6 +136,9 @@ class LthnAppShell extends LitElement {
     })();
     this.active = (saved && NAV.some(n => n.id === saved)) ? saved : "chat";
     this.collapsed = false;
+    this.menuLinks  = LthnAppShell._read(LthnAppShell.MENU_LINKS_KEY,  "in-window");
+    this.menuLayout = LthnAppShell._read(LthnAppShell.MENU_LAYOUT_KEY, "toggle");
+    this._applyMenuLayout();
     this.running = true;
     this.model = "gemma-4-e2b";
     this.tps = "47.2";
@@ -173,6 +199,19 @@ class LthnAppShell extends LitElement {
       }
     });
 
+    // Subscribe to "lthn:menu:changed" — emitted by the Settings panel
+    // when the user flips Menu Links or Menu Layout. Lets the rail
+    // react without a reload. ev.data is { setting, value }.
+    this._unsubMenuChanged = Events.On("lthn:menu:changed", (ev) => {
+      const data = ev?.data as { setting?: string; value?: string } | undefined;
+      if (!data?.setting || !data?.value) return;
+      if (data.setting === "links")  this.menuLinks  = data.value;
+      if (data.setting === "layout") {
+        this.menuLayout = data.value;
+        this._applyMenuLayout();
+      }
+    });
+
     // Status-bar live data — same sources chat-window, tray, and
     // Settings → About all bind against. Falls back to the design
     // literals so the bar reads coherently before bindings resolve
@@ -204,33 +243,100 @@ class LthnAppShell extends LitElement {
       this._unsubSetPane();
       this._unsubSetPane = null;
     }
+    if (this._unsubMenuChanged) {
+      this._unsubMenuChanged();
+      this._unsubMenuChanged = null;
+    }
+    if (this._hoverCollapseTimer) {
+      clearTimeout(this._hoverCollapseTimer);
+      this._hoverCollapseTimer = null;
+    }
   }
 
   /** Returned by Events.On to detach the listener on element teardown. */
   private _unsubSetPane: (() => void) | null = null;
+  private _unsubMenuChanged: (() => void) | null = null;
 
   _select(id: string) {
     this.active = id;
     try { localStorage.setItem(LthnAppShell.ACTIVE_PANE_KEY, id); }
     catch { /* localStorage unavailable — silently degrade */ }
   }
-  _toggleCollapse() { this.collapsed = !this.collapsed; }
+  _toggleCollapse() {
+    // No-op when layout is locked open / closed / hover-driven —
+    // the chevron is hidden in those modes but a stray keyboard
+    // binding shouldn't bypass the user preference either.
+    if (this.menuLayout !== "toggle") return;
+    this.collapsed = !this.collapsed;
+  }
 
-  /** Rail-row click dispatcher. ⌘-click (macOS) / Ctrl-click (Linux,
-   *  Windows) pops the surface out into its standalone window via
-   *  WindowService.Open(). Plain click navigates the body in-place
-   *  via _select(). The backend no-ops gracefully for surfaces that
-   *  lack a registry entry — see plans/project/lthn/desktop/
-   *  RFC.menu-behaviours.md § 5 for the coverage gap. */
+  /** Apply the persisted Menu Layout to the rail. See
+   *  plans/project/lthn/desktop/RFC.menu-behaviours.md § 2.2. */
+  _applyMenuLayout() {
+    switch (this.menuLayout) {
+      case "open":   this.collapsed = false; break;
+      case "closed": this.collapsed = true;  break;
+      case "hover":  this.collapsed = true;  break;  // start collapsed; expand on hover
+      case "toggle":
+      default:       /* respect current this.collapsed */ break;
+    }
+  }
+
+  /** Hover Open mode: mouseenter on the rail expands; mouseleave
+   *  collapses after a 300ms debounce so cursor overshoot doesn't
+   *  thrash the rail. No-op when layout != hover. */
+  _onRailEnter = () => {
+    if (this.menuLayout !== "hover") return;
+    if (this._hoverCollapseTimer) {
+      clearTimeout(this._hoverCollapseTimer);
+      this._hoverCollapseTimer = null;
+    }
+    this.collapsed = false;
+  };
+  _onRailLeave = () => {
+    if (this.menuLayout !== "hover") return;
+    if (this._hoverCollapseTimer) clearTimeout(this._hoverCollapseTimer);
+    this._hoverCollapseTimer = setTimeout(() => {
+      this.collapsed = true;
+      this._hoverCollapseTimer = null;
+    }, 300);
+  };
+
+  /** Rail-row click dispatcher. The dispatch matrix lives in
+   *  plans/project/lthn/desktop/RFC.menu-behaviours.md § 4. Summary:
+   *  - ⌘/Ctrl-click always pops out (universal escape hatch, no
+   *    setting can disable it).
+   *  - Plain click on a word always navigates in-place.
+   *  - Plain click on the icon depends on menuLinks:
+   *      hybrid          → pop out
+   *      in-window       → navigate
+   *      collapsed-only  → pop out iff the rail is currently collapsed
+   *  - When the rail is collapsed, the button shows only the icon,
+   *    so any click counts as an icon click. */
   _onNavClick(e: MouseEvent, id: string) {
     if (e.metaKey || e.ctrlKey) {
       e.preventDefault();
-      import("@desktop/desktop/windowservice")
-        .then(w => w.Open(id))
-        .catch(() => { /* import failure: silently degrade to in-place */ });
+      this._popOut(id);
+      return;
+    }
+    const target = e.target as HTMLElement | null;
+    const isIcon = this.collapsed ? true : (target?.closest("i") !== null);
+    const shouldPopOut = isIcon && (
+      this.menuLinks === "hybrid" ||
+      (this.menuLinks === "collapsed-only" && this.collapsed)
+    );
+    if (shouldPopOut) {
+      e.preventDefault();
+      this._popOut(id);
       return;
     }
     this._select(id);
+  }
+
+  private _popOut(id: string) {
+    import("@desktop/desktop/windowservice")
+      .then(w => w.Open(id))
+      .catch(() => { /* WindowService import failure: silently degrade */ });
   }
 
   _renderNavGroup(group: NavEntry["group"], label: string | null) {
@@ -358,7 +464,10 @@ class LthnAppShell extends LitElement {
         </header>
 
         <!-- SIDE NAV -->
-        <aside style="
+        <aside
+          @mouseenter=${this._onRailEnter}
+          @mouseleave=${this._onRailLeave}
+          style="
           grid-row: 2; grid-column: 1;
           display:flex; flex-direction:column;
           background: rgba(0,0,0,0.22);
@@ -373,9 +482,11 @@ class LthnAppShell extends LitElement {
                 <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.model}</span>
               </div>
             ` : html`<lthn-status-dot variant=${this.running ? "ok" : "idle"} ?pulse=${this.running}></lthn-status-dot>`}
-            <button @click=${this._toggleCollapse} title=${this.collapsed ? this.t.expand : this.t.collapse} style="width:22px; height:22px; border-radius:5px; background:transparent; border:1px solid rgba(255,255,255,0.07); color:var(--fg-3); cursor:pointer; display:flex; align-items:center; justify-content:center;">
-              <i class="fa-solid ${this.collapsed ? "fa-angles-right" : "fa-angles-left"}" style="font-size:9px;"></i>
-            </button>
+            ${this.menuLayout === "toggle" ? html`
+              <button @click=${this._toggleCollapse} title=${this.collapsed ? this.t.expand : this.t.collapse} style="width:22px; height:22px; border-radius:5px; background:transparent; border:1px solid rgba(255,255,255,0.07); color:var(--fg-3); cursor:pointer; display:flex; align-items:center; justify-content:center;">
+                <i class="fa-solid ${this.collapsed ? "fa-angles-right" : "fa-angles-left"}" style="font-size:9px;"></i>
+              </button>
+            ` : nothing}
           </div>
 
           ${this._renderNavGroup("primary",  this.t.group.primary)}
