@@ -443,6 +443,23 @@ func (s *Service) DeleteAgent(id string) core.Result {
 	return s.db.Exec(`DELETE FROM agents WHERE id = ?`, id)
 }
 
+// DeleteMachine removes a machine by id. No-op (OK) when the id
+// isn't registered — callers don't need to pre-check. Mirrors
+// DeleteAgent so the panel's row-level delete affordance has a
+// uniform shape across both contexts.
+//
+// Usage example:
+//
+//	r := svc.DeleteMachine("shop")
+func (s *Service) DeleteMachine(id string) core.Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return core.Fail(core.NewError("fleet.DeleteMachine: service closed"))
+	}
+	return s.db.Exec(`DELETE FROM fleet_machines WHERE id = ?`, id)
+}
+
 // UpsertMachine inserts or updates a fleet_machines row. Used by the
 // pair-machine wizard and the future discovery flow when new
 // machines join. id is the stable identifier; updated_at is set to

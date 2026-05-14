@@ -329,6 +329,39 @@ func TestService_Service_DeleteAgent_Ugly(t *core.T) {
 
 // --- UpsertMachine (method on *Service) ---
 
+// --- DeleteMachine (method on *Service) ---
+
+func TestService_Service_DeleteMachine_Good(t *core.T) {
+	svc := homeFixture(t)
+	core.AssertTrue(t, svc.UpsertMachine(fleet.Machine{ID: "x", Name: "x"}).OK)
+	r := svc.DeleteMachine("x")
+	core.AssertTrue(t, r.OK)
+	list := svc.Machines()
+	core.AssertTrue(t, list.OK)
+	core.AssertEqual(t, 0, len(list.Value.([]fleet.Machine)))
+}
+
+func TestService_Service_DeleteMachine_Bad(t *core.T) {
+	t.Setenv("HOME", t.TempDir())
+	r := fleet.New()
+	core.AssertTrue(t, r.OK)
+	svc := r.Value.(*fleet.Service)
+	core.AssertTrue(t, svc.Close().OK)
+	core.AssertFalse(t, svc.DeleteMachine("x").OK)
+}
+
+func TestService_Service_DeleteMachine_Ugly(t *core.T) {
+	svc := homeFixture(t)
+	// Delete-of-nonexistent is OK (idempotent).
+	core.AssertTrue(t, svc.DeleteMachine("does-not-exist").OK)
+	// Double-delete also OK.
+	core.AssertTrue(t, svc.UpsertMachine(fleet.Machine{ID: "x", Name: "x"}).OK)
+	core.AssertTrue(t, svc.DeleteMachine("x").OK)
+	core.AssertTrue(t, svc.DeleteMachine("x").OK, "second delete on same id idempotent")
+}
+
+// --- UpsertMachine (method on *Service) ---
+
 func TestService_Service_UpsertMachine_Good(t *core.T) {
 	svc := homeFixture(t)
 	core.AssertTrue(t, svc.UpsertMachine(fleet.Machine{

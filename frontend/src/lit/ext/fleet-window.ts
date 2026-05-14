@@ -16,7 +16,7 @@
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
 import { T } from "@lthn/i18n/coreservice";
-import { Machines, Queue, RoutingRules, Agents } from "@desktop/fleet/service";
+import { Machines, Queue, RoutingRules, Agents, DeleteAgent, DeleteMachine } from "@desktop/fleet/service";
 import type * as fleetModels from "@desktop/fleet/models";
 import { unwrap } from "../result";
 import "./configure-agent-modal";
@@ -43,6 +43,8 @@ class LthnFleetWindow extends LitElement {
     err: { state: true },
     configureAgentOpen: { state: true },
     pairMachineOpen: { state: true },
+    editingAgent: { state: true },
+    editingMachine: { state: true },
   };
   declare w: number;
   declare h: number;
@@ -56,6 +58,8 @@ class LthnFleetWindow extends LitElement {
   declare err: string | null;
   declare configureAgentOpen: boolean;
   declare pairMachineOpen: boolean;
+  declare editingAgent: AgentRow | null;
+  declare editingMachine: MachineRow | null;
 
   /* Poll interval id — cleared on disconnect. */
   private pollId: number | null = null;
@@ -73,6 +77,8 @@ class LthnFleetWindow extends LitElement {
     this.err = null;
     this.configureAgentOpen = false;
     this.pairMachineOpen = false;
+    this.editingAgent = null;
+    this.editingMachine = null;
   }
   createRenderRoot() { return this; }
   async connectedCallback() {
@@ -137,10 +143,30 @@ class LthnFleetWindow extends LitElement {
   private selectTab(t: Tab) { this.tab = t; }
 
   private emitConfigureAgent() {
+    this.editingAgent = null;
     this.configureAgentOpen = true;
     this.dispatchEvent(new CustomEvent("lthn:fleet:configure-agent", {
       bubbles: true, composed: true,
     }));
+  }
+
+  private editAgent(a: AgentRow) {
+    this.editingAgent = a;
+    this.configureAgentOpen = true;
+  }
+
+  /** Confirm + delete an agent. Also tries to drop the encrypted
+   *  key blob, but failure there is non-fatal — the agents row
+   *  going away is the load-bearing step. */
+  private async deleteAgentRow(a: AgentRow) {
+    const ok = window.confirm(`Delete agent "${a.name}"? This cannot be undone.`);
+    if (!ok) return;
+    const r = await DeleteAgent(a.id);
+    if (!r.OK) {
+      this.err = `Failed to delete agent: ${a.name}`;
+      return;
+    }
+    await this.poll();
   }
 
   /** Modal callback — agent landed in the store. Force a fresh
@@ -148,27 +174,48 @@ class LthnFleetWindow extends LitElement {
    *  the 2s interval. */
   private async onAgentSaved() {
     this.configureAgentOpen = false;
+    this.editingAgent = null;
     await this.poll();
   }
 
   private onConfigureCancel() {
     this.configureAgentOpen = false;
+    this.editingAgent = null;
   }
 
   private emitPairMachine() {
+    this.editingMachine = null;
     this.pairMachineOpen = true;
     this.dispatchEvent(new CustomEvent("lthn:fleet:pair-machine", {
       bubbles: true, composed: true,
     }));
   }
 
+  private editMachine(m: MachineRow) {
+    this.editingMachine = m;
+    this.pairMachineOpen = true;
+  }
+
+  private async deleteMachineRow(m: MachineRow) {
+    const ok = window.confirm(`Delete machine "${m.name}"? This cannot be undone.`);
+    if (!ok) return;
+    const r = await DeleteMachine(m.id);
+    if (!r.OK) {
+      this.err = `Failed to delete machine: ${m.name}`;
+      return;
+    }
+    await this.poll();
+  }
+
   private async onMachineSaved() {
     this.pairMachineOpen = false;
+    this.editingMachine = null;
     await this.poll();
   }
 
   private onPairCancel() {
     this.pairMachineOpen = false;
+    this.editingMachine = null;
   }
 
   /* Centred empty-state card. icon is a fontawesome glyph name
@@ -223,7 +270,7 @@ class LthnFleetWindow extends LitElement {
     const opacity = offline ? 0.55 : 1;
     const loadBar = m.load_pct > 70 ? "var(--warning-400)" : "var(--brand-400)";
     return html`
-      <div style="display:grid; grid-template-columns:16px 1.3fr 1.2fr 1.2fr 1fr 0.8fr 60px; gap:14px; padding:12px 16px; border-radius:8px; background:${bg}; border:${border}; opacity:${opacity}; align-items:center;">
+      <div style="display:grid; grid-template-columns:16px 1.3fr 1.2fr 1.2fr 1fr 0.8fr 80px; gap:14px; padding:12px 16px; border-radius:8px; background:${bg}; border:${border}; opacity:${opacity}; align-items:center;">
         <i class="fa-solid fa-grip-vertical" style="font-size:11px; color:var(--fg-3);"></i>
         <div>
           <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -258,7 +305,14 @@ class LthnFleetWindow extends LitElement {
           </div>
         </div>
         <div style="font-family:var(--font-mono); font-size:11px; color:var(--fg-1); text-align:right;">${(m.tps || 0).toFixed(1)} tok/s</div>
-        <lthn-btn tone="quiet" size="sm"><i class="fa-solid fa-ellipsis"></i></lthn-btn>
+        <div style="display:flex; gap:4px; justify-content:flex-end;">
+          <lthn-btn tone="quiet" size="sm" @click=${() => this.editMachine(m)} title="Edit machine">
+            <i class="fa-solid fa-pen" style="font-size:10px;"></i>
+          </lthn-btn>
+          <lthn-btn tone="quiet" size="sm" @click=${() => { void this.deleteMachineRow(m); }} title="Delete machine">
+            <i class="fa-solid fa-trash" style="font-size:10px;"></i>
+          </lthn-btn>
+        </div>
       </div>
     `;
   }
@@ -274,7 +328,7 @@ class LthnFleetWindow extends LitElement {
   private renderAgentRow(a: AgentRow) {
     const kindBadge = a.kind === "local" ? "local · fleet-routed" : "remote · provider-routed";
     return html`
-      <div style="display:grid; grid-template-columns:36px 1.4fr 1.1fr 1.1fr 0.8fr 60px; gap:14px; padding:12px 16px; border-radius:8px;
+      <div style="display:grid; grid-template-columns:36px 1.4fr 1.1fr 1.1fr 0.8fr 80px; gap:14px; padding:12px 16px; border-radius:8px;
                   background:rgba(255,255,255,0.03);
                   border:1px solid rgba(255,255,255,0.05);
                   align-items:center;">
@@ -297,7 +351,14 @@ class LthnFleetWindow extends LitElement {
         <div>
           <lthn-state-pill variant=${a.status === "ready" ? "ok" : "idle"}>${a.status}</lthn-state-pill>
         </div>
-        <lthn-btn tone="quiet" size="sm"><i class="fa-solid fa-ellipsis"></i></lthn-btn>
+        <div style="display:flex; gap:4px; justify-content:flex-end;">
+          <lthn-btn tone="quiet" size="sm" @click=${() => this.editAgent(a)} title="Edit agent">
+            <i class="fa-solid fa-pen" style="font-size:10px;"></i>
+          </lthn-btn>
+          <lthn-btn tone="quiet" size="sm" @click=${() => { void this.deleteAgentRow(a); }} title="Delete agent">
+            <i class="fa-solid fa-trash" style="font-size:10px;"></i>
+          </lthn-btn>
+        </div>
       </div>
     `;
   }
@@ -419,11 +480,13 @@ class LthnFleetWindow extends LitElement {
       ${chrome}
       <lthn-configure-agent-modal
         .open=${this.configureAgentOpen}
+        .editing=${this.editingAgent}
         @lthn:fleet:agent-saved=${() => { void this.onAgentSaved(); }}
         @lthn:fleet:configure-cancel=${() => this.onConfigureCancel()}>
       </lthn-configure-agent-modal>
       <lthn-pair-machine-modal
         .open=${this.pairMachineOpen}
+        .editing=${this.editingMachine}
         @lthn:fleet:machine-saved=${() => { void this.onMachineSaved(); }}
         @lthn:fleet:pair-cancel=${() => this.onPairCancel()}>
       </lthn-pair-machine-modal>

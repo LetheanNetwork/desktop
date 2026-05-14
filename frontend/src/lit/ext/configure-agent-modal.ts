@@ -102,6 +102,7 @@ const DEFAULT_TEMP    = 0.7;
 class LthnConfigureAgentModal extends LitElement {
   static readonly properties = {
     open:         { type: Boolean, reflect: true },
+    editing:      { attribute: false },
     step:         { state: true },
     provider:     { state: true },
     name:         { state: true },
@@ -115,6 +116,9 @@ class LthnConfigureAgentModal extends LitElement {
     saveErr:      { state: true },
   };
   declare open:        boolean;
+  /** When set, the modal opens in edit mode pre-filled from this row.
+   *  Save path is the same UpsertAgent call (id collision = update). */
+  declare editing:     AgentModel | null;
   declare step:        Step;
   declare provider:    ProviderSpec | null;
   declare name:        string;
@@ -130,6 +134,7 @@ class LthnConfigureAgentModal extends LitElement {
   constructor() {
     super();
     this.open = false;
+    this.editing = null;
     this.step = "provider";
     this.provider = null;
     this.name = "";
@@ -143,6 +148,44 @@ class LthnConfigureAgentModal extends LitElement {
     this.saveErr = "";
   }
   createRenderRoot() { return this; }
+
+  /** When `editing` is set (or `open` toggles to true with editing
+   *  present), pre-fill all fields and skip straight to the
+   *  configure step. Provider is resolved from the catalogue by id;
+   *  unknown providers fall back to openai-compat. API key field
+   *  stays blank in edit mode — we can't show plaintext (Get is
+   *  Go-side only) and the user only types it when rotating. */
+  updated(changed: Map<string, unknown>) {
+    if ((changed.has("open") || changed.has("editing")) && this.open && this.editing) {
+      const e = this.editing;
+      const provider = PROVIDERS.find(p => p.id === e.provider)
+        || PROVIDERS.find(p => p.id === "openai-compat")!;
+      this.provider = provider;
+      this.name = e.name || "";
+      this.model = e.model || "";
+      this.baseUrl = e.base_url || "";
+      this.apiKey = "";
+      this.persona = e.persona || "";
+      let ctx = DEFAULT_CONTEXT;
+      let temp = DEFAULT_TEMP;
+      if (e.model_settings) {
+        try {
+          const ms = JSON.parse(e.model_settings) as { context_length?: number; temperature?: number };
+          if (typeof ms.context_length === "number") ctx = ms.context_length;
+          if (typeof ms.temperature === "number") temp = ms.temperature;
+        } catch { /* ignore malformed JSON, defaults apply */ }
+      }
+      this.contextLen = ctx;
+      this.temperature = temp;
+      this.step = "configure";
+      this.saveErr = "";
+    }
+    if (changed.has("open") && !this.open) {
+      // Closed (externally or via cancel/save) — clear editing so
+      // the next add-flow opens at the provider picker.
+      this.editing = null;
+    }
+  }
 
   /** Reset wizard state to step 1, no fields. Called on cancel,
    *  save-success, and external re-open. */
@@ -191,16 +234,23 @@ class LthnConfigureAgentModal extends LitElement {
       this.saveErr = "Name is required";
       return;
     }
-    if (this.provider.needsKey && !this.apiKey.trim()) {
+    const isEdit = !!this.editing;
+    // New rows MUST supply an API key for remote providers; edits
+    // leave the existing sealed blob alone unless the user types
+    // a new value (rotation).
+    if (this.provider.needsKey && !isEdit && !this.apiKey.trim()) {
       this.saveErr = "API key is required for this provider";
       return;
     }
     this.saving = true;
     this.saveErr = "";
-    const id = this.idFromName(this.name);
+    // Preserve the id when editing so a rename updates the existing
+    // row rather than spawning a duplicate. New-flow derives id
+    // from name as before.
+    const id = this.editing?.id || this.idFromName(this.name);
     const ref = this.provider.needsKey ? `agent:${id}` : "";
     try {
-      if (this.provider.needsKey) {
+      if (this.provider.needsKey && this.apiKey.trim()) {
         const keyR = await WPut(ref, this.apiKey.trim());
         if (!keyR.OK) {
           this.saveErr = "Failed to seal API key";
@@ -317,6 +367,31 @@ class LthnConfigureAgentModal extends LitElement {
     `;
   }
 
+  /** Heading + back-button row for the configure step. Edit mode
+   *  hides the back button (no meaningful "back" — there's no
+   *  step-1 picker for an existing row). */
+  private renderConfigureHeader(p: ProviderSpec, isEdit: boolean) {
+    return html`
+      <div style="display:flex; align-items:center; gap:10px;">
+        ${isEdit
+          ? nothing
+          : html`
+            <lthn-btn tone="quiet" size="sm" @click=${() => this.back()}>
+              <i class="fa-solid fa-chevron-left" style="font-size:10px;"></i>
+              Back
+            </lthn-btn>
+          `}
+        <div style="flex:1; display:flex; align-items:center; gap:8px;">
+          <i class="fa-solid ${p.icon}" style="color:var(--brand-300);"></i>
+          <div style="font-size:14px; font-weight:600; color:var(--fg-0);">
+            ${isEdit ? "Edit " : ""}${p.label}
+          </div>
+          <lthn-state-pill variant=${p.kind === "local" ? "latest" : "preview"}>${p.kind}</lthn-state-pill>
+        </div>
+      </div>
+    `;
+  }
+
   private renderField(label: string, child: unknown, hint?: string) {
     return html`
       <label style="display:flex; flex-direction:column; gap:4px;">
@@ -346,19 +421,10 @@ class LthnConfigureAgentModal extends LitElement {
   private renderConfigureStep() {
     const p = this.provider;
     if (!p) return nothing;
+    const isEdit = !!this.editing;
     return html`
       <div style="display:flex; flex-direction:column; gap:14px;">
-        <div style="display:flex; align-items:center; gap:10px;">
-          <lthn-btn tone="quiet" size="sm" @click=${() => this.back()}>
-            <i class="fa-solid fa-chevron-left" style="font-size:10px;"></i>
-            Back
-          </lthn-btn>
-          <div style="flex:1; display:flex; align-items:center; gap:8px;">
-            <i class="fa-solid ${p.icon}" style="color:var(--brand-300);"></i>
-            <div style="font-size:14px; font-weight:600; color:var(--fg-0);">${p.label}</div>
-            <lthn-state-pill variant=${p.kind === "local" ? "latest" : "preview"}>${p.kind}</lthn-state-pill>
-          </div>
-        </div>
+        ${this.renderConfigureHeader(p, isEdit)}
 
         ${this.renderField("Name", html`
           <input type="text" .value=${this.name}
@@ -386,13 +452,15 @@ class LthnConfigureAgentModal extends LitElement {
           : nothing}
 
         ${p.needsKey
-          ? this.renderField("API key", html`
+          ? this.renderField(isEdit ? "API key (leave blank to keep current)" : "API key", html`
               <input type="password" .value=${this.apiKey}
                 @input=${(e: Event) => { this.apiKey = (e.target as HTMLInputElement).value; }}
-                placeholder="sk-…"
+                placeholder=${isEdit ? "•••••••••• (stored — type to rotate)" : "sk-…"}
                 autocomplete="off"
                 style=${this.inputStyle()}>
-            `, "Sealed with ChaCha20-Poly1305 at rest. Never crosses the WebView again.")
+            `, isEdit
+                 ? "Existing key stays sealed. Type a new one to rotate it."
+                 : "Sealed with ChaCha20-Poly1305 at rest. Never crosses the WebView again.")
           : nothing}
 
         ${this.renderField("Persona", html`
@@ -434,7 +502,9 @@ class LthnConfigureAgentModal extends LitElement {
           <lthn-btn tone="ghost" size="md" @click=${() => this.cancel()}>Cancel</lthn-btn>
           <lthn-btn tone="primary" size="md" ?disabled=${this.saving}
             @click=${() => { void this.save(); }}>
-            ${this.saving ? html`<i class="fa-solid fa-spinner fa-spin" style="font-size:11px;"></i> Saving…` : "Save agent"}
+            ${this.saving
+              ? html`<i class="fa-solid fa-spinner fa-spin" style="font-size:11px;"></i> Saving…`
+              : isEdit ? "Update agent" : "Save agent"}
           </lthn-btn>
         </div>
       </div>

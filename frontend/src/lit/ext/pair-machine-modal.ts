@@ -46,6 +46,7 @@ const CAPABILITIES: CapabilitySpec[] = [
 class LthnPairMachineModal extends LitElement {
   static readonly properties = {
     open:        { type: Boolean, reflect: true },
+    editing:     { attribute: false },
     name:        { state: true },
     host:        { state: true },
     port:        { state: true },
@@ -56,6 +57,10 @@ class LthnPairMachineModal extends LitElement {
     saveErr:     { state: true },
   };
   declare open:        boolean;
+  /** When set, the modal opens pre-filled from this row. Save calls
+   *  the same UpsertMachine path; the existing id is preserved
+   *  regardless of name edits. */
+  declare editing:     MachineModel | null;
   declare name:        string;
   declare host:        string;
   declare port:        number;
@@ -68,6 +73,7 @@ class LthnPairMachineModal extends LitElement {
   constructor() {
     super();
     this.open = false;
+    this.editing = null;
     this.name = "";
     this.host = "";
     this.port = 0;
@@ -78,6 +84,22 @@ class LthnPairMachineModal extends LitElement {
     this.saveErr = "";
   }
   createRenderRoot() { return this; }
+
+  updated(changed: Map<string, unknown>) {
+    if ((changed.has("open") || changed.has("editing")) && this.open && this.editing) {
+      const e = this.editing;
+      this.name = e.name || "";
+      this.host = e.host || "";
+      this.port = e.port || 0;
+      this.capabilities = [...(e.capabilities || [])];
+      this.tags = e.tags || "";
+      this.isSelf = !!e.is_self;
+      this.saveErr = "";
+    }
+    if (changed.has("open") && !this.open) {
+      this.editing = null;
+    }
+  }
 
   private reset() {
     this.name = "";
@@ -117,7 +139,9 @@ class LthnPairMachineModal extends LitElement {
     }
     this.saving = true;
     this.saveErr = "";
-    const id = this.idFromName(this.name);
+    // Preserve the id when editing so a rename updates the existing
+    // row rather than spawning a duplicate.
+    const id = this.editing?.id || this.idFromName(this.name);
     try {
       const machine = new MachineModel({
         id,
@@ -237,6 +261,7 @@ class LthnPairMachineModal extends LitElement {
 
   render() {
     if (!this.open) return nothing;
+    const isEdit = !!this.editing;
     return html`
       <div
         @click=${(e: MouseEvent) => this.onBackdropClick(e)}
@@ -267,11 +292,12 @@ class LthnPairMachineModal extends LitElement {
             <div style="display:flex; flex-direction:column; gap:6px;">
               <div style="font-size:16px; font-weight:600; color:var(--fg-0);
                           letter-spacing:-0.005em;">
-                Pair a machine
+                ${isEdit ? `Edit ${this.editing?.name || "machine"}` : "Pair a machine"}
               </div>
               <div style="font-size:12px; color:var(--fg-2); line-height:1.5;">
-                Add a node to the compute fleet. Auto-discovery lands in the
-                first-run wizard; for now, name the box and pick the roles it fulfils.
+                ${isEdit
+                  ? "Tweak any field. Save updates the row in-place — same id, same routing rules attached."
+                  : "Add a node to the compute fleet. Auto-discovery lands in the first-run wizard; for now, name the box and pick the roles it fulfils."}
               </div>
             </div>
 
@@ -341,7 +367,9 @@ class LthnPairMachineModal extends LitElement {
               <lthn-btn tone="ghost" size="md" @click=${() => this.cancel()}>Cancel</lthn-btn>
               <lthn-btn tone="primary" size="md" ?disabled=${this.saving}
                 @click=${() => { void this.save(); }}>
-                ${this.saving ? html`<i class="fa-solid fa-spinner fa-spin" style="font-size:11px;"></i> Saving…` : "Pair machine"}
+                ${this.saving
+                  ? html`<i class="fa-solid fa-spinner fa-spin" style="font-size:11px;"></i> Saving…`
+                  : isEdit ? "Update machine" : "Pair machine"}
               </lthn-btn>
             </div>
 

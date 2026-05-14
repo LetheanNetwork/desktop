@@ -113,6 +113,16 @@ func ExampleService_DeleteAgent() {
 	_ = svc.DeleteAgent("openai-default")
 }
 
+func ExampleService_DeleteMachine() {
+	r := fleet.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*fleet.Service)
+	defer svc.Close()
+	_ = svc.DeleteMachine("shop")
+}
+
 func ExampleService_UpsertMachine() {
 	r := fleet.New()
 	if !r.OK {
