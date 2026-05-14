@@ -51,6 +51,8 @@ class LthnSettingsWindow extends LitElement {
     locales: { state: true },
     currentLang: { state: true },
     startWithWindow: { state: true },
+    menuLinks:  { state: true },
+    menuLayout: { state: true },
     modelsDir: { state: true },
     routeNames: { state: true },
     build: { state: true },
@@ -72,6 +74,11 @@ class LthnSettingsWindow extends LitElement {
   declare locales: string[];
   declare currentLang: string;
   declare startWithWindow: boolean;
+  /** Menu Behaviours — see plans/project/lthn/desktop/RFC.menu-behaviours.md.
+   *  menuLinks  ∈ {"hybrid", "in-window", "collapsed-only"}
+   *  menuLayout ∈ {"toggle", "open", "closed", "hover"} */
+  declare menuLinks: string;
+  declare menuLayout: string;
   declare modelsDir: string;
   declare routeNames: string[];
   declare build: { version: string; go_version: string; goos: string; goarch: string; num_cpu: number };
@@ -84,6 +91,7 @@ class LthnSettingsWindow extends LitElement {
   declare apiKeyRevealed: boolean;
   declare panel: {
     generalT: string; generalD: string;
+    menuT: string;
     modelsT: string; modelsD: string;
     runnerT: string; runnerD: string;
     apiT: string; apiD: string;
@@ -94,6 +102,10 @@ class LthnSettingsWindow extends LitElement {
   declare row: {
     startWindowL: string; startWindowH: string;
     languageL: string; languageH: string;
+    menuLinksL: string; menuLinksH: string;
+    menuLinksOptHybrid: string; menuLinksOptInWindow: string; menuLinksOptCollapsed: string;
+    menuLayoutL: string; menuLayoutH: string;
+    menuLayoutOptToggle: string; menuLayoutOptOpen: string; menuLayoutOptClosed: string; menuLayoutOptHover: string;
     modelDirL: string; modelDirH: string; btnBrowse: string;
     defaultModelL: string; defaultModelHint: string; defaultModelEmpty: string;
     quantL: string; quantH: string;
@@ -119,6 +131,12 @@ class LthnSettingsWindow extends LitElement {
     // application boot will read this to decide whether to spawn the
     // unified app shell at launch, or leave the binary tray-only.
     this.startWithWindow = storedSetting("lthn.boot.window") === "true";
+    // Menu Behaviours defaults — least surprise out of the box. See
+    // plans/project/lthn/desktop/RFC.menu-behaviours.md § 2 for the full
+    // value table. The app-shell reads the same localStorage keys at
+    // mount + reacts to "lthn:menu:changed" emits when these flip.
+    this.menuLinks  = storedSetting("lthn.menu.links",  "in-window");
+    this.menuLayout = storedSetting("lthn.menu.layout", "toggle");
     this.modelsDir = "~/Lethean/conf/models/";
     this.routeNames = [];
     this.build = { version: "0.1.0", go_version: "", goos: "", goarch: "", num_cpu: 0 };
@@ -135,6 +153,7 @@ class LthnSettingsWindow extends LitElement {
     this.panel = {
       generalT: "General",
       generalD: "App-wide defaults — what to show at launch, which language to speak, theme.",
+      menuT:    "Menu Behaviours",
       modelsT:  "Models",
       modelsD:  "Where lthn looks for models and which one loads at startup.",
       runnerT:  "Runner",
@@ -153,6 +172,17 @@ class LthnSettingsWindow extends LitElement {
       startWindowH: "If on, the unified app shell opens at launch alongside the tray. Off = tray-only until you click in.",
       languageL: "Default language",
       languageH: "Sets the language for the WebView surfaces. Stored locally; persists across restarts.",
+      menuLinksL: "Menu Links",
+      menuLinksH: "How clicks on rail items navigate. Hybrid: word opens here, icon pops out. Always In-Window: both navigate. New When Collapsed: pop out only when the rail is icon-only. ⌘/Ctrl-click always pops out.",
+      menuLinksOptHybrid:    "Hybrid",
+      menuLinksOptInWindow:  "Always in-window",
+      menuLinksOptCollapsed: "New when collapsed",
+      menuLayoutL: "Menu Layout",
+      menuLayoutH: "How the rail collapses. Toggle keeps the chevron-driven behaviour. Always Open / Always Closed lock it. Hover Open expands on mouseover.",
+      menuLayoutOptToggle: "Toggle",
+      menuLayoutOptOpen:   "Always open",
+      menuLayoutOptClosed: "Always closed",
+      menuLayoutOptHover:  "Hover open",
       modelDirL: "Model directory",
       modelDirH: "Canonical Lethean layout — visible in Finder, safe to inspect.",
       btnBrowse: "Browse…",
@@ -279,8 +309,11 @@ class LthnSettingsWindow extends LitElement {
     const { unwrap } = resultMod;
     const [
       title, subtitleTpl, locales, currentLang, paths, routes, routeViews, build, addr, listening,
-      pGT, pGD, pMT, pMD, pRT, pRD, pAT, pAD, pTT, pTD, pIT, pID, pAbT, pAbD,
-      rSwL, rSwH, rLgL, rLgH, rMdL, rMdH, rBrw,
+      pGT, pGD, pMnT, pMT, pMD, pRT, pRD, pAT, pAD, pTT, pTD, pIT, pID, pAbT, pAbD,
+      rSwL, rSwH, rLgL, rLgH,
+      rMlL, rMlH, rMlOH, rMlOI, rMlOC,
+      rMyL, rMyH, rMyOT, rMyOO, rMyOX, rMyOV,
+      rMdL, rMdH, rBrw,
       rDmL, rDmH, rDmE, rQuL, rQuH, rSmL, rSmH,
       rHsL, rEpL, rAkL, rAkH,
       rItL, rItH, rHpL, rHpH, rPwL, rPwH,
@@ -300,6 +333,7 @@ class LthnSettingsWindow extends LitElement {
       unwrap<boolean>(server.WListening(), false),
       i18n.T("window.settings.panel_general_title"),
       i18n.T("window.settings.panel_general_desc"),
+      i18n.T("window.settings.subsection_menu_title"),
       i18n.T("window.settings.panel_models_title"),
       i18n.T("window.settings.panel_models_desc"),
       i18n.T("window.settings.panel_runner_title"),
@@ -316,6 +350,17 @@ class LthnSettingsWindow extends LitElement {
       i18n.T("window.settings.row_startwindow_hint"),
       i18n.T("window.settings.row_language_label"),
       i18n.T("window.settings.row_language_hint"),
+      i18n.T("window.settings.row_menulinks_label"),
+      i18n.T("window.settings.row_menulinks_hint"),
+      i18n.T("window.settings.row_menulinks_opt_hybrid"),
+      i18n.T("window.settings.row_menulinks_opt_inwindow"),
+      i18n.T("window.settings.row_menulinks_opt_collapsed"),
+      i18n.T("window.settings.row_menulayout_label"),
+      i18n.T("window.settings.row_menulayout_hint"),
+      i18n.T("window.settings.row_menulayout_opt_toggle"),
+      i18n.T("window.settings.row_menulayout_opt_open"),
+      i18n.T("window.settings.row_menulayout_opt_closed"),
+      i18n.T("window.settings.row_menulayout_opt_hover"),
       i18n.T("window.settings.row_modeldir_label"),
       i18n.T("window.settings.row_modeldir_hint"),
       i18n.T("window.settings.btn_browse"),
@@ -350,6 +395,7 @@ class LthnSettingsWindow extends LitElement {
     ]);
     this.panel = {
       generalT: pGT, generalD: pGD,
+      menuT:    pMnT,
       modelsT: pMT, modelsD: pMD,
       runnerT: pRT, runnerD: pRD,
       apiT: pAT, apiD: pAD,
@@ -360,6 +406,10 @@ class LthnSettingsWindow extends LitElement {
     this.row = {
       startWindowL: rSwL, startWindowH: rSwH,
       languageL: rLgL, languageH: rLgH,
+      menuLinksL: rMlL, menuLinksH: rMlH,
+      menuLinksOptHybrid: rMlOH, menuLinksOptInWindow: rMlOI, menuLinksOptCollapsed: rMlOC,
+      menuLayoutL: rMyL, menuLayoutH: rMyH,
+      menuLayoutOptToggle: rMyOT, menuLayoutOptOpen: rMyOO, menuLayoutOptClosed: rMyOX, menuLayoutOptHover: rMyOV,
       modelDirL: rMdL, modelDirH: rMdH, btnBrowse: rBrw,
       defaultModelL: rDmL, defaultModelHint: rDmH, defaultModelEmpty: rDmE,
       quantL: rQuL, quantH: rQuH,
@@ -440,6 +490,26 @@ class LthnSettingsWindow extends LitElement {
   _setStartWithWindow(on: boolean) {
     this.startWithWindow = on;
     writeStoredSetting("lthn.boot.window", on ? "true" : "false");
+  }
+
+  /** Menu Behaviours setters — write-through to localStorage and
+   *  emit "lthn:menu:changed" so any open <lthn-app-shell> reacts
+   *  without waiting for a reload. Wails Events fire same-window
+   *  too, so the in-shell Settings panel updates the rail directly. */
+  _setMenuLinks(v: string) {
+    this.menuLinks = v;
+    writeStoredSetting("lthn.menu.links", v);
+    this._emitMenuChanged("links", v);
+  }
+  _setMenuLayout(v: string) {
+    this.menuLayout = v;
+    writeStoredSetting("lthn.menu.layout", v);
+    this._emitMenuChanged("layout", v);
+  }
+  private _emitMenuChanged(setting: string, value: string) {
+    import("@wailsio/runtime")
+      .then(({ Events }) => (Events.Emit as (name: string, data: unknown) => Promise<boolean>)("lthn:menu:changed", { setting, value }))
+      .catch(() => { /* events unavailable in test/canvas — settings still persist */ });
   }
 
   /** Flag for a given locale tag — keeps the picker visually intuitive. */
@@ -553,6 +623,17 @@ class LthnSettingsWindow extends LitElement {
   }
 
   _sectionGeneral() {
+    const linksOptions: Array<[string, string]> = [
+      ["hybrid",         this.row.menuLinksOptHybrid],
+      ["in-window",      this.row.menuLinksOptInWindow],
+      ["collapsed-only", this.row.menuLinksOptCollapsed],
+    ];
+    const layoutOptions: Array<[string, string]> = [
+      ["toggle", this.row.menuLayoutOptToggle],
+      ["open",   this.row.menuLayoutOptOpen],
+      ["closed", this.row.menuLayoutOptClosed],
+      ["hover",  this.row.menuLayoutOptHover],
+    ];
     return this._section({
       title: this.panel.generalT,
       desc:  this.panel.generalD,
@@ -580,8 +661,46 @@ class LthnSettingsWindow extends LitElement {
             `)}
           </div>
         `)}
+        ${this._subsection(this.panel.menuT)}
+        ${this._row(this.row.menuLinksL, this.row.menuLinksH,
+          this._segmentPickKeyed(this.menuLinks, linksOptions, v => this._setMenuLinks(v)))}
+        ${this._row(this.row.menuLayoutL, this.row.menuLayoutH,
+          this._segmentPickKeyed(this.menuLayout, layoutOptions, v => this._setMenuLayout(v)))}
       `,
     });
+  }
+
+  /** Sub-section heading — uppercase mono caption with a thin top
+   *  divider. Used inside _section content to group related rows
+   *  without spawning a whole new panel page. */
+  _subsection(label: string) {
+    return html`
+      <div style="margin-top:14px; padding-top:14px;
+                  border-top:1px solid rgba(255,255,255,0.06);
+                  font-family:var(--font-mono); font-size:10px;
+                  color:var(--fg-3); letter-spacing:0.08em;
+                  text-transform:uppercase;">${label}</div>
+    `;
+  }
+
+  /** Keyed variant of _segmentPick — options are [value, label]
+   *  pairs so the persisted value can be a short ID while the
+   *  displayed text is a human-readable (and translatable) string. */
+  _segmentPickKeyed(value: string, options: Array<[string, string]>, onPick: (v: string) => void) {
+    return html`
+      <div style="display:inline-flex; border-radius:6px;
+                  background:rgba(0,0,0,0.18); border:1px solid rgba(255,255,255,0.06); padding:2px;">
+        ${options.map(([v, label]) => html`
+          <button @click=${() => onPick(v)}
+            style="padding:4px 10px; font-family:var(--font-sans); font-size:11px;
+                   border:none; cursor:pointer;
+                   color:${v === value ? "var(--fg-0)" : "var(--fg-3)"};
+                   background:${v === value ? "rgba(255,255,255,0.08)" : "transparent"};
+                   border-radius:4px; letter-spacing:0.01em;
+                   --wails-draggable: no-drag;">${label}</button>
+        `)}
+      </div>
+    `;
   }
 
   _sectionModels() {
