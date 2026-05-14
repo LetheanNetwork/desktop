@@ -134,3 +134,55 @@ describe("lthn-app-shell — unknown active value", () => {
     expect(host.textContent).toContain("not-a-real-pane");
   });
 });
+
+describe("lthn-app-shell — rail click dispatch", () => {
+  // The rail-row click handler routes plain clicks to in-place
+  // navigation (_select) and ⌘/Ctrl-clicks to the standalone-window
+  // pop-out via WindowService.Open. The pop-out branch is asserted
+  // via negative-space — `active` MUST NOT change — because mocking
+  // the dynamic `import("@desktop/desktop/windowservice")` adds
+  // setup weight the contract doesn't need.
+  // Spec: plans/project/lthn/desktop/RFC.menu-behaviours.md § 3.
+  type ShellEl = HTMLElement & {
+    active: string;
+    updateComplete: Promise<boolean>;
+  };
+
+  function findNavButton(host: HTMLElement, label: string): HTMLButtonElement | null {
+    const buttons = Array.from(host.querySelectorAll("button")) as HTMLButtonElement[];
+    return buttons.find(b => (b.textContent ?? "").trim().includes(label)) ?? null;
+  }
+
+  it("plain click navigates the body in-place", async () => {
+    const { el, host } = await mountWindow<ShellEl>("lthn-app-shell", {
+      attrs: { active: "chat" },
+    });
+    const btn = findNavButton(host, "Telemetry");
+    expect(btn, "telemetry button should be rendered").not.toBeNull();
+    btn!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await el.updateComplete;
+    expect(el.active).toBe("telemetry");
+  });
+
+  it("⌘-click does NOT change the in-place active surface (pop-out branch)", async () => {
+    const { el, host } = await mountWindow<ShellEl>("lthn-app-shell", {
+      attrs: { active: "chat" },
+    });
+    const btn = findNavButton(host, "Telemetry");
+    expect(btn, "telemetry button should be rendered").not.toBeNull();
+    btn!.dispatchEvent(new MouseEvent("click", { bubbles: true, metaKey: true }));
+    await el.updateComplete;
+    expect(el.active).toBe("chat");
+  });
+
+  it("Ctrl-click does NOT change the in-place active surface (pop-out branch)", async () => {
+    const { el, host } = await mountWindow<ShellEl>("lthn-app-shell", {
+      attrs: { active: "chat" },
+    });
+    const btn = findNavButton(host, "Telemetry");
+    expect(btn, "telemetry button should be rendered").not.toBeNull();
+    btn!.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true }));
+    await el.updateComplete;
+    expect(el.active).toBe("chat");
+  });
+});

@@ -216,6 +216,23 @@ class LthnAppShell extends LitElement {
   }
   _toggleCollapse() { this.collapsed = !this.collapsed; }
 
+  /** Rail-row click dispatcher. ⌘-click (macOS) / Ctrl-click (Linux,
+   *  Windows) pops the surface out into its standalone window via
+   *  WindowService.Open(). Plain click navigates the body in-place
+   *  via _select(). The backend no-ops gracefully for surfaces that
+   *  lack a registry entry — see plans/project/lthn/desktop/
+   *  RFC.menu-behaviours.md § 5 for the coverage gap. */
+  _onNavClick(e: MouseEvent, id: string) {
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault();
+      import("@desktop/desktop/windowservice")
+        .then(w => w.Open(id))
+        .catch(() => { /* import failure: silently degrade to in-place */ });
+      return;
+    }
+    this._select(id);
+  }
+
   _renderNavGroup(group: NavEntry["group"], label: string | null) {
     const items = NAV.filter(n => n.group === group);
     if (!items.length) return nothing;
@@ -228,7 +245,7 @@ class LthnAppShell extends LitElement {
         const label = this.t.nav[n.id] ?? n.label;
         return html`
           <button
-            @click=${() => this._select(n.id)}
+            @click=${(e: MouseEvent) => this._onNavClick(e, n.id)}
             title=${this.collapsed ? label : ""}
             style="
               --wails-draggable: no-drag;
