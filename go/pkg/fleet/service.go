@@ -80,6 +80,38 @@ type RoutingRule struct {
 	Predicate string `json:"predicate"`
 }
 
+// Agent is one configured Team Member — endpoint + persona +
+// feature set. The runtime composes a callable agent from the row.
+//
+//	{ id: "openai-default", name: "OpenAI · GPT-5",
+//	  provider: "openai-compat", kind: "remote",
+//	  base_url: "https://api.openai.com/v1",
+//	  api_key_ref: "key:openai:default",
+//	  model: "gpt-5", persona: "concise reviewer", ... }
+//
+// Kind distinguishes runtime topology:
+//   - "remote"  : provider handles routing; api_key_ref + base_url
+//                 are load-bearing
+//   - "local"   : runs against the user's machine fleet via routing
+//                 rules; model_settings JSON carries context length,
+//                 temperature, sampling params
+type Agent struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Provider      string `json:"provider"`
+	Kind          string `json:"kind"`
+	BaseURL       string `json:"base_url"`
+	APIKeyRef     string `json:"api_key_ref"`
+	Model         string `json:"model"`
+	Persona       string `json:"persona"`
+	Features      string `json:"features"`
+	ModelSettings string `json:"model_settings"`
+	Status        string `json:"status"`
+	Tags          string `json:"tags"`
+	CreatedAt     int64  `json:"created_at"`
+	UpdatedAt     int64  `json:"updated_at"`
+}
+
 // Service is the fleet domain service. Holds an open *store.DuckDB
 // against the master DB and lazily applies schema on first use.
 type Service struct {
@@ -275,6 +307,108 @@ func (s *Service) RoutingRules() core.Result {
 		out = append(out, r)
 	}
 	return core.Ok(out)
+}
+
+// Agents returns every configured Team Member ordered by name asc.
+// Empty registry returns []Agent{} in Value.
+//
+// Usage example:
+//
+//	r := svc.Agents()
+//	if r.OK { agents := r.Value.([]fleet.Agent); _ = agents }
+func (s *Service) Agents() core.Result {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return core.Fail(core.NewError("fleet.Agents: service closed"))
+	}
+	rows, err := s.db.Conn().Query(`
+		SELECT id, name, provider, kind, COALESCE(base_url,''),
+		       COALESCE(api_key_ref,''), COALESCE(model,''),
+		       COALESCE(persona,''), COALESCE(features,''),
+		       COALESCE(model_settings,''), status, COALESCE(tags,''),
+		       created_at, updated_at
+		FROM agents
+		ORDER BY name ASC
+	`)
+	if err != nil {
+		return core.Fail(core.E("fleet.Agents", "query", err))
+	}
+	defer rows.Close()
+	out := []Agent{}
+	for rows.Next() {
+		var a Agent
+		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Kind,
+			&a.BaseURL, &a.APIKeyRef, &a.Model, &a.Persona, &a.Features,
+			&a.ModelSettings, &a.Status, &a.Tags,
+			&a.CreatedAt, &a.UpdatedAt); err != nil {
+			return core.Fail(core.E("fleet.Agents", "scan row", err))
+		}
+		out = append(out, a)
+	}
+	return core.Ok(out)
+}
+
+// UpsertAgent inserts or updates an agents row. id is the stable
+// identifier; updated_at is set to now; created_at preserved on
+// update via the COALESCE in the SET clause.
+//
+// Usage example:
+//
+//	r := svc.UpsertAgent(fleet.Agent{
+//	    ID: "openai-default", Name: "OpenAI · GPT-5",
+//	    Provider: "openai-compat", Kind: "remote",
+//	    BaseURL: "https://api.openai.com/v1",
+//	    APIKeyRef: "key:openai:default", Model: "gpt-5",
+//	})
+func (s *Service) UpsertAgent(a Agent) core.Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return core.Fail(core.NewError("fleet.UpsertAgent: service closed"))
+	}
+	now := core.UnixNow()
+	if a.CreatedAt == 0 {
+		a.CreatedAt = now
+	}
+	if a.Kind == "" {
+		a.Kind = "remote"
+	}
+	if a.Status == "" {
+		a.Status = "idle"
+	}
+	return s.db.Exec(`
+		INSERT INTO agents
+			(id, name, provider, kind, base_url, api_key_ref, model,
+			 persona, features, model_settings, status, tags,
+			 created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (id) DO UPDATE SET
+			name=excluded.name, provider=excluded.provider,
+			kind=excluded.kind, base_url=excluded.base_url,
+			api_key_ref=excluded.api_key_ref, model=excluded.model,
+			persona=excluded.persona, features=excluded.features,
+			model_settings=excluded.model_settings,
+			status=excluded.status, tags=excluded.tags,
+			updated_at=excluded.updated_at
+	`, a.ID, a.Name, a.Provider, a.Kind, a.BaseURL, a.APIKeyRef, a.Model,
+		a.Persona, a.Features, a.ModelSettings, a.Status, a.Tags,
+		a.CreatedAt, now)
+}
+
+// DeleteAgent removes an agent by id. No-op (OK) when the id isn't
+// registered — callers don't need to pre-check.
+//
+// Usage example:
+//
+//	r := svc.DeleteAgent("openai-default")
+func (s *Service) DeleteAgent(id string) core.Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return core.Fail(core.NewError("fleet.DeleteAgent: service closed"))
+	}
+	return s.db.Exec(`DELETE FROM agents WHERE id = ?`, id)
 }
 
 // UpsertMachine inserts or updates a fleet_machines row. Used by the

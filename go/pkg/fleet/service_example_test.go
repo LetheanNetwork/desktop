@@ -75,6 +75,44 @@ func ExampleService_RoutingRules() {
 	}
 }
 
+func ExampleService_Agents() {
+	r := fleet.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*fleet.Service)
+	defer svc.Close()
+	a := svc.Agents()
+	if a.OK {
+		_ = a.Value.([]fleet.Agent)
+	}
+}
+
+func ExampleService_UpsertAgent() {
+	r := fleet.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*fleet.Service)
+	defer svc.Close()
+	_ = svc.UpsertAgent(fleet.Agent{
+		ID: "openai-default", Name: "OpenAI · GPT-5",
+		Provider: "openai-compat", Kind: "remote",
+		BaseURL: "https://api.openai.com/v1",
+		APIKeyRef: "key:openai:default", Model: "gpt-5",
+	})
+}
+
+func ExampleService_DeleteAgent() {
+	r := fleet.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*fleet.Service)
+	defer svc.Close()
+	_ = svc.DeleteAgent("openai-default")
+}
+
 func ExampleService_UpsertMachine() {
 	r := fleet.New()
 	if !r.OK {

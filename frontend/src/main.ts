@@ -86,6 +86,7 @@ switch (surface) {
         openChat:         await i18n.T("tray.open.chat"),
         openModels:       await i18n.T("tray.open.models"),
         openTelemetry:    await i18n.T("tray.open.telemetry"),
+        openFleet:        await i18n.T("tray.open.fleet"),
         tabSystem:        await i18n.T("tray.tab.system"),
         tabRunner:        await i18n.T("tray.tab.runner"),
         tabActivity:      await i18n.T("tray.tab.activity"),
@@ -293,12 +294,15 @@ switch (surface) {
               <i class="fa-regular fa-comment" style="font-size:11px;"></i>
               ${t.openChat}
             </lthn-btn>
+            <lthn-btn tone="ghost" size="md" @click=${openAppPane("fleet")}>
+              <i class="fa-solid fa-server" style="font-size:11px;"></i>
+              ${t.openFleet}
+            </lthn-btn>
             <lthn-btn tone="ghost" size="md" @click=${openAppPane("models")}>
               <i class="fa-solid fa-cube" style="font-size:11px;"></i>
               ${t.openModels}
             </lthn-btn>
-            <lthn-btn tone="ghost" size="md" @click=${openAppPane("telemetry")}
-              style="grid-column: 1 / -1;">
+            <lthn-btn tone="ghost" size="md" @click=${openAppPane("telemetry")}>
               <i class="fa-solid fa-wave-square" style="font-size:11px;"></i>
               ${t.openTelemetry}
             </lthn-btn>

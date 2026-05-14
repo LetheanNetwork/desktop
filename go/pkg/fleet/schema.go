@@ -10,6 +10,9 @@
 //
 //	fleet_machines      — registered machines in the user's compute fleet
 //	fleet_routing       — routing-priority rules between machines
+//	agents              — configured Team Members (endpoint + persona +
+//	                      features). Each agent runs on the fleet
+//	                      according to fleet_routing rules.
 //	tasks               — local task tracker (mantis-replacement)
 //	task_links          — sync state between local tasks and external
 //	                      connectors (forge / mantis / github)
@@ -52,6 +55,29 @@ var schemaStatements = []string{
 		machine_id  TEXT NOT NULL,
 		predicate   TEXT,
 		PRIMARY KEY (priority, machine_id)
+	)`,
+	// agents — configured Team Members. Each row is an endpoint +
+	// persona + feature set; the runtime composes a callable agent
+	// from the row. provider distinguishes the endpoint shape
+	// (openai-compat, ollama, opencode-go, anthropic, lemma-local,
+	// etc.); kind=local means this agent runs against the user's
+	// fleet (uses model_settings JSON); kind=remote means the
+	// provider handles routing (api_key + base_url are load-bearing).
+	`CREATE TABLE IF NOT EXISTS agents (
+		id              TEXT PRIMARY KEY,
+		name            TEXT NOT NULL,
+		provider        TEXT NOT NULL,
+		kind            TEXT NOT NULL DEFAULT 'remote',
+		base_url        TEXT,
+		api_key_ref     TEXT,
+		model           TEXT,
+		persona         TEXT,
+		features        TEXT,
+		model_settings  TEXT,
+		status          TEXT NOT NULL DEFAULT 'idle',
+		tags            TEXT,
+		created_at      BIGINT NOT NULL,
+		updated_at      BIGINT NOT NULL
 	)`,
 	`CREATE TABLE IF NOT EXISTS tasks (
 		id          TEXT PRIMARY KEY,
