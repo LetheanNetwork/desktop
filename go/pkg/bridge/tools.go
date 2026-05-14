@@ -470,18 +470,31 @@ func (s *Service) eval(ctx context.Context, windowName, body string) map[string]
 		s.evalMu.Unlock()
 	}()
 
+	// Indirect-eval ((0,eval)(body)) — returns the value of the last
+	// expression statement naturally. The earlier IIFE wrap
+	// ((function(){body})()) required callers to write explicit
+	// `return` because expression statements inside a function body
+	// don't auto-return; `1+1` and `document.title` both came back
+	// as undefined. Indirect eval handles bare-expression bodies AND
+	// IIFE-wrapped bodies AND multi-statement scripts (last expression
+	// wins). If the body returns a Promise, await it so async fetches
+	// resolve before we POST back.
 	wrapped := core.Sprintf(`(function(){
   var __id=%s;
   var __post=function(payload){
     try{fetch('http://127.0.0.1:%d/internal/eval-reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),keepalive:true}).catch(function(){});}catch(e){}
   };
   try{
-    var __r=(function(){%s})();
-    __post({reqId:__id, result:__r});
+    var __r=(0,eval)(%s);
+    if(__r && typeof __r.then==='function'){
+      __r.then(function(v){__post({reqId:__id, result:v});}, function(e){__post({reqId:__id, error:String(e)+(e&&e.stack?'\n'+e.stack:'')});});
+    } else {
+      __post({reqId:__id, result:__r});
+    }
   }catch(e){
     __post({reqId:__id, error:String(e)+(e&&e.stack?'\n'+e.stack:'')});
   }
-})();`, jsonLit(reqID), s.port, body)
+})();`, jsonLit(reqID), s.port, jsonLit(body))
 
 	if errResp := s.runCoreGUIWindowTask("window.exec_js", guiwindow.TaskExecJS{Name: windowName, JS: wrapped}); errResp != nil {
 		return errResp
