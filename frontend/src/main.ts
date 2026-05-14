@@ -535,9 +535,14 @@ switch (surface) {
     /* Lethean-6 application shell — single frameless main window with
      * titlebar + side-nav + body that auto-mounts the matching window
      * for the `active` nav entry. ?pane=chat|models|settings|... picks
-     * the initial view; the nav buttons swap thereafter. */
-    const pane = params.get("pane") || "chat";
-    app.innerHTML = `<lthn-app-shell active="${pane}"></lthn-app-shell>`;
+     * the initial view (explicit URL overrides everything); without
+     * it, the shell's constructor falls back to the last-active pane
+     * stored in localStorage (so a restart lands the user back where
+     * they were), or "chat" on first-launch. */
+    const pane = params.get("pane");
+    app.innerHTML = pane
+      ? `<lthn-app-shell active="${pane}"></lthn-app-shell>`
+      : `<lthn-app-shell></lthn-app-shell>`;
     break;
   }
   case "welcome": {

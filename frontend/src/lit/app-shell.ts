@@ -97,9 +97,20 @@ class LthnAppShell extends LitElement {
     group: Record<string, string>;
     nav: Record<string, string>;
   };
+  /** localStorage key for the last-active pane. Restored on mount so
+   *  the user lands on whichever surface they were last using rather
+   *  than the chat default. Written on every _select(). */
+  private static readonly ACTIVE_PANE_KEY = "lthn.app.active-pane";
+
   constructor() {
     super();
-    this.active = "chat";
+    // Restore the last-active pane from localStorage if it's a known
+    // nav id; falls back to chat for first-launch / unknown values.
+    const saved = (() => {
+      try { return localStorage.getItem(LthnAppShell.ACTIVE_PANE_KEY); }
+      catch { return null; }
+    })();
+    this.active = (saved && NAV.some(n => n.id === saved)) ? saved : "chat";
     this.collapsed = false;
     this.running = true;
     this.model = "gemma-4-e2b";
@@ -157,7 +168,7 @@ class LthnAppShell extends LitElement {
     this._unsubSetPane = Events.On("lthn:app:setpane", (ev) => {
       const id = typeof ev?.data === "string" ? ev.data : null;
       if (id && NAV.some(n => n.id === id)) {
-        this.active = id;
+        this._select(id);
       }
     });
 
@@ -197,7 +208,11 @@ class LthnAppShell extends LitElement {
   /** Returned by Events.On to detach the listener on element teardown. */
   private _unsubSetPane: (() => void) | null = null;
 
-  _select(id: string) { this.active = id; }
+  _select(id: string) {
+    this.active = id;
+    try { localStorage.setItem(LthnAppShell.ACTIVE_PANE_KEY, id); }
+    catch { /* localStorage unavailable — silently degrade */ }
+  }
   _toggleCollapse() { this.collapsed = !this.collapsed; }
 
   _renderNavGroup(group: NavEntry["group"], label: string | null) {

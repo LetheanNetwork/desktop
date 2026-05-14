@@ -57,6 +57,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/repos"
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/sandbox"
 	"dappco.re/lthn/desktop/pkg/server"
@@ -392,6 +393,20 @@ func (s *Service) Run() core.Result {
 
 	if r := s.registerCoreGUI(); !r.OK {
 		return r
+	}
+
+	// Point the window service's StateManager at ~/Lethean/conf/
+	// window_state.json so per-window position/size/maximised auto-
+	// persist across restarts (debounced 500ms inside the manager).
+	// Without this the path defaults to $DIR_CONFIG which lthn-desktop
+	// doesn't set, dropping state under the binary's cwd. Failure
+	// non-fatal — windows just won't remember their slot.
+	if confR := paths.ConfDir(); confR.OK {
+		if winSvc, ok := core.ServiceFor[*guiwindow.Service](s.opts.Core, "window"); ok {
+			winSvc.Manager().State().SetPath(
+				core.PathJoin(confR.Value.(string), "window_state.json"),
+			)
+		}
 	}
 
 	// Attach the constructed app to services that need app refs
