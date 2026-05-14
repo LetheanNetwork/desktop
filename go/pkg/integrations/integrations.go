@@ -72,8 +72,8 @@ type clientDef struct {
 var catalogue = []clientDef{
 	{ID: "claude-code", Name: "Claude Code", Description: "Anthropic CLI · OpenAI-compatible endpoint mode",
 		ConfigPathRaw: "~/.config/claude/config.json", NeedsConfig: true},
-	{ID: "opencode", Name: "OpenCode", Description: "Open-source coding agent",
-		ConfigPathRaw: "~/.config/opencode/config.toml", NeedsConfig: true},
+	{ID: "opencode", Name: "OpenCode", Description: "Open-source coding agent · sandbox-managed via Lethean Desktop",
+		ConfigPathRaw: "~/.config/opencode/opencode.json", NeedsConfig: true},
 	{ID: "codex", Name: "Codex CLI", Description: "OpenAI CLI",
 		ConfigPathRaw: "~/.codex/config.yaml", NeedsConfig: true},
 	{ID: "copilot", Name: "GitHub Copilot", Description: "VS Code extension proxy mode",
