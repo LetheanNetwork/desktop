@@ -10,6 +10,11 @@ dist/
 frontend/bindings/
 frontend/dist/
 
+# Vite + Monaco — workers are copied into frontend/public/monaco/ at
+# build time from node_modules. ~120 generated worker files; never
+# tracked.
+frontend/public/
+
 # Go build cache + test artefacts
 *.test
 *.prof
