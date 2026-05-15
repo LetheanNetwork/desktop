@@ -161,7 +161,22 @@ func newAppCore() *core.Core {
 		core.Print(core.Stderr(), "lthn: data dir resolve failed: %s\n", dataR.Error())
 		return nil
 	}
-	ormPath := core.PathJoin(dataR.Value.(string), "orm.duckdb")
+	// File is named for the substrate (tasks), not the storage tech
+	// (orm/duckdb). Per design_cooperative_task_queue, the trajectory
+	// is for everything (sandboxes, imports, watchers, etc.) to land
+	// as Issues / events hanging off tasks — the file name reflects
+	// where this is heading, not just today's mixed contents.
+	ormPath := core.PathJoin(dataR.Value.(string), "tasks.duckdb")
+	// Migration: if a legacy orm.duckdb exists from before the rename
+	// (~2026-05-15), point at it and rename in place — saves the user
+	// from re-running `lthn opencode import`.
+	legacyPath := core.PathJoin(dataR.Value.(string), "orm.duckdb")
+	if core.Stat(legacyPath).OK && !core.Stat(ormPath).OK {
+		_ = core.Rename(legacyPath, ormPath)
+		// WAL files migrate too; missing rename is non-fatal — DuckDB
+		// recovers cleanly from a missing WAL on next open.
+		_ = core.Rename(legacyPath+".wal", ormPath+".wal")
+	}
 	var duck *orm.DuckDBMedium
 	if r := orm.NewDuckDB(ormPath); r.OK {
 		duck = r.Value.(*orm.DuckDBMedium)
