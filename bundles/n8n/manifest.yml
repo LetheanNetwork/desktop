@@ -1,0 +1,66 @@
+schema: lthn-vm/v1
+name: n8n
+display: n8n
+description: Workflow automation — visual flow editor, 400+ integrations, agent-friendly webhook + HTTP nodes. Pairs naturally with the Lethean Agent + Agentic surfaces for autonomous task orchestration.
+category: automation
+icon: fa-diagram-project
+homepage: https://n8n.io
+license: Sustainable-Use-License
+
+# Single-image bundle for the v1 sqlite-backed shape. Postgres-companion
+# variant for production deployments is a separate bundle if needed.
+images:
+  - id: app
+    image: n8nio/n8n:latest
+    env:
+      N8N_HOST: ${env.PUBLIC_HOST}
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: ${env.PROTOCOL}
+      WEBHOOK_URL: ${env.PUBLIC_URL}
+      GENERIC_TIMEZONE: ${env.TIMEZONE}
+    volumes:
+      - container: /home/node/.n8n
+        persist: n8n-data
+    expose:
+      port: 5678
+      route: /n8n
+
+plugin:
+  routes:
+    - title: n8n
+      icon: fa-diagram-project
+      group: extend
+      target: ${expose.app.route}
+      open_after_install: true
+  commands:
+    - id: n8n.open
+      title: Open n8n
+      runs: route:${expose.app.route}
+  settings:
+    - key: timezone
+      type: string
+      prompt: Default timezone for scheduled workflows
+      default: UTC
+
+env:
+  - key: PUBLIC_HOST
+    prompt: Hostname n8n advertises in webhook URLs
+    type: string
+    default: lthn.local
+  - key: PROTOCOL
+    prompt: URL protocol (http or https)
+    type: string
+    default: http
+  - key: PUBLIC_URL
+    prompt: Full public URL n8n uses for webhook callbacks
+    type: string
+    default: http://lthn.local/n8n/
+  - key: TIMEZONE
+    prompt: Timezone for scheduled workflows
+    type: string
+    default: UTC
+
+permissions:
+  - scope: service.notify
+    mode: invoke
+    reason: Notify when scheduled workflows fail or webhook errors fire.

@@ -1,0 +1,60 @@
+schema: lthn-vm/v1
+name: vaultwarden
+display: Vaultwarden
+description: Self-hosted Bitwarden-compatible password manager. Personal-infra shape — single binary, embedded SQLite, encrypted-at-rest vault. Pairs well with the LetheanAccount key for cross-device sync.
+category: personal
+icon: fa-key
+homepage: https://github.com/dani-garcia/vaultwarden
+license: AGPL-3.0
+
+# Single-image bundle. Vaultwarden's official image is self-contained
+# (Rust binary + embedded SQLite + bundled web vault). Persistent
+# volume holds the vault database + attachments + sends.
+images:
+  - id: app
+    image: vaultwarden/server:latest
+    env:
+      DOMAIN: ${env.PUBLIC_URL}
+      ADMIN_TOKEN: ${env.ADMIN_TOKEN}
+      SIGNUPS_ALLOWED: "false"
+    volumes:
+      - container: /data
+        persist: vaultwarden-data
+    expose:
+      port: 80
+      route: /vaultwarden
+
+plugin:
+  routes:
+    - title: Vaultwarden
+      icon: fa-key
+      group: extend
+      target: ${expose.app.route}
+      open_after_install: true
+  commands:
+    - id: vaultwarden.open
+      title: Open Vaultwarden
+      runs: route:${expose.app.route}
+    - id: vaultwarden.admin
+      title: Open Vaultwarden admin panel
+      runs: route:${expose.app.route}/admin
+  settings:
+    - key: signups.allowed
+      type: bool
+      prompt: Allow new user signups
+      default: "false"
+
+env:
+  - key: PUBLIC_URL
+    prompt: Public URL Vaultwarden advertises (used in invite + reset links)
+    type: string
+    default: http://lthn.local/vaultwarden/
+  - key: ADMIN_TOKEN
+    prompt: Admin panel token (long random string; required to reach /admin)
+    type: secret
+    default: ${random.password(48)}
+
+permissions:
+  - scope: service.notify
+    mode: invoke
+    reason: Notify on vault unlock prompts and security events.

@@ -1,0 +1,67 @@
+schema: lthn-vm/v1
+name: sonarqube
+display: SonarQube
+description: Static code analysis + quality reports for 30+ languages. Multi-image bundle — SonarQube depends on a Postgres companion for issue history and durable scan results.
+category: dev-tools
+icon: fa-shield-halved
+homepage: https://www.sonarsource.com/products/sonarqube/
+license: LGPL-3.0
+
+# Multi-image bundle — db (postgres) + app (sonarqube). The app reaches
+# the db via PostgreSQL connection using the sibling-resolution image
+# id as the host (SONAR_JDBC_URL points at "db" — the marketplace
+# runtime wires bundle-internal DNS at install time).
+images:
+  - id: db
+    image: postgres:16
+    env:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: ${env.DB_PASSWORD}
+      POSTGRES_DB: sonar
+    volumes:
+      - container: /var/lib/postgresql/data
+        persist: sonarqube-db
+  - id: app
+    image: sonarqube:10-community
+    env:
+      SONAR_JDBC_URL: jdbc:postgresql://db:5432/sonar
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: ${env.DB_PASSWORD}
+    volumes:
+      - container: /opt/sonarqube/data
+        persist: sonarqube-data
+      - container: /opt/sonarqube/extensions
+        persist: sonarqube-extensions
+      - container: /opt/sonarqube/logs
+        persist: sonarqube-logs
+    expose:
+      port: 9000
+      route: /sonarqube
+
+plugin:
+  routes:
+    - title: SonarQube
+      icon: fa-shield-halved
+      group: extend
+      target: ${expose.app.route}
+      open_after_install: true
+  commands:
+    - id: sonarqube.open
+      title: Open SonarQube
+      runs: route:${expose.app.route}
+  settings:
+    - key: db.password
+      type: secret
+      prompt: SonarQube database password
+      default: ${random.password(32)}
+
+env:
+  - key: DB_PASSWORD
+    prompt: Database password (shared between SonarQube and Postgres)
+    type: secret
+    default: ${random.password(32)}
+
+permissions:
+  - scope: service.notify
+    mode: invoke
+    reason: Notify when SonarQube is ready for scans.
