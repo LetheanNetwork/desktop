@@ -22,6 +22,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/repos"
 	"dappco.re/lthn/desktop/pkg/sandbox"
+	"dappco.re/lthn/desktop/pkg/tasks"
 )
 
 // newAppCore constructs the shared *core.Core for any lthn CLI verb
@@ -176,11 +177,15 @@ func newAppCore() *core.Core {
 			return nil
 		}
 	}
-	for _, schema := range []orm.Schema{
+	schemas := []orm.Schema{
 		opencode.Sandbox{}.Schema(),
 		opencode.ImportedProject{}.Schema(),
 		opencode.ImportedProvider{}.Schema(),
-	} {
+	}
+	// tasks subsystem — Issue + Note tables; substrate for the
+	// cooperative task queue (see design_cooperative_task_queue).
+	schemas = append(schemas, tasks.Schemas()...)
+	for _, schema := range schemas {
 		if r := orm.RegisterSchema(c, schema); !r.OK {
 			core.Print(core.Stderr(), "lthn: orm schema %s failed: %s\n", schema.Name, r.Error())
 			return nil
