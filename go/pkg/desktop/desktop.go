@@ -44,6 +44,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/build"
 	"dappco.re/lthn/desktop/pkg/container"
+	"dappco.re/lthn/desktop/pkg/downloader"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/git"
 	"dappco.re/lthn/desktop/pkg/integrations"
@@ -248,6 +249,16 @@ func (s *Service) Run() core.Result {
 		})
 	}
 
+	// Downloader → Wails event bus. The downloader spawns its fetch
+	// via c.Go and reports progress + terminal state through this
+	// emitter; the WebView listens for "downloader:progress" +
+	// "downloader:done" off the same bus the Fleet window already
+	// uses.
+	downloaderSvc := downloader.NewWailsService(s.opts.Core)
+	downloaderSvc.SetEmitter(func(name string, data any) {
+		emitCoreEvent(s.opts.Core, name, data)
+	})
+
 	wailsServices := []application.Service{
 		// In-this-repo packages — each ships its own *WailsService /
 		// *Service with Wails3 lifecycle + (T, error) methods. Bindings
@@ -256,6 +267,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(s.opts.Server),
 		application.NewService(sessions.NewWailsService(s.opts.Core)),
 		application.NewService(models.NewWailsService()),
+		application.NewService(downloaderSvc),
 		application.NewService(firstlaunch.NewWailsService()),
 		application.NewService(integrations.NewWailsService()),
 		application.NewService(apikey.NewWailsService(s.opts.Core)),
