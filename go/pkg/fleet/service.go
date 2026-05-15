@@ -178,13 +178,26 @@ func New() core.Result {
 // Usage example:
 //
 //	if r := fleet.Register(c); !r.OK { return r }
+// Register is lock-tolerant. DuckDB serialises every connection to the
+// master DB by an OS file lock — when the GUI or `lthn serve` already
+// holds it, a sibling CLI process (e.g. `lthn fleet ...`) can't open
+// the same file even read-only. Rather than tank Core boot, log a
+// warning and register an empty Service so callers that don't need
+// the live DB (the read-only inspector talks to a /tmp snapshot, the
+// keys Service has no DB dep) keep working. Service methods check for
+// the nil db and return a clean error when invoked against the inert
+// handle, matching the rest of the Service contract.
+//
+// Usage example:
+//
+//	core.New(core.WithName("fleet", fleet.Register))
 func Register(c *core.Core) core.Result {
 	r := New()
-	if !r.OK {
+	if r.OK {
 		return r
 	}
-	svc := r.Value.(*Service)
-	return c.RegisterService("fleet", svc)
+	core.Warn("fleet.Register: master DB unavailable, registering degraded Service", "err", r.Error())
+	return core.Ok(&Service{})
 }
 
 // Close releases the underlying DB handle. Idempotent.

@@ -162,14 +162,15 @@ func defaultSpecOutput(format string) string {
 	return "openapi.yaml"
 }
 
-// bootAPICore builds the *core.Core and a runner.Service the API
-// verbs need to register RouteGroups. Returns (nil, nil) on failure
-// after printing the error to stderr — caller should return 1.
+// bootAPICore builds the *core.Core and looks up the Core-registered
+// runner.Service the API verbs need to register RouteGroups. Returns
+// (nil, nil) on failure after printing the error to stderr — caller
+// should return 1.
 func bootAPICore() (*core.Core, *runner.Service) {
 	c := newAppCore()
 	if c == nil {
 		return nil, nil
 	}
-	r := runner.NewServiceFromCore(c)
+	r, _ := core.ServiceFor[*runner.Service](c, "runner")
 	return c, r
 }

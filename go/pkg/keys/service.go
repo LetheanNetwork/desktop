@@ -91,12 +91,7 @@ func New() core.Result {
 //
 //	if r := keys.Register(c); !r.OK { return r }
 func Register(c *core.Core) core.Result {
-	r := New()
-	if !r.OK {
-		return r
-	}
-	svc := r.Value.(*Service)
-	return c.RegisterService("keys", svc)
+	return New()
 }
 
 // ensureMaster loads or generates the master key. Idempotent;

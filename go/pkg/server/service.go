@@ -116,6 +116,28 @@ type Options struct {
 	// construction time — appending groups after NewService has
 	// no effect on the live core.HTTPServer.
 	ExtraGroups []coreapi.RouteGroup
+
+	// Core, when non-nil, lets the server auto-discover RouteGroups
+	// from every registered Core service that implements RoutesProvider
+	// (i.e. exposes a `RouteGroups() []coreapi.RouteGroup` method). The
+	// auto-discovered groups are mounted alongside ExtraGroups before
+	// Engine.Handler() snapshots — the canonical path for service-
+	// owned API surfaces without accumulating in cmd/lthn.
+	Core *core.Core
+}
+
+// RoutesProvider is the contract a Core-registered service implements to
+// publish its HTTP RouteGroups to the lthn server. Service.NewService
+// iterates every registered service at construction time and mounts the
+// groups returned by anything that satisfies this interface.
+//
+// Usage example:
+//
+//	func (s *Service) RouteGroups() []coreapi.RouteGroup {
+//	    return []coreapi.RouteGroup{NewAPIProvider(s.coreproc)}
+//	}
+type RoutesProvider interface {
+	RouteGroups() []coreapi.RouteGroup
 }
 
 // Service is the HTTP API subsystem. Wraps a *coreapi.Engine so the
@@ -197,6 +219,27 @@ func NewService(opts Options) *Service {
 	for _, g := range opts.ExtraGroups {
 		engine.Register(g)
 	}
+	// Auto-discover RouteGroups from registered Core services. Each
+	// service that owns an API surface implements RoutesProvider so
+	// the route declaration lives next to the service instead of
+	// accumulating in cmd/lthn.
+	if opts.Core != nil {
+		for _, name := range opts.Core.Services() {
+			r := opts.Core.Service(name)
+			if !r.OK || r.Value == nil {
+				continue
+			}
+			provider, ok := r.Value.(RoutesProvider)
+			if !ok {
+				continue
+			}
+			for _, g := range provider.RouteGroups() {
+				if g != nil {
+					engine.Register(g)
+				}
+			}
+		}
+	}
 	s.http = &core.HTTPServer{Addr: opts.Addr, Handler: engine.Handler()}
 	return s
 }
@@ -275,14 +318,35 @@ func (s *Service) Stop(_ core.Context) core.Result {
 	return core.Ok(nil)
 }
 
-// Register constructs a default server Service and wires it into the
-// Core container. Mantis #1336 one-shot canonical entry.
+// Register is the zero-option core.WithName-compatible factory. Builds
+// the server with default Options and the supplied Core so route-group
+// auto-discovery can resolve registered RoutesProvider services.
+//
+// Use RegisterService(opts) when the caller needs to bind a Runner /
+// LocalKey / Brand / Addr / ExtraGroups at registration time — those
+// can't be set after construction because Engine.Handler() snapshots
+// the route tree on first call.
 //
 // Usage example:
 //
-//	if r := server.Register(c); !r.OK {
-//		return r
-//	}
+//	core.New(core.WithName("server", server.Register))
 func Register(c *core.Core) core.Result {
-	return NewService(Options{}).Register(c)
+	return core.Ok(NewService(Options{Core: c}))
+}
+
+// RegisterService is the options-binding factory used by core.WithName
+// when the caller needs to pre-configure the server (Runner / LocalKey
+// / Addr / Brand / ExtraGroups). Closes over opts so options reach the
+// service before Engine.Handler() snapshots routes.
+//
+// Usage example:
+//
+//	core.New(core.WithName("server", server.RegisterService(server.Options{
+//	    Runner: r, LocalKey: key, Brand: server.Brand{Version: v},
+//	})))
+func RegisterService(opts Options) func(*core.Core) core.Result {
+	return func(c *core.Core) core.Result {
+		opts.Core = c
+		return core.Ok(NewService(opts))
+	}
 }

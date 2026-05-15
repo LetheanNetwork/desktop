@@ -69,16 +69,21 @@ func aiModels(args []string) int {
 	return 0
 }
 
-// newRunner constructs the talk-surface runner with routes loaded
-// from ~/Lethean/conf/lthn.yaml via the config service. Routes are
-// dotted-key entries under `routes.<name>.{kind,base_url,api_key,model}`.
-// When no routes are configured the runner serves the echo stub.
+// newRunner returns the Core-registered runner Service. The runner is
+// constructed in app.go via core.WithName("runner", runner.Register)
+// which reads routes from ~/Lethean/conf/lthn.yaml via the config
+// service. Falls back to an empty Service if Core boot fails (echo
+// stub behaviour).
 func newRunner() *runner.Service {
 	c := newAppCore()
 	if c == nil {
 		return runner.NewService(runner.Options{})
 	}
-	return runner.NewServiceFromCore(c)
+	r, _ := core.ServiceFor[*runner.Service](c, "runner")
+	if r == nil {
+		return runner.NewService(runner.Options{})
+	}
+	return r
 }
 
 // printReply formats a Result from runner.Generate / Chat to stdout

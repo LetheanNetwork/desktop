@@ -228,5 +228,5 @@ func (s *Service) Models() core.Result {
 //		return r
 //	}
 func Register(c *core.Core) core.Result {
-	return NewService(Options{}).Register(c)
+	return core.Ok(NewServiceFromCore(c))
 }

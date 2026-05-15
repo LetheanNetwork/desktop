@@ -21,9 +21,15 @@ import (
 	"dappco.re/lthn/desktop/pkg/mdns"
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/paths"
+	lthnai "dappco.re/lthn/desktop/pkg/ai"
+	"dappco.re/lthn/desktop/pkg/fleet"
+	"dappco.re/lthn/desktop/pkg/keys"
+	lthnml "dappco.re/lthn/desktop/pkg/ml"
 	"dappco.re/lthn/desktop/pkg/plugin"
+	lthnprocess "dappco.re/lthn/desktop/pkg/process"
 	"dappco.re/lthn/desktop/pkg/queue"
 	"dappco.re/lthn/desktop/pkg/repos"
+	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/sandbox"
 	"dappco.re/lthn/desktop/pkg/tasks"
 )
@@ -162,6 +168,36 @@ func newAppCore() *core.Core {
 		// Configure + OnStart with the resolved port. User-facing
 		// toggle binds via mdns.Service.SetDiscoverable.
 		core.WithName("mdns", mdns.Register),
+		// lthn-process — lthn-side consumer wrapper for the upstream
+		// dappco.re/go/process service. Owns the CLI verbs (run /
+		// start / kill / list / get) and publishes the /api/process
+		// REST routes via RoutesProvider so pkg/server auto-mounts
+		// them at engine construction. Registering here keeps the
+		// route declaration next to the service and out of cmd/lthn.
+		core.WithName("lthn-process", lthnprocess.Register),
+		// keys — encrypted-at-rest provider-credentials store under
+		// ~/Lethean/data/keys/. Wails frontends write provider API
+		// keys via the binding; plaintext never crosses the WebView.
+		core.WithName("keys", keys.Register),
+		// fleet — compute-fleet view (machines, agents, routing
+		// rules) backed by master DuckDB. Frontends consume via the
+		// fleet-window Wails binding.
+		core.WithName("fleet", fleet.Register),
+		// runner — talk-surface owning the inference-route table.
+		// Built from Core config (routes.<name>.{kind,base_url,...});
+		// SetDynamicRoutes refreshes the live router when opencode
+		// sandboxes spawn / exit.
+		core.WithName("runner", runner.Register),
+		// ai — persistent state for the AI subsystem. Backs
+		// ~/Lethean/data/desktop/ai.duckdb so chats / provider routes
+		// / tool transcripts grow without contending against the
+		// fleet/tasks master DB lock.
+		core.WithName("ai", lthnai.Register),
+		// ml — persistent state for the ML subsystem. Backs
+		// ~/Lethean/data/desktop/ml.duckdb so training runs / LoRA
+		// jobs / dataset manifests / model-pack registry grow without
+		// contending against the master DB.
+		core.WithName("ml", lthnml.Register),
 	)
 
 	if r := c.ServiceStartup(core.Background(), nil); !r.OK {

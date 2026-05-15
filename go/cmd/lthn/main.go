@@ -28,8 +28,6 @@ package main
 import (
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
-	"dappco.re/go/process"
-	processapi "dappco.re/go/process/pkg/api"
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/desktop"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
@@ -238,7 +236,11 @@ func cmdGUI(args []string) int {
 	if c == nil {
 		return 1
 	}
-	r := runner.NewServiceFromCore(c)
+	r, _ := core.ServiceFor[*runner.Service](c, "runner")
+	if r == nil {
+		core.Print(core.Stderr(), "lthn gui: runner service unavailable\n")
+		return 1
+	}
 	keyR := apikey.GenerateOrLoad(c)
 	if !keyR.OK {
 		core.Print(core.Stderr(), "lthn gui: %s\n", keyR.Error())
@@ -249,19 +251,22 @@ func cmdGUI(args []string) int {
 		Runner:   r,
 		LocalKey: key,
 		Brand:    server.Brand{Version: firstlaunch.Version},
+		Core:     c,
 	})
-	fleetR := fleet.New()
-	if !fleetR.OK {
-		core.Print(core.Stderr(), "lthn gui: %s\n", fleetR.Error())
+	if rr := c.RegisterService("server", s); !rr.OK {
+		core.Print(core.Stderr(), "lthn gui: %s\n", rr.Error())
 		return 1
 	}
-	fleetSvc := fleetR.Value.(*fleet.Service)
-	keysR := keys.New()
-	if !keysR.OK {
-		core.Print(core.Stderr(), "lthn gui: %s\n", keysR.Error())
+	fleetSvc, _ := core.ServiceFor[*fleet.Service](c, "fleet")
+	if fleetSvc == nil {
+		core.Print(core.Stderr(), "lthn gui: fleet service unavailable\n")
 		return 1
 	}
-	keysSvc := keysR.Value.(*keys.Service)
+	keysSvc, _ := core.ServiceFor[*keys.Service](c, "keys")
+	if keysSvc == nil {
+		core.Print(core.Stderr(), "lthn gui: keys service unavailable\n")
+		return 1
+	}
 	d := desktop.NewService(desktop.Options{
 		Name:            "lthn",
 		Description:     "Lethean Desktop",
@@ -275,6 +280,10 @@ func cmdGUI(args []string) int {
 		AppIcon:         appIcon,
 		ShowAppOnLaunch: core.Getenv("LTHN_DEV") == "1",
 	})
+	if rr := c.RegisterService("desktop", d); !rr.OK {
+		core.Print(core.Stderr(), "lthn gui: %s\n", rr.Error())
+		return 1
+	}
 	if rr := d.Run(); !rr.OK {
 		core.Print(core.Stderr(), "lthn gui: %s\n", rr.Error())
 		return 1
@@ -322,9 +331,9 @@ func cmdServe(args []string) int {
 	if c == nil {
 		return 1
 	}
-	r := runner.NewServiceFromCore(c)
-	if rr := r.Register(c); !rr.OK {
-		core.Print(core.Stderr(), serveErrorFormat, rr.Error())
+	r, _ := core.ServiceFor[*runner.Service](c, "runner")
+	if r == nil {
+		core.Print(core.Stderr(), serveErrorFormat, "runner service unavailable")
 		return 1
 	}
 	keyR := apikey.GenerateOrLoad(c)
@@ -379,18 +388,18 @@ func cmdServe(args []string) int {
 	if gatewaySvc, _ := core.ServiceFor[*gateway.Service](c, "gateway"); gatewaySvc != nil {
 		extras = append(extras, gateway.NewRoutes(gatewaySvc))
 	}
-	if procSvc, _ := core.ServiceFor[*process.Service](c, "process"); procSvc != nil {
-		// nil registry → DefaultRegistry; nil hub → no WS push (REST only for v1)
-		extras = append(extras, processapi.NewProvider(nil, procSvc, nil))
-	}
+	// lthn-process (+ any future service implementing
+	// server.RoutesProvider) is auto-discovered via Options.Core
+	// passed to server.NewService below — no manual accumulation.
 	s := server.NewService(server.Options{
 		Addr:        core.Concat(":", port),
 		Runner:      r,
 		LocalKey:    key,
 		Brand:       server.Brand{Version: firstlaunch.Version},
 		ExtraGroups: extras,
+		Core:        c,
 	})
-	if rr := s.Register(c); !rr.OK {
+	if rr := c.RegisterService("server", s); !rr.OK {
 		core.Print(core.Stderr(), serveErrorFormat, rr.Error())
 		return 1
 	}

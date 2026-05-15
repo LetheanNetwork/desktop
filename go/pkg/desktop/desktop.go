@@ -169,13 +169,60 @@ func NewService(opts Options) *Service {
 	return &Service{opts: opts}
 }
 
-// Register constructs the desktop service for Core registration.
+// Register is the zero-option core.WithName-compatible factory. Use
+// RegisterService(opts) when the caller needs to bind Frontend, icons,
+// or other binary-state options at registration time (those can't be
+// supplied via post-registration config since the Wails app captures
+// them at construction).
 //
 // Usage example:
 //
-//	core.New(core.WithService(desktop.Register))
+//	core.New(core.WithName("desktop", desktop.Register))
 func Register(c *core.Core) core.Result {
 	return core.Ok(NewService(Options{Core: c}))
+}
+
+// RegisterService is the options-binding factory. Resolves Server /
+// Runner / Fleet / Keys from the Core service registry at registration
+// time so the caller only needs to supply binary-state options
+// (Frontend, TrayIcon, AppIcon, ShowAppOnLaunch).
+//
+// Usage example:
+//
+//	core.New(
+//	    core.WithName("server", server.RegisterService(serverOpts)),
+//	    core.WithName("desktop", desktop.RegisterService(desktop.Options{
+//	        Frontend:        frontendDist,
+//	        TrayIcon:        trayIcon,
+//	        AppIcon:         appIcon,
+//	        ShowAppOnLaunch: dev,
+//	    })),
+//	)
+func RegisterService(opts Options) func(*core.Core) core.Result {
+	return func(c *core.Core) core.Result {
+		opts.Core = c
+		if opts.Server == nil {
+			if s, _ := core.ServiceFor[*server.Service](c, "server"); s != nil {
+				opts.Server = s
+			}
+		}
+		if opts.Runner == nil {
+			if r, _ := core.ServiceFor[*runner.Service](c, "runner"); r != nil {
+				opts.Runner = r
+			}
+		}
+		if opts.Fleet == nil {
+			if f, _ := core.ServiceFor[*fleet.Service](c, "fleet"); f != nil {
+				opts.Fleet = f
+			}
+		}
+		if opts.Keys == nil {
+			if k, _ := core.ServiceFor[*keys.Service](c, "keys"); k != nil {
+				opts.Keys = k
+			}
+		}
+		return core.Ok(NewService(opts))
+	}
 }
 
 // Run launches the Wails event loop. Blocks until the user picks

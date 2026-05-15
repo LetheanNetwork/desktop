@@ -161,12 +161,16 @@ func fleetSummary() int {
 		{"connector_state", countRows(db, "connector_state")},
 		{"fleet_routing", countRows(db, "fleet_routing")},
 	}
-	// Also count keys by listing refs from disk.
-	if kR := keys.New(); kR.OK {
-		ksvc := kR.Value.(*keys.Service)
-		defer ksvc.ServiceShutdown()
-		if l := ksvc.List(); l.OK {
-			counters = append(counters, counter{"keys (encrypted)", len(l.Value.([]string))})
+	// Also count keys via the Core-registered keys service. Boot a
+	// transient Core for the lookup; the read-only fleet inspector
+	// shares the same service substrate the GUI/serve modes use.
+	c := newAppCore()
+	if c != nil {
+		defer c.ServiceShutdown(core.Background())
+		if ksvc, _ := core.ServiceFor[*keys.Service](c, "keys"); ksvc != nil {
+			if l := ksvc.List(); l.OK {
+				counters = append(counters, counter{"keys (encrypted)", len(l.Value.([]string))})
+			}
 		}
 	}
 	dbR := paths.MasterDB()
@@ -401,13 +405,16 @@ func fleetQueue() int {
 }
 
 func fleetKeys() int {
-	r := keys.New()
-	if !r.OK {
-		core.Print(core.Stderr(), "keys: open failed: %s\n", r.Error())
+	c := newAppCore()
+	if c == nil {
 		return 1
 	}
-	svc := r.Value.(*keys.Service)
-	defer svc.ServiceShutdown()
+	defer c.ServiceShutdown(core.Background())
+	svc, _ := core.ServiceFor[*keys.Service](c, "keys")
+	if svc == nil {
+		core.Print(core.Stderr(), "keys: service unavailable\n")
+		return 1
+	}
 	l := svc.List()
 	if !l.OK {
 		core.Print(core.Stderr(), "keys: list failed: %s\n", l.Error())
