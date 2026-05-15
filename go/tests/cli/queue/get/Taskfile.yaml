@@ -1,0 +1,22 @@
+version: "3"
+
+# Covers `lthn queue get <job-id>` — fetches one Job by id. When wired,
+# replace with the canon shape:
+#   - exit 2 + "usage" when id is missing
+#   - exit 0 + JSON-or-table on a known seeded id
+#   - exit 1 + shaped error on unknown id
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        run_capture_all 2 "$output" ../../bin/lthn queue get
+        assert_contains "unknown subcommand" "$output"
+        EOF

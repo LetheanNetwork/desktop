@@ -1,0 +1,25 @@
+version: "3"
+
+# Covers `lthn tasks create --project P --summary S [--description D]
+# [--severity SEV] [--priority PRI] [--assignee A] [--reporter R]` —
+# inserts an Issue row + fires KindCreated. When wired, replace with
+# the canon shape:
+#   - exit 2 + "usage" when --project or --summary is missing
+#   - exit 0 + the new issue-id printed on valid args
+#   - default severity = minor + default priority = normal land in the row
+#   - exit 1 + shaped error on orm insert failure (force via read-only HOME)
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        run_capture_all 2 "$output" ../../bin/lthn tasks create --project ide --summary "wire panel"
+        assert_contains "unknown subcommand" "$output"
+        EOF

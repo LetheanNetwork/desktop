@@ -1,0 +1,25 @@
+version: "3"
+
+# Covers `lthn queue list` — surfaces persisted Job records filtered
+# by status / kind / project / issue_id. When the cmdQueue verb wires
+# into main.go, replace the unknown-subcommand assertion with the
+# canon shape:
+#   - exit 0 + table header on a fresh isolate_home
+#   - --status pending / --kind X / --limit N flag handling
+#   - exit 2 + "usage" on bad flags
+# Mirror state/list/Taskfile.yaml as the local pattern.
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        run_capture_all 2 "$output" ../../bin/lthn queue list
+        assert_contains "unknown subcommand" "$output"
+        EOF

@@ -1,0 +1,24 @@
+version: "3"
+
+# Covers `lthn queue enqueue --kind <name> [--payload JSON] [--project P]
+# [--issue-id ID] [--at RFC3339]` — pushes a Job onto the queue. When
+# wired, replace with the canon shape:
+#   - exit 2 + "usage" when --kind is missing
+#   - exit 0 + the new job-id printed when args are valid
+#   - --at flag triggers Schedule path (ScheduledFor in the persisted row)
+#   - bad --payload JSON returns exit 1 with shaped error
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        run_capture_all 2 "$output" ../../bin/lthn queue enqueue --kind lint
+        assert_contains "unknown subcommand" "$output"
+        EOF

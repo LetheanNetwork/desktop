@@ -29,6 +29,8 @@ tasks:
       - task -d telemetry test
       - task -d service test
       - task -d serve test
+      - task -d queue test
+      - task -d tasks test
 
   build:
     desc: Build the lthn binary the tests will exercise

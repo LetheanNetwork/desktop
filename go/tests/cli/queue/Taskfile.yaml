@@ -1,0 +1,23 @@
+version: "3"
+
+# CLI artefact tests for `lthn queue` — the throttled background job
+# substrate (see go/pkg/queue + design_cooperative_task_queue). Each
+# leaf folder mirrors one verb the queue surface exposes via Core's
+# c.Command auto-binding.
+#
+# Today: the queue subsystem exists in pkg/queue (Enqueue / Cancel /
+# List / Get + Schedule / RegisterKind) but the cmd/lthn dispatcher
+# does NOT expose `lthn queue <verb>`. Each leaf currently asserts
+# the verb is unknown (exit 2). When a verb is wired into main.go's
+# switch + a cmdQueue handler lands, replace the leaf body with
+# happy-path / bad-input / edge-case assertions following the
+# state/* leaves as the canon.
+
+tasks:
+  test:
+    desc: Run every queue leaf test
+    cmds:
+      - task -d list test
+      - task -d get test
+      - task -d enqueue test
+      - task -d cancel test

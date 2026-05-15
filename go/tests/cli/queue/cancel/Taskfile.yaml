@@ -1,0 +1,24 @@
+version: "3"
+
+# Covers `lthn queue cancel <job-id>` — flips a pending Job to
+# StatusCancelled. When wired, replace with the canon shape:
+#   - exit 2 + "usage" when id is missing
+#   - exit 0 on a pending seeded id
+#   - exit 1 + shaped error when the job is already terminal
+#     (matches queue.Cancel's "job is not pending" failure)
+#   - exit 1 + shaped error on unknown id
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        run_capture_all 2 "$output" ../../bin/lthn queue cancel
+        assert_contains "unknown subcommand" "$output"
+        EOF

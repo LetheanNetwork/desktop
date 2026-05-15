@@ -1,0 +1,23 @@
+version: "3"
+
+# Covers `lthn tasks listnotes <issue-id>` — returns every Note on an
+# Issue, oldest first. When wired, replace with the canon shape:
+#   - exit 2 + "usage" when id is missing
+#   - exit 0 + zero rows on an issue with no notes
+#   - exit 0 + N rows after N seeded `lthn tasks addnote` calls,
+#     in the same created_at order
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        run_capture_all 2 "$output" ../../bin/lthn tasks listnotes
+        assert_contains "unknown subcommand" "$output"
+        EOF

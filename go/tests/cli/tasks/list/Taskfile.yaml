@@ -1,0 +1,24 @@
+version: "3"
+
+# Covers `lthn tasks list [--project P] [--state S] [--assignee A]
+# [--reporter R] [--limit N] [--offset N]` — filters Issues, newest
+# updated_at first. When wired, replace with the canon shape:
+#   - exit 0 + table header on a fresh isolate_home (zero rows)
+#   - exit 0 + seeded rows after `lthn tasks create`
+#   - --state open vs --state done filters correctly
+#   - --limit 1 caps output
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        run_capture_all 2 "$output" ../../bin/lthn tasks list
+        assert_contains "unknown subcommand" "$output"
+        EOF

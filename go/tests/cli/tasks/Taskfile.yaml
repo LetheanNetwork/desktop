@@ -1,0 +1,25 @@
+version: "3"
+
+# CLI artefact tests for `lthn tasks` — the local-first issue tracker
+# (see go/pkg/tasks). Each leaf folder mirrors one verb the tasks
+# surface exposes via Core's c.Command auto-binding.
+#
+# Today: the tasks subsystem exists in pkg/tasks (Create / Get / List
+# / Update / Close + AddNote / ListNotes) but the cmd/lthn dispatcher
+# does NOT expose `lthn tasks <verb>`. Each leaf currently asserts
+# the verb is unknown (exit 2). When a verb is wired into main.go's
+# switch + a cmdTasks handler lands, replace the leaf body with
+# happy-path / bad-input / edge-case assertions following the
+# state/* leaves as the canon.
+
+tasks:
+  test:
+    desc: Run every tasks leaf test
+    cmds:
+      - task -d create test
+      - task -d get test
+      - task -d list test
+      - task -d update test
+      - task -d close test
+      - task -d addnote test
+      - task -d listnotes test

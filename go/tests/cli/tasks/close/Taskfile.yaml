@@ -1,0 +1,24 @@
+version: "3"
+
+# Covers `lthn tasks close <issue-id> [--resolution R]` — convenience
+# wrapper over Update that flips state to done + sets Resolution.
+# When wired, replace with the canon shape:
+#   - exit 2 + "usage" when id is missing
+#   - exit 0 on a seeded open issue; ClosedAt populates
+#   - exit 1 + shaped error when the issue is already done
+#     (depends on whether Update treats no-op as Ok or Fail; verify)
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        run_capture_all 2 "$output" ../../bin/lthn tasks close
+        assert_contains "unknown subcommand" "$output"
+        EOF

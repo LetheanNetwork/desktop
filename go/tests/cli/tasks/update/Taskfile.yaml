@@ -1,0 +1,26 @@
+version: "3"
+
+# Covers `lthn tasks update <issue-id> [--summary S] [--state S]
+# [--severity SEV] [--priority PRI] [--assignee A] [--version V]
+# [--target-version V] [--fixed-in V] [--resolution R]` — partial-
+# field mutation, fires KindUpdated (or KindClosed when state moves
+# to done/cancelled). When wired, replace with the canon shape:
+#   - exit 2 + "usage" when id is missing
+#   - exit 0 on valid mutation; UpdatedAt advances
+#   - state=done sets ClosedAt + fires KindClosed (verify via events log)
+#   - exit 1 + shaped error on unknown id
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        run_capture_all 2 "$output" ../../bin/lthn tasks update
+        assert_contains "unknown subcommand" "$output"
+        EOF

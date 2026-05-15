@@ -1,0 +1,25 @@
+version: "3"
+
+# Covers `lthn tasks addnote <issue-id> --body B [--author A]` —
+# appends a Note to an Issue + fires KindNoted. When wired, replace
+# with the canon shape:
+#   - exit 2 + "usage" when id is missing
+#   - exit 2 + "usage" when --body is empty
+#   - exit 0 + new note-id printed on valid args
+#   - body containing newlines / quotes round-trips intact through
+#     ListNotes
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        run_capture_all 2 "$output" ../../bin/lthn tasks addnote
+        assert_contains "unknown subcommand" "$output"
+        EOF
