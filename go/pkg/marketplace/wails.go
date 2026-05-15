@@ -81,12 +81,10 @@ func (s *Service) Installed() core.Result {
 	return core.Ok(InstalledOutput{Packages: out})
 }
 
-// Install resolves a catalogue entry, hands the manifest to the
-// plugin host, and lets it fetch + write + start the binary. The
-// plugin host is wired via pkg/plugin and registered at boot in
-// pkg/desktop; if it's missing (degenerate dev build) the call
-// surfaces a clean error rather than a nil-pointer panic.
-func (s *Service) Install(code string) core.Result {
+// InstallPlugin resolves a binary-plugin catalogue entry, hands the
+// manifest to the plugin host, and lets it fetch + write + start the
+// binary. For lthn-vm bundle installs use Service.Install instead.
+func (s *Service) InstallPlugin(code string) core.Result {
 	if core.Trim(code) == "" {
 		return core.Fail(core.E(installOp, codeRequiredMessage, nil))
 	}
