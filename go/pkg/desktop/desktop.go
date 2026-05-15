@@ -259,6 +259,15 @@ func (s *Service) Run() core.Result {
 		emitCoreEvent(s.opts.Core, name, data)
 	})
 
+	// Marketplace → Wails event bus. Every Install/Launch/Stop/Uninstall
+	// fires a BundleChanged on Core's ACTION bus; this subscriber ferries
+	// it to the WebView so <lthn-marketplace-window> can update status
+	// pills without polling ListInstalled on a timer.
+	// Frontend listens on "marketplace:bundle:changed".
+	marketplace.Subscribe(s.opts.Core, func(_ *core.Core, ev marketplace.BundleChanged) {
+		emitCoreEvent(s.opts.Core, "marketplace:bundle:changed", ev)
+	})
+
 	wailsServices := []application.Service{
 		// In-this-repo packages — each ships its own *WailsService /
 		// *Service with Wails3 lifecycle + (T, error) methods. Bindings

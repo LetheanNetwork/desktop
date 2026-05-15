@@ -52,6 +52,15 @@ interface BundleStatusOutput {
   Handles:  { SandboxID: string; Status: string; HostPort: number }[];
 }
 
+// BundleChangedPayload mirrors the Go marketplace.BundleChanged shape
+// forwarded by the desktop bridge on "marketplace:bundle:changed".
+interface BundleChangedPayload {
+  phase:  string;
+  bundle: InstalledBundle;
+  before: InstalledBundle;
+  at:     string;
+}
+
 // EnvPrompt holds a pending install's env-collection state.
 interface EnvPrompt {
   entry:  CatalogueEntry;
@@ -157,6 +166,21 @@ class LthnMarketplaceWindow extends LitElement {
     // Load i18n keys — fall back to constructor defaults on failure.
     this._loadT().catch(() => { /* defaults stand */ });
     await this._refresh();
+    // Subscribe to BundleChanged events so status pills react to lifecycle
+    // changes without polling ListInstalled on a timer.
+    try {
+      const { Events } = await import("@wailsio/runtime");
+      this._unsubBundleChanged = Events.On(
+        "marketplace:bundle:changed",
+        (e: { data: BundleChangedPayload }) => {
+          const ev = e?.data;
+          if (!ev?.bundle?.BundleID) return;
+          this._applyBundleChanged(ev);
+        },
+      );
+    } catch {
+      // Canvas / test environment — no Wails runtime, poll remains the fallback.
+    }
   }
 
   private async _loadT() {
@@ -320,6 +344,30 @@ class LthnMarketplaceWindow extends LitElement {
       this.err = e instanceof Error ? e.message : String(e);
     }
     await this._refresh();
+  }
+
+  private _unsubBundleChanged: (() => void) | null = null;
+
+  private _applyBundleChanged(ev: BundleChangedPayload) {
+    const id = ev.bundle.BundleID;
+    if (ev.phase === "uninstalled") {
+      this.installed = this.installed.filter(b => b.BundleID !== id);
+    } else if (ev.phase === "installed") {
+      if (!this.installed.some(b => b.BundleID === id)) {
+        this.installed = [...this.installed, ev.bundle];
+      }
+    } else {
+      // launched / stopped — update status in place
+      this.installed = this.installed.map(b =>
+        b.BundleID === id ? { ...b, Status: ev.bundle.Status } : b,
+      );
+    }
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this._unsubBundleChanged?.();
+    this._unsubBundleChanged = null;
   }
 
   private _isInstalled(name: string): boolean {
