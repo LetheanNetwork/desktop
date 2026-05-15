@@ -614,7 +614,7 @@ switch (surface) {
     break;
   }
   case "marketplace": {
-    await import("./lit/ide/marketplace-window");
+    await import("./lit/ext/marketplace-window");
     app.innerHTML = `<lthn-marketplace-window></lthn-marketplace-window>`;
     break;
   }
