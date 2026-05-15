@@ -1,0 +1,57 @@
+schema: lthn-vm/v1
+name: phpmyadmin
+display: PHPMyAdmin
+description: MySQL / MariaDB admin UI. Browse databases, edit rows, run queries. The MariaDB sandbox runs alongside so you have a working database out of the box.
+category: dev-tools
+icon: fa-database
+homepage: https://www.phpmyadmin.net/
+license: GPL-2.0
+
+# Multi-image bundle — db + app land as sibling sandboxes on the bundle's
+# internal Docker network. PHPMyAdmin resolves the db host by its image
+# id (PMA_HOST=db).
+images:
+  - id: db
+    image: mariadb:11
+    env:
+      MARIADB_ROOT_PASSWORD: ${env.DB_PASSWORD}
+    volumes:
+      - container: /var/lib/mysql
+        persist: phpmyadmin-db
+  - id: app
+    image: phpmyadmin/phpmyadmin:5
+    env:
+      PMA_HOST: db
+      PMA_USER: root
+      PMA_PASSWORD: ${env.DB_PASSWORD}
+    expose:
+      port: 80
+      route: /phpmyadmin
+
+plugin:
+  routes:
+    - title: PHPMyAdmin
+      icon: fa-database
+      group: extend
+      target: ${expose.app.route}
+      open_after_install: true
+  commands:
+    - id: phpmyadmin.open
+      title: Open PHPMyAdmin
+      runs: route:${expose.app.route}
+  settings:
+    - key: db.password
+      type: secret
+      prompt: Database root password
+      default: ${random.password(32)}
+
+env:
+  - key: DB_PASSWORD
+    prompt: Database root password (shared between MariaDB and PHPMyAdmin)
+    type: secret
+    default: ${random.password(32)}
+
+permissions:
+  - scope: service.notify
+    mode: invoke
+    reason: Notify when database is ready for queries.
