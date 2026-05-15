@@ -15,7 +15,6 @@ package opencode
 
 import (
 	goio "io"
-	"net/http"
 
 	core "dappco.re/go"
 )
@@ -75,10 +74,11 @@ func (s *Service) targetFor(id string) (string, core.Result) {
 // reverse-proxy). Auto-injects the Basic Auth header and returns
 // (body, status, err).
 func (s *Service) callOpenCode(method, url string, body goio.Reader) (string, int, error) {
-	req, err := http.NewRequest(method, url, body)
-	if err != nil {
-		return "", 0, err
+	r := core.NewHTTPRequest(method, url, body)
+	if !r.OK {
+		return "", 0, r.Value.(error)
 	}
+	req := r.Value.(*core.Request)
 	s.applyAuth(req)
 	client := &core.HTTPClient{Timeout: 10 * core.Second}
 	resp, err := client.Do(req)

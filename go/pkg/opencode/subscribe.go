@@ -24,7 +24,6 @@ package opencode
 
 import (
 	"bufio"
-	"net/http"
 
 	core "dappco.re/go"
 )
@@ -192,10 +191,11 @@ func (s *Service) runSubscription(ctx core.Context, id, target, authHeader strin
 // ends or ctx fires. Each "data: <json>" line forwards to the
 // emitter. Non-data lines (id, retry, comments) are skipped.
 func (s *Service) streamEvents(ctx core.Context, target, authHeader string) error {
-	req, err := http.NewRequestWithContext(ctx, core.MethodGet, target+"/global/event", nil)
-	if err != nil {
-		return err
+	r := core.NewHTTPRequestContext(ctx, core.MethodGet, target+"/global/event", nil)
+	if !r.OK {
+		return r.Value.(error)
 	}
+	req := r.Value.(*core.Request)
 	req.Header.Set("Accept", "text/event-stream")
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)

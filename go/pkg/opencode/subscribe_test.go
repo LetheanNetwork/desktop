@@ -4,7 +4,6 @@ package opencode
 
 import (
 	"net/http/httptest"
-	"strings"
 
 	core "dappco.re/go"
 )

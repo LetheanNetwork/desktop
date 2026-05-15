@@ -26,7 +26,6 @@ package opencode
 import (
 	goio "io"
 	"iter"
-	"net/http"
 
 	core "dappco.re/go"
 	"dappco.re/go/ai/ai"
@@ -190,10 +189,11 @@ func (m *Model) invoke(ctx core.Context, messages []inference.Message) (string, 
 	sessReqBody := core.NewBufferString(core.JSONMarshalString(map[string]any{
 		"title": "lthn-route",
 	}))
-	sessReq, err := http.NewRequestWithContext(ctx, core.MethodPost, target+"/session", sessReqBody)
-	if err != nil {
-		return "", err
+	rr := core.NewHTTPRequestContext(ctx, core.MethodPost, target+"/session", sessReqBody)
+	if !rr.OK {
+		return "", rr.Value.(error)
 	}
+	sessReq := rr.Value.(*core.Request)
 	sessReq.Header.Set("Content-Type", "application/json")
 	m.opts.Service.applyAuth(sessReq)
 	sessResp, err := core.DefaultHTTPClient.Do(sessReq)
@@ -225,11 +225,12 @@ func (m *Model) invoke(ctx core.Context, messages []inference.Message) (string, 
 			{"type": "text", "text": sb.String()},
 		},
 	}))
-	msgReq, err := http.NewRequestWithContext(ctx, core.MethodPost,
+	mr := core.NewHTTPRequestContext(ctx, core.MethodPost,
 		target+"/session/"+sess.ID+"/message", msgReqBody)
-	if err != nil {
-		return "", err
+	if !mr.OK {
+		return "", mr.Value.(error)
 	}
+	msgReq := mr.Value.(*core.Request)
 	msgReq.Header.Set("Content-Type", "application/json")
 	m.opts.Service.applyAuth(msgReq)
 	msgResp, err := core.DefaultHTTPClient.Do(msgReq)

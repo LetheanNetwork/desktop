@@ -3,7 +3,7 @@
 package bridge_test
 
 import (
-
+	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/bridge"
 )
 

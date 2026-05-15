@@ -28,7 +28,6 @@ package opencode
 import (
 	"crypto/rand"
 	goio "io"
-	"net/http"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -146,10 +145,11 @@ func (s *Service) ImportFromHost() core.Result {
 // to any. Used for /project + /provider — caller type-asserts the
 // expected shape.
 func importFetchJSON(url, authHeader string) (any, error) {
-	req, err := http.NewRequest(core.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
+	r := core.NewHTTPRequest(core.MethodGet, url, nil)
+	if !r.OK {
+		return nil, r.Value.(error)
 	}
+	req := r.Value.(*core.Request)
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
 	}

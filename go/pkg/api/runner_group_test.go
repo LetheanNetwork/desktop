@@ -8,7 +8,6 @@
 package api_test
 
 import (
-	"net/http"
 	"net/http/httptest"
 
 	core "dappco.re/go"
@@ -41,7 +40,7 @@ func newTestEngine(t *core.T) *gin.Engine {
 
 func TestRunnerGroup_Models_ReturnsStubEmptyList(t *core.T) {
 	engine := newTestEngine(t)
-	req, _ := http.NewRequest(core.MethodGet, "/v1/runner/models", nil)
+	req := core.NewHTTPRequest(core.MethodGet, "/v1/runner/models", nil).Value.(*core.Request)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
@@ -54,8 +53,8 @@ func TestRunnerGroup_Models_ReturnsStubEmptyList(t *core.T) {
 
 func TestRunnerGroup_Generate_EchoesPromptViaStub(t *core.T) {
 	engine := newTestEngine(t)
-	req, _ := http.NewRequest(core.MethodPost, "/v1/runner/generate",
-		core.NewReader(`{"prompt":"hello"}`))
+	req := core.NewHTTPRequest(core.MethodPost, "/v1/runner/generate",
+		core.NewReader(`{"prompt":"hello"}`)).Value.(*core.Request)
 	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
@@ -69,8 +68,8 @@ func TestRunnerGroup_Generate_EchoesPromptViaStub(t *core.T) {
 
 func TestRunnerGroup_Generate_400OnMissingPrompt(t *core.T) {
 	engine := newTestEngine(t)
-	req, _ := http.NewRequest(core.MethodPost, "/v1/runner/generate",
-		core.NewReader(`{}`))
+	req := core.NewHTTPRequest(core.MethodPost, "/v1/runner/generate",
+		core.NewReader(`{}`)).Value.(*core.Request)
 	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
@@ -80,8 +79,8 @@ func TestRunnerGroup_Generate_400OnMissingPrompt(t *core.T) {
 
 func TestRunnerGroup_Chat_RoundTripsLastUserMessage(t *core.T) {
 	engine := newTestEngine(t)
-	req, _ := http.NewRequest(core.MethodPost, "/v1/runner/chat",
-		core.NewReader(`{"messages":[{"role":"user","content":"ping"}]}`))
+	req := core.NewHTTPRequest(core.MethodPost, "/v1/runner/chat",
+		core.NewReader(`{"messages":[{"role":"user","content":"ping"}]}`)).Value.(*core.Request)
 	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)

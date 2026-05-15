@@ -5,7 +5,6 @@ package opencode
 import (
 	goio "io"
 	"net"
-	"net/http"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -310,8 +309,9 @@ func waitHealthy(target, authHeader string, timeout core.Duration) core.Result {
 	deadline := core.Now().Add(timeout)
 	client := &core.HTTPClient{Timeout: 2 * core.Second}
 	for core.Now().Before(deadline) {
-		req, err := http.NewRequest(core.MethodGet, target+"/global/health", nil)
-		if err == nil {
+		r := core.NewHTTPRequest(core.MethodGet, target+"/global/health", nil)
+		if r.OK {
+			req := r.Value.(*core.Request)
 			if authHeader != "" {
 				req.Header.Set("Authorization", authHeader)
 			}
@@ -340,10 +340,11 @@ func waitHealthy(target, authHeader string, timeout core.Duration) core.Result {
 // OPENCODE_SERVER_PASSWORD is set (always set by Start).
 func applyProfile(target, authHeader string, p Profile) core.Result {
 	body := core.NewBufferString(p.ToOpenCodeWire())
-	req, err := http.NewRequest(core.MethodPatch, target+"/global/config", body)
-	if err != nil {
-		return core.Fail(core.E("opencode.applyProfile", "request build failed", err))
+	r := core.NewHTTPRequest(core.MethodPatch, target+"/global/config", body)
+	if !r.OK {
+		return core.Fail(core.E("opencode.applyProfile", "request build failed", r.Value.(error)))
 	}
+	req := r.Value.(*core.Request)
 	req.Header.Set("Content-Type", "application/json")
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)

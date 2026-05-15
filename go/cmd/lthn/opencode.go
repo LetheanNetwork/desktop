@@ -4,7 +4,6 @@ package main
 
 import (
 	goio "io"
-	"net/http"
 
 	core "dappco.re/go"
 )
@@ -101,7 +100,7 @@ func opencodeStart(args []string) int {
 		}
 	}
 	payload := core.JSONMarshalString(map[string]string{"profile": profile})
-	req, _ := http.NewRequest(core.MethodPost, opencodeBase, core.NewReader(payload))
+	req := core.NewHTTPRequest(core.MethodPost, opencodeBase, core.NewReader(payload)).Value.(*core.Request)
 	req.Header.Set("Content-Type", "application/json")
 	body, code, err := doRequest(req)
 	if err != nil {
@@ -122,7 +121,7 @@ func opencodeStop(args []string) int {
 		core.Print(core.Stderr(), "lthn opencode stop: usage: lthn opencode stop ID\n")
 		return 2
 	}
-	req, _ := http.NewRequest(core.MethodDelete, opencodeBase+"/"+args[0], nil)
+	req := core.NewHTTPRequest(core.MethodDelete, opencodeBase+"/"+args[0], nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode stop: %s\n", err)
@@ -137,7 +136,7 @@ func opencodeStop(args []string) int {
 }
 
 func opencodeStatus() int {
-	req, _ := http.NewRequest(core.MethodGet, opencodeBase, nil)
+	req := core.NewHTTPRequest(core.MethodGet, opencodeBase, nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode status: %s\n", err)
@@ -157,7 +156,7 @@ func opencodeInspect(args []string) int {
 		core.Print(core.Stderr(), "lthn opencode inspect: usage: lthn opencode inspect ID\n")
 		return 2
 	}
-	req, _ := http.NewRequest(core.MethodGet, opencodeBase+"/"+args[0], nil)
+	req := core.NewHTTPRequest(core.MethodGet, opencodeBase+"/"+args[0], nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode inspect: %s\n", err)
@@ -200,7 +199,7 @@ func opencodeProfile(args []string) int {
 }
 
 func profileList() int {
-	req, _ := http.NewRequest(core.MethodGet, opencodeProfBase, nil)
+	req := core.NewHTTPRequest(core.MethodGet, opencodeProfBase, nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode profile list: %s\n", err)
@@ -219,7 +218,7 @@ func profileShow(args []string) int {
 		core.Print(core.Stderr(), "lthn opencode profile show: usage: lthn opencode profile show NAME\n")
 		return 2
 	}
-	req, _ := http.NewRequest(core.MethodGet, opencodeProfBase+"/"+args[0], nil)
+	req := core.NewHTTPRequest(core.MethodGet, opencodeProfBase+"/"+args[0], nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode profile show: %s\n", err)
@@ -244,7 +243,7 @@ func profileSave(args []string) int {
 		return 1
 	}
 	data, _ := raw.Value.([]byte)
-	req, _ := http.NewRequest(core.MethodPost, opencodeProfBase, core.NewReader(string(data)))
+	req := core.NewHTTPRequest(core.MethodPost, opencodeProfBase, core.NewReader(string(data))).Value.(*core.Request)
 	req.Header.Set("Content-Type", "application/json")
 	body, code, err := doRequest(req)
 	if err != nil {
@@ -264,7 +263,7 @@ func profileDelete(args []string) int {
 		core.Print(core.Stderr(), "lthn opencode profile delete: usage: lthn opencode profile delete NAME\n")
 		return 2
 	}
-	req, _ := http.NewRequest(core.MethodDelete, opencodeProfBase+"/"+args[0], nil)
+	req := core.NewHTTPRequest(core.MethodDelete, opencodeProfBase+"/"+args[0], nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode profile delete: %s\n", err)
@@ -312,7 +311,7 @@ func opencodeMergeHostConfig(args []string) int {
 		"profile": profile,
 		"force":   force,
 	})
-	req, _ := http.NewRequest(core.MethodPost, opencodeHostConfigBase, core.NewReader(payload))
+	req := core.NewHTTPRequest(core.MethodPost, opencodeHostConfigBase, core.NewReader(payload)).Value.(*core.Request)
 	req.Header.Set("Content-Type", "application/json")
 	body, code, err := doRequest(req)
 	if err != nil {
@@ -344,7 +343,7 @@ func opencodeProviders(args []string) int {
 		core.Print(core.Stderr(), "lthn opencode providers: usage: lthn opencode providers ID\n")
 		return 2
 	}
-	req, _ := http.NewRequest(core.MethodGet, opencodeBase+"/"+args[0]+"/providers", nil)
+	req := core.NewHTTPRequest(core.MethodGet, opencodeBase+"/"+args[0]+"/providers", nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode providers: %s\n", err)
@@ -367,8 +366,8 @@ func opencodeProviders(args []string) int {
 //	lthn opencode import
 //	# {"projects":9,"providers":21,"providers_with_auth":1}
 func opencodeImport() int {
-	req, _ := http.NewRequest(core.MethodPost,
-		"http://localhost:8000/v1/api/opencode/import", nil)
+	req := core.NewHTTPRequest(core.MethodPost,
+		"http://localhost:8000/v1/api/opencode/import", nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode import: %s\n", err)
@@ -395,7 +394,7 @@ func opencodeImports(args []string) int {
 	if len(args) > 0 && args[0] == "providers" {
 		url += "/providers"
 	}
-	req, _ := http.NewRequest(core.MethodGet, url, nil)
+	req := core.NewHTTPRequest(core.MethodGet, url, nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode imports: %s\n", err)
@@ -424,7 +423,7 @@ func opencodeWeb(args []string) int {
 		core.Print(core.Stderr(), "lthn opencode web: usage: lthn opencode web ID\n")
 		return 2
 	}
-	req, _ := http.NewRequest(core.MethodGet, opencodeBase+"/"+args[0]+"/web", nil)
+	req := core.NewHTTPRequest(core.MethodGet, opencodeBase+"/"+args[0]+"/web", nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode web: %s\n", err)
@@ -461,8 +460,8 @@ func opencodeWeb(args []string) int {
 //	lthn opencode upgrade
 //	# {"updated":true,"digest":"sha256:...","restarted":["oc-..."]}
 func opencodeUpgrade() int {
-	req, _ := http.NewRequest(core.MethodPost,
-		"http://localhost:8000/v1/api/opencode/upgrade", nil)
+	req := core.NewHTTPRequest(core.MethodPost,
+		"http://localhost:8000/v1/api/opencode/upgrade", nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode upgrade: %s\n", err)
@@ -488,7 +487,7 @@ func opencodeTUI(args []string) int {
 		core.Print(core.Stderr(), "lthn opencode tui: usage: lthn opencode tui ID\n")
 		return 2
 	}
-	req, _ := http.NewRequest(core.MethodPost, opencodeBase+"/"+args[0]+"/tui", nil)
+	req := core.NewHTTPRequest(core.MethodPost, opencodeBase+"/"+args[0]+"/tui", nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode tui: %s\n", err)
@@ -526,7 +525,7 @@ func opencodeEnable(args []string) int {
 		}
 	}
 	payload := core.JSONMarshalString(map[string]string{"profile": profile})
-	req, _ := http.NewRequest(core.MethodPost, opencodeEnableBase, core.NewReader(payload))
+	req := core.NewHTTPRequest(core.MethodPost, opencodeEnableBase, core.NewReader(payload)).Value.(*core.Request)
 	req.Header.Set("Content-Type", "application/json")
 	body, code, err := doRequest(req)
 	if err != nil {
@@ -545,7 +544,7 @@ func opencodeEnable(args []string) int {
 // opencodeDisable persists `opencode.serve.enabled = false` + stops
 // any running sandboxes.
 func opencodeDisable() int {
-	req, _ := http.NewRequest(core.MethodPost, opencodeDisableBase, nil)
+	req := core.NewHTTPRequest(core.MethodPost, opencodeDisableBase, nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode disable: %s\n", err)
@@ -561,7 +560,7 @@ func opencodeDisable() int {
 
 // opencodeEnabled prints the persisted enabled flag.
 func opencodeEnabled() int {
-	req, _ := http.NewRequest(core.MethodGet, opencodeEnabledBase, nil)
+	req := core.NewHTTPRequest(core.MethodGet, opencodeEnabledBase, nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode enabled: %s\n", err)

@@ -11,7 +11,6 @@ package plugin
 
 import (
 	"net"
-	"net/http"
 
 	core "dappco.re/go"
 	"dappco.re/go/process"
@@ -64,7 +63,7 @@ func waitForHealth(ctx core.Context, port int, path string, timeout core.Duratio
 			return core.Fail(core.E("plugin.waitForHealth", "context cancelled", nil))
 		default:
 		}
-		req, _ := http.NewRequestWithContext(ctx, core.MethodGet, url, nil)
+		req := core.NewHTTPRequestContext(ctx, core.MethodGet, url, nil).Value.(*core.Request)
 		resp, err := core.DefaultHTTPClient.Do(req)
 		if err == nil {
 			resp.Body.Close()

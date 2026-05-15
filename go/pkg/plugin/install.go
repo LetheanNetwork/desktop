@@ -10,7 +10,6 @@ package plugin
 import (
 	"crypto/sha256"
 	"io"
-	"net/http"
 	"net/url"
 
 	core "dappco.re/go"
@@ -74,10 +73,11 @@ func fetchBinary(ctx core.Context, rawURL string) core.Result {
 	}
 	cctx, cancel := core.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(cctx, core.MethodGet, rawURL, nil)
-	if err != nil {
-		return core.Fail(core.E(fetchBinaryOp, "build request: "+err.Error(), nil))
+	r := core.NewHTTPRequestContext(cctx, core.MethodGet, rawURL, nil)
+	if !r.OK {
+		return core.Fail(core.E(fetchBinaryOp, "build request: "+r.Error(), nil))
 	}
+	req := r.Value.(*core.Request)
 	resp, err := core.DefaultHTTPClient.Do(req)
 	if err != nil {
 		return core.Fail(core.E(fetchBinaryOp, "http: "+err.Error(), nil))
