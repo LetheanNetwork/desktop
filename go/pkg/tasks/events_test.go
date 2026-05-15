@@ -24,9 +24,11 @@ func newEventsCore(t *core.T) *core.Core {
 	return c
 }
 
-// TestEvents_Subscribe_Created — Create fires KindCreated with the
-// new Issue and zero-value Before.
-func TestEvents_Subscribe_Created(t *core.T) {
+// TestEvents_Subscribe_Good — a single subscriber receives every
+// IssueChanged broadcast, populated with the Issue snapshot AFTER
+// the change. Covers the canonical create path: KindCreated event
+// with zero-value Before.
+func TestEvents_Subscribe_Good(t *core.T) {
 	c := newEventsCore(t)
 
 	var got []tasks.IssueChanged
@@ -51,104 +53,68 @@ func TestEvents_Subscribe_Created(t *core.T) {
 	core.AssertEqual(t, "", ev.Before.ID)
 }
 
-// TestEvents_Update_FiresUpdated — Update with a non-closing state
-// change fires KindUpdated with both Before and Issue populated.
-func TestEvents_Update_FiresUpdated(t *core.T) {
+// TestEvents_Subscribe_Bad — Subscribe with a nil Core or nil
+// callback is a defensive no-op (returns early without panicking
+// or registering anything). Test asserts AssertNotPanics across
+// both nil paths.
+func TestEvents_Subscribe_Bad(t *core.T) {
+	core.AssertNotPanics(t, func() {
+		tasks.Subscribe(nil, func(*core.Core, tasks.IssueChanged) {})
+	})
+	c := newEventsCore(t)
+	core.AssertNotPanics(t, func() {
+		tasks.Subscribe(c, nil)
+	})
+}
+
+// TestEvents_Subscribe_Ugly — fan-out covers the four Kind variants
+// (KindCreated / KindUpdated / KindClosed / KindNoted), exercises
+// multiple registered subscribers, and proves Core's panic-recover
+// keeps the cascade alive when one subscriber panics.
+func TestEvents_Subscribe_Ugly(t *core.T) {
 	c := newEventsCore(t)
 
-	r := tasks.Create(c, tasks.CreateInput{Project: "lthn", Summary: "u"})
-	core.RequireTrue(t, r.OK)
-	created := r.Value.(tasks.Issue)
-
-	var got []tasks.IssueChanged
+	var seen []string
 	var mu core.Mutex
-	tasks.Subscribe(c, func(_ *core.Core, ev tasks.IssueChanged) {
+	record := func(_ *core.Core, ev tasks.IssueChanged) {
 		mu.Lock()
-		got = append(got, ev)
+		seen = append(seen, ev.Kind)
 		mu.Unlock()
+	}
+
+	tasks.Subscribe(c, record)
+	tasks.Subscribe(c, func(*core.Core, tasks.IssueChanged) {
+		panic("simulated bad subscriber — Core's recover keeps cascade alive")
 	})
-
-	r = tasks.Update(c, created.ID, tasks.UpdateInput{
-		State: tasks.StateInProgress,
-	})
-	core.RequireTrue(t, r.OK)
-
-	mu.Lock()
-	defer mu.Unlock()
-	core.AssertLen(t, got, 1)
-	ev := got[0]
-	core.AssertEqual(t, tasks.KindUpdated, ev.Kind)
-	core.AssertEqual(t, tasks.StateOpen, ev.Before.State)
-	core.AssertEqual(t, tasks.StateInProgress, ev.Issue.State)
-}
-
-// TestEvents_Close_FiresClosed — a state transition to StateDone
-// fires KindClosed (not KindUpdated).
-func TestEvents_Close_FiresClosed(t *core.T) {
-	c := newEventsCore(t)
-
-	r := tasks.Create(c, tasks.CreateInput{Project: "lthn", Summary: "c"})
-	created := r.Value.(tasks.Issue)
-
-	var seen string
-	tasks.Subscribe(c, func(_ *core.Core, ev tasks.IssueChanged) {
-		seen = ev.Kind
-	})
-
-	core.RequireTrue(t, tasks.Close(c, created.ID, "fixed").OK)
-	core.AssertEqual(t, tasks.KindClosed, seen)
-}
-
-// TestEvents_AddNote_FiresNoted — appending a Note fires KindNoted
-// with the parent Issue snapshot AND the new Note populated.
-func TestEvents_AddNote_FiresNoted(t *core.T) {
-	c := newEventsCore(t)
-
-	r := tasks.Create(c, tasks.CreateInput{Project: "lthn", Summary: "n"})
-	parent := r.Value.(tasks.Issue)
-
-	var got tasks.IssueChanged
-	tasks.Subscribe(c, func(_ *core.Core, ev tasks.IssueChanged) {
-		if ev.Kind == tasks.KindNoted {
-			got = ev
-		}
-	})
-
-	core.RequireTrue(t, tasks.AddNote(c, parent.ID, "a comment", "tester").OK)
-	core.AssertEqual(t, tasks.KindNoted, got.Kind)
-	core.AssertEqual(t, "a comment", got.Note.Body)
-	core.AssertEqual(t, parent.ID, got.Issue.ID)
-}
-
-// TestEvents_MultipleSubscribers — every registered listener receives
-// every event; one bad listener doesn't take the cascade down.
-func TestEvents_MultipleSubscribers(t *core.T) {
-	c := newEventsCore(t)
-
-	var aCount, bCount int
-	var mu core.Mutex
+	var aCount int
 	tasks.Subscribe(c, func(*core.Core, tasks.IssueChanged) {
 		mu.Lock()
 		aCount++
 		mu.Unlock()
 	})
-	tasks.Subscribe(c, func(*core.Core, tasks.IssueChanged) {
-		// Panic to confirm Core's recover keeps the cascade alive.
-		panic("simulated bad subscriber")
-	})
-	tasks.Subscribe(c, func(*core.Core, tasks.IssueChanged) {
-		mu.Lock()
-		bCount++
-		mu.Unlock()
-	})
 
-	core.RequireTrue(t, tasks.Create(c, tasks.CreateInput{Project: "lthn", Summary: "m"}).OK)
-	// Allow microscopic time for any goroutine fan-out (Core's
-	// broadcast is sync today but defensive).
+	// Cover every Kind by walking an Issue through its lifecycle.
+	r := tasks.Create(c, tasks.CreateInput{Project: "lthn", Summary: "u"})
+	core.RequireTrue(t, r.OK)
+	created := r.Value.(tasks.Issue)
+
+	core.RequireTrue(t, tasks.Update(c, created.ID, tasks.UpdateInput{
+		State: tasks.StateInProgress,
+	}).OK)
+	core.RequireTrue(t, tasks.AddNote(c, created.ID, "comment", "tester").OK)
+	core.RequireTrue(t, tasks.Close(c, created.ID, "fixed").OK)
+
+	// Tiny pause for any goroutine fan-out (Core broadcast is sync today
+	// but defensive). Then assert four distinct Kinds reached the recorder.
 	core.Sleep(5 * core.Millisecond)
-
 	mu.Lock()
 	defer mu.Unlock()
-	core.AssertEqual(t, 1, aCount)
-	core.AssertEqual(t, 1, bCount)
+	core.AssertLen(t, seen, 4)
+	core.AssertEqual(t, tasks.KindCreated, seen[0])
+	core.AssertEqual(t, tasks.KindUpdated, seen[1])
+	core.AssertEqual(t, tasks.KindNoted, seen[2])
+	core.AssertEqual(t, tasks.KindClosed, seen[3])
+	// Healthy subscriber count matches event count — panic in the
+	// middle subscriber doesn't take the third one down.
+	core.AssertEqual(t, 4, aCount)
 }

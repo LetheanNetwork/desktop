@@ -11,6 +11,7 @@ func TestSchemas_Schemas_Good(t *core.T) {
 	schemas := tasks.Schemas()
 	core.AssertLen(t, schemas, 2)
 	core.AssertEqual(t, "tasks_issues", schemas[0].Name)
+	core.AssertEqual(t, "tasks_notes", schemas[1].Name)
 }
 
 func TestSchemas_Schemas_Bad(t *core.T) {
