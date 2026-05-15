@@ -18,6 +18,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/gateway"
 	lthni18n "dappco.re/lthn/desktop/pkg/i18n"
 	"dappco.re/lthn/desktop/pkg/marketplace"
+	"dappco.re/lthn/desktop/pkg/mdns"
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/plugin"
@@ -155,6 +156,12 @@ func newAppCore() *core.Core {
 		// installed Permissions snapshot. Mounted on the api Engine
 		// in cmdServe alongside opencode + plugin proxy groups.
 		core.WithName("gateway", gateway.Register),
+		// mdns — LAN-discovery broadcast of the lthn HTTP server as
+		// _http._tcp.local under "lthn" (resolves to lthn.local).
+		// Service registers in disabled state; cmdServe calls
+		// Configure + OnStart with the resolved port. User-facing
+		// toggle binds via mdns.Service.SetDiscoverable.
+		core.WithName("mdns", mdns.Register),
 	)
 
 	if r := c.ServiceStartup(core.Background(), nil); !r.OK {

@@ -28,12 +28,15 @@ package main
 import (
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
+	"dappco.re/go/process"
+	processapi "dappco.re/go/process/pkg/api"
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/desktop"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/gateway"
 	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/lthn/desktop/pkg/mdns"
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/runner"
@@ -376,6 +379,10 @@ func cmdServe(args []string) int {
 	if gatewaySvc, _ := core.ServiceFor[*gateway.Service](c, "gateway"); gatewaySvc != nil {
 		extras = append(extras, gateway.NewRoutes(gatewaySvc))
 	}
+	if procSvc, _ := core.ServiceFor[*process.Service](c, "process"); procSvc != nil {
+		// nil registry → DefaultRegistry; nil hub → no WS push (REST only for v1)
+		extras = append(extras, processapi.NewProvider(nil, procSvc, nil))
+	}
 	s := server.NewService(server.Options{
 		Addr:        core.Concat(":", port),
 		Runner:      r,
@@ -390,6 +397,27 @@ func cmdServe(args []string) int {
 	if rr := s.Start(core.Background()); !rr.OK {
 		core.Print(core.Stderr(), serveErrorFormat, rr.Error())
 		return 1
+	}
+	// mdns — broadcast the HTTP server as _http._tcp.local under
+	// "lthn" (resolves to lthn.local). Best-effort: a broadcast
+	// failure shouldn't bring the serve down; LAN discovery is a
+	// feature, not a hard dependency.
+	if mdnsSvc, _ := core.ServiceFor[*mdns.Service](c, "mdns"); mdnsSvc != nil {
+		portInt := core.Atoi(port)
+		if portInt.OK {
+			mdnsSvc.Configure(mdns.Options{
+				Port: portInt.Value.(int),
+				TXT: []string{
+					"version=" + firstlaunch.Version,
+					"marketplace=v1",
+					"gateway=v1",
+				},
+			})
+			if rr := mdnsSvc.OnStart(); !rr.OK {
+				core.Print(core.Stderr(),
+					"lthn serve: mdns broadcast failed (non-fatal): %s\n", rr.Error())
+			}
+		}
 	}
 	return 0
 }
