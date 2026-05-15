@@ -221,6 +221,8 @@ func TestQueue_List_Bad(t *core.T) {
 // TestQueue_List_Ugly — IssueID + Project filters narrow correctly
 // across a multi-row queue; the Order("enqueued_at","desc") clause
 // puts the most-recent insert first when no narrower filter applies.
+// Also covers Kind+Limit — the orm bridge bug (#1395) that returned
+// zero rows when a Where predicate combined with Limit(1).
 func TestQueue_List_Ugly(t *core.T) {
 	c := newQueueCore(t)
 	core.RequireTrue(t, queue.EnqueueWithOptions(c, "lint", queue.EnqueueOptions{
@@ -245,6 +247,13 @@ func TestQueue_List_Ugly(t *core.T) {
 	core.RequireTrue(t, r.OK)
 	jobs, _ = orm.Cast[[]queue.Job](r)
 	core.AssertLen(t, jobs, 2)
+
+	// Kind+Limit — previously returned 0 rows due to orm bridge bug #1395.
+	r = queue.List(c, queue.ListFilter{Kind: "lint", Limit: 1})
+	core.RequireTrue(t, r.OK)
+	jobs, _ = orm.Cast[[]queue.Job](r)
+	core.AssertLen(t, jobs, 1)
+	core.AssertEqual(t, "lint", jobs[0].Kind)
 }
 
 // TestQueue_Get_Good — Get returns the persisted Job by id.
