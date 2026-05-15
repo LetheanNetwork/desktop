@@ -639,6 +639,11 @@ switch (surface) {
     app.innerHTML = `<lthn-telemetry-window></lthn-telemetry-window>`;
     break;
   }
+  case "processes": {
+    await import("./lit/obs/processes-window");
+    app.innerHTML = `<lthn-processes-window></lthn-processes-window>`;
+    break;
+  }
   case "integrations": {
     app.innerHTML = `<lthn-integrations-window></lthn-integrations-window>`;
     break;
@@ -672,7 +677,7 @@ switch (surface) {
         <p style="opacity:0.7;font-size:14px;">Mount any window via <code>?surface=chat&amp;state=multi-turn</code> etc.</p>
         <ul style="opacity:0.7;font-size:13px;font-family:var(--font-mono,monospace);">
           <li><a href="?surface=chat">chat</a> · <a href="?surface=welcome">welcome</a> · <a href="?surface=settings">settings</a> · <a href="?surface=models">models</a></li>
-          <li><a href="?surface=benchmark">benchmark</a> · <a href="?surface=logs">logs</a> · <a href="?surface=telemetry">telemetry</a></li>
+          <li><a href="?surface=benchmark">benchmark</a> · <a href="?surface=logs">logs</a> · <a href="?surface=telemetry">telemetry</a> · <a href="?surface=processes">processes</a></li>
           <li><a href="?surface=integrations">integrations</a> · <a href="?surface=tools">tools</a> · <a href="?surface=editor">editor</a> · <a href="?surface=git">git</a></li>
           <li><a href="?surface=build">build</a> · <a href="?surface=lint">lint</a> · <a href="?surface=containers">containers</a> · <a href="?surface=repos">repos</a> · <a href="?surface=php">php</a> · <a href="?surface=marketplace">marketplace</a> · <a href="?surface=plugin">plugin</a></li>
           <li><a href="?surface=network">network</a> · <a href="?surface=distillation">distillation</a> · <a href="?surface=fleet">fleet</a> · <a href="?surface=providers">providers</a></li>
