@@ -52,7 +52,6 @@ const NAV: NavEntry[] = [
   { id: "benchmark",     label: "Benchmark",     icon: "fa-gauge-high",       tag: "lthn-benchmark-window",     group: "observe" },
   { id: "logs",          label: "Activity",      icon: "fa-wave-square",      tag: "lthn-logs-window",          group: "observe" },
   { id: "telemetry",     label: "Telemetry",     icon: "fa-bolt",             tag: "lthn-telemetry-window",     group: "observe" },
-  { id: "processes",     label: "Processes",     icon: "fa-microchip",        tag: "lthn-processes-window",     group: "observe" },
   { id: "integrations",  label: "Integrations",  icon: "fa-link",             tag: "lthn-integrations-window",  group: "extend" },
   { id: "tools",         label: "Tools · MCP",   icon: "fa-screwdriver-wrench", tag: "lthn-tools-window",       group: "extend" },
   { id: "providers",     label: "Providers",     icon: "fa-store",            tag: "lthn-providers-window",     group: "extend" },
@@ -157,7 +156,7 @@ class LthnAppShell extends LitElement {
       group: { primary: "Workspace", observe: "Observe", extend: "Extend", preview: "Preview" },
       nav: {
         chat: "Chat", models: "Models", benchmark: "Benchmark", logs: "Activity",
-        telemetry: "Telemetry", processes: "Processes", integrations: "Integrations", tools: "Tools · MCP",
+        telemetry: "Telemetry", integrations: "Integrations", tools: "Tools · MCP",
         network: "Network", distillation: "Fine-tune", fleet: "Fleet", settings: "Settings",
       },
     };
@@ -168,13 +167,13 @@ class LthnAppShell extends LitElement {
     const [
       brand, search, settingsTip, preview, expand, collapse,
       gPrimary, gObserve, gExtend, gPreview,
-      nChat, nModels, nBenchmark, nLogs, nTelemetry, nProcesses, nIntegrations, nTools, nNetwork, nDistillation, nFleet, nSettings,
+      nChat, nModels, nBenchmark, nLogs, nTelemetry, nIntegrations, nTools, nNetwork, nDistillation, nFleet, nSettings,
     ] = await Promise.all([
       T("shell.brand"), T("shell.search"), T("shell.settings_tooltip"),
       T("shell.preview_tag"), T("shell.expand"), T("shell.collapse"),
       T("shell.group.primary"), T("shell.group.observe"), T("shell.group.extend"), T("shell.group.preview"),
       T("shell.nav.chat"), T("shell.nav.models"), T("shell.nav.benchmark"), T("shell.nav.logs"),
-      T("shell.nav.telemetry"), T("shell.nav.processes"), T("shell.nav.integrations"), T("shell.nav.tools"),
+      T("shell.nav.telemetry"), T("shell.nav.integrations"), T("shell.nav.tools"),
       T("shell.nav.network"), T("shell.nav.distillation"), T("shell.nav.fleet"), T("shell.nav.settings"),
     ]);
     this.t = {
@@ -182,7 +181,7 @@ class LthnAppShell extends LitElement {
       group:  { primary: gPrimary, observe: gObserve, extend: gExtend, preview: gPreview },
       nav: {
         chat: nChat, models: nModels, benchmark: nBenchmark, logs: nLogs,
-        telemetry: nTelemetry, processes: nProcesses, integrations: nIntegrations, tools: nTools,
+        telemetry: nTelemetry, integrations: nIntegrations, tools: nTools,
         network: nNetwork, distillation: nDistillation, fleet: nFleet, settings: nSettings,
       },
     };

@@ -122,7 +122,6 @@
       "benchmark": "Benchmark",
       "logs": "Activity",
       "telemetry": "Telemetry",
-      "processes": "Processes",
       "integrations": "Integrations",
       "tools": "Tools · MCP",
       "network": "Network",
@@ -342,9 +341,6 @@
       "btn_clear":   "Clear",
       "btn_pause":   "Pause",
       "btn_resume":  "Resume"
-    },
-    "processes":    {
-      "title": "Processes", "subtitle": "daemons · processes · pipelines"
     },
     "settings":     {
       "title": "Settings", "subtitle": "lthn · v0.2.0-rc1",
