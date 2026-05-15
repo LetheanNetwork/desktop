@@ -19,6 +19,7 @@ package marketplace
 import (
 	core "dappco.re/go"
 	"dappco.re/go/orm"
+	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/sandbox"
 )
 
@@ -204,6 +205,12 @@ func (s *Service) Install(input InstallInput) core.Result {
 		_ = orm.Of[InstalledBundle](s.core).Save(&rec)
 	}
 
+	// Five-pillar plugin registration — wire the manifest's plugin:
+	// block into pkg/plugin's Core action registry. Best-effort; a
+	// plugin-block failure doesn't fail the install (the sandboxes
+	// already landed). Uninstall calls plugin.UnregisterBundle.
+	_ = plugin.RegisterBundle(s.core, m.Name, manifestToPluginInput(m))
+
 	if lastErr != "" {
 		return core.Fail(core.E(installBundleOp, "one or more images failed to start: "+lastErr, nil))
 	}
@@ -212,6 +219,51 @@ func (s *Service) Install(input InstallInput) core.Result {
 		BundleID:   m.Name,
 		SandboxIDs: sandboxIDs,
 	})
+}
+
+// manifestToPluginInput translates a BundleManifest's plugin: block
+// + images block into the plugin-package-local BundleInput shape.
+// The two type-trees are deliberately separated to avoid an import
+// cycle (pkg/plugin can't import pkg/marketplace because
+// marketplace/wails.go imports plugin for the legacy binary-plugin
+// host).
+func manifestToPluginInput(m BundleManifest) plugin.BundleInput {
+	in := plugin.BundleInput{
+		Exposes: map[string]string{},
+	}
+	for _, img := range m.Images {
+		if img.Expose != nil && img.Expose.Route != "" {
+			in.Exposes[img.ID] = img.Expose.Route
+		}
+	}
+	if m.Plugin == nil {
+		return in
+	}
+	for _, r := range m.Plugin.Routes {
+		in.Routes = append(in.Routes, plugin.BundleRouteEntry{
+			Title:            r.Title,
+			Icon:             r.Icon,
+			Group:            r.Group,
+			Target:           r.Target,
+			OpenAfterInstall: r.OpenAfterInstall,
+		})
+	}
+	for _, c := range m.Plugin.Commands {
+		in.Commands = append(in.Commands, plugin.BundleCommandEntry{
+			ID:    c.ID,
+			Title: c.Title,
+			Runs:  c.Runs,
+		})
+	}
+	for _, s := range m.Plugin.Settings {
+		in.Settings = append(in.Settings, plugin.BundleSettingEntry{
+			Key:     s.Key,
+			Type:    s.Type,
+			Prompt:  s.Prompt,
+			Default: s.Default,
+		})
+	}
+	return in
 }
 
 // Launch starts all sandboxes for an already-installed bundle.
@@ -322,7 +374,12 @@ func (s *Service) Uninstall(bundleID string) core.Result {
 	// Stop all running sandboxes first.
 	_ = s.Stop(bundleID)
 
+	// Drop five-pillar plugin entries before the orm record so a
+	// later "list installed" doesn't surface ghost route/command
+	// names. plugin.UnregisterBundle is idempotent + handles unknown
+	// bundle ids cleanly.
 	if s.core != nil {
+		_ = plugin.UnregisterBundle(s.core, bundleID)
 		rec := InstalledBundle{BundleID: bundleID}
 		_ = orm.Of[InstalledBundle](s.core).Delete(&rec)
 	}
