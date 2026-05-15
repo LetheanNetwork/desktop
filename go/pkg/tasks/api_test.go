@@ -3,10 +3,9 @@
 package tasks_test
 
 import (
-
 	core "dappco.re/go"
-	"dappco.re/lthn/desktop/pkg/tasks"
 	"dappco.re/go/orm"
+	"dappco.re/lthn/desktop/pkg/tasks"
 )
 
 // newTestCore returns a *core.Core with orm registered + a fresh Memium
@@ -15,17 +14,11 @@ import (
 func newTestCore(t *core.T) *core.Core {
 	t.Helper()
 	c := core.New()
-	if r := orm.Register(c); !r.OK {
-		t.Fatalf("orm.Register: %s", r.Error())
-	}
+	core.RequireTrue(t, orm.Register(c).OK)
 	mem := orm.NewMemium()
-	if r := orm.Mount(c, "default", mem); !r.OK {
-		t.Fatalf("orm.Mount: %s", r.Error())
-	}
+	core.RequireTrue(t, orm.Mount(c, "default", mem).OK)
 	for _, schema := range tasks.Schemas() {
-		if r := orm.RegisterSchema(c, schema); !r.OK {
-			t.Fatalf("orm.RegisterSchema: %s", r.Error())
-		}
+		core.RequireTrue(t, orm.RegisterSchema(c, schema).OK)
 		mem.RegisterTable(schema.Name, schema)
 	}
 	return c
@@ -38,76 +31,45 @@ func TestTasks_Create_Good_PopulatesDefaults(t *core.T) {
 		Project: "ide",
 		Summary: "wire tasks panel",
 	})
-	if !r.OK {
-		t.Fatalf("Create: %s", r.Error())
-	}
+	core.RequireTrue(t, r.OK)
 	issue, _, ok := orm.Detail[tasks.Issue](r)
-	if !ok {
-		t.Fatal("Detail cast failed")
-	}
-	if issue.ID == "" {
-		t.Error("expected non-empty ID")
-	}
-	if issue.State != tasks.StateOpen {
-		t.Errorf("expected state=%q, got %q", tasks.StateOpen, issue.State)
-	}
-	if issue.Severity != tasks.SeverityMinor {
-		t.Errorf("expected severity=%q, got %q", tasks.SeverityMinor, issue.Severity)
-	}
-	if issue.Priority != tasks.PriorityNormal {
-		t.Errorf("expected priority=%q, got %q", tasks.PriorityNormal, issue.Priority)
-	}
-	if issue.CreatedAt.IsZero() {
-		t.Error("expected non-zero CreatedAt")
-	}
+	core.RequireTrue(t, ok)
+	core.AssertNotEmpty(t, issue.ID)
+	core.AssertEqual(t, tasks.StateOpen, issue.State)
+	core.AssertEqual(t, tasks.SeverityMinor, issue.Severity)
+	core.AssertEqual(t, tasks.PriorityNormal, issue.Priority)
+	core.AssertFalse(t, issue.CreatedAt.IsZero())
 }
 
 func TestTasks_Create_Bad_MissingProject(t *core.T) {
 	c := newTestCore(t)
-
 	r := tasks.Create(c, tasks.CreateInput{Summary: "no project"})
-	if r.OK {
-		t.Fatal("expected failure when project is empty")
-	}
+	core.AssertFalse(t, r.OK)
 }
 
 func TestTasks_Create_Bad_MissingSummary(t *core.T) {
 	c := newTestCore(t)
-
 	r := tasks.Create(c, tasks.CreateInput{Project: "ide"})
-	if r.OK {
-		t.Fatal("expected failure when summary is empty")
-	}
+	core.AssertFalse(t, r.OK)
 }
 
 func TestTasks_Get_Good_RoundTrip(t *core.T) {
 	c := newTestCore(t)
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "round trip"})
-	if !created.OK {
-		t.Fatalf("Create: %s", created.Error())
-	}
+	core.RequireTrue(t, created.OK)
 	createdIssue, _, _ := orm.Detail[tasks.Issue](created)
 
 	r := tasks.Get(c, createdIssue.ID)
-	if !r.OK {
-		t.Fatalf("Get: %s", r.Error())
-	}
+	core.RequireTrue(t, r.OK)
 	issue, _, ok := orm.Detail[tasks.Issue](r)
-	if !ok {
-		t.Fatal("Detail cast failed")
-	}
-	if issue.Summary != "round trip" {
-		t.Errorf("expected summary=%q, got %q", "round trip", issue.Summary)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, "round trip", issue.Summary)
 }
 
 func TestTasks_Get_Bad_NotFound(t *core.T) {
 	c := newTestCore(t)
-
 	r := tasks.Get(c, "missing-id")
-	if r.OK {
-		t.Fatal("expected not-found failure")
-	}
+	core.AssertFalse(t, r.OK)
 }
 
 func TestTasks_List_Good_FiltersByProject(t *core.T) {
@@ -117,63 +79,39 @@ func TestTasks_List_Good_FiltersByProject(t *core.T) {
 	tasks.Create(c, tasks.CreateInput{Project: "store", Summary: "store one"})
 
 	r := tasks.List(c, tasks.ListFilter{Project: "ide"})
-	if !r.OK {
-		t.Fatalf("List: %s", r.Error())
-	}
+	core.RequireTrue(t, r.OK)
 	issues, ok := orm.Cast[[]tasks.Issue](r)
-	if !ok {
-		t.Fatal("Cast to []Issue failed")
-	}
-	if len(issues) != 2 {
-		t.Errorf("expected 2 issues, got %d", len(issues))
-	}
+	core.RequireTrue(t, ok)
+	core.AssertLen(t, issues, 2)
 	for _, issue := range issues {
-		if issue.Project != "ide" {
-			t.Errorf("expected project=ide, got %q", issue.Project)
-		}
+		core.AssertEqual(t, "ide", issue.Project)
 	}
 }
 
 func TestTasks_Update_Good_StateTransitionSetsClosedAt(t *core.T) {
 	c := newTestCore(t)
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "to be closed"})
-	if !created.OK {
-		t.Fatalf("Create: %s", created.Error())
-	}
+	core.RequireTrue(t, created.OK)
 	createdIssue, _, _ := orm.Detail[tasks.Issue](created)
 
 	r := tasks.Update(c, createdIssue.ID, tasks.UpdateInput{State: tasks.StateDone})
-	if !r.OK {
-		t.Fatalf("Update: %s", r.Error())
-	}
+	core.RequireTrue(t, r.OK)
 	updated, _, _ := orm.Detail[tasks.Issue](r)
-	if updated.State != tasks.StateDone {
-		t.Errorf("expected state=%q, got %q", tasks.StateDone, updated.State)
-	}
-	if updated.ClosedAt.IsZero() {
-		t.Error("expected ClosedAt set on state=done")
-	}
+	core.AssertEqual(t, tasks.StateDone, updated.State)
+	core.AssertFalse(t, updated.ClosedAt.IsZero())
 }
 
 func TestTasks_Close_Good_SetsResolution(t *core.T) {
 	c := newTestCore(t)
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "to close"})
-	if !created.OK {
-		t.Fatalf("Create: %s", created.Error())
-	}
+	core.RequireTrue(t, created.OK)
 	createdIssue, _, _ := orm.Detail[tasks.Issue](created)
 
 	r := tasks.Close(c, createdIssue.ID, "fixed")
-	if !r.OK {
-		t.Fatalf("Close: %s", r.Error())
-	}
+	core.RequireTrue(t, r.OK)
 	closed, _, _ := orm.Detail[tasks.Issue](r)
-	if closed.State != tasks.StateDone {
-		t.Errorf("expected state=done, got %q", closed.State)
-	}
-	if closed.Resolution != "fixed" {
-		t.Errorf("expected resolution=fixed, got %q", closed.Resolution)
-	}
+	core.AssertEqual(t, tasks.StateDone, closed.State)
+	core.AssertEqual(t, "fixed", closed.Resolution)
 }
 
 func TestTasks_AddNote_Good_PersistsAndLists(t *core.T) {
@@ -181,62 +119,44 @@ func TestTasks_AddNote_Good_PersistsAndLists(t *core.T) {
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "note me"})
 	createdIssue, _, _ := orm.Detail[tasks.Issue](created)
 
-	if r := tasks.AddNote(c, createdIssue.ID, "first comment", "cladius"); !r.OK {
-		t.Fatalf("AddNote: %s", r.Error())
-	}
-	if r := tasks.AddNote(c, createdIssue.ID, "second comment", "snider"); !r.OK {
-		t.Fatalf("AddNote: %s", r.Error())
-	}
+	core.RequireTrue(t, tasks.AddNote(c, createdIssue.ID, "first comment", "cladius").OK)
+	core.RequireTrue(t, tasks.AddNote(c, createdIssue.ID, "second comment", "snider").OK)
 
 	r := tasks.ListNotes(c, createdIssue.ID)
-	if !r.OK {
-		t.Fatalf("ListNotes: %s", r.Error())
-	}
+	core.RequireTrue(t, r.OK)
 	notes, ok := orm.Cast[[]tasks.Note](r)
-	if !ok {
-		t.Fatal("Cast to []Note failed")
-	}
-	if len(notes) != 2 {
-		t.Errorf("expected 2 notes, got %d", len(notes))
-	}
+	core.RequireTrue(t, ok)
+	core.AssertLen(t, notes, 2)
 }
 
 func TestTasks_AddNote_Bad_EmptyBody(t *core.T) {
 	c := newTestCore(t)
-
 	r := tasks.AddNote(c, "any-id", "", "cladius")
-	if r.OK {
-		t.Fatal("expected failure on empty body")
-	}
+	core.AssertFalse(t, r.OK)
 }
 
 func TestApi_Create_Good(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "create good"})
-	if !result.OK {
-		t.Fatalf("Create: %s", result.Error())
-	}
+	core.RequireTrue(t, result.OK)
 	issue, _, ok := orm.Detail[tasks.Issue](result)
-	if !ok || issue.Project != "ide" {
-		t.Fatalf("Create: unexpected issue %#v", issue)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, "ide", issue.Project)
 }
 
 func TestApi_Create_Bad(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.Create(c, tasks.CreateInput{Summary: "missing project"})
-	if result.OK {
-		t.Fatal("Create: expected missing project failure")
-	}
+	core.AssertFalse(t, result.OK)
 }
 
 func TestApi_Create_Ugly(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "defaults"})
 	issue, _, ok := orm.Detail[tasks.Issue](result)
-	if !ok || issue.State != tasks.StateOpen || issue.Priority != tasks.PriorityNormal {
-		t.Fatalf("Create: defaults drifted %#v", issue)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, tasks.StateOpen, issue.State)
+	core.AssertEqual(t, tasks.PriorityNormal, issue.Priority)
 }
 
 func TestApi_Get_Good(t *core.T) {
@@ -244,17 +164,13 @@ func TestApi_Get_Good(t *core.T) {
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "get good"})
 	issue, _, _ := orm.Detail[tasks.Issue](created)
 	result := tasks.Get(c, issue.ID)
-	if !result.OK {
-		t.Fatalf("Get: %s", result.Error())
-	}
+	core.AssertTrue(t, result.OK)
 }
 
 func TestApi_Get_Bad(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.Get(c, "missing")
-	if result.OK {
-		t.Fatal("Get: expected missing issue failure")
-	}
+	core.AssertFalse(t, result.OK)
 }
 
 func TestApi_Get_Ugly(t *core.T) {
@@ -262,9 +178,8 @@ func TestApi_Get_Ugly(t *core.T) {
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "get ugly"})
 	issue, _, _ := orm.Detail[tasks.Issue](created)
 	found, _, ok := orm.Detail[tasks.Issue](tasks.Get(c, issue.ID))
-	if !ok || found.ID != issue.ID {
-		t.Fatalf("Get: round-trip ID mismatch %#v", found)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, issue.ID, found.ID)
 }
 
 func TestApi_List_Good(t *core.T) {
@@ -273,18 +188,16 @@ func TestApi_List_Good(t *core.T) {
 	tasks.Create(c, tasks.CreateInput{Project: "other", Summary: "two"})
 	result := tasks.List(c, tasks.ListFilter{Project: "ide"})
 	issues, ok := orm.Cast[[]tasks.Issue](result)
-	if !ok || len(issues) != 1 {
-		t.Fatalf("List: expected one ide issue, got %#v", issues)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertLen(t, issues, 1)
 }
 
 func TestApi_List_Bad(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.List(c, tasks.ListFilter{Project: "none"})
 	issues, ok := orm.Cast[[]tasks.Issue](result)
-	if !ok || len(issues) != 0 {
-		t.Fatalf("List: expected empty result, got %#v", issues)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertLen(t, issues, 0)
 }
 
 func TestApi_List_Ugly(t *core.T) {
@@ -293,9 +206,8 @@ func TestApi_List_Ugly(t *core.T) {
 	tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "offset two"})
 	result := tasks.List(c, tasks.ListFilter{State: tasks.StateOpen})
 	issues, ok := orm.Cast[[]tasks.Issue](result)
-	if !ok || len(issues) != 2 {
-		t.Fatalf("List: state filter expected two open issues, got %#v", issues)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertLen(t, issues, 2)
 }
 
 func TestApi_Update_Good(t *core.T) {
@@ -304,17 +216,14 @@ func TestApi_Update_Good(t *core.T) {
 	issue, _, _ := orm.Detail[tasks.Issue](created)
 	result := tasks.Update(c, issue.ID, tasks.UpdateInput{State: tasks.StateInProgress})
 	updated, _, ok := orm.Detail[tasks.Issue](result)
-	if !ok || updated.State != tasks.StateInProgress {
-		t.Fatalf("Update: state not changed %#v", updated)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, tasks.StateInProgress, updated.State)
 }
 
 func TestApi_Update_Bad(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.Update(c, "missing", tasks.UpdateInput{State: tasks.StateDone})
-	if result.OK {
-		t.Fatal("Update: expected missing issue failure")
-	}
+	core.AssertFalse(t, result.OK)
 }
 
 func TestApi_Update_Ugly(t *core.T) {
@@ -323,9 +232,8 @@ func TestApi_Update_Ugly(t *core.T) {
 	issue, _, _ := orm.Detail[tasks.Issue](created)
 	result := tasks.Update(c, issue.ID, tasks.UpdateInput{State: tasks.StateDone})
 	updated, _, ok := orm.Detail[tasks.Issue](result)
-	if !ok || updated.ClosedAt.IsZero() {
-		t.Fatalf("Update: done transition should set ClosedAt %#v", updated)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertFalse(t, updated.ClosedAt.IsZero())
 }
 
 func TestApi_Close_Good(t *core.T) {
@@ -334,17 +242,14 @@ func TestApi_Close_Good(t *core.T) {
 	issue, _, _ := orm.Detail[tasks.Issue](created)
 	result := tasks.Close(c, issue.ID, "fixed")
 	closed, _, ok := orm.Detail[tasks.Issue](result)
-	if !ok || closed.Resolution != "fixed" {
-		t.Fatalf("Close: expected fixed resolution %#v", closed)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, "fixed", closed.Resolution)
 }
 
 func TestApi_Close_Bad(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.Close(c, "missing", "fixed")
-	if result.OK {
-		t.Fatal("Close: expected missing issue failure")
-	}
+	core.AssertFalse(t, result.OK)
 }
 
 func TestApi_Close_Ugly(t *core.T) {
@@ -353,35 +258,30 @@ func TestApi_Close_Ugly(t *core.T) {
 	issue, _, _ := orm.Detail[tasks.Issue](created)
 	result := tasks.Close(c, issue.ID, "")
 	closed, _, ok := orm.Detail[tasks.Issue](result)
-	if !ok || closed.State != tasks.StateDone {
-		t.Fatalf("Close: should mark done even with blank resolution %#v", closed)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, tasks.StateDone, closed.State)
 }
 
 func TestApi_AddNote_Good(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.AddNote(c, "issue-1", "body", "vi")
 	note, _, ok := orm.Detail[tasks.Note](result)
-	if !ok || note.IssueID != "issue-1" {
-		t.Fatalf("AddNote: unexpected note %#v", note)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, "issue-1", note.IssueID)
 }
 
 func TestApi_AddNote_Bad(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.AddNote(c, "", "body", "vi")
-	if result.OK {
-		t.Fatal("AddNote: expected missing issue failure")
-	}
+	core.AssertFalse(t, result.OK)
 }
 
 func TestApi_AddNote_Ugly(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.AddNote(c, "issue-1", "body", "")
 	note, _, ok := orm.Detail[tasks.Note](result)
-	if !ok || note.Author != "" {
-		t.Fatalf("AddNote: blank author should be accepted %#v", note)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, "", note.Author)
 }
 
 func TestApi_ListNotes_Good(t *core.T) {
@@ -389,18 +289,16 @@ func TestApi_ListNotes_Good(t *core.T) {
 	tasks.AddNote(c, "issue-1", "first", "vi")
 	result := tasks.ListNotes(c, "issue-1")
 	notes, ok := orm.Cast[[]tasks.Note](result)
-	if !ok || len(notes) != 1 {
-		t.Fatalf("ListNotes: expected one note, got %#v", notes)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertLen(t, notes, 1)
 }
 
 func TestApi_ListNotes_Bad(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.ListNotes(c, "missing")
 	notes, ok := orm.Cast[[]tasks.Note](result)
-	if !ok || len(notes) != 0 {
-		t.Fatalf("ListNotes: expected empty result, got %#v", notes)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertLen(t, notes, 0)
 }
 
 func TestApi_ListNotes_Ugly(t *core.T) {
@@ -409,7 +307,8 @@ func TestApi_ListNotes_Ugly(t *core.T) {
 	tasks.AddNote(c, "issue-1", "second", "you")
 	result := tasks.ListNotes(c, "issue-1")
 	notes, ok := orm.Cast[[]tasks.Note](result)
-	if !ok || notes[0].Body != "first" || notes[1].Body != "second" {
-		t.Fatalf("ListNotes: expected oldest-first notes, got %#v", notes)
-	}
+	core.RequireTrue(t, ok)
+	core.AssertLen(t, notes, 2)
+	core.AssertEqual(t, "first", notes[0].Body)
+	core.AssertEqual(t, "second", notes[1].Body)
 }

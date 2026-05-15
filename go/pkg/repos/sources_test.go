@@ -3,7 +3,6 @@
 package repos
 
 import (
-
 	core "dappco.re/go"
 )
 
@@ -20,13 +19,9 @@ func TestSources_Register_Good(t *core.T) {
 	})
 	got := s.collectSourcePaths(core.Background())
 	want := []string{"/a/b", "/c/d", "/e/f"}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
+	core.AssertLen(t, got, len(want))
 	for i, p := range want {
-		if got[i] != p {
-			t.Errorf("position %d: got %q want %q", i, got[i], p)
-		}
+		core.AssertEqual(t, p, got[i])
 	}
 }
 
@@ -38,9 +33,8 @@ func TestSources_Register_Bad(t *core.T) {
 		return []string{"", "", "/x"}
 	})
 	got := s.collectSourcePaths(core.Background())
-	if len(got) != 1 || got[0] != "/x" {
-		t.Fatalf("expected [/x], got %v", got)
-	}
+	core.AssertLen(t, got, 1)
+	core.AssertEqual(t, "/x", got[0])
 }
 
 // TestSources_Register_Ugly — RegisterSource on a nil service or
@@ -51,7 +45,5 @@ func TestSources_Register_Ugly(t *core.T) {
 	// also: non-nil service, nil callback
 	s2 := NewService(nil)
 	s2.RegisterSource("nil-fn", nil)
-	if got := s2.collectSourcePaths(core.Background()); len(got) != 0 {
-		t.Fatalf("expected empty, got %v", got)
-	}
+	core.AssertLen(t, s2.collectSourcePaths(core.Background()), 0)
 }

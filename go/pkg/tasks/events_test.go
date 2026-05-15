@@ -3,7 +3,6 @@
 package tasks_test
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/orm"
 	"dappco.re/lthn/desktop/pkg/tasks"
@@ -15,17 +14,11 @@ import (
 func newEventsCore(t *core.T) *core.Core {
 	t.Helper()
 	c := core.New()
-	if r := orm.Register(c); !r.OK {
-		t.Fatalf("orm.Register: %s", r.Error())
-	}
+	core.RequireTrue(t, orm.Register(c).OK)
 	mem := orm.NewMemium()
-	if r := orm.Mount(c, "default", mem); !r.OK {
-		t.Fatalf("orm.Mount: %s", r.Error())
-	}
+	core.RequireTrue(t, orm.Mount(c, "default", mem).OK)
 	for _, schema := range tasks.Schemas() {
-		if r := orm.RegisterSchema(c, schema); !r.OK {
-			t.Fatalf("orm.RegisterSchema: %s", r.Error())
-		}
+		core.RequireTrue(t, orm.RegisterSchema(c, schema).OK)
 		mem.RegisterTable(schema.Name, schema)
 	}
 	return c
@@ -47,25 +40,15 @@ func TestEvents_Subscribe_Created(t *core.T) {
 	r := tasks.Create(c, tasks.CreateInput{
 		Project: "lthn", Summary: "first event",
 	})
-	if !r.OK {
-		t.Fatalf("create: %s", r.Error())
-	}
+	core.RequireTrue(t, r.OK)
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(got) != 1 {
-		t.Fatalf("got %d events, want 1", len(got))
-	}
+	core.AssertLen(t, got, 1)
 	ev := got[0]
-	if ev.Kind != tasks.KindCreated {
-		t.Errorf("kind: got %q, want %q", ev.Kind, tasks.KindCreated)
-	}
-	if ev.Issue.Summary != "first event" {
-		t.Errorf("issue.summary: got %q", ev.Issue.Summary)
-	}
-	if ev.Before.ID != "" {
-		t.Errorf("before should be zero-value on Create, got %+v", ev.Before)
-	}
+	core.AssertEqual(t, tasks.KindCreated, ev.Kind)
+	core.AssertEqual(t, "first event", ev.Issue.Summary)
+	core.AssertEqual(t, "", ev.Before.ID)
 }
 
 // TestEvents_Update_FiresUpdated — Update with a non-closing state
@@ -74,9 +57,7 @@ func TestEvents_Update_FiresUpdated(t *core.T) {
 	c := newEventsCore(t)
 
 	r := tasks.Create(c, tasks.CreateInput{Project: "lthn", Summary: "u"})
-	if !r.OK {
-		t.Fatalf("create: %s", r.Error())
-	}
+	core.RequireTrue(t, r.OK)
 	created := r.Value.(tasks.Issue)
 
 	var got []tasks.IssueChanged
@@ -90,25 +71,15 @@ func TestEvents_Update_FiresUpdated(t *core.T) {
 	r = tasks.Update(c, created.ID, tasks.UpdateInput{
 		State: tasks.StateInProgress,
 	})
-	if !r.OK {
-		t.Fatalf("update: %s", r.Error())
-	}
+	core.RequireTrue(t, r.OK)
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(got) != 1 {
-		t.Fatalf("got %d events, want 1", len(got))
-	}
+	core.AssertLen(t, got, 1)
 	ev := got[0]
-	if ev.Kind != tasks.KindUpdated {
-		t.Errorf("kind: got %q, want %q", ev.Kind, tasks.KindUpdated)
-	}
-	if ev.Before.State != tasks.StateOpen {
-		t.Errorf("before.state: got %q, want %q", ev.Before.State, tasks.StateOpen)
-	}
-	if ev.Issue.State != tasks.StateInProgress {
-		t.Errorf("issue.state: got %q, want %q", ev.Issue.State, tasks.StateInProgress)
-	}
+	core.AssertEqual(t, tasks.KindUpdated, ev.Kind)
+	core.AssertEqual(t, tasks.StateOpen, ev.Before.State)
+	core.AssertEqual(t, tasks.StateInProgress, ev.Issue.State)
 }
 
 // TestEvents_Close_FiresClosed — a state transition to StateDone
@@ -124,12 +95,8 @@ func TestEvents_Close_FiresClosed(t *core.T) {
 		seen = ev.Kind
 	})
 
-	if r := tasks.Close(c, created.ID, "fixed"); !r.OK {
-		t.Fatalf("close: %s", r.Error())
-	}
-	if seen != tasks.KindClosed {
-		t.Errorf("kind: got %q, want %q", seen, tasks.KindClosed)
-	}
+	core.RequireTrue(t, tasks.Close(c, created.ID, "fixed").OK)
+	core.AssertEqual(t, tasks.KindClosed, seen)
 }
 
 // TestEvents_AddNote_FiresNoted — appending a Note fires KindNoted
@@ -147,18 +114,10 @@ func TestEvents_AddNote_FiresNoted(t *core.T) {
 		}
 	})
 
-	if r := tasks.AddNote(c, parent.ID, "a comment", "tester"); !r.OK {
-		t.Fatalf("add note: %s", r.Error())
-	}
-	if got.Kind != tasks.KindNoted {
-		t.Fatalf("kind: got %q, want %q", got.Kind, tasks.KindNoted)
-	}
-	if got.Note.Body != "a comment" {
-		t.Errorf("note.body: got %q", got.Note.Body)
-	}
-	if got.Issue.ID != parent.ID {
-		t.Errorf("parent issue not attached: got %q want %q", got.Issue.ID, parent.ID)
-	}
+	core.RequireTrue(t, tasks.AddNote(c, parent.ID, "a comment", "tester").OK)
+	core.AssertEqual(t, tasks.KindNoted, got.Kind)
+	core.AssertEqual(t, "a comment", got.Note.Body)
+	core.AssertEqual(t, parent.ID, got.Issue.ID)
 }
 
 // TestEvents_MultipleSubscribers — every registered listener receives
@@ -183,16 +142,13 @@ func TestEvents_MultipleSubscribers(t *core.T) {
 		mu.Unlock()
 	})
 
-	if r := tasks.Create(c, tasks.CreateInput{Project: "lthn", Summary: "m"}); !r.OK {
-		t.Fatalf("create: %s", r.Error())
-	}
+	core.RequireTrue(t, tasks.Create(c, tasks.CreateInput{Project: "lthn", Summary: "m"}).OK)
 	// Allow microscopic time for any goroutine fan-out (Core's
 	// broadcast is sync today but defensive).
 	core.Sleep(5 * core.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
-	if aCount != 1 || bCount != 1 {
-		t.Fatalf("each non-panicking listener should fire once; got a=%d b=%d", aCount, bCount)
-	}
+	core.AssertEqual(t, 1, aCount)
+	core.AssertEqual(t, 1, bCount)
 }

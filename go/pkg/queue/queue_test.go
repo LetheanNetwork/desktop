@@ -3,7 +3,6 @@
 package queue_test
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/orm"
 	"dappco.re/lthn/desktop/pkg/queue"
@@ -15,25 +14,17 @@ import (
 func newQueueCore(t *core.T) *core.Core {
 	t.Helper()
 	c := core.New()
-	if r := orm.Register(c); !r.OK {
-		t.Fatalf("orm.Register: %s", r.Error())
-	}
+	core.RequireTrue(t, orm.Register(c).OK)
 	mem := orm.NewMemium()
-	if r := orm.Mount(c, "default", mem); !r.OK {
-		t.Fatalf("orm.Mount: %s", r.Error())
-	}
+	core.RequireTrue(t, orm.Mount(c, "default", mem).OK)
 	for _, schema := range queue.Schemas() {
-		if r := orm.RegisterSchema(c, schema); !r.OK {
-			t.Fatalf("orm.RegisterSchema: %s", r.Error())
-		}
+		core.RequireTrue(t, orm.RegisterSchema(c, schema).OK)
 		mem.RegisterTable(schema.Name, schema)
 	}
 	// ServiceStartup wires c.context (cancellable) which the worker
 	// loop selects on. Without this, c.Context() returns nil and
 	// the worker blocks on a nil channel forever.
-	if r := c.ServiceStartup(core.Background(), nil); !r.OK {
-		t.Fatalf("ServiceStartup: %s", r.Error())
-	}
+	core.RequireTrue(t, c.ServiceStartup(core.Background(), nil).OK)
 	t.Cleanup(func() { _ = c.ServiceShutdown(core.Background()) })
 	return c
 }
@@ -51,19 +42,11 @@ func TestQueue_Enqueue_PersistsAsPending(t *core.T) {
 	r := queue.Enqueue(c, "lint", core.NewOptions(
 		core.Option{Key: "path", Value: "/foo"},
 	))
-	if !r.OK {
-		t.Fatalf("enqueue: %s", r.Error())
-	}
+	core.RequireTrue(t, r.OK)
 	job := r.Value.(queue.Job)
-	if job.Status != queue.StatusPending {
-		t.Errorf("status: got %q want %q", job.Status, queue.StatusPending)
-	}
-	if got.Phase != queue.PhaseEnqueued {
-		t.Errorf("event phase: got %q want %q", got.Phase, queue.PhaseEnqueued)
-	}
-	if got.Job.Kind != "lint" {
-		t.Errorf("event job.kind: got %q", got.Job.Kind)
-	}
+	core.AssertEqual(t, queue.StatusPending, job.Status)
+	core.AssertEqual(t, queue.PhaseEnqueued, got.Phase)
+	core.AssertEqual(t, "lint", got.Job.Kind)
 }
 
 // TestQueue_Worker_DispatchesAndCompletes — full round-trip:
@@ -86,16 +69,12 @@ func TestQueue_Worker_DispatchesAndCompletes(t *core.T) {
 	// Start the worker via the Service lifecycle.
 	svc := queue.NewService(queue.Options{PollInterval: 50 * core.Millisecond})(c).
 		Value.(*queue.Service)
-	if r := svc.OnStart(); !r.OK {
-		t.Fatalf("OnStart: %s", r.Error())
-	}
+	core.RequireTrue(t, svc.OnStart().OK)
 
 	r := queue.Enqueue(c, "echo", core.NewOptions(
 		core.Option{Key: "path", Value: "/echo-target"},
 	))
-	if !r.OK {
-		t.Fatalf("enqueue: %s", r.Error())
-	}
+	core.RequireTrue(t, r.OK)
 	jobID := r.Value.(queue.Job).ID
 
 	// Wait for handler to fire.
@@ -107,9 +86,7 @@ func TestQueue_Worker_DispatchesAndCompletes(t *core.T) {
 		t.Fatalf("handler never ran within 2s")
 	}
 
-	if receivedPath != "/echo-target" {
-		t.Errorf("payload: got %q want /echo-target", receivedPath)
-	}
+	core.AssertEqual(t, "/echo-target", receivedPath)
 
 	// Wait briefly for worker to finish marking Done.
 	deadline := core.Now().Add(1 * core.Second)
@@ -118,9 +95,7 @@ func TestQueue_Worker_DispatchesAndCompletes(t *core.T) {
 		if gr.OK {
 			job, _, _ := orm.Detail[queue.Job](gr)
 			if job.Status == queue.StatusDone {
-				if job.Attempts != 1 {
-					t.Errorf("attempts: got %d want 1", job.Attempts)
-				}
+				core.AssertEqual(t, 1, job.Attempts)
 				return
 			}
 		}
@@ -154,9 +129,7 @@ func TestQueue_Worker_FailureMarksFailedWithError(t *core.T) {
 		if gr.OK {
 			job, _, _ := orm.Detail[queue.Job](gr)
 			if job.Status == queue.StatusFailed {
-				if job.LastError == "" {
-					t.Errorf("last_error empty on failed job")
-				}
+				core.AssertNotEmpty(t, job.LastError)
 				return
 			}
 		}
@@ -200,17 +173,11 @@ func TestQueue_Cancel_PendingJob(t *core.T) {
 	r := queue.Enqueue(c, "lint", core.NewOptions())
 	job := r.Value.(queue.Job)
 
-	if r := queue.Cancel(c, job.ID); !r.OK {
-		t.Fatalf("cancel: %s", r.Error())
-	}
+	core.RequireTrue(t, queue.Cancel(c, job.ID).OK)
 	gr := queue.Get(c, job.ID)
-	if !gr.OK {
-		t.Fatalf("get cancelled job: %s", gr.Error())
-	}
+	core.RequireTrue(t, gr.OK)
 	cancelled, _, _ := orm.Detail[queue.Job](gr)
-	if cancelled.Status != queue.StatusCancelled {
-		t.Errorf("status: got %q want cancelled", cancelled.Status)
-	}
+	core.AssertEqual(t, queue.StatusCancelled, cancelled.Status)
 }
 
 // TestQueue_RegisterKind_AppearsInKinds — registered handlers show
@@ -226,7 +193,5 @@ func TestQueue_RegisterKind_AppearsInKinds(t *core.T) {
 		Handler: func(core.Context, core.Options) core.Result { return core.Ok(nil) },
 	})
 	kinds := queue.Kinds(c)
-	if len(kinds) < 2 {
-		t.Fatalf("kinds count: got %v", kinds)
-	}
+	core.AssertGreaterOrEqual(t, len(kinds), 2)
 }

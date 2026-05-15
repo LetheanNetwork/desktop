@@ -3,7 +3,6 @@
 package queue_test
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/orm"
 	"dappco.re/lthn/desktop/pkg/queue"
@@ -27,9 +26,7 @@ func TestSchedule_FuturePastIsImmediate(t *core.T) {
 
 	// Schedule for "now" — worker should pick it up next tick.
 	r := queue.Schedule(c, core.Now().UTC(), "imm", core.NewOptions())
-	if !r.OK {
-		t.Fatalf("schedule: %s", r.Error())
-	}
+	core.RequireTrue(t, r.OK)
 
 	done := make(chan struct{})
 	go func() { ran.Wait(); close(done) }()
@@ -57,21 +54,15 @@ func TestSchedule_FutureNotPickedUpYet(t *core.T) {
 
 	// Schedule one hour from now.
 	r := queue.Schedule(c, core.Now().UTC().Add(core.Hour), "future", core.NewOptions())
-	if !r.OK {
-		t.Fatalf("schedule: %s", r.Error())
-	}
+	core.RequireTrue(t, r.OK)
 	jobID := r.Value.(queue.Job).ID
 
 	// Wait through several ticks — worker MUST NOT pick it up.
 	core.Sleep(200 * core.Millisecond)
-	if fired {
-		t.Fatalf("future job fired prematurely")
-	}
+	core.AssertFalse(t, fired)
 	gr := queue.Get(c, jobID)
 	job, _, _ := orm.Detail[queue.Job](gr)
-	if job.Status != queue.StatusPending {
-		t.Errorf("status: got %q want pending", job.Status)
-	}
+	core.AssertEqual(t, queue.StatusPending, job.Status)
 }
 
 // TestScheduleAfter_FiresAfterDuration — ScheduleAfter(50ms) gets
@@ -92,21 +83,15 @@ func TestScheduleAfter_FiresAfterDuration(t *core.T) {
 
 	start := core.Now()
 	r := queue.ScheduleAfter(c, 80*core.Millisecond, "delayed", core.NewOptions())
-	if !r.OK {
-		t.Fatalf("schedule-after: %s", r.Error())
-	}
+	core.RequireTrue(t, r.OK)
 
 	done := make(chan struct{})
 	go func() { ran.Wait(); close(done) }()
 	select {
 	case <-done:
 		elapsed := core.Since(start)
-		if elapsed < 80*core.Millisecond {
-			t.Errorf("fired too early: %v < 80ms", elapsed)
-		}
-		if elapsed > 500*core.Millisecond {
-			t.Errorf("fired too late: %v > 500ms", elapsed)
-		}
+		core.AssertGreaterOrEqual(t, elapsed, 80*core.Millisecond)
+		core.AssertLessOrEqual(t, elapsed, 500*core.Millisecond)
 	case <-core.After(2 * core.Second):
 		t.Fatalf("delayed job never ran within 2s")
 	}
@@ -138,17 +123,13 @@ func TestSchedule_HandlerSelfReschedule(t *core.T) {
 		Value.(*queue.Service)
 	_ = svc.OnStart()
 
-	if r := queue.Enqueue(c, "retry-twice", core.NewOptions()); !r.OK {
-		t.Fatalf("initial enqueue: %s", r.Error())
-	}
+	core.RequireTrue(t, queue.Enqueue(c, "retry-twice", core.NewOptions()).OK)
 
 	finished := make(chan struct{})
 	go func() { done.Wait(); close(finished) }()
 	select {
 	case <-finished:
-		if attempts != 3 {
-			t.Errorf("attempts: got %d want 3", attempts)
-		}
+		core.AssertEqual(t, 3, attempts)
 	case <-core.After(3 * core.Second):
 		t.Fatalf("self-rescheduling chain didn't complete (attempts=%d)", attempts)
 	}
