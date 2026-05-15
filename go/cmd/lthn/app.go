@@ -20,6 +20,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/plugin"
+	"dappco.re/lthn/desktop/pkg/queue"
 	"dappco.re/lthn/desktop/pkg/repos"
 	"dappco.re/lthn/desktop/pkg/sandbox"
 	"dappco.re/lthn/desktop/pkg/tasks"
@@ -135,6 +136,14 @@ func newAppCore() *core.Core {
 		// imports (opencode + future codex/claude/pi) surface
 		// alongside scanned repos.
 		core.WithName("repos", repos.Register),
+		// queue — throttled background job substrate. Single
+		// worker processes pending Jobs sequentially; subsystems
+		// register kind handlers via queue.RegisterKind and enqueue
+		// work via queue.Enqueue. Per design_cooperative_task_queue:
+		// capture-greedy / execute-throttled, behaves with other
+		// apps. Service.OnStart spawns the worker after schemas are
+		// registered + ServiceStartup runs.
+		core.WithName("queue", queue.Register),
 	)
 
 	if r := c.ServiceStartup(context.Background(), nil); !r.OK {
@@ -200,6 +209,10 @@ func newAppCore() *core.Core {
 	// tasks subsystem — Issue + Note tables; substrate for the
 	// cooperative task queue (see design_cooperative_task_queue).
 	schemas = append(schemas, tasks.Schemas()...)
+	// queue subsystem — Job table for the throttled background
+	// substrate. Worker spawns via Service.OnStart after the
+	// service bus runs ServiceStartup.
+	schemas = append(schemas, queue.Schemas()...)
 	for _, schema := range schemas {
 		if r := orm.RegisterSchema(c, schema); !r.OK {
 			core.Print(core.Stderr(), "lthn: orm schema %s failed: %s\n", schema.Name, r.Error())

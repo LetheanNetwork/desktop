@@ -1,0 +1,192 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Worker — the single-goroutine loop that processes pending jobs.
+// Spawned by Service.OnStart via c.waitGroup.Go so Core's
+// ServiceShutdown drains it cleanly.
+//
+// Loop body:
+//   1. Sleep PollInterval (or exit if c.shutdown).
+//   2. Query orm for the oldest pending job whose ScheduledFor <= now.
+//   3. If found: CAS Status pending → running, dispatch via
+//      c.Action("queue.kind.<Kind>"), record outcome.
+//   4. Loop.
+//
+// Per-kind parallelism (v2 polish): the dispatch step gets wrapped
+// in c.Lock("queue.kind." + job.Kind).TryLock(); skip the job if
+// the kind's lock is already held. v1 has a single worker so
+// per-kind locking is moot.
+
+package queue
+
+import (
+	"time"
+
+	core "dappco.re/go"
+	"dappco.re/go/orm"
+)
+
+// runWorker is the loop body. Exits when c.Context() cancels —
+// Core's ServiceShutdown cancels the context before draining
+// services, which is the queue's "stop now" signal.
+func runWorker(c *core.Core, interval time.Duration) {
+	if c == nil {
+		return
+	}
+	ctx := c.Context()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		// Drain ready jobs in this tick — process more than one
+		// per tick when the queue has a backlog so we're not
+		// rate-limited by PollInterval. Bounded loop so a huge
+		// backlog can't starve other Core work.
+		for i := 0; i < 16; i++ {
+			if ctx.Err() != nil {
+				return
+			}
+			if !processOne(c) {
+				break
+			}
+		}
+	}
+}
+
+// processOne picks the oldest pending job and runs it. Returns true
+// if a job was processed (regardless of outcome), false when the
+// queue is empty / no job is ready yet.
+func processOne(c *core.Core) bool {
+	job, ok := claimNext(c)
+	if !ok {
+		return false
+	}
+	dispatch(c, job)
+	return true
+}
+
+// claimNext atomically picks the oldest pending job whose
+// ScheduledFor has passed and CAS-updates its Status to running.
+// Returns (job, true) on success; (zero, false) when nothing is
+// ready.
+//
+// CAS-via-orm: orm.Of[Job].Where("status","=","pending").
+//                              Where("scheduled_for","<=",now).
+//                              Order("enqueued_at","asc").
+//                              Limit(1).Get()
+//   then Save with Status=running. Single-worker means no race;
+//   multi-worker (v2) needs a real CAS (predicate-update returning
+//   rows-affected) which orm.DuckDBMedium can support via the
+//   ON CONFLICT clause if needed later.
+func claimNext(c *core.Core) (Job, bool) {
+	now := time.Now().UTC()
+	// Memium's predicate engine doesn't honour `<=` on time
+	// fields cleanly, so filter ScheduledFor in Go after fetching
+	// pending jobs. Bounded by Limit(64) so the in-memory filter
+	// stays cheap. DuckDBMedium would push this whole filter
+	// server-side; the same code works on either backend.
+	r := orm.Of[Job](c).
+		Where("status", "=", StatusPending).
+		Order("enqueued_at", "asc").
+		Limit(64).
+		Get()
+	if !r.OK {
+		return Job{}, false
+	}
+	jobs, ok := r.Value.([]Job)
+	if !ok || len(jobs) == 0 {
+		return Job{}, false
+	}
+	var picked *Job
+	for i := range jobs {
+		if !jobs[i].ScheduledFor.After(now) {
+			picked = &jobs[i]
+			break
+		}
+	}
+	if picked == nil {
+		return Job{}, false
+	}
+	job := *picked
+	before := job
+	job.Status = StatusRunning
+	job.Attempts++
+	job.StartedAt = now
+	if r := orm.Save(c, &job); !r.OK {
+		return Job{}, false
+	}
+	c.ACTION(JobChanged{
+		Phase:  PhaseStarted,
+		Job:    job,
+		Before: before,
+		At:     now,
+	})
+	return job, true
+}
+
+// dispatch invokes the registered handler for the job's kind +
+// records the outcome. Panics inside the handler are recovered by
+// Core's c.Action.Run wrapper; we still defensively recover here in
+// case the recovery layer changes.
+func dispatch(c *core.Core, job Job) {
+	action := c.Action(ActionName(job.Kind))
+	now := time.Now().UTC()
+
+	defer func() {
+		if rec := recover(); rec != nil {
+			markFailed(c, job, core.Sprintf("panic: %v", rec), now)
+		}
+	}()
+
+	if !action.Exists() {
+		markFailed(c, job, "no handler registered for kind: "+job.Kind, now)
+		return
+	}
+	result := action.Run(c.Context(), decodeOptions(job.Payload))
+	if !result.OK {
+		markFailed(c, job, result.Error(), time.Now().UTC())
+		return
+	}
+	markDone(c, job, time.Now().UTC())
+}
+
+// markDone transitions a job from running → done.
+func markDone(c *core.Core, job Job, at time.Time) {
+	before := job
+	job.Status = StatusDone
+	job.CompletedAt = at
+	job.LastError = ""
+	if r := orm.Save(c, &job); !r.OK {
+		core.Warn("queue.markDone", "save", r.Error())
+		return
+	}
+	c.ACTION(JobChanged{
+		Phase:  PhaseDone,
+		Job:    job,
+		Before: before,
+		At:     at,
+	})
+}
+
+// markFailed transitions a job from running → failed with the
+// stringified error. v1 has no automatic retry; failed jobs stay
+// failed until manually re-enqueued. Retry policy is a v2 polish.
+func markFailed(c *core.Core, job Job, errMsg string, at time.Time) {
+	before := job
+	job.Status = StatusFailed
+	job.CompletedAt = at
+	job.LastError = errMsg
+	if r := orm.Save(c, &job); !r.OK {
+		core.Warn("queue.markFailed", "save", r.Error())
+		return
+	}
+	c.ACTION(JobChanged{
+		Phase:  PhaseFailed,
+		Job:    job,
+		Before: before,
+		At:     at,
+	})
+}
