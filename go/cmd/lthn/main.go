@@ -91,6 +91,8 @@ func main() {
 		core.Exit(cmdFleet(args[1:]))
 	case "opencode":
 		core.Exit(cmdOpenCode(args[1:]))
+	case "marketplace":
+		core.Exit(cmdMarketplace(args[1:]))
 	default:
 		core.Print(core.Stderr(), "lthn: unknown subcommand %q\nrun `lthn help` for available commands\n", args[0])
 		core.Exit(2)

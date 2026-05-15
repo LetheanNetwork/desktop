@@ -217,6 +217,9 @@ func newAppCore() *core.Core {
 	// substrate. Worker spawns via Service.OnStart after the
 	// service bus runs ServiceStartup.
 	schemas = append(schemas, queue.Schemas()...)
+	// marketplace subsystem — InstalledBundle table tracking which
+	// lthn-vm bundles the user has installed + their lifecycle state.
+	schemas = append(schemas, marketplace.InstalledBundle{}.Schema())
 	for _, schema := range schemas {
 		if r := orm.RegisterSchema(c, schema); !r.OK {
 			core.Print(core.Stderr(), "lthn: orm schema %s failed: %s\n", schema.Name, r.Error())
