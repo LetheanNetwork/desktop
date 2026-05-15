@@ -43,18 +43,11 @@ type SourceProvider func(ctx core.Context) []string
 type Service struct {
 	core *core.Core
 
-	// sourcesMu guards sources. Writers are package boots
-	// (RegisterSource); readers are Status() invocations.
-	sourcesMu core.RWMutex
-	sources   []registeredSource
-}
-
-// registeredSource pairs a SourceProvider with its identifier so
-// future surfaces can attribute "this row came from <name>" — not
-// load-bearing for v1 but the slot is reserved.
-type registeredSource struct {
-	name string
-	fn   SourceProvider
+	// sources is the named registry of SourceProvider callbacks.
+	// Lock/Seal/Disable lifecycle comes for free with Registry[T];
+	// Status() iterates via Each() on every call so newly-registered
+	// sources appear in the next response without a restart.
+	sources *core.Registry[SourceProvider]
 }
 
 // RegisterSource installs a candidate-path provider. Called by
@@ -74,9 +67,7 @@ func (s *Service) RegisterSource(name string, fn SourceProvider) {
 	if s == nil || fn == nil {
 		return
 	}
-	s.sourcesMu.Lock()
-	s.sources = append(s.sources, registeredSource{name: name, fn: fn})
-	s.sourcesMu.Unlock()
+	s.sources.Set(name, fn)
 }
 
 // collectSourcePaths drains every registered SourceProvider and
@@ -87,23 +78,20 @@ func (s *Service) RegisterSource(name string, fn SourceProvider) {
 // Used by Status() to merge external paths (opencode imports etc.)
 // into the canonical-roots scan.
 func (s *Service) collectSourcePaths(ctx core.Context) []string {
-	s.sourcesMu.RLock()
-	srcs := append([]registeredSource(nil), s.sources...)
-	s.sourcesMu.RUnlock()
-	if len(srcs) == 0 {
+	if s == nil || s.sources == nil {
 		return nil
 	}
 	seen := map[string]bool{}
 	var out []string
-	for _, src := range srcs {
-		for _, p := range src.fn(ctx) {
+	s.sources.Each(func(_ string, fn SourceProvider) {
+		for _, p := range fn(ctx) {
 			if p == "" || seen[p] {
 				continue
 			}
 			seen[p] = true
 			out = append(out, p)
 		}
-	}
+	})
 	return out
 }
 
@@ -114,7 +102,12 @@ func (s *Service) collectSourcePaths(ctx core.Context) []string {
 // Usage example:
 //
 //	svc := repos.NewService(c)
-func NewService(c *core.Core) *Service { return &Service{core: c} }
+func NewService(c *core.Core) *Service {
+	return &Service{
+		core:    c,
+		sources: core.NewRegistry[SourceProvider](),
+	}
+}
 
 // Register constructs the repos service for Core registration.
 //
