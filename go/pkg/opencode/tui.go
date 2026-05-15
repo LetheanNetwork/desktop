@@ -32,7 +32,6 @@
 package opencode
 
 import (
-	"context"
 	goruntime "runtime"
 	"time"
 
@@ -84,7 +83,7 @@ func (s *Service) OpenTUI(id string) core.Result {
 	// flag defaults to $OPENCODE_SERVER_PASSWORD when set.
 	targetURL := core.Sprintf("http://127.0.0.1:%d/", sb.HostPort)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 10*time.Second)
 	defer cancel()
 
 	switch goruntime.GOOS {

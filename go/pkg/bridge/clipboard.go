@@ -6,7 +6,6 @@
 package bridge
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	guiclipboard "dappco.re/go/gui/pkg/clipboard"
@@ -31,7 +30,7 @@ func (s *Service) toolClipboardRead() map[string]any {
 // toolClipboardWrite sets the clipboard text. params: { text }
 func (s *Service) toolClipboardWrite(params map[string]any) map[string]any {
 	text := paramString(params, "text", "")
-	r := s.Core().Action("clipboard.set_text").Run(context.Background(), core.NewOptions(
+	r := s.Core().Action("clipboard.set_text").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "text", Value: text},
 	))
 	if !r.OK {
@@ -59,7 +58,7 @@ func (s *Service) toolClipboardHas() map[string]any {
 
 // toolClipboardClear empties the clipboard by writing the empty string.
 func (s *Service) toolClipboardClear() map[string]any {
-	r := s.Core().Action("clipboard.clear").Run(context.Background(), core.NewOptions())
+	r := s.Core().Action("clipboard.clear").Run(core.Background(), core.NewOptions())
 	if !r.OK {
 		return map[string]any{"ok": false, "error": r.Error()}
 	}

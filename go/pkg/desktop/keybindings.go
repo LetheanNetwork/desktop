@@ -17,7 +17,6 @@
 package desktop
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	guievents "dappco.re/go/gui/pkg/events"
@@ -61,7 +60,7 @@ func registerKeyBindings(c *core.Core) {
 	verbByAccelerator := map[string]string{}
 	for _, b := range bindings {
 		verbByAccelerator[b.accel] = b.verb
-		c.Action("keybinding.add").Run(context.Background(), core.NewOptions(
+		c.Action("keybinding.add").Run(core.Background(), core.NewOptions(
 			core.Option{Key: "task", Value: guikeybinding.TaskAdd{
 				Accelerator: b.accel,
 				Description: "lthn:" + b.verb,
@@ -81,7 +80,7 @@ func registerKeyBindings(c *core.Core) {
 		// TODO(snider): core/gui needs keybinding callbacks to include
 		// the originating window name. Until then the frontend receives
 		// an empty payload, matching the old type but not the full detail.
-		return c.Action("events.emit").Run(context.Background(), core.NewOptions(
+		return c.Action("events.emit").Run(core.Background(), core.NewOptions(
 			core.Option{Key: "task", Value: guievents.TaskEmit{Name: "lthn:key:" + verb, Data: ""}},
 		))
 	})

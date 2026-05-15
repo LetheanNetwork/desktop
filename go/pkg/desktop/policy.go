@@ -19,7 +19,6 @@
 package desktop
 
 import (
-	"context"
 
 	core "dappco.re/go"
 )
@@ -35,7 +34,7 @@ func attachDock(c *core.Core) { sharedDockCore = c }
 // on Windows/Linux/iOS.
 func setPolicyRegular() {
 	if sharedDockCore != nil {
-		sharedDockCore.Action("dock.show_icon").Run(context.Background(), core.NewOptions())
+		sharedDockCore.Action("dock.show_icon").Run(core.Background(), core.NewOptions())
 	}
 }
 
@@ -44,6 +43,6 @@ func setPolicyRegular() {
 // on Windows/Linux/iOS.
 func setPolicyAccessory() {
 	if sharedDockCore != nil {
-		sharedDockCore.Action("dock.hide_icon").Run(context.Background(), core.NewOptions())
+		sharedDockCore.Action("dock.hide_icon").Run(core.Background(), core.NewOptions())
 	}
 }

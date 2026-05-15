@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/sessions"
@@ -24,7 +23,7 @@ func cmdSessions(args []string) int {
 	if c == nil {
 		return 1
 	}
-	defer c.ServiceShutdown(context.Background())
+	defer c.ServiceShutdown(core.Background())
 
 	switch args[0] {
 	case "create":

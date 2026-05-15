@@ -17,7 +17,6 @@
 package opencode
 
 import (
-	"context"
 	"strconv"
 	"strings"
 	"time"
@@ -49,7 +48,7 @@ func (s *Service) Reconcile() core.Result {
 	// is in a partially-bound state. We re-derive host ports from
 	// the Ports column rather than trusting the port we allocated
 	// last time — host bindings stick across runtime restarts.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 5*time.Second)
 	defer cancel()
 	runR := ps.Run(ctx, s.runtime(),
 		"ps",

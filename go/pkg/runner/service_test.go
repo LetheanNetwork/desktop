@@ -8,7 +8,6 @@
 package runner_test
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	"dappco.re/go/config"
@@ -114,7 +113,7 @@ func configCoreWithRoutes(t *core.T, yaml string) *core.Core {
 			EnvPrefix: "LTHN_TEST",
 		})),
 	)
-	core.AssertTrue(t, c.ServiceStartup(context.Background(), nil).OK)
+	core.AssertTrue(t, c.ServiceStartup(core.Background(), nil).OK)
 	return c
 }
 

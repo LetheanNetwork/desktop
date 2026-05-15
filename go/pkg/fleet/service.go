@@ -23,7 +23,6 @@
 package fleet
 
 import (
-	"context"
 	"sync"
 
 	core "dappco.re/go"
@@ -509,7 +508,7 @@ func (s *Service) UpsertMachine(m Machine) core.Result {
 func (s *Service) ServiceName() string { return "Fleet" }
 
 // ServiceStartup is the Wails3 lifecycle hook; no-op (Init already ran in New).
-func (s *Service) ServiceStartup(_ context.Context, _ any) core.Result {
+func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 

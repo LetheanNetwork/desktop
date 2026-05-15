@@ -10,7 +10,6 @@
 package plugin
 
 import (
-	"context"
 	"net"
 	"net/http"
 	"strconv"
@@ -58,7 +57,7 @@ func pickFreePort() core.Result {
 // it returns 200 or `timeout` elapses. Backoff is constant
 // 100 ms — plugins should start fast; if they don't, the
 // manifest's startup_timeout buys more time.
-func waitForHealth(ctx context.Context, port int, path string, timeout time.Duration) core.Result {
+func waitForHealth(ctx core.Context, port int, path string, timeout time.Duration) core.Result {
 	url := "http://127.0.0.1:" + strconv.Itoa(port) + path
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -85,7 +84,7 @@ func waitForHealth(ctx context.Context, port int, path string, timeout time.Dura
 // free port, spawns the plugin with the canonical CLI flags,
 // waits for health, then registers the reverse-proxy mount.
 // Caller holds s.mu.
-func (s *Service) startPlugin(ctx context.Context, code, token string) core.Result {
+func (s *Service) startPlugin(ctx core.Context, code, token string) core.Result {
 	dirR := pluginDir(code)
 	if !dirR.OK {
 		return dirR

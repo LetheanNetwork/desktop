@@ -8,7 +8,6 @@
 package plugin
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -71,11 +70,11 @@ func verifyURL(rawURL string) core.Result {
 // fetchBinary downloads `rawURL` (after allowlist check) up to
 // maxBinarySize bytes. Returns the raw bytes for verifyChecksum
 // to inspect before they hit disk.
-func fetchBinary(ctx context.Context, rawURL string) core.Result {
+func fetchBinary(ctx core.Context, rawURL string) core.Result {
 	if res := verifyURL(rawURL); !res.OK {
 		return res
 	}
-	cctx, cancel := context.WithTimeout(ctx, downloadTimeout)
+	cctx, cancel := core.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(cctx, http.MethodGet, rawURL, nil)
 	if err != nil {

@@ -15,7 +15,6 @@
 package plugin
 
 import (
-	"context"
 	"time"
 
 	core "dappco.re/go"
@@ -115,7 +114,7 @@ func (s *Service) handleExit(code string, proc *process.Process) {
 	// Re-spawn via the normal path. Errors land back in
 	// ps.state / ps.lastError and the watcher's next iteration
 	// catches the new process's Done().
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 60*time.Second)
 	defer cancel()
 	s.mu.Lock()
 	tok := s.resolveToken()

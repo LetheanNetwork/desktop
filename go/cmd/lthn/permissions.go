@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/permissions"
@@ -25,7 +24,7 @@ func cmdPermissions(args []string) int {
 	if c == nil {
 		return 1
 	}
-	defer c.ServiceShutdown(context.Background())
+	defer c.ServiceShutdown(core.Background())
 	permissions.Install(c)
 
 	switch args[0] {
@@ -83,7 +82,7 @@ func permissionsSet(c *core.Core, args []string) int {
 		return 2
 	}
 	key := core.Concat("permissions.", args[0])
-	r := c.Action("config.set").Run(context.Background(), core.NewOptions(
+	r := c.Action("config.set").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "key", Value: key},
 		core.Option{Key: "value", Value: args[1]},
 	))
@@ -91,7 +90,7 @@ func permissionsSet(c *core.Core, args []string) int {
 		core.Print(core.Stderr(), "lthn permissions set: %s\n", r.Error())
 		return 1
 	}
-	commit := c.Action("config.commit").Run(context.Background(), core.NewOptions())
+	commit := c.Action("config.commit").Run(core.Background(), core.NewOptions())
 	if !commit.OK {
 		core.Print(core.Stderr(), "lthn permissions set: commit failed: %s\n", commit.Error())
 		return 1
@@ -100,7 +99,7 @@ func permissionsSet(c *core.Core, args []string) int {
 }
 
 func permissionsList(c *core.Core, _ []string) int {
-	r := c.Action("config.get").Run(context.Background(), core.NewOptions(
+	r := c.Action("config.get").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "key", Value: "permissions"},
 	))
 	if !r.OK {

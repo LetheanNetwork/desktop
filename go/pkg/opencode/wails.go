@@ -13,7 +13,6 @@
 package opencode
 
 import (
-	"context"
 
 	core "dappco.re/go"
 )
@@ -37,7 +36,7 @@ func NewWailsService(svc *Service) *WailsService {
 func (w *WailsService) ServiceName() string { return "OpenCodeWails" }
 
 // ServiceStartup satisfies the Wails Service lifecycle hook.
-func (w *WailsService) ServiceStartup(_ context.Context, _ any) core.Result {
+func (w *WailsService) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 

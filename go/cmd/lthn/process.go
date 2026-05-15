@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 
 	core "dappco.re/go"
 )
@@ -23,7 +22,7 @@ func cmdProcess(args []string) int {
 	if c == nil {
 		return 1
 	}
-	defer c.ServiceShutdown(context.Background())
+	defer c.ServiceShutdown(core.Background())
 
 	switch args[0] {
 	case "list":
@@ -43,7 +42,7 @@ func processList(c *core.Core, args []string) int {
 			runningOnly = true
 		}
 	}
-	r := c.Action("process.list").Run(context.Background(), core.NewOptions(
+	r := c.Action("process.list").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "runningOnly", Value: runningOnly},
 	))
 	if !r.OK {
@@ -63,7 +62,7 @@ func processGet(c *core.Core, args []string) int {
 		core.Print(core.Stderr(), "lthn process get: usage: lthn process get ID\n")
 		return 2
 	}
-	r := c.Action("process.get").Run(context.Background(), core.NewOptions(
+	r := c.Action("process.get").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "id", Value: args[0]},
 	))
 	if !r.OK {

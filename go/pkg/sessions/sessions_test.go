@@ -11,7 +11,6 @@
 package sessions_test
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	"dappco.re/go/inference"
@@ -34,7 +33,7 @@ func coreFixture(t *core.T) *core.Core {
 			DatabasePath: tmp + "/sessions-test.db",
 		})),
 	)
-	r := c.ServiceStartup(context.Background(), nil)
+	r := c.ServiceStartup(core.Background(), nil)
 	core.AssertTrue(t, r.OK, "ServiceStartup must succeed under tempdir")
 	return c
 }

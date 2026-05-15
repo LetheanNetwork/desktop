@@ -7,14 +7,13 @@
 package bridge
 
 import (
-	"context"
 
 	core "dappco.re/go"
 )
 
 // toolWebviewHover dispatches mouseover + mouseenter on the
 // element matching `selector`. params: { selector, window? }
-func (s *Service) toolWebviewHover(ctx context.Context, params map[string]any) map[string]any {
+func (s *Service) toolWebviewHover(ctx core.Context, params map[string]any) map[string]any {
 	sel := jsonLit(paramString(params, "selector", ""))
 	return s.eval(ctx, paramString(params, "window", DefaultWindow),
 		core.Sprintf(`var el=document.querySelector(%s);if(!el)throw new Error("element not found: "+%s);['mouseover','mouseenter','pointerover','pointerenter'].forEach(function(t){el.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window}));});return {hovered:true,tag:el.tagName.toLowerCase()};`, sel, sel))
@@ -23,7 +22,7 @@ func (s *Service) toolWebviewHover(ctx context.Context, params map[string]any) m
 // toolWebviewType sets an input/textarea's value and dispatches
 // input + change events so framework bindings (Lit @input, React
 // onChange) see the update. params: { selector, value, window? }
-func (s *Service) toolWebviewType(ctx context.Context, params map[string]any) map[string]any {
+func (s *Service) toolWebviewType(ctx core.Context, params map[string]any) map[string]any {
 	sel := jsonLit(paramString(params, "selector", ""))
 	val := jsonLit(paramString(params, "value", ""))
 	return s.eval(ctx, paramString(params, "window", DefaultWindow),
@@ -32,7 +31,7 @@ func (s *Service) toolWebviewType(ctx context.Context, params map[string]any) ma
 
 // toolWebviewCheck sets a checkbox or radio's checked state.
 // params: { selector, checked, window? }
-func (s *Service) toolWebviewCheck(ctx context.Context, params map[string]any) map[string]any {
+func (s *Service) toolWebviewCheck(ctx core.Context, params map[string]any) map[string]any {
 	sel := jsonLit(paramString(params, "selector", ""))
 	checked := paramBool(params, "checked", true)
 	checkedJS := "true"
@@ -46,7 +45,7 @@ func (s *Service) toolWebviewCheck(ctx context.Context, params map[string]any) m
 // toolWebviewSelect picks an option in a <select>. value matches
 // either the option's value attr or its text content. params:
 // { selector, value, window? }
-func (s *Service) toolWebviewSelect(ctx context.Context, params map[string]any) map[string]any {
+func (s *Service) toolWebviewSelect(ctx core.Context, params map[string]any) map[string]any {
 	sel := jsonLit(paramString(params, "selector", ""))
 	val := jsonLit(paramString(params, "value", ""))
 	return s.eval(ctx, paramString(params, "window", DefaultWindow),
@@ -56,7 +55,7 @@ func (s *Service) toolWebviewSelect(ctx context.Context, params map[string]any) 
 // toolWebviewScroll scrolls the page so the matched element is in
 // view (or to absolute coords when only x/y given). params:
 // { selector?, x?, y?, behavior?, window? }
-func (s *Service) toolWebviewScroll(ctx context.Context, params map[string]any) map[string]any {
+func (s *Service) toolWebviewScroll(ctx core.Context, params map[string]any) map[string]any {
 	sel := core.Trim(paramString(params, "selector", ""))
 	behavior := paramString(params, "behavior", "smooth")
 	bJS := jsonLit(behavior)
@@ -74,7 +73,7 @@ func (s *Service) toolWebviewScroll(ctx context.Context, params map[string]any) 
 // toolWebviewDOMTree returns a depth-limited DOM tree starting
 // from `selector` (or document.body when omitted). params:
 // { selector?, maxDepth?, window? }
-func (s *Service) toolWebviewDOMTree(ctx context.Context, params map[string]any) map[string]any {
+func (s *Service) toolWebviewDOMTree(ctx core.Context, params map[string]any) map[string]any {
 	root := jsonLit(paramString(params, "selector", "body"))
 	depth := paramInt(params, "maxDepth", 6)
 	return s.eval(ctx, paramString(params, "window", DefaultWindow),
@@ -83,7 +82,7 @@ func (s *Service) toolWebviewDOMTree(ctx context.Context, params map[string]any)
 
 // toolWebviewSource returns the full document.documentElement.outerHTML.
 // params: { window? }
-func (s *Service) toolWebviewSource(ctx context.Context, params map[string]any) map[string]any {
+func (s *Service) toolWebviewSource(ctx core.Context, params map[string]any) map[string]any {
 	return s.eval(ctx, paramString(params, "window", DefaultWindow),
 		`return document.documentElement.outerHTML;`)
 }
@@ -91,7 +90,7 @@ func (s *Service) toolWebviewSource(ctx context.Context, params map[string]any) 
 // toolWebviewComputedStyle returns getComputedStyle entries for
 // the matched element, optionally narrowed by props list. params:
 // { selector, props?, window? }
-func (s *Service) toolWebviewComputedStyle(ctx context.Context, params map[string]any) map[string]any {
+func (s *Service) toolWebviewComputedStyle(ctx core.Context, params map[string]any) map[string]any {
 	sel := jsonLit(paramString(params, "selector", ""))
 	propsRaw, _ := params["props"].([]any)
 	propsJS := "null"
@@ -115,7 +114,7 @@ func (s *Service) toolWebviewComputedStyle(ctx context.Context, params map[strin
 // toolWebviewElementInfo returns a rich descriptor for the matched
 // element — tag, attrs, bounds, computed display, text snippet.
 // params: { selector, window? }
-func (s *Service) toolWebviewElementInfo(ctx context.Context, params map[string]any) map[string]any {
+func (s *Service) toolWebviewElementInfo(ctx core.Context, params map[string]any) map[string]any {
 	sel := jsonLit(paramString(params, "selector", ""))
 	return s.eval(ctx, paramString(params, "window", DefaultWindow),
 		core.Sprintf(`var el=document.querySelector(%s);if(!el)throw new Error("element not found: "+%s);var r=el.getBoundingClientRect();var cs=window.getComputedStyle(el);var attrs={};for(var i=0;i<el.attributes.length;i++){var a=el.attributes[i];attrs[a.name]=a.value;}return {tag:el.tagName.toLowerCase(),id:el.id||null,classes:Array.from(el.classList),attrs:attrs,bounds:{x:r.x,y:r.y,w:r.width,h:r.height},display:cs.display,visibility:cs.visibility,opacity:cs.opacity,text:(el.textContent||'').slice(0,500),childCount:el.children.length,hasFocus:document.activeElement===el};`, sel, sel))
@@ -124,7 +123,7 @@ func (s *Service) toolWebviewElementInfo(ctx context.Context, params map[string]
 // toolWebviewHighlight outlines the matched element with a
 // temporary box-shadow + outline for the user to visually locate.
 // params: { selector, duration?, window? } — duration in ms, default 2000
-func (s *Service) toolWebviewHighlight(ctx context.Context, params map[string]any) map[string]any {
+func (s *Service) toolWebviewHighlight(ctx core.Context, params map[string]any) map[string]any {
 	sel := jsonLit(paramString(params, "selector", ""))
 	dur := paramInt(params, "duration", 2000)
 	return s.eval(ctx, paramString(params, "window", DefaultWindow),
@@ -141,7 +140,7 @@ func (s *Service) toolWebviewConsoleClear() map[string]any {
 
 // toolWebviewPerformance returns performance.timing + memory (where
 // supported) for the window. params: { window? }
-func (s *Service) toolWebviewPerformance(ctx context.Context, params map[string]any) map[string]any {
+func (s *Service) toolWebviewPerformance(ctx core.Context, params map[string]any) map[string]any {
 	return s.eval(ctx, paramString(params, "window", DefaultWindow),
 		`var t=performance.timing?{...performance.timing.toJSON()}:null;var nav=performance.getEntriesByType('navigation')[0]||null;var mem=(performance.memory)?{usedJSHeapSize:performance.memory.usedJSHeapSize,totalJSHeapSize:performance.memory.totalJSHeapSize,jsHeapSizeLimit:performance.memory.jsHeapSizeLimit}:null;return {timing:t,navigation:nav,memory:mem,now:performance.now()};`)
 }

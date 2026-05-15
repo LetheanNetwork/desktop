@@ -3,7 +3,6 @@
 package opencode
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,7 +39,7 @@ func TestSubscribe_streamEvents_Good(t *core.T) {
 		mu.Unlock()
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 2*time.Second)
 	defer cancel()
 	if err := svc.streamEvents(ctx, server.URL, ""); err != nil {
 		t.Fatalf("streamEvents err: %v", err)
@@ -71,7 +70,7 @@ func TestSubscribe_streamEvents_Bad(t *core.T) {
 
 	svc := &Service{}
 	svc.SetEventEmitter(func(string) {})
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 2*time.Second)
 	defer cancel()
 	err := svc.streamEvents(ctx, server.URL, "Basic deadbeef")
 	if err == nil {
@@ -102,7 +101,7 @@ func TestSubscribe_streamEvents_Ugly(t *core.T) {
 	got := make(chan string, 4)
 	svc.SetEventEmitter(func(e string) { got <- e })
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := core.WithCancel(core.Background())
 	done := make(chan error, 1)
 	go func() {
 		done <- svc.streamEvents(ctx, server.URL, "")

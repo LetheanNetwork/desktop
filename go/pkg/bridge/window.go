@@ -6,7 +6,6 @@
 package bridge
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	guiwindow "dappco.re/go/gui/pkg/window"
@@ -40,7 +39,7 @@ func (s *Service) coreGUIWindowInfo(name string) (*guiwindow.WindowInfo, map[str
 }
 
 func (s *Service) runCoreGUIWindowTask(action string, task any) map[string]any {
-	r := s.Core().Action(action).Run(context.Background(), core.NewOptions(
+	r := s.Core().Action(action).Run(core.Background(), core.NewOptions(
 		core.Option{Key: "task", Value: task},
 	))
 	if !r.OK {

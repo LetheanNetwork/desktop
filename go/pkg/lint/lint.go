@@ -12,7 +12,6 @@
 package lint
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	"dappco.re/go/process"
@@ -97,7 +96,7 @@ func (s *Service) runLint(binary string, args ...string) core.Result {
 	if ps == nil {
 		return core.Fail(core.E(runLintOp, "process service unavailable", nil))
 	}
-	r := ps.Run(context.Background(), binary, args...)
+	r := ps.Run(core.Background(), binary, args...)
 	out, _ := r.Value.(string)
 	if !r.OK && out == "" {
 		return core.Fail(core.E(runLintOp, r.Error(), nil))

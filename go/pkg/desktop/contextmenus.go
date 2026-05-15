@@ -15,7 +15,6 @@
 package desktop
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	guicontextmenu "dappco.re/go/gui/pkg/contextmenu"
@@ -50,14 +49,14 @@ func registerContextMenuRelay(c *core.Core) {
 			return core.Ok(nil)
 		}
 		event := "lthn:context:" + core.TrimPrefix(clicked.MenuName, "lthn-") + ":" + clicked.ActionID
-		return c.Action("events.emit").Run(context.Background(), core.NewOptions(
+		return c.Action("events.emit").Run(core.Background(), core.NewOptions(
 			core.Option{Key: "task", Value: guievents.TaskEmit{Name: event, Data: clicked.Data}},
 		))
 	})
 }
 
 func addContextMenu(c *core.Core, name string, items []guicontextmenu.MenuItemDef) {
-	c.Action("contextmenu.add").Run(context.Background(), core.NewOptions(
+	c.Action("contextmenu.add").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "task", Value: guicontextmenu.TaskAdd{
 			Name: name,
 			Menu: guicontextmenu.ContextMenuDef{Name: name, Items: items},

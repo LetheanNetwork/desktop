@@ -4,7 +4,6 @@ package opencode
 
 import (
 	"bytes"
-	"context"
 	goio "io"
 	"net"
 	"net/http"
@@ -255,7 +254,7 @@ func (s *Service) Start(profileName string) core.Result {
 		"--port", core.Sprintf("%d", containerPort),
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 30*time.Second)
 	defer cancel()
 	runR := ps.Run(ctx, s.runtime(), args...)
 	if !runR.OK {
@@ -286,7 +285,7 @@ func (s *Service) Start(profileName string) core.Result {
 	// don't fail Start — the sandbox is still usable with opencode's
 	// own default config; the patch is a narrowing optimisation.
 	if r := waitHealthy(target, authHeader, 30*time.Second); !r.OK {
-		_ = ps.Run(context.Background(), s.runtime(), "rm", "-f", ContainerName(id))
+		_ = ps.Run(core.Background(), s.runtime(), "rm", "-f", ContainerName(id))
 		s.proxy.Delete(id)
 		return r
 	}
@@ -387,7 +386,7 @@ func (s *Service) Stop(id string) core.Result {
 	// down here means no flap of reconnect-retry-fail noise.
 	s.Unsubscribe(id)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 15*time.Second)
 	defer cancel()
 	// docker rm -f stops + removes in one shot. Ignore failure —
 	// the container may already be gone; we still want to clean

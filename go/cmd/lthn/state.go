@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 
 	core "dappco.re/go"
 )
@@ -23,7 +22,7 @@ func cmdState(args []string) int {
 	if c == nil {
 		return 1
 	}
-	defer c.ServiceShutdown(context.Background())
+	defer c.ServiceShutdown(core.Background())
 
 	switch args[0] {
 	case "get":
@@ -47,7 +46,7 @@ func stateGet(c *core.Core, args []string) int {
 		core.Print(core.Stderr(), "lthn state get: usage: lthn state get GROUP KEY\n")
 		return 2
 	}
-	r := c.Action("store.get").Run(context.Background(), core.NewOptions(
+	r := c.Action("store.get").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: args[0]},
 		core.Option{Key: "key", Value: args[1]},
 	))
@@ -66,7 +65,7 @@ func stateSet(c *core.Core, args []string) int {
 		core.Print(core.Stderr(), "lthn state set: usage: lthn state set GROUP KEY VALUE\n")
 		return 2
 	}
-	r := c.Action("store.set").Run(context.Background(), core.NewOptions(
+	r := c.Action("store.set").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: args[0]},
 		core.Option{Key: "key", Value: args[1]},
 		core.Option{Key: "value", Value: args[2]},
@@ -83,7 +82,7 @@ func stateDelete(c *core.Core, args []string) int {
 		core.Print(core.Stderr(), "lthn state delete: usage: lthn state delete GROUP KEY\n")
 		return 2
 	}
-	r := c.Action("store.delete").Run(context.Background(), core.NewOptions(
+	r := c.Action("store.delete").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: args[0]},
 		core.Option{Key: "key", Value: args[1]},
 	))
@@ -99,7 +98,7 @@ func stateList(c *core.Core, args []string) int {
 		core.Print(core.Stderr(), "lthn state list: usage: lthn state list GROUP\n")
 		return 2
 	}
-	r := c.Action("store.get_all").Run(context.Background(), core.NewOptions(
+	r := c.Action("store.get_all").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: args[0]},
 	))
 	if !r.OK {
@@ -115,7 +114,7 @@ func stateList(c *core.Core, args []string) int {
 }
 
 func stateGroups(c *core.Core, _ []string) int {
-	r := c.Action("store.groups").Run(context.Background(), core.NewOptions())
+	r := c.Action("store.groups").Run(core.Background(), core.NewOptions())
 	if !r.OK {
 		core.Print(core.Stderr(), "lthn state groups: %s\n", r.Error())
 		return 1

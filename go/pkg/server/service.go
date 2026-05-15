@@ -33,7 +33,6 @@
 package server
 
 import (
-	"context"
 	"net/http"
 
 	core "dappco.re/go"
@@ -271,7 +270,7 @@ func (s *Service) Start(_ core.Context) core.Result {
 //
 //	_ = s.Stop(core.Background())
 func (s *Service) Stop(_ core.Context) core.Result {
-	if err := s.http.Shutdown(context.Background()); err != nil {
+	if err := s.http.Shutdown(core.Background()); err != nil {
 		return core.Fail(err)
 	}
 	return core.Ok(nil)

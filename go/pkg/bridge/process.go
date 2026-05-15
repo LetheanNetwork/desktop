@@ -11,7 +11,6 @@
 package bridge
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	"dappco.re/go/process"
@@ -33,7 +32,7 @@ func (s *Service) procSvc() *process.Service {
 }
 
 // toolProcessStart spawns a process. params: { command, args?, dir?, env? }
-func (s *Service) toolProcessStart(ctx context.Context, params map[string]any) map[string]any {
+func (s *Service) toolProcessStart(ctx core.Context, params map[string]any) map[string]any {
 	ps := s.procSvc()
 	if ps == nil {
 		return map[string]any{"ok": false, "error": processServiceUnavailable}

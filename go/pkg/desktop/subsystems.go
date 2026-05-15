@@ -24,7 +24,6 @@
 package desktop
 
 import (
-	"context"
 	"io"
 	"net/http"
 
@@ -158,7 +157,7 @@ func adaptMCPRest(h mcpsvc.RESTHandler) gin.HandlerFunc {
 		}
 		ctx := c.Request.Context()
 		if ctx == nil {
-			ctx = context.Background()
+			ctx = core.Background()
 		}
 		result, err := h(ctx, body)
 		if err != nil {

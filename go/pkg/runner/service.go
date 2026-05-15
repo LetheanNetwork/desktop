@@ -24,7 +24,6 @@
 package runner
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	"dappco.re/go/ai/ai"
@@ -148,7 +147,7 @@ func (s *Service) Generate(prompt string) core.Result {
 	if s.router == nil {
 		return core.Ok(core.Concat("[lthn stub] received: ", prompt))
 	}
-	resp := s.router.Chat(context.Background(), ai.ProviderChatRequest{
+	resp := s.router.Chat(core.Background(), ai.ProviderChatRequest{
 		Prompt: prompt,
 	})
 	if !resp.OK {
@@ -180,7 +179,7 @@ func (s *Service) Chat(messages []inference.Message) core.Result {
 		}
 		return core.Ok(core.Concat("[lthn stub] received: ", last))
 	}
-	resp := s.router.Chat(context.Background(), ai.ProviderChatRequest{
+	resp := s.router.Chat(core.Background(), ai.ProviderChatRequest{
 		Messages: messages,
 	})
 	if !resp.OK {

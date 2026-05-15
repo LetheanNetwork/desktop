@@ -17,7 +17,6 @@
 package integrations
 
 import (
-	"context"
 
 	core "dappco.re/go"
 )
@@ -54,7 +53,7 @@ type WailsService struct{}
 func NewWailsService() *WailsService { return &WailsService{} }
 
 func (s *WailsService) ServiceName() string { return "Integrations" }
-func (s *WailsService) ServiceStartup(_ context.Context, _ any) core.Result {
+func (s *WailsService) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }

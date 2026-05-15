@@ -22,7 +22,6 @@
 package sessions
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	"dappco.re/go/inference"
@@ -135,7 +134,7 @@ func List(c *core.Core) core.Result {
 	if c == nil {
 		return core.Fail(core.E("sessions.List", coreNilMessage, nil))
 	}
-	r := c.Action("store.get_all").Run(context.Background(), core.NewOptions(
+	r := c.Action("store.get_all").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: groupManifest},
 	))
 	if !r.OK {
@@ -165,7 +164,7 @@ func writeMessages(c *core.Core, id string, msgs []inference.Message) core.Resul
 	if !ok {
 		return core.Fail(core.E("sessions.writeMessages", "encode failed", nil))
 	}
-	return c.Action("store.set").Run(context.Background(), core.NewOptions(
+	return c.Action("store.set").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: groupMessages},
 		core.Option{Key: "key", Value: id},
 		core.Option{Key: "value", Value: string(bytes)},
@@ -173,7 +172,7 @@ func writeMessages(c *core.Core, id string, msgs []inference.Message) core.Resul
 }
 
 func readMessages(c *core.Core, id string) core.Result {
-	r := c.Action("store.get").Run(context.Background(), core.NewOptions(
+	r := c.Action("store.get").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: groupMessages},
 		core.Option{Key: "key", Value: id},
 	))
@@ -200,7 +199,7 @@ func writeManifest(c *core.Core, info SessionInfo) core.Result {
 	if !ok {
 		return core.Fail(core.E("sessions.writeManifest", "encode failed", nil))
 	}
-	return c.Action("store.set").Run(context.Background(), core.NewOptions(
+	return c.Action("store.set").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: groupManifest},
 		core.Option{Key: "key", Value: info.ID},
 		core.Option{Key: "value", Value: string(bytes)},
@@ -208,7 +207,7 @@ func writeManifest(c *core.Core, info SessionInfo) core.Result {
 }
 
 func readManifest(c *core.Core, id string) core.Result {
-	r := c.Action("store.get").Run(context.Background(), core.NewOptions(
+	r := c.Action("store.get").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: groupManifest},
 		core.Option{Key: "key", Value: id},
 	))

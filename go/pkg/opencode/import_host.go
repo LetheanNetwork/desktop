@@ -26,7 +26,6 @@
 package opencode
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -86,7 +85,7 @@ func (s *Service) ImportFromHost() core.Result {
 
 	// 3. Spawn `opencode serve --port N --hostname 127.0.0.1`.
 	target := core.Sprintf("http://127.0.0.1:%d", port)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 30*time.Second)
 	defer cancel()
 	procR := ps.StartWithOptions(ctx, process.RunOptions{
 		Command: "opencode",

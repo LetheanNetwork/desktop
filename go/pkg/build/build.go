@@ -16,7 +16,6 @@
 package build
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	"dappco.re/go/process"
@@ -168,7 +167,7 @@ func (s *Service) startProc(cwd, command string, args []string) core.Result {
 		Args:    args,
 		Dir:     cwd,
 	}
-	r := ps.StartWithOptions(context.Background(), opts)
+	r := ps.StartWithOptions(core.Background(), opts)
 	if !r.OK {
 		return core.Fail(core.E(startProcOp, r.Error(), nil))
 	}

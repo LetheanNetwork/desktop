@@ -8,14 +8,13 @@
 package git
 
 import (
-	"context"
 
 	core "dappco.re/go"
 )
 
 // ServiceName / Startup / Shutdown — Wails3 lifecycle.
 func (s *Service) ServiceName() string { return "Git" }
-func (s *Service) ServiceStartup(_ context.Context, _ any) core.Result {
+func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }

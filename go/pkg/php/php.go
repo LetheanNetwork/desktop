@@ -20,7 +20,6 @@
 package php
 
 import (
-	"context"
 	"sort"
 
 	core "dappco.re/go"
@@ -247,7 +246,7 @@ func (s *Service) runProc(cwd, command string, args []string) core.Result {
 		Args:    args,
 		Dir:     cwd,
 	}
-	r := ps.StartWithOptions(context.Background(), opts)
+	r := ps.StartWithOptions(core.Background(), opts)
 	if !r.OK {
 		return core.Fail(core.E(runProcOp, r.Error(), nil))
 	}

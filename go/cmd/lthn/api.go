@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 
 	core "dappco.re/go"
 
@@ -132,7 +131,7 @@ func apiSDK(args []string) int {
 		}
 	}
 
-	if r := lthnapi.GenerateSDK(context.Background(), specPath, out, language, pkg); !r.OK {
+	if r := lthnapi.GenerateSDK(core.Background(), specPath, out, language, pkg); !r.OK {
 		core.Print(core.Stderr(), "lthn api sdk: %s\n", r.Error())
 		return 1
 	}

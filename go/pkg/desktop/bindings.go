@@ -30,7 +30,6 @@
 package desktop
 
 import (
-	"context"
 
 	core "dappco.re/go"
 )
@@ -50,7 +49,7 @@ type WindowService struct {
 func NewWindowService() *WindowService { return &WindowService{} }
 
 func (s *WindowService) ServiceName() string { return "Window" }
-func (s *WindowService) ServiceStartup(_ context.Context, _ any) core.Result {
+func (s *WindowService) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 func (s *WindowService) ServiceShutdown() core.Result { return core.Ok(nil) }

@@ -36,7 +36,6 @@
 package bridge
 
 import (
-	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -134,7 +133,7 @@ func RegisterService(opts Options) func(*core.Core) core.Result {
 }
 
 // OnStartup starts the bridge HTTP server.
-func (s *Service) OnStartup(_ context.Context) core.Result {
+func (s *Service) OnStartup(_ core.Context) core.Result {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mcp/info", s.handleInfo)
 	mux.HandleFunc("/mcp/tools", s.handleTools)
@@ -162,7 +161,7 @@ func (s *Service) OnStartup(_ context.Context) core.Result {
 }
 
 // OnShutdown stops the bridge HTTP server gracefully.
-func (s *Service) OnShutdown(ctx context.Context) core.Result {
+func (s *Service) OnShutdown(ctx core.Context) core.Result {
 	s.mu.Lock()
 	srv := s.httpSrv
 	s.mu.Unlock()

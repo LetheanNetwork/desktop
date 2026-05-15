@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	"dappco.re/go/api"
@@ -146,7 +145,7 @@ func newAppCore() *core.Core {
 		core.WithName("queue", queue.Register),
 	)
 
-	if r := c.ServiceStartup(context.Background(), nil); !r.OK {
+	if r := c.ServiceStartup(core.Background(), nil); !r.OK {
 		core.Print(core.Stderr(), "lthn: startup failed: %s\n", r.Error())
 		return nil
 	}
@@ -227,7 +226,7 @@ func newAppCore() *core.Core {
 	// imports show up in the multi-repo dashboard alongside scanned
 	// roots. Future codex/claude/pi imports plug in the same way.
 	if reposSvc, _ := core.ServiceFor[*repos.Service](c, "repos"); reposSvc != nil {
-		reposSvc.RegisterSource("opencode-imports", func(_ context.Context) []string {
+		reposSvc.RegisterSource("opencode-imports", func(_ core.Context) []string {
 			r := orm.Of[opencode.ImportedProject](c).
 				Where("worktree", "!=", "").
 				Get()

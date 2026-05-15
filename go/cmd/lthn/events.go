@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	"dappco.re/go/stream"
@@ -24,7 +23,7 @@ func cmdEvents(args []string) int {
 	if c == nil {
 		return 1
 	}
-	defer c.ServiceShutdown(context.Background())
+	defer c.ServiceShutdown(core.Background())
 
 	switch args[0] {
 	case "stats":
@@ -42,7 +41,7 @@ func cmdEvents(args []string) int {
 }
 
 func eventsStats(c *core.Core, _ []string) int {
-	r := c.Action("stream.stats").Run(context.Background(), core.NewOptions())
+	r := c.Action("stream.stats").Run(core.Background(), core.NewOptions())
 	if !r.OK {
 		core.Print(core.Stderr(), "lthn events stats: %s\n", r.Error())
 		return 1
@@ -60,7 +59,7 @@ func eventsPublish(c *core.Core, args []string) int {
 		core.Print(core.Stderr(), "lthn events publish: usage: lthn events publish CHANNEL FRAME\n")
 		return 2
 	}
-	r := c.Action("stream.publish").Run(context.Background(), core.NewOptions(
+	r := c.Action("stream.publish").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "channel", Value: args[0]},
 		core.Option{Key: "frame", Value: []byte(args[1])},
 	))
@@ -72,7 +71,7 @@ func eventsPublish(c *core.Core, args []string) int {
 }
 
 func eventsConfig(c *core.Core, _ []string) int {
-	r := c.Action("stream.config").Run(context.Background(), core.NewOptions())
+	r := c.Action("stream.config").Run(core.Background(), core.NewOptions())
 	if !r.OK {
 		core.Print(core.Stderr(), "lthn events config: %s\n", r.Error())
 		return 1
@@ -107,7 +106,7 @@ func eventsConfig(c *core.Core, _ []string) int {
 }
 
 func eventsRunning(c *core.Core, _ []string) int {
-	r := c.Action("stream.running").Run(context.Background(), core.NewOptions())
+	r := c.Action("stream.running").Run(core.Background(), core.NewOptions())
 	if !r.OK {
 		core.Print(core.Stderr(), "lthn events running: %s\n", r.Error())
 		return 1

@@ -25,7 +25,6 @@ package opencode
 
 import (
 	"bytes"
-	"context"
 	goio "io"
 	"iter"
 	"net/http"
@@ -83,7 +82,7 @@ func NewModel(opts ModelOptions) *Model {
 
 // Generate implements inference.TextModel — defers to Chat with a
 // single user message, mirroring the openai.Model shape.
-func (m *Model) Generate(ctx context.Context, prompt string, opts ...inference.GenerateOption) iter.Seq[inference.Token] {
+func (m *Model) Generate(ctx core.Context, prompt string, opts ...inference.GenerateOption) iter.Seq[inference.Token] {
 	return m.Chat(ctx, []inference.Message{{Role: "user", Content: prompt}}, opts...)
 }
 
@@ -91,7 +90,7 @@ func (m *Model) Generate(ctx context.Context, prompt string, opts ...inference.G
 // opencode-serve and yields a single token carrying the assistant's
 // full response. Non-streaming for v1; streaming follows once the
 // /session/:id/event SSE shape is wired through.
-func (m *Model) Chat(ctx context.Context, messages []inference.Message, _ ...inference.GenerateOption) iter.Seq[inference.Token] {
+func (m *Model) Chat(ctx core.Context, messages []inference.Message, _ ...inference.GenerateOption) iter.Seq[inference.Token] {
 	return func(yield func(inference.Token) bool) {
 		start := time.Now()
 		text, err := m.invoke(ctx, messages)
@@ -106,14 +105,14 @@ func (m *Model) Chat(ctx context.Context, messages []inference.Message, _ ...inf
 }
 
 // Classify is not supported via the opencode session API.
-func (m *Model) Classify(context.Context, []string, ...inference.GenerateOption) ([]inference.ClassifyResult, error) {
+func (m *Model) Classify(core.Context, []string, ...inference.GenerateOption) ([]inference.ClassifyResult, error) {
 	return nil, core.E("opencode.Classify",
 		"classification is not supported via opencode session routing", nil)
 }
 
 // BatchGenerate runs Generate sequentially for each prompt — mirrors
 // the openai backend's approach.
-func (m *Model) BatchGenerate(ctx context.Context, prompts []string, opts ...inference.GenerateOption) ([]inference.BatchResult, error) {
+func (m *Model) BatchGenerate(ctx core.Context, prompts []string, opts ...inference.GenerateOption) ([]inference.BatchResult, error) {
 	out := make([]inference.BatchResult, 0, len(prompts))
 	for _, p := range prompts {
 		var tokens []inference.Token
@@ -166,7 +165,7 @@ func (m *Model) setResult(metrics inference.GenerateMetrics, err error) {
 // invoke creates a session, posts the user message, and returns the
 // assistant's response text. Errors propagate; the caller sets the
 // Model's lastErr via setResult.
-func (m *Model) invoke(ctx context.Context, messages []inference.Message) (string, error) {
+func (m *Model) invoke(ctx core.Context, messages []inference.Message) (string, error) {
 	target, r := m.opts.Service.targetFor(m.opts.SandboxID)
 	if !r.OK {
 		return "", core.E("opencode.invoke", r.Error(), nil)

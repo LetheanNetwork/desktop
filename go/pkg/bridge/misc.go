@@ -7,7 +7,6 @@
 package bridge
 
 import (
-	"context"
 
 	core "dappco.re/go"
 )
@@ -125,7 +124,7 @@ func (s *Service) toolLangList() map[string]any {
 // Wails doesn't expose a single cross-platform theme accessor today;
 // the matchMedia('(prefers-color-scheme: dark)') check is what every
 // Lit window already uses for theming, so this stays consistent.
-func (s *Service) toolThemeGet(ctx context.Context, params map[string]any) map[string]any {
+func (s *Service) toolThemeGet(ctx core.Context, params map[string]any) map[string]any {
 	return s.eval(ctx, paramString(params, "window", DefaultWindow),
 		`return {theme: window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'};`)
 }

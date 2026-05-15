@@ -20,7 +20,6 @@
 package plugin
 
 import (
-	"context"
 	"sync"
 	"time"
 
@@ -76,14 +75,14 @@ func Register(c *core.Core) core.Result {
 // Core actions; everything goes through the Wails surface. Kept
 // for future expansion (e.g. exposing `plugin.list` as a Core
 // action so other services can enumerate installed plugins).
-func (s *Service) OnStartup(context.Context) core.Result {
+func (s *Service) OnStartup(core.Context) core.Result {
 	return core.Ok(nil)
 }
 
 // OnShutdown stops every running plugin. Plugins ride out the
 // host's process group death on SIGKILL anyway, but a clean
 // SIGTERM here lets them flush state before going.
-func (s *Service) OnShutdown(context.Context) core.Result {
+func (s *Service) OnShutdown(core.Context) core.Result {
 	s.mu.Lock()
 	codes := make([]string, 0, len(s.state))
 	for code := range s.state {

@@ -11,7 +11,6 @@
 package plugin
 
 import (
-	"context"
 	"time"
 
 	core "dappco.re/go"
@@ -71,7 +70,7 @@ func (s *Service) Install(input InstallInput) core.Result {
 			return core.Fail(core.E(installOp,
 				"binary_url or local_path required", nil))
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), downloadTimeout)
+		ctx, cancel := core.WithTimeout(core.Background(), downloadTimeout)
 		defer cancel()
 		fetchedR := fetchBinary(ctx, validated.BinaryURL)
 		if !fetchedR.OK {
@@ -132,7 +131,7 @@ func (s *Service) Start(code string) core.Result {
 	// Generous outer timeout — health gating happens with its
 	// own narrower window inside startPlugin. This is just the
 	// ceiling for spawn-plus-health.
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 60*time.Second)
 	defer cancel()
 	if r := s.startPlugin(ctx, code, s.resolveToken()); !r.OK {
 		return core.Fail(core.E("plugin.Start", r.Error(), nil))

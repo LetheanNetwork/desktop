@@ -16,7 +16,6 @@
 package git
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	"dappco.re/go/process"
@@ -63,7 +62,7 @@ func (s *Service) runGit(repo string, args ...string) core.Result {
 		return core.Fail(core.E(runGitOp, "process service unavailable", nil))
 	}
 	full := append([]string{"-C", repo}, args...)
-	r := proc.Run(context.Background(), "git", full...)
+	r := proc.Run(core.Background(), "git", full...)
 	out, _ := r.Value.(string)
 	if !r.OK {
 		return core.Fail(core.E(runGitOp, r.Error(), nil))

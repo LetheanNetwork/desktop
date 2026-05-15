@@ -17,7 +17,6 @@
 package repos
 
 import (
-	"context"
 	"sync"
 
 	core "dappco.re/go"
@@ -33,11 +32,11 @@ import (
 //
 // Usage example:
 //
-//	reposSvc.RegisterSource("opencode-imports", func(ctx context.Context) []string {
+//	reposSvc.RegisterSource("opencode-imports", func(ctx core.Context) []string {
 //	    rows := orm.Of[opencode.ImportedProject](c).Where("worktree","!=","").Get()
 //	    return pathsFrom(rows)
 //	})
-type SourceProvider func(ctx context.Context) []string
+type SourceProvider func(ctx core.Context) []string
 
 // Service owns the repos surface. Holds *core.Core for late
 // resolution of any future dependencies (currently scmgit is a
@@ -88,7 +87,7 @@ func (s *Service) RegisterSource(name string, fn SourceProvider) {
 //
 // Used by Status() to merge external paths (opencode imports etc.)
 // into the canonical-roots scan.
-func (s *Service) collectSourcePaths(ctx context.Context) []string {
+func (s *Service) collectSourcePaths(ctx core.Context) []string {
 	s.sourcesMu.RLock()
 	srcs := append([]registeredSource(nil), s.sources...)
 	s.sourcesMu.RUnlock()
@@ -195,7 +194,7 @@ func (s *Service) scanRoots(roots []string) []string {
 // and shapes the result for the Lit window. Calls fan out to N
 // `git` invocations concurrently inside scmgit — bounded by its
 // internal worker pool, not by us.
-func (s *Service) statuses(ctx context.Context, paths []string) []Status {
+func (s *Service) statuses(ctx core.Context, paths []string) []Status {
 	raw := scmgit.Status(ctx, scmgit.StatusOptions{Paths: paths})
 	out := make([]Status, 0, len(raw))
 	for _, st := range raw {

@@ -15,7 +15,6 @@
 package container
 
 import (
-	"context"
 	"time"
 
 	core "dappco.re/go"
@@ -95,7 +94,7 @@ func (s *Service) quickVersion(cmd, flag string) string {
 	if ps == nil {
 		return ""
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 2*time.Second)
 	defer cancel()
 	r := ps.Run(ctx, cmd, flag)
 	if !r.OK {
@@ -167,12 +166,12 @@ func (s *Service) detectAll() []Runtime {
 // Empty slice on any failure — partial-host situations are
 // expected (daemon stopped, no socket, etc.) and shouldn't error
 // the whole panel.
-func (s *Service) listDocker(ctx context.Context) []Container {
+func (s *Service) listDocker(ctx core.Context) []Container {
 	ps := s.proc()
 	if ps == nil {
 		return nil
 	}
-	c, cancel := context.WithTimeout(ctx, 3*time.Second)
+	c, cancel := core.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	r := ps.Run(c, "docker", "ps", "--format", "{{json .}}", "--no-trunc")
 	if !r.OK {
@@ -207,12 +206,12 @@ func (s *Service) listDocker(ctx context.Context) []Container {
 }
 
 // listPodman returns running Podman containers via `podman ps`.
-func (s *Service) listPodman(ctx context.Context) []Container {
+func (s *Service) listPodman(ctx core.Context) []Container {
 	ps := s.proc()
 	if ps == nil {
 		return nil
 	}
-	c, cancel := context.WithTimeout(ctx, 3*time.Second)
+	c, cancel := core.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	r := ps.Run(c, "podman", "ps", "--format", "json")
 	if !r.OK {

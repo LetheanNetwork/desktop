@@ -11,7 +11,6 @@
 package server
 
 import (
-	"context"
 
 	core "dappco.re/go"
 )
@@ -23,7 +22,7 @@ func (s *Service) ServiceName() string { return "Server" }
 // ServiceStartup runs on Wails boot. Returns nil unconditionally —
 // the gin engine is constructed in NewService, before the Wails
 // application takes ownership.
-func (s *Service) ServiceStartup(_ context.Context, _ any) core.Result {
+func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 

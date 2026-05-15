@@ -16,7 +16,6 @@
 package sandbox
 
 import (
-	"context"
 	"time"
 
 	core "dappco.re/go"
@@ -183,7 +182,7 @@ func (s *Service) spawnApple(input SpawnInput, timeout time.Duration) core.Resul
 		Path:     input.Image,
 		Provider: string(container.RuntimeApple),
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := core.WithTimeout(core.Background(), timeout)
 	defer cancel()
 	started := time.Now()
 	// AppleProvider.Run uses ro.Name as the container name + threads
@@ -241,7 +240,7 @@ func (s *Service) spawnViaCLI(rt container.RuntimeType, input SpawnInput, timeou
 		return argsResult
 	}
 	run := argsResult.Value.(runCommand)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := core.WithTimeout(core.Background(), timeout)
 	defer cancel()
 	started := time.Now()
 	r := ps.Run(ctx, run.Binary, run.Args...)

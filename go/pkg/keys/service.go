@@ -34,7 +34,6 @@
 package keys
 
 import (
-	"context"
 	"sync"
 
 	core "dappco.re/go"
@@ -311,7 +310,7 @@ func (s *Service) Has(ref string) core.Result {
 func (s *Service) ServiceName() string { return "Keys" }
 
 // ServiceStartup is the Wails3 lifecycle hook; no-op (lazy init).
-func (s *Service) ServiceStartup(_ context.Context, _ any) core.Result {
+func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 

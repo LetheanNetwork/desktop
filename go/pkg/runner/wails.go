@@ -8,7 +8,6 @@
 package runner
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	"dappco.re/go/config"
@@ -30,7 +29,7 @@ type RouteView struct {
 // instance through application.NewService.
 
 func (s *Service) ServiceName() string { return "Runner" }
-func (s *Service) ServiceStartup(_ context.Context, _ any) core.Result {
+func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }

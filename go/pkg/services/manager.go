@@ -3,7 +3,6 @@
 package services
 
 import (
-	"context"
 	"runtime"
 
 	core "dappco.re/go"
@@ -154,7 +153,7 @@ func (ctl *controller) launchctlTarget() string {
 }
 
 func (ctl *controller) launchctl(args ...string) core.Result {
-	return process.Run(context.Background(), "launchctl", args...)
+	return process.Run(core.Background(), "launchctl", args...)
 }
 
 func (ctl *controller) installLaunchAgent() core.Result {
@@ -249,7 +248,7 @@ func (ctl *controller) systemdUnitName() string {
 
 func (ctl *controller) systemctl(args ...string) core.Result {
 	full := append([]string{"--user"}, args...)
-	return process.Run(context.Background(), "systemctl", full...)
+	return process.Run(core.Background(), "systemctl", full...)
 }
 
 func (ctl *controller) installSystemdUserUnit() core.Result {

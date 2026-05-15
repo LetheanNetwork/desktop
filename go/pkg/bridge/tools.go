@@ -6,7 +6,6 @@
 package bridge
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"time"
@@ -235,7 +234,7 @@ func toolCatalogue() []map[string]any {
 	}
 }
 
-func (s *Service) dispatch(ctx context.Context, tool string, params map[string]any) map[string]any {
+func (s *Service) dispatch(ctx core.Context, tool string, params map[string]any) map[string]any {
 	switch tool {
 	case "webview_console":
 		return s.toolConsole(params)
@@ -452,7 +451,7 @@ func (s *Service) toolWindows() map[string]any {
 // eval dispatches the wrapped body through core/gui and waits for
 // the fetch-back at /internal/eval-reply. 5s timeout - anything
 // longer is almost certainly a hung script.
-func (s *Service) eval(ctx context.Context, windowName, body string) map[string]any {
+func (s *Service) eval(ctx core.Context, windowName, body string) map[string]any {
 	if body == "" {
 		return map[string]any{"ok": false, "error": "script param required"}
 	}
@@ -531,7 +530,7 @@ func (s *Service) ServiceName() string { return "Bridge" }
 // ServiceStartup is a no-op for the Wails lifecycle — the bridge's
 // HTTP listener boots via the Core OnStartup hook. Wails calls this
 // once per session after application.New returns.
-func (s *Service) ServiceStartup(_ context.Context, _ any) core.Result {
+func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 

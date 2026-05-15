@@ -3,7 +3,6 @@
 package api
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
@@ -92,10 +91,10 @@ func ExportSpec(c *core.Core, format, path string, info SpecInfo) core.Result {
 //
 // Usage example:
 //
-//	if r := api.GenerateSDK(context.Background(), "openapi.yaml", "build/sdk", "typescript-fetch", "lthn-api"); !r.OK {
+//	if r := api.GenerateSDK(core.Background(), "openapi.yaml", "build/sdk", "typescript-fetch", "lthn-api"); !r.OK {
 //	    return r
 //	}
-func GenerateSDK(ctx context.Context, specPath, outputDir, language, packageName string) core.Result {
+func GenerateSDK(ctx core.Context, specPath, outputDir, language, packageName string) core.Result {
 	if specPath == "" {
 		return core.Fail(core.E(generateSDKOp, "specPath is required", nil))
 	}

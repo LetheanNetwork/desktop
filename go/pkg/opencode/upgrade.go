@@ -18,7 +18,6 @@
 package opencode
 
 import (
-	"context"
 	"strings"
 	"time"
 
@@ -58,7 +57,7 @@ func (s *Service) Upgrade() core.Result {
 
 	// docker pull is potentially slow on a real update — 60s is
 	// generous for any image we'd realistically ship.
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 60*time.Second)
 	defer cancel()
 
 	pullR := ps.Run(ctx, s.runtime(), "pull", s.image())

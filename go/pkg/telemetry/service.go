@@ -17,7 +17,6 @@
 package telemetry
 
 import (
-	"context"
 	"runtime"
 	"time"
 
@@ -145,7 +144,7 @@ func (s *Service) ServiceName() string { return "Telemetry" }
 
 // ServiceStartup runs at app boot. No-op today; reserved for the
 // powermetrics / IOReport / XPC helper handshake when that lands.
-func (s *Service) ServiceStartup(_ context.Context, _ any) core.Result {
+func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 

@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 
 	core "dappco.re/go"
 )
@@ -24,7 +23,7 @@ func cmdConfig(args []string) int {
 	if c == nil {
 		return 1
 	}
-	defer c.ServiceShutdown(context.Background())
+	defer c.ServiceShutdown(core.Background())
 
 	switch args[0] {
 	case "get":
@@ -48,7 +47,7 @@ func configGet(c *core.Core, args []string) int {
 		core.Print(core.Stderr(), "lthn config get: usage: lthn config get KEY\n")
 		return 2
 	}
-	r := c.Action("config.get").Run(context.Background(), core.NewOptions(
+	r := c.Action("config.get").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "key", Value: args[0]},
 	))
 	if !r.OK {
@@ -68,7 +67,7 @@ func configSet(c *core.Core, args []string) int {
 		core.Print(core.Stderr(), "lthn config set: usage: lthn config set KEY VALUE\n")
 		return 2
 	}
-	r := c.Action("config.set").Run(context.Background(), core.NewOptions(
+	r := c.Action("config.set").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "key", Value: args[0]},
 		core.Option{Key: "value", Value: args[1]},
 	))
@@ -77,7 +76,7 @@ func configSet(c *core.Core, args []string) int {
 		return 1
 	}
 	// Persist after every set — CLI flow.
-	commit := c.Action("config.commit").Run(context.Background(), core.NewOptions())
+	commit := c.Action("config.commit").Run(core.Background(), core.NewOptions())
 	if !commit.OK {
 		core.Print(core.Stderr(), "lthn config set: commit failed: %s\n", commit.Error())
 		return 1
@@ -86,7 +85,7 @@ func configSet(c *core.Core, args []string) int {
 }
 
 func configAll(c *core.Core, _ []string) int {
-	r := c.Action("config.all").Run(context.Background(), core.NewOptions())
+	r := c.Action("config.all").Run(core.Background(), core.NewOptions())
 	if !r.OK {
 		core.Print(core.Stderr(), "lthn config list: %s\n", r.Error())
 		return 1
@@ -100,7 +99,7 @@ func configAll(c *core.Core, _ []string) int {
 }
 
 func configCommit(c *core.Core, _ []string) int {
-	r := c.Action("config.commit").Run(context.Background(), core.NewOptions())
+	r := c.Action("config.commit").Run(core.Background(), core.NewOptions())
 	if !r.OK {
 		core.Print(core.Stderr(), "lthn config commit: %s\n", r.Error())
 		return 1
@@ -109,7 +108,7 @@ func configCommit(c *core.Core, _ []string) int {
 }
 
 func configPath(c *core.Core, _ []string) int {
-	r := c.Action("config.path").Run(context.Background(), core.NewOptions())
+	r := c.Action("config.path").Run(core.Background(), core.NewOptions())
 	if !r.OK {
 		core.Print(core.Stderr(), "lthn config path: %s\n", r.Error())
 		return 1

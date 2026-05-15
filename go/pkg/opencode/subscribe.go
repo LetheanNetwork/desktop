@@ -24,7 +24,6 @@ package opencode
 
 import (
 	"bufio"
-	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -115,7 +114,7 @@ func (s *Service) Subscribe(id string) (func(), core.Result) {
 	}
 	authHeader := s.authHeader()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := core.WithCancel(core.Background())
 	wrap := func() {
 		cancel()
 		s.mu.Lock()
@@ -156,7 +155,7 @@ func (s *Service) Unsubscribe(id string) {
 // until the context is cancelled. Each "data:" line is forwarded
 // to the installed emitter (re-resolved per event so a late
 // SetEventEmitter takes effect immediately).
-func (s *Service) runSubscription(ctx context.Context, id, target, authHeader string) {
+func (s *Service) runSubscription(ctx core.Context, id, target, authHeader string) {
 	backoff := 1 * time.Second
 	maxBackoff := 30 * time.Second
 
@@ -194,7 +193,7 @@ func (s *Service) runSubscription(ctx context.Context, id, target, authHeader st
 // streamEvents opens one SSE connection + reads until the stream
 // ends or ctx fires. Each "data: <json>" line forwards to the
 // emitter. Non-data lines (id, retry, comments) are skipped.
-func (s *Service) streamEvents(ctx context.Context, target, authHeader string) error {
+func (s *Service) streamEvents(ctx core.Context, target, authHeader string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target+"/global/event", nil)
 	if err != nil {
 		return err

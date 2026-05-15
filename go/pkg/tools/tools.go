@@ -13,7 +13,6 @@
 package tools
 
 import (
-	"context"
 
 	core "dappco.re/go"
 	mcpsvc "dappco.re/go/mcp/pkg/mcp"
@@ -46,7 +45,7 @@ type WailsService struct {
 func NewWailsService(c *core.Core) *WailsService { return &WailsService{core: c} }
 
 func (s *WailsService) ServiceName() string { return "Tools" }
-func (s *WailsService) ServiceStartup(_ context.Context, _ any) core.Result {
+func (s *WailsService) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }
