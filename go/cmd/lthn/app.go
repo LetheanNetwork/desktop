@@ -16,6 +16,7 @@ import (
 	"dappco.re/go/stream"
 	"dappco.re/lthn/desktop/pkg/bridge"
 	lthni18n "dappco.re/lthn/desktop/pkg/i18n"
+	"dappco.re/lthn/desktop/pkg/marketplace"
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/plugin"
@@ -143,6 +144,10 @@ func newAppCore() *core.Core {
 		// apps. Service.OnStart spawns the worker after schemas are
 		// registered + ServiceStartup runs.
 		core.WithName("queue", queue.Register),
+		// marketplace — lthn-vm bundle catalogue + install lifecycle.
+		// Provides marketplace.Service to subsystems.go for MCP tool
+		// registration (marketplace_list/install/launch/stop/uninstall).
+		core.WithName("marketplace", marketplace.Register),
 	)
 
 	if r := c.ServiceStartup(core.Background(), nil); !r.OK {

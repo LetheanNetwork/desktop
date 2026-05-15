@@ -31,6 +31,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	lthnapi "dappco.re/lthn/desktop/pkg/api"
+	"dappco.re/lthn/desktop/pkg/marketplace"
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/runner"
@@ -95,6 +96,11 @@ func mountSubsystems(c *core.Core, engine *coreapi.Engine, r *runner.Service) co
 	// protocol; native MCP clients (Claude Desktop stdio) keep
 	// working as before — both routes share the same handler.
 	if mcpSvc, ok := core.ServiceFor[*mcpsvc.Service](c, "mcp"); ok && mcpSvc != nil {
+		// Marketplace tools — list/install/launch/stop/uninstall via MCP.
+		if ms, msOK := core.ServiceFor[*marketplace.Service](c, "marketplace"); msOK && ms != nil {
+			marketplace.RegisterMCPTools(mcpSvc, ms)
+		}
+
 		bridge := coreapi.NewToolBridge("/mcp")
 		for _, t := range mcpSvc.Tools() {
 			bridge.Add(coreapi.ToolDescriptor{
