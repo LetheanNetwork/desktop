@@ -1,0 +1,84 @@
+version: "3"
+
+# Covers `lthn marketplace import-coolify PATH` — the Coolify-template
+# → lthn-vm-manifest converter (RFC.marketplace §12). The verb
+# branches early in cmdMarketplace before newAppCore so it doesn't
+# need HOME isolation; it's a pure file-to-file conversion.
+#
+# Test laydown:
+# - missing PATH arg → exit 2 with usage
+# - non-existent PATH → exit 1 with file-not-found error
+# - real fixture path → exit 0, stdout carries valid YAML, stderr
+#   carries the summary line
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        output="$(mktemp)"
+        stderr_out="$(mktemp)"
+        trap "rm -f $output $stderr_out" EXIT
+
+        # Missing PATH arg → exit 2 + usage on stderr
+        run_capture_all 2 "$output" ../../bin/lthn marketplace import-coolify
+        assert_contains "usage" "$output"
+        assert_contains "PATH" "$output"
+
+        # Non-existent path → exit 1
+        run_capture_all 1 "$output" ../../bin/lthn marketplace import-coolify /nonexistent/template
+        assert_contains "docker-compose.yml not found" "$output"
+
+        # Real fixture — build a minimal Coolify template in tmpdir
+        fixture="$(mktemp -d)"
+        trap "rm -rf $fixture" EXIT
+        cat >"$fixture/docker-compose.yml" <<'YAML'
+        services:
+          db:
+            image: postgres:16
+            environment:
+              POSTGRES_PASSWORD: $DB_PASSWORD
+            volumes:
+              - testdata:/var/lib/postgresql/data
+          app:
+            image: ghost:5
+            environment:
+              database__connection__password: ${DB_PASSWORD}
+              url: ${PUBLIC_URL}
+            ports:
+              - "2368:2368"
+        YAML
+        cat >"$fixture/.env.template" <<'EOF2'
+        DB_PASSWORD=changeme
+        PUBLIC_URL=http://lthn.local/ghost/
+        EOF2
+
+        # Run — stdout = manifest YAML, stderr = summary line
+        ../../bin/lthn marketplace import-coolify "$fixture" >"$output" 2>"$stderr_out"
+        rc=$?
+        if [[ "$rc" -ne 0 ]]; then
+          echo "import-coolify exited $rc"
+          cat "$stderr_out"
+          exit 1
+        fi
+
+        # Validate stdout — has the expected manifest fields
+        assert_contains "schema: lthn-vm/v1" "$output"
+        assert_contains "name:" "$output"
+        assert_contains "images:" "$output"
+        assert_contains "postgres:16" "$output"
+        assert_contains "ghost:5" "$output"
+        # Shell-ref rewrite landed: $DB_PASSWORD becomes the lthn-vm
+        # ${env.DB_PASSWORD} token shape. Match on a distinctive substring
+        # so the assertion line itself doesn't get shell-expanded.
+        assert_contains "env.DB_PASSWORD" "$output"
+        # Secret heuristic flipped DB_PASSWORD to type=secret
+        assert_contains "type: secret" "$output"
+
+        # Validate stderr — summary line carries the metadata
+        assert_contains "imported:" "$stderr_out"
+        assert_contains "images=2" "$stderr_out"
+        EOF

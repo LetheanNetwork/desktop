@@ -1,0 +1,13 @@
+version: "3"
+
+# CLI artefact tests for `lthn marketplace` — the lthn-vm bundle
+# marketplace surface (RFC.marketplace). Each leaf folder mirrors
+# one verb the marketplace dispatch exposes; pattern follows
+# tests/cli/state/* + tests/cli/help/* as canon.
+
+tasks:
+  test:
+    desc: Run every marketplace leaf test
+    cmds:
+      - task -d unknown test
+      - task -d import-coolify test

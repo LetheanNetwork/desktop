@@ -1,0 +1,30 @@
+version: "3"
+
+# Covers `lthn marketplace` dispatcher error paths.
+# - no verb → exit 2 with "missing verb" listing the catalogue
+# - unknown verb → exit 2 with "unknown verb"
+#
+# Doesn't isolate HOME — these paths don't construct an appCore
+# (the early dispatch in cmdMarketplace returns before newAppCore).
+
+tasks:
+  test:
+    cmds:
+      - |
+        bash <<'EOF'
+        set -euo pipefail
+        source ../../_lib/run.sh
+
+        output="$(mktemp)"
+        trap "rm -f $output" EXIT
+
+        # No verb — exit 2, lists the catalogue
+        run_capture_all 2 "$output" ../../bin/lthn marketplace
+        assert_contains "missing verb" "$output"
+        assert_contains "import-coolify" "$output"
+        assert_contains "install" "$output"
+
+        # Unknown verb — exit 2 with unknown-verb error
+        run_capture_all 2 "$output" ../../bin/lthn marketplace nosuchverb
+        assert_contains "unknown verb" "$output"
+        EOF

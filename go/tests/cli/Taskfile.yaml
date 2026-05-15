@@ -31,6 +31,7 @@ tasks:
       - task -d serve test
       - task -d queue test
       - task -d tasks test
+      - task -d marketplace test
 
   build:
     desc: Build the lthn binary the tests will exercise
