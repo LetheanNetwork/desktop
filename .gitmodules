@@ -71,3 +71,9 @@
 [submodule "external/poindexter"]
 	path = external/poindexter
 	url = https://forge.lthn.ai/Snider/Poindexter.git
+[submodule "external/ml"]
+	path = external/ml
+	url = https://github.com/dappcore/go-ml.git
+[submodule "external/mlx"]
+	path = external/mlx
+	url = https://github.com/dappcore/go-mlx.git

@@ -155,6 +155,69 @@ func MasterDB() core.Result {
 	return core.Ok(core.PathJoin(data.Value.(string), "lthn.duckdb"))
 }
 
+// DesktopDir returns ~/Lethean/data/desktop/. Per-app namespace for
+// lthn/desktop's persistent state. Separate per-subsystem DBs live
+// here (ai.duckdb, ml.duckdb) so each can grow without contention
+// against the shared master DB and so future apps (ofm, hostuk) can
+// land alongside under their own ~/Lethean/data/<app>/ subfolder.
+// Mode 0o755 (owner read+write, group/other read).
+//
+// Usage example:
+//
+//	r := paths.DesktopDir()
+//	if r.OK { _ = r.Value.(string) }
+func DesktopDir() core.Result {
+	data := DataDir()
+	if !data.OK {
+		return data
+	}
+	dir := core.PathJoin(data.Value.(string), "desktop")
+	if r := core.MkdirAll(dir, 0o755); !r.OK {
+		return r
+	}
+	return core.Ok(dir)
+}
+
+// AIDB returns ~/Lethean/data/desktop/ai.duckdb. Persistent settings
+// + state for the ai subsystem — provider routes, conversation
+// history, model metadata. Sized to grow independently of the master
+// DB; ai workloads (long chats, tool transcripts, training-data
+// candidates) can balloon and shouldn't contend with fleet/tasks for
+// the master lock. Path only — store.OpenDuckDB() creates the file on
+// first open.
+//
+// Usage example:
+//
+//	r := paths.AIDB()
+//	if r.OK { _ = r.Value.(string) }
+func AIDB() core.Result {
+	dir := DesktopDir()
+	if !dir.OK {
+		return dir
+	}
+	return core.Ok(core.PathJoin(dir.Value.(string), "ai.duckdb"))
+}
+
+// MLDB returns ~/Lethean/data/desktop/ml.duckdb. Persistent settings
+// + state for the ml subsystem — training run records, LoRA / GRPO
+// job state, dataset manifests, evaluation results, model-pack
+// registry. Like ai.duckdb, sized to grow independently so heavy ml
+// workloads (long training logs, weight checkpoint metadata) don't
+// pressure the master DB. Path only — store.OpenDuckDB() creates the
+// file on first open.
+//
+// Usage example:
+//
+//	r := paths.MLDB()
+//	if r.OK { _ = r.Value.(string) }
+func MLDB() core.Result {
+	dir := DesktopDir()
+	if !dir.OK {
+		return dir
+	}
+	return core.Ok(core.PathJoin(dir.Value.(string), "ml.duckdb"))
+}
+
 // KeysDir returns ~/Lethean/data/keys/. Encrypted-at-rest blobs
 // (sealed-box / age) — wallet seeds, API tokens, signing keys. Never
 // flat files. Mode 0700 (owner-only).
