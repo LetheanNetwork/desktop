@@ -1,0 +1,52 @@
+schema: lthn-vm/v1
+name: opencode
+display: OpenCode
+description: Sandboxed AI coding agent with 75+ provider adapters. Runs inside lthn-vm — no host install required.
+category: ai-agents
+icon: fa-robot
+homepage: https://opencode.ai
+license: MIT
+
+# Single image — lthn/dev:latest has opencode-ai baked in.
+images:
+  - id: app
+    image: lthn/dev:latest
+    env:
+      OPENCODE_SERVER_PASSWORD: ${env.SERVER_PASSWORD}
+    volumes:
+      - container: /workspace
+        persist: opencode-workspace
+    expose:
+      port: 4096
+      route: /opencode
+
+plugin:
+  routes:
+    - title: OpenCode
+      icon: fa-robot
+      group: extend
+      target: ${expose.app.route}
+      open_after_install: true
+  commands:
+    - id: opencode.open
+      title: Open OpenCode
+      runs: route:${expose.app.route}
+  settings:
+    - key: theme
+      type: string
+      prompt: UI theme
+      default: dark
+
+env:
+  - key: SERVER_PASSWORD
+    prompt: Server password (used by OpenCode to authenticate requests)
+    type: secret
+    default: ${random.password(32)}
+
+permissions:
+  - scope: project.metadata
+    mode: read
+    reason: List available projects in the workspace picker.
+  - scope: project.outputs
+    mode: write
+    reason: Save agent outputs next to source files.
