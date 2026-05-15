@@ -8,7 +8,6 @@
 package validator_test
 
 import (
-	"net/http"
 	"net/http/httptest"
 
 	core "dappco.re/go"
@@ -18,7 +17,7 @@ import (
 const modelsPath = "/models"
 
 func TestValidator_Endpoint_Good_2xx(t *core.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, req *core.Request) {
 		core.AssertEqual(t, modelsPath, req.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":[{"id":"gemma-4-e2b"}]}`))
@@ -35,9 +34,9 @@ func TestValidator_Endpoint_Good_2xx(t *core.T) {
 }
 
 func TestValidator_Endpoint_Good_TrailingSlashStripped(t *core.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, req *core.Request) {
 		core.AssertEqual(t, modelsPath, req.URL.Path)
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(core.StatusOK)
 	}))
 	defer srv.Close()
 
@@ -50,8 +49,8 @@ func TestValidator_Endpoint_Good_TrailingSlashStripped(t *core.T) {
 }
 
 func TestValidator_Endpoint_Bad_404(t *core.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		w.WriteHeader(core.StatusNotFound)
 		_, _ = w.Write([]byte(`not found`))
 	}))
 	defer srv.Close()

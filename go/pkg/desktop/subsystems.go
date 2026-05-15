@@ -25,7 +25,6 @@ package desktop
 
 import (
 	"io"
-	"net/http"
 
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
@@ -81,7 +80,7 @@ func mountSubsystems(c *core.Core, engine *coreapi.Engine, r *runner.Service) co
 		engine.Register(&subEngineGroup{
 			name:     "subapi",
 			basePath: "/api",
-			handler:  http.StripPrefix("/api", apiSvc.Engine.Handler()),
+			handler:  core.HTTPStripPrefix("/api", apiSvc.Engine.Handler()),
 		})
 	}
 
@@ -140,7 +139,7 @@ func mountSubsystems(c *core.Core, engine *coreapi.Engine, r *runner.Service) co
 func adaptMCPRest(h mcpsvc.RESTHandler) gin.HandlerFunc {
 	if h == nil {
 		return func(c *gin.Context) {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, coreapi.Fail(
+			c.AbortWithStatusJSON(core.StatusInternalServerError, coreapi.Fail(
 				"tool_unbound",
 				"mcp tool registered without a REST handler",
 			))
@@ -149,7 +148,7 @@ func adaptMCPRest(h mcpsvc.RESTHandler) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, coreapi.Fail(
+			c.AbortWithStatusJSON(core.StatusBadRequest, coreapi.Fail(
 				"invalid_body",
 				err.Error(),
 			))
@@ -161,24 +160,24 @@ func adaptMCPRest(h mcpsvc.RESTHandler) gin.HandlerFunc {
 		}
 		result, err := h(ctx, body)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, coreapi.Fail(
+			c.AbortWithStatusJSON(core.StatusInternalServerError, coreapi.Fail(
 				"tool_error",
 				err.Error(),
 			))
 			return
 		}
-		c.JSON(http.StatusOK, coreapi.OK(result))
+		c.JSON(core.StatusOK, coreapi.OK(result))
 	}
 }
 
 // subEngineGroup is a coreapi.RouteGroup that proxies every request
-// under basePath to an inner http.Handler — used to mount the
+// under basePath to an inner core.Handler — used to mount the
 // standalone dappco.re/go/api Service's Engine at /api/* on our
 // outer engine.
 type subEngineGroup struct {
 	name     string
 	basePath string
-	handler  http.Handler
+	handler  core.Handler
 }
 
 func (g *subEngineGroup) Name() string     { return g.name }

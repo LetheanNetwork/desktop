@@ -16,7 +16,6 @@
 package server
 
 import (
-	"net/http"
 
 	core "dappco.re/go"
 	"github.com/gin-gonic/gin"
@@ -134,7 +133,7 @@ func (s *Service) handleModels(c *gin.Context) {
 	if s.opts.Runner != nil {
 		mr := s.opts.Runner.Models()
 		if !mr.OK {
-			writeGinError(c, http.StatusInternalServerError, mr.Error(), "runner_error")
+			writeGinError(c, core.StatusInternalServerError, mr.Error(), "runner_error")
 			return
 		}
 		if v, ok := mr.Value.([]string); ok {
@@ -154,7 +153,7 @@ func (s *Service) handleModels(c *gin.Context) {
 			OwnedBy: "lthn",
 		})
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(core.StatusOK, resp)
 }
 
 // handleChat implements POST /v1/chat/completions. Non-streaming
@@ -162,12 +161,12 @@ func (s *Service) handleModels(c *gin.Context) {
 func (s *Service) handleChat(c *gin.Context) {
 	var req chatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		writeGinError(c, http.StatusBadRequest, err.Error(), "invalid_request_error")
+		writeGinError(c, core.StatusBadRequest, err.Error(), "invalid_request_error")
 		return
 	}
 	prompt := lastUserMessage(req.Messages)
 	reply := s.generate(prompt)
-	c.JSON(http.StatusOK, chatResponse{
+	c.JSON(core.StatusOK, chatResponse{
 		ID:      core.Concat("chatcmpl-", randID()),
 		Object:  "chat.completion",
 		Created: core.UnixNow(),
@@ -184,11 +183,11 @@ func (s *Service) handleChat(c *gin.Context) {
 func (s *Service) handleCompletion(c *gin.Context) {
 	var req completionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		writeGinError(c, http.StatusBadRequest, err.Error(), "invalid_request_error")
+		writeGinError(c, core.StatusBadRequest, err.Error(), "invalid_request_error")
 		return
 	}
 	reply := s.generate(req.Prompt)
-	c.JSON(http.StatusOK, completionResponse{
+	c.JSON(core.StatusOK, completionResponse{
 		ID:      core.Concat("cmpl-", randID()),
 		Object:  "text_completion",
 		Created: core.UnixNow(),

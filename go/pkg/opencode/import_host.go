@@ -148,14 +148,14 @@ func (s *Service) ImportFromHost() core.Result {
 // to any. Used for /project + /provider — caller type-asserts the
 // expected shape.
 func importFetchJSON(url, authHeader string) (any, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequest(core.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
 	}
-	client := &http.Client{Timeout: 10 * core.Second}
+	client := &core.HTTPClient{Timeout: 10 * core.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

@@ -191,13 +191,13 @@ func (m *Model) invoke(ctx core.Context, messages []inference.Message) (string, 
 	sessReqBody := bytes.NewBufferString(core.JSONMarshalString(map[string]any{
 		"title": "lthn-route",
 	}))
-	sessReq, err := http.NewRequestWithContext(ctx, http.MethodPost, target+"/session", sessReqBody)
+	sessReq, err := http.NewRequestWithContext(ctx, core.MethodPost, target+"/session", sessReqBody)
 	if err != nil {
 		return "", err
 	}
 	sessReq.Header.Set("Content-Type", "application/json")
 	m.opts.Service.applyAuth(sessReq)
-	sessResp, err := http.DefaultClient.Do(sessReq)
+	sessResp, err := core.DefaultHTTPClient.Do(sessReq)
 	if err != nil {
 		return "", err
 	}
@@ -226,14 +226,14 @@ func (m *Model) invoke(ctx core.Context, messages []inference.Message) (string, 
 			{"type": "text", "text": sb.String()},
 		},
 	}))
-	msgReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+	msgReq, err := http.NewRequestWithContext(ctx, core.MethodPost,
 		target+"/session/"+sess.ID+"/message", msgReqBody)
 	if err != nil {
 		return "", err
 	}
 	msgReq.Header.Set("Content-Type", "application/json")
 	m.opts.Service.applyAuth(msgReq)
-	msgResp, err := http.DefaultClient.Do(msgReq)
+	msgResp, err := core.DefaultHTTPClient.Do(msgReq)
 	if err != nil {
 		return "", err
 	}

@@ -3,7 +3,6 @@
 package opencode
 
 import (
-	"net/http"
 	"net/http/httptest"
 	"strings"
 
@@ -13,10 +12,10 @@ import (
 // TestSubscribe_streamEvents_Good — happy path: emitter receives every
 // "data:" line; comments + id lines are skipped; clean EOF returns nil.
 func TestSubscribe_streamEvents_Good(t *core.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, r *core.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		f, _ := w.(http.Flusher)
+		w.WriteHeader(core.StatusOK)
+		f, _ := w.(core.Flusher)
 		_, _ = w.Write([]byte(": comment-line-should-be-ignored\n"))
 		_, _ = w.Write([]byte("id: 123\n"))
 		_, _ = w.Write([]byte(`data: {"type":"server.connected"}` + "\n"))
@@ -61,8 +60,8 @@ func TestSubscribe_streamEvents_Good(t *core.T) {
 
 // TestSubscribe_streamEvents_Bad — 4xx upstream surfaces as an error.
 func TestSubscribe_streamEvents_Bad(t *core.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
+	server := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, r *core.Request) {
+		w.WriteHeader(core.StatusUnauthorized)
 	}))
 	defer server.Close()
 
@@ -82,10 +81,10 @@ func TestSubscribe_streamEvents_Bad(t *core.T) {
 // TestSubscribe_streamEvents_Ugly — context cancellation mid-stream
 // terminates promptly without panic.
 func TestSubscribe_streamEvents_Ugly(t *core.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, r *core.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		f, _ := w.(http.Flusher)
+		w.WriteHeader(core.StatusOK)
+		f, _ := w.(core.Flusher)
 		// Slow drip — emit one event then sleep past test timeout.
 		_, _ = w.Write([]byte(`data: {"x":1}` + "\n"))
 		if f != nil {

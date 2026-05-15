@@ -309,9 +309,9 @@ func (s *Service) Start(profileName string) core.Result {
 // will 401 otherwise when OPENCODE_SERVER_PASSWORD is set.
 func waitHealthy(target, authHeader string, timeout core.Duration) core.Result {
 	deadline := core.Now().Add(timeout)
-	client := &http.Client{Timeout: 2 * core.Second}
+	client := &core.HTTPClient{Timeout: 2 * core.Second}
 	for core.Now().Before(deadline) {
-		req, err := http.NewRequest(http.MethodGet, target+"/global/health", nil)
+		req, err := http.NewRequest(core.MethodGet, target+"/global/health", nil)
 		if err == nil {
 			if authHeader != "" {
 				req.Header.Set("Authorization", authHeader)
@@ -319,7 +319,7 @@ func waitHealthy(target, authHeader string, timeout core.Duration) core.Result {
 			resp, derr := client.Do(req)
 			if derr == nil {
 				_ = resp.Body.Close()
-				if resp.StatusCode == http.StatusOK {
+				if resp.StatusCode == core.StatusOK {
 					return core.Ok(nil)
 				}
 			}
@@ -341,7 +341,7 @@ func waitHealthy(target, authHeader string, timeout core.Duration) core.Result {
 // OPENCODE_SERVER_PASSWORD is set (always set by Start).
 func applyProfile(target, authHeader string, p Profile) core.Result {
 	body := bytes.NewBufferString(p.ToOpenCodeWire())
-	req, err := http.NewRequest(http.MethodPatch, target+"/global/config", body)
+	req, err := http.NewRequest(core.MethodPatch, target+"/global/config", body)
 	if err != nil {
 		return core.Fail(core.E("opencode.applyProfile", "request build failed", err))
 	}
@@ -349,7 +349,7 @@ func applyProfile(target, authHeader string, p Profile) core.Result {
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
 	}
-	client := &http.Client{Timeout: 5 * core.Second}
+	client := &core.HTTPClient{Timeout: 5 * core.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return core.Fail(core.E("opencode.applyProfile", "patch failed", err))

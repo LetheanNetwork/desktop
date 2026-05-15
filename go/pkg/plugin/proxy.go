@@ -9,7 +9,6 @@
 package plugin
 
 import (
-	"net/http"
 	"net/http/httputil"
 	"net/url"
 
@@ -64,7 +63,7 @@ func (g *ProxyGroup) Set(code, targetURL string) {
 	// says code == namespace by default so the namespace prefix is
 	// effectively preserved).
 	originalDirector := rp.Director
-	rp.Director = func(req *http.Request) {
+	rp.Director = func(req *core.Request) {
 		originalDirector(req)
 		// Inject X-Lthn-User for plugins that want to keyspace state.
 		req.Header.Set("X-Lthn-User", "local")
@@ -100,7 +99,7 @@ func (g *ProxyGroup) dispatch(c *gin.Context) {
 	rp, ok := g.targets[code]
 	g.mu.RUnlock()
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{
+		c.JSON(core.StatusNotFound, gin.H{
 			"error": "plugin not running: " + code,
 			"hint":  "install + start via the marketplace surface",
 		})

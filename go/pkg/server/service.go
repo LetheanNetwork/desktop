@@ -9,7 +9,7 @@
 // Two ways the same engine is used:
 //
 //	Start(ctx)      → standalone HTTP listener on opts.Addr (lthn serve)
-//	Handler()       → http.Handler for Wails Asset.Handler (lthn gui)
+//	Handler()       → core.Handler for Wails Asset.Handler (lthn gui)
 //
 // The runner reference is optional. When unset, completion endpoints
 // echo the prompt and /v1/models reports the static stub list. When
@@ -33,7 +33,6 @@
 package server
 
 import (
-	"net/http"
 
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
@@ -115,7 +114,7 @@ type Options struct {
 	// for late registrations (e.g. plugin proxy, opencode proxy +
 	// control) since Engine.Handler() snapshots the route tree at
 	// construction time — appending groups after NewService has
-	// no effect on the live http.Server.
+	// no effect on the live core.HTTPServer.
 	ExtraGroups []coreapi.RouteGroup
 }
 
@@ -125,7 +124,7 @@ type Options struct {
 type Service struct {
 	opts   Options
 	engine *coreapi.Engine
-	http   *http.Server
+	http   *core.HTTPServer
 	// listening tracks whether Start() has an active ListenAndServe
 	// running. Read by the Wails surface (WListening()) so the WebView
 	// can show the "HTTP server" toggle in its real state — false in
@@ -198,7 +197,7 @@ func NewService(opts Options) *Service {
 	for _, g := range opts.ExtraGroups {
 		engine.Register(g)
 	}
-	s.http = &http.Server{Addr: opts.Addr, Handler: engine.Handler()}
+	s.http = &core.HTTPServer{Addr: opts.Addr, Handler: engine.Handler()}
 	return s
 }
 
@@ -217,7 +216,7 @@ func (s *Service) Register(c *core.Core) core.Result {
 	return core.Ok(nil)
 }
 
-// Handler returns the http.Handler that serves the OpenAI-compatible
+// Handler returns the core.Handler that serves the OpenAI-compatible
 // surface. Exposed so consumers (pkg/desktop's Wails Asset.Handler)
 // can mount the same routes the standalone `lthn serve` exposes
 // inside the WebView origin — no CORS, no port hunting.
@@ -228,7 +227,7 @@ func (s *Service) Register(c *core.Core) core.Result {
 //	app := application.New(application.Options{
 //	    Assets: application.AssetOptions{Handler: s.Handler()},
 //	})
-func (s *Service) Handler() http.Handler {
+func (s *Service) Handler() core.Handler {
 	return s.engine.Handler()
 }
 
@@ -257,7 +256,7 @@ func (s *Service) Start(_ core.Context) core.Result {
 	s.listening = true
 	err := s.http.ListenAndServe()
 	s.listening = false
-	if err == nil || err == http.ErrServerClosed {
+	if err == nil || err == core.ErrHTTPServerClosed {
 		return core.Ok(nil)
 	}
 	return core.Fail(err)

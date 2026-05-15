@@ -25,7 +25,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
-	"net/http"
 
 	core "dappco.re/go"
 	goiostore "dappco.re/go/io/store"
@@ -98,7 +97,7 @@ func (s *Service) authHeader() string {
 
 // applyAuth sets the Authorization header on a request from the
 // persisted server password. No-op when the header is empty.
-func (s *Service) applyAuth(r *http.Request) {
+func (s *Service) applyAuth(r *core.Request) {
 	if h := s.authHeader(); h != "" {
 		r.Header.Set("Authorization", h)
 	}

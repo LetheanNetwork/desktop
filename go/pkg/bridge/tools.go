@@ -7,7 +7,6 @@ package bridge
 
 import (
 	"io"
-	"net/http"
 
 	core "dappco.re/go"
 	guiwindow "dappco.re/go/gui/pkg/window"
@@ -15,7 +14,7 @@ import (
 
 // ─── HTTP handlers ──────────────────────────────────────────────────
 
-func (s *Service) handleInfo(w http.ResponseWriter, _ *http.Request) {
+func (s *Service) handleInfo(w core.ResponseWriter, _ *core.Request) {
 	corsJSON(w)
 	writeJSON(w, map[string]any{
 		"name":    "lthn-desktop-bridge",
@@ -25,24 +24,24 @@ func (s *Service) handleInfo(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Service) handleTools(w http.ResponseWriter, _ *http.Request) {
+func (s *Service) handleTools(w core.ResponseWriter, _ *core.Request) {
 	corsJSON(w)
 	writeJSON(w, map[string]any{"tools": toolCatalogue()})
 }
 
-func (s *Service) handleHealth(w http.ResponseWriter, _ *http.Request) {
+func (s *Service) handleHealth(w core.ResponseWriter, _ *core.Request) {
 	corsJSON(w)
 	writeJSON(w, map[string]any{"ok": true, "port": s.port})
 }
 
-func (s *Service) handleCall(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleCall(w core.ResponseWriter, r *core.Request) {
 	corsJSON(w)
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
+	if r.Method == core.MethodOptions {
+		w.WriteHeader(core.StatusNoContent)
 		return
 	}
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+	if r.Method != core.MethodPost {
+		w.WriteHeader(core.StatusMethodNotAllowed)
 		writeJSON(w, map[string]any{"error": "POST required", "ok": false})
 		return
 	}
@@ -51,7 +50,7 @@ func (s *Service) handleCall(w http.ResponseWriter, r *http.Request) {
 		Params map[string]any `json:"params"`
 	}
 	if rr := readJSON(r, &req); !rr.OK {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(core.StatusBadRequest)
 		writeJSON(w, map[string]any{"error": "invalid json: " + rr.Error(), "ok": false})
 		return
 	}
@@ -59,19 +58,19 @@ func (s *Service) handleCall(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
-func (s *Service) handleInternalConsole(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleInternalConsole(w core.ResponseWriter, r *core.Request) {
 	corsJSON(w)
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
+	if r.Method == core.MethodOptions {
+		w.WriteHeader(core.StatusNoContent)
 		return
 	}
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+	if r.Method != core.MethodPost {
+		w.WriteHeader(core.StatusMethodNotAllowed)
 		return
 	}
 	var entry ConsoleEntry
 	if rr := readJSON(r, &entry); !rr.OK {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(core.StatusBadRequest)
 		writeJSON(w, map[string]any{"error": rr.Error()})
 		return
 	}
@@ -87,19 +86,19 @@ func (s *Service) handleInternalConsole(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-func (s *Service) handleInternalError(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleInternalError(w core.ResponseWriter, r *core.Request) {
 	corsJSON(w)
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
+	if r.Method == core.MethodOptions {
+		w.WriteHeader(core.StatusNoContent)
 		return
 	}
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+	if r.Method != core.MethodPost {
+		w.WriteHeader(core.StatusMethodNotAllowed)
 		return
 	}
 	var entry ErrorEntry
 	if rr := readJSON(r, &entry); !rr.OK {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(core.StatusBadRequest)
 		writeJSON(w, map[string]any{"error": rr.Error()})
 		return
 	}
@@ -115,19 +114,19 @@ func (s *Service) handleInternalError(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-func (s *Service) handleInternalEvalReply(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleInternalEvalReply(w core.ResponseWriter, r *core.Request) {
 	corsJSON(w)
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
+	if r.Method == core.MethodOptions {
+		w.WriteHeader(core.StatusNoContent)
 		return
 	}
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+	if r.Method != core.MethodPost {
+		w.WriteHeader(core.StatusMethodNotAllowed)
 		return
 	}
 	var reply evalReply
 	if rr := readJSON(r, &reply); !rr.OK {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(core.StatusBadRequest)
 		writeJSON(w, map[string]any{"error": rr.Error()})
 		return
 	}
@@ -594,24 +593,24 @@ func (s *Service) ClearErrors() {
 
 // ─── HTTP helpers ───────────────────────────────────────────────────
 
-func corsJSON(w http.ResponseWriter) {
+func corsJSON(w core.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
+func writeJSON(w core.ResponseWriter, v any) {
 	r := core.JSONMarshal(v)
 	if !r.OK {
-		http.Error(w, `{"error":"json encode failed"}`, http.StatusInternalServerError)
+		core.HTTPError(w, `{"error":"json encode failed"}`, core.StatusInternalServerError)
 		return
 	}
 	enc, _ := r.Value.([]byte)
 	_, _ = w.Write(enc)
 }
 
-func readJSON(r *http.Request, dst any) core.Result {
+func readJSON(r *core.Request, dst any) core.Result {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
 		return core.Fail(core.E("bridge.readJSON", "read request JSON failed", err))

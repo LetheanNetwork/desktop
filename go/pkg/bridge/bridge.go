@@ -36,7 +36,6 @@
 package bridge
 
 import (
-	"net/http"
 
 	core "dappco.re/go"
 )
@@ -99,7 +98,7 @@ type Service struct {
 	*core.ServiceRuntime[Options]
 
 	mu      core.Mutex
-	httpSrv *http.Server
+	httpSrv *core.HTTPServer
 	port    int
 
 	consoleMu  core.Mutex
@@ -132,7 +131,7 @@ func RegisterService(opts Options) func(*core.Core) core.Result {
 
 // OnStartup starts the bridge HTTP server.
 func (s *Service) OnStartup(_ core.Context) core.Result {
-	mux := http.NewServeMux()
+	mux := core.NewServeMux()
 	mux.HandleFunc("/mcp/info", s.handleInfo)
 	mux.HandleFunc("/mcp/tools", s.handleTools)
 	mux.HandleFunc("/mcp/call", s.handleCall)
@@ -142,7 +141,7 @@ func (s *Service) OnStartup(_ core.Context) core.Result {
 	mux.HandleFunc("/internal/eval-reply", s.handleInternalEvalReply)
 
 	s.mu.Lock()
-	s.httpSrv = &http.Server{
+	s.httpSrv = &core.HTTPServer{
 		Addr:              core.Sprintf("127.0.0.1:%d", s.port),
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * core.Second,
@@ -151,7 +150,7 @@ func (s *Service) OnStartup(_ core.Context) core.Result {
 	s.mu.Unlock()
 
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != nil && err != core.ErrHTTPServerClosed {
 			core.Print(core.Stderr(), "bridge: http listen failed: %v\n", err)
 		}
 	}()

@@ -10,7 +10,6 @@
 package opencode
 
 import (
-	"net/http"
 	"net/http/httputil"
 	"net/url"
 
@@ -78,13 +77,13 @@ func (g *SandboxProxyGroup) Set(id, targetURL, authHeader string) {
 	rp := httputil.NewSingleHostReverseProxy(u)
 	// SSE-friendly: httputil.ReverseProxy's default ServeHTTP
 	// flushes streaming responses (no Buffered field — flush happens
-	// when downstream Writer implements http.Flusher, which gin's
+	// when downstream Writer implements core.Flusher, which gin's
 	// ResponseWriter does). No customisation needed for SSE today.
 	if authHeader != "" {
 		// Wrap the default Director so the upstream-rewrite logic
 		// (Host, X-Forwarded-*) still runs, then inject auth.
 		defaultDir := rp.Director
-		rp.Director = func(req *http.Request) {
+		rp.Director = func(req *core.Request) {
 			defaultDir(req)
 			req.Header.Set("Authorization", authHeader)
 		}
@@ -127,7 +126,7 @@ func (g *SandboxProxyGroup) dispatch(c *gin.Context) {
 	rp, ok := g.targets[id]
 	g.mu.RUnlock()
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{
+		c.JSON(core.StatusNotFound, gin.H{
 			"error": "sandbox not running: " + id,
 			"hint":  "start a sandbox via `lthn opencode start` or the Integrations panel",
 		})

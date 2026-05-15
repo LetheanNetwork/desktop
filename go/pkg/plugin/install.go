@@ -75,16 +75,16 @@ func fetchBinary(ctx core.Context, rawURL string) core.Result {
 	}
 	cctx, cancel := core.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(cctx, http.MethodGet, rawURL, nil)
+	req, err := http.NewRequestWithContext(cctx, core.MethodGet, rawURL, nil)
 	if err != nil {
 		return core.Fail(core.E(fetchBinaryOp, "build request: "+err.Error(), nil))
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := core.DefaultHTTPClient.Do(req)
 	if err != nil {
 		return core.Fail(core.E(fetchBinaryOp, "http: "+err.Error(), nil))
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != core.StatusOK {
 		return core.Fail(core.E(fetchBinaryOp,
 			"http status "+core.Itoa(resp.StatusCode)+" for "+rawURL, nil))
 	}

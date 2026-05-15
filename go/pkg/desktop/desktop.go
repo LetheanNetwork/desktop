@@ -32,7 +32,6 @@ package desktop
 
 import (
 	"io/fs"
-	"net/http"
 	"runtime"
 
 	core "dappco.re/go"
@@ -701,7 +700,7 @@ func (s *Service) attachSPA() core.Result {
 	if err != nil {
 		return core.Fail(core.E("desktop.attachSPA", "frontend root not found", err))
 	}
-	fileServer := http.FileServer(http.FS(sub))
+	fileServer := core.HTTPFileServer(core.HTTPFS(sub))
 	s.opts.Server.Engine().SetNoRoute(func(c *gin.Context) {
 		fileServer.ServeHTTP(c.Writer, c.Request)
 	})
@@ -717,12 +716,12 @@ func (s *Service) attachSPA() core.Result {
 // so the default Wails handler returns 404 and spams the console.
 // Intercept here and return an empty 200 instead — the runtime
 // happily continues with no overrides applied.
-func ginMiddleware(engine http.Handler) application.Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func ginMiddleware(engine core.Handler) application.Middleware {
+	return func(next core.Handler) core.Handler {
+		return core.HandlerFunc(func(w core.ResponseWriter, r *core.Request) {
 			if r.URL.Path == "/wails/custom.js" {
 				w.Header().Set("Content-Type", "application/javascript")
-				w.WriteHeader(http.StatusOK)
+				w.WriteHeader(core.StatusOK)
 				_, _ = w.Write([]byte("/* no user overrides */\n"))
 				return
 			}

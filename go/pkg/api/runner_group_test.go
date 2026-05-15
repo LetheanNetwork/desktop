@@ -41,11 +41,11 @@ func newTestEngine(t *core.T) *gin.Engine {
 
 func TestRunnerGroup_Models_ReturnsStubEmptyList(t *core.T) {
 	engine := newTestEngine(t)
-	req, _ := http.NewRequest(http.MethodGet, "/v1/runner/models", nil)
+	req, _ := http.NewRequest(core.MethodGet, "/v1/runner/models", nil)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
-	core.AssertEqual(t, http.StatusOK, w.Code)
+	core.AssertEqual(t, core.StatusOK, w.Code)
 	body := w.Body.String()
 	if !core.Contains(body, `"models"`) {
 		t.Fatalf("expected models key in body, got %q", body)
@@ -54,13 +54,13 @@ func TestRunnerGroup_Models_ReturnsStubEmptyList(t *core.T) {
 
 func TestRunnerGroup_Generate_EchoesPromptViaStub(t *core.T) {
 	engine := newTestEngine(t)
-	req, _ := http.NewRequest(http.MethodPost, "/v1/runner/generate",
+	req, _ := http.NewRequest(core.MethodPost, "/v1/runner/generate",
 		core.NewReader(`{"prompt":"hello"}`))
 	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
-	core.AssertEqual(t, http.StatusOK, w.Code)
+	core.AssertEqual(t, core.StatusOK, w.Code)
 	body := w.Body.String()
 	if !core.Contains(body, "[lthn stub] received: hello") {
 		t.Fatalf("expected stub reply in body, got %q", body)
@@ -69,24 +69,24 @@ func TestRunnerGroup_Generate_EchoesPromptViaStub(t *core.T) {
 
 func TestRunnerGroup_Generate_400OnMissingPrompt(t *core.T) {
 	engine := newTestEngine(t)
-	req, _ := http.NewRequest(http.MethodPost, "/v1/runner/generate",
+	req, _ := http.NewRequest(core.MethodPost, "/v1/runner/generate",
 		core.NewReader(`{}`))
 	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
-	core.AssertEqual(t, http.StatusBadRequest, w.Code)
+	core.AssertEqual(t, core.StatusBadRequest, w.Code)
 }
 
 func TestRunnerGroup_Chat_RoundTripsLastUserMessage(t *core.T) {
 	engine := newTestEngine(t)
-	req, _ := http.NewRequest(http.MethodPost, "/v1/runner/chat",
+	req, _ := http.NewRequest(core.MethodPost, "/v1/runner/chat",
 		core.NewReader(`{"messages":[{"role":"user","content":"ping"}]}`))
 	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
-	core.AssertEqual(t, http.StatusOK, w.Code)
+	core.AssertEqual(t, core.StatusOK, w.Code)
 	body := w.Body.String()
 	if !core.Contains(body, "[lthn stub] received: ping") {
 		t.Fatalf("expected stub reply in body, got %q", body)

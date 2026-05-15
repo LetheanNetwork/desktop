@@ -8,7 +8,6 @@ package downloader_test
 
 import (
 	"io"
-	"net/http"
 	"net/http/httptest"
 
 	core "dappco.re/go"
@@ -30,7 +29,7 @@ func homeFixture(t *core.T) string {
 func TestDownloader_Fetch_Good(t *core.T) {
 	home := homeFixture(t)
 	payload := []byte("MOCK-GGUF-BYTES")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
 		_, _ = w.Write(payload)
 	}))
 	defer srv.Close()
@@ -48,7 +47,7 @@ func TestDownloader_Fetch_Good(t *core.T) {
 
 func TestDownloader_Fetch_Good_Overwrite(t *core.T) {
 	home := homeFixture(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
 		_, _ = w.Write([]byte("v2"))
 	}))
 	defer srv.Close()
@@ -78,8 +77,8 @@ func TestDownloader_Fetch_Bad_EmptyName(t *core.T) {
 
 func TestDownloader_Fetch_Bad_HTTPError(t *core.T) {
 	homeFixture(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		w.WriteHeader(core.StatusNotFound)
 		_, _ = io.WriteString(w, "not found")
 	}))
 	defer srv.Close()

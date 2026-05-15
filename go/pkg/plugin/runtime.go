@@ -65,11 +65,11 @@ func waitForHealth(ctx core.Context, port int, path string, timeout core.Duratio
 			return core.Fail(core.E("plugin.waitForHealth", "context cancelled", nil))
 		default:
 		}
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		resp, err := http.DefaultClient.Do(req)
+		req, _ := http.NewRequestWithContext(ctx, core.MethodGet, url, nil)
+		resp, err := core.DefaultHTTPClient.Do(req)
 		if err == nil {
 			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
+			if resp.StatusCode == core.StatusOK {
 				return core.Ok(nil)
 			}
 		}

@@ -36,7 +36,7 @@ func (s *Service) ProviderList(id string) core.Result {
 	if !r.OK {
 		return r
 	}
-	body, code, err := s.callOpenCode(http.MethodGet, target+"/provider", nil)
+	body, code, err := s.callOpenCode(core.MethodGet, target+"/provider", nil)
 	if err != nil {
 		return core.Fail(core.E("opencode.ProviderList", "call failed", err))
 	}
@@ -80,7 +80,7 @@ func (s *Service) callOpenCode(method, url string, body goio.Reader) (string, in
 		return "", 0, err
 	}
 	s.applyAuth(req)
-	client := &http.Client{Timeout: 10 * core.Second}
+	client := &core.HTTPClient{Timeout: 10 * core.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", 0, err

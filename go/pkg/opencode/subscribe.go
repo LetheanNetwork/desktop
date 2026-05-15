@@ -193,7 +193,7 @@ func (s *Service) runSubscription(ctx core.Context, id, target, authHeader strin
 // ends or ctx fires. Each "data: <json>" line forwards to the
 // emitter. Non-data lines (id, retry, comments) are skipped.
 func (s *Service) streamEvents(ctx core.Context, target, authHeader string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target+"/global/event", nil)
+	req, err := http.NewRequestWithContext(ctx, core.MethodGet, target+"/global/event", nil)
 	if err != nil {
 		return err
 	}
@@ -203,7 +203,7 @@ func (s *Service) streamEvents(ctx core.Context, target, authHeader string) erro
 	}
 	// No timeout on the client — SSE is long-lived. The context
 	// is the cancellation lever.
-	client := &http.Client{}
+	client := &core.HTTPClient{}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

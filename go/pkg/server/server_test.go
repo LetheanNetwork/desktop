@@ -14,7 +14,6 @@
 package server_test
 
 import (
-	"net/http"
 	"net/http/httptest"
 
 	core "dappco.re/go"
@@ -57,12 +56,12 @@ func (failingRunner) Models() core.Result {
 
 // post is a small helper: marshal body to JSON, fire a POST through the
 // gin engine, return the recorded response.
-func post(t *core.T, h http.Handler, path string, body any) *httptest.ResponseRecorder {
+func post(t *core.T, h core.Handler, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	marshalled := core.JSONMarshal(body)
 	core.AssertTrue(t, marshalled.OK)
 	b := marshalled.Value.([]byte)
-	req := httptest.NewRequest(http.MethodPost, path, core.NewBufferReader(b))
+	req := httptest.NewRequest(core.MethodPost, path, core.NewBufferReader(b))
 	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -99,11 +98,11 @@ func TestServer_Register_Good(t *core.T) {
 func TestServer_Health_Good(t *core.T) {
 	s := server.NewService(server.Options{})
 	Health := "/health"
-	req := httptest.NewRequest(http.MethodGet, Health, nil)
+	req := httptest.NewRequest(core.MethodGet, Health, nil)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 
-	core.AssertEqual(t, http.StatusOK, w.Code)
+	core.AssertEqual(t, core.StatusOK, w.Code)
 	core.AssertTrue(t, core.Contains(w.Body.String(), `"success":true`))
 	core.AssertTrue(t, core.Contains(w.Body.String(), `"data":"healthy"`))
 }
@@ -111,22 +110,22 @@ func TestServer_Health_Good(t *core.T) {
 func TestServer_Models_Good_Stub(t *core.T) {
 	// No runner — handler falls back to ["lthn-stub"].
 	s := server.NewService(server.Options{})
-	req := httptest.NewRequest(http.MethodGet, modelsEndpoint, nil)
+	req := httptest.NewRequest(core.MethodGet, modelsEndpoint, nil)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 
-	core.AssertEqual(t, http.StatusOK, w.Code)
+	core.AssertEqual(t, core.StatusOK, w.Code)
 	core.AssertTrue(t, core.Contains(w.Body.String(), "lthn-stub"))
 }
 
 func TestServer_Models_Good_FromRunner(t *core.T) {
 	r := &stubRunner{models: []string{"gemma-4-e2b", "llama-3.2-3b"}}
 	s := server.NewService(server.Options{Runner: r})
-	req := httptest.NewRequest(http.MethodGet, modelsEndpoint, nil)
+	req := httptest.NewRequest(core.MethodGet, modelsEndpoint, nil)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 
-	core.AssertEqual(t, http.StatusOK, w.Code)
+	core.AssertEqual(t, core.StatusOK, w.Code)
 	body := w.Body.String()
 	core.AssertTrue(t, core.Contains(body, "gemma-4-e2b"))
 	core.AssertTrue(t, core.Contains(body, "llama-3.2-3b"))
@@ -134,11 +133,11 @@ func TestServer_Models_Good_FromRunner(t *core.T) {
 
 func TestServer_Models_Bad_RunnerError(t *core.T) {
 	s := server.NewService(server.Options{Runner: failingRunner{}})
-	req := httptest.NewRequest(http.MethodGet, modelsEndpoint, nil)
+	req := httptest.NewRequest(core.MethodGet, modelsEndpoint, nil)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 
-	core.AssertEqual(t, http.StatusInternalServerError, w.Code)
+	core.AssertEqual(t, core.StatusInternalServerError, w.Code)
 	core.AssertTrue(t, core.Contains(w.Body.String(), "runner_error"))
 }
 
@@ -151,7 +150,7 @@ func TestServer_Chat_Good_StubEcho(t *core.T) {
 			{"role": "user", "content": "hello"},
 		},
 	})
-	core.AssertEqual(t, http.StatusOK, w.Code)
+	core.AssertEqual(t, core.StatusOK, w.Code)
 	body := w.Body.String()
 	core.AssertTrue(t, core.Contains(body, "chat.completion"))
 	core.AssertTrue(t, core.Contains(body, "lthn stub"))
@@ -168,19 +167,19 @@ func TestServer_Chat_Good_PicksLastUserTurn(t *core.T) {
 			{"role": "user", "content": "latest"},
 		},
 	})
-	core.AssertEqual(t, http.StatusOK, w.Code)
+	core.AssertEqual(t, core.StatusOK, w.Code)
 	core.AssertEqual(t, "latest", r.lastPrompt, "handler must forward the most recent user message")
 }
 
 func TestServer_Chat_Bad_MalformedJSON(t *core.T) {
 	s := server.NewService(server.Options{})
-	req := httptest.NewRequest(http.MethodPost, chatCompletionsEndpoint,
+	req := httptest.NewRequest(core.MethodPost, chatCompletionsEndpoint,
 		core.NewReader(`{"messages": not-json}`))
 	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 
-	core.AssertEqual(t, http.StatusBadRequest, w.Code)
+	core.AssertEqual(t, core.StatusBadRequest, w.Code)
 	core.AssertTrue(t, core.Contains(w.Body.String(), "invalid_request_error"))
 }
 
@@ -189,7 +188,7 @@ func TestServer_Completion_Good_StubEcho(t *core.T) {
 	w := post(t, s.Handler(), completionsEndpoint, map[string]any{
 		"prompt": "say hi",
 	})
-	core.AssertEqual(t, http.StatusOK, w.Code)
+	core.AssertEqual(t, core.StatusOK, w.Code)
 	body := w.Body.String()
 	core.AssertTrue(t, core.Contains(body, "text_completion"))
 	core.AssertTrue(t, core.Contains(body, "say hi"))
@@ -197,13 +196,13 @@ func TestServer_Completion_Good_StubEcho(t *core.T) {
 
 func TestServer_Completion_Bad_MalformedJSON(t *core.T) {
 	s := server.NewService(server.Options{})
-	req := httptest.NewRequest(http.MethodPost, completionsEndpoint,
+	req := httptest.NewRequest(core.MethodPost, completionsEndpoint,
 		core.NewReader(`{"prompt": broken}`))
 	req.Header.Set(contentTypeHeader, applicationJSON)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 
-	core.AssertEqual(t, http.StatusBadRequest, w.Code)
+	core.AssertEqual(t, core.StatusBadRequest, w.Code)
 }
 
 func TestServer_Completion_Bad_RunnerError(t *core.T) {
@@ -213,7 +212,7 @@ func TestServer_Completion_Bad_RunnerError(t *core.T) {
 	})
 	// generate() swallows the runner error into the reply text, so the
 	// HTTP response is still 200 — but body carries the error marker.
-	core.AssertEqual(t, http.StatusOK, w.Code)
+	core.AssertEqual(t, core.StatusOK, w.Code)
 	core.AssertTrue(t, core.Contains(w.Body.String(), "lthn error"))
 }
 
@@ -221,10 +220,10 @@ func TestServer_MethodNotAllowed_Bad(t *core.T) {
 	s := server.NewService(server.Options{})
 	// GET against /v1/chat/completions falls through to the generated OpenAPI route.
 	MethodNotAllowed := chatCompletionsEndpoint
-	req := httptest.NewRequest(http.MethodGet, MethodNotAllowed, nil)
+	req := httptest.NewRequest(core.MethodGet, MethodNotAllowed, nil)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
-	core.AssertEqual(t, http.StatusOK, w.Code)
+	core.AssertEqual(t, core.StatusOK, w.Code)
 }
 
 // Stop on a non-started server should not panic and should return Ok.

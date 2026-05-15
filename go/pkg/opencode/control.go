@@ -9,7 +9,6 @@
 package opencode
 
 import (
-	"net/http"
 
 	core "dappco.re/go"
 	"github.com/gin-gonic/gin"
@@ -103,10 +102,10 @@ func (g *ControlGroup) RegisterRoutes(rg *gin.RouterGroup) {
 func (g *ControlGroup) importFromHost(c *gin.Context) {
 	r := g.svc.ImportFromHost()
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, r.Value)
+	c.JSON(core.StatusOK, r.Value)
 }
 
 // listImports GET /v1/api/opencode/imports → every imported
@@ -114,10 +113,10 @@ func (g *ControlGroup) importFromHost(c *gin.Context) {
 func (g *ControlGroup) listImports(c *gin.Context) {
 	r := g.svc.ListImports()
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"projects": r.Value})
+	c.JSON(core.StatusOK, gin.H{"projects": r.Value})
 }
 
 // listImportedProviders GET /v1/api/opencode/imports/providers →
@@ -127,10 +126,10 @@ func (g *ControlGroup) listImports(c *gin.Context) {
 func (g *ControlGroup) listImportedProviders(c *gin.Context) {
 	r := g.svc.ListImportedProviders()
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"providers": r.Value})
+	c.JSON(core.StatusOK, gin.H{"providers": r.Value})
 }
 
 // webURL GET /v1/api/opencode/sandbox/:id/web → returns the direct
@@ -139,10 +138,10 @@ func (g *ControlGroup) webURL(c *gin.Context) {
 	id := core.TrimCutset(c.Param("id"), "/ ")
 	r := g.svc.WebURL(id)
 	if !r.OK {
-		c.JSON(http.StatusNotFound, gin.H{"error": r.Error()})
+		c.JSON(core.StatusNotFound, gin.H{"error": r.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"url": r.Value})
+	c.JSON(core.StatusOK, gin.H{"url": r.Value})
 }
 
 // openWebWindow POST /v1/api/opencode/sandbox/:id/web → spawns an
@@ -152,10 +151,10 @@ func (g *ControlGroup) openWebWindow(c *gin.Context) {
 	id := core.TrimCutset(c.Param("id"), "/ ")
 	r := g.svc.OpenWebWindow(id)
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, r.Value)
+	c.JSON(core.StatusOK, r.Value)
 }
 
 // upgrade POST /v1/api/opencode/upgrade → pulls lthn/dev:latest +
@@ -165,11 +164,11 @@ func (g *ControlGroup) openWebWindow(c *gin.Context) {
 func (g *ControlGroup) upgrade(c *gin.Context) {
 	r := g.svc.Upgrade()
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
 	res, _ := r.Value.(UpgradeResult)
-	c.JSON(http.StatusOK, res)
+	c.JSON(core.StatusOK, res)
 }
 
 // openTUI POST /v1/api/opencode/sandbox/:id/tui → spawns the user's
@@ -178,33 +177,33 @@ func (g *ControlGroup) openTUI(c *gin.Context) {
 	id := core.TrimCutset(c.Param("id"), "/ ")
 	r := g.svc.OpenTUI(id)
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"opened": id})
+	c.JSON(core.StatusOK, gin.H{"opened": id})
 }
 
 // studio GET /v1/api/opencode/studio → reports whether the host's
 // OpenCode native app is installed.
 func (g *ControlGroup) studio(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"installed": g.svc.IsStudioInstalled()})
+	c.JSON(core.StatusOK, gin.H{"installed": g.svc.IsStudioInstalled()})
 }
 
 // openStudio POST /v1/api/opencode/studio → launches the host's
 // OpenCode native app. 4xx when not installed.
 func (g *ControlGroup) openStudio(c *gin.Context) {
 	if !g.svc.IsStudioInstalled() {
-		c.JSON(http.StatusNotFound, gin.H{
+		c.JSON(core.StatusNotFound, gin.H{
 			"error": "OpenCode native app is not installed on this host",
 		})
 		return
 	}
 	r := g.svc.OpenStudio()
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"opened": true})
+	c.JSON(core.StatusOK, gin.H{"opened": true})
 }
 
 // enable POST /v1/api/opencode/enable → persists the enabled flag
@@ -216,11 +215,11 @@ func (g *ControlGroup) enable(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 	r := g.svc.Enable(req.Profile)
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
 	id, _ := r.Value.(string)
-	c.JSON(http.StatusOK, gin.H{"id": id, "enabled": true})
+	c.JSON(core.StatusOK, gin.H{"id": id, "enabled": true})
 }
 
 // disable POST /v1/api/opencode/disable → persists the disabled
@@ -228,16 +227,16 @@ func (g *ControlGroup) enable(c *gin.Context) {
 func (g *ControlGroup) disable(c *gin.Context) {
 	r := g.svc.Disable()
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"enabled": false})
+	c.JSON(core.StatusOK, gin.H{"enabled": false})
 }
 
 // enabled GET /v1/api/opencode/enabled → returns the persisted
 // flag. Cheap — no upstream call.
 func (g *ControlGroup) enabled(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"enabled": g.svc.IsEnabled()})
+	c.JSON(core.StatusOK, gin.H{"enabled": g.svc.IsEnabled()})
 }
 
 // providerList GET /v1/api/opencode/sandbox/:id/providers → returns
@@ -246,11 +245,11 @@ func (g *ControlGroup) providerList(c *gin.Context) {
 	id := core.TrimCutset(c.Param("id"), "/ ")
 	r := g.svc.ProviderList(id)
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
 	body, _ := r.Value.(string)
-	c.Data(http.StatusOK, "application/json", []byte(body))
+	c.Data(core.StatusOK, "application/json", []byte(body))
 }
 
 // hostConfigMerge POST /v1/api/opencode/host-config → merges the
@@ -269,17 +268,17 @@ func (g *ControlGroup) hostConfigMerge(c *gin.Context) {
 		// Conflict surfaces as 409 so the frontend can distinguish
 		// "needs user confirmation" from "actually broken".
 		if r.Code() == HostConfigConflict {
-			c.JSON(http.StatusConflict, gin.H{
+			c.JSON(core.StatusConflict, gin.H{
 				"error": r.Error(),
 				"code":  HostConfigConflict,
 			})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
 	res, _ := r.Value.(MergeHostConfigResult)
-	c.JSON(http.StatusOK, res)
+	c.JSON(core.StatusOK, res)
 }
 
 // spawn POST /v1/api/opencode/sandbox → spawns a new container.
@@ -297,7 +296,7 @@ func (g *ControlGroup) spawn(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 	r := g.svc.Start(req.Profile)
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
 	id, _ := r.Value.(string)
@@ -305,7 +304,7 @@ func (g *ControlGroup) spawn(c *gin.Context) {
 	if profile == "" {
 		profile = DefaultProfile
 	}
-	c.JSON(http.StatusOK, gin.H{
+	c.JSON(core.StatusOK, gin.H{
 		"id":      id,
 		"url":     "/v1/api/sandbox/" + id,
 		"profile": profile,
@@ -316,11 +315,11 @@ func (g *ControlGroup) spawn(c *gin.Context) {
 func (g *ControlGroup) list(c *gin.Context) {
 	r := g.svc.Status()
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
 	list, _ := r.Value.([]Sandbox)
-	c.JSON(http.StatusOK, gin.H{"sandboxes": list})
+	c.JSON(core.StatusOK, gin.H{"sandboxes": list})
 }
 
 // stop DELETE /v1/api/opencode/sandbox/:id → stops + removes one.
@@ -328,10 +327,10 @@ func (g *ControlGroup) stop(c *gin.Context) {
 	id := core.TrimCutset(c.Param("id"), "/ ")
 	r := g.svc.Stop(id)
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"stopped": id})
+	c.JSON(core.StatusOK, gin.H{"stopped": id})
 }
 
 // inspect GET /v1/api/opencode/sandbox/:id → returns one record.
@@ -339,22 +338,22 @@ func (g *ControlGroup) inspect(c *gin.Context) {
 	id := core.TrimCutset(c.Param("id"), "/ ")
 	r := g.svc.Inspect(id)
 	if !r.OK {
-		c.JSON(http.StatusNotFound, gin.H{"error": r.Error()})
+		c.JSON(core.StatusNotFound, gin.H{"error": r.Error()})
 		return
 	}
 	sb, _ := r.Value.(Sandbox)
-	c.JSON(http.StatusOK, sb)
+	c.JSON(core.StatusOK, sb)
 }
 
 // profileList GET /v1/api/opencode/profile → all stored profiles.
 func (g *ControlGroup) profileList(c *gin.Context) {
 	r := g.svc.ListProfiles()
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
 	list, _ := r.Value.([]Profile)
-	c.JSON(http.StatusOK, gin.H{"profiles": list})
+	c.JSON(core.StatusOK, gin.H{"profiles": list})
 }
 
 // profileGet GET /v1/api/opencode/profile/:name → one profile record.
@@ -362,11 +361,11 @@ func (g *ControlGroup) profileGet(c *gin.Context) {
 	name := core.TrimCutset(c.Param("name"), "/ ")
 	r := g.svc.GetProfile(name)
 	if !r.OK {
-		c.JSON(http.StatusNotFound, gin.H{"error": r.Error()})
+		c.JSON(core.StatusNotFound, gin.H{"error": r.Error()})
 		return
 	}
 	p, _ := r.Value.(Profile)
-	c.JSON(http.StatusOK, p)
+	c.JSON(core.StatusOK, p)
 }
 
 // profileSave POST /v1/api/opencode/profile → upsert. Body = Profile
@@ -374,15 +373,15 @@ func (g *ControlGroup) profileGet(c *gin.Context) {
 func (g *ControlGroup) profileSave(c *gin.Context) {
 	var p Profile
 	if err := c.ShouldBindJSON(&p); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid profile JSON: " + err.Error()})
+		c.JSON(core.StatusBadRequest, gin.H{"error": "invalid profile JSON: " + err.Error()})
 		return
 	}
 	r := g.svc.SaveProfile(p)
 	if !r.OK {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": r.Error()})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, p)
+	c.JSON(core.StatusOK, p)
 }
 
 // profileDelete DELETE /v1/api/opencode/profile/:name → drop one.
@@ -391,8 +390,8 @@ func (g *ControlGroup) profileDelete(c *gin.Context) {
 	name := core.TrimCutset(c.Param("name"), "/ ")
 	r := g.svc.DeleteProfile(name)
 	if !r.OK {
-		c.JSON(http.StatusBadRequest, gin.H{"error": r.Error()})
+		c.JSON(core.StatusBadRequest, gin.H{"error": r.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"deleted": name})
+	c.JSON(core.StatusOK, gin.H{"deleted": name})
 }

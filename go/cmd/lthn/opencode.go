@@ -78,7 +78,7 @@ const (
 
 // httpClient is the shared client for control calls. Generous timeout —
 // spawn waits for health + applies PATCH /global/config synchronously.
-var httpClient = &http.Client{Timeout: 60 * core.Second}
+var httpClient = &core.HTTPClient{Timeout: 60 * core.Second}
 
 // opencodeStart accepts `--profile NAME` (or `--profile=NAME`).
 //
@@ -102,7 +102,7 @@ func opencodeStart(args []string) int {
 		}
 	}
 	payload := core.JSONMarshalString(map[string]string{"profile": profile})
-	req, _ := http.NewRequest(http.MethodPost, opencodeBase, strings.NewReader(payload))
+	req, _ := http.NewRequest(core.MethodPost, opencodeBase, strings.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	body, code, err := doRequest(req)
 	if err != nil {
@@ -110,7 +110,7 @@ func opencodeStart(args []string) int {
 		core.Print(core.Stderr(), "hint: is `lthn serve` running on :8000?\n")
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode start: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -123,13 +123,13 @@ func opencodeStop(args []string) int {
 		core.Print(core.Stderr(), "lthn opencode stop: usage: lthn opencode stop ID\n")
 		return 2
 	}
-	req, _ := http.NewRequest(http.MethodDelete, opencodeBase+"/"+args[0], nil)
+	req, _ := http.NewRequest(core.MethodDelete, opencodeBase+"/"+args[0], nil)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode stop: %s\n", err)
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode stop: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -138,14 +138,14 @@ func opencodeStop(args []string) int {
 }
 
 func opencodeStatus() int {
-	req, _ := http.NewRequest(http.MethodGet, opencodeBase, nil)
+	req, _ := http.NewRequest(core.MethodGet, opencodeBase, nil)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode status: %s\n", err)
 		core.Print(core.Stderr(), "hint: is `lthn serve` running on :8000?\n")
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode status: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -158,13 +158,13 @@ func opencodeInspect(args []string) int {
 		core.Print(core.Stderr(), "lthn opencode inspect: usage: lthn opencode inspect ID\n")
 		return 2
 	}
-	req, _ := http.NewRequest(http.MethodGet, opencodeBase+"/"+args[0], nil)
+	req, _ := http.NewRequest(core.MethodGet, opencodeBase+"/"+args[0], nil)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode inspect: %s\n", err)
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode inspect: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -201,13 +201,13 @@ func opencodeProfile(args []string) int {
 }
 
 func profileList() int {
-	req, _ := http.NewRequest(http.MethodGet, opencodeProfBase, nil)
+	req, _ := http.NewRequest(core.MethodGet, opencodeProfBase, nil)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode profile list: %s\n", err)
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode profile list: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -220,13 +220,13 @@ func profileShow(args []string) int {
 		core.Print(core.Stderr(), "lthn opencode profile show: usage: lthn opencode profile show NAME\n")
 		return 2
 	}
-	req, _ := http.NewRequest(http.MethodGet, opencodeProfBase+"/"+args[0], nil)
+	req, _ := http.NewRequest(core.MethodGet, opencodeProfBase+"/"+args[0], nil)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode profile show: %s\n", err)
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode profile show: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -245,14 +245,14 @@ func profileSave(args []string) int {
 		return 1
 	}
 	data, _ := raw.Value.([]byte)
-	req, _ := http.NewRequest(http.MethodPost, opencodeProfBase, strings.NewReader(string(data)))
+	req, _ := http.NewRequest(core.MethodPost, opencodeProfBase, strings.NewReader(string(data)))
 	req.Header.Set("Content-Type", "application/json")
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode profile save: %s\n", err)
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode profile save: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -265,13 +265,13 @@ func profileDelete(args []string) int {
 		core.Print(core.Stderr(), "lthn opencode profile delete: usage: lthn opencode profile delete NAME\n")
 		return 2
 	}
-	req, _ := http.NewRequest(http.MethodDelete, opencodeProfBase+"/"+args[0], nil)
+	req, _ := http.NewRequest(core.MethodDelete, opencodeProfBase+"/"+args[0], nil)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode profile delete: %s\n", err)
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode profile delete: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -313,7 +313,7 @@ func opencodeMergeHostConfig(args []string) int {
 		"profile": profile,
 		"force":   force,
 	})
-	req, _ := http.NewRequest(http.MethodPost, opencodeHostConfigBase, strings.NewReader(payload))
+	req, _ := http.NewRequest(core.MethodPost, opencodeHostConfigBase, strings.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	body, code, err := doRequest(req)
 	if err != nil {
@@ -321,12 +321,12 @@ func opencodeMergeHostConfig(args []string) int {
 		core.Print(core.Stderr(), "hint: is `lthn serve` running on :8000?\n")
 		return 1
 	}
-	if code == http.StatusConflict {
+	if code == core.StatusConflict {
 		core.Print(core.Stderr(), "lthn opencode merge-host-config: conflict — %s\n", body)
 		core.Print(core.Stderr(), "hint: pass --force to overwrite the existing provider.lthn block.\n")
 		return 2
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode merge-host-config: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -345,14 +345,14 @@ func opencodeProviders(args []string) int {
 		core.Print(core.Stderr(), "lthn opencode providers: usage: lthn opencode providers ID\n")
 		return 2
 	}
-	req, _ := http.NewRequest(http.MethodGet, opencodeBase+"/"+args[0]+"/providers", nil)
+	req, _ := http.NewRequest(core.MethodGet, opencodeBase+"/"+args[0]+"/providers", nil)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode providers: %s\n", err)
 		core.Print(core.Stderr(), "hint: is `lthn serve` running on :8000?\n")
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode providers: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -368,7 +368,7 @@ func opencodeProviders(args []string) int {
 //	lthn opencode import
 //	# {"projects":9,"providers":21,"providers_with_auth":1}
 func opencodeImport() int {
-	req, _ := http.NewRequest(http.MethodPost,
+	req, _ := http.NewRequest(core.MethodPost,
 		"http://localhost:8000/v1/api/opencode/import", nil)
 	body, code, err := doRequest(req)
 	if err != nil {
@@ -376,7 +376,7 @@ func opencodeImport() int {
 		core.Print(core.Stderr(), "hint: is `lthn serve` running on :8000?\n")
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode import: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -396,13 +396,13 @@ func opencodeImports(args []string) int {
 	if len(args) > 0 && args[0] == "providers" {
 		url += "/providers"
 	}
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	req, _ := http.NewRequest(core.MethodGet, url, nil)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode imports: %s\n", err)
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode imports: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -425,13 +425,13 @@ func opencodeWeb(args []string) int {
 		core.Print(core.Stderr(), "lthn opencode web: usage: lthn opencode web ID\n")
 		return 2
 	}
-	req, _ := http.NewRequest(http.MethodGet, opencodeBase+"/"+args[0]+"/web", nil)
+	req, _ := http.NewRequest(core.MethodGet, opencodeBase+"/"+args[0]+"/web", nil)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode web: %s\n", err)
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode web: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -462,7 +462,7 @@ func opencodeWeb(args []string) int {
 //	lthn opencode upgrade
 //	# {"updated":true,"digest":"sha256:...","restarted":["oc-..."]}
 func opencodeUpgrade() int {
-	req, _ := http.NewRequest(http.MethodPost,
+	req, _ := http.NewRequest(core.MethodPost,
 		"http://localhost:8000/v1/api/opencode/upgrade", nil)
 	body, code, err := doRequest(req)
 	if err != nil {
@@ -470,7 +470,7 @@ func opencodeUpgrade() int {
 		core.Print(core.Stderr(), "hint: is `lthn serve` running on :8000?\n")
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode upgrade: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -489,14 +489,14 @@ func opencodeTUI(args []string) int {
 		core.Print(core.Stderr(), "lthn opencode tui: usage: lthn opencode tui ID\n")
 		return 2
 	}
-	req, _ := http.NewRequest(http.MethodPost, opencodeBase+"/"+args[0]+"/tui", nil)
+	req, _ := http.NewRequest(core.MethodPost, opencodeBase+"/"+args[0]+"/tui", nil)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode tui: %s\n", err)
 		core.Print(core.Stderr(), "hint: is `lthn serve` running on :8000?\n")
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode tui: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -527,7 +527,7 @@ func opencodeEnable(args []string) int {
 		}
 	}
 	payload := core.JSONMarshalString(map[string]string{"profile": profile})
-	req, _ := http.NewRequest(http.MethodPost, opencodeEnableBase, strings.NewReader(payload))
+	req, _ := http.NewRequest(core.MethodPost, opencodeEnableBase, strings.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	body, code, err := doRequest(req)
 	if err != nil {
@@ -535,7 +535,7 @@ func opencodeEnable(args []string) int {
 		core.Print(core.Stderr(), "hint: is `lthn serve` running on :8000?\n")
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode enable: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -546,13 +546,13 @@ func opencodeEnable(args []string) int {
 // opencodeDisable persists `opencode.serve.enabled = false` + stops
 // any running sandboxes.
 func opencodeDisable() int {
-	req, _ := http.NewRequest(http.MethodPost, opencodeDisableBase, nil)
+	req, _ := http.NewRequest(core.MethodPost, opencodeDisableBase, nil)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode disable: %s\n", err)
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode disable: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -562,13 +562,13 @@ func opencodeDisable() int {
 
 // opencodeEnabled prints the persisted enabled flag.
 func opencodeEnabled() int {
-	req, _ := http.NewRequest(http.MethodGet, opencodeEnabledBase, nil)
+	req, _ := http.NewRequest(core.MethodGet, opencodeEnabledBase, nil)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode enabled: %s\n", err)
 		return 1
 	}
-	if code != http.StatusOK {
+	if code != core.StatusOK {
 		core.Print(core.Stderr(), "lthn opencode enabled: HTTP %d — %s\n", code, body)
 		return 1
 	}
@@ -577,7 +577,7 @@ func opencodeEnabled() int {
 }
 
 // doRequest runs the HTTP call and returns (body, status, error).
-func doRequest(req *http.Request) (string, int, error) {
+func doRequest(req *core.Request) (string, int, error) {
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", 0, err
