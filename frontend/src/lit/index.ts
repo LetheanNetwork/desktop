@@ -14,6 +14,7 @@ import "./chat/chat-window";
 import "./ops/welcome-window";
 import "./ops/settings-window";
 import "./ops/model-browser-window";
+import "./ops/process-window";
 import "./obs/benchmark-window";
 import "./obs/logs-window";
 import "./obs/telemetry-window";

@@ -36,12 +36,23 @@ vars:
   # Where the Go module + cmd live (Lethean canon: go/ subfolder).
   GO_DIR: "go"
   GO_CMD: "./cmd/lthn"
+  # Where the go-mlx repo lives. Override with LTHN_MLX_REPO env var
+  # if go-mlx is checked out elsewhere on this machine.
+  LTHN_MLX_REPO: '{{.LTHN_MLX_REPO | default "/Users/snider/Code/core/go-mlx"}}'
 
 tasks:
   build:
-    summary: Builds the application (OS-detect)
+    summary: Builds the application (OS-detect) + lthn-mlx sibling binary
+    deps: [build:lthn-mlx]
     cmds:
       - task: "{{OS}}:build"
+
+  build:lthn-mlx:
+    summary: Build the lthn-mlx CLI from go-mlx source into bin/
+    status:
+      - test -x "{{.BIN_DIR}}/lthn-mlx"
+    cmds:
+      - cd "{{.LTHN_MLX_REPO}}/go" && go build -o "{{.ROOT_DIR}}/{{.BIN_DIR}}/lthn-mlx" ./cmd/mlx
 
   package:
     summary: Packages a production build

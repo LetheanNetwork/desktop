@@ -3,19 +3,16 @@
 package main
 
 import (
-
 	core "dappco.re/go"
+	lthnprocess "dappco.re/lthn/desktop/pkg/process"
 )
 
-// cmdProcess dispatches `lthn process <verb>` — operations against the
-// go-process supervisor running on the shared Core.
-//
-// Usage example:
-//
-//	rc := cmdProcess([]string{"list"})
+// cmdProcess dispatches `lthn process <verb>` — thin shim that looks
+// up the Core-registered lthn-process service and forwards verbs into
+// it. No business logic; the service owns all action wrappers.
 func cmdProcess(args []string) int {
 	if len(args) == 0 {
-		core.Print(core.Stderr(), "lthn process: missing verb (list / get)\n")
+		core.Print(core.Stderr(), "lthn process: missing verb (run / start / kill / list / get)\n")
 		return 2
 	}
 	c := newAppCore()
@@ -23,50 +20,58 @@ func cmdProcess(args []string) int {
 		return 1
 	}
 	defer c.ServiceShutdown(core.Background())
+	svc, _ := core.ServiceFor[*lthnprocess.Service](c, "lthn-process")
+	if svc == nil {
+		core.Print(core.Stderr(), "lthn process: service not registered\n")
+		return 1
+	}
 
 	switch args[0] {
+	case "run":
+		return printResultJSON(svc.Run(args[1], args[2:]), "process run", len(args) < 2)
+	case "start":
+		return printResultJSON(svc.Start(args[1], args[2:]), "process start", len(args) < 2)
+	case "kill":
+		if len(args) < 2 {
+			core.Print(core.Stderr(), "lthn process kill: usage: lthn process kill ID\n")
+			return 2
+		}
+		r := svc.Kill(args[1])
+		if !r.OK {
+			core.Print(core.Stderr(), "lthn process kill: %s\n", r.Error())
+			return 1
+		}
+		return 0
 	case "list":
-		return processList(c, args[1:])
+		runningOnly := false
+		for _, a := range args[1:] {
+			if a == "--running" {
+				runningOnly = true
+			}
+		}
+		return printResultJSON(svc.List(runningOnly), "process list", false)
 	case "get":
-		return processGet(c, args[1:])
+		if len(args) < 2 {
+			core.Print(core.Stderr(), "lthn process get: usage: lthn process get ID\n")
+			return 2
+		}
+		return printResultJSON(svc.Get(args[1]), "process get", false)
 	default:
 		core.Print(core.Stderr(), "lthn process: unknown verb %q\n", args[0])
 		return 2
 	}
 }
 
-func processList(c *core.Core, args []string) int {
-	runningOnly := false
-	for _, a := range args {
-		if a == "--running" {
-			runningOnly = true
-		}
-	}
-	r := c.Action("process.list").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "runningOnly", Value: runningOnly},
-	))
-	if !r.OK {
-		core.Print(core.Stderr(), "lthn process list: %s\n", r.Error())
-		return 1
-	}
-	if jr := core.JSONMarshalIndent(r.Value, "", "  "); jr.OK {
-		if b, ok := jr.Value.([]byte); ok {
-			core.Print(core.Stdout(), "%s\n", string(b))
-		}
-	}
-	return 0
-}
-
-func processGet(c *core.Core, args []string) int {
-	if len(args) < 1 {
-		core.Print(core.Stderr(), "lthn process get: usage: lthn process get ID\n")
+// printResultJSON renders a core.Result as indented JSON to stdout
+// (success) or its error to stderr (failure). usageMissing short-
+// circuits with a usage message when the caller passed too few args.
+func printResultJSON(r core.Result, op string, usageMissing bool) int {
+	if usageMissing {
+		core.Print(core.Stderr(), "lthn %s: missing required argument\n", op)
 		return 2
 	}
-	r := c.Action("process.get").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "id", Value: args[0]},
-	))
 	if !r.OK {
-		core.Print(core.Stderr(), "lthn process get: %s\n", r.Error())
+		core.Print(core.Stderr(), "lthn %s: %s\n", op, r.Error())
 		return 1
 	}
 	if jr := core.JSONMarshalIndent(r.Value, "", "  "); jr.OK {
