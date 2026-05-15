@@ -86,9 +86,14 @@ func (s *WailsService) SetEmitter(emit Emitter) {
 func (s *WailsService) ServiceName() string { return "Downloader" }
 
 // ServiceStartup is the Wails3 lifecycle hook fired when the app
-// starts servicing requests. No setup needed — Download spawns its
-// own goroutine on demand.
+// starts servicing requests. Spawns a background sweep of the
+// quarantine dir to remove orphan files from a previous interrupted
+// download. The sweep runs via c.Go so the lifecycle hook returns
+// immediately.
 func (s *WailsService) ServiceStartup(_ core.Context, _ any) core.Result {
+	if s != nil && s.core != nil {
+		s.core.Go(func() { cleanStaleQuarantine(s.core) })
+	}
 	return core.Ok(nil)
 }
 
@@ -132,10 +137,46 @@ func (s *WailsService) Download(url, name string) string {
 	return id
 }
 
-// run is the goroutine body — invokes FetchWithProgress with a
-// throttled Wails-event-emitting callback, broadcasts the terminal
-// "done" event when the fetch returns.
+// DownloadVerified is Download with an expected SHA-256 hex digest
+// the downloaded file must match. Mismatch → quarantine file deleted,
+// final path absent, "downloader:done" fires with ok=false carrying
+// the digest-mismatch error message. sha256hex of "" is treated
+// identically to Download (no verify, but quarantine + atomic-promote
+// still apply for partial-write protection).
+//
+// Usage example (TypeScript):
+//
+//	const id = await DownloadVerified(url, "gemma.gguf", "<sha256hex>");
+//	Events.On("downloader:done", (e) => {
+//	    if (e.data.id === id && !e.data.ok) {
+//	        showError(`Verify failed: ${e.data.error}`);
+//	    }
+//	});
+func (s *WailsService) DownloadVerified(url, name, sha256hex string) string {
+	id := newJobID()
+	if s == nil {
+		return id
+	}
+	if s.core == nil {
+		s.runVerified(id, url, name, sha256hex)
+		return id
+	}
+	s.core.Go(func() { s.runVerified(id, url, name, sha256hex) })
+	return id
+}
+
+// run is the goroutine body for Download — invokes FetchWithProgress
+// with a throttled Wails-event-emitting callback, broadcasts the
+// terminal "done" event when the fetch returns. Equivalent to
+// runVerified with an empty digest.
 func (s *WailsService) run(id, url, name string) {
+	s.runVerified(id, url, name, "")
+}
+
+// runVerified is the goroutine body for both Download (sha256hex="")
+// and DownloadVerified — invokes FetchVerified with a throttled
+// progress callback, broadcasts the terminal "done" event.
+func (s *WailsService) runVerified(id, url, name, sha256hex string) {
 	var lastEmit core.Time
 	onProgress := func(written, total int64) {
 		now := core.Now()
@@ -150,7 +191,7 @@ func (s *WailsService) run(id, url, name string) {
 			"total":   total,
 		})
 	}
-	r := FetchWithProgress(url, name, onProgress)
+	r := FetchVerified(url, name, sha256hex, onProgress)
 
 	payload := map[string]any{
 		"id":   id,

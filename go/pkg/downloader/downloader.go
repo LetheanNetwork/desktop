@@ -66,7 +66,8 @@ func Fetch(url, name string) core.Result {
 
 // FetchWithProgress is Fetch with a Progress callback fired after
 // every chunk read off the wire. nil callback = no measurement
-// overhead (identical to Fetch).
+// overhead (identical to Fetch). Equivalent to FetchVerified with an
+// empty digest.
 //
 // Usage example:
 //
@@ -75,17 +76,47 @@ func Fetch(url, name string) core.Result {
 //	})
 //	if r.OK { dest := r.Value.(string); _ = dest }
 func FetchWithProgress(url, name string, onProgress Progress) core.Result {
+	return FetchVerified(url, name, "", onProgress)
+}
+
+// FetchVerified is the trust-aware fetch primitive. Source is gated
+// through AllowedSource; bytes write to ~/Lethean/conf/models/.quarantine/<name>
+// during download; if sha256hex is non-empty the digest is checked
+// post-download via Verify; on success the file is atomically promoted
+// to ~/Lethean/conf/models/<name> via rename(2). On failure the
+// quarantine file is removed so partial / unverified bytes never reach
+// the model path.
+//
+// sha256hex of "" skips the verify step but still routes through
+// quarantine + atomic-promote — eliminating the partial-write torn-
+// read window even for non-checksummed downloads.
+//
+// Usage example:
+//
+//	r := downloader.FetchVerified(url, name, "abc...def", onProgress)
+//	if r.OK { dest := r.Value.(string); _ = dest }
+func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result {
 	if url == "" {
 		return core.Fail(core.E(fetchOp, "url is required", nil))
 	}
 	if name == "" {
 		return core.Fail(core.E(fetchOp, "name is required", nil))
 	}
+	if !AllowedSource(url) {
+		return core.Fail(core.E(fetchOp,
+			core.Concat("source not allowed: ", url), nil))
+	}
 	dirR := paths.ModelsDir()
 	if !dirR.OK {
 		return dirR
 	}
-	dest := core.PathJoin(dirR.Value.(string), name)
+	finalDest := core.PathJoin(dirR.Value.(string), name)
+
+	qdR := quarantineDir()
+	if !qdR.OK {
+		return qdR
+	}
+	qDest := core.PathJoin(qdR.Value.(string), name)
 
 	getR := core.HTTPGet(url)
 	if !getR.OK {
@@ -99,12 +130,11 @@ func FetchWithProgress(url, name string, onProgress Progress) core.Result {
 			nil))
 	}
 
-	createR := core.Create(dest)
+	createR := core.Create(qDest)
 	if !createR.OK {
 		return createR
 	}
 	file := createR.Value.(*core.OSFile)
-	defer file.Close()
 
 	var src core.Reader = resp.Body
 	if onProgress != nil {
@@ -115,9 +145,29 @@ func FetchWithProgress(url, name string, onProgress Progress) core.Result {
 		}
 	}
 	if r := core.Copy(file, src); !r.OK {
+		_ = file.Close()
+		_ = core.Remove(qDest)
 		return core.Fail(core.E(fetchOp, "stream copy failed", r.Value.(error)))
 	}
-	return core.Ok(dest)
+	// Close before Verify + Rename so the file handle is released and
+	// the rename(2) doesn't race with an open writer on Windows.
+	if err := file.Close(); err != nil {
+		_ = core.Remove(qDest)
+		return core.Fail(core.E(fetchOp, "quarantine close failed", err))
+	}
+
+	if sha256hex != "" {
+		if r := Verify(qDest, sha256hex); !r.OK {
+			_ = core.Remove(qDest)
+			return r
+		}
+	}
+
+	if r := core.Rename(qDest, finalDest); !r.OK {
+		_ = core.Remove(qDest)
+		return r
+	}
+	return core.Ok(finalDest)
 }
 
 // countingReader wraps a Reader, reporting cumulative bytes read to
