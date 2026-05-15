@@ -3,7 +3,6 @@
 package tasks_test
 
 import (
-	"sync"
 	"testing"
 
 	core "dappco.re/go"
@@ -39,7 +38,7 @@ func TestEvents_Subscribe_Created(t *testing.T) {
 	c := newEventsCore(t)
 
 	var got []tasks.IssueChanged
-	var mu sync.Mutex
+	var mu core.Mutex
 	tasks.Subscribe(c, func(_ *core.Core, ev tasks.IssueChanged) {
 		mu.Lock()
 		got = append(got, ev)
@@ -82,7 +81,7 @@ func TestEvents_Update_FiresUpdated(t *testing.T) {
 	created := r.Value.(tasks.Issue)
 
 	var got []tasks.IssueChanged
-	var mu sync.Mutex
+	var mu core.Mutex
 	tasks.Subscribe(c, func(_ *core.Core, ev tasks.IssueChanged) {
 		mu.Lock()
 		got = append(got, ev)
@@ -169,7 +168,7 @@ func TestEvents_MultipleSubscribers(t *testing.T) {
 	c := newEventsCore(t)
 
 	var aCount, bCount int
-	var mu sync.Mutex
+	var mu core.Mutex
 	tasks.Subscribe(c, func(*core.Core, tasks.IssueChanged) {
 		mu.Lock()
 		aCount++

@@ -3,7 +3,6 @@
 package queue_test
 
 import (
-	"sync"
 	"testing"
 	"time"
 
@@ -74,7 +73,7 @@ func TestQueue_Enqueue_PersistsAsPending(t *testing.T) {
 func TestQueue_Worker_DispatchesAndCompletes(t *testing.T) {
 	c := newQueueCore(t)
 
-	var ran sync.WaitGroup
+	var ran core.WaitGroup
 	ran.Add(1)
 	var receivedPath string
 	queue.RegisterKind(c, queue.HandlerOptions{

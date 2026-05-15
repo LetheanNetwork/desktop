@@ -20,7 +20,6 @@
 package plugin
 
 import (
-	"sync"
 
 	core "dappco.re/go"
 )
@@ -36,7 +35,7 @@ type Options struct{}
 // group registered at boot in pkg/desktop.
 type Service struct {
 	*core.ServiceRuntime[Options]
-	mu    sync.RWMutex
+	mu    core.RWMutex
 	state map[string]*pluginState // keyed by code
 	proxy *ProxyGroup
 }

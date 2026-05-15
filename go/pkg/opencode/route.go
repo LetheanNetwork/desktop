@@ -28,7 +28,6 @@ import (
 	goio "io"
 	"iter"
 	"net/http"
-	"sync"
 
 	core "dappco.re/go"
 	"dappco.re/go/ai/ai"
@@ -58,7 +57,7 @@ type ModelOptions struct {
 type Model struct {
 	opts ModelOptions
 
-	mu      sync.Mutex
+	mu      core.Mutex
 	lastErr error
 	metrics inference.GenerateMetrics
 }

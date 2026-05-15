@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"sync"
 
 	core "dappco.re/go"
 	"github.com/gin-gonic/gin"
@@ -21,7 +20,7 @@ import (
 // ProxyGroup implements coreapi.RouteGroup. Registered exactly
 // once on the coreapi.Engine; the targets map mutates at runtime.
 type ProxyGroup struct {
-	mu      sync.RWMutex
+	mu      core.RWMutex
 	targets map[string]*httputil.ReverseProxy // keyed by plugin code
 }
 

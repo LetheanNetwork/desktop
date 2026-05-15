@@ -37,7 +37,6 @@ package bridge
 
 import (
 	"net/http"
-	"sync"
 
 	core "dappco.re/go"
 )
@@ -99,17 +98,17 @@ type evalReply struct {
 type Service struct {
 	*core.ServiceRuntime[Options]
 
-	mu      sync.Mutex
+	mu      core.Mutex
 	httpSrv *http.Server
 	port    int
 
-	consoleMu  sync.Mutex
+	consoleMu  core.Mutex
 	consoleBuf []ConsoleEntry
 
-	errorMu  sync.Mutex
+	errorMu  core.Mutex
 	errorBuf []ErrorEntry
 
-	evalMu       sync.Mutex
+	evalMu       core.Mutex
 	evalCounter  uint64
 	pendingEvals map[string]chan evalReply
 }

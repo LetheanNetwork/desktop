@@ -17,7 +17,6 @@
 package repos
 
 import (
-	"sync"
 
 	core "dappco.re/go"
 	scmgit "dappco.re/go/scm/git"
@@ -46,7 +45,7 @@ type Service struct {
 
 	// sourcesMu guards sources. Writers are package boots
 	// (RegisterSource); readers are Status() invocations.
-	sourcesMu sync.RWMutex
+	sourcesMu core.RWMutex
 	sources   []registeredSource
 }
 

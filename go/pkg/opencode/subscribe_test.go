@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"time"
 
 	core "dappco.re/go"
@@ -32,7 +31,7 @@ func TestSubscribe_streamEvents_Good(t *core.T) {
 
 	svc := &Service{}
 	var got []string
-	var mu sync.Mutex
+	var mu core.Mutex
 	svc.SetEventEmitter(func(e string) {
 		mu.Lock()
 		got = append(got, e)

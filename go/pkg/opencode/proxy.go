@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"sync"
 
 	core "dappco.re/go"
 	"github.com/gin-gonic/gin"
@@ -23,7 +22,7 @@ import (
 // once on the coreapi.Engine; the targets map mutates at runtime as
 // opencode sandboxes Start / Stop.
 type SandboxProxyGroup struct {
-	mu      sync.RWMutex
+	mu      core.RWMutex
 	targets map[string]*httputil.ReverseProxy // keyed by sandbox id
 }
 

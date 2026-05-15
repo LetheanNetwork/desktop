@@ -34,7 +34,6 @@
 package keys
 
 import (
-	"sync"
 
 	core "dappco.re/go"
 	"dappco.re/go/io/sigil"
@@ -65,7 +64,7 @@ const (
 // Service owns the encrypted keys directory. Stateless beyond the
 // master-key cache; the disk is the source of truth.
 type Service struct {
-	mu     sync.RWMutex
+	mu     core.RWMutex
 	master []byte // 32-byte cached master; loaded on first use
 }
 

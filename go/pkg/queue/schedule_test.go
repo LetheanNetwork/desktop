@@ -3,7 +3,6 @@
 package queue_test
 
 import (
-	"sync"
 	"testing"
 	"time"
 
@@ -17,7 +16,7 @@ import (
 func TestSchedule_FuturePastIsImmediate(t *testing.T) {
 	c := newQueueCore(t)
 
-	var ran sync.WaitGroup
+	var ran core.WaitGroup
 	ran.Add(1)
 	queue.RegisterKind(c, queue.HandlerOptions{
 		Kind:    "imm",
@@ -82,7 +81,7 @@ func TestSchedule_FutureNotPickedUpYet(t *testing.T) {
 func TestScheduleAfter_FiresAfterDuration(t *testing.T) {
 	c := newQueueCore(t)
 
-	var ran sync.WaitGroup
+	var ran core.WaitGroup
 	ran.Add(1)
 	queue.RegisterKind(c, queue.HandlerOptions{
 		Kind:    "delayed",
@@ -122,7 +121,7 @@ func TestSchedule_HandlerSelfReschedule(t *testing.T) {
 	c := newQueueCore(t)
 
 	var attempts int
-	var done sync.WaitGroup
+	var done core.WaitGroup
 	done.Add(1)
 	queue.RegisterKind(c, queue.HandlerOptions{
 		Kind: "retry-twice",

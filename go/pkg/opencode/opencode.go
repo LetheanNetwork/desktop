@@ -7,7 +7,6 @@ import (
 	goio "io"
 	"net"
 	"net/http"
-	"sync"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -54,7 +53,7 @@ type Service struct {
 	// success. Set via SetOnSandboxChange after the runner exists
 	// — the wire-up happens in cmd/lthn after newAppCore returns.
 	// Held outside Options because Options is read-only at runtime.
-	mu              sync.RWMutex
+	mu              core.RWMutex
 	onSandboxChange func()
 
 	// eventEmitter forwards opencode-serve's SSE /global/event

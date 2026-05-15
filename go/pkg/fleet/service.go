@@ -23,7 +23,6 @@
 package fleet
 
 import (
-	"sync"
 
 	core "dappco.re/go"
 	"dappco.re/go/store"
@@ -133,7 +132,7 @@ type Agent struct {
 // Service is the fleet domain service. Holds an open *store.DuckDB
 // against the master DB and lazily applies schema on first use.
 type Service struct {
-	mu sync.RWMutex
+	mu core.RWMutex
 	db *store.DuckDB
 }
 

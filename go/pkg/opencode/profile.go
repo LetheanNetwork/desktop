@@ -15,7 +15,6 @@
 package opencode
 
 import (
-	"sync"
 
 	core "dappco.re/go"
 	goiostore "dappco.re/go/io/store"
@@ -151,10 +150,10 @@ func DefaultLthnProfile() Profile {
 const profileKVPath = "Lethean/data/opencode.duckdb"
 
 // kvOnce + kvStore are lazily initialised on first profile access.
-// One per Service instance — wrapped in sync.Once so concurrent
+// One per Service instance — wrapped in core.Once so concurrent
 // callers don't race the DuckDB file open.
 var (
-	kvOnce sync.Once
+	kvOnce core.Once
 	kvErr  error
 	kvInst *goiostore.KeyValueStore
 )
