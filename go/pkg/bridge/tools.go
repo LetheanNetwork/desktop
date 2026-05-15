@@ -8,7 +8,6 @@ package bridge
 import (
 	"io"
 	"net/http"
-	"time"
 
 	core "dappco.re/go"
 	guiwindow "dappco.re/go/gui/pkg/window"
@@ -505,7 +504,7 @@ func (s *Service) eval(ctx core.Context, windowName, body string) map[string]any
 			return map[string]any{"ok": false, "error": reply.Error}
 		}
 		return map[string]any{"ok": true, "value": reply.Result}
-	case <-time.After(5 * core.Second):
+	case <-core.After(5 * core.Second):
 		return map[string]any{"ok": false, "error": "eval timeout (5s)", "reqId": reqID}
 	case <-ctx.Done():
 		return map[string]any{"ok": false, "error": "context cancelled"}

@@ -19,7 +19,6 @@
 package queue
 
 import (
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -33,7 +32,7 @@ func runWorker(c *core.Core, interval core.Duration) {
 		return
 	}
 	ctx := c.Context()
-	ticker := time.NewTicker(interval)
+	ticker := core.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {

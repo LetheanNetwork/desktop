@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"time"
 
 	core "dappco.re/go"
 )
@@ -109,7 +108,7 @@ func TestSubscribe_streamEvents_Ugly(t *core.T) {
 	// Wait for the first event, then cancel.
 	select {
 	case <-got:
-	case <-time.After(2 * core.Second):
+	case <-core.After(2 * core.Second):
 		cancel()
 		<-done
 		t.Fatalf("never received first event")
@@ -118,7 +117,7 @@ func TestSubscribe_streamEvents_Ugly(t *core.T) {
 
 	select {
 	case <-done:
-	case <-time.After(2 * core.Second):
+	case <-core.After(2 * core.Second):
 		t.Fatalf("cancellation didn't terminate streamEvents promptly")
 	}
 }

@@ -3,7 +3,6 @@
 package queue_test
 
 import (
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -104,7 +103,7 @@ func TestQueue_Worker_DispatchesAndCompletes(t *core.T) {
 	go func() { ran.Wait(); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(2 * core.Second):
+	case <-core.After(2 * core.Second):
 		t.Fatalf("handler never ran within 2s")
 	}
 

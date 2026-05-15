@@ -26,7 +26,6 @@ import (
 	"bufio"
 	"net/http"
 	"strings"
-	"time"
 
 	core "dappco.re/go"
 )
@@ -171,7 +170,7 @@ func (s *Service) runSubscription(ctx core.Context, id, target, authHeader strin
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(backoff):
+			case <-core.After(backoff):
 			}
 			backoff *= 2
 			if backoff > maxBackoff {
@@ -184,7 +183,7 @@ func (s *Service) runSubscription(ctx core.Context, id, target, authHeader strin
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(500 * core.Millisecond):
+		case <-core.After(500 * core.Millisecond):
 		}
 		backoff = 1 * core.Second
 	}

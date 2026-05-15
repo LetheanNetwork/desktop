@@ -3,7 +3,6 @@
 package bridge_test
 
 import (
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/bridge"
@@ -23,7 +22,7 @@ func TestLayout_WindowStateJSON(t *core.T) {
 func TestLayout_LayoutJSON(t *core.T) {
 	layout := bridge.Layout{
 		Name:    "autosave",
-		SavedAt: time.Unix(100, 0).UTC(),
+		SavedAt: core.Unix(100, 0).UTC(),
 		Windows: []bridge.WindowState{
 			{Name: "tray", Width: 320, Height: 240, Visible: true},
 		},

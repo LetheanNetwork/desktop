@@ -3,7 +3,6 @@
 package bridge_test
 
 import (
-	"time"
 
 	"dappco.re/lthn/desktop/pkg/bridge"
 )
@@ -15,7 +14,7 @@ func ExampleWindowState() {
 func ExampleLayout() {
 	_ = bridge.Layout{
 		Name:    "autosave",
-		SavedAt: time.Unix(100, 0).UTC(),
+		SavedAt: core.Unix(100, 0).UTC(),
 		Windows: []bridge.WindowState{
 			{Name: "tray", Width: 320, Height: 240, Visible: true},
 		},

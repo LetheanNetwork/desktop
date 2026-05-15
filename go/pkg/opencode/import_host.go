@@ -31,7 +31,6 @@ import (
 	"encoding/hex"
 	goio "io"
 	"net/http"
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -317,9 +316,9 @@ func unixMillis(v any) core.Time {
 		if n <= 0 {
 			return core.Time{}
 		}
-		return time.UnixMilli(int64(n))
+		return core.UnixMilli(int64(n))
 	case int64:
-		return time.UnixMilli(n)
+		return core.UnixMilli(n)
 	}
 	return core.Time{}
 }

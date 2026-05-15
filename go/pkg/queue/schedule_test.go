@@ -3,7 +3,6 @@
 package queue_test
 
 import (
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -36,7 +35,7 @@ func TestSchedule_FuturePastIsImmediate(t *core.T) {
 	go func() { ran.Wait(); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(2 * core.Second):
+	case <-core.After(2 * core.Second):
 		t.Fatalf("scheduled-now job never ran within 2s")
 	}
 }
@@ -108,7 +107,7 @@ func TestScheduleAfter_FiresAfterDuration(t *core.T) {
 		if elapsed > 500*core.Millisecond {
 			t.Errorf("fired too late: %v > 500ms", elapsed)
 		}
-	case <-time.After(2 * core.Second):
+	case <-core.After(2 * core.Second):
 		t.Fatalf("delayed job never ran within 2s")
 	}
 }
@@ -150,7 +149,7 @@ func TestSchedule_HandlerSelfReschedule(t *core.T) {
 		if attempts != 3 {
 			t.Errorf("attempts: got %d want 3", attempts)
 		}
-	case <-time.After(3 * core.Second):
+	case <-core.After(3 * core.Second):
 		t.Fatalf("self-rescheduling chain didn't complete (attempts=%d)", attempts)
 	}
 }
