@@ -7,18 +7,23 @@ import { renderChrome } from "../chrome";
 import { T } from "@lthn/i18n/coreservice";
 import type { LocalModel } from "../types";
 
+// Wails event payload shapes for the downloader bus.
+interface DlProgressPayload { id: string; name: string; written: number; total: number; }
+interface DlDonePayload    { id: string; name: string; ok: boolean; dest?: string; error?: string; }
+
 class LthnModelBrowserWindow extends LitElement {
   static readonly properties = {
-    selected: { type: String, reflect: true },
-    w:        { type: Number },
-    h:        { type: Number },
-    embedded: { type: Boolean, reflect: true },
-    chrome:   { state: true },
-    local:    { state: true },
-    loadErr:  { state: true },
-    modelsDir:{ state: true },
-    diskFree: { state: true },
-    t:        { state: true },
+    selected:  { type: String, reflect: true },
+    w:         { type: Number },
+    h:         { type: Number },
+    embedded:  { type: Boolean, reflect: true },
+    chrome:    { state: true },
+    local:     { state: true },
+    loadErr:   { state: true },
+    modelsDir: { state: true },
+    diskFree:  { state: true },
+    downloads: { state: true },
+    t:         { state: true },
   };
   declare selected: string;
   declare w: number;
@@ -29,6 +34,10 @@ class LthnModelBrowserWindow extends LitElement {
   declare loadErr: string;
   declare modelsDir: string;
   declare diskFree: number;
+  // jobId → { name, written, total } for in-flight downloads.
+  declare downloads: Map<string, { name: string; written: number; total: number }>;
+  // Cleanup fns from Events.On so we unsub on disconnect.
+  private _dlUnsubscribe: (() => void)[] = [];
   declare t: {
     btnFilters: string; btnImportGguf: string;
     railLabel: string; railEmpty: string; railEmptyHint: string;
@@ -48,6 +57,7 @@ class LthnModelBrowserWindow extends LitElement {
     this.loadErr = "";
     this.modelsDir = "~/.lthn/models/";
     this.diskFree = 0;
+    this.downloads = new Map();
     this.t = {
       btnFilters: "Filters", btnImportGguf: "Import GGUF…",
       railLabel: "Local",
@@ -151,6 +161,87 @@ class LthnModelBrowserWindow extends LitElement {
       subtitle: subtitleTpl.replace(/·\s*\d+\s*·/, `· ${this.local.length} ·`)
                            .replace(/·\s*—\s*·/, `· ${this.local.length} ·`),
     };
+
+    // Subscribe to downloader bus events from the Wails event bridge.
+    // Dynamic import so the component stays mountable in test + canvas
+    // environments where the binding isn't present.
+    try {
+      const { Events } = await import("@wailsio/runtime");
+      const offProgress = Events.On("downloader:progress", (e: { data: DlProgressPayload }) => {
+        const p = e?.data;
+        if (!p?.id) return;
+        const next = new Map(this.downloads);
+        next.set(p.id, { name: p.name, written: p.written, total: p.total });
+        this.downloads = next;
+        // Reflect downloading status in the local rail while in-flight.
+        this.local = this.local.map(m =>
+          m.name === p.name ? { ...m, status: "downloading" as const } : m,
+        );
+      });
+      const offDone = Events.On("downloader:done", (e: { data: DlDonePayload }) => {
+        const d = e?.data;
+        if (!d?.id) return;
+        const next = new Map(this.downloads);
+        next.delete(d.id);
+        this.downloads = next;
+        // Re-list local models so the newly fetched file appears in the rail.
+        try {
+          import("@desktop/models/wailsservice").then(async ms => {
+            const { unwrap } = await import("../result");
+            type Entry = { name: string; size: number; path: string; is_dir: boolean };
+            const entries = await unwrap<Entry[]>(ms.List(), []);
+            this.local = entries.map(deriveLocalModel);
+            this.chrome = {
+              ...this.chrome,
+              subtitle: this.chrome.subtitle
+                .replace(/·\s*\d+\s*·/, `· ${this.local.length} ·`)
+                .replace(/·\s*—\s*·/, `· ${this.local.length} ·`),
+            };
+          });
+        } catch { /* non-Wails env — keep existing local list */ }
+      });
+      this._dlUnsubscribe = [offProgress, offDone];
+    } catch { /* non-Wails env — no event bus */ }
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    for (const unsub of this._dlUnsubscribe) { try { unsub(); } catch { /* ignore */ } }
+    this._dlUnsubscribe = [];
+  }
+
+  // _startDownload calls the Wails downloader binding for a HuggingFace
+  // model result. url is the resolved .gguf direct-link; name is the
+  // filename used as the local dest under ~/Lethean/conf/models/.
+  // Fires-and-forgets — progress + done arrive on the event bus.
+  async _startDownload(url: string, name: string) {
+    // Optimistic: mark the local entry as downloading before the job id
+    // comes back so the rail reflects the intent immediately.
+    const existing = this.local.find(m => m.name === name);
+    if (!existing) {
+      this.local = [
+        ...this.local,
+        { id: modelSlug(name), name, family: modelFamily(name), size: "—", status: "downloading" },
+      ];
+    } else {
+      this.local = this.local.map(m =>
+        m.name === name ? { ...m, status: "downloading" as const } : m,
+      );
+    }
+    try {
+      const dl = await import("@desktop/downloader/wailsservice");
+      const id: string = await dl.Download(url, name);
+      // Seed the downloads map so the progress bar renders at 0% while
+      // waiting for the first progress event off the wire.
+      const next = new Map(this.downloads);
+      next.set(id, { name, written: 0, total: 0 });
+      this.downloads = next;
+    } catch {
+      // Non-Wails env or binding not yet generated — revert optimistic status.
+      this.local = this.local.map(m =>
+        m.name === name ? { ...m, status: "available" as const } : m,
+      );
+    }
   }
 
   render() {
@@ -166,11 +257,11 @@ class LthnModelBrowserWindow extends LitElement {
     const selStatus = selected?.status === "loaded" ? "loaded"
                     : selected ? selected.status : "loaded";
     const results = [
-      { name:"Qwen2.5-Coder-7B-Instruct",     author:"Qwen",       size:"4.8 GB", q:"q4_k_m", family:"Coder",   tools:true,  vision:false, downloads:"1.2M" },
-      { name:"Mistral-Nemo-12B-Instruct",     author:"MistralAI",  size:"8.4 GB", q:"q4_k_m", family:"Mistral", tools:true,  vision:false, downloads:"420k" },
-      { name:"Llama-3.2-11B-Vision-Instruct", author:"Meta",       size:"9.1 GB", q:"q4_k_m", family:"Llama",   tools:false, vision:true,  downloads:"880k" },
-      { name:"Gemma-3-27B-IT",                author:"Google",     size:"16 GB",  q:"q4_k_m", family:"Gemma",   tools:false, vision:false, downloads:"340k" },
-      { name:"Phi-4-14B-Instruct",            author:"Microsoft",  size:"9.6 GB", q:"q4_k_m", family:"Phi",     tools:true,  vision:false, downloads:"260k" },
+      { name:"Qwen2.5-Coder-7B-Instruct",     author:"Qwen",       size:"4.8 GB", q:"q4_k_m", family:"Coder",   tools:true,  vision:false, dlCount:"1.2M", hfRepo:"Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",        file:"qwen2.5-coder-7b-instruct-q4_k_m.gguf" },
+      { name:"Mistral-Nemo-12B-Instruct",     author:"MistralAI",  size:"8.4 GB", q:"q4_k_m", family:"Mistral", tools:true,  vision:false, dlCount:"420k",  hfRepo:"MistralAI/Mistral-Nemo-Instruct-2407-GGUF",   file:"mistral-nemo-instruct-2407-q4_k_m.gguf" },
+      { name:"Llama-3.2-11B-Vision-Instruct", author:"Meta",       size:"9.1 GB", q:"q4_k_m", family:"Llama",   tools:false, vision:true,  dlCount:"880k",  hfRepo:"bartowski/Llama-3.2-11B-Vision-Instruct-GGUF", file:"Llama-3.2-11B-Vision-Instruct-Q4_K_M.gguf" },
+      { name:"Gemma-3-27B-IT",                author:"Google",     size:"16 GB",  q:"q4_k_m", family:"Gemma",   tools:false, vision:false, dlCount:"340k",  hfRepo:"bartowski/gemma-3-27b-it-GGUF",               file:"gemma-3-27b-it-Q4_K_M.gguf" },
+      { name:"Phi-4-14B-Instruct",            author:"Microsoft",  size:"9.6 GB", q:"q4_k_m", family:"Phi",     tools:true,  vision:false, dlCount:"260k",  hfRepo:"microsoft/Phi-4-mini-instruct-GGUF",          file:"Phi-4-mini-instruct-q4.gguf" },
     ];
 
     const toolbar = html`
@@ -224,30 +315,55 @@ class LthnModelBrowserWindow extends LitElement {
             </div>
           </div>
           <div style="flex:1; overflow:auto; padding:4px 18px 18px; display:flex; flex-direction:column; gap:8px;">
-            ${results.map((r, i) => html`
+            ${results.map((r, i) => {
+              // A result is in-flight when a local entry with the same name is downloading.
+              const inFlight = this.local.some(m => m.name === r.name && m.status === "downloading");
+              // Find the active download entry for this result to show progress.
+              const dlEntry = inFlight
+                ? [...this.downloads.values()].find(d => d.name === r.file)
+                : undefined;
+              const pct = dlEntry && dlEntry.total > 0
+                ? Math.round(100 * dlEntry.written / dlEntry.total)
+                : (inFlight ? 0 : -1);
+              const hfUrl = `https://huggingface.co/${r.hfRepo}/resolve/main/${r.file}`;
+              return html`
               <div style="padding:12px 14px; border-radius:8px;
                           background:${i === 0 ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.025)"};
                           border:1px solid ${i === 0 ? "rgba(64,193,197,0.22)" : "rgba(255,255,255,0.05)"};
-                          display:flex; align-items:center; gap:14px;">
-                <div style="flex:1; min-width:0;">
-                  <div style="font-family:var(--font-mono); font-size:12px; color:var(--fg-0); letter-spacing:-0.005em;">${r.name}</div>
-                  <div style="font-size:10.5px; color:var(--fg-3); margin-top:3px; display:flex; gap:12px;">
-                    <span>by ${r.author}</span><span>· ${r.downloads} downloads</span>
+                          display:flex; flex-direction:column; gap:0;">
+                <div style="display:flex; align-items:center; gap:14px;">
+                  <div style="flex:1; min-width:0;">
+                    <div style="font-family:var(--font-mono); font-size:12px; color:var(--fg-0); letter-spacing:-0.005em;">${r.name}</div>
+                    <div style="font-size:10.5px; color:var(--fg-3); margin-top:3px; display:flex; gap:12px;">
+                      <span>by ${r.author}</span><span>· ${r.dlCount} downloads</span>
+                    </div>
+                    <div style="display:flex; gap:4px; margin-top:6px;">
+                      ${[r.family, r.q, r.tools && "tools", r.vision && "vision"].filter(Boolean).map(b => html`
+                        <span style="font-family:var(--font-mono); font-size:9.5px; padding:1px 6px; border-radius:999px;
+                                     background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.07);
+                                     color:var(--fg-2); letter-spacing:0.02em;">${b}</span>
+                      `)}
+                    </div>
                   </div>
-                  <div style="display:flex; gap:4px; margin-top:6px;">
-                    ${[r.family, r.q, r.tools && "tools", r.vision && "vision"].filter(Boolean).map(b => html`
-                      <span style="font-family:var(--font-mono); font-size:9.5px; padding:1px 6px; border-radius:999px;
-                                   background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.07);
-                                   color:var(--fg-2); letter-spacing:0.02em;">${b}</span>
-                    `)}
-                  </div>
+                  <div style="text-align:right; font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">${r.size}</div>
+                  <lthn-btn
+                    tone=${inFlight ? "ghost" : i === 0 ? "primary" : "ghost"}
+                    size="sm"
+                    ?disabled=${inFlight}
+                    @click=${inFlight ? null : () => this._startDownload(hfUrl, r.file)}
+                    style="--wails-draggable:no-drag;">
+                    <i class="fa-solid fa-${inFlight ? "spinner fa-spin" : "arrow-down"}" style="font-size:10px;"></i>
+                    ${inFlight && pct >= 0 ? `${pct}%` : this.t.btnDownload}
+                  </lthn-btn>
                 </div>
-                <div style="text-align:right; font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">${r.size}</div>
-                <lthn-btn tone=${i === 0 ? "primary" : "ghost"} size="sm">
-                  <i class="fa-solid fa-arrow-down" style="font-size:10px;"></i> ${this.t.btnDownload}
-                </lthn-btn>
-              </div>
-            `)}
+                ${inFlight ? html`
+                  <div style="height:2px; background:rgba(255,255,255,0.06); border-radius:1px; margin-top:8px; overflow:hidden;">
+                    <div style="width:${pct >= 0 ? pct : 0}%; height:100%; background:var(--warning-400);
+                                transition:width 250ms linear;"></div>
+                  </div>
+                ` : nothing}
+              </div>`;
+            })}
           </div>
         </main>
 
@@ -332,11 +448,14 @@ class LthnModelBrowserWindow extends LitElement {
           <span>${m.family}</span>
           <span style="font-family:var(--font-mono);">${m.size}</span>
         </div>
-        ${m.status === "downloading" ? html`
+        ${m.status === "downloading" ? (() => {
+          const dl = [...this.downloads.values()].find(d => d.name === m.name);
+          const pct = dl && dl.total > 0 ? Math.round(100 * dl.written / dl.total) : 0;
+          return html`
           <div style="height:2px; background:rgba(255,255,255,0.06); border-radius:1px; margin-top:4px; overflow:hidden;">
-            <div style="width:62%; height:100%; background:var(--warning-400);"></div>
-          </div>
-        ` : nothing}
+            <div style="width:${pct}%; height:100%; background:var(--warning-400); transition:width 250ms linear;"></div>
+          </div>`;
+        })() : nothing}
       </div>
     `;
   }
