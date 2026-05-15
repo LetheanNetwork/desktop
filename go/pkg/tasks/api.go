@@ -63,6 +63,11 @@ func Create(c *core.Core, input CreateInput) core.Result {
 	if r := orm.Insert(c, &issue); !r.OK {
 		return r
 	}
+	c.ACTION(IssueChanged{
+		Kind:  KindCreated,
+		Issue: issue,
+		At:    now,
+	})
 	return core.Ok(issue)
 }
 
@@ -126,6 +131,9 @@ func Update(c *core.Core, id string, input UpdateInput) core.Result {
 	if !ok {
 		return core.Fail(core.E("tasks.Update", "cast issue", nil))
 	}
+	// Snapshot for the IssueChange.Before payload — listeners may
+	// want to compute their own diffs without re-querying orm.
+	before := issue
 	mutated := false
 	if input.Summary != "" {
 		issue.Summary = input.Summary
@@ -173,10 +181,27 @@ func Update(c *core.Core, id string, input UpdateInput) core.Result {
 	if !mutated {
 		return core.Ok(issue)
 	}
-	issue.UpdatedAt = time.Now().UTC()
+	now := time.Now().UTC()
+	issue.UpdatedAt = now
 	if saveResult := orm.Save(c, &issue); !saveResult.OK {
 		return saveResult
 	}
+	// Closed transitions get the dedicated KindClosed event so
+	// listeners (PR-watcher, audit, agent-prep) can subscribe to
+	// "issue closed" without diffing every state field. Other
+	// updates fire KindUpdated; listeners diff Before vs Issue
+	// for whichever fields they care about.
+	kind := KindUpdated
+	if issue.State != before.State &&
+		(issue.State == StateDone || issue.State == StateCancelled) {
+		kind = KindClosed
+	}
+	c.ACTION(IssueChanged{
+		Kind:   kind,
+		Issue:  issue,
+		Before: before,
+		At:     now,
+	})
 	return core.Ok(issue)
 }
 
@@ -207,16 +232,33 @@ func AddNote(c *core.Core, issueID, body, author string) core.Result {
 	if body == "" {
 		return core.Fail(core.E("tasks.AddNote", "body is required", nil))
 	}
+	now := time.Now().UTC()
 	note := Note{
 		ID:        newID(),
 		IssueID:   issueID,
 		Body:      body,
 		Author:    author,
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: now,
 	}
 	if r := orm.Insert(c, &note); !r.OK {
 		return r
 	}
+	// Broadcast KindNoted so listeners that aggregate activity
+	// (Vi.Activity feed, audit log, PR-watcher commenting) can
+	// react. Best-effort fetch of the parent Issue snapshot —
+	// failures don't block the note insert.
+	parent := Issue{}
+	if r := Get(c, issueID); r.OK {
+		if i, _, ok := orm.Detail[Issue](r); ok {
+			parent = i
+		}
+	}
+	c.ACTION(IssueChanged{
+		Kind:  KindNoted,
+		Issue: parent,
+		Note:  note,
+		At:    now,
+	})
 	return core.Ok(note)
 }
 
