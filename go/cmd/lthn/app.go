@@ -141,17 +141,40 @@ func newAppCore() *core.Core {
 		return nil
 	}
 
-	// orm bootstrap — lib not service. Register + mount the default
-	// Memium + register schemas for every subsystem that uses orm-backed
-	// records. Pattern mirrors core/ide's pkg/server/orm_init.go.
+	// orm bootstrap — lib not service. Register + mount the DuckDB
+	// medium (persistent across serve restarts) under "default" +
+	// register schemas. Pattern mirrors core/ide's pkg/server/orm_init.go,
+	// but consumes orm.NewDuckDB now that it lives in core/orm proper
+	// (was a private duckDBMedium in core/ide pre-2026-05-15).
+	//
+	// Memium fallback: if DuckDB open fails (path unwritable, etc.),
+	// drop to in-memory so startup doesn't abort. Imports + sandbox
+	// records won't persist in that path but the user can still use
+	// the binary.
 	if r := orm.Register(c); !r.OK {
 		core.Print(core.Stderr(), "lthn: orm register failed: %s\n", r.Error())
 		return nil
 	}
-	memium := orm.NewMemium()
-	if r := orm.Mount(c, "default", memium); !r.OK {
-		core.Print(core.Stderr(), "lthn: orm mount failed: %s\n", r.Error())
+	dataR := paths.DataDir()
+	if !dataR.OK {
+		core.Print(core.Stderr(), "lthn: data dir resolve failed: %s\n", dataR.Error())
 		return nil
+	}
+	ormPath := core.PathJoin(dataR.Value.(string), "orm.duckdb")
+	var duck *orm.DuckDBMedium
+	if r := orm.NewDuckDB(ormPath); r.OK {
+		duck = r.Value.(*orm.DuckDBMedium)
+		if mr := orm.Mount(c, "default", duck); !mr.OK {
+			core.Print(core.Stderr(), "lthn: orm DuckDB mount failed: %s\n", mr.Error())
+			return nil
+		}
+	} else {
+		core.Print(core.Stderr(), "lthn: orm DuckDB open failed (%s); falling back to in-memory\n", r.Error())
+		memium := orm.NewMemium()
+		if mr := orm.Mount(c, "default", memium); !mr.OK {
+			core.Print(core.Stderr(), "lthn: orm mount failed: %s\n", mr.Error())
+			return nil
+		}
 	}
 	for _, schema := range []orm.Schema{
 		opencode.Sandbox{}.Schema(),
@@ -162,7 +185,9 @@ func newAppCore() *core.Core {
 			core.Print(core.Stderr(), "lthn: orm schema %s failed: %s\n", schema.Name, r.Error())
 			return nil
 		}
-		memium.RegisterTable(schema.Name, schema)
+		if duck != nil {
+			duck.RegisterTable(schema.Name, schema)
+		}
 	}
 
 	// Wire imported worktrees into the repos surface — opencode
