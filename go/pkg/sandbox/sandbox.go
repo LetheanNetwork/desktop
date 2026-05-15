@@ -43,6 +43,8 @@ const (
 // process.Service can be resolved at call time.
 type Service struct {
 	*core.ServiceRuntime[Options]
+	mu      core.RWMutex
+	handles map[string]*ContainerHandle
 }
 
 // NewService returns the canonical Core service factory.
