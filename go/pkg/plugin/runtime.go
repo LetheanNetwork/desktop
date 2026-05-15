@@ -12,7 +12,6 @@ package plugin
 import (
 	"net"
 	"net/http"
-	"strconv"
 
 	core "dappco.re/go"
 	"dappco.re/go/process"
@@ -57,7 +56,7 @@ func pickFreePort() core.Result {
 // 100 ms — plugins should start fast; if they don't, the
 // manifest's startup_timeout buys more time.
 func waitForHealth(ctx core.Context, port int, path string, timeout core.Duration) core.Result {
-	url := "http://127.0.0.1:" + strconv.Itoa(port) + path
+	url := "http://127.0.0.1:" + core.Itoa(port) + path
 	deadline := core.Now().Add(timeout)
 	for core.Now().Before(deadline) {
 		select {
@@ -106,7 +105,7 @@ func (s *Service) startPlugin(ctx core.Context, code, token string) core.Result 
 	binPath := core.PathJoin(dir, m.Binary)
 	args := []string{
 		"--namespace=" + m.Namespace,
-		"--port=" + strconv.Itoa(port),
+		"--port=" + core.Itoa(port),
 		"--token=" + token,
 		"--data=" + core.PathJoin(dir, "data"),
 	}
@@ -132,7 +131,7 @@ func (s *Service) startPlugin(ctx core.Context, code, token string) core.Result 
 		startedAt: core.Now(),
 		proc: &processHandle{
 			proc:   proc,
-			target: "http://127.0.0.1:" + strconv.Itoa(port),
+			target: "http://127.0.0.1:" + core.Itoa(port),
 			port:   port,
 		},
 	}

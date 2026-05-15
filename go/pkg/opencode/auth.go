@@ -23,8 +23,6 @@ package opencode
 
 import (
 	"crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
 
 	core "dappco.re/go"
 	goiostore "dappco.re/go/io/store"
@@ -69,7 +67,7 @@ func (s *Service) ServerPassword() core.Result {
 	if _, err := rand.Read(buf); err != nil {
 		return core.Fail(core.E("opencode.ServerPassword", "rand read failed", err))
 	}
-	pw := hex.EncodeToString(buf)
+	pw := core.HexEncode(buf)
 	if err := st.Set(serverAuthStoreGroup, serverAuthPasswordKey, pw); err != nil {
 		return core.Fail(err)
 	}
@@ -92,7 +90,7 @@ func (s *Service) authHeader() string {
 		return ""
 	}
 	raw := serverAuthUsername + ":" + pw
-	return "Basic " + base64.StdEncoding.EncodeToString([]byte(raw))
+	return "Basic " + core.Base64Encode([]byte(raw))
 }
 
 // applyAuth sets the Authorization header on a request from the

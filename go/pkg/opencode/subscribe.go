@@ -25,7 +25,6 @@ package opencode
 import (
 	"bufio"
 	"net/http"
-	"strings"
 
 	core "dappco.re/go"
 )
@@ -223,10 +222,10 @@ func (s *Service) streamEvents(ctx core.Context, target, authHeader string) erro
 			return ctx.Err()
 		}
 		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
+		if !core.HasPrefix(line, "data:") {
 			continue
 		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		payload := core.Trim(core.TrimPrefix(line, "data:"))
 		if payload == "" {
 			continue
 		}

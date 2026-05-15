@@ -18,7 +18,6 @@
 package opencode
 
 import (
-	"strings"
 
 	core "dappco.re/go"
 )
@@ -68,9 +67,9 @@ func (s *Service) Upgrade() core.Result {
 	res := UpgradeResult{
 		Digest: parsePullDigest(out),
 	}
-	if strings.Contains(out, "Downloaded newer image") {
+	if core.Contains(out, "Downloaded newer image") {
 		res.Updated = true
-	} else if strings.Contains(out, "Image is up to date") {
+	} else if core.Contains(out, "Image is up to date") {
 		res.Updated = false
 	} else {
 		// Unrecognised output — assume not-updated to avoid
@@ -111,12 +110,12 @@ func (s *Service) Upgrade() core.Result {
 //
 //	Digest: sha256:ca59eb28d5ea6a1f50c45a1f1df5c1a9286343e41b389fe89fb4ffac96dbeb84
 func parsePullDigest(pullOutput string) string {
-	for _, line := range strings.Split(pullOutput, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "Digest:") {
+	for _, line := range core.Split(pullOutput, "\n") {
+		line = core.Trim(line)
+		if !core.HasPrefix(line, "Digest:") {
 			continue
 		}
-		return strings.TrimSpace(strings.TrimPrefix(line, "Digest:"))
+		return core.Trim(core.TrimPrefix(line, "Digest:"))
 	}
 	return ""
 }

@@ -8,7 +8,6 @@
 package php
 
 import (
-	"sort"
 
 	core "dappco.re/go"
 	"dappco.re/go/php/pkg/php"
@@ -138,7 +137,7 @@ func sortedComposerScripts(parsed map[string]core.RawMessage) []ScriptEntry {
 	for name := range parsed {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	core.SliceSort(names)
 
 	entries := []ScriptEntry{}
 	for _, name := range names {

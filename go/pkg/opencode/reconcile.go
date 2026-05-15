@@ -61,21 +61,21 @@ func (s *Service) Reconcile() core.Result {
 	authHeader := s.authHeader()
 
 	recovered := 0
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		line = strings.TrimSpace(line)
+	for _, line := range core.Split(core.Trim(out), "\n") {
+		line = core.Trim(line)
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 2)
+		parts := core.SplitN(line, "\t", 2)
 		if len(parts) != 2 {
 			continue
 		}
-		name := strings.TrimSpace(parts[0])
-		ports := strings.TrimSpace(parts[1])
-		if !strings.HasPrefix(name, containerPrefix) {
+		name := core.Trim(parts[0])
+		ports := core.Trim(parts[1])
+		if !core.HasPrefix(name, containerPrefix) {
 			continue
 		}
-		id := strings.TrimPrefix(name, containerPrefix)
+		id := core.TrimPrefix(name, containerPrefix)
 		hostPort := parseHostPort(ports)
 		if hostPort == 0 {
 			continue
@@ -113,9 +113,9 @@ func (s *Service) Reconcile() core.Result {
 func parseHostPort(ports string) int {
 	// Pick the first binding — multiple v4/v6 entries are aliases
 	// of the same host port.
-	first := strings.SplitN(ports, ",", 2)[0]
+	first := core.SplitN(ports, ",", 2)[0]
 	// "127.0.0.1:51823->4096/tcp" → "127.0.0.1:51823"
-	arrow := strings.Index(first, "->")
+	arrow := core.Index(first, "->")
 	if arrow < 0 {
 		return 0
 	}
@@ -125,7 +125,7 @@ func parseHostPort(ports string) int {
 	if colon < 0 {
 		return 0
 	}
-	portStr := strings.TrimSpace(hostSide[colon+1:])
+	portStr := core.Trim(hostSide[colon+1:])
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
 		return 0

@@ -3,7 +3,6 @@
 package opencode
 
 import (
-	"bytes"
 	goio "io"
 	"net"
 	"net/http"
@@ -340,7 +339,7 @@ func waitHealthy(target, authHeader string, timeout core.Duration) core.Result {
 // authHeader is the Basic Auth credential lthn injects when
 // OPENCODE_SERVER_PASSWORD is set (always set by Start).
 func applyProfile(target, authHeader string, p Profile) core.Result {
-	body := bytes.NewBufferString(p.ToOpenCodeWire())
+	body := core.NewBufferString(p.ToOpenCodeWire())
 	req, err := http.NewRequest(core.MethodPatch, target+"/global/config", body)
 	if err != nil {
 		return core.Fail(core.E("opencode.applyProfile", "request build failed", err))

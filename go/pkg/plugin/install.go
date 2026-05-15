@@ -9,7 +9,6 @@ package plugin
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 	"io"
 	"net/http"
 	"net/url"
@@ -116,7 +115,7 @@ func verifyChecksum(data []byte, checksum string) core.Result {
 	}
 	want := core.Lower(checksum[len(prefix):])
 	sum := sha256.Sum256(data)
-	got := hex.EncodeToString(sum[:])
+	got := core.HexEncode(sum[:])
 	if got != want {
 		return core.Fail(core.E("plugin.verifyChecksum",
 			"checksum mismatch: want "+want+" got "+got, nil))

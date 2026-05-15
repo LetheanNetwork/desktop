@@ -33,7 +33,6 @@ package apikey
 
 import (
 	"crypto/rand"
-	"encoding/hex"
 
 	core "dappco.re/go"
 	"dappco.re/go/config"
@@ -119,7 +118,7 @@ func generate() core.Result {
 	if _, err := rand.Read(buf); err != nil {
 		return core.Fail(core.E("apikey.generate", "entropy read failed", err))
 	}
-	return core.Ok(keyPrefix + hex.EncodeToString(buf))
+	return core.Ok(keyPrefix + core.HexEncode(buf))
 }
 
 // Mask returns a UI-safe form of the key — full prefix + first 4

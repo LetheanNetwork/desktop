@@ -27,8 +27,6 @@ package opencode
 
 import (
 	"crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
 	goio "io"
 	"net/http"
 
@@ -79,8 +77,8 @@ func (s *Service) ImportFromHost() core.Result {
 	if _, err := rand.Read(pwBuf); err != nil {
 		return core.Fail(core.E("opencode.ImportFromHost", "rand read failed", err))
 	}
-	pw := hex.EncodeToString(pwBuf)
-	authHeader := "Basic " + base64.StdEncoding.EncodeToString([]byte(serverAuthUsername+":"+pw))
+	pw := core.HexEncode(pwBuf)
+	authHeader := "Basic " + core.Base64Encode([]byte(serverAuthUsername+":"+pw))
 
 	// 3. Spawn `opencode serve --port N --hostname 127.0.0.1`.
 	target := core.Sprintf("http://127.0.0.1:%d", port)

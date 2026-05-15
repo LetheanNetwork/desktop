@@ -24,7 +24,6 @@
 package opencode
 
 import (
-	"bytes"
 	goio "io"
 	"iter"
 	"net/http"
@@ -174,7 +173,7 @@ func (m *Model) invoke(ctx core.Context, messages []inference.Message) (string, 
 	// v2 maps inference.Message[] → opencode parts more faithfully
 	// (system / user / assistant roles), but for v1 the concatenated
 	// shape is what the openai adapter uses too.
-	var sb bytes.Buffer
+	var sb core.Buffer
 	for i, msg := range messages {
 		if i > 0 {
 			sb.WriteByte('\n')
@@ -188,7 +187,7 @@ func (m *Model) invoke(ctx core.Context, messages []inference.Message) (string, 
 	}
 
 	// Create a session.
-	sessReqBody := bytes.NewBufferString(core.JSONMarshalString(map[string]any{
+	sessReqBody := core.NewBufferString(core.JSONMarshalString(map[string]any{
 		"title": "lthn-route",
 	}))
 	sessReq, err := http.NewRequestWithContext(ctx, core.MethodPost, target+"/session", sessReqBody)
@@ -219,7 +218,7 @@ func (m *Model) invoke(ctx core.Context, messages []inference.Message) (string, 
 	}
 
 	// Post the message.
-	msgReqBody := bytes.NewBufferString(core.JSONMarshalString(map[string]any{
+	msgReqBody := core.NewBufferString(core.JSONMarshalString(map[string]any{
 		"providerID": m.opts.ProviderID,
 		"modelID":    m.opts.ModelID,
 		"parts": []map[string]any{
@@ -257,7 +256,7 @@ func (m *Model) invoke(ctx core.Context, messages []inference.Message) (string, 
 		// inspect rather than swallow a malformed-shape error.
 		return string(msgBody), nil
 	}
-	var out bytes.Buffer
+	var out core.Buffer
 	for _, p := range msgWire.Parts {
 		if p.Type == "text" && p.Text != "" {
 			out.WriteString(p.Text)

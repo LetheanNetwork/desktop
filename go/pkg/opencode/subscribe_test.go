@@ -73,7 +73,7 @@ func TestSubscribe_streamEvents_Bad(t *core.T) {
 	if err == nil {
 		t.Fatalf("expected error on 401")
 	}
-	if !strings.Contains(err.Error(), "401") {
+	if !core.Contains(err.Error(), "401") {
 		t.Errorf("want 401 in error, got %v", err)
 	}
 }

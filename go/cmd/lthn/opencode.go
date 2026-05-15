@@ -5,7 +5,6 @@ package main
 import (
 	goio "io"
 	"net/http"
-	"strings"
 
 	core "dappco.re/go"
 )
@@ -102,7 +101,7 @@ func opencodeStart(args []string) int {
 		}
 	}
 	payload := core.JSONMarshalString(map[string]string{"profile": profile})
-	req, _ := http.NewRequest(core.MethodPost, opencodeBase, strings.NewReader(payload))
+	req, _ := http.NewRequest(core.MethodPost, opencodeBase, core.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	body, code, err := doRequest(req)
 	if err != nil {
@@ -245,7 +244,7 @@ func profileSave(args []string) int {
 		return 1
 	}
 	data, _ := raw.Value.([]byte)
-	req, _ := http.NewRequest(core.MethodPost, opencodeProfBase, strings.NewReader(string(data)))
+	req, _ := http.NewRequest(core.MethodPost, opencodeProfBase, core.NewReader(string(data)))
 	req.Header.Set("Content-Type", "application/json")
 	body, code, err := doRequest(req)
 	if err != nil {
@@ -313,7 +312,7 @@ func opencodeMergeHostConfig(args []string) int {
 		"profile": profile,
 		"force":   force,
 	})
-	req, _ := http.NewRequest(core.MethodPost, opencodeHostConfigBase, strings.NewReader(payload))
+	req, _ := http.NewRequest(core.MethodPost, opencodeHostConfigBase, core.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	body, code, err := doRequest(req)
 	if err != nil {
@@ -527,7 +526,7 @@ func opencodeEnable(args []string) int {
 		}
 	}
 	payload := core.JSONMarshalString(map[string]string{"profile": profile})
-	req, _ := http.NewRequest(core.MethodPost, opencodeEnableBase, strings.NewReader(payload))
+	req, _ := http.NewRequest(core.MethodPost, opencodeEnableBase, core.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	body, code, err := doRequest(req)
 	if err != nil {
@@ -584,5 +583,5 @@ func doRequest(req *core.Request) (string, int, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, _ := goio.ReadAll(resp.Body)
-	return strings.TrimSpace(string(raw)), resp.StatusCode, nil
+	return core.Trim(string(raw)), resp.StatusCode, nil
 }
