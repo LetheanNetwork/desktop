@@ -158,7 +158,7 @@ func (s *Service) startPlugin(ctx core.Context, code, token string) core.Result 
 	// restart-vs-die. User-initiated Stop sets state to
 	// "stopped" first so the watcher knows the exit was
 	// expected and skips the restart path.
-	go s.watchProcess(code, proc)
+	s.Core().Go(func() { s.watchProcess(code, proc) })
 	return core.Ok(nil)
 }
 

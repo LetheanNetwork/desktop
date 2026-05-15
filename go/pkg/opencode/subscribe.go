@@ -125,7 +125,7 @@ func (s *Service) Subscribe(id string) (func(), core.Result) {
 	s.subscriptions[id] = wrap
 	s.mu.Unlock()
 
-	go s.runSubscription(ctx, id, target, authHeader)
+	s.Core().Go(func() { s.runSubscription(ctx, id, target, authHeader) })
 	return wrap, core.Ok(nil)
 }
 

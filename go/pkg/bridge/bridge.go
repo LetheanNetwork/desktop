@@ -149,11 +149,11 @@ func (s *Service) OnStartup(_ core.Context) core.Result {
 	srv := s.httpSrv
 	s.mu.Unlock()
 
-	go func() {
+	s.Core().Go(func() {
 		if err := srv.ListenAndServe(); err != nil && err != core.ErrHTTPServerClosed {
 			core.Print(core.Stderr(), "bridge: http listen failed: %v\n", err)
 		}
-	}()
+	})
 	return core.Ok(nil)
 }
 

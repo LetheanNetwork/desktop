@@ -132,7 +132,7 @@ func (s *Service) handleExit(code string, proc *process.Process) {
 	newProc := ps.proc
 	s.mu.Unlock()
 	if newProc != nil && newProc.proc != nil {
-		go s.watchProcess(code, newProc.proc)
+		s.Core().Go(func() { s.watchProcess(code, newProc.proc) })
 	}
 }
 

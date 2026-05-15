@@ -80,7 +80,7 @@ func (s *Service) OnStart() core.Result {
 	}
 	c := s.Core()
 	interval := s.Options().PollInterval
-	go runWorker(c, interval)
+	c.Go(func() { runWorker(c, interval) })
 	return core.Ok(nil)
 }
 
