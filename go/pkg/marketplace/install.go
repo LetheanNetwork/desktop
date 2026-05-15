@@ -211,6 +211,10 @@ func (s *Service) Install(input InstallInput) core.Result {
 	// already landed). Uninstall calls plugin.UnregisterBundle.
 	_ = plugin.RegisterBundle(s.core, m.Name, manifestToPluginInput(m))
 
+	// Broadcast — frontend renders status pills + future MCP/agent
+	// consumers react. Before is zero (first install, no prior state).
+	fireBundleChanged(s.core, PhaseInstalled, rec, InstalledBundle{})
+
 	if lastErr != "" {
 		return core.Fail(core.E(installBundleOp, "one or more images failed to start: "+lastErr, nil))
 	}
@@ -313,11 +317,13 @@ func (s *Service) Launch(bundleID string) core.Result {
 		_ = sbSvc.SpawnLong(spawnIn)
 	}
 
-	rec := recR.Value.(InstalledBundle)
+	before := recR.Value.(InstalledBundle)
+	rec := before
 	rec.Status = BundleStatusRunning
 	if s.core != nil {
 		_ = orm.Of[InstalledBundle](s.core).Save(&rec)
 	}
+	fireBundleChanged(s.core, PhaseLaunched, rec, before)
 
 	return core.Ok(nil)
 }
@@ -348,11 +354,13 @@ func (s *Service) Stop(bundleID string) core.Result {
 
 	recR := s.findInstalledBundle(bundleID)
 	if recR.OK {
-		rec := recR.Value.(InstalledBundle)
+		before := recR.Value.(InstalledBundle)
+		rec := before
 		rec.Status = BundleStatusStopped
 		if s.core != nil {
 			_ = orm.Of[InstalledBundle](s.core).Save(&rec)
 		}
+		fireBundleChanged(s.core, PhaseStopped, rec, before)
 	}
 
 	return core.Ok(nil)
@@ -371,6 +379,14 @@ func (s *Service) Uninstall(bundleID string) core.Result {
 		return core.Fail(core.E(uninstallBundleOp, "bundle id is required", nil))
 	}
 
+	// Capture the pre-uninstall state before Stop flips status. The
+	// broadcast at the end carries this as Bundle so subscribers see
+	// the final shape; Before carries whatever Stop saved.
+	var before InstalledBundle
+	if recR := s.findInstalledBundle(bundleID); recR.OK {
+		before = recR.Value.(InstalledBundle)
+	}
+
 	// Stop all running sandboxes first.
 	_ = s.Stop(bundleID)
 
@@ -383,6 +399,11 @@ func (s *Service) Uninstall(bundleID string) core.Result {
 		rec := InstalledBundle{BundleID: bundleID}
 		_ = orm.Of[InstalledBundle](s.core).Delete(&rec)
 	}
+
+	// Broadcast — Bundle carries the captured pre-uninstall state so
+	// subscribers know what was removed; Before stays zero since the
+	// orm record is gone by the time the broadcast fires.
+	fireBundleChanged(s.core, PhaseUninstalled, before, InstalledBundle{})
 
 	return core.Ok(nil)
 }
