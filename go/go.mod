@@ -21,6 +21,7 @@ require (
 	dappco.re/go/core v0.8.0-alpha.1 // indirect
 	dappco.re/go/log v0.9.0 // indirect
 	dappco.re/go/rag v0.8.0-alpha.1 // indirect
+	dappco.re/go/update v0.0.0-00010101000000-000000000000
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/99designs/gqlgen v0.17.88 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
@@ -160,3 +161,5 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
+
+replace dappco.re/go/update => ../external/update/go

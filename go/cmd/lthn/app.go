@@ -26,6 +26,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/keys"
 	lthnml "dappco.re/lthn/desktop/pkg/ml"
 	"dappco.re/lthn/desktop/pkg/plugin"
+	lthnupdate "dappco.re/lthn/desktop/pkg/update"
 	lthnprocess "dappco.re/lthn/desktop/pkg/process"
 	"dappco.re/lthn/desktop/pkg/queue"
 	"dappco.re/lthn/desktop/pkg/repos"
@@ -198,6 +199,13 @@ func newAppCore() *core.Core {
 		// jobs / dataset manifests / model-pack registry grow without
 		// contending against the master DB.
 		core.WithName("ml", lthnml.Register),
+		// update — self-update against the LetheanNetwork/desktop
+		// GitHub release feed. Constructed with CheckOnStartup =
+		// NoCheck so registering is offline-cheap; consumers call
+		// Service.Start() to fire the check. Current version flows
+		// from `-ldflags -X dappco.re/go/update.Version=...` at task
+		// build time, removing the manually-bumped version constant.
+		core.WithName("update", lthnupdate.Register),
 	)
 
 	if r := c.ServiceStartup(core.Background(), nil); !r.OK {

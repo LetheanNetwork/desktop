@@ -77,3 +77,6 @@
 [submodule "external/mlx"]
 	path = external/mlx
 	url = https://github.com/dappcore/go-mlx.git
+[submodule "external/update"]
+	path = external/update
+	url = https://github.com/dappcore/go-update.git

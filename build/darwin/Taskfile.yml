@@ -41,12 +41,17 @@ tasks:
             ref: .DEV
       - task: common:generate:icons
     cmds:
-      - cd "{{.GO_DIR}}" && go build {{.BUILD_FLAGS}} -o "../{{.OUTPUT}}" "{{.GO_CMD}}"
+      - cd "{{.GO_DIR}}" && go build {{.BUILD_FLAGS}} -ldflags "-X dappco.re/go/update.Version={{.LTHN_VERSION}}" -o "../{{.OUTPUT}}" "{{.GO_CMD}}"
     vars:
       # Dev: no flags; Prod: -trimpath only.
       # Strip flags (-ldflags="-w -s") removed — they conflict with
-      # DuckDB Arrow C symbols that go-store imports via cgo.
+      # DuckDB Arrow C symbols that go-store imports via cgo. The
+      # -ldflags '-X dappco.re/go/update.Version=…' stamp on the cmd
+      # below ships the build version into the update service so it
+      # has a real reference to compare against the latest release.
       BUILD_FLAGS: '{{if eq .DEV "true"}}{{if .EXTRA_TAGS}}-tags {{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}{{if .EXTRA_TAGS}}-tags {{.EXTRA_TAGS}} {{end}}-trimpath -buildvcs=false{{end}}'
+      LTHN_VERSION:
+        sh: git describe --tags --always --dirty 2>/dev/null || echo dev
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{ .OUTPUT | default .DEFAULT_OUTPUT }}'
     env:
