@@ -31,7 +31,6 @@
 package desktop
 
 import (
-	"io/fs"
 	"runtime"
 
 	core "dappco.re/go"
@@ -101,8 +100,8 @@ type Options struct {
 	Description string
 	// Frontend is the embedded Vite build (cmd/lthn/embed.go). The
 	// service serves it via a NoRoute fallback on the gin engine.
-	// The fs.FS root should contain index.html at its top level.
-	Frontend fs.FS
+	// The core.FS root should contain index.html at its top level.
+	Frontend core.FS
 	// FrontendRoot is the subdirectory within Frontend that holds
 	// index.html + assets/. Defaults to "dist" — matches the
 	// embed.FS shape `//go:embed all:dist`.
@@ -696,10 +695,11 @@ func restoreFocusedWindow(c *core.Core, name string) bool {
 // assets/*, etc. The handler inherits the canonical middleware chain
 // (auth, sunset, cache, tracing) just like any other route.
 func (s *Service) attachSPA() core.Result {
-	sub, err := fs.Sub(s.opts.Frontend, s.opts.FrontendRoot)
-	if err != nil {
-		return core.Fail(core.E("desktop.attachSPA", "frontend root not found", err))
+	sr := core.Sub(s.opts.Frontend, s.opts.FrontendRoot)
+	if !sr.OK {
+		return core.Fail(core.E("desktop.attachSPA", "frontend root not found", sr.Value.(error)))
 	}
+	sub := sr.Value.(core.FS)
 	fileServer := core.HTTPFileServer(core.HTTPFS(sub))
 	s.opts.Server.Engine().SetNoRoute(func(c *gin.Context) {
 		fileServer.ServeHTTP(c.Writer, c.Request)

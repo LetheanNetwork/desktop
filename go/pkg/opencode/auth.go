@@ -22,7 +22,6 @@
 package opencode
 
 import (
-	"crypto/rand"
 
 	core "dappco.re/go"
 	goiostore "dappco.re/go/io/store"
@@ -64,8 +63,8 @@ func (s *Service) ServerPassword() core.Result {
 	}
 	// First call ever — generate + persist.
 	buf := make([]byte, serverPasswordBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return core.Fail(core.E("opencode.ServerPassword", "rand read failed", err))
+	if r := core.RandRead(buf); !r.OK {
+		return core.Fail(core.E("opencode.ServerPassword", "rand read failed", r.Value.(error)))
 	}
 	pw := core.HexEncode(buf)
 	if err := st.Set(serverAuthStoreGroup, serverAuthPasswordKey, pw); err != nil {

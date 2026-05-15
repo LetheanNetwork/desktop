@@ -24,7 +24,6 @@
 package desktop
 
 import (
-	"io"
 
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
@@ -146,14 +145,15 @@ func adaptMCPRest(h mcpsvc.RESTHandler) gin.HandlerFunc {
 		}
 	}
 	return func(c *gin.Context) {
-		body, err := io.ReadAll(c.Request.Body)
-		if err != nil {
+		br := core.ReadAll(c.Request.Body)
+		if !br.OK {
 			c.AbortWithStatusJSON(core.StatusBadRequest, coreapi.Fail(
 				"invalid_body",
-				err.Error(),
+				br.Error(),
 			))
 			return
 		}
+		body := []byte(br.Value.(string))
 		ctx := c.Request.Context()
 		if ctx == nil {
 			ctx = core.Background()

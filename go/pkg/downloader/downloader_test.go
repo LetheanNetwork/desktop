@@ -7,7 +7,6 @@
 package downloader_test
 
 import (
-	"io"
 	"net/http/httptest"
 
 	core "dappco.re/go"
@@ -79,7 +78,7 @@ func TestDownloader_Fetch_Bad_HTTPError(t *core.T) {
 	homeFixture(t)
 	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
 		w.WriteHeader(core.StatusNotFound)
-		_, _ = io.WriteString(w, "not found")
+		_ = core.WriteString(w, "not found")
 	}))
 	defer srv.Close()
 

@@ -20,7 +20,6 @@
 package php
 
 import (
-	"sort"
 
 	core "dappco.re/go"
 	"dappco.re/go/php/pkg/php"
@@ -154,7 +153,7 @@ func (s *Service) detect(roots []string, maxDepth int) []ProjectSummary {
 	for _, root := range roots {
 		s.detectRoot(root, maxDepth, &out)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	core.SliceSortFunc(out, func(a, b ProjectSummary) bool { return a.Path < b.Path })
 	return out
 }
 

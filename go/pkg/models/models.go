@@ -12,7 +12,6 @@
 package models
 
 import (
-	"io/fs"
 
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
@@ -47,7 +46,7 @@ func List() core.Result {
 	if !entriesR.OK {
 		return entriesR
 	}
-	dirEntries, ok := entriesR.Value.([]fs.DirEntry)
+	dirEntries, ok := entriesR.Value.([]core.FsDirEntry)
 	if !ok {
 		return core.Ok([]Entry{})
 	}

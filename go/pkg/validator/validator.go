@@ -17,7 +17,6 @@
 package validator
 
 import (
-	"io"
 
 	core "dappco.re/go"
 )
@@ -50,14 +49,14 @@ func Endpoint(baseURL string) core.Result {
 	r := resp.Value.(*core.Response)
 	defer r.Body.Close()
 
-	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, 4096))
-	if err != nil {
-		return core.Fail(core.E("validator.Endpoint", "read body failed", err))
+	br := core.ReadAll(core.LimitReader(r.Body, 4096))
+	if !br.OK {
+		return core.Fail(core.E("validator.Endpoint", "read body failed", br.Value.(error)))
 	}
 	return core.Ok(EndpointInfo{
 		URL:    url,
 		Status: r.StatusCode,
 		OK:     r.StatusCode >= 200 && r.StatusCode < 300,
-		Body:   string(bodyBytes),
+		Body:   br.Value.(string),
 	})
 }

@@ -32,7 +32,6 @@
 package apikey
 
 import (
-	"crypto/rand"
 
 	core "dappco.re/go"
 	"dappco.re/go/config"
@@ -115,8 +114,8 @@ func generateAndStore(cfg *config.Service) core.Result {
 // fails — extremely rare on a healthy system.
 func generate() core.Result {
 	buf := make([]byte, keyEntropyBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return core.Fail(core.E("apikey.generate", "entropy read failed", err))
+	if r := core.RandRead(buf); !r.OK {
+		return core.Fail(core.E("apikey.generate", "entropy read failed", r.Value.(error)))
 	}
 	return core.Ok(keyPrefix + core.HexEncode(buf))
 }

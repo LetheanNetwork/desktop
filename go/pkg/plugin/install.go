@@ -8,8 +8,6 @@
 package plugin
 
 import (
-	"crypto/sha256"
-	"io"
 	"net/url"
 
 	core "dappco.re/go"
@@ -87,10 +85,11 @@ func fetchBinary(ctx core.Context, rawURL string) core.Result {
 		return core.Fail(core.E(fetchBinaryOp,
 			"http status "+core.Itoa(resp.StatusCode)+" for "+rawURL, nil))
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBinarySize+1))
-	if err != nil {
-		return core.Fail(core.E(fetchBinaryOp, "read body: "+err.Error(), nil))
+	br := core.ReadAll(core.LimitReader(resp.Body, maxBinarySize+1))
+	if !br.OK {
+		return core.Fail(core.E(fetchBinaryOp, "read body: "+br.Error(), nil))
 	}
+	body := []byte(br.Value.(string))
 	if len(body) > maxBinarySize {
 		return core.Fail(core.E(fetchBinaryOp,
 			"binary exceeds "+core.Itoa(maxBinarySize)+" bytes", nil))
@@ -114,7 +113,7 @@ func verifyChecksum(data []byte, checksum string) core.Result {
 			"unsupported algorithm in "+checksum+" (need sha256:)", nil))
 	}
 	want := core.Lower(checksum[len(prefix):])
-	sum := sha256.Sum256(data)
+	sum := core.SHA256(data)
 	got := core.HexEncode(sum[:])
 	if got != want {
 		return core.Fail(core.E("plugin.verifyChecksum",

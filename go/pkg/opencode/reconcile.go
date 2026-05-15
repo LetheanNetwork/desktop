@@ -17,8 +17,6 @@
 package opencode
 
 import (
-	"strconv"
-	"strings"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -121,14 +119,14 @@ func parseHostPort(ports string) int {
 	}
 	hostSide := first[:arrow]
 	// Last colon separates host:port.
-	colon := strings.LastIndex(hostSide, ":")
+	colon := core.LastIndex(hostSide, ":")
 	if colon < 0 {
 		return 0
 	}
 	portStr := core.Trim(hostSide[colon+1:])
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
+	pr := core.Atoi(portStr)
+	if !pr.OK {
 		return 0
 	}
-	return port
+	return pr.Value.(int)
 }

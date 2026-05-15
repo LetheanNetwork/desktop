@@ -26,7 +26,6 @@
 package opencode
 
 import (
-	"crypto/rand"
 	goio "io"
 
 	core "dappco.re/go"
@@ -73,8 +72,8 @@ func (s *Service) ImportFromHost() core.Result {
 	// OPENCODE_SERVER_PASSWORD we use for our sandboxes (this serve
 	// lives for ~3 seconds, no shared-state benefit to reusing).
 	pwBuf := make([]byte, 24)
-	if _, err := rand.Read(pwBuf); err != nil {
-		return core.Fail(core.E("opencode.ImportFromHost", "rand read failed", err))
+	if r := core.RandRead(pwBuf); !r.OK {
+		return core.Fail(core.E("opencode.ImportFromHost", "rand read failed", r.Value.(error)))
 	}
 	pw := core.HexEncode(pwBuf)
 	authHeader := "Basic " + core.Base64Encode([]byte(serverAuthUsername+":"+pw))

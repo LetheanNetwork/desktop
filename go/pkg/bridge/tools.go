@@ -6,7 +6,6 @@
 package bridge
 
 import (
-	"io"
 
 	core "dappco.re/go"
 	guiwindow "dappco.re/go/gui/pkg/window"
@@ -611,11 +610,11 @@ func writeJSON(w core.ResponseWriter, v any) {
 }
 
 func readJSON(r *core.Request, dst any) core.Result {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
-	if err != nil {
-		return core.Fail(core.E("bridge.readJSON", "read request JSON failed", err))
+	br := core.ReadAll(core.LimitReader(r.Body, 4<<20))
+	if !br.OK {
+		return core.Fail(core.E("bridge.readJSON", "read request JSON failed", br.Value.(error)))
 	}
-	decoded := core.JSONUnmarshal(body, dst)
+	decoded := core.JSONUnmarshalString(br.Value.(string), dst)
 	if !decoded.OK {
 		return core.Fail(core.E("bridge.readJSON", "decode request JSON failed", decoded.Value.(error)))
 	}

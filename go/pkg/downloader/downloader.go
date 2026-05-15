@@ -27,7 +27,6 @@
 package downloader
 
 import (
-	"io"
 
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
@@ -75,8 +74,8 @@ func Fetch(url, name string) core.Result {
 	file := createR.Value.(*core.OSFile)
 	defer file.Close()
 
-	if _, err := io.Copy(file, resp.Body); err != nil {
-		return core.Fail(core.E(fetchOp, "stream copy failed", err))
+	if r := core.Copy(file, resp.Body); !r.OK {
+		return core.Fail(core.E(fetchOp, "stream copy failed", r.Value.(error)))
 	}
 	return core.Ok(dest)
 }
