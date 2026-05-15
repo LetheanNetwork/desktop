@@ -36,8 +36,14 @@ import (
 func cmdMarketplace(args []string) int {
 	if len(args) == 0 {
 		core.Print(core.Stderr(),
-			"lthn marketplace: missing verb (list / search / install / start / stop / uninstall / status / update)\n")
+			"lthn marketplace: missing verb (list / search / install / start / stop / uninstall / status / update / import-coolify)\n")
 		return 2
+	}
+	// import-coolify doesn't need a Core — pure file-to-file conversion.
+	// Branch early so the user can pipe through `lthn marketplace
+	// import-coolify` without spinning up the full service stack.
+	if args[0] == "import-coolify" {
+		return marketplaceImportCoolify(args[1:])
 	}
 	c := newAppCore()
 	if c == nil {
@@ -278,4 +284,40 @@ func marketplaceUpdate(_ *marketplace.Service, args []string) int {
 	core.Print(core.Stderr(), "lthn marketplace update: not yet implemented (v2 polish — RFC.marketplace.md §5.3 open question)\n")
 	core.Print(core.Stderr(), "hint: `lthn marketplace uninstall %s && lthn marketplace install %s` re-pulls today\n", args[0], args[0])
 	return 1
+}
+
+// marketplaceImportCoolify reads a Coolify template directory + emits
+// the equivalent lthn-vm manifest.yml to stdout. Per RFC.marketplace
+// §12: "Would slash the conversion effort for the long-tail bundles".
+//
+// The output goes to stdout (so `> bundles/foo/manifest.yml` captures
+// it); a one-line summary goes to stderr so the redirect doesn't
+// swallow the human-readable feedback.
+//
+// Usage example:
+//
+//	lthn marketplace import-coolify ./coolify-templates/n8n > bundles/n8n/manifest.yml
+func marketplaceImportCoolify(args []string) int {
+	if len(args) < 1 {
+		core.Print(core.Stderr(), "lthn marketplace import-coolify: usage: lthn marketplace import-coolify PATH\n")
+		core.Print(core.Stderr(), "  PATH is a directory containing docker-compose.yml + optional .env.template\n")
+		return 2
+	}
+	r := marketplace.ImportCoolify(args[0])
+	if !r.OK {
+		core.Print(core.Stderr(), "lthn marketplace import-coolify: %s\n", r.Error())
+		return 1
+	}
+	m := r.Value.(marketplace.BundleManifest)
+	out := marketplace.MarshalManifest(m)
+	if !out.OK {
+		core.Print(core.Stderr(), "lthn marketplace import-coolify: marshal failed: %s\n", out.Error())
+		return 1
+	}
+	yaml := out.Value.([]byte)
+	core.Print(core.Stdout(), "%s", string(yaml))
+	core.Print(core.Stderr(),
+		"imported: name=%s images=%d env=%d (review volumes + ports + secret-heuristic env types before installing)\n",
+		m.Name, len(m.Images), len(m.Env))
+	return 0
 }
