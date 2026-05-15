@@ -3,7 +3,6 @@
 package queue_test
 
 import (
-	"testing"
 	"time"
 
 	core "dappco.re/go"
@@ -14,7 +13,7 @@ import (
 // newQueueCore is a test-local Core with orm wired and the queue
 // schema registered. Mirrors the test-core helpers in pkg/tasks
 // + pkg/opencode tests.
-func newQueueCore(t *testing.T) *core.Core {
+func newQueueCore(t *core.T) *core.Core {
 	t.Helper()
 	c := core.New()
 	if r := orm.Register(c); !r.OK {
@@ -42,7 +41,7 @@ func newQueueCore(t *testing.T) *core.Core {
 
 // TestQueue_Enqueue_PersistsAsPending — Enqueue creates a Job with
 // Status=pending, fires JobChanged{Phase: Enqueued}.
-func TestQueue_Enqueue_PersistsAsPending(t *testing.T) {
+func TestQueue_Enqueue_PersistsAsPending(t *core.T) {
 	c := newQueueCore(t)
 
 	var got queue.JobChanged
@@ -70,7 +69,7 @@ func TestQueue_Enqueue_PersistsAsPending(t *testing.T) {
 
 // TestQueue_Worker_DispatchesAndCompletes — full round-trip:
 // register handler, start service, enqueue, wait, confirm Done.
-func TestQueue_Worker_DispatchesAndCompletes(t *testing.T) {
+func TestQueue_Worker_DispatchesAndCompletes(t *core.T) {
 	c := newQueueCore(t)
 
 	var ran core.WaitGroup
@@ -133,7 +132,7 @@ func TestQueue_Worker_DispatchesAndCompletes(t *testing.T) {
 
 // TestQueue_Worker_FailureMarksFailedWithError — handler returning
 // Fail leaves Job in StatusFailed with LastError populated.
-func TestQueue_Worker_FailureMarksFailedWithError(t *testing.T) {
+func TestQueue_Worker_FailureMarksFailedWithError(t *core.T) {
 	c := newQueueCore(t)
 
 	queue.RegisterKind(c, queue.HandlerOptions{
@@ -170,7 +169,7 @@ func TestQueue_Worker_FailureMarksFailedWithError(t *testing.T) {
 // TestQueue_Worker_MissingHandlerFails — enqueueing for a kind
 // with no registered handler marks the job Failed (rather than
 // hanging forever or panicking).
-func TestQueue_Worker_MissingHandlerFails(t *testing.T) {
+func TestQueue_Worker_MissingHandlerFails(t *core.T) {
 	c := newQueueCore(t)
 
 	svc := queue.NewService(queue.Options{PollInterval: 30 * core.Millisecond})(c).
@@ -196,7 +195,7 @@ func TestQueue_Worker_MissingHandlerFails(t *testing.T) {
 
 // TestQueue_Cancel_PendingJob — cancelling a pending job moves it
 // to StatusCancelled + fires JobChanged{Phase: Cancelled}.
-func TestQueue_Cancel_PendingJob(t *testing.T) {
+func TestQueue_Cancel_PendingJob(t *core.T) {
 	c := newQueueCore(t)
 
 	r := queue.Enqueue(c, "lint", core.NewOptions())
@@ -217,7 +216,7 @@ func TestQueue_Cancel_PendingJob(t *testing.T) {
 
 // TestQueue_RegisterKind_AppearsInKinds — registered handlers show
 // up via queue.Kinds(c).
-func TestQueue_RegisterKind_AppearsInKinds(t *testing.T) {
+func TestQueue_RegisterKind_AppearsInKinds(t *core.T) {
 	c := newQueueCore(t)
 	queue.RegisterKind(c, queue.HandlerOptions{
 		Kind:    "lint",

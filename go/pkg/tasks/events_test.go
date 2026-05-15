@@ -3,7 +3,6 @@
 package tasks_test
 
 import (
-	"testing"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -13,7 +12,7 @@ import (
 // newEventsCore is a test-local Core with orm wired and the tasks
 // schemas registered. Mirrors newTestCore in api_test.go but kept
 // separate so events tests can run in isolation.
-func newEventsCore(t *testing.T) *core.Core {
+func newEventsCore(t *core.T) *core.Core {
 	t.Helper()
 	c := core.New()
 	if r := orm.Register(c); !r.OK {
@@ -34,7 +33,7 @@ func newEventsCore(t *testing.T) *core.Core {
 
 // TestEvents_Subscribe_Created — Create fires KindCreated with the
 // new Issue and zero-value Before.
-func TestEvents_Subscribe_Created(t *testing.T) {
+func TestEvents_Subscribe_Created(t *core.T) {
 	c := newEventsCore(t)
 
 	var got []tasks.IssueChanged
@@ -71,7 +70,7 @@ func TestEvents_Subscribe_Created(t *testing.T) {
 
 // TestEvents_Update_FiresUpdated — Update with a non-closing state
 // change fires KindUpdated with both Before and Issue populated.
-func TestEvents_Update_FiresUpdated(t *testing.T) {
+func TestEvents_Update_FiresUpdated(t *core.T) {
 	c := newEventsCore(t)
 
 	r := tasks.Create(c, tasks.CreateInput{Project: "lthn", Summary: "u"})
@@ -114,7 +113,7 @@ func TestEvents_Update_FiresUpdated(t *testing.T) {
 
 // TestEvents_Close_FiresClosed — a state transition to StateDone
 // fires KindClosed (not KindUpdated).
-func TestEvents_Close_FiresClosed(t *testing.T) {
+func TestEvents_Close_FiresClosed(t *core.T) {
 	c := newEventsCore(t)
 
 	r := tasks.Create(c, tasks.CreateInput{Project: "lthn", Summary: "c"})
@@ -135,7 +134,7 @@ func TestEvents_Close_FiresClosed(t *testing.T) {
 
 // TestEvents_AddNote_FiresNoted — appending a Note fires KindNoted
 // with the parent Issue snapshot AND the new Note populated.
-func TestEvents_AddNote_FiresNoted(t *testing.T) {
+func TestEvents_AddNote_FiresNoted(t *core.T) {
 	c := newEventsCore(t)
 
 	r := tasks.Create(c, tasks.CreateInput{Project: "lthn", Summary: "n"})
@@ -164,7 +163,7 @@ func TestEvents_AddNote_FiresNoted(t *testing.T) {
 
 // TestEvents_MultipleSubscribers — every registered listener receives
 // every event; one bad listener doesn't take the cascade down.
-func TestEvents_MultipleSubscribers(t *testing.T) {
+func TestEvents_MultipleSubscribers(t *core.T) {
 	c := newEventsCore(t)
 
 	var aCount, bCount int

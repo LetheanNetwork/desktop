@@ -3,12 +3,11 @@
 package tasks
 
 import (
-	"testing"
 
 	core "dappco.re/go"
 )
 
-func TestTypesIssueSchema(t *testing.T) {
+func TestTypesIssueSchema(t *core.T) {
 	schema := Issue{}.Schema()
 	if schema.Name != "tasks_issues" {
 		t.Fatalf("Issue Schema: expected tasks_issues, got %q", schema.Name)
@@ -18,7 +17,7 @@ func TestTypesIssueSchema(t *testing.T) {
 	}
 }
 
-func TestTypesNoteSchema(t *testing.T) {
+func TestTypesNoteSchema(t *core.T) {
 	schema := Note{}.Schema()
 	if schema.Name != "tasks_notes" {
 		t.Fatalf("Note Schema: expected tasks_notes, got %q", schema.Name)
@@ -28,7 +27,7 @@ func TestTypesNoteSchema(t *testing.T) {
 	}
 }
 
-func TestTypesIssueStateConstants(t *testing.T) {
+func TestTypesIssueStateConstants(t *core.T) {
 	issue := Issue{State: StateOpen, CreatedAt: core.Now(), UpdatedAt: core.Now()}
 	if issue.State != "open" {
 		t.Fatalf("Issue constants: StateOpen drifted to %q", issue.State)

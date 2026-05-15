@@ -3,7 +3,6 @@
 package tasks_test
 
 import (
-	"testing"
 
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/tasks"
@@ -13,7 +12,7 @@ import (
 // newTestCore returns a *core.Core with orm registered + a fresh Memium
 // mounted under "default" + the tasks schemas registered. Tests use this
 // to exercise the package end-to-end without any DuckDB / filesystem.
-func newTestCore(t *testing.T) *core.Core {
+func newTestCore(t *core.T) *core.Core {
 	t.Helper()
 	c := core.New()
 	if r := orm.Register(c); !r.OK {
@@ -32,7 +31,7 @@ func newTestCore(t *testing.T) *core.Core {
 	return c
 }
 
-func TestTasks_Create_Good_PopulatesDefaults(t *testing.T) {
+func TestTasks_Create_Good_PopulatesDefaults(t *core.T) {
 	c := newTestCore(t)
 
 	r := tasks.Create(c, tasks.CreateInput{
@@ -63,7 +62,7 @@ func TestTasks_Create_Good_PopulatesDefaults(t *testing.T) {
 	}
 }
 
-func TestTasks_Create_Bad_MissingProject(t *testing.T) {
+func TestTasks_Create_Bad_MissingProject(t *core.T) {
 	c := newTestCore(t)
 
 	r := tasks.Create(c, tasks.CreateInput{Summary: "no project"})
@@ -72,7 +71,7 @@ func TestTasks_Create_Bad_MissingProject(t *testing.T) {
 	}
 }
 
-func TestTasks_Create_Bad_MissingSummary(t *testing.T) {
+func TestTasks_Create_Bad_MissingSummary(t *core.T) {
 	c := newTestCore(t)
 
 	r := tasks.Create(c, tasks.CreateInput{Project: "ide"})
@@ -81,7 +80,7 @@ func TestTasks_Create_Bad_MissingSummary(t *testing.T) {
 	}
 }
 
-func TestTasks_Get_Good_RoundTrip(t *testing.T) {
+func TestTasks_Get_Good_RoundTrip(t *core.T) {
 	c := newTestCore(t)
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "round trip"})
 	if !created.OK {
@@ -102,7 +101,7 @@ func TestTasks_Get_Good_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestTasks_Get_Bad_NotFound(t *testing.T) {
+func TestTasks_Get_Bad_NotFound(t *core.T) {
 	c := newTestCore(t)
 
 	r := tasks.Get(c, "missing-id")
@@ -111,7 +110,7 @@ func TestTasks_Get_Bad_NotFound(t *testing.T) {
 	}
 }
 
-func TestTasks_List_Good_FiltersByProject(t *testing.T) {
+func TestTasks_List_Good_FiltersByProject(t *core.T) {
 	c := newTestCore(t)
 	tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "ide one"})
 	tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "ide two"})
@@ -135,7 +134,7 @@ func TestTasks_List_Good_FiltersByProject(t *testing.T) {
 	}
 }
 
-func TestTasks_Update_Good_StateTransitionSetsClosedAt(t *testing.T) {
+func TestTasks_Update_Good_StateTransitionSetsClosedAt(t *core.T) {
 	c := newTestCore(t)
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "to be closed"})
 	if !created.OK {
@@ -156,7 +155,7 @@ func TestTasks_Update_Good_StateTransitionSetsClosedAt(t *testing.T) {
 	}
 }
 
-func TestTasks_Close_Good_SetsResolution(t *testing.T) {
+func TestTasks_Close_Good_SetsResolution(t *core.T) {
 	c := newTestCore(t)
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "to close"})
 	if !created.OK {
@@ -177,7 +176,7 @@ func TestTasks_Close_Good_SetsResolution(t *testing.T) {
 	}
 }
 
-func TestTasks_AddNote_Good_PersistsAndLists(t *testing.T) {
+func TestTasks_AddNote_Good_PersistsAndLists(t *core.T) {
 	c := newTestCore(t)
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "note me"})
 	createdIssue, _, _ := orm.Detail[tasks.Issue](created)
@@ -202,7 +201,7 @@ func TestTasks_AddNote_Good_PersistsAndLists(t *testing.T) {
 	}
 }
 
-func TestTasks_AddNote_Bad_EmptyBody(t *testing.T) {
+func TestTasks_AddNote_Bad_EmptyBody(t *core.T) {
 	c := newTestCore(t)
 
 	r := tasks.AddNote(c, "any-id", "", "cladius")
@@ -211,7 +210,7 @@ func TestTasks_AddNote_Bad_EmptyBody(t *testing.T) {
 	}
 }
 
-func TestApi_Create_Good(t *testing.T) {
+func TestApi_Create_Good(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "create good"})
 	if !result.OK {
@@ -223,7 +222,7 @@ func TestApi_Create_Good(t *testing.T) {
 	}
 }
 
-func TestApi_Create_Bad(t *testing.T) {
+func TestApi_Create_Bad(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.Create(c, tasks.CreateInput{Summary: "missing project"})
 	if result.OK {
@@ -231,7 +230,7 @@ func TestApi_Create_Bad(t *testing.T) {
 	}
 }
 
-func TestApi_Create_Ugly(t *testing.T) {
+func TestApi_Create_Ugly(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "defaults"})
 	issue, _, ok := orm.Detail[tasks.Issue](result)
@@ -240,7 +239,7 @@ func TestApi_Create_Ugly(t *testing.T) {
 	}
 }
 
-func TestApi_Get_Good(t *testing.T) {
+func TestApi_Get_Good(t *core.T) {
 	c := newTestCore(t)
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "get good"})
 	issue, _, _ := orm.Detail[tasks.Issue](created)
@@ -250,7 +249,7 @@ func TestApi_Get_Good(t *testing.T) {
 	}
 }
 
-func TestApi_Get_Bad(t *testing.T) {
+func TestApi_Get_Bad(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.Get(c, "missing")
 	if result.OK {
@@ -258,7 +257,7 @@ func TestApi_Get_Bad(t *testing.T) {
 	}
 }
 
-func TestApi_Get_Ugly(t *testing.T) {
+func TestApi_Get_Ugly(t *core.T) {
 	c := newTestCore(t)
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "get ugly"})
 	issue, _, _ := orm.Detail[tasks.Issue](created)
@@ -268,7 +267,7 @@ func TestApi_Get_Ugly(t *testing.T) {
 	}
 }
 
-func TestApi_List_Good(t *testing.T) {
+func TestApi_List_Good(t *core.T) {
 	c := newTestCore(t)
 	tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "one"})
 	tasks.Create(c, tasks.CreateInput{Project: "other", Summary: "two"})
@@ -279,7 +278,7 @@ func TestApi_List_Good(t *testing.T) {
 	}
 }
 
-func TestApi_List_Bad(t *testing.T) {
+func TestApi_List_Bad(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.List(c, tasks.ListFilter{Project: "none"})
 	issues, ok := orm.Cast[[]tasks.Issue](result)
@@ -288,7 +287,7 @@ func TestApi_List_Bad(t *testing.T) {
 	}
 }
 
-func TestApi_List_Ugly(t *testing.T) {
+func TestApi_List_Ugly(t *core.T) {
 	c := newTestCore(t)
 	tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "offset one"})
 	tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "offset two"})
@@ -299,7 +298,7 @@ func TestApi_List_Ugly(t *testing.T) {
 	}
 }
 
-func TestApi_Update_Good(t *testing.T) {
+func TestApi_Update_Good(t *core.T) {
 	c := newTestCore(t)
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "update"})
 	issue, _, _ := orm.Detail[tasks.Issue](created)
@@ -310,7 +309,7 @@ func TestApi_Update_Good(t *testing.T) {
 	}
 }
 
-func TestApi_Update_Bad(t *testing.T) {
+func TestApi_Update_Bad(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.Update(c, "missing", tasks.UpdateInput{State: tasks.StateDone})
 	if result.OK {
@@ -318,7 +317,7 @@ func TestApi_Update_Bad(t *testing.T) {
 	}
 }
 
-func TestApi_Update_Ugly(t *testing.T) {
+func TestApi_Update_Ugly(t *core.T) {
 	c := newTestCore(t)
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "close through update"})
 	issue, _, _ := orm.Detail[tasks.Issue](created)
@@ -329,7 +328,7 @@ func TestApi_Update_Ugly(t *testing.T) {
 	}
 }
 
-func TestApi_Close_Good(t *testing.T) {
+func TestApi_Close_Good(t *core.T) {
 	c := newTestCore(t)
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "close"})
 	issue, _, _ := orm.Detail[tasks.Issue](created)
@@ -340,7 +339,7 @@ func TestApi_Close_Good(t *testing.T) {
 	}
 }
 
-func TestApi_Close_Bad(t *testing.T) {
+func TestApi_Close_Bad(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.Close(c, "missing", "fixed")
 	if result.OK {
@@ -348,7 +347,7 @@ func TestApi_Close_Bad(t *testing.T) {
 	}
 }
 
-func TestApi_Close_Ugly(t *testing.T) {
+func TestApi_Close_Ugly(t *core.T) {
 	c := newTestCore(t)
 	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "close blank"})
 	issue, _, _ := orm.Detail[tasks.Issue](created)
@@ -359,7 +358,7 @@ func TestApi_Close_Ugly(t *testing.T) {
 	}
 }
 
-func TestApi_AddNote_Good(t *testing.T) {
+func TestApi_AddNote_Good(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.AddNote(c, "issue-1", "body", "vi")
 	note, _, ok := orm.Detail[tasks.Note](result)
@@ -368,7 +367,7 @@ func TestApi_AddNote_Good(t *testing.T) {
 	}
 }
 
-func TestApi_AddNote_Bad(t *testing.T) {
+func TestApi_AddNote_Bad(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.AddNote(c, "", "body", "vi")
 	if result.OK {
@@ -376,7 +375,7 @@ func TestApi_AddNote_Bad(t *testing.T) {
 	}
 }
 
-func TestApi_AddNote_Ugly(t *testing.T) {
+func TestApi_AddNote_Ugly(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.AddNote(c, "issue-1", "body", "")
 	note, _, ok := orm.Detail[tasks.Note](result)
@@ -385,7 +384,7 @@ func TestApi_AddNote_Ugly(t *testing.T) {
 	}
 }
 
-func TestApi_ListNotes_Good(t *testing.T) {
+func TestApi_ListNotes_Good(t *core.T) {
 	c := newTestCore(t)
 	tasks.AddNote(c, "issue-1", "first", "vi")
 	result := tasks.ListNotes(c, "issue-1")
@@ -395,7 +394,7 @@ func TestApi_ListNotes_Good(t *testing.T) {
 	}
 }
 
-func TestApi_ListNotes_Bad(t *testing.T) {
+func TestApi_ListNotes_Bad(t *core.T) {
 	c := newTestCore(t)
 	result := tasks.ListNotes(c, "missing")
 	notes, ok := orm.Cast[[]tasks.Note](result)
@@ -404,7 +403,7 @@ func TestApi_ListNotes_Bad(t *testing.T) {
 	}
 }
 
-func TestApi_ListNotes_Ugly(t *testing.T) {
+func TestApi_ListNotes_Ugly(t *core.T) {
 	c := newTestCore(t)
 	tasks.AddNote(c, "issue-1", "first", "vi")
 	tasks.AddNote(c, "issue-1", "second", "you")

@@ -3,7 +3,6 @@
 package repos
 
 import (
-	"testing"
 
 	core "dappco.re/go"
 )
@@ -11,7 +10,7 @@ import (
 // TestSources_Register_Good — a registered SourceProvider's paths
 // surface in collectSourcePaths, deduped against any duplicates
 // the same provider returns + duplicates across providers.
-func TestSources_Register_Good(t *testing.T) {
+func TestSources_Register_Good(t *core.T) {
 	s := NewService(nil)
 	s.RegisterSource("opencode-imports", func(_ core.Context) []string {
 		return []string{"/a/b", "/c/d", "/a/b"} // intra-provider dup
@@ -33,7 +32,7 @@ func TestSources_Register_Good(t *testing.T) {
 
 // TestSources_Register_Bad — empty paths from a provider are
 // silently dropped (no panic, no inflated dedup map).
-func TestSources_Register_Bad(t *testing.T) {
+func TestSources_Register_Bad(t *core.T) {
 	s := NewService(nil)
 	s.RegisterSource("empty-source", func(_ core.Context) []string {
 		return []string{"", "", "/x"}
@@ -46,7 +45,7 @@ func TestSources_Register_Bad(t *testing.T) {
 
 // TestSources_Register_Ugly — RegisterSource on a nil service or
 // with a nil callback is a safe no-op (not a panic).
-func TestSources_Register_Ugly(t *testing.T) {
+func TestSources_Register_Ugly(t *core.T) {
 	var s *Service
 	s.RegisterSource("noop", func(_ core.Context) []string { return []string{"/p"} })
 	// also: non-nil service, nil callback

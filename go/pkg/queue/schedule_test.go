@@ -3,7 +3,6 @@
 package queue_test
 
 import (
-	"testing"
 	"time"
 
 	core "dappco.re/go"
@@ -13,7 +12,7 @@ import (
 
 // TestSchedule_FuturePastIsImmediate — Schedule with a time in the
 // past (or now) lets the worker pick it up on the next tick.
-func TestSchedule_FuturePastIsImmediate(t *testing.T) {
+func TestSchedule_FuturePastIsImmediate(t *core.T) {
 	c := newQueueCore(t)
 
 	var ran core.WaitGroup
@@ -44,7 +43,7 @@ func TestSchedule_FuturePastIsImmediate(t *testing.T) {
 
 // TestSchedule_FutureNotPickedUpYet — Schedule for the far future
 // keeps the job in StatusPending past several worker ticks.
-func TestSchedule_FutureNotPickedUpYet(t *testing.T) {
+func TestSchedule_FutureNotPickedUpYet(t *core.T) {
 	c := newQueueCore(t)
 
 	var fired bool
@@ -78,7 +77,7 @@ func TestSchedule_FutureNotPickedUpYet(t *testing.T) {
 
 // TestScheduleAfter_FiresAfterDuration — ScheduleAfter(50ms) gets
 // processed within ~3x that duration (allows for tick latency).
-func TestScheduleAfter_FiresAfterDuration(t *testing.T) {
+func TestScheduleAfter_FiresAfterDuration(t *core.T) {
 	c := newQueueCore(t)
 
 	var ran core.WaitGroup
@@ -117,7 +116,7 @@ func TestScheduleAfter_FiresAfterDuration(t *testing.T) {
 // TestSchedule_HandlerSelfReschedule — handlers can re-enqueue
 // themselves via ScheduleAfter for the back-off-and-retry pattern
 // (canonical "in 20m re-check the PR" flow from the design memory).
-func TestSchedule_HandlerSelfReschedule(t *testing.T) {
+func TestSchedule_HandlerSelfReschedule(t *core.T) {
 	c := newQueueCore(t)
 
 	var attempts int
