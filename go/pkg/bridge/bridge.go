@@ -108,7 +108,7 @@ type Service struct {
 	errorBuf []ErrorEntry
 
 	evalMu       core.Mutex
-	evalCounter  uint64
+	evalCounter  core.AtomicUint64
 	pendingEvals map[string]chan evalReply
 }
 

@@ -453,10 +453,9 @@ func (s *Service) eval(ctx core.Context, windowName, body string) map[string]any
 		return map[string]any{"ok": false, "error": "script param required"}
 	}
 
-	s.evalMu.Lock()
-	s.evalCounter++
-	reqID := core.Sprintf("eval-%d", s.evalCounter)
+	reqID := core.Sprintf("eval-%d", s.evalCounter.Add(1))
 	ch := make(chan evalReply, 1)
+	s.evalMu.Lock()
 	s.pendingEvals[reqID] = ch
 	s.evalMu.Unlock()
 
