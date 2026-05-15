@@ -63,6 +63,12 @@ type InstalledBundle struct {
 	ConfigPath string `json:"config_path"`
 	// InstalledAt is the install timestamp.
 	InstalledAt core.Time `json:"installed_at"`
+	// Permissions is the JSON-encoded []Permission the bundle declared
+	// in its manifest.permissions block. Snapshot at install time;
+	// pkg/gateway uses this to gate plugin requests at the API
+	// boundary (per RFC.marketplace.md §7a). Stored as JSON-encoded
+	// string so the orm column shape stays simple.
+	Permissions string `json:"permissions,omitempty"`
 }
 
 // Schema satisfies the orm.Schemer interface so orm.Of[InstalledBundle]
@@ -77,6 +83,7 @@ func (InstalledBundle) Schema() orm.Schema {
 		b.String("status").NotNull()
 		b.String("config_path").NotNull()
 		b.Time("installed_at").NotNull()
+		b.String("permissions")
 		b.Index("status")
 	})
 }
@@ -187,6 +194,11 @@ func (s *Service) Install(input InstallInput) core.Result {
 		Status:         status,
 		ConfigPath:     configPath,
 		InstalledAt:    core.Now(),
+		// Snapshot the manifest's permissions block as JSON so
+		// pkg/gateway can read them back via CheckPermission without
+		// re-fetching the manifest. Empty when the manifest declares
+		// no permissions (allowed shape).
+		Permissions: encodePermissions(m.Permissions),
 	}
 	if s.core != nil {
 		_ = orm.Of[InstalledBundle](s.core).Save(&rec)
@@ -446,4 +458,39 @@ func substituteTokens(v string, env map[string]string) string {
 		v = core.Replace(v, "${env."+k+"}", val)
 	}
 	return v
+}
+
+// encodePermissions JSON-encodes the manifest permissions block for
+// persistence on InstalledBundle.Permissions. Empty input round-trips
+// as "" (not "null") so the orm column stays clean for bundles that
+// declare no permissions.
+//
+// Usage example:
+//
+//	rec.Permissions = encodePermissions(manifest.Permissions)
+func encodePermissions(perms []Permission) string {
+	if len(perms) == 0 {
+		return ""
+	}
+	return core.JSONMarshalString(perms)
+}
+
+// DecodePermissions parses an InstalledBundle.Permissions string back
+// into the typed slice. Returns nil for empty / invalid input so
+// callers (pkg/gateway.CheckPermission) can treat absence and parse
+// failure identically: no permissions = nothing allowed.
+//
+// Usage example:
+//
+//	perms := marketplace.DecodePermissions(rec.Permissions)
+//	for _, p := range perms { /* … */ }
+func DecodePermissions(encoded string) []Permission {
+	if encoded == "" {
+		return nil
+	}
+	var out []Permission
+	if r := core.JSONUnmarshalString(encoded, &out); !r.OK {
+		return nil
+	}
+	return out
 }

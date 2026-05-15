@@ -32,6 +32,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/desktop"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/fleet"
+	"dappco.re/lthn/desktop/pkg/gateway"
 	"dappco.re/lthn/desktop/pkg/keys"
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/plugin"
@@ -371,6 +372,9 @@ func cmdServe(args []string) int {
 	}
 	if pluginSvc, _ := core.ServiceFor[*plugin.Service](c, "plugin"); pluginSvc != nil {
 		extras = append(extras, pluginSvc.ProxyGroup())
+	}
+	if gatewaySvc, _ := core.ServiceFor[*gateway.Service](c, "gateway"); gatewaySvc != nil {
+		extras = append(extras, gateway.NewRoutes(gatewaySvc))
 	}
 	s := server.NewService(server.Options{
 		Addr:        core.Concat(":", port),

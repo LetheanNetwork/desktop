@@ -15,6 +15,7 @@ import (
 	"dappco.re/go/store"
 	"dappco.re/go/stream"
 	"dappco.re/lthn/desktop/pkg/bridge"
+	"dappco.re/lthn/desktop/pkg/gateway"
 	lthni18n "dappco.re/lthn/desktop/pkg/i18n"
 	"dappco.re/lthn/desktop/pkg/marketplace"
 	"dappco.re/lthn/desktop/pkg/opencode"
@@ -148,6 +149,12 @@ func newAppCore() *core.Core {
 		// Provides marketplace.Service to subsystems.go for MCP tool
 		// registration (marketplace_list/install/launch/stop/uninstall).
 		core.WithName("marketplace", marketplace.Register),
+		// gateway — runtime data firewall (RFC.marketplace.md §7a).
+		// Plugins call /v1/api/gateway/<scope>/<mode> with a Bundle-ID
+		// header; gateway.CheckPermission gates against the bundle's
+		// installed Permissions snapshot. Mounted on the api Engine
+		// in cmdServe alongside opencode + plugin proxy groups.
+		core.WithName("gateway", gateway.Register),
 	)
 
 	if r := c.ServiceStartup(core.Background(), nil); !r.OK {
