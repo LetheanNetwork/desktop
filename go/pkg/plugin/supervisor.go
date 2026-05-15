@@ -15,7 +15,6 @@
 package plugin
 
 import (
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/go/process"
@@ -23,7 +22,7 @@ import (
 
 // crashWindow is the wall-clock window over which crashCap
 // failures count. Three crashes inside 60 s → dead.
-const crashWindow = 60 * time.Second
+const crashWindow = 60 * core.Second
 
 // crashCap is the maximum tolerated crashes inside crashWindow
 // before the supervisor gives up and marks the plugin dead.
@@ -31,11 +30,11 @@ const crashCap = 3
 
 // restartBaseDelay is the first backoff interval. Each
 // subsequent restart doubles the delay (capped at restartMaxDelay).
-const restartBaseDelay = 100 * time.Millisecond
+const restartBaseDelay = 100 * core.Millisecond
 
 // restartMaxDelay caps exponential growth so a long-running
 // plugin that crashes once after weeks doesn't wait forever.
-const restartMaxDelay = 10 * time.Second
+const restartMaxDelay = 10 * core.Second
 
 // pluginState extension fields used by the supervisor. Lives
 // here rather than plugin.go so the supervision concern is
@@ -80,7 +79,7 @@ func (s *Service) handleExit(code string, proc *process.Process) {
 	ps.lastError = "exited with code " + core.Itoa(info.ExitCode)
 	ps.proc = nil
 	// Trim the crash log to entries inside the rolling window.
-	now := time.Now()
+	now := core.Now()
 	cutoff := now.Add(-crashWindow)
 	pruned := ps.crashAt[:0]
 	for _, t := range ps.crashAt {
@@ -110,11 +109,11 @@ func (s *Service) handleExit(code string, proc *process.Process) {
 		"code", code,
 		"attempt", len(ps.crashAt),
 		"delay", delay.String())
-	time.Sleep(delay)
+	core.Sleep(delay)
 	// Re-spawn via the normal path. Errors land back in
 	// ps.state / ps.lastError and the watcher's next iteration
 	// catches the new process's Done().
-	ctx, cancel := core.WithTimeout(core.Background(), 60*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 60*core.Second)
 	defer cancel()
 	s.mu.Lock()
 	tok := s.resolveToken()
@@ -140,7 +139,7 @@ func (s *Service) handleExit(code string, proc *process.Process) {
 // backoffFor returns the delay before the Nth restart attempt
 // (N counted from 1). Exponential — base × 2^(N-1) capped at
 // restartMaxDelay.
-func backoffFor(attempt int) time.Duration {
+func backoffFor(attempt int) core.Duration {
 	if attempt <= 1 {
 		return restartBaseDelay
 	}

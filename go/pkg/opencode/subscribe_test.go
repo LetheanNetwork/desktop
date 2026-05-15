@@ -39,7 +39,7 @@ func TestSubscribe_streamEvents_Good(t *core.T) {
 		mu.Unlock()
 	})
 
-	ctx, cancel := core.WithTimeout(core.Background(), 2*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 2*core.Second)
 	defer cancel()
 	if err := svc.streamEvents(ctx, server.URL, ""); err != nil {
 		t.Fatalf("streamEvents err: %v", err)
@@ -70,7 +70,7 @@ func TestSubscribe_streamEvents_Bad(t *core.T) {
 
 	svc := &Service{}
 	svc.SetEventEmitter(func(string) {})
-	ctx, cancel := core.WithTimeout(core.Background(), 2*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 2*core.Second)
 	defer cancel()
 	err := svc.streamEvents(ctx, server.URL, "Basic deadbeef")
 	if err == nil {
@@ -93,7 +93,7 @@ func TestSubscribe_streamEvents_Ugly(t *core.T) {
 		if f != nil {
 			f.Flush()
 		}
-		time.Sleep(5 * time.Second)
+		core.Sleep(5 * core.Second)
 	}))
 	defer server.Close()
 
@@ -110,7 +110,7 @@ func TestSubscribe_streamEvents_Ugly(t *core.T) {
 	// Wait for the first event, then cancel.
 	select {
 	case <-got:
-	case <-time.After(2 * time.Second):
+	case <-time.After(2 * core.Second):
 		cancel()
 		<-done
 		t.Fatalf("never received first event")
@@ -119,7 +119,7 @@ func TestSubscribe_streamEvents_Ugly(t *core.T) {
 
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(2 * core.Second):
 		t.Fatalf("cancellation didn't terminate streamEvents promptly")
 	}
 }

@@ -8,7 +8,6 @@
 package telemetry_test
 
 import (
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/telemetry"
@@ -43,7 +42,7 @@ func TestTelemetry_Sample_Good_ReadingShape(t *core.T) {
 
 func TestTelemetry_Sample_Good_UptimeMonotonic(t *core.T) {
 	r1 := telemetry.Sample().Value.(telemetry.Reading)
-	time.Sleep(5 * time.Millisecond)
+	core.Sleep(5 * core.Millisecond)
 	r2 := telemetry.Sample().Value.(telemetry.Reading)
 	core.AssertGreater(t, r2.UptimeSeconds, r1.UptimeSeconds, "uptime must move forward across samples")
 }

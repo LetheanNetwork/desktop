@@ -15,7 +15,6 @@
 package queue
 
 import (
-	"time"
 
 	core "dappco.re/go"
 )
@@ -29,9 +28,9 @@ import (
 //
 // Usage example:
 //
-//	r := queue.Schedule(c, time.Now().Add(20*time.Minute), "pr-check",
+//	r := queue.Schedule(c, core.Now().Add(20*core.Minute), "pr-check",
 //	    core.NewOptions(core.Option{Key: "pr_id", Value: "1352"}))
-func Schedule(c *core.Core, at time.Time, kind string, payload core.Options) core.Result {
+func Schedule(c *core.Core, at core.Time, kind string, payload core.Options) core.Result {
 	return EnqueueWithOptions(c, kind, EnqueueOptions{
 		Payload:      encodeOptions(payload),
 		ScheduledFor: at.UTC(),
@@ -43,10 +42,10 @@ func Schedule(c *core.Core, at time.Time, kind string, payload core.Options) cor
 //
 // Usage example:
 //
-//	r := queue.ScheduleAfter(c, 20*time.Minute, "pr-check",
+//	r := queue.ScheduleAfter(c, 20*core.Minute, "pr-check",
 //	    core.NewOptions(core.Option{Key: "pr_id", Value: "1352"}))
-func ScheduleAfter(c *core.Core, after time.Duration, kind string, payload core.Options) core.Result {
-	return Schedule(c, time.Now().UTC().Add(after), kind, payload)
+func ScheduleAfter(c *core.Core, after core.Duration, kind string, payload core.Options) core.Result {
+	return Schedule(c, core.Now().UTC().Add(after), kind, payload)
 }
 
 // ScheduleWithOptions is the full-control deferred enqueue. Use
@@ -56,13 +55,13 @@ func ScheduleAfter(c *core.Core, after time.Duration, kind string, payload core.
 //
 //	r := queue.ScheduleWithOptions(c, "pr-check", queue.EnqueueOptions{
 //	    Payload:      `{"pr_id":"1352"}`,
-//	    ScheduledFor: time.Now().Add(20*time.Minute).UTC(),
+//	    ScheduledFor: core.Now().Add(20*core.Minute).UTC(),
 //	    Project:      "ide",
 //	    IssueID:      "01ABC...",
 //	})
 func ScheduleWithOptions(c *core.Core, kind string, opts EnqueueOptions) core.Result {
 	if opts.ScheduledFor.IsZero() {
-		opts.ScheduledFor = time.Now().UTC()
+		opts.ScheduledFor = core.Now().UTC()
 	}
 	return EnqueueWithOptions(c, kind, opts)
 }
@@ -83,7 +82,7 @@ func ScheduleWithOptions(c *core.Core, kind string, opts EnqueueOptions) core.Re
 //	    Kind: "pr-check",
 //	    Handler: func(ctx core.Context, opts core.Options) core.Result {
 //	        if !checkReady(opts.String("pr_id")) {
-//	            queue.ScheduleAfter(c, 5*time.Minute, "pr-check", opts)
+//	            queue.ScheduleAfter(c, 5*core.Minute, "pr-check", opts)
 //	            return core.Ok("not yet, rescheduled")
 //	        }
 //	        return doWork(opts)

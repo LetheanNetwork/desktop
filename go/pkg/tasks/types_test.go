@@ -4,7 +4,8 @@ package tasks
 
 import (
 	"testing"
-	"time"
+
+	core "dappco.re/go"
 )
 
 func TestTypesIssueSchema(t *testing.T) {
@@ -28,7 +29,7 @@ func TestTypesNoteSchema(t *testing.T) {
 }
 
 func TestTypesIssueStateConstants(t *testing.T) {
-	issue := Issue{State: StateOpen, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	issue := Issue{State: StateOpen, CreatedAt: core.Now(), UpdatedAt: core.Now()}
 	if issue.State != "open" {
 		t.Fatalf("Issue constants: StateOpen drifted to %q", issue.State)
 	}

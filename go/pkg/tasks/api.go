@@ -3,7 +3,6 @@
 package tasks
 
 import (
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -24,7 +23,7 @@ func newID() string {
 	if !r.OK {
 		// Fallback: nanosecond timestamp. Sortable, unique enough for
 		// rare crypto/rand failure paths.
-		return core.Sprintf("T%d", time.Now().UnixNano())
+		return core.Sprintf("T%d", core.Now().UnixNano())
 	}
 	return r.Value.(string)
 }
@@ -44,7 +43,7 @@ func Create(c *core.Core, input CreateInput) core.Result {
 	if input.Summary == "" {
 		return core.Fail(core.E("tasks.Create", "summary is required", nil))
 	}
-	now := time.Now().UTC()
+	now := core.Now().UTC()
 	issue := Issue{
 		ID:            newID(),
 		Project:       input.Project,
@@ -147,7 +146,7 @@ func Update(c *core.Core, id string, input UpdateInput) core.Result {
 		issue.State = input.State
 		mutated = true
 		if input.State == StateDone || input.State == StateCancelled {
-			issue.ClosedAt = time.Now().UTC()
+			issue.ClosedAt = core.Now().UTC()
 		}
 	}
 	if input.Severity != "" {
@@ -181,7 +180,7 @@ func Update(c *core.Core, id string, input UpdateInput) core.Result {
 	if !mutated {
 		return core.Ok(issue)
 	}
-	now := time.Now().UTC()
+	now := core.Now().UTC()
 	issue.UpdatedAt = now
 	if saveResult := orm.Save(c, &issue); !saveResult.OK {
 		return saveResult
@@ -232,7 +231,7 @@ func AddNote(c *core.Core, issueID, body, author string) core.Result {
 	if body == "" {
 		return core.Fail(core.E("tasks.AddNote", "body is required", nil))
 	}
-	now := time.Now().UTC()
+	now := core.Now().UTC()
 	note := Note{
 		ID:        newID(),
 		IssueID:   issueID,

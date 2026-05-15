@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/go/process"
@@ -57,10 +56,10 @@ func pickFreePort() core.Result {
 // it returns 200 or `timeout` elapses. Backoff is constant
 // 100 ms — plugins should start fast; if they don't, the
 // manifest's startup_timeout buys more time.
-func waitForHealth(ctx core.Context, port int, path string, timeout time.Duration) core.Result {
+func waitForHealth(ctx core.Context, port int, path string, timeout core.Duration) core.Result {
 	url := "http://127.0.0.1:" + strconv.Itoa(port) + path
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	deadline := core.Now().Add(timeout)
+	for core.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
 			return core.Fail(core.E("plugin.waitForHealth", "context cancelled", nil))
@@ -74,7 +73,7 @@ func waitForHealth(ctx core.Context, port int, path string, timeout time.Duratio
 				return core.Ok(nil)
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		core.Sleep(100 * core.Millisecond)
 	}
 	return core.Fail(core.E("plugin.waitForHealth",
 		"plugin did not become healthy within "+timeout.String(), nil))
@@ -130,7 +129,7 @@ func (s *Service) startPlugin(ctx core.Context, code, token string) core.Result 
 		state:     "starting",
 		port:      port,
 		pid:       proc.Info().PID,
-		startedAt: time.Now(),
+		startedAt: core.Now(),
 		proc: &processHandle{
 			proc:   proc,
 			target: "http://127.0.0.1:" + strconv.Itoa(port),
@@ -140,9 +139,9 @@ func (s *Service) startPlugin(ctx core.Context, code, token string) core.Result 
 	s.state[code] = ps2
 	// Health gate. Plugins that don't return 200 within their
 	// startup window get killed; pluginState becomes "dead".
-	timeout := time.Duration(m.StartupTimeout) * time.Second
+	timeout := core.Duration(m.StartupTimeout) * core.Second
 	if timeout <= 0 {
-		timeout = 5 * time.Second
+		timeout = 5 * core.Second
 	}
 	if r := waitForHealth(ctx, port, m.Health.Path, timeout); !r.OK {
 		// Kill the unhealthy process; surface the error to the caller.
@@ -182,7 +181,7 @@ func (s *Service) stopPlugin(code string) core.Result {
 	}
 	s.proxy.Delete(code)
 	ps2.state = "stopped"
-	ps2.stoppedAt = time.Now()
+	ps2.stoppedAt = core.Now()
 	ps2.proc = nil
 	return core.Ok(nil)
 }

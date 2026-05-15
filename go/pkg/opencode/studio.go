@@ -21,7 +21,6 @@ package opencode
 
 import (
 	goruntime "runtime"
-	"time"
 
 	core "dappco.re/go"
 )
@@ -74,7 +73,7 @@ func (s *Service) OpenStudio() core.Result {
 		return core.Fail(core.E("opencode.OpenStudio", "process service unavailable", nil))
 	}
 
-	ctx, cancel := core.WithTimeout(core.Background(), 10*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 10*core.Second)
 	defer cancel()
 
 	switch goruntime.GOOS {

@@ -8,7 +8,6 @@
 package container
 
 import (
-	"time"
 
 	core "dappco.re/go"
 )
@@ -57,7 +56,7 @@ func (s *Service) Detect(force bool) core.Result {
 // service queries every runtime it knows how to talk to; otherwise
 // only the named one.
 func (s *Service) List(runtime string) core.Result {
-	ctx, cancel := core.WithTimeout(core.Background(), 4*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 4*core.Second)
 	defer cancel()
 	out := ListOutput{}
 	if runtime == "" || runtime == "docker" {
@@ -87,7 +86,7 @@ func (s *Service) Logs(id, runtime string, tail int) core.Result {
 	if ps == nil {
 		return core.Fail(core.E(logsOp, "process service unavailable", nil))
 	}
-	ctx, cancel := core.WithTimeout(core.Background(), 5*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 5*core.Second)
 	defer cancel()
 	tailArg := core.Itoa(tail)
 	var r core.Result

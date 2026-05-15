@@ -21,7 +21,6 @@ package plugin
 
 import (
 	"sync"
-	"time"
 
 	core "dappco.re/go"
 )
@@ -125,8 +124,8 @@ type Status struct {
 	State     string    `json:"state"` // "stopped" | "starting" | "running" | "dead"
 	Port      int       `json:"port,omitempty"`
 	PID       int       `json:"pid,omitempty"`
-	StartedAt time.Time `json:"started_at,omitempty"`
-	StoppedAt time.Time `json:"stopped_at,omitempty"`
+	StartedAt core.Time `json:"started_at,omitempty"`
+	StoppedAt core.Time `json:"stopped_at,omitempty"`
 	LastError string    `json:"last_error,omitempty"`
 }
 
@@ -150,15 +149,15 @@ type pluginState struct {
 	state     string
 	port      int
 	pid       int
-	startedAt time.Time
-	stoppedAt time.Time
+	startedAt core.Time
+	stoppedAt core.Time
 	lastError string
 	// crashAt records timestamps of recent unexpected exits.
 	// The supervisor (supervisor.go) trims this to a rolling
 	// window and uses len() to decide restart-vs-give-up. v1
 	// of the data structure is intentionally a flat slice —
 	// at the 3-crash threshold the slice never grows past 4.
-	crashAt []time.Time
+	crashAt []core.Time
 }
 
 // statusFor projects the current pluginState into the wire-shape

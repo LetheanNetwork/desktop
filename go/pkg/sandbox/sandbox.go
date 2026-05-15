@@ -16,7 +16,6 @@
 package sandbox
 
 import (
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/go/container"
@@ -137,9 +136,9 @@ func (s *Service) Spawn(input SpawnInput) core.Result {
 		return rtResult
 	}
 	rt := rtResult.Value.(container.RuntimeType)
-	timeout := time.Duration(input.TimeoutSeconds) * time.Second
+	timeout := core.Duration(input.TimeoutSeconds) * core.Second
 	if timeout <= 0 {
-		timeout = 60 * time.Second
+		timeout = 60 * core.Second
 	}
 	if rt == container.RuntimeApple {
 		return s.spawnApple(input, timeout)
@@ -168,7 +167,7 @@ func (s *Service) prepareSpawnInput(input SpawnInput) core.Result {
 // the canonical Provider implementation for macOS 26+ native
 // containers. Bundles the EntryPoint into a ContainerConfig + waits
 // for exit via the provider's Wait machinery.
-func (s *Service) spawnApple(input SpawnInput, timeout time.Duration) core.Result {
+func (s *Service) spawnApple(input SpawnInput, timeout core.Duration) core.Result {
 	provider := container.NewAppleProvider()
 	if !provider.Available() {
 		return core.Fail(core.E(spawnAppleOp,
@@ -184,7 +183,7 @@ func (s *Service) spawnApple(input SpawnInput, timeout time.Duration) core.Resul
 	}
 	ctx, cancel := core.WithTimeout(core.Background(), timeout)
 	defer cancel()
-	started := time.Now()
+	started := core.Now()
 	// AppleProvider.Run uses ro.Name as the container name + threads
 	// EntryPoint args via Args (verified against external/container's
 	// apple.go). For now we encode command+args by prepending the
@@ -208,7 +207,7 @@ func (s *Service) spawnApple(input SpawnInput, timeout time.Duration) core.Resul
 	if waitErr := provider.Wait(ctx, ctr.ID); waitErr != nil {
 		return core.Fail(core.E(spawnAppleOp, "wait failed", waitErr))
 	}
-	dur := time.Since(started).Milliseconds()
+	dur := core.Since(started).Milliseconds()
 	// AppleProvider's Container struct has Status but no ExitCode
 	// today; map exit semantics from Status until the upstream
 	// provider exposes the raw code.
@@ -230,7 +229,7 @@ func (s *Service) spawnApple(input SpawnInput, timeout time.Duration) core.Resul
 // go-container ships real providers for them. process.Service runs
 // `<runtime> run --rm <image> <command> <args...>` and captures
 // combined stdout.
-func (s *Service) spawnViaCLI(rt container.RuntimeType, input SpawnInput, timeout time.Duration) core.Result {
+func (s *Service) spawnViaCLI(rt container.RuntimeType, input SpawnInput, timeout core.Duration) core.Result {
 	ps := s.proc()
 	if ps == nil {
 		return core.Fail(core.E("sandbox.spawnViaCLI", "process service unavailable", nil))
@@ -242,9 +241,9 @@ func (s *Service) spawnViaCLI(rt container.RuntimeType, input SpawnInput, timeou
 	run := argsResult.Value.(runCommand)
 	ctx, cancel := core.WithTimeout(core.Background(), timeout)
 	defer cancel()
-	started := time.Now()
+	started := core.Now()
 	r := ps.Run(ctx, run.Binary, run.Args...)
-	dur := time.Since(started).Milliseconds()
+	dur := core.Since(started).Milliseconds()
 	exit := 0
 	out, _ := r.Value.(string)
 	if !r.OK {

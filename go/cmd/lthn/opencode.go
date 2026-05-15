@@ -6,7 +6,6 @@ import (
 	goio "io"
 	"net/http"
 	"strings"
-	"time"
 
 	core "dappco.re/go"
 )
@@ -79,7 +78,7 @@ const (
 
 // httpClient is the shared client for control calls. Generous timeout —
 // spawn waits for health + applies PATCH /global/config synchronously.
-var httpClient = &http.Client{Timeout: 60 * time.Second}
+var httpClient = &http.Client{Timeout: 60 * core.Second}
 
 // opencodeStart accepts `--profile NAME` (or `--profile=NAME`).
 //

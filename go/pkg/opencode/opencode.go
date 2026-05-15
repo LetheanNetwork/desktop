@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"sync"
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -214,7 +213,7 @@ func (s *Service) Start(profileName string) core.Result {
 	}
 	profile := profileR.Value.(Profile)
 
-	id := core.Sprintf("oc-%d", time.Now().UnixNano())
+	id := core.Sprintf("oc-%d", core.Now().UnixNano())
 	portR := allocatePort()
 	if !portR.OK {
 		return portR
@@ -254,7 +253,7 @@ func (s *Service) Start(profileName string) core.Result {
 		"--port", core.Sprintf("%d", containerPort),
 	}
 
-	ctx, cancel := core.WithTimeout(core.Background(), 30*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 30*core.Second)
 	defer cancel()
 	runR := ps.Run(ctx, s.runtime(), args...)
 	if !runR.OK {
@@ -266,7 +265,7 @@ func (s *Service) Start(profileName string) core.Result {
 		Image:     s.image(),
 		HostPort:  hostPort,
 		Status:    StatusRunning,
-		CreatedAt: time.Now(),
+		CreatedAt: core.Now(),
 	}
 	saveR := orm.Of[Sandbox](s.Core()).Save(&sb)
 	if !saveR.OK {
@@ -284,7 +283,7 @@ func (s *Service) Start(profileName string) core.Result {
 	// the profile via PATCH /config. Failures to apply the profile
 	// don't fail Start — the sandbox is still usable with opencode's
 	// own default config; the patch is a narrowing optimisation.
-	if r := waitHealthy(target, authHeader, 30*time.Second); !r.OK {
+	if r := waitHealthy(target, authHeader, 30*core.Second); !r.OK {
 		_ = ps.Run(core.Background(), s.runtime(), "rm", "-f", ContainerName(id))
 		s.proxy.Delete(id)
 		return r
@@ -309,10 +308,10 @@ func (s *Service) Start(profileName string) core.Result {
 // returns 200 OK or the timeout fires. authHeader is the Basic
 // Auth credential lthn injects on outbound calls — opencode-serve
 // will 401 otherwise when OPENCODE_SERVER_PASSWORD is set.
-func waitHealthy(target, authHeader string, timeout time.Duration) core.Result {
-	deadline := time.Now().Add(timeout)
-	client := &http.Client{Timeout: 2 * time.Second}
-	for time.Now().Before(deadline) {
+func waitHealthy(target, authHeader string, timeout core.Duration) core.Result {
+	deadline := core.Now().Add(timeout)
+	client := &http.Client{Timeout: 2 * core.Second}
+	for core.Now().Before(deadline) {
 		req, err := http.NewRequest(http.MethodGet, target+"/global/health", nil)
 		if err == nil {
 			if authHeader != "" {
@@ -326,7 +325,7 @@ func waitHealthy(target, authHeader string, timeout time.Duration) core.Result {
 				}
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
+		core.Sleep(500 * core.Millisecond)
 	}
 	return core.Fail(core.E("opencode.waitHealthy", "opencode-serve did not become healthy within "+timeout.String(), nil))
 }
@@ -351,7 +350,7 @@ func applyProfile(target, authHeader string, p Profile) core.Result {
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 5 * core.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return core.Fail(core.E("opencode.applyProfile", "patch failed", err))
@@ -386,7 +385,7 @@ func (s *Service) Stop(id string) core.Result {
 	// down here means no flap of reconnect-retry-fail noise.
 	s.Unsubscribe(id)
 
-	ctx, cancel := core.WithTimeout(core.Background(), 15*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 15*core.Second)
 	defer cancel()
 	// docker rm -f stops + removes in one shot. Ignore failure —
 	// the container may already be gone; we still want to clean

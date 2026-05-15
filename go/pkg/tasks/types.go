@@ -17,8 +17,7 @@
 package tasks
 
 import (
-	"time"
-
+	core "dappco.re/go"
 	"dappco.re/go/orm"
 )
 
@@ -41,9 +40,9 @@ type Issue struct {
 	TargetVersion string
 	FixedIn       string
 	Resolution    string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	ClosedAt      time.Time
+	CreatedAt     core.Time
+	UpdatedAt     core.Time
+	ClosedAt      core.Time
 }
 
 // Schema declares the orm shape for Issue. Registered at IDE boot.
@@ -87,7 +86,7 @@ type Note struct {
 	IssueID   string
 	Body      string
 	Author    string
-	CreatedAt time.Time
+	CreatedAt core.Time
 }
 
 // Schema declares the orm shape for Note.

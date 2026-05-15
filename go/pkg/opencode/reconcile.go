@@ -19,7 +19,6 @@ package opencode
 import (
 	"strconv"
 	"strings"
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -48,7 +47,7 @@ func (s *Service) Reconcile() core.Result {
 	// is in a partially-bound state. We re-derive host ports from
 	// the Ports column rather than trusting the port we allocated
 	// last time — host bindings stick across runtime restarts.
-	ctx, cancel := core.WithTimeout(core.Background(), 5*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 5*core.Second)
 	defer cancel()
 	runR := ps.Run(ctx, s.runtime(),
 		"ps",
@@ -87,7 +86,7 @@ func (s *Service) Reconcile() core.Result {
 			Image:     s.image(),
 			HostPort:  hostPort,
 			Status:    StatusRunning,
-			CreatedAt: time.Now(),
+			CreatedAt: core.Now(),
 		}
 		if r := orm.Of[Sandbox](s.Core()).Save(&sb); !r.OK {
 			continue

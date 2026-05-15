@@ -38,7 +38,6 @@ package bridge
 import (
 	"net/http"
 	"sync"
-	"time"
 
 	core "dappco.re/go"
 )
@@ -72,7 +71,7 @@ type ConsoleEntry struct {
 	Level   string    `json:"level"`
 	Message string    `json:"message"`
 	Source  string    `json:"source,omitempty"`
-	At      time.Time `json:"at"`
+	At      core.Time `json:"at"`
 }
 
 // ErrorEntry mirrors the JSON shape the JS shim POSTs to
@@ -83,7 +82,7 @@ type ErrorEntry struct {
 	Line    int       `json:"line,omitempty"`
 	Col     int       `json:"col,omitempty"`
 	Stack   string    `json:"stack,omitempty"`
-	At      time.Time `json:"at"`
+	At      core.Time `json:"at"`
 }
 
 // evalReply pairs a request id with the JS execution result (or
@@ -147,7 +146,7 @@ func (s *Service) OnStartup(_ core.Context) core.Result {
 	s.httpSrv = &http.Server{
 		Addr:              core.Sprintf("127.0.0.1:%d", s.port),
 		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: 5 * core.Second,
 	}
 	srv := s.httpSrv
 	s.mu.Unlock()

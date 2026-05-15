@@ -11,7 +11,6 @@
 package plugin
 
 import (
-	"time"
 
 	core "dappco.re/go"
 )
@@ -131,7 +130,7 @@ func (s *Service) Start(code string) core.Result {
 	// Generous outer timeout — health gating happens with its
 	// own narrower window inside startPlugin. This is just the
 	// ceiling for spawn-plus-health.
-	ctx, cancel := core.WithTimeout(core.Background(), 60*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 60*core.Second)
 	defer cancel()
 	if r := s.startPlugin(ctx, code, s.resolveToken()); !r.OK {
 		return core.Fail(core.E("plugin.Start", r.Error(), nil))

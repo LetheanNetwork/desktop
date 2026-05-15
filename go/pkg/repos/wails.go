@@ -8,7 +8,6 @@
 package repos
 
 import (
-	"time"
 
 	core "dappco.re/go"
 )
@@ -40,7 +39,7 @@ func (s *Service) Status(input StatusInput) core.Result {
 	// 30s ceiling — git status across the canonical roots takes
 	// well under a second on a healthy SSD, but pathological cases
 	// (slow network FS mounts, hung git auth helpers) need a cap.
-	ctx, cancel := core.WithTimeout(core.Background(), 30*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 30*core.Second)
 	defer cancel()
 
 	paths := input.Paths

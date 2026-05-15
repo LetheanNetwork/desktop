@@ -85,7 +85,7 @@ func (s *Service) ImportFromHost() core.Result {
 
 	// 3. Spawn `opencode serve --port N --hostname 127.0.0.1`.
 	target := core.Sprintf("http://127.0.0.1:%d", port)
-	ctx, cancel := core.WithTimeout(core.Background(), 30*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 30*core.Second)
 	defer cancel()
 	procR := ps.StartWithOptions(ctx, process.RunOptions{
 		Command: "opencode",
@@ -95,7 +95,7 @@ func (s *Service) ImportFromHost() core.Result {
 			"--hostname", "127.0.0.1",
 		},
 		Env:     []string{"OPENCODE_SERVER_PASSWORD=" + pw},
-		Timeout: 20 * time.Second,
+		Timeout: 20 * core.Second,
 	})
 	if !procR.OK {
 		return procR
@@ -110,7 +110,7 @@ func (s *Service) ImportFromHost() core.Result {
 
 	// 4. Wait for health — generous because cold-start can probe
 	// the user's huge opencode.db (46MB on Snider's host).
-	if r := waitHealthy(target, authHeader, 15*time.Second); !r.OK {
+	if r := waitHealthy(target, authHeader, 15*core.Second); !r.OK {
 		return core.Fail(core.E("opencode.ImportFromHost",
 			"host opencode serve never became healthy: "+r.Error(), nil))
 	}
@@ -130,7 +130,7 @@ func (s *Service) ImportFromHost() core.Result {
 
 	// 7. Kill happens via defer.
 	// 8. Persist.
-	now := time.Now()
+	now := core.Now()
 	projectsList, _ := projects.([]any)
 	providersWrap, _ := providers.(map[string]any)
 	providersList, _ := providersWrap["all"].([]any)
@@ -156,7 +156,7 @@ func importFetchJSON(url, authHeader string) (any, error) {
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 10 * core.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -201,7 +201,7 @@ func readHostAuthJSON() map[string]map[string]any {
 
 // persistProjects upserts ImportedProject rows from the /project
 // JSON array. Returns count of rows successfully written.
-func persistProjects(c *core.Core, projects []any, now time.Time) int {
+func persistProjects(c *core.Core, projects []any, now core.Time) int {
 	count := 0
 	for _, raw := range projects {
 		p, ok := raw.(map[string]any)
@@ -226,7 +226,7 @@ func persistProjects(c *core.Core, projects []any, now time.Time) int {
 			iconURL, _ = icon["url"].(string)
 		}
 
-		var uCreated, uUpdated time.Time
+		var uCreated, uUpdated core.Time
 		if t, ok := p["time"].(map[string]any); ok {
 			uCreated = unixMillis(t["created"])
 			uUpdated = unixMillis(t["updated"])
@@ -255,7 +255,7 @@ func persistProjects(c *core.Core, projects []any, now time.Time) int {
 
 // persistProviders upserts ImportedProvider rows, looking up auth
 // material per-provider-id in authMap. Returns (count, withAuth).
-func persistProviders(c *core.Core, providers []any, authMap map[string]map[string]any, now time.Time) (int, int) {
+func persistProviders(c *core.Core, providers []any, authMap map[string]map[string]any, now core.Time) (int, int) {
 	count, withAuth := 0, 0
 	for _, raw := range providers {
 		p, ok := raw.(map[string]any)
@@ -310,18 +310,18 @@ func stringFrom(m map[string]any, key string) string {
 }
 
 // unixMillis converts a JSON-decoded numeric field (opencode uses
-// float64 for unix-ms) into a time.Time. Zero on absent / non-numeric.
-func unixMillis(v any) time.Time {
+// float64 for unix-ms) into a core.Time. Zero on absent / non-numeric.
+func unixMillis(v any) core.Time {
 	switch n := v.(type) {
 	case float64:
 		if n <= 0 {
-			return time.Time{}
+			return core.Time{}
 		}
 		return time.UnixMilli(int64(n))
 	case int64:
 		return time.UnixMilli(n)
 	}
-	return time.Time{}
+	return core.Time{}
 }
 
 // projectNameFrom picks a human-readable label from the worktree

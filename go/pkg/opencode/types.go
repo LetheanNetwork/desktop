@@ -24,8 +24,7 @@
 package opencode
 
 import (
-	"time"
-
+	core "dappco.re/go"
 	"dappco.re/go/orm"
 )
 
@@ -63,7 +62,7 @@ type Sandbox struct {
 	// CreatedAt is the spawn timestamp. Useful for housekeeping
 	// (drop sandboxes older than N days, etc.) but not load-bearing
 	// for the v1 protocol surface.
-	CreatedAt time.Time
+	CreatedAt core.Time
 }
 
 // containerPrefix is the canonical name prefix for lthn-owned

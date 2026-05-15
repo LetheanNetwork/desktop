@@ -10,7 +10,6 @@
 package queue
 
 import (
-	"time"
 
 	core "dappco.re/go"
 )
@@ -43,7 +42,7 @@ type JobChanged struct {
 	Before Job `json:"before"`
 
 	// At is when the broadcast fired.
-	At time.Time `json:"at"`
+	At core.Time `json:"at"`
 }
 
 // Phase constants name the lifecycle transitions a JobChanged event

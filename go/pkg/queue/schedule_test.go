@@ -24,12 +24,12 @@ func TestSchedule_FuturePastIsImmediate(t *testing.T) {
 		Handler: func(core.Context, core.Options) core.Result { ran.Done(); return core.Ok(nil) },
 	})
 
-	svc := queue.NewService(queue.Options{PollInterval: 30 * time.Millisecond})(c).
+	svc := queue.NewService(queue.Options{PollInterval: 30 * core.Millisecond})(c).
 		Value.(*queue.Service)
 	_ = svc.OnStart()
 
 	// Schedule for "now" — worker should pick it up next tick.
-	r := queue.Schedule(c, time.Now().UTC(), "imm", core.NewOptions())
+	r := queue.Schedule(c, core.Now().UTC(), "imm", core.NewOptions())
 	if !r.OK {
 		t.Fatalf("schedule: %s", r.Error())
 	}
@@ -38,7 +38,7 @@ func TestSchedule_FuturePastIsImmediate(t *testing.T) {
 	go func() { ran.Wait(); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(2 * core.Second):
 		t.Fatalf("scheduled-now job never ran within 2s")
 	}
 }
@@ -54,19 +54,19 @@ func TestSchedule_FutureNotPickedUpYet(t *testing.T) {
 		Handler: func(core.Context, core.Options) core.Result { fired = true; return core.Ok(nil) },
 	})
 
-	svc := queue.NewService(queue.Options{PollInterval: 30 * time.Millisecond})(c).
+	svc := queue.NewService(queue.Options{PollInterval: 30 * core.Millisecond})(c).
 		Value.(*queue.Service)
 	_ = svc.OnStart()
 
 	// Schedule one hour from now.
-	r := queue.Schedule(c, time.Now().UTC().Add(time.Hour), "future", core.NewOptions())
+	r := queue.Schedule(c, core.Now().UTC().Add(core.Hour), "future", core.NewOptions())
 	if !r.OK {
 		t.Fatalf("schedule: %s", r.Error())
 	}
 	jobID := r.Value.(queue.Job).ID
 
 	// Wait through several ticks — worker MUST NOT pick it up.
-	time.Sleep(200 * time.Millisecond)
+	core.Sleep(200 * core.Millisecond)
 	if fired {
 		t.Fatalf("future job fired prematurely")
 	}
@@ -89,12 +89,12 @@ func TestScheduleAfter_FiresAfterDuration(t *testing.T) {
 		Handler: func(core.Context, core.Options) core.Result { ran.Done(); return core.Ok(nil) },
 	})
 
-	svc := queue.NewService(queue.Options{PollInterval: 20 * time.Millisecond})(c).
+	svc := queue.NewService(queue.Options{PollInterval: 20 * core.Millisecond})(c).
 		Value.(*queue.Service)
 	_ = svc.OnStart()
 
-	start := time.Now()
-	r := queue.ScheduleAfter(c, 80*time.Millisecond, "delayed", core.NewOptions())
+	start := core.Now()
+	r := queue.ScheduleAfter(c, 80*core.Millisecond, "delayed", core.NewOptions())
 	if !r.OK {
 		t.Fatalf("schedule-after: %s", r.Error())
 	}
@@ -103,14 +103,14 @@ func TestScheduleAfter_FiresAfterDuration(t *testing.T) {
 	go func() { ran.Wait(); close(done) }()
 	select {
 	case <-done:
-		elapsed := time.Since(start)
-		if elapsed < 80*time.Millisecond {
+		elapsed := core.Since(start)
+		if elapsed < 80*core.Millisecond {
 			t.Errorf("fired too early: %v < 80ms", elapsed)
 		}
-		if elapsed > 500*time.Millisecond {
+		if elapsed > 500*core.Millisecond {
 			t.Errorf("fired too late: %v > 500ms", elapsed)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(2 * core.Second):
 		t.Fatalf("delayed job never ran within 2s")
 	}
 }
@@ -129,7 +129,7 @@ func TestSchedule_HandlerSelfReschedule(t *testing.T) {
 		Handler: func(_ core.Context, _ core.Options) core.Result {
 			attempts++
 			if attempts < 3 {
-				queue.ScheduleAfter(c, 30*time.Millisecond, "retry-twice", core.NewOptions())
+				queue.ScheduleAfter(c, 30*core.Millisecond, "retry-twice", core.NewOptions())
 				return core.Ok("rescheduled")
 			}
 			done.Done()
@@ -137,7 +137,7 @@ func TestSchedule_HandlerSelfReschedule(t *testing.T) {
 		},
 	})
 
-	svc := queue.NewService(queue.Options{PollInterval: 20 * time.Millisecond})(c).
+	svc := queue.NewService(queue.Options{PollInterval: 20 * core.Millisecond})(c).
 		Value.(*queue.Service)
 	_ = svc.OnStart()
 
@@ -152,7 +152,7 @@ func TestSchedule_HandlerSelfReschedule(t *testing.T) {
 		if attempts != 3 {
 			t.Errorf("attempts: got %d want 3", attempts)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(3 * core.Second):
 		t.Fatalf("self-rescheduling chain didn't complete (attempts=%d)", attempts)
 	}
 }

@@ -18,7 +18,6 @@ package telemetry
 
 import (
 	"runtime"
-	"time"
 
 	core "dappco.re/go"
 )
@@ -44,7 +43,7 @@ type Reading struct {
 // processStart is the time the binary started. Captured at package
 // init so Sample().UptimeSeconds is meaningful across the whole
 // process lifetime, not per-call.
-var processStart = time.Now()
+var processStart = core.Now()
 
 // Sample takes one telemetry reading from the local process. Cheap
 // — runtime.ReadMemStats is microseconds. Safe to call frequently.
@@ -68,7 +67,7 @@ func Sample() core.Result {
 		StackInUseMB:  bytesToMB(ms.StackInuse),
 		NumGoroutines: runtime.NumGoroutine(),
 		NumCgoCalls:   runtime.NumCgoCall(),
-		UptimeSeconds: time.Since(processStart).Seconds(),
+		UptimeSeconds: core.Since(processStart).Seconds(),
 		NumGC:         ms.NumGC,
 		LastGCPauseMs: float64(lastGCPauseNs) / 1e6,
 	})

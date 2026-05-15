@@ -156,8 +156,8 @@ func (s *Service) Unsubscribe(id string) {
 // to the installed emitter (re-resolved per event so a late
 // SetEventEmitter takes effect immediately).
 func (s *Service) runSubscription(ctx core.Context, id, target, authHeader string) {
-	backoff := 1 * time.Second
-	maxBackoff := 30 * time.Second
+	backoff := 1 * core.Second
+	maxBackoff := 30 * core.Second
 
 	for {
 		if ctx.Err() != nil {
@@ -184,9 +184,9 @@ func (s *Service) runSubscription(ctx core.Context, id, target, authHeader strin
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(500 * core.Millisecond):
 		}
-		backoff = 1 * time.Second
+		backoff = 1 * core.Second
 	}
 }
 

@@ -77,7 +77,7 @@ func (s *Service) handleInternalConsole(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if entry.At.IsZero() {
-		entry.At = time.Now()
+		entry.At = core.Now()
 	}
 	s.consoleMu.Lock()
 	s.consoleBuf = append(s.consoleBuf, entry)
@@ -105,7 +105,7 @@ func (s *Service) handleInternalError(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if entry.At.IsZero() {
-		entry.At = time.Now()
+		entry.At = core.Now()
 	}
 	s.errorMu.Lock()
 	s.errorBuf = append(s.errorBuf, entry)
@@ -505,7 +505,7 @@ func (s *Service) eval(ctx core.Context, windowName, body string) map[string]any
 			return map[string]any{"ok": false, "error": reply.Error}
 		}
 		return map[string]any{"ok": true, "value": reply.Result}
-	case <-time.After(5 * time.Second):
+	case <-time.After(5 * core.Second):
 		return map[string]any{"ok": false, "error": "eval timeout (5s)", "reqId": reqID}
 	case <-ctx.Done():
 		return map[string]any{"ok": false, "error": "context cancelled"}

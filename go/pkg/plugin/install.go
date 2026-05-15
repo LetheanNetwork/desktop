@@ -13,7 +13,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"time"
 
 	core "dappco.re/go"
 )
@@ -38,7 +37,7 @@ const maxBinarySize = 32 << 20
 
 // downloadTimeout caps the fetch end-to-end. Slow connections
 // can still complete a 32 MB transfer in 60 s comfortably.
-const downloadTimeout = 60 * time.Second
+const downloadTimeout = 60 * core.Second
 
 // verifyURL checks the URL against the host allowlist + path
 // prefix. Returns the parsed URL on success.

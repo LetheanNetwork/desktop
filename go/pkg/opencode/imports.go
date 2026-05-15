@@ -18,8 +18,7 @@
 package opencode
 
 import (
-	"time"
-
+	core "dappco.re/go"
 	"dappco.re/go/orm"
 )
 
@@ -82,14 +81,14 @@ type ImportedProject struct {
 
 	// UpstreamCreatedAt + UpstreamUpdatedAt are the project's
 	// timestamps inside the upstream's own DB (unix-ms in the
-	// case of opencode, captured here as time.Time for orm).
-	UpstreamCreatedAt time.Time
-	UpstreamUpdatedAt time.Time
+	// case of opencode, captured here as core.Time for orm).
+	UpstreamCreatedAt core.Time
+	UpstreamUpdatedAt core.Time
 
 	// ImportedAt is when lthn captured the row. Re-imports refresh
 	// this to "now"; a sync timestamp distinct from the upstream's
 	// own time fields.
-	ImportedAt time.Time
+	ImportedAt core.Time
 }
 
 // Schema declares the orm shape for ImportedProject.
@@ -168,7 +167,7 @@ type ImportedProvider struct {
 	HasAuth bool
 
 	// ImportedAt is when lthn captured the row.
-	ImportedAt time.Time
+	ImportedAt core.Time
 }
 
 // Schema declares the orm shape for ImportedProvider.

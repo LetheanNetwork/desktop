@@ -15,7 +15,6 @@
 package tasks
 
 import (
-	"time"
 
 	core "dappco.re/go"
 )
@@ -58,7 +57,7 @@ type IssueChanged struct {
 	// At is when the broadcast fired. Distinct from Issue.UpdatedAt
 	// because consumers may want event-receive time vs orm-write
 	// time (clock skew / replay scenarios).
-	At time.Time `json:"at"`
+	At core.Time `json:"at"`
 }
 
 // Kind enumerates the lifecycle moments. Field names use Kind to

@@ -87,7 +87,7 @@ func TestQueue_Worker_DispatchesAndCompletes(t *testing.T) {
 	})
 
 	// Start the worker via the Service lifecycle.
-	svc := queue.NewService(queue.Options{PollInterval: 50 * time.Millisecond})(c).
+	svc := queue.NewService(queue.Options{PollInterval: 50 * core.Millisecond})(c).
 		Value.(*queue.Service)
 	if r := svc.OnStart(); !r.OK {
 		t.Fatalf("OnStart: %s", r.Error())
@@ -106,7 +106,7 @@ func TestQueue_Worker_DispatchesAndCompletes(t *testing.T) {
 	go func() { ran.Wait(); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(2 * core.Second):
 		t.Fatalf("handler never ran within 2s")
 	}
 
@@ -115,8 +115,8 @@ func TestQueue_Worker_DispatchesAndCompletes(t *testing.T) {
 	}
 
 	// Wait briefly for worker to finish marking Done.
-	deadline := time.Now().Add(1 * time.Second)
-	for time.Now().Before(deadline) {
+	deadline := core.Now().Add(1 * core.Second)
+	for core.Now().Before(deadline) {
 		gr := queue.Get(c, jobID)
 		if gr.OK {
 			job, _, _ := orm.Detail[queue.Job](gr)
@@ -127,7 +127,7 @@ func TestQueue_Worker_DispatchesAndCompletes(t *testing.T) {
 				return
 			}
 		}
-		time.Sleep(20 * time.Millisecond)
+		core.Sleep(20 * core.Millisecond)
 	}
 	t.Fatalf("job never reached StatusDone")
 }
@@ -144,15 +144,15 @@ func TestQueue_Worker_FailureMarksFailedWithError(t *testing.T) {
 		},
 	})
 
-	svc := queue.NewService(queue.Options{PollInterval: 30 * time.Millisecond})(c).
+	svc := queue.NewService(queue.Options{PollInterval: 30 * core.Millisecond})(c).
 		Value.(*queue.Service)
 	_ = svc.OnStart()
 
 	r := queue.Enqueue(c, "boom", core.NewOptions())
 	jobID := r.Value.(queue.Job).ID
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	deadline := core.Now().Add(2 * core.Second)
+	for core.Now().Before(deadline) {
 		gr := queue.Get(c, jobID)
 		if gr.OK {
 			job, _, _ := orm.Detail[queue.Job](gr)
@@ -163,7 +163,7 @@ func TestQueue_Worker_FailureMarksFailedWithError(t *testing.T) {
 				return
 			}
 		}
-		time.Sleep(20 * time.Millisecond)
+		core.Sleep(20 * core.Millisecond)
 	}
 	t.Fatalf("job never reached StatusFailed")
 }
@@ -174,15 +174,15 @@ func TestQueue_Worker_FailureMarksFailedWithError(t *testing.T) {
 func TestQueue_Worker_MissingHandlerFails(t *testing.T) {
 	c := newQueueCore(t)
 
-	svc := queue.NewService(queue.Options{PollInterval: 30 * time.Millisecond})(c).
+	svc := queue.NewService(queue.Options{PollInterval: 30 * core.Millisecond})(c).
 		Value.(*queue.Service)
 	_ = svc.OnStart()
 
 	r := queue.Enqueue(c, "no-handler-for-this", core.NewOptions())
 	jobID := r.Value.(queue.Job).ID
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	deadline := core.Now().Add(2 * core.Second)
+	for core.Now().Before(deadline) {
 		gr := queue.Get(c, jobID)
 		if gr.OK {
 			job, _, _ := orm.Detail[queue.Job](gr)
@@ -190,7 +190,7 @@ func TestQueue_Worker_MissingHandlerFails(t *testing.T) {
 				return
 			}
 		}
-		time.Sleep(20 * time.Millisecond)
+		core.Sleep(20 * core.Millisecond)
 	}
 	t.Fatalf("missing handler should mark job failed")
 }

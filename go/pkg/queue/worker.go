@@ -28,7 +28,7 @@ import (
 // runWorker is the loop body. Exits when c.Context() cancels —
 // Core's ServiceShutdown cancels the context before draining
 // services, which is the queue's "stop now" signal.
-func runWorker(c *core.Core, interval time.Duration) {
+func runWorker(c *core.Core, interval core.Duration) {
 	if c == nil {
 		return
 	}
@@ -82,7 +82,7 @@ func processOne(c *core.Core) bool {
 //   rows-affected) which orm.DuckDBMedium can support via the
 //   ON CONFLICT clause if needed later.
 func claimNext(c *core.Core) (Job, bool) {
-	now := time.Now().UTC()
+	now := core.Now().UTC()
 	// Memium's predicate engine doesn't honour `<=` on time
 	// fields cleanly, so filter ScheduledFor in Go after fetching
 	// pending jobs. Bounded by Limit(64) so the in-memory filter
@@ -133,7 +133,7 @@ func claimNext(c *core.Core) (Job, bool) {
 // case the recovery layer changes.
 func dispatch(c *core.Core, job Job) {
 	action := c.Action(ActionName(job.Kind))
-	now := time.Now().UTC()
+	now := core.Now().UTC()
 
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -147,14 +147,14 @@ func dispatch(c *core.Core, job Job) {
 	}
 	result := action.Run(c.Context(), decodeOptions(job.Payload))
 	if !result.OK {
-		markFailed(c, job, result.Error(), time.Now().UTC())
+		markFailed(c, job, result.Error(), core.Now().UTC())
 		return
 	}
-	markDone(c, job, time.Now().UTC())
+	markDone(c, job, core.Now().UTC())
 }
 
 // markDone transitions a job from running → done.
-func markDone(c *core.Core, job Job, at time.Time) {
+func markDone(c *core.Core, job Job, at core.Time) {
 	before := job
 	job.Status = StatusDone
 	job.CompletedAt = at
@@ -174,7 +174,7 @@ func markDone(c *core.Core, job Job, at time.Time) {
 // markFailed transitions a job from running → failed with the
 // stringified error. v1 has no automatic retry; failed jobs stay
 // failed until manually re-enqueued. Retry policy is a v2 polish.
-func markFailed(c *core.Core, job Job, errMsg string, at time.Time) {
+func markFailed(c *core.Core, job Job, errMsg string, at core.Time) {
 	before := job
 	job.Status = StatusFailed
 	job.CompletedAt = at

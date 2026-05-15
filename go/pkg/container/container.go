@@ -15,7 +15,6 @@
 package container
 
 import (
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/go/process"
@@ -94,7 +93,7 @@ func (s *Service) quickVersion(cmd, flag string) string {
 	if ps == nil {
 		return ""
 	}
-	ctx, cancel := core.WithTimeout(core.Background(), 2*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 2*core.Second)
 	defer cancel()
 	r := ps.Run(ctx, cmd, flag)
 	if !r.OK {
@@ -171,7 +170,7 @@ func (s *Service) listDocker(ctx core.Context) []Container {
 	if ps == nil {
 		return nil
 	}
-	c, cancel := core.WithTimeout(ctx, 3*time.Second)
+	c, cancel := core.WithTimeout(ctx, 3*core.Second)
 	defer cancel()
 	r := ps.Run(c, "docker", "ps", "--format", "{{json .}}", "--no-trunc")
 	if !r.OK {
@@ -211,7 +210,7 @@ func (s *Service) listPodman(ctx core.Context) []Container {
 	if ps == nil {
 		return nil
 	}
-	c, cancel := core.WithTimeout(ctx, 3*time.Second)
+	c, cancel := core.WithTimeout(ctx, 3*core.Second)
 	defer cancel()
 	r := ps.Run(c, "podman", "ps", "--format", "json")
 	if !r.OK {

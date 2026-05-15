@@ -7,7 +7,6 @@
 package lint
 
 import (
-	"time"
 
 	core "dappco.re/go"
 )
@@ -71,9 +70,9 @@ func (s *Service) Run(path, severity, lang string) core.Result {
 	if lang != "" {
 		args = append(args, "--lang", lang)
 	}
-	start := time.Now()
+	start := core.Now()
 	outR := s.runLint(binary, args...)
-	dur := time.Since(start).Milliseconds()
+	dur := core.Since(start).Milliseconds()
 	if !outR.OK {
 		return outR
 	}

@@ -5,7 +5,6 @@ package tasks_test
 import (
 	"sync"
 	"testing"
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -191,7 +190,7 @@ func TestEvents_MultipleSubscribers(t *testing.T) {
 	}
 	// Allow microscopic time for any goroutine fan-out (Core's
 	// broadcast is sync today but defensive).
-	time.Sleep(5 * time.Millisecond)
+	core.Sleep(5 * core.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()

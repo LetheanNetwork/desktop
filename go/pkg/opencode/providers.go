@@ -16,7 +16,6 @@ package opencode
 import (
 	goio "io"
 	"net/http"
-	"time"
 
 	core "dappco.re/go"
 )
@@ -81,7 +80,7 @@ func (s *Service) callOpenCode(method, url string, body goio.Reader) (string, in
 		return "", 0, err
 	}
 	s.applyAuth(req)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 10 * core.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", 0, err

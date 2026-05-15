@@ -8,7 +8,6 @@
 package queue
 
 import (
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -28,7 +27,7 @@ type EnqueueOptions struct {
 	// run as soon as the worker picks it up. Future =
 	// the worker skips until time arrives. (#368 Schedule helper
 	// wraps this for cleaner API.)
-	ScheduledFor time.Time
+	ScheduledFor core.Time
 
 	// Project + IssueID optionally link the job to a tasks.Issue
 	// for cascade traceability ("which Issue is this work for?").
@@ -61,7 +60,7 @@ func EnqueueWithOptions(c *core.Core, kind string, opts EnqueueOptions) core.Res
 	if kind == "" {
 		return core.Fail(core.E("queue.Enqueue", "kind is required", nil))
 	}
-	now := time.Now().UTC()
+	now := core.Now().UTC()
 	scheduled := opts.ScheduledFor
 	if scheduled.IsZero() {
 		scheduled = now
@@ -114,7 +113,7 @@ func Cancel(c *core.Core, id string) core.Result {
 	}
 	before := job
 	job.Status = StatusCancelled
-	job.CompletedAt = time.Now().UTC()
+	job.CompletedAt = core.Now().UTC()
 	if r := orm.Save(c, &job); !r.OK {
 		return r
 	}
@@ -185,7 +184,7 @@ func newJobID() string {
 	if !r.OK {
 		// Fallback: nanosecond timestamp — sortable, unique enough
 		// for rare crypto/rand failure paths.
-		return core.Sprintf("j-%d", time.Now().UnixNano())
+		return core.Sprintf("j-%d", core.Now().UnixNano())
 	}
 	return "j-" + r.Value.(string)
 }

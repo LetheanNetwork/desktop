@@ -21,7 +21,6 @@
 package bridge
 
 import (
-	"time"
 
 	core "dappco.re/go"
 	guiscreen "dappco.re/go/gui/pkg/screen"
@@ -44,7 +43,7 @@ type WindowState struct {
 // Layout is the serialised shape of a saved layout file.
 type Layout struct {
 	Name    string        `json:"name"`
-	SavedAt time.Time     `json:"saved_at"`
+	SavedAt core.Time     `json:"saved_at"`
 	Windows []WindowState `json:"windows"`
 }
 
@@ -85,7 +84,7 @@ func (s *Service) captureLayout(name string) (*Layout, map[string]any) {
 	}
 	return &Layout{
 		Name:    name,
-		SavedAt: time.Now(),
+		SavedAt: core.Now(),
 		Windows: out,
 	}, nil
 }

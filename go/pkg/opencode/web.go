@@ -22,7 +22,6 @@ package opencode
 
 import (
 	"net/url"
-	"time"
 
 	core "dappco.re/go"
 )
@@ -102,7 +101,7 @@ func (s *Service) OpenWebWindow(id string) core.Result {
 	// service. In serve mode it isn't registered, and Action.Run
 	// returns a Fail with "action not found" — surface as a clear
 	// error so the caller knows to fall back to system browser.
-	ctx, cancel := core.WithTimeout(core.Background(), 5*time.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), 5*core.Second)
 	defer cancel()
 
 	// Build the TaskOpenWindow payload as a typed map so we don't

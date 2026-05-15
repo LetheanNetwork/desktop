@@ -32,8 +32,7 @@
 package queue
 
 import (
-	"time"
-
+	core "dappco.re/go"
 	"dappco.re/go/orm"
 )
 
@@ -60,10 +59,10 @@ type Job struct {
 	Status string
 
 	// ScheduledFor is when the job becomes eligible to run. Set to
-	// time.Now() for immediate execution; future for deferred work.
+	// core.Now() for immediate execution; future for deferred work.
 	// The worker's WHERE clause filters out jobs scheduled for the
 	// future. (Schedule(at, fn) helper lands in #368.)
-	ScheduledFor time.Time
+	ScheduledFor core.Time
 
 	// Attempts increments each time the worker dispatches the job.
 	// Failed jobs that should retry get Status reset to pending +
@@ -82,13 +81,13 @@ type Job struct {
 	IssueID string
 
 	// EnqueuedAt is when the job was created.
-	EnqueuedAt time.Time
+	EnqueuedAt core.Time
 
 	// StartedAt + CompletedAt are the worker's claim/release
 	// timestamps. Zero when the job hasn't reached that lifecycle
 	// moment yet.
-	StartedAt   time.Time
-	CompletedAt time.Time
+	StartedAt   core.Time
+	CompletedAt core.Time
 }
 
 // Schema declares the orm shape for Job. Registered in

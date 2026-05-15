@@ -29,7 +29,6 @@ import (
 	"iter"
 	"net/http"
 	"sync"
-	"time"
 
 	core "dappco.re/go"
 	"dappco.re/go/ai/ai"
@@ -92,10 +91,10 @@ func (m *Model) Generate(ctx core.Context, prompt string, opts ...inference.Gene
 // /session/:id/event SSE shape is wired through.
 func (m *Model) Chat(ctx core.Context, messages []inference.Message, _ ...inference.GenerateOption) iter.Seq[inference.Token] {
 	return func(yield func(inference.Token) bool) {
-		start := time.Now()
+		start := core.Now()
 		text, err := m.invoke(ctx, messages)
 		m.setResult(inference.GenerateMetrics{
-			TotalDuration: time.Since(start),
+			TotalDuration: core.Since(start),
 		}, err)
 		if err != nil || text == "" {
 			return

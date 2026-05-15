@@ -9,7 +9,6 @@
 package queue
 
 import (
-	"time"
 
 	core "dappco.re/go"
 )
@@ -19,7 +18,7 @@ type Options struct {
 	// PollInterval is how often the worker scans for ready jobs.
 	// Smaller = lower latency from Enqueue → execution; larger =
 	// fewer wakeups when the queue is idle. Default 1s.
-	PollInterval time.Duration
+	PollInterval core.Duration
 }
 
 // Service runs the queue worker loop. Embeds *core.ServiceRuntime[Options]
@@ -34,12 +33,12 @@ type Service struct {
 // Usage example:
 //
 //	core.WithName("queue", queue.NewService(queue.Options{
-//	    PollInterval: time.Second,
+//	    PollInterval: core.Second,
 //	}))
 func NewService(opts Options) func(*core.Core) core.Result {
 	return func(c *core.Core) core.Result {
 		if opts.PollInterval <= 0 {
-			opts.PollInterval = time.Second
+			opts.PollInterval = core.Second
 		}
 		svc := &Service{
 			ServiceRuntime: core.NewServiceRuntime(c, opts),
