@@ -32,6 +32,8 @@
 package gateway
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 
 	core "dappco.re/go"
@@ -46,6 +48,20 @@ import (
 // every gateway request; an absent header returns 401 before any
 // permission check runs.
 const headerBundleID = "Bundle-ID"
+
+// maxGatewayBodyBytes is the upper bound on a single incoming plugin
+// request body. Cerberus Mantis #1435 — without this, a plugin
+// could submit a 10 GiB POST body, ReadAll'd by a scope handler,
+// to OOM the host. 4 MiB is generous (manifest-sized data + room
+// for batched RAG payloads); scope handlers that need bigger bodies
+// declare their cap via a future per-scope override.
+//
+// The net/http import here is permitted (covered by AX phase 5/5b
+// migrations — gateway is the API boundary, http.MaxBytesReader is
+// the canonical primitive). core.MaxBytesReader would be the
+// preferred CoreGO wrap; tracking as project_corego_export_gaps.md
+// Gap 6 if it becomes a pattern.
+const maxGatewayBodyBytes = 4 << 20 // 4 MiB
 
 // scopeKey composes Scope:Mode for the in-memory handler registry.
 // The same handler can serve multiple modes (e.g. project.metadata:
@@ -208,6 +224,13 @@ func (g *gatewayRoutes) RegisterRoutes(rg *gin.RouterGroup) {
 // Schema validation lives inside each scope's Handler so per-scope
 // shapes don't bleed up here; the gateway just routes.
 func (s *Service) Handle(ctx *gin.Context) {
+	// Cerberus #1435 — body-cap before scope handlers read. Wraps
+	// the request body in MaxBytesReader; any scope handler that
+	// does ShouldBindJSON / ReadAll / etc. on this body will get
+	// an error past the cap. Stops OOM-by-large-payload attacks
+	// at the boundary, regardless of which handler is dispatched.
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxGatewayBodyBytes)
+
 	bundleID := ctx.GetHeader(headerBundleID)
 	if bundleID == "" {
 		writeError(ctx, core.StatusUnauthorized, "missing-bundle-id",
