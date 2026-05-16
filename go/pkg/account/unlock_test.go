@@ -8,10 +8,15 @@
 package account_test
 
 import (
+	"bytes"
+	"testing"
+
 	core "dappco.re/go"
 	subject "dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/serverkey"
 	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
+	"github.com/ProtonMail/go-crypto/openpgp"
+	"github.com/ProtonMail/go-crypto/openpgp/packet"
 )
 
 // fixtureAccountID is the canonical id used by every unlock fixture
@@ -257,15 +262,25 @@ func TestUnlock_CorruptedKeyBytewiseDistinguishing_Ugly(t *core.T) {
 	// §4.2 packet-tag canary; garbage first byte → re-classify
 	// as bad_passphrase.
 	//
-	// This sub-case exercises 100 independent wrong-passphrase ×
+	// This sub-case exercises N independent wrong-passphrase ×
 	// fresh-ciphertext pairs. Pre-fix, ~5% mis-classified as
 	// corrupted_key (intermittent test failure). Post-fix, the
 	// combined cipherFunc-validity gate (openpgp's ~95% filter) +
-	// our packet-tag-bit canary (additional ~50% per byte) drives
-	// the residual to vanishing — the test pins zero corrupted_key
-	// classifications across 100 iterations.
+	// our multi-byte packet-parse canary (packet.Read rejects
+	// random bytes ~always) drives the residual to vanishing.
+	//
+	// Iteration count is 1000 by default to statistically pin the
+	// residual false-allow rate against random S2K-salt rotation
+	// (Cerberus verify follow-up on commit 2128119). Each iter
+	// burns an RSA-2048 keygen + S2K (~120ms wallclock), so the
+	// full sub-case is ~2 minutes — gated behind `testing.Short()`
+	// at 50 iter to keep `go test -short` fast.
+	flakeIters := 1000
+	if testing.Short() {
+		flakeIters = 50
+	}
 	corruptedKeyHits := 0
-	for i := 0; i < 100; i++ {
+	for i := 0; i < flakeIters; i++ {
 		// Fresh account + fresh ciphertext each iteration — the
 		// flake is per-(passphrase, S2K-salt, body-ciphertext)
 		// triple, so a single fixture reused across iterations
@@ -284,7 +299,105 @@ func TestUnlock_CorruptedKeyBytewiseDistinguishing_Ugly(t *core.T) {
 		}
 	}
 	core.AssertTrue(t, corruptedKeyHits == 0,
-		core.Sprintf("sub-case 5 (Mantis #1510 flake-pin) — wrong-passphrase × intact-ciphertext MUST classify as bad_passphrase across all 100 iterations; got %d corrupted_key mis-classifications", corruptedKeyHits))
+		core.Sprintf("sub-case 5 (Mantis #1510 flake-pin) — wrong-passphrase × intact-ciphertext MUST classify as bad_passphrase across all %d iterations; got %d corrupted_key mis-classifications", flakeIters, corruptedKeyHits))
+
+	// Sub-case 6 — zero-length LiteralData body, WRONG passphrase.
+	// Cerberus verify follow-up shape-coverage: an attacker who
+	// somehow forges (or a degenerate sealer who emits) a
+	// ciphertext whose inner LiteralData carries no payload bytes
+	// MUST NOT slip past the distinguisher with a misleading code.
+	// The on-disk shape here was built by symmetric-encrypting an
+	// EMPTY plaintext with the CORRECT fixture passphrase; the
+	// unlock attempt uses the WRONG passphrase, so the openpgp
+	// FindKey loop either rejects at SKE (→ bad_passphrase via the
+	// prompt sentinel) OR clears the cipherFunc gate and produces
+	// garbage inner bytes that packet.Read rejects (→ canary fires
+	// → bad_passphrase). Deterministic outcome: bad_passphrase.
+	idEmpty := "6666666666666666"
+	pgpEmpty := pgp.NewService()
+	emptyCT, err := pgpEmpty.SymmetricallyEncrypt([]byte(fixturePassphrase), []byte{})
+	core.AssertTrue(t, err == nil, "symmetric-encrypt of empty plaintext must succeed")
+	core.AssertTrue(t, len(emptyCT) > 16, "even empty plaintext produces non-trivial SKE+SEIPD envelope")
+	writeRawAccount(t, home, idEmpty, emptyCT)
+	r6 := svc.Unlock(subject.UnlockInput{AccountID: idEmpty, Passphrase: fixtureWrongPassphrase})
+	core.AssertFalse(t, r6.OK, "sub-case 6 — wrong passphrase against zero-length-body ciphertext MUST fail")
+	core.AssertEqual(t, "account.unlock.bad_passphrase", r6.Code(),
+		"sub-case 6 — zero-length LiteralData body + WRONG passphrase MUST classify as bad_passphrase (canary fires either at SKE or at inner packet.Read)")
+
+	// Sub-case 7 — raw legacy EncryptedDataPacket (packet tag 9,
+	// no SEIPD MDC, no AEAD). The ProtonMail go-crypto public
+	// SerializeSymmetricallyEncrypted always emits tag 18 (SEIPD)
+	// and offers no public constructor for the legacy tag-9 shape.
+	// Hand-crafting the packet header requires reaching into
+	// private openpgp bytes — out of scope for a test-only widening
+	// dispatch. The shape is captured here as a t.Skip so the gap
+	// is visible in test output + tracked, not silently absent.
+	//
+	// Surface gap: openpgp/packet exports no public helper to write
+	// a tag-9 SymmetricallyEncrypted without IntegrityProtected.
+	// Tracked as production-side investigation — defence-in-depth
+	// for the SE-switch case `*packet.SymmetricallyEncrypted` in
+	// classifyPostPromptError is currently unproven against the
+	// legacy non-MDC shape.
+	t.Run("sub_case_7_raw_edp_no_seipd", func(t *core.T) {
+		t.Skip("raw tag-9 EncryptedDataPacket construction requires private openpgp API; SE-switch defence-in-depth coverage tracked as separate widening ticket")
+	})
+
+	// Sub-case 8 — AEAD-shape ciphertext (SEIPDv2 / AEADEncrypted)
+	// with WRONG passphrase. This exercises the SE-switch's
+	// `*packet.AEADEncrypted` branch in classifyPostPromptError.
+	// Lethean Provision does NOT emit this shape today, but the
+	// unlock path must handle it gracefully if it ever lands (e.g.
+	// a future Provision modernisation, or a hand-rolled key file
+	// from an interoperable PGP impl).
+	//
+	// AEAD with WRONG passphrase: the AEAD construction MACs the
+	// session-key derivation, so a wrong S2K key yields an AEAD
+	// MAC failure at SKE-decrypt time. classifyPostPromptError's
+	// SKE-level `return true` path catches it → bad_passphrase.
+	idAEAD := "8888888888888888"
+	pgpAEAD := pgp.NewService()
+	aeadCfg := &packet.Config{
+		AEADConfig: &packet.AEADConfig{},
+	}
+	aeadCT, err := encryptAEAD(pgpAEAD, []byte(fixturePassphrase), aeadCfg)
+	if err != nil {
+		t.Skip("AEAD-shape ciphertext construction failed — go-crypto build may not support AEAD: " + err.Error())
+	}
+	core.AssertTrue(t, len(aeadCT) > 32, "AEAD envelope must be non-trivial")
+	writeRawAccount(t, home, idAEAD, aeadCT)
+	r8 := svc.Unlock(subject.UnlockInput{AccountID: idAEAD, Passphrase: fixtureWrongPassphrase})
+	core.AssertFalse(t, r8.OK, "sub-case 8 — wrong passphrase against AEAD ciphertext MUST fail")
+	core.AssertEqual(t, "account.unlock.bad_passphrase", r8.Code(),
+		"sub-case 8 — AEAD ciphertext + WRONG passphrase MUST classify as bad_passphrase (AEAD MAC fails fast on wrong derived key)")
+}
+
+// encryptAEAD wraps openpgp.SymmetricallyEncrypt with an AEAD-shaped
+// packet.Config so sub-case 8 can construct a SEIPDv2 ciphertext
+// without going through pgp.Service (which deliberately keeps its
+// public surface MDC-only). Returns the serialised envelope bytes
+// suitable for writeRawAccount.
+//
+// Usage:
+//
+//	ct, err := encryptAEAD(pgp.NewService(), []byte("pw"), &packet.Config{AEADConfig: &packet.AEADConfig{}})
+func encryptAEAD(_ *pgp.Service, passphrase []byte, cfg *packet.Config) ([]byte, error) {
+	var buf bytes.Buffer
+	w, err := openpgp.SymmetricallyEncrypt(&buf, passphrase, nil, cfg)
+	if err != nil {
+		return nil, err
+	}
+	// Write a small fixed payload so the inner LiteralData has a
+	// real body; the test only cares about the SKE+SE envelope
+	// shape, not the plaintext content.
+	if _, err := w.Write([]byte("aead-fixture-payload")); err != nil {
+		_ = w.Close()
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // --- Unlock — Ugly: per-account lockout (M1) ---
