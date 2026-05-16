@@ -368,21 +368,25 @@ func loadOne(id string) (DealRecord, error) {
 // Cerberus #1486: the record ID lands directly in the filename so
 // IsValidID guards it even though Create generates the ID via Sprintf.
 //
-// Stale writes wrap the paths.VersionStale envelope as the typed
-// "deals.update.conflict" cause; recoverable via
-// paths.VersionStaleFromError on the returned error.
+// Return shape (Mantis #1544, gating W2): on the stale-write path
+// the function returns core.Fail(paths.ConflictEnvelope{...}) so the
+// Wails-marshalled Result.Value carries the lowercase-json shape
+// (`{code, current_version, current_hash}`) that conflict-dispatch.ts
+// extractEnvelope already pattern-matches on. Non-conflict failures
+// propagate via core.Fail(core.E(...)) so audit + diagnostic detail
+// reach the caller unchanged.
 //
 // Audit emission is automatic via paths.AuditModeForPath — sales/deals/*
 // routes through AuditModeBatch per RFC §6.1.
 //
 // Usage example:
 //
-//	if err := writeRecord(rec, dir, prior.Version); err != nil {
-//	    return core.Fail(core.E("deals.UpdateStage", "write", err))
+//	if wr := writeRecord(rec, dir, prior.Version); !wr.OK {
+//	    return wr
 //	}
-func writeRecord(r DealRecord, dir string, ifVersion int) error {
+func writeRecord(r DealRecord, dir string, ifVersion int) core.Result {
 	if err := paths.IsValidID(r.ID); err != nil {
-		return err
+		return core.Fail(err)
 	}
 	// Stamp the next monotonic version. ifVersion=0 (Create / legacy
 	// upgrade) yields version=1; subsequent updates increment.
@@ -392,7 +396,7 @@ func writeRecord(r DealRecord, dir string, ifVersion int) error {
 	}
 	raw, err := marshalRecord(r)
 	if err != nil {
-		return err
+		return core.Fail(err)
 	}
 	target := core.PathJoin(dir, r.ID+".md")
 	res := paths.AtomicWriteWithVersion(target, paths.WriteInput{
@@ -400,23 +404,13 @@ func writeRecord(r DealRecord, dir string, ifVersion int) error {
 		IfVersion: ifVersion,
 	})
 	if res.OK {
-		return nil
+		return res
 	}
-	if core.Contains(res.Error(), paths.CodeVersionStale) {
-		return core.E("deals.writeRecord", "deals.update.conflict",
-			versionStaleAsError(res.Value))
+	if stale, ok := paths.VersionStaleFromError(res.Value); ok {
+		return core.Fail(paths.NewConflictEnvelope(
+			"deals.update.conflict", stale))
 	}
-	return core.E("deals.writeRecord", res.Error(), nil)
-}
-
-// versionStaleAsError surfaces the typed paths.VersionStale envelope as
-// an error whose Error() reports "deals.update.conflict". The envelope
-// stays accessible via paths.VersionStaleFromError on the returned cause.
-func versionStaleAsError(v any) error {
-	if e, ok := v.(error); ok {
-		return e
-	}
-	return core.NewCode("deals.update.conflict", "version_stale")
+	return core.Fail(core.E("deals.writeRecord", res.Error(), nil))
 }
 
 // fireEvent publishes a deal event on the Core ACTION bus.

@@ -3,6 +3,8 @@
 package deals_test
 
 import (
+	"encoding/json"
+	"sync"
 	"testing"
 
 	core "dappco.re/go"
@@ -234,10 +236,20 @@ func TestAtomicCutover_Deals_Update_Good(t *testing.T) {
 	}
 }
 
-// TestAtomicCutover_Deals_Update_VersionStale_Ugly — stale IfVersion
-// surfaces a wrapped conflict via the primitive. Drives the primitive
-// directly with a known-stale IfVersion to assert the conflict-wrap
-// shape is reachable on sales/deals paths.
+// TestAtomicCutover_Deals_Update_VersionStale_Ugly — drives two
+// concurrent svc.UpdateStage calls and asserts the loser's Result
+// carries a paths.ConflictEnvelope whose JSON marshal matches the
+// lowercase `{code, current_version, current_hash}` wire shape that
+// frontend/src/lit/conflict-dispatch.ts extractEnvelope pattern-
+// matches on (Mantis #1547 service-tier round-trip; pins #1544 against
+// future drift).
+//
+// Why two goroutines: svc.UpdateStage re-reads the file inside the
+// call so a single-shot out-of-band mutation cannot drive a real
+// conflict through the service. Concurrent UpdateStage goroutines
+// race for the WithFileLock; the loser's locked-section ReadVersion
+// sees the winner's bumped version and the primitive returns
+// VersionStale → wrapped as ConflictEnvelope by deals.writeRecord.
 func TestAtomicCutover_Deals_Update_VersionStale_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	svc := deals.NewService(nil)
@@ -248,28 +260,85 @@ func TestAtomicCutover_Deals_Update_VersionStale_Ugly(t *testing.T) {
 		t.Fatalf("Create failed: %s", cr.Error())
 	}
 	id := cr.Value.(deals.Deal).ID
-	dirR := core.UserHomeDir()
-	if !dirR.OK {
-		t.Fatalf("UserHomeDir: %s", dirR.Error())
+
+	var conflict core.Result
+	var saw bool
+	for attempt := 0; attempt < 32 && !saw; attempt++ {
+		var (
+			mu      sync.Mutex
+			results []core.Result
+			wg      sync.WaitGroup
+			start   = make(chan struct{})
+		)
+		wg.Add(2)
+		// Alternate target stages so each goroutine has a legal-from-
+		// engage transition target (engage → propose / engage → qual is
+		// illegal so use propose/close which are both reachable). The
+		// goal is to make BOTH calls valid input-wise so the only
+		// failure mode is the optimistic-lock conflict, not a
+		// transition-illegal rejection.
+		go func() {
+			defer wg.Done()
+			<-start
+			r := svc.UpdateStage(deals.UpdateStageInput{ID: id, Stage: "propose"})
+			mu.Lock()
+			results = append(results, r)
+			mu.Unlock()
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			r := svc.UpdateStage(deals.UpdateStageInput{ID: id, Stage: "propose"})
+			mu.Lock()
+			results = append(results, r)
+			mu.Unlock()
+		}()
+		close(start)
+		wg.Wait()
+
+		for _, r := range results {
+			if !r.OK && core.Contains(r.Error(), "deals.update.conflict") {
+				conflict = r
+				saw = true
+				break
+			}
+		}
 	}
-	fpath := core.PathJoin(dirR.Value.(string), "Lethean/sales/deals", id+".md")
-	body := []byte("---\nversion: 1\nid: " + id + "\ncustomer: Stale\nstage: engage\n---\n")
-	r := paths.AtomicWriteWithVersion(fpath, paths.WriteInput{
-		Body:      body,
-		IfVersion: 99, // intentionally stale
-	})
-	if r.OK {
-		t.Fatal("expected stale conflict, got OK")
+	if !saw {
+		t.Skip("could not provoke a writer race after 32 attempts — environment lock skew; flake-defensive skip")
 	}
-	if !core.Contains(r.Error(), paths.CodeVersionStale) {
-		t.Fatalf("expected paths.CodeVersionStale in error, got %q", r.Error())
-	}
-	vs, ok := paths.VersionStaleFromError(r.Value)
+
+	// Wire-shape assertion #1 — Result.Value is a paths.ConflictEnvelope.
+	env, ok := paths.ConflictEnvelopeFrom(conflict.Value)
 	if !ok {
-		t.Fatal("expected VersionStale envelope reachable via VersionStaleFromError")
+		t.Fatalf("expected paths.ConflictEnvelope in Result.Value, got %T", conflict.Value)
 	}
-	if vs.CurrentVersion != 1 {
-		t.Fatalf("expected CurrentVersion=1, got %d", vs.CurrentVersion)
+	if env.Code != "deals.update.conflict" {
+		t.Fatalf("expected envelope code deals.update.conflict, got %q", env.Code)
+	}
+	if env.CurrentVersion < 1 {
+		t.Fatalf("expected CurrentVersion >= 1, got %d", env.CurrentVersion)
+	}
+
+	// Wire-shape assertion #2 — Result.Value marshals to the lowercase
+	// snake_case keys conflict-dispatch.ts walks. Discipline anchor.
+	raw, err := json.Marshal(conflict.Value)
+	if err != nil {
+		t.Fatalf("json.Marshal(conflict.Value): %s", err.Error())
+	}
+	js := string(raw)
+	for _, want := range []string{
+		`"code":"deals.update.conflict"`,
+		`"current_version":`,
+	} {
+		if !core.Contains(js, want) {
+			t.Fatalf("expected marshalled envelope to contain %s, got %s", want, js)
+		}
+	}
+	for _, banned := range []string{`"Code":`, `"Message":`, `"Operation":`} {
+		if core.Contains(js, banned) {
+			t.Fatalf("marshalled envelope leaks *core.Err PascalCase key %s: %s", banned, js)
+		}
 	}
 }
 

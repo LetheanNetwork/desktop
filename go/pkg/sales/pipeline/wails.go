@@ -153,11 +153,14 @@ func (s *Service) MoveDeal(input MoveInput) core.Result {
 	// Persist + fire the typed event. writeDealStage re-reads the
 	// frontmatter to mutate-in-place; we already have the prior
 	// fromStage so the returned value is redundant but kept for
-	// signature symmetry.
-	if _, err := writeDealStage(input.DealID, input.ToStage); err != nil {
+	// signature symmetry. The conflict-path returns
+	// core.Fail(paths.ConflictEnvelope{...}) directly so the
+	// Wails-marshalled Value carries the lowercase-json shape
+	// conflict-dispatch.ts expects (Mantis #1544 gating W2).
+	if _, wr := writeDealStage(input.DealID, input.ToStage); !wr.OK {
 		s.auditMoveAttempt(input.DealID, fromStage, input.ToStage,
-			"write_failed", err.Error())
-		return core.Fail(core.E("pipeline.MoveDeal", "write stage", err))
+			"write_failed", wr.Error())
+		return wr
 	}
 
 	s.fireMove(input.DealID, fromStage, input.ToStage)

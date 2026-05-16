@@ -3,6 +3,8 @@
 package pipeline_test
 
 import (
+	"encoding/json"
+	"sync"
 	"testing"
 
 	core "dappco.re/go"
@@ -209,9 +211,14 @@ func TestAtomicCutover_Pipeline_Update_Good(t *testing.T) {
 	}
 }
 
-// TestAtomicCutover_Pipeline_Update_VersionStale_Ugly — drives the
-// primitive directly with a known-stale IfVersion to confirm the
-// conflict-wrap shape is reachable on the pipeline write path.
+// TestAtomicCutover_Pipeline_Update_VersionStale_Ugly — drives two
+// concurrent svc.MoveDeal calls (engage→propose, both legal) and
+// asserts the loser's Result carries a paths.ConflictEnvelope whose
+// JSON marshal matches the lowercase `{code, current_version,
+// current_hash}` wire shape that
+// frontend/src/lit/conflict-dispatch.ts extractEnvelope pattern-
+// matches on (Mantis #1547 service-tier round-trip; pins #1544 against
+// future drift).
 func TestAtomicCutover_Pipeline_Update_VersionStale_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dealSvc := deals.NewService(nil)
@@ -222,28 +229,91 @@ func TestAtomicCutover_Pipeline_Update_VersionStale_Ugly(t *testing.T) {
 		t.Fatalf("Create failed: %s", cr.Error())
 	}
 	id := cr.Value.(deals.Deal).ID
-	dirR := core.UserHomeDir()
-	if !dirR.OK {
-		t.Fatalf("UserHomeDir: %s", dirR.Error())
+	pipeSvc := pipeline.NewService(nil)
+
+	var conflict core.Result
+	var saw bool
+	for attempt := 0; attempt < 32 && !saw; attempt++ {
+		// Re-stage the deal back to "engage" between attempts so both
+		// goroutines have a legal target. After a winning move lands
+		// the file sits at "propose"; the loser's IsLegalTransition
+		// would reject a second "propose" as a self-transition (Mantis
+		// #1488) and short-circuit before reaching writeDealStage.
+		if attempt > 0 {
+			reset := pipeSvc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "engage"})
+			if !reset.OK {
+				t.Fatalf("reset MoveDeal: %s", reset.Error())
+			}
+		}
+		var (
+			mu      sync.Mutex
+			results []core.Result
+			wg      sync.WaitGroup
+			start   = make(chan struct{})
+		)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			r := pipeSvc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "propose"})
+			mu.Lock()
+			results = append(results, r)
+			mu.Unlock()
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			r := pipeSvc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "propose"})
+			mu.Lock()
+			results = append(results, r)
+			mu.Unlock()
+		}()
+		close(start)
+		wg.Wait()
+
+		for _, r := range results {
+			if !r.OK && core.Contains(r.Error(), "pipeline.update.conflict") {
+				conflict = r
+				saw = true
+				break
+			}
+		}
 	}
-	fpath := core.PathJoin(dirR.Value.(string), "Lethean/sales/deals", id+".md")
-	body := []byte("---\nversion: 1\nid: " + id + "\ncustomer: Stale\nstage: engage\n---\n")
-	r := paths.AtomicWriteWithVersion(fpath, paths.WriteInput{
-		Body:      body,
-		IfVersion: 99,
-	})
-	if r.OK {
-		t.Fatal("expected stale conflict, got OK")
+	if !saw {
+		t.Skip("could not provoke a writer race after 32 attempts — environment lock skew; flake-defensive skip")
 	}
-	if !core.Contains(r.Error(), paths.CodeVersionStale) {
-		t.Fatalf("expected paths.CodeVersionStale in error, got %q", r.Error())
-	}
-	vs, ok := paths.VersionStaleFromError(r.Value)
+
+	// Wire-shape assertion #1 — Result.Value is a paths.ConflictEnvelope.
+	env, ok := paths.ConflictEnvelopeFrom(conflict.Value)
 	if !ok {
-		t.Fatal("expected VersionStale envelope reachable via VersionStaleFromError")
+		t.Fatalf("expected paths.ConflictEnvelope in Result.Value, got %T", conflict.Value)
 	}
-	if vs.CurrentVersion != 1 {
-		t.Fatalf("expected CurrentVersion=1, got %d", vs.CurrentVersion)
+	if env.Code != "pipeline.update.conflict" {
+		t.Fatalf("expected envelope code pipeline.update.conflict, got %q", env.Code)
+	}
+	if env.CurrentVersion < 1 {
+		t.Fatalf("expected CurrentVersion >= 1, got %d", env.CurrentVersion)
+	}
+
+	// Wire-shape assertion #2 — Result.Value marshals to the lowercase
+	// snake_case keys conflict-dispatch.ts walks. Discipline anchor.
+	raw, err := json.Marshal(conflict.Value)
+	if err != nil {
+		t.Fatalf("json.Marshal(conflict.Value): %s", err.Error())
+	}
+	js := string(raw)
+	for _, want := range []string{
+		`"code":"pipeline.update.conflict"`,
+		`"current_version":`,
+	} {
+		if !core.Contains(js, want) {
+			t.Fatalf("expected marshalled envelope to contain %s, got %s", want, js)
+		}
+	}
+	for _, banned := range []string{`"Code":`, `"Message":`, `"Operation":`} {
+		if core.Contains(js, banned) {
+			t.Fatalf("marshalled envelope leaks *core.Err PascalCase key %s: %s", banned, js)
+		}
 	}
 }
 

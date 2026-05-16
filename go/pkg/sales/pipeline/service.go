@@ -183,7 +183,7 @@ func loadDeals() ([]dealFrontmatter, error) {
 // writeDealStage reads the deal file, mutates the stage frontmatter
 // field, bumps the version, and writes it back via
 // paths.AtomicWriteWithVersion (Cascade W1, Mantis #1540). Returns the
-// previous stage.
+// previous stage paired with a core.Result.
 //
 // The deal file is shared with pkg/sales/deals — both writers MUST
 // route through paths.AtomicWriteWithVersion + the version frontmatter
@@ -192,9 +192,11 @@ func loadDeals() ([]dealFrontmatter, error) {
 // under lock-friendly semantics), increments the version, edits the
 // stage line in place, and writes back gated on IfVersion=priorVersion.
 //
-// Stale writes wrap the paths.VersionStale envelope as
-// "pipeline.update.conflict" preserving the structured payload
-// accessible via paths.VersionStaleFromError. Legacy files without a
+// Return shape (Mantis #1544, gating W2): on the stale-write path
+// the function returns core.Fail(paths.ConflictEnvelope{...}) so the
+// Wails-marshalled Result.Value carries the lowercase-json shape
+// (`{code, current_version, current_hash}`) that conflict-dispatch.ts
+// extractEnvelope already pattern-matches on. Legacy files without a
 // version frontmatter field read as 0 and upgrade via an unconditional
 // first-write that stamps version=1.
 //
@@ -203,29 +205,29 @@ func loadDeals() ([]dealFrontmatter, error) {
 //
 // Audit emission is automatic via paths.AuditModeForPath — sales/deals/*
 // routes through AuditModeBatch per RFC §6.1.
-func writeDealStage(id, toStage string) (fromStage string, err error) {
+func writeDealStage(id, toStage string) (fromStage string, result core.Result) {
 	if vErr := paths.IsValidID(id); vErr != nil {
-		return "", vErr
+		return "", core.Fail(vErr)
 	}
 	dirR := dealsDir()
 	if !dirR.OK {
-		return "", core.E("pipeline.writeDealStage", dirR.Error(), nil)
+		return "", core.Fail(core.E("pipeline.writeDealStage", dirR.Error(), nil))
 	}
 	dir := dirR.Value.(string)
 	fpath := core.PathJoin(dir, id+".md")
 
 	rd := paths.ReadVersion(fpath)
 	if !rd.OK {
-		return "", core.E("pipeline.writeDealStage", rd.Error(), nil)
+		return "", core.Fail(core.E("pipeline.writeDealStage", rd.Error(), nil))
 	}
 	cur := rd.Value.(paths.ReadOutput)
 	if len(cur.Body) == 0 {
-		return "", core.E("pipeline.writeDealStage", "not found: "+id, nil)
+		return "", core.Fail(core.E("pipeline.writeDealStage", "not found: "+id, nil))
 	}
 
 	fm, err := parseFrontmatter(cur.Body)
 	if err != nil {
-		return "", err
+		return "", core.Fail(err)
 	}
 	fromStage = fm.Stage
 
@@ -245,23 +247,13 @@ func writeDealStage(id, toStage string) (fromStage string, err error) {
 		IfVersion: cur.Version,
 	})
 	if res.OK {
-		return fromStage, nil
+		return fromStage, res
 	}
-	if core.Contains(res.Error(), paths.CodeVersionStale) {
-		return fromStage, core.E("pipeline.writeDealStage",
-			"pipeline.update.conflict", versionStaleAsError(res.Value))
+	if stale, ok := paths.VersionStaleFromError(res.Value); ok {
+		return fromStage, core.Fail(paths.NewConflictEnvelope(
+			"pipeline.update.conflict", stale))
 	}
-	return fromStage, core.E("pipeline.writeDealStage", res.Error(), nil)
-}
-
-// versionStaleAsError surfaces the paths.VersionStale envelope as an
-// error whose Error() reports "pipeline.update.conflict". The envelope
-// stays accessible via paths.VersionStaleFromError on the returned cause.
-func versionStaleAsError(v any) error {
-	if e, ok := v.(error); ok {
-		return e
-	}
-	return core.NewCode("pipeline.update.conflict", "version_stale")
+	return fromStage, core.Fail(core.E("pipeline.writeDealStage", res.Error(), nil))
 }
 
 // setVersionField stamps a "version: N" line into the frontmatter
@@ -269,114 +261,165 @@ func versionStaleAsError(v any) error {
 // "---\n...---\n" delimiter, the value is updated in place; otherwise a
 // new line is inserted immediately after the opening delimiter.
 // Mirrors updateYAMLField's frontmatter-only discipline so the body
-// stays untouched.
+// stays untouched (Mantis #1545 — bounded discipline prevents body
+// lines like "version: 1.2.3 of the spec" from being mistaken for the
+// frontmatter version field).
 //
 // Usage example:
 //
 //	updated := setVersionField(raw, 2)
 func setVersionField(raw []byte, v int) []byte {
-	line := core.Sprintf("version: %d", v)
-	// First try in-place update via updateYAMLField.
-	out := updateYAMLField(raw, "version", core.Sprintf("%d", v))
-	// updateYAMLField returns the original bytes when no match is
-	// found — detect by checking whether the key landed.
-	if containsLine(out, line) {
-		return out
+	valueStr := core.Sprintf("%d", v)
+	// First try in-place update via updateYAMLField (frontmatter-
+	// bounded). If the field exists inside frontmatter the helper
+	// returns a new slice with the value rewritten.
+	if hasVersionInFrontmatter(raw) {
+		return updateYAMLField(raw, "version", valueStr)
 	}
-	// No version field present — insert one after the opening "---\n".
+	// No version field in frontmatter — insert one after the opening
+	// "---\n". Refuse to touch raw if it lacks a frontmatter opener
+	// (matches updateYAMLField's "no opener → unchanged" discipline).
 	open := []byte("---\n")
-	if len(raw) >= len(open) {
-		match := true
-		for i, b := range open {
-			if raw[i] != b {
-				match = false
-				break
-			}
-		}
-		if match {
-			ins := make([]byte, 0, len(raw)+len(line)+1)
-			ins = append(ins, open...)
-			ins = append(ins, []byte(line)...)
-			ins = append(ins, '\n')
-			ins = append(ins, raw[len(open):]...)
-			return ins
+	if len(raw) < len(open) {
+		return raw
+	}
+	for i, b := range open {
+		if raw[i] != b {
+			return raw
 		}
 	}
-	return raw
+	line := "version: " + valueStr
+	ins := make([]byte, 0, len(raw)+len(line)+1)
+	ins = append(ins, open...)
+	ins = append(ins, []byte(line)...)
+	ins = append(ins, '\n')
+	ins = append(ins, raw[len(open):]...)
+	return ins
 }
 
-// containsLine reports whether raw contains the exact line bytes as a
-// standalone line (newline-delimited).
-func containsLine(raw []byte, line string) bool {
-	needle := []byte(line)
-	for i := 0; i+len(needle) <= len(raw); i++ {
-		// Match at start-of-line or document start.
-		if i > 0 && raw[i-1] != '\n' {
-			continue
+// hasVersionInFrontmatter reports whether raw's frontmatter block
+// contains a line starting with "version: " — used by setVersionField
+// to decide between in-place update and prepend-insert without
+// scanning the body (Mantis #1545).
+//
+// Returns false when raw lacks the leading "---\n" delimiter or the
+// closing "---" line, mirroring updateYAMLField's boundary discipline.
+func hasVersionInFrontmatter(raw []byte) bool {
+	const open = "---\n"
+	if len(raw) < len(open) {
+		return false
+	}
+	for i := 0; i < len(open); i++ {
+		if raw[i] != open[i] {
+			return false
 		}
-		ok := true
-		for j := range needle {
-			if raw[i+j] != needle[j] {
-				ok = false
+	}
+	fmStart := len(open)
+	closeIdx := -1
+	for i := fmStart; i+2 < len(raw); i++ {
+		if raw[i] == '-' && raw[i+1] == '-' && raw[i+2] == '-' {
+			if i == fmStart || raw[i-1] == '\n' {
+				closeIdx = i
 				break
 			}
 		}
-		if !ok {
-			continue
-		}
-		// End of match must be EOF or newline.
-		end := i + len(needle)
-		if end == len(raw) || raw[end] == '\n' {
-			return true
+	}
+	if closeIdx < 0 {
+		return false
+	}
+	prefix := []byte("version: ")
+	lineStart := fmStart
+	for i := fmStart; i <= closeIdx; i++ {
+		atEnd := i == closeIdx
+		if atEnd || raw[i] == '\n' {
+			line := raw[lineStart:i]
+			if len(line) >= len(prefix) {
+				match := true
+				for j := range prefix {
+					if line[j] != prefix[j] {
+						match = false
+						break
+					}
+				}
+				if match {
+					return true
+				}
+			}
+			lineStart = i + 1
 		}
 	}
 	return false
 }
 
 // updateYAMLField replaces the value of a YAML field key on its own line
-// within a Trix file. Only touches the first occurrence inside the
-// frontmatter block. Falls back to the original bytes on any ambiguity.
+// within a Trix file's frontmatter block ONLY. The scan is bounded to
+// the bytes between the leading "---\n" delimiter and the next "---"
+// line on its own; body lines after the closing delimiter are NEVER
+// considered (Mantis #1545 — bounded scan stops body lines like
+// "version: 1.2.3 of the spec" from corrupting frontmatter sync).
+//
+// Returns the original bytes unchanged when:
+//   - raw lacks a leading "---\n" opening delimiter
+//   - the frontmatter block has no closing "---" line
+//   - the key is not present inside the bounded frontmatter block
+//
+// Mirrors paths.parseFrontmatterVersion's bounded-walk shape so both
+// readers and writers agree on the frontmatter boundary.
 func updateYAMLField(raw []byte, key, value string) []byte {
-	// Build the search prefix: "key: " (at start of line).
-	prefix := []byte(key + ": ")
-	result := make([]byte, 0, len(raw)+32)
-	i := 0
-	for i < len(raw) {
-		// Check for start-of-line match.
-		lineStart := i
-		// Find end of this line.
-		end := i
-		for end < len(raw) && raw[end] != '\n' {
-			end++
-		}
-		line := raw[lineStart:end]
-		if len(line) >= len(prefix) {
-			match := true
-			for j := range prefix {
-				if line[j] != prefix[j] {
-					match = false
-					break
-				}
-			}
-			if match {
-				// Replace this line with "key: value".
-				result = append(result, []byte(key+": "+value)...)
-				if end < len(raw) {
-					result = append(result, '\n')
-				}
-				i = end + 1
-				// Append the rest unchanged.
-				result = append(result, raw[i:]...)
-				return result
-			}
-		}
-		result = append(result, raw[lineStart:end]...)
-		if end < len(raw) {
-			result = append(result, '\n')
-		}
-		i = end + 1
+	const open = "---\n"
+	if len(raw) < len(open) {
+		return raw
 	}
-	return raw // no match — return unchanged
+	for i := 0; i < len(open); i++ {
+		if raw[i] != open[i] {
+			return raw
+		}
+	}
+	// fmStart is the first byte after the opening "---\n".
+	fmStart := len(open)
+	// Locate the closing "---" delimiter — must sit on its own at
+	// start-of-line within the frontmatter block.
+	closeIdx := -1
+	for i := fmStart; i+2 < len(raw); i++ {
+		if raw[i] == '-' && raw[i+1] == '-' && raw[i+2] == '-' {
+			// Must be at start-of-line (previous byte is newline).
+			if i == fmStart || raw[i-1] == '\n' {
+				closeIdx = i
+				break
+			}
+		}
+	}
+	if closeIdx < 0 {
+		return raw
+	}
+	// Walk the frontmatter block line-by-line for an existing "key: "
+	// occurrence. Replace in place; leave the rest of the file alone.
+	prefix := []byte(key + ": ")
+	lineStart := fmStart
+	for i := fmStart; i <= closeIdx; i++ {
+		atEnd := i == closeIdx
+		if atEnd || raw[i] == '\n' {
+			line := raw[lineStart:i]
+			if len(line) >= len(prefix) {
+				match := true
+				for j := range prefix {
+					if line[j] != prefix[j] {
+						match = false
+						break
+					}
+				}
+				if match {
+					result := make([]byte, 0, len(raw)+len(value))
+					result = append(result, raw[:lineStart]...)
+					result = append(result, []byte(key+": "+value)...)
+					result = append(result, raw[i:]...)
+					return result
+				}
+			}
+			lineStart = i + 1
+		}
+	}
+	return raw // no match in frontmatter — return unchanged
 }
 
 // fireMove publishes a pipeline move event on the Core ACTION bus.

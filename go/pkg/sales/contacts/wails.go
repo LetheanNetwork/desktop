@@ -168,8 +168,8 @@ func (s *Service) Create(input CreateInput) core.Result {
 	if err != nil {
 		return core.Fail(core.E("contacts.Create", "marshal", err))
 	}
-	if err := atomicWriteFile(fpath, raw, 0); err != nil {
-		return core.Fail(core.E("contacts.Create", err.Error(), err))
+	if wr := atomicWriteFile(fpath, raw, 0); !wr.OK {
+		return wr
 	}
 
 	contact := toContact(rec, core.Now())
@@ -234,8 +234,8 @@ func (s *Service) Update(input UpdateInput) core.Result {
 	if err != nil {
 		return core.Fail(core.E("contacts.Update", "marshal", err))
 	}
-	if err := atomicWriteFile(fpath, updated, priorVersion); err != nil {
-		return core.Fail(core.E("contacts.Update", err.Error(), err))
+	if wr := atomicWriteFile(fpath, updated, priorVersion); !wr.OK {
+		return wr
 	}
 
 	contact := toContact(rec, core.Now())
@@ -246,10 +246,18 @@ func (s *Service) Update(input UpdateInput) core.Result {
 // atomicWriteFile routes contact writes through paths.AtomicWriteWithVersion
 // (Cascade W1, Mantis #1540). The IfVersion gate uses the version the
 // caller observed on disk; pass 0 for first-writes / legacy upgrades so
-// the primitive performs an unconditional write. Stale writes surface as
-// "contacts.update.conflict" (or "contacts.create.conflict" on the
-// create path) preserving the paths.VersionStale envelope under the
-// returned error's cause — recoverable via paths.VersionStaleFromError.
+// the primitive performs an unconditional write.
+//
+// Return shape (Mantis #1544, gating W2): on the stale-write path
+// the function returns core.Fail(paths.ConflictEnvelope{...}) so the
+// Wails-marshalled Result.Value carries lowercase json keys
+// (`{code, current_version, current_hash}`) that conflict-dispatch.ts
+// extractEnvelope already pattern-matches on. The prior wrap-as-
+// *core.Err shape marshalled PascalCase + empty Code field, so the
+// frontend toast never rendered.
+//
+// On non-conflict failures the function returns the underlying
+// core.Fail unchanged so audit/diagnostic information propagates.
 //
 // Audit emission is automatic via paths.AuditModeForPath (sales/* paths
 // route through AuditModeBatch per RFC §6.1) — callers do not need to
@@ -257,35 +265,23 @@ func (s *Service) Update(input UpdateInput) core.Result {
 //
 // Usage example:
 //
-//	if err := atomicWriteFile(fpath, body, prior.Version); err != nil {
-//	    return core.Fail(core.E("contacts.Update", err.Error(), err))
+//	if wr := atomicWriteFile(fpath, body, prior.Version); !wr.OK {
+//	    return wr
 //	}
-func atomicWriteFile(path string, content []byte, ifVersion int) error {
+func atomicWriteFile(path string, content []byte, ifVersion int) core.Result {
 	r := paths.AtomicWriteWithVersion(path, paths.WriteInput{
 		Body:      content,
 		IfVersion: ifVersion,
 	})
 	if r.OK {
-		return nil
+		return r
 	}
-	if core.Contains(r.Error(), paths.CodeVersionStale) {
-		// Wrap the primitive's typed VersionStale envelope so callers
-		// keep matching on the contacts.<verb>.conflict code while the
-		// structured payload remains accessible via
-		// paths.VersionStaleFromError.
-		return core.E("contacts.atomicWriteFile", "contacts.update.conflict",
-			versionStaleAsError(r.Value))
+	if stale, ok := paths.VersionStaleFromError(r.Value); ok {
+		// Typed envelope — plain struct, lowercase json tags, marshals
+		// to the shape conflict-dispatch.ts extractEnvelope expects.
+		return core.Fail(paths.NewConflictEnvelope(
+			"contacts.update.conflict", stale))
 	}
-	return core.E("contacts.atomicWriteFile", "write failed: "+r.Error(), nil)
-}
-
-// versionStaleAsError extracts the structured paths.VersionStale payload
-// from a Result.Value and returns it as an error whose Error() reports
-// the canonical "contacts.update.conflict" code. The envelope stays
-// accessible via paths.VersionStaleFromError on the returned cause.
-func versionStaleAsError(v any) error {
-	if e, ok := v.(error); ok {
-		return e
-	}
-	return core.NewCode("contacts.update.conflict", "version_stale")
+	return core.Fail(core.E("contacts.atomicWriteFile",
+		"write failed: "+r.Error(), nil))
 }

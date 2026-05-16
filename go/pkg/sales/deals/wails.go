@@ -126,8 +126,8 @@ func (s *Service) Create(input CreateInput) core.Result {
 
 	// Cascade W1 (Mantis #1540) — Create is an unconditional first-write
 	// (ifVersion=0). writeRecord stamps Version=1 into the marshalled body.
-	if err := writeRecord(rec, dir, 0); err != nil {
-		return core.Fail(core.E("deals.Create", "write", err))
+	if wr := writeRecord(rec, dir, 0); !wr.OK {
+		return wr
 	}
 
 	s.fireEvent(EventDealCreated, rec)
@@ -168,8 +168,10 @@ func (s *Service) UpdateStage(input UpdateStageInput) core.Result {
 	// Cascade W1 (Mantis #1540) — IfVersion=priorVersion gates the
 	// write under the primitive's optimistic-lock check. priorVersion=0
 	// (legacy file) skips the check and stamps Version=1 on the upgrade.
-	if err := writeRecord(rec, dir, priorVersion); err != nil {
-		return core.Fail(core.E("deals.UpdateStage", "write", err))
+	// Conflict-path returns core.Fail(paths.ConflictEnvelope{...})
+	// directly via writeRecord (Mantis #1544 gating W2).
+	if wr := writeRecord(rec, dir, priorVersion); !wr.OK {
+		return wr
 	}
 
 	s.fireEvent(EventDealStageChanged, rec)
@@ -222,8 +224,10 @@ func (s *Service) AddActivity(input AddActivityInput) core.Result {
 
 	// Cascade W1 (Mantis #1540) — same IfVersion discipline as
 	// UpdateStage. Activity-log appends are still record-level writes.
-	if err := writeRecord(rec, dir, priorVersion); err != nil {
-		return core.Fail(core.E("deals.AddActivity", "write", err))
+	// Conflict-path returns core.Fail(paths.ConflictEnvelope{...})
+	// directly via writeRecord (Mantis #1544 gating W2).
+	if wr := writeRecord(rec, dir, priorVersion); !wr.OK {
+		return wr
 	}
 
 	return core.Ok(toDeal(rec, core.Now(), true))
