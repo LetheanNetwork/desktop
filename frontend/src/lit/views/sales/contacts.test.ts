@@ -150,3 +150,51 @@ describe("lthn-view-contacts — backend wire", () => {
     expect(el.contacts.length).toBe(6); // empty → fixture preserved
   });
 });
+
+describe("lthn-view-contacts — conflict-reload listener (Cascade W1)", () => {
+  it("CONFLICT_RELOAD_EVENT with matching service triggers _loadFromBackend", async () => {
+    (ContactsList as unknown as { mockReset: () => void }).mockReset();
+    const reloaded: Array<{ contacts: Contact[] }> = [];
+    (ContactsList as unknown as { mockImplementation: (fn: () => Promise<unknown>) => void }).mockImplementation(() => {
+      const payload = { Value: { contacts: [
+        { name: "Reloaded", role: "X", last: "now", warmth: "hot", next: "y" },
+      ] } };
+      reloaded.push(payload.Value);
+      return Promise.resolve(payload);
+    });
+    const { el } = await mountWindow<ContactsEl>("lthn-view-contacts");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    const initial = reloaded.length;
+
+    window.dispatchEvent(new CustomEvent("lthn:conflict:reload-requested", {
+      detail: { service: "sales.contacts.update" },
+    }));
+    // _loadFromBackend resolves async; tick the microtask queue.
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(reloaded.length).toBeGreaterThan(initial);
+  });
+
+  it("CONFLICT_RELOAD_EVENT with non-matching service is ignored", async () => {
+    (ContactsList as unknown as { mockReset: () => void }).mockReset();
+    const calls: number[] = [];
+    (ContactsList as unknown as { mockImplementation: (fn: () => Promise<unknown>) => void }).mockImplementation(() => {
+      calls.push(1);
+      return Promise.resolve({ Value: { contacts: [] } });
+    });
+    const { el } = await mountWindow<ContactsEl>("lthn-view-contacts");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    const baseline = calls.length;
+
+    window.dispatchEvent(new CustomEvent("lthn:conflict:reload-requested", {
+      detail: { service: "sales.deals.update" }, // not ours
+    }));
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(calls.length).toBe(baseline);
+  });
+});

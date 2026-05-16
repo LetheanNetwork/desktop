@@ -20,6 +20,18 @@
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
+import {
+  CONFLICT_RELOAD_EVENT,
+  type ConflictDetail,
+} from "../../conflict-dispatch";
+
+/** Service identifier the shared <lthn-conflict-toast> filters its
+ *  reload signal by. Matches the Go-side wrapped conflict code's
+ *  prefix. Cascade W1 (Mantis #1540). Today only the listener side is
+ *  load-bearing — deals.ts has no write call-site yet. When an Edit /
+ *  AddActivity UI lands it MUST call handleStaleVersionConflict(result,
+ *  DEALS_SERVICE) on its update path. */
+const DEALS_SERVICE = "sales.deals.update";
 
 /** Kind of activity-log entry. Drives the icon + alt text. */
 type ActivityKind = "call" | "email" | "meet";
@@ -128,9 +140,25 @@ class LthnViewDeals extends LitElement {
 
   createRenderRoot() { return this; }
 
+  /** Cascade W1 (Mantis #1540) — listener for CONFLICT_RELOAD_EVENT
+   *  dispatched by the shared <lthn-conflict-toast>. Scope-filter on
+   *  DEALS_SERVICE so sibling sales views' reload signals don't
+   *  trigger our refetch. */
+  private _onConflictReload = (e: Event) => {
+    const ce = e as CustomEvent<ConflictDetail>;
+    if (ce.detail?.service !== DEALS_SERVICE) return;
+    void this._loadFromBackend();
+  };
+
   async connectedCallback() {
     super.connectedCallback();
+    window.addEventListener(CONFLICT_RELOAD_EVENT, this._onConflictReload);
     await this._loadFromBackend();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener(CONFLICT_RELOAD_EVENT, this._onConflictReload);
   }
 
   /** Pull the first available deal from pkg/sales/deals (shipped in

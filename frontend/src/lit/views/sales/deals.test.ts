@@ -162,3 +162,47 @@ describe("lthn-view-deals — backend wire", () => {
     expect(el.deal.customer).toBe("Heritage Law LLP"); // fixture preserved
   });
 });
+
+describe("lthn-view-deals — conflict-reload listener (Cascade W1)", () => {
+  it("CONFLICT_RELOAD_EVENT with matching service triggers _loadFromBackend", async () => {
+    (DealsList as unknown as { mockReset: () => void }).mockReset();
+    const calls: number[] = [];
+    (DealsList as unknown as { mockImplementation: (fn: () => Promise<unknown>) => void }).mockImplementation(() => {
+      calls.push(1);
+      return Promise.resolve({ Value: { deals: [] } });
+    });
+    const { el } = await mountWindow<HTMLElement & { updateComplete: Promise<boolean> }>("lthn-view-deals");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    const baseline = calls.length;
+
+    window.dispatchEvent(new CustomEvent("lthn:conflict:reload-requested", {
+      detail: { service: "sales.deals.update" },
+    }));
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(calls.length).toBeGreaterThan(baseline);
+  });
+
+  it("CONFLICT_RELOAD_EVENT with non-matching service is ignored", async () => {
+    (DealsList as unknown as { mockReset: () => void }).mockReset();
+    const calls: number[] = [];
+    (DealsList as unknown as { mockImplementation: (fn: () => Promise<unknown>) => void }).mockImplementation(() => {
+      calls.push(1);
+      return Promise.resolve({ Value: { deals: [] } });
+    });
+    const { el } = await mountWindow<HTMLElement & { updateComplete: Promise<boolean> }>("lthn-view-deals");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    const baseline = calls.length;
+
+    window.dispatchEvent(new CustomEvent("lthn:conflict:reload-requested", {
+      detail: { service: "sales.contacts.update" }, // not ours
+    }));
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(calls.length).toBe(baseline);
+  });
+});

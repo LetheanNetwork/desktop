@@ -26,6 +26,16 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../../chrome";
+import {
+  CONFLICT_RELOAD_EVENT,
+  handleStaleVersionConflict,
+  type ConflictDetail,
+} from "../../conflict-dispatch";
+
+/** Service identifier used when dispatching CONFLICT_409_EVENT on a
+ *  stale write — the shared toast filters its reload-signal back to
+ *  this view by matching this exact string. Cascade W1 (Mantis #1540). */
+const PIPELINE_SERVICE = "sales.pipeline.update";
 
 /** A single deal card inside a pipeline column. */
 interface Deal {
@@ -172,6 +182,16 @@ class LthnViewPipeline extends LitElement {
     };
   };
 
+  /** Cascade W1 (Mantis #1540) — listener for CONFLICT_RELOAD_EVENT
+   *  dispatched by <lthn-conflict-toast>. Scope-filter on the service
+   *  identifier this view owns so sibling sales views' reload signals
+   *  don't trigger our refetch. */
+  private _onConflictReload = (e: Event) => {
+    const ce = e as CustomEvent<ConflictDetail>;
+    if (ce.detail?.service !== PIPELINE_SERVICE) return;
+    void this._loadFromBackend();
+  };
+
   constructor() {
     super();
     this.w = 1280;
@@ -192,12 +212,14 @@ class LthnViewPipeline extends LitElement {
     // used internally via _emitMoved → the event bubbles through
     // window so connectedCallback's listener catches it.
     window.addEventListener("lthn:sales:moved", this._onSalesMoved);
+    window.addEventListener(CONFLICT_RELOAD_EVENT, this._onConflictReload);
     await this._loadFromBackend();
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener("lthn:sales:moved", this._onSalesMoved);
+    window.removeEventListener(CONFLICT_RELOAD_EVENT, this._onConflictReload);
   }
 
   /** Dismiss the Vi-callout. Called by the Confirm button + the
@@ -293,7 +315,7 @@ class LthnViewPipeline extends LitElement {
 
     // Backend call — lazy-import keeps the test fixture decoupled.
     const svc = await import("@desktop/sales/pipeline/service").catch(() => null);
-    type MoveFn = (input: { dealId: string; toStage: string }) => Promise<{ OK?: boolean }>;
+    type MoveFn = (input: { dealId: string; toStage: string }) => Promise<{ OK: boolean; Value: unknown }>;
     const moveFn = svc && typeof (svc as { MoveDeal?: unknown }).MoveDeal === "function"
       ? (svc as { MoveDeal: MoveFn }).MoveDeal
       : null;
@@ -306,8 +328,18 @@ class LthnViewPipeline extends LitElement {
 
     try {
       const r = await moveFn({ dealId: deal_id, toStage: to });
+      // Cascade W1 (Mantis #1540) — stale-version conflict path.
+      // handleStaleVersionConflict returns true + dispatches
+      // CONFLICT_409_EVENT (the shared toast renders); revert the
+      // optimistic move so the UI agrees with disk-state until the
+      // user reloads.
+      if (handleStaleVersionConflict(r, PIPELINE_SERVICE)) {
+        this.columns = prev;
+        return;
+      }
       if (r && r.OK === false) {
-        // Backend explicitly rejected — revert + leave a quiet trace.
+        // Backend explicitly rejected (non-conflict) — revert + leave
+        // a quiet trace.
         this.columns = prev;
         this._loadState = "err";
         return;

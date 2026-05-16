@@ -16,6 +16,18 @@
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
+import {
+  CONFLICT_RELOAD_EVENT,
+  type ConflictDetail,
+} from "../../conflict-dispatch";
+
+/** Service identifier the shared <lthn-conflict-toast> filters its
+ *  reload signal by. Matches the Go-side wrapped conflict code's
+ *  prefix. Cascade W1 (Mantis #1540). Today only the listener side is
+ *  load-bearing — contacts.ts has no write call-site yet. When an
+ *  Add/Edit UI lands it MUST call handleStaleVersionConflict(result,
+ *  CONTACTS_SERVICE) on its update path. */
+const CONTACTS_SERVICE = "sales.contacts.update";
 
 /** Warmth bucket — how warm is the conversation right now. Used both
  *  for the dot colour and for the active-warmth pill in the footer
@@ -95,9 +107,25 @@ class LthnViewContacts extends LitElement {
 
   createRenderRoot() { return this; }
 
+  /** Cascade W1 (Mantis #1540) — listener for CONFLICT_RELOAD_EVENT
+   *  dispatched by the shared <lthn-conflict-toast>. Scope-filter on
+   *  CONTACTS_SERVICE so sibling sales views' reload signals don't
+   *  trigger our refetch. */
+  private _onConflictReload = (e: Event) => {
+    const ce = e as CustomEvent<ConflictDetail>;
+    if (ce.detail?.service !== CONTACTS_SERVICE) return;
+    void this._loadFromBackend();
+  };
+
   async connectedCallback() {
     super.connectedCallback();
+    window.addEventListener(CONFLICT_RELOAD_EVENT, this._onConflictReload);
     await this._loadFromBackend();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener(CONFLICT_RELOAD_EVENT, this._onConflictReload);
   }
 
   /** Pull the live contacts list from pkg/sales/contacts (shipped

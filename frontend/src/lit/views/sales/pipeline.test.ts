@@ -415,3 +415,94 @@ describe("lthn-view-pipeline — Vi-callout for terminal moves", () => {
     expect(callout!.textContent).toContain("Calliope Partners");
   });
 });
+
+describe("lthn-view-pipeline — conflict detection + reload listener (Cascade W1)", () => {
+  it("MoveDeal stale-version conflict reverts the optimistic move", async () => {
+    vi.resetModules();
+    // Stale write: backend returns { OK:false, Value:{ code:"…conflict", … } }.
+    vi.doMock("@desktop/sales/pipeline/service", () => ({
+      List: async () => ({ OK: true, Value: {} }),
+      MoveDeal: async () => ({
+        OK: false,
+        Value: {
+          code: "pipeline.update.conflict",
+          current_version: 7,
+          current_hash: "deadbeef",
+        },
+      }),
+    }));
+
+    const { el } = await mountWindow<PipelineEl>("lthn-view-pipeline");
+    const sourceDeal = el.columns.find(c => c.id === "qual")!.deals[0];
+    const qualBefore = el.columns.find(c => c.id === "qual")!.deals.length;
+    const engageBefore = el.columns.find(c => c.id === "engage")!.deals.length;
+
+    try {
+      const dt = makeDataTransfer();
+      el._onDealDragStart(dragEvent("dragstart", dt), "qual", sourceDeal);
+      await el._onColumnDrop(dragEvent("drop", dt), "engage");
+      await el.updateComplete;
+
+      // Optimistic move reverted on stale conflict. The CONFLICT_409_EVENT
+      // dispatch shape is pinned independently by conflict-dispatch.test.ts
+      // — here we verify the integration: a conflict-shaped MoveDeal
+      // response routes through handleStaleVersionConflict + reverts.
+      expect(el.columns.find(c => c.id === "qual")!.deals.length).toBe(qualBefore);
+      expect(el.columns.find(c => c.id === "engage")!.deals.length).toBe(engageBefore);
+    } finally {
+      vi.doUnmock("@desktop/sales/pipeline/service");
+    }
+  });
+
+  it("CONFLICT_RELOAD_EVENT with matching service triggers _loadFromBackend", async () => {
+    vi.resetModules();
+    const listCalls: number[] = [];
+    vi.doMock("@desktop/sales/pipeline/service", () => ({
+      List: async () => {
+        listCalls.push(1);
+        return { OK: true, Value: {} };
+      },
+      MoveDeal: async () => ({ OK: true, Value: {} }),
+    }));
+
+    const { el } = await mountWindow<PipelineEl>("lthn-view-pipeline");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    const baseline = listCalls.length;
+
+    window.dispatchEvent(new CustomEvent("lthn:conflict:reload-requested", {
+      detail: { service: "sales.pipeline.update" },
+    }));
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(listCalls.length).toBeGreaterThan(baseline);
+    vi.doUnmock("@desktop/sales/pipeline/service");
+  });
+
+  it("CONFLICT_RELOAD_EVENT with non-matching service is ignored", async () => {
+    vi.resetModules();
+    const listCalls: number[] = [];
+    vi.doMock("@desktop/sales/pipeline/service", () => ({
+      List: async () => {
+        listCalls.push(1);
+        return { OK: true, Value: {} };
+      },
+      MoveDeal: async () => ({ OK: true, Value: {} }),
+    }));
+
+    const { el } = await mountWindow<PipelineEl>("lthn-view-pipeline");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    const baseline = listCalls.length;
+
+    window.dispatchEvent(new CustomEvent("lthn:conflict:reload-requested", {
+      detail: { service: "sales.contacts.update" }, // not ours
+    }));
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(listCalls.length).toBe(baseline);
+    vi.doUnmock("@desktop/sales/pipeline/service");
+  });
+});
