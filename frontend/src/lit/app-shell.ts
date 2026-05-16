@@ -402,6 +402,33 @@ class LthnAppShell extends LitElement {
     this._selectView(view.id);
   };
 
+  /** Window-level keydown — ⌘⇧[ / ⌘⇧] (Ctrl+Shift+[ / Ctrl+Shift+]
+   *  non-mac) cycle backwards / forwards through the view list.
+   *  Standard macOS app convention (Safari, Chrome use this for
+   *  tab cycling). Suppressed while a text input has focus so it
+   *  doesn't steal from the chat composer / search inputs / cell
+   *  editors. */
+  private _onKeyDownForViewCycle = (ev: KeyboardEvent) => {
+    const accel = ev.metaKey || ev.ctrlKey;
+    if (!accel || !ev.shiftKey) return;
+    if (ev.altKey) return;
+    const k = ev.key;
+    if (k !== "[" && k !== "]" && k !== "{" && k !== "}") return;
+    const target = ev.target as HTMLElement | null;
+    if (target) {
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+    }
+    const direction = (k === "[" || k === "{") ? -1 : 1;
+    const currentIdx = VIEWS.findIndex(v => v.id === this.view);
+    if (currentIdx < 0) return;
+    const nextIdx = ((currentIdx + direction) % VIEWS.length + VIEWS.length) % VIEWS.length;
+    const nextView = VIEWS[nextIdx];
+    if (!nextView) return;
+    ev.preventDefault();
+    this._selectView(nextView.id);
+  };
+
   /** Open + close the palette. Reset query + selection each toggle
    *  so the user always lands at the top of the unfiltered list. */
   _togglePalette() {
@@ -451,6 +478,7 @@ class LthnAppShell extends LitElement {
     // i18n promise lands.
     window.addEventListener("keydown", this._onKeyDownForPalette);
     window.addEventListener("keydown", this._onKeyDownForViewSwitch);
+    window.addEventListener("keydown", this._onKeyDownForViewCycle);
     // Outside-click closes the view-switcher dropdown.
     document.addEventListener("click", this._onDocClickForSwitcher);
     const [
@@ -543,6 +571,7 @@ class LthnAppShell extends LitElement {
     super.disconnectedCallback();
     window.removeEventListener("keydown", this._onKeyDownForPalette);
     window.removeEventListener("keydown", this._onKeyDownForViewSwitch);
+    window.removeEventListener("keydown", this._onKeyDownForViewCycle);
     document.removeEventListener("click", this._onDocClickForSwitcher);
     if (this._unsubSetPane) {
       this._unsubSetPane();

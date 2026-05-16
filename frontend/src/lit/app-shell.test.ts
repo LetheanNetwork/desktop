@@ -659,3 +659,73 @@ describe("lthn-app-shell — ⌘1..⌘7 view shortcuts", () => {
     expect(el.view).toBe("planning");
   });
 });
+
+describe("lthn-app-shell — ⌘⇧[ / ⌘⇧] view cycling", () => {
+  type ShellWithView = HTMLElement & {
+    view: string;
+    updateComplete: Promise<boolean>;
+  };
+
+  it("⌘⇧] advances to the next view (admin → planning)", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "admin" } });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "]", metaKey: true, shiftKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe("planning");
+  });
+
+  it("⌘⇧[ moves to the previous view (planning → admin)", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "planning" } });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "[", metaKey: true, shiftKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe("admin");
+  });
+
+  it("⌘⇧] wraps from the last view (office → admin)", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "office" } });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "]", metaKey: true, shiftKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe("admin");
+  });
+
+  it("⌘⇧[ wraps from the first view (admin → office)", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "admin" } });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "[", metaKey: true, shiftKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe("office");
+  });
+
+  it("Ctrl+Shift+] also works (Linux/Windows)", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "admin" } });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "]", ctrlKey: true, shiftKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe("planning");
+  });
+
+  it("⌘] without shift is ignored", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "admin" } });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "]", metaKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe("admin");
+  });
+
+  it("⌘⇧] suppressed while an INPUT has focus", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "admin" } });
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "]", metaKey: true, shiftKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe("admin");
+    input.remove();
+  });
+
+  it("five forward cycles visit every view in order", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "admin" } });
+    const expected = ["planning", "coding", "marketing", "operations", "sales"];
+    for (const want of expected) {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "]", metaKey: true, shiftKey: true, bubbles: true }));
+      await el.updateComplete;
+      expect(el.view).toBe(want);
+    }
+  });
+});
