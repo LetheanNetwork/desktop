@@ -1,13 +1,14 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-// Package mail is the lthn-side v1 mailbox catalogue service.
-// Reads folder and thread metadata from
-// ~/Lethean/office/mail/{folder-slug}/threads.md — Trix-style YAML
-// frontmatter per thread; no message body stored.
+// Package mail is the lthn-side v2 mailbox service.
+// v1 scope (catalogue only: folder list + thread headers) is unchanged.
+// v2 layers live IMAP fetch, SMTP send, MIME parsing, and asymmetrically-
+// encrypted credential storage ON TOP of the v1 threads.md files.
 //
-// v1 scope: catalogue only — folder list + thread headers.
-// No IMAP fetch, SMTP send, MIME parsing, or attachment download.
-// v2 (separate Mantis ticket) adds live IMAP integration.
+// Credential storage (§1): _accounts.enc is PGP-asymmetrically encrypted
+// to the user's public key (Enchantrix pgp.Encrypt). Decryption requires
+// the unlocked private key from pkg/account. Writes work without unlock;
+// reads gate on unlock.
 //
 // Wire shape matches MailFolder + MailThread consumed by
 // <lthn-view-mail> in the Office role view.
@@ -103,6 +104,13 @@ type MailThreadRecord struct {
 	// Snippet is the first ~120 chars of the body, pre-truncated by
 	// whoever wrote the threads.md file.
 	Snippet string `yaml:"snippet"`
+
+	// IMAPUID is the IMAP UID of the message (v2 only). Zero for v1 records.
+	IMAPUID uint32 `yaml:"imap_uid,omitempty"`
+
+	// AllowHTML is the per-thread HTML-rendering opt-in (§4.2 — stored
+	// so the choice persists across FetchBody calls).
+	AllowHTML bool `yaml:"allow_html,omitempty"`
 }
 
 // ListFoldersOutput is the ListFolders response envelope.
@@ -146,6 +154,184 @@ type ListThreadsOutput struct {
 	Unread int `json:"unread"`
 }
 
+// --- v2 credential types (§1.4) ---
+
+// IMAPConfig holds IMAP server connection details for one account.
+//
+// Usage example:
+//
+//	cfg := mail.IMAPConfig{Host: "imap.fastmail.com", Port: 993, User: "me@fastmail.com", TLS: true}
+type IMAPConfig struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+	User string `json:"user"`
+	TLS  bool   `json:"tls"`
+}
+
+// SMTPConfig holds SMTP server connection details for one account.
+// Either TLS (implicit) or TLSStarttls (STARTTLS) must be true per §3.
+//
+// Usage example:
+//
+//	cfg := mail.SMTPConfig{Host: "smtp.fastmail.com", Port: 587, User: "me@fastmail.com", TLSStarttls: true}
+type SMTPConfig struct {
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	User        string `json:"user"`
+	TLSStarttls bool   `json:"tls_starttls"`
+}
+
+// AuthSpec describes authentication credentials for an account.
+// Secret is INPUT ONLY — never returned by ListAccounts (§1.4).
+//
+// Usage example:
+//
+//	auth := mail.AuthSpec{Kind: "appPassword", Secret: "app-password-here"}
+type AuthSpec struct {
+	Kind   string `json:"kind"`
+	Secret string `json:"secret"`
+}
+
+// AccountInput is the SaveAccount request body.
+//
+// Usage example:
+//
+//	r := svc.SaveAccount(mail.AccountInput{Name: "personal", IMAP: imapCfg, SMTP: smtpCfg, Auth: auth})
+type AccountInput struct {
+	Name string     `json:"name"`
+	IMAP IMAPConfig `json:"imap"`
+	SMTP SMTPConfig `json:"smtp"`
+	Auth AuthSpec   `json:"auth"`
+}
+
+// MailAccount is the on-disk JSON record (per entry in _accounts.enc).
+// Secret is zeroed before any return to callers (§1.4).
+//
+// Usage example:
+//
+//	var acct mail.MailAccount
+//	_ = core.JSONUnmarshal(plaintext, &acct)
+type MailAccount struct {
+	Name string     `json:"name"`
+	IMAP IMAPConfig `json:"imap"`
+	SMTP SMTPConfig `json:"smtp"`
+	Auth AuthSpec   `json:"auth"`
+}
+
+// --- v2 IMAP fetch types (§2) ---
+
+// FetchOnceInput drives the manual-refresh endpoint.
+//
+// Usage example:
+//
+//	r := svc.FetchOnce(mail.FetchOnceInput{AccountName: "personal", FolderSlug: "inbox"})
+type FetchOnceInput struct {
+	AccountName string `json:"account_name"`
+	FolderSlug  string `json:"folder_slug"`
+}
+
+// FolderState records the IMAP state for one (account, folder) pair.
+// Written to ~/Lethean/office/mail/_state/{account}/{folder}.json.
+//
+// Usage example:
+//
+//	state := mail.FolderState{UIDValidity: 1234567, LastUIDSeen: 42, LastFetchTS: core.Now()}
+type FolderState struct {
+	UIDValidity uint32    `json:"uid_validity"`
+	LastUIDSeen uint32    `json:"last_uid_seen"`
+	LastFetchTS core.Time `json:"last_fetch_ts"`
+}
+
+// --- v2 SMTP send types (§3) ---
+
+// SendAttachment is one file to attach to an outgoing message.
+// Path must be absolute and under ~/Lethean/ per §3.1.
+//
+// Usage example:
+//
+//	att := mail.SendAttachment{Filename: "invoice.pdf", Path: "/Users/x/Lethean/docs/invoice.pdf"}
+type SendAttachment struct {
+	Filename string `json:"filename"`
+	Path     string `json:"path"`
+	MIME     string `json:"mime,omitempty"`
+}
+
+// SendInput drives the SMTP send endpoint (§3).
+//
+// Usage example:
+//
+//	r := svc.Send(mail.SendInput{AccountName: "personal", To: []string{"ada@lthn.io"}, Subject: "Hello", BodyText: "Hi!"})
+type SendInput struct {
+	AccountName string           `json:"account_name"`
+	To          []string         `json:"to"`
+	Cc          []string         `json:"cc,omitempty"`
+	Bcc         []string         `json:"bcc,omitempty"`
+	Subject     string           `json:"subject"`
+	BodyText    string           `json:"body_text"`
+	BodyHTML    string           `json:"body_html,omitempty"`
+	Attachments []SendAttachment `json:"attachments,omitempty"`
+	InReplyTo   string           `json:"in_reply_to,omitempty"`
+}
+
+// --- v2 MIME / body fetch types (§4) ---
+
+// FetchBodyInput drives the on-demand body fetch (§4.1).
+//
+// Usage example:
+//
+//	r := svc.FetchBody(mail.FetchBodyInput{AccountName: "personal", FolderSlug: "inbox", ThreadID: "abc123"})
+type FetchBodyInput struct {
+	AccountName string `json:"account_name"`
+	FolderSlug  string `json:"folder_slug"`
+	ThreadID    string `json:"thread_id"`
+	AllowHTML   bool   `json:"allow_html,omitempty"`
+}
+
+// AttachmentMeta is the metadata for one MIME part (§4.1).
+// Bytes are fetched separately via DownloadAttachment.
+//
+// Usage example:
+//
+//	for _, a := range out.Attachments { _ = a.Filename }
+type AttachmentMeta struct {
+	Filename string `json:"filename"`
+	MIME     string `json:"mime"`
+	SizeB    int64  `json:"size_b"`
+	PartID   string `json:"part_id"`
+}
+
+// FetchBodyOutput is the FetchBody response (§4.1).
+// HTML is empty by default (AllowHTML=false per §4.2 Q3 ruling).
+//
+// Usage example:
+//
+//	out := r.Value.(mail.FetchBodyOutput)
+//	_ = out.Plain
+type FetchBodyOutput struct {
+	Plain       string           `json:"plain"`
+	HTML        string           `json:"html"`
+	Attachments []AttachmentMeta `json:"attachments"`
+}
+
+// DownloadAttachmentInput drives the attachment-download endpoint (§4.3).
+// DestFilename is validated via paths.IsValidID (slug-style, no traversal).
+//
+// Usage example:
+//
+//	r := svc.DownloadAttachment(mail.DownloadAttachmentInput{
+//	    AccountName: "personal", FolderSlug: "inbox", ThreadID: "abc123",
+//	    PartID: "2.1", DestFilename: "invoice-jan.pdf",
+//	})
+type DownloadAttachmentInput struct {
+	AccountName  string `json:"account_name"`
+	FolderSlug   string `json:"folder_slug"`
+	ThreadID     string `json:"thread_id"`
+	PartID       string `json:"part_id"`
+	DestFilename string `json:"dest_filename"`
+}
+
+// --- folder-label helpers (v1, unchanged) ---
+
 // folderLabels maps slug → display label for the five canonical folders.
 // Unknown slugs use a title-cased fallback generated at runtime.
 var folderLabels = map[string]string{
@@ -170,4 +356,15 @@ func folderLabel(slug string) string {
 		return string(first-32) + slug[1:]
 	}
 	return slug
+}
+
+// deprecatedProviders is the set of mail providers for which
+// Auth.Kind=="password" is rejected per §1.5 Q2 ruling.
+var deprecatedProviders = map[string]bool{
+	"gmail.com":    true,
+	"outlook.com":  true,
+	"live.com":     true,
+	"hotmail.com":  true,
+	"yahoo.com":    true,
+	"aol.com":      true,
 }

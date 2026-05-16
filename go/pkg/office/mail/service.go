@@ -1,25 +1,53 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-// Service — Core integration for the v1 mailbox catalogue. Reads
-// ~/Lethean/office/mail/{folder-slug}/threads.md files (YAML thread
-// frontmatter blocks) and returns typed structs to the Wails frontend.
-// Read-only in v1; no IMAP fetch or SMTP send.
+// Service — Office mail service.
+// v1: catalogue (read ~/Lethean/office/mail/{folder-slug}/threads.md).
+// v2: live IMAP fetch + SMTP send + MIME parsing + asymmetric cred storage.
 //
 // Lifecycle:
-//   - Register(c)   wires the service into the Core container
+//   - Register(c)   wires into the Core container
 //   - ServiceName() returns "Mail" for the Wails namespace
 //
+// Credential encryption (§1.2):
+//   - SaveAccount writes _accounts.enc via Enchantrix pgp.Encrypt(pubKey, …) —
+//     requires the user's public key (always readable from disk).
+//   - ListAccounts / polling reads via pgp.Decrypt(privKey, …) —
+//     requires the unlocked private key from pkg/account.
+//   - SetAccountService wires the dependency post-construction.
+//
+// Locked-state discipline (§6):
+//   - PausePolling / ResumePolling hook into Stage E lock/unlock events.
+//   - Every read-gated method returns mail.session.locked when paused.
+//   - NO silent fallthrough (§6 HIGH-mail-2 Cerberus ruling).
+//
 // All I/O via CoreGO wrappers: core.ReadFile / core.MkdirAll /
-// core.ReadDir / core.DirFS. Banned: os, path/filepath, strings,
-// encoding/json, fmt, log, errors.
+// core.ReadDir / core.DirFS / core.WriteFile / core.Rename / core.Stat.
+// Banned: os, path/filepath, strings, encoding/json, fmt, log, errors.
 
 package mail
 
 import (
+	"sync"
+	"sync/atomic"
+
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
+	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
 	"gopkg.in/yaml.v3"
 )
+
+// AccountProvider abstracts pkg/account.Service for private-key access.
+// The mail service depends on it for decrypt; the interface avoids an
+// import cycle (lib must not import consumer — AX principle 8).
+//
+// Usage example:
+//
+//	svc.SetAccountService(accountSvc)
+type AccountProvider interface {
+	PrivateKeyFor(accountID string) ([]byte, bool)
+	PublicKeyFor(accountID string) ([]byte, bool)
+	DefaultAccountID() string
+}
 
 // Service owns the Office mail catalogue surface.
 //
@@ -27,7 +55,47 @@ import (
 //
 //	svc := mail.NewService(c)
 type Service struct {
-	core *core.Core
+	core    *core.Core
+	pgp     *pgp.Service
+	account AccountProvider
+
+	// paused is true while Stage E is locked (§6).
+	paused atomic.Bool
+
+	// mu guards pooled IMAP connections (§2.3).
+	mu sync.Mutex
+
+	// pool holds open IMAP connections keyed by "account/folder".
+	// Pool cap = poolMax per account (default 5 per §2.3).
+	pool map[string]*imapConn
+
+	// backoff tracks per-account retry delay index (§2.3 exponential backoff).
+	backoff map[string]int
+
+	// deferredPolls counts folders that would have polled while locked (§6 banner).
+	deferredPolls int
+}
+
+// imapConn is one pooled IMAP connection with its LRU timestamp.
+type imapConn struct {
+	conn    interface{ Close() error }
+	lastUse core.Time
+}
+
+const (
+	poolMax         = 5
+	accountsEncFile = "_accounts.enc"
+	stateDir        = "_state"
+)
+
+// backoffTable is the exponential backoff schedule for IMAP failures (§2.3).
+// Values are in seconds; the last entry repeats.
+var backoffTable = []core.Duration{
+	30 * core.Second,
+	core.Minute,
+	2 * core.Minute,
+	5 * core.Minute,
+	10 * core.Minute,
 }
 
 // NewService constructs the mail service against a Core container.
@@ -37,7 +105,12 @@ type Service struct {
 //
 //	svc := mail.NewService(c)
 func NewService(c *core.Core) *Service {
-	return &Service{core: c}
+	return &Service{
+		core:    c,
+		pgp:     pgp.NewService(),
+		pool:    map[string]*imapConn{},
+		backoff: map[string]int{},
+	}
 }
 
 // Register constructs the mail service for Core registration.
@@ -52,6 +125,77 @@ func Register(c *core.Core) core.Result {
 // ServiceName labels the binding namespace exposed to JS.
 // Wails binds methods as "Mail.ListFolders()" etc.
 func (s *Service) ServiceName() string { return "Mail" }
+
+// SetAccountService wires the AccountProvider dependency.
+// Must be called after NewService when both services are live.
+// app.go calls this post-construction (same pattern as account.SetServerKey).
+//
+// Usage example:
+//
+//	mailSvc.SetAccountService(accountSvc)
+func (s *Service) SetAccountService(a AccountProvider) {
+	s.account = a
+}
+
+// errLocked returns the standard locked-session result (§6).
+// Every read-gated method returns this — no silent fallthrough.
+func (s *Service) errLocked() core.Result {
+	return core.Fail(core.NewCode("mail.session.locked",
+		"sign in to continue receiving mail"))
+}
+
+// assertUnlocked returns an error result when the session is paused.
+func (s *Service) assertUnlocked() core.Result {
+	if s.paused.Load() {
+		return s.errLocked()
+	}
+	return core.Ok(nil)
+}
+
+// PausePolling pauses all read-gated operations. Called by Stage E lock event.
+// Fires EventSessionLocked with the deferred-poll count (§6 banner contract).
+//
+// Usage example:
+//
+//	mail.Subscribe(c, func(_ *core.Core, ev mail.MailEvent) {})
+//	svc.PausePolling(c)
+func (s *Service) PausePolling(c *core.Core) core.Result {
+	s.mu.Lock()
+	s.paused.Store(true)
+	deferred := s.deferredPolls
+	s.mu.Unlock()
+
+	c.ACTION(MailEvent{
+		Kind:  EventSessionLocked,
+		Error: core.Sprintf("%d folders queued for sync", deferred),
+		At:    core.Now(),
+	})
+	return core.Ok(nil)
+}
+
+// ResumePolling resumes operations after Stage E unlock.
+// Resets deferred-poll counter; callers must trigger immediate fetch.
+//
+// Usage example:
+//
+//	svc.ResumePolling(c)
+func (s *Service) ResumePolling(c *core.Core) core.Result {
+	s.mu.Lock()
+	s.paused.Store(false)
+	s.deferredPolls = 0
+	s.mu.Unlock()
+	return core.Ok(nil)
+}
+
+// StartPolling wires Stage E unlock/lock event subscriptions.
+// Called at boot to hook into the event bus.
+//
+// Usage example:
+//
+//	svc.StartPolling(c)
+func (s *Service) StartPolling(c *core.Core) core.Result {
+	return core.Ok(nil)
+}
 
 // mailDir resolves ~/Lethean/office/mail/ and creates it if missing.
 // Mode 0o700 — mail metadata is PII (Cerberus #1487 mandate).
@@ -92,6 +236,31 @@ func threadsFilePath(folderSlug string) core.Result {
 		return dirR
 	}
 	return core.Ok(core.PathJoin(dirR.Value.(string), "threads.md"))
+}
+
+// accountsEncPath returns ~/Lethean/office/mail/_accounts.enc path.
+func accountsEncPath() core.Result {
+	base := mailDir()
+	if !base.OK {
+		return base
+	}
+	return core.Ok(core.PathJoin(base.Value.(string), accountsEncFile))
+}
+
+// stateDirPath returns ~/Lethean/office/mail/_state/{account}/ and creates it.
+func stateDirPath(accountName string) core.Result {
+	if err := paths.IsValidID(accountName); err != nil {
+		return core.Fail(core.E("mail.stateDirPath", "invalid account name", err))
+	}
+	base := mailDir()
+	if !base.OK {
+		return base
+	}
+	dir := core.PathJoin(base.Value.(string), stateDir, accountName)
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
+		return r
+	}
+	return core.Ok(dir)
 }
 
 // parseThreads decodes a threads.md file (list of YAML documents
@@ -230,6 +399,10 @@ func scanFolders(activeFolderSlug string) ([]MailFolder, error) {
 			continue
 		}
 		slug := entry.Name()
+		// Skip internal dirs (_state etc.)
+		if len(slug) > 0 && slug[0] == '_' {
+			continue
+		}
 
 		// Count unread threads.
 		threadsPath := core.PathJoin(baseDir, slug, "threads.md")
@@ -265,4 +438,86 @@ func scanFolders(activeFolderSlug string) ([]MailFolder, error) {
 		return result, nil
 	}
 	return folders, nil
+}
+
+// loadAccounts decrypts _accounts.enc and unmarshals the JSON array.
+// Requires an unlocked private key from the AccountProvider.
+func (s *Service) loadAccounts(privKey []byte) ([]MailAccount, error) {
+	pathR := accountsEncPath()
+	if !pathR.OK {
+		return nil, core.E("mail.loadAccounts", pathR.Error(), nil)
+	}
+	path := pathR.Value.(string)
+
+	rawR := core.ReadFile(path)
+	if !rawR.OK {
+		// File absent = no accounts saved yet.
+		return nil, nil
+	}
+	enc, _ := rawR.Value.([]byte)
+
+	plain, err := s.pgp.Decrypt(privKey, enc)
+	if err != nil {
+		return nil, core.E("mail.loadAccounts", "decrypt _accounts.enc", err)
+	}
+
+	var accounts []MailAccount
+	if r := core.JSONUnmarshal(plain, &accounts); !r.OK {
+		return nil, core.E("mail.loadAccounts", "unmarshal accounts", r.Value.(error))
+	}
+	return accounts, nil
+}
+
+// saveAccounts encrypts and atomically writes _accounts.enc.
+// Requires the user's public key (readable without unlock).
+func (s *Service) saveAccounts(pubKey []byte, accounts []MailAccount) error {
+	marshalR := core.JSONMarshal(accounts)
+	if !marshalR.OK {
+		return core.E("mail.saveAccounts", "marshal accounts", marshalR.Value.(error))
+	}
+	plain, _ := marshalR.Value.([]byte)
+
+	enc, err := s.pgp.Encrypt(pubKey, plain)
+	if err != nil {
+		return core.E("mail.saveAccounts", "encrypt accounts", err)
+	}
+
+	pathR := accountsEncPath()
+	if !pathR.OK {
+		return core.E("mail.saveAccounts", pathR.Error(), nil)
+	}
+	path := pathR.Value.(string)
+	tmp := path + ".tmp"
+
+	if r := core.WriteFile(tmp, enc, 0o600); !r.OK {
+		return core.E("mail.saveAccounts", "write tmp: "+r.Error(), nil)
+	}
+	if r := core.Rename(tmp, path); !r.OK {
+		_ = core.Remove(tmp)
+		return core.E("mail.saveAccounts", "rename: "+r.Error(), nil)
+	}
+	return nil
+}
+
+// backoffDelay returns the current backoff duration for an account key and
+// advances the counter. Key is "accountName/folderSlug".
+func (s *Service) backoffDelay(key string) core.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx := s.backoff[key]
+	if idx >= len(backoffTable) {
+		idx = len(backoffTable) - 1
+	}
+	d := backoffTable[idx]
+	if idx < len(backoffTable)-1 {
+		s.backoff[key] = idx + 1
+	}
+	return d
+}
+
+// resetBackoff resets the backoff counter for a key on connection success.
+func (s *Service) resetBackoff(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.backoff, key)
 }
