@@ -66,14 +66,19 @@ class LthnViewMail extends LitElement {
     w:        { type: Number },
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },
-    /** Index of the currently-selected thread in FIXTURE_THREADS.
-     *  Default 0 = top of the list. Click on any thread row sets this. */
     selectedIdx: { state: true },
+    folders:  { state: true },
+    threads:  { state: true },
+    loading:  { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare selectedIdx: number;
+  declare folders: MailFolder[];
+  declare threads: MailThread[];
+  declare loading: boolean;
+  private _timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
@@ -81,22 +86,69 @@ class LthnViewMail extends LitElement {
     this.h = 720;
     this.embedded = false;
     this.selectedIdx = 0;
+    this.folders = FIXTURE_FOLDERS;
+    this.threads = FIXTURE_THREADS;
+    this.loading = false;
   }
 
   createRenderRoot() { return this; }
+
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+    this._timer = setInterval(() => { void this._loadFromBackend(); }, 60_000);
+  }
+
+  disconnectedCallback() {
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    super.disconnectedCallback();
+  }
+
+  async _loadFromBackend(): Promise<void> {
+    if (this.loading) return;
+    this.loading = true;
+    try {
+      const svc = await import("@desktop/office/mail/service").catch(() => null);
+      if (!svc || typeof (svc as { ListFolders?: unknown }).ListFolders !== "function") {
+        return;
+      }
+      const mailSvc = svc as {
+        ListFolders: () => Promise<{ Value?: { folders?: MailFolder[] } }>;
+        ListThreads: (input: { folderSlug: string; limit?: number }) => Promise<{ Value?: { threads?: MailThread[] } }>;
+      };
+
+      const [fr, tr] = await Promise.all([
+        mailSvc.ListFolders(),
+        mailSvc.ListThreads({ folderSlug: "inbox", limit: 50 }),
+      ]);
+
+      const folders = fr?.Value?.folders;
+      if (folders && folders.length > 0) {
+        this.folders = folders;
+      }
+
+      const threads = tr?.Value?.threads;
+      if (threads && threads.length > 0) {
+        this.threads = threads;
+      }
+    } catch {
+      // Binding unavailable — keep fixture data.
+    } finally {
+      this.loading = false;
+    }
+  }
 
   /** The thread currently shown in the reading-pane. Defensive index
    *  clamp so a bad selectedIdx (e.g. set to -1 by a test) falls back
    *  to the top thread instead of throwing. */
   _selected(): MailThread {
-    const idx = Math.max(0, Math.min(this.selectedIdx, FIXTURE_THREADS.length - 1));
-    return FIXTURE_THREADS[idx];
+    const idx = Math.max(0, Math.min(this.selectedIdx, this.threads.length - 1));
+    return this.threads[idx];
   }
 
-  /** Total unread count across all fixture threads — surfaces in the
-   *  titlebar subtitle so users see triage shape at a glance. */
+  /** Total unread count across all threads. */
   _unreadCount(): number {
-    return FIXTURE_THREADS.filter(t => t.unread).length;
+    return this.threads.filter(t => t.unread).length;
   }
 
   render() {
@@ -107,7 +159,7 @@ class LthnViewMail extends LitElement {
       <div class="lthn-view-mail" style="flex:1; display:grid; grid-template-columns: 160px 360px 1fr; min-height:0;">
         <!-- folders rail -->
         <aside class="lthn-view-mail-folders" style="background:rgba(0,0,0,0.20); border-right:1px solid rgba(255,255,255,0.05); padding:14px 8px; display:flex; flex-direction:column; gap:2px;">
-          ${FIXTURE_FOLDERS.map(f => html`
+          ${this.folders.map(f => html`
             <div class="lthn-view-mail-folder"
                  data-label=${f.label}
                  ?data-active=${f.active}
@@ -124,7 +176,7 @@ class LthnViewMail extends LitElement {
 
         <!-- threads list -->
         <aside class="lthn-view-mail-threads" style="background:rgba(0,0,0,0.12); border-right:1px solid rgba(255,255,255,0.05); overflow:auto;">
-          ${FIXTURE_THREADS.map((t, i) => {
+          ${this.threads.map((t, i) => {
             const sel = i === this.selectedIdx;
             return html`
               <div class="lthn-view-mail-thread"
@@ -181,7 +233,7 @@ class LthnViewMail extends LitElement {
       subtitle: `${unread} unread`,
       w: this.w, h: this.h,
       body,
-      footer: html`${FIXTURE_THREADS.length} threads · IMAP via host.uk.com · Vi triage on-device only · fixtures (pkg/mail pending)`,
+      footer: html`${this.threads.length} threads · IMAP via host.uk.com · Vi triage on-device only`,
       embedded: this.embedded,
     });
   }

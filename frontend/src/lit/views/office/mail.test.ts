@@ -1,9 +1,16 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, findCard, isEmbedded } from "../../../test/window-fixture";
 import "./mail";
+
+vi.mock("@desktop/office/mail/service", () => ({
+  ListFolders: vi.fn(),
+  ListThreads: vi.fn(),
+}));
+
+import { ListFolders as MockedListFolders, ListThreads as MockedListThreads } from "@desktop/office/mail/service";
 
 describe("lthn-view-mail — smoke", () => {
   it("mounts without crashing and produces the Mail card", async () => {
@@ -50,7 +57,6 @@ describe("lthn-view-mail — smoke", () => {
     const { host } = await mountWindow("lthn-view-mail");
     expect(host.textContent).toContain("IMAP via host.uk.com");
     expect(host.textContent).toContain("Vi triage on-device only");
-    expect(host.textContent).toContain("pkg/mail pending");
   });
 });
 
@@ -98,5 +104,74 @@ describe("lthn-view-mail — embedded mode", () => {
     expect(host.querySelector(".lthn-view-mail-folders")).not.toBeNull();
     expect(host.querySelector(".lthn-view-mail-threads")).not.toBeNull();
     expect(host.querySelector(".lthn-view-mail-reading")).not.toBeNull();
+  });
+});
+
+describe("lthn-view-mail — backend wire", () => {
+  type MailEl = LitElement & {
+    folders: { label: string; unread: number; active: boolean }[];
+    threads: { from: string; subj: string; when: string; unread: boolean; body: string }[];
+    _loadFromBackend: () => Promise<void>;
+    updateComplete: Promise<boolean>;
+  };
+
+  beforeEach(() => {
+    (MockedListFolders as unknown as { mockReset: () => void }).mockReset();
+    (MockedListThreads as unknown as { mockReset: () => void }).mockReset();
+  });
+
+  it("backend rows replace fixture when folders and threads are returned", async () => {
+    (MockedListFolders as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { folders: [{ label: "Work", unread: 3, active: true }] } });
+    (MockedListThreads as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { threads: [{ from: "Backend Sender", subj: "Backend subject", when: "now", unread: true, body: "Backend body" }] } });
+
+    const { el, host } = await mountWindow<MailEl>("lthn-view-mail");
+    // Wait for connectedCallback's _loadFromBackend to finish.
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("Work");
+    expect(host.textContent).toContain("Backend Sender");
+    expect(host.textContent).toContain("Backend subject");
+  });
+
+  it("backend rejection keeps fixture data visible", async () => {
+    (MockedListFolders as unknown as { mockRejectedValue: (v: unknown) => void })
+      .mockRejectedValue(new Error("unavailable"));
+    (MockedListThreads as unknown as { mockRejectedValue: (v: unknown) => void })
+      .mockRejectedValue(new Error("unavailable"));
+
+    const { el, host } = await mountWindow<MailEl>("lthn-view-mail");
+    await el._loadFromBackend();
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("Inbox");
+    expect(host.textContent).toContain("Ada Penley");
+  });
+
+  it("empty backend response keeps fixture data visible", async () => {
+    (MockedListFolders as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { folders: [] } });
+    (MockedListThreads as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { threads: [] } });
+
+    const { el, host } = await mountWindow<MailEl>("lthn-view-mail");
+    await el._loadFromBackend();
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("Inbox");
+    expect(host.textContent).toContain("Ada Penley");
+  });
+
+  it("fixture-only tests remain green — smoke renders five folders", async () => {
+    (MockedListFolders as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { folders: [] } });
+    (MockedListThreads as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { threads: [] } });
+
+    const { host } = await mountWindow("lthn-view-mail");
+    const folders = host.querySelectorAll(".lthn-view-mail-folder");
+    expect(folders.length).toBe(5);
   });
 });
