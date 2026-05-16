@@ -226,3 +226,89 @@ func TestRequireAuth_RejectsShortHeader_Ugly(t *core.T) {
 	handler(rec, req)
 	core.AssertEqual(t, 401, rec.Code, "header shorter than 'bearer ' must 401 cleanly (no panic)")
 }
+
+// requireOrigin tests — Cerberus H#9-verify F1 (Mantis #1534).
+// /internal/* endpoints can't enforce bearer auth (the in-WebView
+// JS shim has no access to the bridge token and we deliberately do
+// not leak it into the eval closure), so we apply Origin-only auth
+// as defence-in-depth alongside each endpoint's own capability
+// (eval-reply's per-call reqID with 2^128 keyspace).
+
+func TestRequireOrigin_AllowsEmptyOrigin_Good(t *core.T) {
+	// The in-process WebView posts WITHOUT Origin (null/file:
+	// origins omit it on same-origin fetches), so the middleware
+	// must pass empty-Origin requests through.
+	s := authFixture(t, "tok-ignored")
+	called := false
+	handler := s.requireOrigin(func(w core.ResponseWriter, _ *core.Request) {
+		called = true
+		w.WriteHeader(200)
+	})
+	req := core.NewHTTPTestRequest(core.MethodPost, "/internal/eval-reply", nil)
+	rec := core.NewHTTPTestRecorder()
+	handler(rec, req)
+	core.AssertEqual(t, 200, rec.Code, "WebView shim (no Origin) must pass through")
+	core.AssertTrue(t, called, "next handler must run when Origin is absent")
+}
+
+func TestRequireOrigin_AllowsNullOrigin_Good(t *core.T) {
+	// Some embedded WebViews report Origin: "null"; treat as safe.
+	s := authFixture(t, "tok-ignored")
+	handler := s.requireOrigin(func(w core.ResponseWriter, _ *core.Request) {
+		w.WriteHeader(200)
+	})
+	req := core.NewHTTPTestRequest(core.MethodPost, "/internal/eval-reply", nil)
+	req.Header.Set("Origin", "null")
+	rec := core.NewHTTPTestRecorder()
+	handler(rec, req)
+	core.AssertEqual(t, 200, rec.Code, "'null' Origin must pass through")
+}
+
+func TestRequireOrigin_RejectsBrowserOrigin_Bad(t *core.T) {
+	// DNS-rebind primitive: attacker.example resolved to 127.0.0.1,
+	// browser sets Origin: https://attacker.example. Must be 403'd.
+	s := authFixture(t, "tok-ignored")
+	called := false
+	handler := s.requireOrigin(func(w core.ResponseWriter, _ *core.Request) {
+		called = true
+		w.WriteHeader(200)
+	})
+	req := core.NewHTTPTestRequest(core.MethodPost, "/internal/eval-reply", nil)
+	req.Header.Set("Origin", "https://attacker.example")
+	rec := core.NewHTTPTestRecorder()
+	handler(rec, req)
+	core.AssertEqual(t, 403, rec.Code, "browser-Origin requests must 403 (DNS-rebind defence)")
+	core.AssertFalse(t, called, "next handler must NOT run when Origin check fails")
+}
+
+func TestRequireOrigin_RejectsLocalhostOrigin_Bad(t *core.T) {
+	// Even http://localhost:9879 set as Origin by a browser fetch
+	// is the rebind primitive shape — reject.
+	s := authFixture(t, "tok-ignored")
+	handler := s.requireOrigin(func(w core.ResponseWriter, _ *core.Request) {
+		w.WriteHeader(200)
+	})
+	req := core.NewHTTPTestRequest(core.MethodPost, "/internal/eval-reply", nil)
+	req.Header.Set("Origin", "http://localhost:9879")
+	rec := core.NewHTTPTestRecorder()
+	handler(rec, req)
+	core.AssertEqual(t, 403, rec.Code, "any non-empty Origin must 403 — the WebView shim never sets one")
+}
+
+func TestRequireOrigin_DoesNotRequireBearer_Good(t *core.T) {
+	// Critical contract: requireOrigin must NEVER consult the
+	// Authorization header. The WebView shim has no token to send.
+	s := authFixture(t, "tok-real")
+	called := false
+	handler := s.requireOrigin(func(w core.ResponseWriter, _ *core.Request) {
+		called = true
+		w.WriteHeader(200)
+	})
+	req := core.NewHTTPTestRequest(core.MethodPost, "/internal/eval-reply", nil)
+	// Deliberately no Authorization header — and no Origin either.
+	rec := core.NewHTTPTestRecorder()
+	handler(rec, req)
+	core.AssertEqual(t, 200, rec.Code,
+		"requireOrigin must not require a bearer token (the WebView shim has none)")
+	core.AssertTrue(t, called)
+}

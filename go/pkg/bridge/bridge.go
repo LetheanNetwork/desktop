@@ -170,20 +170,25 @@ func (s *Service) OnStartup(_ core.Context) core.Result {
 	s.tokenMu.Unlock()
 
 	mux := core.NewServeMux()
-	// Auth-free endpoints:
-	//   - /health  : liveness probe (must work without the token).
-	//   - /internal/*: posted FROM the bundled WebView itself (JS
-	//     shim → ring buffer for console/error; eval-reply uses
-	//     unguessable per-call ids that already serve as a
-	//     capability token). Requiring bearer auth here would
-	//     break the WebView's telemetry callbacks; the privilege-
-	//     escalation surface is /mcp/*, not these.
+	// Auth tiers:
+	//   - /health  : liveness probe (no auth — must work without the
+	//     token so external uptime checks can poll).
+	//   - /internal/*: requireOrigin only (no bearer). Posted FROM
+	//     the bundled WebView itself; the JS shim has no access to
+	//     the bridge token (injecting it into the eval closure would
+	//     leak it to any script the eval body runs). Defence-in-
+	//     depth: Origin header check blocks the DNS-rebind pivot,
+	//     and each endpoint's payload carries its own capability
+	//     (eval-reply: per-call reqID — 2^128 keyspace).
+	//     Cerberus H#9-verify F1 (Mantis #1534): /internal/eval-reply
+	//     was previously bare; requireOrigin closes the no-Origin
+	//     attack surface while preserving the WebView caller.
+	//   - /mcp/*   : requireAuth (bearer + Origin). The privilege-
+	//     escalation surface (webview_eval lives here).
 	mux.HandleFunc("/health", s.handleHealth)
-	mux.HandleFunc("/internal/console", s.handleInternalConsole)
-	mux.HandleFunc("/internal/error", s.handleInternalError)
-	mux.HandleFunc("/internal/eval-reply", s.handleInternalEvalReply)
-	// /mcp/* — the privilege-escalation surface (webview_eval lives
-	// here). Bearer auth + Origin policy required.
+	mux.HandleFunc("/internal/console", s.requireOrigin(s.handleInternalConsole))
+	mux.HandleFunc("/internal/error", s.requireOrigin(s.handleInternalError))
+	mux.HandleFunc("/internal/eval-reply", s.requireOrigin(s.handleInternalEvalReply))
 	mux.HandleFunc("/mcp/info", s.requireAuth(s.handleInfo))
 	mux.HandleFunc("/mcp/tools", s.requireAuth(s.handleTools))
 	mux.HandleFunc("/mcp/call", s.requireAuth(s.handleCall))

@@ -133,6 +133,44 @@ func constantTimeEqual(a, b string) bool {
 	return diff == 0
 }
 
+// requireOrigin wraps an http.HandlerFunc with the Origin-header
+// check ONLY — no bearer check. Used by /internal/* endpoints that
+// the in-process WebView shim posts to without having the bridge
+// bearer token: the JS shim is injected into the WebView via
+// window.exec_js, and we deliberately do NOT leak the bridge token
+// into that JS closure (any script body running inside the eval
+// wrapper could then read the token from its scope).
+//
+// Defence-in-depth posture for /internal/*:
+//   1. Origin header check — blocks the DNS-rebind pivot where a
+//      browser-loaded attacker page fetches the bridge port and
+//      browser tooling sets the Origin: header. The in-process
+//      WebView posts WITHOUT an Origin header (same-origin fetches
+//      from null/file: origins omit it), so it passes through.
+//   2. Per-endpoint capability tokens (e.g. /internal/eval-reply's
+//      reqID — 2^128 keyspace) that gate any state mutation the
+//      handler performs.
+//
+// Cerberus H#9-verify F1 (Mantis #1534): /internal/eval-reply was
+// previously installed bare (no middleware). With Origin-only auth
+// the DNS-rebind primitive is closed; the reqID capability remains
+// load-bearing for race-POST defence.
+//
+// Usage example:
+//
+//	mux.HandleFunc("/internal/eval-reply",
+//	    s.requireOrigin(s.handleInternalEvalReply))
+func (s *Service) requireOrigin(next func(core.ResponseWriter, *core.Request)) func(core.ResponseWriter, *core.Request) {
+	return func(w core.ResponseWriter, r *core.Request) {
+		if !originAllowed(r.Header.Get("Origin")) {
+			w.WriteHeader(403)
+			_, _ = w.Write([]byte(`{"error":"forbidden"}`))
+			return
+		}
+		next(w, r)
+	}
+}
+
 // requireAuth wraps an http.HandlerFunc with bearer-token + origin
 // checks. Token mismatch → 401 with a generic body. Bad origin →
 // 403 with a generic body. Both responses are deliberately terse —
@@ -140,6 +178,8 @@ func constantTimeEqual(a, b string) bool {
 // "did you mean" hint.
 //
 // /health is intentionally NOT wrapped (probe endpoint).
+// /internal/* uses requireOrigin (bearer check would break the
+// WebView's token-less shim — see requireOrigin doc).
 //
 // Usage example:
 //
