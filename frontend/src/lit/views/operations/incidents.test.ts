@@ -1,7 +1,14 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import "./incidents";
+
+// Mock the @desktop/incidents/service module so we control List() output.
+vi.mock("@desktop/incidents/service", () => ({
+  List: vi.fn(),
+}));
+
+import { List } from "@desktop/incidents/service";
 
 async function mount(attrs: Record<string, string | boolean> = {}) {
   const el = document.createElement("lthn-view-incidents") as HTMLElement & {
@@ -22,7 +29,10 @@ async function mount(attrs: Record<string, string | boolean> = {}) {
 }
 
 describe("<lthn-view-incidents>", () => {
-  beforeEach(() => { document.body.innerHTML = ""; });
+  beforeEach(() => {
+    (List as unknown as { mockReset: () => void }).mockReset();
+    document.body.innerHTML = "";
+  });
 
   it("renders without crashing", async () => {
     const el = await mount();
@@ -59,5 +69,32 @@ describe("<lthn-view-incidents>", () => {
   it("embedded mode reflects the attribute", async () => {
     const el = await mount({ embedded: true });
     expect(el.hasAttribute("embedded")).toBe(true);
+  });
+
+  it("loads incidents from backend when binding resolves", async () => {
+    (List as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: {
+        incidents: [
+          { id: "2026-05-INC-001", ts: "now", sev: "P2", state: "investigating",
+            title: "hub · elevated latency", svc: "hub", who: "Mei", comments: 1 },
+        ],
+      },
+    });
+    const el = await mount();
+    // Allow connectedCallback's _loadFromBackend to settle.
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.incidents.length).toBe(1);
+    expect(el.textContent).toContain("hub · elevated latency");
+  });
+
+  it("keeps fixture data when binding rejects", async () => {
+    (List as unknown as { mockRejectedValue: (v: unknown) => void })
+      .mockRejectedValue(new Error("no binding"));
+    const el = await mount();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    // Fixture should still be in place (5 entries).
+    expect(el.incidents.length).toBe(5);
   });
 });

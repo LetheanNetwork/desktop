@@ -2,10 +2,9 @@
 
 // <lthn-view-incidents> — Operations view's Incident log panel.
 //
-// v1 fixture data. Future: backs into a `pkg/incidents` Go service
-// that subscribes to PagerDuty webhooks + correlates with the
-// vi_site_probes + queue_jobs activity tables. Tracking ticket
-// will be filed by Cladius post-Phase 2.
+// Loads live incident data from pkg/incidents.List() via the Wails
+// binding. Falls back to the fixture data when the binding is
+// unavailable (test environments, pre-binding builds).
 //
 // Vi cross-cut: a call-out at the bottom shows Vi's post-mortem
 // draft offering — same voice pattern as the Mail triage and PR
@@ -44,11 +43,15 @@ class LthnViewIncidents extends LitElement {
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },
     incidents: { state: true },
+    loading:   { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare incidents: IncidentEntry[];
+  declare loading: boolean;
+
+  private _timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
@@ -56,8 +59,47 @@ class LthnViewIncidents extends LitElement {
     this.h = 720;
     this.embedded = false;
     this.incidents = FIXTURE_INCIDENTS;
+    this.loading = false;
   }
   createRenderRoot() { return this; }
+
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+    // Re-poll every 60 s — incidents change infrequently; no need to hammer.
+    this._timer = setInterval(() => { void this._loadFromBackend(); }, 60_000);
+  }
+
+  disconnectedCallback() {
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    super.disconnectedCallback();
+  }
+
+  async _loadFromBackend() {
+    if (this.loading) return;
+    this.loading = true;
+    try {
+      // Lazy-import the Wails binding so a missing binding in tests
+      // doesn't kill the module load. Falls back to fixture on failure.
+      const svc = await import("@desktop/incidents/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
+        return;
+      }
+      const r = await (svc as {
+        List: (input: { state: string; limit: number }) => Promise<{
+          Value?: { incidents?: IncidentEntry[] }
+        }>
+      }).List({ state: "", limit: 50 });
+      const rows = r?.Value?.incidents;
+      if (rows && rows.length > 0) {
+        this.incidents = rows;
+      }
+    } catch {
+      // Backend unavailable — keep fixture data in place.
+    } finally {
+      this.loading = false;
+    }
+  }
 
   private _sevColor(s: IncidentEntry["sev"]): string {
     return ({
