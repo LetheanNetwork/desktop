@@ -117,3 +117,100 @@ func WithinDir(base, candidate string) bool {
 	// "/a/bc" — the candidate must be a strict child segment.
 	return core.HasPrefix(cleanCand, cleanBase+"/")
 }
+
+// IsValidAbsoluteUnderRoot validates that a user-supplied candidate
+// path is safe to use as a destination under a known root directory.
+// Used by Office v2.B.3 dispatches (mail-v2 attachment download +
+// files-v2 location addition) where the user picks a target path
+// the backend then writes to / reads from — the helper closes the
+// confused-deputy gap between "the user typed a path" and "the
+// service is about to touch it".
+//
+// Contract (mail-v2 §3.1):
+//
+//  1. candidate is non-empty + contains no NUL bytes
+//  2. tilde expansion (`~/foo` → `<HOME>/foo`) applied BEFORE
+//     absoluteness + clean-path checks. Bare `~` (no slash) expands
+//     to HOME itself.
+//  3. candidate (post-tilde) is absolute — starts with `/` on POSIX
+//  4. CleanPath(candidate) is byte-equal to candidate post-tilde
+//     — defends against `..`, `.`, and double-slash sequences
+//     that Clean would collapse. Caller MUST submit a pre-cleaned
+//     path; we don't silently rewrite (a Clean that changes the
+//     bytes signals the caller's intent diverges from the resolved
+//     path, which is exactly the prompt-injection signal we want
+//     to surface as an error).
+//  5. root MUST be absolute. Relative roots reject — a relative
+//     root is a programming bug, not a user error.
+//  6. CleanPath(candidate) MUST live under CleanPath(root) — same
+//     WithinDir semantics (equal-or-strict-child).
+//
+// Returns nil when all rules pass; a typed core error with code
+// `paths.invalid_absolute` otherwise so callers can surface a
+// uniform machine-readable failure.
+//
+// Usage example:
+//
+//	if err := paths.IsValidAbsoluteUnderRoot(workspaceRoot, input.Destination); err != nil {
+//	    return core.Fail(err)
+//	}
+//	// safe to: core.WriteFile(input.Destination, payload, 0o600)
+func IsValidAbsoluteUnderRoot(root, candidate string) error {
+	if candidate == "" {
+		return core.E("paths.invalid_absolute", "candidate is empty", nil)
+	}
+	// NUL-byte guard before any other processing — a stray NUL would
+	// truncate downstream C-string consumers (e.g. open syscalls).
+	for i := 0; i < len(candidate); i++ {
+		if candidate[i] == 0 {
+			return core.E("paths.invalid_absolute", "candidate must not contain NUL byte", nil)
+		}
+	}
+	for i := 0; i < len(root); i++ {
+		if root[i] == 0 {
+			return core.E("paths.invalid_absolute", "root must not contain NUL byte", nil)
+		}
+	}
+	// Tilde expansion — `~` or `~/foo`. Anything past the first
+	// character isn't an alias for another user's home (we don't
+	// support `~alice/...`) so `~alice` rejects on the absoluteness
+	// check below.
+	expanded := candidate
+	if candidate == "~" || (len(candidate) >= 2 && candidate[0] == '~' && candidate[1] == '/') {
+		homeR := core.UserHomeDir()
+		if !homeR.OK {
+			return core.E("paths.invalid_absolute", "tilde expansion failed: HOME unavailable", nil)
+		}
+		home, _ := homeR.Value.(string)
+		if home == "" {
+			return core.E("paths.invalid_absolute", "tilde expansion failed: HOME empty", nil)
+		}
+		if candidate == "~" {
+			expanded = home
+		} else {
+			expanded = home + candidate[1:]
+		}
+	}
+	if !core.PathIsAbs(expanded) {
+		return core.E("paths.invalid_absolute", "candidate is not absolute after tilde expansion", nil)
+	}
+	cleanCand := core.CleanPath(expanded, "/")
+	if cleanCand != expanded {
+		return core.E("paths.invalid_absolute",
+			"candidate is not path-clean — collapse '..' / '.' / '//' before submission", nil)
+	}
+	if root == "" {
+		return core.E("paths.invalid_absolute", "root is empty", nil)
+	}
+	if !core.PathIsAbs(root) {
+		return core.E("paths.invalid_absolute", "root must be absolute", nil)
+	}
+	cleanRoot := core.CleanPath(root, "/")
+	if cleanCand == cleanRoot {
+		return nil
+	}
+	if !core.HasPrefix(cleanCand, cleanRoot+"/") {
+		return core.E("paths.invalid_absolute", "candidate escapes root after cleaning", nil)
+	}
+	return nil
+}
