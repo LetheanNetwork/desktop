@@ -35,6 +35,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/vi"
 	"dappco.re/lthn/desktop/pkg/incidents"
 	"dappco.re/lthn/desktop/pkg/runbooks"
+	"dappco.re/lthn/desktop/pkg/serverkey"
 )
 
 // newAppCore constructs the shared *core.Core for any lthn CLI verb
@@ -219,6 +220,14 @@ func newAppCore() *core.Core {
 		// first launch. Wails surface: Runbooks.List / Get / Search /
 		// MarkRehearsed. Event: runbooks.rehearsed.
 		core.WithName("runbooks", runbooks.Register),
+		// serverkey — Stage B of the first-run auth-gate (Mantis #1474,
+		// plans RFC at code/lthn/desktop/auth-gate/RFC.md). Owns the
+		// "base egg" PGP key at ~/Lethean/wallets/server.key + its
+		// HKDF-derived passphrase root at ~/Lethean/wallets/.seed.
+		// Issues + verifies the short-lived bootstrap tokens the
+		// account-creation endpoint family consumes. Bootstrap()
+		// runs explicitly below — Register only constructs.
+		core.WithName("serverkey", serverkey.Register),
 		// update — self-update against the LetheanNetwork/desktop
 		// GitHub release feed. Constructed with CheckOnStartup =
 		// NoCheck so registering is offline-cheap; consumers call
@@ -231,6 +240,25 @@ func newAppCore() *core.Core {
 	if r := c.ServiceStartup(core.Background(), nil); !r.OK {
 		core.Print(core.Stderr(), "lthn: startup failed: %s\n", r.Error())
 		return nil
+	}
+
+	// serverkey Bootstrap — Stage B of the first-run auth-gate
+	// (Mantis #1474). Resolves ~/Lethean/wallets/.seed (creates on
+	// first run, mode 0600), derives the HKDF-SHA256 passphrase, and
+	// loads or generates ~/Lethean/wallets/server.key (mode 0600).
+	// MUST run before any HTTP server starts listening so the
+	// bootstrap-auth middleware's Verifier reference is live before
+	// the WebView can issue an account-creation request.
+	//
+	// Bootstrap is idempotent — every verb (gui, serve, doctor)
+	// calls newAppCore which invokes this, so the on-disk key only
+	// gets generated once across the install lifetime; subsequent
+	// calls re-load from disk via the HKDF-derived passphrase.
+	if serverkeySvc, _ := core.ServiceFor[*serverkey.Service](c, "serverkey"); serverkeySvc != nil {
+		if r := serverkeySvc.Bootstrap(); !r.OK {
+			core.Print(core.Stderr(), "lthn: serverkey bootstrap failed: %s\n", r.Error())
+			return nil
+		}
 	}
 
 	// orm bootstrap — lib not service. Register + mount the DuckDB
