@@ -107,8 +107,8 @@ export class ViewSwitcherElement extends LitElement {
                  background:rgba(255,255,255,0.04);
                  border:1px solid rgba(255,255,255,0.07);
                  color:var(--fg-2); font-family:var(--font-sans);
-                 font-size:11.5px; cursor:pointer;">
-          <i class="fa-solid ${active.icon}" style="font-size:10px; color:var(--brand-300);"></i>
+                 font-size:11.5px; font-weight:500; cursor:pointer;">
+          <i class="fa-solid ${active.icon}" style="font-size:10px; color:var(--fg-2);"></i>
           <span>${active.label}</span>
           <i class="fa-solid ${this._open ? "fa-angle-up" : "fa-angle-down"}"
              style="font-size:9px; color:var(--fg-3);"></i>
