@@ -488,6 +488,70 @@ func (s *Service) auditLockoutTriggered(accountID string, unlockAt int64) {
 		accountID, core.Now().UTC().Unix(), unlockAt)
 }
 
+// PrivateKeyFor returns the in-memory unlocked PGP private key bytes for
+// the given account_id. Returns (nil, false) when not unlocked. Used by
+// pkg/office/mail to decrypt _accounts.enc for IMAP polling (§1.2).
+//
+// Usage example:
+//
+//	priv, ok := svc.PrivateKeyFor("abc123def4567890")
+//	if !ok { return errLocked }
+func (s *Service) PrivateKeyFor(accountID string) ([]byte, bool) {
+	if accountID == "" {
+		return nil, false
+	}
+	s.mu.RLock()
+	priv, ok := s.unlocked[accountID]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	cp := make([]byte, len(priv))
+	copy(cp, priv)
+	return cp, true
+}
+
+// PublicKeyFor reads the on-disk public key for the given account_id.
+// Returns (nil, false) on any error. Always readable without unlock.
+// Used by pkg/office/mail to encrypt _accounts.enc (§1.2).
+//
+// Usage example:
+//
+//	pub, ok := svc.PublicKeyFor("abc123def4567890")
+func (s *Service) PublicKeyFor(accountID string) ([]byte, bool) {
+	if accountID == "" {
+		return nil, false
+	}
+	rootR := paths.Root()
+	if !rootR.OK {
+		return nil, false
+	}
+	root := rootR.Value.(string)
+	pubPath := core.PathJoin(root, accountDir, accountID, publicKeyFile)
+	rawR := core.ReadFile(pubPath)
+	if !rawR.OK {
+		return nil, false
+	}
+	raw, _ := rawR.Value.([]byte)
+	return raw, true
+}
+
+// DefaultAccountID returns the account_id of the first unlocked account,
+// or an empty string when no accounts are unlocked. Provides a fallback
+// for callers that don't manage account selection explicitly.
+//
+// Usage example:
+//
+//	id := svc.DefaultAccountID()
+func (s *Service) DefaultAccountID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for id := range s.unlocked {
+		return id
+	}
+	return ""
+}
+
 // auditLockRequested emits auth.lock.requested per RFC §6 M4 when
 // the frontend / CLI explicitly Sign-Out for a session.
 func (s *Service) auditLockRequested(accountID string) {
