@@ -62,7 +62,8 @@ type Service struct {
 	// paused is true while Stage E is locked (§6).
 	paused atomic.Bool
 
-	// mu guards pooled IMAP connections (§2.3).
+	// mu guards pooled IMAP connections (§2.3) and the
+	// folderMu / accountMu maps below.
 	mu sync.Mutex
 
 	// pool holds open IMAP connections keyed by "account/folder".
@@ -74,6 +75,21 @@ type Service struct {
 
 	// deferredPolls counts folders that would have polled while locked (§6 banner).
 	deferredPolls int
+
+	// folderMu holds per-folder-path Mutexes (Cerberus #9 Concern
+	// 1.B/1.C, cascade W4 Part 2) for defence-in-depth above
+	// paths.WithFileLock. Two concurrent appendThreadRecord calls
+	// on the same folder serialise here so the rotation race window
+	// at paths.maybeRotate's archived-suffix stamp (1-second
+	// resolution, Mantis #1554) never opens from this surface.
+	folderMu map[string]*sync.Mutex
+
+	// accountMu makes FetchOnce single-flight per account (Mantis
+	// #1555) — second concurrent FetchOnce for the same account
+	// BLOCKS (rather than returning ErrPollInFlight) so callers do
+	// not need to wire a retry loop. Lock is acquired at FetchOnce
+	// entry, released on exit.
+	accountMu map[string]*sync.Mutex
 }
 
 // imapConn is one pooled IMAP connection with its LRU timestamp.
@@ -106,11 +122,53 @@ var backoffTable = []core.Duration{
 //	svc := mail.NewService(c)
 func NewService(c *core.Core) *Service {
 	return &Service{
-		core:    c,
-		pgp:     pgp.NewService(),
-		pool:    map[string]*imapConn{},
-		backoff: map[string]int{},
+		core:      c,
+		pgp:       pgp.NewService(),
+		pool:      map[string]*imapConn{},
+		backoff:   map[string]int{},
+		folderMu:  map[string]*sync.Mutex{},
+		accountMu: map[string]*sync.Mutex{},
 	}
+}
+
+// folderMutex returns the per-folder Mutex for path, creating it on
+// first call. Cerberus #9 Concern 1.B/1.C — serialise all
+// appendThreadRecord calls for the same folder so the rotation race
+// window at paths.maybeRotate (archive-suffix 1-second resolution,
+// Mantis #1554) never opens from this surface.
+//
+// Usage example:
+//
+//	m := s.folderMutex(threadsPath)
+//	m.Lock(); defer m.Unlock()
+func (s *Service) folderMutex(path string) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if m, ok := s.folderMu[path]; ok {
+		return m
+	}
+	m := &sync.Mutex{}
+	s.folderMu[path] = m
+	return m
+}
+
+// accountMutex returns the per-account Mutex for FetchOnce single-
+// flight (Mantis #1555). Second concurrent FetchOnce for the same
+// account name blocks here.
+//
+// Usage example:
+//
+//	m := s.accountMutex(acct.Name)
+//	m.Lock(); defer m.Unlock()
+func (s *Service) accountMutex(accountName string) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if m, ok := s.accountMu[accountName]; ok {
+		return m
+	}
+	m := &sync.Mutex{}
+	s.accountMu[accountName] = m
+	return m
 }
 
 // Register constructs the mail service for Core registration.

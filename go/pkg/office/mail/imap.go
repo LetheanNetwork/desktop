@@ -8,8 +8,21 @@
 // at poolMax (default 5) per account with round-robin + LRU eviction.
 // Exponential backoff: 30s/1m/2m/5m/10m capped per §2.3.
 //
-// Threading to threads.md uses the v1 atomic-write pattern:
-// WriteFile → Rename at 0o600 (Cerberus #1487).
+// Threading to threads.md uses paths.AtomicAppendLine (cascade W4
+// Part 2, RFC.atomic-write-cascade-adoption.md §2 row 10). Records
+// above PipeBufLimit() fall back to a rewrite-merge through
+// paths.AtomicWriteWithVersion + IfMatchHash — Cerberus #9 Concern
+// 1.A: Darwin PIPE_BUF is 512 bytes so YAML headers with long
+// subjects + "Re: Re:" chains hit the fallback on the normal path
+// (NOT an edge case). Without the fallback, mail thread records
+// would silently get dropped on every reply-chain message on macOS.
+//
+// Per-folder mutex (cascade W4 Part 2, Cerberus #9 Concern 1.B/1.C)
+// — defence-in-depth above paths.WithFileLock to keep the rotation
+// race window from opening when two FetchOnce calls land on the
+// same folder concurrently. Per-account mutex (Mantis #1555) makes
+// FetchOnce single-flight per account so the IMAP poll loop cannot
+// double-fetch in parallel.
 
 package mail
 
@@ -24,10 +37,29 @@ import (
 	imap "github.com/emersion/go-imap/v2"
 )
 
+// fellBackToRewrite is the audit-event code emitted when
+// appendThreadRecord trips the Darwin PIPE_BUF fallback and lands
+// the record via AtomicWriteWithVersion rewrite-merge instead of
+// AtomicAppendLine (Cerberus #9 Concern 1.A). Distinct code keeps
+// the operational visibility: on Darwin this fires for normal-case
+// long-subject messages; on Linux (4 KiB PIPE_BUF) it should be
+// rare. Distinguishable from CodeAppendRecordTooLarge so dashboards
+// can show "fallback engaged" vs "primitive rejected, data lost".
+const fellBackToRewriteCode = "paths.append.fell_back_to_rewrite"
+
 // FetchOnce performs a one-shot IMAP fetch for the given account and folder.
 // Fetches new messages since last_uid_seen, appends to threads.md,
 // updates _state/{account}/{folder}.json, fires EventThreadReceived per
 // new thread. Returns mail.session.locked when paused (§6).
+//
+// Single-flight per account (Mantis #1555, cascade W4 Part 2) — a
+// second concurrent FetchOnce for the same account name BLOCKS on
+// the per-account Mutex until the in-flight call returns. Blocking
+// (rather than returning ErrPollInFlight) keeps callers from needing
+// a retry loop; the IMAP poll loop the future Stage E hook will
+// drive cannot double-fetch from this surface. The mutex is acquired
+// AFTER input validation so cheap-fail paths (empty account, invalid
+// slug, locked session) bypass the lock entirely.
 //
 // Usage example:
 //
@@ -47,6 +79,14 @@ func (s *Service) FetchOnce(input FetchOnceInput) core.Result {
 	if s.account == nil {
 		return core.Fail(core.E("mail.FetchOnce", "account provider not wired", nil))
 	}
+
+	// Mantis #1555 — acquire the per-account single-flight Mutex
+	// BEFORE touching IMAP state. Second concurrent FetchOnce on
+	// the same account blocks here.
+	am := s.accountMutex(input.AccountName)
+	am.Lock()
+	defer am.Unlock()
+
 	accountID := s.account.DefaultAccountID()
 	priv, ok := s.account.PrivateKeyFor(accountID)
 	if !ok {
@@ -242,8 +282,44 @@ func (s *Service) handleUIDValidityRotation(accountName, folderSlug string, oldU
 	return nil
 }
 
-// appendThreadRecord atomically appends a MailThreadRecord YAML block to
-// the folder's threads.md file. Uses WriteFile→Rename pattern (0o600).
+// appendThreadRecord appends a MailThreadRecord YAML block to the
+// folder's threads.md file via the cascade W4 Part 2 write path:
+//
+//   1. Compose the record as a single YAML document framed by the
+//      "---\n" delimiter (one line in the threads.md sense, even
+//      though the document spans multiple physical lines — the
+//      delimiter separates documents).
+//   2. PRIMARY: paths.AtomicAppendLine — O_APPEND + kernel-atomic
+//      write semantics. Cheap, scales to IMAP-fetch volume.
+//   3. FALLBACK (Cerberus #9 Concern 1.A): if the composed payload
+//      exceeds paths.PipeBufLimit() the primitive rejects with
+//      CodeAppendRecordTooLarge. Darwin's PIPE_BUF is 512 bytes so
+//      this is the NORMAL case on macOS for thread records with
+//      typical YAML headers + long subjects + "Re: Re:" chains —
+//      NOT an edge case. The fallback rewrites threads.md as a
+//      whole via paths.AtomicWriteWithVersion + IfMatchHash so the
+//      record lands durably with the existing-content preserved
+//      verbatim. An audit event "paths.append.fell_back_to_rewrite"
+//      surfaces the path-and-size so dashboards can distinguish
+//      "fallback engaged" from "primitive rejected, data lost".
+//
+// Folder-scoped Mutex (Cerberus #9 Concern 1.B/1.C, Mantis #1554
+// defence-in-depth) — two concurrent appendThreadRecord calls on
+// the same folder serialise here so the rotation race window at
+// paths.maybeRotate's archive-suffix stamp (1-second resolution)
+// never opens from this surface.
+//
+// Returns nil on success (either primary or fallback path); a wrapped
+// core.E on hard failure. The fallback NEVER silently drops a
+// record — if both primary AND fallback fail, the error propagates
+// and the IMAP fetch loop's outer Warn surfaces it (caller-side
+// retry on next FetchOnce will re-fetch the IMAP message via UID).
+//
+// Usage example:
+//
+//	if err := s.appendThreadRecord("inbox", rec); err != nil {
+//	    core.Warn("append failed", "err", err)
+//	}
 func (s *Service) appendThreadRecord(folderSlug string, rec MailThreadRecord) error {
 	threadsR := threadsFilePath(folderSlug)
 	if !threadsR.OK {
@@ -251,28 +327,89 @@ func (s *Service) appendThreadRecord(folderSlug string, rec MailThreadRecord) er
 	}
 	path := threadsR.Value.(string)
 
-	// Read existing content.
-	var existing []byte
-	if rawR := core.ReadFile(path); rawR.OK {
-		existing, _ = rawR.Value.([]byte)
-	}
-
 	block, err := yaml.Marshal(rec)
 	if err != nil {
 		return core.E("mail.appendThread", "marshal record", err)
 	}
-	sep := []byte("---\n")
-	newContent := append(existing, sep...)
-	newContent = append(newContent, block...)
 
-	tmp := path + ".tmp"
-	if r := core.WriteFile(tmp, newContent, 0o600); !r.OK {
-		return core.E("mail.appendThread", "write tmp: "+r.Error(), nil)
+	// Compose record as a single document framed by the "---\n"
+	// delimiter so parseThreads() in service.go recognises the
+	// boundary. AtomicAppendLine guarantees exactly-one trailing
+	// newline so the appended payload concatenates cleanly with
+	// future records.
+	sep := []byte("---\n")
+	payload := make([]byte, 0, len(sep)+len(block))
+	payload = append(payload, sep...)
+	payload = append(payload, block...)
+
+	// Folder-mutex guard — defence-in-depth above paths.WithFileLock.
+	fm := s.folderMutex(path)
+	fm.Lock()
+	defer fm.Unlock()
+
+	// PRIMARY — AtomicAppendLine. Accounts for the trailing-newline
+	// invariant the primitive maintains: it adds '\n' to the
+	// effective length when the payload doesn't already end with
+	// one. Hash + version check sit at the primitive boundary.
+	ar := paths.AtomicAppendLine(path, payload)
+	if ar.OK {
+		return nil
 	}
-	if r := core.Rename(tmp, path); !r.OK {
-		_ = core.Remove(tmp)
-		return core.E("mail.appendThread", "rename: "+r.Error(), nil)
+	// FALLBACK — Cerberus #9 Concern 1.A. The primitive surfaces
+	// CodeAppendRecordTooLarge via its error string (core.NewCode
+	// embeds the code as the message); match on that to distinguish
+	// the over-limit case from genuine I/O failures.
+	if !core.Contains(ar.Error(), paths.CodeAppendRecordTooLarge) {
+		// Hard failure — neither size nor lock. Propagate up.
+		return core.E("mail.appendThread",
+			"AtomicAppendLine failed: "+ar.Error(), nil)
 	}
+	// Size-bound fallback. Surface via core.Warn — expected on
+	// Darwin for normal-case YAML records with long subjects (NOT
+	// an error path; the rewrite-merge below lands the record
+	// durably). On Linux (PipeBufLimit=4096) this should be rare.
+	core.Warn("mail.appendThread fallback: record exceeded PipeBufLimit, falling back to rewrite-merge",
+		"path", path, "record_bytes", len(payload),
+		"pipe_buf_limit", paths.PipeBufLimit())
+
+	// Read current bytes for the merge under the same folder-mutex
+	// guard so a concurrent appender cannot land between read and
+	// rewrite. AtomicWriteWithVersion's IfMatchHash provides the
+	// inner cross-process check.
+	var existing []byte
+	var priorHash string
+	if rawR := core.ReadFile(path); rawR.OK {
+		existing, _ = rawR.Value.([]byte)
+		priorHash = core.SHA256Hex(existing)
+	}
+	merged := make([]byte, 0, len(existing)+len(payload)+1)
+	merged = append(merged, existing...)
+	merged = append(merged, payload...)
+	if len(merged) == 0 || merged[len(merged)-1] != '\n' {
+		merged = append(merged, '\n')
+	}
+	wr := paths.AtomicWriteWithVersion(path, paths.WriteInput{
+		Body:        merged,
+		IfMatchHash: priorHash,
+		// IncludeBody EXPLICIT false — threads.md is NOT in the
+		// at-rest-encrypted prefix list but body envelope-leak is
+		// undesirable regardless (per-thread bytes are PII). Cascade
+		// discipline anchor.
+		IncludeBody: false,
+	})
+	if !wr.OK {
+		return core.E("mail.appendThread",
+			"rewrite-merge fallback failed: "+wr.Error(), nil)
+	}
+	// Audit-event surface so operations can dashboard fallback rate.
+	// Fires via the typed MailEvent bus so the existing subscriber
+	// surface picks it up without a new contract.
+	s.core.ACTION(MailEvent{
+		Kind:       fellBackToRewriteCode,
+		FolderSlug: folderSlug,
+		Error:      core.Sprintf("record_bytes=%d pipe_buf_limit=%d", len(payload), paths.PipeBufLimit()),
+		At:         core.Now(),
+	})
 	return nil
 }
 
