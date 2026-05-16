@@ -15,6 +15,7 @@ import (
 	"dappco.re/go/stream"
 	"dappco.re/lthn/desktop/pkg/account"
 	lthnai "dappco.re/lthn/desktop/pkg/ai"
+	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/gateway"
@@ -342,6 +343,30 @@ func newAppCore() *core.Core {
 		// rotation skew between issue + verify possible.
 		if accountSvc, _ := core.ServiceFor[*account.Service](c, "account"); accountSvc != nil {
 			accountSvc.SetServerKey(serverkeySvc)
+		}
+
+		// Stage F.B Phase 2 boot wiring (Mantis #1509) — construct
+		// pkg/audit with the serverkey-derived HMAC secret so the
+		// at-rest account_id hashing (RFC.stage-f.md §6.4) survives
+		// process restarts. Registers POST-Bootstrap because
+		// AuditHMACSecret reads ~/Lethean/wallets/.seed which only
+		// exists after serverkey.Bootstrap landed it. Uses the
+		// explicit audit.New + SetDefault + c.RegisterService path
+		// (rather than core.WithName("audit", audit.Register)) so the
+		// Options{} fallback warning — "process-local random fallback;
+		// account_id-keyed Query results will NOT survive a process
+		// restart" — never fires for the lthn primary binary.
+		//
+		// audit.Register stays usable by tests / sub-binaries (lthn-mlx
+		// future work per RFC §6.5) that don't have a serverkey wired;
+		// the lthn primary binary always takes the explicit boot path.
+		// Registered via c.RegisterService so server.NewService's
+		// RoutesProvider auto-discovery (server.go:480) picks up the
+		// GET /v1/audit/events surface from pkg/audit's RouteGroups().
+		auditSvc := audit.New(c, audit.Options{AuditSecret: serverkeySvc.AuditHMACSecret()})
+		audit.SetDefault(auditSvc)
+		if r := c.RegisterService("audit", auditSvc); !r.OK {
+			core.Print(core.Stderr(), "lthn: audit RegisterService failed: %s\n", r.Error())
 		}
 	}
 
