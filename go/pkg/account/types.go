@@ -119,6 +119,88 @@ type AccountStatus struct {
 	AccountID  string `json:"account_id,omitempty"`
 }
 
+// UnlockInput is the request body the frontend sends to
+// /v1/account/unlock per RFC.stage-e.md §2. Both fields are required;
+// empties reject with the canonical "account.unlock.*" codes before
+// any disk I/O so a malformed POST cannot consume a lockout slot.
+//
+// Usage example:
+//
+//	in := account.UnlockInput{
+//	    AccountID:  "abc123def4567890",
+//	    Passphrase: "user-typed",
+//	}
+type UnlockInput struct {
+	// AccountID is the literal id under ~/Lethean/account/. Required.
+	AccountID string `json:"account_id"`
+
+	// Passphrase is the symmetric-decrypt key the user typed. Required.
+	// Frontend MUST NOT log / persist / cache this value — same
+	// closure-only discipline Cerberus #1465 demanded for bootstrap-
+	// tokens, applied to passphrases too.
+	Passphrase string `json:"passphrase"`
+}
+
+// UnlockOutput is the success-shape returned on a 200 OK to
+// /v1/account/unlock. SessionToken is the LTHN-SESS-1.* bearer the
+// frontend feeds into api-fetch.ts:setSessionToken; ExpiresAt is a
+// UI hint (the verifier is authoritative).
+//
+// Usage example:
+//
+//	out := r.Value.(account.UnlockOutput)
+//	_ = out.SessionToken
+type UnlockOutput struct {
+	SessionToken string `json:"session_token"`
+	ExpiresAt    int64  `json:"expires_at"`
+	AccountID    string `json:"account_id"`
+}
+
+// LockInput is the request body for /v1/account/lock. The forced-
+// lock endpoint clears the in-process unlocked private key for the
+// supplied account_id; the next REST request without a valid session
+// token re-arms the auth gate. Per RFC §6.
+//
+// Usage example:
+//
+//	in := account.LockInput{AccountID: "abc123def4567890"}
+type LockInput struct {
+	AccountID string `json:"account_id"`
+}
+
+// LockOutput is the success-shape returned by /v1/account/lock.
+//
+// Usage example:
+//
+//	out := r.Value.(account.LockOutput)
+//	_ = out.AccountID
+type LockOutput struct {
+	AccountID string `json:"account_id"`
+}
+
+// SessionTokenIssuer is the narrow contract Unlock consumes from
+// pkg/serverkey for session-token issuance. Decoupled so account_test
+// can inject an in-process fake without depending on the full
+// serverkey.Service (which would require Bootstrap() + a real PGP
+// key pair under $HOME).
+//
+// Usage example:
+//
+//	svc.SetServerKey(serverkeySvc) // *serverkey.Service satisfies this
+type SessionTokenIssuer interface {
+	IssueSessionToken(accountID string) core.Result
+}
+
+// lockoutEntry tracks per-account_id failed-unlock state per RFC §5
+// M1 (Cerberus DREAD ruling — counter is per-account, NOT global).
+// attempts holds the unix-seconds of each failed attempt inside the
+// rolling lockoutWindowSeconds; unlockAt > now means the account is
+// currently locked.
+type lockoutEntry struct {
+	attempts []int64
+	unlockAt int64
+}
+
 // File modes — declared at package scope so service.go / routes.go
 // all reference the same value. 0o600 is load-bearing for Cerberus
 // #1464 (open-time mode verification carried forward).
@@ -155,10 +237,39 @@ const accountIDLength = 16
 // "account.exists"). Adding a new code requires updating the
 // frontend's known-codes set in the same commit.
 const (
-	codeAccountExists       = "account.exists"
-	codeAccountIDMismatch   = "account.id_mismatch"
-	codeAccountIDRequired   = "account.id.required"
-	codePublicKeyRequired   = "account.public_key.required"
-	codeAccountWriteFailed  = "account.write_failed"
-	codeAccountInvalidBody  = "account.invalid_body"
+	codeAccountExists      = "account.exists"
+	codeAccountIDMismatch  = "account.id_mismatch"
+	codeAccountIDRequired  = "account.id.required"
+	codePublicKeyRequired  = "account.public_key.required"
+	codeAccountWriteFailed = "account.write_failed"
+	codeAccountInvalidBody = "account.invalid_body"
+
+	// Stage E.B per RFC.stage-e.md §5 — unlock failure namespace.
+	// The frontend keys inline-copy off these codes (bad_passphrase
+	// renders "N attempts remaining"; locked_out renders the cooldown
+	// countdown; corrupted_key renders the repair instruction).
+	codeUnlockBadPassphrase      = "account.unlock.bad_passphrase"
+	codeUnlockLockedOut          = "account.unlock.locked_out"
+	codeUnlockCorruptedKey       = "account.unlock.corrupted_key"
+	codeUnlockPassphraseRequired = "account.unlock.passphrase.required"
+	codeUnlockMisconfigured      = "account.unlock.server_misconfigured"
+	codeUnlockSessionMintFailed  = "account.unlock.session_mint_failed"
+)
+
+// Lockout policy constants per RFC.stage-e.md §5 + Cerberus DREAD M1.
+//
+// lockoutThreshold — failed attempts inside the rolling window
+// before the account_id is locked.
+// lockoutWindowSeconds — sliding window over which attempts count.
+// lockoutCooldownSeconds — how long the account stays locked after
+// crossing the threshold.
+//
+// 5 / 300s / 60s matches the RFC's "5 failed attempts within 5
+// minutes → lock the account_id for 60 seconds". Tunable at the
+// package level so the test fixture can pin the values without
+// mocking the clock.
+const (
+	lockoutThreshold        = 5
+	lockoutWindowSeconds    = 5 * 60
+	lockoutCooldownSeconds  = 60
 )

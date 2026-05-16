@@ -23,6 +23,29 @@ import (
 //	}
 type Service struct {
 	core *core.Core
+
+	// mu guards unlocked + lockouts. RW because HasUnlocked reads;
+	// Unlock + Lock + recordFailedAttempt write.
+	mu core.RWMutex
+
+	// unlocked holds the in-memory decrypted PGP private key per
+	// account_id for the session lifetime. Cleared by Lock or by
+	// ServiceShutdown. NEVER persisted to disk in cleartext —
+	// re-decrypt on next Bootstrap is the policy.
+	unlocked map[string][]byte
+
+	// lockouts tracks per-account_id failed-unlock counters per RFC
+	// §5 M1. In-memory only — restart resets the counter. RFC §5
+	// notes the rationale: disk-persistence inverts the threat model
+	// (attacker with disk access can wipe the counter).
+	lockouts map[string]*lockoutEntry
+
+	// serverkey is the session-token issuer Unlock invokes after a
+	// successful decrypt. Wired via SetServerKey at construction
+	// time (cmd/lthn/app.go) so the same serverkey instance the
+	// bearer middleware verifies tokens against is the one that
+	// minted them.
+	serverkey SessionTokenIssuer
 }
 
 // NewService constructs the account service. The core handle is
@@ -30,11 +53,20 @@ type Service struct {
 // the cooperative task queue plugs in) but is not required for
 // Create today — pass nil from tests that don't care.
 //
+// Maps are pre-allocated so the first Unlock / Lock call doesn't
+// race against a nil map; SetServerKey wires the session-token
+// issuer separately (cmd/lthn/app.go calls it after Bootstrap).
+//
 // Usage example:
 //
 //	svc := account.NewService(c)
+//	svc.SetServerKey(serverkeySvc)
 func NewService(c *core.Core) *Service {
-	return &Service{core: c}
+	return &Service{
+		core:     c,
+		unlocked: map[string][]byte{},
+		lockouts: map[string]*lockoutEntry{},
+	}
 }
 
 // Register is the canonical core.WithName-compatible factory. Wired
@@ -61,8 +93,15 @@ func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 
-// ServiceShutdown is the Wails3 lifecycle hook; no-op.
+// ServiceShutdown clears the in-memory unlocked private keys so a
+// shutdown leaves no decrypted material in process memory.
+// Lockouts cleared too — the next process incarnation starts fresh
+// (RFC §5 — disk-persisted counters would invert the threat model).
 func (s *Service) ServiceShutdown() core.Result {
+	s.mu.Lock()
+	s.unlocked = nil
+	s.lockouts = nil
+	s.mu.Unlock()
 	return core.Ok(nil)
 }
 
