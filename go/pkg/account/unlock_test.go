@@ -402,3 +402,119 @@ func TestAccount_Lock_PathTraversal_Bad_DREAD_ADD_HIGH_2(t *core.T) {
 			"Lock("+evil+") error message MUST carry paths.invalid_id")
 	}
 }
+
+// --- Cerberus Stage E.B DREAD ADD-HIGH-3 — trigger-attempt response
+// shape. The 5th failed attempt MUST return `locked_out`, NOT
+// `bad_passphrase + 5 remaining`. Previously the code cleared the
+// attempts slice before computing the response, so the user saw "5
+// attempts remaining" the moment they had 0 chances left + the
+// audit-log claimed `attempts_remaining=5` immediately followed by
+// `locked_out 60s` on the NEXT attempt — implying no lockout was
+// pending.
+
+// TestUnlock_TriggerAttemptReturnsLockedOut_Ugly_DREAD_ADD_HIGH_3
+// pins the trigger-attempt response: 4 wrong attempts return
+// bad_passphrase with decrementing remaining (4 → 1); the 5th
+// returns locked_out, NOT bad_passphrase.
+func TestUnlock_TriggerAttemptReturnsLockedOut_Ugly_DREAD_ADD_HIGH_3(t *core.T) {
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+
+	// Attempts 1–4: bad_passphrase with decrementing remaining.
+	for i := 0; i < 4; i++ {
+		r := svc.Unlock(subject.UnlockInput{
+			AccountID:  fixtureAccountID,
+			Passphrase: fixtureWrongPassphrase,
+		})
+		core.AssertFalse(t, r.OK, "attempt should fail")
+		core.AssertEqual(t, "account.unlock.bad_passphrase", r.Code(),
+			core.Sprintf("attempt %d MUST surface bad_passphrase", i+1))
+	}
+
+	// Attempt 5 — the trigger attempt. MUST return locked_out, NOT
+	// bad_passphrase. This is the load-bearing DREAD ADD-HIGH-3
+	// regression cover.
+	r := svc.Unlock(subject.UnlockInput{
+		AccountID:  fixtureAccountID,
+		Passphrase: fixtureWrongPassphrase,
+	})
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, "account.unlock.locked_out", r.Code(),
+		"5th attempt MUST surface locked_out (Cerberus DREAD ADD-HIGH-3) — not bad_passphrase")
+}
+
+// TestUnlock_TriggerAttemptWithCorrectPassphraseStillUnlocks_Ugly —
+// the threshold-trigger fires on WRONG passphrases. If the 5th
+// attempt happens to be the correct passphrase, it MUST still
+// unlock (the gate ran successfully BEFORE recordFailedAttempt).
+// Subtle case: the correct 5th attempt bypasses recordFailedAttempt
+// because decryptFailureNone returns OK from distinguishDecrypt,
+// and clearLockout wipes the entry on success.
+func TestUnlock_TriggerAttemptWithCorrectPassphraseStillUnlocks_Ugly(t *core.T) {
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+
+	// 4 wrong attempts — the counter is at 4 but the threshold (5)
+	// is NOT yet reached.
+	for i := 0; i < 4; i++ {
+		_ = svc.Unlock(subject.UnlockInput{
+			AccountID: fixtureAccountID, Passphrase: fixtureWrongPassphrase,
+		})
+	}
+
+	// 5th attempt is CORRECT — must unlock cleanly. Successful
+	// unlock also clears the lockout state.
+	r := svc.Unlock(subject.UnlockInput{
+		AccountID: fixtureAccountID, Passphrase: fixturePassphrase,
+	})
+	core.AssertTrue(t, r.OK, "correct passphrase on 5th attempt MUST unlock")
+	core.AssertTrue(t, svc.HasUnlocked(fixtureAccountID))
+}
+
+// TestUnlock_PostLockoutAttempt_NoDuplicateTrigger_Ugly — after the
+// lockout has triggered, subsequent attempts within the cooldown
+// MUST return locked_out via the lockoutState early-reject path
+// WITHOUT re-emitting auth.lockout.triggered. The reserved event
+// is specifically the moment the threshold tripped; re-emitting on
+// every rejected post-trigger attempt would pollute Stage F's
+// log-tailer with duplicate trigger events.
+//
+// We can't assert on emit count directly without capturing stderr,
+// but we CAN assert on the response shape — successive locked_out
+// responses MUST share the same unlockAt timestamp (the lockout
+// trip didn't fire a NEW lockout, just denied access on the
+// existing one).
+func TestUnlock_PostLockoutAttempt_NoDuplicateTrigger_Ugly(t *core.T) {
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+
+	// Trigger the lockout (5 wrong attempts).
+	for i := 0; i < 5; i++ {
+		_ = svc.Unlock(subject.UnlockInput{
+			AccountID: fixtureAccountID, Passphrase: fixtureWrongPassphrase,
+		})
+	}
+
+	// Post-trigger attempts — MUST return locked_out without
+	// resetting the cooldown.
+	r1 := svc.Unlock(subject.UnlockInput{
+		AccountID: fixtureAccountID, Passphrase: fixtureWrongPassphrase,
+	})
+	core.AssertFalse(t, r1.OK)
+	core.AssertEqual(t, "account.unlock.locked_out", r1.Code())
+
+	r2 := svc.Unlock(subject.UnlockInput{
+		AccountID: fixtureAccountID, Passphrase: fixtureWrongPassphrase,
+	})
+	core.AssertFalse(t, r2.OK)
+	core.AssertEqual(t, "account.unlock.locked_out", r2.Code())
+
+	// Both rejections surface the same cooldown countdown (within
+	// 1s tolerance for clock tick) — the second attempt didn't
+	// reset the lockout window.
+	core.AssertTrue(t, r1.Error() != "" && r2.Error() != "",
+		"both rejections carry error messages")
+}

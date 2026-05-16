@@ -91,9 +91,17 @@ func (s *Service) Unlock(input UnlockInput) core.Result {
 	// A locked account never reaches the decrypt path, so the attacker
 	// can't accelerate brute-force by parallelism past the per-account
 	// cap.
+	//
+	// Cerberus DREAD ADD-HIGH-3 — auth.lockout.triggered is reserved
+	// for the moment the threshold trips. Subsequent attempts within
+	// the cooldown emit auth.unlock.failed with attempts_remaining=0
+	// (consistent with "the user has zero chances right now") and
+	// return locked_out. Re-emitting auth.lockout.triggered on every
+	// rejected attempt would pollute the Stage F log-tailer with
+	// duplicate trigger events that don't reflect new state.
 	now := core.Now().UTC().Unix()
 	if locked, unlockAt := s.lockoutState(input.AccountID, now); locked {
-		s.auditLockoutTriggered(input.AccountID, unlockAt)
+		s.auditUnlockFailed(input.AccountID, 0)
 		return core.Fail(core.NewCode(codeUnlockLockedOut,
 			core.Sprintf("too many attempts — try again in %d seconds", unlockAt-now)))
 	}
@@ -111,8 +119,13 @@ func (s *Service) Unlock(input UnlockInput) core.Result {
 	// the per-account cap by spamming non-existent ids).
 	statR := core.Stat(privatePath)
 	if !statR.OK {
-		remaining := s.recordFailedAttempt(input.AccountID, now)
+		remaining, triggered, unlockAt := s.recordFailedAttempt(input.AccountID, now)
 		s.auditUnlockFailed(input.AccountID, remaining)
+		if triggered {
+			s.auditLockoutTriggered(input.AccountID, unlockAt)
+			return core.Fail(core.NewCode(codeUnlockLockedOut,
+				core.Sprintf("too many attempts — try again in %d seconds", unlockAt-now)))
+		}
 		return core.Fail(core.NewCode(codeUnlockBadPassphrase,
 			core.Sprintf("passphrase didn't unlock your account — %d attempts remaining", remaining)))
 	}
@@ -151,8 +164,17 @@ func (s *Service) Unlock(input UnlockInput) core.Result {
 	if decryptErr != nil {
 		switch kind {
 		case decryptFailureBadPassphrase:
-			remaining := s.recordFailedAttempt(input.AccountID, now)
+			remaining, triggered, unlockAt := s.recordFailedAttempt(input.AccountID, now)
 			s.auditUnlockFailed(input.AccountID, remaining)
+			if triggered {
+				// Cerberus DREAD ADD-HIGH-3 — surface the locked_out
+				// response on the SAME attempt that triggered, so the
+				// UI doesn't show "5 remaining" the moment the user
+				// has 0 chances left.
+				s.auditLockoutTriggered(input.AccountID, unlockAt)
+				return core.Fail(core.NewCode(codeUnlockLockedOut,
+					core.Sprintf("too many attempts — try again in %d seconds", unlockAt-now)))
+			}
 			return core.Fail(core.NewCode(codeUnlockBadPassphrase,
 				core.Sprintf("passphrase didn't unlock your account — %d attempts remaining", remaining)))
 		default:
@@ -341,14 +363,32 @@ func (s *Service) lockoutState(accountID string, nowUnix int64) (bool, int64) {
 }
 
 // recordFailedAttempt increments the lockout counter for the
-// account_id, returns the number of attempts remaining BEFORE the
-// next lock-trigger. When the counter crosses the threshold the
-// account is locked for the configured cooldown.
+// account_id, returns (remaining, triggered, unlockAt).
+//
+//   - remaining is the number of attempts left AFTER this one BEFORE
+//     the lockout trips. On the trigger-attempt itself remaining is 0
+//     — the user just used the last chance.
+//   - triggered is true ONLY on the attempt that crosses the
+//     threshold. Caller MUST emit auth.lockout.triggered + surface
+//     the locked_out response on this single boolean — the next
+//     attempt would also see "locked" via lockoutState but won't
+//     re-trigger.
+//   - unlockAt is the unix timestamp the cooldown expires; zero when
+//     not triggered.
+//
+// Cerberus Stage E.B DREAD ADD-HIGH-3 (Mantis #1480) — the previous
+// shape returned `remaining=5` on the trigger attempt because the
+// code cleared the attempts slice before computing the response.
+// User saw "5 attempts remaining" + the audit lied + the lockout
+// event fired one attempt late. Fixed by computing remaining
+// BEFORE the post-trigger slice-clear AND returning the triggered
+// boolean so Unlock can route to the locked_out code on the same
+// attempt that triggered.
 //
 // Lockout counter is per-account_id per Cerberus DREAD M1 — a
 // typo-spamming user MUST NOT lock out a sibling account on the
 // same machine.
-func (s *Service) recordFailedAttempt(accountID string, nowUnix int64) int {
+func (s *Service) recordFailedAttempt(accountID string, nowUnix int64) (remaining int, triggered bool, unlockAt int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.lockouts == nil {
@@ -370,15 +410,20 @@ func (s *Service) recordFailedAttempt(accountID string, nowUnix int64) int {
 		}
 	}
 	entry.attempts = append(kept, nowUnix)
-	if len(entry.attempts) >= lockoutThreshold {
+	// Compute remaining + trigger state BEFORE the post-trigger
+	// slice clear — otherwise the clear hides the "this attempt
+	// just used the last chance" signal.
+	count := len(entry.attempts)
+	if count >= lockoutThreshold {
 		entry.unlockAt = nowUnix + lockoutCooldownSeconds
 		entry.attempts = entry.attempts[:0]
+		return 0, true, entry.unlockAt
 	}
-	remaining := lockoutThreshold - len(entry.attempts)
+	remaining = lockoutThreshold - count
 	if remaining < 0 {
 		remaining = 0
 	}
-	return remaining
+	return remaining, false, 0
 }
 
 // clearLockout resets the lockout state for the account_id —
