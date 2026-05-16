@@ -24,6 +24,28 @@ type RouteView struct {
 	Model   string `json:"model"`
 }
 
+// Cerberus Mantis #1426 — defence-in-depth caps on the WGenerate /
+// WChat Wails surface. Threat model: a compromised renderer (post-
+// XSS — currently blocked by Lit auto-escape + bridge auth) or a
+// future plugin-tier caller (#1421) could submit billion-message
+// arrays or multi-GiB payloads, OOM-ing the runtime before the
+// inference router gets a chance to reject. These caps stop the
+// request at the binding boundary.
+//
+// Sizing rationale:
+//   - 1 MiB single prompt fits a 200K-token Claude-class context at
+//     ~5 bytes/token, with headroom for system prompts + chat
+//     framing.
+//   - 8 MiB total across a WChat message array fits a substantial
+//     multi-doc RAG paste with room to spare.
+//   - 2000 messages is far more than any reasonable conversation
+//     (typical: 10s; aggressive: 100s).
+const (
+	maxPromptBytes    = 1 << 20 // 1 MiB — WGenerate prompt OR per-msg
+	maxChatTotalBytes = 8 << 20 // 8 MiB — sum across all WChat messages
+	maxChatMessages   = 2000
+)
+
 // ServiceName / Startup / Shutdown — Wails3 lifecycle. Service was
 // already constructed as a Core service; Wails just wraps the same
 // instance through application.NewService.
@@ -44,6 +66,11 @@ func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }
 //	import { WGenerate } from "@desktop/runner/service";
 //	const reply = await WGenerate("hello");
 func (s *Service) WGenerate(prompt string) core.Result {
+	if len(prompt) > maxPromptBytes {
+		return core.Fail(core.E("runner.Service.WGenerate",
+			core.Sprintf("prompt exceeds %d byte cap (got %d)",
+				maxPromptBytes, len(prompt)), nil))
+	}
 	r := s.Generate(prompt)
 	if !r.OK {
 		return core.Fail(core.E("runner.Service.WGenerate", "generate failed", r.Value.(error)))
@@ -55,6 +82,29 @@ func (s *Service) WGenerate(prompt string) core.Result {
 // WChat is the WebView-binding-friendly Chat — full message
 // history in, assistant reply out.
 func (s *Service) WChat(messages []inference.Message) core.Result {
+	// Cerberus #1426 — defence-in-depth caps before the array hits
+	// any allocator path. Order matters: count first (cheap), then
+	// per-message size (still O(n) but bounded), then total.
+	if len(messages) > maxChatMessages {
+		return core.Fail(core.E("runner.Service.WChat",
+			core.Sprintf("message count exceeds %d (got %d)",
+				maxChatMessages, len(messages)), nil))
+	}
+	var total int
+	for i, m := range messages {
+		size := len(m.Role) + len(m.Content)
+		if size > maxPromptBytes {
+			return core.Fail(core.E("runner.Service.WChat",
+				core.Sprintf("message[%d] size %d exceeds %d byte cap",
+					i, size, maxPromptBytes), nil))
+		}
+		total += size
+		if total > maxChatTotalBytes {
+			return core.Fail(core.E("runner.Service.WChat",
+				core.Sprintf("cumulative message size at index %d exceeds %d byte cap",
+					i, maxChatTotalBytes), nil))
+		}
+	}
 	r := s.Chat(messages)
 	if !r.OK {
 		return core.Fail(core.E("runner.Service.WChat", "chat failed", r.Value.(error)))
