@@ -64,13 +64,15 @@ type postFrontmatter struct {
 }
 
 // socialDir resolves ~/Lethean/marketing/social/ and creates it if missing.
+// Mode 0o700 (Cerberus #1487 PR-1): unsent post drafts + scheduled
+// content shape — owner-only at rest.
 func socialDir() core.Result {
 	root := paths.Root()
 	if !root.OK {
 		return root
 	}
 	dir := core.PathJoin(root.Value.(string), "marketing", "social")
-	if r := core.MkdirAll(dir, 0o755); !r.OK {
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)
@@ -188,7 +190,12 @@ func parsePost(raw []byte) (SocialPost, error) {
 // writePost serialises a SocialPost to Trix format and writes it to disk.
 // Post text lives in the body (not frontmatter) to avoid YAML quoting of
 // newlines and special characters.
+// Cerberus #1486: p.ID lands directly in the filename — validate.
+// Cerberus #1487 PR-1: 0o600 — owner-only at rest.
 func writePost(dir string, p SocialPost) core.Result {
+	if err := paths.IsValidID(p.ID); err != nil {
+		return core.Fail(err)
+	}
 	fm := postFrontmatter{
 		ID:     p.ID,
 		Ch:     joinChannels(p.Ch),
@@ -207,7 +214,7 @@ func writePost(dir string, p SocialPost) core.Result {
 		data = append(data, []byte(p.Text)...)
 	}
 	fpath := core.PathJoin(dir, p.ID+".md")
-	if r := core.WriteFile(fpath, data, 0o644); !r.OK {
+	if r := core.WriteFile(fpath, data, 0o600); !r.OK {
 		return r
 	}
 	return core.Ok(nil)

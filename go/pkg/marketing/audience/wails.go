@@ -9,6 +9,7 @@ package audience
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // List returns all audience segments, with the "all" segment first.
@@ -63,8 +64,8 @@ func (s *Service) List(_ ListInput) core.Result {
 //	r := svc.Get("local-ai-developers")
 //	if r.OK { seg := r.Value.(audience.Segment) }
 func (s *Service) Get(id string) core.Result {
-	if id == "" {
-		return core.Fail(core.E("audience.Get", "id is required", nil))
+	if err := paths.IsValidID(id); err != nil {
+		return core.Fail(err)
 	}
 	dirR := audienceDir()
 	if !dirR.OK {
@@ -108,6 +109,11 @@ func (s *Service) Create(input CreateInput) core.Result {
 	if id == "" {
 		id = "segment"
 	}
+	// Cerberus #1486: slugifyAudience is defensive but not a path-safe
+	// guarantee — validate before the slug propagates into writeSegment.
+	if err := paths.IsValidID(id); err != nil {
+		return core.Fail(err)
+	}
 
 	seg := Segment{
 		ID:     id,
@@ -132,8 +138,8 @@ func (s *Service) Create(input CreateInput) core.Result {
 //	r := svc.Update(audience.UpdateInput{ID: "local-ai-developers", N: 5000})
 //	if r.OK { seg := r.Value.(audience.Segment) }
 func (s *Service) Update(input UpdateInput) core.Result {
-	if input.ID == "" {
-		return core.Fail(core.E("audience.Update", "id is required", nil))
+	if err := paths.IsValidID(input.ID); err != nil {
+		return core.Fail(err)
 	}
 	dirR := audienceDir()
 	if !dirR.OK {

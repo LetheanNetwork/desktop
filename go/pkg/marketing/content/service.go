@@ -79,13 +79,15 @@ type itemFrontmatter struct {
 }
 
 // contentDir resolves ~/Lethean/marketing/content/ and creates it if missing.
+// Mode 0o700 (Cerberus #1487 PR-1): content drafts + Due dates carry
+// pre-publication strategy — owner-only at rest.
 func contentDir() core.Result {
 	root := paths.Root()
 	if !root.OK {
 		return root
 	}
 	dir := core.PathJoin(root.Value.(string), "marketing", "content")
-	if r := core.MkdirAll(dir, 0o755); !r.OK {
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)
@@ -166,7 +168,12 @@ func parseItem(raw []byte) (ContentItem, error) {
 }
 
 // writeItem serialises a ContentItem to Trix format and writes it to disk.
+// Cerberus #1486: item.ID lands directly in the filename — validate.
+// Cerberus #1487 PR-1: 0o600 — owner-only at rest.
 func writeItem(dir string, item ContentItem) core.Result {
+	if err := paths.IsValidID(item.ID); err != nil {
+		return core.Fail(err)
+	}
 	fm := itemFrontmatter{
 		ID:   item.ID,
 		T:    item.T,
@@ -186,7 +193,7 @@ func writeItem(dir string, item ContentItem) core.Result {
 		data = append(data, []byte(item.Body)...)
 	}
 	fpath := core.PathJoin(dir, item.ID+".md")
-	if r := core.WriteFile(fpath, data, 0o644); !r.OK {
+	if r := core.WriteFile(fpath, data, 0o600); !r.OK {
 		return r
 	}
 	return core.Ok(nil)

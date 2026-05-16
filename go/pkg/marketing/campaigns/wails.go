@@ -9,6 +9,7 @@ package campaigns
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // List returns all campaigns, optionally filtered by state.
@@ -62,8 +63,8 @@ func (s *Service) List(input ListInput) core.Result {
 //	r := svc.Get("v02-launch-20260516")
 //	if r.OK { c := r.Value.(campaigns.Campaign) }
 func (s *Service) Get(id string) core.Result {
-	if id == "" {
-		return core.Fail(core.E("campaigns.Get", "id is required", nil))
+	if err := paths.IsValidID(id); err != nil {
+		return core.Fail(err)
 	}
 	dirR := campaignsDir()
 	if !dirR.OK {
@@ -149,8 +150,8 @@ func (s *Service) Create(input CreateInput) core.Result {
 //	r := svc.Update(campaigns.UpdateInput{ID: "v02-launch-20260516", State: "complete"})
 //	if r.OK { c := r.Value.(campaigns.Campaign) }
 func (s *Service) Update(input UpdateInput) core.Result {
-	if input.ID == "" {
-		return core.Fail(core.E("campaigns.Update", "id is required", nil))
+	if err := paths.IsValidID(input.ID); err != nil {
+		return core.Fail(err)
 	}
 	dirR := campaignsDir()
 	if !dirR.OK {

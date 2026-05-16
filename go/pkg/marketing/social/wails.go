@@ -9,6 +9,7 @@ package social
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // List returns all social posts, optionally filtered by channel or state.
@@ -62,8 +63,8 @@ func (s *Service) List(input ListInput) core.Result {
 //	r := svc.Get("post-20260516")
 //	if r.OK { p := r.Value.(social.SocialPost) }
 func (s *Service) Get(id string) core.Result {
-	if id == "" {
-		return core.Fail(core.E("social.Get", "id is required", nil))
+	if err := paths.IsValidID(id); err != nil {
+		return core.Fail(err)
 	}
 	dirR := socialDir()
 	if !dirR.OK {
@@ -132,8 +133,8 @@ func (s *Service) Create(input CreateInput) core.Result {
 //	r := svc.MarkSent("post-20260516")
 //	if r.OK { p := r.Value.(social.SocialPost) }
 func (s *Service) MarkSent(id string) core.Result {
-	if id == "" {
-		return core.Fail(core.E("social.MarkSent", "id is required", nil))
+	if err := paths.IsValidID(id); err != nil {
+		return core.Fail(err)
 	}
 	dirR := socialDir()
 	if !dirR.OK {

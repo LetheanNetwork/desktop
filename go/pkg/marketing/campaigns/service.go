@@ -62,13 +62,15 @@ type campaignFrontmatter struct {
 }
 
 // campaignsDir resolves ~/Lethean/marketing/campaigns/ and creates it if missing.
+// Mode 0o700 (Cerberus #1487 PR-1): campaign bodies + spend + reach
+// metrics — owner-only at rest.
 func campaignsDir() core.Result {
 	root := paths.Root()
 	if !root.OK {
 		return root
 	}
 	dir := core.PathJoin(root.Value.(string), "marketing", "campaigns")
-	if r := core.MkdirAll(dir, 0o755); !r.OK {
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)
@@ -153,7 +155,12 @@ func parseCampaign(raw []byte) (Campaign, error) {
 }
 
 // writeCampaign serialises a Campaign to Trix format and writes it to disk.
+// Cerberus #1486: c.ID lands directly in the filename — validate.
+// Cerberus #1487 PR-1: 0o600 — owner-only at rest.
 func writeCampaign(dir string, c Campaign) core.Result {
+	if err := paths.IsValidID(c.ID); err != nil {
+		return core.Fail(err)
+	}
 	fm := campaignFrontmatter{
 		ID:      c.ID,
 		Name:    c.Name,
@@ -174,7 +181,7 @@ func writeCampaign(dir string, c Campaign) core.Result {
 		content = append(content, []byte(c.Body)...)
 	}
 	fpath := core.PathJoin(dir, c.ID+".md")
-	if r := core.WriteFile(fpath, content, 0o644); !r.OK {
+	if r := core.WriteFile(fpath, content, 0o600); !r.OK {
 		return r
 	}
 	return core.Ok(nil)

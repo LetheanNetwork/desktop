@@ -9,6 +9,7 @@ package content
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // List returns the content calendar grouped into ContentColumn values.
@@ -73,8 +74,8 @@ func (s *Service) List(input ListInput) core.Result {
 //	r := svc.Get("v02-release-notes-20260516")
 //	if r.OK { item := r.Value.(content.ContentItem) }
 func (s *Service) Get(id string) core.Result {
-	if id == "" {
-		return core.Fail(core.E("content.Get", "id is required", nil))
+	if err := paths.IsValidID(id); err != nil {
+		return core.Fail(err)
 	}
 	dirR := contentDir()
 	if !dirR.OK {
@@ -142,8 +143,8 @@ func (s *Service) Create(input CreateInput) core.Result {
 //	r := svc.Advance("v02-release-notes-20260516")
 //	if r.OK { item := r.Value.(content.ContentItem) }
 func (s *Service) Advance(id string) core.Result {
-	if id == "" {
-		return core.Fail(core.E("content.Advance", "id is required", nil))
+	if err := paths.IsValidID(id); err != nil {
+		return core.Fail(err)
 	}
 	dirR := contentDir()
 	if !dirR.OK {

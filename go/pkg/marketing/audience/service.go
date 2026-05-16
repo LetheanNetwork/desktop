@@ -61,13 +61,15 @@ type segmentFrontmatter struct {
 }
 
 // audienceDir resolves ~/Lethean/marketing/audience/ and creates it if missing.
+// Mode 0o700 (Cerberus #1487 PR-1): segment definitions can carry
+// subscriber-list shape data; owner-only at rest.
 func audienceDir() core.Result {
 	root := paths.Root()
 	if !root.OK {
 		return root
 	}
 	dir := core.PathJoin(root.Value.(string), "marketing", "audience")
-	if r := core.MkdirAll(dir, 0o755); !r.OK {
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)
@@ -141,7 +143,14 @@ func parseSegment(raw []byte) (Segment, error) {
 }
 
 // writeSegment serialises a Segment to Trix format and writes it to disk.
+// Cerberus #1486: seg.ID lands directly in the filename — validate
+// before the PathJoin even though Create generates the slug via
+// slugifyAudience (which can still emit edge-case shapes).
+// Cerberus #1487 PR-1: 0o600 — owner-only at rest.
 func writeSegment(dir string, seg Segment) core.Result {
+	if err := paths.IsValidID(seg.ID); err != nil {
+		return core.Fail(err)
+	}
 	fm := segmentFrontmatter{
 		ID:     seg.ID,
 		Name:   seg.Name,
@@ -157,7 +166,7 @@ func writeSegment(dir string, seg Segment) core.Result {
 	data := append([]byte("---\n"), fmBytes...)
 	data = append(data, []byte("---\n")...)
 	fpath := core.PathJoin(dir, seg.ID+".md")
-	if r := core.WriteFile(fpath, data, 0o644); !r.OK {
+	if r := core.WriteFile(fpath, data, 0o600); !r.OK {
 		return r
 	}
 	return core.Ok(nil)
