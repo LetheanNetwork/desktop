@@ -546,6 +546,14 @@ func (s *Service) resolveVolumes(img ImageEntry) ([]sandbox.LongVolumeMount, cor
 				core.Concat("invalid volume name (must be alphanumeric + [_.-] only, no paths): ",
 					v.Persist), nil))
 		}
+		// Cerberus Mantis #1446 — gate the container-side path too.
+		// `Container: "/data:ro,bind"` would inject mount options
+		// into the docker -v argument vector.
+		if !sandbox.IsValidContainerPath(v.Container) {
+			return nil, core.Fail(core.E("marketplace.resolveVolumes",
+				core.Concat("invalid container path (must be absolute, no : , whitespace): ",
+					v.Container), nil))
+		}
 		out = append(out, sandbox.LongVolumeMount{
 			Name:      v.Persist,
 			Container: v.Container,

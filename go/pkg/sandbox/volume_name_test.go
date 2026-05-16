@@ -67,6 +67,45 @@ func TestSandbox_IsValidVolumeName_Bad_SpecialChars(t *core.T) {
 	core.AssertFalse(t, IsValidVolumeName("data$(pwd)"))
 }
 
+// Cerberus Mantis #1446 — container-path gate (child of #1431).
+// Same shape primitive as IsValidVolumeName; this catches the
+// container-side of the `-v <name>:<container>` arg.
+
+func TestSandbox_IsValidContainerPath_Good(t *core.T) {
+	core.AssertTrue(t, IsValidContainerPath("/data"))
+	core.AssertTrue(t, IsValidContainerPath("/var/lib/postgresql/data"))
+	core.AssertTrue(t, IsValidContainerPath("/srv/app"))
+}
+
+func TestSandbox_IsValidContainerPath_Bad_MountOptionInjection(t *core.T) {
+	// The exact attack pattern Cerberus flagged.
+	core.AssertFalse(t, IsValidContainerPath("/data:ro,bind,private"))
+	core.AssertFalse(t, IsValidContainerPath("/data:ro"))
+	core.AssertFalse(t, IsValidContainerPath("/data:rw"))
+}
+
+func TestSandbox_IsValidContainerPath_Bad_NoLeadingSlash(t *core.T) {
+	core.AssertFalse(t, IsValidContainerPath("data"))
+	core.AssertFalse(t, IsValidContainerPath("relative/path"))
+}
+
+func TestSandbox_IsValidContainerPath_Bad_CommaSeparator(t *core.T) {
+	core.AssertFalse(t, IsValidContainerPath("/data,bind"))
+}
+
+func TestSandbox_IsValidContainerPath_Bad_Whitespace(t *core.T) {
+	core.AssertFalse(t, IsValidContainerPath("/data path"))
+	core.AssertFalse(t, IsValidContainerPath("/data\tpath"))
+}
+
+func TestSandbox_IsValidContainerPath_Bad_Empty(t *core.T) {
+	core.AssertFalse(t, IsValidContainerPath(""))
+}
+
+func TestSandbox_IsValidContainerPath_Bad_NullByte(t *core.T) {
+	core.AssertFalse(t, IsValidContainerPath("/data\x00escape"))
+}
+
 // TestSandbox_buildLongRunArgs_HardenedDefaults — Cerberus Mantis
 // #1434 — assert that every `docker run` for a long-running bundle
 // container gets the cap-drop + no-new-privileges + pids-limit

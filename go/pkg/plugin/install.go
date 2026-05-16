@@ -174,6 +174,22 @@ func allowedLocalPath(path string) core.Result {
 		return core.Fail(core.E("plugin.allowedLocalPath",
 			"local_path must resolve under user home: "+path, nil))
 	}
+	// Cerberus Mantis #1444 — resolve symlinks before re-asserting the
+	// HOME prefix. Without this, `~/Downloads/escape -> /etc/passwd`
+	// passes the CleanPath check on the symlink path but reads the
+	// target. EvalSymlinks follows the chain to the real file; we then
+	// re-check it's still under HOME. If EvalSymlinks fails (e.g. the
+	// path doesn't exist yet), we proceed with the cleaned path —
+	// caller will fail on the subsequent ReadFile, which is the safe
+	// surface (no reading a path that resolves outside HOME).
+	if eR := core.PathEvalSymlinks(clean); eR.OK {
+		resolved, _ := eR.Value.(string)
+		if !core.HasPrefix(resolved, home+sep) && resolved != home {
+			return core.Fail(core.E("plugin.allowedLocalPath",
+				"local_path resolves outside user home via symlink: "+path+" → "+resolved, nil))
+		}
+		return core.Ok(resolved)
+	}
 	return core.Ok(clean)
 }
 

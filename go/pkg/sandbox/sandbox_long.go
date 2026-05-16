@@ -74,6 +74,43 @@ type LongVolumeMount struct {
 	Container string // mount path inside the container
 }
 
+// IsValidContainerPath reports whether p is a syntactically-valid
+// container-side mount path. Cerberus Mantis #1446 — `vol.Container`
+// flows into `-v <name>:<container>` and Docker parses everything
+// after the colon as the container path, BUT a malicious manifest
+// could declare `Container: "/data:ro,bind,private"` to inject mount
+// options into the docker-run argument vector. The IsValidVolumeName
+// gate (#1431) catches the host-side, this catches the container-side.
+//
+// Rules:
+//   - Non-empty, length 1..256 (longer than a real container path).
+//   - Starts with `/` (absolute container path).
+//   - Contains no `:` (the docker `-v` separator and mount-option key).
+//   - Contains no `,` (mount-option separator).
+//   - Contains no NUL or control characters.
+//   - Contains no whitespace.
+//
+// Backslash + path-traversal in the container path itself are NOT
+// rejected — they're container-internal semantics, not a host attack.
+// The host gate is IsValidVolumeName.
+func IsValidContainerPath(p string) bool {
+	if p == "" || len(p) > 256 {
+		return false
+	}
+	if p[0] != '/' {
+		return false
+	}
+	for _, ch := range p {
+		if ch == 0 || ch < 32 {
+			return false
+		}
+		if ch == ':' || ch == ',' || ch == ' ' || ch == '\t' {
+			return false
+		}
+	}
+	return true
+}
+
 // IsValidVolumeName reports whether name is a syntactically-valid
 // named Docker volume. Cerberus Mantis #1431 — without this gate, a
 // bundle manifest could declare VolumeMount{Persist: "/var/run/
@@ -365,6 +402,11 @@ func (s *Service) buildLongRunArgs(rt, containerName string, hostPort int, input
 	for _, vol := range input.Volumes {
 		if !IsValidVolumeName(vol.Name) {
 			core.Warn("sandbox: refusing volume with invalid name",
+				"name", vol.Name, "container", vol.Container)
+			continue
+		}
+		if !IsValidContainerPath(vol.Container) {
+			core.Warn("sandbox: refusing volume with invalid container path (Mantis #1446)",
 				"name", vol.Name, "container", vol.Container)
 			continue
 		}
