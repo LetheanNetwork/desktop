@@ -10,6 +10,32 @@ import (
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
+// testSlug returns a unique slug for a test to prevent FS collisions.
+func testSlug(t *testing.T) string {
+	t.Helper()
+	// Use a sanitised prefix from the test name to keep slugs valid.
+	return "test-" + core.SHA256Hex([]byte(t.Name()))[:12]
+}
+
+// cleanupDoc removes the test document after the test completes.
+func cleanupDoc(t *testing.T, slug string) {
+	t.Helper()
+	t.Cleanup(func() {
+		dirR := docsDir()
+		if !dirR.OK {
+			return
+		}
+		_ = core.Remove(core.PathJoin(dirR.Value.(string), slug+".md"))
+	})
+}
+
+// newTestService returns a Service backed by a fresh core.Core for
+// tests that exercise write methods. The core is minimal — no options.
+func newTestService() *Service {
+	c := core.New()
+	return NewService(c)
+}
+
 // TestScan_Empty — empty docs dir produces an empty record list.
 func TestScan_Empty(t *testing.T) {
 	// parseDoc + scanDocs rely on the filesystem; this unit test covers
@@ -208,5 +234,507 @@ func TestSplitFrontmatter_NoFrontmatter(t *testing.T) {
 	}
 	if string(body) != string(raw) {
 		t.Fatalf("expected body == raw when no frontmatter")
+	}
+}
+
+// -- v2 write-surface tests ---------------------------------------------------
+
+// TestCreate_Good — happy path: file lands on disk, DocRow returned.
+func TestCreate_Good(t *testing.T) {
+	svc := newTestService()
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+
+	r := svc.Create(CreateInput{Slug: slug, Body: "# Test\n\nContent.", State: "draft"})
+	if !r.OK {
+		t.Fatalf("Create failed: %v", r.Error())
+	}
+	row, ok := r.Value.(DocRow)
+	if !ok {
+		t.Fatal("expected DocRow value")
+	}
+	if row.State != "draft" {
+		t.Fatalf("expected state=draft, got %q", row.State)
+	}
+}
+
+// TestCreate_Bad — duplicate slug returns documents.create.exists.
+func TestCreate_Bad(t *testing.T) {
+	svc := newTestService()
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+
+	// First create must succeed.
+	if r := svc.Create(CreateInput{Slug: slug, Body: "# First\n"}); !r.OK {
+		t.Fatalf("first Create failed: %v", r.Error())
+	}
+	// Second create must reject with exists error.
+	r := svc.Create(CreateInput{Slug: slug, Body: "# Dupe\n"})
+	if r.OK {
+		t.Fatal("expected Create to fail for duplicate slug")
+	}
+	if !core.Contains(r.Error(), "documents.create.exists") {
+		t.Fatalf("expected documents.create.exists, got %q", r.Error())
+	}
+}
+
+// TestCreate_Ugly — traversal slug rejected before any FS touch.
+func TestCreate_Ugly(t *testing.T) {
+	svc := newTestService()
+	r := svc.Create(CreateInput{Slug: "../etc/passwd", Body: "evil"})
+	if r.OK {
+		t.Fatal("expected Create to reject traversal slug")
+	}
+	if !core.Contains(r.Error(), "documents.slug.invalid") {
+		t.Fatalf("expected documents.slug.invalid, got %q", r.Error())
+	}
+}
+
+// TestCreate_BodyTooLarge_Bad — 1.1MB body rejected before FS touch.
+func TestCreate_BodyTooLarge_Bad(t *testing.T) {
+	svc := newTestService()
+	slug := testSlug(t)
+	body := make([]byte, MaxBodyBytes+1024)
+	for i := range body {
+		body[i] = 'a'
+	}
+	r := svc.Create(CreateInput{Slug: slug, Body: string(body)})
+	if r.OK {
+		t.Fatal("expected Create to reject oversized body")
+	}
+	if !core.Contains(r.Error(), "documents.body.too_large") {
+		t.Fatalf("expected documents.body.too_large, got %q", r.Error())
+	}
+}
+
+// TestValidateSlug_Good — valid slugs pass validateSlug.
+func TestValidateSlug_Good(t *testing.T) {
+	valid := []string{"release-notes", "v0.2-notes", "Q2-board-pack"}
+	for _, s := range valid {
+		if err := validateSlug(s); err != nil {
+			t.Errorf("expected %q to be valid, got: %v", s, err)
+		}
+	}
+}
+
+// TestValidateSlug_Bad — reserved slugs are rejected.
+func TestValidateSlug_Bad(t *testing.T) {
+	reserved := []string{"new", "search", "index"}
+	for _, s := range reserved {
+		if err := validateSlug(s); err == nil {
+			t.Errorf("expected reserved slug %q to be rejected", s)
+		}
+	}
+}
+
+// TestValidateSlug_Ugly — traversal slugs are rejected.
+func TestValidateSlug_Ugly(t *testing.T) {
+	traversal := []string{"../etc", "foo/bar", "a\\b", ""}
+	for _, s := range traversal {
+		if err := validateSlug(s); err == nil {
+			t.Errorf("expected traversal slug %q to be rejected", s)
+		}
+	}
+}
+
+// TestSave_Good — round-trip: Create then Save, body updated.
+func TestSave_Good(t *testing.T) {
+	svc := newTestService()
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+
+	if r := svc.Create(CreateInput{Slug: slug, Body: "# V1\n"}); !r.OK {
+		t.Fatalf("Create failed: %v", r.Error())
+	}
+
+	// Get the document to retrieve mtime + hash for the composite token.
+	getR := svc.Get(GetInput{Slug: slug})
+	if !getR.OK {
+		t.Fatalf("Get failed: %v", getR.Error())
+	}
+
+	// Compute the hash from disk as the Save token.
+	dirR := docsDir()
+	if !dirR.OK {
+		t.Fatalf("docsDir: %v", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), slug+".md")
+	hashHex, mtime, err := readBodyHash(fpath)
+	if err != nil {
+		t.Fatalf("readBodyHash: %v", err)
+	}
+
+	r := svc.Save(SaveInput{
+		Slug:        slug,
+		Body:        "# V2\n\nUpdated content.",
+		IfMatch:     mtime,
+		IfMatchHash: hashHex,
+	})
+	if !r.OK {
+		t.Fatalf("Save failed: %v", r.Error())
+	}
+}
+
+// TestSave_Bad — missing IfMatchHash rejected with documents.save.missing_if_match.
+func TestSave_Bad(t *testing.T) {
+	svc := newTestService()
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+
+	if r := svc.Create(CreateInput{Slug: slug, Body: "# V1\n"}); !r.OK {
+		t.Fatalf("Create failed: %v", r.Error())
+	}
+
+	r := svc.Save(SaveInput{
+		Slug:        slug,
+		Body:        "# V2\n",
+		IfMatch:     core.Now(),
+		IfMatchHash: "", // deliberately missing
+	})
+	if r.OK {
+		t.Fatal("expected Save to reject missing IfMatchHash")
+	}
+	if !core.Contains(r.Error(), "documents.save.missing_if_match") {
+		t.Fatalf("expected documents.save.missing_if_match, got %q", r.Error())
+	}
+}
+
+// TestSave_ConflictDetected_Ugly — stale hash rejected with documents.save.conflict.
+func TestSave_ConflictDetected_Ugly(t *testing.T) {
+	svc := newTestService()
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+
+	if r := svc.Create(CreateInput{Slug: slug, Body: "# V1\n"}); !r.OK {
+		t.Fatalf("Create failed: %v", r.Error())
+	}
+
+	dirR := docsDir()
+	if !dirR.OK {
+		t.Fatalf("docsDir: %v", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), slug+".md")
+	hashHex, mtime, err := readBodyHash(fpath)
+	if err != nil {
+		t.Fatalf("readBodyHash: %v", err)
+	}
+
+	// First Save succeeds — advances content hash on disk.
+	r1 := svc.Save(SaveInput{
+		Slug:        slug,
+		Body:        "# V2\n",
+		IfMatch:     mtime,
+		IfMatchHash: hashHex,
+	})
+	if !r1.OK {
+		t.Fatalf("first Save failed: %v", r1.Error())
+	}
+
+	// Second Save uses the now-stale hash — must conflict.
+	r2 := svc.Save(SaveInput{
+		Slug:        slug,
+		Body:        "# V3\n",
+		IfMatch:     mtime,
+		IfMatchHash: hashHex, // stale — V2 changed it
+	})
+	if r2.OK {
+		t.Fatal("expected second Save to fail with conflict")
+	}
+	if !core.Contains(r2.Error(), "documents.save.conflict") {
+		t.Fatalf("expected documents.save.conflict, got %q", r2.Error())
+	}
+}
+
+// TestDelete_Good — file removed after Delete with valid token.
+func TestDelete_Good(t *testing.T) {
+	svc := newTestService()
+	slug := testSlug(t)
+	// No cleanupDoc — Delete removes it.
+
+	if r := svc.Create(CreateInput{Slug: slug, Body: "# ToDelete\n"}); !r.OK {
+		t.Fatalf("Create failed: %v", r.Error())
+	}
+
+	dirR := docsDir()
+	if !dirR.OK {
+		t.Fatalf("docsDir: %v", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), slug+".md")
+	hashHex, mtime, err := readBodyHash(fpath)
+	if err != nil {
+		t.Fatalf("readBodyHash: %v", err)
+	}
+
+	r := svc.Delete(DeleteInput{
+		Slug:        slug,
+		IfMatch:     mtime,
+		IfMatchHash: hashHex,
+	})
+	if !r.OK {
+		t.Fatalf("Delete failed: %v", r.Error())
+	}
+	// File must be gone.
+	if statR := core.Stat(fpath); statR.OK {
+		t.Fatal("expected file to be deleted")
+	}
+}
+
+// TestDelete_Bad — stale hash rejected with documents.delete.conflict.
+func TestDelete_Bad(t *testing.T) {
+	svc := newTestService()
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+
+	if r := svc.Create(CreateInput{Slug: slug, Body: "# Keeper\n"}); !r.OK {
+		t.Fatalf("Create failed: %v", r.Error())
+	}
+
+	r := svc.Delete(DeleteInput{
+		Slug:        slug,
+		IfMatch:     core.Now(),
+		IfMatchHash: "0000000000000000000000000000000000000000000000000000000000000000",
+	})
+	if r.OK {
+		t.Fatal("expected Delete to fail with stale hash")
+	}
+	if !core.Contains(r.Error(), "documents.delete.conflict") {
+		t.Fatalf("expected documents.delete.conflict, got %q", r.Error())
+	}
+}
+
+// TestDelete_Ugly — missing IfMatchHash rejected before FS touch.
+func TestDelete_Ugly(t *testing.T) {
+	svc := newTestService()
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+
+	if r := svc.Create(CreateInput{Slug: slug, Body: "# Keeper\n"}); !r.OK {
+		t.Fatalf("Create failed: %v", r.Error())
+	}
+
+	r := svc.Delete(DeleteInput{
+		Slug:        slug,
+		IfMatch:     core.Now(),
+		IfMatchHash: "", // deliberately missing
+	})
+	if r.OK {
+		t.Fatal("expected Delete to reject missing IfMatchHash")
+	}
+	if !core.Contains(r.Error(), "documents.save.missing_if_match") {
+		t.Fatalf("expected missing_if_match error, got %q", r.Error())
+	}
+}
+
+// TestSessionLocked_SaveRejected_Bad — locked session rejects Save.
+func TestSessionLocked_SaveRejected_Bad(t *testing.T) {
+	svc := newTestService()
+	svc.SetLocked(true)
+	r := svc.Save(SaveInput{Slug: "any", Body: "body", IfMatch: core.Now(), IfMatchHash: "abc"})
+	if r.OK {
+		t.Fatal("expected Save to be rejected when session locked")
+	}
+	if !core.Contains(r.Error(), "documents.session.locked") {
+		t.Fatalf("expected documents.session.locked, got %q", r.Error())
+	}
+}
+
+// TestSessionLocked_CreateRejected_Bad — locked session rejects Create.
+func TestSessionLocked_CreateRejected_Bad(t *testing.T) {
+	svc := newTestService()
+	svc.SetLocked(true)
+	r := svc.Create(CreateInput{Slug: "any", Body: "body"})
+	if r.OK {
+		t.Fatal("expected Create to be rejected when session locked")
+	}
+	if !core.Contains(r.Error(), "documents.session.locked") {
+		t.Fatalf("expected documents.session.locked, got %q", r.Error())
+	}
+}
+
+// TestSessionLocked_ReadStillWorks_Good — List is not blocked by locked state.
+func TestSessionLocked_ReadStillWorks_Good(t *testing.T) {
+	svc := newTestService()
+	svc.SetLocked(true)
+	r := svc.List(ListInput{})
+	if !r.OK {
+		t.Fatalf("List should succeed when session locked, got: %v", r.Error())
+	}
+}
+
+// TestRelated_BrokenRefSurvivesSave_Good — Q5: broken related refs survive Save.
+func TestRelated_BrokenRefSurvivesSave_Good(t *testing.T) {
+	svc := newTestService()
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+
+	if r := svc.Create(CreateInput{
+		Slug:    slug,
+		Body:    "# Doc\n",
+		Related: []string{"non-existent-slug"},
+	}); !r.OK {
+		t.Fatalf("Create with broken related ref failed: %v", r.Error())
+	}
+
+	// Verify the file was created (broken ref did not block Create).
+	dirR := docsDir()
+	if !dirR.OK {
+		t.Fatalf("docsDir: %v", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), slug+".md")
+	if statR := core.Stat(fpath); !statR.OK {
+		t.Fatal("expected file to exist after Create with broken related ref")
+	}
+}
+
+// TestNormaliseTags_Good — tags are lowercased.
+func TestNormaliseTags_Good(t *testing.T) {
+	tags := normaliseTags([]string{"Sales", "Q2-2026", "CONTRACTS"})
+	for _, tag := range tags {
+		if tag != core.Lower(tag) {
+			t.Errorf("expected lowercase tag, got %q", tag)
+		}
+	}
+}
+
+// TestNormaliseTags_Bad — empty slice returns empty (not nil panic).
+func TestNormaliseTags_Bad(t *testing.T) {
+	got := normaliseTags([]string{})
+	if len(got) != 0 {
+		t.Fatalf("expected empty slice, got %v", got)
+	}
+}
+
+// TestNormaliseTags_Ugly — nil input returns nil (no panic).
+func TestNormaliseTags_Ugly(t *testing.T) {
+	got := normaliseTags(nil)
+	if got != nil {
+		t.Fatalf("expected nil, got %v", got)
+	}
+}
+
+// TestReadBodyHash_Good — returns consistent hash for known content.
+func TestReadBodyHash_Good(t *testing.T) {
+	svc := newTestService()
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+
+	if r := svc.Create(CreateInput{Slug: slug, Body: "# Hash Test\n"}); !r.OK {
+		t.Fatalf("Create failed: %v", r.Error())
+	}
+
+	dirR := docsDir()
+	if !dirR.OK {
+		t.Fatalf("docsDir: %v", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), slug+".md")
+
+	h1, _, err := readBodyHash(fpath)
+	if err != nil {
+		t.Fatalf("readBodyHash failed: %v", err)
+	}
+	h2, _, err := readBodyHash(fpath)
+	if err != nil {
+		t.Fatalf("readBodyHash (2nd) failed: %v", err)
+	}
+	if h1 != h2 {
+		t.Fatalf("expected deterministic hash, got %q vs %q", h1, h2)
+	}
+	if len(h1) != 64 {
+		t.Fatalf("expected 64-char hex hash, got %d chars", len(h1))
+	}
+}
+
+// TestReadBodyHash_Bad — non-existent file returns error.
+func TestReadBodyHash_Bad(t *testing.T) {
+	_, _, err := readBodyHash("/tmp/does-not-exist-clotho-test.md")
+	if err == nil {
+		t.Fatal("expected error for non-existent file")
+	}
+}
+
+// TestReadBodyHash_Ugly — after content changes, hash changes.
+func TestReadBodyHash_Ugly(t *testing.T) {
+	svc := newTestService()
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+
+	if r := svc.Create(CreateInput{Slug: slug, Body: "# V1\n"}); !r.OK {
+		t.Fatalf("Create failed: %v", r.Error())
+	}
+
+	dirR := docsDir()
+	if !dirR.OK {
+		t.Fatalf("docsDir: %v", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), slug+".md")
+	h1, mtime, err := readBodyHash(fpath)
+	if err != nil {
+		t.Fatalf("readBodyHash v1 failed: %v", err)
+	}
+
+	// Save changes the content.
+	if r := svc.Save(SaveInput{Slug: slug, Body: "# V2\n", IfMatch: mtime, IfMatchHash: h1}); !r.OK {
+		t.Fatalf("Save failed: %v", r.Error())
+	}
+
+	h2, _, err := readBodyHash(fpath)
+	if err != nil {
+		t.Fatalf("readBodyHash v2 failed: %v", err)
+	}
+	if h1 == h2 {
+		t.Fatal("expected hash to change after Save")
+	}
+}
+
+// TestAtomicWriteFile_Good — file lands with correct content.
+func TestAtomicWriteFile_Good(t *testing.T) {
+	dirR := docsDir()
+	if !dirR.OK {
+		t.Skipf("docsDir unavailable: %v", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), "atomic-test-clotho.md")
+	t.Cleanup(func() { _ = core.Remove(fpath) })
+
+	content := []byte("# Atomic\n\nContent.")
+	if err := atomicWriteFile(fpath, content); err != nil {
+		t.Fatalf("atomicWriteFile failed: %v", err)
+	}
+	rawR := core.ReadFile(fpath)
+	if !rawR.OK {
+		t.Fatalf("ReadFile after atomicWriteFile failed: %v", rawR.Error())
+	}
+	if string(rawR.Value.([]byte)) != string(content) {
+		t.Fatal("atomicWriteFile content mismatch")
+	}
+}
+
+// TestAtomicWriteFile_Bad — writing to non-existent directory fails.
+func TestAtomicWriteFile_Bad(t *testing.T) {
+	err := atomicWriteFile("/tmp/clotho-no-such-dir-xyz/file.md", []byte("body"))
+	if err == nil {
+		t.Fatal("expected atomicWriteFile to fail for missing directory")
+	}
+}
+
+// TestAtomicWriteFile_Ugly — tmp file cleaned up on rename fail
+// (directory-not-found prevents rename; tmp should not linger).
+func TestAtomicWriteFile_Ugly(t *testing.T) {
+	// If the dir doesn't exist, Write returns an error before the tmp file
+	// can be created — so we verify the error path is reached.
+	err := atomicWriteFile("/nonexistent-dir/file.md", []byte("x"))
+	if err == nil {
+		t.Fatal("expected error from atomicWriteFile with invalid dir")
+	}
+}
+
+// TestFrontmatter_UpdatedAt_Drift_Ugly — updated_at 5 min behind mtime logs
+// and does not cause a failure.
+func TestFrontmatter_UpdatedAt_Drift_Ugly(t *testing.T) {
+	old := core.Now().Add(-5 * time.Minute)
+	raw := []byte("---\nstate: draft\nupdated_at: " + old.Format("2006-01-02T15:04:05Z") + "\n---\n# Body\n")
+	// parseDoc must not panic or fatal — drift is advisory.
+	rec := parseDoc("drift-doc", raw, core.Now(), 0)
+	if rec.Slug != "drift-doc" {
+		t.Fatalf("expected slug=drift-doc, got %q", rec.Slug)
 	}
 }

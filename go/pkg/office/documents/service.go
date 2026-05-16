@@ -2,20 +2,25 @@
 
 // Service — Core integration for the Office document catalogue. Reads
 // markdown files from ~/Lethean/office/docs/ and returns typed rows to
-// the Wails frontend.
+// the Wails frontend. v2 adds Create / Save / Delete with optimistic
+// locking (mtime + sha256 composite token) and locked-state defence.
 //
 // Lifecycle:
 //   - Register(c)   wires the service into the Core container
 //   - ServiceName() returns "Documents" for the Wails namespace
+//   - SetLocked(b)  called by the desktop session layer on lock/unlock
 //
 // All I/O uses CoreGO wrappers (core.ReadFile / core.ReadDir /
-// core.DirFS / core.MkdirAll / core.Stat / core.UserHomeDir).
+// core.DirFS / core.MkdirAll / core.Stat / core.UserHomeDir /
+// core.WriteFile / core.Rename).
 // Banned stdlib imports: os, path/filepath, strings, encoding/json,
 // fmt, log, errors.
 
 package documents
 
 import (
+	"sync/atomic"
+
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"gopkg.in/yaml.v3"
@@ -27,7 +32,8 @@ import (
 //
 //	svc := documents.NewService(c)
 type Service struct {
-	core *core.Core
+	core   *core.Core
+	locked atomic.Bool // set by desktop session layer on lock/unlock
 }
 
 // NewService constructs the documents service against a Core container.
@@ -68,11 +74,14 @@ func docsDir() core.Result {
 }
 
 // docFrontmatter is the YAML schema decoded from each document's
-// optional frontmatter block.
+// optional frontmatter block. v2 adds Tags, Related, UpdatedAt.
 type docFrontmatter struct {
-	State  string `yaml:"state"`
-	Author string `yaml:"author"`
-	Title  string `yaml:"title"` // optional; overridden by H1 body scan
+	State     string    `yaml:"state"`
+	Author    string    `yaml:"author"`
+	Title     string    `yaml:"title"` // optional; overridden by H1 body scan
+	Tags      []string  `yaml:"tags,omitempty"`
+	Related   []string  `yaml:"related,omitempty"`
+	UpdatedAt core.Time `yaml:"updated_at,omitempty"`
 }
 
 // parseDoc extracts a DocRecord from raw file bytes, the OS-provided
@@ -329,4 +338,371 @@ func loadDoc(slug string) ([]byte, error) {
 	}
 	raw, _ := rawR.Value.([]byte)
 	return raw, nil
+}
+
+// SetLocked is called by the desktop session layer to set the locked state.
+// When locked, all write methods reject with documents.session.locked.
+// Read methods (List/Get) continue to work in locked state.
+//
+// Usage example:
+//
+//	docsSvc.SetLocked(true)  // on session lock
+//	docsSvc.SetLocked(false) // on session unlock
+func (s *Service) SetLocked(locked bool) { s.locked.Store(locked) }
+
+// assertUnlocked returns a Fail result when the session is locked.
+// Called at the top of every write method before any FS touch.
+func (s *Service) assertUnlocked(scope string) (core.Result, bool) {
+	if s.locked.Load() {
+		return core.Fail(core.E(scope, "documents.session.locked", nil)), false
+	}
+	return core.Result{}, true
+}
+
+// reservedSlugs are route-collision candidates that must not be used as
+// document filenames.
+var reservedSlugs = map[string]bool{
+	"new":    true,
+	"search": true,
+	"index":  true,
+}
+
+// validateSlug wraps paths.IsValidID and rejects reserved route names.
+func validateSlug(slug string) error {
+	if err := paths.IsValidID(slug); err != nil {
+		return err
+	}
+	if reservedSlugs[slug] {
+		return core.E("documents.validateSlug", "reserved slug: "+slug, nil)
+	}
+	return nil
+}
+
+// readBodyHash reads the document at path in a single stat+open cycle and
+// returns the hex(sha256(raw file bytes)) and the mtime. The caller MUST
+// NOT stat or open the file again before using these values for conflict
+// detection — that would re-introduce the TOCTOU window.
+func readBodyHash(path string) (hashHex string, mtime core.Time, err error) {
+	statR := core.Stat(path)
+	if !statR.OK {
+		return "", core.Time{}, core.E("documents.readBodyHash", statR.Error(), nil)
+	}
+	info, _ := statR.Value.(core.FsFileInfo)
+	if info == nil {
+		return "", core.Time{}, core.E("documents.readBodyHash", "stat returned nil info", nil)
+	}
+	mtime = info.ModTime()
+
+	rawR := core.ReadFile(path)
+	if !rawR.OK {
+		return "", core.Time{}, core.E("documents.readBodyHash", rawR.Error(), nil)
+	}
+	raw, _ := rawR.Value.([]byte)
+	return core.SHA256Hex(raw), mtime, nil
+}
+
+// composeFrontmatter produces the YAML frontmatter block for a document.
+// Keys are in a deterministic order: state, author, tags, related, updated_at.
+func composeFrontmatter(state, author string, tags, related []string, updatedAt core.Time) ([]byte, error) {
+	fm := docFrontmatter{
+		State:     state,
+		Author:    author,
+		Tags:      tags,
+		Related:   related,
+		UpdatedAt: updatedAt,
+	}
+	out, err := yaml.Marshal(fm)
+	if err != nil {
+		return nil, core.E("documents.composeFrontmatter", "yaml marshal failed", err)
+	}
+	return out, nil
+}
+
+// atomicWriteFile writes content to path via a tmp file + rename. The rename
+// is POSIX-atomic — no partial content is ever visible to concurrent readers.
+// content is written at mode 0o600 (Cerberus #1487 PII mandate).
+func atomicWriteFile(path string, content []byte) error {
+	tmp := path + ".tmp"
+	if r := core.WriteFile(tmp, content, 0o600); !r.OK {
+		return core.E("documents.atomicWriteFile", "write tmp failed: "+r.Error(), nil)
+	}
+	if r := core.Rename(tmp, path); !r.OK {
+		return core.E("documents.atomicWriteFile", "rename failed: "+r.Error(), nil)
+	}
+	return nil
+}
+
+// buildFileContent assembles the full file bytes from frontmatter + body.
+func buildFileContent(fm []byte, body string) []byte {
+	// "---\n" + fm bytes + "---\n" + body
+	out := make([]byte, 0, 4+len(fm)+4+len(body))
+	out = append(out, "---\n"...)
+	out = append(out, fm...)
+	out = append(out, "---\n"...)
+	out = append(out, body...)
+	return out
+}
+
+// normaliseTags lowercases each tag. Uses core.Lower which wraps strings.ToLower.
+func normaliseTags(tags []string) []string {
+	if len(tags) == 0 {
+		return tags
+	}
+	out := make([]string, len(tags))
+	for i, t := range tags {
+		out[i] = core.Lower(t)
+	}
+	return out
+}
+
+// Create writes a new document file. Fires EventCreated on success.
+// Rejects if the session is locked (documents.session.locked).
+// Rejects if body exceeds MaxBodyBytes (documents.body.too_large).
+// Rejects if slug already exists (documents.create.exists).
+//
+// Usage example:
+//
+//	r := svc.Create(documents.CreateInput{Slug: "notes", Body: "# Notes\n"})
+//	if r.OK { /* created */ }
+func (s *Service) Create(input CreateInput) core.Result {
+	if fail, ok := s.assertUnlocked("documents.Create"); !ok {
+		return fail
+	}
+	if err := validateSlug(input.Slug); err != nil {
+		return core.Fail(core.E("documents.Create", "documents.slug.invalid", err))
+	}
+	if len(input.Body) > MaxBodyBytes {
+		return core.Fail(core.E("documents.Create", "documents.body.too_large", nil))
+	}
+
+	dirR := docsDir()
+	if !dirR.OK {
+		return core.Fail(core.E("documents.Create", dirR.Error(), nil))
+	}
+	dir := dirR.Value.(string)
+	fpath := core.PathJoin(dir, input.Slug+".md")
+
+	// Reject if file already exists.
+	if statR := core.Stat(fpath); statR.OK {
+		return core.Fail(core.E("documents.Create", "documents.create.exists", nil))
+	}
+
+	state := input.State
+	switch state {
+	case "draft", "ready", "final", "live":
+	default:
+		state = "draft"
+	}
+
+	userR := core.UserCurrent()
+	author := ""
+	if userR.OK {
+		if u, _ := userR.Value.(*core.User); u != nil {
+			author = u.Username
+		}
+	}
+
+	now := core.Now()
+	fm, err := composeFrontmatter(state, author, normaliseTags(input.Tags), input.Related, now)
+	if err != nil {
+		return core.Fail(core.E("documents.Create", "frontmatter compose failed", err))
+	}
+
+	content := buildFileContent(fm, input.Body)
+	if err := atomicWriteFile(fpath, content); err != nil {
+		return core.Fail(core.E("documents.Create", "write failed", err))
+	}
+
+	statR := core.Stat(fpath)
+	var modTime core.Time
+	var sizeB int64
+	if statR.OK {
+		if info, _ := statR.Value.(core.FsFileInfo); info != nil {
+			modTime = info.ModTime()
+			sizeB = info.Size()
+		}
+	}
+	rec := parseDoc(input.Slug, content, modTime, sizeB)
+
+	s.core.ACTION(DocChanged{
+		Kind:  "created",
+		Slug:  input.Slug,
+		After: rec,
+		At:    now,
+	})
+
+	return core.Ok(toRow(rec, now))
+}
+
+// Save updates the body and metadata of an existing document. Requires a
+// valid composite token (IfMatch + IfMatchHash) from a prior Get — blind
+// writes are rejected. Fires EventUpdated on success.
+// Rejects if the session is locked (documents.session.locked).
+//
+// Usage example:
+//
+//	r := svc.Save(documents.SaveInput{
+//	    Slug: "notes", Body: "# Updated\n", IfMatch: t, IfMatchHash: h,
+//	})
+func (s *Service) Save(input SaveInput) core.Result {
+	if fail, ok := s.assertUnlocked("documents.Save"); !ok {
+		return fail
+	}
+	if err := validateSlug(input.Slug); err != nil {
+		return core.Fail(core.E("documents.Save", "documents.slug.invalid", err))
+	}
+	if len(input.Body) > MaxBodyBytes {
+		return core.Fail(core.E("documents.Save", "documents.body.too_large", nil))
+	}
+	if input.IfMatch.IsZero() || input.IfMatchHash == "" {
+		return core.Fail(core.E("documents.Save", "documents.save.missing_if_match", nil))
+	}
+
+	dirR := docsDir()
+	if !dirR.OK {
+		return core.Fail(core.E("documents.Save", dirR.Error(), nil))
+	}
+	dir := dirR.Value.(string)
+	fpath := core.PathJoin(dir, input.Slug+".md")
+
+	// Read current content under a shared read — no flock available yet
+	// (Mantis #1490 gating). We use stat+read atomically to minimise the
+	// TOCTOU window: read the hash BEFORE the conflict check, not after.
+	currentHash, currentMtime, err := readBodyHash(fpath)
+	if err != nil {
+		return core.Fail(core.E("documents.Save", "read failed", err))
+	}
+
+	// Composite conflict check (Q1 ruling):
+	// - hash matches → content identical → accept (mtime clock-skew safe)
+	// - mtime differs AND hash differs → conflict
+	if currentHash != input.IfMatchHash {
+		// Content on disk differs from what the client last saw.
+		return core.Fail(core.E("documents.Save", "documents.save.conflict", nil))
+	}
+	// If hash matches but mtime differs — clock-skew case — accept.
+	_ = currentMtime // used only as fast-path context; hash is authoritative
+
+	// Load existing frontmatter to preserve fields not in SaveInput.
+	raw, loadErr := loadDoc(input.Slug)
+	if loadErr != nil {
+		return core.Fail(core.E("documents.Save", "load failed", loadErr))
+	}
+	existingFm, _ := splitFrontmatter(raw)
+	var existing docFrontmatter
+	_ = yaml.Unmarshal(existingFm, &existing)
+
+	state := input.State
+	if state == "" {
+		state = existing.State
+	}
+	switch state {
+	case "draft", "ready", "final", "live":
+	default:
+		state = "draft"
+	}
+	tags := input.Tags
+	if tags == nil {
+		tags = existing.Tags
+	}
+	related := input.Related
+	if related == nil {
+		related = existing.Related
+	}
+
+	now := core.Now()
+	fm, err := composeFrontmatter(state, existing.Author, normaliseTags(tags), related, now)
+	if err != nil {
+		return core.Fail(core.E("documents.Save", "frontmatter compose failed", err))
+	}
+
+	content := buildFileContent(fm, input.Body)
+	if err := atomicWriteFile(fpath, content); err != nil {
+		return core.Fail(core.E("documents.Save", "write failed", err))
+	}
+
+	statR := core.Stat(fpath)
+	var modTime core.Time
+	var sizeB int64
+	if statR.OK {
+		if info, _ := statR.Value.(core.FsFileInfo); info != nil {
+			modTime = info.ModTime()
+			sizeB = info.Size()
+		}
+	}
+	rec := parseDoc(input.Slug, content, modTime, sizeB)
+	before := parseDoc(input.Slug, raw, input.IfMatch, int64(len(raw)))
+
+	if !s.locked.Load() {
+		s.core.ACTION(DocChanged{
+			Kind:   "updated",
+			Slug:   input.Slug,
+			Before: before,
+			After:  rec,
+			At:     now,
+		})
+	}
+
+	return core.Ok(toRow(rec, now))
+}
+
+// Delete hard-deletes a document. Requires a valid composite token from a
+// recent Get. Fires EventDeleted on success.
+// Rejects if the session is locked (documents.session.locked).
+//
+// Usage example:
+//
+//	r := svc.Delete(documents.DeleteInput{
+//	    Slug: "old-draft", IfMatch: t, IfMatchHash: h,
+//	})
+func (s *Service) Delete(input DeleteInput) core.Result {
+	if fail, ok := s.assertUnlocked("documents.Delete"); !ok {
+		return fail
+	}
+	if err := validateSlug(input.Slug); err != nil {
+		return core.Fail(core.E("documents.Delete", "documents.slug.invalid", err))
+	}
+	if input.IfMatch.IsZero() || input.IfMatchHash == "" {
+		return core.Fail(core.E("documents.Delete", "documents.save.missing_if_match", nil))
+	}
+
+	dirR := docsDir()
+	if !dirR.OK {
+		return core.Fail(core.E("documents.Delete", dirR.Error(), nil))
+	}
+	dir := dirR.Value.(string)
+	fpath := core.PathJoin(dir, input.Slug+".md")
+
+	currentHash, _, err := readBodyHash(fpath)
+	if err != nil {
+		return core.Fail(core.E("documents.Delete", "read failed", err))
+	}
+	if currentHash != input.IfMatchHash {
+		return core.Fail(core.E("documents.Delete", "documents.delete.conflict", nil))
+	}
+
+	raw, _ := loadDoc(input.Slug)
+	var modTime core.Time
+	if statR := core.Stat(fpath); statR.OK {
+		if info, _ := statR.Value.(core.FsFileInfo); info != nil {
+			modTime = info.ModTime()
+		}
+	}
+	before := parseDoc(input.Slug, raw, modTime, int64(len(raw)))
+
+	if r := core.Remove(fpath); !r.OK {
+		return core.Fail(core.E("documents.Delete", "remove failed: "+r.Error(), nil))
+	}
+
+	now := core.Now()
+	if !s.locked.Load() {
+		s.core.ACTION(DocChanged{
+			Kind:   "deleted",
+			Slug:   input.Slug,
+			Before: before,
+			At:     now,
+		})
+	}
+
+	return core.Ok(nil)
 }

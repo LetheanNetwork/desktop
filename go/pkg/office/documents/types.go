@@ -130,3 +130,86 @@ type GetInput struct {
 	// Slug is the filename stem of the document to retrieve.
 	Slug string `json:"slug"`
 }
+
+// MaxBodyBytes is the maximum permitted document body size (1 MB). Enforced
+// server-side before any disk touch. Defence against DoS (Q2 ruling).
+const MaxBodyBytes = 1 << 20
+
+// CreateInput drives the Create method.
+//
+// Usage example:
+//
+//	r := svc.Create(documents.CreateInput{
+//	    Slug: "release-notes", Title: "Release Notes",
+//	    Body: "# Release Notes\n\nContent.", State: "draft",
+//	})
+type CreateInput struct {
+	// Slug is the filename stem; MUST pass paths.IsValidID.
+	Slug string `json:"slug"`
+
+	// Title is the first H1 line. Empty → falls back to Slug.
+	Title string `json:"title"`
+
+	// Body is the markdown body. MUST be ≤ MaxBodyBytes.
+	Body string `json:"body"`
+
+	// State is the lifecycle state. Defaults to "draft".
+	State string `json:"state"`
+
+	// Tags are free-form labels; lowercase-normalised at write.
+	Tags []string `json:"tags,omitempty"`
+
+	// Related lists sibling document slugs. Existence is NOT validated (Q5).
+	Related []string `json:"related,omitempty"`
+}
+
+// SaveInput drives the Save method. The IfMatch + IfMatchHash composite
+// token is REQUIRED — blind writes are rejected (Q1 ruling).
+//
+// Usage example:
+//
+//	r := svc.Save(documents.SaveInput{
+//	    Slug: "release-notes", Body: "# Updated\n\nContent.",
+//	    IfMatch: lastMtime, IfMatchHash: lastBodyHash,
+//	})
+type SaveInput struct {
+	// Slug identifies the document to update.
+	Slug string `json:"slug"`
+
+	// Body is the new markdown body. MUST be ≤ MaxBodyBytes.
+	Body string `json:"body"`
+
+	// State updates the lifecycle state. Empty → preserve existing.
+	State string `json:"state,omitempty"`
+
+	// Tags replaces the tag list. Nil → preserve existing.
+	Tags []string `json:"tags,omitempty"`
+
+	// Related replaces the related-doc list. Nil → preserve existing.
+	Related []string `json:"related,omitempty"`
+
+	// IfMatch is the mtime from the last Get (half of composite lock token).
+	IfMatch core.Time `json:"if_match"`
+
+	// IfMatchHash is the hex(sha256(body bytes on disk)) from the last Get.
+	IfMatchHash string `json:"if_match_hash"`
+}
+
+// DeleteInput drives the Delete method. Requires the composite token from a
+// recent Get to prevent accidental deletion of a stale view (Q4 ruling).
+//
+// Usage example:
+//
+//	r := svc.Delete(documents.DeleteInput{
+//	    Slug: "old-draft", IfMatch: lastMtime, IfMatchHash: lastBodyHash,
+//	})
+type DeleteInput struct {
+	// Slug identifies the document to remove.
+	Slug string `json:"slug"`
+
+	// IfMatch is the mtime from the last Get.
+	IfMatch core.Time `json:"if_match"`
+
+	// IfMatchHash is the hex(sha256(body bytes on disk)) from the last Get.
+	IfMatchHash string `json:"if_match_hash"`
+}

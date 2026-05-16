@@ -4,6 +4,8 @@ package documents
 
 import (
 	"testing"
+
+	core "dappco.re/go"
 )
 
 // TestServiceName — ServiceName returns the correct Wails binding namespace.
@@ -72,5 +74,57 @@ func TestGetInput_Fields(t *testing.T) {
 	in := GetInput{Slug: "release-notes"}
 	if in.Slug == "" {
 		t.Fatal("GetInput.Slug must not be empty")
+	}
+}
+
+// TestCreateInput_Fields — CreateInput carries required Slug + Body fields.
+func TestCreateInput_Fields(t *testing.T) {
+	in := CreateInput{Slug: "board-pack", Body: "# Board Pack\n", State: "draft"}
+	if in.Slug == "" || in.Body == "" || in.State == "" {
+		t.Fatal("CreateInput has empty required fields")
+	}
+}
+
+// TestSaveInput_Fields — SaveInput carries Slug, Body, and composite token.
+func TestSaveInput_Fields(t *testing.T) {
+	in := SaveInput{
+		Slug:        "board-pack",
+		Body:        "# Updated\n",
+		IfMatchHash: "abc123",
+	}
+	if in.Slug == "" || in.Body == "" || in.IfMatchHash == "" {
+		t.Fatal("SaveInput has empty required fields")
+	}
+}
+
+// TestDeleteInput_Fields — DeleteInput carries Slug and composite token.
+func TestDeleteInput_Fields(t *testing.T) {
+	in := DeleteInput{Slug: "old-draft", IfMatchHash: "abc123"}
+	if in.Slug == "" || in.IfMatchHash == "" {
+		t.Fatal("DeleteInput has empty required fields")
+	}
+}
+
+// TestMaxBodyBytes — constant is exactly 1 MB.
+func TestMaxBodyBytes(t *testing.T) {
+	if MaxBodyBytes != 1<<20 {
+		t.Fatalf("MaxBodyBytes expected %d, got %d", 1<<20, MaxBodyBytes)
+	}
+}
+
+// TestDocChanged_Fields — DocChanged carries all event payload fields.
+func TestDocChanged_Fields(t *testing.T) {
+	e := DocChanged{Kind: "created", Slug: "notes", At: core.Now()}
+	if e.Kind == "" || e.Slug == "" || e.At.IsZero() {
+		t.Fatal("DocChanged has empty required fields")
+	}
+}
+
+// TestEventConstants — event name constants follow the documents.* namespace.
+func TestEventConstants(t *testing.T) {
+	for _, name := range []string{EventCreated, EventUpdated, EventDeleted} {
+		if !core.HasPrefix(name, "documents.") {
+			t.Errorf("event constant %q does not start with 'documents.'", name)
+		}
 	}
 }
