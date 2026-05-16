@@ -72,6 +72,10 @@ import (
 	"dappco.re/lthn/desktop/pkg/vi"
 	"dappco.re/lthn/desktop/pkg/incidents"
 	"dappco.re/lthn/desktop/pkg/runbooks"
+	"dappco.re/lthn/desktop/pkg/sales/contacts"
+	"dappco.re/lthn/desktop/pkg/sales/deals"
+	"dappco.re/lthn/desktop/pkg/sales/forecast"
+	"dappco.re/lthn/desktop/pkg/sales/pipeline"
 	"github.com/gin-gonic/gin"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -313,6 +317,18 @@ func (s *Service) Run() core.Result {
 	incidentsSvc, _ := core.ServiceFor[*incidents.Service](s.opts.Core, "incidents")
 	// runbooks — Operations view runbook library. Core-registered instance.
 	runbooksSvc, _ := core.ServiceFor[*runbooks.Service](s.opts.Core, "runbooks")
+	// sales/contacts — CRM contact catalogue. Core-registered so events fired
+	// during Wails method calls propagate on the shared bus.
+	contactsSvc, _ := core.ServiceFor[*contacts.Service](s.opts.Core, "sales-contacts")
+	// sales/deals — deal record + activity log. Core-registered; source-of-truth
+	// for pipeline stage consumed by sales/pipeline.
+	dealsSvc, _ := core.ServiceFor[*deals.Service](s.opts.Core, "sales-deals")
+	// sales/pipeline — derived Kanban rollup. Core-registered; reads from the
+	// same deals dir that dealsSvc writes to.
+	pipelineSvc, _ := core.ServiceFor[*pipeline.Service](s.opts.Core, "sales-pipeline")
+	// sales/forecast — quarterly probability-weighted rollup. Core-registered;
+	// reads from deals dir, fires no events.
+	forecastSvc, _ := core.ServiceFor[*forecast.Service](s.opts.Core, "sales-forecast")
 	// serverkey — Stage B first-run auth-gate. Core-registered + Bootstrap()ed
 	// from cmd/lthn/app.go::newAppCore so the in-memory key + verifier are
 	// live by the time the WebView mounts <lthn-auth-gate> and calls
@@ -381,6 +397,10 @@ func (s *Service) Run() core.Result {
 		application.NewService(viSvc),
 		application.NewService(incidentsSvc),
 		application.NewService(runbooksSvc),
+		application.NewService(contactsSvc),
+		application.NewService(dealsSvc),
+		application.NewService(pipelineSvc),
+		application.NewService(forecastSvc),
 		application.NewService(serverkeySvc),
 		application.NewService(accountSvc),
 		application.NewService(s.opts.Fleet),

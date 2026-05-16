@@ -36,6 +36,10 @@ import (
 	"dappco.re/lthn/desktop/pkg/vi"
 	"dappco.re/lthn/desktop/pkg/incidents"
 	"dappco.re/lthn/desktop/pkg/runbooks"
+	"dappco.re/lthn/desktop/pkg/sales/contacts"
+	"dappco.re/lthn/desktop/pkg/sales/deals"
+	"dappco.re/lthn/desktop/pkg/sales/forecast"
+	"dappco.re/lthn/desktop/pkg/sales/pipeline"
 	"dappco.re/lthn/desktop/pkg/serverkey"
 )
 
@@ -221,6 +225,22 @@ func newAppCore() *core.Core {
 		// first launch. Wails surface: Runbooks.List / Get / Search /
 		// MarkRehearsed. Event: runbooks.rehearsed.
 		core.WithName("runbooks", runbooks.Register),
+		// sales/contacts — CRM contact catalogue. Reads/writes Trix-style
+		// markdown files from ~/Lethean/sales/contacts/{slug}.md. Warmth
+		// recomputed on read from last_touch timestamp (≤7d=hot, 8-21d=warm,
+		// >21d=cool). Wails surface: Contacts.List/Get/Create/Update.
+		core.WithName("sales-contacts", contacts.Register),
+		// sales/deals — deal record + activity log. Reads/writes Trix-style
+		// markdown files from ~/Lethean/sales/deals/{id}.md. Source-of-truth
+		// for pipeline stage. Wails: Deals.List/Get/Create/UpdateStage/AddActivity.
+		core.WithName("sales-deals", deals.Register),
+		// sales/pipeline — derived Kanban rollup from deal files. Groups
+		// deal records by stage into PipelineColumn values; no separate
+		// persistence. Wails: Pipeline.List/MoveDeal.
+		core.WithName("sales-pipeline", pipeline.Register),
+		// sales/forecast — quarterly probability-weighted rollup from deals.
+		// Read-only; no separate persistence. Wails: Forecast.Quarterly.
+		core.WithName("sales-forecast", forecast.Register),
 		// serverkey — Stage B of the first-run auth-gate (Mantis #1474,
 		// plans RFC at code/lthn/desktop/auth-gate/RFC.md). Owns the
 		// "base egg" PGP key at ~/Lethean/wallets/server.key + its
