@@ -304,10 +304,49 @@ func (s *Service) GetHandle(sandboxID string) core.Result {
 	return core.Ok(*h)
 }
 
+// hardenedDefaults is the conservative set of `docker run` security
+// flags applied to every long-running bundle container. Cerberus
+// Mantis #1434 — the previous default was wide-open (every container
+// ran with default Docker caps, no PIDs cap, no setuid block). This
+// list closes the obvious privilege-escalation + fork-bomb attack
+// surface.
+//
+// Per-flag rationale:
+//
+//   - `--cap-drop=ALL` — drop every Linux capability. Bundles that
+//     need a specific one back (e.g. CAP_CHOWN for postgres) will
+//     surface a clear "operation not permitted" failure that the
+//     bundle author can address by adding a `caps:` entry to the
+//     manifest (future Mantis when we wire it).
+//   - `--security-opt=no-new-privileges` — block setuid + capability
+//     escalation INSIDE the container. Defence-in-depth on top of
+//     cap-drop=ALL.
+//   - `--pids-limit=512` — cap concurrent processes. Prevents fork
+//     bombs from a compromised bundle from exhausting host PIDs.
+//     512 is generous for an inference daemon (typical: 10-50);
+//     bundles that need more (multi-worker servers) can request
+//     a higher cap via manifest later.
+//
+// Future hardening (separate Mantis):
+//   - `--user $(id -u):$(id -g)` — currently skipped because many
+//     OCI images assume root inside the container for setup. Requires
+//     a manifest opt-in / per-bundle override.
+//   - `--read-only` — root FS read-only; bundles get a tmpfs for
+//     scratch. Same reason as --user: needs per-bundle declaration.
+//   - `--network=lthn-bundles` (already partly there via
+//     NetworkName) — every bundle on a single private network,
+//     no host network access by default.
+var hardenedDefaults = []string{
+	"--cap-drop=ALL",
+	"--security-opt=no-new-privileges",
+	"--pids-limit=512",
+}
+
 // buildLongRunArgs constructs the `docker run -d ...` arguments for
 // a long-running bundle container.
 func (s *Service) buildLongRunArgs(rt, containerName string, hostPort int, input SpawnLongInput) []string {
 	args := []string{"run", "-d", "--name", containerName}
+	args = append(args, hardenedDefaults...)
 
 	if hostPort > 0 {
 		args = append(args, "-p",

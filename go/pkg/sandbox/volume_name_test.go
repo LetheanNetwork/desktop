@@ -67,6 +67,39 @@ func TestSandbox_IsValidVolumeName_Bad_SpecialChars(t *core.T) {
 	core.AssertFalse(t, IsValidVolumeName("data$(pwd)"))
 }
 
+// TestSandbox_buildLongRunArgs_HardenedDefaults — Cerberus Mantis
+// #1434 — assert that every `docker run` for a long-running bundle
+// container gets the cap-drop + no-new-privileges + pids-limit
+// hardening flags. Regression guard: if these get dropped or moved,
+// the test fails loudly rather than silently shipping permissive
+// containers.
+func TestSandbox_buildLongRunArgs_HardenedDefaults(t *core.T) {
+	s := &Service{}
+	input := SpawnLongInput{
+		Image:   "alpine",
+		Command: "sleep",
+	}
+	args := s.buildLongRunArgs("docker", "lthn-test", 0, input)
+	var sawCapDrop, sawNoNewPrivs, sawPidsLimit bool
+	for _, a := range args {
+		if a == "--cap-drop=ALL" {
+			sawCapDrop = true
+		}
+		if a == "--security-opt=no-new-privileges" {
+			sawNoNewPrivs = true
+		}
+		if a == "--pids-limit=512" {
+			sawPidsLimit = true
+		}
+	}
+	core.AssertTrue(t, sawCapDrop,
+		"docker run must include --cap-drop=ALL (Mantis #1434)")
+	core.AssertTrue(t, sawNoNewPrivs,
+		"docker run must include --security-opt=no-new-privileges (Mantis #1434)")
+	core.AssertTrue(t, sawPidsLimit,
+		"docker run must include --pids-limit=512 (Mantis #1434)")
+}
+
 // TestSandbox_buildLongRunArgs_RejectsBadVolume — defence-in-depth
 // check that buildLongRunArgs silently skips an invalid volume name
 // even if marketplace's validator was bypassed (which it shouldn't
