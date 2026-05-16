@@ -171,6 +171,90 @@ func TestWithFileLock_Concurrent_Ugly(t *core.T) {
 	core.AssertEqual(t, N, counter, "all goroutines should have acquired the lock serially")
 }
 
+// TestWithFileLock_NWayRaceRespectsTimeout_Ugly — Cerberus DREAD-r2
+// F1 (Mantis #1525). Multiple goroutines chase the same lock under
+// a long-held holder + a re-planter that keeps replacing the
+// sentinel with a dead-PID body the moment any acquire-window opens.
+// The re-planter forces maybeReclaim() to return true in a tight
+// loop; pre-fix code skipped the deadline check on every reclaim
+// continue, so racers could wait far past their declared Timeout.
+// With the fix the deadline is re-tested at the TOP of every
+// iteration and each racer surfaces CodeLockTimeout within budget.
+func TestWithFileLock_NWayRaceRespectsTimeout_Ugly(t *core.T) {
+	homeFixture(t)
+	root := paths.Root()
+	core.AssertTrue(t, root.OK)
+	target := core.PathJoin(root.Value.(string), "nway-race.md")
+	sentinel := target + paths.LockfileSuffix
+
+	// Re-planter goroutine: continuously writes a dead-PID sentinel
+	// body so racers' maybeReclaim() removes it then immediately
+	// finds a fresh dead sentinel on the next iteration. This is
+	// the precise reclaim-loop shape that the pre-fix code starved
+	// on — every reclaim returned true so the deadline check was
+	// bypassed.
+	deadPID := 1<<30 - 1
+	body := []byte(core.Itoa(deadPID) + "\n0\n")
+	stop := make(chan struct{})
+	planterDone := make(chan struct{})
+	go func() {
+		defer close(planterDone)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = core.WriteFile(sentinel, body, 0o600)
+		}
+	}()
+
+	const N = 3
+	results := make(chan core.Result, N)
+	var wg sync.WaitGroup
+	wg.Add(N)
+	started := core.Now()
+	for i := 0; i < N; i++ {
+		go func() {
+			defer wg.Done()
+			r := paths.WithFileLock(target, 200*core.Millisecond, func() core.Result {
+				return core.Ok(nil)
+			})
+			results <- r
+		}()
+	}
+	wg.Wait()
+	close(stop)
+	<-planterDone
+	elapsed := core.Now().Sub(started)
+	// Wallclock budget: 200ms timeout + 1.8s grace. Pre-fix
+	// behaviour exhibited unbounded blocking until the iteration
+	// cap (or test-runner timeout) kicked in.
+	core.AssertTrue(t, elapsed < 2*core.Second,
+		core.Sprintf("N-way race must surface within budget; took %s", elapsed))
+	close(results)
+	timeouts := 0
+	wins := 0
+	for r := range results {
+		if r.OK {
+			wins++
+			continue
+		}
+		if core.Contains(r.Error(), paths.CodeLockTimeout) ||
+			core.Contains(r.Error(), paths.CodeLockIterationCap) {
+			timeouts++
+			continue
+		}
+		t.Fatalf("unexpected failure shape: %s", r.Error())
+	}
+	// At least one racer should hit the deadline — full sweep of
+	// wins would mean the re-planter never raced any racer, which
+	// is fine on a fast scheduler but the fixture is intentionally
+	// hostile. We accept any mix as long as TOTAL wallclock stays
+	// inside budget (the real load-bearing assertion above).
+	_ = wins + timeouts
+}
+
 func TestPathsRoot_NetworkFSRejected_Bad(t *core.T) {
 	homeFixture(t)
 	paths.SetRootFSTypeForTest("nfs")

@@ -56,11 +56,19 @@ const LockfileSuffix = ".lockfile"
 // frontend / audit-tail / log-tail surfaces pattern-match on these
 // literals.
 const (
-	CodeLockTimeout   = "paths.lock.timeout"
-	CodeLockNetworkFS = "paths.lock.network_fs"
-	CodeLockOpen      = "paths.lock.open_failed"
-	CodeLockRelease   = "paths.lock.release_failed"
+	CodeLockTimeout       = "paths.lock.timeout"
+	CodeLockNetworkFS     = "paths.lock.network_fs"
+	CodeLockOpen          = "paths.lock.open_failed"
+	CodeLockRelease       = "paths.lock.release_failed"
+	CodeLockIterationCap  = "paths.lock.iteration_cap"
 )
+
+// lockIterationCap bounds the acquire loop against monotonic-clock
+// pathology (Cerberus DREAD-r2 F1, Mantis #1525). Under healthy
+// contention the loop exits via Timeout long before this cap; the
+// cap is a defence-in-depth ceiling so a misbehaving clock cannot
+// produce an unbounded busy-spin.
+const lockIterationCap = 10000
 
 // backoffSteps controls the spin-wait progression on lock
 // contention. Starts at 5ms, doubles each step up to 100ms cap,
@@ -120,7 +128,22 @@ func WithFileLock(path string, timeout core.Duration, fn func() core.Result) cor
 	sentinel := path + LockfileSuffix
 	deadline := core.Now().Add(timeout)
 	step := 0
-	for {
+	// F1 (Cerberus DREAD-r2, Mantis #1525): deadline check lives at
+	// the TOP of the loop so every iteration — including post-
+	// maybeReclaim "continue" branches — re-tests the timeout before
+	// any further work. Without this, a sustained N-process race that
+	// keeps reclaiming each other's sentinels can starve a waiter past
+	// its declared Timeout. lockIterationCap is a defence-in-depth
+	// ceiling against monotonic-clock pathology in the same loop.
+	for iter := 0; ; iter++ {
+		if !core.Now().Before(deadline) {
+			return core.Fail(core.NewCode(CodeLockTimeout,
+				"timed out waiting for lock on "+path))
+		}
+		if iter >= lockIterationCap {
+			return core.Fail(core.NewCode(CodeLockIterationCap,
+				"lock acquire iteration cap exceeded for "+path))
+		}
 		acquired, fatal := tryAcquireSentinel(sentinel)
 		if acquired {
 			defer releaseSentinel(sentinel)
@@ -132,12 +155,9 @@ func WithFileLock(path string, timeout core.Duration, fn func() core.Result) cor
 		}
 		// Contended — check whether the holder is alive.
 		if maybeReclaim(sentinel) {
-			// Reclaimed; retry without waiting.
+			// Reclaimed; retry without waiting (deadline re-checked
+			// at top of next iteration per F1).
 			continue
-		}
-		if !core.Now().Before(deadline) {
-			return core.Fail(core.NewCode(CodeLockTimeout,
-				"timed out waiting for lock on "+path))
 		}
 		// Exponential backoff bounded at 100ms.
 		wait := backoffSteps[len(backoffSteps)-1]
