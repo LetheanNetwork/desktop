@@ -1,9 +1,15 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window-fixture";
 import "./analytics";
+
+vi.mock("@desktop/marketing/analytics/service", () => ({
+  Get: vi.fn(),
+}));
+
+import { Get as MockedGet } from "@desktop/marketing/analytics/service";
 
 type AnalyticsEl = LitElement & {
   window: "7d" | "30d" | "90d";
@@ -75,5 +81,59 @@ describe("lthn-view-analytics — two-shell", () => {
     const { host } = await mountWindow("lthn-view-analytics", { attrs: { embedded: "" } });
     expect(isEmbedded(host)).toBe(true);
     expect(host.querySelector("header")).toBeNull();
+  });
+});
+
+describe("lthn-view-analytics — backend wire", () => {
+  type AnalyticsEl = LitElement & {
+    sources: { label: string; v: number; n: string }[];
+    pages: { p: string; v: string; b: string; d: string }[];
+    sessions: string;
+    _loadFromBackend: () => Promise<void>;
+    updateComplete: Promise<boolean>;
+  };
+
+  beforeEach(() => {
+    (MockedGet as unknown as { mockReset: () => void }).mockReset();
+  });
+
+  it("backend data replaces fixture when present", async () => {
+    (MockedGet as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: {
+        sources: [{ label: "Backend Source", v: 50, n: "25 K" }],
+        pages: [{ p: "/backend", v: "10 K", b: "10%", d: "5:00" }],
+        sessions: "99,999",
+      }});
+
+    const { el, host } = await mountWindow<AnalyticsEl>("lthn-view-analytics");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("Backend Source");
+    expect(host.textContent).toContain("/backend");
+    expect(host.textContent).toContain("99,999");
+  });
+
+  it("backend rejection keeps fixture data visible", async () => {
+    (MockedGet as unknown as { mockRejectedValue: (v: unknown) => void })
+      .mockRejectedValue(new Error("unavailable"));
+
+    const { el, host } = await mountWindow<AnalyticsEl>("lthn-view-analytics");
+    await el._loadFromBackend();
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("Hacker News");
+    expect(host.textContent).toContain("/sovereign-compute");
+  });
+
+  it("empty backend response keeps fixture data visible", async () => {
+    (MockedGet as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { sources: [], pages: [], sessions: "" } });
+
+    const { el, host } = await mountWindow<AnalyticsEl>("lthn-view-analytics");
+    await el._loadFromBackend();
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("Hacker News");
   });
 });

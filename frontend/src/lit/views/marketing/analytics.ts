@@ -59,14 +59,19 @@ class LthnViewAnalytics extends LitElement {
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },
     window:   { state: true },
+    sources:  { state: true },
+    pages:    { state: true },
+    sessions: { state: true },
+    loading:  { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
-  /** Reporting window — 7d / 30d / 90d. Only 30d has fixture data
-   *  today; the other two render an empty-state row so the future
-   *  data-window hookup is visible to anyone reading the code. */
   declare window: Window;
+  declare sources: Source[];
+  declare pages: PageRow[];
+  declare sessions: string;
+  declare loading: boolean;
 
   constructor() {
     super();
@@ -74,16 +79,50 @@ class LthnViewAnalytics extends LitElement {
     this.h = 720;
     this.embedded = false;
     this.window = "30d";
+    this.sources = FIXTURE_SOURCES;
+    this.pages = FIXTURE_PAGES;
+    this.sessions = "48,412";
+    this.loading = false;
   }
 
   createRenderRoot() { return this; }
 
-  _setWindow(w: Window) { this.window = w; }
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+  }
+
+  async _loadFromBackend(): Promise<void> {
+    if (this.loading) return;
+    this.loading = true;
+    try {
+      const svc = await import("@desktop/marketing/analytics/service").catch(() => null);
+      if (!svc || typeof (svc as { Get?: unknown }).Get !== "function") return;
+      const r = await (svc as {
+        Get: (input: { window?: string }) => Promise<{
+          Value?: { sources?: Source[]; pages?: PageRow[]; sessions?: string }
+        }>
+      }).Get({ window: this.window });
+      const val = r?.Value;
+      if (val?.sources && val.sources.length > 0) this.sources = val.sources;
+      if (val?.pages && val.pages.length > 0) this.pages = val.pages;
+      if (val?.sessions) this.sessions = val.sessions;
+    } catch {
+      // Binding unavailable — keep fixture data.
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  _setWindow(w: Window) {
+    this.window = w;
+    void this._loadFromBackend();
+  }
 
   render() {
-    const sources = this.window === "30d" ? FIXTURE_SOURCES : [];
-    const pages   = this.window === "30d" ? FIXTURE_PAGES   : [];
-    const sessions = this.window === "30d" ? "48,412" : "—";
+    const sources = this.window === "30d" ? this.sources : [];
+    const pages   = this.window === "30d" ? this.pages   : [];
+    const sessions = this.window === "30d" ? this.sessions : "—";
     const windows: Window[] = ["7d", "30d", "90d"];
 
     const toolbar = html`
