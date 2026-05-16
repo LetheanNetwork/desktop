@@ -31,7 +31,110 @@ const (
 
 	// indexCacheFileName is the local file name for the cached index.
 	indexCacheFileName = "index.json"
+
+	// Cerberus Mantis #1433 — size caps on the two registry fetch
+	// surfaces. Without these, a malicious mirror could stream
+	// unbounded bytes regardless of Content-Length, exhausting RAM
+	// (ReadAll into memory; the catalogue path doesn't stream to
+	// disk). Cap shape mirrors the downloader hardening (#1425).
+	//
+	// 4 MiB for the index — the curated catalogue today has dozens
+	// of entries; thousands of entries would still fit in 4 MiB at
+	// JSON-density. 256 KiB for a single manifest — a manifest is
+	// metadata + envrefs + image refs, never large.
+	maxIndexBytes    = 4 << 20  // 4 MiB
+	maxManifestBytes = 256 << 10 // 256 KiB
+
+	// maxRegistryRedirects matches the downloader's explicit-cap
+	// pattern. Default Go client is 10; we match for auditability.
+	maxRegistryRedirects = 10
 )
+
+// httpsOnlyClient is the registry's HTTP client. Cerberus Mantis
+// #1433 — three guarantees:
+//
+//   - CheckRedirect rejects any non-https redirect target. The plain
+//     CheckRedirect+AllowedSource shape from the downloader doesn't
+//     directly apply (the marketplace registry isn't host-allowlisted
+//     today), so we enforce protocol instead — the original URL must
+//     also be https, and every hop must stay https.
+//   - Redirect chain capped at maxRegistryRedirects.
+//   - The default transport's TLS settings apply — no MitM-friendly
+//     InsecureSkipVerify anywhere in this package.
+//
+// Pinning specific CAs / fingerprints is Mantis #1428 (TLS pinning
+// deferred to marketplace manifest), tracked separately.
+var httpsOnlyClient = &core.HTTPClient{
+	CheckRedirect: func(req *core.Request, via []*core.Request) error {
+		if len(via) >= maxRegistryRedirects {
+			return core.NewError("marketplace: stopped after " +
+				core.Sprintf("%d", maxRegistryRedirects) + " redirects")
+		}
+		if req.URL.Scheme != "https" {
+			return core.NewError("marketplace: refusing non-https redirect to " +
+				req.URL.String())
+		}
+		return nil
+	},
+}
+
+// requireHTTPS rejects URLs whose scheme isn't https. Cerberus
+// Mantis #1433 — the original FetchManifest accepted both http:// and
+// https://, opening a downgrade vector for any catalogue that
+// declared http:// source URLs (catalogue itself is fetched over
+// https today, but per-entry source URLs are caller-supplied).
+func requireHTTPS(op, rawURL string) core.Result {
+	if !core.HasPrefix(rawURL, "https://") {
+		return core.Fail(core.E(op,
+			"only https:// URLs accepted (refusing "+rawURL+")", nil))
+	}
+	return core.Ok(nil)
+}
+
+// fetchCapped performs a GET via httpsOnlyClient and ReadAll's the
+// body bounded at maxBytes. Returns (raw bytes, response status,
+// Result.OK). A response that exceeds the cap fails with a clear
+// message rather than truncating silently.
+//
+// Pattern mirrors pkg/downloader's two-stage gate: Content-Length
+// pre-check + LimitReader at cap+1 with post-read overflow check.
+func fetchCapped(op, url string, maxBytes int64) (raw []byte, status int, result core.Result) {
+	reqR := core.NewHTTPRequest("GET", url, nil)
+	if !reqR.OK {
+		return nil, 0, reqR
+	}
+	req := reqR.Value.(*core.Request)
+	resp, err := httpsOnlyClient.Do(req)
+	if err != nil {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		return nil, 0, core.Fail(core.E(op, "GET failed: "+url, err))
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, core.Fail(core.E(op,
+			core.Sprintf("HTTP %d from %s", resp.StatusCode, url), nil))
+	}
+	if resp.ContentLength > maxBytes {
+		return nil, resp.StatusCode, core.Fail(core.E(op,
+			core.Sprintf("Content-Length %d exceeds cap %d",
+				resp.ContentLength, maxBytes), nil))
+	}
+
+	bounded := core.LimitReader(resp.Body, maxBytes+1)
+	readR := core.ReadAll(bounded)
+	if !readR.OK {
+		return nil, resp.StatusCode, core.Fail(core.E(op, "response read failed", nil))
+	}
+	raw, _ = readR.Value.([]byte)
+	if int64(len(raw)) > maxBytes {
+		return nil, resp.StatusCode, core.Fail(core.E(op,
+			core.Sprintf("response body exceeded %d byte cap", maxBytes), nil))
+	}
+	return raw, resp.StatusCode, core.Ok(nil)
+}
 
 // CatalogueEntry is one record in the marketplace index.
 // Matches the shape at marketplace.lthn.ai/v1/index.json.
@@ -104,8 +207,13 @@ func (s *Service) FetchManifest(sourceURL string) core.Result {
 	}
 
 	switch {
-	case core.HasPrefix(sourceURL, "https://") || core.HasPrefix(sourceURL, "http://"):
+	case core.HasPrefix(sourceURL, "https://"):
 		return s.fetchManifestHTTPS(sourceURL)
+	case core.HasPrefix(sourceURL, "http://"):
+		// Cerberus #1433 — http:// is a downgrade vector; reject
+		// loudly rather than silently upgrading.
+		return core.Fail(core.E(fetchManifestOp,
+			"refusing plaintext http:// source URL (use https://): "+sourceURL, nil))
 	case core.HasPrefix(sourceURL, "oci://"):
 		return core.Fail(core.E(fetchManifestOp,
 			"oci:// source URLs are not supported in v1 — use https:// instead", nil))
@@ -186,25 +294,16 @@ func (s *Service) readIndexCache(cachePath string) core.Result {
 }
 
 // downloadIndex fetches the index from indexURL, writes the cache, and returns
-// the parsed result.
+// the parsed result. Cerberus #1433 — fetch is now https-only with redirect
+// re-validation + a 4 MiB body cap.
 func (s *Service) downloadIndex(indexURL, cachePath string) core.Result {
-	getR := core.HTTPGet(indexURL)
-	if !getR.OK {
-		return core.Fail(core.E(fetchIndexOp, "HTTP fetch failed: "+indexURL, nil))
+	if r := requireHTTPS(fetchIndexOp, indexURL); !r.OK {
+		return r
 	}
-	resp := getR.Value.(*core.Response)
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return core.Fail(core.E(fetchIndexOp,
-			core.Sprintf("HTTP %d from %s", resp.StatusCode, indexURL), nil))
+	raw, _, r := fetchCapped(fetchIndexOp, indexURL, maxIndexBytes)
+	if !r.OK {
+		return r
 	}
-
-	readR := core.ReadAll(resp.Body)
-	if !readR.OK {
-		return core.Fail(core.E(fetchIndexOp, "response read failed", nil))
-	}
-	raw, _ := readR.Value.([]byte)
 
 	var entries []CatalogueEntry
 	if r := core.JSONUnmarshal(raw, &entries); !r.OK {
@@ -223,25 +322,14 @@ func (s *Service) downloadIndex(indexURL, cachePath string) core.Result {
 }
 
 // fetchManifestHTTPS downloads a manifest YAML from an https:// URL and
-// parses it.
+// parses it. Cerberus #1433 — https-only, redirect re-validated, 256 KiB cap.
 func (s *Service) fetchManifestHTTPS(url string) core.Result {
-	getR := core.HTTPGet(url)
-	if !getR.OK {
-		return core.Fail(core.E(fetchManifestOp, "HTTP fetch failed: "+url, nil))
+	if r := requireHTTPS(fetchManifestOp, url); !r.OK {
+		return r
 	}
-	resp := getR.Value.(*core.Response)
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return core.Fail(core.E(fetchManifestOp,
-			core.Sprintf("HTTP %d from %s", resp.StatusCode, url), nil))
+	raw, _, r := fetchCapped(fetchManifestOp, url, maxManifestBytes)
+	if !r.OK {
+		return r
 	}
-
-	readR := core.ReadAll(resp.Body)
-	if !readR.OK {
-		return core.Fail(core.E(fetchManifestOp, "response read failed", nil))
-	}
-	raw, _ := readR.Value.([]byte)
-
 	return ParseManifestBytes(raw)
 }
