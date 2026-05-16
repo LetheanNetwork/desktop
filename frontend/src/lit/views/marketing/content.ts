@@ -54,14 +54,16 @@ class LthnViewContent extends LitElement {
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },
     filter:   { state: true },
+    columns:  { state: true },
+    loading:  { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
-  /** Optional column filter — when set, only that pipeline stage is
-   *  visible. Cycled via clicking the column header pill. Useful for
-   *  the "what am I drafting today" mid-day flow. */
   declare filter: ContentColumn["id"] | "";
+  declare columns: ContentColumn[];
+  declare loading: boolean;
+  private _timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
@@ -69,9 +71,40 @@ class LthnViewContent extends LitElement {
     this.h = 720;
     this.embedded = false;
     this.filter = "";
+    this.columns = FIXTURE_COLUMNS;
+    this.loading = false;
   }
 
   createRenderRoot() { return this; }
+
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+    this._timer = setInterval(() => { void this._loadFromBackend(); }, 60_000);
+  }
+
+  disconnectedCallback() {
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    super.disconnectedCallback();
+  }
+
+  async _loadFromBackend(): Promise<void> {
+    if (this.loading) return;
+    this.loading = true;
+    try {
+      const svc = await import("@desktop/marketing/content/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") return;
+      const r = await (svc as {
+        List: (input: { col?: string }) => Promise<{ Value?: { columns?: ContentColumn[] } }>
+      }).List({});
+      const columns = r?.Value?.columns;
+      if (columns && columns.length > 0) this.columns = columns;
+    } catch {
+      // Binding unavailable — keep fixture data.
+    } finally {
+      this.loading = false;
+    }
+  }
 
   _setFilter(id: ContentColumn["id"] | "") {
     this.filter = this.filter === id ? "" : id;
@@ -79,12 +112,12 @@ class LthnViewContent extends LitElement {
 
   render() {
     const cols = this.filter
-      ? FIXTURE_COLUMNS.filter(c => c.id === this.filter)
-      : FIXTURE_COLUMNS;
-    const totalInFlight = FIXTURE_COLUMNS
+      ? this.columns.filter(c => c.id === this.filter)
+      : this.columns;
+    const totalInFlight = this.columns
       .filter(c => c.id !== "live")
       .reduce((s, c) => s + c.items.length, 0);
-    const dueToday = FIXTURE_COLUMNS
+    const dueToday = this.columns
       .flatMap(c => c.items)
       .filter(it => it.due === "today").length;
 
