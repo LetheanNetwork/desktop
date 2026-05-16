@@ -18,6 +18,7 @@ package server
 import (
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/marketplace"
 	"github.com/gin-gonic/gin"
 )
 
@@ -257,9 +258,13 @@ func writeGinError(c *gin.Context, status int, msg, kind string) {
 	})
 }
 
-// cspPolicy is the Content-Security-Policy value applied to every
-// response the lthn server emits. It forms the second defence layer
-// behind Lit's built-in auto-escape (the primary defence).
+// cspPolicyBase is the static portion of the Content-Security-Policy
+// value applied to every response the lthn server emits. It forms
+// the second defence layer behind Lit's built-in auto-escape (the
+// primary defence). The frame-src directive is appended per-response
+// by cspMiddleware so the live plugin-port registry (Cerberus CRIT-1
+// per plans/code/lthn/desktop/views/RFC.plugin-views.md §3.3) is
+// the source of truth at the moment each response renders.
 //
 // Directive rationale:
 //   - default-src 'self'       — deny everything not explicitly listed.
@@ -272,7 +277,11 @@ func writeGinError(c *gin.Context, status int, msg, kind string) {
 //     HF API (model browser) + wss for future WebSocket lanes.
 //   - frame-ancestors 'none'   — prevents the WebView being embedded in
 //     an attacker-controlled frame (belt-and-suspenders with X-Frame-Options).
-const cspPolicy = "default-src 'self'; " +
+//   - frame-src appended at request time — per-port loopback allowlist
+//     regenerated from marketplace.ViewRegistry.IframePorts(). NEVER
+//     wildcards (Cerberus CRIT-1 — frame-src 'none' http://127.0.0.1:<p1>
+//     http://127.0.0.1:<p2>). Empty registry → frame-src 'none'.
+const cspPolicyBase = "default-src 'self'; " +
 	"script-src 'self'; " +
 	"style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data: blob:; " +
@@ -285,16 +294,74 @@ const cspPolicy = "default-src 'self'; " +
 // cspHeader is the HTTP header name for the Content-Security-Policy.
 const cspHeader = "Content-Security-Policy"
 
-// cspMiddleware returns a gin.HandlerFunc that injects cspPolicy on
-// every response. Mounted before any route so SPA shell, API responses,
-// and error pages all carry the policy.
+// PluginPortSource is the contract cspMiddleware uses to fetch the
+// live plugin-port allowlist on every response. The default impl
+// reads marketplace.ViewRegistry; tests inject a stub.
+type PluginPortSource func() []int
+
+// defaultPluginPortSource returns the live ports the marketplace
+// ViewRegistry holds. Read on every response so install / uninstall
+// mutations propagate without restart.
+var defaultPluginPortSource PluginPortSource = func() []int {
+	return marketplace.ViewRegistry.IframePorts()
+}
+
+// cspMiddleware returns a gin.HandlerFunc that injects the composite
+// Content-Security-Policy on every response. The frame-src directive
+// enumerates exactly the loopback ports the live ViewRegistry
+// currently holds for iframe-kind plugins. Empty registry produces
+// `frame-src 'none'` per RFC §3.3.
+//
+// Mounted before any route so SPA shell, API responses, and error
+// pages all carry the policy.
 //
 // Usage example:
 //
 //	coreapi.WithMiddleware(cspMiddleware())
+//
+// Usage example (with a custom port source — tests):
+//
+//	mw := cspMiddlewareWithSource(func() []int { return []int{4096} })
 func cspMiddleware() gin.HandlerFunc {
+	return cspMiddlewareWithSource(defaultPluginPortSource)
+}
+
+// cspMiddlewareWithSource builds the CSP middleware against an
+// explicit port source. Used by tests to assert frame-src
+// enumeration without touching the package-global ViewRegistry.
+func cspMiddlewareWithSource(source PluginPortSource) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Header(cspHeader, cspPolicy)
+		c.Header(cspHeader, BuildCSPPolicy(source))
 		c.Next()
 	}
+}
+
+// BuildCSPPolicy composes the full CSP value: the static
+// cspPolicyBase plus a frame-src directive enumerating the live
+// iframe loopback ports. Exported so tests can assert the exact
+// rendered policy string without spinning a gin engine.
+//
+// Behaviour per RFC §3.3:
+//   - empty port list → `frame-src 'none'`
+//   - non-empty → `frame-src 'none' http://127.0.0.1:<p1> http://127.0.0.1:<p2>` …
+//   - NEVER wildcards (no `frame-src *`, no `http://127.0.0.1:*`)
+//   - port 0 entries are silently dropped (defensive — zero is the
+//     lit-kind sentinel; should never reach this path)
+func BuildCSPPolicy(source PluginPortSource) string {
+	var ports []int
+	if source != nil {
+		ports = source()
+	}
+	b := core.NewBuilder()
+	b.WriteString(cspPolicyBase)
+	b.WriteString("; frame-src 'none'")
+	seen := map[int]bool{}
+	for _, p := range ports {
+		if p <= 0 || seen[p] {
+			continue
+		}
+		seen[p] = true
+		b.WriteString(core.Sprintf(" http://127.0.0.1:%d", p))
+	}
+	return b.String()
 }

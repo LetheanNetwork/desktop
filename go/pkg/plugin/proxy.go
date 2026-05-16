@@ -19,12 +19,90 @@
 package plugin
 
 import (
+	"net/http"
 	"net/http/httputil"
 	"net/url"
 
 	core "dappco.re/go"
 	"github.com/gin-gonic/gin"
 )
+
+// pluginProxyCSPHeader is the restrictive Content-Security-Policy
+// the loopback reverse-proxy STRIPS from the plugin's own response
+// + INJECTS as the authoritative policy per
+// plans/code/lthn/desktop/views/RFC.plugin-views.md §3.4 (HIGH-1)
+// and Cerberus round-2 LOW-R2-1 floor extension (Mantis #1712).
+//
+// Defence shape:
+//   - default-src 'self'             — same-origin baseline
+//   - script-src 'self'              — explicit; never rely on default
+//   - style-src 'self' 'unsafe-inline' — opencode (today's first tier-2
+//     consumer) ships inline style; drop 'unsafe-inline' if a future
+//     plugin can confirm it doesn't need it
+//   - connect-src 'self' wails://wails — outbound fetches restricted
+//     to the plugin's own loopback origin + the host shell origin
+//     (postMessage / parent-window navigation). Forbids exfiltration
+//     of a granted session token to any external endpoint.
+//   - frame-ancestors wails://wails  — only the host shell may frame
+//     the plugin
+//   - object-src 'none'              — block <object>/<embed> plugins
+//   - base-uri 'self'                — prevent <base> href injection
+//   - form-action 'self'             — restrict form submissions to
+//     the plugin's own origin
+//
+// The plugin author's own CSP header is dropped before injection so
+// a permissive policy from the plugin process can't widen the
+// effective policy the WebView observes.
+const pluginProxyCSPHeader = "default-src 'self'; " +
+	"script-src 'self'; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"connect-src 'self' wails://wails; " +
+	"frame-ancestors wails://wails; " +
+	"object-src 'none'; " +
+	"base-uri 'self'; " +
+	"form-action 'self'"
+
+// PluginProxyCSPHeader returns the policy value the reverse-proxy
+// injects on every response from a plugin's loopback origin.
+// Exported for tests + audit log + spec-grep parity. The literal
+// is the contract; renaming this const without a spec bump breaks
+// the Cerberus DREAD §3.4 + LOW-R2-1 audit trail.
+func PluginProxyCSPHeader() string { return pluginProxyCSPHeader }
+
+// stripAndInjectCSP is the http.ReverseProxy.ModifyResponse hook
+// per §3.4. Drops ANY CSP header the plugin process set and writes
+// the restrictive policy in its place. Fires on every response —
+// 2xx, 3xx, 4xx, 5xx — so an error response from the plugin webapp
+// cannot smuggle a permissive policy past the gate (Cerberus round-2
+// LOW-R2-1 error-response coverage).
+//
+// Returns nil error always — the rewrite is unconditional. Callers
+// wire it as the proxy's ModifyResponse field.
+//
+// Usage example:
+//
+//	rp := httputil.NewSingleHostReverseProxy(u)
+//	rp.ModifyResponse = stripAndInjectCSP
+func stripAndInjectCSP(resp *http.Response) error {
+	if resp == nil || resp.Header == nil {
+		return nil
+	}
+	// Drop both header-name spellings — RFC 7231 says headers are
+	// case-insensitive but some upstreams send "content-security-policy"
+	// while http.Header normalises on canonical case. Del covers
+	// canonical; the variant-spellings are dropped via raw iteration
+	// over the underlying map.
+	resp.Header.Del("Content-Security-Policy")
+	resp.Header.Del("Content-Security-Policy-Report-Only")
+	for k := range resp.Header {
+		if core.Lower(k) == "content-security-policy" ||
+			core.Lower(k) == "content-security-policy-report-only" {
+			resp.Header.Del(k)
+		}
+	}
+	resp.Header.Set("Content-Security-Policy", pluginProxyCSPHeader)
+	return nil
+}
 
 // ProxyGroup implements coreapi.RouteGroup. Registered exactly
 // once on the coreapi.Engine; the targets map mutates at runtime.
@@ -69,6 +147,12 @@ func (g *ProxyGroup) Set(code, targetURL string) {
 	// prefix, prepend code namespace) happens in dispatch() at call
 	// time so the Director stays unmodified.
 	rp := httputil.NewSingleHostReverseProxy(u)
+	// CSP strip-and-inject per RFC.plugin-views §3.4 (Cerberus HIGH-1
+	// + round-2 LOW-R2-1). The plugin's own CSP is dropped before
+	// injection so a permissive plugin policy cannot widen the
+	// effective WebView posture. Fires on every response code so
+	// 4xx/5xx responses cannot slip a permissive policy past.
+	rp.ModifyResponse = stripAndInjectCSP
 	g.mu.Lock()
 	g.targets[code] = rp
 	g.mu.Unlock()

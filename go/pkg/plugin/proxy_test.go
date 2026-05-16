@@ -212,3 +212,97 @@ func TestProxy_dispatch_NotFound_Ugly(t *core.T) {
 
 	core.AssertEqual(t, http.StatusNotFound, resp.StatusCode)
 }
+
+// cspBackend returns a backend httptest.Server that responds with a
+// caller-supplied status code AND a permissive
+// Content-Security-Policy header. Used to verify the proxy's
+// strip-and-inject runs on every response shape (2xx + 4xx + 5xx)
+// per Cerberus round-2 LOW-R2-1 error-response coverage.
+func cspBackend(status int, permissiveCSP string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if permissiveCSP != "" {
+			w.Header().Set("Content-Security-Policy", permissiveCSP)
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte("body"))
+	}))
+}
+
+// TestProxy_StripsAndInjectsCSP_Good verifies the §3.4 contract on
+// the happy 200 path — the plugin's permissive CSP is dropped + the
+// restrictive PluginProxyCSPHeader is set.
+func TestProxy_StripsAndInjectsCSP_Good(t *core.T) {
+	frontURL, pg, cleanup := setupProxy(t)
+	defer cleanup()
+	backend := cspBackend(http.StatusOK,
+		"default-src *; connect-src https://exfil.example.com")
+	defer backend.Close()
+
+	pg.Set("testpkg", backend.URL)
+
+	resp := get(t, frontURL, "/v1/api/plugin/testpkg/x", "")
+	defer resp.Body.Close()
+	io.ReadAll(resp.Body) //nolint:errcheck
+
+	core.AssertEqual(t, http.StatusOK, resp.StatusCode)
+	headers := resp.Header.Values("Content-Security-Policy")
+	core.AssertEqual(t, 1, len(headers))
+	core.AssertEqual(t, subject.PluginProxyCSPHeader(), headers[0])
+
+	// LOW-R2-1 floor extension — confirm the extended directives land.
+	for _, mustHave := range []string{
+		"object-src 'none'",
+		"base-uri 'self'",
+		"form-action 'self'",
+		"connect-src 'self' wails://wails",
+		"frame-ancestors wails://wails",
+	} {
+		core.AssertTrue(t, core.Contains(headers[0], mustHave))
+	}
+}
+
+// TestProxy_StripsAndInjectsCSP_OnErrorResponse_Good asserts the
+// strip-inject MUST fire on 4xx + 5xx responses too, not only 200s.
+// A plugin returning 500 with a CSP-permissive header would otherwise
+// slip the inject (Cerberus round-2 LOW-R2-1).
+func TestProxy_StripsAndInjectsCSP_OnErrorResponse_Good(t *core.T) {
+	for _, status := range []int{http.StatusBadRequest,
+		http.StatusUnauthorized, http.StatusInternalServerError,
+		http.StatusBadGateway} {
+		frontURL, pg, cleanup := setupProxy(t)
+		backend := cspBackend(status,
+			"default-src *; connect-src https://attacker.example.com")
+
+		pg.Set("err", backend.URL)
+		resp := get(t, frontURL, "/v1/api/plugin/err/x", "")
+		io.ReadAll(resp.Body) //nolint:errcheck
+		got := resp.Header.Get("Content-Security-Policy")
+		resp.Body.Close()
+		backend.Close()
+		cleanup()
+
+		core.AssertEqual(t, status, resp.StatusCode)
+		core.AssertEqual(t, subject.PluginProxyCSPHeader(), got)
+		core.AssertFalse(t, core.Contains(got, "attacker.example.com"))
+	}
+}
+
+// TestProxy_StripsAndInjectsCSP_NoCSPHeader_Good covers the path
+// where the plugin webapp DOESN'T set a CSP header at all — the
+// proxy must still inject the restrictive policy so an attacker
+// can't smuggle through by simply omitting the header.
+func TestProxy_StripsAndInjectsCSP_NoCSPHeader_Good(t *core.T) {
+	frontURL, pg, cleanup := setupProxy(t)
+	defer cleanup()
+	backend := cspBackend(http.StatusOK, "") // no CSP at all
+	defer backend.Close()
+
+	pg.Set("testpkg", backend.URL)
+
+	resp := get(t, frontURL, "/v1/api/plugin/testpkg/x", "")
+	defer resp.Body.Close()
+	io.ReadAll(resp.Body) //nolint:errcheck
+
+	core.AssertEqual(t, subject.PluginProxyCSPHeader(),
+		resp.Header.Get("Content-Security-Policy"))
+}
