@@ -84,6 +84,13 @@ interface ErrorResponseBody {
  *  Cerberus #1465 applied to the user-typed passphrase. */
 const UNLOCK_INPUT_ID = "lthn-auth-gate-passphrase";
 
+/** Stable id attributes on the setup-form passphrase + confirm inputs.
+ *  Same closure-only read pattern as UNLOCK_INPUT_ID — the typed
+ *  passphrase lives in a local var inside _onRunSetup, NEVER on
+ *  `this` or in any storage surface (RFC.stage-x.md §4.2). */
+const SETUP_PASSPHRASE_INPUT_ID = "lthn-auth-gate-setup-passphrase";
+const SETUP_CONFIRM_INPUT_ID    = "lthn-auth-gate-setup-confirm";
+
 class LthnAuthGate extends LitElement {
   static readonly properties = {
     state:           { type: String, reflect: true },
@@ -99,6 +106,7 @@ class LthnAuthGate extends LitElement {
     errorBody:       { state: true },
     accountId:       { state: true },
     unlockError:     { state: true },
+    setupError:      { state: true },
     lockedOutUntilSec: { state: true },
   };
 
@@ -129,6 +137,10 @@ class LthnAuthGate extends LitElement {
   /** Inline error message under the passphrase input in state=auth.
    *  Cleared on next Wreath-in attempt or on input change. */
   declare unlockError:  string;
+  /** Inline error message under the setup form in state=setup —
+   *  mismatch, too-short, server-side validation failures. Cleared
+   *  on next submit attempt or on input change. */
+  declare setupError:   string;
   /** Unix-seconds timestamp until which the unlock button stays
    *  disabled after a lockout response (account.unlock.locked_out).
    *  0 when not locked-out. RFC.stage-e §5 — 60s default cooldown,
@@ -151,6 +163,7 @@ class LthnAuthGate extends LitElement {
     this.errorBody         = "";
     this.accountId         = "";
     this.unlockError       = "";
+    this.setupError        = "";
     this.lockedOutUntilSec = 0;
   }
 
@@ -201,74 +214,144 @@ class LthnAuthGate extends LitElement {
     }
   }
 
-  /** Run setup click handler. Mints a fresh bootstrap token, POSTs
-   *  /v1/account/create with it as the Bootstrap authorization, and
-   *  on success dispatches AUTH_OK_EVENT so the app-shell flips back
-   *  to "ok". The token lives ONLY in the local `token` variable —
-   *  never stored on `this`, never persisted (Cerberus #1465). On
-   *  retry the gate mints a NEW token via this same handler; we
-   *  never re-use a prior token. */
+  /** Run setup click handler — RFC.stage-x.md §3 end-to-end provision.
+   *
+   *  Closure-only discipline (Cerberus #1465 applied to passphrase +
+   *  bootstrap-token + session-token): each value lives in handler-
+   *  local vars / api-fetch module-scope ONLY. Inputs are cleared at
+   *  the end so a stale value can't re-submit from a later click
+   *  without the user re-typing.
+   *
+   *  Flow per RFC.stage-x.md §3:
+   *   1. read passphrase + confirm from <input id={SETUP_*_INPUT_ID}>
+   *   2. mismatch → inline error, NO fetch
+   *   3. mint bootstrap-token with scope="account.provision"
+   *   4. generate fresh request_id via crypto.randomUUID()
+   *   5. POST /v1/account/provision with {passphrase, request_id}
+   *   6. on 200 → setSessionToken(session_token), dispatch AUTH_OK_EVENT
+   *   7. on 400 passphrase.required → inline error, stays on setup
+   *   8. on 409 exists → re-derive state (race with concurrent setup)
+   *   9. on any other failure → framed error view with captured body */
   async _onRunSetup(): Promise<void> {
     if (this.loading) return;
+
+    const ppInput = this.querySelector("#" + SETUP_PASSPHRASE_INPUT_ID) as HTMLInputElement | null;
+    const ccInput = this.querySelector("#" + SETUP_CONFIRM_INPUT_ID) as HTMLInputElement | null;
+    const pp = ppInput?.value ?? "";
+    const cc = ccInput?.value ?? "";
+
+    if (pp.length === 0) {
+      this.setupError = "Enter a passphrase to set up your Lethean Account.";
+      return;
+    }
+    if (pp.length < 12) {
+      this.setupError = "Passphrase must be at least 12 characters.";
+      return;
+    }
+    if (pp !== cc) {
+      this.setupError = "Passphrases don't match.";
+      return;
+    }
+
     this.loading = true;
+    this.setupError = "";
     try {
       const svc = await import("@desktop/serverkey/service");
-      const tokR = await svc.IssueBootstrapToken();
+      const tokR = await svc.IssueBootstrapTokenForScope("account.provision");
       if (!tokR || !tokR.OK) {
         this.state = "error";
+        this.errorStatus = 0;
+        this.errorMessage = "Couldn't mint a setup token.";
+        this.errorBody = "";
         return;
       }
       const tok = (tokR.Value as BootstrapTokenValue | undefined)?.token;
       if (typeof tok !== "string" || tok.length === 0) {
         this.state = "error";
+        this.errorStatus = 0;
+        this.errorMessage = "Server returned an empty setup token.";
+        this.errorBody = "";
         return;
       }
-      // Per RFC §5 — POST to /v1/account/create with the raw token in
-      // the Bootstrap authorization header. The body is empty for v1;
-      // Stage B' will define the account-creation payload once the
-      // endpoint lands. Cerberus #1469: send the raw token, the
-      // verifier canonicalises server-side.
-      const res = await fetch("/v1/account/create", {
+
+      // Client-generated request_id for the §3.2 idempotency dedup
+      // window (server-side dedup ships in Stage X.B Phase 2c — this
+      // field is required by the contract today and ignored by the
+      // 2a server impl). Fresh UUID per submit; regenerated on retry.
+      const requestID = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+        ? crypto.randomUUID()
+        : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      const res = await fetch("/v1/account/provision", {
         method: "POST",
         headers: {
           "Authorization": "Bootstrap " + tok,
           "Content-Type":  "application/json",
         },
-        body: "{}",
+        body: JSON.stringify({ passphrase: pp, request_id: requestID }),
       });
-      if (!res.ok) {
-        // Endpoint absent (404 until Stage B' lands) or refused — fall
-        // back to the error frame so the user can retry. The state
-        // machine handles "endpoint error" via state=error per RFC §1.
-        //
-        // Capture the real response so the error frame renders the
-        // actual server message instead of the design's hardcoded
-        // mockup. Without this, every error looks like "missing
-        // authorization header" even when the real cause is
-        // bad-body / wrong-scope / endpoint-missing.
-        this.errorStatus = res.status;
-        try {
-          const txt = await res.text();
-          this.errorBody = txt;
-          try {
-            const parsed = JSON.parse(txt) as { error?: { message?: string } };
-            this.errorMessage = parsed?.error?.message ?? "";
-          } catch { this.errorMessage = ""; }
-        } catch { this.errorBody = ""; }
-        const rid = res.headers.get("X-Request-Id");
-        if (rid) this.requestId = rid;
-        this.state = "error";
+
+      if (res.ok) {
+        const json = await res.json().catch(() => null) as
+          { Value?: UnlockResponseBody; value?: UnlockResponseBody } | null;
+        const out = json?.Value ?? json?.value ?? null;
+        const sessionToken = out?.session_token;
+        if (typeof sessionToken !== "string" || sessionToken.length === 0) {
+          this.state = "error";
+          this.errorStatus = res.status;
+          this.errorMessage = "Setup succeeded but the session token was empty.";
+          this.errorBody = "";
+          return;
+        }
+        setSessionToken(sessionToken);
+        if (ppInput) ppInput.value = "";
+        if (ccInput) ccInput.value = "";
+        this.state = "ok";
+        window.dispatchEvent(new CustomEvent(AUTH_OK_EVENT));
         return;
       }
-      this.state = "ok";
-      window.dispatchEvent(new CustomEvent(AUTH_OK_EVENT));
+
+      // Non-OK — read body once.
+      const txt = await res.text().catch(() => "");
+      let body: ErrorResponseBody | null = null;
+      try { body = JSON.parse(txt) as ErrorResponseBody; } catch {}
+      const code = body?.error?.code ?? "";
+      const msg  = body?.error?.message ?? "";
+      const rid  = res.headers.get("X-Request-Id")
+                || res.headers.get("X-Request-ID")
+                || body?.meta?.request_id
+                || "";
+      if (rid) this.requestId = rid;
+
+      if (code === "account.provision.passphrase.required") {
+        this.setupError = msg || "Enter your passphrase.";
+        return;
+      }
+      if (code === "account.exists") {
+        // Concurrent setup race — re-derive state. If an account
+        // really does exist now, we transition to auth and the user
+        // unlocks instead of provisioning again.
+        if (ppInput) ppInput.value = "";
+        if (ccInput) ccInput.value = "";
+        await this._deriveState();
+        return;
+      }
+      // Any other failure (keygen/encrypt/mint/5xx) — framed error.
+      this.errorStatus = res.status;
+      this.errorBody = txt;
+      this.errorMessage = msg;
+      this.state = "error";
+      return;
     } catch {
       this.state = "error";
+      this.errorStatus = 0;
+      this.errorMessage = "Couldn't reach the runner.";
+      this.errorBody = "";
+      return;
     } finally {
       this.loading = false;
-      // `tok` (the bootstrap token) is now out of scope — closure-only
-      // storage rule satisfied. Garbage collector reclaims the string;
-      // no `this.*` field, no localStorage, no module cache.
+      // pp + cc fall out of scope here — GC reclaims, no `this.*`
+      // cache, no localStorage. Closure-only discipline preserved.
     }
   }
 
@@ -511,47 +594,90 @@ class LthnAuthGate extends LitElement {
   /* ── setup · no Lethean Account on this Mac ──────────────────────── */
   private _setup(): TemplateResult {
     return html`
-      <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:48px 56px; gap:28px; text-align:center;">
-        <div style="width:64px; height:64px; border-radius:16px;
-                    background:linear-gradient(155deg, rgba(64,193,197,0.18), rgba(64,193,197,0.02));
-                    border:1px solid rgba(64,193,197,0.24);
-                    display:flex; align-items:center; justify-content:center;">
-          <lthn-glyph size="34" color="var(--brand-300)" active></lthn-glyph>
-        </div>
-        <div style="display:flex; flex-direction:column; gap:10px; max-width:520px;">
-          <div style="font-size:24px; font-weight:600; color:var(--fg-0); letter-spacing:-0.02em;">
+      <div style="flex:1; display:flex; flex-direction:column; align-items:center; padding:40px 56px 32px; gap:22px;">
+        <div style="display:flex; flex-direction:column; align-items:center; gap:14px; text-align:center;">
+          <div style="width:60px; height:60px; border-radius:16px;
+                      background:linear-gradient(155deg, rgba(64,193,197,0.18), rgba(64,193,197,0.02));
+                      border:1px solid rgba(64,193,197,0.24);
+                      display:flex; align-items:center; justify-content:center;">
+            <lthn-glyph size="32" color="var(--brand-300)" active></lthn-glyph>
+          </div>
+          <div style="font-size:22px; font-weight:600; color:var(--fg-0); letter-spacing:-0.02em;">
             Welcome. Let's set you up.
           </div>
-          <div style="font-size:13.5px; color:var(--fg-2); line-height:1.6;">
-            We need to provision a local keypair, your default workspace, and a
-            stored credential so the runner can talk to itself. Three minutes —
-            no account, no email, nothing on a server.
+          <div style="font-size:13px; color:var(--fg-2); line-height:1.55; max-width:480px;">
+            Choose a passphrase to protect your Lethean Account on this Mac. Nothing leaves your machine — no account, no email, nothing on a server.
           </div>
         </div>
-        <div style="display:flex; flex-direction:column; gap:8px; align-items:center;">
-          <lthn-btn tone="primary" size="lg" @click=${() => this._onRunSetup()}>
-            <i class="fa-solid fa-play" style="font-size:11px;"></i>
-            Run setup
-          </lthn-btn>
-          <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); letter-spacing:0.04em;">
-            or  <span style="color:var(--fg-2);">lthn setup</span>  in a terminal
+
+        <form @submit=${(ev: Event) => { ev.preventDefault(); void this._onRunSetup(); }}
+              style="display:flex; flex-direction:column; gap:12px; width:100%; max-width:380px;">
+          <label for=${SETUP_PASSPHRASE_INPUT_ID}
+            style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase;">
+            Passphrase
+          </label>
+          <div style="display:flex; align-items:center; gap:0; background:rgba(0,0,0,0.30);
+                      border:1px solid rgba(64,193,197,0.30); border-radius:8px;
+                      padding:0 12px; height:40px;">
+            <i class="fa-solid fa-lock" style="font-size:11px; color:var(--fg-3); margin-right:10px;"></i>
+            <input id=${SETUP_PASSPHRASE_INPUT_ID} type="password"
+              placeholder="at least 12 characters"
+              autocomplete="new-password" minlength="12" required
+              ?disabled=${this.loading}
+              @input=${this._onSetupInput}
+              style="flex:1; background:transparent; border:none; outline:none;
+                     color:var(--fg-0); font-family:var(--font-mono); font-size:13px; letter-spacing:0.04em;" />
           </div>
-        </div>
-        <div style="display:flex; gap:32px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.04); width:100%; max-width:520px; justify-content:center;">
-          ${[
-            { icon: "fa-key",          l: "Generates a keypair" },
-            { icon: "fa-folder-tree",  l: "Picks a model directory" },
-            { icon: "fa-shield-halved",l: "Stores creds in Keychain" },
-          ].map(s => html`
-            <div style="display:flex; flex-direction:column; align-items:center; gap:6px; font-size:11px; color:var(--fg-3);">
-              <i class="fa-solid ${s.icon}" style="font-size:13px; color:var(--brand-300);"></i>
-              ${s.l}
+
+          <label for=${SETUP_CONFIRM_INPUT_ID}
+            style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase;">
+            Confirm passphrase
+          </label>
+          <div style="display:flex; align-items:center; gap:0; background:rgba(0,0,0,0.30);
+                      border:1px solid rgba(64,193,197,0.30); border-radius:8px;
+                      padding:0 12px; height:40px;">
+            <i class="fa-solid fa-lock" style="font-size:11px; color:var(--fg-3); margin-right:10px;"></i>
+            <input id=${SETUP_CONFIRM_INPUT_ID} type="password"
+              placeholder="type the same passphrase again"
+              autocomplete="new-password" minlength="12" required
+              ?disabled=${this.loading}
+              @input=${this._onSetupInput}
+              style="flex:1; background:transparent; border:none; outline:none;
+                     color:var(--fg-0); font-family:var(--font-mono); font-size:13px; letter-spacing:0.04em;" />
+          </div>
+
+          ${this.setupError ? html`
+            <div role="alert" style="font-size:11.5px; color:var(--err-400); line-height:1.5;">
+              ${this.setupError}
+            </div>` : nothing}
+
+          <div style="font-size:11px; color:var(--fg-3); line-height:1.55;">
+            Non-Latin scripts are normalised before storage so the same passphrase
+            typed on any keyboard works. We can't recover it for you — write it
+            somewhere safe.
+          </div>
+
+          <div style="display:flex; gap:10px; align-items:center; margin-top:4px;">
+            <lthn-btn tone="primary" size="lg" type="submit"
+              ?disabled=${this.loading}
+              @click=${() => this._onRunSetup()}>
+              <i class="fa-solid fa-play" style="font-size:11px;"></i>
+              ${this.loading ? "Setting up…" : "Run setup"}
+            </lthn-btn>
+            <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); letter-spacing:0.04em;">
+              or <span style="color:var(--fg-2);">lthn setup</span> in a terminal
             </div>
-          `)}
-        </div>
+          </div>
+        </form>
       </div>
     `;
   }
+
+  /** Clear the inline setup error the moment the user starts typing
+   *  again — mirrors _onPassphraseInput for the unlock form. */
+  private _onSetupInput = () => {
+    if (this.setupError.length > 0) this.setupError = "";
+  };
 
   /* ── auth · account on disk, just needs the passphrase ───────────── */
   private _auth(): TemplateResult {
