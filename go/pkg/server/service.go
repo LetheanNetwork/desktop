@@ -189,9 +189,8 @@ type Options struct {
 // paths are in the allowlist. New entries REQUIRE a new Mantis
 // ticket + new Cerberus DREAD review.
 //
-// Today's single entry: /v1/account/create requires a token minted
-// with scope=account.create. pkg/account.APIBasePath + "/create"
-// is the canonical path and MUST match this map's key verbatim.
+// Stage E.B adds /v1/account/unlock alongside /v1/account/create —
+// the only bootstrap-token-gated paths today.
 //
 // Usage example (inside NewService):
 //
@@ -199,6 +198,68 @@ type Options struct {
 //	    WithBootstrapAuth(opts.ServerKey, opts.LocalKey, BootstrapPathScopes))
 var BootstrapPathScopes = map[string]string{
 	"/v1/account/create": "account.create",
+	"/v1/account/unlock": "account.unlock",
+}
+
+// RouteTiers classifies every non-skip-list /v1 route per
+// RFC.stage-e.md v2 §4. Each entry is a security-policy decision —
+// adding a TierLocal entry exposes the route to the static LocalKey
+// fallback, adding a TierSession entry requires a valid unlocked
+// session token. New entries SHOULD default to TierSession
+// (deny-by-default — Cerberus DREAD H1); the matching CI test in
+// service_test.go (TestService_AllRoutesTiered_Good) asserts every
+// gin-registered path is in this map OR in BootstrapPathScopes OR
+// in the skip-list.
+//
+// Today's classification:
+//
+//	/v1/models               local — model list, no per-account scope
+//	/v1/chat/completions     local — OpenAI compat shim, stub today
+//	/v1/completions          local — OpenAI compat shim, stub today
+//	/v1/account/lock         session — Sign-Out requires unlocked state
+//
+// Per Cerberus DREAD C2 — a third TierData slot is RESERVED for
+// at-rest-encrypted data endpoints (Phase 2 — Mantis #1487). Today
+// it behaves identically to TierSession; defining it now locks the
+// policy so future contributors classify into it.
+//
+// Usage example (inside NewService):
+//
+//	apiOpts = append(apiOpts,
+//	    WithBootstrapAndSessionAuth(opts.ServerKey, opts.LocalKey,
+//	        BootstrapPathScopes, RouteTiers))
+var RouteTiers = map[string]RouteTier{
+	"/v1/models":           TierLocal,
+	"/v1/chat/completions": TierLocal,
+	"/v1/completions":      TierLocal,
+	"/v1/account/lock":     TierSession,
+}
+
+// RouteTierSkipList names paths that bypass routeTiers classification
+// entirely — typically built-in coreapi endpoints (/health, openapi,
+// swagger) that have no per-account data semantics.
+//
+// Adding to this list is a security-policy decision — paths here
+// bypass ALL session-tier requirements. The bearer-equality check
+// still runs in the middleware; skip-list paths get past the tier
+// classification check, NOT past auth entirely.
+//
+// Today's bypass set: /health (liveness probe), /openapi.json (API
+// schema discovery), /v1/openapi.json (versioned variant).
+var RouteTierSkipList = []string{
+	"/health",
+	"/openapi.json",
+	"/v1/openapi.json",
+}
+
+// RouteTierSkipPrefixes names path prefixes that bypass routeTiers
+// classification. Used for the swagger UI tree (/swagger/*) and the
+// SDK codegen tree (/sdk/* + /v1/sdk/*) which both expand into many
+// sub-paths the test would otherwise need to enumerate one-by-one.
+var RouteTierSkipPrefixes = []string{
+	"/swagger",
+	"/sdk",
+	"/v1/sdk",
 }
 
 // RoutesProvider is the contract a Core-registered service implements to
