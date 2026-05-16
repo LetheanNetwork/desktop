@@ -1,6 +1,7 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
 import { describe, it, expect } from "vitest";
+import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../test/window-fixture";
 import "./welcome-window";
 
@@ -25,7 +26,7 @@ describe("lthn-welcome-window — smoke", () => {
   });
 
   it("step prop drives which body section renders", async () => {
-    const { el, host } = await mountWindow<HTMLElement & { step: number; updateComplete: Promise<boolean> }>(
+    const { el, host } = await mountWindow<LitElement & { step: number; updateComplete: Promise<boolean> }>(
       "lthn-welcome-window",
       { props: { step: 2 } },
     );
@@ -36,7 +37,7 @@ describe("lthn-welcome-window — smoke", () => {
   });
 
   it("step 4 — renders the Menu Behaviours tour content", async () => {
-    const { host } = await mountWindow<HTMLElement & { step: number }>(
+    const { host } = await mountWindow<LitElement & { step: number }>(
       "lthn-welcome-window",
       { props: { step: 4 } },
     );
@@ -52,5 +53,38 @@ describe("lthn-welcome-window — two-shell", () => {
     const { host } = await mountWindow("lthn-welcome-window", { attrs: { embedded: "" } });
     expect(isEmbedded(host)).toBe(true);
     expect(host.querySelector("header")).toBeNull();
+  });
+});
+
+describe("lthn-welcome-window — Choose folder wire", () => {
+  type WelcomeEl = LitElement & {
+    step: number;
+    modelsDir: string;
+    _chooseModelsFolder: () => Promise<void>;
+    _adoptModelsFolder: (path: string) => Promise<void>;
+  };
+
+  it("renders the Choose folder button on step 1", async () => {
+    const { host } = await mountWindow<WelcomeEl>("lthn-welcome-window", { props: { step: 1 } });
+    const btn = host.querySelector(".lthn-welcome-choose-folder");
+    expect(btn, "Choose folder button present on step 1").not.toBeNull();
+    expect(btn?.textContent?.trim()).toContain("Choose folder");
+  });
+
+  it("_adoptModelsFolder('') is a silent no-op", async () => {
+    const { el } = await mountWindow<WelcomeEl>("lthn-welcome-window");
+    const initial = el.modelsDir;
+    let threw: unknown = null;
+    try { await el._adoptModelsFolder(""); }
+    catch (e) { threw = e; }
+    expect(threw, "empty path must not throw").toBeNull();
+    expect(el.modelsDir, "modelsDir unchanged for empty path").toBe(initial);
+  });
+
+  it("renders the Reset to default button on step 1", async () => {
+    const { host } = await mountWindow<WelcomeEl>("lthn-welcome-window", { props: { step: 1 } });
+    const btn = host.querySelector(".lthn-welcome-reset-folder");
+    expect(btn, "reset button present").not.toBeNull();
+    expect(btn?.textContent?.trim()).toBe("Reset to default");
   });
 });

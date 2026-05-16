@@ -6,6 +6,7 @@ import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
 import { T } from "@lthn/i18n/coreservice";
 import type { LitContent } from "../types";
+import { unwrap, demand } from "../result";
 
 /** Shape returned by runner.WRoutes() — mirrored here so the
  *  settings shell doesn't force a module-graph dependency on the
@@ -257,7 +258,7 @@ class LthnSettingsWindow extends LitElement {
       // If the value is masked, fetch the real one for the copy —
       // there's no use in copying bullets.
       const ak = await import("@desktop/apikey/wailsservice");
-      const full = this.apiKeyRevealed ? this.apiKey : await ak.Reveal();
+      const full = this.apiKeyRevealed ? this.apiKey : await demand<string>(ak.Reveal());
       await navigator.clipboard.writeText(full);
     } catch (err) {
       console.error("settings: apikey copy failed", err);
@@ -270,7 +271,7 @@ class LthnSettingsWindow extends LitElement {
   async _rotateApiKey() {
     try {
       const ak = await import("@desktop/apikey/wailsservice");
-      const fresh = await ak.WRotate();
+      const fresh = await demand<string>(ak.WRotate());
       if (fresh) {
         this.apiKey = fresh;
         this.apiKeyRevealed = true;
@@ -302,14 +303,12 @@ class LthnSettingsWindow extends LitElement {
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const [i18n, fl, runner, server, resultMod] = await Promise.all([
+    const [i18n, fl, runner, server] = await Promise.all([
       import("@lthn/i18n/coreservice"),
       import("@desktop/firstlaunch/wailsservice"),
       import("@desktop/runner/service"),
       import("@desktop/server/service"),
-      import("../result"),
     ]);
-    const { unwrap } = resultMod;
     const [
       title, subtitleTpl, locales, currentLang, paths, routes, routeViews, build, addr, listening,
       pGT, pGD, pMnT, pMT, pMD, pRT, pRD, pAT, pAD, pTT, pTD, pIT, pID, pAbT, pAbD,
@@ -434,13 +433,14 @@ class LthnSettingsWindow extends LitElement {
     };
     this.locales = locales;
     this.currentLang = currentLang;
-    if (paths?.models_dir) {
-      this.modelsDir = collapseHome(paths.models_dir);
+    if (paths?.OK) {
+      const p = paths.Value as { models_dir?: string };
+      if (p?.models_dir) this.modelsDir = collapseHome(p.models_dir);
     }
     this.routeNames = routes || [];
     this.routes = (routeViews || []) as RouteView[];
-    if (build) {
-      this.build = build;
+    if (build?.OK) {
+      this.build = build.Value as { version: string; go_version: string; goos: string; goarch: string; num_cpu: number };
     }
     if (addr) {
       const a = addr.startsWith(":") ? `localhost${addr}` : addr;

@@ -1,6 +1,7 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
 import { describe, it, expect } from "vitest";
+import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../test/window-fixture";
 import "./settings-window";
 
@@ -45,10 +46,9 @@ describe("lthn-settings-window — Menu Behaviours subsection (General)", () => 
   // the lthn.menu.* prefix and emit lthn:menu:changed so an open
   // <lthn-app-shell> reacts without a reload. See
   // plans/project/lthn/desktop/RFC.menu-behaviours.md.
-  type SettingsEl = HTMLElement & {
+  type SettingsEl = LitElement & {
     menuLinks: string;
     menuLayout: string;
-    updateComplete: Promise<boolean>;
   };
 
   it("renders the Menu Behaviours subsection heading under General", async () => {

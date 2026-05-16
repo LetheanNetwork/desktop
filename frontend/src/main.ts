@@ -475,7 +475,7 @@ switch (surface) {
         const stateLabel = connectionLabel();
         const sparkData = state.samples.length ? state.samples.join(",") : "";
         const sparkMax = Math.max(1, ...state.samples) * 1.2;
-        const hasModel = state.connected && state.model && state.model !== t.valNoModel;
+        const hasModel = !!(state.connected && state.model && state.model !== t.valNoModel);
         const heroCard = renderHeroCard(variant, stateLabel, hasModel, sparkData, sparkMax);
 
         const openSection = renderOpenSection();
