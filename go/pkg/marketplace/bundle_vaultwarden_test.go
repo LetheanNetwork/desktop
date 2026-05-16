@@ -11,7 +11,7 @@ const bundleVaultwardenYAML = `
 schema: lthn-vm/v1
 name: vaultwarden
 display: Vaultwarden
-description: Self-hosted Bitwarden-compatible password manager. Personal-infra shape — single binary, embedded SQLite, encrypted-at-rest vault. Pairs well with the LetheanAccount key for cross-device sync.
+description: Self-hosted Bitwarden-compatible password manager. Personal-infra shape — single binary, embedded SQLite, encrypted-at-rest vault. Vaultwarden's own master-password gate is the unlock primitive; lthn hosts the container.
 category: personal
 icon: fa-key
 homepage: https://github.com/dani-garcia/vaultwarden
