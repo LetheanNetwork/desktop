@@ -52,13 +52,16 @@ class LthnViewSocial extends LitElement {
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },
     channelFilter: { state: true },
+    allPosts: { state: true },
+    loading:  { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
-  /** Optional channel filter — clicking the channel chip in the toolbar
-   *  narrows the queue. Empty = all channels. */
   declare channelFilter: Channel | "";
+  declare allPosts: SocialPost[];
+  declare loading: boolean;
+  private _timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
@@ -66,9 +69,40 @@ class LthnViewSocial extends LitElement {
     this.h = 720;
     this.embedded = false;
     this.channelFilter = "";
+    this.allPosts = FIXTURE_POSTS;
+    this.loading = false;
   }
 
   createRenderRoot() { return this; }
+
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+    this._timer = setInterval(() => { void this._loadFromBackend(); }, 60_000);
+  }
+
+  disconnectedCallback() {
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    super.disconnectedCallback();
+  }
+
+  async _loadFromBackend(): Promise<void> {
+    if (this.loading) return;
+    this.loading = true;
+    try {
+      const svc = await import("@desktop/marketing/social/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") return;
+      const r = await (svc as {
+        List: (input: { channel?: string }) => Promise<{ Value?: { posts?: SocialPost[] } }>
+      }).List({});
+      const posts = r?.Value?.posts;
+      if (posts && posts.length > 0) this.allPosts = posts;
+    } catch {
+      // Binding unavailable — keep fixture data.
+    } finally {
+      this.loading = false;
+    }
+  }
 
   _setChannel(c: Channel | "") {
     this.channelFilter = this.channelFilter === c ? "" : c;
@@ -76,9 +110,9 @@ class LthnViewSocial extends LitElement {
 
   render() {
     const posts = this.channelFilter
-      ? FIXTURE_POSTS.filter(p => p.ch.includes(this.channelFilter as Channel))
-      : FIXTURE_POSTS;
-    const scheduledCount = FIXTURE_POSTS.filter(p => p.state === "scheduled").length;
+      ? this.allPosts.filter(p => p.ch.includes(this.channelFilter as Channel))
+      : this.allPosts;
+    const scheduledCount = this.allPosts.filter(p => p.state === "scheduled").length;
     const channels: Channel[] = ["mastodon", "x", "linkedin", "bluesky"];
 
     const toolbar = html`

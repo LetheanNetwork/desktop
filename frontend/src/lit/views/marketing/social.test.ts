@@ -1,9 +1,15 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window-fixture";
 import "./social";
+
+vi.mock("@desktop/marketing/social/service", () => ({
+  List: vi.fn(),
+}));
+
+import { List as MockedList } from "@desktop/marketing/social/service";
 
 type SocialEl = LitElement & {
   channelFilter: "" | "mastodon" | "x" | "linkedin" | "bluesky";
@@ -65,5 +71,50 @@ describe("lthn-view-social — two-shell", () => {
     const { host } = await mountWindow("lthn-view-social", { attrs: { embedded: "" } });
     expect(isEmbedded(host)).toBe(true);
     expect(host.querySelector("header")).toBeNull();
+  });
+});
+
+describe("lthn-view-social — backend wire", () => {
+  type SocialEl = LitElement & {
+    allPosts: { ch: string[]; when: string; state: string; text: string }[];
+    _loadFromBackend: () => Promise<void>;
+    updateComplete: Promise<boolean>;
+  };
+
+  beforeEach(() => {
+    (MockedList as unknown as { mockReset: () => void }).mockReset();
+  });
+
+  it("backend posts replace fixture when present", async () => {
+    (MockedList as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { posts: [{ ch: ["mastodon"], when: "now", state: "scheduled", text: "Backend post text" }] } });
+
+    const { el, host } = await mountWindow<SocialEl>("lthn-view-social");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("Backend post text");
+  });
+
+  it("backend rejection keeps fixture data visible", async () => {
+    (MockedList as unknown as { mockRejectedValue: (v: unknown) => void })
+      .mockRejectedValue(new Error("unavailable"));
+
+    const { el, host } = await mountWindow<SocialEl>("lthn-view-social");
+    await el._loadFromBackend();
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("Lethean v0.2 is out");
+  });
+
+  it("empty backend response keeps fixture data visible", async () => {
+    (MockedList as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { posts: [] } });
+
+    const { el, host } = await mountWindow<SocialEl>("lthn-view-social");
+    await el._loadFromBackend();
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("Lethean v0.2 is out");
   });
 });
