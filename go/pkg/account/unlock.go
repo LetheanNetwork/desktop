@@ -154,13 +154,22 @@ func (s *Service) Unlock(input UnlockInput) core.Result {
 	}
 	ciphertext, _ := readR.Value.([]byte)
 
+	// Cerberus DREAD CRIT-1 (RFC.stage-x.md §6) — NFKC normalise the
+	// passphrase BEFORE decrypt so the same logical input typed on
+	// different OS keyboards (NFC vs NFD) unlocks the same account.
+	// The create-side mirror lands in Stage X.B Phase 2's Provision.
+	// Symmetry across encrypt + decrypt is load-bearing — diverging
+	// here causes permanent cross-platform self-lockout.
+	passphrase := nfkcPassphrase(input.Passphrase)
+	defer zeroAndKeepAlive(passphrase)
+
 	// Distinguishing decrypt — track whether the openpgp prompt was
 	// invoked. Parser failures (garbage / truncated armour) fail
 	// BEFORE the prompt closure ever fires; bad-passphrase failures
 	// happen AFTER the parser reaches the symmetric-key packet and
 	// invokes prompt. This is the H4 / RFC §10 ruling:
 	// NOT-string-match-on-error-message.
-	plaintext, kind, decryptErr := distinguishDecrypt(ciphertext, []byte(input.Passphrase))
+	plaintext, kind, decryptErr := distinguishDecrypt(ciphertext, passphrase)
 	if decryptErr != nil {
 		switch kind {
 		case decryptFailureBadPassphrase:
