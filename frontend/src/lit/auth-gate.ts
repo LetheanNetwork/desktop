@@ -292,9 +292,11 @@ class LthnAuthGate extends LitElement {
       });
 
       if (res.ok) {
+        // coreapi.Response[T] envelope shape — see unlock handler above
+        // for the field-name discovery; same shape applies here.
         const json = await res.json().catch(() => null) as
-          { Value?: UnlockResponseBody; value?: UnlockResponseBody } | null;
-        const out = json?.Value ?? json?.value ?? null;
+          { data?: UnlockResponseBody; Value?: UnlockResponseBody; value?: UnlockResponseBody } | null;
+        const out = json?.data ?? json?.Value ?? json?.value ?? null;
         const sessionToken = out?.session_token;
         if (typeof sessionToken !== "string" || sessionToken.length === 0) {
           this.state = "error";
@@ -435,9 +437,14 @@ class LthnAuthGate extends LitElement {
       });
 
       if (res.ok) {
+        // coreapi.Response[T] envelope shape is `{success, data, ...}`
+        // with the JSON tag `data,omitempty` (external/api/go/response.go
+        // line 15). The legacy `Value`/`value` paths cover test mocks
+        // that pre-date the discovery — keep them so unit tests stay
+        // green while real prod responses land via `data`.
         const json = await res.json().catch(() => null) as
-          { Value?: UnlockResponseBody; value?: UnlockResponseBody } | null;
-        const out = json?.Value ?? json?.value ?? null;
+          { data?: UnlockResponseBody; Value?: UnlockResponseBody; value?: UnlockResponseBody } | null;
+        const out = json?.data ?? json?.Value ?? json?.value ?? null;
         const sessionToken = out?.session_token;
         if (typeof sessionToken !== "string" || sessionToken.length === 0) {
           this.state = "error";
