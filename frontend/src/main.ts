@@ -18,6 +18,27 @@ if (!app) throw new Error("missing #app mount point in index.html");
 const params = new URLSearchParams(location.search);
 const surface = params.get("surface") || "canvas";
 
+// Security note — innerHTML writes below (Cerberus Mantis #1422, 2026-05-16).
+//
+// Every `app.innerHTML = \`<lthn-xxx-window ...>\`` write in this switch is safe
+// because:
+//   1. The tag names are hard-coded Lit custom element names — not interpolated
+//      from URL params.
+//   2. Attribute values (state, step, pane, tab, path, lang, code, etc.) come from
+//      `params.get(...)` — `new URLSearchParams(location.search)`. The URL is set
+//      by the Go Wails runtime via Window.SetURL(); network-reachable injection
+//      requires bridge auth (Mantis #1423, shipped).
+//   3. Attribute values land in Lit element *properties*, not as raw HTML content.
+//      The browser HTML-parses the attribute string once; Lit's property-setter
+//      receives a plain string — no second-parse, no re-execution.
+//   4. Cases where URL params are sensitive (path, code) use the safe imperative
+//      pattern: `createElement` + direct property assignment, not innerHTML.
+//
+// Do NOT add `unsafeHTML` or `innerHTML` writes here that interpolate user-supplied
+// content (e.g. chat messages, model names, file content). Those belong in Lit
+// templates with standard text-binding interpolation, which auto-escapes.
+// The CSP injected by pkg/server (script-src 'self') is the second defence layer.
+
 switch (surface) {
   case "tray": {
     /* P0 tray popover — 400×560, composed inline from Lit primitives
@@ -553,6 +574,14 @@ switch (surface) {
   case "settings": {
     const open = params.get("open") || "general";
     app.innerHTML = `<lthn-settings-window open="${open}"></lthn-settings-window>`;
+    break;
+  }
+  case "about": {
+    /* About is a panel inside the settings window — the About card
+     * lives in _sectionAbout (version, runtime, platform, licence,
+     * source). The dedicated `about` Wails window registration just
+     * pre-opens settings at the right panel, no separate component. */
+    app.innerHTML = `<lthn-settings-window open="about"></lthn-settings-window>`;
     break;
   }
   case "models": {

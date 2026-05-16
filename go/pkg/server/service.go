@@ -181,6 +181,32 @@ func NewService(opts Options) *Service {
 		coreapi.WithAddr(opts.Addr),
 		coreapi.WithRequestID(),
 		coreapi.WithResponseMeta(),
+		// Cerberus Mantis #1422 (2026-05-16) — CSP defence-in-depth.
+		//
+		// Primary defence: Lit auto-escapes all interpolated content in
+		// html`...` templates — a raw <script> string becomes the literal
+		// six-character sequence, never an executable element.
+		//
+		// This CSP is the second layer: if an unexpected sink (unsafeHTML
+		// misuse, a new component bypassing Lit's escape, or a future
+		// innerHTML write carrying external content) ever reaches the
+		// browser, the policy refuses inline-script execution and eval().
+		//
+		// style-src 'unsafe-inline': Lit emits inline <style> inside shadow
+		// roots. The standards-compliant alternative is nonce-based CSP for
+		// styles, which requires coordinating a per-request nonce between
+		// the Go server and the Vite build. The complexity cost is not
+		// justified today — 'unsafe-inline' on styles only allows injected
+		// styles, not injected scripts. Revisit if a nonce pipeline lands.
+		//
+		// connect-src: 127.0.0.1:9879 is the bridge (tools), 9876 is the
+		// mdns / service-discovery port. huggingface.co + hf.co are for the
+		// model browser's HF API calls. wss: is included for future WebSocket
+		// transports on the same localhost origins.
+		//
+		// The Wails runtime injects its JS via the native WebView runtime,
+		// not via <script> tags — webview_eval bypass is unaffected by CSP.
+		coreapi.WithMiddleware(cspMiddleware()),
 	}
 	// Cerberus Mantis #1430 (2026-05-16) — bearer auth re-enabled. The
 	// WebView fetch interceptor lives at frontend/src/lit/api-fetch.ts;

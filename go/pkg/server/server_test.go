@@ -232,3 +232,65 @@ func TestServer_Stop_Good_NotStarted(t *core.T) {
 	r := s.Stop(nil)
 	core.AssertTrue(t, r.OK, "Stop on never-Started server is a clean Ok")
 }
+
+// Cerberus Mantis #1422 — CSP defence-in-depth. The middleware must fire
+// on every response so an attacker who reaches a sink bypassed by Lit's
+// auto-escape still hits the policy wall.
+
+func TestServer_CSP_Good_HeaderPresentOnHealthRoute(t *core.T) {
+	// /health is the cheapest stable route — no runner, no auth.
+	// CSP middleware fires before the route handler, so if the header
+	// appears here it appears everywhere.
+	s := server.NewService(server.Options{})
+	req := httptest.NewRequest(core.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusOK, w.Code)
+	csp := w.Header().Get("Content-Security-Policy")
+	core.AssertNotEmpty(t, csp)
+	core.AssertTrue(t, core.Contains(csp, "default-src 'self'"),
+		"CSP must anchor to same-origin default")
+	core.AssertTrue(t, core.Contains(csp, "script-src 'self'"),
+		"CSP must restrict script execution to same-origin")
+	core.AssertTrue(t, core.Contains(csp, "frame-ancestors 'none'"),
+		"CSP must forbid framing")
+}
+
+func TestServer_CSP_Good_HeaderPresentOnAPIRoute(t *core.T) {
+	// Verify the middleware fires on POST routes too (not just GET/SPA).
+	s := server.NewService(server.Options{})
+	w := post(t, s.Handler(), chatCompletionsEndpoint, map[string]any{
+		"messages": []map[string]string{{"role": "user", "content": "hi"}},
+	})
+	core.AssertEqual(t, core.StatusOK, w.Code)
+	csp := w.Header().Get("Content-Security-Policy")
+	core.AssertNotEmpty(t, csp, "CSP header must be set on POST /v1/chat/completions")
+}
+
+func TestServer_CSP_Bad_NoEvalInPolicy(t *core.T) {
+	// Negative assertion: 'unsafe-eval' must never appear in the policy.
+	// If it does, a sink that calls eval() or new Function() can bypass.
+	s := server.NewService(server.Options{})
+	req := httptest.NewRequest(core.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+
+	csp := w.Header().Get("Content-Security-Policy")
+	core.AssertTrue(t, !core.Contains(csp, "unsafe-eval"),
+		"CSP must NOT permit unsafe-eval")
+}
+
+func TestServer_CSP_Good_HuggingFaceInConnectSrc(t *core.T) {
+	// Model browser fetches the HF API. Blocking that would break the
+	// feature. Asserting here so a future policy tightening that forgets
+	// this allowance gets caught by the test suite.
+	s := server.NewService(server.Options{})
+	req := httptest.NewRequest(core.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+
+	csp := w.Header().Get("Content-Security-Policy")
+	core.AssertTrue(t, core.Contains(csp, "huggingface.co"),
+		"connect-src must allow huggingface.co for the model browser")
+}

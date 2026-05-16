@@ -256,3 +256,45 @@ func writeGinError(c *gin.Context, status int, msg, kind string) {
 		Error: errorBody{Message: msg, Type: kind},
 	})
 }
+
+// cspPolicy is the Content-Security-Policy value applied to every
+// response the lthn server emits. It forms the second defence layer
+// behind Lit's built-in auto-escape (the primary defence).
+//
+// Directive rationale:
+//   - default-src 'self'       — deny everything not explicitly listed.
+//   - script-src 'self'        — no inline scripts, no eval, no remote JS.
+//   - style-src 'self' 'unsafe-inline' — inline <style> allowed for Lit
+//     shadow-root styles; nonce-based alternative deferred (see service.go
+//     cspMiddleware comment for the tradeoff).
+//   - img-src 'self' data: blob: — Lit image bindings + base64 data URIs.
+//   - connect-src ... — XHR/fetch targets: same-origin + bridge ports +
+//     HF API (model browser) + wss for future WebSocket lanes.
+//   - frame-ancestors 'none'   — prevents the WebView being embedded in
+//     an attacker-controlled frame (belt-and-suspenders with X-Frame-Options).
+const cspPolicy = "default-src 'self'; " +
+	"script-src 'self'; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: blob:; " +
+	"connect-src 'self' " +
+	"http://127.0.0.1:9879 http://127.0.0.1:9876 " +
+	"wss://127.0.0.1:9879 wss://127.0.0.1:9876 " +
+	"https://huggingface.co https://hf.co; " +
+	"frame-ancestors 'none'"
+
+// cspHeader is the HTTP header name for the Content-Security-Policy.
+const cspHeader = "Content-Security-Policy"
+
+// cspMiddleware returns a gin.HandlerFunc that injects cspPolicy on
+// every response. Mounted before any route so SPA shell, API responses,
+// and error pages all carry the policy.
+//
+// Usage example:
+//
+//	coreapi.WithMiddleware(cspMiddleware())
+func cspMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header(cspHeader, cspPolicy)
+		c.Next()
+	}
+}
