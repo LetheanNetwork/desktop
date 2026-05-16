@@ -239,8 +239,22 @@ func IsAllowedImageRegistry(image string) bool {
 	if image == "" {
 		return false
 	}
-	// Strip @digest + :tag for the host check.
+	// Cerberus pass-6 LOW — registry hostnames are case-insensitive
+	// per OCI distribution spec (Docker/containerd lowercase before
+	// resolve). Normalise so `GHCR.IO/owner/img` matches `ghcr.io`.
+	// Done early so all subsequent index/contains checks are case-
+	// folded.
+	image = core.Lower(image)
+	// Cerberus pass-6 LOW — `@` without a valid digest is a malformed
+	// ref that downstream OCI pullers reject, but the gate's job is
+	// to reject malformed refs at the perimeter. Require digest to be
+	// `sha256:<64-hex>` shape (the only algorithm distribution
+	// guarantees today).
 	if i := core.LastIndex(image, "@"); i > 0 {
+		digest := image[i+1:]
+		if !core.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 {
+			return false
+		}
 		image = image[:i]
 	}
 	if i := core.LastIndex(image, ":"); i > 0 {
@@ -259,6 +273,13 @@ func IsAllowedImageRegistry(image string) bool {
 		return true
 	}
 	first := image[:slash]
+	// Cerberus pass-6 LOW — leading-slash gives empty first segment
+	// (`/evil.com/foo` → first==""). Empty first segment falls into
+	// the Docker Hub shorthand path and returned `true` previously.
+	// Reject as malformed.
+	if first == "" {
+		return false
+	}
 	// If the first segment contains . or :, it's a registry domain.
 	if core.Contains(first, ".") || core.Contains(first, ":") {
 		// Strip :port if present so `registry.gitlab.com:443` matches

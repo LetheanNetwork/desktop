@@ -42,8 +42,11 @@ func TestManifest_IsAllowedImageRegistry_Good_ExplicitRegistries(t *core.T) {
 }
 
 func TestManifest_IsAllowedImageRegistry_Good_WithDigest(t *core.T) {
-	core.AssertTrue(t, subject.IsAllowedImageRegistry("ghcr.io/owner/img@sha256:abc123"))
-	core.AssertTrue(t, subject.IsAllowedImageRegistry("ghcr.io/owner/img:tag@sha256:abc"))
+	// Full sha256 digest = sha256: + 64 hex chars. Cerberus pass-6
+	// LOW tightened the gate to reject short/malformed digests.
+	const fullDigest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	core.AssertTrue(t, subject.IsAllowedImageRegistry("ghcr.io/owner/img@"+fullDigest))
+	core.AssertTrue(t, subject.IsAllowedImageRegistry("ghcr.io/owner/img:tag@"+fullDigest))
 }
 
 func TestManifest_IsAllowedImageRegistry_Good_RegistryWithPort(t *core.T) {
@@ -69,4 +72,29 @@ func TestManifest_IsAllowedImageRegistry_Bad_TypoSquatRegistry(t *core.T) {
 func TestManifest_IsAllowedImageRegistry_Bad_Empty(t *core.T) {
 	core.AssertFalse(t, subject.IsAllowedImageRegistry(""))
 	core.AssertFalse(t, subject.IsAllowedImageRegistry("   "))
+}
+
+// Cerberus pass-6 LOW bundle — three edge-case fixes.
+
+func TestManifest_IsAllowedImageRegistry_Good_CaseInsensitive(t *core.T) {
+	// Registry hostnames are case-insensitive per OCI; Docker/
+	// containerd lowercase before resolve. The gate now normalises.
+	core.AssertTrue(t, subject.IsAllowedImageRegistry("GHCR.io/owner/img"))
+	core.AssertTrue(t, subject.IsAllowedImageRegistry("Docker.IO/library/nginx"))
+	core.AssertTrue(t, subject.IsAllowedImageRegistry("FORGE.LTHN.SH/lthn/dev"))
+}
+
+func TestManifest_IsAllowedImageRegistry_Bad_AtWithoutValidDigest(t *core.T) {
+	// `@` without a valid sha256:<64-hex> digest is malformed.
+	core.AssertFalse(t, subject.IsAllowedImageRegistry("ghcr.io/owner/img@malformed"))
+	core.AssertFalse(t, subject.IsAllowedImageRegistry("ghcr.io/owner/img@sha256:short"))
+	core.AssertFalse(t, subject.IsAllowedImageRegistry("user:pass@evil.com/foo"))
+	core.AssertFalse(t, subject.IsAllowedImageRegistry("ghcr.io/owner/img@md5:abc123"))
+}
+
+func TestManifest_IsAllowedImageRegistry_Bad_LeadingSlash(t *core.T) {
+	// `/evil.com/foo` previously fell into the Docker Hub shorthand
+	// path (empty first segment) and accepted. Now rejected.
+	core.AssertFalse(t, subject.IsAllowedImageRegistry("/evil.com/foo"))
+	core.AssertFalse(t, subject.IsAllowedImageRegistry("/foo"))
 }
