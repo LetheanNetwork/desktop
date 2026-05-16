@@ -33,6 +33,8 @@
 package server
 
 import (
+	"net/http"
+
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
 	"github.com/gin-gonic/gin"
@@ -123,6 +125,44 @@ type Options struct {
 	// Engine.Handler() snapshots — the canonical path for service-
 	// owned API surfaces without accumulating in cmd/lthn.
 	Core *core.Core
+
+	// WebViewOnlyGroups names ADDITIONAL RouteGroups (by
+	// RouteGroup.Name()) that must NOT mount on the public HTTP engine.
+	// Auto-discovered groups whose Name() is in this list — or in the
+	// built-in defaultWebViewOnlyGroups set — mount on a separate
+	// engine reachable only through Handler() (the surface exposed to
+	// the Wails Asset.Handler). The standalone `lthn serve` HTTP
+	// listener does not host these routes.
+	//
+	// Mantis #1449 Path 3 — the lthn-process RouteGroup is always
+	// filtered (built-in default). process.run / process.start /
+	// process.kill expose arbitrary command execution; combined with
+	// any bearer leak (XSS, apikey-file read, plugin proxy, timing
+	// oracle) the surface becomes RCE as the user. The WebView is the
+	// only legitimate HTTP consumer (in-process Go and MCP callers
+	// dispatch via Core actions, not REST); restricting the mount to
+	// the Wails Asset.Handler keeps the WebView functional while
+	// removing every external HTTP-client reach path.
+	//
+	// Use this field when future RouteGroups need the same protection
+	// without bumping the built-in defaults (e.g. an early-access
+	// admin surface, a debug RouteGroup that should never be public):
+	//
+	//	server.Options{
+	//	    Core:              c,
+	//	    WebViewOnlyGroups: []string{"lthn-admin-debug"},
+	//	}
+	//
+	// Tests that need to OPT OUT of the built-in lthn-process filter
+	// (to verify pre-#1449 behaviour) set DisableDefaultWebViewOnly.
+	WebViewOnlyGroups []string
+
+	// DisableDefaultWebViewOnly skips the built-in WebView-only filter
+	// set. Tests use this to verify the legacy single-engine mount
+	// path. Production callers should NEVER set this — Mantis #1449
+	// Path 3 reach reduction depends on the default filter being
+	// active.
+	DisableDefaultWebViewOnly bool
 }
 
 // RoutesProvider is the contract a Core-registered service implements to
@@ -142,10 +182,25 @@ type RoutesProvider interface {
 // Service is the HTTP API subsystem. Wraps a *coreapi.Engine so the
 // canonical middleware chain (auth, SSRF, sunset, cache, tracing,
 // codegen) applies to every route lthn registers.
+//
+// Two engines today (Mantis #1449 Path 3):
+//
+//   - engine — the public engine. Hosts every RouteGroup except those
+//     whose Name() appears in opts.WebViewOnlyGroups. Bound by Start()
+//     to the standalone HTTP listener for `lthn serve`.
+//   - webviewEngine — the WebView-only engine. Hosts the filtered-out
+//     groups. Reachable solely through Handler(), which composes both
+//     so the Wails Asset.Handler sees the union and the standalone
+//     listener sees only the public surface.
+//
+// When opts.WebViewOnlyGroups is empty (default for non-desktop
+// callers), webviewEngine is nil and Handler() returns the public
+// engine's handler verbatim — pre-#1449 behaviour preserved.
 type Service struct {
-	opts   Options
-	engine *coreapi.Engine
-	http   *core.HTTPServer
+	opts          Options
+	engine        *coreapi.Engine
+	webviewEngine *coreapi.Engine
+	http          *core.HTTPServer
 	// listening tracks whether Start() has an active ListenAndServe
 	// running. Read by the Wails surface (WListening()) so the WebView
 	// can show the "HTTP server" toggle in its real state — false in
@@ -244,10 +299,25 @@ func NewService(opts Options) *Service {
 	for _, g := range opts.ExtraGroups {
 		engine.Register(g)
 	}
+	// Build the WebView-only engine when the resolved filter has any
+	// entries (either from opts.WebViewOnlyGroups or the built-in
+	// defaultWebViewOnlyGroups list — Mantis #1449 Path 3). Runs with
+	// the same middleware chain (bearer-auth, CSP, etc.) so a stolen
+	// bearer still authenticates, but the routes simply aren't
+	// reachable from outside the Wails Asset.Handler.
+	webviewOnly := resolveWebViewOnly(opts)
+	if len(webviewOnly) > 0 {
+		s.webviewEngine, _ = coreapi.New(apiOpts...)
+	}
 	// Auto-discover RouteGroups from registered Core services. Each
 	// service that owns an API surface implements RoutesProvider so
 	// the route declaration lives next to the service instead of
 	// accumulating in cmd/lthn.
+	//
+	// Groups whose Name() appears in opts.WebViewOnlyGroups route to
+	// s.webviewEngine instead of s.engine — Mantis #1449 Path 3 reach
+	// reduction. Groups not in the set keep their pre-#1449 mount on
+	// the public engine.
 	if opts.Core != nil {
 		for _, name := range opts.Core.Services() {
 			r := opts.Core.Service(name)
@@ -259,14 +329,68 @@ func NewService(opts Options) *Service {
 				continue
 			}
 			for _, g := range provider.RouteGroups() {
-				if g != nil {
-					engine.Register(g)
+				if g == nil {
+					continue
 				}
+				if webviewOnly[g.Name()] && s.webviewEngine != nil {
+					s.webviewEngine.Register(g)
+					continue
+				}
+				engine.Register(g)
 			}
 		}
 	}
 	s.http = &core.HTTPServer{Addr: opts.Addr, Handler: engine.Handler()}
 	return s
+}
+
+// defaultWebViewOnlyGroups names the RouteGroups that ship with
+// always-on WebView-only mounting. The lthn-process group's identifier
+// is duplicated here (rather than imported from pkg/process) to keep
+// pkg/server free of a back-edge to the consumer packages it auto-
+// discovers — the same reason RoutesProvider is satisfied by interface
+// shape rather than concrete type.
+//
+// Adding to this list is a security-policy decision: every name here
+// becomes unreachable from `lthn serve` HTTP listeners. New entries
+// should land via Mantis ticket + Athena routing.
+//
+// Mantis #1449 Path 3 — "lthn-process" is the load-bearing entry. It
+// matches the constant pkg/process exports as GroupName.
+var defaultWebViewOnlyGroups = []string{
+	"lthn-process",
+}
+
+// resolveWebViewOnly merges opts.WebViewOnlyGroups with
+// defaultWebViewOnlyGroups (unless opts.DisableDefaultWebViewOnly is
+// set) and returns a set-lookup map. Returns nil when both inputs are
+// empty so callers can branch on `len(map) == 0`.
+//
+// Usage example:
+//
+//	if resolveWebViewOnly(opts)[g.Name()] { /* webview-only mount */ }
+func resolveWebViewOnly(opts Options) map[string]bool {
+	if opts.DisableDefaultWebViewOnly && len(opts.WebViewOnlyGroups) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(opts.WebViewOnlyGroups)+len(defaultWebViewOnlyGroups))
+	if !opts.DisableDefaultWebViewOnly {
+		for _, n := range defaultWebViewOnlyGroups {
+			if n != "" {
+				out[n] = true
+			}
+		}
+	}
+	for _, n := range opts.WebViewOnlyGroups {
+		if n == "" {
+			continue
+		}
+		out[n] = true
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // Register wires the server service into the Core container. Mantis
@@ -284,25 +408,44 @@ func (s *Service) Register(c *core.Core) core.Result {
 	return core.Ok(nil)
 }
 
-// Handler returns the core.Handler that serves the OpenAI-compatible
-// surface. Exposed so consumers (pkg/desktop's Wails Asset.Handler)
-// can mount the same routes the standalone `lthn serve` exposes
-// inside the WebView origin — no CORS, no port hunting.
+// Handler returns the core.Handler the Wails Asset.Handler mounts.
+// When opts.WebViewOnlyGroups is empty this is the public engine's
+// handler verbatim (pre-#1449 behaviour). When at least one group is
+// flagged WebView-only, Handler returns a composite handler that
+// dispatches requests whose path matches a WebView-only group's
+// BasePath to the webview engine and routes everything else to the
+// public engine — so the WebView keeps seeing the union of routes
+// while the standalone HTTP listener (Start()) only sees the public
+// surface.
+//
+// Mantis #1449 Path 3 — process REST mounts here so the WebView's
+// same-origin /v1/api/process/* fetches still resolve, but an external
+// curl against `lthn serve`'s listener returns 404.
 //
 // Usage example:
 //
-//	s := server.NewService(server.Options{Runner: r})
+//	s := server.NewService(server.Options{
+//	    Runner:            r,
+//	    WebViewOnlyGroups: []string{process.GroupName},
+//	})
 //	app := application.New(application.Options{
 //	    Assets: application.AssetOptions{Handler: s.Handler()},
 //	})
 func (s *Service) Handler() core.Handler {
-	return s.engine.Handler()
+	public := s.engine.Handler()
+	if s.webviewEngine == nil {
+		return public
+	}
+	return newWebViewComposite(public, s.webviewEngine.Handler(), s.webviewOnlyPrefixes())
 }
 
-// Engine returns the underlying *coreapi.Engine for callers that need
-// to register additional RouteGroups, StreamGroups, or attach a
-// fallback. pkg/desktop uses this to mount subsystem routes onto the
-// same canonical engine.
+// Engine returns the public *coreapi.Engine for callers that need to
+// register additional RouteGroups, StreamGroups, or attach a fallback.
+// pkg/desktop uses this to mount subsystem routes onto the same
+// canonical public engine.
+//
+// Groups registered here mount on the standalone HTTP listener too —
+// use WebViewEngine() for WebView-only mounts (Mantis #1449).
 //
 // Usage example:
 //
@@ -310,6 +453,104 @@ func (s *Service) Handler() core.Handler {
 //	s.Engine().Register(myRouteGroup{})
 func (s *Service) Engine() *coreapi.Engine {
 	return s.engine
+}
+
+// WebViewEngine returns the WebView-only *coreapi.Engine, or nil when
+// opts.WebViewOnlyGroups is empty. Routes registered on this engine
+// are reachable only through Handler() — the standalone HTTP listener
+// (Start()) ignores them. Mantis #1449 Path 3.
+//
+// Usage example:
+//
+//	if eng := s.WebViewEngine(); eng != nil {
+//	    eng.Register(mySensitiveGroup{})
+//	}
+func (s *Service) WebViewEngine() *coreapi.Engine {
+	return s.webviewEngine
+}
+
+// webviewOnlyPrefixes returns the BasePaths of every RouteGroup
+// currently mounted on the webview engine. Used by Handler()'s
+// composite to decide which incoming request paths go to the webview
+// engine instead of the public engine. Each prefix is taken verbatim
+// from RouteGroup.BasePath() — gin route trees match by exact prefix
+// so the same comparison applies here.
+func (s *Service) webviewOnlyPrefixes() []string {
+	if s.webviewEngine == nil {
+		return nil
+	}
+	groups := s.webviewEngine.Groups()
+	out := make([]string, 0, len(groups))
+	for _, g := range groups {
+		if g == nil {
+			continue
+		}
+		bp := g.BasePath()
+		if bp == "" {
+			continue
+		}
+		out = append(out, bp)
+	}
+	return out
+}
+
+// webViewComposite is the http.Handler returned by Handler() when at
+// least one RouteGroup mounted on the webview engine. Dispatches
+// requests whose path starts with any of the webview-only prefixes to
+// the webview handler; routes everything else (including unknown
+// paths) to the public handler.
+//
+// The fallthrough means the public handler still owns the SPA fallback
+// and 404 path — the webview composite only diverts traffic it knows
+// belongs to a webview-only group.
+type webViewComposite struct {
+	public          http.Handler
+	webview         http.Handler
+	webviewPrefixes []string
+}
+
+// newWebViewComposite returns a composite handler that diverts
+// webview-only paths to webview and falls through to public for
+// everything else. prefixes are the BasePath() values of the webview
+// engine's RouteGroups; a path matches a prefix when it equals the
+// prefix or starts with prefix + "/".
+func newWebViewComposite(public, webview http.Handler, prefixes []string) http.Handler {
+	return &webViewComposite{
+		public:          public,
+		webview:         webview,
+		webviewPrefixes: prefixes,
+	}
+}
+
+// ServeHTTP routes the request to the webview handler when the path
+// matches any of the webview-only BasePath prefixes, otherwise to the
+// public handler.
+func (c *webViewComposite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	for _, p := range c.webviewPrefixes {
+		if pathHasPrefix(r.URL.Path, p) {
+			c.webview.ServeHTTP(w, r)
+			return
+		}
+	}
+	c.public.ServeHTTP(w, r)
+}
+
+// pathHasPrefix reports whether path equals prefix or starts with
+// prefix + "/". Avoids the trailing-slash mismatch that bites when
+// BasePath is "/v1/api/process" and the incoming request is
+// "/v1/api/process/processes/list".
+//
+// Usage example:
+//
+//	if pathHasPrefix("/v1/api/process/list", "/v1/api/process") { ... }
+func pathHasPrefix(path, prefix string) bool {
+	if !core.HasPrefix(path, prefix) {
+		return false
+	}
+	if len(path) == len(prefix) {
+		return true
+	}
+	return path[len(prefix)] == '/'
 }
 
 // Start begins serving HTTP on the configured Addr. Blocks until the
