@@ -37,6 +37,7 @@ const (
 	CodeAppendWriteFailed     = "paths.append.write_failed"
 	CodeAppendFsyncFailed     = "paths.append.fsync_failed"
 	CodeAppendRotateFailed    = "paths.append.rotate_failed"
+	CodeAppendRotateSplit     = "paths.append.rotate_split"
 	CodeAppendRecordTooLarge  = "paths.append.record_too_large"
 )
 
@@ -62,6 +63,22 @@ var appendRotateThreshold = AppendRotateThreshold
 // to AppendRotateThreshold to keep the override from leaking.
 func SetAppendRotateThresholdForTest(b int64) {
 	appendRotateThreshold = b
+}
+
+// rotateRecreateFaultForTest is the F3 fault-injection hook. When
+// non-nil it overrides the post-rename OpenFile inside maybeRotate
+// so tests can deterministically exercise the rollback path
+// (Cerberus DREAD-r2 F3, Mantis #1527). Returns the Result that
+// maybeRotate sees in place of the real OpenFile call. Production
+// code MUST NOT touch this — pair every test setter with a
+// t.Cleanup() that resets it to nil.
+var rotateRecreateFaultForTest func(path string) core.Result
+
+// SetRotateRecreateFaultForTest installs a fault-injection callback
+// that maybeRotate consults in place of the recreate OpenFile.
+// Pass nil to disable.
+func SetRotateRecreateFaultForTest(fn func(path string) core.Result) {
+	rotateRecreateFaultForTest = fn
 }
 
 // AtomicAppendLine appends line to path with kernel-atomic write
@@ -170,12 +187,32 @@ func maybeRotate(path string) core.Result {
 			"rename: "+r.Error(), nil))
 	}
 	// Create a fresh, empty replacement so subsequent appends in
-	// the same lock window see the zero-byte file.
-	openR := core.OpenFile(path,
-		core.O_CREATE|core.O_WRONLY|core.O_TRUNC, writeFileMode)
+	// the same lock window see the zero-byte file. Test fault
+	// injection (F3) substitutes the result when wired.
+	var openR core.Result
+	if rotateRecreateFaultForTest != nil {
+		openR = rotateRecreateFaultForTest(path)
+	} else {
+		openR = core.OpenFile(path,
+			core.O_CREATE|core.O_WRONLY|core.O_TRUNC, writeFileMode)
+	}
 	if !openR.OK {
-		return core.Fail(core.E(CodeAppendRotateFailed,
-			"recreate empty: "+openR.Error(), nil))
+		// F3 (Cerberus DREAD-r2, Mantis #1527): rename succeeded but
+		// the recreate failed. Without rollback the rotation left
+		// state split — archived file exists, current path missing
+		// — and subsequent appends would silently re-create the
+		// current file with NO record of the archived history.
+		// Try to roll back the rename. If rollback also fails,
+		// surface CodeAppendRotateSplit with a recovery hint
+		// pointing operators at the archived path.
+		if rb := core.Rename(archived, path); rb.OK {
+			return core.Fail(core.E(CodeAppendRotateFailed,
+				"recreate empty: "+openR.Error()+
+					" (rolled back rename; archived path restored)", nil))
+		}
+		return core.Fail(core.NewCode(CodeAppendRotateSplit,
+			"split rotation state: archived="+archived+
+				", current missing; rename archived back to current to recover"))
 	}
 	if f, _ := openR.Value.(*core.OSFile); f != nil {
 		_ = f.Close()

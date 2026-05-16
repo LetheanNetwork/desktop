@@ -408,6 +408,83 @@ func TestAtomicAppendLine_RotationAtThreshold_Ugly(t *core.T) {
 	core.AssertTrue(t, rotatedFound, "an archived file MUST exist after rotation")
 }
 
+// TestAtomicAppendLine_RotateRecreateFailRollsBack_Ugly — Cerberus
+// DREAD-r2 F3 (Mantis #1527). When the post-rename recreate fails,
+// maybeRotate MUST roll back the rename so callers don't observe
+// "current missing, archived present" split state. The
+// fault-injection hook forces a single recreate failure; the next
+// append (with the fault cleared) MUST succeed AND find no
+// .archived sibling (rename was rolled back).
+func TestAtomicAppendLine_RotateRecreateFailRollsBack_Ugly(t *core.T) {
+	homeFixture(t)
+	// Seed at the default threshold so no rotation fires during seed.
+	t.Cleanup(func() { paths.SetAppendRotateThresholdForTest(paths.AppendRotateThreshold) })
+
+	fp := tmpFile(t, "rollback.md")
+	// Seed the file with normal appends, no rotation.
+	for i := 0; i < 5; i++ {
+		r := paths.AtomicAppendLine(fp, []byte(core.Sprintf("seed %d xxxxxxxxxx", i)))
+		core.AssertTrue(t, r.OK, "seed append "+core.Itoa(i)+": "+r.Error())
+	}
+
+	// Now drop the threshold so the NEXT append triggers rotation.
+	paths.SetAppendRotateThresholdForTest(32)
+
+	// Arm the fault: next recreate fails. Provide a clean OpenFile
+	// for any subsequent calls so post-recovery rotation can succeed.
+	armed := true
+	paths.SetRotateRecreateFaultForTest(func(p string) core.Result {
+		if !armed {
+			// Normal recreate when disarmed.
+			return core.OpenFile(p,
+				core.O_CREATE|core.O_WRONLY|core.O_TRUNC, 0o600)
+		}
+		armed = false
+		return core.Result{OK: false, Value: core.NewCode("test.injected", "injected recreate failure")}
+	})
+	t.Cleanup(func() { paths.SetRotateRecreateFaultForTest(nil) })
+
+	// Append again — rotation triggers, recreate fails, rollback
+	// runs. The error surfaces but the on-disk state must NOT be
+	// split (no .archived sibling left behind).
+	r := paths.AtomicAppendLine(fp, []byte("after-fault yyyyyyyyyy"))
+	core.AssertFalse(t, r.OK, "rotation with recreate fault must surface failure")
+	core.AssertContains(t, r.Error(), paths.CodeAppendRotateFailed,
+		"rollback path surfaces CodeAppendRotateFailed (not Split — rollback succeeded)")
+
+	// File must still exist (rollback restored it) — confirm via Lstat.
+	stat := core.Lstat(fp)
+	core.AssertTrue(t, stat.OK, "current file must exist after rollback")
+
+	// No .archived sibling should have been left behind.
+	root := paths.Root().Value.(string)
+	entries := core.ReadDir(core.DirFS(root), ".")
+	core.AssertTrue(t, entries.OK)
+	list, _ := entries.Value.([]core.FsDirEntry)
+	for _, e := range list {
+		if core.HasPrefix(e.Name(), "rollback.md.") && core.HasSuffix(e.Name(), ".archived") {
+			t.Errorf("rollback path must remove .archived sibling, found: %s", e.Name())
+		}
+	}
+
+	// Clear the fault and verify the system recovers — next append
+	// rotates cleanly (archived sibling appears this time).
+	paths.SetRotateRecreateFaultForTest(nil)
+	r2 := paths.AtomicAppendLine(fp, []byte("recovered zzzzzzzzzz"))
+	core.AssertTrue(t, r2.OK, "post-fault append should rotate cleanly: "+r2.Error())
+	entries2 := core.ReadDir(core.DirFS(root), ".")
+	core.AssertTrue(t, entries2.OK)
+	list2, _ := entries2.Value.([]core.FsDirEntry)
+	rotated := false
+	for _, e := range list2 {
+		if core.HasPrefix(e.Name(), "rollback.md.") && core.HasSuffix(e.Name(), ".archived") {
+			rotated = true
+		}
+	}
+	core.AssertTrue(t, rotated,
+		"normal rotation must succeed once the fault is cleared")
+}
+
 func TestIsAtRestEncryptedPath_Coverage(t *core.T) {
 	homeFixture(t)
 	root := paths.Root().Value.(string)
