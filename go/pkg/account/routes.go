@@ -19,6 +19,7 @@ package account
 import (
 	"net/http"
 
+	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
 	"github.com/gin-gonic/gin"
 )
@@ -183,6 +184,18 @@ func (g *routesProvider) handleProvision(c *gin.Context) {
 		return
 	}
 
+	// Cerberus #1511 — server generates the audit RequestID. Any
+	// caller-supplied input.RequestID is dropped to prevent forensic
+	// deniability (an attacker forging arbitrary id values to muddy
+	// the audit JOIN). The server-side id is echoed in the response
+	// X-Request-Id header so the legitimate caller can still correlate
+	// their request to the audit log. Phase 2c idempotency dedup (if
+	// it ever lands) MUST design a separate ClientIdempotencyKey field;
+	// the audit RequestID stays server-authoritative.
+	srvReqID := serverRequestID()
+	input.RequestID = srvReqID
+	c.Header("X-Request-Id", srvReqID)
+
 	r := g.svc.Provision(input)
 	if r.OK {
 		out, _ := r.Value.(ProvisionOutput)
@@ -227,13 +240,17 @@ func (g *routesProvider) handleUnlock(c *gin.Context) {
 		return
 	}
 
-	// Cerberus #1711 Phase 2.5 — thread the gin request-id into the
-	// downstream auth.session.issued audit event. Request body's
-	// request_id (if supplied) takes precedence over the gin-injected
-	// header so an idempotency-key style caller controls the join-key.
-	if input.RequestID == "" {
-		input.RequestID = c.GetHeader("X-Request-Id")
-	}
+	// Cerberus #1511 — server generates the audit RequestID. Both
+	// the caller's body field AND the X-Request-Id header are dropped
+	// (both are attacker-controlled in a hostile-plugin scenario;
+	// trusting either lets an attacker forge an arbitrary audit
+	// JOIN key). The server's UUID v4 is echoed in the response
+	// X-Request-Id header so the legitimate caller can correlate.
+	// Supersedes the original Cerberus #1711 Phase 2.5 wiring (which
+	// took caller's request_id verbatim).
+	srvReqID := serverRequestID()
+	input.RequestID = srvReqID
+	c.Header("X-Request-Id", srvReqID)
 
 	r := g.svc.Unlock(input)
 	if r.OK {
@@ -314,4 +331,44 @@ func statusForCode(code string) int {
 		return http.StatusTooManyRequests
 	}
 	return http.StatusInternalServerError
+}
+
+// serverRequestID generates a server-side UUID v4 used as the
+// authoritative audit RequestID for /v1/account/{unlock,provision}
+// handlers per Cerberus #1511. The caller's body field +
+// X-Request-Id header are dropped at the handler boundary to prevent
+// forensic deniability (an attacker forging arbitrary values to
+// confuse the audit JOIN). The server's UUID is echoed in the
+// response X-Request-Id header so legitimate callers can still
+// correlate their request to the audit log.
+//
+// On RandomBytes failure returns the empty string; downstream
+// IssueSessionTokenWithRequest is tolerant of empty (just omits the
+// audit field). NOT a panic-worthy condition.
+//
+// CoreGO gap: core.UUIDv4 doesn't exist yet (logged at
+// project_corego_export_gaps). This helper is the local stand-in
+// until the export lands; the call-site swap is a single import +
+// rename when CoreGO ships it.
+//
+// Usage example:
+//
+//	srvReqID := serverRequestID()
+//	input.RequestID = srvReqID
+//	c.Header("X-Request-Id", srvReqID)
+func serverRequestID() string {
+	r := core.RandomBytes(16)
+	if !r.OK {
+		return ""
+	}
+	b, ok := r.Value.([]byte)
+	if !ok || len(b) != 16 {
+		return ""
+	}
+	// RFC 4122 §4.4 — version 4 (random) UUID. Top nibble of
+	// time_hi_and_version (byte 6) = 0100 = 4. Top two bits of
+	// clock_seq_hi_and_reserved (byte 8) = 10 (variant 1).
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return core.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }

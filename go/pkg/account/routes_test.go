@@ -200,6 +200,38 @@ func TestRoutes_UnlockEndpoint_Good(t *core.T) {
 	core.AssertNotEqual(t, "", env.Data.SessionToken)
 }
 
+// TestRoutes_UnlockEndpoint_RequestIDOverriddenByServer_Ugly pins
+// Cerberus #1511 — caller-supplied input.RequestID is DROPPED at the
+// handler boundary + replaced with a server-generated UUID v4 echoed
+// in the X-Request-Id response header. Forensic deniability defence.
+func TestRoutes_UnlockEndpoint_RequestIDOverriddenByServer_Ugly(t *core.T) {
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+	eng := newTestEngine(t, svc)
+
+	const forgedID = "attacker-chosen-forensic-decoy-12345"
+	body := core.JSONMarshal(subject.UnlockInput{
+		AccountID:  fixtureAccountID,
+		Passphrase: fixturePassphrase,
+		RequestID:  forgedID,
+	})
+	core.AssertTrue(t, body.OK)
+
+	rr := doPOST(eng, "/v1/account/unlock", body.Value.([]byte))
+	core.AssertEqual(t, http.StatusOK, rr.Code)
+
+	echoed := rr.Header().Get("X-Request-Id")
+	core.AssertNotEqual(t, "", echoed,
+		"server MUST echo a generated request_id in X-Request-Id response header")
+	core.AssertNotEqual(t, forgedID, echoed,
+		"server-generated id MUST NOT equal caller-supplied forged id (Cerberus #1511)")
+	// UUID v4 shape: 8-4-4-4-12 hex chars, version-byte top nibble = 4,
+	// variant-byte top two bits = 10. Length sanity check is sufficient
+	// for routing test; full RFC parse lives in the helper's own unit tests.
+	core.AssertEqual(t, 36, len(echoed), "server-generated id MUST be 36-char UUID v4")
+}
+
 func TestRoutes_UnlockEndpoint_BadPassphrase_401(t *core.T) {
 	home := homeFixture(t)
 	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
