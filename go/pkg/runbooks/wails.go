@@ -1,0 +1,158 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Wails surface for the runbooks service. Methods are bound on the
+// *Service receiver and exposed to the frontend via wails3 generate
+// bindings — the TS shape lands at
+// frontend/bindings/dappco.re/lthn/desktop/pkg/runbooks/service.
+
+package runbooks
+
+import (
+	core "dappco.re/go"
+)
+
+// List returns all runbooks, optionally filtered by health or area.
+// The ListOutput always carries fresh/aging/stale counts for the
+// FULL library (not the filtered subset) so the sidebar health
+// widget stays accurate regardless of the active filter.
+//
+// Usage example:
+//
+//	r := svc.List(runbooks.ListInput{Health: "stale"})
+//	if r.OK { out := r.Value.(runbooks.ListOutput) }
+func (s *Service) List(input ListInput) core.Result {
+	records, err := scanAll()
+	if err != nil {
+		return core.Fail(core.E("runbooks.List", "scan failed", err))
+	}
+
+	now := core.Now()
+	// Seed on first empty scan so a fresh install immediately has content.
+	if len(records) == 0 {
+		if dir := runbooksDir(); dir.OK {
+			seedAll(dir.Value.(string))
+			// Rescan after seeding.
+			records, _ = scanAll()
+		}
+	}
+
+	fresh, aging, stale := buildCounts(records, now)
+	total := len(records)
+
+	// Filter.
+	var filtered []RunbookEntry
+	for _, r := range records {
+		entry := toEntry(r, now)
+		if input.Health != "" && entry.Health != input.Health {
+			continue
+		}
+		if input.Area != "" && r.Area != input.Area {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	if filtered == nil {
+		filtered = []RunbookEntry{}
+	}
+
+	if input.Limit > 0 && len(filtered) > input.Limit {
+		filtered = filtered[:input.Limit]
+	}
+
+	return core.Ok(ListOutput{
+		Books: filtered,
+		Total: total,
+		Fresh: fresh,
+		Aging: aging,
+		Stale: stale,
+	})
+}
+
+// Get returns a single runbook with the full markdown body.
+//
+// Usage example:
+//
+//	r := svc.Get(runbooks.GetInput{ID: "R-01"})
+//	if r.OK { detail := r.Value.(runbooks.RunbookDetail) }
+func (s *Service) Get(input GetInput) core.Result {
+	if input.ID == "" && input.Slug == "" {
+		return core.Fail(core.E("runbooks.Get", "id or slug is required", nil))
+	}
+	rec, _, err := loadOne(input.ID, input.Slug)
+	if err != nil {
+		label := input.ID
+		if label == "" {
+			label = input.Slug
+		}
+		return core.Fail(core.E("runbooks.Get", "not found: "+label, err))
+	}
+	now := core.Now()
+	return core.Ok(RunbookDetail{
+		RunbookEntry: toEntry(rec, now),
+		Body:         rec.Body,
+	})
+}
+
+// Search performs a case-insensitive substring search across title,
+// area, ID, and tags. An empty query returns all runbooks.
+//
+// Usage example:
+//
+//	r := svc.Search(runbooks.SearchInput{Query: "postfix"})
+//	if r.OK { out := r.Value.(runbooks.ListOutput) }
+func (s *Service) Search(input SearchInput) core.Result {
+	records, err := scanAll()
+	if err != nil {
+		return core.Fail(core.E("runbooks.Search", "scan failed", err))
+	}
+
+	now := core.Now()
+	fresh, aging, stale := buildCounts(records, now)
+	total := len(records)
+
+	var matched []RunbookEntry
+	for _, r := range records {
+		if !matchSearch(r, input.Query) {
+			continue
+		}
+		matched = append(matched, toEntry(r, now))
+	}
+	if matched == nil {
+		matched = []RunbookEntry{}
+	}
+	if input.Limit > 0 && len(matched) > input.Limit {
+		matched = matched[:input.Limit]
+	}
+
+	return core.Ok(ListOutput{
+		Books: matched,
+		Total: total,
+		Fresh: fresh,
+		Aging: aging,
+		Stale: stale,
+	})
+}
+
+// MarkRehearsed updates the LastRehearsed timestamp to now, rewrites
+// the Trix file, and fires the runbooks.rehearsed event.
+//
+// Usage example:
+//
+//	r := svc.MarkRehearsed(runbooks.MarkInput{ID: "R-05"})
+//	if r.OK { entry := r.Value.(runbooks.RunbookEntry) }
+func (s *Service) MarkRehearsed(input MarkInput) core.Result {
+	if input.ID == "" {
+		return core.Fail(core.E("runbooks.MarkRehearsed", "id is required", nil))
+	}
+	rec, dirPath, err := loadOne(input.ID, "")
+	if err != nil {
+		return core.Fail(core.E("runbooks.MarkRehearsed", "not found: "+input.ID, err))
+	}
+	rec.LastRehearsed = core.Now().UTC()
+	if err := writeRecord(rec, dirPath); err != nil {
+		return core.Fail(core.E("runbooks.MarkRehearsed", "write", err))
+	}
+	entry := toEntry(rec, core.Now())
+	s.fireEvent(EventRehearsed, entry)
+	return core.Ok(entry)
+}

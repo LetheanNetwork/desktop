@@ -33,6 +33,8 @@ import (
 	"dappco.re/lthn/desktop/pkg/tasks"
 	lthnupdate "dappco.re/lthn/desktop/pkg/update"
 	"dappco.re/lthn/desktop/pkg/vi"
+	"dappco.re/lthn/desktop/pkg/incidents"
+	"dappco.re/lthn/desktop/pkg/runbooks"
 )
 
 // newAppCore constructs the shared *core.Core for any lthn CLI verb
@@ -206,6 +208,17 @@ func newAppCore() *core.Core {
 		// Briefs / Activity slots remain fixture-data until separate
 		// follow-up tickets (mirrors RFC.vi.md §"Open tickets").
 		core.WithName("vi", vi.Register),
+		// incidents — Operations view's incident log. Reads/writes
+		// Trix-style markdown files from ~/Lethean/incidents/{YYYY}/{MM}/.
+		// Wails surface: Incidents.List / Get / Create / UpdateState /
+		// AddPostmortem. Events: incidents.opened + incidents.transitioned.
+		core.WithName("incidents", incidents.Register),
+		// runbooks — Operations view's runbook library. Scans
+		// ~/Lethean/runbooks/*.md for procedures with freshness tracking
+		// (last_rehearsed frontmatter). Seeds seven default runbooks on
+		// first launch. Wails surface: Runbooks.List / Get / Search /
+		// MarkRehearsed. Event: runbooks.rehearsed.
+		core.WithName("runbooks", runbooks.Register),
 		// update — self-update against the LetheanNetwork/desktop
 		// GitHub release feed. Constructed with CheckOnStartup =
 		// NoCheck so registering is offline-cheap; consumers call

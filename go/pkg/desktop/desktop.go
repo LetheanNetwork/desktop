@@ -68,6 +68,8 @@ import (
 	"dappco.re/lthn/desktop/pkg/tools"
 	"dappco.re/lthn/desktop/pkg/validator"
 	"dappco.re/lthn/desktop/pkg/vi"
+	"dappco.re/lthn/desktop/pkg/incidents"
+	"dappco.re/lthn/desktop/pkg/runbooks"
 	"github.com/gin-gonic/gin"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -304,6 +306,11 @@ func (s *Service) Run() core.Result {
 	// instance owns the probe loop; the same instance is bound to
 	// Wails here so Sites() / Catalogue() resolve to live data.
 	viSvc, _ := core.ServiceFor[*vi.Service](s.opts.Core, "vi")
+	// incidents — Operations view incident log. Core-registered instance
+	// so events fired during Wails method calls propagate on the shared bus.
+	incidentsSvc, _ := core.ServiceFor[*incidents.Service](s.opts.Core, "incidents")
+	// runbooks — Operations view runbook library. Core-registered instance.
+	runbooksSvc, _ := core.ServiceFor[*runbooks.Service](s.opts.Core, "runbooks")
 	// Bridge opencode-serve's /global/event SSE stream → Wails event
 	// bus. The opencode side runs the SSE goroutine + parses; each
 	// event JSON is forwarded here, where emitCoreEvent ferries it
@@ -359,6 +366,8 @@ func (s *Service) Run() core.Result {
 		application.NewService(reposSvc),
 		application.NewService(tasks.NewService(s.opts.Core)),
 		application.NewService(viSvc),
+		application.NewService(incidentsSvc),
+		application.NewService(runbooksSvc),
 		application.NewService(s.opts.Fleet),
 		application.NewService(s.opts.Keys),
 		application.NewService(tools.NewWailsService(s.opts.Core)),
