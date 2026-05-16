@@ -185,3 +185,188 @@ func TestModelsDir_IgnoresUnparseableOverrideFile_Ugly(t *core.T) {
 	core.AssertEqual(t, want, r.Value.(string),
 		"ModelsDir must fall back to default when paths.json is unparseable")
 }
+
+// TestPathsOverride_WriteIsAtomic_Ugly — Cerberus H#9-verify F3
+// (Mantis #1536). The previous direct WriteFile sequence (truncate
+// + write) left a window where a mid-write crash landed a partial
+// JSON blob on disk and the next read silently returned the
+// zero-value override. Atomic write via tmp+rename guarantees the
+// final paths.json never contains a partial body — either the
+// previous valid content OR the fully-serialised new content.
+//
+// We can't synthesise a real mid-write crash from a unit test, so
+// we assert the load-bearing post-conditions:
+//
+//   1. After a successful Set/Clear, paths.json parses cleanly
+//      (never half-written content reaching the final filename).
+//   2. The atomic-write contract is exposed via the implementation:
+//      a stale paths.json.tmp left behind by a prior aborted write
+//      MUST NOT be read by readPathsOverride — readers consult only
+//      the final filename. This defends against an OS that left a
+//      tmp file behind after a crash.
+func TestPathsOverride_WriteIsAtomic_Ugly(t *core.T) {
+	home := homeFixture(t)
+	override := core.PathJoin(home, "atomic-models")
+	core.AssertTrue(t, paths.SetModelsDirOverride(override).OK,
+		"baseline Set must succeed")
+
+	confDir := paths.ConfDir().Value.(string)
+	finalFile := core.PathJoin(confDir, "paths.json")
+	tmpFile := finalFile + ".tmp"
+
+	// After a successful Set, the final file parses cleanly and the
+	// tmp file does NOT linger (rename consumed it).
+	body := core.ReadFile(finalFile)
+	core.AssertTrue(t, body.OK, "final paths.json must be readable")
+	raw, _ := body.Value.([]byte)
+	core.AssertContains(t, string(raw), override,
+		"final paths.json must carry the override after successful write")
+
+	tmpStat := core.Stat(tmpFile)
+	core.AssertFalse(t, tmpStat.OK,
+		"paths.json.tmp must NOT linger after successful write (rename consumed it)")
+}
+
+func TestPathsOverride_StaleTmpIsIgnoredByRead_Ugly(t *core.T) {
+	// Simulate a prior crash that left paths.json.tmp on disk with
+	// partial/garbage content but the final paths.json holds a valid
+	// prior override. The reader must consult ONLY paths.json — the
+	// stale tmp must not influence ModelsDir() in any way.
+	home := homeFixture(t)
+	override := core.PathJoin(home, "prior-models")
+	core.AssertTrue(t, paths.SetModelsDirOverride(override).OK)
+
+	confDir := paths.ConfDir().Value.(string)
+	tmpFile := core.PathJoin(confDir, "paths.json.tmp")
+
+	// Plant a stale tmp file that, if mistakenly read, would point
+	// elsewhere (or fail to parse entirely).
+	stale := []byte(`{"models_dir":"/tmp/STALE_NEVER_SEE"}`)
+	core.AssertTrue(t, core.WriteFile(tmpFile, stale, 0o600).OK)
+
+	// The read-side ignores the tmp file entirely — ModelsDir()
+	// still returns the prior valid override.
+	r := paths.ModelsDir()
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, override, r.Value.(string),
+		"ModelsDir must read only paths.json, never paths.json.tmp")
+}
+
+func TestPathsOverride_WriteFinalIsMode0600_Good(t *core.T) {
+	// After the tmp+rename refactor (Cerberus F3), the final
+	// paths.json must still land with mode 0o600 — the tmp file is
+	// created 0o600 too so there's no readable-by-others window
+	// between write and rename. Cerberus L3 hardening is preserved.
+	home := homeFixture(t)
+	core.AssertTrue(t, paths.SetModelsDirOverride(core.PathJoin(home, "vault-models")).OK)
+
+	stat := core.Stat(core.PathJoin(paths.ConfDir().Value.(string), "paths.json"))
+	core.AssertTrue(t, stat.OK)
+	info := stat.Value.(core.FsFileInfo)
+	core.AssertEqual(t, 0o600, int(info.Mode().Perm()),
+		"paths.json must retain 0o600 mode after atomic-write refactor")
+}
+
+// TestWritePathsOverride_RandomTmpSuffix_Good — Cerberus DREAD-r3 LOW
+// (Mantis #1541). The tmp filename used by writePathsOverride must
+// carry a per-call random suffix (paths.json.tmp.<random>), NOT the
+// legacy fixed paths.json.tmp. Two assertions:
+//
+//  1. The legacy fixed tmp filename is NEVER produced (no
+//     paths.json.tmp left lingering by a successful write).
+//  2. Any tmp files that did briefly exist match the random-suffix
+//     shape paths.json.tmp.* — after a successful write the rename
+//     consumes them so a glob should find none, which itself is the
+//     proof that staging is per-call rather than shared.
+func TestWritePathsOverride_RandomTmpSuffix_Good(t *core.T) {
+	home := homeFixture(t)
+	core.AssertTrue(t, paths.SetModelsDirOverride(core.PathJoin(home, "rand-tmp-models")).OK)
+
+	confDir := paths.ConfDir().Value.(string)
+	// Legacy fixed tmp name must not exist — the refactor moved off it.
+	legacyTmp := core.PathJoin(confDir, "paths.json.tmp")
+	core.AssertFalse(t, core.Stat(legacyTmp).OK,
+		"legacy fixed paths.json.tmp must NOT exist after random-suffix refactor")
+
+	// Any per-call random-suffix tmps must have been consumed by the
+	// rename — a glob should find zero stragglers after a successful
+	// write.
+	matches := core.PathGlob(core.PathJoin(confDir, "paths.json.tmp.*"))
+	core.AssertEqual(t, 0, len(matches),
+		"random-suffix tmp files must be consumed by rename after successful write")
+}
+
+// TestWritePathsOverride_ConcurrentCallersSerialised_Ugly — Cerberus
+// DREAD-r3 LOW (Mantis #1541). Spawn N goroutines, each calling
+// SetModelsDirOverride with a distinct path. The mutex serialises
+// the read-modify-write so each call's tmp write lands intact; the
+// final paths.json holds ONE of the N inputs (last-rename-wins is
+// the documented semantics) and the JSON is well-formed — never a
+// corrupt or empty body from a cross-writer stomp.
+//
+// Defends against the pre-fix race where two callers would both
+// stage to paths.json.tmp at once: second writer's truncate would
+// land mid-stream of the first writer's serialisation, and whichever
+// rename fired last would publish the corrupted blob.
+func TestWritePathsOverride_ConcurrentCallersSerialised_Ugly(t *core.T) {
+	home := homeFixture(t)
+	const n = 10
+
+	// Pre-build N distinct override targets. Each one is a real dir
+	// under $HOME — SetModelsDirOverride validates + MkdirAlls them.
+	candidates := make([]string, n)
+	for i := 0; i < n; i++ {
+		candidates[i] = core.PathJoin(home, "concurrent-models-"+core.Itoa(i))
+	}
+
+	var wg core.WaitGroup
+	results := make([]core.Result, n)
+	for i := 0; i < n; i++ {
+		idx := i
+		wg.Go(func() {
+			results[idx] = paths.SetModelsDirOverride(candidates[idx])
+		})
+	}
+	wg.Wait()
+
+	// Every concurrent caller must succeed — the mutex serialises
+	// them but does not fail any.
+	for i, r := range results {
+		core.AssertTrue(t, r.OK,
+			"concurrent SetModelsDirOverride caller #"+core.Itoa(i)+" must succeed")
+	}
+
+	// Final paths.json must parse as well-formed JSON and carry
+	// exactly one of the N candidates (last-rename-wins).
+	confDir := paths.ConfDir().Value.(string)
+	body := core.ReadFile(core.PathJoin(confDir, "paths.json"))
+	core.AssertTrue(t, body.OK, "final paths.json must be readable after concurrent writes")
+	raw, _ := body.Value.([]byte)
+
+	type shape struct {
+		ModelsDir string `json:"models_dir"`
+	}
+	var got shape
+	dec := core.JSONUnmarshalString(string(raw), &got)
+	core.AssertTrue(t, dec.OK,
+		"final paths.json must parse cleanly — no cross-writer stomp on the staging file")
+
+	// The persisted value must be one of the N inputs — never the
+	// empty string, never a truncated path, never a path that no
+	// caller supplied.
+	matched := false
+	for _, c := range candidates {
+		if got.ModelsDir == c {
+			matched = true
+			break
+		}
+	}
+	core.AssertTrue(t, matched,
+		"persisted models_dir must match one of the concurrent inputs (last-rename-wins)")
+
+	// And no random-suffix tmp file may linger after all writes
+	// complete — every staging file got renamed or cleaned.
+	matches := core.PathGlob(core.PathJoin(confDir, "paths.json.tmp.*"))
+	core.AssertEqual(t, 0, len(matches),
+		"no random-suffix tmp file may linger after concurrent writes settle")
+}

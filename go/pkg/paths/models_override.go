@@ -40,6 +40,18 @@ package paths
 
 import core "dappco.re/go"
 
+// pathsOverrideMu serialises in-process read-modify-write callers of
+// the override file (Cerberus DREAD-r3 LOW, Mantis #1541). Two
+// concurrent SetModelsDirOverride / ClearModelsDirOverride callers
+// would otherwise both read pathsOverride, both mutate it, and race
+// at the write step — second writer's intent silently lost. The
+// mutex makes the read-modify-write atomic from the program's view.
+//
+// Cross-process safety (multiple desktop binaries against the same
+// $HOME) needs core.Flock — pending the CoreGO primitive. This
+// mutex closes the in-process gap only.
+var pathsOverrideMu core.Mutex
+
 // pathsOverride is the JSON shape written to ~/Lethean/conf/paths.json.
 // Empty strings mean "no override — fall through to the default".
 type pathsOverride struct {
@@ -90,6 +102,33 @@ func readModelsDirOverride() string {
 // writePathsOverride persists the override struct to disk. Empty
 // fields are omitted (omitempty) so a partial override only carries
 // the keys the user actually set.
+//
+// Cerberus H#9-verify F3 (Mantis #1536): writes are atomic via
+// tmp-file + rename rather than direct write. The previous direct
+// core.WriteFile(file, raw, ...) call left a window where a crash
+// (power loss, OOM-kill, container teardown) between truncate and
+// flush would land a partial JSON blob on disk. On next start
+// readPathsOverride() would fail to parse the truncated body and
+// silently return the zero-value struct — losing the user's override
+// without any indication. tmp+rename ensures the final paths.json
+// either holds the previous valid content or the fully-serialised
+// new content; never a half-written intermediate.
+//
+// Cerberus DREAD-r3 LOW (Mantis #1541): the tmp filename carries a
+// per-call random suffix (paths.json.tmp.<16-hex-chars>) rather than
+// a fixed paths.json.tmp. Two concurrent writers would otherwise
+// stomp the SAME staging file mid-stream and one writer's tmp body
+// would land partially overwritten before its rename, leaving a
+// corrupt blob on disk if the rename happened to fire on the
+// interleaved bytes. With unique tmp filenames each caller writes
+// intact content; the final rename is last-writer-wins which is the
+// expected semantics for a serial override store. Pairs with the
+// pathsOverrideMu lock on the Set/Clear callsites to serialise
+// in-process read-modify-write.
+//
+// Mode 0o600 on the tmp file too (Cerberus L3 2026-05-16): the
+// override holds user-supplied path context (drive labels, mount
+// names) that mustn't be world-readable even mid-rename.
 func writePathsOverride(p pathsOverride) core.Result {
 	file := pathsOverrideFile()
 	if file == "" {
@@ -100,11 +139,24 @@ func writePathsOverride(p pathsOverride) core.Result {
 		return body
 	}
 	raw, _ := body.Value.([]byte)
-	// 0o600 (Cerberus L3 2026-05-16): the override file holds a
-	// user-supplied path that may carry context (drive labels, mount
-	// names) we don't want world-readable.
-	if w := core.WriteFile(file, raw, 0o600); !w.OK {
-		return core.Fail(core.E("paths.writePathsOverride", "write failed", w.Value.(error)))
+	// 8 bytes of crypto entropy → 16 hex chars → 64 bits of
+	// uniqueness per tmp filename. Far more than enough to dodge
+	// collision under any realistic concurrent-writer load.
+	suffix := core.RandomString(8)
+	if !suffix.OK {
+		return core.Fail(core.E("paths.writePathsOverride", "random suffix gen failed", suffix.Value.(error)))
+	}
+	tmp := file + ".tmp." + suffix.Value.(string)
+	if w := core.WriteFile(tmp, raw, 0o600); !w.OK {
+		return core.Fail(core.E("paths.writePathsOverride", "write tmp failed", w.Value.(error)))
+	}
+	if r := core.Rename(tmp, file); !r.OK {
+		// Best-effort cleanup so a stale tmp doesn't sit forever; the
+		// rename failure is the real error we surface. Uses the same
+		// randomised tmp name we just wrote — never the legacy fixed
+		// paths.json.tmp.
+		_ = core.Remove(tmp)
+		return core.Fail(core.E("paths.writePathsOverride", "rename tmp→final failed", r.Value.(error)))
 	}
 	return core.Ok(file)
 }
@@ -154,6 +206,13 @@ func SetModelsDirOverride(p string) core.Result {
 	if info == nil || !info.IsDir() {
 		return core.Fail(core.NewError("paths.SetModelsDirOverride: path is not a directory (or is a symlink)"))
 	}
+	// Cerberus DREAD-r3 LOW (Mantis #1541): serialise the read-
+	// modify-write sequence so two concurrent in-process callers
+	// can't both base their write on the same pre-read state and
+	// lose the first writer's intent. Cross-process safety still
+	// pending core.Flock (CoreGO gap).
+	pathsOverrideMu.Lock()
+	defer pathsOverrideMu.Unlock()
 	cur := readPathsOverride()
 	cur.ModelsDir = p
 	if r := writePathsOverride(cur); !r.OK {
@@ -227,6 +286,11 @@ func indexByteOverride(s string, b byte) int {
 //	r := paths.ClearModelsDirOverride()
 //	if !r.OK { core.Warn("clear failed", "err", r.Error()) }
 func ClearModelsDirOverride() core.Result {
+	// Cerberus DREAD-r3 LOW (Mantis #1541): same in-process
+	// read-modify-write serialisation as SetModelsDirOverride —
+	// a concurrent Clear vs Set must not race on the file.
+	pathsOverrideMu.Lock()
+	defer pathsOverrideMu.Unlock()
 	cur := readPathsOverride()
 	if cur.ModelsDir == "" {
 		return core.Ok(nil)
