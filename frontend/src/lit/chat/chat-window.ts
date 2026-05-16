@@ -156,22 +156,6 @@ class LthnChatWindow extends LitElement {
     searchQuery: { state: true },
     pinnedConversations: { state: true },
     navIndex: { state: true },
-    // slashMenuOpen moved to SlashMenuController
-    // (Athena 2026-05-16, lane 3 of the chat-window controllers plan).
-    // Host exposes getter/setter shim below that delegates to the
-    // controller; templates + existing tests keep their access path.
-    // contextMenuFor moved to ContextMenuController
-    // (Athena 2026-05-16, lane 4 of the chat-window controllers plan).
-    // Host exposes getter/setter shim below that delegates to the
-    // controller; templates + existing tests keep their access path.
-    // helpOpen moved to HelpOverlayController
-    // (Athena 2026-05-16, lane 5 of the chat-window controllers plan).
-    // Host exposes getter/setter shim below that delegates to the
-    // controller; templates + existing tests keep their access path.
-    // findOpen / findQuery / findCursor moved to FindController
-    // (Athena 2026-05-16, lane 2 of the chat-window controllers plan).
-    // Host exposes getter/setter shims below that delegate to the
-    // controller; templates + existing tests keep their access path.
     atBottom: { state: true },
     contentMatchedIds: { state: true },
     systemPromptDraft: { state: true },
@@ -223,73 +207,6 @@ class LthnChatWindow extends LitElement {
    *  display-ordered filtered list. Enter commits the highlighted
    *  conversation to activeConversationId + clears the highlight. */
   declare navIndex: number;
-  /** Whether the composer's slash-commands menu is open. Owned by
-   *  SlashMenuController; this is a thin getter/setter shim so render
-   *  templates + existing tests + the slash-action methods that set
-   *  `this.slashMenuOpen = false` after firing keep their access path
-   *  unchanged. State-only: the menu closes on outside-click + on
-   *  command-execute, never persists. */
-  get slashMenuOpen(): boolean { return this._slashMenuController.open; }
-  set slashMenuOpen(v: boolean) {
-    if (this._slashMenuController.open === v) return;
-    this._slashMenuController.open = v;
-    this.requestUpdate();
-  }
-  /** Right-click context menu state. null = closed. When open, carries
-   *  the conversation id the user right-clicked plus the menu's screen
-   *  coordinates (clientX/Y from the contextmenu event). Closes on
-   *  outside-click, Escape, or after an item is chosen. Owned by
-   *  ContextMenuController; this is a thin getter/setter shim so
-   *  render templates + existing tests keep their access path
-   *  (e.g. `this.contextMenuFor.id`, `el.contextMenuFor = {...}`). */
-  get contextMenuFor(): { id: string; x: number; y: number } | null {
-    return this._contextMenuController.for;
-  }
-  set contextMenuFor(v: { id: string; x: number; y: number } | null) {
-    if (this._contextMenuController.for === v) return;
-    this._contextMenuController.for = v;
-    this.requestUpdate();
-  }
-  /** Whether the keyboard-shortcut help overlay is showing. Opened by
-   *  the /help slash command and the bare-? toggle. Closed by
-   *  backdrop click, the X button, Escape, or a second ?. Owned by
-   *  HelpOverlayController; this is a thin getter/setter shim so
-   *  render templates + existing tests + the bare-? toggle branch
-   *  keep their access path (e.g. `this.helpOpen = true`,
-   *  `el.helpOpen`). State-only — no persistence. */
-  get helpOpen(): boolean { return this._helpOverlayController.open; }
-  set helpOpen(v: boolean) {
-    if (this._helpOverlayController.open === v) return;
-    this._helpOverlayController.open = v;
-    this.requestUpdate();
-  }
-  /** Find-bar state — owned by FindController, exposed here as
-   *  getter/setter accessors so render templates + existing tests
-   *  can keep their `this.findOpen` / `this.findQuery` / `this.findCursor`
-   *  access path. The controller is the source of truth; these are
-   *  thin shims that delegate + call `requestUpdate()` after each
-   *  mutation. Setting `findQuery` flows through `setQuery()` which
-   *  resets `findCursor` to 0 (the old `updated()` change-handler
-   *  contract, now atomic with the mutation). */
-  get findOpen(): boolean { return this._findController.open; }
-  set findOpen(v: boolean) {
-    if (this._findController.open === v) return;
-    this._findController.open = v;
-    if (!v) {
-      this._findController.query = "";
-      this._findController.cursor = 0;
-    }
-    this.requestUpdate();
-  }
-  get findQuery(): string { return this._findController.query; }
-  set findQuery(v: string) { this._findController.setQuery(v); }
-  get findCursor(): number { return this._findController.cursor; }
-  set findCursor(v: number) {
-    if (this._findController.cursor === v) return;
-    this._findController.cursor = v;
-    this.requestUpdate();
-    queueMicrotask(() => this._findController.scrollActiveIntoView());
-  }
   /** True when the transcript scroller is at (or within ~16px of) the
    *  bottom. Drives two behaviours: (a) auto-scroll on new turns
    *  arrives only when we were at bottom (so a user reading older
@@ -407,17 +324,6 @@ class LthnChatWindow extends LitElement {
     this.searchQuery = "";
     this.pinnedConversations = loadPinnedConversations();
     this.navIndex = -1;
-    // slashMenuOpen now lives on SlashMenuController (default: closed —
-    // matching the previous host init). Setting it here would fire the
-    // shim's no-op early-return, so we skip it.
-    // contextMenuFor now lives on ContextMenuController (default: null —
-    // matching the previous host init). Setting it here would fire the
-    // shim's no-op early-return, so we skip it.
-    // helpOpen now lives on HelpOverlayController (default: false —
-    // matching the previous host init). Setting it here would fire
-    // the shim's no-op early-return, so we skip it.
-    // findOpen / findQuery / findCursor now live on FindController
-    // (defaults: closed, empty, 0 — matching the previous host inits).
     this.atBottom = true;
     this.contentMatchedIds = new Set();
     this.systemPromptDraft = "";
@@ -553,13 +459,6 @@ class LthnChatWindow extends LitElement {
     }
   };
 
-  // _toggleFind / _findMatchCount / _findStep / _scrollFindActiveIntoView
-  // delegators below preserve the public test + render surface; the
-  // logic lives in FindController.
-  _toggleFind() { this._findController.toggle(); }
-  _findMatchCount(): number { return this._findController.matchCount(); }
-  _findStep(delta: number) { this._findController.step(delta); }
-
   // _onOutsideClickForSlash moved to SlashMenuController.
   // The controller installs its window-level outside-click listener
   // in hostConnected + strips it in hostDisconnected; no host-side
@@ -584,7 +483,7 @@ class LthnChatWindow extends LitElement {
     this._contextMenuController.openAt(c.id, ev.clientX, ev.clientY);
     // Close the slash menu if it was open — they're mutually
     // exclusive overlays and the context menu is the newer summon.
-    this.slashMenuOpen = false;
+    this._slashMenuController.close();
   }
 
   /** Run a context-menu action then dismiss the menu. Delegator —
@@ -918,10 +817,6 @@ class LthnChatWindow extends LitElement {
     // cursor-only changes.
   }
 
-  /** Delegator preserved for the existing chat-window.test.ts surface.
-   *  Logic lives in FindController.scrollActiveIntoView(). */
-  _scrollFindActiveIntoView() { this._findController.scrollActiveIntoView(); }
-
   /** Debounce the live Sessions.Search call so each keystroke doesn't
    *  fire a disk-walking request. Empty query clears the content-match
    *  set immediately (no need to round-trip). */
@@ -1103,7 +998,7 @@ class LthnChatWindow extends LitElement {
   }
 
   /** Toggle the composer's slash-commands dropdown. The menu itself
-   *  is rendered conditionally on this.slashMenuOpen in
+   *  is rendered conditionally on this._slashMenuController.open in
    *  _renderComposer; an outside-click listener (installed in
    *  connectedCallback) closes it when the user clicks elsewhere. */
   _toggleSlashMenu() { this._slashMenuController.toggle(); }
@@ -1111,7 +1006,7 @@ class LthnChatWindow extends LitElement {
   /** Slash command — `/new`. Closes the menu, then dispatches to the
    *  same code path the rail's "New conversation" button uses. */
   async _slashNew() {
-    this.slashMenuOpen = false;
+    this._slashMenuController.close();
     await this._newConversation();
   }
 
@@ -1121,7 +1016,7 @@ class LthnChatWindow extends LitElement {
    *  (idempotent at the Go layer). Reloads the transcript +
    *  refreshes the rail so the rail's message-count drops. */
   async _slashClear() {
-    this.slashMenuOpen = false;
+    this._slashMenuController.close();
     if (!this.activeConversationId) return;
     try {
       const svc = await import("@desktop/sessions/wailsservice");
@@ -1139,7 +1034,7 @@ class LthnChatWindow extends LitElement {
    *  write. Split so the e2e harness can drive _exportTo directly
    *  without the native dialog. */
   async _slashExport() {
-    this.slashMenuOpen = false;
+    this._slashMenuController.close();
     if (!this.activeConversationId) return;
     try {
       const dlg = await import("@wailsio/runtime").then(m => m.Dialogs);
@@ -1171,7 +1066,7 @@ class LthnChatWindow extends LitElement {
    *  active conversation and writes it to the system clipboard. No-op
    *  when there's nothing to copy (no turns yet). */
   async _slashCopy() {
-    this.slashMenuOpen = false;
+    this._slashMenuController.close();
     const transcript = buildTranscript(this.liveTurns, this.activeModel);
     if (!transcript) return;
     try {
@@ -1186,8 +1081,8 @@ class LthnChatWindow extends LitElement {
    *  slash menu closes immediately so the help overlay doesn't have
    *  to coexist with the command list. */
   _slashHelp() {
-    this.slashMenuOpen = false;
-    this.helpOpen = true;
+    this._slashMenuController.close();
+    this._helpOverlayController.show();
   }
 
   /** Slash command — `/export-all`. Opens the OS folder picker, then
@@ -1195,7 +1090,7 @@ class LthnChatWindow extends LitElement {
    *  test harness can drive the ExportAll wire without firing the
    *  native dialog. */
   async _slashExportAll() {
-    this.slashMenuOpen = false;
+    this._slashMenuController.close();
     try {
       const dlg = await import("@wailsio/runtime").then(m => m.Dialogs);
       const picked = await dlg.OpenFile({
@@ -1888,7 +1783,7 @@ class LthnChatWindow extends LitElement {
 
   /* — right-click context menu (Rename / Pin / Export / Delete) — */
   _renderContextMenu() {
-    const cm = this.contextMenuFor;
+    const cm = this._contextMenuController.for;
     if (!cm) return nothing;
     const pinned = this.pinnedConversations.has(cm.id);
     // Viewport-clamp math lives on ContextMenuController (lane 4,
@@ -1970,7 +1865,7 @@ class LthnChatWindow extends LitElement {
 
   /* — /help overlay (keyboard shortcuts + slash commands cheat sheet) — */
   _renderHelpOverlay() {
-    if (!this.helpOpen) return nothing;
+    if (!this._helpOverlayController.open) return nothing;
     const sections: Array<{ heading: string; entries: Array<[string, string]> }> = [
       {
         heading: "Conversations",
@@ -2008,7 +1903,7 @@ class LthnChatWindow extends LitElement {
     return html`
       <div
         class="lthn-chat-help-backdrop"
-        @click=${() => { this.helpOpen = false; }}
+        @click=${() => this._helpOverlayController.close()}
         style="
           position:absolute; inset:0;
           background:rgba(0,0,0,0.48);
@@ -2039,7 +1934,7 @@ class LthnChatWindow extends LitElement {
             <div style="flex:1"></div>
             <button
               class="lthn-chat-help-close"
-              @click=${() => { this.helpOpen = false; }}
+              @click=${() => this._helpOverlayController.close()}
               title="Close"
               style="
                 width:24px; height:24px;
@@ -2081,12 +1976,12 @@ class LthnChatWindow extends LitElement {
   /* — surface (conversation transcript or empty hero) — */
   /** Find bar — floats over the transcript when findOpen is true. */
   _renderFindBar() {
-    if (!this.findOpen) return nothing;
-    const count = this._findMatchCount();
-    const hasQuery = this.findQuery.trim().length > 0;
+    if (!this._findController.open) return nothing;
+    const count = this._findController.matchCount();
+    const hasQuery = this._findController.query.trim().length > 0;
     const counterText = !hasQuery ? ""
       : count === 0 ? "no matches"
-      : `${this.findCursor + 1} of ${count}`;
+      : `${this._findController.cursor + 1} of ${count}`;
     const arrowDisabled = count === 0;
     return html`
       <div class="lthn-chat-find"
@@ -2103,20 +1998,20 @@ class LthnChatWindow extends LitElement {
           class="lthn-chat-find-input"
           type="text"
           placeholder="Find in transcript"
-          .value=${this.findQuery}
-          @input=${(ev: Event) => { this.findQuery = (ev.target as HTMLInputElement).value; }}
+          .value=${this._findController.query}
+          @input=${(ev: Event) => { this._findController.setQuery((ev.target as HTMLInputElement).value); }}
           @keydown=${(ev: KeyboardEvent) => {
             // ↓ / Enter → next match; ↑ → previous. preventDefault so
             // the keystroke doesn't move the caret + accidentally
             // submit a form parent if one ever wraps the bar.
             if (ev.key === "ArrowDown" || ev.key === "Enter") {
               ev.preventDefault();
-              this._findStep(1);
+              this._findController.step(1);
               return;
             }
             if (ev.key === "ArrowUp") {
               ev.preventDefault();
-              this._findStep(-1);
+              this._findController.step(-1);
               return;
             }
           }}
@@ -2137,7 +2032,7 @@ class LthnChatWindow extends LitElement {
           class="lthn-chat-find-prev"
           title="Previous match"
           ?disabled=${arrowDisabled}
-          @click=${() => this._findStep(-1)}
+          @click=${() => this._findController.step(-1)}
           style="
             width:22px; height:22px;
             display:inline-flex; align-items:center; justify-content:center;
@@ -2153,7 +2048,7 @@ class LthnChatWindow extends LitElement {
           class="lthn-chat-find-next"
           title="Next match"
           ?disabled=${arrowDisabled}
-          @click=${() => this._findStep(1)}
+          @click=${() => this._findController.step(1)}
           style="
             width:22px; height:22px;
             display:inline-flex; align-items:center; justify-content:center;
@@ -2168,7 +2063,7 @@ class LthnChatWindow extends LitElement {
         <button
           class="lthn-chat-find-close"
           title="Close"
-          @click=${() => { this.findOpen = false; this.findQuery = ""; this.findCursor = 0; }}
+          @click=${() => this._findController.tryHandleEscape()}
           style="
             width:22px; height:22px;
             display:inline-flex; align-items:center; justify-content:center;
@@ -2315,17 +2210,17 @@ class LthnChatWindow extends LitElement {
         </div>
         <div style="margin-left:30px; font-size:13.5px; line-height:1.6;
                     color:var(--fg-1); white-space:pre-wrap; letter-spacing:-0.003em;">
-          ${this.findOpen && this.findQuery.trim()
+          ${this._findController.open && this._findController.query.trim()
             ? (() => {
                 // Find the active-match offset inside THIS turn, if any.
                 // The flat positions array maps cursor index → {turn,
                 // offset}; we look up the cursor's entry then check
                 // whether it belongs to this turn.
-                const positions = findMatchPositions(this.liveTurns, this.findQuery);
-                const active = positions[this.findCursor];
+                const positions = findMatchPositions(this.liveTurns, this._findController.query);
+                const active = positions[this._findController.cursor];
                 const activeOffsetHere = (active && active.turnIndex === turnIndex)
                   ? active.offset : -1;
-                return findSplitTurn(t.text || "", this.findQuery, activeOffsetHere).map(seg => seg.match
+                return findSplitTurn(t.text || "", this._findController.query, activeOffsetHere).map(seg => seg.match
                   ? html`<span class=${seg.active ? "lthn-chat-find-match lthn-chat-find-active" : "lthn-chat-find-match"}
                                 style="background:${seg.active ? "rgba(64,193,197,0.42)" : "rgba(217,154,72,0.32)"};
                                        color:var(--fg-0);
@@ -2421,7 +2316,7 @@ class LthnChatWindow extends LitElement {
                         @click=${(ev: Event) => { ev.stopPropagation(); this._toggleSlashMenu(); }}>
                 <i class="fa-solid fa-slash-forward" style="font-size:10px;"></i> ${this.t.composerSlash}
               </lthn-btn>
-              ${this.slashMenuOpen ? html`
+              ${this._slashMenuController.open ? html`
                 <div class="lthn-chat-slash-menu"
                      @click=${(ev: Event) => ev.stopPropagation()}
                      style="

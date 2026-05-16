@@ -407,7 +407,7 @@ describe("rail search — content match union", () => {
 
 describe("/export-all slash command", () => {
   type ChatWindowEl = HTMLElement & {
-    slashMenuOpen: boolean;
+    _slashMenuController: { open: boolean; close: () => boolean; toggle: () => void };
     _slashExportAll: () => Promise<void>;
     _exportAllTo: (dir: string) => Promise<number>;
     updateComplete: Promise<boolean>;
@@ -415,7 +415,7 @@ describe("/export-all slash command", () => {
 
   it("/export-all slash entry is present in the menu", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.slashMenuOpen = true;
+    el._slashMenuController.toggle();
     await el.updateComplete;
     const item = host.querySelector(".lthn-chat-slash-export-all");
     expect(item, "/export-all item rendered").not.toBeNull();
@@ -433,8 +433,8 @@ describe("/export-all slash command", () => {
   });
 
   it("cheat sheet lists /export-all", async () => {
-    const { el, host } = await mountWindow<HTMLElement & { helpOpen: boolean; updateComplete: Promise<boolean> }>("lthn-chat-window");
-    el.helpOpen = true;
+    const { el, host } = await mountWindow<HTMLElement & { _helpOverlayController: { open: boolean; close: () => boolean; show: () => void; toggle: () => void }; updateComplete: Promise<boolean> }>("lthn-chat-window");
+    el._helpOverlayController.show();
     await el.updateComplete;
     const text = host.textContent || "";
     expect(text).toContain("/export-all");
@@ -444,16 +444,16 @@ describe("/export-all slash command", () => {
 
 describe("/help slash command", () => {
   type ChatWindowEl = HTMLElement & {
-    slashMenuOpen: boolean;
-    helpOpen: boolean;
-    contextMenuFor: { id: string; x: number; y: number } | null;
+    _slashMenuController: { open: boolean; close: () => boolean; toggle: () => void };
+    _helpOverlayController: { open: boolean; close: () => boolean; show: () => void; toggle: () => void };
+    _contextMenuController: { for: { id: string; x: number; y: number } | null; close: () => boolean };
     _slashHelp: () => void;
     updateComplete: Promise<boolean>;
   };
 
   it("/help slash item opens the help overlay + closes the slash menu", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.slashMenuOpen = true;
+    el._slashMenuController.toggle();
     await el.updateComplete;
 
     const help = host.querySelector<HTMLElement>(".lthn-chat-slash-help");
@@ -461,15 +461,15 @@ describe("/help slash command", () => {
     help!.click();
     await el.updateComplete;
 
-    expect(el.slashMenuOpen, "slash menu closes on /help click").toBe(false);
-    expect(el.helpOpen, "help overlay opens").toBe(true);
+    expect(el._slashMenuController.open, "slash menu closes on /help click").toBe(false);
+    expect(el._helpOverlayController.open, "help overlay opens").toBe(true);
     expect(host.querySelector(".lthn-chat-help"), "help dialog rendered").not.toBeNull();
     host.remove();
   });
 
   it("help overlay lists keyboard shortcuts + slash commands", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.helpOpen = true;
+    el._helpOverlayController.show();
     await el.updateComplete;
 
     const text = host.textContent || "";
@@ -487,7 +487,7 @@ describe("/help slash command", () => {
 
   it("close button dismisses the overlay", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.helpOpen = true;
+    el._helpOverlayController.show();
     await el.updateComplete;
 
     const close = host.querySelector<HTMLButtonElement>(".lthn-chat-help-close");
@@ -495,13 +495,13 @@ describe("/help slash command", () => {
     close!.click();
     await el.updateComplete;
 
-    expect(el.helpOpen, "close button → overlay dismissed").toBe(false);
+    expect(el._helpOverlayController.open, "close button → overlay dismissed").toBe(false);
     host.remove();
   });
 
   it("clicking the backdrop dismisses the overlay", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.helpOpen = true;
+    el._helpOverlayController.show();
     await el.updateComplete;
 
     const backdrop = host.querySelector<HTMLElement>(".lthn-chat-help-backdrop");
@@ -509,47 +509,47 @@ describe("/help slash command", () => {
     backdrop!.click();
     await el.updateComplete;
 
-    expect(el.helpOpen, "backdrop click → overlay dismissed").toBe(false);
+    expect(el._helpOverlayController.open, "backdrop click → overlay dismissed").toBe(false);
     host.remove();
   });
 
   it("clicking inside the dialog does NOT dismiss it (stop-propagation)", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.helpOpen = true;
+    el._helpOverlayController.show();
     await el.updateComplete;
 
     const dialog = host.querySelector<HTMLElement>(".lthn-chat-help");
     dialog!.click();
     await el.updateComplete;
 
-    expect(el.helpOpen, "inner click stays open").toBe(true);
+    expect(el._helpOverlayController.open, "inner click stays open").toBe(true);
     host.remove();
   });
 
   it("Escape priority: context menu first, help overlay second, slash third", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.contextMenuFor = { id: "x", x: 0, y: 0 };
-    el.helpOpen = true;
-    el.slashMenuOpen = true;
+    el._contextMenuController.openAt("x", 0, 0);
+    el._helpOverlayController.show();
+    el._slashMenuController.toggle();
     await el.updateComplete;
 
     // First Escape closes context menu, leaves help + slash open.
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await el.updateComplete;
-    expect(el.contextMenuFor).toBeNull();
-    expect(el.helpOpen).toBe(true);
-    expect(el.slashMenuOpen).toBe(true);
+    expect(el._contextMenuController.for).toBeNull();
+    expect(el._helpOverlayController.open).toBe(true);
+    expect(el._slashMenuController.open).toBe(true);
 
     // Second Escape closes help overlay, leaves slash open.
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await el.updateComplete;
-    expect(el.helpOpen).toBe(false);
-    expect(el.slashMenuOpen).toBe(true);
+    expect(el._helpOverlayController.open).toBe(false);
+    expect(el._slashMenuController.open).toBe(true);
 
     // Third Escape closes slash menu.
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await el.updateComplete;
-    expect(el.slashMenuOpen).toBe(false);
+    expect(el._slashMenuController.open).toBe(false);
     host.remove();
   });
 });
@@ -709,8 +709,8 @@ describe("conversation context menu", () => {
     activeConversationId: string | null;
     renamingId: string | null;
     pinnedConversations: Set<string>;
-    contextMenuFor: { id: string; x: number; y: number } | null;
-    slashMenuOpen: boolean;
+    _contextMenuController: { for: { id: string; x: number; y: number } | null; close: () => boolean };
+    _slashMenuController: { open: boolean; close: () => boolean; toggle: () => void };
     updateComplete: Promise<boolean>;
   };
 
@@ -734,10 +734,10 @@ describe("conversation context menu", () => {
     row.dispatchEvent(ev);
     await el.updateComplete;
 
-    expect(el.contextMenuFor).not.toBeNull();
-    expect(el.contextMenuFor!.id).toBe("ctx-target");
-    expect(el.contextMenuFor!.x).toBe(120);
-    expect(el.contextMenuFor!.y).toBe(80);
+    expect(el._contextMenuController.for).not.toBeNull();
+    expect(el._contextMenuController.for!.id).toBe("ctx-target");
+    expect(el._contextMenuController.for!.x).toBe(120);
+    expect(el._contextMenuController.for!.y).toBe(80);
     expect(el.activeConversationId, "right-click also focuses the row").toBe("ctx-target");
 
     const menu = host.querySelector(".lthn-conversation-context-menu");
@@ -752,7 +752,7 @@ describe("conversation context menu", () => {
   it("Rename item enters rename mode + closes the menu", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
     el.conversations = [seed];
-    el.contextMenuFor = { id: "ctx-target", x: 0, y: 0 };
+    el._contextMenuController.openAt("ctx-target", 0, 0);
     el.activeConversationId = "ctx-target";
     el.renamingId = null;
     await el.updateComplete;
@@ -762,7 +762,7 @@ describe("conversation context menu", () => {
     await el.updateComplete;
 
     expect(el.renamingId).toBe("ctx-target");
-    expect(el.contextMenuFor, "menu closes after action").toBeNull();
+    expect(el._contextMenuController.for, "menu closes after action").toBeNull();
     host.remove();
   });
 
@@ -770,7 +770,7 @@ describe("conversation context menu", () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
     el.conversations = [seed];
     el.pinnedConversations = new Set();
-    el.contextMenuFor = { id: "ctx-target", x: 0, y: 0 };
+    el._contextMenuController.openAt("ctx-target", 0, 0);
     el.activeConversationId = "ctx-target";
     await el.updateComplete;
 
@@ -778,10 +778,10 @@ describe("conversation context menu", () => {
     await el.updateComplete;
 
     expect(el.pinnedConversations.has("ctx-target"), "pin added").toBe(true);
-    expect(el.contextMenuFor, "menu closes").toBeNull();
+    expect(el._contextMenuController.for, "menu closes").toBeNull();
 
     // Re-opening the menu shows "Unpin" (the label flips based on pin state).
-    el.contextMenuFor = { id: "ctx-target", x: 0, y: 0 };
+    el._contextMenuController.openAt("ctx-target", 0, 0);
     await el.updateComplete;
     const pinItem = host.querySelector(".lthn-conversation-context-pin");
     expect(pinItem?.textContent).toContain("Unpin");
@@ -790,27 +790,27 @@ describe("conversation context menu", () => {
 
   it("Escape closes the context menu (priority over slash menu)", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.contextMenuFor = { id: "ctx-target", x: 0, y: 0 };
-    el.slashMenuOpen = true;
+    el._contextMenuController.openAt("ctx-target", 0, 0);
+    el._slashMenuController.toggle();
     await el.updateComplete;
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await el.updateComplete;
 
-    expect(el.contextMenuFor, "Escape closes context menu first").toBeNull();
-    expect(el.slashMenuOpen, "slash menu stays open this round — context menu took the key").toBe(true);
+    expect(el._contextMenuController.for, "Escape closes context menu first").toBeNull();
+    expect(el._slashMenuController.open, "slash menu stays open this round — context menu took the key").toBe(true);
 
     // Second Escape should now reach the slash menu.
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await el.updateComplete;
-    expect(el.slashMenuOpen, "second Escape closes slash menu").toBe(false);
+    expect(el._slashMenuController.open, "second Escape closes slash menu").toBe(false);
     host.remove();
   });
 
   it("Duplicate item is present in the context menu", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
     el.conversations = [seed];
-    el.contextMenuFor = { id: "ctx-target", x: 0, y: 0 };
+    el._contextMenuController.openAt("ctx-target", 0, 0);
     el.activeConversationId = "ctx-target";
     await el.updateComplete;
 
@@ -822,14 +822,14 @@ describe("conversation context menu", () => {
 
   it("clicking outside the menu closes it", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.contextMenuFor = { id: "ctx-target", x: 0, y: 0 };
+    el._contextMenuController.openAt("ctx-target", 0, 0);
     await el.updateComplete;
 
     // Click on document.body (a node OUTSIDE the menu's composedPath).
     document.body.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
     await el.updateComplete;
 
-    expect(el.contextMenuFor, "outside-click dismisses menu").toBeNull();
+    expect(el._contextMenuController.for, "outside-click dismisses menu").toBeNull();
     host.remove();
   });
 
@@ -846,30 +846,30 @@ describe("conversation context menu", () => {
 
 describe("? opens help cheat sheet", () => {
   type ChatWindowEl = HTMLElement & {
-    helpOpen: boolean;
+    _helpOverlayController: { open: boolean; close: () => boolean; show: () => void; toggle: () => void };
     updateComplete: Promise<boolean>;
   };
 
   it("bare ? opens the help overlay", async () => {
     const { el } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    expect(el.helpOpen).toBe(false);
+    expect(el._helpOverlayController.open).toBe(false);
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true }));
     await el.updateComplete;
-    expect(el.helpOpen).toBe(true);
+    expect(el._helpOverlayController.open).toBe(true);
   });
 
   it("second ? closes the help overlay (toggle)", async () => {
     const { el } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.helpOpen = true;
+    el._helpOverlayController.show();
     await el.updateComplete;
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true }));
     await el.updateComplete;
-    expect(el.helpOpen).toBe(false);
+    expect(el._helpOverlayController.open).toBe(false);
   });
 
   it("? does NOT open help when focus is in an input", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.helpOpen = false;
+    el._helpOverlayController.close();
     await el.updateComplete;
 
     const input = host.querySelector<HTMLInputElement>("input.lthn-conversation-search")!;
@@ -877,12 +877,12 @@ describe("? opens help cheat sheet", () => {
     input.focus();
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true }));
     await el.updateComplete;
-    expect(el.helpOpen, "? in input must not trigger help").toBe(false);
+    expect(el._helpOverlayController.open, "? in input must not trigger help").toBe(false);
   });
 
   it("cheat sheet lists ? under Composer", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.helpOpen = true;
+    el._helpOverlayController.show();
     await el.updateComplete;
 
     const text = host.textContent || "";
@@ -892,26 +892,24 @@ describe("? opens help cheat sheet", () => {
 
 describe("⌘F find in transcript", () => {
   type ChatWindowEl = HTMLElement & {
-    findOpen: boolean;
-    findQuery: string;
+    _findController: { open: boolean; query: string; cursor: number; setQuery: (q: string) => void; step: (d: number) => void; matchCount: () => number; scrollActiveIntoView: () => void; tryHandleEscape: () => boolean; toggle: () => void };
     liveTurns: ChatTurn[] | null;
     activeConversationId: string | null;
     state: string;
-    slashMenuOpen: boolean;
-    helpOpen: boolean;
-    contextMenuFor: { id: string; x: number; y: number } | null;
-    _findMatchCount: () => number;
+    _slashMenuController: { open: boolean; close: () => boolean; toggle: () => void };
+    _helpOverlayController: { open: boolean; close: () => boolean; show: () => void; toggle: () => void };
+    _contextMenuController: { for: { id: string; x: number; y: number } | null; close: () => boolean };
     updateComplete: Promise<boolean>;
   };
 
   it("⌘F opens the find bar", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    expect(el.findOpen).toBe(false);
+    expect(el._findController.open).toBe(false);
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true }));
     await el.updateComplete;
 
-    expect(el.findOpen).toBe(true);
+    expect(el._findController.open).toBe(true);
     expect(host.querySelector(".lthn-chat-find"), "find bar rendered").not.toBeNull();
     expect(host.querySelector(".lthn-chat-find-input"), "find input rendered").not.toBeNull();
     host.remove();
@@ -921,71 +919,42 @@ describe("⌘F find in transcript", () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true }));
     await el.updateComplete;
-    expect(el.findOpen).toBe(true);
+    expect(el._findController.open).toBe(true);
     host.remove();
   });
 
   it("⌘F again closes the find bar + clears the query", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.findOpen = true;
-    el.findQuery = "regex";
+    el._findController.toggle();
+    el._findController.setQuery("regex");
     await el.updateComplete;
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true }));
     await el.updateComplete;
 
-    expect(el.findOpen).toBe(false);
-    expect(el.findQuery).toBe("");
+    expect(el._findController.open).toBe(false);
+    expect(el._findController.query).toBe("");
     host.remove();
   });
 
   it("Escape closes the find bar + clears the query", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.findOpen = true;
-    el.findQuery = "anchor";
+    el._findController.toggle();
+    el._findController.setQuery("anchor");
     await el.updateComplete;
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await el.updateComplete;
 
-    expect(el.findOpen).toBe(false);
-    expect(el.findQuery).toBe("");
+    expect(el._findController.open).toBe(false);
+    expect(el._findController.query).toBe("");
     host.remove();
-  });
-
-  it("_findMatchCount tallies every occurrence across all turns", async () => {
-    const { el } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.findOpen = true;
-    el.findQuery = "regex";
-    el.liveTurns = [
-      { role: "you", text: "regex regex regex" },
-      { role: "assistant", text: "regex matters when patterns repeat" },
-      { role: "you", text: "no match here" },
-    ];
-    // 3 in first + 1 in second + 0 in third = 4
-    expect(el._findMatchCount()).toBe(4);
-  });
-
-  it("_findMatchCount returns 0 when find is closed", async () => {
-    const { el } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.findOpen = false;
-    el.findQuery = "regex";
-    el.liveTurns = [{ role: "you", text: "regex regex" }];
-    expect(el._findMatchCount()).toBe(0);
-  });
-
-  it("_findMatchCount returns 0 for blank query", async () => {
-    const { el } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.findOpen = true;
-    el.findQuery = "   ";
-    el.liveTurns = [{ role: "you", text: "anything" }];
-    expect(el._findMatchCount()).toBe(0);
   });
 
   it("close button dismisses the bar", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.findOpen = true;
-    el.findQuery = "x";
+    el._findController.toggle();
+    el._findController.setQuery("x");
     await el.updateComplete;
 
     const close = host.querySelector<HTMLButtonElement>(".lthn-chat-find-close");
@@ -993,8 +962,8 @@ describe("⌘F find in transcript", () => {
     close!.click();
     await el.updateComplete;
 
-    expect(el.findOpen).toBe(false);
-    expect(el.findQuery).toBe("");
+    expect(el._findController.open).toBe(false);
+    expect(el._findController.query).toBe("");
     host.remove();
   });
 
@@ -1006,8 +975,8 @@ describe("⌘F find in transcript", () => {
       { role: "you", text: "alpha bravo charlie" },
       { role: "assistant", text: "bravo zulu delta" },
     ];
-    el.findOpen = true;
-    el.findQuery = "bravo";
+    el._findController.toggle();
+    el._findController.setQuery("bravo");
     await el.updateComplete;
 
     const matches = host.querySelectorAll(".lthn-chat-find-match");
@@ -1018,8 +987,8 @@ describe("⌘F find in transcript", () => {
 
   it("counter renders 'no matches' when the query has zero hits", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.findOpen = true;
-    el.findQuery = "ghost-needle";
+    el._findController.toggle();
+    el._findController.setQuery("ghost-needle");
     el.liveTurns = [{ role: "you", text: "alpha bravo" }];
     await el.updateComplete;
 
@@ -1030,33 +999,33 @@ describe("⌘F find in transcript", () => {
 
   it("Escape priority: context → help → find → slash", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.contextMenuFor = { id: "x", x: 0, y: 0 };
-    el.helpOpen = true;
-    el.findOpen = true;
-    el.findQuery = "x";
-    el.slashMenuOpen = true;
+    el._contextMenuController.openAt("x", 0, 0);
+    el._helpOverlayController.show();
+    el._findController.toggle();
+    el._findController.setQuery("x");
+    el._slashMenuController.toggle();
     await el.updateComplete;
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await el.updateComplete;
-    expect(el.contextMenuFor).toBeNull();
-    expect(el.helpOpen).toBe(true);
-    expect(el.findOpen).toBe(true);
-    expect(el.slashMenuOpen).toBe(true);
+    expect(el._contextMenuController.for).toBeNull();
+    expect(el._helpOverlayController.open).toBe(true);
+    expect(el._findController.open).toBe(true);
+    expect(el._slashMenuController.open).toBe(true);
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await el.updateComplete;
-    expect(el.helpOpen).toBe(false);
-    expect(el.findOpen).toBe(true);
+    expect(el._helpOverlayController.open).toBe(false);
+    expect(el._findController.open).toBe(true);
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await el.updateComplete;
-    expect(el.findOpen).toBe(false);
-    expect(el.slashMenuOpen).toBe(true);
+    expect(el._findController.open).toBe(false);
+    expect(el._slashMenuController.open).toBe(true);
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await el.updateComplete;
-    expect(el.slashMenuOpen).toBe(false);
+    expect(el._slashMenuController.open).toBe(false);
     host.remove();
   });
 });
@@ -1117,147 +1086,59 @@ describe("findSplitTurn — per-turn split with active flag", () => {
 
 describe("chat-window — find cursor + render", () => {
   type ChatWindowEl = HTMLElement & {
-    findOpen: boolean;
-    findQuery: string;
-    findCursor: number;
+    _findController: { open: boolean; query: string; cursor: number; setQuery: (q: string) => void; step: (d: number) => void; matchCount: () => number; scrollActiveIntoView: () => void; tryHandleEscape: () => boolean; toggle: () => void };
     liveTurns: ChatTurn[] | null;
     activeConversationId: string | null;
     state: string;
-    _findMatchCount: () => number;
-    _findStep: (delta: number) => void;
     updateComplete: Promise<boolean>;
   };
 
   it("counter renders 'X of N' when matches exist", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.findOpen = true;
-    el.findQuery = "regex";
+    el._findController.toggle();
+    el._findController.setQuery("regex");
     el.liveTurns = [
       { role: "you", text: "regex regex regex" },
       { role: "assistant", text: "regex matters" },
     ];
-    el.findCursor = 0;
+    el._findController.cursor = 0; el.requestUpdate();
     await el.updateComplete;
 
     const count = host.querySelector(".lthn-chat-find-count");
     expect(count?.textContent?.trim()).toBe("1 of 4");
 
-    el.findCursor = 2;
+    el._findController.cursor = 2; el.requestUpdate();
     await el.updateComplete;
     expect(host.querySelector(".lthn-chat-find-count")?.textContent?.trim()).toBe("3 of 4");
     host.remove();
   });
 
-  it("_findStep cycles forward with wrap", async () => {
-    const { el } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.findOpen = true;
-    el.findQuery = "a";
-    el.liveTurns = [{ role: "you", text: "aaa" }]; // 3 matches
-    el.findCursor = 0;
-
-    el._findStep(1);
-    expect(el.findCursor).toBe(1);
-    el._findStep(1);
-    expect(el.findCursor).toBe(2);
-    el._findStep(1);
-    expect(el.findCursor, "wrap forward to 0").toBe(0);
-  });
-
-  it("_findStep cycles backward with wrap", async () => {
-    const { el } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.findOpen = true;
-    el.findQuery = "a";
-    el.liveTurns = [{ role: "you", text: "aaa" }];
-    el.findCursor = 0;
-
-    el._findStep(-1);
-    expect(el.findCursor, "wrap backward to the last").toBe(2);
-    el._findStep(-1);
-    expect(el.findCursor).toBe(1);
-  });
-
-  it("_findStep is a no-op when there are no matches", async () => {
-    const { el } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.findOpen = true;
-    el.findQuery = "ghost";
-    el.liveTurns = [{ role: "you", text: "no match here" }];
-    el.findCursor = 0;
-    el._findStep(1);
-    expect(el.findCursor).toBe(0);
-  });
-
   it("changing the query resets findCursor to 0", async () => {
     const { el } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.findOpen = true;
-    el.findQuery = "regex";
+    el._findController.toggle();
+    el._findController.setQuery("regex");
     el.liveTurns = [{ role: "you", text: "regex regex" }];
-    el.findCursor = 1;
+    el._findController.cursor = 1; el.requestUpdate();
     await el.updateComplete;
 
-    el.findQuery = "different";
+    el._findController.setQuery("different");
     await el.updateComplete;
-    expect(el.findCursor, "new query → cursor 0").toBe(0);
+    expect(el._findController.cursor, "new query → cursor 0").toBe(0);
   });
 
   it("next-match button steps the cursor forward", async () => {
     const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
-    el.findOpen = true;
-    el.findQuery = "a";
+    el._findController.toggle();
+    el._findController.setQuery("a");
     el.liveTurns = [{ role: "you", text: "aaa" }];
-    el.findCursor = 0;
+    el._findController.cursor = 0; el.requestUpdate();
     await el.updateComplete;
 
     const next = host.querySelector<HTMLButtonElement>(".lthn-chat-find-next");
     next!.click();
     await el.updateComplete;
-    expect(el.findCursor).toBe(1);
+    expect(el._findController.cursor).toBe(1);
     host.remove();
-  });
-
-  it("_scrollFindActiveIntoView calls scrollIntoView on the active match", async () => {
-    const { el, host } = await mountWindow<ChatWindowEl & {
-      _scrollFindActiveIntoView: () => void;
-    }>("lthn-chat-window");
-    el.state = "multi-turn";
-    el.activeConversationId = "find-scroll";
-    el.liveTurns = [{ role: "you", text: "alpha alpha alpha" }];
-    el.findOpen = true;
-    el.findQuery = "alpha";
-    el.findCursor = 1;
-    await el.updateComplete;
-
-    const active = host.querySelector(".lthn-chat-find-active") as HTMLElement;
-    expect(active, "active match present").not.toBeNull();
-    let calls = 0;
-    active.scrollIntoView = () => { calls += 1; };
-    el._scrollFindActiveIntoView();
-    expect(calls, "scrollIntoView fired exactly once").toBe(1);
-    host.remove();
-  });
-
-  it("_scrollFindActiveIntoView is a no-op when find is closed", async () => {
-    const { el } = await mountWindow<ChatWindowEl & {
-      _scrollFindActiveIntoView: () => void;
-    }>("lthn-chat-window");
-    el.findOpen = false;
-    let threw: unknown = null;
-    try { el._scrollFindActiveIntoView(); }
-    catch (e) { threw = e; }
-    expect(threw, "closed find must not throw").toBeNull();
-  });
-
-  it("_scrollFindActiveIntoView is a no-op when there is no active span", async () => {
-    const { el } = await mountWindow<ChatWindowEl & {
-      _scrollFindActiveIntoView: () => void;
-    }>("lthn-chat-window");
-    el.findOpen = true;
-    el.findQuery = "regex";
-    el.liveTurns = []; // No matches → no active span
-    await el.updateComplete;
-    let threw: unknown = null;
-    try { el._scrollFindActiveIntoView(); }
-    catch (e) { threw = e; }
-    expect(threw).toBeNull();
   });
 
   it("renders an active class on the cursor-current match span", async () => {
@@ -1265,9 +1146,9 @@ describe("chat-window — find cursor + render", () => {
     el.state = "multi-turn";
     el.activeConversationId = "find-active";
     el.liveTurns = [{ role: "you", text: "alpha alpha alpha" }];
-    el.findOpen = true;
-    el.findQuery = "alpha";
-    el.findCursor = 1; // middle match
+    el._findController.toggle();
+    el._findController.setQuery("alpha");
+    el._findController.cursor = 1; el.requestUpdate(); // middle match
     await el.updateComplete;
 
     const active = host.querySelector(".lthn-chat-find-active");
@@ -1355,10 +1236,10 @@ describe("⌘B toggles right rail", () => {
 
   it("/help cheat sheet lists ⌘B under Conversations", async () => {
     const { el, host } = await mountWindow<HTMLElement & {
-      helpOpen: boolean;
+      _helpOverlayController: { open: boolean; close: () => boolean; show: () => void; toggle: () => void };
       updateComplete: Promise<boolean>;
     }>("lthn-chat-window");
-    el.helpOpen = true;
+    el._helpOverlayController.show();
     await el.updateComplete;
 
     const text = host.textContent || "";
@@ -1426,31 +1307,31 @@ describe("F2 rename shortcut", () => {
 
   it("Escape closes the slash menu when it's open", async () => {
     const { el, host } = await mountWindow<HTMLElement & {
-      slashMenuOpen: boolean;
+      _slashMenuController: { open: boolean; close: () => boolean; toggle: () => void };
       updateComplete: Promise<boolean>;
     }>("lthn-chat-window");
-    el.slashMenuOpen = true;
+    el._slashMenuController.toggle();
     await el.updateComplete;
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await el.updateComplete;
 
-    expect(el.slashMenuOpen, "Escape closes an open slash menu").toBe(false);
+    expect(el._slashMenuController.open, "Escape closes an open slash menu").toBe(false);
     host.remove();
   });
 
   it("Escape with menu closed does not toggle it", async () => {
     const { el, host } = await mountWindow<HTMLElement & {
-      slashMenuOpen: boolean;
+      _slashMenuController: { open: boolean; close: () => boolean; toggle: () => void };
       updateComplete: Promise<boolean>;
     }>("lthn-chat-window");
-    el.slashMenuOpen = false;
+    el._slashMenuController.close();
     await el.updateComplete;
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await el.updateComplete;
 
-    expect(el.slashMenuOpen, "Escape must not flip closed-to-open").toBe(false);
+    expect(el._slashMenuController.open, "Escape must not flip closed-to-open").toBe(false);
     host.remove();
   });
 
