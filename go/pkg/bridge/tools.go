@@ -240,21 +240,21 @@ func (s *Service) dispatch(ctx core.Context, tool string, params map[string]any)
 	case "webview_eval":
 		return s.eval(ctx, paramString(params, "window", DefaultWindow), paramString(params, "script", ""))
 	case "webview_url":
-		return s.eval(ctx, paramString(params, "window", DefaultWindow), `return window.location.href;`)
+		return s.eval(ctx, paramString(params, "window", DefaultWindow), `window.location.href`)
 	case "webview_title":
-		return s.eval(ctx, paramString(params, "window", DefaultWindow), `return document.title;`)
+		return s.eval(ctx, paramString(params, "window", DefaultWindow), `document.title`)
 	case "webview_query":
 		sel := jsonLit(paramString(params, "selector", ""))
 		return s.eval(ctx, paramString(params, "window", DefaultWindow),
-			core.Sprintf(`var els=Array.from(document.querySelectorAll(%s));return els.map(function(e){var r=e.getBoundingClientRect();return {tag:e.tagName.toLowerCase(),id:e.id||null,classes:Array.from(e.classList),x:r.x,y:r.y,w:r.width,h:r.height,text:(e.textContent||'').slice(0,200)};});`, sel))
+			core.Sprintf(`(function(){var els=Array.from(document.querySelectorAll(%s));return els.map(function(e){var r=e.getBoundingClientRect();return {tag:e.tagName.toLowerCase(),id:e.id||null,classes:Array.from(e.classList),x:r.x,y:r.y,w:r.width,h:r.height,text:(e.textContent||'').slice(0,200)};});})()`, sel))
 	case "webview_click":
 		sel := jsonLit(paramString(params, "selector", ""))
 		return s.eval(ctx, paramString(params, "window", DefaultWindow),
-			core.Sprintf(`var el=document.querySelector(%s);if(!el)throw new Error("element not found: "+%s);el.click();return {clicked:true,tag:el.tagName.toLowerCase()};`, sel, sel))
+			core.Sprintf(`(function(){var el=document.querySelector(%s);if(!el)throw new Error("element not found: "+%s);el.click();return {clicked:true,tag:el.tagName.toLowerCase()};})()`, sel, sel))
 	case "webview_navigate":
 		url := jsonLit(paramString(params, "url", ""))
 		return s.eval(ctx, paramString(params, "window", DefaultWindow),
-			core.Sprintf(`window.location.href=%s;return {navigatedTo:%s};`, url, url))
+			core.Sprintf(`(function(){window.location.href=%s;return {navigatedTo:%s};})()`, url, url))
 	case "webview_windows":
 		return s.toolWindows()
 	case "layout_save":
@@ -453,7 +453,18 @@ func (s *Service) eval(ctx core.Context, windowName, body string) map[string]any
 		return map[string]any{"ok": false, "error": "script param required"}
 	}
 
-	reqID := core.Sprintf("eval-%d", s.evalCounter.Add(1))
+	// Cerberus #1427 — eval-id is the only thing protecting /internal/
+	// eval-reply from a race-POST forgery (the route is auth-free
+	// because the WebView is trusted and the id was claimed to be
+	// "unguessable"). The previous monotonic "eval-%d" was trivially
+	// guessable. 16 crypto-random bytes (hex = 32 chars, 2^128
+	// keyspace) makes the race-POST attack infeasible.
+	randR := core.RandomString(16)
+	if !randR.OK {
+		return map[string]any{"ok": false,
+			"error": "eval: crypto/rand unavailable: " + randR.Error()}
+	}
+	reqID := core.Concat("eval-", randR.Value.(string))
 	ch := make(chan evalReply, 1)
 	s.evalMu.Lock()
 	s.pendingEvals[reqID] = ch

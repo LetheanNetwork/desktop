@@ -107,9 +107,20 @@ type Service struct {
 	errorMu  core.Mutex
 	errorBuf []ErrorEntry
 
-	evalMu       core.Mutex
-	evalCounter  core.AtomicUint64
+	evalMu core.Mutex
+	// Cerberus #1427 / Mantis 2026-05-16 — eval reqID was previously
+	// "eval-%d" from a monotonic counter, trivially guessable by a
+	// local-same-user (or post-DNS-rebind no-Origin) attacker who could
+	// race-POST a forged reply to /internal/eval-reply. The reqID is
+	// now hex of 16 crypto-random bytes (2^128 keyspace) — generated
+	// fresh per eval call inside (*Service).eval. No counter needed.
 	pendingEvals map[string]chan evalReply
+
+	// Cerberus #1423 / Mantis 2026-05-16 — bearer-token auth.
+	// Token is loaded or generated in OnStartup; held in memory so
+	// requireAuth doesn't hit disk per-request.
+	tokenMu core.Mutex
+	token   string
 }
 
 // RegisterService returns a Core service factory for the bridge. The
@@ -131,14 +142,35 @@ func RegisterService(opts Options) func(*core.Core) core.Result {
 
 // OnStartup starts the bridge HTTP server.
 func (s *Service) OnStartup(_ core.Context) core.Result {
+	// Cerberus #1423 — load/generate the bearer-token before
+	// installing routes so requireAuth has the expected value
+	// available on the first request.
+	tokR := loadOrGenerateToken()
+	if !tokR.OK {
+		return core.Fail(core.E("bridge.OnStartup", "auth token init failed", tokR.Value.(error)))
+	}
+	s.tokenMu.Lock()
+	s.token, _ = tokR.Value.(string)
+	s.tokenMu.Unlock()
+
 	mux := core.NewServeMux()
-	mux.HandleFunc("/mcp/info", s.handleInfo)
-	mux.HandleFunc("/mcp/tools", s.handleTools)
-	mux.HandleFunc("/mcp/call", s.handleCall)
+	// Auth-free endpoints:
+	//   - /health  : liveness probe (must work without the token).
+	//   - /internal/*: posted FROM the bundled WebView itself (JS
+	//     shim → ring buffer for console/error; eval-reply uses
+	//     unguessable per-call ids that already serve as a
+	//     capability token). Requiring bearer auth here would
+	//     break the WebView's telemetry callbacks; the privilege-
+	//     escalation surface is /mcp/*, not these.
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/internal/console", s.handleInternalConsole)
 	mux.HandleFunc("/internal/error", s.handleInternalError)
 	mux.HandleFunc("/internal/eval-reply", s.handleInternalEvalReply)
+	// /mcp/* — the privilege-escalation surface (webview_eval lives
+	// here). Bearer auth + Origin policy required.
+	mux.HandleFunc("/mcp/info", s.requireAuth(s.handleInfo))
+	mux.HandleFunc("/mcp/tools", s.requireAuth(s.handleTools))
+	mux.HandleFunc("/mcp/call", s.requireAuth(s.handleCall))
 
 	s.mu.Lock()
 	s.httpSrv = &core.HTTPServer{
