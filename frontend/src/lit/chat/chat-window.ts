@@ -3,6 +3,7 @@
 // Light-DOM Lit element. Composes renderChrome() from ../chrome.js.
 
 import { LitElement, html, nothing } from "lit";
+import { ref as litRef } from "lit/directives/ref.js";
 import { renderChrome } from "../chrome";
 import { T } from "@lthn/i18n/coreservice";
 import type {
@@ -34,6 +35,58 @@ const TURNS_GEN: ChatTurn[] = [
   { role:"you",   text:"Now write the test that would have caught this." },
   { role:"model", text:"A table-driven test that fires each goroutine and asserts the captured value matches the iteration — running it under `-race` proves the closure capture rather than just timing luck.\n\n" },
 ];
+
+// highlightMatch lives in ../highlight (shared with model-browser);
+// pure helpers + constants + types live in ./chat-window.helpers
+// (Athena 2026-05-16 architecture review). Both re-exported so
+// existing imports keep resolving from this canonical module path.
+import { highlightMatch } from "../highlight";
+import { ComposerHistoryController } from "./composer-history.controller";
+import { FindController } from "./find.controller";
+import { SlashMenuController } from "./slash-menu.controller";
+// Pure helpers + persistence + constants live in chat-window.helpers
+// (Athena split 2026-05-16). Import only what the class methods +
+// render templates actually call internally; the rest is re-exported
+// below for external consumers.
+import {
+  buildTranscript, composerCounterText, composerCounterTone,
+  COMPOSER_COUNTER_WARN_AT, COMPOSER_MAX_HEIGHT,
+  deriveAutoTitle, findMatchPositions, findSplitTurn,
+  flattenForDisplay,
+  loadActiveConversation, loadPinnedConversations,
+  matchesSearch, matchesTagFilter, parseTagInput, relativeTime,
+  saveActiveConversation, savePinnedConversations, splitPinnedConversations,
+  tagsToInput, withSystemPrompt,
+} from "./chat-window.helpers";
+export { highlightMatch, type HighlightSegment } from "../highlight";
+export {
+  AUTO_TITLE_MAX, ACTIVE_CONVERSATION_KEY,
+  buildTranscript, composerCounterText, composerCounterTone,
+  COMPOSER_COUNTER_WARN_AT, COMPOSER_MAX_HEIGHT,
+  deriveAutoTitle, findMatchPositions, findSplitTurn,
+  flattenForDisplay,
+  loadActiveConversation, loadPinnedConversations,
+  matchesSearch, matchesTagFilter, parseTagInput,
+  PINNED_CONVERSATIONS_KEY, RAIL_BUCKET_ORDER, relativeTime,
+  saveActiveConversation, savePinnedConversations,
+  splitPinnedConversations, tagsToInput, userMessageHistory,
+  withSystemPrompt,
+  type ComposerCounterTone, type FindPosition, type FindSegment,
+} from "./chat-window.helpers";
+
+/* — shared style fragment for context-menu items so each <button>
+ *  doesn't duplicate the layout. Optional colour override is for the
+ *  destructive Delete item. */
+function ctxItemStyle(colour: string = "var(--fg-0)"): string {
+  return [
+    "width:100%; display:flex; align-items:center; gap:10px;",
+    "padding:7px 10px;",
+    "background:transparent; border:none; border-radius:5px;",
+    "font:inherit; font-size:12px; text-align:left;",
+    `color:${colour};`,
+    "cursor:pointer; --wails-draggable: no-drag;",
+  ].join(" ");
+}
 
 /* ── per-state derived props ──────────────────────────────────────── */
 function chatStateData(state: ChatState): ChatStateData {
@@ -97,6 +150,25 @@ class LthnChatWindow extends LitElement {
     chrome:    { state: true },
     conversations: { state: true },
     activeConversationId: { state: true },
+    renamingId: { state: true },
+    searchQuery: { state: true },
+    pinnedConversations: { state: true },
+    navIndex: { state: true },
+    // slashMenuOpen moved to SlashMenuController
+    // (Athena 2026-05-16, lane 3 of the chat-window controllers plan).
+    // Host exposes getter/setter shim below that delegates to the
+    // controller; templates + existing tests keep their access path.
+    contextMenuFor: { state: true },
+    helpOpen: { state: true },
+    // findOpen / findQuery / findCursor moved to FindController
+    // (Athena 2026-05-16, lane 2 of the chat-window controllers plan).
+    // Host exposes getter/setter shims below that delegate to the
+    // controller; templates + existing tests keep their access path.
+    atBottom: { state: true },
+    contentMatchedIds: { state: true },
+    systemPromptDraft: { state: true },
+    tagsDraft: { state: true },
+    tagFilter: { state: true },
     railErr: { state: true },
     liveTurns: { state: true },
     composerValue: { state: true },
@@ -116,6 +188,145 @@ class LthnChatWindow extends LitElement {
   declare chrome:    { title: string; subtitle: string };
   declare conversations: Conversation[];
   declare activeConversationId: string | null;
+  /** Id of the conversation currently in inline-rename mode, or null
+   *  when nothing is being renamed. The active rail row renders an
+   *  <input> instead of a static title when this matches its id. */
+  declare renamingId: string | null;
+  /** Current value of the conversation-search input. Empty = show
+   *  every conversation. Non-empty = case-insensitive substring
+   *  filter over title (see matchesSearch below). State-only — the
+   *  search isn't persisted across mounts; it's a transient view
+   *  filter, not a saved preference. */
+  declare searchQuery: string;
+  /** Names of conversation ids the user has pinned. Pinned chats
+   *  render in their own section above the today/yesterday/week
+   *  buckets. Persisted to localStorage under PINNED_CONVERSATIONS_KEY. */
+  declare pinnedConversations: Set<string>;
+  /** Tri-state: false during the initial connectedCallback / restore
+   *  phase, true once we've decided what activeConversationId should
+   *  be. Gates the auto-save in updated() — the very first render
+   *  fires updated() while active is still null (default), which
+   *  would clobber a persisted id with null. Skipping save until
+   *  restoration completes prevents that. */
+  private _restoreComplete = false;
+  /** Highlight index for keyboard navigation in the conversation
+   *  rail. -1 = nothing highlighted (default). When the search input
+   *  has focus + the user presses ↑/↓, this advances through the
+   *  display-ordered filtered list. Enter commits the highlighted
+   *  conversation to activeConversationId + clears the highlight. */
+  declare navIndex: number;
+  /** Whether the composer's slash-commands menu is open. Owned by
+   *  SlashMenuController; this is a thin getter/setter shim so render
+   *  templates + existing tests + the slash-action methods that set
+   *  `this.slashMenuOpen = false` after firing keep their access path
+   *  unchanged. State-only: the menu closes on outside-click + on
+   *  command-execute, never persists. */
+  get slashMenuOpen(): boolean { return this._slashMenuController.open; }
+  set slashMenuOpen(v: boolean) {
+    if (this._slashMenuController.open === v) return;
+    this._slashMenuController.open = v;
+    this.requestUpdate();
+  }
+  /** Right-click context menu state. null = closed. When open, carries
+   *  the conversation id the user right-clicked plus the menu's screen
+   *  coordinates (clientX/Y from the contextmenu event). Closes on
+   *  outside-click, Escape, or after an item is chosen. */
+  declare contextMenuFor: { id: string; x: number; y: number } | null;
+  /** Whether the keyboard-shortcut help overlay is showing. Opened by
+   *  the /help slash command (and ? key in future). Closed by outside
+   *  click, Escape, or the X button. State-only. */
+  declare helpOpen: boolean;
+  /** Find-bar state — owned by FindController, exposed here as
+   *  getter/setter accessors so render templates + existing tests
+   *  can keep their `this.findOpen` / `this.findQuery` / `this.findCursor`
+   *  access path. The controller is the source of truth; these are
+   *  thin shims that delegate + call `requestUpdate()` after each
+   *  mutation. Setting `findQuery` flows through `setQuery()` which
+   *  resets `findCursor` to 0 (the old `updated()` change-handler
+   *  contract, now atomic with the mutation). */
+  get findOpen(): boolean { return this._findController.open; }
+  set findOpen(v: boolean) {
+    if (this._findController.open === v) return;
+    this._findController.open = v;
+    if (!v) {
+      this._findController.query = "";
+      this._findController.cursor = 0;
+    }
+    this.requestUpdate();
+  }
+  get findQuery(): string { return this._findController.query; }
+  set findQuery(v: string) { this._findController.setQuery(v); }
+  get findCursor(): number { return this._findController.cursor; }
+  set findCursor(v: number) {
+    if (this._findController.cursor === v) return;
+    this._findController.cursor = v;
+    this.requestUpdate();
+    queueMicrotask(() => this._findController.scrollActiveIntoView());
+  }
+  /** True when the transcript scroller is at (or within ~16px of) the
+   *  bottom. Drives two behaviours: (a) auto-scroll on new turns
+   *  arrives only when we were at bottom (so a user reading older
+   *  messages doesn't get yanked away), (b) the floating
+   *  "↓ Latest" button renders only when we're NOT at bottom. */
+  declare atBottom: boolean;
+  /** Reference to the live transcript scroll container, captured via
+   *  Lit's ref() directive. Null until the first render lands. */
+  private _scrollEl: HTMLElement | null = null;
+  /** Turn count snapshot used by updated() to detect new arrivals. */
+  private _prevTurnCount = 0;
+  /** Ids that matched the current searchQuery by message content
+   *  (returned by Sessions.Search). UNIONed with the in-memory
+   *  title filter when rendering the rail so users can find past
+   *  conversations by what was discussed inside them, not just by
+   *  title. State-only, reset on every query change. */
+  declare contentMatchedIds: Set<string>;
+  /** Working draft of the active conversation's system prompt. Bound
+   *  to the right-rail "Instructions" textarea. Distinct from the
+   *  persisted value in Conversation.systemPrompt so the user can
+   *  type without each keystroke firing a backend write — the blur
+   *  handler / save action commits via SetSystemPrompt. */
+  declare systemPromptDraft: string;
+  /** Conversation id the systemPromptDraft was initialised against —
+   *  guards against stale writes if the user switches conversations
+   *  mid-edit. */
+  private _systemPromptSource: string = "";
+  /** Working draft of the active conversation's tag list, rendered
+   *  as the comma-separated string the user is editing. Persisted
+   *  via Sessions.SetTags on blur (re-parsed through parseTagInput
+   *  to dedupe + lowercase server-side). */
+  declare tagsDraft: string;
+  /** Conversation id the tagsDraft was initialised against — guards
+   *  against stale writes during a mid-edit switch. */
+  private _tagsSource: string = "";
+  /** Active tag filter — when non-empty, the rail only shows
+   *  conversations whose tags include this value. Clicking a tag
+   *  chip in a rail row sets it; clicking again on the active filter
+   *  pill clears it. Transient state — not persisted across mounts. */
+  declare tagFilter: string;
+  /** Debounce handle for Sessions.Search — cleared on every keystroke
+   *  so only the last query in a burst reaches the backend. */
+  private _contentSearchTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The query string the most recently FIRED Sessions.Search request
+   *  carried. When the response lands, we ignore it unless this still
+   *  matches the live searchQuery — race-safe against fast typers. */
+  private _contentSearchQuery: string = "";
+  /** Composer history navigation — Reactive Controller. Owns the
+   *  cursor state + ↑/↓ branches + reset hook. See
+   *  composer-history.controller.ts (Athena 2026-05-16, first lane of
+   *  the chat-window controllers plan). */
+  private _historyController = new ComposerHistoryController(this);
+  /** Find-in-transcript overlay — Reactive Controller. Owns the open/
+   *  query/cursor state, ⌘F + Escape hand-offs, match-count derivation
+   *  and the active-match scroll side-effect. See find.controller.ts
+   *  (Athena 2026-05-16, lane 2 of the chat-window controllers plan). */
+  private _findController = new FindController(this);
+  /** Composer slash-menu mechanics — Reactive Controller. Owns the
+   *  open flag, toggle, outside-click window listener + Escape hand-off.
+   *  Slash-ACTION methods (`_slashNew`, `_slashClear`, etc.) stay on
+   *  this host — they mutate conversation state, not menu mechanics
+   *  (§6 of the controllers plan). See slash-menu.controller.ts
+   *  (Athena 2026-05-16, lane 3 of the chat-window controllers plan). */
+  private _slashMenuController = new SlashMenuController(this);
   declare railErr: string;
   declare liveTurns: ChatTurn[] | null;
   declare composerValue: string;
@@ -148,6 +359,22 @@ class LthnChatWindow extends LitElement {
     this.chrome = { title: "lthn · chat", subtitle: "conversation · local" };
     this.conversations = [];
     this.activeConversationId = null;
+    this.renamingId = null;
+    this.searchQuery = "";
+    this.pinnedConversations = loadPinnedConversations();
+    this.navIndex = -1;
+    // slashMenuOpen now lives on SlashMenuController (default: closed —
+    // matching the previous host init). Setting it here would fire the
+    // shim's no-op early-return, so we skip it.
+    this.contextMenuFor = null;
+    this.helpOpen = false;
+    // findOpen / findQuery / findCursor now live on FindController
+    // (defaults: closed, empty, 0 — matching the previous host inits).
+    this.atBottom = true;
+    this.contentMatchedIds = new Set();
+    this.systemPromptDraft = "";
+    this.tagsDraft = "";
+    this.tagFilter = "";
     this.railErr = "";
     this.liveTurns = null;
     this.composerValue = "";
@@ -184,8 +411,297 @@ class LthnChatWindow extends LitElement {
     };
   }
   createRenderRoot() { return this; }
+  /** Outside-click handler for the slash menu — installed on
+   *  connectedCallback, removed on disconnect. Bound once so the
+   *  removeEventListener call hits the right reference. */
+  /** Global keyboard handler — ⌘K / Ctrl+K focuses the conversation
+   *  search input; ⌘N / Ctrl+N creates a fresh conversation.
+   *  Mounted on window in connectedCallback so the shortcut works
+   *  regardless of where the user is in the chat surface.
+   *
+   *  Multi-instance safety: only the LATEST chat-window in document
+   *  order acts on each event. The shell-mounted instance is always
+   *  in the document; tests append a second one for isolation. The
+   *  "latest" check ensures the test instance handles its own keys
+   *  (it's appended later) without doubling up with the shell. In
+   *  production there's only one chat-window so it's always last. */
+  private _onKeyDownForCmdK = (ev: KeyboardEvent) => {
+    // Multi-instance gate first: only the last-mounted chat-window
+    // claims shortcuts, regardless of modifier shape. Two mounted
+    // chats would otherwise double-fire ⌘N / ⌘K / F2.
+    const all = document.querySelectorAll("lthn-chat-window");
+    if (all[all.length - 1] !== this) return;
+    // F2 — Finder/Explorer rename convention. No modifier. Skipped
+    // when no active conversation or when focus is already inside
+    // an editable element (avoid stealing keys mid-typing).
+    if (ev.key === "F2") {
+      if (!this.activeConversationId) return;
+      const tgt = ev.target as Element | null;
+      if (tgt instanceof HTMLInputElement || tgt instanceof HTMLTextAreaElement) return;
+      ev.preventDefault();
+      this._startRename(this.activeConversationId);
+      return;
+    }
+    // ? — universal "show shortcuts" hotkey (Slack / GitHub / many
+    // others use this). Bare key, no modifier; skip when focus is in
+    // an editable element so the user can actually type "?". Toggle
+    // shape: a second ? closes the overlay.
+    if (ev.key === "?") {
+      const tgt = ev.target as Element | null;
+      if (tgt instanceof HTMLInputElement || tgt instanceof HTMLTextAreaElement) return;
+      ev.preventDefault();
+      this.helpOpen = !this.helpOpen;
+      return;
+    }
+    // Escape — close transient overlays in priority order: context
+    // menu (most recently summoned), help overlay, find bar, then
+    // slash menu. Higher layers (rename input, dialogs) still get
+    // Escape when nothing's open; we only intercept when there's
+    // something to dismiss.
+    if (ev.key === "Escape") {
+      if (this.contextMenuFor) {
+        ev.preventDefault();
+        this.contextMenuFor = null;
+        return;
+      }
+      if (this.helpOpen) {
+        ev.preventDefault();
+        this.helpOpen = false;
+        return;
+      }
+      if (this._findController.tryHandleEscape()) {
+        ev.preventDefault();
+        return;
+      }
+      if (this._slashMenuController.tryHandleEscape()) {
+        ev.preventDefault();
+        return;
+      }
+    }
+    // accel = the platform's "command" modifier. macOS keys carry
+    // metaKey; Windows/Linux carry ctrlKey.
+    const accel = ev.metaKey || ev.ctrlKey;
+    if (!accel) return;
+    const key = ev.key.toLowerCase();
+    if (key === "k") {
+      const input = this.querySelector<HTMLInputElement>("input.lthn-conversation-search");
+      if (!input) return;
+      ev.preventDefault();
+      input.focus();
+      input.select();
+      return;
+    }
+    if (key === "n") {
+      ev.preventDefault();
+      void this._newConversation();
+      return;
+    }
+    if (key === "b") {
+      ev.preventDefault();
+      this._toggleRightRail();
+      return;
+    }
+    if (this._findController.tryHandleAccel(key)) {
+      ev.preventDefault();
+      return;
+    }
+  };
+
+  // _toggleFind / _findMatchCount / _findStep / _scrollFindActiveIntoView
+  // delegators below preserve the public test + render surface; the
+  // logic lives in FindController.
+  _toggleFind() { this._findController.toggle(); }
+  _findMatchCount(): number { return this._findController.matchCount(); }
+  _findStep(delta: number) { this._findController.step(delta); }
+
+  // _onOutsideClickForSlash moved to SlashMenuController.
+  // The controller installs its window-level outside-click listener
+  // in hostConnected + strips it in hostDisconnected; no host-side
+  // wiring needed (lane 3, Athena 2026-05-16).
+
+  /** Outside-click close for the right-click context menu. Walks the
+   *  composedPath looking for the menu's anchor class — clicks INSIDE
+   *  the menu (item presses, gap clicks) don't close it from here
+   *  because item handlers explicitly close after dispatching. */
+  private _onOutsideClickForContext = (ev: MouseEvent) => {
+    if (!this.contextMenuFor) return;
+    const path = (ev.composedPath?.() || []) as Element[];
+    for (const node of path) {
+      if (node instanceof Element &&
+          node.classList?.contains("lthn-conversation-context-menu")) {
+        return;
+      }
+    }
+    this.contextMenuFor = null;
+  };
+
+  /** Right-click handler bound per rail row. Captures the conversation
+   *  id + viewport coordinates so the menu can position itself, then
+   *  sets activeConversationId so the rest of the UI tracks the
+   *  conversation the user is operating on. */
+  private _onContextMenuRailRow(ev: MouseEvent, c: Conversation) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    this.activeConversationId = c.id;
+    this.contextMenuFor = { id: c.id, x: ev.clientX, y: ev.clientY };
+    // Close the slash menu if it was open — they're mutually
+    // exclusive overlays and the context menu is the newer summon.
+    this.slashMenuOpen = false;
+  }
+
+  /** Run a context-menu action then dismiss the menu. Centralises the
+   *  close-after-fire pattern so item handlers stay one-liners. */
+  private _runContextMenuAction(fn: () => unknown) {
+    this.contextMenuFor = null;
+    void fn();
+  }
+
+  /** Set or clear the rail's tag filter. Calling with a tag that's
+   *  already active clears (toggle). Calling with a fresh tag
+   *  replaces. Empty input clears. Public so chip click handlers +
+   *  tests share the same path. */
+  _toggleTagFilter(tag: string) {
+    const t = (tag || "").trim().toLowerCase();
+    if (!t) {
+      this.tagFilter = "";
+      return;
+    }
+    this.tagFilter = this.tagFilter === t ? "" : t;
+  }
+
+  /** Reload the tags draft from the active conversation's manifest.
+   *  Mirror of _loadSystemPromptDraft — keeps the in-progress edit
+   *  buffer in sync with the canonical store, skipping when the
+   *  source already matches so a typing burst isn't blown away. */
+  _loadTagsDraft() {
+    const id = this.activeConversationId || "";
+    if (!id) {
+      this.tagsDraft = "";
+      this._tagsSource = "";
+      return;
+    }
+    const conv = this.conversations.find(c => c.id === id);
+    const stored = tagsToInput(conv?.tags);
+    if (this._tagsSource === id && this.tagsDraft === stored) return;
+    this.tagsDraft = stored;
+    this._tagsSource = id;
+  }
+
+  /** Persist the tag draft via Sessions.SetTags after parsing through
+   *  parseTagInput. No-op when the parsed list matches the stored
+   *  one, so blur events on unchanged tags don't fire backend writes. */
+  async _saveTags() {
+    const id = this.activeConversationId;
+    if (!id || this._tagsSource !== id) return;
+    const conv = this.conversations.find(c => c.id === id);
+    const stored = conv?.tags || [];
+    const parsed = parseTagInput(this.tagsDraft);
+    if (parsed.length === stored.length && parsed.every((t, i) => t === stored[i])) return;
+    try {
+      const svc = await import("@desktop/sessions/wailsservice");
+      const { demand } = await import("../result");
+      await demand<unknown>(svc.SetTags(id, parsed));
+      await this._reloadRail();
+    } catch (err: unknown) {
+      console.warn("sessions.SetTags failed:", err);
+    }
+  }
+
+  /** Reload the system-prompt draft from the active conversation's
+   *  manifest. Skips the reload when the draft is already in sync
+   *  with the same source id, so a typing burst doesn't get blown
+   *  away by a benign re-render. */
+  _loadSystemPromptDraft() {
+    const id = this.activeConversationId || "";
+    if (!id) {
+      this.systemPromptDraft = "";
+      this._systemPromptSource = "";
+      return;
+    }
+    const conv = this.conversations.find(c => c.id === id);
+    const stored = conv?.systemPrompt || "";
+    if (this._systemPromptSource === id && this.systemPromptDraft === stored) {
+      return;
+    }
+    this.systemPromptDraft = stored;
+    this._systemPromptSource = id;
+  }
+
+  /** Persist the system-prompt draft via Sessions.SetSystemPrompt.
+   *  Called on textarea blur. Skips when the draft equals the stored
+   *  value so unchanged blurs don't fire a no-op backend write. */
+  async _saveSystemPrompt() {
+    const id = this.activeConversationId;
+    if (!id || this._systemPromptSource !== id) return;
+    const conv = this.conversations.find(c => c.id === id);
+    const stored = conv?.systemPrompt || "";
+    const draft = this.systemPromptDraft;
+    if (stored === draft) return;
+    try {
+      const svc = await import("@desktop/sessions/wailsservice");
+      const { demand } = await import("../result");
+      await demand<unknown>(svc.SetSystemPrompt(id, draft));
+      await this._reloadRail();
+    } catch (err: unknown) {
+      console.warn("sessions.SetSystemPrompt failed:", err);
+    }
+  }
+
+  /** Threshold in pixels — being within this distance from the bottom
+   *  is "at bottom" for auto-scroll purposes. 16px tolerates the
+   *  rounding errors browsers introduce on sub-pixel scroll positions
+   *  AND the gap created by the last turn's bottom padding. */
+  static readonly SCROLL_BOTTOM_THRESHOLD = 16;
+
+  /** Resize the composer textarea to fit its content, capped at
+   *  COMPOSER_MAX_HEIGHT so very long pastes don't push the page
+   *  off-screen. Wired via @input — height is recomputed each
+   *  keystroke. The reset-to-empty pattern (height = "auto" → read
+   *  scrollHeight → assign) is the canonical "auto-grow textarea"
+   *  recipe; browsers without scrollHeight (none in practice) become
+   *  inert here. Public so the suite can drive without dispatching
+   *  fake @input events. */
+  _autoGrowComposer(ta: HTMLTextAreaElement) {
+    if (!ta) return;
+    // Clearing height first lets scrollHeight reflect the actual
+    // content height rather than the previous expanded box.
+    ta.style.height = "auto";
+    const next = Math.min(COMPOSER_MAX_HEIGHT, ta.scrollHeight);
+    ta.style.height = next + "px";
+  }
+
+  /** Recompute atBottom from the live scroll container metrics.
+   *  Called from the @scroll handler and from _scrollToBottom after
+   *  it nudges scrollTop. Public surface so tests can stub the
+   *  container's metrics then trigger the recompute deterministically. */
+  _recomputeAtBottom() {
+    const el = this._scrollEl;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    this.atBottom = distance <= LthnChatWindow.SCROLL_BOTTOM_THRESHOLD;
+  }
+
+  /** Scroll the transcript container to the bottom. behavior="smooth"
+   *  for user-triggered (button click), "auto" for auto-follow on
+   *  new turns (smooth feels laggy mid-stream). */
+  _scrollToBottom(behavior: ScrollBehavior = "smooth") {
+    const el = this._scrollEl;
+    if (!el) return;
+    // scrollTo with behavior:"smooth" requires animation frames; tests
+    // sit in happy-dom which doesn't tick those. The direct scrollTop
+    // assignment is the deterministic path.
+    el.scrollTop = el.scrollHeight;
+    if (behavior === "smooth" && typeof el.scrollTo === "function") {
+      try { el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }); } catch { /* no-op */ }
+    }
+    this.atBottom = true;
+  }
   async connectedCallback() {
     super.connectedCallback();
+    // SlashMenuController self-installs its window outside-click listener
+    // in hostConnected — no host-side wiring needed.
+    window.addEventListener("click", this._onOutsideClickForContext, true);
+    window.addEventListener("keydown", this._onKeyDownForCmdK);
     const [
       title, subtitle, rs, bt, by, bw, re, rn,
       et, eb, cd, cr, ca, cs, bSend, bStop,
@@ -235,7 +751,30 @@ class LthnChatWindow extends LitElement {
       sampTemp: sT, sampTopP: sP, sampMaxTok: sMax, sampContext: sCtx,
       labelSources: lSrc, sourcesEmpty: sEmpty,
     };
+    // Restore last-active conversation BEFORE _reloadRail. The rail
+    // loader's fallback assigns conversations[0] when active is null,
+    // which would clobber the saved value via the updated() hook's
+    // saveActiveConversation. Setting active up-front lets that
+    // guard skip + leaves the saved id in localStorage.
+    const saved = loadActiveConversation();
+    if (saved) this.activeConversationId = saved;
+
     await Promise.all([this._reloadRail(), this._reloadModel(), this._reloadBuild()]);
+
+    // Validate: if the restored id is no longer in the rail (the
+    // conversation was deleted externally between sessions), fall
+    // through to the first-conversation fallback.
+    if (this.activeConversationId &&
+        !this.conversations.some(c => c.id === this.activeConversationId)) {
+      this.activeConversationId = this.conversations[0]?.id || null;
+    }
+    // Restoration complete — future activeConversationId assignments
+    // (user clicks, slash commands, etc.) MUST persist to localStorage.
+    this._restoreComplete = true;
+    // Sync localStorage to the final restored value so it's a known
+    // good state when the next mount reads. (The initial Lit render
+    // fired updated() during the suppressed phase, so we owe one save.)
+    saveActiveConversation(this.activeConversationId);
   }
 
   /** Pull the binary version from firstlaunch.Build() so the footer
@@ -248,6 +787,17 @@ class LthnChatWindow extends LitElement {
       const b = await svc.Build();
       if (b?.version) this.version = b.version;
     } catch { /* keep fallback */ }
+  }
+
+  /** Lit lifecycle — strip the outside-click listener + keydown
+   *  handler when the element unmounts so we don't leak across
+   *  mount/unmount cycles. */
+  disconnectedCallback() {
+    // SlashMenuController self-strips its window outside-click listener
+    // in hostDisconnected — no host-side wiring needed.
+    window.removeEventListener("click", this._onOutsideClickForContext, true);
+    window.removeEventListener("keydown", this._onKeyDownForCmdK);
+    super.disconnectedCallback();
   }
 
   /** Pull the runner's loaded model list and pick the first one for
@@ -274,7 +824,111 @@ class LthnChatWindow extends LitElement {
    *  the selected conversation. */
   updated(changed: Map<string, unknown>) {
     if (changed.has("activeConversationId")) {
+      // Persist on every assignment so the next mount can restore.
+      // Includes null → clears the key, which is what we want when a
+      // delete cascade rolls forward to "nothing".
+      //
+      // Gate on _restoreComplete: the FIRST render (during initial
+      // connectedCallback) fires updated() while active is still the
+      // null default, before our async restore code reads localStorage.
+      // Letting that null write through would clobber the persisted id.
+      if (this._restoreComplete) {
+        saveActiveConversation(this.activeConversationId);
+      }
       void this._loadTurns();
+      // A new conversation always opens at the latest message — reset
+      // the bottom snapshot so the floating button doesn't flash on
+      // the first render.
+      this._prevTurnCount = 0;
+      this.atBottom = true;
+      // Reload the system-prompt + tags drafts from whichever
+      // conversation is now active. Sync from this.conversations
+      // rather than the backend so the switch is instant; the
+      // catalogue carries both fields as of the last _reloadRail.
+      this._loadSystemPromptDraft();
+      this._loadTagsDraft();
+    }
+    if (changed.has("conversations")) {
+      // After a List() refresh, the active conversation's prompt or
+      // tags may have arrived for the first time (initial mount) or
+      // been updated externally. Refresh both drafts.
+      this._loadSystemPromptDraft();
+      this._loadTagsDraft();
+    }
+    if (changed.has("liveTurns")) {
+      const count = (this.liveTurns || []).length;
+      // Auto-scroll when new turns arrive AND the user was already
+      // at the bottom. If they've scrolled up to read history, leave
+      // the viewport where it is — the floating button surfaces the
+      // new content without yanking focus.
+      if (count > this._prevTurnCount && this.atBottom) {
+        // Defer one microtask so the new turn has rendered before we
+        // measure scrollHeight + scrollTo.
+        queueMicrotask(() => this._scrollToBottom("auto"));
+      }
+      this._prevTurnCount = count;
+    }
+    if (changed.has("searchQuery")) {
+      this._scheduleContentSearch();
+    }
+    // findQuery / findCursor change-handling moved into FindController
+    // (Athena 2026-05-16, lane 2). The controller's setQuery() resets
+    // cursor + schedules scrollActiveIntoView() atomically with the
+    // mutation; the findCursor setter on this host does the same for
+    // cursor-only changes.
+  }
+
+  /** Delegator preserved for the existing chat-window.test.ts surface.
+   *  Logic lives in FindController.scrollActiveIntoView(). */
+  _scrollFindActiveIntoView() { this._findController.scrollActiveIntoView(); }
+
+  /** Debounce the live Sessions.Search call so each keystroke doesn't
+   *  fire a disk-walking request. Empty query clears the content-match
+   *  set immediately (no need to round-trip). */
+  _scheduleContentSearch() {
+    if (this._contentSearchTimer) {
+      clearTimeout(this._contentSearchTimer);
+      this._contentSearchTimer = null;
+    }
+    const q = (this.searchQuery || "").trim();
+    if (!q) {
+      // Blank query — drop the content matches; the title filter
+      // (instant) is the only path.
+      if (this.contentMatchedIds.size > 0) this.contentMatchedIds = new Set();
+      return;
+    }
+    this._contentSearchTimer = setTimeout(() => { void this._runContentSearch(q); }, 300);
+  }
+
+  /** Fire Sessions.Search for the given query and adopt the returned
+   *  ids — race-safe against fast typers: discards the response if
+   *  the user has moved on to a different query in the meantime.
+   *  Public so the test harness can drive it without waiting on the
+   *  300ms debounce window. */
+  async _runContentSearch(q: string) {
+    if (!q) {
+      this.contentMatchedIds = new Set();
+      return;
+    }
+    this._contentSearchQuery = q;
+    try {
+      const svc = await import("@desktop/sessions/wailsservice");
+      const { unwrap } = await import("../result");
+      type SearchHit = { id: string };
+      const hits = await unwrap<SearchHit[]>(svc.Search(q), []);
+      // The user may have typed more since we fired — only commit if
+      // the live query still matches our snapshot.
+      if (this.searchQuery.trim() !== q) return;
+      const ids = new Set<string>();
+      for (const h of (hits || [])) {
+        if (h && typeof h.id === "string") ids.add(h.id);
+      }
+      this.contentMatchedIds = ids;
+    } catch (err: unknown) {
+      console.warn("sessions.Search failed:", err);
+      // Don't blank the existing content matches on transient failure
+      // — the title filter still works; keep the previous set so the
+      // UI doesn't lose hits mid-typing.
     }
   }
 
@@ -313,6 +967,13 @@ class LthnChatWindow extends LitElement {
     this.sending = true;
     this.sendErr = "";
     this.composerValue = "";
+    // Reset history navigation — next ↑ should start at the newest
+    // (which now includes the message we're about to send).
+    this._historyController.reset();
+    // Composer is empty now — collapse the auto-grown height back to
+    // its base so the next message starts from a single-row affordance.
+    const taReset = this.querySelector<HTMLTextAreaElement>("textarea.lthn-chat-composer");
+    if (taReset) taReset.style.height = "";
     try {
       const [sessions, runner] = await Promise.all([
         import("@desktop/sessions/wailsservice"),
@@ -321,8 +982,237 @@ class LthnChatWindow extends LitElement {
       const { demand, unwrap } = await import("../result");
       type Msg = Parameters<typeof messageToTurn>[0];
       await demand<unknown>(sessions.Append(id, "user", text));
-      const history = await unwrap<Msg[]>(sessions.Read(id), []);
-      const reply = await unwrap<string>(runner.WChat(history || []), "");
+
+      // Auto-rename: the first user message in a still-default-named
+      // conversation becomes its title. Skipped when the user has
+      // already renamed (title doesn't match this.t.railNew). Failure
+      // is best-effort — a Rename hiccup must not break the send.
+      const current = this.conversations.find(c => c.id === id);
+      if (current && current.title === this.t.railNew) {
+        const derived = deriveAutoTitle(text);
+        if (derived) {
+          try { await demand<unknown>(sessions.Rename(id, derived)); }
+          catch { /* keep going — assistant reply matters more */ }
+        }
+      }
+
+      const rawHistory = await unwrap<Msg[]>(sessions.Read(id), []);
+      const history = withSystemPrompt(rawHistory || [], current?.systemPrompt || "");
+      const reply = await unwrap<string>(runner.WChat(history), "");
+      await demand<unknown>(sessions.Append(id, "assistant", reply || ""));
+      await this._loadTurns();
+      await this._reloadRail();
+    } catch (err: unknown) {
+      this.sendErr = err instanceof Error ? err.message : String(err);
+    } finally {
+      this.sending = false;
+    }
+  }
+
+  /** Keyboard handler for the conversation-search input. Drives the
+   *  arrow-key navigation through the filtered rail:
+   *    - Escape clears query + blurs (the original behaviour)
+   *    - ArrowDown / ArrowUp move navIndex through the display-ordered
+   *      filtered list, wrapping at the edges
+   *    - Enter commits the highlighted conversation as active +
+   *      blurs the input
+   *  Other keys fall through to the input's default behaviour. */
+  _railSearchKeydown(ev: KeyboardEvent) {
+    const input = ev.target as HTMLInputElement;
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      this.searchQuery = "";
+      this.navIndex = -1;
+      input.blur();
+      return;
+    }
+    // Build the navigation list — same filter the rail renders.
+    // Title match (in-memory) UNION content match (async Sessions.Search),
+    // intersected with the active tag filter.
+    const filtered = (this.searchQuery.trim().length > 0
+      ? this.conversations.filter(c =>
+          matchesSearch(c, this.searchQuery) || this.contentMatchedIds.has(c.id))
+      : this.conversations)
+      .filter(c => matchesTagFilter(c, this.tagFilter));
+    const flat = flattenForDisplay(filtered);
+    if (flat.length === 0) return;
+
+    if (ev.key === "ArrowDown") {
+      ev.preventDefault();
+      this.navIndex = this.navIndex < 0
+        ? 0
+        : (this.navIndex + 1) % flat.length;
+      return;
+    }
+    if (ev.key === "ArrowUp") {
+      ev.preventDefault();
+      this.navIndex = this.navIndex <= 0
+        ? flat.length - 1
+        : this.navIndex - 1;
+      return;
+    }
+    if (ev.key === "Enter") {
+      const target = this.navIndex >= 0 ? flat[this.navIndex] : flat[0];
+      if (target) {
+        ev.preventDefault();
+        this.activeConversationId = target.id;
+        this.navIndex = -1;
+        input.blur();
+      }
+    }
+  }
+
+  /** Toggle the composer's slash-commands dropdown. The menu itself
+   *  is rendered conditionally on this.slashMenuOpen in
+   *  _renderComposer; an outside-click listener (installed in
+   *  connectedCallback) closes it when the user clicks elsewhere. */
+  _toggleSlashMenu() { this._slashMenuController.toggle(); }
+
+  /** Slash command — `/new`. Closes the menu, then dispatches to the
+   *  same code path the rail's "New conversation" button uses. */
+  async _slashNew() {
+    this.slashMenuOpen = false;
+    await this._newConversation();
+  }
+
+  /** Slash command — `/clear`. Wipes the active conversation's
+   *  messages while keeping the session itself (title + id stay).
+   *  No-op when there's no active session or it's already empty
+   *  (idempotent at the Go layer). Reloads the transcript +
+   *  refreshes the rail so the rail's message-count drops. */
+  async _slashClear() {
+    this.slashMenuOpen = false;
+    if (!this.activeConversationId) return;
+    try {
+      const svc = await import("@desktop/sessions/wailsservice");
+      const { demand } = await import("../result");
+      await demand<unknown>(svc.ClearMessages(this.activeConversationId));
+      await this._loadTurns();
+      await this._reloadRail();
+    } catch (err: unknown) {
+      console.warn("slash /clear failed:", err);
+    }
+  }
+
+  /** Slash command — `/export`. Opens a SaveFile dialog so the user
+   *  picks a destination, then dispatches to _exportTo for the actual
+   *  write. Split so the e2e harness can drive _exportTo directly
+   *  without the native dialog. */
+  async _slashExport() {
+    this.slashMenuOpen = false;
+    if (!this.activeConversationId) return;
+    try {
+      const dlg = await import("@wailsio/runtime").then(m => m.Dialogs);
+      const picked = await dlg.SaveFile({
+        Title: "Export conversation",
+        ButtonText: "Export",
+        Filename: "conversation.md",
+        Filters: [{ DisplayName: "Markdown", Pattern: "*.md" }],
+      });
+      if (!picked || typeof picked !== "string") return;
+      await this._exportTo(this.activeConversationId, picked);
+    } catch (err: unknown) {
+      console.warn("export dialog failed:", err);
+    }
+  }
+
+  /** Write the named session's transcript as markdown to the given
+   *  path via sessions.Export. Public so tests can drive without
+   *  the native dialog. Throws on failure so the caller can decide
+   *  whether to surface inline. */
+  async _exportTo(id: string, path: string) {
+    if (!id || !path) return;
+    const svc = await import("@desktop/sessions/wailsservice");
+    const { demand } = await import("../result");
+    await demand<unknown>(svc.Export(id, path));
+  }
+
+  /** Slash command — `/copy`. Builds a plain-text transcript of the
+   *  active conversation and writes it to the system clipboard. No-op
+   *  when there's nothing to copy (no turns yet). */
+  async _slashCopy() {
+    this.slashMenuOpen = false;
+    const transcript = buildTranscript(this.liveTurns, this.activeModel);
+    if (!transcript) return;
+    try {
+      await navigator.clipboard.writeText(transcript);
+    } catch {
+      // Clipboard write may fail under sandbox; not load-bearing for
+      // the suite — the menu still closes either way.
+    }
+  }
+
+  /** Slash command — `/help`. Opens the shortcut-sheet overlay. The
+   *  slash menu closes immediately so the help overlay doesn't have
+   *  to coexist with the command list. */
+  _slashHelp() {
+    this.slashMenuOpen = false;
+    this.helpOpen = true;
+  }
+
+  /** Slash command — `/export-all`. Opens the OS folder picker, then
+   *  dispatches to _exportAllTo for the actual write. Split so the
+   *  test harness can drive the ExportAll wire without firing the
+   *  native dialog. */
+  async _slashExportAll() {
+    this.slashMenuOpen = false;
+    try {
+      const dlg = await import("@wailsio/runtime").then(m => m.Dialogs);
+      const picked = await dlg.OpenFile({
+        Title: "Export every conversation",
+        ButtonText: "Export here",
+        CanChooseFiles: false,
+        CanChooseDirectories: true,
+      });
+      if (!picked || typeof picked !== "string") return;
+      await this._exportAllTo(picked);
+    } catch (err: unknown) {
+      console.warn("export-all dialog failed:", err);
+    }
+  }
+
+  /** Write every session in the catalogue as markdown into dir via
+   *  Sessions.ExportAll. Returns the count written so callers can
+   *  surface a confirmation. Public so tests can drive without the
+   *  native dialog. Throws on backend failure so the caller sees
+   *  the inline error rather than a silent no-op. */
+  async _exportAllTo(dir: string): Promise<number> {
+    if (!dir) return 0;
+    const svc = await import("@desktop/sessions/wailsservice");
+    const { demand } = await import("../result");
+    const count = await demand<number>(svc.ExportAll(dir));
+    return count;
+  }
+
+  /** Regenerate the last assistant reply. Pops the trailing message
+   *  via sessions.RemoveLast, re-runs the runner against the trimmed
+   *  history, and appends a fresh assistant turn. No-op when there's
+   *  no active session, the session is empty, or a send is in flight.
+   *  Errors surface inline via sendErr — same channel as _send.
+   *  Public so tests can drive without UI events. */
+  async _regenerate() {
+    if (!this.activeConversationId || this.sending) return;
+    const id = this.activeConversationId;
+    this.sending = true;
+    this.sendErr = "";
+    try {
+      const [sessions, runner] = await Promise.all([
+        import("@desktop/sessions/wailsservice"),
+        import("@desktop/runner/service"),
+      ]);
+      const { demand, unwrap } = await import("../result");
+      type Msg = Parameters<typeof messageToTurn>[0];
+      // Drop the last message (expected to be the assistant reply
+      // we want to redo). If the session only has the user turn —
+      // because the previous send errored before the assistant
+      // landed — RemoveLast will return that user message instead
+      // and the next runner call will produce a fresh assistant.
+      // Either branch lands the right history shape.
+      await demand<unknown>(sessions.RemoveLast(id));
+      const rawHistory = await unwrap<Msg[]>(sessions.Read(id), []);
+      const current = this.conversations.find(c => c.id === id);
+      const history = withSystemPrompt(rawHistory || [], current?.systemPrompt || "");
+      const reply = await unwrap<string>(runner.WChat(history), "");
       await demand<unknown>(sessions.Append(id, "assistant", reply || ""));
       await this._loadTurns();
       await this._reloadRail();
@@ -334,11 +1224,165 @@ class LthnChatWindow extends LitElement {
   }
 
   /** Composer keydown — ⌘↵ / Ctrl+↵ sends; plain Enter inserts a
-   *  newline (textarea default). */
+   *  newline (textarea default). ↑/↓ walks the user-message history
+   *  when the composer is empty or already browsing — see
+   *  userMessageHistory for the source list. */
   _composerKeydown(e: KeyboardEvent) {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       void this._send();
+      return;
+    }
+    if (e.key === "ArrowUp")   { this._historyController.up(e);   return; }
+    if (e.key === "ArrowDown") { this._historyController.down(e); return; }
+  }
+
+  /** Cycle the right rail expand → collapse → expand. "hidden" is
+   *  reserved for the embedded shell to suppress the rail entirely
+   *  (set externally); the in-window controls only toggle between
+   *  expanded + collapsed so the user always has the rail one click
+   *  away. Header sliders + chart-line icons both call this — a
+   *  duplicate affordance the design intentionally provides. */
+  _toggleRightRail() {
+    this.rightRail = this.rightRail === "expanded" ? "collapsed" : "expanded";
+  }
+
+  /** Copy arbitrary text to the system clipboard. Used by the message
+   *  bubble's copy icon (transcript text) and the code-block's Copy
+   *  button (code body). navigator.clipboard.writeText resolves async
+   *  but we don't await — the click is a fire-and-forget UX action;
+   *  failures just no-op rather than block the UI. */
+  _copyText(text: string) {
+    if (!text) return;
+    void navigator.clipboard.writeText(text).catch(() => { /* clipboard denied */ });
+  }
+
+  /** Delete the active conversation via Dialogs.Question confirmation.
+   *  Split from _adoptDelete so tests can drive the deletion path
+   *  without firing the native dialog (same pattern as the model
+   *  browser's _importGguf / _adoptGguf split). */
+  async _deleteActiveConversation() {
+    if (!this.activeConversationId) return;
+    try {
+      const dlg = await import("@wailsio/runtime").then(m => m.Dialogs);
+      const choice = await dlg.Question({
+        Title: "Delete conversation?",
+        Message: "This removes the conversation and all of its messages. The action can't be undone.",
+        Buttons: [
+          { Label: "Delete", IsDefault: false },
+          { Label: "Cancel", IsCancel: true },
+        ],
+      });
+      if (choice !== "Delete") return;
+      await this._adoptDelete(this.activeConversationId);
+    } catch (err: unknown) {
+      console.warn("delete conversation dialog failed:", err);
+    }
+  }
+
+  /** Delete a conversation by id + refresh the rail. Public so tests
+   *  can drive deletion directly (no Dialogs.Question dependency).
+   *  After deletion, advance the active selection to the first
+   *  surviving conversation, or null when none remain — the chat
+   *  surface handles the no-active case by showing the empty state. */
+  async _adoptDelete(id: string) {
+    if (!id) return;
+    try {
+      const svc = await import("@desktop/sessions/wailsservice");
+      const { demand } = await import("../result");
+      await demand<unknown>(svc.Delete(id));
+      const wasActive = this.activeConversationId === id;
+      if (wasActive) {
+        // Defer the active reassignment until after _reloadRail
+        // has mutated this.conversations so we can pick the first
+        // surviving conversation deterministically.
+        this.activeConversationId = null;
+      }
+      await this._reloadRail();
+      if (wasActive && this.conversations.length > 0) {
+        this.activeConversationId = this.conversations[0].id;
+      }
+    } catch (err: unknown) {
+      this.railErr = err instanceof Error ? err.message : String(err);
+      throw err;
+    }
+  }
+
+  /** Fork the given conversation — Sessions.Duplicate clones the
+   *  manifest + messages into a new id (title suffixed with "(copy)").
+   *  After the call lands, the rail is refreshed and the new copy is
+   *  promoted to active so the user lands on the fork immediately.
+   *  Public so the context menu + future shortcut wire dispatch the
+   *  same code path. */
+  async _duplicateConversation(id: string) {
+    if (!id) return;
+    try {
+      const svc = await import("@desktop/sessions/wailsservice");
+      const { demand } = await import("../result");
+      const newId = await demand<string>(svc.Duplicate(id));
+      await this._reloadRail();
+      if (newId) this.activeConversationId = newId;
+    } catch (err: unknown) {
+      this.railErr = err instanceof Error ? err.message : String(err);
+      throw err;
+    }
+  }
+
+  /** Toggle pin state on a conversation. Persists to localStorage so
+   *  pinned set survives restart. Mirrors the model browser's
+   *  _togglePin shape — reassign to a new Set so Lit's `===` change
+   *  detection re-renders the rail. */
+  _togglePinConversation(id: string) {
+    if (!id) return;
+    const next = new Set(this.pinnedConversations);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    this.pinnedConversations = next;
+    savePinnedConversations(next);
+  }
+
+  /** Enter rename mode for the given conversation. The render path
+   *  swaps the title <div> for an autofocused <input>. Caller (the
+   *  pen icon's @click) passes the conversation id — typically the
+   *  active one, since the icon only appears on the active row. */
+  _startRename(id: string) {
+    if (!id) return;
+    this.renamingId = id;
+  }
+
+  /** Leave rename mode without persisting. Bound to Esc on the input
+   *  + to the icon-click toggle. */
+  _cancelRename() {
+    this.renamingId = null;
+  }
+
+  /** Commit a rename. Returns silently when the title is empty or
+   *  unchanged from the current value; otherwise persists via
+   *  sessions.Rename + refreshes the rail so the new title shows.
+   *  Public so the e2e test can drive without going through the
+   *  input's blur/keydown handlers. */
+  async _adoptRename(id: string, title: string) {
+    if (!id) return;
+    const clean = (title || "").trim();
+    if (!clean) {
+      this.renamingId = null;
+      return;
+    }
+    const existing = this.conversations.find(c => c.id === id);
+    if (existing && existing.title === clean) {
+      this.renamingId = null;
+      return;
+    }
+    try {
+      const svc = await import("@desktop/sessions/wailsservice");
+      const { demand } = await import("../result");
+      await demand<unknown>(svc.Rename(id, clean));
+      this.renamingId = null;
+      await this._reloadRail();
+    } catch (err: unknown) {
+      this.railErr = err instanceof Error ? err.message : String(err);
+      this.renamingId = null;
+      throw err;
     }
   }
 
@@ -418,8 +1462,11 @@ class LthnChatWindow extends LitElement {
       <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); letter-spacing:0.02em; padding:0 4px;">
         ${railData.ctx} · ${this.runnerCount} runner
       </div>
-      <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-sliders" style="font-size:10px;"></i></lthn-btn>
-      <lthn-btn tone="ghost" size="sm" ?active=${this.rightRail === "expanded"}>
+      <lthn-btn tone="ghost" size="sm" @click=${() => this._toggleRightRail()}>
+        <i class="fa-solid fa-sliders" style="font-size:10px;"></i>
+      </lthn-btn>
+      <lthn-btn tone="ghost" size="sm" ?active=${this.rightRail === "expanded"}
+                @click=${() => this._toggleRightRail()}>
         <i class="fa-solid fa-chart-line" style="font-size:10px;"></i>
       </lthn-btn>
     `;
@@ -434,6 +1481,8 @@ class LthnChatWindow extends LitElement {
         </div>
         ${this.rightRail !== "hidden" ? this._renderRightRail(railData) : nothing}
       </div>
+      ${this._renderContextMenu()}
+      ${this._renderHelpOverlay()}
     `;
 
     return renderChrome({
@@ -454,6 +1503,18 @@ class LthnChatWindow extends LitElement {
       { label: this.t.bWeek,      key: "week" },
     ];
     const activeId = this.activeConversationId;
+    const hasQuery = this.searchQuery.trim().length > 0;
+    const hasTagFilter = this.tagFilter.trim().length > 0;
+    // Title match (in-memory, instant) UNION content match (async,
+    // populated by _runContentSearch after a debounce window).
+    // INTERSECTED with the active tag filter — both must pass for a
+    // conversation to render.
+    const filtered = (hasQuery
+      ? this.conversations.filter(c =>
+          matchesSearch(c, this.searchQuery) || this.contentMatchedIds.has(c.id))
+      : this.conversations)
+      .filter(c => matchesTagFilter(c, this.tagFilter));
+    const noMatches = (hasQuery || hasTagFilter) && filtered.length === 0;
     return html`
       <aside style="width:240px; flex-shrink:0; border-right:1px solid rgba(255,255,255,0.05);
                     background:rgba(0,0,0,0.18); display:flex; flex-direction:column; min-height:0;">
@@ -462,12 +1523,79 @@ class LthnChatWindow extends LitElement {
                       background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06);
                       border-radius:6px;">
             <i class="fa-solid fa-magnifying-glass" style="font-size:10px; color:var(--fg-3);"></i>
-            <span style="font-size:11.5px; color:var(--fg-3);">${this.t.railSearch}</span>
-            <div style="flex:1"></div>
-            <span style="font-family:var(--font-mono); font-size:9.5px; color:var(--fg-3);
-                         padding:1px 4px; border:1px solid rgba(255,255,255,0.08); border-radius:3px;">⌘K</span>
+            <input
+              class="lthn-conversation-search"
+              type="text"
+              .value=${this.searchQuery}
+              placeholder=${this.t.railSearch}
+              @input=${(ev: Event) => {
+                this.searchQuery = (ev.target as HTMLInputElement).value;
+                this.navIndex = -1;
+              }}
+              @keydown=${(ev: KeyboardEvent) => this._railSearchKeydown(ev)}
+              style="
+                flex:1;
+                min-width:0;
+                background:transparent;
+                border:none;
+                outline:none;
+                font-size:11.5px;
+                color:var(--fg-0);
+                font-family:inherit;
+                --wails-draggable: no-drag;
+              "
+            />
+            ${hasQuery ? html`
+              <button
+                class="lthn-conversation-search-clear"
+                @click=${() => { this.searchQuery = ""; }}
+                title="Clear search"
+                style="
+                  flex-shrink:0;
+                  width:18px; height:18px;
+                  display:inline-flex; align-items:center; justify-content:center;
+                  background:transparent;
+                  border:none;
+                  border-radius:3px;
+                  color:var(--fg-3);
+                  cursor:pointer;
+                  padding:0;
+                  --wails-draggable: no-drag;
+                "
+                onmouseover="this.style.color='var(--fg-0)';"
+                onmouseout="this.style.color='var(--fg-3)';">
+                <i class="fa-solid fa-xmark" style="font-size:9px;"></i>
+              </button>
+            ` : html`
+              <span style="font-family:var(--font-mono); font-size:9.5px; color:var(--fg-3);
+                           padding:1px 4px; border:1px solid rgba(255,255,255,0.08); border-radius:3px;">⌘K</span>
+            `}
           </div>
         </div>
+        ${hasTagFilter ? html`
+          <div class="lthn-conversation-tag-filter"
+               style="margin:0 10px 6px; display:flex; align-items:center; gap:6px;
+                      padding:4px 8px;
+                      background:rgba(64,193,197,0.08);
+                      border:1px solid rgba(64,193,197,0.20);
+                      border-radius:6px;">
+            <span style="font-size:10px; color:var(--fg-3);">Tag</span>
+            <span style="font-size:11px; color:var(--brand-200); font-weight:500;">${this.tagFilter}</span>
+            <div style="flex:1"></div>
+            <button class="lthn-conversation-tag-filter-clear"
+                    @click=${() => this._toggleTagFilter(this.tagFilter)}
+                    title="Clear tag filter"
+                    style="
+                      width:16px; height:16px; padding:0;
+                      display:inline-flex; align-items:center; justify-content:center;
+                      background:transparent; border:none; border-radius:3px;
+                      color:var(--fg-3); cursor:pointer;
+                      --wails-draggable: no-drag;
+                    ">
+              <i class="fa-solid fa-xmark" style="font-size:8px;"></i>
+            </button>
+          </div>
+        ` : nothing}
         <div style="flex:1; min-height:0; overflow:hidden; padding:0 6px 8px;">
           ${empty ? html`
             <div style="padding:60px 16px 0; text-align:center; font-size:11.5px;
@@ -478,13 +1606,41 @@ class LthnChatWindow extends LitElement {
               </div>
               ${this.t.railEmpty}
             </div>
+          ` : noMatches ? html`
+            <div class="lthn-conversation-search-empty"
+                 style="padding:40px 16px 0; text-align:center; font-size:11.5px;
+                        color:var(--fg-3); line-height:1.55;">
+              <i class="fa-solid fa-magnifying-glass" style="font-size:16px; color:var(--fg-3); display:block; margin-bottom:10px;"></i>
+              No conversations match "${this.searchQuery.trim()}".
+            </div>
           ` : html`
             <div style="display:flex; flex-direction:column; gap:1px;">
-              ${buckets.map(b => html`
-                <lthn-label style="display:block; padding:8px 8px 4px;">${b.label}</lthn-label>
-                ${this.conversations.filter(c => c.bucket === b.key).map(c =>
-                  this._renderRailItem(c, c.id === activeId))}
-              `)}
+              ${(() => {
+                // Display-ordered flat list — used to map a row's
+                // global index back to navIndex for the highlight.
+                const flat = flattenForDisplay(filtered);
+                const idAtIndex = (this.navIndex >= 0 && this.navIndex < flat.length)
+                  ? flat[this.navIndex].id
+                  : "";
+                const { pinned: pinnedRows, rest } = splitPinnedConversations(filtered, this.pinnedConversations);
+                return html`
+                  ${pinnedRows.length > 0 ? html`
+                    <lthn-label class="lthn-conversation-pinned-label"
+                                style="display:block; padding:8px 8px 4px;">
+                      Pinned · ${pinnedRows.length}
+                    </lthn-label>
+                    ${pinnedRows.map(c => this._renderRailItem(c, c.id === activeId, c.id === idAtIndex))}
+                  ` : nothing}
+                  ${buckets.map(b => {
+                    const items = rest.filter(c => c.bucket === b.key);
+                    if (items.length === 0) return nothing;
+                    return html`
+                      <lthn-label style="display:block; padding:8px 8px 4px;">${b.label}</lthn-label>
+                      ${items.map(c => this._renderRailItem(c, c.id === activeId, c.id === idAtIndex))}
+                    `;
+                  })}
+                `;
+              })()}
             </div>
           `}
         </div>
@@ -499,31 +1655,504 @@ class LthnChatWindow extends LitElement {
     `;
   }
 
-  _renderRailItem(c: Conversation, active: boolean) {
+  /** Render a text fragment with the active searchQuery highlighted —
+   *  matched segments get the brand colour + slight weight bump so
+   *  the row visibly carries WHY it matched. Empty query → identity
+   *  render (single non-match segment). */
+  _renderHighlighted(text: string) {
+    const segments = highlightMatch(text || "", this.searchQuery || "");
+    if (segments.length === 0) return nothing;
+    return segments.map(seg => seg.match
+      ? html`<span class="lthn-rail-match"
+                   style="color:var(--brand-200); font-weight:600;
+                          background:rgba(64,193,197,0.10);
+                          border-radius:2px; padding:0 1px;">${seg.text}</span>`
+      : html`<span>${seg.text}</span>`);
+  }
+
+  _renderRailItem(c: Conversation, active: boolean, navHighlight: boolean = false) {
+    const renaming = this.renamingId === c.id;
+    // Background priority: active > nav-highlight > none. Border
+    // shows on either active or nav-highlight (active is solid
+    // brand, nav-highlight is dashed brand) so keyboard nav reads
+    // as "preview" rather than "selected" until Enter commits.
+    const bg = active ? "rgba(255,255,255,0.07)"
+             : navHighlight ? "rgba(64,193,197,0.06)"
+             : "transparent";
+    const borderLeft = active ? "2px solid var(--brand-400)"
+                     : navHighlight ? "2px dashed var(--brand-400)"
+                     : "2px solid transparent";
     return html`
       <div
-        @click=${() => { this.activeConversationId = c.id; }}
+        class=${navHighlight ? "lthn-conversation-row lthn-conversation-nav" : "lthn-conversation-row"}
+        data-conversation-id=${c.id}
+        @click=${() => { if (!renaming) this.activeConversationId = c.id; }}
+        @contextmenu=${(ev: MouseEvent) => this._onContextMenuRailRow(ev, c)}
         style="padding:8px 10px; border-radius:6px;
-               background:${active ? "rgba(255,255,255,0.07)" : "transparent"};
-               border-left:${active ? "2px solid var(--brand-400)" : "2px solid transparent"};
-               display:flex; flex-direction:column; gap:2px; cursor:pointer;
+               background:${bg};
+               border-left:${borderLeft};
+               display:flex; flex-direction:row; align-items:center; gap:8px;
+               cursor:${renaming ? "default" : "pointer"};
                --wails-draggable: no-drag;">
-        <div style="font-size:12px; font-weight:500; color:var(--fg-0); white-space:nowrap;
-                    overflow:hidden; text-overflow:ellipsis; letter-spacing:-0.005em;">${c.title}</div>
-        ${c.snippet ? html`<div style="font-size:10.5px; color:var(--fg-3); white-space:nowrap;
-                    overflow:hidden; text-overflow:ellipsis;">${c.snippet}</div>` : nothing}
-        ${c.model ? html`<div style="font-family:var(--font-mono); font-size:9px; color:var(--fg-3);
-                    letter-spacing:0.02em; margin-top:1px;">${c.model}</div>` : nothing}
+        <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;">
+          ${renaming
+            ? html`<input
+                class="lthn-conversation-rename"
+                data-conversation-id=${c.id}
+                .value=${c.title}
+                @click=${(ev: Event) => ev.stopPropagation()}
+                @keydown=${(ev: KeyboardEvent) => {
+                  if (ev.key === "Enter") {
+                    ev.preventDefault();
+                    void this._adoptRename(c.id, (ev.target as HTMLInputElement).value);
+                  } else if (ev.key === "Escape") {
+                    ev.preventDefault();
+                    this._cancelRename();
+                  }
+                }}
+                @blur=${(ev: Event) => {
+                  void this._adoptRename(c.id, (ev.target as HTMLInputElement).value);
+                }}
+                ${litRef((el?: Element) => { if (el instanceof HTMLInputElement) el.focus(); })}
+                style="
+                  width:100%;
+                  font-size:12px; font-weight:500;
+                  color:var(--fg-0);
+                  background:rgba(0,0,0,0.32);
+                  border:1px solid rgba(64,193,197,0.32);
+                  border-radius:4px;
+                  padding:3px 6px;
+                  letter-spacing:-0.005em;
+                  font-family:inherit;
+                  outline:none;
+                  --wails-draggable: no-drag;
+                ">`
+            : html`<div style="font-size:12px; font-weight:500; color:var(--fg-0); white-space:nowrap;
+                      overflow:hidden; text-overflow:ellipsis; letter-spacing:-0.005em;
+                      display:flex; align-items:center; gap:6px;">
+                <span style="overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0;">${this._renderHighlighted(c.title)}</span>
+                ${c.systemPrompt ? html`<i class="fa-solid fa-wand-magic-sparkles lthn-conversation-prompt-flag"
+                                          title="Custom instructions set for this conversation"
+                                          style="font-size:9px; color:var(--brand-300); flex-shrink:0;
+                                                 opacity:0.85;"></i>` : nothing}
+                ${c.updatedAt ? html`<span class="lthn-conversation-time"
+                                            style="font-size:9.5px; color:var(--fg-3);
+                                                   flex-shrink:0; font-family:var(--font-mono);
+                                                   letter-spacing:0.01em;">${relativeTime(c.updatedAt, Math.floor(Date.now() / 1000))}</span>` : nothing}
+              </div>`}
+          ${c.snippet && !renaming ? html`<div style="font-size:10.5px; color:var(--fg-3); white-space:nowrap;
+                      overflow:hidden; text-overflow:ellipsis;">${this._renderHighlighted(c.snippet)}</div>` : nothing}
+          ${c.model && !renaming ? html`<div style="font-family:var(--font-mono); font-size:9px; color:var(--fg-3);
+                      letter-spacing:0.02em; margin-top:1px;">${c.model}</div>` : nothing}
+          ${c.tags && c.tags.length > 0 && !renaming ? html`
+            <div class="lthn-conversation-tags"
+                 style="display:flex; flex-wrap:wrap; gap:3px; margin-top:3px;">
+              ${c.tags.map(tag => {
+                const isActive = this.tagFilter === tag;
+                return html`
+                  <button class="lthn-conversation-tag"
+                          data-tag=${tag}
+                          ?data-active=${isActive}
+                          @click=${(ev: Event) => {
+                            ev.stopPropagation();
+                            this._toggleTagFilter(tag);
+                          }}
+                          title=${isActive ? "Clear filter" : `Filter to "${tag}"`}
+                          style="font:inherit; font-size:9px;
+                                 padding:1px 5px; border-radius:999px;
+                                 background:${isActive ? "rgba(64,193,197,0.20)" : "rgba(64,193,197,0.08)"};
+                                 border:1px solid ${isActive ? "rgba(64,193,197,0.45)" : "rgba(64,193,197,0.18)"};
+                                 color:var(--brand-200); letter-spacing:0.01em;
+                                 cursor:pointer;
+                                 --wails-draggable: no-drag;">${tag}</button>
+                `;
+              })}
+            </div>
+          ` : nothing}
+        </div>
+        ${active && !renaming ? html`
+          <button
+            class="lthn-conversation-pin"
+            data-conversation-id=${c.id}
+            ?data-pinned=${this.pinnedConversations.has(c.id)}
+            @click=${(ev: Event) => {
+              ev.stopPropagation();
+              this._togglePinConversation(c.id);
+            }}
+            title=${this.pinnedConversations.has(c.id) ? "Unpin" : "Pin"}
+            style="
+              flex-shrink:0;
+              width:22px; height:22px;
+              display:inline-flex; align-items:center; justify-content:center;
+              background:transparent;
+              border:1px solid transparent;
+              border-radius:5px;
+              color:${this.pinnedConversations.has(c.id) ? "var(--brand-300)" : "var(--fg-3)"};
+              cursor:pointer;
+              --wails-draggable: no-drag;
+            "
+            onmouseover="this.style.background='rgba(64,193,197,0.08)';"
+            onmouseout="this.style.background='transparent';">
+            <i class="fa-${this.pinnedConversations.has(c.id) ? "solid" : "regular"} fa-star" style="font-size:10px;"></i>
+          </button>
+          <button
+            class="lthn-conversation-rename-toggle"
+            data-conversation-id=${c.id}
+            @click=${(ev: Event) => {
+              ev.stopPropagation();
+              this._startRename(c.id);
+            }}
+            title="Rename conversation"
+            style="
+              flex-shrink:0;
+              width:22px; height:22px;
+              display:inline-flex; align-items:center; justify-content:center;
+              background:transparent;
+              border:1px solid transparent;
+              border-radius:5px;
+              color:var(--fg-3);
+              cursor:pointer;
+              --wails-draggable: no-drag;
+            "
+            onmouseover="this.style.background='rgba(64,193,197,0.08)'; this.style.color='var(--brand-300)';"
+            onmouseout="this.style.background='transparent'; this.style.color='var(--fg-3)';">
+            <i class="fa-regular fa-pen-to-square" style="font-size:10px;"></i>
+          </button>
+          <button
+            class="lthn-conversation-delete"
+            data-conversation-id=${c.id}
+            @click=${(ev: Event) => {
+              ev.stopPropagation();
+              void this._deleteActiveConversation();
+            }}
+            title="Delete conversation"
+            style="
+              flex-shrink:0;
+              width:22px; height:22px;
+              display:inline-flex; align-items:center; justify-content:center;
+              background:transparent;
+              border:1px solid transparent;
+              border-radius:5px;
+              color:var(--fg-3);
+              cursor:pointer;
+              --wails-draggable: no-drag;
+            "
+            onmouseover="this.style.background='rgba(239,68,68,0.08)'; this.style.color='var(--error-400)';"
+            onmouseout="this.style.background='transparent'; this.style.color='var(--fg-3)';">
+            <i class="fa-regular fa-trash-can" style="font-size:10px;"></i>
+          </button>
+        ` : nothing}
+      </div>
+    `;
+  }
+
+  /* — right-click context menu (Rename / Pin / Export / Delete) — */
+  _renderContextMenu() {
+    const cm = this.contextMenuFor;
+    if (!cm) return nothing;
+    const pinned = this.pinnedConversations.has(cm.id);
+    // Clamp the menu inside the viewport so a click near the right
+    // edge doesn't push it off-screen. 180px wide × ~165px tall is
+    // the rendered footprint; bias by 8px so the cursor lands
+    // inside the menu (predictable arrow-keys + click-through).
+    const W = 180, H = 165, PAD = 8;
+    const maxX = (typeof window !== "undefined" ? window.innerWidth  : cm.x + W) - W - PAD;
+    const maxY = (typeof window !== "undefined" ? window.innerHeight : cm.y + H) - H - PAD;
+    const x = Math.max(PAD, Math.min(cm.x, maxX));
+    const y = Math.max(PAD, Math.min(cm.y, maxY));
+    return html`
+      <div
+        class="lthn-conversation-context-menu"
+        role="menu"
+        data-conversation-id=${cm.id}
+        style="
+          position:fixed; left:${x}px; top:${y}px;
+          z-index:9000; width:${W}px;
+          background:rgba(18,20,24,0.96);
+          border:1px solid rgba(255,255,255,0.08);
+          border-radius:8px;
+          padding:4px;
+          box-shadow:0 12px 32px rgba(0,0,0,0.5);
+          --wails-draggable: no-drag;
+        "
+        @click=${(ev: Event) => ev.stopPropagation()}>
+        <button
+          class="lthn-conversation-context-rename"
+          role="menuitem"
+          @click=${() => this._runContextMenuAction(() => this._startRename(cm.id))}
+          style="${ctxItemStyle()}"
+          onmouseover="this.style.background='rgba(64,193,197,0.10)';"
+          onmouseout="this.style.background='transparent';">
+          <i class="fa-regular fa-pen-to-square" style="font-size:11px; width:14px;"></i>
+          <span>Rename</span>
+          <span style="margin-left:auto; font-size:10px; color:var(--fg-3);">F2</span>
+        </button>
+        <button
+          class="lthn-conversation-context-pin"
+          role="menuitem"
+          @click=${() => this._runContextMenuAction(() => this._togglePinConversation(cm.id))}
+          style="${ctxItemStyle()}"
+          onmouseover="this.style.background='rgba(64,193,197,0.10)';"
+          onmouseout="this.style.background='transparent';">
+          <i class="fa-${pinned ? "solid" : "regular"} fa-star"
+             style="font-size:11px; width:14px; color:${pinned ? "var(--brand-300)" : "inherit"};"></i>
+          <span>${pinned ? "Unpin" : "Pin"}</span>
+        </button>
+        <button
+          class="lthn-conversation-context-duplicate"
+          role="menuitem"
+          @click=${() => this._runContextMenuAction(() => this._duplicateConversation(cm.id))}
+          style="${ctxItemStyle()}"
+          onmouseover="this.style.background='rgba(64,193,197,0.10)';"
+          onmouseout="this.style.background='transparent';">
+          <i class="fa-regular fa-clone" style="font-size:11px; width:14px;"></i>
+          <span>Duplicate</span>
+        </button>
+        <button
+          class="lthn-conversation-context-export"
+          role="menuitem"
+          @click=${() => this._runContextMenuAction(() => this._slashExport())}
+          style="${ctxItemStyle()}"
+          onmouseover="this.style.background='rgba(64,193,197,0.10)';"
+          onmouseout="this.style.background='transparent';">
+          <i class="fa-regular fa-file-arrow-down" style="font-size:11px; width:14px;"></i>
+          <span>Export to .md</span>
+        </button>
+        <div style="height:1px; background:rgba(255,255,255,0.06); margin:4px 6px;"></div>
+        <button
+          class="lthn-conversation-context-delete"
+          role="menuitem"
+          @click=${() => this._runContextMenuAction(() => this._deleteActiveConversation())}
+          style="${ctxItemStyle("var(--error-400)")}"
+          onmouseover="this.style.background='rgba(239,68,68,0.10)';"
+          onmouseout="this.style.background='transparent';">
+          <i class="fa-regular fa-trash-can" style="font-size:11px; width:14px;"></i>
+          <span>Delete</span>
+        </button>
+      </div>
+    `;
+  }
+
+  /* — /help overlay (keyboard shortcuts + slash commands cheat sheet) — */
+  _renderHelpOverlay() {
+    if (!this.helpOpen) return nothing;
+    const sections: Array<{ heading: string; entries: Array<[string, string]> }> = [
+      {
+        heading: "Conversations",
+        entries: [
+          ["⌘N",          "New conversation"],
+          ["⌘K",          "Focus the rail search"],
+          ["⌘B",          "Toggle the right rail"],
+          ["F2",          "Rename the active conversation"],
+          ["↑ / ↓",       "Walk the conversation list"],
+          ["Enter",       "Open the highlighted conversation"],
+          ["Right-click", "Context menu — rename / pin / export / delete"],
+        ],
+      },
+      {
+        heading: "Composer",
+        entries: [
+          ["⌘↵",     "Send the message"],
+          ["⌘F",     "Find in the transcript"],
+          ["?",      "Show this cheat sheet"],
+          ["Escape", "Dismiss overlays in priority order"],
+        ],
+      },
+      {
+        heading: "Slash commands",
+        entries: [
+          ["/new",        "New conversation"],
+          ["/copy",       "Copy transcript to the clipboard"],
+          ["/clear",      "Wipe messages (session stays)"],
+          ["/export",     "Export the transcript as Markdown"],
+          ["/export-all", "Back up every conversation to a folder"],
+          ["/help",       "Show this cheat sheet"],
+        ],
+      },
+    ];
+    return html`
+      <div
+        class="lthn-chat-help-backdrop"
+        @click=${() => { this.helpOpen = false; }}
+        style="
+          position:absolute; inset:0;
+          background:rgba(0,0,0,0.48);
+          backdrop-filter:blur(2px);
+          display:flex; align-items:center; justify-content:center;
+          z-index:9100;
+          --wails-draggable: no-drag;
+        ">
+        <div
+          class="lthn-chat-help"
+          role="dialog"
+          aria-label="Keyboard shortcuts"
+          @click=${(ev: Event) => ev.stopPropagation()}
+          style="
+            min-width:380px; max-width:520px; max-height:80%;
+            overflow-y:auto;
+            background:rgba(18,20,24,0.98);
+            border:1px solid rgba(255,255,255,0.10);
+            border-radius:10px;
+            padding:18px 20px;
+            box-shadow:0 24px 48px rgba(0,0,0,0.5);
+          ">
+          <div style="display:flex; align-items:center; gap:10px; padding-bottom:12px;
+                      border-bottom:1px solid rgba(255,255,255,0.06);">
+            <div style="font-size:14px; font-weight:600; color:var(--fg-0); letter-spacing:-0.01em;">
+              Shortcuts
+            </div>
+            <div style="flex:1"></div>
+            <button
+              class="lthn-chat-help-close"
+              @click=${() => { this.helpOpen = false; }}
+              title="Close"
+              style="
+                width:24px; height:24px;
+                display:inline-flex; align-items:center; justify-content:center;
+                background:transparent; border:none; border-radius:5px;
+                color:var(--fg-3); cursor:pointer;
+                --wails-draggable: no-drag;
+              "
+              onmouseover="this.style.background='rgba(255,255,255,0.06)'; this.style.color='var(--fg-1)';"
+              onmouseout="this.style.background='transparent'; this.style.color='var(--fg-3)';">
+              <i class="fa-solid fa-xmark" style="font-size:12px;"></i>
+            </button>
+          </div>
+          ${sections.map(s => html`
+            <div style="padding-top:14px;">
+              <div class="lthn-chat-help-heading"
+                   style="font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase;
+                          color:var(--fg-3); margin-bottom:6px;">
+                ${s.heading}
+              </div>
+              <div style="display:flex; flex-direction:column; gap:4px;">
+                ${s.entries.map(([key, desc]) => html`
+                  <div class="lthn-chat-help-row"
+                       style="display:flex; align-items:center; gap:14px; padding:4px 0;">
+                    <span style="font-family:var(--font-mono); font-size:11px;
+                                 color:var(--brand-300);
+                                 min-width:96px;">${key}</span>
+                    <span style="font-size:12px; color:var(--fg-1);">${desc}</span>
+                  </div>
+                `)}
+              </div>
+            </div>
+          `)}
+        </div>
       </div>
     `;
   }
 
   /* — surface (conversation transcript or empty hero) — */
+  /** Find bar — floats over the transcript when findOpen is true. */
+  _renderFindBar() {
+    if (!this.findOpen) return nothing;
+    const count = this._findMatchCount();
+    const hasQuery = this.findQuery.trim().length > 0;
+    const counterText = !hasQuery ? ""
+      : count === 0 ? "no matches"
+      : `${this.findCursor + 1} of ${count}`;
+    const arrowDisabled = count === 0;
+    return html`
+      <div class="lthn-chat-find"
+           style="position:absolute; top:10px; right:20px; z-index:60;
+                  display:flex; align-items:center; gap:8px;
+                  padding:6px 10px;
+                  background:rgba(18,20,24,0.96);
+                  border:1px solid rgba(64,193,197,0.22);
+                  border-radius:8px;
+                  box-shadow:0 8px 20px rgba(0,0,0,0.42);
+                  --wails-draggable: no-drag;">
+        <i class="fa-solid fa-magnifying-glass" style="font-size:10px; color:var(--fg-3);"></i>
+        <input
+          class="lthn-chat-find-input"
+          type="text"
+          placeholder="Find in transcript"
+          .value=${this.findQuery}
+          @input=${(ev: Event) => { this.findQuery = (ev.target as HTMLInputElement).value; }}
+          @keydown=${(ev: KeyboardEvent) => {
+            // ↓ / Enter → next match; ↑ → previous. preventDefault so
+            // the keystroke doesn't move the caret + accidentally
+            // submit a form parent if one ever wraps the bar.
+            if (ev.key === "ArrowDown" || ev.key === "Enter") {
+              ev.preventDefault();
+              this._findStep(1);
+              return;
+            }
+            if (ev.key === "ArrowUp") {
+              ev.preventDefault();
+              this._findStep(-1);
+              return;
+            }
+          }}
+          ${litRef((el?: Element) => { if (el instanceof HTMLInputElement) el.focus(); })}
+          style="
+            background:transparent; border:none; outline:none;
+            font-size:12px; color:var(--fg-0);
+            font-family:inherit;
+            width:200px;
+            --wails-draggable: no-drag;
+          " />
+        <span class="lthn-chat-find-count"
+              style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);
+                     letter-spacing:0.02em; min-width:60px; text-align:right;">
+          ${counterText}
+        </span>
+        <button
+          class="lthn-chat-find-prev"
+          title="Previous match"
+          ?disabled=${arrowDisabled}
+          @click=${() => this._findStep(-1)}
+          style="
+            width:22px; height:22px;
+            display:inline-flex; align-items:center; justify-content:center;
+            background:transparent; border:none; border-radius:4px;
+            color:${arrowDisabled ? "var(--fg-3)" : "var(--fg-1)"};
+            opacity:${arrowDisabled ? 0.4 : 1};
+            cursor:${arrowDisabled ? "default" : "pointer"};
+            --wails-draggable: no-drag;
+          ">
+          <i class="fa-solid fa-chevron-up" style="font-size:9px;"></i>
+        </button>
+        <button
+          class="lthn-chat-find-next"
+          title="Next match"
+          ?disabled=${arrowDisabled}
+          @click=${() => this._findStep(1)}
+          style="
+            width:22px; height:22px;
+            display:inline-flex; align-items:center; justify-content:center;
+            background:transparent; border:none; border-radius:4px;
+            color:${arrowDisabled ? "var(--fg-3)" : "var(--fg-1)"};
+            opacity:${arrowDisabled ? 0.4 : 1};
+            cursor:${arrowDisabled ? "default" : "pointer"};
+            --wails-draggable: no-drag;
+          ">
+          <i class="fa-solid fa-chevron-down" style="font-size:9px;"></i>
+        </button>
+        <button
+          class="lthn-chat-find-close"
+          title="Close"
+          @click=${() => { this.findOpen = false; this.findQuery = ""; this.findCursor = 0; }}
+          style="
+            width:22px; height:22px;
+            display:inline-flex; align-items:center; justify-content:center;
+            background:transparent; border:none; border-radius:4px;
+            color:var(--fg-3); cursor:pointer;
+            --wails-draggable: no-drag;
+          ">
+          <i class="fa-solid fa-xmark" style="font-size:10px;"></i>
+        </button>
+      </div>
+    `;
+  }
+
   _renderSurface(turns: ChatTurn[] | null, banner: ChatBanner | null) {
     const empty = this.state === "empty";
     const streamingIdx = this.state === "generating" ? (turns?.length || 0) - 1 : -1;
     return html`
       <main style="flex:1; min-height:0; display:flex; flex-direction:column; position:relative;">
+        ${this._renderFindBar()}
         ${banner ? html`
           <div style="flex-shrink:0; margin:12px 22px 0; padding:10px 12px; border-radius:8px;
                       background:${banner.tone === "warn" ? "rgba(217,154,72,0.08)" : "rgba(64,193,197,0.06)"};
@@ -535,11 +2164,39 @@ class LthnChatWindow extends LitElement {
             ${banner.action ? html`<lthn-btn tone="ghost" size="sm">${banner.action}</lthn-btn>` : nothing}
           </div>
         ` : nothing}
-        <div style="flex:1; min-height:0; overflow:hidden; padding:20px 22px;
-                    display:flex; flex-direction:column; gap:22px;">
+        <div
+          class="lthn-chat-transcript"
+          ${litRef((el?: Element) => {
+            this._scrollEl = el instanceof HTMLElement ? el : null;
+          })}
+          @scroll=${() => this._recomputeAtBottom()}
+          style="flex:1; min-height:0; overflow-y:auto; padding:20px 22px;
+                 display:flex; flex-direction:column; gap:22px;">
           ${empty ? this._renderEmpty() :
-            (turns || []).map((t, i) => this._renderTurn(t, i === streamingIdx))}
+            (turns || []).map((t, i, arr) => this._renderTurn(t, i === streamingIdx, i === arr.length - 1, i))}
         </div>
+        ${!empty && !this.atBottom ? html`
+          <button
+            class="lthn-chat-scroll-bottom"
+            title="Jump to latest"
+            @click=${() => this._scrollToBottom("smooth")}
+            style="
+              position:absolute; right:18px; bottom:14px;
+              display:flex; align-items:center; gap:6px;
+              padding:6px 10px;
+              background:rgba(64,193,197,0.14);
+              border:1px solid rgba(64,193,197,0.32);
+              border-radius:999px;
+              color:var(--brand-200);
+              font-size:11px; letter-spacing:-0.005em;
+              cursor:pointer;
+              box-shadow:0 8px 16px rgba(0,0,0,0.32);
+              --wails-draggable: no-drag;
+            ">
+            <i class="fa-solid fa-arrow-down" style="font-size:9px;"></i>
+            <span>Latest</span>
+          </button>
+        ` : nothing}
       </main>
     `;
   }
@@ -583,8 +2240,12 @@ class LthnChatWindow extends LitElement {
     `;
   }
 
-  _renderTurn(t: ChatTurn, streaming: boolean) {
+  _renderTurn(t: ChatTurn, streaming: boolean, isLast: boolean = false, turnIndex: number = -1) {
     const isYou = t.role === "you";
+    // Regenerate only makes sense on the final assistant turn —
+    // re-running an earlier message would orphan everything after.
+    // The button stays disabled while a send/regenerate is in flight.
+    const canRegenerate = isLast && !isYou && !this.sending;
     return html`
       <div style="display:flex; flex-direction:column; gap:8px; padding-top:4px;">
         <div style="display:flex; align-items:center; gap:8px;">
@@ -604,14 +2265,39 @@ class LthnChatWindow extends LitElement {
           <div style="flex:1"></div>
           ${!streaming ? html`
             <div style="display:flex; gap:4px; opacity:0.5;">
-              <lthn-btn tone="quiet" size="sm"><i class="fa-regular fa-copy" style="font-size:10px;"></i></lthn-btn>
-              <lthn-btn tone="quiet" size="sm"><i class="fa-solid fa-rotate-right" style="font-size:10px;"></i></lthn-btn>
+              <lthn-btn tone="quiet" size="sm" @click=${() => this._copyText(t.text)}>
+                <i class="fa-regular fa-copy" style="font-size:10px;"></i>
+              </lthn-btn>
+              ${canRegenerate ? html`
+                <lthn-btn class="lthn-chat-regenerate" tone="quiet" size="sm"
+                          @click=${() => void this._regenerate()}
+                          title="Regenerate reply">
+                  <i class="fa-solid fa-rotate-right" style="font-size:10px;"></i>
+                </lthn-btn>
+              ` : nothing}
             </div>
           ` : nothing}
         </div>
         <div style="margin-left:30px; font-size:13.5px; line-height:1.6;
                     color:var(--fg-1); white-space:pre-wrap; letter-spacing:-0.003em;">
-          ${t.text}${streaming ? html`<span style="display:inline-block; width:7px; height:14px;
+          ${this.findOpen && this.findQuery.trim()
+            ? (() => {
+                // Find the active-match offset inside THIS turn, if any.
+                // The flat positions array maps cursor index → {turn,
+                // offset}; we look up the cursor's entry then check
+                // whether it belongs to this turn.
+                const positions = findMatchPositions(this.liveTurns, this.findQuery);
+                const active = positions[this.findCursor];
+                const activeOffsetHere = (active && active.turnIndex === turnIndex)
+                  ? active.offset : -1;
+                return findSplitTurn(t.text || "", this.findQuery, activeOffsetHere).map(seg => seg.match
+                  ? html`<span class=${seg.active ? "lthn-chat-find-match lthn-chat-find-active" : "lthn-chat-find-match"}
+                                style="background:${seg.active ? "rgba(64,193,197,0.42)" : "rgba(217,154,72,0.32)"};
+                                       color:var(--fg-0);
+                                       border-radius:2px; padding:0 1px;">${seg.text}</span>`
+                  : html`<span>${seg.text}</span>`);
+              })()
+            : t.text}${streaming ? html`<span style="display:inline-block; width:7px; height:14px;
             background:var(--brand-300); vertical-align:-3px; margin-left:2px;
             animation:lthn-cursor 1s steps(2) infinite;"></span>` : nothing}
         </div>
@@ -625,7 +2311,7 @@ class LthnChatWindow extends LitElement {
               <span style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);
                            letter-spacing:0.04em; text-transform:uppercase;">${t.code.lang}</span>
               <div style="flex:1"></div>
-              <lthn-btn tone="quiet" size="sm">
+              <lthn-btn tone="quiet" size="sm" @click=${() => this._copyText(t.code!.text)}>
                 <i class="fa-regular fa-copy" style="font-size:10px;"></i> Copy
               </lthn-btn>
             </div>
@@ -669,12 +2355,21 @@ class LthnChatWindow extends LitElement {
                     min-height:78px; padding:12px 14px 38px;
                     opacity:${disabled ? 0.55 : 1};">
           <textarea
+            class="lthn-chat-composer"
             .value=${value}
             ?disabled=${disabled || sending}
-            @input=${(e: Event) => { this.composerValue = (e.target as HTMLTextAreaElement).value; }}
+            @input=${(e: Event) => {
+              const ta = e.target as HTMLTextAreaElement;
+              this.composerValue = ta.value;
+              this._autoGrowComposer(ta);
+              // Any manual edit exits history-browsing — the user has
+              // moved on from the loaded past message.
+              this._historyController.reset();
+            }}
             @keydown=${(e: KeyboardEvent) => this._composerKeydown(e)}
             placeholder=${disabled ? this.t.composerDisabled : this.t.composerReady}
-            style="width:100%; min-height:52px; resize:vertical;
+            style="width:100%; min-height:52px; max-height:${COMPOSER_MAX_HEIGHT}px; resize:none;
+                   overflow-y:auto;
                    background:transparent; border:none; outline:none;
                    font-family:var(--font-sans); font-size:13px;
                    line-height:1.5; color:var(--fg-0);
@@ -686,12 +2381,170 @@ class LthnChatWindow extends LitElement {
             <lthn-btn tone="quiet" size="sm" ?dim=${disabled}>
               <i class="fa-regular fa-paperclip" style="font-size:11px;"></i> ${this.t.composerAttach}
             </lthn-btn>
-            <lthn-btn tone="quiet" size="sm" ?dim=${disabled}>
-              <i class="fa-solid fa-slash-forward" style="font-size:10px;"></i> ${this.t.composerSlash}
-            </lthn-btn>
+            <div class="lthn-slash-menu-anchor" style="position:relative;">
+              <lthn-btn class="lthn-chat-slash-toggle" tone="quiet" size="sm" ?dim=${disabled}
+                        @click=${(ev: Event) => { ev.stopPropagation(); this._toggleSlashMenu(); }}>
+                <i class="fa-solid fa-slash-forward" style="font-size:10px;"></i> ${this.t.composerSlash}
+              </lthn-btn>
+              ${this.slashMenuOpen ? html`
+                <div class="lthn-chat-slash-menu"
+                     @click=${(ev: Event) => ev.stopPropagation()}
+                     style="
+                       position:absolute;
+                       left:0; bottom:calc(100% + 6px);
+                       min-width:200px;
+                       background:rgba(20,24,30,0.96);
+                       backdrop-filter: blur(12px);
+                       border:1px solid rgba(255,255,255,0.08);
+                       border-radius:7px;
+                       box-shadow: 0 8px 24px rgba(0,0,0,0.32);
+                       padding:4px;
+                       display:flex; flex-direction:column; gap:1px;
+                       z-index:10;
+                       --wails-draggable: no-drag;
+                     ">
+                  <button class="lthn-chat-slash-cmd lthn-chat-slash-new"
+                          @click=${() => void this._slashNew()}
+                          style="
+                            display:flex; align-items:center; gap:10px;
+                            padding:7px 10px;
+                            background:transparent;
+                            border:none;
+                            border-radius:4px;
+                            color:var(--fg-1);
+                            font-size:12px;
+                            font-family:inherit;
+                            text-align:left;
+                            cursor:pointer;
+                            --wails-draggable: no-drag;
+                          "
+                          onmouseover="this.style.background='rgba(255,255,255,0.05)';"
+                          onmouseout="this.style.background='transparent';">
+                    <span style="font-family:var(--font-mono); color:var(--brand-300); font-size:11.5px;">/new</span>
+                    <span style="color:var(--fg-2); font-size:11px;">New conversation</span>
+                  </button>
+                  <button class="lthn-chat-slash-cmd lthn-chat-slash-copy"
+                          @click=${() => void this._slashCopy()}
+                          style="
+                            display:flex; align-items:center; gap:10px;
+                            padding:7px 10px;
+                            background:transparent;
+                            border:none;
+                            border-radius:4px;
+                            color:var(--fg-1);
+                            font-size:12px;
+                            font-family:inherit;
+                            text-align:left;
+                            cursor:pointer;
+                            --wails-draggable: no-drag;
+                          "
+                          onmouseover="this.style.background='rgba(255,255,255,0.05)';"
+                          onmouseout="this.style.background='transparent';">
+                    <span style="font-family:var(--font-mono); color:var(--brand-300); font-size:11.5px;">/copy</span>
+                    <span style="color:var(--fg-2); font-size:11px;">Copy transcript</span>
+                  </button>
+                  <button class="lthn-chat-slash-cmd lthn-chat-slash-clear"
+                          @click=${() => void this._slashClear()}
+                          style="
+                            display:flex; align-items:center; gap:10px;
+                            padding:7px 10px;
+                            background:transparent;
+                            border:none;
+                            border-radius:4px;
+                            color:var(--fg-1);
+                            font-size:12px;
+                            font-family:inherit;
+                            text-align:left;
+                            cursor:pointer;
+                            --wails-draggable: no-drag;
+                          "
+                          onmouseover="this.style.background='rgba(255,255,255,0.05)';"
+                          onmouseout="this.style.background='transparent';">
+                    <span style="font-family:var(--font-mono); color:var(--brand-300); font-size:11.5px;">/clear</span>
+                    <span style="color:var(--fg-2); font-size:11px;">Wipe messages</span>
+                  </button>
+                  <button class="lthn-chat-slash-cmd lthn-chat-slash-export"
+                          @click=${() => void this._slashExport()}
+                          style="
+                            display:flex; align-items:center; gap:10px;
+                            padding:7px 10px;
+                            background:transparent;
+                            border:none;
+                            border-radius:4px;
+                            color:var(--fg-1);
+                            font-size:12px;
+                            font-family:inherit;
+                            text-align:left;
+                            cursor:pointer;
+                            --wails-draggable: no-drag;
+                          "
+                          onmouseover="this.style.background='rgba(255,255,255,0.05)';"
+                          onmouseout="this.style.background='transparent';">
+                    <span style="font-family:var(--font-mono); color:var(--brand-300); font-size:11.5px;">/export</span>
+                    <span style="color:var(--fg-2); font-size:11px;">Export as markdown</span>
+                  </button>
+                  <button class="lthn-chat-slash-cmd lthn-chat-slash-help"
+                          @click=${() => this._slashHelp()}
+                          style="
+                            display:flex; align-items:center; gap:10px;
+                            padding:7px 10px;
+                            background:transparent;
+                            border:none;
+                            border-radius:4px;
+                            color:var(--fg-1);
+                            font-size:12px;
+                            font-family:inherit;
+                            text-align:left;
+                            cursor:pointer;
+                            --wails-draggable: no-drag;
+                          "
+                          onmouseover="this.style.background='rgba(255,255,255,0.05)';"
+                          onmouseout="this.style.background='transparent';">
+                    <span style="font-family:var(--font-mono); color:var(--brand-300); font-size:11.5px;">/help</span>
+                    <span style="color:var(--fg-2); font-size:11px;">Shortcuts cheat sheet</span>
+                  </button>
+                  <button class="lthn-chat-slash-cmd lthn-chat-slash-export-all"
+                          @click=${() => void this._slashExportAll()}
+                          style="
+                            display:flex; align-items:center; gap:10px;
+                            padding:7px 10px;
+                            background:transparent;
+                            border:none;
+                            border-radius:4px;
+                            color:var(--fg-1);
+                            font-size:12px;
+                            font-family:inherit;
+                            text-align:left;
+                            cursor:pointer;
+                            --wails-draggable: no-drag;
+                          "
+                          onmouseover="this.style.background='rgba(255,255,255,0.05)';"
+                          onmouseout="this.style.background='transparent';">
+                    <span style="font-family:var(--font-mono); color:var(--brand-300); font-size:11.5px;">/export-all</span>
+                    <span style="color:var(--fg-2); font-size:11px;">Back up every conversation</span>
+                  </button>
+                </div>
+              ` : nothing}
+            </div>
             <div style="flex:1"></div>
-            ${hint ? html`<span style="font-family:var(--font-mono); font-size:10px;
-                          color:var(--fg-3); letter-spacing:0.02em;">${hint}</span>` : nothing}
+            ${(() => {
+              // Counter sits between the hint and the Send button. When
+              // the composer is non-empty, the count replaces the hint;
+              // when empty, the hint shows through. The tone helper
+              // promotes the counter colour past COMPOSER_COUNTER_WARN_AT
+              // so a long message is visually obvious before send.
+              const counterText = composerCounterText(this.composerValue);
+              const counterTone = composerCounterTone(this.composerValue);
+              if (counterText) {
+                const colour = counterTone === "warn" ? "var(--brand-300)" : "var(--fg-3)";
+                return html`<span class="lthn-chat-composer-counter"
+                              data-counter-tone=${counterTone}
+                              style="font-family:var(--font-mono); font-size:10px;
+                                     color:${colour}; letter-spacing:0.02em;">${counterText}</span>`;
+              }
+              return hint ? html`<span style="font-family:var(--font-mono); font-size:10px;
+                            color:var(--fg-3); letter-spacing:0.02em;">${hint}</span>` : nothing;
+            })()}
             ${sending ? html`
               <lthn-btn tone="danger" size="sm">
                 <i class="fa-solid fa-stop" style="font-size:10px;"></i> ${this.t.btnStop}
@@ -715,9 +2568,15 @@ class LthnChatWindow extends LitElement {
         <aside style="width:36px; flex-shrink:0; border-left:1px solid rgba(255,255,255,0.05);
                       background:rgba(0,0,0,0.18); display:flex; flex-direction:column;
                       align-items:center; padding:10px 0; gap:10px;">
-          <lthn-btn tone="quiet" size="sm"><i class="fa-solid fa-chart-line" style="font-size:11px;"></i></lthn-btn>
-          <lthn-btn tone="quiet" size="sm"><i class="fa-solid fa-bolt" style="font-size:11px;"></i></lthn-btn>
-          <lthn-btn tone="quiet" size="sm"><i class="fa-solid fa-database" style="font-size:11px;"></i></lthn-btn>
+          <lthn-btn tone="quiet" size="sm" @click=${() => this._toggleRightRail()}>
+            <i class="fa-solid fa-chart-line" style="font-size:11px;"></i>
+          </lthn-btn>
+          <lthn-btn tone="quiet" size="sm" @click=${() => this._toggleRightRail()}>
+            <i class="fa-solid fa-bolt" style="font-size:11px;"></i>
+          </lthn-btn>
+          <lthn-btn tone="quiet" size="sm" @click=${() => this._toggleRightRail()}>
+            <i class="fa-solid fa-database" style="font-size:11px;"></i>
+          </lthn-btn>
         </aside>
       `;
     }
@@ -728,9 +2587,62 @@ class LthnChatWindow extends LitElement {
         <div style="padding:14px 18px 8px; display:flex; align-items:center; gap:8px;">
           <lthn-label>${this.t.railMeta}</lthn-label>
           <div style="flex:1"></div>
-          <lthn-btn tone="quiet" size="sm"><i class="fa-solid fa-angle-right" style="font-size:10px;"></i></lthn-btn>
+          <lthn-btn tone="quiet" size="sm" @click=${() => this._toggleRightRail()}>
+            <i class="fa-solid fa-angle-right" style="font-size:10px;"></i>
+          </lthn-btn>
         </div>
         <div style="padding:0 18px 16px; display:flex; flex-direction:column; gap:14px; overflow:auto;">
+          <div class="lthn-chat-tags"
+               style="display:flex; flex-direction:column; gap:6px;">
+            <lthn-label>Tags</lthn-label>
+            <input
+              class="lthn-chat-tags-input"
+              type="text"
+              .value=${this.tagsDraft}
+              ?disabled=${!this.activeConversationId}
+              placeholder="comma, separated, labels"
+              @input=${(e: Event) => {
+                this.tagsDraft = (e.target as HTMLInputElement).value;
+              }}
+              @blur=${() => void this._saveTags()}
+              style="
+                width:100%;
+                background:rgba(0,0,0,0.28);
+                border:1px solid rgba(255,255,255,0.08);
+                border-radius:6px;
+                padding:7px 9px;
+                font-family:var(--font-sans); font-size:11.5px;
+                color:var(--fg-1);
+                outline:none;
+                --wails-draggable: no-drag;
+              " />
+          </div>
+
+          <div class="lthn-chat-systemprompt"
+               style="display:flex; flex-direction:column; gap:6px;">
+            <lthn-label>Instructions</lthn-label>
+            <textarea
+              class="lthn-chat-systemprompt-input"
+              .value=${this.systemPromptDraft}
+              ?disabled=${!this.activeConversationId}
+              placeholder="Steering for this conversation only — e.g. \\"You are a Go reviewer; cite playground links.\\""
+              @input=${(e: Event) => {
+                this.systemPromptDraft = (e.target as HTMLTextAreaElement).value;
+              }}
+              @blur=${() => void this._saveSystemPrompt()}
+              style="
+                width:100%; min-height:60px; max-height:160px;
+                background:rgba(0,0,0,0.28);
+                border:1px solid rgba(255,255,255,0.08);
+                border-radius:6px;
+                padding:7px 9px;
+                font-family:var(--font-sans); font-size:11.5px;
+                line-height:1.45; color:var(--fg-1);
+                outline:none; resize:vertical;
+                --wails-draggable: no-drag;
+              "></textarea>
+          </div>
+
           ${this._renderRailStat(this.t.statTps, data.toksLive, data.sparkline)}
           ${this._renderRailStat(this.t.statWatts, data.watts)}
           ${this._renderRailStat(this.t.statKv, data.kvHit)}
@@ -796,12 +2708,30 @@ function messageToTurn(msg: { role: string; content: string }): ChatTurn {
   };
 }
 
+// AUTO_TITLE_MAX + buildTranscript + PINNED_CONVERSATIONS_KEY +
+// load/save/splitPinnedConversations + ACTIVE_CONVERSATION_KEY +
+// load/saveActiveConversation + RAIL_BUCKET_ORDER + flattenForDisplay +
+// matchesSearch + deriveAutoTitle moved to ./chat-window.helpers
+// (Athena 2026-05-16). Re-exported at the top of this file.
+
 interface SessionInfoShape {
   id: string;
   title: string;
   created_at: number;
   updated_at: number;
   messages: number;
+  /** Truncated preview of the latest message — populated by the Go
+   *  side's Append / RemoveLast hooks. Optional because Search/List
+   *  predating the snippet field would omit it; the empty fallback
+   *  keeps the rail rendering coherent. */
+  snippet?: string;
+  /** Per-conversation runner steering. Empty / absent = no system
+   *  prompt; the send path uses it verbatim when non-empty. */
+  system_prompt?: string;
+  /** Free-text labels — lowercased + de-duped by the Go side. Empty
+   *  / absent = no tags; the rail row's chip render is conditional
+   *  on a non-empty list. */
+  tags?: string[];
 }
 
 /** SessionInfo → Conversation. Returns null when the timestamp is
@@ -816,11 +2746,19 @@ function deriveConversation(info: SessionInfoShape): Conversation | null {
   else if (ageSec < 172800)  bucket = "yesterday";   // 24–48 h
   else if (ageSec < 604800)  bucket = "week";        // < 7 d
   else                       return null;            // older — out of rail
+  // Prefer the manifest's live snippet (last-message preview) over
+  // the fallback message-count placeholder. The Go-side Append +
+  // RemoveLast hooks keep `snippet` fresh; older manifests written
+  // before this field landed silently fall through to the count.
+  const snippet = info.snippet || (info.messages > 0 ? `${info.messages} messages` : "");
   return {
     id: info.id,
     bucket,
     title: info.title || "(untitled)",
-    snippet: info.messages > 0 ? `${info.messages} messages` : "",
+    snippet,
     model: "",
+    systemPrompt: info.system_prompt || "",
+    tags: Array.isArray(info.tags) ? info.tags : [],
+    updatedAt: updatedSec || undefined,
   };
 }
