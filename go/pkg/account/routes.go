@@ -135,6 +135,20 @@ func (g *routesProvider) handleCreate(c *gin.Context) {
 		return
 	}
 
+	// Cerberus #1524 — server generates the audit RequestID. Any
+	// caller-supplied input.RequestID is dropped to prevent forensic
+	// deniability (an attacker forging arbitrary id values to muddy
+	// the audit JOIN). Mirrors the same discipline handleUnlock +
+	// handleProvision apply per Cerberus #1511. The server-side id is
+	// echoed in the response X-Request-Id header so the legitimate
+	// caller can still correlate their request to the audit log.
+	// Create has no audit emission today; the override still lands so
+	// the contract is consistent across every bootstrap-auth endpoint
+	// and stays correct the moment audit-on-create ships.
+	srvReqID := serverRequestID()
+	input.RequestID = srvReqID
+	c.Header("X-Request-Id", srvReqID)
+
 	r := g.svc.Create(input)
 	if r.OK {
 		out, _ := r.Value.(CreateOutput)

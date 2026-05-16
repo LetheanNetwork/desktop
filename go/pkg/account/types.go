@@ -85,6 +85,16 @@ type CreateInput struct {
 	// the canonical ID from PublicKey and rejects mismatches with
 	// "account.id_mismatch" (Cerberus #1460 (b)).
 	AccountID string `json:"account_id"`
+
+	// RequestID is the server-generated audit identifier for the
+	// create call. Mirrors UnlockInput/ProvisionInput per Cerberus
+	// #1524 — the gin handler DROPS any caller-supplied value and
+	// overwrites with a server-side UUID v4 BEFORE invoking
+	// Service.Create. Forward-contract field today (Create has no
+	// audit emission yet); when an audit event lands it consumes
+	// this field. Empty is acceptable for non-HTTP callers (CLI /
+	// tests).
+	RequestID string `json:"request_id,omitempty"`
 }
 
 // CreateOutput is the success-shape returned on a 200 OK. AccountID

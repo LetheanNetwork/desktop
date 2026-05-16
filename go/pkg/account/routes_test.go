@@ -155,6 +155,38 @@ func TestRoutes_CreateEndpoint_IDMismatch_Bad(t *core.T) {
 	core.AssertEqual(t, "account.id_mismatch", env.Error.Code)
 }
 
+// TestRoutes_CreateEndpoint_RequestIDOverriddenByServer_Ugly pins
+// Cerberus #1524 — caller-supplied input.RequestID is DROPPED at the
+// handler boundary + replaced with a server-generated UUID v4 echoed
+// in the X-Request-Id response header. Mirrors the Unlock + Provision
+// discipline so every bootstrap-auth endpoint behaves consistently
+// (no audit emission on Create today, but the contract holds the
+// moment one ships).
+func TestRoutes_CreateEndpoint_RequestIDOverriddenByServer_Ugly(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	eng := newTestEngine(t, svc)
+
+	const forgedID = "attacker-chosen-forensic-decoy-12345"
+	in := validInput()
+	in.RequestID = forgedID
+	body := core.JSONMarshal(in)
+	core.AssertTrue(t, body.OK)
+
+	rr := doPOST(eng, "/v1/account/create", body.Value.([]byte))
+	core.AssertEqual(t, http.StatusOK, rr.Code, "valid Create with forged request_id → 200")
+
+	echoed := rr.Header().Get("X-Request-Id")
+	core.AssertNotEqual(t, "", echoed,
+		"server MUST echo a generated request_id in X-Request-Id response header")
+	core.AssertNotEqual(t, forgedID, echoed,
+		"server-generated id MUST NOT equal caller-supplied forged id (Cerberus #1524)")
+	// UUID v4 shape: 8-4-4-4-12 hex chars (36 incl dashes). Length sanity
+	// is sufficient for the handler-routing test; full RFC parse lives
+	// in serverRequestID's own unit tests upstream.
+	core.AssertEqual(t, 36, len(echoed), "server-generated id MUST be 36-char UUID v4")
+}
+
 // --- Compile-time anchor: pkg/server.BootstrapPathScopes must list
 // our endpoint at the canonical path/scope tuple. This protects
 // against a silent rename in either side breaking the auth gate.
