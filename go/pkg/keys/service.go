@@ -72,6 +72,16 @@ type Service struct {
 // exists. The master key is loaded (or generated) lazily on the
 // first Put/Get. Returns Result with Value=*Service.
 //
+// Cerberus Mantis #1441 — asserts dir mode is 0o700 + master file
+// (if present) is 0o600 at construction time. paths.KeysDir creates
+// the dir with 0o700 on first use, but MkdirAll silently no-ops on
+// an existing dir regardless of its mode. If the operator or a
+// rogue tool widened the perms, we surface that at startup as a
+// core.Warn rather than silently shipping under reduced protection.
+// CoreGO has no Chmod primitive today (tracked as a separate export
+// gap), so we detect-and-warn rather than detect-and-fix. The
+// operator gets a clear actionable message.
+//
 // Usage example:
 //
 //	r := keys.New()
@@ -81,7 +91,47 @@ func New() core.Result {
 	if !dirR.OK {
 		return dirR
 	}
+	dir := dirR.Value.(string)
+	assertKeysDirMode(dir)
 	return core.Ok(&Service{})
+}
+
+// assertKeysDirMode is the Mantis #1441 startup check. Stats the
+// keys dir + master file; logs a core.Warn for any mode that's
+// wider than the expected 0o700 / 0o600. Best-effort — Stat
+// failure is silent (KeysDir would have caught a real I/O error).
+func assertKeysDirMode(dir string) {
+	statR := core.Stat(dir)
+	if !statR.OK {
+		return
+	}
+	info, ok := statR.Value.(core.FsFileInfo)
+	if !ok {
+		return
+	}
+	gotPerm := info.Mode().Perm()
+	if gotPerm != dirMode {
+		core.Warn("keys: directory mode wider than 0o700 — "+
+			"someone (or full-disk tooling) loosened it; "+
+			"`chmod 700 ~/Lethean/data/keys` to restore (Mantis #1441)",
+			"got", core.Sprintf("%o", gotPerm),
+			"want", core.Sprintf("%o", dirMode))
+	}
+	masterPath := core.PathJoin(dir, masterFileName)
+	mStatR := core.Stat(masterPath)
+	if !mStatR.OK {
+		return // not generated yet — first-write will use fileMode
+	}
+	mInfo, ok := mStatR.Value.(core.FsFileInfo)
+	if !ok {
+		return
+	}
+	if mPerm := mInfo.Mode().Perm(); mPerm != fileMode {
+		core.Warn("keys: master file mode wider than 0o600 — "+
+			"`chmod 600 ~/Lethean/data/keys/.master` to restore (Mantis #1441)",
+			"got", core.Sprintf("%o", mPerm),
+			"want", core.Sprintf("%o", fileMode))
+	}
 }
 
 // Register adopts the canonical Service shape (Mantis #1336).
@@ -354,3 +404,71 @@ func (s *Service) WHas(ref string) core.Result { return s.Has(ref) }
 
 // WDelete removes a ref. Idempotent.
 func (s *Service) WDelete(ref string) core.Result { return s.Delete(ref) }
+
+// GetOrCreate returns the plaintext stored under ref; if no blob exists
+// yet it calls generate(), stores the result under ref, then returns it.
+// generate must return exactly masterKeySize bytes for keys used as
+// symmetric keys (the caller is responsible for the length contract).
+// Concurrent callers are serialised via the master lock — at most one
+// generate() call fires per ref.
+//
+// Usage example:
+//
+//	r := svc.GetOrCreate("single-instance", func() ([]byte, error) {
+//	    return core.RandomBytes(32).Value.([]byte), nil
+//	})
+//	if r.OK { key := r.Value.([]byte); _ = key }
+func (s *Service) GetOrCreate(ref string, generate func() ([]byte, error)) core.Result {
+	// Fast path — key already on disk.
+	if r := s.Get(ref); r.OK {
+		return r
+	}
+	// Slow path — generate and persist.
+	raw, err := generate()
+	if err != nil {
+		return core.Fail(core.E("keys.GetOrCreate", "generate", err))
+	}
+	if r := s.Put(ref, raw); !r.OK {
+		return r
+	}
+	return core.Ok(raw)
+}
+
+// singleInstanceRef is the stable key name for the per-install
+// SingleInstance encryption key.
+const singleInstanceRef = "single-instance"
+
+// SingleInstanceKey returns the 32-byte per-install key used to
+// authenticate the Wails single-instance IPC channel. On first call
+// it generates a cryptographically random key, persists it under
+// ~/Lethean/data/keys/single-instance.aead, and returns it. Every
+// subsequent call reloads the same persisted bytes — the key is stable
+// across restarts.
+//
+// Cerberus #1442: replaces the build-time constant in pkg/desktop that
+// shared the same EncryptionKey across every installed binary on every
+// machine, defeating the authenticated-channel guarantee.
+//
+// Usage example:
+//
+//	r := svc.SingleInstanceKey()
+//	if r.OK { key := r.Value.([32]byte); _ = key }
+func (s *Service) SingleInstanceKey() core.Result {
+	r := s.GetOrCreate(singleInstanceRef, func() ([]byte, error) {
+		rr := core.RandomBytes(masterKeySize)
+		if !rr.OK {
+			return nil, rr.Value.(error)
+		}
+		return rr.Value.([]byte), nil
+	})
+	if !r.OK {
+		return r
+	}
+	raw := r.Value.([]byte)
+	if len(raw) != masterKeySize {
+		return core.Fail(core.NewError("keys.SingleInstanceKey: stored key has wrong length"))
+	}
+	var key [32]byte
+	copy(key[:], raw)
+	return core.Ok(key)
+}
