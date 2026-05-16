@@ -124,6 +124,13 @@ type DocRecord struct {
 //	    ProbabilityPct: 60, Owner: "Snider",
 //	}
 type DealRecord struct {
+	// Version is the monotonic optimistic-lock version (Cascade W1,
+	// Mantis #1540). Stamped by writeRecord; 0 on legacy files
+	// predating the cutover, ≥1 after first write through
+	// paths.AtomicWriteWithVersion. The IfVersion check in the
+	// primitive uses this value verbatim.
+	Version int `yaml:"version,omitempty"`
+
 	// ID is the canonical deal identifier (matches filename slug).
 	ID string `yaml:"id"`
 	// Customer is the counterparty display name.

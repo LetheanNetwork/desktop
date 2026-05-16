@@ -124,7 +124,9 @@ func (s *Service) Create(input CreateInput) core.Result {
 		UpdatedAt:      now,
 	}
 
-	if err := writeRecord(rec, dir); err != nil {
+	// Cascade W1 (Mantis #1540) — Create is an unconditional first-write
+	// (ifVersion=0). writeRecord stamps Version=1 into the marshalled body.
+	if err := writeRecord(rec, dir, 0); err != nil {
 		return core.Fail(core.E("deals.Create", "write", err))
 	}
 
@@ -159,10 +161,14 @@ func (s *Service) UpdateStage(input UpdateStageInput) core.Result {
 		return core.Fail(core.E("deals.UpdateStage", "not found: "+input.ID, err))
 	}
 
+	priorVersion := rec.Version
 	rec.Stage = input.Stage
 	rec.UpdatedAt = core.Now().UTC()
 
-	if err := writeRecord(rec, dir); err != nil {
+	// Cascade W1 (Mantis #1540) — IfVersion=priorVersion gates the
+	// write under the primitive's optimistic-lock check. priorVersion=0
+	// (legacy file) skips the check and stamps Version=1 on the upgrade.
+	if err := writeRecord(rec, dir, priorVersion); err != nil {
 		return core.Fail(core.E("deals.UpdateStage", "write", err))
 	}
 
@@ -211,9 +217,12 @@ func (s *Service) AddActivity(input AddActivityInput) core.Result {
 	newLog = append(newLog, entry)
 	newLog = append(newLog, rec.Log...)
 	rec.Log = newLog
+	priorVersion := rec.Version
 	rec.UpdatedAt = core.Now().UTC()
 
-	if err := writeRecord(rec, dir); err != nil {
+	// Cascade W1 (Mantis #1540) — same IfVersion discipline as
+	// UpdateStage. Activity-log appends are still record-level writes.
+	if err := writeRecord(rec, dir, priorVersion); err != nil {
 		return core.Fail(core.E("deals.AddActivity", "write", err))
 	}
 
