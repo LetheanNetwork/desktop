@@ -21,6 +21,7 @@ images:
       route: /opencode
 
 plugin:
+  code: opencode
   routes:
     - title: OpenCode
       icon: fa-robot
@@ -36,6 +37,19 @@ plugin:
       type: string
       prompt: UI theme
       default: dark
+  # Full-screen view registration per plans/code/lthn/desktop/views/RFC.plugin-views.md §9.
+  # Materialised on the frontend as <lthn-plugin-view kind=iframe> mounted in
+  # the shell body slot, selectable from <lthn-view-switcher> next to ⌘K.
+  # The session-token capability triggers the §5.5 install prompt and routes
+  # the §5.1 postMessage handshake to the lthn host once granted.
+  views:
+    - id: opencode
+      label: OpenCode
+      icon: fa-robot
+      kind: iframe
+      source: ${expose.app.route}
+      capabilities:
+        - session-token
 
 env:
   - key: SERVER_PASSWORD

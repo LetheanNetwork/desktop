@@ -32,6 +32,7 @@ images:
       route: /opencode
 
 plugin:
+  code: opencode
   routes:
     - title: OpenCode
       icon: fa-robot
@@ -47,6 +48,14 @@ plugin:
       type: string
       prompt: UI theme
       default: dark
+  views:
+    - id: opencode
+      label: OpenCode
+      icon: fa-robot
+      kind: iframe
+      source: ${expose.app.route}
+      capabilities:
+        - session-token
 
 env:
   - key: SERVER_PASSWORD
@@ -88,12 +97,27 @@ func TestBundle_OpenCode_Good(t *core.T) {
 
 	// Plugin block.
 	core.AssertNotNil(t, m.Plugin)
+	core.AssertEqual(t, "opencode", m.Plugin.Code)
 	core.AssertLen(t, m.Plugin.Routes, 1)
 	core.AssertEqual(t, "OpenCode", m.Plugin.Routes[0].Title)
 	core.AssertLen(t, m.Plugin.Commands, 1)
 	core.AssertEqual(t, "opencode.open", m.Plugin.Commands[0].ID)
 	core.AssertLen(t, m.Plugin.Settings, 1)
 	core.AssertEqual(t, "theme", m.Plugin.Settings[0].Key)
+
+	// Views block — Unit C addition per plans/code/lthn/desktop/views/RFC.plugin-views.md §9.
+	// The manifest declares one iframe-kind view backed by the app expose
+	// block; the session-token capability triggers the §5.5 install prompt
+	// + §5.1 postMessage handshake.
+	core.AssertLen(t, m.Plugin.Views, 1)
+	v := m.Plugin.Views[0]
+	core.AssertEqual(t, "opencode", v.ID)
+	core.AssertEqual(t, "OpenCode", v.Label)
+	core.AssertEqual(t, "fa-robot", v.Icon)
+	core.AssertEqual(t, subject.PluginViewKindIframe, v.Kind)
+	core.AssertEqual(t, "${expose.app.route}", v.Source)
+	core.AssertLen(t, v.Capabilities, 1)
+	core.AssertEqual(t, "session-token", v.Capabilities[0])
 
 	// Env block.
 	core.AssertLen(t, m.Env, 1)
