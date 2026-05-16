@@ -40,6 +40,13 @@ type Campaign struct {
 	Channel string `json:"channel"`
 	// Body is the markdown body below the frontmatter (campaign brief / notes).
 	Body string `json:"body,omitempty"`
+
+	// Version is the monotonic optimistic-lock version (Cascade W2,
+	// RFC §B.3 row 7). Stamped by writeCampaign; 0 on legacy files
+	// predating the cutover, >=1 after first write through
+	// paths.AtomicWriteWithVersion. Internal-only — `json:"-"` keeps
+	// it out of the Wails wire shape consumed by the frontend.
+	Version int `json:"-"`
 }
 
 // ListInput drives the List method.

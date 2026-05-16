@@ -51,7 +51,13 @@ func Register(c *core.Core) core.Result {
 func (s *Service) ServiceName() string { return "Campaigns" }
 
 // campaignFrontmatter is the minimal shape parsed from each campaign file.
+//
+// Cascade W2 (RFC §B.3 row 7) — Version carries the monotonic
+// optimistic-lock anchor. omitempty so legacy files predating the
+// cutover (no version: line) round-trip cleanly as Version=0; the
+// first write through writeCampaign stamps version=1.
 type campaignFrontmatter struct {
+	Version int    `yaml:"version,omitempty"`
 	ID      string `yaml:"id"`
 	Name    string `yaml:"name"`
 	State   string `yaml:"state"`
@@ -151,17 +157,48 @@ func parseCampaign(raw []byte) (Campaign, error) {
 		Spend:   fm.Spend,
 		Channel: fm.Channel,
 		Body:    body,
+		Version: fm.Version,
 	}, nil
 }
 
-// writeCampaign serialises a Campaign to Trix format and writes it to disk.
+// writeCampaign serialises a Campaign to Trix format and writes it via
+// paths.AtomicWriteWithVersion (Cascade W2, RFC §B.3 row 7).
+//
+// ifVersion is the optimistic-lock anchor — pass the Version the
+// caller observed on disk (via parseCampaign), or 0 for first-writes /
+// legacy-file upgrades. writeCampaign stamps the next monotonic
+// version (ifVersion+1) into the marshalled frontmatter so subsequent
+// reads see version=1,2,3... monotonically.
+//
 // Cerberus #1486: c.ID lands directly in the filename — validate.
-// Cerberus #1487 PR-1: 0o600 — owner-only at rest.
-func writeCampaign(dir string, c Campaign) core.Result {
+//
+// Return shape (Mantis #1544 gating, inherited from W1): on the
+// stale-write path the function returns
+// core.Fail(paths.ConflictEnvelope{...}) so the Wails-marshalled
+// Result.Value carries the lowercase-json shape
+// (`{code, current_version, current_hash}`) that
+// conflict-dispatch.ts extractEnvelope pattern-matches on. The
+// per-service Code is "campaigns.update.conflict" — the frontend
+// scopes its toast + reload-listener on this exact string.
+//
+// Audit emission is automatic via paths.AuditModeForPath —
+// marketing/* paths route through AuditModeBatch per RFC §6.1.
+//
+// Usage example:
+//
+//	if wr := writeCampaign(dir, c, prior.Version); !wr.OK {
+//	    return wr
+//	}
+func writeCampaign(dir string, c Campaign, ifVersion int) core.Result {
 	if err := paths.IsValidID(c.ID); err != nil {
 		return core.Fail(err)
 	}
+	nextVersion := ifVersion + 1
+	if nextVersion < 1 {
+		nextVersion = 1
+	}
 	fm := campaignFrontmatter{
+		Version: nextVersion,
 		ID:      c.ID,
 		Name:    c.Name,
 		State:   c.State,
@@ -181,10 +218,19 @@ func writeCampaign(dir string, c Campaign) core.Result {
 		content = append(content, []byte(c.Body)...)
 	}
 	fpath := core.PathJoin(dir, c.ID+".md")
-	if r := core.WriteFile(fpath, content, 0o600); !r.OK {
-		return r
+	res := paths.AtomicWriteWithVersion(fpath, paths.WriteInput{
+		Body:      content,
+		IfVersion: ifVersion,
+	})
+	if res.OK {
+		return res
 	}
-	return core.Ok(nil)
+	if stale, ok := paths.VersionStaleFromError(res.Value); ok {
+		return core.Fail(paths.NewConflictEnvelope(
+			"campaigns.update.conflict", stale))
+	}
+	return core.Fail(core.E("campaigns.writeCampaign",
+		"write failed: "+res.Error(), nil))
 }
 
 // loadCampaigns scans ~/Lethean/marketing/campaigns/ and returns all parseable

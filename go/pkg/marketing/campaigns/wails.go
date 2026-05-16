@@ -136,9 +136,15 @@ func (s *Service) Create(input CreateInput) core.Result {
 		Body:    input.Body,
 	}
 
-	if r := writeCampaign(dirR.Value.(string), c); !r.OK {
-		return core.Fail(core.E("campaigns.Create", "write failed", nil))
+	// Cascade W2 (RFC §B.3 row 7) — Create is an unconditional first-
+	// write (ifVersion=0). writeCampaign stamps Version=1 into the
+	// marshalled frontmatter. Conflict-path (rare on Create — only
+	// fires if another goroutine races on the same slug) returns
+	// core.Fail(paths.ConflictEnvelope{...}) directly via writeCampaign.
+	if wr := writeCampaign(dirR.Value.(string), c, 0); !wr.OK {
+		return wr
 	}
+	c.Version = 1
 	s.fireCampaignEvent(EventCampaignCreated, id)
 	return core.Ok(c)
 }
@@ -168,6 +174,8 @@ func (s *Service) Update(input UpdateInput) core.Result {
 		return core.Fail(core.E("campaigns.Update", "parse failed", err))
 	}
 
+	priorVersion := c.Version
+
 	// Patch non-empty fields.
 	if input.State != "" {
 		c.State = input.State
@@ -188,8 +196,18 @@ func (s *Service) Update(input UpdateInput) core.Result {
 		c.Body = input.Body
 	}
 
-	if r := writeCampaign(dirR.Value.(string), c); !r.OK {
-		return core.Fail(core.E("campaigns.Update", "write failed", nil))
+	// Cascade W2 (RFC §B.3 row 7) — IfVersion=priorVersion gates the
+	// write under the primitive's optimistic-lock check.
+	// priorVersion=0 (legacy file predating cutover) skips the check
+	// and stamps Version=1 on the upgrade write. Conflict-path returns
+	// core.Fail(paths.ConflictEnvelope{...}) directly via writeCampaign
+	// (Mantis #1544 gating shape inherited from W1).
+	if wr := writeCampaign(dirR.Value.(string), c, priorVersion); !wr.OK {
+		return wr
+	}
+	c.Version = priorVersion + 1
+	if c.Version < 1 {
+		c.Version = 1
 	}
 	s.fireCampaignEvent(EventCampaignUpdated, c.ID)
 	return core.Ok(c)
