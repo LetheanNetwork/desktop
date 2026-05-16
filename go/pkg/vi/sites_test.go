@@ -110,11 +110,13 @@ func TestSites_DefaultCatalogue_Good(t *core.T) {
 }
 
 // TestSites_Schemas_Good — Schemas() returns the vi_site_probes
-// schema shape required by orm.RegisterSchema; smoke check on PK +
-// indexes.
+// schema (first, Sites came before PR Activity) plus any other
+// schemas the package owns; smoke check on PK + indexes for the
+// sites entry without asserting total count (the count is owned by
+// TestPRFetch_Schemas_Good in pr_fetch_test.go).
 func TestSites_Schemas_Good(t *core.T) {
 	schemas := vi.Schemas()
-	core.AssertLen(t, schemas, 1)
+	core.AssertTrue(t, len(schemas) >= 1)
 	core.AssertEqual(t, "vi_site_probes", schemas[0].Name)
 	core.AssertEqual(t, "id", schemas[0].PK[0])
 }

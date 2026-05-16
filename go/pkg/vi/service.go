@@ -32,6 +32,12 @@ import (
 // can enqueue ad-hoc work via queue.Enqueue(c, vi.ProbeKind, ...).
 const ProbeKind = "vi-probe-site"
 
+// FetchPRKind is the queue.RegisterKind name under which Vi's
+// per-repo PR fetcher registers. Exported so a future
+// "vi prs refresh" CLI can enqueue ad-hoc work via
+// queue.Enqueue(c, vi.FetchPRKind, ...).
+const FetchPRKind = "vi-fetch-prs"
+
 // Service holds the Vi catalogue + Core reference. Per the canonical
 // service pattern (Mantis #1336): a tiny struct with a *core.Core
 // for late resolution of dependencies (config service, queue
@@ -108,6 +114,25 @@ func (s *Service) OnStart() core.Result {
 	// don't need a separate ticker.
 	for _, cat := range LoadCatalogue(c) {
 		s.enqueue(cat.URL, 0)
+	}
+
+	// PR fetcher — same self-rescheduling shape against
+	// FetchPRKind. Defaults to ~5min cadence so we sit well under
+	// GitHub's rate ceiling even when watching a dozen repos. The
+	// handler ignores register failures the same way the probe
+	// handler does — CLI modes that don't run the queue stay
+	// usable without PR data.
+	prRegister := queue.RegisterKind(c, queue.HandlerOptions{
+		Kind:        FetchPRKind,
+		Description: "Vi: poll one configured repo for open pull requests",
+		Handler: func(ctx core.Context, opts core.Options) core.Result {
+			return s.handleFetchPRJob(ctx, opts)
+		},
+	})
+	if prRegister.OK {
+		for _, repo := range LoadPRRepos(c) {
+			s.enqueueFetchPR(RepoKey(repo), 0)
+		}
 	}
 	return core.Ok(nil)
 }
@@ -234,6 +259,105 @@ func (s *Service) Sites() core.Result {
 	}
 	return core.Ok(SitesOutput{
 		Sites:   sites,
+		Scanned: len(catalogue),
+	})
+}
+
+// handleFetchPRJob is the queue handler for a single repo's PR
+// poll. Mirrors handleProbeJob's shape: re-resolve the live repo
+// catalogue (so interval / token changes take effect on next tick
+// without restart), perform the fetch, reschedule the next tick.
+// Always returns Ok so the queue marks the Job Done — fetch outcome
+// lives in PRActivity rows + warn logs, not the queue Job status.
+func (s *Service) handleFetchPRJob(ctx core.Context, opts core.Options) core.Result {
+	_ = ctx
+	key := opts.String("repo")
+	if key == "" {
+		return core.Ok("vi: no repo key in payload, skipping")
+	}
+
+	var repo PRRepo
+	var found bool
+	for _, candidate := range LoadPRRepos(s.core) {
+		if RepoKey(candidate) == key {
+			repo = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		// Repo removed from config — let the recurring chain die.
+		return core.Ok("vi: repo no longer catalogued, ending chain")
+	}
+
+	_ = Fetch(s.core, repo)
+
+	interval := repo.Interval
+	if interval <= 0 {
+		interval = DefaultPRInterval
+	}
+	s.enqueueFetchPR(RepoKey(repo), interval)
+	return core.Ok(nil)
+}
+
+// enqueueFetchPR schedules a PR-fetch Job for the given repo key.
+// delay=0 means "as soon as the worker picks it up"; non-zero
+// defers via queue.ScheduleAfter.
+func (s *Service) enqueueFetchPR(repoKey string, delay core.Duration) {
+	payload := core.NewOptions(core.Option{Key: "repo", Value: repoKey})
+	if delay <= 0 {
+		_ = queue.Enqueue(s.core, FetchPRKind, payload)
+		return
+	}
+	_ = queue.ScheduleAfter(s.core, delay, FetchPRKind, payload)
+}
+
+// Repos is the Wails-bound accessor for the configured PR-watcher
+// targets. Returns the resolved catalogue (config-overridden when
+// `vi.repos` is set, defaults otherwise).
+//
+// Bound to JS as `Vi.Repos()` — frontend uses this to render the
+// "watching N repos" hint + per-repo cadence pill.
+func (s *Service) Repos() core.Result {
+	if s == nil || s.core == nil {
+		return core.Ok([]PRRepo{})
+	}
+	return core.Ok(LoadPRRepos(s.core))
+}
+
+// Activity is the Wails-bound accessor for the latest PR activity,
+// shaped as ActivityOutput. Returns one ActivityEntry per
+// (provider, owner, repo, pr_number) that is currently open,
+// ordered newest-first by upstream UpdatedAt.
+//
+// Bound to JS as `Vi.Activity()` — frontend re-polls on its own
+// cadence; real-time push is the §"Future: real-time push"
+// follow-up tracked in RFC.vi.md.
+func (s *Service) Activity() core.Result {
+	if s == nil || s.core == nil {
+		return core.Ok(ActivityOutput{Items: []ActivityEntry{}})
+	}
+	catalogue := LoadPRRepos(s.core)
+	rows := LatestPerPR(s.core, catalogue, DefaultActivityLimit)
+
+	items := make([]ActivityEntry, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, ActivityEntry{
+			Kind:      "pr",
+			Provider:  row.Provider,
+			Repo:      row.Owner + "/" + row.Repo,
+			Number:    row.PRNumber,
+			Title:     row.Title,
+			Author:    row.Author,
+			State:     row.State,
+			URL:       row.URL,
+			OpenedAt:  core.TimeFormat(row.OpenedAt, core.TimeRFC3339),
+			UpdatedAt: core.TimeFormat(row.UpdatedAt, core.TimeRFC3339),
+			CheckedAt: core.TimeFormat(row.CheckedAt, core.TimeRFC3339),
+		})
+	}
+	return core.Ok(ActivityOutput{
+		Items:   items,
 		Scanned: len(catalogue),
 	})
 }

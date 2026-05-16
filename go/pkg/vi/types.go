@@ -142,7 +142,10 @@ func (SiteProbe) Schema() orm.Schema {
 //
 //	schemas = append(schemas, vi.Schemas()...)
 func Schemas() []orm.Schema {
-	return []orm.Schema{SiteProbe{}.Schema()}
+	return []orm.Schema{
+		SiteProbe{}.Schema(),
+		PRActivity{}.Schema(),
+	}
 }
 
 // SiteStatus is the JSON-shaped row the Wails Sites() response

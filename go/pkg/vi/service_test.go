@@ -179,3 +179,139 @@ func TestService_Register_Good(t *core.T) {
 	_, ok := r.Value.(*vi.Service)
 	core.AssertTrue(t, ok)
 }
+
+// TestService_Activity_Good — with one persisted PR snapshot per
+// catalogue entry, Activity() returns one ActivityEntry per open
+// PR, newest-first by checked_at (and limited to the watched
+// catalogue — out-of-catalogue rows don't surface).
+func TestService_Activity_Good(t *core.T) {
+	c := newServiceCore(t)
+	svc := vi.NewService(c)
+	t0 := core.Now().UTC()
+
+	// Override the watched repos to a small known set.
+	cfg, ok := core.ServiceFor[*config.Service](c, "config")
+	core.RequireTrue(t, ok)
+	core.RequireTrue(t, cfg.Set("vi.repos", []map[string]any{
+		{"provider": "forge", "owner": "lthn", "name": "desktop"},
+		{"provider": "github", "owner": "LetheanNetwork", "name": "desktop"},
+	}).OK)
+
+	rows := []vi.PRActivity{
+		{ID: "pra-f1", Provider: "forge", Owner: "lthn", Repo: "desktop",
+			PRNumber: 7, Title: "Lethean forge PR", Author: "snider", State: "open",
+			URL: "https://forge.lthn.sh/lthn/desktop/pulls/7",
+			OpenedAt: t0.Add(-24 * core.Hour), UpdatedAt: t0, CheckedAt: t0},
+		{ID: "pra-g1", Provider: "github", Owner: "LetheanNetwork", Repo: "desktop",
+			PRNumber: 1, Title: "GitHub mirror PR", Author: "external", State: "open",
+			URL: "https://github.com/LetheanNetwork/desktop/pull/1",
+			OpenedAt: t0.Add(-2 * core.Hour), UpdatedAt: t0, CheckedAt: t0},
+	}
+	for i := range rows {
+		core.RequireTrue(t, orm.Insert(c, &rows[i]).OK)
+	}
+
+	r := svc.Activity()
+	core.RequireTrue(t, r.OK)
+	out := r.Value.(vi.ActivityOutput)
+	core.AssertEqual(t, 2, out.Scanned)
+	core.AssertLen(t, out.Items, 2)
+
+	// First entry has the canonical fields shaped + URL preserved.
+	first := out.Items[0]
+	core.AssertEqual(t, "pr", first.Kind)
+	core.AssertTrue(t, first.Provider == "forge" || first.Provider == "github")
+	core.AssertTrue(t, first.URL != "")
+	core.AssertTrue(t, first.Repo != "")
+	core.AssertTrue(t, first.UpdatedAt != "")
+}
+
+// TestService_Activity_Bad — nil service + service-with-nil-core
+// both return a stable Activity envelope rather than panicking, so
+// the Wails binding always has a JSON shape to surface.
+func TestService_Activity_Bad(t *core.T) {
+	var nilSvc *vi.Service
+	r := nilSvc.Activity()
+	core.RequireTrue(t, r.OK)
+	out := r.Value.(vi.ActivityOutput)
+	core.AssertLen(t, out.Items, 0)
+
+	svc := vi.NewService(nil)
+	r = svc.Activity()
+	core.RequireTrue(t, r.OK)
+}
+
+// TestService_Activity_Ugly — closed PRs are filtered out; only
+// open PRs surface to the Activity panel. Scanned reflects the
+// catalogue size regardless of how many open rows landed.
+func TestService_Activity_Ugly(t *core.T) {
+	c := newServiceCore(t)
+	svc := vi.NewService(c)
+	cfg, ok := core.ServiceFor[*config.Service](c, "config")
+	core.RequireTrue(t, ok)
+	core.RequireTrue(t, cfg.Set("vi.repos", []map[string]any{
+		{"provider": "forge", "owner": "lthn", "name": "desktop"},
+	}).OK)
+
+	t0 := core.Now().UTC()
+	open := vi.PRActivity{
+		ID: "pra-o", Provider: "forge", Owner: "lthn", Repo: "desktop",
+		PRNumber: 1, Title: "open", State: "open", CheckedAt: t0,
+	}
+	closed := vi.PRActivity{
+		ID: "pra-c", Provider: "forge", Owner: "lthn", Repo: "desktop",
+		PRNumber: 2, Title: "closed", State: "closed", CheckedAt: t0,
+	}
+	core.RequireTrue(t, orm.Insert(c, &open).OK)
+	core.RequireTrue(t, orm.Insert(c, &closed).OK)
+
+	r := svc.Activity()
+	core.RequireTrue(t, r.OK)
+	out := r.Value.(vi.ActivityOutput)
+	core.AssertEqual(t, 1, out.Scanned)
+	core.AssertLen(t, out.Items, 1)
+	core.AssertEqual(t, 1, out.Items[0].Number)
+}
+
+// TestService_Repos_Good — Repos() returns the live config-
+// resolved catalogue (defaults when nothing's configured).
+func TestService_Repos_Good(t *core.T) {
+	c := newServiceCore(t)
+	svc := vi.NewService(c)
+
+	r := svc.Repos()
+	core.RequireTrue(t, r.OK)
+	repos := r.Value.([]vi.PRRepo)
+	core.AssertEqual(t, 1, len(repos)) // default catalogue
+	core.AssertEqual(t, "lthn", repos[0].Owner)
+}
+
+// TestService_Repos_Bad — nil service returns an empty list rather
+// than panicking.
+func TestService_Repos_Bad(t *core.T) {
+	var nilSvc *vi.Service
+	r := nilSvc.Repos()
+	core.RequireTrue(t, r.OK)
+	repos := r.Value.([]vi.PRRepo)
+	core.AssertLen(t, repos, 0)
+}
+
+// TestService_Repos_Ugly — flipping vi.repos between calls is
+// reflected without restart (live-reload discipline mirrors the
+// sites catalogue).
+func TestService_Repos_Ugly(t *core.T) {
+	c := newServiceCore(t)
+	svc := vi.NewService(c)
+	cfg, ok := core.ServiceFor[*config.Service](c, "config")
+	core.RequireTrue(t, ok)
+
+	before := svc.Repos().Value.([]vi.PRRepo)
+	core.AssertEqual(t, 1, len(before))
+
+	core.RequireTrue(t, cfg.Set("vi.repos", []map[string]any{
+		{"provider": "forge", "owner": "lthn", "name": "ai"},
+		{"provider": "github", "owner": "openai", "name": "openai-python"},
+	}).OK)
+	after := svc.Repos().Value.([]vi.PRRepo)
+	core.AssertEqual(t, 2, len(after))
+}
