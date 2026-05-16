@@ -18,6 +18,64 @@ if (!app) throw new Error("missing #app mount point in index.html");
 const params = new URLSearchParams(location.search);
 const surface = params.get("surface") || "canvas";
 
+// Top-level auth-gate overlay — fires on ANY 401 from apiFetch in ANY
+// surface (tray, chat, settings, welcome, models, …). The Lethean-7
+// auth-gate mount inside <lthn-app-shell> only catches 401s while the
+// "app" surface is mounted; the dozen+ per-surface windows bypass the
+// shell entirely. Without this overlay, those surfaces show the raw
+// 401 JSON in the WebView (Snider's 2026-05-16 screenshots).
+//
+// Design: dispatch on AUTH_401_EVENT → inject <lthn-auth-gate> as an
+// absolute-positioned overlay covering the entire viewport. On
+// AUTH_OK_EVENT → remove the overlay so the underlying surface
+// reappears. Same Lit element, same state machine — just mounted at
+// document level instead of inside the shell.
+//
+// Per Cerberus #1465 — the gate's bootstrap-token lives in closure
+// scope inside the element; this mount doesn't change that property.
+(() => {
+  let overlay: HTMLElement | null = null;
+  const mount = (state: "setup" | "auth" | "error", reqId?: string) => {
+    if (overlay) {
+      overlay.setAttribute("state", state);
+      if (reqId) overlay.setAttribute("request-id", reqId);
+      return;
+    }
+    overlay = document.createElement("lthn-auth-gate");
+    overlay.setAttribute("state", state);
+    if (reqId) overlay.setAttribute("request-id", reqId);
+    overlay.style.cssText =
+      "position:fixed;inset:0;z-index:9999;background:var(--surf-0,#0a090e);" +
+      "display:flex;align-items:stretch;justify-content:stretch;";
+    document.body.appendChild(overlay);
+  };
+  const unmount = () => {
+    if (overlay) { overlay.remove(); overlay = null; }
+  };
+  window.addEventListener("lthn:auth:401", (ev: Event) => {
+    const detail = (ev as CustomEvent<{ requestId?: string }>).detail;
+    mount("error", detail?.requestId);
+  });
+  window.addEventListener("lthn:auth:ok", () => { unmount(); });
+  // Boot-time probe — if account is absent, mount the setup gate
+  // BEFORE the surface renders so the first paint is the gate, not
+  // a flash of the underlying window. Same logic as app-shell's
+  // _probeAuthState (commit 9ad8b3d) but applied at the document
+  // level so all surfaces benefit.
+  void (async () => {
+    try {
+      const svc = await import("@desktop/serverkey/service").catch(() => null);
+      if (!svc || typeof (svc as { AccountStatus?: unknown }).AccountStatus !== "function") return;
+      const r = await (svc as {
+        AccountStatus: () => Promise<{ OK?: boolean; Value?: { has_user_account?: boolean } }>
+      }).AccountStatus();
+      if (r?.OK !== false && r?.Value?.has_user_account === false) {
+        mount("setup");
+      }
+    } catch { /* binding missing → degrade silently */ }
+  })();
+})();
+
 // Security note — innerHTML writes below (Cerberus Mantis #1422, 2026-05-16).
 //
 // Every `app.innerHTML = \`<lthn-xxx-window ...>\`` write in this switch is safe
