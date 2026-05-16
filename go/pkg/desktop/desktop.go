@@ -240,6 +240,20 @@ func (s *Service) Run() core.Result {
 		return core.Fail(core.E("desktop.Run", "Server is required", nil))
 	}
 
+	// Resolve the per-install SingleInstance encryption key. Generated
+	// once on first launch, persisted at ~/Lethean/data/keys/
+	// single-instance.aead, reloaded on every subsequent boot.
+	// Cerberus #1442: replaces the build-time constant that was shared
+	// across every installed binary on every machine.
+	var singleInstanceKey [32]byte
+	if s.opts.Keys != nil {
+		kr := s.opts.Keys.SingleInstanceKey()
+		if !kr.OK {
+			return core.Fail(core.E("desktop.Run", "load single-instance key", kr.Value.(error)))
+		}
+		singleInstanceKey = kr.Value.([32]byte)
+	}
+
 	// Mount the dappco.re/go/api + dappco.re/go/mcp HTTP surfaces onto
 	// our gin engine BEFORE the SPA fallback — pkg/server's NoRoute
 	// fallback catches anything not handled by registered routes, so
@@ -375,19 +389,16 @@ func (s *Service) Run() core.Result {
 		//  instance callback as untrusted". Since lthn re-broadcasts
 		// the second-instance payload straight onto the lthn:* event
 		// bus where the frontend acts on it, untrusted args are a
-		// real injection risk. The 32-byte literal here is build-time
-		// constant (same value in every install of the same binary,
-		// so legit second launches authenticate against the running
-		// first instance; a third-party attacker would need the
-		// binary's bytes to forge a payload).
+		// real injection risk.
+		//
+		// Cerberus #1442: the key is per-install, generated once on
+		// first launch and persisted at ~/Lethean/data/keys/
+		// single-instance.aead by pkg/keys. Every machine gets a
+		// distinct random 32-byte key; the build-time constant that
+		// was identical across every installed binary has been removed.
 		SingleInstance: &application.SingleInstanceOptions{
-			UniqueID: "io.lethean.desktop",
-			EncryptionKey: [32]byte{
-				0x6c, 0x74, 0x68, 0x6e, 0x2e, 0x73, 0x69, 0x6e,
-				0x67, 0x6c, 0x65, 0x2d, 0x69, 0x6e, 0x73, 0x74,
-				0x61, 0x6e, 0x63, 0x65, 0x2e, 0x76, 0x31, 0x2e,
-				0x6c, 0x65, 0x74, 0x68, 0x65, 0x61, 0x6e, 0x21,
-			},
+			UniqueID:      "io.lethean.desktop",
+			EncryptionKey: singleInstanceKey,
 			AdditionalData: map[string]string{
 				"app":     "lthn-desktop",
 				"version": "0.2.0-rc1",
