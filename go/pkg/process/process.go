@@ -31,16 +31,40 @@ import (
 // sub-engine mount in pkg/desktop/subsystems.go.
 const APIBasePath = "/v1/api/process"
 
+// GroupName is the RouteGroup identifier the rebased process provider
+// publishes via RouteGroup.Name(). Stable + grep-able so pkg/server's
+// auto-discovery loop can identify the group and route it to the
+// WebView-only mount instead of the public HTTP engine — Mantis #1449
+// Path 3 (process REST reach reduction).
+//
+// Distinct from the upstream go-process group's "process" name so the
+// filter in pkg/server is unambiguous when both this consumer's group
+// and any future direct go-process mount coexist in one Core.
+//
+// Usage example:
+//
+//	for _, g := range provider.RouteGroups() {
+//	    if g.Name() == process.GroupName {
+//	        // Wails-only mount path.
+//	    }
+//	}
+const GroupName = "lthn-process"
+
 // rebasedProvider wraps processapi.ProcessProvider so its BasePath
 // reads as APIBasePath rather than upstream's "/api/process". Lets the
 // outer gin engine host process REST under a non-conflicting prefix.
+//
+// Name() reports the lthn-side GroupName (not upstream's "process") so
+// pkg/server's auto-discovery loop can filter this group out of the
+// public HTTP engine and mount it on the Wails Asset.Handler engine
+// only — Mantis #1449 reach reduction.
 type rebasedProvider struct {
 	inner *processapi.ProcessProvider
 }
 
-func (p *rebasedProvider) Name() string                          { return p.inner.Name() }
-func (p *rebasedProvider) BasePath() string                      { return APIBasePath }
-func (p *rebasedProvider) RegisterRoutes(rg *gin.RouterGroup)    { p.inner.RegisterRoutes(rg) }
+func (p *rebasedProvider) Name() string                       { return GroupName }
+func (p *rebasedProvider) BasePath() string                   { return APIBasePath }
+func (p *rebasedProvider) RegisterRoutes(rg *gin.RouterGroup) { p.inner.RegisterRoutes(rg) }
 
 // Service wraps the dappco.re/go/process action surface for consumers
 // inside this binary. All calls round-trip through c.Action so they
