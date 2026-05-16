@@ -28,14 +28,104 @@ import (
 )
 
 // SessionInfo is the manifest entry for a session — what `lthn
-// sessions list` prints.
+// sessions list` prints. Snippet is a truncated preview of the
+// session's most recent message content so the rail can render a
+// glance-level preview without an N+1 message read per row. Empty
+// for sessions that have no messages yet; cleared by ClearMessages
+// + recomputed by Append / RemoveLast.
+//
+// SystemPrompt is per-conversation runner steering — empty for a
+// generic chat, populated by the right-rail "Instructions" field so
+// users can shape one session's persona without affecting others.
+// Send-time the chat-window prepends {role:"system", content:
+// prompt} to the history before the runner call. No truncation cap
+// on the storage side — prompts can be multi-paragraph.
 type SessionInfo struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	CreatedAt int64  `json:"created_at"`
-	UpdatedAt int64  `json:"updated_at"`
-	Messages  int    `json:"messages"`
+	ID           string   `json:"id"`
+	Title        string   `json:"title"`
+	CreatedAt    int64    `json:"created_at"`
+	UpdatedAt    int64    `json:"updated_at"`
+	Messages     int      `json:"messages"`
+	Snippet      string   `json:"snippet,omitempty"`
+	SystemPrompt string   `json:"system_prompt,omitempty"`
+	// Tags is the free-text label set the user has attached to this
+	// session. Lowercased + de-duplicated on the way in (SetTags
+	// enforces both). The rail renders chips beneath the title and a
+	// future filter wires off the same field.
+	Tags []string `json:"tags,omitempty"`
 }
+
+// SnippetMax caps the manifest snippet length so a multi-KB
+// message doesn't bloat the catalogue. 96 RUNES is comfortable for a
+// rail row (~10 words on average) and leaves room for the title +
+// model badge underneath. Rune count, not byte length — keeps the
+// visible width predictable across ASCII + emoji + CJK alike.
+const SnippetMax = 96
+
+// snippetInputCap caps the bytes of input renderSnippet inspects.
+// Cerberus L1 2026-05-16: an adversarial 1 MiB message of single
+// spaces would cause `for Contains "  "` to run quadratically.
+// 64 KiB is generous for chat content; past that we slice down to
+// SnippetMax runes anyway, so the extra bytes weren't going to land
+// in the manifest.
+const snippetInputCap = 64 * 1024
+
+// renderSnippet collapses a multi-line message body into a single
+// inline preview, trims surrounding whitespace, and caps the length
+// at SnippetMax runes with a trailing ellipsis when truncated. Empty
+// input yields an empty snippet so consumers can branch on a falsy
+// check. Adversarial-input safe: caps content before the
+// space-collapse loop (Cerberus L1 fix 2026-05-16).
+func renderSnippet(content string) string {
+	if content == "" {
+		return ""
+	}
+	// Defensive cap before the O(n²) space-collapse — see snippetInputCap.
+	if len(content) > snippetInputCap {
+		content = content[:snippetInputCap]
+	}
+	// Collapse every newline / carriage return / tab to a single space
+	// so a code block doesn't blow out the rail row vertically.
+	flat := core.Replace(content, "\r", " ")
+	flat = core.Replace(flat, "\n", " ")
+	flat = core.Replace(flat, "\t", " ")
+	// Collapse runs of consecutive spaces left by the replacements.
+	for core.Contains(flat, "  ") {
+		flat = core.Replace(flat, "  ", " ")
+	}
+	flat = core.Trim(flat)
+	if flat == "" {
+		return ""
+	}
+	if core.RuneCount(flat) <= SnippetMax {
+		return flat
+	}
+	// Truncate at SnippetMax-1 runes + append "…" so the total stays
+	// at exactly SnippetMax runes. Rune-aware slicing prevents
+	// splitting a multi-byte codepoint mid-sequence.
+	runes := []rune(flat)
+	return string(runes[:SnippetMax-1]) + "…"
+}
+
+// SystemPromptMax caps the per-session system prompt to 16 KiB
+// (Cerberus M1 2026-05-16). Long enough for a multi-paragraph
+// persona; short enough that an adversary can't bloat List() reads.
+const SystemPromptMax = 16 * 1024
+
+// MaxTags caps how many labels a session can carry (Cerberus M1).
+// 32 is more than any human curates by hand; rejecting beyond that
+// blocks plugins from posting `make([]string, 1e7)`.
+const MaxTags = 32
+
+// MaxTagLength caps each tag at 64 RUNES (Cerberus M1). Rail chips
+// can't usefully render longer than that anyway.
+const MaxTagLength = 64
+
+// SearchQueryMin is the shortest query Sessions.Search will accept.
+// Cerberus H3 2026-05-16: blank/single-char queries trivially scan
+// every message body across every session — keystroke-rate DoS.
+// 2 is the same threshold every modern search field uses.
+const SearchQueryMin = 2
 
 const (
 	groupMessages  = "sessions"
@@ -102,6 +192,9 @@ func Append(c *core.Core, id, role, content string) core.Result {
 	info := infoR.Value.(SessionInfo)
 	info.UpdatedAt = core.UnixNow()
 	info.Messages = len(msgs)
+	// Refresh snippet from the just-appended message so the rail
+	// preview reflects the latest content.
+	info.Snippet = renderSnippet(content)
 	return writeManifest(c, info)
 }
 
@@ -120,6 +213,579 @@ func Read(c *core.Core, id string) core.Result {
 		return msgsR
 	}
 	return msgsR
+}
+
+// RemoveLast pops the trailing message from a session's history and
+// returns it. Used by the chat-window's regenerate affordance: the
+// click drops the last assistant reply, then dispatches the trimmed
+// history through the runner so a fresh reply replaces it.
+//
+// Returns OK with Value = inference.Message (the popped one) on
+// success. Refuses an empty session — caller should check before
+// calling, but the guard means a programmatic mistake fails fast
+// instead of corrupting the manifest counter.
+//
+// Manifest is updated to reflect the new message count + bumped
+// UpdatedAt timestamp, matching Append's contract.
+//
+// Usage example:
+//
+//	r := sessions.RemoveLast(c, id)
+//	if r.OK { popped := r.Value.(inference.Message); _ = popped.Role }
+func RemoveLast(c *core.Core, id string) core.Result {
+	if c == nil {
+		return core.Fail(core.E("sessions.RemoveLast", coreNilMessage, nil))
+	}
+	if id == "" {
+		return core.Fail(core.E("sessions.RemoveLast", "empty id", nil))
+	}
+	msgsR := readMessages(c, id)
+	if !msgsR.OK {
+		return msgsR
+	}
+	msgs := msgsR.Value.([]inference.Message)
+	if len(msgs) == 0 {
+		return core.Fail(core.E("sessions.RemoveLast", "session is empty", nil))
+	}
+	popped := msgs[len(msgs)-1]
+	trimmed := msgs[:len(msgs)-1]
+	if r := writeMessages(c, id, trimmed); !r.OK {
+		return r
+	}
+	infoR := readManifest(c, id)
+	if !infoR.OK {
+		return infoR
+	}
+	info := infoR.Value.(SessionInfo)
+	info.UpdatedAt = core.UnixNow()
+	info.Messages = len(trimmed)
+	// Snippet follows the new tail — empty when nothing's left,
+	// otherwise the previous message's content.
+	if len(trimmed) == 0 {
+		info.Snippet = ""
+	} else {
+		info.Snippet = renderSnippet(trimmed[len(trimmed)-1].Content)
+	}
+	if r := writeManifest(c, info); !r.OK {
+		return r
+	}
+	return core.Ok(popped)
+}
+
+// ClearMessages wipes a session's message log while preserving the
+// session row itself — manifest entry stays (title, created_at)
+// with Messages reset to 0 and UpdatedAt bumped to now. Used by the
+// chat-window's /clear slash command so users can keep a thread's
+// title + identity while wiping the transcript.
+//
+// Idempotent: clearing an already-empty session succeeds quietly.
+//
+// Usage example:
+//
+//	r := sessions.ClearMessages(c, id)
+//	if !r.OK { core.Warn("clear failed", "err", r.Error()) }
+func ClearMessages(c *core.Core, id string) core.Result {
+	if c == nil {
+		return core.Fail(core.E("sessions.ClearMessages", coreNilMessage, nil))
+	}
+	if id == "" {
+		return core.Fail(core.E("sessions.ClearMessages", "empty id", nil))
+	}
+	// Confirm the session exists — clearing an unknown id should
+	// fail rather than silently create-then-clear the row.
+	infoR := readManifest(c, id)
+	if !infoR.OK {
+		return infoR
+	}
+	if r := writeMessages(c, id, []inference.Message{}); !r.OK {
+		return r
+	}
+	info := infoR.Value.(SessionInfo)
+	info.Messages = 0
+	info.UpdatedAt = core.UnixNow()
+	info.Snippet = ""
+	return writeManifest(c, info)
+}
+
+// Rename updates a session's manifest title + bumps UpdatedAt. The
+// message log is untouched. Refuses an empty title — the rail's
+// design assumes every session has a visible name, and the only
+// caller is the inline-edit affordance which has its own non-empty
+// validation; defending here keeps the contract crisp.
+//
+// Usage example:
+//
+//	r := sessions.Rename(c, id, "Drafting the launch announcement")
+//	if !r.OK { core.Warn("rename failed", "err", r.Error()) }
+func Rename(c *core.Core, id, title string) core.Result {
+	if c == nil {
+		return core.Fail(core.E("sessions.Rename", coreNilMessage, nil))
+	}
+	if id == "" {
+		return core.Fail(core.E("sessions.Rename", "empty id", nil))
+	}
+	if title == "" {
+		return core.Fail(core.E("sessions.Rename", "empty title", nil))
+	}
+	infoR := readManifest(c, id)
+	if !infoR.OK {
+		return infoR
+	}
+	info := infoR.Value.(SessionInfo)
+	info.Title = title
+	info.UpdatedAt = core.UnixNow()
+	return writeManifest(c, info)
+}
+
+// SetSystemPrompt persists the per-conversation runner steering. An
+// empty string clears the prompt (manifest's omitempty drops the key
+// from JSON, paying no storage for the default case). UpdatedAt
+// bumps so the rail-bucket sort reflects the recency of the edit.
+//
+// Failure modes:
+//   - nil core / empty id → fail
+//   - session not found → fail (manifest read propagates)
+//
+// Usage example:
+//
+//	r := sessions.SetSystemPrompt(c, id, "You are a Go expert.")
+//	if !r.OK { core.Warn("set prompt failed", "err", r.Error()) }
+func SetSystemPrompt(c *core.Core, id, prompt string) core.Result {
+	if c == nil {
+		return core.Fail(core.E("sessions.SetSystemPrompt", coreNilMessage, nil))
+	}
+	if id == "" {
+		return core.Fail(core.E("sessions.SetSystemPrompt", "empty id", nil))
+	}
+	// Cerberus M1 2026-05-16: cap unbounded input at the boundary
+	// rather than letting it bloat the manifest. 16 KiB is generous
+	// for a real prompt; past that = abuse.
+	if len(prompt) > SystemPromptMax {
+		return core.Fail(core.NewError("sessions.SetSystemPrompt: prompt exceeds 16 KiB"))
+	}
+	infoR := readManifest(c, id)
+	if !infoR.OK {
+		return infoR
+	}
+	info := infoR.Value.(SessionInfo)
+	info.SystemPrompt = prompt
+	info.UpdatedAt = core.UnixNow()
+	return writeManifest(c, info)
+}
+
+// SetTags writes the tag set onto a session's manifest. Input is
+// normalised: each tag trimmed, lowercased, blanks dropped,
+// duplicates removed (first-occurrence wins). nil + []string{} both
+// clear the field. UpdatedAt bumps so the rail reorder reflects the
+// edit.
+//
+// Failure modes:
+//   - nil core / empty id → fail
+//   - session not found → fail (manifest read propagates)
+//
+// Usage example:
+//
+//	r := sessions.SetTags(c, id, []string{"work", "ops"})
+//	if !r.OK { core.Warn("set tags failed", "err", r.Error()) }
+func SetTags(c *core.Core, id string, tags []string) core.Result {
+	if c == nil {
+		return core.Fail(core.E("sessions.SetTags", coreNilMessage, nil))
+	}
+	if id == "" {
+		return core.Fail(core.E("sessions.SetTags", "empty id", nil))
+	}
+	// Cerberus M1 2026-05-16: bound the input set BEFORE
+	// normaliseTags allocates O(N) on it.
+	if len(tags) > MaxTags {
+		return core.Fail(core.NewError("sessions.SetTags: too many tags (max 32)"))
+	}
+	for _, t := range tags {
+		if core.RuneCount(t) > MaxTagLength {
+			return core.Fail(core.NewError("sessions.SetTags: tag exceeds 64 runes"))
+		}
+	}
+	infoR := readManifest(c, id)
+	if !infoR.OK {
+		return infoR
+	}
+	info := infoR.Value.(SessionInfo)
+	info.Tags = normaliseTags(tags)
+	info.UpdatedAt = core.UnixNow()
+	return writeManifest(c, info)
+}
+
+// normaliseTags trims + lowercases each tag, drops blanks, removes
+// duplicates while preserving the first occurrence's order. Pure —
+// drives SetTags but exported via package-level so tests can assert
+// without hitting the store.
+func normaliseTags(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, t := range in {
+		clean := core.Lower(core.Trim(t))
+		if clean == "" {
+			continue
+		}
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		out = append(out, clean)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// Duplicate forks an existing session into a new one. The new
+// session gets a fresh id + bumped timestamps, a title suffixed with
+// " (copy)" so the rail visibly distinguishes the fork, and an
+// identical copy of every message. Used by the chat-window's
+// "Duplicate" context-menu item so a user can branch a conversation
+// without losing the original line of thought.
+//
+// Failure modes:
+//   - nil core / empty id → fail
+//   - source manifest unreadable → fail (propagates manifest error)
+//   - source messages unreadable → fail (propagates read error)
+//   - new id collides on disk → fail (writeManifest surfaces)
+//
+// Returns OK with Value = the new session id (string).
+//
+// Usage example:
+//
+//	r := sessions.Duplicate(c, "abc")
+//	if r.OK { newId := r.Value.(string); _ = newId }
+func Duplicate(c *core.Core, id string) core.Result {
+	if c == nil {
+		return core.Fail(core.E("sessions.Duplicate", coreNilMessage, nil))
+	}
+	if id == "" {
+		return core.Fail(core.E("sessions.Duplicate", "empty id", nil))
+	}
+	infoR := readManifest(c, id)
+	if !infoR.OK {
+		return infoR
+	}
+	src := infoR.Value.(SessionInfo)
+	msgsR := readMessages(c, id)
+	if !msgsR.OK {
+		return msgsR
+	}
+	msgs := msgsR.Value.([]inference.Message)
+
+	idResult := core.RandomString(16)
+	if !idResult.OK {
+		return idResult
+	}
+	newID := idResult.Value.(string)
+	now := core.UnixNow()
+	// Copy tag slice so future SetTags on the copy doesn't share
+	// backing storage with the source.
+	var tagsCopy []string
+	if len(src.Tags) > 0 {
+		tagsCopy = make([]string, len(src.Tags))
+		copy(tagsCopy, src.Tags)
+	}
+	dst := SessionInfo{
+		ID:           newID,
+		Title:        src.Title + " (copy)",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		Messages:     len(msgs),
+		Snippet:      src.Snippet,
+		SystemPrompt: src.SystemPrompt,
+		Tags:         tagsCopy,
+	}
+	if r := writeManifest(c, dst); !r.OK {
+		return r
+	}
+	// Copy the message slice rather than reusing the pointer so a
+	// future Append on the copy doesn't share backing storage with the
+	// source (defensive — writeMessages serialises to disk anyway).
+	out := make([]inference.Message, len(msgs))
+	copy(out, msgs)
+	if r := writeMessages(c, newID, out); !r.OK {
+		return r
+	}
+	return core.Ok(newID)
+}
+
+// Export renders a session's transcript as markdown and writes it
+// to the given filesystem path. The output is plain text with
+// `You:` / `Assistant:` speaker prefixes followed by the message
+// body, separated by blank lines — same shape as the in-app `/copy`
+// transcript so the file is paste-ready.
+//
+// path is taken verbatim from the caller; safety + permission
+// checks are the OS file dialog's responsibility (the chat-window
+// only calls this after Dialogs.SaveFile returns a chosen path).
+//
+// Failure modes:
+//   - nil core / empty id / empty path → fail
+//   - session not found → fail (manifest read propagates)
+//   - parent directory missing or unwritable → fail (WriteFile)
+//
+// Usage example:
+//
+//	r := sessions.Export(c, id, "/Users/snider/Desktop/chat.md")
+//	if !r.OK { core.Warn("export failed", "err", r.Error()) }
+func Export(c *core.Core, id, path string) core.Result {
+	if c == nil {
+		return core.Fail(core.E("sessions.Export", coreNilMessage, nil))
+	}
+	if id == "" {
+		return core.Fail(core.E("sessions.Export", "empty id", nil))
+	}
+	if path == "" {
+		return core.Fail(core.E("sessions.Export", "empty path", nil))
+	}
+	infoR := readManifest(c, id)
+	if !infoR.OK {
+		return infoR
+	}
+	info := infoR.Value.(SessionInfo)
+	msgsR := readMessages(c, id)
+	if !msgsR.OK {
+		return msgsR
+	}
+	msgs := msgsR.Value.([]inference.Message)
+	body := renderMarkdown(info, msgs)
+	if w := core.WriteFile(path, []byte(body), 0o644); !w.OK {
+		return core.Fail(core.E("sessions.Export", "write failed", w.Value.(error)))
+	}
+	return core.Ok(path)
+}
+
+// ExportAll writes every session in the catalogue to dir as markdown
+// files named "{slugged-title}-{id}.md". The slug strips characters
+// that won't survive a filesystem (spaces → -, drops anything not in
+// [a-z0-9-_]). Empty / unwritten sessions still get a file (covers
+// "I want everything backed up" rather than "I want non-empty
+// transcripts only"). Returns the count of files written.
+//
+// Failure modes:
+//   - nil core / empty dir → fail
+//   - List() failure → propagates
+//   - per-session Export failure → fail with the FIRST error encountered
+//     (no partial-success silently)
+//
+// Usage example:
+//
+//	r := sessions.ExportAll(c, "/Users/snider/Documents/lthn-export")
+//	if r.OK { count := r.Value.(int); _ = count }
+func ExportAll(c *core.Core, dir string) core.Result {
+	if c == nil {
+		return core.Fail(core.E("sessions.ExportAll", coreNilMessage, nil))
+	}
+	if dir == "" {
+		return core.Fail(core.E("sessions.ExportAll", "empty dir", nil))
+	}
+	if r := core.MkdirAll(dir, 0o755); !r.OK {
+		return core.Fail(core.E("sessions.ExportAll", "mkdir failed", r.Value.(error)))
+	}
+	listR := List(c)
+	if !listR.OK {
+		return listR
+	}
+	infos, _ := listR.Value.([]SessionInfo)
+	count := 0
+	for _, info := range infos {
+		name := slugFilename(info.Title) + "-" + info.ID + ".md"
+		path := core.PathJoin(dir, name)
+		r := Export(c, info.ID, path)
+		if !r.OK {
+			return core.Fail(core.E("sessions.ExportAll", "export "+info.ID+" failed", r.Value.(error)))
+		}
+		count++
+	}
+	return core.Ok(count)
+}
+
+// SlugMax caps the rune length of an ExportAll filename slug
+// (Cerberus H2 2026-05-16). 64 runes is comfortable for a
+// filesystem entry; the appended "-{16-char id}.md" stays well
+// under the 255-byte UNIX filename limit.
+const SlugMax = 64
+
+// SlugInputCap caps the bytes inspected by slugFilename so an
+// adversarial multi-MiB title doesn't trigger O(N) allocation per
+// session in ExportAll.
+const SlugInputCap = 4 * 1024
+
+// slugFilename normalises a session title into a filesystem-safe
+// slug. Lowercases, replaces non-[a-z0-9-_] runs with a single dash,
+// trims leading/trailing dashes. Empty titles become "untitled".
+// Rune-aware (Cerberus L2 2026-05-16) so multi-byte codepoints don't
+// get byte-mangled. Capped at SlugMax runes (Cerberus H2). Pure —
+// exported via the ExportAll path; tests can drive directly.
+func slugFilename(title string) string {
+	if len(title) > SlugInputCap {
+		title = title[:SlugInputCap]
+	}
+	s := core.Lower(core.Trim(title))
+	if s == "" {
+		return "untitled"
+	}
+	out := make([]rune, 0, SlugMax)
+	prevDash := false
+	for _, ch := range s {
+		isAlnum := (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_'
+		if isAlnum {
+			out = append(out, ch)
+			prevDash = false
+		} else if !prevDash {
+			out = append(out, '-')
+			prevDash = true
+		}
+		if len(out) >= SlugMax {
+			break
+		}
+	}
+	// Trim leading + trailing dashes.
+	start, end := 0, len(out)
+	for start < end && out[start] == '-' {
+		start++
+	}
+	for end > start && out[end-1] == '-' {
+		end--
+	}
+	if start == end {
+		return "untitled"
+	}
+	return string(out[start:end])
+}
+
+// renderMarkdown turns a session manifest + message log into the
+// markdown body the export writes. Format mirrors the frontend's
+// buildTranscript helper so file output + clipboard output stay in
+// sync. Pure function — exported via the Export path.
+func renderMarkdown(info SessionInfo, msgs []inference.Message) string {
+	var b core.Builder
+	b.WriteString("# ")
+	if info.Title != "" {
+		b.WriteString(info.Title)
+	} else {
+		b.WriteString("Untitled conversation")
+	}
+	b.WriteString("\n\n")
+	for i, m := range msgs {
+		role := "Assistant"
+		if m.Role == "user" {
+			role = "You"
+		}
+		b.WriteString(role)
+		b.WriteString(":\n")
+		b.WriteString(m.Content)
+		if i < len(msgs)-1 {
+			b.WriteString("\n\n")
+		}
+	}
+	return b.String()
+}
+
+// Delete removes a session from both groups — its message log AND
+// the manifest entry. Idempotent on a non-existent id: the underlying
+// store.delete succeeds without error when the key is absent, so
+// repeated calls don't fail.
+//
+// Returns OK with nil value on success. The order matters only for
+// crash-recovery — manifest goes LAST so a mid-deletion crash leaves
+// a manifest pointer to an empty message log, which List() still
+// surfaces. The reverse order would orphan messages with no manifest,
+// invisible to the UI but eating disk.
+//
+// Usage example:
+//
+//	r := sessions.Delete(c, id)
+//	if !r.OK { core.Warn("delete failed", "err", r.Error()) }
+func Delete(c *core.Core, id string) core.Result {
+	if c == nil {
+		return core.Fail(core.E("sessions.Delete", coreNilMessage, nil))
+	}
+	if id == "" {
+		return core.Fail(core.E("sessions.Delete", "empty id", nil))
+	}
+	if r := c.Action("store.delete").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "group", Value: groupMessages},
+		core.Option{Key: "key", Value: id},
+	)); !r.OK {
+		return r
+	}
+	return c.Action("store.delete").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "group", Value: groupManifest},
+		core.Option{Key: "key", Value: id},
+	))
+}
+
+// Search returns every session whose title OR any message content
+// matches the query, case-insensitive substring. Empty query returns
+// the same shape as List(c) — every session, no filter applied — so
+// callers can pipe one path regardless of whether the user typed
+// anything.
+//
+// Each match is the existing SessionInfo manifest entry; no snippet
+// extraction yet (the rail's row render reads its own snippet from
+// message data on demand). Adds N+1 disk reads on the hot path —
+// linear in session count, fine at the typical scale (dozens-to-
+// hundreds of sessions); revisit when stores grow past that.
+//
+// Usage example:
+//
+//	r := sessions.Search(c, "regex")
+//	if r.OK { hits := r.Value.([]SessionInfo); _ = hits }
+func Search(c *core.Core, query string) core.Result {
+	if c == nil {
+		return core.Fail(core.E("sessions.Search", coreNilMessage, nil))
+	}
+	q := core.Trim(query)
+	if q == "" {
+		return List(c)
+	}
+	// Cerberus H3 2026-05-16: refuse single-char queries — they
+	// trigger an N+1 disk-walk over every message body of every
+	// session per keystroke. UI debounce + min-length both close
+	// this surface; the backend guard is the load-bearing one.
+	if core.RuneCount(q) < SearchQueryMin {
+		return core.Ok([]SessionInfo{})
+	}
+	qLow := core.Lower(q)
+
+	listR := List(c)
+	if !listR.OK {
+		return listR
+	}
+	all, ok := listR.Value.([]SessionInfo)
+	if !ok {
+		return core.Ok([]SessionInfo{})
+	}
+
+	out := make([]SessionInfo, 0, len(all))
+	for _, info := range all {
+		if core.Contains(core.Lower(info.Title), qLow) {
+			out = append(out, info)
+			continue
+		}
+		// Title miss — inspect message content. readMessages
+		// failures are skipped silently so one corrupt session
+		// doesn't blank the entire search result set.
+		msgsR := readMessages(c, info.ID)
+		if !msgsR.OK {
+			continue
+		}
+		msgs, _ := msgsR.Value.([]inference.Message)
+		for _, m := range msgs {
+			if core.Contains(core.Lower(m.Content), qLow) {
+				out = append(out, info)
+				break
+			}
+		}
+	}
+	return core.Ok(out)
 }
 
 // List returns the manifest entries for every session. Order is
