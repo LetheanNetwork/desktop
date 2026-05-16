@@ -1,0 +1,197 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+package account
+
+import (
+	"crypto"
+
+	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
+	"dappco.re/lthn/desktop/pkg/serverkey"
+	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
+	"github.com/ProtonMail/go-crypto/openpgp/packet"
+	"github.com/ProtonMail/go-crypto/openpgp/s2k"
+)
+
+// Provision generates a fresh Lethean Account on this Mac per
+// RFC.stage-x.md §3 — Ed25519 keypair via Enchantrix, AES-256
+// symmetric-encryption of the private key with the user-typed
+// passphrase, atomic three-file write under ~/Lethean/account/<id>/,
+// and an immediately-issued session token so the frontend can flip
+// straight to state=ok after the response.
+//
+// Stage X.B Phase 2a happy-path scope:
+//
+//   - Passphrase NFKC normalised (mirrors Phase 1's unlock-side fix)
+//   - Ed25519 + Curve25519 keypair (Cerberus DREAD HIGH-1)
+//   - AES-256-CFB + S2K iteration count 65011712 (Cerberus DREAD HIGH-2)
+//   - Atomic three-file write — public.key + meta.json + private.key
+//     in that order, private.key as the LEAF signal per Cerberus #1471
+//   - Refuse-to-overwrite guard (Cerberus #1460 (a))
+//   - Session token auto-issued via SessionTokenIssuer
+//   - Passphrase + plaintext private bytes zeroed with runtime.KeepAlive
+//
+// Deferred to Phase 2b/2c/2d (tracked in RFC.stage-x.md §10):
+//
+//   - 256-char raw length cap BEFORE NFKC (Q6 Unicode-expansion)
+//   - HIBP common-passphrase check via pkg/passphrase (HIGH-3)
+//   - request_id 5-minute idempotency dedup (Q5)
+//   - Null-byte rejection (LOW)
+//   - Strength meter / weak / common code surface
+//   - auth.account.provisioned + auth.session.issued typed events
+//     (Stage F wiring lands separately)
+//
+// Usage example:
+//
+//	r := svc.Provision(account.ProvisionInput{
+//	    Passphrase: "correct horse battery staple",
+//	    RequestID:  uuidv4(),
+//	})
+//	if r.OK {
+//	    out := r.Value.(account.ProvisionOutput)
+//	    _ = out.SessionToken
+//	}
+func (s *Service) Provision(input ProvisionInput) core.Result {
+	if input.Passphrase == "" {
+		return core.Fail(core.NewCode(codeProvisionPassphraseRequired,
+			"passphrase is required"))
+	}
+	if s.serverkey == nil {
+		return core.Fail(core.NewCode(codeProvisionMisconfigured,
+			"session-token issuer not wired — call SetServerKey before Provision"))
+	}
+
+	// NFKC normalise so the same logical passphrase typed on any OS
+	// keyboard encrypts to the same bytes — the create-side mirror of
+	// Stage X.B Phase 1's unlock-side patch (RFC.stage-x.md §6).
+	// nfkcPassphrase + zeroAndKeepAlive live in passnorm.go.
+	passphrase := nfkcPassphrase(input.Passphrase)
+	defer zeroAndKeepAlive(passphrase)
+
+	rootR := paths.Root()
+	if !rootR.OK {
+		return rootR
+	}
+	root, _ := rootR.Value.(string)
+
+	accountRoot := core.PathJoin(root, accountDir)
+	if r := core.MkdirAll(accountRoot, dirMode); !r.OK {
+		return core.Fail(core.E("account.Provision", "mkdir account root", r.Value.(error)))
+	}
+
+	// Cerberus DREAD HIGH-1 — Ed25519 + Curve25519. Enchantrix's
+	// GenerateKeyPairWithConfig with a nil config falls back to
+	// RSA-2048 (the openpgp library default). Modern callers MUST
+	// pass an explicit config.
+	pgpSvc := pgp.NewService()
+	pubArmoured, privPlain, err := pgpSvc.GenerateKeyPairWithConfig(
+		"user", "user@lthn.local", "first-run",
+		&packet.Config{
+			Algorithm: packet.PubKeyAlgoEdDSA,
+			Curve:     packet.Curve25519,
+		},
+	)
+	if err != nil {
+		return core.Fail(core.NewCode(codeProvisionKeygenFailed,
+			"keypair generation failed: "+err.Error()))
+	}
+	defer zeroAndKeepAlive(privPlain)
+
+	canonical := deriveAccountID(pubArmoured)
+	dir := core.PathJoin(accountRoot, canonical)
+	privatePath := core.PathJoin(dir, privateKeyFile)
+
+	// Cerberus #1460 (a) — refuse-to-overwrite. Two Provision calls
+	// produce different keypairs (crypto/rand) so the collision is
+	// vanishingly rare in practice, but the leaf-file guard mirrors
+	// Create's posture so a partial-write retry can't silently land
+	// a second account under the same id.
+	if core.Stat(privatePath).OK {
+		return core.Fail(core.NewCode(codeAccountExists,
+			"an account already exists at this id; refusing to overwrite"))
+	}
+
+	if r := core.MkdirAll(dir, dirMode); !r.OK {
+		return core.Fail(core.E("account.Provision", "mkdir account dir", r.Value.(error)))
+	}
+
+	// Cerberus DREAD HIGH-2 — AES-256 + iterated S2K at the highest
+	// standard count. SymmetricallyEncryptWithConfig with a nil
+	// config defaults to AES-128 + 16777216 iterations; modern
+	// callers MUST pass an explicit config.
+	encPriv, err := pgpSvc.SymmetricallyEncryptWithConfig(passphrase, privPlain, &packet.Config{
+		DefaultCipher: packet.CipherAES256,
+		S2KConfig: &s2k.Config{
+			Hash:     crypto.SHA256,
+			S2KCount: 65011712,
+		},
+	})
+	if err != nil {
+		return core.Fail(core.NewCode(codeProvisionEncryptFailed,
+			"symmetric encryption of private key failed: "+err.Error()))
+	}
+
+	// Build the meta blob FIRST so a marshal failure aborts before
+	// any rename happens (same posture as Create — type=provision
+	// distinguishes from Create's type=create meta in future audit).
+	meta := map[string]any{
+		"account_id": canonical,
+		"created_at": core.Now().UTC().Unix(),
+		"version":    1,
+		"type":       "provision",
+	}
+	metaR := core.JSONMarshal(meta)
+	if !metaR.OK {
+		return core.Fail(core.E("account.Provision", "marshal meta", metaR.Value.(error)))
+	}
+	metaBytes, _ := metaR.Value.([]byte)
+
+	// Atomic three-file write with private.key LAST per Cerberus
+	// #1471 — AccountStatus's leaf signal flips to true atomically.
+	// A crash between any pair of renames leaves the directory
+	// half-built without private.key; AccountStatus reads
+	// has_user_account=false and the next Provision call can retry.
+	publicPath := core.PathJoin(dir, publicKeyFile)
+	metaPath := core.PathJoin(dir, metaFile)
+
+	if r := atomicWrite(publicPath, pubArmoured); !r.OK {
+		return core.Fail(core.NewCode(codeAccountWriteFailed,
+			"writing public.key failed: "+r.Error()))
+	}
+	if r := atomicWrite(metaPath, metaBytes); !r.OK {
+		return core.Fail(core.NewCode(codeAccountWriteFailed,
+			"writing meta.json failed: "+r.Error()))
+	}
+	// LEAF — encrypted private key, NOT the SHA-256 marker Stage B'
+	// Create wrote. Once this rename lands AccountStatus reports
+	// has_user_account=true and the unlock path can decrypt against
+	// the supplied passphrase.
+	if r := atomicWrite(privatePath, encPriv); !r.OK {
+		return core.Fail(core.NewCode(codeAccountWriteFailed,
+			"writing private.key failed: "+r.Error()))
+	}
+
+	// Issue a session token immediately so the frontend can flip
+	// state=ok in one round-trip (RFC.stage-x.md §3 step 11). Failure
+	// here leaves the account on disk in a valid state — the user
+	// can simply reload + unlock — but the response surfaces the
+	// distinct code so the UX can guide them to retry.
+	tokR := s.serverkey.IssueSessionToken(canonical)
+	if !tokR.OK {
+		return core.Fail(core.NewCode(codeProvisionSessionMintFailed,
+			"account written but session-token mint failed: "+tokR.Error()))
+	}
+	out, _ := tokR.Value.(serverkey.SessionTokenOutput)
+	if out.Token == "" {
+		return core.Fail(core.NewCode(codeProvisionSessionMintFailed,
+			"session-token issuer returned an empty token"))
+	}
+
+	return core.Ok(ProvisionOutput{
+		AccountID:    canonical,
+		Path:         dir,
+		SessionToken: out.Token,
+		ExpiresAt:    out.ExpiresAt,
+		DedupHit:     false, // Phase 2c will toggle this on idempotent replay.
+	})
+}

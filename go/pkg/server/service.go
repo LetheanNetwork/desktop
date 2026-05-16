@@ -197,8 +197,9 @@ type Options struct {
 //	apiOpts = append(apiOpts,
 //	    WithBootstrapAuth(opts.ServerKey, opts.LocalKey, BootstrapPathScopes))
 var BootstrapPathScopes = map[string]string{
-	"/v1/account/create": "account.create",
-	"/v1/account/unlock": "account.unlock",
+	"/v1/account/create":    "account.create",
+	"/v1/account/provision": "account.provision",
+	"/v1/account/unlock":    "account.unlock",
 }
 
 // RouteTiers classifies every non-skip-list /v1 route per

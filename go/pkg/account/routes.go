@@ -75,6 +75,7 @@ func (g *routesProvider) BasePath() string { return APIBasePath }
 //	}
 func (g *routesProvider) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/create", g.handleCreate)
+	rg.POST("/provision", g.handleProvision)
 	rg.POST("/unlock", g.handleUnlock)
 	rg.POST("/lock", g.handleLock)
 }
@@ -154,6 +155,46 @@ func (g *routesProvider) handleCreate(c *gin.Context) {
 	msg := r.Error()
 	status := statusForCode(code)
 	c.JSON(status, coreapi.Fail(code, msg))
+}
+
+// handleProvision is the gin handler for POST /v1/account/provision.
+// Reads ProvisionInput, defers keygen + encrypt + atomic-write to
+// Service.Provision per RFC.stage-x.md §3, and shapes the response.
+//
+// Auth: bootstrap-auth middleware verifies LTHN-BOOT-1.* token with
+// scope=account.provision BEFORE this handler runs — by the time we
+// land the nonce is already burned (replay defence holds on partial
+// failure per Cerberus #1460 (d) discipline applied here).
+//
+// HTTP status mapping per RFC.stage-x.md §3 "Failure codes":
+//
+//   - account.invalid_body                   → 400 Bad Request
+//   - account.provision.passphrase.required  → 400 Bad Request
+//   - account.exists                         → 409 Conflict
+//   - account.provision.keygen_failed        → 500 Internal Server Error
+//   - account.provision.encrypt_failed       → 500 Internal Server Error
+//   - account.provision.session_mint_failed  → 500 Internal Server Error
+//   - account.provision.server_misconfigured → 500 Internal Server Error
+//   - account.write_failed                   → 500 Internal Server Error
+func (g *routesProvider) handleProvision(c *gin.Context) {
+	var input ProvisionInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, coreapi.Fail(codeAccountInvalidBody, err.Error()))
+		return
+	}
+
+	r := g.svc.Provision(input)
+	if r.OK {
+		out, _ := r.Value.(ProvisionOutput)
+		c.JSON(http.StatusOK, coreapi.OK(out))
+		return
+	}
+
+	code := r.Code()
+	if code == "" {
+		code = codeAccountWriteFailed
+	}
+	c.JSON(statusForCode(code), coreapi.Fail(code, r.Error()))
 }
 
 // handleUnlock is the gin handler for POST /v1/account/unlock.
@@ -254,7 +295,8 @@ func statusForCode(code string) int {
 		codePublicKeyRequired,
 		codeAccountIDRequired,
 		codeAccountIDMismatch,
-		codeUnlockPassphraseRequired:
+		codeUnlockPassphraseRequired,
+		codeProvisionPassphraseRequired:
 		return http.StatusBadRequest
 	case codeAccountExists:
 		return http.StatusConflict

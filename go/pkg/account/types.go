@@ -191,6 +191,44 @@ type SessionTokenIssuer interface {
 	IssueSessionToken(accountID string) core.Result
 }
 
+// ProvisionInput is the request body the frontend sends to
+// POST /v1/account/provision per RFC.stage-x.md §2.1. Passphrase is
+// required; empty rejects with account.provision.passphrase.required
+// BEFORE any keygen so a malformed POST cannot consume the expensive
+// keygen path. RequestID is the client-generated UUID v4 for the
+// §3.2 idempotency dedup window — Phase 2a accepts an empty value
+// (dedup ships in Phase 2c).
+//
+// Usage example:
+//
+//	in := account.ProvisionInput{
+//	    Passphrase: "correct horse battery staple",
+//	    RequestID:  "8b1d4a3e-0a4c-4f6e-9c4e-2a3b9d6f8e1c",
+//	}
+type ProvisionInput struct {
+	Passphrase string `json:"passphrase"`
+	RequestID  string `json:"request_id"`
+}
+
+// ProvisionOutput is the success-shape returned on a 200 OK from
+// /v1/account/provision. SessionToken mirrors UnlockOutput's shape so
+// the auth-gate frontend handles both responses with one branch.
+// DedupHit ships false in Phase 2a (idempotency dedup is Phase 2c);
+// the field is reserved here so callers can rely on its presence
+// today without a contract change later.
+//
+// Usage example:
+//
+//	out := r.Value.(account.ProvisionOutput)
+//	setSessionToken(out.SessionToken)
+type ProvisionOutput struct {
+	AccountID    string `json:"account_id"`
+	Path         string `json:"path"`
+	SessionToken string `json:"session_token"`
+	ExpiresAt    int64  `json:"expires_at"`
+	DedupHit     bool   `json:"dedup_hit,omitempty"`
+}
+
 // lockoutEntry tracks per-account_id failed-unlock state per RFC §5
 // M1 (Cerberus DREAD ruling — counter is per-account, NOT global).
 // attempts holds the unix-seconds of each failed attempt inside the
@@ -254,6 +292,18 @@ const (
 	codeUnlockPassphraseRequired = "account.unlock.passphrase.required"
 	codeUnlockMisconfigured      = "account.unlock.server_misconfigured"
 	codeUnlockSessionMintFailed  = "account.unlock.session_mint_failed"
+
+	// Stage X.B per RFC.stage-x.md §2.1 — server-side provision
+	// (keygen + encrypt + write + session-token) failure namespace.
+	// Frontend keys inline-copy off these codes (passphrase.required
+	// renders "Enter a passphrase"; keygen_failed flips to error
+	// state; session_mint_failed mirrors the unlock-side variant so
+	// the same UX branch handles both).
+	codeProvisionPassphraseRequired = "account.provision.passphrase.required"
+	codeProvisionKeygenFailed       = "account.provision.keygen_failed"
+	codeProvisionEncryptFailed      = "account.provision.encrypt_failed"
+	codeProvisionMisconfigured      = "account.provision.server_misconfigured"
+	codeProvisionSessionMintFailed  = "account.provision.session_mint_failed"
 )
 
 // Lockout policy constants per RFC.stage-e.md §5 + Cerberus DREAD M1.
