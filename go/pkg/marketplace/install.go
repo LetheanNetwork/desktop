@@ -216,6 +216,14 @@ func (s *Service) Install(input InstallInput) core.Result {
 	// already landed). Uninstall calls plugin.UnregisterBundle.
 	_ = plugin.RegisterBundle(s.core, m.Name, manifestToPluginInput(m))
 
+	// Plugin-view registry — populate the source-of-truth for the
+	// frontend descriptor lookup, CSP frame-src allowlist + §5.1
+	// postMessage origin verification per RFC.plugin-views §2 + §3.3
+	// + §7.2. Best-effort: a port-collision Fail Result here doesn't
+	// fail the install (the sandboxes already landed); the affected
+	// view simply doesn't register so the frontend falls back per §6.
+	registerPluginViews(m)
+
 	// Broadcast — frontend renders status pills + future MCP/agent
 	// consumers react. Before is zero (first install, no prior state).
 	fireBundleChanged(s.core, PhaseInstalled, rec, InstalledBundle{})
@@ -383,6 +391,22 @@ func (s *Service) Stop(bundleID string) core.Result {
 // Does NOT delete persistent volumes — caller prompts the user first
 // per RFC.marketplace.md §5.4.
 //
+// Ordering — plugin-views RFC §2.1 (Cerberus HIGH-4):
+//
+//  1. Drop the plugin from the live plugin-view registry
+//     (PluginViewRegistry.Drop) — stops accepting postMessage and
+//     drops capability grants for the doomed plugin BEFORE any
+//     in-flight message can be honoured.
+//  2. CSP frame-src allowlist mutation falls out of (1) — the next
+//     HTTP response the cspMiddleware renders sees the narrowed
+//     registry.
+//  3. Emit PluginUninstalled on the IPC bus so subscribers (frontend
+//     descriptor table, future MCP listeners) drop their entries.
+//  4. Tear down sandboxes (existing Stop call) + drop five-pillar
+//     plugin entries + remove the orm record.
+//  5. Broadcast the BundleChanged PhaseUninstalled event so existing
+//     listeners stay informed.
+//
 // Usage example:
 //
 //	r := svc.Uninstall("opencode")
@@ -400,7 +424,20 @@ func (s *Service) Uninstall(bundleID string) core.Result {
 		before = recR.Value.(InstalledBundle)
 	}
 
-	// Stop all running sandboxes first.
+	// Step 1 + 2 + 3 — drop from plugin-view registry first so
+	// postMessage handlers, CSP allowlist + capability table all see
+	// the narrowed state BEFORE the iframe is torn down. The view
+	// registry holds the descriptors the frontend mounts against +
+	// the per-port CSP allowlist the cspMiddleware reads on every
+	// response. Plugin code derived from bundle id — pluginCodeOf
+	// resolves the BundleManifest.Plugin.Code → fall back to Name.
+	pluginCode := s.resolvePluginCode(bundleID)
+	if pluginCode != "" {
+		ViewRegistry.Drop(pluginCode)
+		firePluginUninstalled(s.core, pluginCode)
+	}
+
+	// Step 4 — stop all running sandboxes.
 	_ = s.Stop(bundleID)
 
 	// Drop five-pillar plugin entries before the orm record so a
@@ -413,12 +450,117 @@ func (s *Service) Uninstall(bundleID string) core.Result {
 		_ = orm.Of[InstalledBundle](s.core).Delete(&rec)
 	}
 
-	// Broadcast — Bundle carries the captured pre-uninstall state so
-	// subscribers know what was removed; Before stays zero since the
-	// orm record is gone by the time the broadcast fires.
+	// Step 5 — Broadcast BundleChanged. Bundle carries the captured
+	// pre-uninstall state so subscribers know what was removed;
+	// Before stays zero since the orm record is gone by the time the
+	// broadcast fires.
 	fireBundleChanged(s.core, PhaseUninstalled, before, InstalledBundle{})
 
 	return core.Ok(nil)
+}
+
+// registerPluginViews materialises the manifest's PluginView block
+// into resolved PluginViewDescriptors + adds them to the live
+// ViewRegistry. Per RFC.plugin-views §2 + §3.3 + §5.1 + §7.2 this
+// is the source-of-truth update for:
+//
+//   - the frontend descriptor lookup (GetViewDescriptor)
+//   - the CSP frame-src per-port allowlist (cspMiddleware)
+//   - the postMessage inbound origin verification (PluginCodeForOrigin)
+//   - the §7.2 origin-uniqueness invariant (port collision reject)
+//
+// Iframe sources of the form ${expose.<id>.route} are NOT resolved
+// here — the frontend mounts against http://127.0.0.1:<port> which
+// the descriptor carries explicitly (LoopbackPort + LoopbackOrigin).
+// The Source field stays as the manifest's resolved route string so
+// the iframe URL can reference plugin-internal paths.
+func registerPluginViews(m BundleManifest) {
+	if m.Plugin == nil || len(m.Plugin.Views) == 0 {
+		return
+	}
+	code := pluginCodeOf(m)
+	if code == "" {
+		return
+	}
+	// Build expose id → port + route lookup so iframe view sources
+	// can resolve the per-image expose block at install time.
+	type exposeBinding struct {
+		port  int
+		route string
+	}
+	bindings := map[string]exposeBinding{}
+	for _, img := range m.Images {
+		if img.Expose != nil {
+			bindings[img.ID] = exposeBinding{
+				port:  img.Expose.Port,
+				route: img.Expose.Route,
+			}
+		}
+	}
+	for _, v := range m.Plugin.Views {
+		desc := PluginViewDescriptor{
+			ID:           v.ID,
+			Label:        v.Label,
+			Icon:         iconOrDefault(v.Icon),
+			Group:        "plugin",
+			Kind:         v.Kind,
+			Source:       v.Source,
+			PluginCode:   code,
+			Capabilities: append([]string{}, v.Capabilities...),
+		}
+		if v.Kind == PluginViewKindIframe {
+			exposeID := exposeIDFromSource(v.Source)
+			if b, ok := bindings[exposeID]; ok {
+				desc.LoopbackPort = b.port
+				desc.LoopbackOrigin = core.Sprintf("http://127.0.0.1:%d", b.port)
+				if b.route != "" {
+					desc.Source = b.route
+				}
+			}
+		}
+		_ = ViewRegistry.Add(code, desc)
+	}
+}
+
+// iconOrDefault returns the manifest-declared icon or "fa-cube"
+// when the manifest omitted it (per §2 optional-field default).
+func iconOrDefault(icon string) string {
+	if core.Trim(icon) == "" {
+		return "fa-cube"
+	}
+	return icon
+}
+
+// exposeIDFromSource extracts `<id>` from a `${expose.<id>.route}`
+// placeholder string. Returns "" when the source isn't shaped like
+// the placeholder (caller treats as no binding).
+func exposeIDFromSource(src string) string {
+	src = core.Trim(src)
+	const prefix = "${expose."
+	const suffix = ".route}"
+	if !core.HasPrefix(src, prefix) || !core.HasSuffix(src, suffix) {
+		return ""
+	}
+	return src[len(prefix) : len(src)-len(suffix)]
+}
+
+// resolvePluginCode returns the plugin code for an installed bundle.
+// Loads the manifest from the bundle's config directory; falls back
+// to the bundle id when the manifest can't be read (bundle predates
+// the views feature OR config path missing).
+func (s *Service) resolvePluginCode(bundleID string) string {
+	configPath := s.bundleConfigPath(bundleID)
+	manifestPath := core.JoinPath(configPath, "manifest.yml")
+	readR := core.ReadFile(manifestPath)
+	if !readR.OK {
+		return core.Trim(bundleID)
+	}
+	raw, _ := readR.Value.([]byte)
+	mR := ParseManifestBytes(raw)
+	if !mR.OK {
+		return core.Trim(bundleID)
+	}
+	return pluginCodeOf(mR.Value.(BundleManifest))
 }
 
 // Status returns the current state of an installed bundle including

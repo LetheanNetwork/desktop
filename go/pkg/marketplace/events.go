@@ -71,6 +71,48 @@ const (
 	PhaseUninstalled = "uninstalled"
 )
 
+// PluginUninstalled is broadcast on the Core IPC bus after a plugin
+// bundle is uninstalled, carrying just the plugin code. Frontend
+// listeners drop descriptor table entries + tear down mounted views
+// per plans/code/lthn/desktop/views/RFC.plugin-views.md §2.1 step 4.
+//
+// Fired AFTER capability table drop (step 2) + CSP allowlist drop
+// (step 3) so subscribers observing the event see a state where the
+// host has already stopped accepting postMessage from the doomed
+// iframe (step 1).
+//
+// Usage example:
+//
+//	c.RegisterAction(func(c *core.Core, msg core.Message) core.Result {
+//	    if ev, ok := msg.(marketplace.PluginUninstalled); ok {
+//	        // drop descriptors keyed by ev.Code
+//	    }
+//	    return core.Result{OK: true}
+//	})
+type PluginUninstalled struct {
+	// Code is the plugin code (PluginBlock.Code, falling back to
+	// bundle Name when unset) being uninstalled. Frontend uses this
+	// to namespace localStorage cleanup + descriptor teardown.
+	Code string `json:"code"`
+	// At is when the broadcast fired.
+	At core.Time `json:"at"`
+}
+
+// firePluginUninstalled broadcasts a PluginUninstalled event on the
+// Core IPC bus. Safe to call when c is nil; drops the broadcast
+// silently in that case. Called by Uninstall AFTER the capability +
+// CSP cleanup steps so subscribers observe a clean post-uninstall
+// state.
+func firePluginUninstalled(c *core.Core, code string) {
+	if c == nil || code == "" {
+		return
+	}
+	c.ACTION(PluginUninstalled{
+		Code: code,
+		At:   core.Now().UTC(),
+	})
+}
+
 // Subscribe is the typed shorthand for "I only care about
 // BundleChanged messages on this Core". Wraps c.RegisterAction with
 // the msg.(BundleChanged) cast inline. For multi-message subscribers,

@@ -107,6 +107,36 @@ var fixture = []Package{
 	},
 }
 
+// GetViewDescriptor returns the resolved PluginViewDescriptor for a
+// view id, looked up from the live ViewRegistry. Returns a Fail
+// Result with code "marketplace.view.not_found" when the id is not
+// currently registered (plugin not installed, plugin uninstalled
+// after the frontend cached the id, etc).
+//
+// Per plans/code/lthn/desktop/views/RFC.plugin-views.md §2 — the
+// frontend calls this on mount-time to hydrate the descriptor it
+// uses to render <lthn-plugin-view>. The descriptor table mutates
+// at install / uninstall; the lookup is cheap (one map read).
+//
+// Usage example:
+//
+//	r := svc.GetViewDescriptor("opencode")
+//	if !r.OK { /* fall back per §6 chain */ }
+//	d := r.Value.(marketplace.PluginViewDescriptor)
+func (s *Service) GetViewDescriptor(id string) core.Result {
+	id = core.Trim(id)
+	if id == "" {
+		return core.Fail(core.E("marketplace.view.not_found",
+			"view id is required", nil))
+	}
+	d, ok := ViewRegistry.Lookup(id)
+	if !ok {
+		return core.Fail(core.E("marketplace.view.not_found",
+			"no plugin view registered for id: "+id, nil))
+	}
+	return core.Ok(d)
+}
+
 // search filters the in-memory catalogue by query + category.
 // query is matched case-insensitively against code/name/category/
 // description; category is exact (case-insensitive) match.
