@@ -68,10 +68,10 @@ func mailDir() core.Result {
 }
 
 // folderDir resolves ~/Lethean/office/mail/{slug}/ and creates it.
-// Validates slug before path join.
+// Validates slug via paths.IsValidID before path join.
 func folderDir(slug string) core.Result {
-	if !isValidSlug(slug) {
-		return core.Fail(core.E("mail.folderDir", "invalid folder slug: "+slug, nil))
+	if err := paths.IsValidID(slug); err != nil {
+		return core.Fail(core.E("mail.folderDir", "invalid folder slug", err))
 	}
 	base := mailDir()
 	if !base.OK {
@@ -203,27 +203,6 @@ func toThread(r MailThreadRecord, now core.Time) MailThread {
 		Unread: r.Unread,
 		Body:   r.Snippet,
 	}
-}
-
-// isValidSlug rejects folder slugs that contain path-traversal characters.
-// Cerberus #1486-style guard; replaced by paths.IsValidID when exported.
-func isValidSlug(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		b := s[i]
-		if b == 0 || b == '/' || b == '\\' {
-			return false
-		}
-	}
-	// Reject ".." anywhere.
-	for i := 0; i < len(s)-1; i++ {
-		if s[i] == '.' && s[i+1] == '.' {
-			return false
-		}
-	}
-	return true
 }
 
 // scanFolders reads all subdirectories of mailDir() and returns a

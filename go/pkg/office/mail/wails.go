@@ -9,6 +9,7 @@ package mail
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // ListFolders returns all mail folders found in ~/Lethean/office/mail/.
@@ -38,8 +39,8 @@ func (s *Service) ListFolders() core.Result {
 //	r := svc.ListThreads(mail.ListThreadsInput{FolderSlug: "inbox", Limit: 20})
 //	if r.OK { out := r.Value.(mail.ListThreadsOutput) }
 func (s *Service) ListThreads(input ListThreadsInput) core.Result {
-	if !isValidSlug(input.FolderSlug) {
-		return core.Fail(core.E("mail.ListThreads", "invalid folderSlug: "+input.FolderSlug, nil))
+	if err := paths.IsValidID(input.FolderSlug); err != nil {
+		return core.Fail(core.E("mail.ListThreads", "invalid folderSlug", err))
 	}
 
 	limit := input.Limit

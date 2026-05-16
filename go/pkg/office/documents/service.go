@@ -253,29 +253,6 @@ func toRow(r DocRecord, now core.Time) DocRow {
 	}
 }
 
-// isValidSlug returns true when slug contains no path traversal characters.
-// Rejects empty, "/", "\", "..", null bytes. This is the Cerberus #1486
-// posture; replaced by paths.IsValidID when that helper is exported upstream.
-func isValidSlug(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		b := s[i]
-		if b == 0 || b == '/' || b == '\\' {
-			return false
-		}
-	}
-	// Reject ".." anywhere in the slug.
-	if len(s) >= 2 {
-		for i := 0; i < len(s)-1; i++ {
-			if s[i] == '.' && s[i+1] == '.' {
-				return false
-			}
-		}
-	}
-	return true
-}
 
 // scanDocs reads all *.md files from docsDir() and returns a slice of
 // DocRecord values sorted by ModTime descending (newest first).

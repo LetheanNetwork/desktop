@@ -7,6 +7,7 @@ import (
 	"time"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // TestScanFolders_Empty — no mail dir yet → empty folder list (no error).
@@ -165,21 +166,21 @@ func TestRelativeWhen_Days(t *testing.T) {
 	}
 }
 
-// TestIsValidSlug_Valid — plain folder slugs pass.
+// TestIsValidSlug_Valid — plain folder slugs pass paths.IsValidID.
 func TestIsValidSlug_Valid(t *testing.T) {
 	valid := []string{"inbox", "sent", "drafts", "archive", "trash", "my-folder"}
 	for _, s := range valid {
-		if !isValidSlug(s) {
-			t.Errorf("expected %q to be valid", s)
+		if err := paths.IsValidID(s); err != nil {
+			t.Errorf("expected %q to be valid, got: %v", s, err)
 		}
 	}
 }
 
-// TestIsValidSlug_Invalid — traversal slugs are rejected.
+// TestIsValidSlug_Invalid — traversal slugs are rejected by paths.IsValidID.
 func TestIsValidSlug_Invalid(t *testing.T) {
 	invalid := []string{"", "../inbox", "inbox/foo", "in\\box", "null\x00"}
 	for _, s := range invalid {
-		if isValidSlug(s) {
+		if err := paths.IsValidID(s); err == nil {
 			t.Errorf("expected %q to be invalid", s)
 		}
 	}

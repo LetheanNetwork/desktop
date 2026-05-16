@@ -7,6 +7,7 @@ import (
 	"time"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // TestScan_Empty — empty docs dir produces an empty record list.
@@ -163,21 +164,21 @@ func TestResolveAuthor_Other(t *testing.T) {
 	}
 }
 
-// TestIsValidSlug_Valid — plain slugs pass.
+// TestIsValidSlug_Valid — plain slugs pass paths.IsValidID.
 func TestIsValidSlug_Valid(t *testing.T) {
 	valid := []string{"release-notes", "v0.2-notes", "Q2-board-pack"}
 	for _, s := range valid {
-		if !isValidSlug(s) {
-			t.Errorf("expected %q to be valid", s)
+		if err := paths.IsValidID(s); err != nil {
+			t.Errorf("expected %q to be valid, got: %v", s, err)
 		}
 	}
 }
 
-// TestIsValidSlug_Invalid — slugs with traversal characters are rejected.
+// TestIsValidSlug_Invalid — slugs with traversal characters are rejected by paths.IsValidID.
 func TestIsValidSlug_Invalid(t *testing.T) {
 	invalid := []string{"", "../etc/passwd", "foo/bar", "a\\b", "null\x00byte"}
 	for _, s := range invalid {
-		if isValidSlug(s) {
+		if err := paths.IsValidID(s); err == nil {
 			t.Errorf("expected %q to be invalid", s)
 		}
 	}

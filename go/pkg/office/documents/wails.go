@@ -9,6 +9,7 @@ package documents
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // List returns the documents in ~/Lethean/office/docs/, optionally
@@ -61,8 +62,8 @@ func (s *Service) List(input ListInput) core.Result {
 //	r := svc.Get(documents.GetInput{Slug: "release-notes"})
 //	if r.OK { d := r.Value.(documents.DocDetail) }
 func (s *Service) Get(input GetInput) core.Result {
-	if !isValidSlug(input.Slug) {
-		return core.Fail(core.E("documents.Get", "invalid slug: "+input.Slug, nil))
+	if err := paths.IsValidID(input.Slug); err != nil {
+		return core.Fail(core.E("documents.Get", "invalid slug", err))
 	}
 
 	raw, err := loadDoc(input.Slug)
