@@ -57,6 +57,12 @@ import "./views/operations";
 // Calendar is shared with the Office view per HANDOVER-VIEWS.md.
 import "./views/planning";
 
+// First-run + 401 auth-gate — registers <lthn-auth-gate>. Mounted by
+// <lthn-app-shell> ahead of the normal body slot whenever authState
+// is anything other than "ok" (Stage C of plans/code/lthn/desktop/
+// auth-gate/RFC.md).
+import "./auth-gate";
+
 // Lethean-6 application shell — frameless single-window chrome that
 // auto-mounts the matching <lthn-*-window> by `active` attribute.
 import "./app-shell";
