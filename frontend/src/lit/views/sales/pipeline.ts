@@ -15,12 +15,24 @@
 // in tests or non-Wails contexts). The pipeline binding returns
 // { Value: { columns: PipelineColumn[], totalValue: string, totalDeals: number } }.
 // On failure the fixture stays in place so the view is always renderable.
+//
+// Drag-to-move: each deal card is draggable; stage columns are drop targets.
+// On drop the view optimistically swaps the card across columns and fires
+// the backend MoveDeal call via the lazy-imported binding. On rejection it
+// reverts. On success it dispatches a window-level CustomEvent
+// `lthn:sales:moved` so sibling sales views (deals/forecast/contacts) can
+// reload. Per the calm-UX rule no toast surfaces on failure — the revert
+// is the only signal.
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
 
 /** A single deal card inside a pipeline column. */
 interface Deal {
+  /** Backend deal slug (e.g. "202605-DEAL-001"). Optional because the
+   *  fixture pre-dates the id field; when absent the customer name `c`
+   *  is used as the slug for MoveDeal calls (best-effort fallback). */
+  id?: string;
   /** Customer / counterparty name. */
   c: string;
   /** Headline value (pre-formatted with currency symbol). */
@@ -29,10 +41,13 @@ interface Deal {
   t: string;
 }
 
+/** Stage identifier — matches backend PipelineColumn.id values. */
+type StageID = "qual" | "engage" | "propose" | "close";
+
 /** A pipeline column = one stage in the funnel. */
 interface PipelineColumn {
   /** Stable id for filtering / tests. */
-  id:    "qual" | "engage" | "propose" | "close";
+  id:    StageID;
   /** Human label rendered in the column header. */
   label: string;
   /** Pre-formatted aggregated value for the stage. */
@@ -40,6 +55,31 @@ interface PipelineColumn {
   /** Deals currently in this stage. */
   deals: Deal[];
 }
+
+/** Detail payload for the `lthn:sales:moved` CustomEvent — sibling sales
+ *  views subscribe and trigger their own `_loadFromBackend()` to stay in
+ *  sync with the new stage assignment. */
+export interface SalesMovedDetail {
+  /** Deal slug — `Deal.id` when present, otherwise `Deal.c` (customer). */
+  deal_id:    string;
+  /** Stage the deal moved out of. */
+  from_stage: StageID;
+  /** Stage the deal landed in. */
+  to_stage:   StageID;
+}
+
+/** Shape used to ferry a drag operation between dragstart and drop —
+ *  encoded into the DataTransfer as JSON so cross-column drops work
+ *  without leaking element references. */
+interface DragPayload {
+  deal_id:    string;
+  from_stage: StageID;
+  customer:   string;
+}
+
+/** MIME type for the JSON drag payload — kept private to this module so
+ *  the test file can mirror it without exporting an internal contract. */
+const DRAG_MIME = "application/x-lthn-pipeline-deal";
 
 /** Fixture pipeline. Strings stay opaque (e.g. "£64 K") because the
  *  source-of-truth is the future rollup service, not arithmetic on
@@ -84,6 +124,8 @@ class LthnViewPipeline extends LitElement {
     columns:  { state: true },
     /** Backend load state — "idle" | "loading" | "ok" | "err". */
     _loadState: { state: true },
+    /** Stage id currently being dragged over — drives drop-target styling. */
+    _dragOverStage: { state: true },
   };
 
   declare w: number;
@@ -91,6 +133,7 @@ class LthnViewPipeline extends LitElement {
   declare embedded: boolean;
   declare columns: PipelineColumn[];
   declare _loadState: "idle" | "loading" | "ok" | "err";
+  declare _dragOverStage: StageID | null;
 
   constructor() {
     super();
@@ -99,6 +142,7 @@ class LthnViewPipeline extends LitElement {
     this.embedded = false;
     this.columns = FIXTURE_PIPELINE;
     this._loadState = "idle";
+    this._dragOverStage = null;
   }
 
   createRenderRoot() { return this; }
@@ -136,6 +180,121 @@ class LthnViewPipeline extends LitElement {
     }
   }
 
+  /** dragstart on a deal card — encode the deal slug + source stage into
+   *  the DataTransfer so the drop handler can reconstruct the move
+   *  without sharing element refs. */
+  _onDealDragStart(e: DragEvent, from: StageID, deal: Deal) {
+    if (!e.dataTransfer) return;
+    const payload: DragPayload = {
+      deal_id:    deal.id ?? deal.c,
+      from_stage: from,
+      customer:   deal.c,
+    };
+    e.dataTransfer.setData(DRAG_MIME, JSON.stringify(payload));
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  /** dragover on a stage column — must preventDefault so the drop fires,
+   *  and we light up the column visually as a drop target. */
+  _onColumnDragOver(e: DragEvent, stage: StageID) {
+    if (!e.dataTransfer) return;
+    // Only accept our own MIME — leaves text drops etc. alone.
+    if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (this._dragOverStage !== stage) this._dragOverStage = stage;
+  }
+
+  /** dragleave clears the drop-target styling. The browser fires this
+   *  per nested child too, so we only clear if the leave is the one for
+   *  this stage (not a child). Best-effort — a fresh dragover restores. */
+  _onColumnDragLeave(stage: StageID) {
+    if (this._dragOverStage === stage) this._dragOverStage = null;
+  }
+
+  /** drop handler — optimistically reshape `this.columns`, call the
+   *  backend MoveDeal binding, revert on rejection, and emit
+   *  `lthn:sales:moved` on success. */
+  async _onColumnDrop(e: DragEvent, to: StageID) {
+    if (!e.dataTransfer) return;
+    e.preventDefault();
+    this._dragOverStage = null;
+
+    const raw = e.dataTransfer.getData(DRAG_MIME);
+    if (!raw) return;
+    let payload: DragPayload;
+    try {
+      payload = JSON.parse(raw) as DragPayload;
+    } catch {
+      return;
+    }
+    const { deal_id, from_stage } = payload;
+    if (from_stage === to) return; // no-op move
+
+    // Snapshot for revert before mutating.
+    const prev = this.columns;
+    const next = this._moveDealLocal(prev, deal_id, from_stage, to);
+    if (!next) return; // deal not found — bail without touching state
+    this.columns = next;
+
+    // Backend call — lazy-import keeps the test fixture decoupled.
+    const svc = await import("@desktop/sales/pipeline/service").catch(() => null);
+    type MoveFn = (input: { dealId: string; toStage: string }) => Promise<{ OK?: boolean }>;
+    const moveFn = svc && typeof (svc as { MoveDeal?: unknown }).MoveDeal === "function"
+      ? (svc as { MoveDeal: MoveFn }).MoveDeal
+      : null;
+    if (!moveFn) {
+      // No binding (test / non-Wails context) — keep the optimistic move
+      // and still emit the cross-view event so listeners exercise.
+      this._emitMoved(deal_id, from_stage, to);
+      return;
+    }
+
+    try {
+      const r = await moveFn({ dealId: deal_id, toStage: to });
+      if (r && r.OK === false) {
+        // Backend explicitly rejected — revert + leave a quiet trace.
+        this.columns = prev;
+        this._loadState = "err";
+        return;
+      }
+      this._emitMoved(deal_id, from_stage, to);
+    } catch {
+      this.columns = prev;
+      this._loadState = "err";
+    }
+  }
+
+  /** Pure helper — return a new columns array with the deal lifted from
+   *  `from` and appended to `to`. Returns null when the deal isn't in
+   *  the source column (caller bails). */
+  _moveDealLocal(
+    cols: PipelineColumn[],
+    deal_id: string,
+    from: StageID,
+    to: StageID,
+  ): PipelineColumn[] | null {
+    const src = cols.find(c => c.id === from);
+    const dst = cols.find(c => c.id === to);
+    if (!src || !dst) return null;
+    const idx = src.deals.findIndex(d => (d.id ?? d.c) === deal_id);
+    if (idx < 0) return null;
+    const deal = src.deals[idx];
+    return cols.map(c => {
+      if (c.id === from) return { ...c, deals: c.deals.filter((_, i) => i !== idx) };
+      if (c.id === to)   return { ...c, deals: [...c.deals, deal] };
+      return c;
+    });
+  }
+
+  /** Dispatch the window-level cross-view refresh event. Sibling sales
+   *  views (deals/forecast/contacts) opt in by registering a listener
+   *  and calling their own `_loadFromBackend()`. */
+  _emitMoved(deal_id: string, from_stage: StageID, to_stage: StageID) {
+    const detail: SalesMovedDetail = { deal_id, from_stage, to_stage };
+    window.dispatchEvent(new CustomEvent<SalesMovedDetail>("lthn:sales:moved", { detail }));
+  }
+
   render() {
     const cols = this.columns;
     const sum  = pipelineSummary(cols);
@@ -163,23 +322,41 @@ class LthnViewPipeline extends LitElement {
         <!-- column-of-cards grid — one column per stage, one card per deal -->
         <div class="lthn-view-pipeline-columns"
              style="display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; flex:1; min-height:0;">
-          ${cols.map(c => html`
-            <div class="lthn-view-pipeline-column" data-stage=${c.id}
-                 style="display:flex; flex-direction:column; gap:8px;">
-              ${c.deals.map(d => html`
-                <div class="lthn-view-pipeline-deal" data-customer=${d.c}
-                     style="padding:12px 14px; border-radius:8px;
-                            background:rgba(255,255,255,0.025);
-                            border:1px solid rgba(255,255,255,0.06);">
-                  <div style="font-size:13px; color:var(--fg-0); line-height:1.4;">${d.c}</div>
-                  <div style="display:flex; justify-content:space-between; margin-top:8px;">
-                    <span style="font-family:var(--font-mono); font-size:11px; color:var(--brand-300);">${d.v}</span>
+          ${cols.map(c => {
+            const isTarget = this._dragOverStage === c.id;
+            // Drop-target styling stays dark-only — brand-300 accent on a
+            // translucent fill so the cue reads without flipping contrast.
+            const colStyle =
+              "display:flex; flex-direction:column; gap:8px; padding:4px; border-radius:8px;" +
+              " transition:background 120ms, box-shadow 120ms;" +
+              (isTarget
+                ? " background:rgba(146, 100, 244, 0.08); box-shadow:inset 0 0 0 1px var(--brand-300);"
+                : " background:transparent;");
+            return html`
+              <div class="lthn-view-pipeline-column" data-stage=${c.id}
+                   style=${colStyle}
+                   @dragover=${(e: DragEvent) => this._onColumnDragOver(e, c.id)}
+                   @dragleave=${() => this._onColumnDragLeave(c.id)}
+                   @drop=${(e: DragEvent) => this._onColumnDrop(e, c.id)}>
+                ${c.deals.map(d => html`
+                  <div class="lthn-view-pipeline-deal" data-customer=${d.c}
+                       draggable="true"
+                       tabindex="0"
+                       @dragstart=${(e: DragEvent) => this._onDealDragStart(e, c.id, d)}
+                       style="padding:12px 14px; border-radius:8px;
+                              background:rgba(255,255,255,0.025);
+                              border:1px solid rgba(255,255,255,0.06);
+                              cursor:grab;">
+                    <div style="font-size:13px; color:var(--fg-0); line-height:1.4;">${d.c}</div>
+                    <div style="display:flex; justify-content:space-between; margin-top:8px;">
+                      <span style="font-family:var(--font-mono); font-size:11px; color:var(--brand-300);">${d.v}</span>
+                    </div>
+                    <div style="font-size:11px; color:var(--fg-3); margin-top:6px; line-height:1.4;">${d.t}</div>
                   </div>
-                  <div style="font-size:11px; color:var(--fg-3); margin-top:6px; line-height:1.4;">${d.t}</div>
-                </div>
-              `)}
-            </div>
-          `)}
+                `)}
+              </div>
+            `;
+          })}
         </div>
       </div>
     `;

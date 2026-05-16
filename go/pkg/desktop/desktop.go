@@ -76,6 +76,11 @@ import (
 	"dappco.re/lthn/desktop/pkg/sales/deals"
 	"dappco.re/lthn/desktop/pkg/sales/forecast"
 	"dappco.re/lthn/desktop/pkg/sales/pipeline"
+	"dappco.re/lthn/desktop/pkg/marketing/campaigns"
+	"dappco.re/lthn/desktop/pkg/marketing/content"
+	"dappco.re/lthn/desktop/pkg/marketing/social"
+	"dappco.re/lthn/desktop/pkg/marketing/audience"
+	"dappco.re/lthn/desktop/pkg/marketing/analytics"
 	"github.com/gin-gonic/gin"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -329,6 +334,17 @@ func (s *Service) Run() core.Result {
 	// sales/forecast — quarterly probability-weighted rollup. Core-registered;
 	// reads from deals dir, fires no events.
 	forecastSvc, _ := core.ServiceFor[*forecast.Service](s.opts.Core, "sales-forecast")
+	// marketing/campaigns — campaign thread catalogue. Core-registered so events
+	// fired during Wails method calls propagate on the shared bus.
+	campaignsSvc, _ := core.ServiceFor[*campaigns.Service](s.opts.Core, "marketing-campaigns")
+	// marketing/content — editorial content calendar. Core-registered.
+	contentSvc, _ := core.ServiceFor[*content.Service](s.opts.Core, "marketing-content")
+	// marketing/social — social post queue. Core-registered.
+	socialSvc, _ := core.ServiceFor[*social.Service](s.opts.Core, "marketing-social")
+	// marketing/audience — subscriber segment catalogue. Core-registered.
+	audienceSvc, _ := core.ServiceFor[*audience.Service](s.opts.Core, "marketing-audience")
+	// marketing/analytics — web analytics rollup (read-only). Core-registered.
+	analyticsSvc, _ := core.ServiceFor[*analytics.Service](s.opts.Core, "marketing-analytics")
 	// serverkey — Stage B first-run auth-gate. Core-registered + Bootstrap()ed
 	// from cmd/lthn/app.go::newAppCore so the in-memory key + verifier are
 	// live by the time the WebView mounts <lthn-auth-gate> and calls
@@ -401,6 +417,11 @@ func (s *Service) Run() core.Result {
 		application.NewService(dealsSvc),
 		application.NewService(pipelineSvc),
 		application.NewService(forecastSvc),
+		application.NewService(campaignsSvc),
+		application.NewService(contentSvc),
+		application.NewService(socialSvc),
+		application.NewService(audienceSvc),
+		application.NewService(analyticsSvc),
 		application.NewService(serverkeySvc),
 		application.NewService(accountSvc),
 		application.NewService(s.opts.Fleet),

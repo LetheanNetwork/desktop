@@ -40,6 +40,11 @@ import (
 	"dappco.re/lthn/desktop/pkg/sales/deals"
 	"dappco.re/lthn/desktop/pkg/sales/forecast"
 	"dappco.re/lthn/desktop/pkg/sales/pipeline"
+	"dappco.re/lthn/desktop/pkg/marketing/campaigns"
+	"dappco.re/lthn/desktop/pkg/marketing/content"
+	"dappco.re/lthn/desktop/pkg/marketing/social"
+	"dappco.re/lthn/desktop/pkg/marketing/audience"
+	"dappco.re/lthn/desktop/pkg/marketing/analytics"
 	"dappco.re/lthn/desktop/pkg/serverkey"
 )
 
@@ -241,6 +246,26 @@ func newAppCore() *core.Core {
 		// sales/forecast — quarterly probability-weighted rollup from deals.
 		// Read-only; no separate persistence. Wails: Forecast.Quarterly.
 		core.WithName("sales-forecast", forecast.Register),
+		// marketing/campaigns — campaign thread catalogue. Reads/writes Trix-style
+		// markdown files from ~/Lethean/marketing/campaigns/{slug}.md. Wails:
+		// Campaigns.List/Get/Create/Update. Events: marketing.campaigns.{created,updated}.
+		core.WithName("marketing-campaigns", campaigns.Register),
+		// marketing/content — editorial content calendar. Reads/writes Trix-style
+		// markdown files from ~/Lethean/marketing/content/{id}.md. Wails:
+		// Content.List/Get/Create/Advance. Events: marketing.content.{created,advanced}.
+		core.WithName("marketing-content", content.Register),
+		// marketing/social — social post queue. Reads/writes Trix-style
+		// markdown files from ~/Lethean/marketing/social/post-{ts}.md. Wails:
+		// Social.List/Get/Create/MarkSent. Events: marketing.social.{created,sent}.
+		core.WithName("marketing-social", social.Register),
+		// marketing/audience — subscriber segment catalogue. Reads/writes Trix-style
+		// markdown files from ~/Lethean/marketing/audience/{slug}.md. Wails:
+		// Audience.List/Get/Create/Update. Events: marketing.audience.{created,updated}.
+		core.WithName("marketing-audience", audience.Register),
+		// marketing/analytics — web analytics rollup (read-only). Derived from the
+		// self-hosted Plausible install; returns fixture data when unconfigured.
+		// Wails: Analytics.Get. No events (read-only).
+		core.WithName("marketing-analytics", analytics.Register),
 		// serverkey — Stage B of the first-run auth-gate (Mantis #1474,
 		// plans RFC at code/lthn/desktop/auth-gate/RFC.md). Owns the
 		// "base egg" PGP key at ~/Lethean/wallets/server.key + its
