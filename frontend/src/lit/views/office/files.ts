@@ -82,15 +82,21 @@ class LthnViewFiles extends LitElement {
     w:        { type: Number },
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },
-    /** Currently-selected location in the left rail. Null means "no
-     *  selection" — the recent-files pane just shows global recents.
-     *  Click any location row to set this; clicking it again clears. */
     selectedLocation: { state: true },
+    locations: { state: true },
+    recent:    { state: true },
+    disk:      { state: true },
+    loading:   { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare selectedLocation: string | null;
+  declare locations: LocationRow[];
+  declare recent: RecentRow[];
+  declare disk: DiskMeter;
+  declare loading: boolean;
+  private _timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
@@ -98,9 +104,65 @@ class LthnViewFiles extends LitElement {
     this.h = 720;
     this.embedded = false;
     this.selectedLocation = null;
+    this.locations = FIXTURE_LOCATIONS;
+    this.recent = FIXTURE_RECENT;
+    this.disk = FIXTURE_DISK;
+    this.loading = false;
   }
 
   createRenderRoot() { return this; }
+
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+    this._timer = setInterval(() => { void this._loadFromBackend(); }, 60_000);
+  }
+
+  disconnectedCallback() {
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    super.disconnectedCallback();
+  }
+
+  async _loadFromBackend(): Promise<void> {
+    if (this.loading) return;
+    this.loading = true;
+    try {
+      const svc = await import("@desktop/office/files/service").catch(() => null);
+      if (!svc || typeof (svc as { ListLocations?: unknown }).ListLocations !== "function") {
+        return;
+      }
+      const filesSvc = svc as {
+        ListLocations: () => Promise<{ Value?: { locations?: LocationRow[] } }>;
+        ListRecent: (input: { locationName?: string; limit?: number }) => Promise<{ Value?: { files?: RecentRow[] } }>;
+        GetDiskUsage: () => Promise<{ Value?: DiskMeter }>;
+      };
+
+      const [lr, rr, dr] = await Promise.all([
+        filesSvc.ListLocations(),
+        filesSvc.ListRecent({}),
+        filesSvc.GetDiskUsage(),
+      ]);
+
+      const locations = lr?.Value?.locations;
+      if (locations && locations.length > 0) {
+        this.locations = locations;
+      }
+
+      const files = rr?.Value?.files;
+      if (files && files.length > 0) {
+        this.recent = files;
+      }
+
+      const disk = dr?.Value;
+      if (disk && disk.free) {
+        this.disk = disk;
+      }
+    } catch {
+      // Binding unavailable — keep fixture data.
+    } finally {
+      this.loading = false;
+    }
+  }
 
   /** Toggle a location selection — clicking the active one clears it.
    *  Split out so tests can drive the state without a click event. */
@@ -109,14 +171,14 @@ class LthnViewFiles extends LitElement {
   }
 
   render() {
-    const recent = FIXTURE_RECENT;
+    const recent = this.recent;
 
     const body = html`
       <div class="lthn-view-files" style="flex:1; display:grid; grid-template-columns: 240px 1fr; min-height:0;">
         <!-- locations rail -->
         <aside class="lthn-view-files-locations" style="background:rgba(0,0,0,0.20); border-right:1px solid rgba(255,255,255,0.05); padding:14px 8px; display:flex; flex-direction:column; gap:1px;">
           <div style="padding:0 12px 6px; font-family:var(--font-mono); font-size:9.5px; color:var(--fg-3); letter-spacing:0.10em; text-transform:uppercase;">Locations</div>
-          ${FIXTURE_LOCATIONS.map(loc => {
+          ${this.locations.map(loc => {
             const active = this.selectedLocation === loc.name;
             return html`
               <div class="lthn-view-files-location"
@@ -142,9 +204,9 @@ class LthnViewFiles extends LitElement {
           <div style="height:1px; background:rgba(255,255,255,0.05); margin:8px 8px;"></div>
           <div class="lthn-view-files-disk" style="padding:0 12px; font-family:var(--font-mono); font-size:10px; color:var(--fg-3); line-height:1.6;">
             Free<br>
-            <span style="color:var(--fg-1); font-size:14px;">${FIXTURE_DISK.free}</span> of ${FIXTURE_DISK.total}
+            <span style="color:var(--fg-1); font-size:14px;">${this.disk.free}</span> of ${this.disk.total}
             <div style="height:4px; border-radius:2px; background:rgba(255,255,255,0.06); margin-top:6px; overflow:hidden;">
-              <div style="width:${FIXTURE_DISK.used}%; height:100%; background:var(--brand-400);"></div>
+              <div style="width:${this.disk.used}%; height:100%; background:var(--brand-400);"></div>
             </div>
           </div>
         </aside>
@@ -182,7 +244,7 @@ class LthnViewFiles extends LitElement {
       subtitle: `~/Documents · ${recent.length} recent`,
       w: this.w, h: this.h,
       body,
-      footer: html`local filesystem · indexed by lthn · ⌘O to open · ⌘shift+P to find · fixtures (pkg/files pending)`,
+      footer: html`local filesystem · indexed by lthn · ⌘O to open · ⌘shift+P to find`,
       embedded: this.embedded,
     });
   }

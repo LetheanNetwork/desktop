@@ -1,9 +1,17 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, findCard, isEmbedded } from "../../../test/window-fixture";
 import "./files";
+
+vi.mock("@desktop/office/files/service", () => ({
+  ListLocations: vi.fn(),
+  ListRecent: vi.fn(),
+  GetDiskUsage: vi.fn(),
+}));
+
+import { ListLocations as MockedListLocations, ListRecent as MockedListRecent, GetDiskUsage as MockedGetDiskUsage } from "@desktop/office/files/service";
 
 describe("lthn-view-files — smoke", () => {
   it("mounts without crashing and produces the Files card", async () => {
@@ -51,7 +59,6 @@ describe("lthn-view-files — smoke", () => {
     const { host } = await mountWindow("lthn-view-files");
     expect(host.textContent).toContain("indexed by lthn");
     expect(host.textContent).toContain("⌘O to open");
-    expect(host.textContent).toContain("pkg/files pending");
   });
 });
 
@@ -99,5 +106,86 @@ describe("lthn-view-files — embedded mode", () => {
     const { host } = await mountWindow("lthn-view-files", { attrs: { embedded: "" } });
     expect(host.querySelector(".lthn-view-files-locations")).not.toBeNull();
     expect(host.querySelector(".lthn-view-files-recent")).not.toBeNull();
+  });
+});
+
+describe("lthn-view-files — backend wire", () => {
+  type FilesEl = LitElement & {
+    locations: { name: string; count: number; size: string; brand?: boolean }[];
+    recent: { name: string; path: string; when: string; size: string }[];
+    disk: { free: string; total: string; used: number };
+    _loadFromBackend: () => Promise<void>;
+    updateComplete: Promise<boolean>;
+  };
+
+  beforeEach(() => {
+    (MockedListLocations as unknown as { mockReset: () => void }).mockReset();
+    (MockedListRecent as unknown as { mockReset: () => void }).mockReset();
+    (MockedGetDiskUsage as unknown as { mockReset: () => void }).mockReset();
+  });
+
+  it("backend rows replace fixture when locations, recents, and disk are returned", async () => {
+    (MockedListLocations as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { locations: [{ name: "Backend Location", count: 7, size: "1.1 GB" }] } });
+    (MockedListRecent as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { files: [{ name: "backend-file.txt", path: "~/Backend/", when: "now", size: "1 KB" }] } });
+    (MockedGetDiskUsage as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { free: "500 GB", total: "2 TB", used: 25 } });
+
+    const { el, host } = await mountWindow<FilesEl>("lthn-view-files");
+    // Wait for connectedCallback's _loadFromBackend to finish.
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("Backend Location");
+    expect(host.textContent).toContain("backend-file.txt");
+    expect(host.textContent).toContain("500 GB");
+  });
+
+  it("backend rejection keeps fixture data visible", async () => {
+    (MockedListLocations as unknown as { mockRejectedValue: (v: unknown) => void })
+      .mockRejectedValue(new Error("unavailable"));
+    (MockedListRecent as unknown as { mockRejectedValue: (v: unknown) => void })
+      .mockRejectedValue(new Error("unavailable"));
+    (MockedGetDiskUsage as unknown as { mockRejectedValue: (v: unknown) => void })
+      .mockRejectedValue(new Error("unavailable"));
+
+    const { el, host } = await mountWindow<FilesEl>("lthn-view-files");
+    await el._loadFromBackend();
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("Code");
+    expect(host.textContent).toContain("sow-heritage-law-v2.md");
+    expect(host.textContent).toContain("312 GB");
+  });
+
+  it("empty backend response keeps fixture data visible", async () => {
+    (MockedListLocations as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { locations: [] } });
+    (MockedListRecent as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { files: [] } });
+    (MockedGetDiskUsage as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { free: "", total: "", used: 0 } });
+
+    const { el, host } = await mountWindow<FilesEl>("lthn-view-files");
+    await el._loadFromBackend();
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("Code");
+    expect(host.textContent).toContain("sow-heritage-law-v2.md");
+    expect(host.textContent).toContain("312 GB");
+  });
+
+  it("fixture-only tests remain green — smoke renders five locations", async () => {
+    (MockedListLocations as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { locations: [] } });
+    (MockedListRecent as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { files: [] } });
+    (MockedGetDiskUsage as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { free: "", total: "", used: 0 } });
+
+    const { host } = await mountWindow("lthn-view-files");
+    const locations = host.querySelectorAll(".lthn-view-files-location");
+    expect(locations.length).toBe(5);
   });
 });
