@@ -95,6 +95,36 @@ class LthnViewContacts extends LitElement {
 
   createRenderRoot() { return this; }
 
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+  }
+
+  /** Pull the live contacts list from pkg/sales/contacts (shipped
+   *  in c883227). Maps the backend Contact shape 1:1 onto the view
+   *  shape — fields are identical (name/role/last/warmth/next).
+   *  Degrades to FIXTURE_CONTACTS on binding-missing or backend
+   *  rejection so the view stays useful in headless dev. */
+  async _loadFromBackend(): Promise<void> {
+    try {
+      const svc = await import("@desktop/sales/contacts/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
+        return;
+      }
+      const r = await (svc as {
+        List: (input: { warmth: string; query: string; limit: number }) => Promise<{
+          Value?: { contacts?: Contact[] }
+        }>
+      }).List({ warmth: "", query: "", limit: 100 });
+      const rows = r?.Value?.contacts;
+      if (rows && rows.length > 0) {
+        this.contacts = rows;
+      }
+    } catch {
+      // Backend unavailable — keep fixture data.
+    }
+  }
+
   /** Apply the query + warmth filters. Pure helper so a unit test can
    *  drive it without mounting the element. */
   _filtered(): Contact[] {

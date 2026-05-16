@@ -1,8 +1,15 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window-fixture";
+
+vi.mock("@desktop/sales/contacts/service", () => ({
+  List: vi.fn(),
+}));
+
+import { List as ContactsList } from "@desktop/sales/contacts/service";
+
 import "./contacts";
 
 type Warmth = "hot" | "warm" | "cool";
@@ -103,5 +110,43 @@ describe("lthn-view-contacts — two-shell", () => {
   it("embedded mode still renders the contact list", async () => {
     const { host } = await mountWindow("lthn-view-contacts", { attrs: { embedded: "" } });
     expect(host.querySelectorAll(".lthn-view-contacts-row").length).toBeGreaterThan(0);
+  });
+});
+
+describe("lthn-view-contacts — backend wire", () => {
+  it("replaces fixture with rows from pkg/sales/contacts.Service.List", async () => {
+    (ContactsList as unknown as { mockReset: () => void }).mockReset();
+    (ContactsList as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: { contacts: [
+        { id: "snider",   name: "Snider",         role: "Founder · Lethean",   last: "now",       warmth: "hot",  next: "ship" },
+        { id: "darbs",    name: "Darbs",          role: "Sysadmin · Lethean",  last: "yesterday", warmth: "warm", next: "review" },
+      ] },
+    });
+    const { el } = await mountWindow<ContactsEl>("lthn-view-contacts");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.contacts.length).toBe(2);
+    expect(el.contacts[0].name).toBe("Snider");
+    expect(el.contacts.find(c => c.name === "Ada Penley")).toBeUndefined(); // fixture displaced
+  });
+
+  it("keeps fixture when backend rejects", async () => {
+    (ContactsList as unknown as { mockReset: () => void }).mockReset();
+    (ContactsList as unknown as { mockRejectedValue: (v: unknown) => void }).mockRejectedValue(new Error("no binding"));
+    const { el } = await mountWindow<ContactsEl>("lthn-view-contacts");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.contacts.length).toBe(6); // FIXTURE_CONTACTS retained
+  });
+
+  it("keeps fixture when backend returns empty", async () => {
+    (ContactsList as unknown as { mockReset: () => void }).mockReset();
+    (ContactsList as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: { contacts: [] },
+    });
+    const { el } = await mountWindow<ContactsEl>("lthn-view-contacts");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.contacts.length).toBe(6); // empty → fixture preserved
   });
 });
