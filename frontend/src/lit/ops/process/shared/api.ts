@@ -117,21 +117,19 @@ export class ProcessApi {
       throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 200)}`);
     }
     const json = await res.json();
-    // coreapi envelope (lthn server): { OK: boolean, Value: T, Error?: { Message: string } }
-    if (json && typeof json === 'object' && 'OK' in json) {
-      if (!json.OK) {
-        throw new Error(json.Error?.Message ?? json.Error ?? 'Request failed');
-      }
-      return json.Value as T;
-    }
-    // upstream go-process standalone envelope: { success: true, data: T }
+    // Canonical coreapi.Response[T] envelope: { success: bool, data: T,
+    // error?: { code, message } }. Cerberus #1520 — the prior path also
+    // accepted a fictional { OK, Value } shape that the lthn server
+    // never emits; every real 200 carries { success, data } and the
+    // dead branch silently dropped the payload through the fall-through
+    // raw-response cast. Single-path parser keyed on the real shape.
     if (json && typeof json === 'object' && 'success' in json) {
       if (!json.success) {
         throw new Error(json.error?.message ?? 'Request failed');
       }
       return json.data as T;
     }
-    // raw response (no envelope)
+    // raw response (no envelope) — e.g. plain-string handlers.
     return json as T;
   }
 
