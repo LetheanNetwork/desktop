@@ -334,6 +334,15 @@ func newAppCore() *core.Core {
 			core.Print(core.Stderr(), "lthn: serverkey bootstrap failed: %s\n", r.Error())
 			return nil
 		}
+		// Stage E.B integration cutover (Mantis #1480) — wire the
+		// session-token issuer into pkg/account so Unlock can mint
+		// LTHN-SESS-1.* tokens on successful passphrase decrypt. The
+		// same serverkey instance the bearer middleware verifies
+		// session-tokens against is the one minting them — no
+		// rotation skew between issue + verify possible.
+		if accountSvc, _ := core.ServiceFor[*account.Service](c, "account"); accountSvc != nil {
+			accountSvc.SetServerKey(serverkeySvc)
+		}
 	}
 
 	// orm bootstrap — lib not service. Register + mount the DuckDB

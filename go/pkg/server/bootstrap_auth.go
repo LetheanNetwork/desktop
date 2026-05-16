@@ -118,6 +118,61 @@ func WithBootstrapAuth(verifier serverkey.Verifier, bearerToken string, pathScop
 	return coreapi.WithMiddleware(mw)
 }
 
+// resolveRouteTier classifies the supplied request path by
+// consulting (in order):
+//
+//  1. routeTiers exact-match
+//  2. routeTierPrefixes longest-prefix-match (uses pathStartsWithPrefix)
+//
+// Returns (tier, true) on a classified path; ("", false) on the
+// deny-by-default branch. Longest-prefix discipline matters when
+// future additions stack sub-trees — the most specific wins so an
+// override at /v1/api/opencode/secret beats a wider /v1/api/opencode.
+//
+// Centralised here (not inline in the middleware) so the CI test
+// can call the same resolver and stay in lockstep with the live
+// classification logic.
+//
+// Usage example:
+//
+//	tier, ok := resolveRouteTier(server.RouteTiers, server.RouteTierPrefixes, "/v1/api/opencode/sandbox/abc")
+//	if ok { _ = tier } // TierLocal via prefix match
+func resolveRouteTier(routeTiers map[string]RouteTier, routeTierPrefixes map[string]RouteTier, path string) (RouteTier, bool) {
+	if tier, ok := routeTiers[path]; ok {
+		return tier, true
+	}
+	var (
+		bestTier  RouteTier
+		bestLen   int
+		bestFound bool
+	)
+	for prefix, tier := range routeTierPrefixes {
+		if !pathStartsWithPrefix(path, prefix) {
+			continue
+		}
+		if len(prefix) > bestLen {
+			bestLen = len(prefix)
+			bestTier = tier
+			bestFound = true
+		}
+	}
+	return bestTier, bestFound
+}
+
+// pathStartsWithPrefix reports whether path == prefix OR path
+// starts with prefix + "/". Matches the same semantics service.go's
+// pathHasPrefix helper uses for the webview-engine composite — kept
+// local here so bootstrap_auth.go stays self-contained.
+func pathStartsWithPrefix(path, prefix string) bool {
+	if !core.HasPrefix(path, prefix) {
+		return false
+	}
+	if len(path) == len(prefix) {
+		return true
+	}
+	return path[len(prefix)] == '/'
+}
+
 // WithBootstrapAndSessionAuth returns a coreapi.Option that installs
 // the full Stage E.B auth-chain middleware: bootstrap-token paths,
 // session-token paths (per the routeTiers classification), and the
@@ -128,14 +183,19 @@ func WithBootstrapAuth(verifier serverkey.Verifier, bearerToken string, pathScop
 //  1. skip-list path (e.g. /health, non-/v1/* static assets) → c.Next()
 //  2. path in pathScopes → require Bootstrap header + matching scope
 //     (fail-closed: 401 if missing/invalid; NEVER falls through)
-//  3. routeTiers[path] == TierSession or TierData → require Bearer
-//     header parseable as LTHN-SESS-1.* and VerifySessionToken OK
-//     (fail-closed: 401; NEVER falls through to static-bearer)
-//  4. routeTiers[path] == TierLocal → require Bearer header matching
-//     bearerToken OR a valid LTHN-SESS-1.* session token (either OK)
-//  5. routeTiers has no entry for path → DENY-BY-DEFAULT, 401 with
+//  3. resolveRouteTier(path) returns TierSession or TierData → require
+//     Bearer header parseable as LTHN-SESS-1.* and VerifySessionToken
+//     OK (fail-closed: 401; NEVER falls through to static-bearer)
+//  4. resolveRouteTier(path) returns TierLocal → require Bearer header
+//     matching bearerToken OR a valid LTHN-SESS-1.* session token
+//     (either OK)
+//  5. resolveRouteTier(path) returns false → DENY-BY-DEFAULT, 401 with
 //     "route_not_tiered" (the CI test should catch this at build,
 //     this is the runtime fallback)
+//
+// routeTierPrefixes catches gin parameterised routes (e.g.
+// /v1/api/opencode/sandbox/:id) that the exact-match routeTiers
+// can't classify against concrete incoming paths.
 //
 // Per Cerberus DREAD H2 — five fail-closed cases on the session-
 // token branch MUST short-circuit with 401, NEVER fall through to
@@ -154,15 +214,16 @@ func WithBootstrapAuth(verifier serverkey.Verifier, bearerToken string, pathScop
 //	    coreapi.WithResponseMeta(),
 //	    coreapi.WithMiddleware(cspMiddleware()),
 //	    server.WithBootstrapAndSessionAuth(serverkeySvc, bearerToken,
-//	        server.BootstrapPathScopes, server.RouteTiers),
+//	        server.BootstrapPathScopes, server.RouteTiers, server.RouteTierPrefixes),
 //	}
 func WithBootstrapAndSessionAuth(
 	verifier serverkey.Verifier,
 	bearerToken string,
 	pathScopes map[string]string,
 	routeTiers map[string]RouteTier,
+	routeTierPrefixes map[string]RouteTier,
 ) coreapi.Option {
-	mw := BootstrapAndSessionAuthMiddleware(verifier, bearerToken, pathScopes, routeTiers)
+	mw := BootstrapAndSessionAuthMiddleware(verifier, bearerToken, pathScopes, routeTiers, routeTierPrefixes)
 	if mw == nil {
 		return func(_ *coreapi.Engine) {}
 	}
@@ -191,6 +252,7 @@ func BootstrapAndSessionAuthMiddleware(
 	bearerToken string,
 	pathScopes map[string]string,
 	routeTiers map[string]RouteTier,
+	routeTierPrefixes map[string]RouteTier,
 ) gin.HandlerFunc {
 	if verifier == nil || len(pathScopes) == 0 {
 		return nil
@@ -202,6 +264,10 @@ func BootstrapAndSessionAuthMiddleware(
 	tierMap := make(map[string]RouteTier, len(routeTiers))
 	for k, v := range routeTiers {
 		tierMap[k] = v
+	}
+	prefixMap := make(map[string]RouteTier, len(routeTierPrefixes))
+	for k, v := range routeTierPrefixes {
+		prefixMap[k] = v
 	}
 	skipList := []string{"/health"}
 	return func(c *gin.Context) {
@@ -248,13 +314,15 @@ func BootstrapAndSessionAuthMiddleware(
 		}
 
 		// Route-tier classification (RFC §4 H1 — deny-by-default).
-		// Unclassified routes 401 with a route_not_tiered code so
-		// the CI failure surfaces obviously vs a normal auth reject.
-		tier, classified := tierMap[path]
+		// Consult exact-match tierMap first, then longest-prefix
+		// match in prefixMap. Unclassified routes 401 with a
+		// route_not_tiered code so the CI failure surfaces obviously
+		// vs a normal auth reject.
+		tier, classified := resolveRouteTier(tierMap, prefixMap, path)
 		if !classified {
 			c.AbortWithStatusJSON(http.StatusUnauthorized,
 				coreapi.Fail("route_not_tiered",
-					"route is not in routeTiers — add an entry to pkg/server.RouteTiers (RFC §4 H1)"))
+					"route is not in routeTiers — add an entry to pkg/server.RouteTiers or RouteTierPrefixes (RFC §4 H1)"))
 			return
 		}
 

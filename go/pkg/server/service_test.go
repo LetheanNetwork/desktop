@@ -54,17 +54,17 @@ func TestService_AllRoutesTiered_Good(t *testing.T) {
 		if _, inScopes := server.BootstrapPathScopes[r.Path]; inScopes {
 			continue
 		}
-		if _, inTiers := server.RouteTiers[r.Path]; inTiers {
+		if isRouteTierClassified(r.Path) {
 			continue
 		}
 		missing = append(missing, r.Method+" "+r.Path)
 	}
 	if len(missing) > 0 {
-		buf := "routes missing from RouteTiers / BootstrapPathScopes / skip-list (RFC §4 H1):"
+		buf := "routes missing from RouteTiers / RouteTierPrefixes / BootstrapPathScopes / skip-list (RFC §4 H1):"
 		for _, m := range missing {
 			buf += "\n  - " + m
 		}
-		buf += "\n\nAdd entries to pkg/server.RouteTiers (or RouteTierSkipList for genuine bypass paths)."
+		buf += "\n\nAdd entries to pkg/server.RouteTiers (exact) or RouteTierPrefixes (group) or RouteTierSkipList (genuine bypass)."
 		t.Fatal(buf)
 	}
 }
@@ -103,6 +103,144 @@ func pathHasPrefix(path, prefix string) bool {
 		return true
 	}
 	return path[len(prefix)] == '/'
+}
+
+// TestService_ProductionRoutesTiered_Good walks the route set with
+// ALL known production RouteGroups registered via ExtraGroups, to
+// surface paths that auto-discovery + extras add beyond the bare
+// NewService surface. This is the production-shape variant of
+// TestService_AllRoutesTiered_Good and lands as part of the Stage
+// E.B integration cutover (Mantis #1480) so the cutover doesn't
+// silently flip route-tier behaviour on routes the bare test
+// didn't see.
+//
+// Routes covered here that the bare test does not:
+//   - /v1/account/* (auto-discovered via account.Service.RouteGroups)
+//   - /v1/api/opencode/* + /v1/api/sandbox/* (opencode ExtraGroups)
+//   - /v1/api/plugin/* (plugin ExtraGroup)
+//   - /v1/api/gateway/* (gateway ExtraGroup)
+//   - /v1/api/process/* — webview-only, lives on s.webviewEngine, not
+//     the public engine; the public test SHOULDN'T see this path.
+//
+// Cerberus DREAD H1 — runtime deny-by-default + this build-time
+// completeness check together close the policy gap.
+func TestService_ProductionRoutesTiered_Good(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// Register exemplar route groups inline so the test doesn't drag
+	// in the actual opencode/plugin/gateway service constructors
+	// (which require disk + network for their own setup).
+	extras := []coreapi.RouteGroup{
+		&fakeGroup{name: "opencode-control", base: "/v1/api/opencode", verbs: map[string][]string{
+			"GET":    {"/sandbox", "/sandbox/:id", "/profile", "/profile/:name", "/sandbox/:id/providers", "/enabled", "/studio", "/sandbox/:id/web", "/imports", "/imports/providers"},
+			"POST":   {"/sandbox", "/profile", "/host-config", "/enable", "/disable", "/sandbox/:id/tui", "/studio", "/upgrade", "/sandbox/:id/web", "/import"},
+			"DELETE": {"/sandbox/:id", "/profile/:name"},
+		}},
+		&fakeGroup{name: "opencode-proxy", base: "/v1/api/sandbox", verbs: map[string][]string{
+			"GET":  {"/*proxy"},
+			"POST": {"/*proxy"},
+		}},
+		&fakeGroup{name: "plugin-proxy", base: "/v1/api/plugin", verbs: map[string][]string{
+			"GET":    {"/*proxy"},
+			"POST":   {"/*proxy"},
+			"PUT":    {"/*proxy"},
+			"DELETE": {"/*proxy"},
+		}},
+		&fakeGroup{name: "gateway", base: "", verbs: map[string][]string{
+			"POST": {"/v1/api/gateway/:scope/:mode"},
+		}},
+		&fakeGroup{name: "runner", base: "/v1", verbs: map[string][]string{
+			"GET":  {"/runner/models"},
+			"POST": {"/runner/generate", "/runner/chat"},
+		}},
+		&fakeGroup{name: "account", base: "/v1/account", verbs: map[string][]string{
+			"POST": {"/create", "/unlock", "/lock"},
+		}},
+	}
+
+	svc := server.NewService(server.Options{
+		Addr:        ":0",
+		LocalKey:    "test-key",
+		ExtraGroups: extras,
+	})
+
+	publicEng := svc.Engine()
+	core.AssertTrue(t, publicEng != nil)
+	h := publicEng.Handler()
+	eng, ok := h.(*gin.Engine)
+	core.AssertTrue(t, ok)
+
+	missing := []string{}
+	for _, r := range eng.Routes() {
+		if isRouteTierSkip(r.Path) {
+			continue
+		}
+		if _, inScopes := server.BootstrapPathScopes[r.Path]; inScopes {
+			continue
+		}
+		if isRouteTierClassified(r.Path) {
+			continue
+		}
+		missing = append(missing, r.Method+" "+r.Path)
+	}
+	if len(missing) > 0 {
+		buf := "PRODUCTION-shape routes missing from RouteTiers / RouteTierPrefixes / BootstrapPathScopes / skip-list (RFC §4 H1):"
+		for _, m := range missing {
+			buf += "\n  - " + m
+		}
+		buf += "\n\nAdd entries to pkg/server.RouteTiers (exact match) or RouteTierPrefixes (group)."
+		t.Fatal(buf)
+	}
+}
+
+// isRouteTierClassified reports whether the supplied gin route path
+// resolves to a tier classification via either exact-match or
+// longest-prefix lookup. Mirrors the live middleware's
+// resolveRouteTier discipline. gin paths can contain :param
+// placeholders that won't match RouteTiers exact-match keys — the
+// prefix branch covers parameterised sub-trees (e.g.
+// /v1/api/opencode/sandbox/:id matches the /v1/api/opencode prefix).
+func isRouteTierClassified(path string) bool {
+	if _, ok := server.RouteTiers[path]; ok {
+		return true
+	}
+	for prefix := range server.RouteTierPrefixes {
+		if pathHasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// fakeGroup is a minimal coreapi.RouteGroup test fixture used by
+// TestService_ProductionRoutesTiered_Good to register paths without
+// dragging the real service constructors into the test compile unit.
+type fakeGroup struct {
+	name  string
+	base  string
+	verbs map[string][]string // METHOD → []leafPath
+}
+
+func (g *fakeGroup) Name() string     { return g.name }
+func (g *fakeGroup) BasePath() string { return g.base }
+func (g *fakeGroup) RegisterRoutes(rg *gin.RouterGroup) {
+	noop := func(c *gin.Context) { c.Status(204) }
+	for method, leaves := range g.verbs {
+		for _, leaf := range leaves {
+			switch method {
+			case "GET":
+				rg.GET(leaf, noop)
+			case "POST":
+				rg.POST(leaf, noop)
+			case "PUT":
+				rg.PUT(leaf, noop)
+			case "DELETE":
+				rg.DELETE(leaf, noop)
+			case "PATCH":
+				rg.PATCH(leaf, noop)
+			}
+		}
+	}
 }
 
 // silence the coreapi import — referenced indirectly via

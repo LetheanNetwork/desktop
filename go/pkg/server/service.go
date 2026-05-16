@@ -208,10 +208,15 @@ var BootstrapPathScopes = map[string]string{
 // session token. New entries SHOULD default to TierSession
 // (deny-by-default — Cerberus DREAD H1); the matching CI test in
 // service_test.go (TestService_AllRoutesTiered_Good) asserts every
-// gin-registered path is in this map OR in BootstrapPathScopes OR
-// in the skip-list.
+// gin-registered path is in this map OR in RouteTierPrefixes OR in
+// BootstrapPathScopes OR in the skip-list.
 //
-// Today's classification:
+// Exact-match entries take precedence over RouteTierPrefixes — use
+// this map for per-route classifications that diverge from the
+// group's tier (e.g. a single TierSession leaf inside an otherwise
+// TierLocal group).
+//
+// Today's exact-match classification:
 //
 //	/v1/models               local — model list, no per-account scope
 //	/v1/chat/completions     local — OpenAI compat shim, stub today
@@ -233,6 +238,42 @@ var RouteTiers = map[string]RouteTier{
 	"/v1/chat/completions": TierLocal,
 	"/v1/completions":      TierLocal,
 	"/v1/account/lock":     TierSession,
+}
+
+// RouteTierPrefixes classifies route GROUPS by URL prefix per
+// RFC.stage-e.md v2 §4. Gin route patterns with :param placeholders
+// (e.g. /v1/api/opencode/sandbox/:id) can't be exact-matched against
+// concrete incoming paths (e.g. /v1/api/opencode/sandbox/abc123) —
+// the middleware consults this map when the exact-match RouteTiers
+// lookup misses. Prefix matching uses pathHasPrefix semantics
+// (path equals prefix OR starts with prefix + "/").
+//
+// Today's prefix classification (Stage E.B baseline — all
+// pre-Stage-E surfaces stay at TierLocal to preserve the existing
+// bearer-auth posture; future tightening promotes individual
+// endpoints to TierSession case-by-case via the exact-match map):
+//
+//	/v1/api/opencode    local — sandbox lifecycle, plugin orchestration
+//	/v1/api/sandbox     local — proxy to opencode sandboxes
+//	/v1/api/plugin      local — proxy to plugin hosts
+//	/v1/api/gateway     local — payment/HTTP gateway
+//	/v1/runner          local — direct runner inference endpoints
+//
+// Longer prefixes win over shorter prefixes when both match — the
+// middleware picks the most specific entry (e.g. /v1/api/opencode
+// beats /v1/api). Today's map has no overlapping prefixes; the
+// invariant matters when future additions introduce sub-trees.
+//
+// Adding a prefix here is a security-policy decision. Prefer
+// exact-match entries in RouteTiers when the surface is small
+// enough to enumerate; use prefixes only for groups with many
+// parameterised routes (opencode has 20+).
+var RouteTierPrefixes = map[string]RouteTier{
+	"/v1/api/opencode": TierLocal,
+	"/v1/api/sandbox":  TierLocal,
+	"/v1/api/plugin":   TierLocal,
+	"/v1/api/gateway":  TierLocal,
+	"/v1/runner":       TierLocal,
 }
 
 // RouteTierSkipList names paths that bypass routeTiers classification
@@ -367,17 +408,17 @@ func NewService(opts Options) *Service {
 	// this, every local process can reach every API endpoint without
 	// authentication.
 	//
-	// Stage B' wiring (Mantis #1474 successor): when ServerKey is
-	// supplied, the combined bootstrap-plus-bearer middleware replaces
-	// the standalone bearer — the same chain entry handles both auth
-	// schemes so /v1/account/create can be gated by a bootstrap-token
-	// while every other route keeps its normal bearer requirement.
-	// When ServerKey is nil, fall back to plain bearer auth (pre-
-	// Stage-B behaviour) so non-desktop callers (CLI, tests) still
-	// authenticate correctly.
+	// Stage E.B cutover (Mantis #1480) — when ServerKey is supplied
+	// the full Stage E.B middleware installs (bootstrap-path scope
+	// gate + session-token bearer + static-bearer fallback for
+	// local-tier routes). RouteTiers classifies every /v1 path so
+	// session-tier endpoints reject the static LocalKey, and local-
+	// tier endpoints accept either source. When ServerKey is nil we
+	// fall back to plain bearer auth (pre-Stage-B behaviour) so
+	// non-desktop callers (CLI, tests) still authenticate correctly.
 	if opts.ServerKey != nil {
 		apiOpts = append(apiOpts,
-			WithBootstrapAuth(opts.ServerKey, opts.LocalKey, BootstrapPathScopes))
+			WithBootstrapAndSessionAuth(opts.ServerKey, opts.LocalKey, BootstrapPathScopes, RouteTiers, RouteTierPrefixes))
 	} else if opts.LocalKey != "" {
 		apiOpts = append(apiOpts, coreapi.WithBearerAuth(opts.LocalKey))
 	}

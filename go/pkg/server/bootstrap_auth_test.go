@@ -292,7 +292,9 @@ var _ = testing.Short
 
 // newSessionTestEngine builds a coreapi.Engine wired with the Stage
 // E.B BootstrapAndSessionAuth middleware + a single GET handler at
-// the supplied path.
+// the supplied path. Tests pass nil for routeTierPrefixes when the
+// scenario only exercises exact-match classification; the
+// prefix-match path is covered in service_test.go.
 func newSessionTestEngine(
 	t *core.T,
 	verifier serverkey.Verifier,
@@ -303,7 +305,7 @@ func newSessionTestEngine(
 ) *coreapi.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	eng, err := coreapi.New(server.WithBootstrapAndSessionAuth(verifier, bearer, pathScopes, routeTiers))
+	eng, err := coreapi.New(server.WithBootstrapAndSessionAuth(verifier, bearer, pathScopes, routeTiers, nil))
 	if err != nil {
 		t.Fatalf("coreapi.New: %v", err)
 	}
@@ -478,7 +480,7 @@ func TestBootstrapAuth_SessionTokenMidHandlerExpiry_Ugly(t *core.T) {
 	// (regressing H3), the handler would still complete because
 	// gin doesn't auto-cancel handlers on context expiry.
 	gin.SetMode(gin.TestMode)
-	eng, err := coreapi.New(server.WithBootstrapAndSessionAuth(svc, "static-bearer", pathScopes, tiers))
+	eng, err := coreapi.New(server.WithBootstrapAndSessionAuth(svc, "static-bearer", pathScopes, tiers, nil))
 	if err != nil {
 		t.Fatalf("coreapi.New: %v", err)
 	}
