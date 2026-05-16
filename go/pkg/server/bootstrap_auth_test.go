@@ -239,5 +239,51 @@ func TestBootstrapAuth_NilVerifier_FallthroughBearer_Good(t *core.T) {
 	core.AssertEqual(t, http.StatusOK, rr.Code)
 }
 
+// --- Cerberus #1489 fail-closed posture ---
+
+// TestBootstrapAuth_NoLocalKey_WithServerKey_FailClosed_Bad — when
+// the middleware is installed (verifier non-nil + pathScopes non-empty)
+// but bearerToken is empty, every non-bootstrap path MUST 503 rather
+// than fall through to permit-all. The split-binary plan (lthn-mlx)
+// runs subsystems where ServerKey is the only auth source and
+// LocalKey is empty by construction — the previous "open server"
+// fallback would have left those endpoints unauthenticated.
+func TestBootstrapAuth_NoLocalKey_WithServerKey_FailClosed_Bad(t *core.T) {
+	_ = homeFixture(t)
+	svc := serverkey.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	paths := map[string]string{"/v1/account/create": "account.create"}
+	// Bearer token deliberately empty — historically this would have
+	// fallen through to "open server", permitting unauthenticated
+	// access to /v1/api/chat. Cerberus #1489: must 503 instead.
+	eng := newTestEngine(t, svc, "", paths, "/v1/api/chat")
+
+	rr := doGET(eng, "/v1/api/chat", "")
+	core.AssertEqual(t, http.StatusServiceUnavailable, rr.Code,
+		"empty bearer + active bootstrap surface must fail closed")
+}
+
+// TestBootstrapAuth_NoLocalKey_WithServerKey_BootstrapPathStillWorks_Good —
+// the fail-closed posture only applies to non-bootstrap paths. The
+// bootstrap endpoint itself must still accept a valid Bootstrap token
+// even when bearerToken is empty.
+func TestBootstrapAuth_NoLocalKey_WithServerKey_BootstrapPathStillWorks_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := serverkey.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	paths := map[string]string{"/v1/account/create": "account.create"}
+	eng := newTestEngine(t, svc, "", paths, "/v1/account/create")
+
+	tokR := svc.IssueBootstrapToken()
+	core.AssertTrue(t, tokR.OK)
+	out := tokR.Value.(serverkey.BootstrapTokenOutput)
+
+	rr := doGET(eng, "/v1/account/create", "Bootstrap "+out.Token)
+	core.AssertEqual(t, http.StatusOK, rr.Code,
+		"bootstrap path must still work even when bearer source is empty")
+}
+
 // silence the testing import.
 var _ = testing.Short

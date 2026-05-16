@@ -60,6 +60,12 @@ const bootstrapAuthHeaderPrefix = "Bootstrap "
 // alongside (callers branch on serverkey availability at server
 // construction time).
 //
+// Cerberus #1489 (HIGH): when the middleware IS installed (verifier !=
+// nil AND pathScopes non-empty) but bearerToken is empty, non-bootstrap
+// requests fail-closed with 503 "server_misconfigured". An empty
+// LocalKey with an active ServerKey is no longer treated as "open
+// server" — that posture was the fail-open footgun.
+//
 // Path matching is exact-equality (same isPublicPath semantics
 // external/api uses for the bearer skip list).
 //
@@ -160,13 +166,25 @@ func BootstrapAuthMiddleware(verifier serverkey.Verifier, bearerToken string, pa
 			return
 		}
 
-		// Standard bearer-auth path. Mirrors
-		// external/api/middleware.go::bearerAuthMiddleware.
+		// Standard bearer-auth path.
+		//
+		// Cerberus #1489 (HIGH — fail-closed posture): when bearerToken
+		// is empty BUT this middleware was installed (i.e. verifier !=
+		// nil AND pathScopes non-empty, gated above), the server has a
+		// bootstrap-auth surface active. Permitting unauthenticated
+		// access to ALL other paths in that posture is the exact
+		// fail-open footgun Cerberus flagged — the lthn-mlx split-binary
+		// plans run subsystems where ServerKey is the only auth source
+		// and LocalKey is empty by construction.
+		//
+		// Reject every non-bootstrap request with 503 to signal
+		// "server misconfigured: no bearer source". The caller is
+		// responsible for installing coreapi.WithBearerAuth (or a
+		// bootstrap-aware equivalent) alongside this middleware when
+		// LocalKey is empty by design.
 		if bearerToken == "" {
-			// No bearer requirement configured — let the request
-			// through. Mirrors coreapi behaviour when LocalKey is
-			// empty (open server).
-			c.Next()
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable,
+				coreapi.Fail("server_misconfigured", "no bearer source configured"))
 			return
 		}
 		header := c.GetHeader("Authorization")
