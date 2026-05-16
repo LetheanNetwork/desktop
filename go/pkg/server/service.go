@@ -33,7 +33,6 @@
 package server
 
 import (
-
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
 	"github.com/gin-gonic/gin"
@@ -57,7 +56,7 @@ type Runner interface {
 type Brand struct {
 	Title       string // e.g. "lthn API"
 	Description string // e.g. "Local Lethean surface — chat, MCP tools, integrations"
-	Version     string // e.g. "0.2.0-rc1" — typically firstlaunch.Version
+	Version     string // e.g. "v0.2.0-rc1" — typically desktop.Version
 }
 
 // Options configures the server at construction time.
@@ -183,15 +182,15 @@ func NewService(opts Options) *Service {
 		coreapi.WithRequestID(),
 		coreapi.WithResponseMeta(),
 	}
-	// TEMP DISABLED 2026-05-13 — WebView fetch doesn't forward the
-	// bearer token yet, every same-origin API call returns 401. Codex
-	// will rewire the apikey injector on the TS side; until then auth
-	// is off so the UI is usable. Re-enable once the fetch interceptor
-	// lands in frontend/src/lit/.
-	_ = opts.LocalKey
-	// if opts.LocalKey != "" {
-	// 	apiOpts = append(apiOpts, coreapi.WithBearerAuth(opts.LocalKey))
-	// }
+	// Cerberus Mantis #1430 (2026-05-16) — bearer auth re-enabled. The
+	// WebView fetch interceptor lives at frontend/src/lit/api-fetch.ts;
+	// it loads the token via apikey.Reveal() on first call + injects
+	// Authorization: Bearer on every same-origin API request. Without
+	// this, every local process can reach every API endpoint without
+	// authentication.
+	if opts.LocalKey != "" {
+		apiOpts = append(apiOpts, coreapi.WithBearerAuth(opts.LocalKey))
+	}
 	if opts.SPAHandler != nil {
 		apiOpts = append(apiOpts, coreapi.WithNoRoute(opts.SPAHandler))
 	}

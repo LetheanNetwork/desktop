@@ -106,7 +106,12 @@ export class ProcessApi {
   }
 
   private async request<T>(path: string, opts?: RequestInit): Promise<T> {
-    const res = await fetch(`${this.base}${path}`, opts);
+    // Cerberus #1430 — apiFetch injects the local bearer token. Plain
+    // fetch() would 401 every request once WithBearerAuth is re-enabled
+    // on the server side (re-enabled in the same change-set as this
+    // wrapper migration).
+    const { apiFetch } = await import('../../../api-fetch');
+    const res = await apiFetch(`${this.base}${path}`, opts);
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 200)}`);
