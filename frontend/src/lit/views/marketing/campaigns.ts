@@ -9,10 +9,11 @@
 // (no chrome) when mounted by <lthn-app-shell>. Mirrors the welcome /
 // settings window pattern.
 //
-// Data: fixture array only for v1. Real source is a future
-// `pkg/marketing/campaigns` Go service that maps a CRM + UTM rollup
-// into the same { name, state, reach, convert, spend, channel } shape
-// the design intentionally codifies. See HANDOVER-VIEWS.md.
+// Data: _loadFromBackend() tries pkg/marketing/campaigns via the Wails
+// binding (lazy-imported, falls back to fixture when the binding is absent
+// — e.g. in tests or pre-Wails contexts). The binding returns
+// { Value: { campaigns: Campaign[], liveCount: number, scheduledCount: number } }.
+// On failure the fixture stays in place so the view is always renderable.
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
@@ -26,11 +27,9 @@ interface Campaign {
   channel: string;
 }
 
-/** Fixture campaigns. Shape mirrors the future pkg/marketing/campaigns
- *  Go service — when that ships, swap this for a fetch + Reactive
- *  Controller (mirroring chat-window patterns). Strings stay opaque
- *  (e.g. "42 K", "£800") because the source-of-truth is the rollup
- *  service, not arithmetic on the client. */
+/** Fixture campaigns. Shape mirrors the pkg/marketing/campaigns Go service.
+ *  When the backend resolves, this array is replaced by the live list.
+ *  Strings stay opaque ("42 K", "£800") — arithmetic is the backend's job. */
 const FIXTURE_CAMPAIGNS: Campaign[] = [
   { name: "v0.2 launch · 'sovereign compute'", state: "live",      reach: "42 K",    convert: "3.2%", spend: "£0",    channel: "earned" },
   { name: "Investor outreach · Q2 cohort",     state: "live",      reach: "38",      convert: "21%",  spend: "£0",    channel: "direct" },
@@ -49,25 +48,71 @@ const STATE_COLOUR: Record<Campaign["state"], string> = {
 
 class LthnViewCampaigns extends LitElement {
   static readonly properties = {
-    w:        { type: Number },
-    h:        { type: Number },
-    embedded: { type: Boolean, reflect: true },
+    w:         { type: Number },
+    h:         { type: Number },
+    embedded:  { type: Boolean, reflect: true },
+    campaigns: { state: true },
+    loading:   { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
+  declare campaigns: Campaign[];
+  declare loading: boolean;
+
+  private _timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
     this.w = 1180;
     this.h = 720;
     this.embedded = false;
+    this.campaigns = FIXTURE_CAMPAIGNS;
+    this.loading = false;
   }
 
   createRenderRoot() { return this; }
 
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+    // Re-poll every 60 s — campaigns change infrequently.
+    this._timer = setInterval(() => { void this._loadFromBackend(); }, 60_000);
+  }
+
+  disconnectedCallback() {
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    super.disconnectedCallback();
+  }
+
+  async _loadFromBackend() {
+    if (this.loading) return;
+    this.loading = true;
+    try {
+      // Lazy-import the Wails binding so a missing binding in tests
+      // (or pre-Wails builds) doesn't kill the module load.
+      const svc = await import("@desktop/marketing/campaigns/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
+        return;
+      }
+      const r = await (svc as {
+        List: (input: { state: string }) => Promise<{
+          Value?: { campaigns?: Campaign[]; liveCount?: number; scheduledCount?: number }
+        }>
+      }).List({ state: "" });
+      const rows = r?.Value?.campaigns;
+      if (rows && rows.length > 0) {
+        this.campaigns = rows;
+      }
+    } catch {
+      // Backend unavailable — keep fixture data in place.
+    } finally {
+      this.loading = false;
+    }
+  }
+
   render() {
-    const items = FIXTURE_CAMPAIGNS;
+    const items = this.campaigns;
     const liveCount      = items.filter(i => i.state === "live").length;
     const scheduledCount = items.filter(i => i.state === "scheduled").length;
 
