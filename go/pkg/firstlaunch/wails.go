@@ -63,6 +63,16 @@ func (s *WailsService) Detect() core.Result {
 // Pure-Go reflection of the running process; no IO, no allocations
 // beyond the struct.
 //
+// Cerberus Mantis #1445 — the returned BuildInfo includes
+// {Version, GoVersion, GoOS, GoArch, NumCPU} = a passive host
+// fingerprint. Safe today because this method is Wails-only
+// (in-process IPC; only the user's own WebView reaches it). DO NOT
+// expose this via a gateway scope (post-#1421 plugin tier) without
+// either (a) gating behind a `system.fingerprint:read` permission
+// the user grants per-plugin, OR (b) returning a sanitized subset
+// (e.g. just Version, no GoOS/GoArch/NumCPU). Plugins should not
+// silently learn the user's runtime fingerprint.
+//
 // Usage example (TS):
 //
 //	import { Build } from "@desktop/firstlaunch/wailsservice";
@@ -82,6 +92,17 @@ func (s *WailsService) Build() core.Result {
 // pkg/paths.* so the welcome wizard, the model browser, the
 // settings General panel, and any future onboarding surface
 // stay aligned with the same source of truth.
+//
+// Cerberus Mantis #1445 — the returned LetheanPaths struct contains
+// concrete absolute paths with the user's home directory expanded
+// (`/Users/<name>/Lethean/...` on macOS, `/home/<name>/...` on
+// Linux). That's a USERNAME LEAK. Safe today because this is Wails-
+// only (in-process; the WebView already runs as the user). If this
+// gets exposed via a gateway scope (post-#1421 plugin tier), MUST
+// be sanitized first — strip the home prefix, return `~/Lethean/...`
+// form, or only return the suffix the plugin actually needs (e.g.
+// "models" subdir name without the full path). Plugins should not
+// silently learn the user's OS username via path strings.
 //
 // Usage example (TS):
 //
@@ -109,4 +130,36 @@ func (s *WailsService) Paths() core.Result {
 		out.ConfigFile, _ = r.Value.(string)
 	}
 	return core.Ok(out)
+}
+
+// SetModelsDir writes a user-chosen models directory to the override
+// config. Path must be absolute. After it lands, paths.ModelsDir()
+// returns the chosen path. Returns the resolved path on success so
+// the WebView can refresh its display without a separate read.
+//
+// Usage example (TS):
+//
+//	import { SetModelsDir } from "@desktop/firstlaunch/wailsservice";
+//	const dir = await SetModelsDir("/Volumes/Vault/lthn-models");
+func (s *WailsService) SetModelsDir(path string) core.Result {
+	r := paths.SetModelsDirOverride(path)
+	if !r.OK {
+		return core.Fail(core.E("firstlaunch.WailsService.SetModelsDir", "set override failed", r.Value.(error)))
+	}
+	return r
+}
+
+// ClearModelsDir wipes the models-dir override so paths.ModelsDir()
+// falls back to the canonical default. Idempotent.
+//
+// Usage example (TS):
+//
+//	import { ClearModelsDir } from "@desktop/firstlaunch/wailsservice";
+//	await ClearModelsDir();
+func (s *WailsService) ClearModelsDir() core.Result {
+	r := paths.ClearModelsDirOverride()
+	if !r.OK {
+		return core.Fail(core.E("firstlaunch.WailsService.ClearModelsDir", "clear override failed", r.Value.(error)))
+	}
+	return r
 }
