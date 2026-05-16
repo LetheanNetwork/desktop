@@ -339,7 +339,11 @@ class LthnAuthGate extends LitElement {
               <i class="fa-regular fa-eye" style="font-size:11px; color:var(--fg-3); margin-left:8px; cursor:pointer;"></i>
             </div>
             <label style="display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--fg-2); margin-top:2px;">
-              <input type="checkbox" checked style="accent-color:var(--brand-400);">
+              <!-- Cerberus #1492 (A1) — default UNCHECKED. Passphrase-once is
+                   weaker than passphrase-per-launch; making it the default would
+                   be a manipulative-default reducing the user's security posture
+                   without them choosing it. The user opts in. -->
+              <input type="checkbox" style="accent-color:var(--brand-400);">
               Remember on this Mac · keep authed in Keychain
             </label>
           </div>
