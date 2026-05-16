@@ -42,32 +42,63 @@ import (
 // uniform.
 const bootstrapAuthHeaderPrefix = "Bootstrap "
 
-// WithBootstrapAuth returns a coreapi.Option that installs the
-// combined bearer-plus-bootstrap middleware. Paths in pathScopes are
-// gated by VerifyBootstrapToken(verifier, scope); every other path
-// falls through to bearer-token auth against bearerToken (mirroring
-// the existing coreapi.WithBearerAuth semantics, including the skip
-// list for /health + swagger + openapi).
+// sessionTokenHeaderPrefix identifies a session token inside a
+// standard `Authorization: Bearer <token>` header. The bearer
+// middleware dispatches on this prefix before doing a bytewise
+// LocalKey comparison so a session token never falls through to
+// the static-bearer path (Cerberus DREAD H2 fail-closed posture).
+const sessionTokenHeaderPrefix = "LTHN-SESS-1."
+
+// RouteTier classifies an HTTP path's auth requirement per
+// RFC.stage-e.md v2 §4. A route's tier dictates which token types
+// the bearer middleware accepts on the route's behalf.
 //
-// This option REPLACES coreapi.WithBearerAuth — callers MUST NOT use
-// both. The combined middleware handles both responsibilities so the
-// bootstrap path can short-circuit the bearer requirement cleanly
-// without editing external/api/middleware.go.
+// Per Cerberus DREAD H1 — deny-by-default is necessary but not
+// sufficient: pkg/server's CI test
+// TestService_AllRoutesTiered_Good walks engine.Routes() post-
+// registration and asserts every path is either in the routeTiers
+// map OR in the bootstrap-auth skip-list.
 //
-// When verifier is nil OR pathScopes is empty, the option returns a
-// no-op so callers can apply it unconditionally; the appropriate
-// fallback is plain coreapi.WithBearerAuth(bearerToken) registered
-// alongside (callers branch on serverkey availability at server
-// construction time).
-//
-// Cerberus #1489 (HIGH): when the middleware IS installed (verifier !=
-// nil AND pathScopes non-empty) but bearerToken is empty, non-bootstrap
-// requests fail-closed with 503 "server_misconfigured". An empty
-// LocalKey with an active ServerKey is no longer treated as "open
-// server" — that posture was the fail-open footgun.
+// Per Cerberus DREAD C2 — the data-tier slot is RESERVED. Today's
+// implementation treats it as a session-tier alias; Phase 2 (Mantis
+// #1487) fills the at-rest-encryption decrypt layer.
+type RouteTier string
+
+const (
+	// TierLocal accepts the static LocalKey bearer-equality match OR
+	// a valid LTHN-SESS-1.* session token. Use for endpoints that
+	// don't access user-data behind the unlock gate (e.g. /health,
+	// /v1/server/info, /v1/models stub).
+	TierLocal RouteTier = "local"
+
+	// TierSession accepts ONLY a valid LTHN-SESS-1.* session token.
+	// Static LocalKey requests reject with 401 — the static key has
+	// no `account_id` claim, so it can't scope per-account
+	// reads/writes that user-data endpoints require.
+	TierSession RouteTier = "session"
+
+	// TierData is the RESERVED slot for at-rest-encrypted data
+	// endpoints per Cerberus DREAD C2 + Mantis #1487. Behaves as
+	// TierSession today; the decrypt-on-read precondition fills in
+	// when #1487 lands. Defining the slot now locks the policy so
+	// future contributors classify into it instead of widening
+	// TierSession.
+	TierData RouteTier = "data"
+)
+
+// WithBootstrapAuth is the pre-Stage-E entry that wires only the
+// bootstrap+bearer responsibilities. Stage E.B introduces the
+// session-tier layer via WithBootstrapAndSessionAuth; this entry
+// stays for callers that haven't migrated yet (it routes every
+// non-bootstrap path through the static-bearer comparison). New
+// callers SHOULD use WithBootstrapAndSessionAuth.
 //
 // Path matching is exact-equality (same isPublicPath semantics
 // external/api uses for the bearer skip list).
+//
+// Cerberus #1489 (HIGH): when the middleware IS installed (verifier !=
+// nil AND pathScopes non-empty) but bearerToken is empty, non-bootstrap
+// requests fail-closed with 503 "server_misconfigured".
 //
 // Usage example:
 //
@@ -79,20 +110,214 @@ const bootstrapAuthHeaderPrefix = "Bootstrap "
 //	        "/v1/account/create": "account.create",
 //	    }),
 //	}
-//
-// Cerberus #1467: paths added here are security-policy decisions. New
-// entries require Mantis ticket + new Cerberus DREAD review. Codify
-// the rule on the caller side too (constant declaration in
-// cmd/lthn/app.go or pkg/server/service.go).
 func WithBootstrapAuth(verifier serverkey.Verifier, bearerToken string, pathScopes map[string]string) coreapi.Option {
 	mw := BootstrapAuthMiddleware(verifier, bearerToken, pathScopes)
 	if mw == nil {
-		// No-op option — caller is responsible for falling back to
-		// coreapi.WithBearerAuth(bearerToken) when bootstrap auth is
-		// unavailable.
 		return func(_ *coreapi.Engine) {}
 	}
 	return coreapi.WithMiddleware(mw)
+}
+
+// WithBootstrapAndSessionAuth returns a coreapi.Option that installs
+// the full Stage E.B auth-chain middleware: bootstrap-token paths,
+// session-token paths (per the routeTiers classification), and the
+// static-bearer fallback for local-tier paths.
+//
+// Auth-chain decision tree (RFC.stage-e.md v2 §4):
+//
+//  1. skip-list path (e.g. /health, non-/v1/* static assets) → c.Next()
+//  2. path in pathScopes → require Bootstrap header + matching scope
+//     (fail-closed: 401 if missing/invalid; NEVER falls through)
+//  3. routeTiers[path] == TierSession or TierData → require Bearer
+//     header parseable as LTHN-SESS-1.* and VerifySessionToken OK
+//     (fail-closed: 401; NEVER falls through to static-bearer)
+//  4. routeTiers[path] == TierLocal → require Bearer header matching
+//     bearerToken OR a valid LTHN-SESS-1.* session token (either OK)
+//  5. routeTiers has no entry for path → DENY-BY-DEFAULT, 401 with
+//     "route_not_tiered" (the CI test should catch this at build,
+//     this is the runtime fallback)
+//
+// Per Cerberus DREAD H2 — five fail-closed cases on the session-
+// token branch MUST short-circuit with 401, NEVER fall through to
+// LocalKey bytewise comparison: malformed prefix, signature
+// invalid, expired, wrong scope, signed by a different server-key.
+//
+// Per Cerberus DREAD H3 — verification happens ONCE at middleware
+// entry. The handler completes even if the token expires mid-
+// handler (long-running work uses the task-queue substrate, not
+// mid-flight re-verification).
+//
+// Usage example:
+//
+//	opts := []coreapi.Option{
+//	    coreapi.WithRequestID(),
+//	    coreapi.WithResponseMeta(),
+//	    coreapi.WithMiddleware(cspMiddleware()),
+//	    server.WithBootstrapAndSessionAuth(serverkeySvc, bearerToken,
+//	        server.BootstrapPathScopes, server.RouteTiers),
+//	}
+func WithBootstrapAndSessionAuth(
+	verifier serverkey.Verifier,
+	bearerToken string,
+	pathScopes map[string]string,
+	routeTiers map[string]RouteTier,
+) coreapi.Option {
+	mw := BootstrapAndSessionAuthMiddleware(verifier, bearerToken, pathScopes, routeTiers)
+	if mw == nil {
+		return func(_ *coreapi.Engine) {}
+	}
+	return coreapi.WithMiddleware(mw)
+}
+
+// BootstrapAndSessionAuthMiddleware returns the Stage E.B gin
+// handler for the full bootstrap + session + bearer chain.
+// Returns nil when verifier is nil OR pathScopes is empty so the
+// caller can chain it safely.
+//
+// Implementation MUST hold the auth chain shape verbatim:
+//
+//   - skip-list / non-/v1 → c.Next()
+//   - bootstrap path → require Bootstrap header + matching scope,
+//     fail-closed on miss
+//   - session-tier or data-tier route → require Bearer LTHN-SESS-1.*
+//     token, VerifySessionToken OK, fail-closed on miss (NEVER
+//     bytewise-compares against LocalKey)
+//   - local-tier route → Bearer either matches LocalKey OR is a
+//     valid session token
+//   - unclassified route → 401 deny-by-default (the CI test
+//     TestService_AllRoutesTiered_Good catches at build time)
+func BootstrapAndSessionAuthMiddleware(
+	verifier serverkey.Verifier,
+	bearerToken string,
+	pathScopes map[string]string,
+	routeTiers map[string]RouteTier,
+) gin.HandlerFunc {
+	if verifier == nil || len(pathScopes) == 0 {
+		return nil
+	}
+	pathMap := make(map[string]string, len(pathScopes))
+	for k, v := range pathScopes {
+		pathMap[k] = v
+	}
+	tierMap := make(map[string]RouteTier, len(routeTiers))
+	for k, v := range routeTiers {
+		tierMap[k] = v
+	}
+	skipList := []string{"/health"}
+	return func(c *gin.Context) {
+		path := c.Request.URL.Path
+
+		// Static-asset / SPA-route bypass (mirrors the legacy
+		// BootstrapAuthMiddleware — the Gin engine in lthn-desktop
+		// fronts both /v1/* API and the embedded SPA via NoRoute).
+		if !core.HasPrefix(path, "/v1/") && path != "/v1" {
+			c.Next()
+			return
+		}
+
+		// Skip-list paths bypass both auth types — matches the
+		// external/api bearer-auth behaviour for /health.
+		for _, p := range skipList {
+			if path == p {
+				c.Next()
+				return
+			}
+		}
+
+		// Bootstrap-token path: require Bootstrap scheme + matching
+		// scope. NEVER fall through to bearer / session — a
+		// missing/invalid bootstrap token on an allowlisted path
+		// MUST 401, not slip through on a normal bearer.
+		if wantScope, ok := pathMap[path]; ok {
+			header := c.GetHeader("Authorization")
+			if !core.HasPrefix(header, bootstrapAuthHeaderPrefix) {
+				c.AbortWithStatusJSON(http.StatusUnauthorized,
+					coreapi.Fail("unauthorised", "bootstrap token required"))
+				return
+			}
+			token := header[len(bootstrapAuthHeaderPrefix):]
+			r := verifier.VerifyBootstrapToken(token, wantScope)
+			if !r.OK {
+				c.AbortWithStatusJSON(http.StatusUnauthorized,
+					coreapi.Fail("unauthorised", "bootstrap token rejected"))
+				return
+			}
+			c.Set("auth_via", "bootstrap")
+			c.Next()
+			return
+		}
+
+		// Route-tier classification (RFC §4 H1 — deny-by-default).
+		// Unclassified routes 401 with a route_not_tiered code so
+		// the CI failure surfaces obviously vs a normal auth reject.
+		tier, classified := tierMap[path]
+		if !classified {
+			c.AbortWithStatusJSON(http.StatusUnauthorized,
+				coreapi.Fail("route_not_tiered",
+					"route is not in routeTiers — add an entry to pkg/server.RouteTiers (RFC §4 H1)"))
+			return
+		}
+
+		header := c.GetHeader("Authorization")
+		if header == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized,
+				coreapi.Fail("unauthorised", "missing authorization header"))
+			return
+		}
+		parts := core.SplitN(header, " ", 2)
+		if len(parts) != 2 || core.Lower(parts[0]) != "bearer" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized,
+				coreapi.Fail("unauthorised", "invalid bearer scheme"))
+			return
+		}
+		token := parts[1]
+
+		// Session-token branch — recognised by the LTHN-SESS-1.
+		// prefix. MUST short-circuit on every failure path; NEVER
+		// fall through to LocalKey bytewise comparison per Cerberus
+		// DREAD H2.
+		if core.HasPrefix(token, sessionTokenHeaderPrefix) {
+			r := verifier.VerifySessionToken(token)
+			if !r.OK {
+				c.AbortWithStatusJSON(http.StatusUnauthorized,
+					coreapi.Fail("unauthorised", "session token rejected"))
+				return
+			}
+			out, _ := r.Value.(serverkey.SessionVerifyOutput)
+			c.Set("auth_via", "session")
+			c.Set("account_id", out.AccountID)
+			c.Next()
+			return
+		}
+
+		// Non-session token: only local-tier routes accept the
+		// static LocalKey. Session-tier or data-tier routes REJECT
+		// here — the static key has no account_id, so it can't
+		// scope per-account reads/writes.
+		if tier == TierSession || tier == TierData {
+			c.AbortWithStatusJSON(http.StatusUnauthorized,
+				coreapi.Fail("unauthorised",
+					"this endpoint requires a session token — unlock your account first"))
+			return
+		}
+
+		// Local-tier static-bearer comparison. Cerberus #1489
+		// fail-closed: when bearerToken is empty AND the middleware
+		// is installed, abort 503 server_misconfigured instead of
+		// permitting unauthenticated access.
+		if bearerToken == "" {
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable,
+				coreapi.Fail("server_misconfigured", "no bearer source configured"))
+			return
+		}
+		if token != bearerToken {
+			c.AbortWithStatusJSON(http.StatusUnauthorized,
+				coreapi.Fail("unauthorised", "invalid bearer token"))
+			return
+		}
+		c.Set("auth_via", "local")
+		c.Next()
+	}
 }
 
 // BootstrapAuthMiddleware returns the combined middleware Gin handler
