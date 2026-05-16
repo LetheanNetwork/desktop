@@ -442,6 +442,10 @@ func scanFolders(activeFolderSlug string) ([]MailFolder, error) {
 
 // loadAccounts decrypts _accounts.enc and unmarshals the JSON array.
 // Requires an unlocked private key from the AccountProvider.
+//
+// Usage example:
+//
+//	accounts, err := s.loadAccounts(priv)
 func (s *Service) loadAccounts(privKey []byte) ([]MailAccount, error) {
 	pathR := accountsEncPath()
 	if !pathR.OK {
@@ -468,35 +472,114 @@ func (s *Service) loadAccounts(privKey []byte) ([]MailAccount, error) {
 	return accounts, nil
 }
 
-// saveAccounts encrypts and atomically writes _accounts.enc.
-// Requires the user's public key (readable without unlock).
-func (s *Service) saveAccounts(pubKey []byte, accounts []MailAccount) error {
+// readAccountsCiphertextHash returns the SHA-256 hex of the current
+// _accounts.enc bytes on disk WITHOUT decrypting them, plus an
+// "exists" flag. The hash is the IfMatchHash anchor passed to
+// AtomicWriteWithVersion — Cerberus #9 Concern 2.C: the optimistic-
+// lock check operates on CIPHERTEXT, never plaintext, so the
+// unlock-or-locked session state of the caller is irrelevant.
+//
+// PGP encryption is non-deterministic (fresh session key per
+// message), so even an unchanged plaintext re-encrypted by a
+// concurrent writer produces a fresh ciphertext + fresh hash → the
+// optimistic-lock check trips correctly. The hash NEVER leaks
+// plaintext semantics.
+//
+// Returns ("", false, nil) when the file does not exist (first-
+// write path — IfMatchHash left empty, primitive treats as
+// unconditional first-write per RFC §3.2 MED-2).
+//
+// Usage example:
+//
+//	priorHash, _, err := s.readAccountsCiphertextHash()
+func (s *Service) readAccountsCiphertextHash() (string, bool, error) {
+	pathR := accountsEncPath()
+	if !pathR.OK {
+		return "", false, core.E("mail.readAccountsCiphertextHash", pathR.Error(), nil)
+	}
+	path := pathR.Value.(string)
+	rawR := core.ReadFile(path)
+	if !rawR.OK {
+		// Missing file → unconditional first-write path.
+		return "", false, nil
+	}
+	enc, _ := rawR.Value.([]byte)
+	return core.SHA256Hex(enc), true, nil
+}
+
+// saveAccounts encrypts the accounts list under pubKey and writes
+// _accounts.enc via paths.AtomicWriteWithVersion (cascade W4 Part 1,
+// RFC.atomic-write-cascade-adoption.md §2 row 10; Cerberus #9 pre-
+// fire DREAD Concerns 2.A/2.B/2.C).
+//
+// priorHash is the IfMatchHash anchor — pass the SHA-256 hex of the
+// ciphertext bytes observed on disk before the load-modify cycle
+// (or empty for first-write to a missing file). The composite-or-
+// pick-one check at the primitive treats empty as "skip this check".
+//
+// IncludeBody is passed EXPLICITLY as false (Cerberus #9 Concern
+// 2.A — never rely on struct-default). The path
+// "office/mail/_accounts.enc" is also in paths.AtRestEncryptedPrefixes,
+// so the primitive enforces body-omission as a second layer even if
+// a caller mistakenly flipped IncludeBody — defence-in-depth.
+//
+// Stale-write path returns core.Fail(paths.ConflictEnvelope{Code:
+// "mail.accounts.update.conflict"}) so the Wails-marshalled
+// Result.Value carries the lowercase-json wire shape conflict-
+// dispatch.ts extractEnvelope pattern-matches on (inherits Mantis
+// #1544 gating from W1+W2+W3).
+//
+// Audit emission is automatic via paths.AuditModeForPath — the
+// _accounts.enc path routes through AuditModeSync per RFC §6.1
+// (auth-substrate; the IMAP credential blob is a RecordSync surface).
+//
+// Usage example:
+//
+//	wr := s.saveAccounts(pub, existing, priorHash)
+//	if !wr.OK { return wr }
+func (s *Service) saveAccounts(pubKey []byte, accounts []MailAccount, priorHash string) core.Result {
 	marshalR := core.JSONMarshal(accounts)
 	if !marshalR.OK {
-		return core.E("mail.saveAccounts", "marshal accounts", marshalR.Value.(error))
+		return core.Fail(core.E("mail.saveAccounts", "marshal accounts", marshalR.Value.(error)))
 	}
 	plain, _ := marshalR.Value.([]byte)
 
 	enc, err := s.pgp.Encrypt(pubKey, plain)
 	if err != nil {
-		return core.E("mail.saveAccounts", "encrypt accounts", err)
+		return core.Fail(core.E("mail.saveAccounts", "encrypt accounts", err))
 	}
 
 	pathR := accountsEncPath()
 	if !pathR.OK {
-		return core.E("mail.saveAccounts", pathR.Error(), nil)
+		return core.Fail(core.E("mail.saveAccounts", pathR.Error(), nil))
 	}
 	path := pathR.Value.(string)
-	tmp := path + ".tmp"
 
-	if r := core.WriteFile(tmp, enc, 0o600); !r.OK {
-		return core.E("mail.saveAccounts", "write tmp: "+r.Error(), nil)
+	// Cerberus #9 pre-fire DREAD Concern 2.B: path MUST remain the
+	// literal single-file blob "~/Lethean/office/mail/_accounts.enc"
+	// — splitting per-account would change the AtRestEncryptedPrefixes
+	// routing + the RecordSync audit contract. accountsEncFile is the
+	// only string referenced by accountsEncPath() above.
+	res := paths.AtomicWriteWithVersion(path, paths.WriteInput{
+		Body:        enc,
+		IfMatchHash: priorHash,
+		// Cerberus #9 Concern 2.A — EXPLICIT false. Never rely on
+		// struct-default. Mantis #1553 tracks the paths-tier reject
+		// of IncludeBody for at-rest paths; until that lands, every
+		// _accounts.enc call site MUST pass explicit false so a
+		// future refactor cannot accidentally surface ciphertext via
+		// the VersionStale envelope.
+		IncludeBody: false,
+	})
+	if res.OK {
+		return res
 	}
-	if r := core.Rename(tmp, path); !r.OK {
-		_ = core.Remove(tmp)
-		return core.E("mail.saveAccounts", "rename: "+r.Error(), nil)
+	if stale, ok := paths.VersionStaleFromError(res.Value); ok {
+		return core.Fail(paths.NewConflictEnvelope(
+			"mail.accounts.update.conflict", stale))
 	}
-	return nil
+	return core.Fail(core.E("mail.saveAccounts",
+		"write failed: "+res.Error(), nil))
 }
 
 // backoffDelay returns the current backoff duration for an account key and

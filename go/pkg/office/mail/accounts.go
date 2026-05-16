@@ -70,6 +70,17 @@ func (s *Service) SaveAccount(input AccountInput) core.Result {
 			"could not read user public key — account may not be set up"))
 	}
 
+	// Snapshot the current ciphertext hash BEFORE the load-modify-save
+	// cycle. Cerberus #9 pre-fire DREAD Concern 2.C: IfMatchHash is
+	// over CIPHERTEXT not plaintext — read happens regardless of
+	// unlock-state since hashing the encrypted blob never requires the
+	// private key. Empty hash + missing file = unconditional first-
+	// write (RFC §3.2 MED-2).
+	priorHash, _, hashErr := s.readAccountsCiphertextHash()
+	if hashErr != nil {
+		return core.Fail(core.E("mail.SaveAccount", "read prior hash", hashErr))
+	}
+
 	// Load existing accounts (may be locked — decrypt attempt may fail).
 	// Writes always succeed without unlock; only reads block on lock.
 	// For SaveAccount: if we can't decrypt the existing list (locked), we
@@ -108,10 +119,7 @@ func (s *Service) SaveAccount(input AccountInput) core.Result {
 		})
 	}
 
-	if err := s.saveAccounts(pub, existing); err != nil {
-		return core.Fail(core.E("mail.SaveAccount", "persist accounts", err))
-	}
-	return core.Ok(nil)
+	return s.saveAccounts(pub, existing, priorHash)
 }
 
 // ListAccounts returns all saved accounts with auth.secret zeroed (§1.4).
@@ -173,6 +181,13 @@ func (s *Service) RemoveAccount(name string) core.Result {
 			"could not read user public key"))
 	}
 
+	// Snapshot ciphertext hash BEFORE the load-modify-save cycle.
+	// Cerberus #9 Concern 2.C — ciphertext hash, no plaintext access.
+	priorHash, _, hashErr := s.readAccountsCiphertextHash()
+	if hashErr != nil {
+		return core.Fail(core.E("mail.RemoveAccount", "read prior hash", hashErr))
+	}
+
 	accounts, err := s.loadAccounts(priv)
 	if err != nil {
 		return core.Fail(core.E("mail.RemoveAccount", "decrypt accounts", err))
@@ -192,10 +207,7 @@ func (s *Service) RemoveAccount(name string) core.Result {
 			core.Sprintf("account %q not found", name)))
 	}
 
-	if err := s.saveAccounts(pub, filtered); err != nil {
-		return core.Fail(core.E("mail.RemoveAccount", "persist accounts", err))
-	}
-	return core.Ok(nil)
+	return s.saveAccounts(pub, filtered, priorHash)
 }
 
 // domainMatches reports whether host (IMAP/SMTP hostname) matches or
