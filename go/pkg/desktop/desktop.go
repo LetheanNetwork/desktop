@@ -40,6 +40,7 @@ import (
 	guisystray "dappco.re/go/gui/pkg/systray"
 	guiwindow "dappco.re/go/gui/pkg/window"
 	coreI18n "dappco.re/go/i18n"
+	"dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/build"
@@ -317,6 +318,12 @@ func (s *Service) Run() core.Result {
 	// live by the time the WebView mounts <lthn-auth-gate> and calls
 	// ServerKey.AccountStatus() / ServerKey.IssueBootstrapToken().
 	serverkeySvc, _ := core.ServiceFor[*serverkey.Service](s.opts.Core, "serverkey")
+	// account — Stage B' account-creation handler. Core-registered so
+	// pkg/server's RoutesProvider auto-discovery mounts /v1/account/create
+	// on the public engine alongside the bootstrap-auth middleware that
+	// gates it. Wails-bound here only to reserve the binding namespace —
+	// the REST endpoint is the canonical Stage C consumer per RFC §2.5.
+	accountSvc, _ := core.ServiceFor[*account.Service](s.opts.Core, "account")
 	// Bridge opencode-serve's /global/event SSE stream → Wails event
 	// bus. The opencode side runs the SSE goroutine + parses; each
 	// event JSON is forwarded here, where emitCoreEvent ferries it
@@ -375,6 +382,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(incidentsSvc),
 		application.NewService(runbooksSvc),
 		application.NewService(serverkeySvc),
+		application.NewService(accountSvc),
 		application.NewService(s.opts.Fleet),
 		application.NewService(s.opts.Keys),
 		application.NewService(tools.NewWailsService(s.opts.Core)),

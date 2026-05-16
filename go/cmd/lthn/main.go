@@ -39,6 +39,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/server"
+	"dappco.re/lthn/desktop/pkg/serverkey"
 	"golang.org/x/term"
 )
 
@@ -251,11 +252,20 @@ func cmdGUI(args []string) int {
 		return 1
 	}
 	key, _ := keyR.Value.(string)
+	// Stage B' wiring (Mantis #1474 successor) — resolve the
+	// Bootstrap()ed *serverkey.Service so server.NewService can install
+	// the combined bootstrap-plus-bearer middleware (instead of the
+	// bearer-only one) and gate /v1/account/create with the short-lived
+	// PGP-signed token. The verifier is the same instance the Wails
+	// surface binds for ServerKey.IssueBootstrapToken, so a token
+	// issued to the WebView round-trips to the REST middleware.
+	serverkeySvc, _ := core.ServiceFor[*serverkey.Service](c, "serverkey")
 	s := server.NewService(server.Options{
-		Runner:   r,
-		LocalKey: key,
-		Brand:    server.Brand{Version: lthn.Version},
-		Core:     c,
+		Runner:    r,
+		LocalKey:  key,
+		Brand:     server.Brand{Version: lthn.Version},
+		Core:      c,
+		ServerKey: serverkeySvc,
 	})
 	if rr := c.RegisterService("server", s); !rr.OK {
 		core.Print(core.Stderr(), "lthn gui: %s\n", rr.Error())
@@ -402,6 +412,14 @@ func cmdServe(args []string) int {
 	// lthn-process (+ any future service implementing
 	// server.RoutesProvider) is auto-discovered via Options.Core
 	// passed to server.NewService below — no manual accumulation.
+	//
+	// Stage B' wiring (Mantis #1474 successor) — same as cmdGUI:
+	// resolve the Bootstrap()ed *serverkey.Service so the combined
+	// bootstrap-plus-bearer middleware lights up. `lthn serve` is the
+	// path a headless install reaches (no Wails), so the account-
+	// creation endpoint MUST be reachable here too once a future
+	// client (CLI or REST consumer) issues a bootstrap token.
+	serverkeySvc, _ := core.ServiceFor[*serverkey.Service](c, "serverkey")
 	s := server.NewService(server.Options{
 		Addr:        core.Concat(":", port),
 		Runner:      r,
@@ -409,6 +427,7 @@ func cmdServe(args []string) int {
 		Brand:       server.Brand{Version: lthn.Version},
 		ExtraGroups: extras,
 		Core:        c,
+		ServerKey:   serverkeySvc,
 	})
 	if rr := c.RegisterService("server", s); !rr.OK {
 		core.Print(core.Stderr(), serveErrorFormat, rr.Error())

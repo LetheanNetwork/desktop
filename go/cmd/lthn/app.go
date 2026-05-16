@@ -13,6 +13,7 @@ import (
 	"dappco.re/go/process"
 	"dappco.re/go/store"
 	"dappco.re/go/stream"
+	"dappco.re/lthn/desktop/pkg/account"
 	lthnai "dappco.re/lthn/desktop/pkg/ai"
 	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/fleet"
@@ -228,6 +229,15 @@ func newAppCore() *core.Core {
 		// account-creation endpoint family consumes. Bootstrap()
 		// runs explicitly below — Register only constructs.
 		core.WithName("serverkey", serverkey.Register),
+		// account — Stage B' of the first-run auth-gate (Mantis #1474
+		// successor). Owns the /v1/account/create endpoint handler
+		// that closes the seam left open by Stage B: pkg/server's
+		// BootstrapAuthMiddleware gates the path with scope=account.create,
+		// then dispatches to account.Service.Create which enforces the
+		// four Cerberus #1460 MUST-NOTs (no overwrite, ID match,
+		// atomic write, nonce-consumption-before-write). REST surface
+		// auto-mounts via pkg/server.RoutesProvider discovery.
+		core.WithName("account", account.Register),
 		// update — self-update against the LetheanNetwork/desktop
 		// GitHub release feed. Constructed with CheckOnStartup =
 		// NoCheck so registering is offline-cheap; consumers call
