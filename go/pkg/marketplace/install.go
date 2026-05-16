@@ -164,11 +164,16 @@ func (s *Service) Install(input InstallInput) core.Result {
 	var lastErr string
 
 	for _, img := range m.Images {
+		vols, vr := s.resolveVolumes(img)
+		if !vr.OK {
+			lastErr = vr.Error()
+			continue
+		}
 		spawnIn := sandbox.SpawnLongInput{
 			Image:   img.Image,
 			Command: s.resolveImageCommand(img),
 			Env:     s.resolveImageEnv(img, env),
-			Volumes: s.resolveVolumes(img),
+			Volumes: vols,
 		}
 		if img.Expose != nil {
 			spawnIn.ExposedPort = img.Expose.Port
@@ -306,10 +311,18 @@ func (s *Service) Launch(bundleID string) core.Result {
 	}
 
 	for _, img := range m.Images {
+		vols, vr := s.resolveVolumes(img)
+		if !vr.OK {
+			// Skip images with rejected volumes — same defence as
+			// Install. The launch path is best-effort; an attacker-
+			// crafted volume name in a stored manifest doesn't make
+			// the whole launch fail, just the offending image.
+			continue
+		}
 		spawnIn := sandbox.SpawnLongInput{
 			Image:   img.Image,
 			Command: s.resolveImageCommand(img),
-			Volumes: s.resolveVolumes(img),
+			Volumes: vols,
 		}
 		if img.Expose != nil {
 			spawnIn.ExposedPort = img.Expose.Port
@@ -518,15 +531,27 @@ func (s *Service) resolveImageCommand(img ImageEntry) string {
 }
 
 // resolveVolumes maps manifest VolumeMount entries to sandbox.LongVolumeMount.
-func (s *Service) resolveVolumes(img ImageEntry) []sandbox.LongVolumeMount {
+//
+// Cerberus Mantis #1431 — every Persist name flows through
+// sandbox.IsValidVolumeName to refuse host-path masquerade as a named
+// volume (e.g. `/var/run/docker.sock` would otherwise become a
+// host-path bind-mount enabling a docker-socket container escape).
+// Returns the volumes plus an error Result; the install loop fails
+// the affected image install cleanly when validation rejects.
+func (s *Service) resolveVolumes(img ImageEntry) ([]sandbox.LongVolumeMount, core.Result) {
 	out := make([]sandbox.LongVolumeMount, 0, len(img.Volumes))
 	for _, v := range img.Volumes {
+		if !sandbox.IsValidVolumeName(v.Persist) {
+			return nil, core.Fail(core.E("marketplace.resolveVolumes",
+				core.Concat("invalid volume name (must be alphanumeric + [_.-] only, no paths): ",
+					v.Persist), nil))
+		}
 		out = append(out, sandbox.LongVolumeMount{
 			Name:      v.Persist,
 			Container: v.Container,
 		})
 	}
-	return out
+	return out, core.Ok(nil)
 }
 
 // substituteTokens replaces ${env.KEY} tokens in v with the

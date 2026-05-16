@@ -74,6 +74,48 @@ type LongVolumeMount struct {
 	Container string // mount path inside the container
 }
 
+// IsValidVolumeName reports whether name is a syntactically-valid
+// named Docker volume. Cerberus Mantis #1431 — without this gate, a
+// bundle manifest could declare VolumeMount{Persist: "/var/run/
+// docker.sock"} which buildLongRunArgs would render as
+// `-v /var/run/docker.sock:/sock` — a host-path bind-mount that
+// gives the container access to the docker socket, which is
+// root-equivalent on the host (classic Docker escape).
+//
+// Rules (mirror Docker's own volume-name regex):
+//   - Length 1..64.
+//   - First character: ASCII alphanumeric.
+//   - Remaining characters: alphanumeric or `_`, `.`, `-`.
+//   - NO leading `/`, `.`, or `-` (rejected by the first-char rule);
+//     in particular no `/` ANYWHERE (so absolute paths can't masquerade
+//     as named volumes).
+//
+// Usage example:
+//
+//	if !sandbox.IsValidVolumeName(v.Name) {
+//	    return core.Fail(core.E(op, "invalid volume name: "+v.Name, nil))
+//	}
+func IsValidVolumeName(name string) bool {
+	if name == "" || len(name) > 64 {
+		return false
+	}
+	for i, ch := range name {
+		alnum := ('a' <= ch && ch <= 'z') ||
+			('A' <= ch && ch <= 'Z') ||
+			('0' <= ch && ch <= '9')
+		if i == 0 {
+			if !alnum {
+				return false
+			}
+			continue
+		}
+		if !(alnum || ch == '_' || ch == '.' || ch == '-') {
+			return false
+		}
+	}
+	return true
+}
+
 // ContainerHandle is the runtime record for one running bundle container.
 type ContainerHandle struct {
 	// SandboxID is the stable lthn-assigned identifier: "sb-<8-char-random>".
@@ -276,7 +318,17 @@ func (s *Service) buildLongRunArgs(rt, containerName string, hostPort int, input
 		args = append(args, "-e", k+"="+v)
 	}
 
+	// Cerberus #1431 — defence-in-depth gate. Marketplace's
+	// resolveVolumes is the primary validator (and errors the install
+	// loudly); the silent-skip here protects the sandbox from any
+	// future caller that bypasses marketplace and constructs a
+	// SpawnLongInput directly with an attacker-controlled volume name.
 	for _, vol := range input.Volumes {
+		if !IsValidVolumeName(vol.Name) {
+			core.Warn("sandbox: refusing volume with invalid name",
+				"name", vol.Name, "container", vol.Container)
+			continue
+		}
 		args = append(args, "-v", vol.Name+":"+vol.Container)
 	}
 
