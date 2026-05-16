@@ -15,7 +15,7 @@ import (
 // ─── HTTP handlers ──────────────────────────────────────────────────
 
 func (s *Service) handleInfo(w core.ResponseWriter, _ *core.Request) {
-	corsJSON(w)
+	noCorsJSON(w)
 	writeJSON(w, map[string]any{
 		"name":    "lthn-desktop-bridge",
 		"version": "0.1.0",
@@ -25,7 +25,7 @@ func (s *Service) handleInfo(w core.ResponseWriter, _ *core.Request) {
 }
 
 func (s *Service) handleTools(w core.ResponseWriter, _ *core.Request) {
-	corsJSON(w)
+	noCorsJSON(w)
 	writeJSON(w, map[string]any{"tools": toolCatalogue()})
 }
 
@@ -35,7 +35,7 @@ func (s *Service) handleHealth(w core.ResponseWriter, _ *core.Request) {
 }
 
 func (s *Service) handleCall(w core.ResponseWriter, r *core.Request) {
-	corsJSON(w)
+	noCorsJSON(w)
 	if r.Method == core.MethodOptions {
 		w.WriteHeader(core.StatusNoContent)
 		return
@@ -621,11 +621,33 @@ func (s *Service) ClearErrors() {
 
 // ─── HTTP helpers ───────────────────────────────────────────────────
 
+// corsJSON sets headers for endpoints intentionally exposed to third-
+// party in-browser probes (today: /health only). Access-Control-Allow-
+// Origin: * is appropriate ONLY for read-only liveness signal — any
+// endpoint that depends on bearer auth must use noCorsJSON instead.
 func corsJSON(w core.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
+// noCorsJSON sets the JSON Content-Type without any Access-Control-
+// Allow-Origin header. Used by /mcp/* (privileged admin surface) and
+// /internal/* (in-process WebView callback surface).
+//
+// Cerberus H#9-verify F2 (Mantis #1535): the prior shared corsJSON
+// helper emitted "Access-Control-Allow-Origin: *" on /mcp/* responses.
+// Combined with the Origin-allowed-when-empty rule in originAllowed(),
+// the wildcard ACAO let a same-origin-policy-violating browser script
+// read /mcp/* bodies even when bearer auth was enforced — bypassing
+// the SOP defence layer that exists to limit blast-radius on a token
+// leak. Removing the header restores browser-enforced cross-origin
+// blocking as defence-in-depth.
+func noCorsJSON(w core.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	// Deliberately NO Access-Control-Allow-Origin — browsers will block
+	// cross-origin readers per SOP, even if bearer auth ever regresses.
 }
 
 func writeJSON(w core.ResponseWriter, v any) {
