@@ -137,6 +137,21 @@ func Fetch(c *core.Core, repo PRRepo) core.Result {
 	checked := core.Now().UTC()
 	inserted := 0
 	for _, pr := range prs {
+		// Cerberus pass-6 HIGH — refuse non-https HTMLURL at fetch-
+		// time. A compromised or malicious upstream forge can return
+		// `javascript:fetch(...)` in html_url; that URL gets persisted,
+		// rendered as a Lit href, and one click runs JS in the same
+		// origin as every Wails binding (full RCE on the host).
+		// Skip rows whose URL isn't https:// rather than store-and-
+		// pray. The frontend will also gate at render-time (belt +
+		// braces).
+		if !isSafePRURL(pr.HTMLURL) {
+			core.Warn("vi: dropping PR row with unsafe URL",
+				"repo", RepoKey(repo),
+				"pr", pr.Number,
+				"url", pr.HTMLURL)
+			continue
+		}
 		row := PRActivity{
 			ID:        newPRActivityID(),
 			Provider:  repo.Provider,
@@ -164,6 +179,20 @@ func Fetch(c *core.Core, repo PRRepo) core.Result {
 		inserted++
 	}
 	return core.Ok(inserted)
+}
+
+// isSafePRURL gates the upstream-supplied html_url before persistence.
+// Cerberus pass-6 — a compromised or malicious upstream forge can
+// return `javascript:fetch(...)` in html_url, which renders as a Lit
+// `<a href=...>` in the activity window and one click runs JS in
+// the same origin as every Wails binding (full RCE).
+//
+// Today only https:// is acceptable. http:// is rejected too because
+// (a) the rest of the marketplace + downloader hardening (#1424,
+// #1433) is https-only, (b) anything we link from the Activity slot
+// should be transport-secured by the time the user can click it.
+func isSafePRURL(u string) bool {
+	return core.HasPrefix(u, "https://")
 }
 
 // buildListURL composes the open-PR list URL for the given repo.

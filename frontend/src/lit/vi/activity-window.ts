@@ -64,6 +64,19 @@ class LthnViActivityWindow extends LitElement {
 
   private _timer: ReturnType<typeof setInterval> | null = null;
 
+  /** Cerberus pass-6 HIGH — defence-in-depth on PR URL rendering.
+   *  Go-side `isSafePRURL` rejects non-https URLs at fetch-time,
+   *  so this gate should be redundant. But the Activity slot is one
+   *  click away from full Wails-binding RCE if `javascript:` ever
+   *  reaches the href — keep the second layer. Refuse anything
+   *  that doesn't begin with `https://` by returning `#`, which
+   *  renders as a no-op anchor (target=_blank to a hash on the
+   *  current page = visual click, no navigation). */
+  private _safeHref(u: string | undefined | null): string {
+    if (typeof u !== "string" || !u.startsWith("https://")) return "#";
+    return u;
+  }
+
   constructor() {
     super();
     this.w = 920; this.h = 620; this.embedded = false;
@@ -204,7 +217,7 @@ class LthnViActivityWindow extends LitElement {
         ` : html`
           <div style="display:flex; flex-direction:column; gap:8px;">
             ${visible.map(i => html`
-              <a href=${i.url} target="_blank" rel="noopener noreferrer"
+              <a href=${this._safeHref(i.url)} target="_blank" rel="noopener noreferrer"
                 title=${i.title}
                 style="text-decoration:none; color:inherit;
                        --wails-draggable: no-drag;">
