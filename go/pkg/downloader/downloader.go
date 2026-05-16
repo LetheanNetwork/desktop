@@ -35,6 +35,48 @@ import (
 
 const fetchOp = "downloader.Fetch"
 
+// maxDownloadBytes is the hard cap on a single fetched file. Sized to
+// fit the largest GGUF distributed on HuggingFace today (≈140GB for
+// 4-bit Qwen 235B, ≈70GB for gpt-oss-120B) plus headroom. Bumping
+// requires a code review per the same TOCTOU rationale that keeps the
+// allow-list compile-time.
+//
+// Cerberus Mantis #1425 — without a cap, a malicious or compromised
+// allowlisted mirror can stream unbounded bytes regardless of any
+// Content-Length value, exhausting disk + crashing the host.
+//
+// var (not const) so the package-internal _test.go can shrink it for
+// overflow assertions that would otherwise need to write 256 GiB to a
+// tempdir. Production callers never mutate it.
+var maxDownloadBytes int64 = 256 << 30 // 256 GiB
+
+// maxRedirects mirrors the Go default (10) but is enforced explicitly
+// in CheckRedirect so the policy is auditable in this file.
+const maxRedirects = 10
+
+// httpClient is the package-private fetch client. CheckRedirect
+// re-validates every hop through AllowedSource — Cerberus Mantis
+// #1424 closed the gap where core.HTTPGet (= http.Get) followed any
+// 302 from an allowlisted host to an arbitrary URL without re-checking
+// the trust gate.
+//
+// Built once, reused for every fetch. The default transport is fine —
+// no per-host TLS pinning is in scope today; that lands when the
+// marketplace manifest provides expected fingerprints.
+var httpClient = &core.HTTPClient{
+	CheckRedirect: func(req *core.Request, via []*core.Request) error {
+		if len(via) >= maxRedirects {
+			return core.NewError("downloader: stopped after " +
+				core.Sprintf("%d", maxRedirects) + " redirects")
+		}
+		next := req.URL.String()
+		if !AllowedSource(next) {
+			return core.NewError("downloader: redirect to disallowed source: " + next)
+		}
+		return nil
+	},
+}
+
 // Progress is the callback signature for FetchWithProgress reports.
 // Receives (bytesWritten, totalBytes) — totalBytes mirrors
 // http.Response.ContentLength: positive when the server sent a
@@ -118,15 +160,36 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	}
 	qDest := core.PathJoin(qdR.Value.(string), name)
 
-	getR := core.HTTPGet(url)
-	if !getR.OK {
-		return getR
+	reqR := core.NewHTTPRequest("GET", url, nil)
+	if !reqR.OK {
+		return reqR
 	}
-	resp := getR.Value.(*core.Response)
+	req := reqR.Value.(*core.Request)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		// On CheckRedirect rejection the http client may return a
+		// non-nil resp whose body still needs closing. Be defensive.
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		return core.Fail(core.E(fetchOp, "GET failed", err))
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		return core.Fail(core.E(fetchOp,
 			core.Concat("HTTP ", core.Sprintf("%d", resp.StatusCode), " from ", url),
+			nil))
+	}
+	// Cerberus #1425 — pre-check Content-Length when the server sent
+	// one. Saves the disk + bandwidth of opening the body for a stream
+	// we already know will be rejected. -1 = chunked transfer; the
+	// LimitReader wrap below catches the unbounded case.
+	if resp.ContentLength > maxDownloadBytes {
+		return core.Fail(core.E(fetchOp,
+			core.Concat("Content-Length ",
+				core.Sprintf("%d", resp.ContentLength),
+				" exceeds cap ",
+				core.Sprintf("%d", maxDownloadBytes)),
 			nil))
 	}
 
@@ -136,18 +199,34 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	}
 	file := createR.Value.(*core.OSFile)
 
-	var src core.Reader = resp.Body
+	// Wrap body at cap+1 so a server that lies about Content-Length
+	// (or omits it entirely) still hits the cap. After copy we compare
+	// the written byte count against the cap — equality on the +1
+	// signals overflow.
+	bounded := core.LimitReader(resp.Body, maxDownloadBytes+1)
+	var src core.Reader = bounded
 	if onProgress != nil {
 		src = &countingReader{
-			inner:    resp.Body,
+			inner:    bounded,
 			total:    resp.ContentLength,
 			onChange: onProgress,
 		}
 	}
-	if r := core.Copy(file, src); !r.OK {
+	copyR := core.Copy(file, src)
+	if !copyR.OK {
 		_ = file.Close()
 		_ = core.Remove(qDest)
-		return core.Fail(core.E(fetchOp, "stream copy failed", r.Value.(error)))
+		return core.Fail(core.E(fetchOp, "stream copy failed", copyR.Value.(error)))
+	}
+	written := copyR.Value.(int64)
+	if written > maxDownloadBytes {
+		_ = file.Close()
+		_ = core.Remove(qDest)
+		return core.Fail(core.E(fetchOp,
+			core.Concat("download exceeded ",
+				core.Sprintf("%d", maxDownloadBytes),
+				" byte cap"),
+			nil))
 	}
 	// Close before Verify + Rename so the file handle is released and
 	// the rename(2) doesn't race with an open writer on Windows.
