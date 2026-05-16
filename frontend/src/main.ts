@@ -640,6 +640,11 @@ switch (surface) {
     app.innerHTML = `<lthn-repos-window></lthn-repos-window>`;
     break;
   }
+  case "vi-sites": {
+    await import("./lit/vi/sites-window");
+    app.innerHTML = `<lthn-vi-sites-window></lthn-vi-sites-window>`;
+    break;
+  }
   case "php": {
     await import("./lit/ide/php-window");
     app.innerHTML = `<lthn-php-window></lthn-php-window>`;
