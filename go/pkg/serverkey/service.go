@@ -321,7 +321,7 @@ func (s *Service) AccountStatus() core.Result {
 		}
 		leaf := core.PathJoin(accountRoot, e.Name(), accountKeyFile)
 		if core.Stat(leaf).OK {
-			return core.Ok(AccountStatusOutput{HasUserAccount: true})
+			return core.Ok(AccountStatusOutput{HasUserAccount: true, AccountID: e.Name()})
 		}
 	}
 	return core.Ok(AccountStatusOutput{HasUserAccount: false})

@@ -138,13 +138,22 @@ type Verifier interface {
 // (a partial account directory created-then-deleted strands the gate
 // in `auth` with nothing to unlock).
 //
+// `AccountID` carries the literal id of the first private.key-bearing
+// directory found, empty when HasUserAccount is false. Multi-account
+// selection is RFC.stage-e §11 non-goal — Stage F surfaces a chooser
+// when multiple accounts exist. For Stage E the frontend fills the
+// unlock-body account_id from this field so the user does not have to
+// re-type it (see RFC.stage-e §5 ¹).
+//
 // Usage example (TS):
 //
 //	import { AccountStatus } from "@desktop/serverkey/service";
 //	const s = await AccountStatus();
 //	if (!s.has_user_account) showSetupGate();
+//	else unlockWith(s.account_id);
 type AccountStatusOutput struct {
-	HasUserAccount bool `json:"has_user_account"`
+	HasUserAccount bool   `json:"has_user_account"`
+	AccountID      string `json:"account_id"`
 }
 
 // SessionTokenOutput wraps the freshly-minted session token + its
