@@ -113,3 +113,60 @@ describe("lthn-view-audience — backend wire", () => {
     expect(host.textContent).toContain("8,214");
   });
 });
+
+describe("lthn-view-audience — conflict-reload listener (Cascade W2)", () => {
+  type AudienceEl = LitElement & {
+    segments: { name: string; n: number; growth: string; src: string }[];
+    updateComplete: Promise<boolean>;
+  };
+
+  beforeEach(() => {
+    (MockedList as unknown as { mockReset: () => void }).mockReset();
+  });
+
+  it("CONFLICT_RELOAD_EVENT with matching service triggers _loadFromBackend", async () => {
+    const calls: number[] = [];
+    (MockedList as unknown as { mockImplementation: (fn: () => Promise<unknown>) => void })
+      .mockImplementation(() => {
+        calls.push(1);
+        return Promise.resolve({ Value: { segments: [
+          { name: "Reloaded", n: 1, growth: "+1 / w", src: "manual" },
+        ] } });
+      });
+
+    const { el } = await mountWindow<AudienceEl>("lthn-view-audience");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    const baseline = calls.length;
+
+    window.dispatchEvent(new CustomEvent("lthn:conflict:reload-requested", {
+      detail: { service: "audience.update" },
+    }));
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(calls.length).toBeGreaterThan(baseline);
+  });
+
+  it("CONFLICT_RELOAD_EVENT with non-matching service is ignored", async () => {
+    const calls: number[] = [];
+    (MockedList as unknown as { mockImplementation: (fn: () => Promise<unknown>) => void })
+      .mockImplementation(() => {
+        calls.push(1);
+        return Promise.resolve({ Value: { segments: [] } });
+      });
+
+    const { el } = await mountWindow<AudienceEl>("lthn-view-audience");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    const baseline = calls.length;
+
+    window.dispatchEvent(new CustomEvent("lthn:conflict:reload-requested", {
+      detail: { service: "campaigns.update" }, // not ours
+    }));
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(calls.length).toBe(baseline);
+  });
+});

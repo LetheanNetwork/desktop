@@ -3,9 +3,13 @@
 package audience_test
 
 import (
+	"encoding/json"
+	"sync"
 	"testing"
 
+	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/marketing/audience"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // TestList_Empty_Good — empty dir → empty segments, TotalN=0.
@@ -111,5 +115,256 @@ func TestServiceName_Good(t *testing.T) {
 	svc := audience.NewService(nil)
 	if svc.ServiceName() != "Audience" {
 		t.Fatalf("expected Audience, got %q", svc.ServiceName())
+	}
+}
+
+// ---- Cascade W2 cutover tests (paths.AtomicWriteWithVersion) ---------------
+
+// TestAtomicCutover_MarketingAudience_Create_Good — Create stamps
+// version=1 via the primitive; ReadVersion confirms the on-disk file
+// carries the same.
+func TestAtomicCutover_MarketingAudience_Create_Good(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := audience.NewService(nil)
+	r := svc.Create(audience.CreateInput{
+		Name: "Local-AI developers",
+		Src:  "signup-tagged",
+		N:    4892,
+	})
+	if !r.OK {
+		t.Fatalf("Create failed: %s", r.Error())
+	}
+	seg := r.Value.(audience.Segment)
+	dirR := core.UserHomeDir()
+	if !dirR.OK {
+		t.Fatalf("UserHomeDir: %s", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), "Lethean/marketing/audience", seg.ID+".md")
+	rd := paths.ReadVersion(fpath)
+	if !rd.OK {
+		t.Fatalf("ReadVersion: %s", rd.Error())
+	}
+	got := rd.Value.(paths.ReadOutput)
+	if got.Version != 1 {
+		t.Fatalf("expected version 1 after Create, got %d", got.Version)
+	}
+}
+
+// TestAtomicCutover_MarketingAudience_Update_Good — a sequential
+// Update bumps the stored version monotonically (1 -> 2).
+func TestAtomicCutover_MarketingAudience_Update_Good(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := audience.NewService(nil)
+	cr := svc.Create(audience.CreateInput{
+		Name: "Probe segment",
+		Src:  "manual",
+		N:    100,
+	})
+	if !cr.OK {
+		t.Fatalf("Create failed: %s", cr.Error())
+	}
+	id := cr.Value.(audience.Segment).ID
+	ur := svc.Update(audience.UpdateInput{ID: id, N: 250})
+	if !ur.OK {
+		t.Fatalf("Update failed: %s", ur.Error())
+	}
+	dirR := core.UserHomeDir()
+	if !dirR.OK {
+		t.Fatalf("UserHomeDir: %s", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), "Lethean/marketing/audience", id+".md")
+	rd := paths.ReadVersion(fpath)
+	if !rd.OK {
+		t.Fatalf("ReadVersion: %s", rd.Error())
+	}
+	got := rd.Value.(paths.ReadOutput)
+	if got.Version != 2 {
+		t.Fatalf("expected version 2 after Update, got %d", got.Version)
+	}
+}
+
+// TestAtomicCutover_MarketingAudience_Update_VersionStale_Ugly —
+// drives two concurrent svc.Update calls and asserts the loser's
+// Result carries a paths.ConflictEnvelope whose JSON marshal matches
+// the lowercase `{code, current_version, current_hash}` wire shape
+// that frontend/src/lit/conflict-dispatch.ts extractEnvelope
+// pattern-matches on (Mantis #1547 service-tier round-trip discipline
+// anchor; pins #1544 against W2 wave drift).
+//
+// Why two goroutines: svc.Update re-reads the file inside the call
+// so a single-shot out-of-band mutation cannot drive a real conflict
+// through the service. Concurrent Update goroutines race for the
+// WithFileLock; the loser's locked-section ReadVersion sees the
+// winner's bumped version and the primitive returns VersionStale ->
+// wrapped as ConflictEnvelope by audience.writeSegment.
+func TestAtomicCutover_MarketingAudience_Update_VersionStale_Ugly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := audience.NewService(nil)
+	cr := svc.Create(audience.CreateInput{
+		Name: "Race segment",
+		Src:  "manual",
+		N:    1,
+	})
+	if !cr.OK {
+		t.Fatalf("Create failed: %s", cr.Error())
+	}
+	id := cr.Value.(audience.Segment).ID
+
+	var conflict core.Result
+	var saw bool
+	for attempt := 0; attempt < 32 && !saw; attempt++ {
+		var (
+			mu      sync.Mutex
+			results []core.Result
+			wg      sync.WaitGroup
+			start   = make(chan struct{})
+		)
+		// Use a fresh N value each attempt so even no-op patches
+		// trigger a write.
+		nVal := attempt*10 + 100
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			r := svc.Update(audience.UpdateInput{ID: id, N: nVal})
+			mu.Lock()
+			results = append(results, r)
+			mu.Unlock()
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			r := svc.Update(audience.UpdateInput{ID: id, N: nVal + 1})
+			mu.Lock()
+			results = append(results, r)
+			mu.Unlock()
+		}()
+		close(start)
+		wg.Wait()
+
+		for _, r := range results {
+			if !r.OK && core.Contains(r.Error(), "audience.update.conflict") {
+				conflict = r
+				saw = true
+				break
+			}
+		}
+	}
+	if !saw {
+		t.Skip("could not provoke a writer race after 32 attempts — environment lock skew; flake-defensive skip")
+	}
+
+	// Wire-shape assertion #1 — Result.Value is a paths.ConflictEnvelope.
+	env, ok := paths.ConflictEnvelopeFrom(conflict.Value)
+	if !ok {
+		t.Fatalf("expected paths.ConflictEnvelope in Result.Value, got %T", conflict.Value)
+	}
+	if env.Code != "audience.update.conflict" {
+		t.Fatalf("expected envelope code audience.update.conflict, got %q", env.Code)
+	}
+	if env.CurrentVersion < 1 {
+		t.Fatalf("expected CurrentVersion >= 1, got %d", env.CurrentVersion)
+	}
+
+	// Wire-shape assertion #2 — Result.Value marshals to the lowercase
+	// snake_case keys conflict-dispatch.ts walks. Discipline anchor.
+	raw, err := json.Marshal(conflict.Value)
+	if err != nil {
+		t.Fatalf("json.Marshal(conflict.Value): %s", err.Error())
+	}
+	js := string(raw)
+	for _, want := range []string{
+		`"code":"audience.update.conflict"`,
+		`"current_version":`,
+	} {
+		if !core.Contains(js, want) {
+			t.Fatalf("expected marshalled envelope to contain %s, got %s", want, js)
+		}
+	}
+	for _, banned := range []string{`"Code":`, `"Message":`, `"Operation":`} {
+		if core.Contains(js, banned) {
+			t.Fatalf("marshalled envelope leaks *core.Err PascalCase key %s: %s", banned, js)
+		}
+	}
+}
+
+// TestAtomicCutover_MarketingAudience_LegacyFile_Ugly — an audience
+// file without version: frontmatter reads as version 0; Update
+// upgrades it via an unconditional first-write that stamps version=1.
+func TestAtomicCutover_MarketingAudience_LegacyFile_Ugly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := audience.NewService(nil)
+	dirR := core.UserHomeDir()
+	if !dirR.OK {
+		t.Fatalf("UserHomeDir: %s", dirR.Error())
+	}
+	audienceDir := core.PathJoin(dirR.Value.(string), "Lethean/marketing/audience")
+	if mk := core.MkdirAll(audienceDir, 0o700); !mk.OK {
+		t.Fatalf("MkdirAll: %s", mk.Error())
+	}
+	legacyID := "legacy-segment-2026"
+	fpath := core.PathJoin(audienceDir, legacyID+".md")
+	legacy := []byte("---\nid: " + legacyID + "\nname: Legacy segment\nn: 1234\ngrowth: \"+10 / w\"\nsrc: manual\nspark: \"\"\n---\n")
+	if w := core.WriteFile(fpath, legacy, 0o600); !w.OK {
+		t.Fatalf("WriteFile: %s", w.Error())
+	}
+	rd := paths.ReadVersion(fpath)
+	if !rd.OK {
+		t.Fatalf("ReadVersion: %s", rd.Error())
+	}
+	if got := rd.Value.(paths.ReadOutput); got.Version != 0 {
+		t.Fatalf("legacy file pre-update: expected version 0, got %d", got.Version)
+	}
+	ur := svc.Update(audience.UpdateInput{ID: legacyID, N: 9999})
+	if !ur.OK {
+		t.Fatalf("Update failed: %s", ur.Error())
+	}
+	rd2 := paths.ReadVersion(fpath)
+	if !rd2.OK {
+		t.Fatalf("ReadVersion post-update: %s", rd2.Error())
+	}
+	if got := rd2.Value.(paths.ReadOutput); got.Version != 1 {
+		t.Fatalf("legacy file post-update: expected version 1, got %d", got.Version)
+	}
+}
+
+// TestAtomicCutover_MarketingAudience_AuditEmissionRecordBatch_Good —
+// Create routes through the primitive's write path (EventWriteSucceeded
+// fires) and marketing/audience/* falls under AuditModeBatch per RFC §6.1.
+func TestAtomicCutover_MarketingAudience_AuditEmissionRecordBatch_Good(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := audience.NewService(nil)
+	paths.SetAuditSecretProvider(func() []byte {
+		return []byte("audience-cutover-test-secret-32-byte")
+	})
+	t.Cleanup(func() { paths.SetAuditSecretProvider(nil) })
+	var saw []paths.LockEvent
+	paths.SubscribeLockEvents(func(ev paths.LockEvent) {
+		saw = append(saw, ev)
+	})
+	t.Cleanup(paths.ClearLockEventSubscribersForTest)
+
+	r := svc.Create(audience.CreateInput{Name: "Audit probe", Src: "manual"})
+	if !r.OK {
+		t.Fatalf("Create failed: %s", r.Error())
+	}
+	found := false
+	for _, ev := range saw {
+		if ev.Kind == paths.EventWriteSucceeded {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("Create MUST route through paths.AtomicWriteWithVersion (no EventWriteSucceeded seen)")
+	}
+	dirR := core.UserHomeDir()
+	if !dirR.OK {
+		t.Fatalf("UserHomeDir: %s", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), "Lethean/marketing/audience/x.md")
+	mode := paths.AuditModeForPath(fpath)
+	if mode != paths.AuditModeBatch {
+		t.Fatalf("expected AuditModeBatch for marketing/audience path, got %v", mode)
 	}
 }

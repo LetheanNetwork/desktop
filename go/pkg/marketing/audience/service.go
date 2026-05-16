@@ -51,13 +51,19 @@ func Register(c *core.Core) core.Result {
 func (s *Service) ServiceName() string { return "Audience" }
 
 // segmentFrontmatter is the YAML shape stored in each segment file.
+//
+// Cascade W2 (RFC §B.3 row 6) — Version carries the monotonic
+// optimistic-lock anchor. omitempty so legacy files predating the
+// cutover (no version: line) round-trip cleanly as Version=0; the
+// first write through writeSegment stamps version=1.
 type segmentFrontmatter struct {
-	ID     string `yaml:"id"`
-	Name   string `yaml:"name"`
-	N      int    `yaml:"n"`
-	Growth string `yaml:"growth"`
-	Src    string `yaml:"src"`
-	Spark  string `yaml:"spark"`
+	Version int    `yaml:"version,omitempty"`
+	ID      string `yaml:"id"`
+	Name    string `yaml:"name"`
+	N       int    `yaml:"n"`
+	Growth  string `yaml:"growth"`
+	Src     string `yaml:"src"`
+	Spark   string `yaml:"spark"`
 }
 
 // audienceDir resolves ~/Lethean/marketing/audience/ and creates it if missing.
@@ -133,31 +139,62 @@ func parseSegment(raw []byte) (Segment, error) {
 		return Segment{}, core.E("audience.parseSegment", "yaml unmarshal", err)
 	}
 	return Segment{
-		ID:     fm.ID,
-		Name:   fm.Name,
-		N:      fm.N,
-		Growth: fm.Growth,
-		Src:    fm.Src,
-		Spark:  fm.Spark,
+		ID:      fm.ID,
+		Name:    fm.Name,
+		N:       fm.N,
+		Growth:  fm.Growth,
+		Src:     fm.Src,
+		Spark:   fm.Spark,
+		Version: fm.Version,
 	}, nil
 }
 
-// writeSegment serialises a Segment to Trix format and writes it to disk.
+// writeSegment serialises a Segment to Trix format and writes it via
+// paths.AtomicWriteWithVersion (Cascade W2, RFC §B.3 row 6).
+//
+// ifVersion is the optimistic-lock anchor — pass the Version the
+// caller observed on disk (via parseSegment), or 0 for first-writes /
+// legacy-file upgrades. writeSegment stamps the next monotonic version
+// (ifVersion+1) into the marshalled frontmatter so subsequent reads
+// see version=1,2,3... monotonically.
+//
 // Cerberus #1486: seg.ID lands directly in the filename — validate
 // before the PathJoin even though Create generates the slug via
 // slugifyAudience (which can still emit edge-case shapes).
-// Cerberus #1487 PR-1: 0o600 — owner-only at rest.
-func writeSegment(dir string, seg Segment) core.Result {
+//
+// Return shape (Mantis #1544 gating, inherited from W1): on the
+// stale-write path the function returns
+// core.Fail(paths.ConflictEnvelope{...}) so the Wails-marshalled
+// Result.Value carries the lowercase-json shape
+// (`{code, current_version, current_hash}`) that
+// conflict-dispatch.ts extractEnvelope pattern-matches on. The
+// per-service Code is "audience.update.conflict" — the frontend
+// scopes its toast + reload-listener on this exact string.
+//
+// Audit emission is automatic via paths.AuditModeForPath —
+// marketing/* paths route through AuditModeBatch per RFC §6.1.
+//
+// Usage example:
+//
+//	if wr := writeSegment(dir, seg, prior.Version); !wr.OK {
+//	    return wr
+//	}
+func writeSegment(dir string, seg Segment, ifVersion int) core.Result {
 	if err := paths.IsValidID(seg.ID); err != nil {
 		return core.Fail(err)
 	}
+	nextVersion := ifVersion + 1
+	if nextVersion < 1 {
+		nextVersion = 1
+	}
 	fm := segmentFrontmatter{
-		ID:     seg.ID,
-		Name:   seg.Name,
-		N:      seg.N,
-		Growth: seg.Growth,
-		Src:    seg.Src,
-		Spark:  seg.Spark,
+		Version: nextVersion,
+		ID:      seg.ID,
+		Name:    seg.Name,
+		N:       seg.N,
+		Growth:  seg.Growth,
+		Src:     seg.Src,
+		Spark:   seg.Spark,
 	}
 	fmBytes, err := yaml.Marshal(fm)
 	if err != nil {
@@ -166,10 +203,19 @@ func writeSegment(dir string, seg Segment) core.Result {
 	data := append([]byte("---\n"), fmBytes...)
 	data = append(data, []byte("---\n")...)
 	fpath := core.PathJoin(dir, seg.ID+".md")
-	if r := core.WriteFile(fpath, data, 0o600); !r.OK {
-		return r
+	res := paths.AtomicWriteWithVersion(fpath, paths.WriteInput{
+		Body:      data,
+		IfVersion: ifVersion,
+	})
+	if res.OK {
+		return res
 	}
-	return core.Ok(nil)
+	if stale, ok := paths.VersionStaleFromError(res.Value); ok {
+		return core.Fail(paths.NewConflictEnvelope(
+			"audience.update.conflict", stale))
+	}
+	return core.Fail(core.E("audience.writeSegment",
+		"write failed: "+res.Error(), nil))
 }
 
 // loadSegments scans ~/Lethean/marketing/audience/ and returns all parseable

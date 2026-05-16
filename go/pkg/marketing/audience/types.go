@@ -37,6 +37,13 @@ type Segment struct {
 	// Spark is the comma-separated weekly count series for the sparkline.
 	// Only populated for the "all" aggregate segment.
 	Spark string `json:"spark,omitempty"`
+
+	// Version is the monotonic optimistic-lock version (Cascade W2,
+	// RFC §B.3 row 6). Stamped by writeSegment; 0 on legacy files
+	// predating the cutover, >=1 after first write through
+	// paths.AtomicWriteWithVersion. Internal-only — `json:"-"` keeps
+	// it out of the Wails wire shape consumed by the frontend.
+	Version int `json:"-"`
 }
 
 // ListInput drives the List method.

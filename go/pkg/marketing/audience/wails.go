@@ -124,9 +124,15 @@ func (s *Service) Create(input CreateInput) core.Result {
 		Spark:  input.Spark,
 	}
 
-	if r := writeSegment(dirR.Value.(string), seg); !r.OK {
-		return core.Fail(core.E("audience.Create", "write failed", nil))
+	// Cascade W2 (RFC §B.3 row 6) — Create is an unconditional first-
+	// write (ifVersion=0). writeSegment stamps Version=1 into the
+	// marshalled frontmatter. Conflict-path (rare on Create — only
+	// fires if another goroutine races on the same slug) returns
+	// core.Fail(paths.ConflictEnvelope{...}) directly via writeSegment.
+	if wr := writeSegment(dirR.Value.(string), seg, 0); !wr.OK {
+		return wr
 	}
+	seg.Version = 1
 	s.fireAudienceEvent(EventAudienceCreated, id, seg.N)
 	return core.Ok(seg)
 }
@@ -155,6 +161,8 @@ func (s *Service) Update(input UpdateInput) core.Result {
 		return core.Fail(core.E("audience.Update", "parse failed", err))
 	}
 
+	priorVersion := seg.Version
+
 	// Patch non-zero fields.
 	if input.N != 0 {
 		seg.N = input.N
@@ -169,8 +177,18 @@ func (s *Service) Update(input UpdateInput) core.Result {
 		seg.Spark = input.Spark
 	}
 
-	if r := writeSegment(dirR.Value.(string), seg); !r.OK {
-		return core.Fail(core.E("audience.Update", "write failed", nil))
+	// Cascade W2 (RFC §B.3 row 6) — IfVersion=priorVersion gates the
+	// write under the primitive's optimistic-lock check.
+	// priorVersion=0 (legacy file predating cutover) skips the check
+	// and stamps Version=1 on the upgrade write. Conflict-path returns
+	// core.Fail(paths.ConflictEnvelope{...}) directly via writeSegment
+	// (Mantis #1544 gating shape inherited from W1).
+	if wr := writeSegment(dirR.Value.(string), seg, priorVersion); !wr.OK {
+		return wr
+	}
+	seg.Version = priorVersion + 1
+	if seg.Version < 1 {
+		seg.Version = 1
 	}
 	s.fireAudienceEvent(EventAudienceUpdated, seg.ID, seg.N)
 	return core.Ok(seg)
