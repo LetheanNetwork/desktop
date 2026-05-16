@@ -49,6 +49,14 @@ import "./views/sales";
 // pkg/incidents + pkg/runbooks land.
 import "./views/operations";
 
+// Planning role views (Phase 2 wave 1) — registers
+// <lthn-view-today|sprints|backlog|roadmap|retros|calendar>.
+// Backed by core/ide pkg/tasks (already adopted in lthn via #359);
+// fixtures-only today, _loadFromBackend() seam awaits a Wails
+// surface for go/pkg/tasks (no binding yet at module-write time).
+// Calendar is shared with the Office view per HANDOVER-VIEWS.md.
+import "./views/planning";
+
 // Lethean-6 application shell — frameless single-window chrome that
 // auto-mounts the matching <lthn-*-window> by `active` attribute.
 import "./app-shell";
