@@ -91,3 +91,83 @@ type MoveInput struct {
 	// ToStage is the target stage identifier.
 	ToStage string `json:"toStage"`
 }
+
+// LegalTransitions enumerates every from-stage → to-stage move
+// MoveDeal will accept. Cerberus pass-9 HIGH (Mantis #1488) — a
+// transition NOT in this set MUST be rejected with
+// transition_illegal so a prompt-injection attack via Vi-driven
+// signals (untrusted PR / email content surfaced by Vi) cannot
+// silently flip a lead to won/lost, distorting forecast + firing
+// downstream automation (Blesta off-boarding, commission triggers).
+//
+// Graph (mirrors the funnel-direction convention every Sales tool
+// the team has used):
+//
+//	qual    → engage, lost
+//	engage  → propose, qual, lost
+//	propose → close, engage, lost
+//	close   → won, propose, lost
+//	won     → (terminal — no transitions out)
+//	lost    → (terminal — no transitions out)
+//
+// Backward moves are permitted up to one stage (engage → qual,
+// propose → engage, close → propose) so the salesperson can correct
+// a mis-classification without admin intervention. Skip-levels
+// (qual → propose, engage → close, etc.) are rejected — they signal
+// either prompt injection or process-confusion both worth flagging.
+//
+// Self-transitions (qual → qual, etc.) are NOT in the map and
+// reject as transition_illegal. The MoveDeal handler short-circuits
+// these earlier with a "no-op move" path; the map is the back-stop.
+//
+// Adding an entry here is a security-policy decision — every new
+// edge widens the prompt-injection blast radius. New entries
+// require Cerberus DREAD review (Mantis ticket trail).
+var LegalTransitions = map[string]map[string]bool{
+	"qual": {
+		"engage": true,
+		"lost":   true,
+	},
+	"engage": {
+		"propose": true,
+		"qual":    true,
+		"lost":    true,
+	},
+	"propose": {
+		"close":  true,
+		"engage": true,
+		"lost":   true,
+	},
+	"close": {
+		"won":     true,
+		"propose": true,
+		"lost":    true,
+	},
+	// won + lost are terminal — no outgoing edges. A "restore"
+	// admin verb would land as a separate Mantis ticket + DREAD
+	// review (not Stage 5 scope).
+}
+
+// IsLegalTransition reports whether a from-stage → to-stage move
+// is permitted by LegalTransitions. Empty `from` is treated as
+// "new deal" — only the initial stages (qual, engage) are legal
+// landing points so deals can't be born at close/won/lost.
+//
+// Usage example:
+//
+//	if !pipeline.IsLegalTransition(fromStage, toStage) {
+//	    return core.Fail(core.NewCode("transition_illegal", "..."))
+//	}
+func IsLegalTransition(from, to string) bool {
+	if from == "" {
+		// New deals — only the entry stages of the funnel.
+		return to == "qual" || to == "engage"
+	}
+	allowed, ok := LegalTransitions[from]
+	if !ok {
+		// Source is unknown OR terminal (won/lost). Either case
+		// MUST reject — no transitions out of terminal stages.
+		return false
+	}
+	return allowed[to]
+}
