@@ -364,13 +364,10 @@ func (s *Service) appendThreadRecord(folderSlug string, rec MailThreadRecord) er
 		return core.E("mail.appendThread",
 			"AtomicAppendLine failed: "+ar.Error(), nil)
 	}
-	// Size-bound fallback. Surface via core.Warn — expected on
-	// Darwin for normal-case YAML records with long subjects (NOT
-	// an error path; the rewrite-merge below lands the record
-	// durably). On Linux (PipeBufLimit=4096) this should be rare.
-	core.Warn("mail.appendThread fallback: record exceeded PipeBufLimit, falling back to rewrite-merge",
-		"path", path, "record_bytes", len(payload),
-		"pipe_buf_limit", paths.PipeBufLimit())
+	// Size-bound fallback. MailEvent paths.append.fell_back_to_rewrite
+	// (emitted below) covers observability; log line was noise on
+	// Darwin where PIPE_BUF=512 makes the fallback the normal case
+	// per Cerberus #1558.
 
 	// Read current bytes for the merge under the same folder-mutex
 	// guard so a concurrent appender cannot land between read and

@@ -255,6 +255,39 @@ func (s *Service) StartPolling(c *core.Core) core.Result {
 	return core.Ok(nil)
 }
 
+// Stop drains the per-folder and per-account Mutex maps and closes
+// any pooled IMAP connections. Mantis #1557 (Cerberus #11 LOW) —
+// folderMu / accountMu are keyed by folder path + account name and
+// accumulate one entry per distinct key seen for the lifetime of the
+// Service. A long-running daemon polling many folders or rotating
+// many account configurations could grow these maps without bound.
+// Stop() called at process shutdown clears them in one pass.
+//
+// The pool map is also drained best-effort: any imapConn entries
+// have their Close() called and the map is re-initialised. fetchFolder
+// today opens-and-closes per call so pool is typically empty; the
+// defensive close handles any future pool-reuse path.
+//
+// Backoff counters are reset for the same hygiene reason.
+//
+// Usage example:
+//
+//	_ = svc.Stop(core.Background())
+func (s *Service) Stop(_ core.Context) core.Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, conn := range s.pool {
+		if conn != nil && conn.conn != nil {
+			_ = conn.conn.Close()
+		}
+	}
+	s.pool = map[string]*imapConn{}
+	s.folderMu = map[string]*sync.Mutex{}
+	s.accountMu = map[string]*sync.Mutex{}
+	s.backoff = map[string]int{}
+	return core.Ok(nil)
+}
+
 // mailDir resolves ~/Lethean/office/mail/ and creates it if missing.
 // Mode 0o700 — mail metadata is PII (Cerberus #1487 mandate).
 func mailDir() core.Result {

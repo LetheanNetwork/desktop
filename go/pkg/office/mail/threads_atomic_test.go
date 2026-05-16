@@ -367,3 +367,76 @@ func TestMail_Poll_SingleFlightInputValidation_Bad(t *testing.T) {
 		t.Fatal("expected invalid FolderSlug to fail")
 	}
 }
+
+// TestMail_Service_StopClearsFolderMu_Good — Mantis #1557 (Cerberus
+// #11 LOW). folderMu and accountMu maps grow one entry per distinct
+// folder path / account name observed for the lifetime of the
+// Service. Stop() drains both maps + the pool + backoff counters in
+// one pass so a long-running daemon cycled through Stop() at process
+// shutdown does not leak the accumulated entries.
+//
+// The test populates folderMu via appendThreadRecord, accountMu via
+// accountMutex(), backoff via backoffDelay(), then calls Stop() and
+// asserts all four are empty.
+func TestMail_Service_StopClearsFolderMu_Good(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	c := core.New()
+	svc := NewService(c)
+
+	// Keep limit generous so the primary AppendLine path runs.
+	paths.SetPipeBufLimitForTest(4096)
+	t.Cleanup(func() { paths.SetPipeBufLimitForTest(0) })
+
+	// Populate folderMu via appendThreadRecord on three folders.
+	for _, slug := range []string{"inbox", "sent", "archive"} {
+		if err := svc.appendThreadRecord(slug, makeRec("rec-"+slug, "subj")); err != nil {
+			t.Fatalf("appendThreadRecord(%s): %v", slug, err)
+		}
+	}
+
+	// Populate accountMu via accountMutex (the FetchOnce entry
+	// point also populates it but requires a live AccountProvider —
+	// hit the helper directly for the same effect).
+	_ = svc.accountMutex("personal")
+	_ = svc.accountMutex("work")
+
+	// Populate backoff via backoffDelay (single tick advances the
+	// counter and seeds the map entry).
+	_ = svc.backoffDelay("personal/inbox")
+
+	// Pre-state assertion — maps populated.
+	svc.mu.Lock()
+	if len(svc.folderMu) != 3 {
+		svc.mu.Unlock()
+		t.Fatalf("folderMu pre-state: got %d entries, want 3", len(svc.folderMu))
+	}
+	if len(svc.accountMu) != 2 {
+		svc.mu.Unlock()
+		t.Fatalf("accountMu pre-state: got %d entries, want 2", len(svc.accountMu))
+	}
+	if len(svc.backoff) != 1 {
+		svc.mu.Unlock()
+		t.Fatalf("backoff pre-state: got %d entries, want 1", len(svc.backoff))
+	}
+	svc.mu.Unlock()
+
+	// Stop and assert all drained.
+	if r := svc.Stop(core.Background()); !r.OK {
+		t.Fatalf("Stop: %s", r.Error())
+	}
+
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if len(svc.folderMu) != 0 {
+		t.Fatalf("folderMu post-Stop: got %d entries, want 0", len(svc.folderMu))
+	}
+	if len(svc.accountMu) != 0 {
+		t.Fatalf("accountMu post-Stop: got %d entries, want 0", len(svc.accountMu))
+	}
+	if len(svc.pool) != 0 {
+		t.Fatalf("pool post-Stop: got %d entries, want 0", len(svc.pool))
+	}
+	if len(svc.backoff) != 0 {
+		t.Fatalf("backoff post-Stop: got %d entries, want 0", len(svc.backoff))
+	}
+}
