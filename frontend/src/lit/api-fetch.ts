@@ -69,10 +69,25 @@ export function clearApiToken(): void {
   cachedToken = null;
 }
 
+/** CustomEvent name dispatched on `window` whenever an apiFetch
+ *  response comes back with status 401. The auth-gate (and the
+ *  app-shell) listen for this and transition into the framed-error
+ *  state so the user sees a recoverable surface instead of the raw
+ *  unauthorised envelope. Mirrors the constant exported from
+ *  auth-gate.ts; kept here verbatim so api-fetch has no inbound
+ *  dependency on the lit-element layer. */
+export const AUTH_401_EVENT = "lthn:auth:401";
+
 /** Same-origin fetch wrapper that injects Authorization: Bearer.
  *  Drop-in replacement for fetch — callers don't change their
  *  request/response handling. Pass the same (input, init) you'd
- *  pass to fetch(). */
+ *  pass to fetch().
+ *
+ *  Stage C of plans/code/lthn/desktop/auth-gate/RFC.md §5 — on a 401
+ *  response we additionally dispatch a window-level CustomEvent so
+ *  the auth-gate can mount. The original response is still returned
+ *  to the caller so their existing error path keeps firing; the
+ *  event is purely additive. */
 export async function apiFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -82,5 +97,20 @@ export async function apiFetch(
   if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  return fetch(input, { ...init, headers });
+  const response = await fetch(input, { ...init, headers });
+  if (response.status === 401) {
+    // Surface the request-id from the server response so the gate's
+    // error frame can show the same trace id the server-side logs
+    // index by. Header name follows the api gateway's existing
+    // X-Request-Id convention.
+    const requestId = response.headers.get("X-Request-Id")
+      || response.headers.get("X-Request-ID")
+      || "";
+    try {
+      window.dispatchEvent(new CustomEvent(AUTH_401_EVENT, { detail: { requestId } }));
+    } catch {
+      // Non-browser context (SSR / worker) — dispatch is best-effort.
+    }
+  }
+  return response;
 }
