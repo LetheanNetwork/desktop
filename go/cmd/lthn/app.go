@@ -32,6 +32,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/sandbox"
 	"dappco.re/lthn/desktop/pkg/tasks"
 	lthnupdate "dappco.re/lthn/desktop/pkg/update"
+	"dappco.re/lthn/desktop/pkg/vi"
 )
 
 // newAppCore constructs the shared *core.Core for any lthn CLI verb
@@ -198,6 +199,13 @@ func newAppCore() *core.Core {
 		// jobs / dataset manifests / model-pack registry grow without
 		// contending against the master DB.
 		core.WithName("ml", lthnml.Register),
+		// vi — Lethean Desktop mascot's data spine. Populates the
+		// Sites slot of the four-slot Vi data contract via the queue
+		// substrate: a "vi-probe-site" handler self-reschedules per
+		// catalogue entry, with results persisted as SiteProbe rows.
+		// Briefs / Activity slots remain fixture-data until separate
+		// follow-up tickets (mirrors RFC.vi.md §"Open tickets").
+		core.WithName("vi", vi.Register),
 		// update — self-update against the LetheanNetwork/desktop
 		// GitHub release feed. Constructed with CheckOnStartup =
 		// NoCheck so registering is offline-cheap; consumers call
@@ -277,6 +285,10 @@ func newAppCore() *core.Core {
 	// marketplace subsystem — InstalledBundle table tracking which
 	// lthn-vm bundles the user has installed + their lifecycle state.
 	schemas = append(schemas, marketplace.InstalledBundle{}.Schema())
+	// vi subsystem — SiteProbe table backing the Sites slot of Vi's
+	// data contract. One row per probe tick; LatestByDomain rolls
+	// up to the per-site latest for the Wails Sites() response.
+	schemas = append(schemas, vi.Schemas()...)
 	for _, schema := range schemas {
 		if r := orm.RegisterSchema(c, schema); !r.OK {
 			core.Print(core.Stderr(), "lthn: orm schema %s failed: %s\n", schema.Name, r.Error())

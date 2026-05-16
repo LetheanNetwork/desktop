@@ -66,6 +66,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/telemetry"
 	"dappco.re/lthn/desktop/pkg/tools"
 	"dappco.re/lthn/desktop/pkg/validator"
+	"dappco.re/lthn/desktop/pkg/vi"
 	"github.com/gin-gonic/gin"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -284,6 +285,10 @@ func (s *Service) Run() core.Result {
 	// — constructing a fresh instance here would create a sibling
 	// that doesn't see the registered sources.
 	reposSvc, _ := core.ServiceFor[*repos.Service](s.opts.Core, "repos")
+	// Vi — Lethean Desktop mascot's data spine. The Core-registered
+	// instance owns the probe loop; the same instance is bound to
+	// Wails here so Sites() / Catalogue() resolve to live data.
+	viSvc, _ := core.ServiceFor[*vi.Service](s.opts.Core, "vi")
 	// Bridge opencode-serve's /global/event SSE stream → Wails event
 	// bus. The opencode side runs the SSE goroutine + parses; each
 	// event JSON is forwarded here, where emitCoreEvent ferries it
@@ -337,6 +342,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(sandboxSvc),
 		application.NewService(opencode.NewWailsService(opencodeSvc)),
 		application.NewService(reposSvc),
+		application.NewService(viSvc),
 		application.NewService(s.opts.Fleet),
 		application.NewService(s.opts.Keys),
 		application.NewService(tools.NewWailsService(s.opts.Core)),
