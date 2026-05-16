@@ -368,6 +368,28 @@ func newAppCore() *core.Core {
 		if r := c.RegisterService("audit", auditSvc); !r.OK {
 			core.Print(core.Stderr(), "lthn: audit RegisterService failed: %s\n", r.Error())
 		}
+
+		// Stage F.B paths-audit wire (Mantis #1521) — the H#4 atomic-
+		// write substrate (pkg/paths/events.go) fires LockEvents on
+		// every AtomicWriteWithVersion / AtomicAppendLine success +
+		// version-stale rejection. Without this adapter every emission
+		// lands in the package-level noopAuditRecorder; the typed bus
+		// stays useful in-process but the audit trail is dark.
+		//
+		// Adapter routes by ev.Mode: AuditModeSync → RecordSync (auth-
+		// substrate, fsync per event), AuditModeBatch → RecordBatch
+		// (cascade, page-boundary flush). HKDF path-hash secret is
+		// sourced from the same serverkey instance the audit Service
+		// uses for account_id hashing — one secret, two domain-
+		// separated info-strings ("paths.lock.v1|<id>" vs
+		// "audit.path.v1|<id>") per RFC.atomic-write.md §6.2 MED-3.
+		//
+		// SetCurrentAccountIDProvider is intentionally NOT wired here —
+		// session-tier wiring lands separately so the boot path stays
+		// session-agnostic. Local-tier callers default to "" (single-
+		// tenant degenerate but still domain-separated).
+		paths.SetAuditRecorder(&pathsAuditAdapter{svc: auditSvc})
+		paths.SetAuditSecretProvider(serverkeySvc.AuditHMACSecret)
 	}
 
 	// orm bootstrap — lib not service. Register + mount the DuckDB
@@ -476,4 +498,62 @@ func newAppCore() *core.Core {
 	}
 
 	return c
+}
+
+// pathsAuditAdapter bridges pkg/paths.AuditRecorder onto pkg/audit's
+// Service. Lives at the boot layer rather than inside either package
+// because pkg/audit imports pkg/paths (for paths.Root) — a reverse
+// dependency in either direction would cycle.
+//
+// Routes by LockEvent.Mode per RFC.atomic-write.md §6.1: AuditModeSync
+// auth-substrate writes get RecordSync (fsync per event); AuditModeBatch
+// cascade writes get RecordBatch (page-boundary flush). Outcome is
+// derived from Kind — write-success / lock-acquired / lock-released map
+// to OutcomeOK; version-stale (write rejected) maps to OutcomeFailed.
+// audit.Service.recordCommon rejects empty Outcome with
+// codeAuditEventInvalid, so the mapping is load-bearing.
+//
+// Usage example (boot wire):
+//
+//	paths.SetAuditRecorder(&pathsAuditAdapter{svc: auditSvc})
+type pathsAuditAdapter struct{ svc *audit.Service }
+
+// RecordPathsEvent implements paths.AuditRecorder. The returned
+// core.Result surfaces audit-side failures up through paths' emit
+// site — pkg/paths/events.go currently ignores the returned Result
+// (subscribers run on the emit goroutine; recorder errors don't
+// propagate to the AtomicWriteWithVersion caller). Flagged for
+// follow-up: an audit-write failure inside an auth-substrate
+// AtomicWriteWithVersion is silently swallowed today. Out of scope
+// for #1521 (this dispatch wires the adapter); raise as a separate
+// Cerberus surface if it warrants escalation.
+func (a *pathsAuditAdapter) RecordPathsEvent(ev paths.LockEvent) core.Result {
+	ae := audit.Event{
+		Event:   ev.Kind,
+		TS:      ev.At.Unix(),
+		Outcome: pathsEventOutcome(ev.Kind),
+		Meta: map[string]any{
+			"path_hash": ev.PathHash,
+			"caller":    ev.Caller,
+			"version":   ev.Version,
+		},
+	}
+	if ev.Mode == paths.AuditModeSync {
+		return a.svc.RecordSync(ae)
+	}
+	return a.svc.RecordBatch(ae)
+}
+
+// pathsEventOutcome maps a paths.LockEvent kind to the closed-set
+// audit Outcome literal. version-stale is the only failed case in the
+// current event-schema (the write was rejected because the on-disk
+// version moved out from under the caller); every other event records
+// a successful primitive step.
+func pathsEventOutcome(kind string) string {
+	switch kind {
+	case paths.EventVersionStale:
+		return audit.OutcomeFailed
+	default:
+		return audit.OutcomeOK
+	}
 }
