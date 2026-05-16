@@ -387,3 +387,95 @@ func TestService_Service_WDelete_Ugly(t *core.T) {
 	core.AssertTrue(t, svc.WDelete("k").OK)
 	core.AssertTrue(t, svc.WDelete("k").OK)
 }
+
+// --- GetOrCreate ---
+
+func TestService_Service_GetOrCreate_Good(t *core.T) {
+	svc := homeFixture(t)
+	// Fresh install — generate fires and key is persisted.
+	calls := 0
+	r := svc.GetOrCreate("new-key", func() ([]byte, error) {
+		calls++
+		return []byte("generated-secret"), nil
+	})
+	core.AssertTrue(t, r.OK, "GetOrCreate must succeed on fresh ref")
+	core.AssertEqual(t, "generated-secret", string(r.Value.([]byte)))
+	core.AssertEqual(t, 1, calls, "generate must be called exactly once")
+
+	// Second call — reloads from disk, generate is NOT called again.
+	r2 := svc.GetOrCreate("new-key", func() ([]byte, error) {
+		calls++
+		return []byte("should-not-appear"), nil
+	})
+	core.AssertTrue(t, r2.OK)
+	core.AssertEqual(t, "generated-secret", string(r2.Value.([]byte)))
+	core.AssertEqual(t, 1, calls, "generate must not fire when key already persisted")
+}
+
+func TestService_Service_GetOrCreate_Bad(t *core.T) {
+	svc := homeFixture(t)
+	// generate() returning an error must propagate as Fail.
+	r := svc.GetOrCreate("failing-key", func() ([]byte, error) {
+		return nil, core.NewError("deliberate generate failure")
+	})
+	core.AssertFalse(t, r.OK, "GetOrCreate must Fail when generate errors")
+
+	// Empty ref must Fail (delegates to Put / Get path-validation).
+	r2 := svc.GetOrCreate("", func() ([]byte, error) {
+		return []byte("x"), nil
+	})
+	core.AssertFalse(t, r2.OK, "GetOrCreate must Fail on empty ref")
+}
+
+func TestService_Service_GetOrCreate_Ugly(t *core.T) {
+	svc := homeFixture(t)
+	// Pre-existing key written via Put must be returned without calling generate.
+	core.AssertTrue(t, svc.Put("pre-existing", []byte("original")).OK)
+	calls := 0
+	r := svc.GetOrCreate("pre-existing", func() ([]byte, error) {
+		calls++
+		return []byte("override"), nil
+	})
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, "original", string(r.Value.([]byte)), "pre-existing value must win")
+	core.AssertEqual(t, 0, calls, "generate must not fire when key already exists")
+}
+
+// --- SingleInstanceKey ---
+
+func TestService_Service_SingleInstanceKey_Good(t *core.T) {
+	svc := homeFixture(t)
+	// First boot — key is generated, returned as [32]byte.
+	r := svc.SingleInstanceKey()
+	core.AssertTrue(t, r.OK, "SingleInstanceKey must succeed on fresh install")
+	key, ok := r.Value.([32]byte)
+	core.AssertTrue(t, ok, "SingleInstanceKey Value must be [32]byte")
+	// Key must not be the zero value.
+	var zero [32]byte
+	core.AssertNotEqual(t, zero, key, "generated key must not be all-zero")
+}
+
+func TestService_Service_SingleInstanceKey_Bad(t *core.T) {
+	// Wrong-length stored blob must Fail.
+	svc := homeFixture(t)
+	// Write a short blob directly to the ref so ensureMaster
+	// and Put/Get succeed but the length check inside
+	// SingleInstanceKey rejects it.
+	core.AssertTrue(t, svc.Put("single-instance", []byte("tooshort")).OK)
+	r := svc.SingleInstanceKey()
+	core.AssertFalse(t, r.OK, "SingleInstanceKey must Fail when stored blob has wrong length")
+}
+
+func TestService_Service_SingleInstanceKey_Ugly(t *core.T) {
+	svc := homeFixture(t)
+	// First call generates; subsequent calls return the same key.
+	r1 := svc.SingleInstanceKey()
+	core.AssertTrue(t, r1.OK)
+	key1 := r1.Value.([32]byte)
+
+	r2 := svc.SingleInstanceKey()
+	core.AssertTrue(t, r2.OK)
+	key2 := r2.Value.([32]byte)
+
+	core.AssertEqual(t, key1, key2, "SingleInstanceKey must return same key on repeat calls")
+}
