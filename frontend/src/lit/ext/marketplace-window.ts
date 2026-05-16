@@ -34,6 +34,14 @@ import {
   fetchCatalogue, filterCatalogue, categories, categoryLabel,
   type CatalogueEntry, type CatalogueIndex,
 } from "./_marketplace-catalogue";
+import {
+  hasAnyViews,
+  renderSessionTokenPrompt,
+  renderViewSummary,
+  wantsSessionTokenCapability,
+  type ManifestWithViews,
+  type PluginViewManifest,
+} from "../marketplace-views-surface";
 
 // InstalledBundle mirrors the Go marketplace.InstalledBundle shape.
 interface InstalledBundle {
@@ -62,11 +70,16 @@ interface BundleChangedPayload {
 }
 
 // EnvPrompt holds a pending install's env-collection state.
+// views[] + wantsSession are derived from the fetched manifest at
+// install time per plans/code/lthn/desktop/views/RFC.plugin-views.md
+// §9.2 (install-time discriminator) + §5.5 (capability prompt copy).
 interface EnvPrompt {
-  entry:  CatalogueEntry;
-  fields: { key: string; prompt: string; type: string; value: string }[];
-  perms:  { scope: string; mode: string; reason: string }[];
-  step:   "env" | "perms" | "installing";
+  entry:        CatalogueEntry;
+  fields:       { key: string; prompt: string; type: string; value: string }[];
+  perms:        { scope: string; mode: string; reason: string }[];
+  views:        PluginViewManifest[];
+  wantsSession: boolean;
+  step:         "env" | "perms" | "installing";
 }
 
 type Tab = "browse" | "installed";
@@ -259,7 +272,7 @@ class LthnMarketplaceWindow extends LitElement {
       const manifest = manR.Value as {
         Env?: { Key: string; Prompt: string; Type: string; Default: string }[];
         Permissions?: { Scope: string; Mode: string; Reason: string }[];
-      };
+      } & ManifestWithViews;
       const envFields = (manifest.Env ?? []).map(e => ({
         key: e.Key, prompt: e.Prompt, type: e.Type,
         value: e.Default?.startsWith("${random") ? "" : (e.Default ?? ""),
@@ -267,12 +280,15 @@ class LthnMarketplaceWindow extends LitElement {
       const perms = (manifest.Permissions ?? []).map(p => ({
         scope: p.Scope, mode: p.Mode, reason: p.Reason,
       }));
+      const views = manifest.Plugin?.Views ?? [];
+      const wantsSession = wantsSessionTokenCapability(manifest);
 
       // Skip env step if no fields need user input (all have non-random defaults).
       const needsEnv = envFields.some(f => f.value === "" && f.type === "secret");
       const needsPerms = perms.length > 0;
+      const needsViewsPrompt = hasAnyViews(manifest);
 
-      if (!needsEnv && !needsPerms) {
+      if (!needsEnv && !needsPerms && !needsViewsPrompt) {
         await this._doInstall(entry, manifest, {});
         return;
       }
@@ -281,6 +297,11 @@ class LthnMarketplaceWindow extends LitElement {
         entry,
         fields: envFields,
         perms,
+        views,
+        wantsSession,
+        // When the only reason to prompt is the views surface, jump
+        // straight to the perms step so the views block renders there;
+        // we don't introduce a fourth step solely for views.
         step: needsEnv ? "env" : "perms",
       };
     } catch (e: unknown) {
@@ -448,16 +469,27 @@ class LthnMarketplaceWindow extends LitElement {
   private _renderPermModal(): TemplateResult {
     if (!this.prompt || this.prompt.step !== "perms") return html``;
     const p = this.prompt;
+    // Views + session-token surfaces per
+    // plans/code/lthn/desktop/views/RFC.plugin-views.md §9.2 + §5.5.
+    // viewSummary returns null when no views are declared — the html
+    // template renders nothing in that branch.
+    const viewSummary = renderViewSummary({ Plugin: { Views: p.views } });
+    const sessionPrompt = p.wantsSession
+      ? renderSessionTokenPrompt(p.entry.display || p.entry.name)
+      : null;
     return html`
       <div style="position:fixed; inset:0; background:rgba(0,0,0,0.55);
                   display:flex; align-items:center; justify-content:center;
                   z-index:100; --wails-draggable:no-drag;">
         <div style="background:var(--bg-2); border:1px solid rgba(255,255,255,0.08);
                     border-radius:12px; padding:24px 28px; width:440px;
-                    display:flex; flex-direction:column; gap:14px;">
+                    display:flex; flex-direction:column; gap:14px;
+                    max-height:80vh; overflow-y:auto;">
           <div style="font-size:14px; font-weight:600; color:var(--fg-0);">
-            ${p.entry.display} · ${this.t.permTitle}
+            ${p.entry.display} · ${p.perms.length > 0 ? this.t.permTitle : "About this plugin"}
           </div>
+          ${viewSummary}
+          ${sessionPrompt}
           <div style="display:flex; flex-direction:column; gap:8px;">
             ${p.perms.map(perm => html`
               <div style="display:flex; gap:10px; align-items:flex-start;
