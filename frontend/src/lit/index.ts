@@ -25,6 +25,30 @@ import "./ext/distillation-window";
 import "./ext/fleet-window";
 import "./ext/providers-window";
 
+// Marketing surface views (Phase 2 wave 1) — registers
+// <lthn-view-campaigns|content|social|audience|analytics>.
+import "./views/marketing";
+
+// Office surface views (Phase 2 wave 1) — registers
+// <lthn-view-documents|mail|files>. Calendar is intentionally not
+// re-registered here; it's owned by the Planning view and shared.
+import "./views/office";
+
+// Coding role views (Phase 2 wave 1) — registers
+// <lthn-view-repos|issues|prs|deploys>.
+import "./views/coding";
+
+// Sales role views (Phase 2 wave 1) — registers
+// <lthn-view-pipeline|contacts|deals|forecast>. Fixtures-only in v1;
+// future pkg/sales/* Go bindings replace the per-element fixture arrays.
+import "./views/sales";
+
+// Operations role views (Phase 2 wave 1) — registers
+// <lthn-view-status|incidents|runbooks>. Status reads live data
+// from vi.Sites (#363); incidents + runbooks fixture-only until
+// pkg/incidents + pkg/runbooks land.
+import "./views/operations";
+
 // Lethean-6 application shell — frameless single-window chrome that
 // auto-mounts the matching <lthn-*-window> by `active` attribute.
 import "./app-shell";
