@@ -239,6 +239,12 @@ var RouteTiers = map[string]RouteTier{
 	"/v1/chat/completions": TierLocal,
 	"/v1/completions":      TierLocal,
 	"/v1/account/lock":     TierSession,
+	// Stage F.B Phase 2.3 — paginated audit query. Session-tier per
+	// RFC.stage-f.md §5.3 ADD-MED-3: F v1 grants any unlocked session
+	// read access to the full audit log across all account_ids
+	// (single-user desktop assumption; per-account scoping is Stage F+
+	// work IF multi-user desktop becomes a deploy mode).
+	"/v1/audit/events": TierSession,
 }
 
 // RouteTierPrefixes classifies route GROUPS by URL prefix per

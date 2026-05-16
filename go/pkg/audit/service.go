@@ -344,6 +344,46 @@ func (s *Service) ensureCurrentHandleLocked(tsUnix int64) core.Result {
 	return core.Ok(nil)
 }
 
+// Register is the canonical core.WithName-compatible factory. Wired
+// in cmd/lthn/app.go so the service is reachable via
+// core.ServiceFor[*Service](c, "audit") — pkg/server's RoutesProvider
+// auto-discovery picks up the /v1/audit/events surface from
+// RouteGroups().
+//
+// Constructed with Options{} defaults — the boot path that needs to
+// pass an HMAC secret or non-default Root SHOULD use audit.New
+// explicitly and call audit.SetDefault(svc) instead of Register, then
+// register the Service under "audit" via c.RegisterService.
+//
+// Usage example:
+//
+//	core.WithName("audit", audit.Register)
+func Register(c *core.Core) core.Result {
+	svc := New(c, Options{})
+	SetDefault(svc)
+	return core.Ok(svc)
+}
+
+// ServiceName labels the binding namespace. Wails bindings would land
+// at frontend/bindings/.../audit/ if any were added (no Wails surface
+// today — the consumer is the REST endpoint + frontend fetch).
+func (s *Service) ServiceName() string { return "Audit" }
+
+// ServiceStartup is the Wails3 lifecycle hook. No-op — rotation goroutine
+// spawned in New() so all moving parts are already live by the time
+// the Core dispatches Startup hooks.
+func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result {
+	return core.Ok(nil)
+}
+
+// ServiceShutdown flushes + closes the live day-file handle via
+// Close. Boot wiring SHOULD let the canonical Core shutdown path
+// drive this; manual Close is reserved for tests / sub-binary
+// teardown (lthn-mlx exit).
+func (s *Service) ServiceShutdown() core.Result {
+	return s.Close()
+}
+
 // Close synchronously shuts the rotation goroutine, fsyncs the live
 // handle, and closes it. Safe to call multiple times — second + later
 // calls are no-ops.
