@@ -48,6 +48,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/office/documents"
 	"dappco.re/lthn/desktop/pkg/office/mail"
 	"dappco.re/lthn/desktop/pkg/office/files"
+	"dappco.re/lthn/desktop/pkg/deploys"
 	"dappco.re/lthn/desktop/pkg/serverkey"
 )
 
@@ -281,6 +282,10 @@ func newAppCore() *core.Core {
 		// workspace locations, recent files, and disk usage. Read-only v1.
 		// Wails: Files.ListLocations / ListRecent / GetDiskUsage.
 		core.WithName("office-files", files.Register),
+		// coding/deploys — Coding role deploy history catalogue. Reads and
+		// writes Trix-style markdown files from ~/Lethean/deploys/. v1 scope:
+		// List / Get / Create. Wails: Deploys.List / Get / Create.
+		core.WithName("coding-deploys", deploys.Register),
 		// serverkey — Stage B of the first-run auth-gate (Mantis #1474,
 		// plans RFC at code/lthn/desktop/auth-gate/RFC.md). Owns the
 		// "base egg" PGP key at ~/Lethean/wallets/server.key + its
