@@ -45,6 +45,7 @@ import { ComposerHistoryController } from "./composer-history.controller";
 import { FindController } from "./find.controller";
 import { SlashMenuController } from "./slash-menu.controller";
 import { ContextMenuController } from "./context-menu.controller";
+import { HelpOverlayController } from "./help-overlay.controller";
 // Pure helpers + persistence + constants live in chat-window.helpers
 // (Athena split 2026-05-16). Import only what the class methods +
 // render templates actually call internally; the rest is re-exported
@@ -163,7 +164,10 @@ class LthnChatWindow extends LitElement {
     // (Athena 2026-05-16, lane 4 of the chat-window controllers plan).
     // Host exposes getter/setter shim below that delegates to the
     // controller; templates + existing tests keep their access path.
-    helpOpen: { state: true },
+    // helpOpen moved to HelpOverlayController
+    // (Athena 2026-05-16, lane 5 of the chat-window controllers plan).
+    // Host exposes getter/setter shim below that delegates to the
+    // controller; templates + existing tests keep their access path.
     // findOpen / findQuery / findCursor moved to FindController
     // (Athena 2026-05-16, lane 2 of the chat-window controllers plan).
     // Host exposes getter/setter shims below that delegate to the
@@ -247,9 +251,18 @@ class LthnChatWindow extends LitElement {
     this.requestUpdate();
   }
   /** Whether the keyboard-shortcut help overlay is showing. Opened by
-   *  the /help slash command (and ? key in future). Closed by outside
-   *  click, Escape, or the X button. State-only. */
-  declare helpOpen: boolean;
+   *  the /help slash command and the bare-? toggle. Closed by
+   *  backdrop click, the X button, Escape, or a second ?. Owned by
+   *  HelpOverlayController; this is a thin getter/setter shim so
+   *  render templates + existing tests + the bare-? toggle branch
+   *  keep their access path (e.g. `this.helpOpen = true`,
+   *  `el.helpOpen`). State-only — no persistence. */
+  get helpOpen(): boolean { return this._helpOverlayController.open; }
+  set helpOpen(v: boolean) {
+    if (this._helpOverlayController.open === v) return;
+    this._helpOverlayController.open = v;
+    this.requestUpdate();
+  }
   /** Find-bar state — owned by FindController, exposed here as
    *  getter/setter accessors so render templates + existing tests
    *  can keep their `this.findOpen` / `this.findQuery` / `this.findCursor`
@@ -349,6 +362,15 @@ class LthnChatWindow extends LitElement {
    *  (§6 of the controllers plan). See context-menu.controller.ts
    *  (Athena 2026-05-16, lane 4 of the chat-window controllers plan). */
   private _contextMenuController = new ContextMenuController(this);
+  /** Keyboard-shortcut cheat-sheet overlay mechanics — Reactive
+   *  Controller. Owns the open flag + show/close/toggle + Escape
+   *  hand-off. The cheat-sheet CONTENT (the rendered sections +
+   *  entries in `_renderHelpOverlay()`) stays on this host — it's a
+   *  render concern, not mechanics (§6 of the controllers plan). See
+   *  help-overlay.controller.ts (Athena 2026-05-16, lane 5 of the
+   *  chat-window controllers plan — final lane, every overlay now
+   *  routes through a controller). */
+  private _helpOverlayController = new HelpOverlayController(this);
   declare railErr: string;
   declare liveTurns: ChatTurn[] | null;
   declare composerValue: string;
@@ -391,7 +413,9 @@ class LthnChatWindow extends LitElement {
     // contextMenuFor now lives on ContextMenuController (default: null —
     // matching the previous host init). Setting it here would fire the
     // shim's no-op early-return, so we skip it.
-    this.helpOpen = false;
+    // helpOpen now lives on HelpOverlayController (default: false —
+    // matching the previous host init). Setting it here would fire
+    // the shim's no-op early-return, so we skip it.
     // findOpen / findQuery / findCursor now live on FindController
     // (defaults: closed, empty, 0 — matching the previous host inits).
     this.atBottom = true;
@@ -474,7 +498,7 @@ class LthnChatWindow extends LitElement {
       const tgt = ev.target as Element | null;
       if (tgt instanceof HTMLInputElement || tgt instanceof HTMLTextAreaElement) return;
       ev.preventDefault();
-      this.helpOpen = !this.helpOpen;
+      this._helpOverlayController.toggle();
       return;
     }
     // Escape — close transient overlays in priority order: context
@@ -487,9 +511,8 @@ class LthnChatWindow extends LitElement {
         ev.preventDefault();
         return;
       }
-      if (this.helpOpen) {
+      if (this._helpOverlayController.tryHandleEscape()) {
         ev.preventDefault();
-        this.helpOpen = false;
         return;
       }
       if (this._findController.tryHandleEscape()) {
