@@ -386,11 +386,18 @@ func cmdServe(args []string) int {
 		// just now or surviving from a previous serve invocation).
 		_ = r.SetDynamicRoutes(opencodeSvc.Routes())
 	}
-	if pluginSvc, _ := core.ServiceFor[*plugin.Service](c, "plugin"); pluginSvc != nil {
+	pluginSvc, _ := core.ServiceFor[*plugin.Service](c, "plugin")
+	if pluginSvc != nil {
 		extras = append(extras, pluginSvc.ProxyGroup())
 	}
 	if gatewaySvc, _ := core.ServiceFor[*gateway.Service](c, "gateway"); gatewaySvc != nil {
 		extras = append(extras, gateway.NewRoutes(gatewaySvc))
+		// Cerberus Mantis #1443 — wire the per-bundle token resolver so
+		// the gateway can verify X-Bundle-Token and derive the
+		// authoritative bundle code rather than trusting Bundle-ID.
+		if pluginSvc != nil {
+			gateway.SetBundleCodeResolver(gatewaySvc, pluginSvc)
+		}
 	}
 	// lthn-process (+ any future service implementing
 	// server.RoutesProvider) is auto-discovered via Options.Core
