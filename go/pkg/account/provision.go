@@ -208,10 +208,20 @@ func (s *Service) Provision(input ProvisionInput) core.Result {
 	//
 	// Recorder write failure ignored — audit failures MUST NEVER block
 	// the auth path, especially not the just-succeeded provision.
+	//
+	// Stage F.B Phase 2.4 parity-grep contract (RFC §3.3.1) — the
+	// core.Print debug-echo MUST appear alongside the typed Record
+	// emission so an operator tailing stderr sees the same event-name
+	// the audit log carries. Same dual-emit shape used by the unlock /
+	// lockout / lock / session.issued / session.verify_failed paths.
+	now := core.Now().UTC().Unix()
+	core.Print(core.Stderr(),
+		"event=auth.account.provisioned account_id=%s ts=%d\n",
+		canonical, now)
 	_ = audit.Default().Record(audit.Event{
 		Event:     audit.EventAuthAccountProvisioned,
 		AccountID: canonical,
-		TS:        core.Now().UTC().Unix(),
+		TS:        now,
 		Scope:     "account.create",
 		Outcome:   audit.OutcomeOK,
 		RequestID: input.RequestID,
