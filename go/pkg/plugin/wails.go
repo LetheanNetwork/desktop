@@ -58,6 +58,17 @@ func (s *Service) Install(input InstallInput) core.Result {
 	validated, _ := validatedR.Value.(Manifest)
 	var binary []byte
 	if core.Trim(input.LocalPath) != "" {
+		// Cerberus Mantis #1432 — gate LocalPath to the user's home
+		// directory. Without this, an attacker reaching the Install
+		// API could supply `/var/run/docker.sock`, `/etc/passwd`, or
+		// `/usr/bin/curl` as the plugin binary. The home-prefix gate
+		// composed with the now-mandatory checksum gives a two-layer
+		// defence: even within $HOME, the bytes must match the
+		// manifest's declared sha256.
+		if r := allowedLocalPath(input.LocalPath); !r.OK {
+			return core.Fail(core.E(installOp,
+				"local_path rejected: "+r.Error(), nil))
+		}
 		read := core.ReadFile(input.LocalPath)
 		if !read.OK {
 			return core.Fail(core.E(installOp,

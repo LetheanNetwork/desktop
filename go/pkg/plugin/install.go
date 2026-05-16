@@ -99,13 +99,22 @@ func fetchBinary(ctx core.Context, rawURL string) core.Result {
 
 // verifyChecksum compares the SHA-256 of `data` against the
 // manifest's checksum string. Format: "sha256:<hex>" (lowercase
-// hex). Manifest without a checksum is allowed — the verify
-// becomes a no-op so dev plugins can ship without a published
-// hash. Production plugins should always declare one.
+// hex).
+//
+// Cerberus Mantis #1432 — non-empty checksum is now REQUIRED. The
+// previous "empty checksum = no-op" carve-out (for "dev plugins")
+// composed with the LocalPath bypass to give arbitrary-binary RCE:
+// any caller could submit an arbitrary file as a plugin with no
+// hash gate. Dev plugins must self-compute the hash via
+// `sha256sum <binary>` and declare it in the manifest — trivial.
+//
+// The hash-mismatch fail-loud message stays the same. The new
+// addition is the empty-string rejection.
 func verifyChecksum(data []byte, checksum string) core.Result {
 	checksum = core.Trim(checksum)
 	if checksum == "" {
-		return core.Ok(nil)
+		return core.Fail(core.E("plugin.verifyChecksum",
+			"checksum required (sha256:<hex>) — Mantis #1432", nil))
 	}
 	const prefix = "sha256:"
 	if !core.HasPrefix(checksum, prefix) {
@@ -120,6 +129,52 @@ func verifyChecksum(data []byte, checksum string) core.Result {
 			"checksum mismatch: want "+want+" got "+got, nil))
 	}
 	return core.Ok(nil)
+}
+
+// allowedLocalPath returns OK when path is a safe location to read
+// a plugin binary from. Cerberus Mantis #1432 — without this gate,
+// `Install.LocalPath` was readable from ANY filesystem path,
+// composing with the empty-checksum bypass to install arbitrary
+// system binaries as plugins (RCE).
+//
+// Policy:
+//   - Path must be absolute (relative paths get rejected — they're
+//     CWD-dependent, hard to reason about).
+//   - Path must resolve under the user's home directory. This is
+//     the broadest "things the user owns" check we can do without
+//     a dedicated staging directory. A future hardening (Cerberus
+//     follow-up) could require a specific cache path under
+//     ~/Lethean/conf/plugin-staging/ — for v1 the home gate is
+//     enough to refuse `/etc/passwd` / `/var/run/docker.sock` /
+//     `/usr/bin/curl` and similar drop-anything attacks.
+//
+// Usage example:
+//
+//	if r := allowedLocalPath(input.LocalPath); !r.OK { return r }
+//	read := core.ReadFile(input.LocalPath)
+func allowedLocalPath(path string) core.Result {
+	path = core.Trim(path)
+	if path == "" {
+		return core.Fail(core.E("plugin.allowedLocalPath",
+			"local_path is empty", nil))
+	}
+	if !core.PathIsAbs(path) {
+		return core.Fail(core.E("plugin.allowedLocalPath",
+			"local_path must be absolute: "+path, nil))
+	}
+	homeR := core.UserHomeDir()
+	if !homeR.OK {
+		return core.Fail(core.E("plugin.allowedLocalPath",
+			"home directory unavailable", nil))
+	}
+	home, _ := homeR.Value.(string)
+	sep := string(core.PathSeparator)
+	clean := core.CleanPath(path, sep)
+	if !core.HasPrefix(clean, home+sep) && clean != home {
+		return core.Fail(core.E("plugin.allowedLocalPath",
+			"local_path must resolve under user home: "+path, nil))
+	}
+	return core.Ok(clean)
 }
 
 // writePlugin lays out a fresh plugin on disk:
