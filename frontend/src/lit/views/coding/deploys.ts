@@ -1,9 +1,9 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 // Coding view · Deploys — <lthn-view-deploys>
 //
-// Deploy history + live environment state. Green-field for v1 — fixtures
-// only. Future: pkg/process + lthn-vm bundle-install path feed deploy
-// activity. Tracked as a Mantis follow-up.
+// Deploy history + live environment state. Wired to pkg/deploys via
+// @desktop/deploys/service (Deploys.List). Fixture fallback when the
+// backend is unavailable.
 //
 // Layout: top section = live environments (card grid), bottom section =
 // recent deploy history (table). Mirrors the Claude Design reference.
@@ -42,15 +42,28 @@ function outcomeColour(outcome: DeployRow["outcome"]): string {
   }
 }
 
+const fixtureEnvs: EnvRow[] = [
+  { name: "production", url: "lthn.ai",         version: "v0.1.8",       commit: "4a82c1", age: "4d",  health: "ok" },
+  { name: "staging",    url: "staging.lthn.ai",  version: "v0.2.0-rc3",   commit: "a3f12c", age: "2h",  health: "ok" },
+  { name: "preview",    url: "preview.lthn.ai",  version: "v0.2.0-pr482", commit: "b8e034", age: "22m", health: "ok" },
+];
+
+const fixtureHistory: DeployRow[] = [
+  { ts: "14:32", env: "preview",    by: "Tobi", commit: "b8e034", outcome: "success",     dur: "58s"     },
+  { ts: "13:18", env: "preview",    by: "you",  commit: "7a221d", outcome: "success",     dur: "1m 04s"  },
+  { ts: "10:42", env: "staging",    by: "you",  commit: "a3f12c", outcome: "success",     dur: "2m 18s"  },
+  { ts: "yest",  env: "staging",    by: "Mei",  commit: "e1d99c", outcome: "rolled-back", dur: "1m 50s"  },
+  { ts: "yest",  env: "production", by: "Mei",  commit: "4a82c1", outcome: "success",     dur: "4m 12s"  },
+];
+
 class LthnViewDeploys extends LitElement {
   static readonly properties = {
     w:        { type: Number },
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },
-    /** Live environments — fixture data until pkg/process bindings land. */
     envs:     { state: true },
-    /** Recent deploy history — fixture data. */
     history:  { state: true },
+    loading:  { state: true },
   };
 
   declare w: number;
@@ -58,26 +71,49 @@ class LthnViewDeploys extends LitElement {
   declare embedded: boolean;
   declare envs: EnvRow[];
   declare history: DeployRow[];
+  declare loading: boolean;
+
+  private _timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
     this.w = 1180; this.h = 720; this.embedded = false;
-    // Design-reference fixtures — identical to Claude Design mockup.
-    this.envs = [
-      { name: "production", url: "lthn.ai",         version: "v0.1.8",       commit: "4a82c1", age: "4d",  health: "ok" },
-      { name: "staging",    url: "staging.lthn.ai",  version: "v0.2.0-rc3",   commit: "a3f12c", age: "2h",  health: "ok" },
-      { name: "preview",    url: "preview.lthn.ai",  version: "v0.2.0-pr482", commit: "b8e034", age: "22m", health: "ok" },
-    ];
-    this.history = [
-      { ts: "14:32", env: "preview",    by: "Tobi", commit: "b8e034", outcome: "success",     dur: "58s"     },
-      { ts: "13:18", env: "preview",    by: "you",  commit: "7a221d", outcome: "success",     dur: "1m 04s"  },
-      { ts: "10:42", env: "staging",    by: "you",  commit: "a3f12c", outcome: "success",     dur: "2m 18s"  },
-      { ts: "yest",  env: "staging",    by: "Mei",  commit: "e1d99c", outcome: "rolled-back", dur: "1m 50s"  },
-      { ts: "yest",  env: "production", by: "Mei",  commit: "4a82c1", outcome: "success",     dur: "4m 12s"  },
-    ];
+    this.envs = fixtureEnvs;
+    this.history = fixtureHistory;
+    this.loading = false;
   }
 
   createRenderRoot() { return this; }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this._loadFromBackend();
+    this._timer = setInterval(() => { this._loadFromBackend(); }, 60_000);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this._timer !== null) { clearInterval(this._timer); this._timer = null; }
+  }
+
+  async _loadFromBackend(): Promise<void> {
+    if (this.loading) return;
+    this.loading = true;
+    try {
+      const svc = await import("@desktop/deploys/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") return;
+      const deploysSvc = svc as {
+        List: (input: { env?: string; limit?: number }) => Promise<{ Value?: { envs?: EnvRow[]; history?: DeployRow[] } }>;
+      };
+      const r = await deploysSvc.List({});
+      const envs = r?.Value?.envs;
+      if (envs && envs.length > 0) this.envs = envs;
+      const history = r?.Value?.history;
+      if (history && history.length > 0) this.history = history;
+    } catch { } finally {
+      this.loading = false;
+    }
+  }
 
   /** Counts how many envs are healthy. */
   _healthSummary(): { ok: number; degraded: number } {
@@ -156,7 +192,7 @@ class LthnViewDeploys extends LitElement {
       subtitle: `${this.envs.length} envs · ${health.ok === this.envs.length ? "all green" : `${health.degraded} degraded`}`,
       w: this.w, h: this.h,
       body,
-      footer: html`auto-deploy preview on PR open · staging on main · production on tag · fixtures (pkg/process bindings pending)`,
+      footer: html`auto-deploy preview on PR open · staging on main · production on tag`,
       embedded: this.embedded,
     });
   }

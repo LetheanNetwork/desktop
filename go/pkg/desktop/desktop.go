@@ -84,6 +84,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/office/documents"
 	"dappco.re/lthn/desktop/pkg/office/mail"
 	officefile "dappco.re/lthn/desktop/pkg/office/files"
+	"dappco.re/lthn/desktop/pkg/deploys"
 	"github.com/gin-gonic/gin"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -354,6 +355,10 @@ func (s *Service) Run() core.Result {
 	mailSvc, _ := core.ServiceFor[*mail.Service](s.opts.Core, "office-mail")
 	// office/files — Office filesystem browser. Core-registered; read-only v1.
 	filesSvc, _ := core.ServiceFor[*officefile.Service](s.opts.Core, "office-files")
+	// coding/deploys — Coding role deploy history catalogue. Core-registered;
+	// reads and writes Trix-style markdown from ~/Lethean/deploys/. v1 scope:
+	// List / Get / Create. Wails: Deploys.List / Get / Create.
+	deploysSvc, _ := core.ServiceFor[*deploys.Service](s.opts.Core, "coding-deploys")
 	// serverkey — Stage B first-run auth-gate. Core-registered + Bootstrap()ed
 	// from cmd/lthn/app.go::newAppCore so the in-memory key + verifier are
 	// live by the time the WebView mounts <lthn-auth-gate> and calls
@@ -434,6 +439,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(documentsSvc),
 		application.NewService(mailSvc),
 		application.NewService(filesSvc),
+		application.NewService(deploysSvc),
 		application.NewService(serverkeySvc),
 		application.NewService(accountSvc),
 		application.NewService(s.opts.Fleet),

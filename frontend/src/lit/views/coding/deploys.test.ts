@@ -1,9 +1,15 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window-fixture";
 import "./deploys";
+
+vi.mock("@desktop/deploys/service", () => ({
+  List: vi.fn(),
+}));
+
+import { List as MockedList } from "@desktop/deploys/service";
 
 interface DeploysTestElement extends LitElement {
   envs: Array<{
@@ -14,6 +20,8 @@ interface DeploysTestElement extends LitElement {
     ts: string; env: string; by: string;
     commit: string; outcome: "success" | "rolled-back" | "failed"; dur: string;
   }>;
+  loading: boolean;
+  _loadFromBackend(): Promise<void>;
   _healthSummary(): { ok: number; degraded: number };
 }
 
@@ -79,5 +87,63 @@ describe("lthn-view-deploys — data-attributes", () => {
     await el.updateComplete;
     const card = host.querySelector(".lthn-view-deploys-env");
     expect(card?.getAttribute("data-env")).toBe("production");
+  });
+});
+
+describe("lthn-view-deploys — backend wire", () => {
+  beforeEach(() => {
+    (MockedList as unknown as { mockReset: () => void }).mockReset();
+  });
+
+  it("backend rows replace fixture when envs and history are returned", async () => {
+    (MockedList as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({
+        Value: {
+          envs: [{ name: "live-env", url: "live.lthn.ai", version: "v9", commit: "ffffff", age: "1m", health: "ok" }],
+          history: [{ ts: "1m", env: "live-env", by: "backend-user", commit: "ffffff", outcome: "success", dur: "10s" }],
+        },
+      });
+
+    const { el, host } = await mountWindow<DeploysTestElement>("lthn-view-deploys");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("live-env");
+    expect(host.textContent).toContain("backend-user");
+    expect(host.textContent).toContain("live.lthn.ai");
+  });
+
+  it("backend rejection keeps fixture data visible", async () => {
+    (MockedList as unknown as { mockRejectedValue: (v: unknown) => void })
+      .mockRejectedValue(new Error("unavailable"));
+
+    const { el, host } = await mountWindow<DeploysTestElement>("lthn-view-deploys");
+    await el._loadFromBackend();
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("production");
+    expect(host.textContent).toContain("lthn.ai");
+  });
+
+  it("empty backend response keeps fixture data visible", async () => {
+    (MockedList as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { envs: [], history: [] } });
+
+    const { el, host } = await mountWindow<DeploysTestElement>("lthn-view-deploys");
+    await el._loadFromBackend();
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("production");
+    expect(host.textContent).toContain("4a82c1");
+  });
+
+  it("fixture-only tests remain green — smoke renders three env cards", async () => {
+    (MockedList as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { envs: [], history: [] } });
+
+    const { el, host } = await mountWindow<DeploysTestElement>("lthn-view-deploys");
+    await el.updateComplete;
+    const cards = host.querySelectorAll(".lthn-view-deploys-env");
+    expect(cards.length).toBe(3);
   });
 });
