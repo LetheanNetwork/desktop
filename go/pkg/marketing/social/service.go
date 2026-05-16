@@ -55,12 +55,18 @@ func Register(c *core.Core) core.Result {
 func (s *Service) ServiceName() string { return "Social" }
 
 // postFrontmatter is the YAML shape stored in each social post file.
+//
+// Cascade W2 (RFC §B.3 row 5) — Version carries the monotonic
+// optimistic-lock anchor. omitempty so legacy files predating the
+// cutover (no version: line) round-trip cleanly as Version=0; the
+// first write through writePost stamps version=1.
 type postFrontmatter struct {
-	ID     string `yaml:"id"`
-	Ch     string `yaml:"ch"` // comma-separated channels
-	When   string `yaml:"when"`
-	State  string `yaml:"state"`
-	Attach string `yaml:"attach"`
+	Version int    `yaml:"version,omitempty"`
+	ID      string `yaml:"id"`
+	Ch      string `yaml:"ch"` // comma-separated channels
+	When    string `yaml:"when"`
+	State   string `yaml:"state"`
+	Attach  string `yaml:"attach"`
 }
 
 // socialDir resolves ~/Lethean/marketing/social/ and creates it if missing.
@@ -178,30 +184,61 @@ func parsePost(raw []byte) (SocialPost, error) {
 		return SocialPost{}, core.E("social.parsePost", "yaml unmarshal", err)
 	}
 	return SocialPost{
-		ID:     fm.ID,
-		Ch:     splitChannels(fm.Ch),
-		When:   fm.When,
-		State:  fm.State,
-		Text:   text,
-		Attach: fm.Attach,
+		ID:      fm.ID,
+		Ch:      splitChannels(fm.Ch),
+		When:    fm.When,
+		State:   fm.State,
+		Text:    text,
+		Attach:  fm.Attach,
+		Version: fm.Version,
 	}, nil
 }
 
-// writePost serialises a SocialPost to Trix format and writes it to disk.
-// Post text lives in the body (not frontmatter) to avoid YAML quoting of
+// writePost serialises a SocialPost to Trix format and writes it via
+// paths.AtomicWriteWithVersion (Cascade W2, RFC §B.3 row 5). Post
+// text lives in the body (not frontmatter) to avoid YAML quoting of
 // newlines and special characters.
+//
+// ifVersion is the optimistic-lock anchor — pass the Version the
+// caller observed on disk (via parsePost), or 0 for first-writes /
+// legacy-file upgrades. writePost stamps the next monotonic version
+// (ifVersion+1) into the marshalled frontmatter so subsequent reads
+// see version=1,2,3... monotonically.
+//
 // Cerberus #1486: p.ID lands directly in the filename — validate.
-// Cerberus #1487 PR-1: 0o600 — owner-only at rest.
-func writePost(dir string, p SocialPost) core.Result {
+//
+// Return shape (Mantis #1544 gating, inherited from W1): on the
+// stale-write path the function returns
+// core.Fail(paths.ConflictEnvelope{...}) so the Wails-marshalled
+// Result.Value carries the lowercase-json shape
+// (`{code, current_version, current_hash}`) that
+// conflict-dispatch.ts extractEnvelope pattern-matches on. The
+// per-service Code is "social.update.conflict" — the frontend
+// scopes its toast + reload-listener on this exact string.
+//
+// Audit emission is automatic via paths.AuditModeForPath —
+// marketing/* paths route through AuditModeBatch per RFC §6.1.
+//
+// Usage example:
+//
+//	if wr := writePost(dir, p, prior.Version); !wr.OK {
+//	    return wr
+//	}
+func writePost(dir string, p SocialPost, ifVersion int) core.Result {
 	if err := paths.IsValidID(p.ID); err != nil {
 		return core.Fail(err)
 	}
+	nextVersion := ifVersion + 1
+	if nextVersion < 1 {
+		nextVersion = 1
+	}
 	fm := postFrontmatter{
-		ID:     p.ID,
-		Ch:     joinChannels(p.Ch),
-		When:   p.When,
-		State:  p.State,
-		Attach: p.Attach,
+		Version: nextVersion,
+		ID:      p.ID,
+		Ch:      joinChannels(p.Ch),
+		When:    p.When,
+		State:   p.State,
+		Attach:  p.Attach,
 	}
 	fmBytes, err := yaml.Marshal(fm)
 	if err != nil {
@@ -214,10 +251,19 @@ func writePost(dir string, p SocialPost) core.Result {
 		data = append(data, []byte(p.Text)...)
 	}
 	fpath := core.PathJoin(dir, p.ID+".md")
-	if r := core.WriteFile(fpath, data, 0o600); !r.OK {
-		return r
+	res := paths.AtomicWriteWithVersion(fpath, paths.WriteInput{
+		Body:      data,
+		IfVersion: ifVersion,
+	})
+	if res.OK {
+		return res
 	}
-	return core.Ok(nil)
+	if stale, ok := paths.VersionStaleFromError(res.Value); ok {
+		return core.Fail(paths.NewConflictEnvelope(
+			"social.update.conflict", stale))
+	}
+	return core.Fail(core.E("social.writePost",
+		"write failed: "+res.Error(), nil))
 }
 
 // loadPosts scans ~/Lethean/marketing/social/ and returns all parseable

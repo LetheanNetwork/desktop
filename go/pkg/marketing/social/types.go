@@ -37,6 +37,13 @@ type SocialPost struct {
 	Text string `json:"text"`
 	// Attach is the optional attachment label ("image", "video"). Empty = no attachment.
 	Attach string `json:"attach,omitempty"`
+
+	// Version is the monotonic optimistic-lock version (Cascade W2,
+	// RFC §B.3 row 5). Stamped by writePost; 0 on legacy files
+	// predating the cutover, >=1 after first write through
+	// paths.AtomicWriteWithVersion. Internal-only — `json:"-"` keeps
+	// it out of the Wails wire shape consumed by the frontend.
+	Version int `json:"-"`
 }
 
 // ListInput drives the List method.

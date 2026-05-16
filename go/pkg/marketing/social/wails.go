@@ -119,9 +119,15 @@ func (s *Service) Create(input CreateInput) core.Result {
 		Attach: input.Attach,
 	}
 
-	if r := writePost(dirR.Value.(string), p); !r.OK {
-		return core.Fail(core.E("social.Create", "write failed", nil))
+	// Cascade W2 (RFC §B.3 row 5) — Create is an unconditional first-
+	// write (ifVersion=0). writePost stamps Version=1 into the
+	// marshalled frontmatter. Conflict-path (rare on Create — only
+	// fires if another goroutine races on the same slug) returns
+	// core.Fail(paths.ConflictEnvelope{...}) directly via writePost.
+	if wr := writePost(dirR.Value.(string), p, 0); !wr.OK {
+		return wr
 	}
+	p.Version = 1
 	s.fireSocialEvent(EventSocialCreated, id, state)
 	return core.Ok(p)
 }
@@ -150,9 +156,21 @@ func (s *Service) MarkSent(id string) core.Result {
 		return core.Fail(core.E("social.MarkSent", "parse failed", err))
 	}
 
+	priorVersion := p.Version
 	p.State = "sent"
-	if r := writePost(dirR.Value.(string), p); !r.OK {
-		return core.Fail(core.E("social.MarkSent", "write failed", nil))
+
+	// Cascade W2 (RFC §B.3 row 5) — IfVersion=priorVersion gates the
+	// write under the primitive's optimistic-lock check.
+	// priorVersion=0 (legacy file predating cutover) skips the check
+	// and stamps Version=1 on the upgrade write. Conflict-path returns
+	// core.Fail(paths.ConflictEnvelope{...}) directly via writePost
+	// (Mantis #1544 gating shape inherited from W1).
+	if wr := writePost(dirR.Value.(string), p, priorVersion); !wr.OK {
+		return wr
+	}
+	p.Version = priorVersion + 1
+	if p.Version < 1 {
+		p.Version = 1
 	}
 	s.fireSocialEvent(EventSocialSent, id, "sent")
 	return core.Ok(p)
