@@ -4,6 +4,7 @@ package serverkey
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/audit"
 	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
 )
 
@@ -310,6 +311,19 @@ func (s *Service) IssueSessionToken(accountID string) core.Result {
 	core.Print(core.Stderr(),
 		"event=auth.session.issued account_id=%s ts=%d exp=%d\n",
 		accountID, now, exp)
+	// Stage F.B Phase 1 — typed audit.Recorder emission alongside the
+	// human-debug core.Print line (RFC.stage-f §1 dual-emit shape).
+	// Recorder write failure is ignored — audit failures MUST NEVER
+	// block the auth path. The session-token bytes themselves are
+	// NEVER passed to the recorder (only the iat/exp/scope envelope).
+	_ = audit.Default().Record(audit.Event{
+		Event:     audit.EventAuthSessionIssued,
+		AccountID: accountID,
+		TS:        now,
+		Exp:       exp,
+		Scope:     scopeSession,
+		Outcome:   audit.OutcomeOK,
+	})
 
 	token := sessionTokenPrefix + core.Base64URLEncode(canon) + "." + core.Base64URLEncode(sig)
 	return core.Ok(SessionTokenOutput{
@@ -460,9 +474,24 @@ func (s *Service) auditSessionVerifyFailed(accountID, reason string) {
 	if !sessionVerifyFailedReasons[reason] {
 		reason = "unknown"
 	}
+	now := core.Now().UTC().Unix()
 	core.Print(core.Stderr(),
 		"event=auth.session.verify_failed account_id=%s ts=%d reason=%s\n",
-		accountID, core.Now().UTC().Unix(), reason)
+		accountID, now, reason)
+	// Stage F.B Phase 1 — typed audit.Recorder emission alongside the
+	// human-debug core.Print line. `reason` lands in Meta so the
+	// Operations-panel pivot stays the same closed enumeration the
+	// log-tailer would have parsed (RFC.stage-f §6 M4 reserved fields).
+	_ = audit.Default().Record(audit.Event{
+		Event:     audit.EventAuthSessionVerifyFailed,
+		AccountID: accountID,
+		TS:        now,
+		Scope:     scopeSession,
+		Outcome:   audit.OutcomeDenied,
+		Meta: map[string]any{
+			"reason": reason,
+		},
+	})
 }
 
 // sessionVerifyFailedReasons is the closed set of reasons RFC §6 M4

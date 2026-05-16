@@ -32,6 +32,7 @@ import (
 	"io"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/serverkey"
 	"github.com/ProtonMail/go-crypto/openpgp"
@@ -484,17 +485,46 @@ func (s *Service) clearLockout(accountID string) {
 // auditUnlockFailed emits auth.unlock.failed per RFC §6 M4. Reserved
 // schema: changing the field names after Stage E ships breaks the
 // Stage F log-tailing contract.
+//
+// Stage F.B Phase 1 — emit through the typed audit.Recorder substrate
+// in addition to the human-debug core.Print echo (RFC.stage-f §1 — the
+// print line remains as the human echo; the recorder receives the
+// structured value). The recorder write failure is intentionally
+// ignored — audit failures MUST NEVER block the auth path that emitted
+// the event.
 func (s *Service) auditUnlockFailed(accountID string, remaining int) {
+	now := core.Now().UTC().Unix()
 	core.Print(core.Stderr(),
 		"event=auth.unlock.failed account_id=%s ts=%d attempts_remaining=%d\n",
-		accountID, core.Now().UTC().Unix(), remaining)
+		accountID, now, remaining)
+	_ = audit.Default().Record(audit.Event{
+		Event:     audit.EventAuthUnlockFailed,
+		AccountID: accountID,
+		TS:        now,
+		Scope:     "unlock",
+		Outcome:   audit.OutcomeFailed,
+		Meta: map[string]any{
+			"attempts_remaining": remaining,
+		},
+	})
 }
 
 // auditLockoutTriggered emits auth.lockout.triggered per RFC §6 M4.
+// Stage F.B Phase 1 — emit through audit.Recorder alongside core.Print
+// (same RFC.stage-f §1 dual-emit shape as auditUnlockFailed).
 func (s *Service) auditLockoutTriggered(accountID string, unlockAt int64) {
+	now := core.Now().UTC().Unix()
 	core.Print(core.Stderr(),
 		"event=auth.lockout.triggered account_id=%s ts=%d unlock_after=%d\n",
-		accountID, core.Now().UTC().Unix(), unlockAt)
+		accountID, now, unlockAt)
+	_ = audit.Default().Record(audit.Event{
+		Event:     audit.EventAuthLockoutTriggered,
+		AccountID: accountID,
+		TS:        now,
+		Exp:       unlockAt,
+		Scope:     "lockout",
+		Outcome:   audit.OutcomeDenied,
+	})
 }
 
 // PrivateKeyFor returns the in-memory unlocked PGP private key bytes for
@@ -562,9 +592,18 @@ func (s *Service) DefaultAccountID() string {
 }
 
 // auditLockRequested emits auth.lock.requested per RFC §6 M4 when
-// the frontend / CLI explicitly Sign-Out for a session.
+// the frontend / CLI explicitly Sign-Out for a session. Stage F.B
+// Phase 1 — emit through audit.Recorder alongside core.Print.
 func (s *Service) auditLockRequested(accountID string) {
+	now := core.Now().UTC().Unix()
 	core.Print(core.Stderr(),
 		"event=auth.lock.requested account_id=%s ts=%d\n",
-		accountID, core.Now().UTC().Unix())
+		accountID, now)
+	_ = audit.Default().Record(audit.Event{
+		Event:     audit.EventAuthLockRequested,
+		AccountID: accountID,
+		TS:        now,
+		Scope:     "lock",
+		Outcome:   audit.OutcomeOK,
+	})
 }
