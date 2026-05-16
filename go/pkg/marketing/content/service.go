@@ -69,13 +69,19 @@ func columnOrder() []colSpec {
 }
 
 // itemFrontmatter is the YAML shape of a content item file.
+//
+// Cascade W2 (RFC §B.3 row 4) — Version carries the monotonic
+// optimistic-lock anchor. omitempty so legacy files predating the
+// cutover (no version: line) round-trip cleanly as Version=0; the
+// first write through writeItem stamps version=1.
 type itemFrontmatter struct {
-	ID   string `yaml:"id"`
-	T    string `yaml:"t"`
-	Who  string `yaml:"who"`
-	When string `yaml:"when"`
-	Due  string `yaml:"due"`
-	Col  string `yaml:"col"`
+	Version int    `yaml:"version,omitempty"`
+	ID      string `yaml:"id"`
+	T       string `yaml:"t"`
+	Who     string `yaml:"who"`
+	When    string `yaml:"when"`
+	Due     string `yaml:"due"`
+	Col     string `yaml:"col"`
 }
 
 // contentDir resolves ~/Lethean/marketing/content/ and creates it if missing.
@@ -157,30 +163,63 @@ func parseItem(raw []byte) (ContentItem, error) {
 		return ContentItem{}, core.E("content.parseItem", "yaml unmarshal", err)
 	}
 	return ContentItem{
-		ID:   fm.ID,
-		T:    fm.T,
-		Who:  fm.Who,
-		When: fm.When,
-		Due:  fm.Due,
-		Col:  fm.Col,
-		Body: body,
+		ID:      fm.ID,
+		T:       fm.T,
+		Who:     fm.Who,
+		When:    fm.When,
+		Due:     fm.Due,
+		Col:     fm.Col,
+		Body:    body,
+		Version: fm.Version,
 	}, nil
 }
 
-// writeItem serialises a ContentItem to Trix format and writes it to disk.
+// writeItem serialises a ContentItem to Trix format and writes it via
+// paths.AtomicWriteWithVersion (Cascade W2, RFC §B.3 row 4).
+//
+// ifVersion is the optimistic-lock anchor — pass the Version the
+// caller observed on disk (via parseItem), or 0 for first-writes /
+// legacy-file upgrades. writeItem stamps the next monotonic version
+// (ifVersion+1) into the marshalled frontmatter so subsequent reads
+// see version=1,2,3... monotonically.
+//
 // Cerberus #1486: item.ID lands directly in the filename — validate.
-// Cerberus #1487 PR-1: 0o600 — owner-only at rest.
-func writeItem(dir string, item ContentItem) core.Result {
+//
+// Return shape (Mantis #1544 gating, inherited from W1): on the
+// stale-write path the function returns
+// core.Fail(paths.ConflictEnvelope{...}) so the Wails-marshalled
+// Result.Value carries the lowercase-json shape
+// (`{code, current_version, current_hash}`) that
+// conflict-dispatch.ts extractEnvelope pattern-matches on. The
+// per-service Code is "content.update.conflict" — the frontend
+// scopes its toast + reload-listener on this exact string.
+//
+// Audit emission is automatic via paths.AuditModeForPath —
+// marketing/* paths route through AuditModeBatch per RFC §6.1.
+//
+// Usage example:
+//
+//	if wr := writeItem(dir, item, prior.Version); !wr.OK {
+//	    return wr
+//	}
+func writeItem(dir string, item ContentItem, ifVersion int) core.Result {
 	if err := paths.IsValidID(item.ID); err != nil {
 		return core.Fail(err)
 	}
+	// Stamp the next monotonic version. ifVersion=0 (Create / legacy
+	// upgrade) yields version=1; subsequent writes increment.
+	nextVersion := ifVersion + 1
+	if nextVersion < 1 {
+		nextVersion = 1
+	}
 	fm := itemFrontmatter{
-		ID:   item.ID,
-		T:    item.T,
-		Who:  item.Who,
-		When: item.When,
-		Due:  item.Due,
-		Col:  item.Col,
+		Version: nextVersion,
+		ID:      item.ID,
+		T:       item.T,
+		Who:     item.Who,
+		When:    item.When,
+		Due:     item.Due,
+		Col:     item.Col,
 	}
 	fmBytes, err := yaml.Marshal(fm)
 	if err != nil {
@@ -193,10 +232,19 @@ func writeItem(dir string, item ContentItem) core.Result {
 		data = append(data, []byte(item.Body)...)
 	}
 	fpath := core.PathJoin(dir, item.ID+".md")
-	if r := core.WriteFile(fpath, data, 0o600); !r.OK {
-		return r
+	res := paths.AtomicWriteWithVersion(fpath, paths.WriteInput{
+		Body:      data,
+		IfVersion: ifVersion,
+	})
+	if res.OK {
+		return res
 	}
-	return core.Ok(nil)
+	if stale, ok := paths.VersionStaleFromError(res.Value); ok {
+		return core.Fail(paths.NewConflictEnvelope(
+			"content.update.conflict", stale))
+	}
+	return core.Fail(core.E("content.writeItem",
+		"write failed: "+res.Error(), nil))
 }
 
 // loadItems scans ~/Lethean/marketing/content/ and returns all parseable

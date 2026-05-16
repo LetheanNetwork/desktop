@@ -39,6 +39,13 @@ type ContentItem struct {
 	Col string `json:"col"`
 	// Body is the markdown body (content outline / notes).
 	Body string `json:"body,omitempty"`
+
+	// Version is the monotonic optimistic-lock version (Cascade W2,
+	// RFC §B.3 row 4). Stamped by writeItem; 0 on legacy files
+	// predating the cutover, >=1 after first write through
+	// paths.AtomicWriteWithVersion. Internal-only — `json:"-"` keeps
+	// it out of the Wails wire shape consumed by the frontend.
+	Version int `json:"-"`
 }
 
 // ContentColumn is the JSON wire type for one pipeline stage column.

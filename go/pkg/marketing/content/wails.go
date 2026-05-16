@@ -128,9 +128,15 @@ func (s *Service) Create(input CreateInput) core.Result {
 		Body: input.Body,
 	}
 
-	if r := writeItem(dirR.Value.(string), item); !r.OK {
-		return core.Fail(core.E("content.Create", "write failed", nil))
+	// Cascade W2 (RFC §B.3 row 4) — Create is an unconditional first-
+	// write (ifVersion=0). writeItem stamps Version=1 into the
+	// marshalled frontmatter. Conflict-path (rare on Create — only
+	// fires if another goroutine races on the same slug) returns
+	// core.Fail(paths.ConflictEnvelope{...}) directly via writeItem.
+	if wr := writeItem(dirR.Value.(string), item, 0); !wr.OK {
+		return wr
 	}
+	item.Version = 1
 	s.fireContentEvent(EventContentCreated, id, col)
 	return core.Ok(item)
 }
@@ -165,6 +171,7 @@ func (s *Service) Advance(id string) core.Result {
 		return core.Fail(core.E("content.Advance", "already at live: "+id, nil))
 	}
 
+	priorVersion := item.Version
 	item.Col = next
 	// When advancing to "live", record the publish time.
 	if next == "live" {
@@ -172,8 +179,18 @@ func (s *Service) Advance(id string) core.Result {
 		item.Due = ""
 	}
 
-	if r := writeItem(dirR.Value.(string), item); !r.OK {
-		return core.Fail(core.E("content.Advance", "write failed", nil))
+	// Cascade W2 (RFC §B.3 row 4) — IfVersion=priorVersion gates the
+	// write under the primitive's optimistic-lock check.
+	// priorVersion=0 (legacy file predating cutover) skips the check
+	// and stamps Version=1 on the upgrade write. Conflict-path returns
+	// core.Fail(paths.ConflictEnvelope{...}) directly via writeItem
+	// (Mantis #1544 gating shape inherited from W1).
+	if wr := writeItem(dirR.Value.(string), item, priorVersion); !wr.OK {
+		return wr
+	}
+	item.Version = priorVersion + 1
+	if item.Version < 1 {
+		item.Version = 1
 	}
 	s.fireContentEvent(EventContentAdvanced, id, next)
 	return core.Ok(item)
