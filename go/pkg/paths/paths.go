@@ -87,13 +87,30 @@ func CliDir() core.Result {
 	return subdir("cli")
 }
 
-// ModelsDir returns ~/Lethean/conf/models/. Creates if missing.
+// ModelsDir returns the models directory. Honours the user-set
+// override at ~/Lethean/conf/paths.json when present (set via
+// SetModelsDirOverride), otherwise falls through to the default
+// ~/Lethean/conf/models/. Creates if missing.
+//
+// The override hot-path is the read-side counterpart to the
+// SetModelsDirOverride / ClearModelsDirOverride producers in
+// models_override.go. readModelsDirOverride returns the empty
+// string on no-override / read-failure / parse-failure, so a
+// corrupt or absent paths.json never blocks ModelsDir() — it just
+// falls back to the default. Validation happens at set-time
+// (validateOverridePath); read-time trusts what's persisted.
 //
 // Usage example:
 //
 //	r := paths.ModelsDir()
 //	if r.OK { models := r.Value.(string); _ = models }
 func ModelsDir() core.Result {
+	if override := readModelsDirOverride(); override != "" {
+		if r := core.MkdirAll(override, 0o755); !r.OK {
+			return r
+		}
+		return core.Ok(override)
+	}
 	conf := ConfDir()
 	if !conf.OK {
 		return conf

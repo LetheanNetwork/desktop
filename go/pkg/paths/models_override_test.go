@@ -110,3 +110,78 @@ func TestPathsOverride_ClearModelsDirOverride_Good_Idempotent(t *core.T) {
 	r := paths.ClearModelsDirOverride()
 	core.AssertTrue(t, r.OK, "clearing when no override is set must succeed silently")
 }
+
+// TestModelsDir_HonoursOverride_Good — the ModelsDir() hot path
+// consults readModelsDirOverride() before falling back to the
+// default ~/Lethean/conf/models/. With an override set, the
+// returned path matches the override exactly.
+func TestModelsDir_HonoursOverride_Good(t *core.T) {
+	home := homeFixture(t)
+	override := core.PathJoin(home, "external-models")
+	core.AssertTrue(t, paths.SetModelsDirOverride(override).OK,
+		"SetModelsDirOverride must succeed before the read-side assertion")
+
+	r := paths.ModelsDir()
+	core.AssertTrue(t, r.OK, "ModelsDir must succeed when an override is set")
+	core.AssertEqual(t, override, r.Value.(string),
+		"ModelsDir must return the override path, not the default")
+
+	// The override directory should exist after ModelsDir (MkdirAll
+	// runs on the hot path too — covers the case where the user set
+	// the override then someone (or restore-from-backup) removed the
+	// directory).
+	stat := core.Stat(override)
+	core.AssertTrue(t, stat.OK)
+	core.AssertTrue(t, stat.Value.(core.FsFileInfo).IsDir())
+}
+
+// TestModelsDir_FallsBackToDefault_Good — with no override set,
+// ModelsDir() returns the canonical ~/Lethean/conf/models/ path.
+// Also covers the post-Clear path: set, clear, assert default.
+func TestModelsDir_FallsBackToDefault_Good(t *core.T) {
+	home := homeFixture(t)
+	want := core.PathJoin(home, "Lethean", "conf", "models")
+
+	// No override yet — default applies.
+	r1 := paths.ModelsDir()
+	core.AssertTrue(t, r1.OK)
+	core.AssertEqual(t, want, r1.Value.(string),
+		"ModelsDir must return the default when no override is set")
+
+	// Set then clear — default applies again.
+	override := core.PathJoin(home, "scratch-models")
+	core.AssertTrue(t, paths.SetModelsDirOverride(override).OK)
+	core.AssertTrue(t, paths.ClearModelsDirOverride().OK)
+
+	r2 := paths.ModelsDir()
+	core.AssertTrue(t, r2.OK)
+	core.AssertEqual(t, want, r2.Value.(string),
+		"ModelsDir must return the default after the override is cleared")
+}
+
+// TestModelsDir_IgnoresUnparseableOverrideFile_Ugly — a corrupt
+// paths.json (truncated, garbage bytes, wrong shape) must not
+// crash the hot path. readPathsOverride is documented best-effort
+// and returns zero-value on any parse failure, so ModelsDir()
+// silently falls through to the default. Defends against
+// half-written files, manual edits gone wrong, downgrade from a
+// future schema, etc.
+func TestModelsDir_IgnoresUnparseableOverrideFile_Ugly(t *core.T) {
+	home := homeFixture(t)
+	want := core.PathJoin(home, "Lethean", "conf", "models")
+
+	// Force ConfDir to exist (ModelsDir would create it anyway, but
+	// we need to land paths.json before the read).
+	confR := paths.ConfDir()
+	core.AssertTrue(t, confR.OK)
+
+	overrideFile := core.PathJoin(confR.Value.(string), "paths.json")
+	garbage := []byte("{this is not valid json,,,,")
+	core.AssertTrue(t, core.WriteFile(overrideFile, garbage, 0o600).OK,
+		"writing garbage paths.json must succeed (fs-level)")
+
+	r := paths.ModelsDir()
+	core.AssertTrue(t, r.OK, "ModelsDir must not fail when paths.json is unparseable")
+	core.AssertEqual(t, want, r.Value.(string),
+		"ModelsDir must fall back to default when paths.json is unparseable")
+}
