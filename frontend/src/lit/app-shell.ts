@@ -53,10 +53,13 @@ import { AUTH_401_EVENT, AUTH_OK_EVENT, type AuthGateState } from "./auth-gate";
 // with the element's emit.
 import "./view-switcher";
 import "./lthn-plugin-view";
+import "./plugin-view-opencode-shim";
 import { VIEW_SWITCHER_SELECT_EVENT } from "./view-switcher";
 import {
   PLUGIN_VIEW_MOUNT_TIMEOUT_EVENT,
 } from "./lthn-plugin-view";
+import type { PluginViewDescriptor } from "./lthn-plugin-view";
+import { peekSessionToken } from "./api-fetch";
 
 // Plugin-views Unit B.5 — default-view config + 2-entry fallback +
 // consent-ratchet per RFC.plugin-views §6.
@@ -438,6 +441,17 @@ class LthnAppShell extends LitElement {
    *  through to the mounted gate so the error frame surfaces the
    *  same trace id the server-side logs index by. */
   declare _authRequestId: string;
+
+  /** Plugin-view descriptor cache — populated lazily by
+   *  _ensurePluginDescriptor when a non-built-in view id is selected.
+   *  Phase 4 wiring of plugin-views Unit C: the shell needs the
+   *  descriptor to know `kind` + `source` + `capabilities` so
+   *  _renderBody can pick the right wrapper (raw <lthn-plugin-view>
+   *  for tier-3, or the §5.1 handshake-brokering shim for tier-2 with
+   *  session-token capability). Value = undefined means "fetch in
+   *  flight or failed"; the body shows a placeholder until the entry
+   *  becomes a real descriptor (re-render triggered via requestUpdate). */
+  private _pluginDescriptors: Map<string, PluginViewDescriptor | undefined> = new Map();
 
   /** localStorage key for the last-active view. Restored on mount so
    *  the user lands on whichever role surface they were last using.
@@ -915,6 +929,11 @@ class LthnAppShell extends LitElement {
       // ":" (manifest validator enforces `<code>` or `<code>:<sub>`).
       const pluginCode = viewId.split(":")[0] ?? viewId;
       markViewActivated(pluginCode, viewId);
+      // Plugin-views Unit C Phase 4 — kick off descriptor fetch so
+      // _renderBody has the kind/source/capabilities shape ready by
+      // the next render flush. Cache-on-demand; subsequent selects of
+      // the same view hit the cache, no refetch.
+      void this._ensurePluginDescriptor(viewId);
       return;
     }
     this.view = viewId;
@@ -1109,6 +1128,23 @@ class LthnAppShell extends LitElement {
         ></lthn-auth-gate>
       </div>`;
     }
+
+    // Plugin-views Unit C Phase 4 — when the active view is a plugin
+    // (id NOT in VIEW_BY_ID), render either the §5.1-handshake-
+    // brokering shim (tier-2: iframe + session-token capability) or
+    // the raw wrapper (tier-3: iframe + no session capability).
+    // First-party tier-0 lit-kind also routes through the raw wrapper.
+    // The descriptor cache is populated by _selectView's
+    // _ensurePluginDescriptor call; if it hasn't landed yet we show
+    // a transient placeholder. Per RFC §6.3 the 1500ms mount-timeout
+    // event will trigger fallback if descriptor never arrives OR
+    // arrives but the iframe load hangs.
+    if (!VIEW_BY_ID[this.view]) {
+      return html`<div style="flex:1; min-height:0; display:flex; overflow:hidden; background:radial-gradient(1200px 600px at 50% 30%, rgba(64,193,197,0.03), transparent 60%);">
+        ${this._renderPluginView(this.view)}
+      </div>`;
+    }
+
     const node = this.querySelector('[slot="body"]');
     if (node) return html`<slot name="body"></slot>`;
     const entry = navForView(this.view).find(n => n.id === this.active);
@@ -1163,6 +1199,78 @@ class LthnAppShell extends LitElement {
    *  connectedCallback). The button has class `lthn-view-switcher`
    *  so the outside-click handler can detect "click was on me".
    */
+  /** Plugin-views Unit C Phase 4 — lazy fetch + cache of plugin view
+   *  descriptors via the marketplace GetViewDescriptor Wails binding.
+   *  Called from _selectView whenever a non-built-in view id is
+   *  picked. Result cached in _pluginDescriptors so subsequent renders
+   *  hit the cache; cache entries are dropped (rendering a "no view"
+   *  placeholder) when the underlying plugin is uninstalled (the
+   *  marketplace.plugin.uninstalled event handler clears matching
+   *  entries — see plugin-uninstall wiring in connectedCallback). */
+  private async _ensurePluginDescriptor(viewId: string): Promise<void> {
+    if (this._pluginDescriptors.has(viewId)) return;
+    // Mark in-flight with undefined so render shows placeholder, not
+    // an empty body. A repeat call during the fetch is a no-op via
+    // the has() guard above.
+    this._pluginDescriptors.set(viewId, undefined);
+    this.requestUpdate();
+    try {
+      const svc = await import("@desktop/marketplace/service");
+      const r = await svc.GetViewDescriptor(viewId);
+      if (r && r.OK) {
+        const d = r.Value as PluginViewDescriptor | undefined;
+        if (d && typeof d.id === "string") {
+          this._pluginDescriptors.set(viewId, d);
+        }
+      }
+    } catch {
+      // Binding unavailable (no Wails surface in test, or transport
+      // error in prod) — leave the entry as undefined so render falls
+      // back to the placeholder. The §6.2 chain takes over via the
+      // mount-timeout event when it fires.
+    }
+    this.requestUpdate();
+  }
+
+  /** Plugin-views Unit C Phase 4 — render branch for plugin views.
+   *  Picks between the §5.1-handshake-brokering shim (tier-2) and the
+   *  raw <lthn-plugin-view> wrapper (tier-0 first-party lit / tier-3
+   *  iframe-no-cap) based on the descriptor's kind + capabilities.
+   *  Tier-1 third-party lit is forward-contract per RFC §5.2 and
+   *  rejected at marketplace.Install — the descriptor for one should
+   *  never reach this branch. */
+  private _renderPluginView(viewId: string) {
+    const descriptor = this._pluginDescriptors.get(viewId);
+    if (!descriptor) {
+      // Descriptor not yet loaded OR plugin uninstalled — show a
+      // brief placeholder until either the fetch lands or the
+      // mount-timeout / fallback path takes over. UI text discipline
+      // per feedback_ui_text_offer_not_implementation.
+      return html`<div style="flex:1; display:flex; align-items:center; justify-content:center; color:var(--fg-3);">
+        Loading view…
+      </div>`;
+    }
+    // Tier-2: iframe + session-token capability → §5.1 handshake shim
+    // brokers postMessage on behalf of the plugin webapp; tokenProvider
+    // closure peeks api-fetch's cachedSessionToken at grant-time so the
+    // token only crosses the boundary when the shim actually responds
+    // to an iframe handshake request (Cerberus #1465 closure discipline).
+    const needsToken = descriptor.kind === "iframe"
+      && Array.isArray(descriptor.capabilities)
+      && descriptor.capabilities.includes("session-token");
+    if (needsToken) {
+      return html`<lthn-plugin-view-opencode-shim
+        .descriptor=${descriptor}
+        .tokenProvider=${peekSessionToken}
+      ></lthn-plugin-view-opencode-shim>`;
+    }
+    // Tier-0 first-party lit OR tier-3 iframe-no-cap → raw wrapper
+    // (no handshake to broker, no token to grant).
+    return html`<lthn-plugin-view
+      .descriptor=${descriptor}
+    ></lthn-plugin-view>`;
+  }
+
   _renderViewSwitcher() {
     const view = VIEW_BY_ID[this.view] ?? VIEW_BY_ID.admin;
     if (this.collapsed) {

@@ -62,6 +62,24 @@ export function clearSessionToken(): void {
   cachedSessionToken = null;
 }
 
+/** Peek the current session-token without consuming or persisting it
+ *  anywhere new. Intended for closure-only consumers that need a
+ *  read-at-call-time view of the cache (e.g. plugin-view shims that
+ *  broker the §5.1 postMessage handshake on behalf of an iframe webapp;
+ *  they call peekSessionToken inside a `tokenProvider: () => string`
+ *  closure passed to the shim, so the token only crosses a boundary
+ *  when the shim actually needs to grant it). Returns null when no
+ *  token is set OR when the user has locked.
+ *
+ *  Cerberus #1465 discipline: token still lives ONLY in this module's
+ *  cachedSessionToken binding. Peek returns the current value; callers
+ *  MUST NOT persist what they receive (localStorage / cookie / etc).
+ *  The audit trail (plugin.view.capability_granted) is the observability
+ *  surface, not the storage one. */
+export function peekSessionToken(): string | null {
+  return cachedSessionToken;
+}
+
 /** Internal — resolve the local bearer token via the Wails apikey
  *  service. Cached after first successful resolution. Returns the
  *  empty string when the binding is unavailable or returns empty —
