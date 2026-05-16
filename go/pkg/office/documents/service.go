@@ -379,26 +379,21 @@ func validateSlug(slug string) error {
 }
 
 // readBodyHash reads the document at path in a single stat+open cycle and
-// returns the hex(sha256(raw file bytes)) and the mtime. The caller MUST
-// NOT stat or open the file again before using these values for conflict
-// detection — that would re-introduce the TOCTOU window.
+// returns the hex(sha256(raw file bytes)) and the mtime. Delegated to
+// paths.ReadVersion (B.2 cutover) — the primitive's snapshot is the
+// canonical single-stat-and-read; this helper is retained for tests that
+// continue to depend on the (hash, mtime, err) tuple shape.
 func readBodyHash(path string) (hashHex string, mtime core.Time, err error) {
-	statR := core.Stat(path)
-	if !statR.OK {
-		return "", core.Time{}, core.E("documents.readBodyHash", statR.Error(), nil)
+	r := paths.ReadVersion(path)
+	if !r.OK {
+		return "", core.Time{}, core.E("documents.readBodyHash", r.Error(), nil)
 	}
-	info, _ := statR.Value.(core.FsFileInfo)
-	if info == nil {
-		return "", core.Time{}, core.E("documents.readBodyHash", "stat returned nil info", nil)
+	out, _ := r.Value.(paths.ReadOutput)
+	if out.Mtime.IsZero() {
+		return "", core.Time{}, core.E("documents.readBodyHash",
+			"file does not exist", nil)
 	}
-	mtime = info.ModTime()
-
-	rawR := core.ReadFile(path)
-	if !rawR.OK {
-		return "", core.Time{}, core.E("documents.readBodyHash", rawR.Error(), nil)
-	}
-	raw, _ := rawR.Value.([]byte)
-	return core.SHA256Hex(raw), mtime, nil
+	return out.BodyHash, out.Mtime, nil
 }
 
 // composeFrontmatter produces the YAML frontmatter block for a document.
@@ -418,18 +413,42 @@ func composeFrontmatter(state, author string, tags, related []string, updatedAt 
 	return out, nil
 }
 
-// atomicWriteFile writes content to path via a tmp file + rename. The rename
-// is POSIX-atomic — no partial content is ever visible to concurrent readers.
-// content is written at mode 0o600 (Cerberus #1487 PII mandate).
-func atomicWriteFile(path string, content []byte) error {
-	tmp := path + ".tmp"
-	if r := core.WriteFile(tmp, content, 0o600); !r.OK {
-		return core.E("documents.atomicWriteFile", "write tmp failed: "+r.Error(), nil)
+// atomicWriteFile writes content to path with optimistic-lock semantics
+// via paths.AtomicWriteWithVersion (B.2 PILOT cutover — Mantis #1490).
+// Empty conflict-condition fields trigger the unconditional first-write
+// path; populated IfMtime + IfMatchHash route through the composite
+// 409-or-rename flow. Returns a typed conflict error when stale so
+// callers can pattern-match the existing "documents.save.conflict" code
+// without rebuilding their error envelopes.
+func atomicWriteFile(path string, content []byte, ifMtime core.Time, ifMatchHash string) error {
+	r := paths.AtomicWriteWithVersion(path, paths.WriteInput{
+		Body:        content,
+		IfMtime:     ifMtime,
+		IfMatchHash: ifMatchHash,
+	})
+	if r.OK {
+		return nil
 	}
-	if r := core.Rename(tmp, path); !r.OK {
-		return core.E("documents.atomicWriteFile", "rename failed: "+r.Error(), nil)
+	if core.Contains(r.Error(), paths.CodeVersionStale) {
+		// Wrap the primitive's typed VersionStale envelope so callers
+		// keep matching on documents.save.conflict while the structured
+		// payload remains accessible via paths.VersionStaleFromError.
+		return core.E("documents.atomicWriteFile", "documents.save.conflict",
+			versionStaleAsError(r.Value))
 	}
-	return nil
+	return core.E("documents.atomicWriteFile", "write failed: "+r.Error(), nil)
+}
+
+// versionStaleAsError extracts the structured paths.VersionStale payload
+// from a Result.Value and returns it as an error whose Error() reports
+// the canonical "documents.save.conflict" code. The structured envelope
+// (current_version / current_mtime / current_hash + flags) stays
+// accessible via paths.VersionStaleFromError(err.(*versionStaleCause)).
+func versionStaleAsError(v any) error {
+	if e, ok := v.(error); ok {
+		return e
+	}
+	return core.NewCode("documents.save.conflict", "version_stale")
 }
 
 // buildFileContent assembles the full file bytes from frontmatter + body.
@@ -509,7 +528,10 @@ func (s *Service) Create(input CreateInput) core.Result {
 	}
 
 	content := buildFileContent(fm, input.Body)
-	if err := atomicWriteFile(fpath, content); err != nil {
+	// Create is the unconditional first-write — empty IfMtime + empty
+	// IfMatchHash trigger the primitive's MED-2 path. The exists-check
+	// above prevents a concurrent Create racing this one.
+	if err := atomicWriteFile(fpath, content, core.Time{}, ""); err != nil {
 		return core.Fail(core.E("documents.Create", "write failed", err))
 	}
 
@@ -565,29 +587,20 @@ func (s *Service) Save(input SaveInput) core.Result {
 	dir := dirR.Value.(string)
 	fpath := core.PathJoin(dir, input.Slug+".md")
 
-	// Read current content under a shared read — no flock available yet
-	// (Mantis #1490 gating). We use stat+read atomically to minimise the
-	// TOCTOU window: read the hash BEFORE the conflict check, not after.
-	currentHash, currentMtime, err := readBodyHash(fpath)
-	if err != nil {
-		return core.Fail(core.E("documents.Save", "read failed", err))
+	// Snapshot existing frontmatter for preservation of fields not in
+	// SaveInput. paths.ReadVersion is the single-stat+read primitive —
+	// using it here matches the primitive's view of "current state"
+	// so the IfMtime + IfMatchHash conditions below race-free against
+	// the actual disk state.
+	rdR := paths.ReadVersion(fpath)
+	if !rdR.OK {
+		return core.Fail(core.E("documents.Save", "load failed: "+rdR.Error(), nil))
 	}
-
-	// Composite conflict check (Q1 ruling):
-	// - hash matches → content identical → accept (mtime clock-skew safe)
-	// - mtime differs AND hash differs → conflict
-	if currentHash != input.IfMatchHash {
-		// Content on disk differs from what the client last saw.
-		return core.Fail(core.E("documents.Save", "documents.save.conflict", nil))
+	rd, _ := rdR.Value.(paths.ReadOutput)
+	if rd.Mtime.IsZero() {
+		return core.Fail(core.E("documents.Save", "documents.save.not_found", nil))
 	}
-	// If hash matches but mtime differs — clock-skew case — accept.
-	_ = currentMtime // used only as fast-path context; hash is authoritative
-
-	// Load existing frontmatter to preserve fields not in SaveInput.
-	raw, loadErr := loadDoc(input.Slug)
-	if loadErr != nil {
-		return core.Fail(core.E("documents.Save", "load failed", loadErr))
-	}
+	raw := rd.Body
 	existingFm, _ := splitFrontmatter(raw)
 	var existing docFrontmatter
 	_ = yaml.Unmarshal(existingFm, &existing)
@@ -617,8 +630,13 @@ func (s *Service) Save(input SaveInput) core.Result {
 	}
 
 	content := buildFileContent(fm, input.Body)
-	if err := atomicWriteFile(fpath, content); err != nil {
-		return core.Fail(core.E("documents.Save", "write failed", err))
+	// B.2 PILOT cutover: route through paths.AtomicWriteWithVersion
+	// with the documents-v2 composite (IfMtime + IfMatchHash). The
+	// primitive holds the file lock for the read-check-write sequence,
+	// so the snapshot read above + this write are TOCTOU-safe under
+	// concurrent writers.
+	if err := atomicWriteFile(fpath, content, input.IfMatch, input.IfMatchHash); err != nil {
+		return core.Fail(core.E("documents.Save", err.Error(), err))
 	}
 
 	statR := core.Stat(fpath)
@@ -673,25 +691,30 @@ func (s *Service) Delete(input DeleteInput) core.Result {
 	dir := dirR.Value.(string)
 	fpath := core.PathJoin(dir, input.Slug+".md")
 
-	currentHash, _, err := readBodyHash(fpath)
-	if err != nil {
-		return core.Fail(core.E("documents.Delete", "read failed", err))
-	}
-	if currentHash != input.IfMatchHash {
-		return core.Fail(core.E("documents.Delete", "documents.delete.conflict", nil))
-	}
-
-	raw, _ := loadDoc(input.Slug)
-	var modTime core.Time
-	if statR := core.Stat(fpath); statR.OK {
-		if info, _ := statR.Value.(core.FsFileInfo); info != nil {
-			modTime = info.ModTime()
+	// Lock + read + check + unlink under one critical section. The
+	// primitive's WithFileLock holds for the inner closure; concurrent
+	// Delete + Save against the same slug now serialise correctly.
+	var before DocRecord
+	lockR := paths.WithFileLock(fpath, 0, func() core.Result {
+		rdR := paths.ReadVersion(fpath)
+		if !rdR.OK {
+			return core.Fail(core.E("documents.Delete", "read failed: "+rdR.Error(), nil))
 		}
-	}
-	before := parseDoc(input.Slug, raw, modTime, int64(len(raw)))
-
-	if r := core.Remove(fpath); !r.OK {
-		return core.Fail(core.E("documents.Delete", "remove failed: "+r.Error(), nil))
+		rd, _ := rdR.Value.(paths.ReadOutput)
+		if rd.Mtime.IsZero() {
+			return core.Fail(core.E("documents.Delete", "documents.delete.not_found", nil))
+		}
+		if rd.BodyHash != input.IfMatchHash {
+			return core.Fail(core.E("documents.Delete", "documents.delete.conflict", nil))
+		}
+		before = parseDoc(input.Slug, rd.Body, rd.Mtime, int64(len(rd.Body)))
+		if r := core.Remove(fpath); !r.OK {
+			return core.Fail(core.E("documents.Delete", "remove failed: "+r.Error(), nil))
+		}
+		return core.Ok(nil)
+	})
+	if !lockR.OK {
+		return lockR
 	}
 
 	now := core.Now()

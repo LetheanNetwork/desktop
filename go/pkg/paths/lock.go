@@ -121,9 +121,14 @@ func WithFileLock(path string, timeout core.Duration, fn func() core.Result) cor
 	deadline := core.Now().Add(timeout)
 	step := 0
 	for {
-		if acquired := tryAcquireSentinel(sentinel); acquired {
+		acquired, fatal := tryAcquireSentinel(sentinel)
+		if acquired {
 			defer releaseSentinel(sentinel)
 			return fn()
+		}
+		if fatal != nil {
+			return core.Fail(core.E(CodeLockOpen,
+				"sentinel open failed: "+fatal.Error(), fatal))
 		}
 		// Contended — check whether the holder is alive.
 		if maybeReclaim(sentinel) {
@@ -145,41 +150,52 @@ func WithFileLock(path string, timeout core.Duration, fn func() core.Result) cor
 }
 
 // tryAcquireSentinel attempts to create the sentinel file with
-// O_CREATE|O_EXCL. Returns true when the kernel reports the file was
-// newly created (we hold the lock); false when the file already
-// existed (some other holder has the lock).
+// O_CREATE|O_EXCL. Returns (acquired, fatalErr):
+//
+//   - (true, nil)   — we hold the lock.
+//   - (false, nil)  — sentinel already exists; contention; retry.
+//   - (false, err)  — fatal I/O error (parent missing, permission,
+//                     read-only filesystem). Outer loop MUST surface
+//                     this rather than spin to timeout.
 //
 // On success the file body is "<pid>\n<fork-time-unix-ns>\n" so the
 // reclaim path can validate the holder's identity.
-func tryAcquireSentinel(sentinel string) bool {
+func tryAcquireSentinel(sentinel string) (bool, error) {
 	openR := core.OpenFile(sentinel,
 		core.O_CREATE|core.O_EXCL|core.O_WRONLY, 0o600)
 	if !openR.OK {
-		// Either the file already exists (contention) or an actual
-		// IO error happened. We treat both as "could not acquire"
-		// and let the outer loop's reclaim + timeout handle it.
-		return false
+		err := unwrapErr(openR)
+		if core.IsExist(err) {
+			// Contention — sentinel already held.
+			return false, nil
+		}
+		// Anything else (ENOENT on parent dir, EACCES, EROFS) is a
+		// fatal acquire-failure; surface it.
+		if err == nil {
+			err = core.NewCode(CodeLockOpen, "OpenFile failed without error")
+		}
+		return false, err
 	}
 	f, _ := openR.Value.(*core.OSFile)
 	if f == nil {
-		return false
+		return false, core.NewCode(CodeLockOpen, "OpenFile returned nil file")
 	}
 	body := sentinelBody(core.Getpid(), processForkTimeUnixNanos(core.Getpid()))
 	if _, err := f.Write(body); err != nil {
 		_ = f.Close()
 		_ = core.Remove(sentinel)
-		return false
+		return false, err
 	}
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
 		_ = core.Remove(sentinel)
-		return false
+		return false, err
 	}
 	if err := f.Close(); err != nil {
 		_ = core.Remove(sentinel)
-		return false
+		return false, err
 	}
-	return true
+	return true, nil
 }
 
 // releaseSentinel unlinks the sentinel file so subsequent acquisitions

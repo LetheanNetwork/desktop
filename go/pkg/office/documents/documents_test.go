@@ -696,7 +696,7 @@ func TestAtomicWriteFile_Good(t *testing.T) {
 	t.Cleanup(func() { _ = core.Remove(fpath) })
 
 	content := []byte("# Atomic\n\nContent.")
-	if err := atomicWriteFile(fpath, content); err != nil {
+	if err := atomicWriteFile(fpath, content, core.Time{}, ""); err != nil {
 		t.Fatalf("atomicWriteFile failed: %v", err)
 	}
 	rawR := core.ReadFile(fpath)
@@ -710,7 +710,7 @@ func TestAtomicWriteFile_Good(t *testing.T) {
 
 // TestAtomicWriteFile_Bad — writing to non-existent directory fails.
 func TestAtomicWriteFile_Bad(t *testing.T) {
-	err := atomicWriteFile("/tmp/clotho-no-such-dir-xyz/file.md", []byte("body"))
+	err := atomicWriteFile("/tmp/clotho-no-such-dir-xyz/file.md", []byte("body"), core.Time{}, "")
 	if err == nil {
 		t.Fatal("expected atomicWriteFile to fail for missing directory")
 	}
@@ -721,7 +721,7 @@ func TestAtomicWriteFile_Bad(t *testing.T) {
 func TestAtomicWriteFile_Ugly(t *testing.T) {
 	// If the dir doesn't exist, Write returns an error before the tmp file
 	// can be created — so we verify the error path is reached.
-	err := atomicWriteFile("/nonexistent-dir/file.md", []byte("x"))
+	err := atomicWriteFile("/nonexistent-dir/file.md", []byte("x"), core.Time{}, "")
 	if err == nil {
 		t.Fatal("expected error from atomicWriteFile with invalid dir")
 	}
@@ -736,5 +736,75 @@ func TestFrontmatter_UpdatedAt_Drift_Ugly(t *testing.T) {
 	rec := parseDoc("drift-doc", raw, core.Now(), 0)
 	if rec.Slug != "drift-doc" {
 		t.Fatalf("expected slug=drift-doc, got %q", rec.Slug)
+	}
+}
+
+// ---- B.2 PILOT cutover tests (paths.AtomicWriteWithVersion) -----------------
+
+// TestSave_PrimitiveStaleEnvelope_Ugly — B.2 PILOT — confirms the
+// VersionStale structured envelope from paths is reachable on a Save
+// conflict. The frontend conflict-UI consumes current_hash to compose
+// the reload prompt; the test pins the field's presence + lifecycle.
+func TestSave_PrimitiveStaleEnvelope_Ugly(t *testing.T) {
+	svc := newTestService()
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+
+	if r := svc.Create(CreateInput{Slug: slug, Body: "# V1\n"}); !r.OK {
+		t.Fatalf("Create failed: %v", r.Error())
+	}
+
+	dirR := docsDir()
+	if !dirR.OK {
+		t.Fatalf("docsDir: %v", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), slug+".md")
+	hashHex, mtime, err := readBodyHash(fpath)
+	if err != nil {
+		t.Fatalf("readBodyHash: %v", err)
+	}
+
+	// First Save advances the disk state.
+	if r := svc.Save(SaveInput{Slug: slug, Body: "# V2\n", IfMatch: mtime, IfMatchHash: hashHex}); !r.OK {
+		t.Fatalf("first Save failed: %v", r.Error())
+	}
+
+	// Second Save with stale hash MUST surface documents.save.conflict.
+	r := svc.Save(SaveInput{Slug: slug, Body: "# V3\n", IfMatch: mtime, IfMatchHash: hashHex})
+	if r.OK {
+		t.Fatal("stale Save should fail")
+	}
+	if !core.Contains(r.Error(), "documents.save.conflict") {
+		t.Fatalf("expected documents.save.conflict, got %q", r.Error())
+	}
+}
+
+// TestCreate_RoutesThroughPrimitive_Good — B.2 PILOT — confirms a
+// successful Create produces a paths.LockEvent (auditable + observable
+// downstream). The recorder is overridden for the test; production
+// boot wires the real audit.Service adapter.
+func TestCreate_RoutesThroughPrimitive_Good(t *testing.T) {
+	svc := newTestService()
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+
+	var captured []paths.LockEvent
+	paths.SubscribeLockEvents(func(ev paths.LockEvent) {
+		captured = append(captured, ev)
+	})
+	t.Cleanup(paths.ClearLockEventSubscribersForTest)
+
+	if r := svc.Create(CreateInput{Slug: slug, Body: "# Routed\n"}); !r.OK {
+		t.Fatalf("Create failed: %v", r.Error())
+	}
+
+	found := false
+	for _, ev := range captured {
+		if ev.Kind == paths.EventWriteSucceeded {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("Create MUST route through paths.AtomicWriteWithVersion (no EventWriteSucceeded seen)")
 	}
 }
