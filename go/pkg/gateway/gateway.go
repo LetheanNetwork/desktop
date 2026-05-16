@@ -27,8 +27,11 @@
 // Localhost session encryption is a v2 forward-arc; for v1 we derive a
 // session key from a go-store secret read at gateway boot (per spec
 // "v1: derive from a go-store secret"). LetheanAccount-derived session
-// keys land when the account substrate is wired (see plans/code/lthn/
-// desktop/RFC.first-release.md §account).
+// keys are TARGETED for the account substrate Stage B work (Mantis
+// #1440) — TODAY the v1 session key is the only thing in play; the
+// account substrate is not yet wired to derive anything. Updating
+// the gateway side will be mechanical once the keys-pkg PGP unlock
+// lands.
 package gateway
 
 import (
@@ -44,10 +47,31 @@ import (
 	"dappco.re/lthn/desktop/pkg/opencode"
 )
 
-// Bundle-ID identifies which installed bundle is calling. Required on
-// every gateway request; an absent header returns 401 before any
-// permission check runs.
+// headerBundleID is the client-supplied bundle identity claim. Kept for
+// backward compatibility but treated as untrusted when X-Bundle-Token is
+// present (Cerberus Mantis #1443). When the token resolves, the resolved
+// code supersedes whatever the client asserted in this header.
 const headerBundleID = "Bundle-ID"
+
+// headerBundleToken carries the per-launch secret issued by the plugin
+// host at Start time (Cerberus Mantis #1443). Plugins pass this on every
+// outbound gateway request. The gateway resolves it to the authoritative
+// bundle code via BundleCodeResolver — so a plugin cannot spoof another
+// plugin's identity by forging the Bundle-ID header.
+const headerBundleToken = "X-Bundle-Token"
+
+// BundleCodeResolver is the narrow interface the gateway uses to resolve
+// a per-launch bundle secret to the plugin code that was issued that
+// secret. Implemented by pkg/plugin.Service; held as an interface here
+// to avoid a circular import (gateway → plugin → marketplace → gateway).
+//
+// Usage example (in tests):
+//
+//	svc := gateway.NewService(c)
+//	gateway.SetBundleCodeResolver(svc, myResolver)
+type BundleCodeResolver interface {
+	LookupBundleCode(secret string) (string, bool)
+}
 
 // maxGatewayBodyBytes is the upper bound on a single incoming plugin
 // request body. Cerberus Mantis #1435 — without this, a plugin
@@ -90,6 +114,12 @@ type Handler func(c *core.Core, bundleID string, ctx *gin.Context) core.Result
 type Service struct {
 	core     *core.Core
 	handlers map[string]Handler
+	// resolver is the optional per-bundle token verifier (Cerberus #1443).
+	// When non-nil, Handle reads X-Bundle-Token and resolves it to the
+	// authoritative bundle code. Nil until SetBundleCodeResolver is called;
+	// tests and non-plugin callers run without it (header claim accepted
+	// as-is for those paths).
+	resolver BundleCodeResolver
 }
 
 // NewService constructs the gateway against a Core container. Wired
@@ -105,6 +135,24 @@ func NewService(c *core.Core) *Service {
 	}
 	registerBuiltinScopes(s)
 	return s
+}
+
+// SetBundleCodeResolver wires the per-bundle token verifier into a
+// running Service (Cerberus Mantis #1443). Called at boot after both
+// the "gateway" and "plugin" services are registered on Core. Once set,
+// Handle uses the resolver to derive the authoritative bundle code from
+// X-Bundle-Token rather than trusting the caller-asserted Bundle-ID.
+//
+// Usage example:
+//
+//	if pluginSvc, ok := core.ServiceFor[*plugin.Service](c, "plugin"); ok {
+//	    gateway.SetBundleCodeResolver(gatewaySvc, pluginSvc)
+//	}
+func SetBundleCodeResolver(s *Service, r BundleCodeResolver) {
+	if s == nil {
+		return
+	}
+	s.resolver = r
 }
 
 // Register constructs the gateway service for Core registration.
@@ -213,13 +261,19 @@ func (g *gatewayRoutes) RegisterRoutes(rg *gin.RouterGroup) {
 }
 
 // Handle is the gin.HandlerFunc dispatch. Order:
-//   1. Read Bundle-ID header — 401 if missing
-//   2. Look up scope handler — 501 if no handler registered
-//   3. CheckPermission against the bundle's declared manifest scope —
-//      403 if not declared
-//   4. Dispatch to the registered Handler
-//   5. Serialise Result.Value as JSON on success; typed error envelope
-//      on Fail.
+//  1. Body-cap (Cerberus #1435) — MaxBytesReader before any read.
+//  2. Resolve authoritative bundle identity (Cerberus #1443):
+//     a. If X-Bundle-Token present and a BundleCodeResolver is wired,
+//        resolve token → code. Spoofed Bundle-ID header is ignored.
+//     b. If no token (backward compat / non-plugin callers), fall back
+//        to the Bundle-ID header claim.
+//     c. 401 when neither produces a non-empty code.
+//  3. Look up scope handler — 501 if no handler registered.
+//  4. CheckPermission against the bundle's declared manifest scope —
+//     403 if not declared.
+//  5. Dispatch to the registered Handler.
+//  6. Serialise Result.Value as JSON on success; typed error envelope
+//     on Fail.
 //
 // Schema validation lives inside each scope's Handler so per-scope
 // shapes don't bleed up here; the gateway just routes.
@@ -231,10 +285,35 @@ func (s *Service) Handle(ctx *gin.Context) {
 	// at the boundary, regardless of which handler is dispatched.
 	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxGatewayBodyBytes)
 
-	bundleID := ctx.GetHeader(headerBundleID)
+	// Cerberus #1443 — derive authoritative bundle identity.
+	// Priority: X-Bundle-Token (verified) > Bundle-ID (claimed).
+	// When a resolver is wired and the token header is present, the
+	// resolved code is the truth; the Bundle-ID header is ignored so
+	// Plugin A cannot impersonate Plugin B by forging Bundle-ID: B.
+	bundleID := ""
+	if s.resolver != nil {
+		if token := ctx.GetHeader(headerBundleToken); token != "" {
+			code, ok := s.resolver.LookupBundleCode(token)
+			if !ok || code == "" {
+				writeError(ctx, core.StatusUnauthorized, "invalid-bundle-token",
+					"X-Bundle-Token is unknown or expired")
+				return
+			}
+			bundleID = code
+			// Strip the token from the forwarded request so scope
+			// handlers never see the raw secret.
+			ctx.Request.Header.Del(headerBundleToken)
+		}
+	}
+	// Fall back to the caller-asserted Bundle-ID when no token was
+	// resolved (backward compat: non-plugin callers such as the
+	// WebView or integration tests supply only the Bundle-ID header).
+	if bundleID == "" {
+		bundleID = ctx.GetHeader(headerBundleID)
+	}
 	if bundleID == "" {
 		writeError(ctx, core.StatusUnauthorized, "missing-bundle-id",
-			"Bundle-ID header is required")
+			"Bundle-ID header is required (or X-Bundle-Token for verified plugin calls)")
 		return
 	}
 	scope := ctx.Param("scope")

@@ -35,9 +35,10 @@ type Options struct{}
 // group registered at boot in pkg/desktop.
 type Service struct {
 	*core.ServiceRuntime[Options]
-	mu    core.RWMutex
-	state map[string]*pluginState // keyed by code
-	proxy *ProxyGroup
+	mu     core.RWMutex
+	state  map[string]*pluginState // keyed by plugin code
+	proxy  *ProxyGroup
+	tokens map[string]string // per-bundle secret → plugin code (Cerberus #1443)
 }
 
 // NewService returns the canonical Core service factory.
@@ -55,6 +56,7 @@ func NewService(opts Options) func(*core.Core) core.Result {
 			ServiceRuntime: core.NewServiceRuntime(c, opts),
 			state:          map[string]*pluginState{},
 			proxy:          NewProxyGroup(),
+			tokens:         map[string]string{},
 		}
 		return core.Ok(svc)
 	}
@@ -143,14 +145,18 @@ type InstalledPlugin struct {
 // plugin. The exported Status struct is computed from this on
 // demand so the UI sees a consistent shape.
 type pluginState struct {
-	manifest  Manifest
-	proc      *processHandle // nil when stopped; see runtime.go
-	state     string
-	port      int
-	pid       int
-	startedAt core.Time
-	stoppedAt core.Time
-	lastError string
+	manifest     Manifest
+	proc         *processHandle // nil when stopped; see runtime.go
+	state        string
+	port         int
+	pid          int
+	startedAt    core.Time
+	stoppedAt    core.Time
+	lastError    string
+	// bundleSecret is the per-launch gateway credential (Cerberus #1443).
+	// Generated in startPlugin, passed to the binary via --bundle-token,
+	// revoked in stopPlugin. Empty for plugins started before the fix.
+	bundleSecret string
 	// crashAt records timestamps of recent unexpected exits.
 	// The supervisor (supervisor.go) trims this to a rolling
 	// window and uses len() to decide restart-vs-give-up. v1
@@ -204,4 +210,44 @@ func pluginDir(code string) core.Result {
 	}
 	root, _ := rootR.Value.(string)
 	return core.Ok(core.PathJoin(root, code))
+}
+
+// ─── Per-bundle token registry (Cerberus Mantis #1443) ─────────────────
+//
+// Each running plugin is issued a unique secret at Start time and
+// passes it as the X-Bundle-Token header on outgoing gateway requests.
+// pkg/gateway resolves the secret here to derive the authoritative
+// bundle code — ignoring the caller-asserted Bundle-ID header — so a
+// plugin cannot claim another bundle's identity just by forging a header.
+
+// registerBundleToken stores secret → code. Caller holds s.mu.
+func (s *Service) registerBundleToken(code, secret string) {
+	s.tokens[secret] = code
+}
+
+// revokeBundleToken removes a secret from the registry. Caller holds
+// s.mu. Idempotent — missing entries are silently skipped.
+func (s *Service) revokeBundleToken(secret string) {
+	delete(s.tokens, secret)
+}
+
+// LookupBundleCode resolves a per-bundle secret to the plugin code
+// that was issued that secret at Start time. Returns ("", false) when
+// the secret is unknown or empty.
+//
+// The gateway calls this via the BundleCodeResolver interface in
+// pkg/gateway — no direct import of pkg/plugin from pkg/gateway.
+//
+// Usage example:
+//
+//	code, ok := pluginSvc.LookupBundleCode(req.Header.Get("X-Bundle-Token"))
+//	if ok { /* code is the authoritative bundle identity */ }
+func (s *Service) LookupBundleCode(secret string) (string, bool) {
+	if secret == "" {
+		return "", false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	code, ok := s.tokens[secret]
+	return code, ok
 }

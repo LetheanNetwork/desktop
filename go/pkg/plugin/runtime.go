@@ -77,6 +77,23 @@ func waitForHealth(ctx core.Context, port int, path string, timeout core.Duratio
 		"plugin did not become healthy within "+timeout.String(), nil))
 }
 
+// genBundleToken generates a cryptographically random per-bundle
+// secret for one plugin launch. The secret is passed to the plugin
+// binary via --bundle-token=<hex> and stored in the token registry
+// so pkg/gateway can verify inbound X-Bundle-Token headers without
+// trusting the caller-asserted Bundle-ID.
+//
+// 32 random bytes → 64-char hex string (256 bits). Same entropy
+// floor as apikey.GenerateOrLoad.
+//
+// Usage example:
+//
+//	r := genBundleToken()
+//	if r.OK { secret := r.Value.(string) }
+func genBundleToken() core.Result {
+	return core.RandomString(32)
+}
+
 // startPlugin reads the on-disk manifest for `code`, picks a
 // free port, spawns the plugin with the canonical CLI flags,
 // waits for health, then registers the reverse-proxy mount.
@@ -101,11 +118,23 @@ func (s *Service) startPlugin(ctx core.Context, code, token string) core.Result 
 		return portR
 	}
 	port, _ := portR.Value.(int)
+	// Cerberus Mantis #1443 — per-bundle gateway credential. Plugins
+	// pass this secret as X-Bundle-Token on gateway requests; the
+	// gateway resolves it to the plugin code here so it never trusts
+	// the caller-asserted Bundle-ID header.
+	bundleTokenR := genBundleToken()
+	if !bundleTokenR.OK {
+		return core.Fail(core.E(startPluginOp, "generate bundle token: "+bundleTokenR.Error(), nil))
+	}
+	bundleSecret, _ := bundleTokenR.Value.(string)
+	s.registerBundleToken(code, bundleSecret)
+
 	binPath := core.PathJoin(dir, m.Binary)
 	args := []string{
 		"--namespace=" + m.Namespace,
 		"--port=" + core.Itoa(port),
 		"--token=" + token,
+		"--bundle-token=" + bundleSecret,
 		"--data=" + core.PathJoin(dir, "data"),
 	}
 	opts := process.RunOptions{
@@ -115,19 +144,24 @@ func (s *Service) startPlugin(ctx core.Context, code, token string) core.Result 
 	}
 	spawn := ps.StartWithOptions(ctx, opts)
 	if !spawn.OK {
+		// Registration must be rolled back on spawn failure so a
+		// later Start with a new secret doesn't leave a ghost entry.
+		s.revokeBundleToken(bundleSecret)
 		return core.Fail(core.E(startPluginOp, "spawn: "+spawn.Error(), nil))
 	}
 	proc, ok := spawn.Value.(*process.Process)
 	if !ok || proc == nil {
+		s.revokeBundleToken(bundleSecret)
 		return core.Fail(core.E(startPluginOp, "process service returned non-process", nil))
 	}
 	// Mark starting so List/Status reflects intent immediately.
 	ps2 := &pluginState{
-		manifest:  m,
-		state:     "starting",
-		port:      port,
-		pid:       proc.Info().PID,
-		startedAt: core.Now(),
+		manifest:    m,
+		state:       "starting",
+		port:        port,
+		pid:         proc.Info().PID,
+		startedAt:   core.Now(),
+		bundleSecret: bundleSecret,
 		proc: &processHandle{
 			proc:   proc,
 			target: "http://127.0.0.1:" + core.Itoa(port),
@@ -143,6 +177,9 @@ func (s *Service) startPlugin(ctx core.Context, code, token string) core.Result 
 	}
 	if r := waitForHealth(ctx, port, m.Health.Path, timeout); !r.OK {
 		// Kill the unhealthy process; surface the error to the caller.
+		// Revoke the bundle token — a dead plugin must not leave a
+		// valid gateway credential in the registry (Cerberus #1443).
+		s.revokeBundleToken(bundleSecret)
 		if kill := ps.Kill(proc.ID); !kill.OK {
 			ps2.lastError = core.Concat(r.Error(), "; kill: ", kill.Error())
 			return r
@@ -176,6 +213,12 @@ func (s *Service) stopPlugin(code string) core.Result {
 		if r := ps.Kill(ps2.proc.proc.ID); !r.OK {
 			return r
 		}
+	}
+	// Cerberus #1443 — revoke the per-bundle gateway credential so
+	// a stopped plugin's secret can no longer authenticate gateway
+	// calls even if the secret leaked before shutdown.
+	if ps2.bundleSecret != "" {
+		s.revokeBundleToken(ps2.bundleSecret)
 	}
 	s.proxy.Delete(code)
 	ps2.state = "stopped"
