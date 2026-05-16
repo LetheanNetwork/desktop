@@ -390,6 +390,24 @@ func newAppCore() *core.Core {
 		// tenant degenerate but still domain-separated).
 		paths.SetAuditRecorder(&pathsAuditAdapter{svc: auditSvc})
 		paths.SetAuditSecretProvider(serverkeySvc.AuditHMACSecret)
+
+		// Mantis #1533 — flush any LockEvents that were dropped during
+		// the pre-secret cold-boot window (between paths-package init
+		// and the SetAuditSecretProvider line above). emitLockEvent
+		// drops + increments auditDegradedCount when the secret is
+		// unavailable rather than emit a path_hash="" event that would
+		// leak "something happened" without the per-account domain
+		// separation. The single summary event lands as soon as the
+		// secret becomes available — which is here, immediately after
+		// SetAuditSecretProvider, because serverkey.Bootstrap above
+		// already landed ~/Lethean/wallets/.seed so AuditHMACSecret()
+		// returns 32 bytes at this point. Calling here (rather than
+		// post first-user-unlock) is safer per the H#13 brief: the
+		// secret is already available; no need to wait.
+		if n := paths.FlushDegradedCount(); n > 0 {
+			core.Print(core.Stdout(),
+				"lthn: paths.FlushDegradedCount summary emitted, count=%d\n", n)
+		}
 	}
 
 	// orm bootstrap — lib not service. Register + mount the DuckDB

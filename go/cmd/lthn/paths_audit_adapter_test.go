@@ -144,6 +144,102 @@ func TestPathsAuditAdapter_RecordPathsEvent_Good_SyncPathLandsInDayFile(t *testi
 		"day-file event must carry outcome=ok; got: "+contents)
 }
 
+// TestFlushDegradedCount_CalledAtBootWire_Good — Mantis #1533.
+// The boot wire in app.go invokes paths.FlushDegradedCount() right
+// after SetAuditSecretProvider so any LockEvents dropped during the
+// pre-secret window are summarised into a single audit event rather
+// than left stranded in the auditDegradedCount counter. This test
+// reproduces that wiring sequence in miniature: pre-secret emission
+// drops + increments the counter; flushing with the secret + adapter
+// installed drains the counter to zero and lands the summary event
+// in the audit day-file.
+func TestFlushDegradedCount_CalledAtBootWire_Good(t *testing.T) {
+	homeForAdapter(t)
+
+	// 1. Pre-secret window — no SetAuditSecretProvider yet. An
+	// AtomicWriteWithVersion under wallets/ (AuditModeSync) emits a
+	// LockEvent that the emit-site drops because currentAuditSecret()
+	// is empty; auditDegradedCount increments. Capture before/after
+	// so the test stays robust to other tests in the same process
+	// having left a non-zero baseline on the package-global counter.
+	// (Provider cleanup in sibling tests means we should see zero
+	// at entry, but the delta assertion doesn't depend on that.)
+	before := paths.AuditDegradedCount()
+	walletDir := paths.WalletsDir().Value.(string)
+	fp := core.PathJoin(walletDir, "pre-secret.key")
+	wr := paths.AtomicWriteWithVersion(fp, paths.WriteInput{Body: []byte("v1")})
+	core.AssertTrue(t, wr.OK, "AtomicWriteWithVersion must succeed even when audit is degraded")
+	pending := paths.AuditDegradedCount()
+	core.AssertGreater(t, pending, before,
+		"pre-secret write must increment auditDegradedCount")
+
+	// 2. Boot wire — install audit Service, recorder adapter, secret
+	// provider. Mirrors the app.go sequence at lines 366-392.
+	auditSvc := audit.New(nil, audit.Options{AuditSecret: []byte("test-secret-32-bytes-padding-xx!")})
+	t.Cleanup(func() { _ = auditSvc.Close() })
+	audit.SetDefault(auditSvc)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	paths.SetAuditRecorder(&pathsAuditAdapter{svc: auditSvc})
+	t.Cleanup(func() { paths.SetAuditRecorder(nil) })
+	paths.SetAuditSecretProvider(func() []byte { return []byte("test-secret-32-bytes-padding-xx!") })
+	t.Cleanup(func() { paths.SetAuditSecretProvider(nil) })
+
+	// 3. Flush — the boot-wire call. Returns the count it drained.
+	flushed := paths.FlushDegradedCount()
+	core.AssertEqual(t, pending, flushed,
+		"FlushDegradedCount must drain the pre-secret pending count")
+	core.AssertEqual(t, int64(0), paths.AuditDegradedCount(),
+		"auditDegradedCount must be zero after a successful flush")
+
+	// 4. Verify the summary event landed in the audit day-file.
+	// FlushDegradedCount routes through RecordPathsEvent → RecordSync
+	// (AuditModeSync) so no auditSvc.Close flush is needed.
+	auditDir := core.PathJoin(paths.Root().Value.(string), "audit")
+	entriesR := core.ReadDir(core.DirFS(auditDir), ".")
+	core.AssertTrue(t, entriesR.OK, "audit dir must be readable post-flush")
+	entries := entriesR.Value.([]core.FsDirEntry)
+	core.AssertGreater(t, len(entries), 0, "audit day-file must exist post-flush")
+
+	var dayFile string
+	for _, e := range entries {
+		if !e.IsDir() {
+			dayFile = core.PathJoin(auditDir, e.Name())
+			break
+		}
+	}
+	body := core.ReadFile(dayFile)
+	core.AssertTrue(t, body.OK, "day-file must be readable")
+	contents := string(body.Value.([]byte))
+	core.AssertTrue(t, core.Contains(contents, paths.EventAuditDegradedSummary),
+		"day-file must carry the paths.audit.degraded_summary event-name; got: "+contents)
+}
+
+// TestFlushDegradedCount_NoOpWhenCounterZero_Good — calling the
+// boot wire on a clean process (no dropped events) is a no-op. The
+// app.go wire's `if n > 0 { core.Print(...) }` guard relies on the
+// returned count being zero in this case so cold boots stay quiet.
+func TestFlushDegradedCount_NoOpWhenCounterZero_Good(t *testing.T) {
+	homeForAdapter(t)
+
+	auditSvc := audit.New(nil, audit.Options{AuditSecret: []byte("test-secret-32-bytes-padding-xx!")})
+	t.Cleanup(func() { _ = auditSvc.Close() })
+	audit.SetDefault(auditSvc)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	paths.SetAuditRecorder(&pathsAuditAdapter{svc: auditSvc})
+	t.Cleanup(func() { paths.SetAuditRecorder(nil) })
+	paths.SetAuditSecretProvider(func() []byte { return []byte("test-secret-32-bytes-padding-xx!") })
+	t.Cleanup(func() { paths.SetAuditSecretProvider(nil) })
+
+	// Counter is zero — no pre-secret drops happened in this test.
+	core.AssertEqual(t, int64(0), paths.AuditDegradedCount(),
+		"counter must start at zero for the no-op assertion")
+	flushed := paths.FlushDegradedCount()
+	core.AssertEqual(t, int64(0), flushed,
+		"FlushDegradedCount must return 0 when there's nothing to flush")
+}
+
 // TestPathsAuditAdapter_PathsEventOutcome_Ugly_KindToOutcomeMapping
 // pins the closed-set Kind→Outcome map so a future event-schema
 // addition fails this test loud rather than silently rejecting at
