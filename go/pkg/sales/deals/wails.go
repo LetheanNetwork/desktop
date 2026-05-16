@@ -9,6 +9,7 @@ package deals
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // List returns all deals, optionally filtered by stage and/or owner.
@@ -68,8 +69,8 @@ func (s *Service) List(input ListInput) core.Result {
 //	r := svc.Get(deals.GetInput{ID: "202605-DEAL-001"})
 //	if r.OK { d := r.Value.(deals.Deal) }
 func (s *Service) Get(input GetInput) core.Result {
-	if input.ID == "" {
-		return core.Fail(core.E("deals.Get", "id is required", nil))
+	if err := paths.IsValidID(input.ID); err != nil {
+		return core.Fail(err)
 	}
 	rec, err := loadOne(input.ID)
 	if err != nil {
@@ -140,8 +141,8 @@ func (s *Service) Create(input CreateInput) core.Result {
 //	    ID: "202605-DEAL-001", Stage: "propose",
 //	})
 func (s *Service) UpdateStage(input UpdateStageInput) core.Result {
-	if input.ID == "" {
-		return core.Fail(core.E("deals.UpdateStage", "id is required", nil))
+	if err := paths.IsValidID(input.ID); err != nil {
+		return core.Fail(err)
 	}
 	if !isValidStage(input.Stage) {
 		return core.Fail(core.E("deals.UpdateStage", "unknown stage: "+input.Stage, nil))
@@ -179,8 +180,8 @@ func (s *Service) UpdateStage(input UpdateStageInput) core.Result {
 //	    T: "30-min call · privacy posture, no blockers.",
 //	})
 func (s *Service) AddActivity(input AddActivityInput) core.Result {
-	if input.DealID == "" {
-		return core.Fail(core.E("deals.AddActivity", "dealId is required", nil))
+	if err := paths.IsValidID(input.DealID); err != nil {
+		return core.Fail(err)
 	}
 	validKinds := map[string]bool{"call": true, "email": true, "meet": true}
 	if !validKinds[input.K] {

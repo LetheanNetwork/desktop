@@ -54,13 +54,16 @@ func Register(c *core.Core) core.Result {
 func (s *Service) ServiceName() string { return "Contacts" }
 
 // contactsDir resolves ~/Lethean/sales/contacts/ and creates it if missing.
+// Mode 0o700 (Cerberus #1487 PR-1): contact records carry PII (names,
+// emails, role context, notes) that the auth-gate footer promises stays
+// on this Mac. World-readable mode would make that promise false.
 func contactsDir() core.Result {
 	root := paths.Root()
 	if !root.OK {
 		return root
 	}
 	dir := core.PathJoin(root.Value.(string), "sales", "contacts")
-	if r := core.MkdirAll(dir, 0o755); !r.OK {
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)

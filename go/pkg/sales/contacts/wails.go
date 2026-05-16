@@ -9,6 +9,7 @@ package contacts
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // List returns all contacts, optionally filtered by warmth and/or a
@@ -91,8 +92,8 @@ func (s *Service) List(input ListInput) core.Result {
 //	r := svc.Get(contacts.GetInput{ID: "ada-penley"})
 //	if r.OK { detail := r.Value.(contacts.ContactDetail) }
 func (s *Service) Get(input GetInput) core.Result {
-	if input.ID == "" {
-		return core.Fail(core.E("contacts.Get", "id is required", nil))
+	if err := paths.IsValidID(input.ID); err != nil {
+		return core.Fail(err)
 	}
 	dirR := contactsDir()
 	if !dirR.OK {
@@ -129,8 +130,8 @@ func (s *Service) Create(input CreateInput) core.Result {
 	}
 
 	id := slugify(input.Name)
-	if id == "" {
-		return core.Fail(core.E("contacts.Create", "name produced empty slug", nil))
+	if err := paths.IsValidID(id); err != nil {
+		return core.Fail(err)
 	}
 
 	dirR := contactsDir()
@@ -161,7 +162,8 @@ func (s *Service) Create(input CreateInput) core.Result {
 	if err != nil {
 		return core.Fail(core.E("contacts.Create", "marshal", err))
 	}
-	if w := core.WriteFile(fpath, raw, 0o644); !w.OK {
+	// 0o600 (Cerberus #1487 PR-1): PII at rest — owner-only.
+	if w := core.WriteFile(fpath, raw, 0o600); !w.OK {
 		return core.Fail(core.E("contacts.Create", w.Error(), nil))
 	}
 
@@ -179,8 +181,8 @@ func (s *Service) Create(input CreateInput) core.Result {
 //	    ID: "ada-penley", Next: "contract", LastTouch: core.Now(),
 //	})
 func (s *Service) Update(input UpdateInput) core.Result {
-	if input.ID == "" {
-		return core.Fail(core.E("contacts.Update", "id is required", nil))
+	if err := paths.IsValidID(input.ID); err != nil {
+		return core.Fail(err)
 	}
 
 	dirR := contactsDir()
@@ -215,7 +217,8 @@ func (s *Service) Update(input UpdateInput) core.Result {
 	if err != nil {
 		return core.Fail(core.E("contacts.Update", "marshal", err))
 	}
-	if w := core.WriteFile(fpath, updated, 0o644); !w.OK {
+	// 0o600 (Cerberus #1487 PR-1): PII at rest — owner-only.
+	if w := core.WriteFile(fpath, updated, 0o600); !w.OK {
 		return core.Fail(core.E("contacts.Update", w.Error(), nil))
 	}
 

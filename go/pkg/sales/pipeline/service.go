@@ -71,13 +71,15 @@ func stageOrder() []stageSpec {
 }
 
 // dealsDir resolves ~/Lethean/sales/deals/ and creates it if missing.
+// Mode 0o700 (Cerberus #1487 PR-1): same directory as pkg/sales/deals
+// — sensitive commercial data, owner-only at rest.
 func dealsDir() core.Result {
 	root := paths.Root()
 	if !root.OK {
 		return root
 	}
 	dir := core.PathJoin(root.Value.(string), "sales", "deals")
-	if r := core.MkdirAll(dir, 0o755); !r.OK {
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)
@@ -180,7 +182,12 @@ func loadDeals() ([]dealFrontmatter, error) {
 
 // writeDealStage reads the deal file, mutates the stage frontmatter field,
 // and writes it back. Returns the previous stage.
+// Cerberus #1486: id is the load-bearing path component; reject anything
+// that fails IsValidID before joining.
 func writeDealStage(id, toStage string) (fromStage string, err error) {
+	if vErr := paths.IsValidID(id); vErr != nil {
+		return "", vErr
+	}
 	dirR := dealsDir()
 	if !dirR.OK {
 		return "", core.E("pipeline.writeDealStage", dirR.Error(), nil)
@@ -204,7 +211,8 @@ func writeDealStage(id, toStage string) (fromStage string, err error) {
 	// We locate the "stage: " key and replace the value after it.
 	// Pattern: scan for "stage: " prefix on its own line.
 	updated := updateYAMLField(raw.Value.([]byte), "stage", toStage)
-	if w := core.WriteFile(fpath, updated, 0o644); !w.OK {
+	// 0o600 (Cerberus #1487 PR-1): commercial PII — owner-only.
+	if w := core.WriteFile(fpath, updated, 0o600); !w.OK {
 		return fromStage, core.E("pipeline.writeDealStage", w.Error(), nil)
 	}
 	return fromStage, nil

@@ -55,13 +55,16 @@ func Register(c *core.Core) core.Result {
 func (s *Service) ServiceName() string { return "Deals" }
 
 // dealsDir resolves ~/Lethean/sales/deals/ and creates it if missing.
+// Mode 0o700 (Cerberus #1487 PR-1): deal records carry sensitive
+// commercial data (customer names, amounts in pence, stakeholders,
+// activity log) — owner-only at rest.
 func dealsDir() core.Result {
 	root := paths.Root()
 	if !root.OK {
 		return root
 	}
 	dir := core.PathJoin(root.Value.(string), "sales", "deals")
-	if r := core.MkdirAll(dir, 0o755); !r.OK {
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)
@@ -336,7 +339,12 @@ func loadAll() ([]DealRecord, error) {
 }
 
 // loadOne reads and fully parses the deal file for the given ID.
+// Cerberus #1486: id is rejected unless IsValidID — defence in depth
+// even though every wails entry point already gates on input.ID.
 func loadOne(id string) (DealRecord, error) {
+	if err := paths.IsValidID(id); err != nil {
+		return DealRecord{}, err
+	}
 	dirR := dealsDir()
 	if !dirR.OK {
 		return DealRecord{}, core.E("deals.loadOne", dirR.Error(), nil)
@@ -350,13 +358,19 @@ func loadOne(id string) (DealRecord, error) {
 }
 
 // writeRecord serialises and writes a DealRecord to disk.
+// Cerberus #1486: the record ID lands directly in the filename so
+// IsValidID guards it even though Create generates the ID via Sprintf.
 func writeRecord(r DealRecord, dir string) error {
+	if err := paths.IsValidID(r.ID); err != nil {
+		return err
+	}
 	raw, err := marshalRecord(r)
 	if err != nil {
 		return err
 	}
 	target := core.PathJoin(dir, r.ID+".md")
-	if w := core.WriteFile(target, raw, 0o644); !w.OK {
+	// 0o600 (Cerberus #1487 PR-1): commercial PII — owner-only.
+	if w := core.WriteFile(target, raw, 0o600); !w.OK {
 		return core.E("deals.writeRecord", w.Error(), nil)
 	}
 	return nil

@@ -9,6 +9,7 @@ package pipeline
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // List returns the pipeline grouped into PipelineColumn values, one per
@@ -83,8 +84,8 @@ func (s *Service) List(input ListInput) core.Result {
 //	r := svc.MoveDeal(pipeline.MoveInput{DealID: "202605-DEAL-001", ToStage: "propose"})
 //	if r.OK { out := r.Value.(pipeline.ListOutput) }
 func (s *Service) MoveDeal(input MoveInput) core.Result {
-	if input.DealID == "" {
-		return core.Fail(core.E("pipeline.MoveDeal", "dealId is required", nil))
+	if err := paths.IsValidID(input.DealID); err != nil {
+		return core.Fail(err)
 	}
 
 	// Validate target stage.

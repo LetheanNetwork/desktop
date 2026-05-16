@@ -51,13 +51,15 @@ func Register(c *core.Core) core.Result {
 func (s *Service) ServiceName() string { return "Forecast" }
 
 // dealsDir resolves ~/Lethean/sales/deals/ and creates it if missing.
+// Mode 0o700 (Cerberus #1487 PR-1): mirrors pkg/sales/deals — same
+// directory, same sensitive contents, same permission posture.
 func dealsDir() core.Result {
 	root := paths.Root()
 	if !root.OK {
 		return root
 	}
 	dir := core.PathJoin(root.Value.(string), "sales", "deals")
-	if r := core.MkdirAll(dir, 0o755); !r.OK {
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)
