@@ -9,6 +9,7 @@ package runbooks
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // List returns all runbooks, optionally filtered by health or area.
@@ -78,6 +79,19 @@ func (s *Service) Get(input GetInput) core.Result {
 	if input.ID == "" && input.Slug == "" {
 		return core.Fail(core.E("runbooks.Get", "id or slug is required", nil))
 	}
+	// Cerberus #1486: id + slug are matched against in-memory records
+	// today but the slug also lands in filenames via writeRecord — gate
+	// any non-empty value through IsValidID before it can propagate.
+	if input.ID != "" {
+		if err := paths.IsValidID(input.ID); err != nil {
+			return core.Fail(err)
+		}
+	}
+	if input.Slug != "" {
+		if err := paths.IsValidID(input.Slug); err != nil {
+			return core.Fail(err)
+		}
+	}
 	rec, _, err := loadOne(input.ID, input.Slug)
 	if err != nil {
 		label := input.ID
@@ -141,8 +155,8 @@ func (s *Service) Search(input SearchInput) core.Result {
 //	r := svc.MarkRehearsed(runbooks.MarkInput{ID: "R-05"})
 //	if r.OK { entry := r.Value.(runbooks.RunbookEntry) }
 func (s *Service) MarkRehearsed(input MarkInput) core.Result {
-	if input.ID == "" {
-		return core.Fail(core.E("runbooks.MarkRehearsed", "id is required", nil))
+	if err := paths.IsValidID(input.ID); err != nil {
+		return core.Fail(err)
 	}
 	rec, dirPath, err := loadOne(input.ID, "")
 	if err != nil {

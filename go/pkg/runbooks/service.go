@@ -75,13 +75,15 @@ func (s *Service) OnStart() core.Result {
 }
 
 // runbooksDir resolves ~/Lethean/runbooks/ and creates it if missing.
+// Mode 0o700 (Cerberus #1487 PR-1): runbooks contain operational
+// secrets (recovery procedures, credential-rotation steps) — owner-only.
 func runbooksDir() core.Result {
 	root := paths.Root()
 	if !root.OK {
 		return root
 	}
 	dir := core.PathJoin(root.Value.(string), "runbooks")
-	if r := core.MkdirAll(dir, 0o755); !r.OK {
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)
@@ -354,13 +356,19 @@ func loadOne(id, slug string) (RunbookRecord, string, error) {
 }
 
 // writeRecord serialises a RunbookRecord back to disk.
+// Cerberus #1486: slug lands directly in the filename; validate before
+// the join even though loadOne paths route through it.
+// Cerberus #1487 PR-1: 0o600 — owner-only at rest.
 func writeRecord(r RunbookRecord, dirPath string) error {
+	if err := paths.IsValidID(r.Slug); err != nil {
+		return err
+	}
 	raw, err := marshalRecord(r)
 	if err != nil {
 		return err
 	}
 	target := core.PathJoin(dirPath, r.Slug+".md")
-	if w := core.WriteFile(target, raw, 0o644); !w.OK {
+	if w := core.WriteFile(target, raw, 0o600); !w.OK {
 		return core.E("runbooks.writeRecord", w.Error(), nil)
 	}
 	return nil
@@ -420,6 +428,8 @@ func seedAll(dirPath string) {
 			continue
 		}
 		target := core.PathJoin(dirPath, rec.Slug+".md")
-		_ = core.WriteFile(target, raw, 0o644)
+		// 0o600 (Cerberus #1487 PR-1): runbooks carry operational
+		// secrets; even seed content uses the production mode.
+		_ = core.WriteFile(target, raw, 0o600)
 	}
 }
