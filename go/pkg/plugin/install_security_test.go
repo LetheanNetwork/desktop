@@ -97,3 +97,90 @@ func TestPlugin_AllowedLocalPath_Good_DeepUnderHome(t *core.T) {
 	core.AssertTrue(t, r.OK,
 		"deeply nested path under HOME must be allowed")
 }
+
+// Cerberus Mantis #1436 — plugin code + binary-path traversal gates.
+// Shape mirrors sandbox.IsValidVolumeName tests (same primitive on
+// adjacent surface).
+
+func TestPlugin_IsValidPluginCode_Good(t *core.T) {
+	core.AssertTrue(t, isValidPluginCode("opencode"))
+	core.AssertTrue(t, isValidPluginCode("ollama"))
+	core.AssertTrue(t, isValidPluginCode("forgejo_runner"))
+	core.AssertTrue(t, isValidPluginCode("phpmyadmin-5"))
+	core.AssertTrue(t, isValidPluginCode("a"))
+	core.AssertTrue(t, isValidPluginCode("z123"))
+}
+
+func TestPlugin_IsValidPluginCode_Bad_PathTraversal(t *core.T) {
+	// The exact attack pattern Cerberus flagged.
+	core.AssertFalse(t, isValidPluginCode("../../etc"))
+	core.AssertFalse(t, isValidPluginCode(".."))
+	core.AssertFalse(t, isValidPluginCode("../foo"))
+}
+
+func TestPlugin_IsValidPluginCode_Bad_LeadingSlash(t *core.T) {
+	core.AssertFalse(t, isValidPluginCode("/etc/passwd"))
+	core.AssertFalse(t, isValidPluginCode("/"))
+}
+
+func TestPlugin_IsValidPluginCode_Bad_LeadingDot(t *core.T) {
+	core.AssertFalse(t, isValidPluginCode(".hidden"))
+}
+
+func TestPlugin_IsValidPluginCode_Bad_LeadingDash(t *core.T) {
+	core.AssertFalse(t, isValidPluginCode("-rf"))
+	core.AssertFalse(t, isValidPluginCode("--privileged"))
+}
+
+func TestPlugin_IsValidPluginCode_Bad_Empty(t *core.T) {
+	core.AssertFalse(t, isValidPluginCode(""))
+}
+
+func TestPlugin_IsValidPluginCode_Bad_TooLong(t *core.T) {
+	long := "a"
+	for i := 0; i < 64; i++ {
+		long += "x"
+	}
+	core.AssertFalse(t, isValidPluginCode(long))
+}
+
+func TestPlugin_IsValidPluginCode_Bad_SpecialChars(t *core.T) {
+	core.AssertFalse(t, isValidPluginCode("code/sub"))
+	core.AssertFalse(t, isValidPluginCode("code.with.dot"))
+	core.AssertFalse(t, isValidPluginCode("code space"))
+	core.AssertFalse(t, isValidPluginCode("code;rm"))
+	core.AssertFalse(t, isValidPluginCode("code$(pwd)"))
+}
+
+func TestPlugin_IsValidBinaryPath_Good(t *core.T) {
+	core.AssertTrue(t, isValidBinaryPath("bin/foo"))
+	core.AssertTrue(t, isValidBinaryPath("bin/opencode"))
+	core.AssertTrue(t, isValidBinaryPath("relative/path/to/binary"))
+	core.AssertTrue(t, isValidBinaryPath("standalone"))
+}
+
+func TestPlugin_IsValidBinaryPath_Bad_Traversal(t *core.T) {
+	// The exact attack pattern.
+	core.AssertFalse(t, isValidBinaryPath("../../etc/passwd"))
+	core.AssertFalse(t, isValidBinaryPath("bin/../../escape"))
+	core.AssertFalse(t, isValidBinaryPath(".."))
+}
+
+func TestPlugin_IsValidBinaryPath_Bad_LeadingSlash(t *core.T) {
+	core.AssertFalse(t, isValidBinaryPath("/etc/passwd"))
+	core.AssertFalse(t, isValidBinaryPath("/usr/bin/curl"))
+}
+
+func TestPlugin_IsValidBinaryPath_Bad_BackslashTraversal(t *core.T) {
+	// Windows-flavoured path-traversal trick.
+	core.AssertFalse(t, isValidBinaryPath("bin\\..\\escape"))
+}
+
+func TestPlugin_IsValidBinaryPath_Bad_NullByte(t *core.T) {
+	// NUL byte injection — some platforms truncate paths at NUL.
+	core.AssertFalse(t, isValidBinaryPath("bin/foo\x00bar"))
+}
+
+func TestPlugin_IsValidBinaryPath_Bad_Empty(t *core.T) {
+	core.AssertFalse(t, isValidBinaryPath(""))
+}

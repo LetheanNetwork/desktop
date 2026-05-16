@@ -52,17 +52,110 @@ type UI struct {
 	Embed      string `json:"embed,omitempty"`      // "iframe" | "native"
 }
 
+// isValidPluginCode reports whether a code is a safe basename for the
+// plugin install directory + URL route. Cerberus Mantis #1436 — the
+// previous validate did "required + non-empty" only, leaving
+// `pluginDir(PathJoin(root, code))` open to path traversal via
+// `code = "../../etc"`. Rules:
+//
+//   - Length 1..64.
+//   - First character: ASCII alphanumeric (so `--malicious` flags
+//     can't appear as a route segment).
+//   - Remaining characters: alphanumeric or `_` or `-`.
+//   - No `/`, no `.`, no `..`, no whitespace, no control chars.
+//
+// Shape mirrors sandbox.IsValidVolumeName (same primitive on adjacent
+// surface — Cerberus's pass-3 "shape observation"). Dots are allowed
+// in volume names but NOT plugin codes; plugin codes flow through
+// URL paths too and a leading dot would surprise the router.
+func isValidPluginCode(code string) bool {
+	if code == "" || len(code) > 64 {
+		return false
+	}
+	for i, ch := range code {
+		alnum := ('a' <= ch && ch <= 'z') ||
+			('A' <= ch && ch <= 'Z') ||
+			('0' <= ch && ch <= '9')
+		if i == 0 {
+			if !alnum {
+				return false
+			}
+			continue
+		}
+		if !(alnum || ch == '_' || ch == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// isValidBinaryPath reports whether a Binary field is a safe
+// relative path that resolves UNDER the plugin install dir.
+// Cerberus Mantis #1436 — without this gate, `Binary: "../../etc/
+// passwd"` would have `PathJoin(dir, m.Binary)` escape the plugin
+// dir, letting WriteFile clobber an arbitrary host file.
+//
+// Rules:
+//   - Non-empty.
+//   - No leading `/` (must be relative).
+//   - No `..` segment anywhere — refuses traversal.
+//   - No NUL or control characters.
+//   - CleanPath of the join must still be prefixed by the plugin dir
+//     (the join-then-check is done at the caller via a helper).
+//
+// For v1 the manifest install path always sets `Binary = "bin/<code>"`
+// (install.go:52), so legitimate manifests look like `bin/foo`. The
+// validator allows that shape and rejects everything else.
+func isValidBinaryPath(p string) bool {
+	if p == "" {
+		return false
+	}
+	if core.HasPrefix(p, "/") {
+		return false
+	}
+	for _, ch := range p {
+		if ch == 0 || ch < 32 {
+			return false
+		}
+	}
+	// Split on / and reject any segment that's ".." or contains
+	// backslash (Windows path-traversal trick). Allow . as a no-op
+	// segment for forward-compat; CleanPath collapses them.
+	parts := core.Split(p, "/")
+	for _, seg := range parts {
+		if seg == ".." {
+			return false
+		}
+		if core.Contains(seg, "\\") {
+			return false
+		}
+	}
+	return true
+}
+
 // validate checks the manifest's required fields + normalises
 // optional ones with defaults. Returns the normalised copy.
 func (m Manifest) validate() core.Result {
 	if core.Trim(m.Code) == "" {
 		return core.Fail(core.E(manifestValidateOp, "code is required", nil))
 	}
+	// Cerberus #1436 — path-traversal gate on Code BEFORE it flows
+	// into pluginDir(PathJoin(root, code)) or the URL route mount.
+	if !isValidPluginCode(m.Code) {
+		return core.Fail(core.E(manifestValidateOp,
+			"invalid code (must be alphanumeric basename, 1-64 chars, leading alnum): "+m.Code, nil))
+	}
 	if core.Trim(m.Name) == "" {
 		return core.Fail(core.E(manifestValidateOp, "name is required", nil))
 	}
 	if core.Trim(m.Binary) == "" {
 		return core.Fail(core.E(manifestValidateOp, "binary path is required", nil))
+	}
+	// Cerberus #1436 — path-traversal gate on Binary BEFORE it flows
+	// into PathJoin(dir, m.Binary).
+	if !isValidBinaryPath(m.Binary) {
+		return core.Fail(core.E(manifestValidateOp,
+			"invalid binary path (must be relative, no `..` segments, no leading `/`): "+m.Binary, nil))
 	}
 	// Namespace defaults to code when omitted.
 	if core.Trim(m.Namespace) == "" {
