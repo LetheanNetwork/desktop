@@ -323,3 +323,95 @@ describe("lthn-view-pipeline — drag to move", () => {
     expect(forecastRefreshes).toBe(1);
   });
 });
+
+// --- Vi-callout for won/lost transitions (Cerberus #1488) ---
+
+describe("lthn-view-pipeline — Vi-callout for terminal moves", () => {
+  interface PipelineElWithCallout extends PipelineEl {
+    _emitMoved: (deal_id: string, from_stage: StageID, to_stage: StageID) => void;
+    _recentWonLost: { customer: string; deal_id: string; to_stage: "won" | "lost" } | null;
+  }
+  type StageID = "qual" | "engage" | "propose" | "close" | "won" | "lost";
+
+  it("renders no callout in the default state", async () => {
+    const { host } = await mountWindow("lthn-view-pipeline");
+    const callout = host.querySelector(".lthn-view-pipeline-vi-callout");
+    expect(callout).toBeNull();
+  });
+
+  it("renders a callout when _emitMoved fires with to_stage=won", async () => {
+    const { el, host } = await mountWindow<PipelineElWithCallout>("lthn-view-pipeline");
+    el._emitMoved("Heritage Law", "close", "won");
+    await el.updateComplete;
+    const callout = host.querySelector(".lthn-view-pipeline-vi-callout");
+    expect(callout).not.toBeNull();
+    expect(callout!.getAttribute("data-stage")).toBe("won");
+    expect(callout!.textContent).toContain("Heritage Law");
+    expect(callout!.textContent).toContain("Won");
+    expect(callout!.textContent).toContain("Vi");
+  });
+
+  it("renders a callout when _emitMoved fires with to_stage=lost", async () => {
+    const { el, host } = await mountWindow<PipelineElWithCallout>("lthn-view-pipeline");
+    el._emitMoved("Marrow Health", "engage", "lost");
+    await el.updateComplete;
+    const callout = host.querySelector(".lthn-view-pipeline-vi-callout");
+    expect(callout).not.toBeNull();
+    expect(callout!.getAttribute("data-stage")).toBe("lost");
+    expect(callout!.textContent).toContain("Marrow Health");
+    expect(callout!.textContent).toContain("Lost");
+  });
+
+  it("does NOT render a callout for non-terminal transitions", async () => {
+    const { el, host } = await mountWindow<PipelineElWithCallout>("lthn-view-pipeline");
+    el._emitMoved("Heritage Law", "qual", "engage");
+    await el.updateComplete;
+    const callout = host.querySelector(".lthn-view-pipeline-vi-callout");
+    expect(callout).toBeNull();
+  });
+
+  it("Confirm button dismisses the callout", async () => {
+    const { el, host } = await mountWindow<PipelineElWithCallout>("lthn-view-pipeline");
+    el._emitMoved("Heritage Law", "close", "won");
+    await el.updateComplete;
+
+    const confirmBtn = host.querySelector(
+      '.lthn-view-pipeline-vi-callout [data-action="confirm"]',
+    ) as HTMLElement;
+    expect(confirmBtn).not.toBeNull();
+    confirmBtn.click();
+    await el.updateComplete;
+
+    expect(host.querySelector(".lthn-view-pipeline-vi-callout")).toBeNull();
+    expect(el._recentWonLost).toBeNull();
+  });
+
+  it("Dismiss button dismisses the callout", async () => {
+    const { el, host } = await mountWindow<PipelineElWithCallout>("lthn-view-pipeline");
+    el._emitMoved("Heritage Law", "close", "won");
+    await el.updateComplete;
+
+    const dismissBtn = host.querySelector(
+      '.lthn-view-pipeline-vi-callout [data-action="dismiss"]',
+    ) as HTMLElement;
+    expect(dismissBtn).not.toBeNull();
+    dismissBtn.click();
+    await el.updateComplete;
+
+    expect(host.querySelector(".lthn-view-pipeline-vi-callout")).toBeNull();
+  });
+
+  it("cross-view: a sibling dispatch with to_stage=won surfaces the callout", async () => {
+    // Mirrors the cross-view contract — when another window dispatches
+    // lthn:sales:moved with a terminal to_stage, this view picks it up
+    // via the window listener registered in connectedCallback.
+    const { el, host } = await mountWindow<PipelineElWithCallout>("lthn-view-pipeline");
+    window.dispatchEvent(new CustomEvent("lthn:sales:moved", {
+      detail: { deal_id: "Calliope Partners", from_stage: "close", to_stage: "won" },
+    }));
+    await el.updateComplete;
+    const callout = host.querySelector(".lthn-view-pipeline-vi-callout");
+    expect(callout).not.toBeNull();
+    expect(callout!.textContent).toContain("Calliope Partners");
+  });
+});

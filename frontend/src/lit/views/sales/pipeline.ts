@@ -24,7 +24,7 @@
 // reload. Per the calm-UX rule no toast surfaces on failure — the revert
 // is the only signal.
 
-import { LitElement, html } from "lit";
+import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../../chrome";
 
 /** A single deal card inside a pipeline column. */
@@ -41,8 +41,12 @@ interface Deal {
   t: string;
 }
 
-/** Stage identifier — matches backend PipelineColumn.id values. */
-type StageID = "qual" | "engage" | "propose" | "close";
+/** Stage identifier — matches backend PipelineColumn.id values.
+ *  "won" and "lost" are terminal stages the backend tracks but the
+ *  UI does not render as drop-target columns. They surface only via
+ *  the Vi-callout when an out-of-band move (CLI / Blesta / future
+ *  "mark won" action) reports a transition. */
+type StageID = "qual" | "engage" | "propose" | "close" | "won" | "lost";
 
 /** A pipeline column = one stage in the funnel. */
 interface PipelineColumn {
@@ -114,6 +118,21 @@ function pipelineSummary(cols: readonly PipelineColumn[]): { deals: number; tota
   return { deals, total: "£558 K" };
 }
 
+/** Vi-callout state for a recent won/lost transition. Surfaces a
+ *  calm, observational nudge to the user when a deal moves to a
+ *  terminal stage — defends against silent-flip class of bugs
+ *  (prompt-injection driving Vi to move deals to won/lost) by
+ *  making every terminal transition visibly user-confirmed. Cerberus
+ *  pass-9 (Mantis #1488) — UI signal layer; backend rejection layer
+ *  lives in pkg/sales/pipeline.LegalTransitions. */
+interface RecentWonLost {
+  customer: string;
+  /** The deal_id the backend uses (slug or customer name fallback). */
+  deal_id: string;
+  /** Always "won" or "lost" — the field is only set for terminal moves. */
+  to_stage: "won" | "lost";
+}
+
 class LthnViewPipeline extends LitElement {
   static readonly properties = {
     w:        { type: Number },
@@ -126,6 +145,9 @@ class LthnViewPipeline extends LitElement {
     _loadState: { state: true },
     /** Stage id currently being dragged over — drives drop-target styling. */
     _dragOverStage: { state: true },
+    /** Recent won/lost transition — drives the Vi-callout render. Null
+     *  when no terminal move has fired since the last user dismiss. */
+    _recentWonLost: { state: true },
   };
 
   declare w: number;
@@ -134,6 +156,21 @@ class LthnViewPipeline extends LitElement {
   declare columns: PipelineColumn[];
   declare _loadState: "idle" | "loading" | "ok" | "err";
   declare _dragOverStage: StageID | null;
+  declare _recentWonLost: RecentWonLost | null;
+
+  /** Reference to the cross-view sync handler so removeEventListener can
+   *  unbind on disconnect — keeps test isolation clean and prevents
+   *  ghost listeners surfacing callouts on already-dismissed views. */
+  private _onSalesMoved = (e: Event) => {
+    const ce = e as CustomEvent<SalesMovedDetail>;
+    const to = ce.detail?.to_stage;
+    if (to !== "won" && to !== "lost") return;
+    this._recentWonLost = {
+      customer: ce.detail.deal_id, // fixture has no separate customer-name in event
+      deal_id:  ce.detail.deal_id,
+      to_stage: to,
+    };
+  };
 
   constructor() {
     super();
@@ -143,13 +180,30 @@ class LthnViewPipeline extends LitElement {
     this.columns = FIXTURE_PIPELINE;
     this._loadState = "idle";
     this._dragOverStage = null;
+    this._recentWonLost = null;
   }
 
   createRenderRoot() { return this; }
 
   async connectedCallback() {
     super.connectedCallback();
+    // Cross-view listener — when another window moves a deal to a
+    // terminal stage, surface the callout here too. Same listener
+    // used internally via _emitMoved → the event bubbles through
+    // window so connectedCallback's listener catches it.
+    window.addEventListener("lthn:sales:moved", this._onSalesMoved);
     await this._loadFromBackend();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener("lthn:sales:moved", this._onSalesMoved);
+  }
+
+  /** Dismiss the Vi-callout. Called by the Confirm button + the
+   *  Dismiss button in the callout footer. */
+  _dismissCallout() {
+    this._recentWonLost = null;
   }
 
   /** Load pipeline data from the pkg/sales/pipeline Wails binding.
@@ -289,10 +343,51 @@ class LthnViewPipeline extends LitElement {
 
   /** Dispatch the window-level cross-view refresh event. Sibling sales
    *  views (deals/forecast/contacts) opt in by registering a listener
-   *  and calling their own `_loadFromBackend()`. */
+   *  and calling their own `_loadFromBackend()`.
+   *
+   *  Cerberus pass-9 (Mantis #1488) — for terminal-stage moves the
+   *  Vi-callout state is set directly (not just via the cross-view
+   *  listener) so the SAME-window move shows the calm-voice nudge
+   *  without depending on the event bubbling through the listener
+   *  registered in connectedCallback. The listener handles cross-
+   *  window propagation; this direct set handles intra-window. */
   _emitMoved(deal_id: string, from_stage: StageID, to_stage: StageID) {
     const detail: SalesMovedDetail = { deal_id, from_stage, to_stage };
+    if (to_stage === "won" || to_stage === "lost") {
+      this._recentWonLost = { customer: deal_id, deal_id, to_stage };
+    }
     window.dispatchEvent(new CustomEvent<SalesMovedDetail>("lthn:sales:moved", { detail }));
+  }
+
+  /** Render the Vi-callout markup when a recent won/lost transition
+   *  is held in state. Calm-voice copy per HANDOVER-VIEWS.md — no
+   *  shame, no alarm; observational signal the user can confirm or
+   *  dismiss. Mirrors the operations/incidents Vi-callout shape. */
+  _renderViCallout() {
+    const r = this._recentWonLost;
+    if (!r) return nothing;
+    const verb = r.to_stage === "won" ? "Won" : "Lost";
+    return html`
+      <div class="lthn-view-pipeline-vi-callout"
+           data-stage=${r.to_stage}
+           style="margin-top:14px; padding:14px 16px; border-radius:10px;
+                  background:rgba(0,0,0,0.20);
+                  border:1px solid rgba(255,255,255,0.05);
+                  display:flex; align-items:center; gap:16px;">
+        <i class="fa-solid fa-feather" style="color:var(--brand-300); font-size:13px;"></i>
+        <span style="flex:1; font-size:12.5px; color:var(--fg-1); line-height:1.55;">
+          <span style="font-family:var(--font-mono); color:var(--brand-300); font-size:10px;
+                       letter-spacing:0.10em; text-transform:uppercase;">Vi</span>
+          · ${r.customer} moved to ${verb} — confirm?
+        </span>
+        <lthn-btn tone="ghost" size="sm"
+                  data-action="confirm"
+                  @click=${() => this._dismissCallout()}>Confirm</lthn-btn>
+        <lthn-btn tone="ghost" size="sm"
+                  data-action="dismiss"
+                  @click=${() => this._dismissCallout()}>Dismiss</lthn-btn>
+      </div>
+    `;
   }
 
   render() {
@@ -358,6 +453,11 @@ class LthnViewPipeline extends LitElement {
             `;
           })}
         </div>
+
+        <!-- Vi-callout — calm-voice nudge for terminal won/lost moves.
+             Cerberus pass-9 (Mantis #1488) — user-visible signal layer
+             paired with the backend LegalTransitions defence. -->
+        ${this._renderViCallout()}
       </div>
     `;
 
