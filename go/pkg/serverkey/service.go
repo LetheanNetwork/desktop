@@ -39,9 +39,10 @@ func NewService(c *core.Core) *Service {
 		salt = []byte(stamp)
 	}
 	return &Service{
-		core:           c,
-		processSalt:    salt,
-		consumedNonces: map[string]core.Time{},
+		core:                  c,
+		processSalt:           salt,
+		consumedNonces:        map[string]core.Time{},
+		consumedSessionNonces: map[string]core.Time{},
 	}
 }
 

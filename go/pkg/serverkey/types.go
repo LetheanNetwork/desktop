@@ -74,6 +74,15 @@ type Service struct {
 	// nonce. Entries expire on next Verify call past now-verifierTTL.
 	consumedNonces map[string]core.Time
 
+	// consumedSessionNonces tracks per-issue session-token nonce
+	// uniqueness — disjoint from consumedNonces so a bootstrap nonce
+	// can't fake-collide with a session nonce. Per RFC §3.1, session-
+	// token Verify does NOT add to this set (session tokens are
+	// consumed N times per session). Issue DOES add — defends against
+	// an internal mint loop yielding duplicate nonces. Entries expire
+	// on next Issue call past now-sessionVerifierTTL.
+	consumedSessionNonces map[string]core.Time
+
 	// singleInstanceCheck overrides the default CoreGUI single-instance
 	// probe in tests. Production wires nil; the Bootstrap call falls
 	// back to the OpenFile(O_EXCL) sentinel lock for the bootstrap
@@ -101,6 +110,25 @@ type Verifier interface {
 	// "auth.bootstrap.*" namespace so the middleware can shape an
 	// error envelope without leaking which check tripped.
 	VerifyBootstrapToken(token, wantScope string) core.Result
+
+	// VerifySessionToken returns OK iff token parses with the
+	// LTHN-SESS-1. prefix, signature verifies against the in-memory
+	// server public key, scope == "session", and the embedded TTL +
+	// verifier ceiling are intact. On OK Result.Value is the
+	// SessionVerifyOutput shape carrying the account_id claim. On
+	// failure returns core.Fail with a code from "auth.session.*".
+	//
+	// Per RFC §3.1 the nonce is NOT added to the consumed set on
+	// verify (session tokens are consumed N times per session). Replay
+	// defence relies on TTL + closure-only frontend storage.
+	//
+	// Usage example:
+	//
+	//	r := svc.VerifySessionToken(token)
+	//	if !r.OK { /* 401 */ }
+	//	out := r.Value.(serverkey.SessionVerifyOutput)
+	//	_ = out.AccountID
+	VerifySessionToken(token string) core.Result
 }
 
 // AccountStatusOutput is the Wails-binding shape consumed by the
@@ -117,6 +145,40 @@ type Verifier interface {
 //	if (!s.has_user_account) showSetupGate();
 type AccountStatusOutput struct {
 	HasUserAccount bool `json:"has_user_account"`
+}
+
+// SessionTokenOutput wraps the freshly-minted session token + its
+// issuance metadata for the unlock-flow handler. Same closure-only
+// storage discipline as BootstrapTokenOutput per RFC §3.2 — NEVER
+// localStorage, NEVER sessionStorage, NEVER cookie. App restart =
+// re-unlock.
+//
+// Usage example:
+//
+//	r := svc.IssueSessionToken(accountID)
+//	if r.OK { out := r.Value.(SessionTokenOutput); _ = out.Token }
+type SessionTokenOutput struct {
+	Token     string `json:"session_token"`         // LTHN-SESS-1.<header>.<sig>
+	ExpiresAt int64  `json:"expires_at"`            // unix seconds — for UI hints only; verifier is authoritative
+	AccountID string `json:"account_id"`            // the unlocked account_id this token authorises
+}
+
+// SessionVerifyOutput is the success-shape Verifier.VerifySessionToken
+// returns inside core.Result.Value. AccountID is the literal value of
+// the embedded `account_id` claim after signature verification — the
+// bearer-auth middleware writes it to c.Set("account_id", ...) so
+// downstream handlers can scope per-account reads/writes without
+// re-parsing the token.
+//
+// Usage example:
+//
+//	r := svc.VerifySessionToken(token)
+//	if r.OK {
+//	    out := r.Value.(serverkey.SessionVerifyOutput)
+//	    _ = out.AccountID
+//	}
+type SessionVerifyOutput struct {
+	AccountID string
 }
 
 // BootstrapTokenOutput wraps the freshly-minted token + its issuance
@@ -178,6 +240,20 @@ var (
 	hkdfInfo = []byte("passphrase")
 )
 
+// bootstrapAllowedScopes is the closed set of scopes
+// IssueBootstrapTokenForScope will mint. Per Cerberus #1467 path/
+// scope lockstep — adding a scope here is a security-policy decision
+// that requires a new Mantis ticket + DREAD review (the matching
+// pathScopes entry in pkg/server.BootstrapPathScopes is the other
+// half of the lockstep).
+//
+// Stage E.B adds account.unlock alongside account.create — the only
+// two scopes bootstrap-tokens authorise today.
+var bootstrapAllowedScopes = map[string]bool{
+	scopeAccountCreate: true,
+	scopeAccountUnlock: true,
+}
+
 const (
 	// seedSize is the byte-length of ~/Lethean/wallets/.seed. 32 bytes
 	// = 256 bits of entropy fed into HKDF-SHA256.
@@ -212,10 +288,42 @@ const (
 	// revisions bump the suffix integer.
 	tokenPrefix = "LTHN-BOOT-1."
 
-	// scopeAccountCreate is the only token-scope Stage B mints. Per
-	// Cerberus #1467 — adding a new scope means a new Mantis ticket
-	// AND a new Cerberus DREAD review.
+	// sessionTokenPrefix identifies the session-token version
+	// (Stage E.B per RFC §3). LTHN-SESS-1. so the bearer-auth
+	// middleware can dispatch on prefix without parsing the body.
+	sessionTokenPrefix = "LTHN-SESS-1."
+
+	// scopeAccountCreate is the only bootstrap-token scope Stage B
+	// mints. Per Cerberus #1467 — adding a new scope means a new
+	// Mantis ticket AND a new Cerberus DREAD review.
 	scopeAccountCreate = "account.create"
+
+	// scopeAccountUnlock is the bootstrap-token scope minted for the
+	// unlock-flow precondition (Stage E.B per RFC §2.2 / §4 — the
+	// /v1/account/unlock POST is gated by a fresh bootstrap-token with
+	// this scope so the same single-use + signed-by-server-key
+	// discipline as account-create applies to unlock).
+	scopeAccountUnlock = "account.unlock"
+
+	// scopeSession is the session-token scope embedded in the
+	// LTHN-SESS-1. header. Per RFC §3.1 + Cerberus #1467 scope-
+	// laundering defence — a token minted with scope=session cannot
+	// satisfy a bootstrap-tier gate, and a bootstrap token cannot
+	// satisfy a session-tier gate.
+	scopeSession = "session"
+
+	// sessionIssuerTTL is the lifetime stamped onto fresh session
+	// tokens per RFC §6 — 15 minutes, chosen as the desk-leave
+	// threshold (the load-bearing question is "how long until an
+	// attacker who acquires the token at moment T can still use it",
+	// NOT "how long can the user work without re-unlocking").
+	sessionIssuerTTL = 15 * 60
+
+	// sessionVerifierTTL is the absolute verifier ceiling per RFC §6
+	// — 30 minutes (2× sessionIssuerTTL, mirrors the bootstrap
+	// 60s/120s pattern). Defends a future spec change that lengthens
+	// `exp` without re-reviewing the verifier.
+	sessionVerifierTTL = 30 * 60
 
 	// accountKeyFile is the leaf-file Cerberus #1471 designates as
 	// the "account is real" signal — directory presence alone is not

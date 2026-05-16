@@ -53,3 +53,26 @@ func (s *Service) WAccountStatus() core.Result {
 func (s *Service) WIssueBootstrapToken() core.Result {
 	return s.IssueBootstrapToken()
 }
+
+// WIssueUnlockBootstrapToken is the Wails-bound mint of an unlock-
+// scoped bootstrap token (Stage E.B per RFC §2.2 / §4). Frontend
+// calls this just before POSTing /v1/account/unlock so the request
+// carries `Authorization: Bootstrap <LTHN-BOOT-1.…>` with a token
+// whose embedded scope claim matches the bootstrap-auth middleware's
+// expected `account.unlock` scope for that path.
+//
+// Same closure-only discipline (Cerberus #1465) — never persist.
+// Same 60s TTL — mint per-attempt so user retry never replays.
+//
+// Usage example (TS):
+//
+//	import { IssueUnlockBootstrapToken } from "@desktop/serverkey/service";
+//	const { token } = await IssueUnlockBootstrapToken();
+//	const r = await fetch("/v1/account/unlock", {
+//	    method: "POST",
+//	    headers: { "Authorization": "Bootstrap " + token },
+//	    body: JSON.stringify({account_id, passphrase}),
+//	});
+func (s *Service) WIssueUnlockBootstrapToken() core.Result {
+	return s.IssueBootstrapTokenForScope("account.unlock")
+}

@@ -7,13 +7,27 @@ import (
 	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
 )
 
-// IssueBootstrapToken mints a fresh detached-PGP-signature token over
-// a canonical JSON header. The token shape is
+// IssueBootstrapToken mints a fresh detached-PGP-signature token with
+// the default account.create scope. Thin wrapper around
+// IssueBootstrapTokenForScope retained for callers that pre-date the
+// Stage E.B multi-scope split.
+//
+// Usage example:
+//
+//	r := svc.IssueBootstrapToken()
+//	if r.OK { out := r.Value.(BootstrapTokenOutput); _ = out.Token }
+func (s *Service) IssueBootstrapToken() core.Result {
+	return s.IssueBootstrapTokenForScope(scopeAccountCreate)
+}
+
+// IssueBootstrapTokenForScope mints a fresh detached-PGP-signature
+// token over a canonical JSON header for the requested scope. The
+// token shape is
 //
 //	LTHN-BOOT-1.<base64url-header>.<base64url-signature>
 //
 // where header = canonicalise({"iat": <now>, "exp": <now+60>,
-// "scope": "account.create", "nonce": "<hex>"}). issuerTTL of 60s
+// "scope": "<wantScope>", "nonce": "<hex>"}). issuerTTL of 60s
 // is intentional — combined with the verifier's 120s ceiling +
 // per-mint nonce, the replay window stays narrow while still
 // permitting the user a sane amount of time to enter their
@@ -23,11 +37,20 @@ import (
 // handler that consumes it (Cerberus #1465). Never persist to
 // localStorage / cookie / IndexedDB / module-level cache.
 //
+// scope MUST be one of the bootstrapAllowedScopes set
+// (account.create or account.unlock). An unknown scope is rejected
+// with "auth.bootstrap.scope" so a typo never silently mints an
+// unverifiable token.
+//
 // Usage example:
 //
-//	r := svc.IssueBootstrapToken()
+//	r := svc.IssueBootstrapTokenForScope("account.unlock")
 //	if r.OK { out := r.Value.(BootstrapTokenOutput); _ = out.Token }
-func (s *Service) IssueBootstrapToken() core.Result {
+func (s *Service) IssueBootstrapTokenForScope(scope string) core.Result {
+	if !bootstrapAllowedScopes[scope] {
+		return core.Fail(core.NewCode("auth.bootstrap.scope",
+			"requested scope is not in the bootstrap-token allow-list"))
+	}
 	s.mu.RLock()
 	priv := s.privateKey
 	s.mu.RUnlock()
@@ -48,7 +71,7 @@ func (s *Service) IssueBootstrapToken() core.Result {
 	header := map[string]any{
 		"iat":   now,
 		"exp":   exp,
-		"scope": scopeAccountCreate,
+		"scope": scope,
 		"nonce": nonce,
 	}
 	canon, canonR := canonicalise(header)
@@ -199,6 +222,251 @@ func (s *Service) VerifyBootstrapToken(token, wantScope string) core.Result {
 	// remember it forever.
 	s.consumedNonces[key] = core.UnixTime(now + verifierTTL)
 	return core.Ok(nil)
+}
+
+// IssueSessionToken mints a fresh LTHN-SESS-1. detached-PGP-signature
+// token authorising the supplied account_id for the issuer-TTL window
+// per RFC §3 / §6.
+//
+//	LTHN-SESS-1.<base64url(canonical-header)>.<base64url(signature)>
+//
+// where header = canonicalise({"iat": <now>, "exp": <now+900>,
+// "scope": "session", "account_id": "<hex>", "nonce": "<hex>"}).
+// 15-minute issuer TTL + 30-minute verifier ceiling (sessionIssuerTTL
+// + sessionVerifierTTL) calibrate to the desk-leave threshold, NOT
+// the user's task duration (RFC §6).
+//
+// The token MUST live only in module-scope frontend state via
+// api-fetch.ts:setSessionToken — never localStorage / sessionStorage
+// / cookie / IndexedDB / module cache (RFC §3.2 — same closure-only
+// discipline Cerberus #1465 demanded for bootstrap-tokens).
+//
+// Per RFC §3.1 the nonce IS added to consumedSessionNonces (a per-
+// issue-uniqueness gate at mint time) but VerifySessionToken does
+// NOT burn the nonce — session tokens are consumed N times.
+//
+// Usage example:
+//
+//	r := svc.IssueSessionToken("abc123def4567890")
+//	if r.OK {
+//	    out := r.Value.(SessionTokenOutput)
+//	    _ = out.Token  // LTHN-SESS-1.…
+//	}
+func (s *Service) IssueSessionToken(accountID string) core.Result {
+	if accountID == "" {
+		return core.Fail(core.NewCode("auth.session.account_id",
+			"account_id is required to mint a session token"))
+	}
+	s.mu.RLock()
+	priv := s.privateKey
+	s.mu.RUnlock()
+	if len(priv) == 0 {
+		return core.Fail(core.E("serverkey.IssueSessionToken",
+			"server key not bootstrapped — call Bootstrap() first", nil))
+	}
+
+	nonceR := core.RandomBytes(nonceSize)
+	if !nonceR.OK {
+		return core.Fail(core.E("serverkey.IssueSessionToken", "generate nonce", nonceR.Value.(error)))
+	}
+	nonce := core.HexEncode(nonceR.Value.([]byte))
+
+	now := core.Now().UTC().Unix()
+	exp := now + sessionIssuerTTL
+
+	header := map[string]any{
+		"iat":        now,
+		"exp":        exp,
+		"scope":      scopeSession,
+		"account_id": accountID,
+		"nonce":      nonce,
+	}
+	canon, canonR := canonicalise(header)
+	if !canonR.OK {
+		return canonR
+	}
+
+	pgpSvc := pgp.NewService()
+	sig, err := pgpSvc.Sign(priv, canon)
+	if err != nil {
+		return core.Fail(core.E("serverkey.IssueSessionToken", "sign header", err))
+	}
+
+	// Per-issue nonce uniqueness — defends against a buggy mint loop
+	// emitting the same nonce twice. Verify does NOT burn (RFC §3.1).
+	key := s.nonceKey(nonce)
+	s.mu.Lock()
+	s.evictExpiredSessionNoncesLocked(now)
+	if _, replay := s.consumedSessionNonces[key]; replay {
+		s.mu.Unlock()
+		return core.Fail(core.NewCode("auth.session.replay",
+			"session-token nonce collision detected at issue time"))
+	}
+	s.consumedSessionNonces[key] = core.UnixTime(now + sessionVerifierTTL)
+	s.mu.Unlock()
+
+	// RFC §6 M4 — audit-log preparation. Event names are reserved
+	// schema; Stage F log-tailing relies on the literal names.
+	core.Print(core.Stderr(),
+		"event=auth.session.issued account_id=%s ts=%d exp=%d\n",
+		accountID, now, exp)
+
+	token := sessionTokenPrefix + core.Base64URLEncode(canon) + "." + core.Base64URLEncode(sig)
+	return core.Ok(SessionTokenOutput{
+		Token:     token,
+		ExpiresAt: exp,
+		AccountID: accountID,
+	})
+}
+
+// VerifySessionToken implements the session-tier half of the
+// Verifier interface per RFC §3.1 + §4. Returns OK with
+// SessionVerifyOutput on success:
+//
+//  1. token has the LTHN-SESS-1. prefix + two base64url-encoded parts
+//  2. header decodes to a map with iat / exp / scope / account_id / nonce
+//  3. scope equals "session" (Cerberus #1467 — bootstrap tokens MUST
+//     NOT satisfy a session-tier gate, and vice versa)
+//  4. iat <= now + clockSkewTolerance
+//  5. exp > now (token not expired)
+//  6. now - iat <= sessionVerifierTTL (30min ceiling — defends a
+//     future spec change that lengthens `exp` without re-reviewing)
+//  7. account_id present and non-empty
+//  8. PGP signature verifies against the in-memory server public key
+//
+// Per RFC §3.1 the nonce is NOT added to a consumed-set on verify —
+// session tokens are consumed N times per session (once per
+// apiFetch call). Replay defence relies on TTL + closure-only
+// frontend storage.
+//
+// On failure returns core.Fail with a code from "auth.session.*".
+// Failures emit auth.session.verify_failed audit events per RFC §6
+// M4 with a `reason` field so Stage F's log-tailer can categorise
+// without parsing prose error messages.
+//
+// Usage example:
+//
+//	r := svc.VerifySessionToken(token)
+//	if !r.OK { /* 401 */ }
+//	out := r.Value.(SessionVerifyOutput)
+//	_ = out.AccountID
+func (s *Service) VerifySessionToken(token string) core.Result {
+	s.mu.RLock()
+	pub := s.publicKey
+	s.mu.RUnlock()
+	if len(pub) == 0 {
+		return core.Fail(core.E("serverkey.VerifySessionToken",
+			"server key not bootstrapped — call Bootstrap() first", nil))
+	}
+
+	if !core.HasPrefix(token, sessionTokenPrefix) {
+		s.auditSessionVerifyFailed("", "prefix")
+		return core.Fail(core.NewCode("auth.session.format", "token prefix invalid"))
+	}
+	body := token[len(sessionTokenPrefix):]
+	parts := core.Split(body, ".")
+	if len(parts) != 2 {
+		s.auditSessionVerifyFailed("", "format")
+		return core.Fail(core.NewCode("auth.session.format", "token must have exactly two segments"))
+	}
+	headerR := core.Base64URLDecode(parts[0])
+	if !headerR.OK {
+		s.auditSessionVerifyFailed("", "format")
+		return core.Fail(core.NewCode("auth.session.format", "header decode failed"))
+	}
+	headerBytes, _ := headerR.Value.([]byte)
+	sigR := core.Base64URLDecode(parts[1])
+	if !sigR.OK {
+		s.auditSessionVerifyFailed("", "format")
+		return core.Fail(core.NewCode("auth.session.format", "signature decode failed"))
+	}
+	sigBytes, _ := sigR.Value.([]byte)
+
+	var header map[string]any
+	if r := core.JSONUnmarshal(headerBytes, &header); !r.OK {
+		s.auditSessionVerifyFailed("", "format")
+		return core.Fail(core.NewCode("auth.session.format", "header is not valid JSON"))
+	}
+
+	// Re-canonicalise the parsed header BEFORE checking the signature —
+	// same Cerberus #1469 discipline as bootstrap-token verify. Forces
+	// the verifier to sign-check the issuer's bytes, not the caller's.
+	canon, canonR := canonicalise(header)
+	if !canonR.OK {
+		return canonR
+	}
+
+	scope, _ := header["scope"].(string)
+	if scope != scopeSession {
+		accountID, _ := header["account_id"].(string)
+		s.auditSessionVerifyFailed(accountID, "scope")
+		return core.Fail(core.NewCode("auth.session.scope", "token scope is not session"))
+	}
+
+	iat, ok := numericClaim(header, "iat")
+	if !ok {
+		s.auditSessionVerifyFailed("", "format")
+		return core.Fail(core.NewCode("auth.session.format", "iat claim missing or non-numeric"))
+	}
+	exp, ok := numericClaim(header, "exp")
+	if !ok {
+		s.auditSessionVerifyFailed("", "format")
+		return core.Fail(core.NewCode("auth.session.format", "exp claim missing or non-numeric"))
+	}
+	accountID, _ := header["account_id"].(string)
+	if accountID == "" {
+		s.auditSessionVerifyFailed("", "format")
+		return core.Fail(core.NewCode("auth.session.format", "account_id missing or empty"))
+	}
+
+	now := core.Now().UTC().Unix()
+	if iat > now+clockSkewTolerance {
+		s.auditSessionVerifyFailed(accountID, "expired")
+		return core.Fail(core.NewCode("auth.session.ttl", "iat in the future beyond clock-skew tolerance"))
+	}
+	if exp <= now {
+		s.auditSessionVerifyFailed(accountID, "expired")
+		return core.Fail(core.NewCode("auth.session.ttl", "token expired"))
+	}
+	if now-iat > sessionVerifierTTL {
+		s.auditSessionVerifyFailed(accountID, "expired")
+		return core.Fail(core.NewCode("auth.session.ttl", "token age exceeds verifier ceiling"))
+	}
+
+	// Signature verification LAST so the timing-signal of "valid
+	// signature but expired token" is no worse than "invalid
+	// signature, never decode further" — both reach this branch in
+	// constant-ish time.
+	pgpSvc := pgp.NewService()
+	if err := pgpSvc.Verify(pub, canon, sigBytes); err != nil {
+		s.auditSessionVerifyFailed(accountID, "signature")
+		return core.Fail(core.NewCode("auth.session.signature", "signature verification failed"))
+	}
+
+	return core.Ok(SessionVerifyOutput{AccountID: accountID})
+}
+
+// auditSessionVerifyFailed emits the auth.session.verify_failed
+// audit event per RFC §6 M4 with the documented structured fields.
+// Reserved-schema: changing field names after Stage E ships breaks
+// the Stage F log-tailing contract.
+func (s *Service) auditSessionVerifyFailed(accountID, reason string) {
+	core.Print(core.Stderr(),
+		"event=auth.session.verify_failed account_id=%s ts=%d reason=%s\n",
+		accountID, core.Now().UTC().Unix(), reason)
+}
+
+// evictExpiredSessionNoncesLocked removes consumedSessionNonces
+// entries whose stored expiry is past `now`. Caller MUST hold s.mu
+// (write lock). Mirrors evictExpiredNoncesLocked's contract; kept
+// separate so the bootstrap and session nonce-sets can have
+// different TTLs / eviction cadence without one starving the other.
+func (s *Service) evictExpiredSessionNoncesLocked(nowUnix int64) {
+	for k, expiresAt := range s.consumedSessionNonces {
+		if expiresAt.Unix() <= nowUnix {
+			delete(s.consumedSessionNonces, k)
+		}
+	}
 }
 
 // nonceKey returns hex(HMAC-SHA256(processSalt, raw nonce bytes)).

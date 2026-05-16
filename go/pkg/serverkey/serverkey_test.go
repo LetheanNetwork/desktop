@@ -312,3 +312,172 @@ func TestServerkey_Canonicalise_Good(t *core.T) {
 	// Sanity: distinct tokens (different nonces).
 	core.AssertTrue(t, out1.Token != out2.Token, "two mints must produce distinct tokens")
 }
+
+// --- IssueBootstrapTokenForScope (Stage E.B multi-scope) ---
+
+func TestServerkey_IssueBootstrapTokenForScope_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	// account.unlock — the Stage E.B addition. Token verifies with
+	// the matching scope.
+	r := svc.IssueBootstrapTokenForScope("account.unlock")
+	core.AssertTrue(t, r.OK, "unlock-scoped mint should succeed")
+	out := r.Value.(subject.BootstrapTokenOutput)
+	core.AssertTrue(t, svc.VerifyBootstrapToken(out.Token, "account.unlock").OK,
+		"unlock-scoped token must verify with unlock scope")
+
+	// Scope-mismatch protection (Cerberus #1467) — an unlock-scoped
+	// token does NOT satisfy account.create.
+	core.AssertTrue(t, !svc.VerifyBootstrapToken(out.Token, "account.create").OK,
+		"unlock-scoped token MUST NOT satisfy account.create scope")
+}
+
+func TestServerkey_IssueBootstrapTokenForScope_RejectsUnknown_Bad(t *core.T) {
+	// Unknown scope must reject — defends against a typo silently
+	// minting an unverifiable token (the allow-list is the lockstep
+	// other half of pkg/server.BootstrapPathScopes).
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	r := svc.IssueBootstrapTokenForScope("totally.made.up.scope")
+	core.AssertTrue(t, !r.OK, "unknown scope must reject")
+	core.AssertEqual(t, "auth.bootstrap.scope", r.Code())
+}
+
+// --- IssueSessionToken / VerifySessionToken (Stage E.B per RFC §3) ---
+
+const testAccountID = "abc123def4567890"
+
+func TestServerkey_IssueSessionToken_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	r := svc.IssueSessionToken(testAccountID)
+	core.AssertTrue(t, r.OK, "session-token mint should succeed")
+	out := r.Value.(subject.SessionTokenOutput)
+
+	// Token format — LTHN-SESS-1.<header>.<sig>
+	core.AssertTrue(t, core.HasPrefix(out.Token, "LTHN-SESS-1."),
+		"session token must carry the session prefix")
+	parts := core.Split(out.Token[len("LTHN-SESS-1."):], ".")
+	core.AssertEqual(t, 2, len(parts))
+
+	// Carries the requested account_id for the bearer middleware.
+	core.AssertEqual(t, testAccountID, out.AccountID)
+}
+
+func TestServerkey_SessionTokenRoundTrip_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	out := svc.IssueSessionToken(testAccountID).Value.(subject.SessionTokenOutput)
+	vr := svc.VerifySessionToken(out.Token)
+	core.AssertTrue(t, vr.OK, "fresh session token must verify")
+
+	sv, ok := vr.Value.(subject.SessionVerifyOutput)
+	core.AssertTrue(t, ok, "verify Result.Value must be SessionVerifyOutput")
+	core.AssertEqual(t, testAccountID, sv.AccountID)
+}
+
+func TestServerkey_SessionTokenReusable_Good(t *core.T) {
+	// Per RFC §3.1 — session tokens are consumed N times per session.
+	// Multiple verifies of the SAME token must all succeed (the
+	// bootstrap-token replay defence does NOT apply here).
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	out := svc.IssueSessionToken(testAccountID).Value.(subject.SessionTokenOutput)
+	for i := 0; i < 5; i++ {
+		vr := svc.VerifySessionToken(out.Token)
+		core.AssertTrue(t, vr.OK, "session token must verify repeatedly within TTL")
+	}
+}
+
+func TestServerkey_IssueSessionToken_EmptyAccountID_Bad(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	r := svc.IssueSessionToken("")
+	core.AssertTrue(t, !r.OK, "empty account_id must reject")
+	core.AssertEqual(t, "auth.session.account_id", r.Code())
+}
+
+func TestServerkey_IssueSessionToken_WithoutBootstrap_Bad(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	r := svc.IssueSessionToken(testAccountID)
+	core.AssertTrue(t, !r.OK, "IssueSessionToken without Bootstrap must fail")
+}
+
+func TestServerkey_VerifySessionToken_WithoutBootstrap_Bad(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	r := svc.VerifySessionToken("LTHN-SESS-1.x.y")
+	core.AssertTrue(t, !r.OK, "VerifySessionToken without Bootstrap must fail")
+}
+
+func TestServerkey_VerifySessionToken_Format_Bad(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	// Wrong prefix — bootstrap token must NOT satisfy the session
+	// verifier (Cerberus #1467 scope-laundering defence at the
+	// type-system layer).
+	bootOut := svc.IssueBootstrapToken().Value.(subject.BootstrapTokenOutput)
+	r1 := svc.VerifySessionToken(bootOut.Token)
+	core.AssertTrue(t, !r1.OK, "bootstrap-prefixed token must reject session verify")
+	core.AssertEqual(t, "auth.session.format", r1.Code())
+
+	// Single segment — malformed body.
+	r2 := svc.VerifySessionToken("LTHN-SESS-1.onlyonesegment")
+	core.AssertTrue(t, !r2.OK)
+	core.AssertEqual(t, "auth.session.format", r2.Code())
+}
+
+func TestServerkey_VerifySessionToken_Tampered_Ugly(t *core.T) {
+	// Cerberus #1469 — flipping any byte in the header part must
+	// fail verify (re-canonicalised bytes won't match the signed
+	// originals — same discipline as bootstrap-token tampering).
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	out := svc.IssueSessionToken(testAccountID).Value.(subject.SessionTokenOutput)
+	rest := out.Token[len("LTHN-SESS-1."):]
+	parts := core.Split(rest, ".")
+	core.AssertEqual(t, 2, len(parts))
+	header := parts[0]
+	mid := len(header) / 2
+	swapped := byte('A')
+	if header[mid] == 'A' {
+		swapped = 'B'
+	}
+	mangled := header[:mid] + string([]byte{swapped}) + header[mid+1:]
+	tampered := "LTHN-SESS-1." + mangled + "." + parts[1]
+
+	r := svc.VerifySessionToken(tampered)
+	core.AssertTrue(t, !r.OK, "tampered session-token header must reject")
+}
+
+func TestServerkey_SessionToken_DistinctMints_Good(t *core.T) {
+	// Two consecutive mints produce distinct tokens (different
+	// nonces) — defends against an internal mint loop emitting the
+	// same nonce twice. Both verify independently.
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	out1 := svc.IssueSessionToken(testAccountID).Value.(subject.SessionTokenOutput)
+	out2 := svc.IssueSessionToken(testAccountID).Value.(subject.SessionTokenOutput)
+	core.AssertTrue(t, out1.Token != out2.Token, "two mints must produce distinct tokens")
+	core.AssertTrue(t, svc.VerifySessionToken(out1.Token).OK)
+	core.AssertTrue(t, svc.VerifySessionToken(out2.Token).OK)
+}
