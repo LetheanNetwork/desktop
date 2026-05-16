@@ -152,14 +152,19 @@ func (s *Service) requireAuth(next func(core.ResponseWriter, *core.Request)) fun
 			return
 		}
 		got := r.Header.Get("Authorization")
-		// Accept "Bearer <token>" only — no naked-token fallback.
-		const prefix = "Bearer "
-		if !core.HasPrefix(got, prefix) {
+		// Accept "Bearer <token>" — RFC 7235 §2.1 specifies the auth
+		// scheme is case-insensitive ("Bearer", "bearer", "BEARER" all
+		// valid). Cerberus H#9-verify F4 (Mantis #1537): the prior
+		// constant-string HasPrefix check rejected lowercase callers
+		// that some HTTP clients emit verbatim. Lower the prefix bytes
+		// only; the token tail keeps its case.
+		const prefixLen = 7 // len("bearer ")
+		if len(got) < prefixLen || core.Lower(got[:prefixLen]) != "bearer " {
 			w.WriteHeader(401)
 			_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 			return
 		}
-		presented := got[len(prefix):]
+		presented := got[prefixLen:]
 		s.tokenMu.Lock()
 		expected := s.token
 		s.tokenMu.Unlock()

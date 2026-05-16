@@ -119,3 +119,110 @@ func TestBridge_LoadOrGenerateToken_EmptyFileRegenerates(t *core.T) {
 	core.AssertTrue(t, len(tok) >= TokenByteLength,
 		"empty token file must trigger regeneration")
 }
+
+// requireAuth bearer-prefix tests — Cerberus H#9-verify F4 (Mantis
+// #1537). RFC 7235 §2.1 specifies HTTP auth scheme names are case-
+// insensitive; the prior strict "Bearer " HasPrefix check rejected
+// lowercase callers ("bearer abc") that some HTTP libraries emit
+// verbatim. The fix lowers the scheme bytes for comparison while
+// preserving the token tail case.
+
+// authFixture wires up a minimal Service with a known bearer token
+// installed, so requireAuth can be invoked directly without a live
+// HTTP server. Returns the service + the token string.
+func authFixture(t *core.T, tok string) *Service {
+	t.Helper()
+	s := &Service{}
+	s.tokenMu.Lock()
+	s.token = tok
+	s.tokenMu.Unlock()
+	return s
+}
+
+func TestRequireAuth_AcceptsLowercaseBearer_Good(t *core.T) {
+	s := authFixture(t, "tok-abc-123")
+	called := false
+	handler := s.requireAuth(func(w core.ResponseWriter, r *core.Request) {
+		called = true
+		w.WriteHeader(200)
+	})
+	req := core.NewHTTPTestRequest(core.MethodGet, "/mcp/info", nil)
+	req.Header.Set("Authorization", "bearer tok-abc-123")
+	rec := core.NewHTTPTestRecorder()
+	handler(rec, req)
+	core.AssertEqual(t, 200, rec.Code, "lowercase 'bearer' must be accepted (RFC 7235)")
+	core.AssertTrue(t, called, "next handler must run on valid lowercase bearer")
+}
+
+func TestRequireAuth_AcceptsUppercaseBearer_Good(t *core.T) {
+	s := authFixture(t, "tok-abc-123")
+	handler := s.requireAuth(func(w core.ResponseWriter, _ *core.Request) {
+		w.WriteHeader(200)
+	})
+	req := core.NewHTTPTestRequest(core.MethodGet, "/mcp/info", nil)
+	req.Header.Set("Authorization", "BEARER tok-abc-123")
+	rec := core.NewHTTPTestRecorder()
+	handler(rec, req)
+	core.AssertEqual(t, 200, rec.Code, "uppercase 'BEARER' must be accepted (RFC 7235)")
+}
+
+func TestRequireAuth_AcceptsCanonicalBearer_Good(t *core.T) {
+	s := authFixture(t, "tok-abc-123")
+	handler := s.requireAuth(func(w core.ResponseWriter, _ *core.Request) {
+		w.WriteHeader(200)
+	})
+	req := core.NewHTTPTestRequest(core.MethodGet, "/mcp/info", nil)
+	req.Header.Set("Authorization", "Bearer tok-abc-123")
+	rec := core.NewHTTPTestRecorder()
+	handler(rec, req)
+	core.AssertEqual(t, 200, rec.Code, "canonical 'Bearer' must still work after F4 fix")
+}
+
+func TestRequireAuth_RejectsMissingHeader_Bad(t *core.T) {
+	s := authFixture(t, "tok-abc-123")
+	handler := s.requireAuth(func(w core.ResponseWriter, _ *core.Request) {
+		w.WriteHeader(200)
+	})
+	req := core.NewHTTPTestRequest(core.MethodGet, "/mcp/info", nil)
+	rec := core.NewHTTPTestRecorder()
+	handler(rec, req)
+	core.AssertEqual(t, 401, rec.Code, "missing Authorization header must 401")
+}
+
+func TestRequireAuth_RejectsNonBearerScheme_Bad(t *core.T) {
+	s := authFixture(t, "tok-abc-123")
+	handler := s.requireAuth(func(w core.ResponseWriter, _ *core.Request) {
+		w.WriteHeader(200)
+	})
+	req := core.NewHTTPTestRequest(core.MethodGet, "/mcp/info", nil)
+	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
+	rec := core.NewHTTPTestRecorder()
+	handler(rec, req)
+	core.AssertEqual(t, 401, rec.Code, "non-bearer scheme (Basic) must 401")
+}
+
+func TestRequireAuth_RejectsBadTokenCaseSensitiveTail_Ugly(t *core.T) {
+	// The scheme is case-insensitive; the token tail is NOT.
+	s := authFixture(t, "tok-abc-123")
+	handler := s.requireAuth(func(w core.ResponseWriter, _ *core.Request) {
+		w.WriteHeader(200)
+	})
+	req := core.NewHTTPTestRequest(core.MethodGet, "/mcp/info", nil)
+	req.Header.Set("Authorization", "bearer TOK-ABC-123")
+	rec := core.NewHTTPTestRecorder()
+	handler(rec, req)
+	core.AssertEqual(t, 401, rec.Code, "token-tail comparison must stay case-sensitive")
+}
+
+func TestRequireAuth_RejectsShortHeader_Ugly(t *core.T) {
+	// "Bear" — shorter than the prefix length; must not panic.
+	s := authFixture(t, "tok-abc-123")
+	handler := s.requireAuth(func(w core.ResponseWriter, _ *core.Request) {
+		w.WriteHeader(200)
+	})
+	req := core.NewHTTPTestRequest(core.MethodGet, "/mcp/info", nil)
+	req.Header.Set("Authorization", "Bear")
+	rec := core.NewHTTPTestRecorder()
+	handler(rec, req)
+	core.AssertEqual(t, 401, rec.Code, "header shorter than 'bearer ' must 401 cleanly (no panic)")
+}
