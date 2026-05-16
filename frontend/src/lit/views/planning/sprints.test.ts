@@ -1,14 +1,24 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window-fixture";
 import { filterCards } from "./sprints";
+
+vi.mock("@desktop/tasks/service", () => ({
+  List: vi.fn(),
+}));
+
+import { List as TasksList } from "@desktop/tasks/service";
+
 import "./sprints";
 
 interface SprintsEl extends LitElement {
   setQuery: (q: string) => void;
-  data: { columns: ReadonlyArray<{ id: string; cards: ReadonlyArray<{ id: string }> }> };
+  data: {
+    columns: ReadonlyArray<{ id: string; cards: ReadonlyArray<{ id: string; title?: string }> }>;
+  };
+  _loadFromBackend: () => Promise<void>;
   updateComplete: Promise<boolean>;
 }
 
@@ -112,5 +122,66 @@ describe("filterCards — pure helper", () => {
     const out = filterCards(cols, "alpha");
     expect(out[0].count).toBe(1);
     expect(out[1].count).toBe(0);
+  });
+});
+
+describe("lthn-view-sprints — backend wire (3-column partial)", () => {
+  it("replaces todo/doing/done columns with Issues from tasks.List", async () => {
+    (TasksList as unknown as { mockReset: () => void }).mockReset();
+    (TasksList as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: { issues: [
+        { ID: "a1", Summary: "Wire pkg/sales contacts", State: "open" },
+        { ID: "b2", Summary: "Stage E LetheanAccount unlock", State: "in_progress" },
+        { ID: "c3", Summary: "Cerberus pass-9 audit",          State: "done" },
+      ] },
+    });
+    const { el } = await mountWindow<SprintsEl>("lthn-view-sprints");
+    await el._loadFromBackend();
+    await el.updateComplete;
+    const todo  = el.data.columns.find(c => c.id === "todo")!;
+    const doing = el.data.columns.find(c => c.id === "doing")!;
+    const done  = el.data.columns.find(c => c.id === "done")!;
+    expect(todo.cards.length).toBe(1);
+    expect(todo.cards[0].title).toBe("Wire pkg/sales contacts");
+    expect(doing.cards.length).toBe(1);
+    expect(doing.cards[0].title).toBe("Stage E LetheanAccount unlock");
+    expect(done.cards.length).toBe(1);
+    expect(done.cards[0].title).toBe("Cerberus pass-9 audit");
+  });
+
+  it("preserves the fixture 'review' column (no backend State maps to it)", async () => {
+    (TasksList as unknown as { mockReset: () => void }).mockReset();
+    (TasksList as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: { issues: [
+        { ID: "x1", Summary: "an open issue", State: "open" },
+      ] },
+    });
+    const { el } = await mountWindow<SprintsEl>("lthn-view-sprints");
+    await el._loadFromBackend();
+    await el.updateComplete;
+    const review = el.data.columns.find(c => c.id === "review")!;
+    expect(review.cards.length).toBeGreaterThan(0); // fixture preserved
+  });
+
+  it("keeps fixture columns when backend rejects", async () => {
+    (TasksList as unknown as { mockReset: () => void }).mockReset();
+    (TasksList as unknown as { mockRejectedValue: (v: unknown) => void }).mockRejectedValue(new Error("no binding"));
+    const { el } = await mountWindow<SprintsEl>("lthn-view-sprints");
+    await el._loadFromBackend();
+    await el.updateComplete;
+    const todo = el.data.columns.find(c => c.id === "todo")!;
+    expect(todo.cards.length).toBeGreaterThan(0); // fixture preserved
+  });
+
+  it("keeps fixture when backend returns empty", async () => {
+    (TasksList as unknown as { mockReset: () => void }).mockReset();
+    (TasksList as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: { issues: [] },
+    });
+    const { el } = await mountWindow<SprintsEl>("lthn-view-sprints");
+    await el._loadFromBackend();
+    await el.updateComplete;
+    const todo = el.data.columns.find(c => c.id === "todo")!;
+    expect(todo.cards.length).toBeGreaterThan(0);
   });
 });

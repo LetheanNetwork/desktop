@@ -128,11 +128,63 @@ class LthnViewSprints extends LitElement {
     void this._loadFromBackend();
   }
 
-  /** Fetch sprint board snapshot from pkg/tasks. Today: no-op (fixture
-   *  remains). Tomorrow: tasks.List(filter) per column.State, sliced
-   *  to the active sprint window. */
+  /** Fetch sprint board snapshot from pkg/tasks via the Wails surface
+   *  (shipped 2026-05-16, commits f49ca72 + 619a7bf). Maps Issue.State
+   *  to three of the four kanban columns:
+   *    "open"        → todo
+   *    "in_progress" → doing
+   *    "done"        → done
+   *  The "review" column stays on fixture because the schema lacks a
+   *  Reviewer field (#463 follow-on). Sprint metadata (sprint number,
+   *  window, remaining days, velocity series) also stays on fixture
+   *  until a TargetVersion/sprint primitive lands.
+   *
+   *  Degrades to fixture on binding-missing or backend-rejected. */
   async _loadFromBackend(): Promise<void> {
-    // Pending Wails binding — see go/pkg/tasks/wails.go (TBD).
+    try {
+      const svc = await import("@desktop/tasks/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
+        return;
+      }
+      const r = await (svc as {
+        List: (input: { state: string; limit: number }) => Promise<{
+          Value?: { issues?: Array<{
+            ID?: string; Summary?: string; State?: string; Severity?: string; Priority?: string;
+          }> }
+        }>
+      }).List({ state: "", limit: 200 });
+      const issues = r?.Value?.issues ?? [];
+      if (issues.length === 0) return;
+      const todo: Card[] = [];
+      const doing: Card[] = [];
+      const done: Card[] = [];
+      for (const it of issues) {
+        const card: Card = {
+          id:    (it.ID ?? "").slice(0, 6),
+          title: it.Summary ?? "(untitled)",
+          est:   1,
+          tag:   "feat",
+        };
+        const s = (it.State ?? "").toLowerCase();
+        if (s === "open") todo.push(card);
+        else if (s === "in_progress") doing.push(card);
+        else if (s === "done") done.push(card);
+      }
+      const existing = this.data.columns;
+      const review = existing.find(c => c.id === "review")
+        ?? { id: "review" as const, label: "Review", count: 0, cards: [] };
+      this.data = {
+        ...this.data,
+        columns: [
+          { id: "todo",   label: "To do",      count: todo.length,  cards: todo },
+          { id: "doing",  label: "In flight",  count: doing.length, cards: doing },
+          { id: "review", label: "Review",     count: review.cards.length, cards: review.cards },
+          { id: "done",   label: "Done",       count: done.length,  cards: done },
+        ],
+      };
+    } catch {
+      // Backend unavailable — fixture stays.
+    }
   }
 
   /** Update the active filter query and re-render. Public so the
