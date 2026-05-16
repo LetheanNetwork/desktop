@@ -180,10 +180,29 @@ func loadDeals() ([]dealFrontmatter, error) {
 	return fms, nil
 }
 
-// writeDealStage reads the deal file, mutates the stage frontmatter field,
-// and writes it back. Returns the previous stage.
+// writeDealStage reads the deal file, mutates the stage frontmatter
+// field, bumps the version, and writes it back via
+// paths.AtomicWriteWithVersion (Cascade W1, Mantis #1540). Returns the
+// previous stage.
+//
+// The deal file is shared with pkg/sales/deals — both writers MUST
+// route through paths.AtomicWriteWithVersion + the version frontmatter
+// field for the optimistic-lock guarantee to hold across cross-package
+// concurrent mutation. Pipeline reads ReadVersion (single stat+read
+// under lock-friendly semantics), increments the version, edits the
+// stage line in place, and writes back gated on IfVersion=priorVersion.
+//
+// Stale writes wrap the paths.VersionStale envelope as
+// "pipeline.update.conflict" preserving the structured payload
+// accessible via paths.VersionStaleFromError. Legacy files without a
+// version frontmatter field read as 0 and upgrade via an unconditional
+// first-write that stamps version=1.
+//
 // Cerberus #1486: id is the load-bearing path component; reject anything
 // that fails IsValidID before joining.
+//
+// Audit emission is automatic via paths.AuditModeForPath — sales/deals/*
+// routes through AuditModeBatch per RFC §6.1.
 func writeDealStage(id, toStage string) (fromStage string, err error) {
 	if vErr := paths.IsValidID(id); vErr != nil {
 		return "", vErr
@@ -195,27 +214,123 @@ func writeDealStage(id, toStage string) (fromStage string, err error) {
 	dir := dirR.Value.(string)
 	fpath := core.PathJoin(dir, id+".md")
 
-	raw := core.ReadFile(fpath)
-	if !raw.OK {
+	rd := paths.ReadVersion(fpath)
+	if !rd.OK {
+		return "", core.E("pipeline.writeDealStage", rd.Error(), nil)
+	}
+	cur := rd.Value.(paths.ReadOutput)
+	if len(cur.Body) == 0 {
 		return "", core.E("pipeline.writeDealStage", "not found: "+id, nil)
 	}
 
-	fm, err := parseFrontmatter(raw.Value.([]byte))
+	fm, err := parseFrontmatter(cur.Body)
 	if err != nil {
 		return "", err
 	}
 	fromStage = fm.Stage
 
-	// Replace the stage value in the raw bytes without re-marshalling
-	// the full YAML — this avoids touching the rest of the frontmatter.
-	// We locate the "stage: " key and replace the value after it.
-	// Pattern: scan for "stage: " prefix on its own line.
-	updated := updateYAMLField(raw.Value.([]byte), "stage", toStage)
-	// 0o600 (Cerberus #1487 PR-1): commercial PII — owner-only.
-	if w := core.WriteFile(fpath, updated, 0o600); !w.OK {
-		return fromStage, core.E("pipeline.writeDealStage", w.Error(), nil)
+	// Edit the stage line in place. updateYAMLField restricts itself to
+	// the frontmatter block so the body is untouched.
+	updated := updateYAMLField(cur.Body, "stage", toStage)
+	// Bump or insert the version frontmatter line so subsequent reads
+	// see a monotonic version (matches the deals service writer shape).
+	nextVersion := cur.Version + 1
+	if nextVersion < 1 {
+		nextVersion = 1
 	}
-	return fromStage, nil
+	updated = setVersionField(updated, nextVersion)
+
+	res := paths.AtomicWriteWithVersion(fpath, paths.WriteInput{
+		Body:      updated,
+		IfVersion: cur.Version,
+	})
+	if res.OK {
+		return fromStage, nil
+	}
+	if core.Contains(res.Error(), paths.CodeVersionStale) {
+		return fromStage, core.E("pipeline.writeDealStage",
+			"pipeline.update.conflict", versionStaleAsError(res.Value))
+	}
+	return fromStage, core.E("pipeline.writeDealStage", res.Error(), nil)
+}
+
+// versionStaleAsError surfaces the paths.VersionStale envelope as an
+// error whose Error() reports "pipeline.update.conflict". The envelope
+// stays accessible via paths.VersionStaleFromError on the returned cause.
+func versionStaleAsError(v any) error {
+	if e, ok := v.(error); ok {
+		return e
+	}
+	return core.NewCode("pipeline.update.conflict", "version_stale")
+}
+
+// setVersionField stamps a "version: N" line into the frontmatter
+// block. If the file already has a version line within the leading
+// "---\n...---\n" delimiter, the value is updated in place; otherwise a
+// new line is inserted immediately after the opening delimiter.
+// Mirrors updateYAMLField's frontmatter-only discipline so the body
+// stays untouched.
+//
+// Usage example:
+//
+//	updated := setVersionField(raw, 2)
+func setVersionField(raw []byte, v int) []byte {
+	line := core.Sprintf("version: %d", v)
+	// First try in-place update via updateYAMLField.
+	out := updateYAMLField(raw, "version", core.Sprintf("%d", v))
+	// updateYAMLField returns the original bytes when no match is
+	// found — detect by checking whether the key landed.
+	if containsLine(out, line) {
+		return out
+	}
+	// No version field present — insert one after the opening "---\n".
+	open := []byte("---\n")
+	if len(raw) >= len(open) {
+		match := true
+		for i, b := range open {
+			if raw[i] != b {
+				match = false
+				break
+			}
+		}
+		if match {
+			ins := make([]byte, 0, len(raw)+len(line)+1)
+			ins = append(ins, open...)
+			ins = append(ins, []byte(line)...)
+			ins = append(ins, '\n')
+			ins = append(ins, raw[len(open):]...)
+			return ins
+		}
+	}
+	return raw
+}
+
+// containsLine reports whether raw contains the exact line bytes as a
+// standalone line (newline-delimited).
+func containsLine(raw []byte, line string) bool {
+	needle := []byte(line)
+	for i := 0; i+len(needle) <= len(raw); i++ {
+		// Match at start-of-line or document start.
+		if i > 0 && raw[i-1] != '\n' {
+			continue
+		}
+		ok := true
+		for j := range needle {
+			if raw[i+j] != needle[j] {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+		// End of match must be EOF or newline.
+		end := i + len(needle)
+		if end == len(raw) || raw[end] == '\n' {
+			return true
+		}
+	}
+	return false
 }
 
 // updateYAMLField replaces the value of a YAML field key on its own line

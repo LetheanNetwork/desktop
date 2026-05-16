@@ -5,6 +5,8 @@ package pipeline_test
 import (
 	"testing"
 
+	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/sales/deals"
 	"dappco.re/lthn/desktop/pkg/sales/pipeline"
 )
@@ -134,5 +136,204 @@ func TestServiceName_Good(t *testing.T) {
 	svc := pipeline.NewService(nil)
 	if svc.ServiceName() != "Pipeline" {
 		t.Fatalf("expected Pipeline, got %q", svc.ServiceName())
+	}
+}
+
+// ---- Cascade W1 cutover tests (paths.AtomicWriteWithVersion) ---------------
+
+// TestAtomicCutover_Pipeline_Create_Good — deals.Create stamps version=1
+// (covered by the deals cutover suite); pipeline pre-condition is that
+// MoveDeal observes that version on disk. Asserts MoveDeal then advances
+// the on-disk version to 2.
+func TestAtomicCutover_Pipeline_Create_Good(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dealSvc := deals.NewService(nil)
+	pipeSvc := pipeline.NewService(nil)
+	cr := dealSvc.Create(deals.CreateInput{
+		Customer: "Heritage Law LLP", AmountPence: 24000, Stage: "qual",
+	})
+	if !cr.OK {
+		t.Fatalf("Create failed: %s", cr.Error())
+	}
+	d := cr.Value.(deals.Deal)
+	mr := pipeSvc.MoveDeal(pipeline.MoveInput{DealID: d.ID, ToStage: "engage"})
+	if !mr.OK {
+		t.Fatalf("MoveDeal failed: %s", mr.Error())
+	}
+	dirR := core.UserHomeDir()
+	if !dirR.OK {
+		t.Fatalf("UserHomeDir: %s", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), "Lethean/sales/deals", d.ID+".md")
+	rd := paths.ReadVersion(fpath)
+	if !rd.OK {
+		t.Fatalf("ReadVersion: %s", rd.Error())
+	}
+	got := rd.Value.(paths.ReadOutput)
+	if got.Version != 2 {
+		t.Fatalf("expected version 2 after MoveDeal (Create=1 + Move=+1), got %d", got.Version)
+	}
+}
+
+// TestAtomicCutover_Pipeline_Update_Good — sequential MoveDeal calls
+// bump the stored version monotonically (1 → 2 → 3).
+func TestAtomicCutover_Pipeline_Update_Good(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dealSvc := deals.NewService(nil)
+	pipeSvc := pipeline.NewService(nil)
+	cr := dealSvc.Create(deals.CreateInput{
+		Customer: "Stannard & Co", AmountPence: 44000, Stage: "qual",
+	})
+	if !cr.OK {
+		t.Fatalf("Create failed: %s", cr.Error())
+	}
+	d := cr.Value.(deals.Deal)
+	if r := pipeSvc.MoveDeal(pipeline.MoveInput{DealID: d.ID, ToStage: "engage"}); !r.OK {
+		t.Fatalf("MoveDeal 1: %s", r.Error())
+	}
+	if r := pipeSvc.MoveDeal(pipeline.MoveInput{DealID: d.ID, ToStage: "propose"}); !r.OK {
+		t.Fatalf("MoveDeal 2: %s", r.Error())
+	}
+	dirR := core.UserHomeDir()
+	if !dirR.OK {
+		t.Fatalf("UserHomeDir: %s", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), "Lethean/sales/deals", d.ID+".md")
+	rd := paths.ReadVersion(fpath)
+	if !rd.OK {
+		t.Fatalf("ReadVersion: %s", rd.Error())
+	}
+	got := rd.Value.(paths.ReadOutput)
+	if got.Version != 3 {
+		t.Fatalf("expected version 3 after Create+Move+Move, got %d", got.Version)
+	}
+}
+
+// TestAtomicCutover_Pipeline_Update_VersionStale_Ugly — drives the
+// primitive directly with a known-stale IfVersion to confirm the
+// conflict-wrap shape is reachable on the pipeline write path.
+func TestAtomicCutover_Pipeline_Update_VersionStale_Ugly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dealSvc := deals.NewService(nil)
+	cr := dealSvc.Create(deals.CreateInput{
+		Customer: "Pemberton Capital", AmountPence: 62000, Stage: "engage",
+	})
+	if !cr.OK {
+		t.Fatalf("Create failed: %s", cr.Error())
+	}
+	id := cr.Value.(deals.Deal).ID
+	dirR := core.UserHomeDir()
+	if !dirR.OK {
+		t.Fatalf("UserHomeDir: %s", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), "Lethean/sales/deals", id+".md")
+	body := []byte("---\nversion: 1\nid: " + id + "\ncustomer: Stale\nstage: engage\n---\n")
+	r := paths.AtomicWriteWithVersion(fpath, paths.WriteInput{
+		Body:      body,
+		IfVersion: 99,
+	})
+	if r.OK {
+		t.Fatal("expected stale conflict, got OK")
+	}
+	if !core.Contains(r.Error(), paths.CodeVersionStale) {
+		t.Fatalf("expected paths.CodeVersionStale in error, got %q", r.Error())
+	}
+	vs, ok := paths.VersionStaleFromError(r.Value)
+	if !ok {
+		t.Fatal("expected VersionStale envelope reachable via VersionStaleFromError")
+	}
+	if vs.CurrentVersion != 1 {
+		t.Fatalf("expected CurrentVersion=1, got %d", vs.CurrentVersion)
+	}
+}
+
+// TestAtomicCutover_Pipeline_LegacyFile_Ugly — a deal file with no
+// version: frontmatter reads as version 0; MoveDeal upgrades it via an
+// unconditional first-write that stamps version=1 alongside the new
+// stage value.
+func TestAtomicCutover_Pipeline_LegacyFile_Ugly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	pipeSvc := pipeline.NewService(nil)
+	dirR := core.UserHomeDir()
+	if !dirR.OK {
+		t.Fatalf("UserHomeDir: %s", dirR.Error())
+	}
+	dealsDir := core.PathJoin(dirR.Value.(string), "Lethean/sales/deals")
+	if mk := core.MkdirAll(dealsDir, 0o700); !mk.OK {
+		t.Fatalf("MkdirAll: %s", mk.Error())
+	}
+	legacyID := "202605-DEAL-998"
+	fpath := core.PathJoin(dealsDir, legacyID+".md")
+	legacy := []byte("---\nid: " + legacyID + "\ncustomer: Legacy Co\nstage: qual\namount_pence: 1000\nclose_target: \"\"\n---\n")
+	if w := core.WriteFile(fpath, legacy, 0o600); !w.OK {
+		t.Fatalf("WriteFile: %s", w.Error())
+	}
+	rd := paths.ReadVersion(fpath)
+	if !rd.OK {
+		t.Fatalf("ReadVersion: %s", rd.Error())
+	}
+	if got := rd.Value.(paths.ReadOutput); got.Version != 0 {
+		t.Fatalf("legacy file pre-update: expected version 0, got %d", got.Version)
+	}
+	mr := pipeSvc.MoveDeal(pipeline.MoveInput{DealID: legacyID, ToStage: "engage"})
+	if !mr.OK {
+		t.Fatalf("MoveDeal failed: %s", mr.Error())
+	}
+	rd2 := paths.ReadVersion(fpath)
+	if !rd2.OK {
+		t.Fatalf("ReadVersion post-update: %s", rd2.Error())
+	}
+	if got := rd2.Value.(paths.ReadOutput); got.Version != 1 {
+		t.Fatalf("legacy file post-update: expected version 1, got %d", got.Version)
+	}
+}
+
+// TestAtomicCutover_Pipeline_AuditEmissionRecordBatch_Good — MoveDeal
+// routes through the primitive's write path (EventWriteSucceeded fires)
+// and sales/deals/* paths fall under AuditModeBatch per RFC §6.1.
+func TestAtomicCutover_Pipeline_AuditEmissionRecordBatch_Good(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dealSvc := deals.NewService(nil)
+	pipeSvc := pipeline.NewService(nil)
+	paths.SetAuditSecretProvider(func() []byte {
+		return []byte("pipeline-cutover-test-secret-32-byte")
+	})
+	t.Cleanup(func() { paths.SetAuditSecretProvider(nil) })
+	var saw []paths.LockEvent
+	paths.SubscribeLockEvents(func(ev paths.LockEvent) {
+		saw = append(saw, ev)
+	})
+	t.Cleanup(paths.ClearLockEventSubscribersForTest)
+
+	cr := dealSvc.Create(deals.CreateInput{
+		Customer: "Whitethorn Press", AmountPence: 36000, Stage: "qual",
+	})
+	if !cr.OK {
+		t.Fatalf("Create failed: %s", cr.Error())
+	}
+	d := cr.Value.(deals.Deal)
+	mr := pipeSvc.MoveDeal(pipeline.MoveInput{DealID: d.ID, ToStage: "engage"})
+	if !mr.OK {
+		t.Fatalf("MoveDeal failed: %s", mr.Error())
+	}
+	// Both Create AND MoveDeal route through the primitive. Count
+	// EventWriteSucceeded occurrences — there should be at least two.
+	count := 0
+	for _, ev := range saw {
+		if ev.Kind == paths.EventWriteSucceeded {
+			count++
+		}
+	}
+	if count < 2 {
+		t.Fatalf("expected ≥2 EventWriteSucceeded (Create + MoveDeal), got %d", count)
+	}
+	dirR := core.UserHomeDir()
+	if !dirR.OK {
+		t.Fatalf("UserHomeDir: %s", dirR.Error())
+	}
+	fpath := core.PathJoin(dirR.Value.(string), "Lethean/sales/deals/x.md")
+	mode := paths.AuditModeForPath(fpath)
+	if mode != paths.AuditModeBatch {
+		t.Fatalf("expected AuditModeBatch for sales/deals path (pipeline writer), got %v", mode)
 	}
 }
