@@ -33,7 +33,7 @@ export interface MountOptions {
   props?: Record<string, unknown>;
 }
 
-export interface MountResult<T extends LitElement = LitElement> {
+export interface MountResult<T extends HTMLElement = LitElement> {
   /** The host div the element lives inside — query against this for text/DOM. */
   host: HTMLDivElement;
   /** The element instance — use for prop set + updateComplete cycles. */
@@ -46,8 +46,14 @@ export interface MountResult<T extends LitElement = LitElement> {
  *
  * Returns `{ host, el }` so the caller can query the rendered DOM and
  * still mutate the element for state-change tests.
+ *
+ * Constraint is `T extends HTMLElement` (NOT LitElement) so callers can
+ * narrow with an inline shape like `HTMLElement & { foo: string }`
+ * without the type-system rejecting non-LitElement-shaped intersections.
+ * The body still treats the element as LitElement-like via the
+ * `updateComplete` runtime probe, so behaviour is unchanged.
  */
-export async function mountWindow<T extends LitElement = LitElement>(
+export async function mountWindow<T extends HTMLElement = LitElement>(
   tag: string,
   opts: MountOptions = {},
 ): Promise<MountResult<T>> {
