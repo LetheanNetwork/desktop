@@ -54,19 +54,22 @@ func Register(c *core.Core) core.Result {
 func (s *Service) ServiceName() string { return "Incidents" }
 
 // incidentsDir resolves ~/Lethean/incidents/ and creates it if missing.
+// Mode 0o700 (Cerberus #1487 PR-1): post-mortem bodies + service names
+// + people-attribution are sensitive — owner-only at rest.
 func incidentsDir() core.Result {
 	root := paths.Root()
 	if !root.OK {
 		return root
 	}
 	dir := core.PathJoin(root.Value.(string), "incidents")
-	if r := core.MkdirAll(dir, 0o755); !r.OK {
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)
 }
 
 // yearMonthDir resolves ~/Lethean/incidents/{YYYY}/{MM}/ and creates it.
+// Mode 0o700 (Cerberus #1487 PR-1): mirrors the parent.
 func yearMonthDir(t core.Time) core.Result {
 	base := incidentsDir()
 	if !base.OK {
@@ -75,7 +78,7 @@ func yearMonthDir(t core.Time) core.Result {
 	yr := core.TimeFormat(t, "2006")
 	mo := core.TimeFormat(t, "01")
 	dir := core.PathJoin(base.Value.(string), yr, mo)
-	if r := core.MkdirAll(dir, 0o755); !r.OK {
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)
@@ -296,7 +299,12 @@ func list90() ([]IncidentRecord, error) {
 
 // loadOne finds and fully parses the incident file for the given ID,
 // returning the record with the PostMortem body populated.
+// Cerberus #1486: id is validated before any directory walk so a
+// traversal payload cannot inflate ReadDir attempts across the tree.
 func loadOne(id string) (IncidentRecord, string, error) {
+	if err := paths.IsValidID(id); err != nil {
+		return IncidentRecord{}, "", err
+	}
 	base := incidentsDir()
 	if !base.OK {
 		return IncidentRecord{}, "", core.E("incidents.loadOne", base.Error(), nil)
@@ -341,13 +349,18 @@ func loadOne(id string) (IncidentRecord, string, error) {
 
 // writeRecord serialises a record back to disk. dirPath must be the
 // directory that already contains the file.
+// Cerberus #1486: rec.ID lands in the filename — validate before join.
+// Cerberus #1487 PR-1: 0o600 — owner-only at rest.
 func writeRecord(r IncidentRecord, dirPath string) error {
+	if err := paths.IsValidID(r.ID); err != nil {
+		return err
+	}
 	raw, err := marshalRecord(r)
 	if err != nil {
 		return err
 	}
 	target := core.PathJoin(dirPath, r.ID+".md")
-	if w := core.WriteFile(target, raw, 0o644); !w.OK {
+	if w := core.WriteFile(target, raw, 0o600); !w.OK {
 		return core.E("incidents.writeRecord", w.Error(), nil)
 	}
 	return nil
