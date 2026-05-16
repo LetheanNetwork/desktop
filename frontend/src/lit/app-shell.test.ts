@@ -14,6 +14,7 @@
 
 import { describe, it, expect } from "vitest";
 import { mountWindow } from "../test/window-fixture";
+import { filterGgufPaths, MODELS_REFRESH_EVENT, filterPaletteEntries } from "./app-shell";
 
 // Side-effect import — registers <lthn-app-shell> + all child window
 // elements the shell can mount via _instantiate.
@@ -347,5 +348,314 @@ describe("lthn-app-shell — rail click dispatch", () => {
     btn!.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true }));
     await el.updateComplete;
     expect(el.active).toBe("chat");
+  });
+});
+
+describe("filterGgufPaths — drag-and-drop import filter", () => {
+  it("keeps only .gguf paths", () => {
+    expect(filterGgufPaths(["a.gguf", "b.txt", "c.gguf"])).toEqual(["a.gguf", "c.gguf"]);
+  });
+
+  it("matches case-insensitively (.GGUF, .Gguf, etc.)", () => {
+    expect(filterGgufPaths(["a.GGUF", "b.Gguf", "c.GGuF"])).toEqual(["a.GGUF", "b.Gguf", "c.GGuF"]);
+  });
+
+  it("rejects non-.gguf extensions (.bin, .safetensors, no ext)", () => {
+    expect(filterGgufPaths(["x.bin", "y.safetensors", "noext", "z.txt"])).toEqual([]);
+  });
+
+  it("preserves absolute paths verbatim — no normalisation", () => {
+    expect(filterGgufPaths([
+      "/Users/snider/Downloads/gemma-4-e2b-q4_k_m.gguf",
+      "/var/tmp/llama-3-2-3b.gguf",
+    ])).toEqual([
+      "/Users/snider/Downloads/gemma-4-e2b-q4_k_m.gguf",
+      "/var/tmp/llama-3-2-3b.gguf",
+    ]);
+  });
+
+  it("filters out non-string entries safely", () => {
+    // Defensive: Wails could theoretically pass mixed types from an
+    // older binding; the filter must not throw on number / object / null.
+    const mixed = ["a.gguf", 42 as unknown as string, null as unknown as string, "b.gguf"];
+    expect(filterGgufPaths(mixed)).toEqual(["a.gguf", "b.gguf"]);
+  });
+
+  it("returns [] for null / undefined / empty input", () => {
+    expect(filterGgufPaths(null)).toEqual([]);
+    expect(filterGgufPaths(undefined)).toEqual([]);
+    expect(filterGgufPaths([])).toEqual([]);
+  });
+
+  it("MODELS_REFRESH_EVENT carries the canonical bus name", () => {
+    expect(MODELS_REFRESH_EVENT).toBe("lthn:models:refresh");
+  });
+});
+
+describe("lthn-app-shell — _adoptDroppedGgufs", () => {
+  type ShellWithDrop = HTMLElement & {
+    _adoptDroppedGgufs: (paths: readonly string[]) => Promise<void>;
+    updateComplete: Promise<boolean>;
+  };
+
+  it("empty input is a silent no-op (no throw)", async () => {
+    const { el } = await mountWindow<ShellWithDrop>("lthn-app-shell");
+    let threw: unknown = null;
+    try { await el._adoptDroppedGgufs([]); }
+    catch (e) { threw = e; }
+    expect(threw, "empty array must not throw").toBeNull();
+  });
+
+  it("null input is a silent no-op (no throw)", async () => {
+    const { el } = await mountWindow<ShellWithDrop>("lthn-app-shell");
+    let threw: unknown = null;
+    try { await el._adoptDroppedGgufs(null as unknown as readonly string[]); }
+    catch (e) { threw = e; }
+    expect(threw, "null input must not throw").toBeNull();
+  });
+});
+
+describe("filterPaletteEntries — ⌘P fuzzy filter", () => {
+  const nav = [
+    { id: "chat",    label: "Chat" },
+    { id: "models",  label: "Models" },
+    { id: "settings", label: "Settings" },
+  ];
+
+  it("returns the full list for empty / blank query", () => {
+    expect(filterPaletteEntries(nav, "")).toHaveLength(3);
+    expect(filterPaletteEntries(nav, "  ")).toHaveLength(3);
+    expect(filterPaletteEntries(nav, null)).toHaveLength(3);
+    expect(filterPaletteEntries(nav, undefined)).toHaveLength(3);
+  });
+
+  it("matches label substring (case-insensitive)", () => {
+    expect(filterPaletteEntries(nav, "chat").map(n => n.id)).toEqual(["chat"]);
+    expect(filterPaletteEntries(nav, "MOD").map(n => n.id)).toEqual(["models"]);
+  });
+
+  it("matches id substring too", () => {
+    expect(filterPaletteEntries(nav, "settings").map(n => n.id)).toEqual(["settings"]);
+  });
+
+  it("returns [] for no match", () => {
+    expect(filterPaletteEntries(nav, "ghost-needle")).toEqual([]);
+  });
+});
+
+describe("lthn-app-shell — ⌘P command palette", () => {
+  type ShellWithPalette = HTMLElement & {
+    active: string;
+    paletteOpen: boolean;
+    paletteQuery: string;
+    paletteIndex: number;
+    _togglePalette: () => void;
+    _palettedStep: (delta: number) => void;
+    _paletteCommit: () => void;
+    updateComplete: Promise<boolean>;
+  };
+
+  it("⌘P opens the palette", async () => {
+    const { el, host } = await mountWindow<ShellWithPalette>("lthn-app-shell");
+    expect(el.paletteOpen).toBe(false);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", metaKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.paletteOpen).toBe(true);
+    expect(host.querySelector(".lthn-palette"), "palette dialog rendered").not.toBeNull();
+    expect(host.querySelector(".lthn-palette-input"), "input rendered").not.toBeNull();
+  });
+
+  it("Ctrl+P also opens (Linux/Windows)", async () => {
+    const { el } = await mountWindow<ShellWithPalette>("lthn-app-shell");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", ctrlKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.paletteOpen).toBe(true);
+  });
+
+  it("⌘P again closes + clears query", async () => {
+    const { el } = await mountWindow<ShellWithPalette>("lthn-app-shell");
+    el.paletteOpen = true;
+    el.paletteQuery = "set";
+    el.paletteIndex = 2;
+    await el.updateComplete;
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", metaKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.paletteOpen).toBe(false);
+    expect(el.paletteQuery).toBe("");
+    expect(el.paletteIndex).toBe(-1);
+  });
+
+  it("_palettedStep cycles with wrap", async () => {
+    const { el } = await mountWindow<ShellWithPalette>("lthn-app-shell");
+    el.paletteOpen = true;
+    el.paletteQuery = ""; // full nav list
+    el.paletteIndex = 0;
+    el._palettedStep(1);
+    expect(el.paletteIndex).toBe(1);
+    el._palettedStep(-1);
+    expect(el.paletteIndex).toBe(0);
+    // backward wraps to last
+    el._palettedStep(-1);
+    expect(el.paletteIndex, "backward wrap").toBeGreaterThan(0);
+  });
+
+  it("_palettedStep is a no-op on empty filter", async () => {
+    const { el } = await mountWindow<ShellWithPalette>("lthn-app-shell");
+    el.paletteOpen = true;
+    el.paletteQuery = "ghost-needle-xyz";
+    el.paletteIndex = -1;
+    el._palettedStep(1);
+    expect(el.paletteIndex, "no matches → index unchanged").toBe(-1);
+  });
+
+  it("_paletteCommit switches pane + closes", async () => {
+    const { el } = await mountWindow<ShellWithPalette>("lthn-app-shell");
+    el.paletteOpen = true;
+    el.paletteQuery = "settings";
+    el.paletteIndex = 0;
+    await el.updateComplete;
+    el._paletteCommit();
+    expect(el.active).toBe("settings");
+    expect(el.paletteOpen).toBe(false);
+  });
+
+  it("Enter in palette input commits the selection", async () => {
+    const { el, host } = await mountWindow<ShellWithPalette>("lthn-app-shell");
+    el.paletteOpen = true;
+    el.paletteQuery = "models";
+    el.paletteIndex = 0;
+    await el.updateComplete;
+    const input = host.querySelector<HTMLInputElement>(".lthn-palette-input")!;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await el.updateComplete;
+    expect(el.active).toBe("models");
+    expect(el.paletteOpen).toBe(false);
+  });
+
+  it("Escape in palette input closes", async () => {
+    const { el, host } = await mountWindow<ShellWithPalette>("lthn-app-shell");
+    el.paletteOpen = true;
+    await el.updateComplete;
+    const input = host.querySelector<HTMLInputElement>(".lthn-palette-input")!;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await el.updateComplete;
+    expect(el.paletteOpen).toBe(false);
+  });
+
+  it("backdrop click dismisses the palette", async () => {
+    const { el, host } = await mountWindow<ShellWithPalette>("lthn-app-shell");
+    el.paletteOpen = true;
+    await el.updateComplete;
+    const backdrop = host.querySelector<HTMLElement>(".lthn-palette-backdrop");
+    expect(backdrop).not.toBeNull();
+    backdrop!.click();
+    await el.updateComplete;
+    expect(el.paletteOpen).toBe(false);
+  });
+
+  it("empty-filter state renders the 'No match for …' hint", async () => {
+    const { el, host } = await mountWindow<ShellWithPalette>("lthn-app-shell");
+    el.paletteOpen = true;
+    el.paletteQuery = "ghost-needle";
+    await el.updateComplete;
+    expect(host.querySelector(".lthn-palette-empty"), "empty hint rendered").not.toBeNull();
+  });
+});
+
+describe("lthn-app-shell — ⌘1..⌘7 view shortcuts", () => {
+  type ShellWithView = HTMLElement & {
+    view: string;
+    active: string;
+    updateComplete: Promise<boolean>;
+  };
+
+  it("⌘1 selects the first view (admin)", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "planning" } });
+    expect(el.view).toBe("planning");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "1", metaKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe("admin");
+  });
+
+  it("⌘2 selects planning", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "2", metaKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe("planning");
+  });
+
+  it("⌘3..⌘7 cycle through coding/marketing/operations/sales/office", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell");
+    const expected = ["coding", "marketing", "operations", "sales", "office"];
+    for (let i = 0; i < expected.length; i++) {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: String(i + 3), metaKey: true, bubbles: true }));
+      await el.updateComplete;
+      expect(el.view, `⌘${i + 3} → ${expected[i]}`).toBe(expected[i]);
+    }
+  });
+
+  it("Ctrl+1..7 also works (Linux/Windows)", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "3", ctrlKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe("coding");
+  });
+
+  it("⌘8 / ⌘0 are ignored (out of range)", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell");
+    const before = el.view;
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "8", metaKey: true, bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "0", metaKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe(before);
+  });
+
+  it("⇧⌘1 is ignored (shift modifier breaks the shortcut)", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "planning" } });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "1", metaKey: true, shiftKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe("planning");
+  });
+
+  it("⌘1 is suppressed while an INPUT has focus", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "planning" } });
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "1", metaKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view, "input had focus → shortcut suppressed").toBe("planning");
+    input.remove();
+  });
+
+  it("⌘1 is suppressed while a TEXTAREA has focus", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "planning" } });
+    const ta = document.createElement("textarea");
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "1", metaKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe("planning");
+    ta.remove();
+  });
+
+  it("⌘1 is suppressed while a contenteditable has focus", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "planning" } });
+    const ce = document.createElement("div");
+    ce.contentEditable = "true";
+    ce.tabIndex = 0;
+    document.body.appendChild(ce);
+    ce.focus();
+    ce.dispatchEvent(new KeyboardEvent("keydown", { key: "1", metaKey: true, bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe("planning");
+    ce.remove();
+  });
+
+  it("plain '1' (no modifier) does not switch views", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "planning" } });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "1", bubbles: true }));
+    await el.updateComplete;
+    expect(el.view).toBe("planning");
   });
 });

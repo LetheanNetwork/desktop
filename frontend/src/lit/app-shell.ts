@@ -378,6 +378,30 @@ class LthnAppShell extends LitElement {
     this._togglePalette();
   };
 
+  /** Window-level keydown — ⌘1..⌘7 (Ctrl+1..7 on non-mac) switch
+   *  between the seven views (admin/planning/coding/marketing/
+   *  operations/sales/office). Suppressed while a text input or
+   *  contenteditable surface has focus so it doesn't steal from
+   *  the chat composer / search inputs / cell editors. The WebView
+   *  has no browser tabs so there's no platform-shortcut collision. */
+  private _onKeyDownForViewSwitch = (ev: KeyboardEvent) => {
+    const accel = ev.metaKey || ev.ctrlKey;
+    if (!accel) return;
+    if (ev.shiftKey || ev.altKey) return;
+    const code = ev.key.charCodeAt(0);
+    if (code < 49 || code > 55) return; // '1'..'7'
+    const target = ev.target as HTMLElement | null;
+    if (target) {
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+    }
+    const idx = code - 49;
+    const view = VIEWS[idx];
+    if (!view) return;
+    ev.preventDefault();
+    this._selectView(view.id);
+  };
+
   /** Open + close the palette. Reset query + selection each toggle
    *  so the user always lands at the top of the unfiltered list. */
   _togglePalette() {
@@ -426,6 +450,7 @@ class LthnAppShell extends LitElement {
     // browser's Escape listener — so it works before the async
     // i18n promise lands.
     window.addEventListener("keydown", this._onKeyDownForPalette);
+    window.addEventListener("keydown", this._onKeyDownForViewSwitch);
     // Outside-click closes the view-switcher dropdown.
     document.addEventListener("click", this._onDocClickForSwitcher);
     const [
@@ -517,6 +542,7 @@ class LthnAppShell extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener("keydown", this._onKeyDownForPalette);
+    window.removeEventListener("keydown", this._onKeyDownForViewSwitch);
     document.removeEventListener("click", this._onDocClickForSwitcher);
     if (this._unsubSetPane) {
       this._unsubSetPane();
