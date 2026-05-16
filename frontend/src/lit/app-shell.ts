@@ -77,6 +77,47 @@ export function filterPaletteEntries<T extends { id: string; label: string }>(
   );
 }
 
+/** Cross-view palette entry — every nav entry across every view,
+ *  decorated with the view it belongs to so the palette can route to
+ *  it (switch view first, then select pane). */
+export interface CrossViewEntry {
+  /** Pane id within the view (e.g. "chat"). */
+  id:        string;
+  /** Display label including the view name ("Admin · Chat"). */
+  label:     string;
+  /** The original pane label without view prefix ("Chat"). */
+  paneLabel: string;
+  /** The pane icon. */
+  icon:      string;
+  /** Containing view id ("admin", "planning"…). */
+  viewId:    string;
+  /** Containing view label for grouping ("Admin"). */
+  viewLabel: string;
+}
+
+/** Build a deduplicated cross-view entry list. Same-id panes in
+ *  different views are kept as distinct entries — the user might
+ *  want "Coding · Settings" vs "Admin · Settings". Settings is the
+ *  classic example: every view has it, all should appear in the
+ *  palette so ⌘P → "settings" → narrowed list lets you pick which
+ *  view's settings you actually want. */
+export function buildCrossViewEntries(views: readonly ViewDef[]): CrossViewEntry[] {
+  const out: CrossViewEntry[] = [];
+  for (const v of views) {
+    for (const n of v.nav) {
+      out.push({
+        id:        `${v.id}::${n.id}`,
+        label:     `${v.label} · ${n.label}`,
+        paneLabel: n.label,
+        icon:      n.icon,
+        viewId:    v.id,
+        viewLabel: v.label,
+      });
+    }
+  }
+  return out;
+}
+
 /** A side-nav entry — one mountable surface in the active view. */
 interface NavEntry {
   id:      string;
@@ -446,7 +487,7 @@ class LthnAppShell extends LitElement {
   /** Step the palette cursor. Wraps. No-op when the filtered list is
    *  empty (so ↓ on "ghost-needle" doesn't move from -1 to 0/NaN). */
   _palettedStep(delta: number) {
-    const list = filterPaletteEntries(NAV, this.paletteQuery);
+    const list = filterPaletteEntries(buildCrossViewEntries(VIEWS), this.paletteQuery);
     if (list.length === 0) return;
     if (this.paletteIndex < 0) {
       this.paletteIndex = delta > 0 ? 0 : list.length - 1;
@@ -456,16 +497,24 @@ class LthnAppShell extends LitElement {
     this.paletteIndex = next;
   }
 
-  /** Commit the highlighted palette entry — switches pane + closes
-   *  the overlay. If the cursor's negative (user pressed Enter
-   *  before stepping), the first filtered match wins. */
+  /** Commit the highlighted palette entry — switches view + pane,
+   *  then closes the overlay. If the cursor's negative (user pressed
+   *  Enter before stepping), the first filtered match wins. The
+   *  entry's viewId is canonical: if it differs from the current
+   *  view, switch first so the side-rail repopulates BEFORE the
+   *  pane selection lands. */
   _paletteCommit() {
-    const list = filterPaletteEntries(NAV, this.paletteQuery);
+    const list = filterPaletteEntries(buildCrossViewEntries(VIEWS), this.paletteQuery);
     if (list.length === 0) return;
     const idx = this.paletteIndex < 0 ? 0 : Math.min(this.paletteIndex, list.length - 1);
     const entry = list[idx];
     if (!entry) return;
-    this._select(entry.id);
+    if (entry.viewId && entry.viewId !== this.view) {
+      this._selectView(entry.viewId);
+    }
+    // entry.id is "viewId::paneId" — extract the pane id for _select.
+    const paneId = entry.id.includes("::") ? entry.id.split("::")[1] : entry.id;
+    this._select(paneId);
     this.paletteOpen = false;
     this.paletteQuery = "";
     this.paletteIndex = -1;
@@ -937,10 +986,13 @@ class LthnAppShell extends LitElement {
     `;
   }
 
-  /** Render the ⌘P command palette overlay. Nothing when closed. */
+  /** Render the ⌘P command palette overlay. Nothing when closed.
+   *  Filters across ALL views' navs (admin + planning + coding +
+   *  marketing + operations + sales + office) so ⌘P can jump
+   *  cross-view, not just within the current one. */
   _renderPalette() {
     if (!this.paletteOpen) return nothing;
-    const filtered = filterPaletteEntries(NAV, this.paletteQuery);
+    const filtered = filterPaletteEntries(buildCrossViewEntries(VIEWS), this.paletteQuery);
     const idx = filtered.length === 0
       ? -1
       : Math.max(0, Math.min(this.paletteIndex, filtered.length - 1));

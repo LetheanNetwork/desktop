@@ -562,6 +562,77 @@ describe("lthn-app-shell — ⌘P command palette", () => {
   });
 });
 
+describe("lthn-app-shell — cross-view ⌘P palette", () => {
+  type ShellWithPaletteCV = HTMLElement & {
+    active: string;
+    view: string;
+    paletteOpen: boolean;
+    paletteQuery: string;
+    paletteIndex: number;
+    _paletteCommit: () => void;
+    updateComplete: Promise<boolean>;
+  };
+
+  it("filter 'campaigns' matches only Marketing", async () => {
+    const { el, host } = await mountWindow<ShellWithPaletteCV>("lthn-app-shell");
+    el.paletteOpen = true;
+    el.paletteQuery = "campaigns";
+    el.paletteIndex = 0;
+    await el.updateComplete;
+    const rows = host.querySelectorAll(".lthn-palette-item");
+    expect(rows.length).toBe(1);
+    expect(host.textContent ?? "").toContain("Marketing · Campaigns");
+  });
+
+  it("Enter on 'Marketing · Campaigns' switches view + pane", async () => {
+    const { el } = await mountWindow<ShellWithPaletteCV>("lthn-app-shell", { attrs: { view: "admin" } });
+    el.paletteOpen = true;
+    el.paletteQuery = "campaigns";
+    el.paletteIndex = 0;
+    await el.updateComplete;
+    el._paletteCommit();
+    await el.updateComplete;
+    expect(el.view).toBe("marketing");
+    expect(el.active).toBe("campaigns");
+    expect(el.paletteOpen).toBe(false);
+  });
+
+  it("'settings' matches every view (one Settings per view)", async () => {
+    const { el, host } = await mountWindow<ShellWithPaletteCV>("lthn-app-shell");
+    el.paletteOpen = true;
+    el.paletteQuery = "settings";
+    await el.updateComplete;
+    const rows = host.querySelectorAll(".lthn-palette-item");
+    expect(rows.length).toBe(7); // admin/planning/coding/marketing/operations/sales/office
+    expect(host.textContent ?? "").toContain("Admin · Settings");
+    expect(host.textContent ?? "").toContain("Operations · Settings");
+  });
+
+  it("Enter on 'Operations · Status' from Admin view jumps to Operations", async () => {
+    const { el } = await mountWindow<ShellWithPaletteCV>("lthn-app-shell", { attrs: { view: "admin" } });
+    el.paletteOpen = true;
+    el.paletteQuery = "status";
+    el.paletteIndex = 0;
+    await el.updateComplete;
+    el._paletteCommit();
+    await el.updateComplete;
+    expect(el.view).toBe("operations");
+    expect(el.active).toBe("status");
+  });
+
+  it("'incidents' jumps to Operations (only Operations has incidents)", async () => {
+    const { el } = await mountWindow<ShellWithPaletteCV>("lthn-app-shell", { attrs: { view: "planning" } });
+    el.paletteOpen = true;
+    el.paletteQuery = "incidents";
+    el.paletteIndex = 0;
+    await el.updateComplete;
+    el._paletteCommit();
+    await el.updateComplete;
+    expect(el.view).toBe("operations");
+    expect(el.active).toBe("incidents");
+  });
+});
+
 describe("lthn-app-shell — ⌘1..⌘7 view shortcuts", () => {
   type ShellWithView = HTMLElement & {
     view: string;
