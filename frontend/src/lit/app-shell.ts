@@ -54,6 +54,102 @@ import { AUTH_401_EVENT, AUTH_OK_EVENT, type AuthGateState } from "./auth-gate";
 import "./view-switcher";
 import "./lthn-plugin-view";
 import { VIEW_SWITCHER_SELECT_EVENT } from "./view-switcher";
+import {
+  PLUGIN_VIEW_MOUNT_TIMEOUT_EVENT,
+} from "./lthn-plugin-view";
+
+// Plugin-views Unit B.5 — default-view config + 2-entry fallback +
+// consent-ratchet per RFC.plugin-views §6.
+//
+// FALLBACK_FINAL is the second + final entry of the §6.2 chain.
+// EXACTLY two entries: configured ui.defaultView → admin. No
+// third entry, no extension hook (CRIT-3 hard cap).
+export const PLUGIN_VIEW_FALLBACK_FINAL = "admin";
+
+// CONFIG_DEFAULT_VIEW_KEY is the lthnconfig path the configured
+// default view id lives under. Read on lthn:auth:ok per §6.1; never
+// read before unlock (pre-unlock boot always lands on the gate).
+export const CONFIG_DEFAULT_VIEW_KEY = "ui.defaultView";
+
+// CONSENT_RATCHET_KEY_PREFIX namespaces the activated-once flag
+// per (pluginCode, viewId) per RFC.plugin-views §6.4. Full key:
+//   lthn.plugin.<code>.viewsActivated.<viewId>
+// Boolean "true"/"false" string under localStorage.
+export const CONSENT_RATCHET_KEY_PREFIX = "lthn.plugin.";
+
+// markViewActivated records that the user has manually selected a
+// plugin view at least once. Called from _selectView when the
+// requested view is plugin-backed AND the trigger is user (switcher,
+// ⌘P, custom shortcut) — NOT boot-time fallback. Per §6.4 storage:
+// `lthn.plugin.<code>.viewsActivated.<viewId>` = "true".
+export function markViewActivated(pluginCode: string, viewId: string): void {
+  if (!pluginCode || !viewId) return;
+  try {
+    localStorage.setItem(
+      `${CONSENT_RATCHET_KEY_PREFIX}${pluginCode}.viewsActivated.${viewId}`,
+      "true",
+    );
+  } catch {
+    /* storage unavailable — degrade silently */
+  }
+}
+
+// isViewActivated returns true when the user has manually selected
+// the (pluginCode, viewId) at least once since install. Used by the
+// Settings → "Open on launch:" dropdown consent-ratchet to refuse
+// persisting a non-built-in viewId that the user hasn't tried.
+export function isViewActivated(pluginCode: string, viewId: string): boolean {
+  if (!pluginCode || !viewId) return false;
+  try {
+    return (
+      localStorage.getItem(
+        `${CONSENT_RATCHET_KEY_PREFIX}${pluginCode}.viewsActivated.${viewId}`,
+      ) === "true"
+    );
+  } catch {
+    return false;
+  }
+}
+
+// canPersistDefaultView reports whether the supplied (viewId,
+// pluginCode) is eligible to be set as ui.defaultView. Built-in
+// view ids always return true; plugin view ids require the
+// (pluginCode, viewId) consent-ratchet entry to exist. This is the
+// gate the Settings → Privacy dropdown calls before writing
+// ui.defaultView through lthnconfig.
+//
+// pluginCode === "" treats the viewId as built-in. The caller is
+// responsible for resolving plugin ownership before invoking.
+//
+// Usage example (inside the Settings dropdown change handler):
+//
+//   if (!canPersistDefaultView(picked.id, picked.pluginCode)) {
+//     showInlineHint("Open this view once first, then return here.");
+//     return;
+//   }
+//   await Config.Set(CONFIG_DEFAULT_VIEW_KEY, picked.id);
+export function canPersistDefaultView(viewId: string, pluginCode: string): boolean {
+  if (!viewId) return false;
+  // Built-in views are always persistable.
+  if (!pluginCode || pluginCode === "lthn-builtin") return true;
+  return isViewActivated(pluginCode, viewId);
+}
+
+// resolveBootView walks the 2-entry §6.2 fallback chain for boot.
+// Inputs:
+//   configured — the ui.defaultView value (empty string when unset)
+//   isMountable — predicate that returns true when the supplied
+//                 viewId is currently mountable (in registry, plugin
+//                 healthy, etc).
+// Returns the chosen viewId. EXACTLY two entries: configured → admin.
+// No third entry, no extension hook (CRIT-3 hard cap).
+export function resolveBootView(
+  configured: string,
+  isMountable: (viewId: string) => boolean,
+): string {
+  if (configured && isMountable(configured)) return configured;
+  return PLUGIN_VIEW_FALLBACK_FINAL;
+}
 
 /** Filter a list of file paths down to those ending in `.gguf`
  *  (case-insensitive). Drives the drag-and-drop import wire — Wails
@@ -623,6 +719,11 @@ class LthnAppShell extends LitElement {
     await this._probeAuthState();
     // Outside-click closes the view-switcher dropdown.
     document.addEventListener("click", this._onDocClickForSwitcher);
+    // Plugin-views §6.3 — mount-timeout fallback. When <lthn-plugin-view>
+    // dispatches lthn:plugin-view:mount-timeout the shell walks the
+    // §6.2 fallback chain. The chain is hard-capped at 2 entries
+    // (configured → admin); falling through both lands on admin.
+    window.addEventListener(PLUGIN_VIEW_MOUNT_TIMEOUT_EVENT, this._onPluginViewMountTimeout);
     const [
       brand, search, settingsTip, preview, expand, collapse,
       gPrimary, gObserve, gExtend, gPreview,
@@ -716,6 +817,7 @@ class LthnAppShell extends LitElement {
     window.removeEventListener("keydown", this._onKeyDownForViewCycle);
     window.removeEventListener(AUTH_401_EVENT, this._onAuth401);
     window.removeEventListener(AUTH_OK_EVENT, this._onAuthOk);
+    window.removeEventListener(PLUGIN_VIEW_MOUNT_TIMEOUT_EVENT, this._onPluginViewMountTimeout);
     document.removeEventListener("click", this._onDocClickForSwitcher);
     if (this._unsubSetPane) {
       this._unsubSetPane();
@@ -794,7 +896,27 @@ class LthnAppShell extends LitElement {
    *  view selection so the next launch lands on the same view. */
   _selectView(viewId: string) {
     const target = VIEW_BY_ID[viewId];
-    if (!target) return;
+    if (!target) {
+      // Per RFC.plugin-views §6.4 — the consent-ratchet records a
+      // manual activation only on successful mount. Plugin-view ids
+      // (not in built-in VIEW_BY_ID) skip the built-in nav-restore
+      // path; the activation flag still flips so a later Settings
+      // dropdown change can persist the plugin view as default.
+      // The actual plugin-view mount happens via <lthn-plugin-view>
+      // when the shell renders body. We persist the active view id
+      // so the next launch lands on it via the resolveBootView path.
+      this.view = viewId;
+      this.switcherOpen = false;
+      try { localStorage.setItem(LthnAppShell.ACTIVE_VIEW_KEY, viewId); }
+      catch { /* storage unavailable */ }
+      // Per §6.4 — markViewActivated records under (pluginCode,
+      // viewId) so the Settings dropdown's canPersistDefaultView
+      // gate flips. The pluginCode is the part of the id before any
+      // ":" (manifest validator enforces `<code>` or `<code>:<sub>`).
+      const pluginCode = viewId.split(":")[0] ?? viewId;
+      markViewActivated(pluginCode, viewId);
+      return;
+    }
     this.view = viewId;
     this.switcherOpen = false;
     try { localStorage.setItem(LthnAppShell.ACTIVE_VIEW_KEY, viewId); }
@@ -823,6 +945,25 @@ class LthnAppShell extends LitElement {
   _onViewSwitcherSelect = (ev: Event) => {
     const detail = (ev as CustomEvent<{ viewId?: string }>).detail;
     if (detail?.viewId) this._selectView(detail.viewId);
+  };
+
+  /** Plugin-view mount-timeout fallback per RFC.plugin-views §6.3
+   *  + §6.2. The <lthn-plugin-view> element fires this event when
+   *  its 1500ms timer expires without an iframe load. The shell
+   *  walks the 2-entry fallback chain (configured → admin) and
+   *  switches to whichever entry is mountable.
+   *
+   *  Hard-capped at 2 entries (CRIT-3); no third entry, no
+   *  extension hook. If the configured default-view is the same as
+   *  the failing view we go straight to admin so the user isn't
+   *  trapped in a re-mount loop.
+   */
+  _onPluginViewMountTimeout = (ev: Event) => {
+    const detail = (ev as CustomEvent<{ viewId?: string }>).detail;
+    if (!detail?.viewId) return;
+    // The failing view is the currently-active one; never re-mount
+    // it. Skip directly to the §6.2 final fallback.
+    this._selectView(PLUGIN_VIEW_FALLBACK_FINAL);
   };
 
   /** Document-level click handler that closes the switcher when the

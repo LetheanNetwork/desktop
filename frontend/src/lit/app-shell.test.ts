@@ -917,3 +917,98 @@ describe("lthn-app-shell — Stage D: boot-time _probeAuthState", () => {
     expect(el._authState).toBe("ok");
   });
 });
+
+// ─── Plugin-views Unit B.5 — fallback chain + consent-ratchet ──────────
+// Per plans/code/lthn/desktop/views/RFC.plugin-views.md §6.
+
+import {
+  resolveBootView,
+  markViewActivated,
+  isViewActivated,
+  canPersistDefaultView,
+  PLUGIN_VIEW_FALLBACK_FINAL,
+  CONSENT_RATCHET_KEY_PREFIX,
+} from "./app-shell";
+import { beforeAll as beforeAllRatchet, beforeEach as beforeEachRatchet } from "vitest";
+
+// happy-dom workers don't always expose a functional localStorage —
+// shim with a Map-backed implementation so the consent-ratchet
+// helpers exercise their real branches.
+beforeAllRatchet(() => {
+  const map = new Map<string, string>();
+  const shim: Storage = {
+    get length() { return map.size; },
+    clear() { map.clear(); },
+    getItem(k: string) { return map.has(k) ? map.get(k)! : null; },
+    key(i: number) { return Array.from(map.keys())[i] ?? null; },
+    removeItem(k: string) { map.delete(k); },
+    setItem(k: string, v: string) { map.set(k, v); },
+  };
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: shim });
+  Object.defineProperty(window, "localStorage", { configurable: true, value: shim });
+});
+
+beforeEachRatchet(() => {
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith(CONSENT_RATCHET_KEY_PREFIX)) localStorage.removeItem(k);
+  }
+});
+
+describe("resolveBootView (RFC.plugin-views §6.2 — 2-entry fallback)", () => {
+  it("picks the configured default when mountable", () => {
+    expect(resolveBootView("opencode", id => id === "opencode")).toBe("opencode");
+  });
+
+  it("falls back to admin when the configured default is unmountable", () => {
+    expect(resolveBootView("opencode", () => false)).toBe(PLUGIN_VIEW_FALLBACK_FINAL);
+    expect(PLUGIN_VIEW_FALLBACK_FINAL).toBe("admin");
+  });
+
+  it("falls back to admin when configured is empty", () => {
+    expect(resolveBootView("", () => true)).toBe(PLUGIN_VIEW_FALLBACK_FINAL);
+  });
+
+  it("CRIT-3 hard cap — no third entry, no extension hook (returns admin)", () => {
+    // Even when a hypothetical "last successfully-active view" might
+    // be supplied, resolveBootView only consults the two entries.
+    // The function signature itself enforces the cap: no third arg.
+    expect(resolveBootView("opencode", () => false)).toBe("admin");
+  });
+});
+
+describe("consent-ratchet (RFC.plugin-views §6.4)", () => {
+  it("markViewActivated + isViewActivated round-trip", () => {
+    expect(isViewActivated("opencode", "opencode")).toBe(false);
+    markViewActivated("opencode", "opencode");
+    expect(isViewActivated("opencode", "opencode")).toBe(true);
+  });
+
+  it("isViewActivated returns false for an empty pluginCode or viewId", () => {
+    expect(isViewActivated("", "opencode")).toBe(false);
+    expect(isViewActivated("opencode", "")).toBe(false);
+  });
+
+  it("TestSettings_DefaultViewDropdownRejectsUnactivatedPlugin_Bad — canPersistDefaultView refuses a plugin view not yet activated", () => {
+    expect(canPersistDefaultView("opencode", "opencode")).toBe(false);
+  });
+
+  it("canPersistDefaultView allows a plugin view AFTER activation", () => {
+    markViewActivated("opencode", "opencode");
+    expect(canPersistDefaultView("opencode", "opencode")).toBe(true);
+  });
+
+  it("canPersistDefaultView always allows built-in view ids (pluginCode empty)", () => {
+    expect(canPersistDefaultView("admin", "")).toBe(true);
+    expect(canPersistDefaultView("coding", "")).toBe(true);
+  });
+
+  it("each (pluginCode, viewId) pair is independent", () => {
+    markViewActivated("opencode", "opencode:terminal");
+    expect(canPersistDefaultView("opencode:terminal", "opencode")).toBe(true);
+    // A different view in the same plugin remains gated until
+    // separately activated.
+    expect(canPersistDefaultView("opencode:history", "opencode")).toBe(false);
+  });
+});
+
