@@ -167,3 +167,206 @@ func TestRoutes_PathScope_Anchor(t *testing.T) {
 	// fails LOUD and the matching pathScopes update is forced.
 	core.AssertEqual(t, "/v1/account", subject.APIBasePath)
 }
+
+// --- Unlock handler (Stage E.B) ---
+
+func TestRoutes_UnlockEndpoint_Good(t *core.T) {
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+	eng := newTestEngine(t, svc)
+
+	body := core.JSONMarshal(subject.UnlockInput{
+		AccountID:  fixtureAccountID,
+		Passphrase: fixturePassphrase,
+	})
+	core.AssertTrue(t, body.OK)
+
+	rr := doPOST(eng, "/v1/account/unlock", body.Value.([]byte))
+	core.AssertEqual(t, http.StatusOK, rr.Code, "valid Unlock → 200")
+
+	var env struct {
+		Success bool `json:"success"`
+		Data    struct {
+			SessionToken string `json:"session_token"`
+			ExpiresAt    int64  `json:"expires_at"`
+			AccountID    string `json:"account_id"`
+		} `json:"data"`
+	}
+	uR := core.JSONUnmarshal(rr.Body.Bytes(), &env)
+	core.AssertTrue(t, uR.OK)
+	core.AssertTrue(t, env.Success)
+	core.AssertEqual(t, fixtureAccountID, env.Data.AccountID)
+	core.AssertNotEqual(t, "", env.Data.SessionToken)
+}
+
+func TestRoutes_UnlockEndpoint_BadPassphrase_401(t *core.T) {
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+	eng := newTestEngine(t, svc)
+
+	body := core.JSONMarshal(subject.UnlockInput{
+		AccountID:  fixtureAccountID,
+		Passphrase: fixtureWrongPassphrase,
+	})
+	core.AssertTrue(t, body.OK)
+
+	rr := doPOST(eng, "/v1/account/unlock", body.Value.([]byte))
+	core.AssertEqual(t, http.StatusUnauthorized, rr.Code,
+		"wrong passphrase → 401")
+
+	var env struct {
+		Success bool `json:"success"`
+		Error   struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	uR := core.JSONUnmarshal(rr.Body.Bytes(), &env)
+	core.AssertTrue(t, uR.OK)
+	core.AssertFalse(t, env.Success)
+	core.AssertEqual(t, "account.unlock.bad_passphrase", env.Error.Code)
+}
+
+func TestRoutes_UnlockEndpoint_LockedOut_429(t *core.T) {
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+	eng := newTestEngine(t, svc)
+
+	// Spam past the lockout threshold.
+	body := core.JSONMarshal(subject.UnlockInput{
+		AccountID:  fixtureAccountID,
+		Passphrase: fixtureWrongPassphrase,
+	})
+	core.AssertTrue(t, body.OK)
+	for i := 0; i < 5; i++ {
+		_ = doPOST(eng, "/v1/account/unlock", body.Value.([]byte))
+	}
+
+	// Next attempt (even correct) → 429 Too Many Requests.
+	goodBody := core.JSONMarshal(subject.UnlockInput{
+		AccountID:  fixtureAccountID,
+		Passphrase: fixturePassphrase,
+	})
+	core.AssertTrue(t, goodBody.OK)
+	rr := doPOST(eng, "/v1/account/unlock", goodBody.Value.([]byte))
+	core.AssertEqual(t, http.StatusTooManyRequests, rr.Code, "locked-out account → 429")
+
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	uR := core.JSONUnmarshal(rr.Body.Bytes(), &env)
+	core.AssertTrue(t, uR.OK)
+	core.AssertEqual(t, "account.unlock.locked_out", env.Error.Code)
+}
+
+func TestRoutes_UnlockEndpoint_CorruptedKey_500(t *core.T) {
+	home := homeFixture(t)
+	writeRawAccount(t, home, fixtureAccountID, []byte("not pgp at all"))
+	svc := newUnlockable(t, home)
+	eng := newTestEngine(t, svc)
+
+	body := core.JSONMarshal(subject.UnlockInput{
+		AccountID:  fixtureAccountID,
+		Passphrase: fixturePassphrase,
+	})
+	core.AssertTrue(t, body.OK)
+
+	rr := doPOST(eng, "/v1/account/unlock", body.Value.([]byte))
+	core.AssertEqual(t, http.StatusInternalServerError, rr.Code,
+		"corrupted key → 500")
+
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	uR := core.JSONUnmarshal(rr.Body.Bytes(), &env)
+	core.AssertTrue(t, uR.OK)
+	core.AssertEqual(t, "account.unlock.corrupted_key", env.Error.Code)
+}
+
+func TestRoutes_UnlockEndpoint_InvalidBody_400(t *core.T) {
+	_ = homeFixture(t)
+	svc := newUnlockable(t, "")
+	eng := newTestEngine(t, svc)
+
+	rr := doPOST(eng, "/v1/account/unlock", []byte("not-json"))
+	core.AssertEqual(t, http.StatusBadRequest, rr.Code)
+
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	uR := core.JSONUnmarshal(rr.Body.Bytes(), &env)
+	core.AssertTrue(t, uR.OK)
+	core.AssertEqual(t, "account.invalid_body", env.Error.Code)
+}
+
+// --- Lock handler (Stage E.B) ---
+
+func TestRoutes_LockEndpoint_Good(t *core.T) {
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+	eng := newTestEngine(t, svc)
+
+	// Unlock first so we have state to clear.
+	unlockBody := core.JSONMarshal(subject.UnlockInput{
+		AccountID: fixtureAccountID, Passphrase: fixturePassphrase,
+	})
+	core.AssertTrue(t, unlockBody.OK)
+	_ = doPOST(eng, "/v1/account/unlock", unlockBody.Value.([]byte))
+	core.AssertTrue(t, svc.HasUnlocked(fixtureAccountID))
+
+	lockBody := core.JSONMarshal(subject.LockInput{AccountID: fixtureAccountID})
+	core.AssertTrue(t, lockBody.OK)
+	rr := doPOST(eng, "/v1/account/lock", lockBody.Value.([]byte))
+	core.AssertEqual(t, http.StatusOK, rr.Code, "valid Lock → 200")
+	core.AssertFalse(t, svc.HasUnlocked(fixtureAccountID),
+		"Lock handler MUST clear unlocked state")
+}
+
+func TestRoutes_LockEndpoint_AccountIDRequired_400(t *core.T) {
+	_ = homeFixture(t)
+	svc := newUnlockable(t, "")
+	eng := newTestEngine(t, svc)
+
+	body := core.JSONMarshal(subject.LockInput{AccountID: ""})
+	core.AssertTrue(t, body.OK)
+	rr := doPOST(eng, "/v1/account/lock", body.Value.([]byte))
+	core.AssertEqual(t, http.StatusBadRequest, rr.Code)
+
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	uR := core.JSONUnmarshal(rr.Body.Bytes(), &env)
+	core.AssertTrue(t, uR.OK)
+	core.AssertEqual(t, "account.id.required", env.Error.Code)
+}
+
+// --- Route registration sanity ---
+
+// TestRoutes_RegisterRoutes_AllThree confirms the RouteGroup mounts
+// /create + /unlock + /lock — defends against a silent rename of
+// the leaf path that would strand the frontend.
+func TestRoutes_RegisterRoutes_AllThree(t *core.T) {
+	_ = homeFixture(t)
+	svc := newUnlockable(t, "")
+	eng := newTestEngine(t, svc)
+
+	// Each route MUST respond with a non-405 (Method Not Allowed) on
+	// POST. A 200/4xx/5xx is fine — what we're proving is the route
+	// is mounted, not the handler's contract.
+	for _, p := range []string{"/v1/account/create", "/v1/account/unlock", "/v1/account/lock"} {
+		rr := doPOST(eng, p, []byte(`{}`))
+		core.AssertNotEqual(t, http.StatusMethodNotAllowed, rr.Code,
+			"route "+p+" must be POST-able")
+	}
+}

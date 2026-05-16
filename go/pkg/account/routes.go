@@ -62,11 +62,11 @@ func (g *routesProvider) Name() string { return GroupName }
 // under /v1/account/.
 func (g *routesProvider) BasePath() string { return APIBasePath }
 
-// RegisterRoutes satisfies coreapi.RouteGroup. Today's surface is
-// a single POST /create — future endpoints (PUT /<id>/seal,
-// DELETE /<id>) land here, each with a corresponding pathScopes
-// entry in pkg/server (every new path is a Mantis ticket + Cerberus
-// DREAD review per #1467).
+// RegisterRoutes satisfies coreapi.RouteGroup. Stage E.B adds POST
+// /unlock + POST /lock alongside the existing /create surface.
+// Future endpoints (PUT /<id>/seal, DELETE /<id>) land here too,
+// each with a corresponding pathScopes entry in pkg/server (every
+// new path is a Mantis ticket + Cerberus DREAD review per #1467).
 //
 // Usage example (inside server.NewService):
 //
@@ -75,6 +75,8 @@ func (g *routesProvider) BasePath() string { return APIBasePath }
 //	}
 func (g *routesProvider) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/create", g.handleCreate)
+	rg.POST("/unlock", g.handleUnlock)
+	rg.POST("/lock", g.handleLock)
 }
 
 // RouteGroups satisfies pkg/server.RoutesProvider — returns the
@@ -154,6 +156,89 @@ func (g *routesProvider) handleCreate(c *gin.Context) {
 	c.JSON(status, coreapi.Fail(code, msg))
 }
 
+// handleUnlock is the gin handler for POST /v1/account/unlock.
+// Reads UnlockInput from the request body, defers the actual
+// passphrase verification + session-token mint to Service.Unlock,
+// and shapes the HTTP response.
+//
+// Auth: bootstrap-auth middleware (pkg/server/bootstrap_auth.go)
+// runs BEFORE this handler — it verifies the LTHN-BOOT-1.* token
+// with scope=account.unlock, consumes the nonce, then dispatches.
+// By the time this handler runs:
+//
+//   - the token signature has been verified
+//   - the nonce has been added to consumed-set (Cerberus #1463)
+//   - c.Get("auth_via") == "bootstrap"
+//
+// HTTP status mapping per RFC §2.2 "Failure codes":
+//
+//   - account.invalid_body                 → 400 Bad Request
+//   - account.id.required                  → 400 Bad Request
+//   - account.unlock.passphrase.required   → 400 Bad Request
+//   - account.unlock.bad_passphrase        → 401 Unauthorized
+//   - account.unlock.locked_out            → 429 Too Many Requests
+//   - account.unlock.corrupted_key         → 500 Internal Server Error
+//   - account.unlock.server_misconfigured  → 500 Internal Server Error
+func (g *routesProvider) handleUnlock(c *gin.Context) {
+	var input UnlockInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, coreapi.Fail(codeAccountInvalidBody, err.Error()))
+		return
+	}
+
+	r := g.svc.Unlock(input)
+	if r.OK {
+		out, _ := r.Value.(UnlockOutput)
+		c.JSON(http.StatusOK, coreapi.OK(out))
+		return
+	}
+
+	code := r.Code()
+	if code == "" {
+		// Defensive — Unlock wraps every domain error with NewCode.
+		// An empty code means an unwrapped internal failure leaked
+		// out — surface as a 500.
+		code = codeUnlockCorruptedKey
+	}
+	c.JSON(statusForCode(code), coreapi.Fail(code, r.Error()))
+}
+
+// handleLock is the gin handler for POST /v1/account/lock. Forced
+// lock — clears the in-process unlocked private key for the
+// supplied account_id so the next REST request without a valid
+// session token re-arms the auth gate.
+//
+// Auth: per RFC §6 + §4 routeTiers — this endpoint is session-tier
+// (a user signing themselves out must already be unlocked). The
+// bearer middleware verifies the LTHN-SESS-1.* token; route-tier
+// classification in pkg/server enforces the tier.
+//
+// HTTP status mapping:
+//
+//   - account.invalid_body  → 400 Bad Request
+//   - account.id.required   → 400 Bad Request
+//   - success               → 200 OK
+func (g *routesProvider) handleLock(c *gin.Context) {
+	var input LockInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, coreapi.Fail(codeAccountInvalidBody, err.Error()))
+		return
+	}
+
+	r := g.svc.Lock(input)
+	if r.OK {
+		out, _ := r.Value.(LockOutput)
+		c.JSON(http.StatusOK, coreapi.OK(out))
+		return
+	}
+
+	code := r.Code()
+	if code == "" {
+		code = codeAccountWriteFailed
+	}
+	c.JSON(statusForCode(code), coreapi.Fail(code, r.Error()))
+}
+
 // statusForCode maps an "account.*" error code to its HTTP status.
 // Kept as a small switch so additions are obvious + LSP-discoverable;
 // codes outside the known set default to 500 so an unmapped failure
@@ -168,10 +253,15 @@ func statusForCode(code string) int {
 	case codeAccountInvalidBody,
 		codePublicKeyRequired,
 		codeAccountIDRequired,
-		codeAccountIDMismatch:
+		codeAccountIDMismatch,
+		codeUnlockPassphraseRequired:
 		return http.StatusBadRequest
 	case codeAccountExists:
 		return http.StatusConflict
+	case codeUnlockBadPassphrase:
+		return http.StatusUnauthorized
+	case codeUnlockLockedOut:
+		return http.StatusTooManyRequests
 	}
 	return http.StatusInternalServerError
 }
