@@ -241,6 +241,50 @@ func TestUnlock_CorruptedKeyBytewiseDistinguishing_Ugly(t *core.T) {
 	core.AssertFalse(t, r4.OK)
 	core.AssertEqual(t, "account.unlock.corrupted_key", r4.Code(),
 		"sub-case 4 — truncated armour → corrupted_key (prompt never invoked)")
+
+	// Sub-case 5 — Mantis #1510 flake pin. Per ProtonMail openpgp
+	// v1.4.0 read.go:215 — "In v4, on wrong passphrase, session key
+	// decryption is very likely to result in an invalid cipherFunc:
+	// only for < 5% of cases we will proceed to decrypt the data".
+	// For that ~5% subset the wrong-passphrase × ciphertext pair
+	// produced an inner-packet body read that errored at the
+	// PACKET-PARSE stage instead of re-invoking the prompt — the
+	// original distinguisher then mis-classified as corrupted_key
+	// (user saw "run lthn account repair" instead of "passphrase
+	// didn't unlock — N attempts remaining"). Cerberus #1711 +
+	// Mantis #1510 prescription: re-probe via the openpgp packet
+	// API and inspect the first decrypted byte for the RFC 4880
+	// §4.2 packet-tag canary; garbage first byte → re-classify
+	// as bad_passphrase.
+	//
+	// This sub-case exercises 100 independent wrong-passphrase ×
+	// fresh-ciphertext pairs. Pre-fix, ~5% mis-classified as
+	// corrupted_key (intermittent test failure). Post-fix, the
+	// combined cipherFunc-validity gate (openpgp's ~95% filter) +
+	// our packet-tag-bit canary (additional ~50% per byte) drives
+	// the residual to vanishing — the test pins zero corrupted_key
+	// classifications across 100 iterations.
+	corruptedKeyHits := 0
+	for i := 0; i < 100; i++ {
+		// Fresh account + fresh ciphertext each iteration — the
+		// flake is per-(passphrase, S2K-salt, body-ciphertext)
+		// triple, so a single fixture reused across iterations
+		// would always classify identically. We need NEW S2K salts
+		// per iteration to exercise the probability space.
+		idFlake := core.Sprintf("flake%011d", i)
+		writeEncryptedAccount(t, home, idFlake, fixturePassphrase)
+		flakeR := svc.Unlock(subject.UnlockInput{
+			AccountID:  idFlake,
+			Passphrase: fixtureWrongPassphrase,
+		})
+		core.AssertFalse(t, flakeR.OK,
+			core.Sprintf("sub-case 5 iter %d — wrong passphrase MUST fail", i))
+		if flakeR.Code() == "account.unlock.corrupted_key" {
+			corruptedKeyHits++
+		}
+	}
+	core.AssertTrue(t, corruptedKeyHits == 0,
+		core.Sprintf("sub-case 5 (Mantis #1510 flake-pin) — wrong-passphrase × intact-ciphertext MUST classify as bad_passphrase across all 100 iterations; got %d corrupted_key mis-classifications", corruptedKeyHits))
 }
 
 // --- Unlock — Ugly: per-account lockout (M1) ---

@@ -36,6 +36,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/serverkey"
 	"github.com/ProtonMail/go-crypto/openpgp"
+	"github.com/ProtonMail/go-crypto/openpgp/packet"
 )
 
 // Unlock decrypts ~/Lethean/account/<input.AccountID>/private.key
@@ -299,7 +300,7 @@ func (s *Service) HasUnlocked(accountID string) bool {
 // by which sentinel the prompt closure returned. Returns plaintext
 // + a decryptFailureKind sentinel on failure paths.
 //
-// Three signal regions:
+// Four signal regions:
 //
 //  1. calls == 0 → parser failed BEFORE the prompt closure was
 //     reachable. Garbage bytes / truncated armour / unrecognised
@@ -312,19 +313,31 @@ func (s *Service) HasUnlocked(accountID string) bool {
 //     surfaced our sentinel. Classified as bad_passphrase.
 //
 //  3. calls > 0, err != nil, NOT errBadPassphrase → the prompt was
-//     invoked at least once but openpgp errored on the body decrypt
-//     step (post-passphrase). This is post-prompt corruption: the
-//     symmetric-key was derivable but the encrypted body is
-//     malformed (truncated, wrong cipher, MDC tampered). Classified
-//     as corrupted_key — Cerberus DREAD ADD-MED-1 — locking the
-//     user out for a file-corruption that is NOT their fault would
-//     be a hostile UX.
+//     invoked but openpgp errored on the post-decrypt packet-parse
+//     step. Cerberus #1711 + Mantis #1510 — for a ~5% subset of
+//     wrong-passphrase × ciphertext pairs the v4 S2K-derived key
+//     yields a cipherFunc that openpgp's FindKey loop accepts
+//     (read.go:215 — "only for < 5% of cases we will proceed to
+//     decrypt the data"). The decrypted body is then random bytes
+//     that fail to parse as OpenPGP packets, surfacing as
+//     ErrDecryptSessionKeyParsing — IDENTICAL sentinel to a
+//     genuine truncated-body case (DREAD ADD-MED-1). To
+//     distinguish, classifyPostPromptError re-probes via the
+//     packet API: it decrypts the SKE+SE packets directly with
+//     the user's passphrase and inspects the first decrypted byte
+//     for an RFC 4880 §4.2 packet-tag canary (bit 7 set). Garbage
+//     first byte → wrong passphrase that happened to clear the
+//     cipherFunc gate. Valid first byte → real post-prompt
+//     corruption, keep corrupted_key (so we don't lock the user
+//     out for a file integrity issue that is NOT their fault).
 //
-// io.ReadAll on md.UnverifiedBody after a successful ReadMessage
-// classifies its own errors as corrupted_key for the same reason.
+//  4. io.ReadAll on md.UnverifiedBody after a successful
+//     ReadMessage erroring → corrupted_key (post-prompt body
+//     integrity error with a correct passphrase).
 //
 // NOT-string-match on error message — the signal is purely type-
-// based (sentinel-identity check via core.Is). Mirrors RFC §10 H4.
+// based (sentinel-identity check via core.Is, then byte-canary
+// validation). Mirrors RFC §10 H4.
 func distinguishDecrypt(ciphertext, passphrase []byte) ([]byte, decryptFailureKind, error) {
 	buf := bytes.NewReader(ciphertext)
 	calls := 0
@@ -340,15 +353,21 @@ func distinguishDecrypt(ciphertext, passphrase []byte) ([]byte, decryptFailureKi
 	}
 	md, err := openpgp.ReadMessage(buf, nil, prompt, nil)
 	if err != nil {
-		// Three classifications keyed by sentinel + prompt-invocation
-		// count. The errBadPassphrase identity check is the load-
-		// bearing distinguisher — any OTHER error post-prompt is
-		// body-corruption, not user fault.
 		if core.Is(err, errBadPassphrase) {
 			return nil, decryptFailureBadPassphrase, err
 		}
+		if calls > 0 && classifyPostPromptError(ciphertext, passphrase) {
+			// Mantis #1510 — wrong passphrase that slipped past the
+			// openpgp FindKey cipherFunc gate. Re-probe confirmed
+			// the decrypted first byte is garbage (no RFC 4880
+			// packet-tag bit), so this is bad_passphrase, not
+			// corruption. Wrap in errBadPassphrase so callers using
+			// core.Is keep working.
+			return nil, decryptFailureBadPassphrase, core.E("account.unlock", "post-prompt decrypt yielded garbage — passphrase wrong", errBadPassphrase)
+		}
 		// calls == 0 (pre-prompt parser failure) AND calls > 0 with
-		// non-sentinel error both indicate corruption.
+		// a valid-shaped post-prompt plaintext indicate genuine
+		// corruption (DREAD ADD-MED-1).
 		return nil, decryptFailureCorruptedKey, err
 	}
 	plaintext, err := io.ReadAll(md.UnverifiedBody)
@@ -359,6 +378,110 @@ func distinguishDecrypt(ciphertext, passphrase []byte) ([]byte, decryptFailureKi
 		return nil, decryptFailureCorruptedKey, err
 	}
 	return plaintext, decryptFailureNone, nil
+}
+
+// classifyPostPromptError re-probes a ciphertext that produced a
+// post-prompt non-sentinel error from openpgp.ReadMessage. The
+// helper reads the symmetric-key packet + symmetrically-encrypted
+// packet directly via the openpgp/packet API, decrypts with the
+// supplied passphrase, and inspects the first decrypted byte for
+// the RFC 4880 §4.2 packet-tag canary (bit 7 MUST be set on any
+// well-formed packet header).
+//
+// Returns true when the first byte looks like garbage → the
+// passphrase was wrong but happened to clear the cipherFunc gate
+// (openpgp read.go:215 — ~5% of wrong-passphrase decrypts proceed
+// past the FindKey loop). Returns false when the first byte parses
+// as a valid packet-tag (genuine post-prompt corruption — likely
+// truncated body / tampered MDC with the CORRECT passphrase, DREAD
+// ADD-MED-1) OR when the re-probe itself errors (we can't tell, so
+// defer to the existing corrupted_key classification).
+//
+// NOT a security boundary — this is a UX classifier. The lockout
+// counter is unaffected; the only observable difference is the
+// human-readable message the user sees + which audit event fires.
+//
+// Usage:
+//
+//	if classifyPostPromptError(ciphertext, passphrase) {
+//	    return nil, decryptFailureBadPassphrase, errBadPassphrase
+//	}
+func classifyPostPromptError(ciphertext, passphrase []byte) bool {
+	buf := bytes.NewReader(ciphertext)
+	var ske *packet.SymmetricKeyEncrypted
+	var se packet.EncryptedDataPacket
+	// Walk packets until we find both an SKE (passphrase-derived
+	// session-key holder) and an SE/SEIPD/AEAD body packet. Bail
+	// out on parse error — that's structural corruption, not the
+	// case this helper is meant to disambiguate.
+	for ske == nil || se == nil {
+		p, err := packet.Read(buf)
+		if err != nil {
+			return false
+		}
+		switch pp := p.(type) {
+		case *packet.SymmetricKeyEncrypted:
+			ske = pp
+		case *packet.SymmetricallyEncrypted:
+			se = pp
+		case *packet.AEADEncrypted:
+			se = pp
+		}
+	}
+	key, cipherFunc, err := ske.Decrypt(passphrase)
+	if err != nil {
+		// SKE-level rejection (v5/v6 AEAD MAC fail, or v4 invalid
+		// cipherFunc enum) is the openpgp library's own
+		// "definitely wrong passphrase" signal — surface it as
+		// bad_passphrase. Path is rarely reached from this helper
+		// (the caller only invokes us when openpgp.ReadMessage
+		// already accepted the SKE) but defensive for v5/v6.
+		return true
+	}
+	rc, err := se.Decrypt(cipherFunc, key)
+	if err != nil {
+		// Decrypt-setup error — can't probe further, keep
+		// corrupted_key classification.
+		return false
+	}
+	defer func() { _ = rc.Close() }()
+	// Attempt to parse the decrypted stream AS a packet via
+	// packet.Read. A genuine SEIPD body inner plaintext begins
+	// with one of: Compressed (tag 8), LiteralData (tag 11), or
+	// OnePassSignature (tag 4). Random bytes from a wrong-pp
+	// decryption have a vanishing chance (~0.5%) of parsing
+	// cleanly as one of those tagged structures — packet.Read
+	// validates the tag byte AND header-length encoding AND
+	// inner-type-specific parse rules, giving us a multi-byte
+	// canary instead of a single bit.
+	//
+	// Cap the body read so a malicious ciphertext can't make us
+	// stream gigabytes of garbage during the probe. 4 KiB is
+	// enough to parse any inner-packet header + tail; if the body
+	// is shorter, the LimitReader still surfaces the parse result.
+	const probeBudget = 4096
+	limited := io.LimitReader(rc, probeBudget)
+	inner, err := packet.Read(limited)
+	if err != nil {
+		// Couldn't parse the decrypted bytes as a valid OpenPGP
+		// packet header — the passphrase was wrong. Random-byte
+		// noise practically never produces a valid tag + length
+		// combo packet.Read accepts.
+		return true
+	}
+	// Genuine inner packet types are Compressed / LiteralData /
+	// OnePassSignature. SignatureV3/V4 also appear in some
+	// signed-then-encrypted flows. Anything else (PublicKey, UserId,
+	// Trust, SymmetricKeyEncrypted, …) inside an SEIPD body would
+	// be structurally nonsensical — almost certainly the artefact
+	// of garbage bytes that happened to parse as something. Be
+	// conservative: only accept the canonical inner types as a
+	// "real plaintext" signal; everything else → bad_passphrase.
+	switch inner.(type) {
+	case *packet.Compressed, *packet.LiteralData, *packet.OnePassSignature, *packet.Signature:
+		return false // looks like a real inner packet — keep corrupted_key
+	}
+	return true // unexpected inner type → wrong passphrase
 }
 
 // errBadPassphrase is the sentinel the prompt closure returns on its
