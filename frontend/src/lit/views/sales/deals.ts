@@ -128,6 +128,35 @@ class LthnViewDeals extends LitElement {
 
   createRenderRoot() { return this; }
 
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+  }
+
+  /** Pull the first available deal from pkg/sales/deals (shipped in
+   *  63062aa). v1 shows whichever deal Service.List returns first;
+   *  multi-deal browsing is a follow-up (Mantis #1478). Degrades to
+   *  FIXTURE_DEAL on binding-missing or rejection. */
+  async _loadFromBackend(): Promise<void> {
+    try {
+      const svc = await import("@desktop/sales/deals/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
+        return;
+      }
+      const r = await (svc as {
+        List: (input: { stage: string; owner: string; limit: number }) => Promise<{
+          Value?: { deals?: Deal[] }
+        }>
+      }).List({ stage: "", owner: "", limit: 1 });
+      const deals = r?.Value?.deals;
+      if (deals && deals.length > 0) {
+        this.deal = deals[0];
+      }
+    } catch {
+      // Backend unavailable — keep fixture deal.
+    }
+  }
+
   /** Filter the activity log by the active kind pill. Pure helper so
    *  the unit test can exercise the filter without mounting the DOM. */
   _filteredLog(): Activity[] {

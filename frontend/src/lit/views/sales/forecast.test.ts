@@ -1,8 +1,15 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window-fixture";
+
+vi.mock("@desktop/sales/forecast/service", () => ({
+  Quarterly: vi.fn(),
+}));
+
+import { Quarterly as ForecastQuarterly } from "@desktop/sales/forecast/service";
+
 import "./forecast";
 
 interface ForecastRow {
@@ -99,5 +106,46 @@ describe("lthn-view-forecast — two-shell", () => {
   it("embedded mode still renders all four quarter rows", async () => {
     const { host } = await mountWindow("lthn-view-forecast", { attrs: { embedded: "" } });
     expect(host.querySelectorAll(".lthn-view-forecast-row").length).toBe(4);
+  });
+});
+
+describe("lthn-view-forecast — backend wire", () => {
+  it("swaps fixture rows + kpis with backend response", async () => {
+    (ForecastQuarterly as unknown as { mockReset: () => void }).mockReset();
+    (ForecastQuarterly as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: {
+        rows: [
+          { q: "Q3 2026", best: 120, commit: 60, won: 12 },
+          { q: "Q4 2026", best: 90,  commit: 40, won: 0 },
+        ],
+        kpis: [
+          { l: "Commit", v: "£100K" },
+          { l: "Best",   v: "£210K" },
+        ],
+      },
+    });
+    const { el } = await mountWindow<HTMLElement & {
+      rows: Array<{ q: string }>;
+      kpis: Array<{ l: string; v: string }>;
+      updateComplete: Promise<boolean>;
+    }>("lthn-view-forecast");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.rows.length).toBe(2);
+    expect(el.rows[0].q).toBe("Q3 2026");
+    expect(el.kpis.length).toBe(2);
+    expect(el.kpis[0].l).toBe("Commit");
+  });
+
+  it("keeps fixture when backend rejects", async () => {
+    (ForecastQuarterly as unknown as { mockReset: () => void }).mockReset();
+    (ForecastQuarterly as unknown as { mockRejectedValue: (v: unknown) => void }).mockRejectedValue(new Error("no binding"));
+    const { el } = await mountWindow<HTMLElement & {
+      rows: Array<{ q: string }>;
+      updateComplete: Promise<boolean>;
+    }>("lthn-view-forecast");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.rows.length).toBe(4); // FIXTURE_ROWS preserved
   });
 });

@@ -98,6 +98,34 @@ class LthnViewForecast extends LitElement {
 
   createRenderRoot() { return this; }
 
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+  }
+
+  /** Pull the quarterly forecast from pkg/sales/forecast (shipped in
+   *  c7a7c9a). Backend computes probability-weighted rollup from deals.
+   *  Degrades to FIXTURE_ROWS + FIXTURE_KPIS on binding-missing. */
+  async _loadFromBackend(): Promise<void> {
+    try {
+      const svc = await import("@desktop/sales/forecast/service").catch(() => null);
+      if (!svc || typeof (svc as { Quarterly?: unknown }).Quarterly !== "function") {
+        return;
+      }
+      const r = await (svc as {
+        Quarterly: (input: { quarters: number }) => Promise<{
+          Value?: { rows?: ForecastRow[]; kpis?: ForecastKpi[] }
+        }>
+      }).Quarterly({ quarters: 4 });
+      const rows = r?.Value?.rows;
+      const kpis = r?.Value?.kpis;
+      if (rows && rows.length > 0) this.rows = rows;
+      if (kpis && kpis.length > 0) this.kpis = kpis;
+    } catch {
+      // Backend unavailable — keep fixtures.
+    }
+  }
+
   render() {
     const rows = this.rows;
     const max  = CHART_MAX_K;

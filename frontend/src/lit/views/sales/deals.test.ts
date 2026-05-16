@@ -1,8 +1,15 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window-fixture";
+
+vi.mock("@desktop/sales/deals/service", () => ({
+  List: vi.fn(),
+}));
+
+import { List as DealsList } from "@desktop/sales/deals/service";
+
 import "./deals";
 
 type Kind     = "call" | "email" | "meet";
@@ -115,5 +122,43 @@ describe("lthn-view-deals — two-shell", () => {
   it("embedded mode still renders the activity log", async () => {
     const { host } = await mountWindow("lthn-view-deals", { attrs: { embedded: "" } });
     expect(host.querySelectorAll(".lthn-view-deals-log-entry").length).toBeGreaterThan(0);
+  });
+});
+
+describe("lthn-view-deals — backend wire", () => {
+  it("swaps fixture deal for the first backend deal", async () => {
+    (DealsList as unknown as { mockReset: () => void }).mockReset();
+    (DealsList as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: { deals: [{
+        customer:    "Acme Hosting Ltd",
+        headline:    "£12 K · 6-month managed",
+        stage:       "Negotiation",
+        probability: "75%",
+        closeTarget: "30 Jun",
+        log:         [{ ts: "today", k: "call", who: "you", t: "Pricing call." }],
+        stakeholders: ["Jane CTO"],
+        docs:         [{ t: "SOW v1", s: "draft" }],
+      }] },
+    });
+    const { el } = await mountWindow<HTMLElement & {
+      deal: { customer: string; stage: string };
+      updateComplete: Promise<boolean>;
+    }>("lthn-view-deals");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.deal.customer).toBe("Acme Hosting Ltd");
+    expect(el.deal.stage).toBe("Negotiation");
+  });
+
+  it("keeps fixture deal when backend rejects", async () => {
+    (DealsList as unknown as { mockReset: () => void }).mockReset();
+    (DealsList as unknown as { mockRejectedValue: (v: unknown) => void }).mockRejectedValue(new Error("no binding"));
+    const { el } = await mountWindow<HTMLElement & {
+      deal: { customer: string };
+      updateComplete: Promise<boolean>;
+    }>("lthn-view-deals");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.deal.customer).toBe("Heritage Law LLP"); // fixture preserved
   });
 });
