@@ -1,8 +1,16 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, findCard, isEmbedded } from "../../../test/window-fixture";
+
+// Mock the @desktop/office/documents/service module so the Wails binding
+// import in documents.ts resolves cleanly in the test environment.
+// The binding is gitignored; in tests we control List() via this mock.
+vi.mock("@desktop/office/documents/service", () => ({
+  List: vi.fn().mockResolvedValue({ Value: null }),
+}));
+
 import "./documents";
 
 describe("lthn-view-documents — smoke", () => {
@@ -26,16 +34,17 @@ describe("lthn-view-documents — smoke", () => {
     expect(rows.length).toBe(6);
   });
 
-  it("shows the local-markdown footer hint", async () => {
+  it("shows the pkg/office/documents footer hint", async () => {
     const { host } = await mountWindow("lthn-view-documents");
     expect(host.textContent).toContain("local markdown");
-    expect(host.textContent).toContain("pkg/documents pending");
+    expect(host.textContent).toContain("pkg/office/documents");
   });
 });
 
 describe("lthn-view-documents — filter control", () => {
   type DocsEl = LitElement & {
     filter: "draft" | "ready" | "final" | "live" | null;
+    docs: { title: string; state: string; author: string; edited: string; size: string }[];
     _setFilter: (state: "draft" | "ready" | "final" | "live") => void;
     updateComplete: Promise<boolean>;
   };
@@ -63,13 +72,8 @@ describe("lthn-view-documents — filter control", () => {
     expect(rows.length).toBe(6);
   });
 
-  it("empty filter result renders the empty-state hint", async () => {
-    // No fixtures use the "live" state? Actually one does. Try a state
-    // we know returns rows then assert the empty path defensively by
-    // setting filter to something that should match nothing if list
-    // were empty — instead pick a real filter and assert the cell.
+  it("ready filter returns the Sovereign-compute manifesto row", async () => {
     const { el, host } = await mountWindow<DocsEl>("lthn-view-documents");
-    // ready: 1 row (Sovereign-compute manifesto)
     el._setFilter("ready");
     await el.updateComplete;
     const rows = host.querySelectorAll(".lthn-view-documents-row");

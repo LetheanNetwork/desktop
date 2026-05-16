@@ -9,18 +9,16 @@
 // chrome) when mounted inside <lthn-app-shell>. Mirrors the welcome /
 // settings window pattern in ../../ops/welcome-window.ts.
 //
-// Data: fixture array only for v1. Real source is a future Go service at
-// `pkg/documents` — a local markdown corpus indexer that walks
-// ~/.lthn/docs/ + writes its index into go-store. When the service lands,
-// swap FIXTURE_DOCUMENTS for a fetch (mirror chat-window's pattern).
+// Data: loads from pkg/office/documents via the Wails binding when available;
+// falls back to fixture data in test environments and pre-binding builds.
+// Binding import is lazy (dynamic) so a missing binding does not kill the
+// module load — same pattern as incidents.ts.
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
 
-/** Shape of one document row. Mirrors the future pkg/documents
- *  Go service so the wire-up is a swap, not a refactor. The string
- *  fields stay opaque (e.g. "4.2 KB", "yest") because the source of
- *  truth is the indexer's formatter, not arithmetic on the client. */
+/** Shape of one document row. Mirrors the DocRow type in
+ *  pkg/office/documents/types.go — field names are canonical. */
 interface DocRow {
   /** Document title — first H1 in the markdown body, falls back to filename. */
   title:  string;
@@ -45,10 +43,9 @@ const STATE_COLOUR: Record<DocRow["state"], string> = {
   live:  "var(--success-400)",
 };
 
-/** Fixture documents. Replace with a live call to the documents
- *  indexer (`pkg/documents`) when bindings land. Strings stay
- *  opaque (KB/ago) because the source-of-truth is the indexer's
- *  human-readable formatter, not browser arithmetic. */
+/** Fixture documents. Shown when the Documents binding is unavailable
+ *  (test environments, pre-binding builds). Strings stay opaque (KB/ago)
+ *  because the source-of-truth is the indexer's human-readable formatter. */
 const FIXTURE_DOCUMENTS: DocRow[] = [
   { title: "v0.2 release notes",          state: "draft", author: "you",  edited: "now",      size: "4.2 KB" },
   { title: "Sovereign-compute manifesto", state: "ready", author: "you",  edited: "yest",     size: "12 KB" },
@@ -66,11 +63,18 @@ class LthnViewDocuments extends LitElement {
     /** Active state filter — null means "all". Backed by the filter
      *  buttons in the toolbar; consumed by the visible-doc list below. */
     filter:   { state: true },
+    /** Live documents from the backend. Falls back to FIXTURE_DOCUMENTS. */
+    docs:     { state: true },
+    loading:  { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare filter: DocRow["state"] | null;
+  declare docs: DocRow[];
+  declare loading: boolean;
+
+  private _timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
@@ -78,26 +82,68 @@ class LthnViewDocuments extends LitElement {
     this.h = 720;
     this.embedded = false;
     this.filter = null;
+    this.docs = FIXTURE_DOCUMENTS;
+    this.loading = false;
   }
 
   createRenderRoot() { return this; }
+
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+    // Re-poll every 30 s — document mtime changes are infrequent.
+    this._timer = setInterval(() => { void this._loadFromBackend(); }, 30_000);
+  }
+
+  disconnectedCallback() {
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    super.disconnectedCallback();
+  }
+
+  async _loadFromBackend() {
+    if (this.loading) return;
+    this.loading = true;
+    try {
+      // Lazy-import the Wails binding — missing binding in tests does not
+      // kill the module load; falls back to fixture data on any failure.
+      const svc = await import("@desktop/office/documents/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
+        return;
+      }
+      const r = await (svc as {
+        List: (input: { state: string; limit: number }) => Promise<{
+          Value?: { docs?: DocRow[] }
+        }>
+      }).List({ state: this.filter ?? "", limit: 50 });
+      const rows = r?.Value?.docs;
+      if (rows && rows.length > 0) {
+        this.docs = rows;
+      }
+    } catch {
+      // Backend unavailable — keep current data (fixture or last good load).
+    } finally {
+      this.loading = false;
+    }
+  }
 
   /** Visible documents = full list when no filter, otherwise the
    *  subset whose state matches. Split out so tests can drive the
    *  filter property directly and assert the row count. */
   _visible(): DocRow[] {
-    if (!this.filter) return FIXTURE_DOCUMENTS;
-    return FIXTURE_DOCUMENTS.filter(d => d.state === this.filter);
+    if (!this.filter) return this.docs;
+    return this.docs.filter(d => d.state === this.filter);
   }
 
   /** Toggle a state filter — clicking the active filter clears it. */
   _setFilter(state: DocRow["state"]) {
     this.filter = (this.filter === state) ? null : state;
+    // Re-fetch with the new filter so the backend can narrow the scan.
+    void this._loadFromBackend();
   }
 
   render() {
     const docs = this._visible();
-    const total = FIXTURE_DOCUMENTS.length;
+    const total = this.docs.length;
 
     const body = html`
       <div class="lthn-view-documents" style="flex:1; display:flex; flex-direction:column; min-height:0;">
@@ -169,7 +215,7 @@ class LthnViewDocuments extends LitElement {
       subtitle: `${docs.length} ${this.filter ? this.filter : "recent"} · ~/.lthn/docs/`,
       w: this.w, h: this.h,
       body,
-      footer: html`local markdown · auto-syncs across machines · ⌘N to write · fixtures (pkg/documents pending)`,
+      footer: html`local markdown · auto-syncs across machines · ⌘N to write · pkg/office/documents`,
       embedded: this.embedded,
     });
   }
