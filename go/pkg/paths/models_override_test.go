@@ -252,6 +252,95 @@ func TestPathsOverride_StaleTmpIsIgnoredByRead_Ugly(t *core.T) {
 		"ModelsDir must read only paths.json, never paths.json.tmp")
 }
 
+// TestReadModelsDirOverride_RejectsPersistedBadPath_Ugly — Cerberus
+// dispatch-5 F1 (Mantis #1542). SetModelsDirOverride enforces the H1
+// confused-deputy guard at write time, but ~/Lethean/conf/paths.json
+// is mode 0o600 (user-writable) — any code running as the user can
+// overwrite it directly, bypassing the setter entirely (compromised
+// plugin, post-exploit malware, stray manual edit). The read path
+// must therefore re-validate every persisted override and fall
+// through to the default when the value doesn't satisfy the same
+// allowlist policy.
+//
+// Each sub-case plants a malicious paths.json DIRECTLY (bypassing
+// SetModelsDirOverride) and asserts:
+//
+//  1. ModelsDir() returns the canonical default — NOT the malicious
+//     path — proving the read-time re-validation kicked in.
+//  2. paths.json on disk STILL holds the malicious value — we refuse
+//     to honour it, but we don't auto-delete; the next legitimate
+//     Set/Clear overwrites it. This keeps the read-path defence
+//     idempotent and avoids fighting the user/attacker in a write
+//     loop.
+func TestReadModelsDirOverride_RejectsPersistedBadPath_Ugly(t *core.T) {
+	type planted struct {
+		name string
+		// build returns the malicious path for the given test $HOME.
+		// Some cases want absolute system paths, others want $HOME-
+		// relative attacker targets (~/.ssh, ~/Library/...).
+		build func(home string) string
+	}
+	cases := []planted{
+		{
+			name:  "absolute_outside_home_etc_passwd",
+			build: func(_ string) string { return "/etc/passwd" },
+		},
+		{
+			name:  "home_ssh_directory",
+			build: func(home string) string { return core.PathJoin(home, ".ssh") },
+		},
+		{
+			name:  "home_library_launchagents_macos_persistence",
+			build: func(home string) string { return core.PathJoin(home, "Library", "LaunchAgents", "lthn") },
+		},
+		{
+			name:  "relative_traversal_escapes_home",
+			build: func(_ string) string { return "../../etc/passwd" },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *core.T) {
+			home := homeFixture(t)
+			malicious := tc.build(home)
+			wantDefault := core.PathJoin(home, "Lethean", "conf", "models")
+
+			// Land paths.json DIRECTLY — never through
+			// SetModelsDirOverride — so the persisted value bypasses
+			// every write-time guard. This is the exact attacker shape
+			// the read-time re-validation defends against.
+			confR := paths.ConfDir()
+			core.AssertTrue(t, confR.OK, "ConfDir must resolve under the fixture HOME")
+			overrideFile := core.PathJoin(confR.Value.(string), "paths.json")
+
+			body := core.JSONMarshal(struct {
+				ModelsDir string `json:"models_dir"`
+			}{ModelsDir: malicious})
+			core.AssertTrue(t, body.OK, "fixture: marshalling planted override must succeed")
+			raw, _ := body.Value.([]byte)
+			core.AssertTrue(t, core.WriteFile(overrideFile, raw, 0o600).OK,
+				"fixture: planting malicious paths.json must succeed")
+
+			// 1. ModelsDir() must refuse to honour the malicious value
+			//    and return the canonical default instead.
+			r := paths.ModelsDir()
+			core.AssertTrue(t, r.OK, "ModelsDir must succeed even when paths.json carries a forbidden override")
+			core.AssertEqual(t, wantDefault, r.Value.(string),
+				"ModelsDir must fall back to the canonical default when the persisted override fails revalidation")
+
+			// 2. paths.json on disk STILL carries the malicious value —
+			//    we refuse to honour it but do not auto-delete. Proves
+			//    the defence is read-side only; rewrite of paths.json
+			//    happens only on legitimate Set/Clear.
+			post := core.ReadFile(overrideFile)
+			core.AssertTrue(t, post.OK, "paths.json must still be readable post-ModelsDir read")
+			postRaw, _ := post.Value.([]byte)
+			core.AssertContains(t, string(postRaw), malicious,
+				"paths.json must retain the malicious value — read-time defence is not a write-time scrubber")
+		})
+	}
+}
+
 func TestPathsOverride_WriteFinalIsMode0600_Good(t *core.T) {
 	// After the tmp+rename refactor (Cerberus F3), the final
 	// paths.json must still land with mode 0o600 — the tmp file is

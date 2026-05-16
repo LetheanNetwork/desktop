@@ -95,8 +95,45 @@ func readPathsOverride() pathsOverride {
 // readModelsDirOverride returns the user-set models dir override, or
 // empty string when none is set. Convenience helper so ModelsDir's
 // hot path doesn't need to know the override schema.
+//
+// Cerberus dispatch-5 F1 (Mantis #1542): the persisted override is
+// re-validated on every read via validateOverridePath. Set-time
+// validation alone trusts the on-disk file's integrity, but
+// ~/Lethean/conf/paths.json is mode 0o600 (user-writable). Any code
+// running as the user — compromised plugin, post-exploit malware,
+// stray manual edit — can overwrite paths.json directly, bypassing
+// SetModelsDirOverride entirely. Re-running validateOverridePath
+// here compounds the H1 confused-deputy guard set-time + read-time
+// so the same allowlist policy (under $HOME, no dot-dirs, no
+// ~/Library) applies regardless of how the value reached disk.
+//
+// A path that fails validation is silently dropped (empty return)
+// so the ModelsDir hot path falls through to the canonical default.
+// We don't delete the offending paths.json — the next legitimate
+// Set/Clear overwrites it — but we also never honour it.
+//
+// NB: this is the cheap path-shape re-validation. The Lstat-symlink
+// check that SetModelsDirOverride applies to the resolved target
+// directory is NOT re-run here (would require pulling the post-shape
+// checks out of SetModelsDirOverride into a shared helper). The
+// shape check alone catches all of the directly-malicious targets
+// (/etc/passwd, ~/.ssh, ~/Library/LaunchAgents); a symlinked target
+// added by post-exploit malware would still slip through here but
+// require an extra write to plant the symlink — strictly worse for
+// the attacker than the prior "edit one JSON file" path. TODO
+// (Mantis #1542 follow-on): extract the Lstat+IsDir+symlink checks
+// into a shared validateOverrideTarget helper and run that here too.
 func readModelsDirOverride() string {
-	return readPathsOverride().ModelsDir
+	p := readPathsOverride().ModelsDir
+	if p == "" {
+		return ""
+	}
+	if reason := validateOverridePath(p); reason != "" {
+		// Persisted path no longer (or never did) satisfy the
+		// confused-deputy guard — fall through to the default.
+		return ""
+	}
+	return p
 }
 
 // writePathsOverride persists the override struct to disk. Empty
