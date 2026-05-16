@@ -40,22 +40,58 @@ class LthnViewAudience extends LitElement {
     w:        { type: Number },
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },
+    segments: { state: true },
+    loading:  { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
+  declare segments: Segment[];
+  declare loading: boolean;
+  private _timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
     this.w = 1180;
     this.h = 720;
     this.embedded = false;
+    this.segments = FIXTURE_SEGMENTS;
+    this.loading = false;
   }
 
   createRenderRoot() { return this; }
 
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+    this._timer = setInterval(() => { void this._loadFromBackend(); }, 60_000);
+  }
+
+  disconnectedCallback() {
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    super.disconnectedCallback();
+  }
+
+  async _loadFromBackend(): Promise<void> {
+    if (this.loading) return;
+    this.loading = true;
+    try {
+      const svc = await import("@desktop/marketing/audience/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") return;
+      const r = await (svc as {
+        List: (input: Record<string, never>) => Promise<{ Value?: { segments?: Segment[] } }>
+      }).List({});
+      const segments = r?.Value?.segments;
+      if (segments && segments.length > 0) this.segments = segments;
+    } catch {
+      // Binding unavailable — keep fixture data.
+    } finally {
+      this.loading = false;
+    }
+  }
+
   render() {
-    const segs = FIXTURE_SEGMENTS;
+    const segs = this.segments;
     const all = segs.find(s => s.name === "All subscribers");
     const total = all?.n ?? 0;
     const totalLabel = total.toLocaleString();

@@ -1,8 +1,15 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window-fixture";
 import "./audience";
+
+vi.mock("@desktop/marketing/audience/service", () => ({
+  List: vi.fn(),
+}));
+
+import { List as MockedList } from "@desktop/marketing/audience/service";
 
 describe("lthn-view-audience — smoke", () => {
   it("mounts with the Audience titlebar", async () => {
@@ -58,5 +65,51 @@ describe("lthn-view-audience — two-shell", () => {
     const { host } = await mountWindow("lthn-view-audience", { attrs: { embedded: "" } });
     expect(isEmbedded(host)).toBe(true);
     expect(host.querySelector("header")).toBeNull();
+  });
+});
+
+describe("lthn-view-audience — backend wire", () => {
+  type AudienceEl = LitElement & {
+    segments: { name: string; n: number; growth: string; src: string }[];
+    _loadFromBackend: () => Promise<void>;
+    updateComplete: Promise<boolean>;
+  };
+
+  beforeEach(() => {
+    (MockedList as unknown as { mockReset: () => void }).mockReset();
+  });
+
+  it("backend segments replace fixture when present", async () => {
+    (MockedList as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { segments: [{ name: "All subscribers", n: 9000, growth: "+200 / w", src: "all" }] } });
+
+    const { el, host } = await mountWindow<AudienceEl>("lthn-view-audience");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("9,000");
+  });
+
+  it("backend rejection keeps fixture data visible", async () => {
+    (MockedList as unknown as { mockRejectedValue: (v: unknown) => void })
+      .mockRejectedValue(new Error("unavailable"));
+
+    const { el, host } = await mountWindow<AudienceEl>("lthn-view-audience");
+    await el._loadFromBackend();
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("8,214");
+    expect(host.textContent).toContain("Local-AI developers");
+  });
+
+  it("empty backend response keeps fixture data visible", async () => {
+    (MockedList as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { segments: [] } });
+
+    const { el, host } = await mountWindow<AudienceEl>("lthn-view-audience");
+    await el._loadFromBackend();
+    await el.updateComplete;
+
+    expect(host.textContent).toContain("8,214");
   });
 });
