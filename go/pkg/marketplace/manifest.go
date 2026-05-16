@@ -171,8 +171,112 @@ func ValidateManifest(m BundleManifest) core.Result {
 			return core.Fail(core.E(validateOp,
 				core.Sprintf("images[%d].image is required", i), nil))
 		}
+		// Cerberus Mantis #1448 — registry-domain allowlist. Without
+		// this, a malicious manifest could declare an image from any
+		// registry the host can reach (a typo-squatted Docker Hub repo,
+		// a hostile registry that serves a different binary, etc).
+		// IsAllowedImageRegistry is permissive on intent (covers the
+		// big-tent OSS registries) but strict on shape (must parse).
+		if !IsAllowedImageRegistry(img.Image) {
+			return core.Fail(core.E(validateOp,
+				core.Sprintf("images[%d].image registry not allowed: %s "+
+					"(allowed: docker.io / ghcr.io / quay.io / gcr.io / "+
+					"mcr.microsoft.com / registry.gitlab.com / lscr.io / "+
+					"forge.lthn.sh / lthn)", i, img.Image), nil))
+		}
 	}
 	return core.Ok(m)
+}
+
+// allowedImageRegistries is the compile-time allowlist of OCI
+// registry domains a bundle's image may pull from when the image
+// reference includes an explicit registry. Cerberus Mantis #1448.
+// Same compile-time discipline as pkg/downloader.allowedHostSuffixes
+// (#1424) — runtime mutation would defeat the gate, so updates ship
+// as code review.
+//
+// Big-tent OSS coverage: Docker Hub (registry-explicit form),
+// GitHub Container Registry, Red Hat Quay, Google Container
+// Registry, Microsoft, GitLab, LinuxServer.io (popular in self-host
+// bundles), Codeberg (Forgejo-hosted), and our own Forge.
+//
+// For Docker Hub shorthand (bare `<org>/<name>` without registry
+// prefix), see IsAllowedImageRegistry's policy: bare orgs are
+// allowed because forcing every manifest to fully-qualify Docker
+// Hub refs would break the existing OSS bundle catalogue. The
+// supply-chain trust there is on the user reading the manifest
+// before install — the gate's value is stopping silent pulls from
+// attacker-controlled or typo-squatted REGISTRY DOMAINS, not
+// auditing every Docker Hub user-namespace.
+var allowedImageRegistries = []string{
+	"docker.io",
+	"index.docker.io",
+	"ghcr.io",
+	"quay.io",
+	"gcr.io",
+	"mcr.microsoft.com",
+	"registry.gitlab.com",
+	"lscr.io",
+	"codeberg.org",
+	"forge.lthn.sh",
+}
+
+// IsAllowedImageRegistry reports whether `image` references a
+// registry on the allowlist. Three image-ref shapes are handled:
+//
+//	<registry>/<path>[:tag][@digest]   e.g. ghcr.io/owner/img:1.0
+//	<org>/<name>[:tag][@digest]        e.g. n8nio/n8n:latest     → Docker Hub-implicit (allowed)
+//	<name>[:tag][@digest]              e.g. nginx                → docker.io/library/nginx-implicit (allowed)
+//
+// We treat the first slash-segment as a REGISTRY domain only when
+// it contains a `.` or `:` (the canonical OCI distinguisher between
+// "registry domain" and "Docker Hub org"). Registry domains must be
+// in allowedImageRegistries. Docker Hub orgs (no dot/colon in first
+// segment) are allowed unconditionally — see allowedImageRegistries
+// docstring for the supply-chain framing.
+func IsAllowedImageRegistry(image string) bool {
+	image = core.Trim(image)
+	if image == "" {
+		return false
+	}
+	// Strip @digest + :tag for the host check.
+	if i := core.LastIndex(image, "@"); i > 0 {
+		image = image[:i]
+	}
+	if i := core.LastIndex(image, ":"); i > 0 {
+		// Only strip the :tag if it doesn't span a `/` (else this is
+		// a registry-with-port like `registry.gitlab.com:443/...`).
+		tail := image[i:]
+		if !core.Contains(tail, "/") {
+			image = image[:i]
+		}
+	}
+	slash := core.Index(image, "/")
+	if slash < 0 {
+		// `nginx` / `alpine` / `postgres` — Docker Hub library/*
+		// shorthand. Library is Docker's own curated namespace of
+		// official images.
+		return true
+	}
+	first := image[:slash]
+	// If the first segment contains . or :, it's a registry domain.
+	if core.Contains(first, ".") || core.Contains(first, ":") {
+		// Strip :port if present so `registry.gitlab.com:443` matches
+		// `registry.gitlab.com` in the allowlist.
+		host := first
+		if i := core.Index(host, ":"); i > 0 {
+			host = host[:i]
+		}
+		for _, allowed := range allowedImageRegistries {
+			if host == allowed {
+				return true
+			}
+		}
+		return false
+	}
+	// Otherwise it's a Docker Hub org shorthand — allowed (see
+	// allowedImageRegistries docstring for the framing).
+	return true
 }
 
 // MarshalManifest serialises a BundleManifest back to YAML bytes.
