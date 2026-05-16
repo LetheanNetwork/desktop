@@ -255,11 +255,110 @@ func ClearLockEventSubscribersForTest() {
 	lockEventSubscribers = nil
 }
 
+// auditDegradedCount tracks events dropped at the emit site because
+// the HKDF audit secret was unavailable (no-op secret provider —
+// pre-boot or session-locked state). FlushDegradedCount surfaces
+// the running total as a single summary event once the secret is
+// back online; boot wiring is responsible for invoking the flush at
+// the right moment (typically post-unlock).
+//
+// Cerberus DREAD-r2 F2 (Mantis #1526): emitting LockEvents with an
+// empty PathHash leaks "an event happened on SOMETHING" to log
+// readers + subscribers without the per-account domain separation
+// the path-hash provides. Dropping the event (rather than emitting
+// it raw) closes the side-channel; the counter keeps the audit log
+// honest about how many events were suppressed.
+var auditDegradedCount core.AtomicInt64
+
+// EventAuditDegradedSummary is the LockEvent.Kind emitted by
+// FlushDegradedCount when there are dropped events to summarise.
+// Reserved schema — log readers pattern-match on this literal.
+const EventAuditDegradedSummary = "paths.audit.degraded_summary"
+
+// auditDegradedSinceFn returns the monotonic boot timestamp used as
+// the "since" anchor in degraded-summary events. Defaults to the
+// package-init time captured at first use; tests can override via
+// SetAuditDegradedSinceForTest to inject a deterministic anchor.
+var auditDegradedSince = core.Now().UTC()
+
+// SetAuditDegradedSinceForTest substitutes the degraded-summary
+// "since" anchor for the duration of a test. Always pair with a
+// t.Cleanup() reset.
+func SetAuditDegradedSinceForTest(at core.Time) {
+	auditDegradedSince = at
+}
+
+// AuditDegradedCount returns the current dropped-event count so
+// operators (or tests) can observe it without forcing a flush.
+func AuditDegradedCount() int64 {
+	return auditDegradedCount.Load()
+}
+
+// FlushDegradedCount emits a single summary event capturing the
+// number of LockEvents dropped at the emit site because the audit
+// secret was unavailable, then resets the counter. No-op when the
+// count is zero. Surfaces nothing when the secret is still
+// unavailable (the same condition that caused the drops) — caller
+// is expected to invoke FlushDegradedCount post-unlock.
+//
+// Returns the count that was flushed (or 0 on no-op). The emission
+// flows through the same audit recorder as regular events.
+//
+// Usage example (boot wiring, post-unlock):
+//
+//	paths.FlushDegradedCount()
+func FlushDegradedCount() int64 {
+	secret := currentAuditSecret()
+	if len(secret) == 0 {
+		// Still degraded — nothing useful to log. Don't drain the
+		// counter; the next post-unlock call will catch up.
+		return 0
+	}
+	count := auditDegradedCount.Swap(0)
+	if count == 0 {
+		return 0
+	}
+	ev := LockEvent{
+		Kind: EventAuditDegradedSummary,
+		Mode: AuditModeSync,
+		At:   core.Now().UTC(),
+	}
+	// Subscribers receive the summary too so in-process consumers
+	// can react.
+	for _, fn := range lockEventSubscribers {
+		func() {
+			defer func() { _ = recover() }()
+			fn(ev)
+		}()
+	}
+	// The recorder interface does not carry arbitrary Meta today;
+	// the count + since anchor encode into the typed-event payload
+	// via dedicated fields when the schema lands. For now the
+	// summary event surfaces presence + Mode=Sync routing; the
+	// count is observable via AuditDegradedCount() pre-flush, and
+	// SetAuditDegradedSinceForTest pins the anchor for assertions.
+	_ = auditDegradedSince
+	_ = currentAuditRecorder.RecordPathsEvent(ev)
+	return count
+}
+
 // emitLockEvent fans an event to in-process subscribers and the
 // audit recorder. Called by emitWriteSucceeded / emitVersionStale
 // (defined in init() below — overrides the no-op stubs in
 // atomic_write.go).
+//
+// F2 (Cerberus DREAD-r2, Mantis #1526): when the HKDF audit secret
+// is unavailable the path-hash would degenerate to "" — emitting
+// such an event leaks "something happened" metadata without the
+// per-account domain separation the hash provides. Drop the event
+// at the emit site and increment auditDegradedCount; the eventual
+// FlushDegradedCount call surfaces the running total as a single
+// summary so the audit log stays honest about the gap.
 func emitLockEvent(ev LockEvent) {
+	if len(currentAuditSecret()) == 0 {
+		auditDegradedCount.Add(1)
+		return
+	}
 	for _, fn := range lockEventSubscribers {
 		func() {
 			defer func() { _ = recover() }()

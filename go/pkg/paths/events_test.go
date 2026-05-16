@@ -40,7 +40,17 @@ func withCaptureRecorder(t *core.T) *captureRecorder {
 	t.Helper()
 	rec := &captureRecorder{}
 	paths.SetAuditRecorder(rec)
-	t.Cleanup(func() { paths.SetAuditRecorder(nil) })
+	// F2 (Mantis #1526): emit-site drops events when the audit
+	// secret is unavailable to avoid the empty-PathHash side
+	// channel. Tests that exercise the emission path MUST install
+	// a non-empty secret provider.
+	paths.SetAuditSecretProvider(func() []byte {
+		return []byte("test-secret-32-bytes-1234567890ab")
+	})
+	t.Cleanup(func() {
+		paths.SetAuditRecorder(nil)
+		paths.SetAuditSecretProvider(nil)
+	})
 	return rec
 }
 
@@ -221,6 +231,90 @@ func TestSubscribeLockEvents_Fanout(t *core.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	core.AssertGreater(t, len(got), 0, "subscriber MUST receive at least one event")
+}
+
+// TestEmitLockEvent_DroppedWhenSecretUnavailable_Bad — Cerberus
+// DREAD-r2 F2 (Mantis #1526). When the HKDF audit secret is
+// unavailable the emit site MUST drop the event (the empty
+// PathHash would be a side-channel leak); the dropped count MUST
+// land in auditDegradedCount instead.
+func TestEmitLockEvent_DroppedWhenSecretUnavailable_Bad(t *core.T) {
+	homeFixture(t)
+	rec := &captureRecorder{}
+	paths.SetAuditRecorder(rec)
+	// Explicitly leave secret provider returning empty.
+	paths.SetAuditSecretProvider(func() []byte { return nil })
+	t.Cleanup(func() {
+		paths.SetAuditRecorder(nil)
+		paths.SetAuditSecretProvider(nil)
+	})
+
+	before := paths.AuditDegradedCount()
+
+	root := paths.Root().Value.(string)
+	fp := core.PathJoin(root, "office", "documents", "x.md")
+	_ = core.MkdirAll(core.PathJoin(root, "office", "documents"), 0o700)
+	r := paths.AtomicWriteWithVersion(fp, paths.WriteInput{Body: []byte("x")})
+	core.AssertTrue(t, r.OK, r.Error())
+
+	// Recorder MUST NOT have seen any events.
+	core.AssertEqual(t, 0, len(rec.snapshot()),
+		"emit site must drop events when secret is unavailable")
+	// Counter MUST have advanced.
+	after := paths.AuditDegradedCount()
+	core.AssertGreater(t, after, before,
+		"auditDegradedCount must record the dropped event")
+}
+
+// TestFlushDegradedCount_EmitsSummary_Good — Cerberus DREAD-r2 F2
+// (Mantis #1526). Once the secret comes back online, a flush call
+// surfaces the accumulated count as a single summary event so the
+// audit log is honest about the gap.
+func TestFlushDegradedCount_EmitsSummary_Good(t *core.T) {
+	homeFixture(t)
+	rec := &captureRecorder{}
+	paths.SetAuditRecorder(rec)
+	// Start with no secret; drive a write to bump the counter.
+	paths.SetAuditSecretProvider(func() []byte { return nil })
+	t.Cleanup(func() {
+		paths.SetAuditRecorder(nil)
+		paths.SetAuditSecretProvider(nil)
+	})
+
+	root := paths.Root().Value.(string)
+	_ = core.MkdirAll(core.PathJoin(root, "office", "documents"), 0o700)
+	fp := core.PathJoin(root, "office", "documents", "y.md")
+	r := paths.AtomicWriteWithVersion(fp, paths.WriteInput{Body: []byte("y")})
+	core.AssertTrue(t, r.OK, r.Error())
+
+	// Flush with secret still empty — no-op, counter preserved.
+	noop := paths.FlushDegradedCount()
+	core.AssertEqual(t, int64(0), noop, "flush is a no-op while secret is empty")
+	core.AssertGreater(t, paths.AuditDegradedCount(), int64(0),
+		"counter must survive a no-op flush")
+
+	// Secret comes online; flush MUST emit one summary event and
+	// reset the counter.
+	paths.SetAuditSecretProvider(func() []byte {
+		return []byte("test-secret-32-bytes-1234567890ab")
+	})
+	count := paths.FlushDegradedCount()
+	core.AssertGreater(t, count, int64(0),
+		"flush must report the accumulated drop count")
+	core.AssertEqual(t, int64(0), paths.AuditDegradedCount(),
+		"counter must reset after a flushing call")
+
+	// Recorder MUST have seen exactly one summary event.
+	summaryCount := 0
+	for _, ev := range rec.snapshot() {
+		if ev.Kind == paths.EventAuditDegradedSummary {
+			summaryCount++
+			core.AssertEqual(t, paths.AuditModeSync, ev.Mode,
+				"degraded summary MUST route via Sync recorder")
+		}
+	}
+	core.AssertEqual(t, 1, summaryCount,
+		"flush must emit exactly one summary event")
 }
 
 var _ = testing.AllocsPerRun
