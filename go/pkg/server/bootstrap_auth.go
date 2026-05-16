@@ -131,6 +131,25 @@ func BootstrapAuthMiddleware(verifier serverkey.Verifier, bearerToken string, pa
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
 
+		// Static-asset / SPA-route bypass — the Gin engine in lthn-desktop
+		// fronts both the JSON API (under /v1/*) AND the embedded SPA
+		// (everything else, served via the NoRoute fallback at
+		// desktop.go:attachSPA). Without this skip the WebView's first
+		// request for "/?surface=tray" (or any /src/*, /assets/*, etc.)
+		// gets a 401 JSON instead of index.html, so the entire frontend
+		// never loads and the user sees raw `{"error":"unauthorised",...}`
+		// in the WebView (Snider's 2026-05-16 screenshot).
+		//
+		// Policy: only paths under /v1/ go through auth. Everything else
+		// is a static asset and reaches NoRoute → file server. The /v1
+		// prefix is also the convention coreapi.WithBearerAuth implicitly
+		// assumed; making it explicit closes the engine-wide-middleware
+		// footgun.
+		if !core.HasPrefix(path, "/v1/") && path != "/v1" {
+			c.Next()
+			return
+		}
+
 		// Skip-list paths bypass both auth types — matches the
 		// external/api bearer-auth behaviour for /health / swagger /
 		// openapi. We only carry /health here because the engine
