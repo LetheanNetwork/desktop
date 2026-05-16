@@ -12,6 +12,7 @@ import (
 
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
+	"dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/server"
 	"github.com/gin-gonic/gin"
 )
@@ -27,11 +28,27 @@ import (
 // Per Cerberus DREAD H1 — "deny-by-default is necessary but NOT
 // sufficient". Build-time check + runtime fallback together close
 // the security-policy gap.
+//
+// Cerberus Stage E.B DREAD ADD-HIGH-1 — earlier version of this
+// test constructed NewService with no Core wired, so auto-discovery
+// never fired and the engine only contained the OpenAI shim routes.
+// The /v1/account/* routes were never registered → the test was
+// vacuously passing. Fixed by registering account.Service via Core
+// so the auto-discovery loop actually populates the engine with the
+// production route set.
 func TestService_AllRoutesTiered_Good(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
+	// Build a Core with account.Register so the RouteGroup auto-
+	// discovery loop inside server.NewService populates the engine
+	// with /v1/account/{create,unlock,lock}. Without this, the test
+	// would only see the OpenAI shim routes (vacuous coverage).
+	c := core.New(core.WithName("account", account.Register))
+
 	svc := server.NewService(server.Options{
 		Addr:     ":0",
 		LocalKey: "test-key",
+		Core:     c,
 		// ServerKey deliberately nil — exercise the path-tier
 		// validation without requiring a serverkey Bootstrap. The
 		// route-tier map is independent of auth-mode.
@@ -45,6 +62,24 @@ func TestService_AllRoutesTiered_Good(t *testing.T) {
 	h := publicEng.Handler()
 	eng, ok := h.(*gin.Engine)
 	core.AssertTrue(t, ok, "coreapi.Engine.Handler must be a *gin.Engine")
+
+	// Sanity: prove account routes ARE in the engine (defends
+	// against a future regression where Core auto-discovery
+	// silently breaks and the test goes vacuous again).
+	var seenAccountCreate, seenAccountUnlock, seenAccountLock bool
+	for _, r := range eng.Routes() {
+		switch r.Path {
+		case "/v1/account/create":
+			seenAccountCreate = true
+		case "/v1/account/unlock":
+			seenAccountUnlock = true
+		case "/v1/account/lock":
+			seenAccountLock = true
+		}
+	}
+	core.AssertTrue(t, seenAccountCreate, "/v1/account/create MUST be auto-discovered (vacuous test guard)")
+	core.AssertTrue(t, seenAccountUnlock, "/v1/account/unlock MUST be auto-discovered (vacuous test guard)")
+	core.AssertTrue(t, seenAccountLock, "/v1/account/lock MUST be auto-discovered (vacuous test guard)")
 
 	missing := []string{}
 	for _, r := range eng.Routes() {

@@ -366,25 +366,25 @@ func (s *Service) VerifySessionToken(token string) core.Result {
 	body := token[len(sessionTokenPrefix):]
 	parts := core.Split(body, ".")
 	if len(parts) != 2 {
-		s.auditSessionVerifyFailed("", "format")
+		s.auditSessionVerifyFailed("", "unknown")
 		return core.Fail(core.NewCode("auth.session.format", "token must have exactly two segments"))
 	}
 	headerR := core.Base64URLDecode(parts[0])
 	if !headerR.OK {
-		s.auditSessionVerifyFailed("", "format")
+		s.auditSessionVerifyFailed("", "unknown")
 		return core.Fail(core.NewCode("auth.session.format", "header decode failed"))
 	}
 	headerBytes, _ := headerR.Value.([]byte)
 	sigR := core.Base64URLDecode(parts[1])
 	if !sigR.OK {
-		s.auditSessionVerifyFailed("", "format")
+		s.auditSessionVerifyFailed("", "unknown")
 		return core.Fail(core.NewCode("auth.session.format", "signature decode failed"))
 	}
 	sigBytes, _ := sigR.Value.([]byte)
 
 	var header map[string]any
 	if r := core.JSONUnmarshal(headerBytes, &header); !r.OK {
-		s.auditSessionVerifyFailed("", "format")
+		s.auditSessionVerifyFailed("", "unknown")
 		return core.Fail(core.NewCode("auth.session.format", "header is not valid JSON"))
 	}
 
@@ -405,17 +405,17 @@ func (s *Service) VerifySessionToken(token string) core.Result {
 
 	iat, ok := numericClaim(header, "iat")
 	if !ok {
-		s.auditSessionVerifyFailed("", "format")
+		s.auditSessionVerifyFailed("", "unknown")
 		return core.Fail(core.NewCode("auth.session.format", "iat claim missing or non-numeric"))
 	}
 	exp, ok := numericClaim(header, "exp")
 	if !ok {
-		s.auditSessionVerifyFailed("", "format")
+		s.auditSessionVerifyFailed("", "unknown")
 		return core.Fail(core.NewCode("auth.session.format", "exp claim missing or non-numeric"))
 	}
 	accountID, _ := header["account_id"].(string)
 	if accountID == "" {
-		s.auditSessionVerifyFailed("", "format")
+		s.auditSessionVerifyFailed("", "unknown")
 		return core.Fail(core.NewCode("auth.session.format", "account_id missing or empty"))
 	}
 
@@ -450,10 +450,35 @@ func (s *Service) VerifySessionToken(token string) core.Result {
 // audit event per RFC §6 M4 with the documented structured fields.
 // Reserved-schema: changing field names after Stage E ships breaks
 // the Stage F log-tailing contract.
+//
+// reason MUST be a member of sessionVerifyFailedReasons. Cerberus
+// DREAD ADD-MED-2 — the RFC §6 M4 enumeration is the canonical
+// set; any reason outside it normalises to "unknown" so the log-
+// tailer keeps a closed-world view + Stage F's grok parser doesn't
+// need to learn new categories per Stage F log-tailing contract.
 func (s *Service) auditSessionVerifyFailed(accountID, reason string) {
+	if !sessionVerifyFailedReasons[reason] {
+		reason = "unknown"
+	}
 	core.Print(core.Stderr(),
 		"event=auth.session.verify_failed account_id=%s ts=%d reason=%s\n",
 		accountID, core.Now().UTC().Unix(), reason)
+}
+
+// sessionVerifyFailedReasons is the closed set of reasons RFC §6 M4
+// reserves for the auth.session.verify_failed audit event. Any
+// caller-supplied reason outside this set normalises to "unknown"
+// in auditSessionVerifyFailed so Stage F's log-tailer always sees
+// one of these literals.
+//
+// Adding a member here is a reserved-schema change — Stage F's
+// grok parser MUST learn the new category in lockstep.
+var sessionVerifyFailedReasons = map[string]bool{
+	"prefix":    true,
+	"signature": true,
+	"expired":   true,
+	"scope":     true,
+	"unknown":   true,
 }
 
 // evictExpiredSessionNoncesLocked removes consumedSessionNonces

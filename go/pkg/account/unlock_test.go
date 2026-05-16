@@ -473,6 +473,89 @@ func TestUnlock_TriggerAttemptWithCorrectPassphraseStillUnlocks_Ugly(t *core.T) 
 	core.AssertTrue(t, svc.HasUnlocked(fixtureAccountID))
 }
 
+// TestUnlock_LockoutStateRaceFree_Ugly_DREAD_ADD_HIGH_4 — concurrent
+// Unlock + HasUnlocked + Lock calls MUST be race-free under
+// `go test -race`. Pre-fix, lockoutState dereferenced
+// st.unlockAt AFTER releasing the RLock; concurrent
+// recordFailedAttempt under the write lock mutated the same
+// pointed-to struct → race-detector fires.
+//
+// This test exercises 100 concurrent Unlock attempts against the
+// same account_id alongside HasUnlocked + Lock reads. With the
+// fix in place (lockoutState copies unlockAt into a local while
+// holding the RLock) the race detector stays silent.
+func TestUnlock_LockoutStateRaceFree_Ugly_DREAD_ADD_HIGH_4(t *core.T) {
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+
+	const goroutines = 100
+	done := make(chan struct{}, goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			_ = svc.Unlock(subject.UnlockInput{
+				AccountID:  fixtureAccountID,
+				Passphrase: fixtureWrongPassphrase,
+			})
+			_ = svc.HasUnlocked(fixtureAccountID)
+			_ = svc.Lock(subject.LockInput{AccountID: fixtureAccountID})
+		}()
+	}
+	for i := 0; i < goroutines; i++ {
+		<-done
+	}
+	// Test passes if `go test -race ./pkg/account/...` finds no
+	// race. The assertion below is existence-only — the actual
+	// lockout state after 100 wrong attempts + interleaved Lock
+	// calls is timing-dependent under -race.
+	core.AssertFalse(t, svc.HasUnlocked(fixtureAccountID),
+		"account MUST NOT be unlocked after 100 wrong attempts")
+}
+
+// TestUnlock_CorruptedBodyClassifiedAsCorruptedKey_Ugly_DREAD_ADD_MED_1
+// pins the post-prompt corruption distinction. A ciphertext whose
+// symmetric-key packet decodes (so prompt fires + returns the
+// passphrase happily) but whose ENCRYPTED BODY is malformed
+// (truncated mid-body, MDC tampered, etc) MUST classify as
+// corrupted_key — NOT bad_passphrase. Otherwise the user gets
+// locked out for a file-corruption that isn't their fault.
+//
+// Synthesises the case by encrypting with the FIXTURE passphrase
+// then truncating mid-body (after the symkey packet but before the
+// MDC). The prompt fires + accepts the passphrase; the body
+// decrypt fails with a non-ErrKeyIncorrect error → corrupted_key.
+func TestUnlock_CorruptedBodyClassifiedAsCorruptedKey_Ugly_DREAD_ADD_MED_1(t *core.T) {
+	home := homeFixture(t)
+	id := "5555555555555555"
+	pgpSvc := pgp.NewService()
+	_, privPlain, err := pgpSvc.GenerateKeyPair("lthn-test", "test@lthn.local", "fixture")
+	core.AssertTrue(t, err == nil)
+	full, err := pgpSvc.SymmetricallyEncrypt([]byte(fixturePassphrase), privPlain)
+	core.AssertTrue(t, err == nil)
+	core.AssertTrue(t, len(full) > 64, "fixture must be big enough to truncate mid-body")
+
+	// Truncate to ~80% of the ciphertext. The symkey packet sits
+	// at the front (small); the encrypted body fills the rest. By
+	// cutting late in the stream we keep the symkey decoder happy
+	// but starve the body decryptor.
+	cutoff := (len(full) * 8) / 10
+	if cutoff < 32 {
+		cutoff = 32
+	}
+	truncated := full[:cutoff]
+	writeRawAccount(t, home, id, truncated)
+
+	svc := newUnlockable(t, home)
+	r := svc.Unlock(subject.UnlockInput{
+		AccountID:  id,
+		Passphrase: fixturePassphrase, // the CORRECT passphrase
+	})
+	core.AssertFalse(t, r.OK, "truncated-body MUST reject")
+	core.AssertEqual(t, "account.unlock.corrupted_key", r.Code(),
+		"truncated-body MUST classify as corrupted_key, NOT bad_passphrase (Cerberus DREAD ADD-MED-1)")
+}
+
 // TestUnlock_PostLockoutAttempt_NoDuplicateTrigger_Ugly — after the
 // lockout has triggered, subsequent attempts within the cooldown
 // MUST return locked_out via the lockoutState early-reject path

@@ -280,22 +280,35 @@ func (s *Service) HasUnlocked(accountID string) bool {
 // distinguishDecrypt runs openpgp.ReadMessage with a tracking prompt
 // so the caller can distinguish parser failure (corrupted_key) from
 // passphrase failure (bad_passphrase) by error TYPE — specifically,
-// by whether the prompt closure was invoked. Returns the plaintext
+// by which sentinel the prompt closure returned. Returns plaintext
 // + a decryptFailureKind sentinel on failure paths.
 //
-// Implementation rationale:
-//   - openpgp.ReadMessage's prompt closure is the SOLE path through
-//     which the passphrase reaches the symmetric-key decryptor.
-//   - Garbage / truncated armour fails inside packets.Next() BEFORE
-//     prompt is reachable → prompt never invoked.
-//   - Wrong passphrase fails inside s.Decrypt(passphrase) — prompt
-//     fired once with the user's value, the symmetric-key packet
-//     rejected it, the outer FindKey loop re-enters prompt which
-//     returns the sentinel "decryption failed" error.
+// Three signal regions:
 //
-// The boolean signal is type-safe — no error.String() matching,
-// no openpgp-error-type peering. Mirrors the RFC §10 H4 ruling
-// verbatim.
+//  1. calls == 0 → parser failed BEFORE the prompt closure was
+//     reachable. Garbage bytes / truncated armour / unrecognised
+//     packet types. Classified as corrupted_key.
+//
+//  2. err is (or wraps) errBadPassphrase → the prompt closure's
+//     second invocation returned the sentinel. The first attempt
+//     used the user's passphrase + the symmetric-key packet
+//     rejected it; the FindKey loop re-entered prompt which
+//     surfaced our sentinel. Classified as bad_passphrase.
+//
+//  3. calls > 0, err != nil, NOT errBadPassphrase → the prompt was
+//     invoked at least once but openpgp errored on the body decrypt
+//     step (post-passphrase). This is post-prompt corruption: the
+//     symmetric-key was derivable but the encrypted body is
+//     malformed (truncated, wrong cipher, MDC tampered). Classified
+//     as corrupted_key — Cerberus DREAD ADD-MED-1 — locking the
+//     user out for a file-corruption that is NOT their fault would
+//     be a hostile UX.
+//
+// io.ReadAll on md.UnverifiedBody after a successful ReadMessage
+// classifies its own errors as corrupted_key for the same reason.
+//
+// NOT-string-match on error message — the signal is purely type-
+// based (sentinel-identity check via core.Is). Mirrors RFC §10 H4.
 func distinguishDecrypt(ciphertext, passphrase []byte) ([]byte, decryptFailureKind, error) {
 	buf := bytes.NewReader(ciphertext)
 	calls := 0
@@ -303,17 +316,24 @@ func distinguishDecrypt(ciphertext, passphrase []byte) ([]byte, decryptFailureKi
 		calls++
 		if calls > 1 {
 			// Second invocation = the symmetric-key packet rejected
-			// the first attempt — wrong passphrase.
+			// the first attempt — wrong passphrase. Sentinel return
+			// is the type-safe signal the caller branches on.
 			return nil, errBadPassphrase
 		}
 		return passphrase, nil
 	}
 	md, err := openpgp.ReadMessage(buf, nil, prompt, nil)
 	if err != nil {
-		if calls == 0 {
-			return nil, decryptFailureCorruptedKey, err
+		// Three classifications keyed by sentinel + prompt-invocation
+		// count. The errBadPassphrase identity check is the load-
+		// bearing distinguisher — any OTHER error post-prompt is
+		// body-corruption, not user fault.
+		if core.Is(err, errBadPassphrase) {
+			return nil, decryptFailureBadPassphrase, err
 		}
-		return nil, decryptFailureBadPassphrase, err
+		// calls == 0 (pre-prompt parser failure) AND calls > 0 with
+		// non-sentinel error both indicate corruption.
+		return nil, decryptFailureCorruptedKey, err
 	}
 	plaintext, err := io.ReadAll(md.UnverifiedBody)
 	if err != nil {
@@ -349,15 +369,31 @@ const (
 //
 // Returns (false, 0) when the account_id has never been seen OR has
 // fewer than the threshold of recent failures.
+//
+// Cerberus DREAD ADD-HIGH-4 — the map value is *lockoutEntry, so
+// the map-RLock only protects the map header (which slot maps to
+// which pointer), NOT the pointed-to lockoutEntry struct. A
+// concurrent recordFailedAttempt holds the write lock + mutates
+// entry.unlockAt; a lockoutState read of entry.unlockAt AFTER
+// RUnlock races against that write. Fix: copy the field into a
+// local while holding the RLock, then read the local. `go test
+// -race ./pkg/account/...` covers the regression.
 func (s *Service) lockoutState(accountID string, nowUnix int64) (bool, int64) {
 	s.mu.RLock()
-	st, ok := s.lockouts[accountID]
+	var (
+		unlockAt int64
+		found    bool
+	)
+	if st, ok := s.lockouts[accountID]; ok {
+		unlockAt = st.unlockAt
+		found = true
+	}
 	s.mu.RUnlock()
-	if !ok {
+	if !found {
 		return false, 0
 	}
-	if st.unlockAt > nowUnix {
-		return true, st.unlockAt
+	if unlockAt > nowUnix {
+		return true, unlockAt
 	}
 	return false, 0
 }
