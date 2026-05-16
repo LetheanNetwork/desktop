@@ -46,6 +46,14 @@ import { LitElement, html, nothing } from "lit";
 import { ref as litRef } from "lit/directives/ref.js";
 import { T } from "@lthn/i18n/coreservice";
 import { AUTH_401_EVENT, AUTH_OK_EVENT, type AuthGateState } from "./auth-gate";
+// Plugin-views Unit B.4 — titlebar view-switcher + iframe wrapper
+// per plans/code/lthn/desktop/views/RFC.plugin-views.md §4.1.
+// Side-effect imports register the custom elements; the named imports
+// pull the select-event literal so the listener stays in lockstep
+// with the element's emit.
+import "./view-switcher";
+import "./lthn-plugin-view";
+import { VIEW_SWITCHER_SELECT_EVENT } from "./view-switcher";
 
 /** Filter a list of file paths down to those ending in `.gguf`
  *  (case-insensitive). Drives the drag-and-drop import wire — Wails
@@ -807,6 +815,16 @@ class LthnAppShell extends LitElement {
     this.switcherOpen = !this.switcherOpen;
   };
 
+  /** Handle the titlebar <lthn-view-switcher>'s pick — per
+   *  plans/code/lthn/desktop/views/RFC.plugin-views.md §4.1, the
+   *  switcher emits lthn:view-switcher:select with the picked view
+   *  id; we route through the same _selectView() the sidebar uses
+   *  so persistence + per-view pane restore stays one code path. */
+  _onViewSwitcherSelect = (ev: Event) => {
+    const detail = (ev as CustomEvent<{ viewId?: string }>).detail;
+    if (detail?.viewId) this._selectView(detail.viewId);
+  };
+
   /** Document-level click handler that closes the switcher when the
    *  click lands outside its container. The switcher's own button
    *  stops propagation so this only fires on outside clicks. */
@@ -1241,6 +1259,15 @@ class LthnAppShell extends LitElement {
           </div>
           <div style="flex:1"></div>
           <div style="--wails-draggable: no-drag; display:flex; align-items:center; gap:6px;">
+            <!-- Plugin-views RFC §4.1 — view-switcher slots immediately
+                 left of the Search ⌘K button. Populated from the same
+                 VIEWS registry the sidebar reads; emits
+                 lthn:view-switcher:select with the picked id. -->
+            <lthn-view-switcher
+              .views=${VIEWS.map(v => ({ id: v.id, label: v.label, icon: v.icon }))}
+              active-view=${this.view}
+              @lthn:view-switcher:select=${this._onViewSwitcherSelect}
+            ></lthn-view-switcher>
             <button style="display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:6px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); color:var(--fg-2); font-family:var(--font-sans); font-size:11.5px; cursor:pointer;">
               <i class="fa-solid fa-magnifying-glass" style="font-size:10px;"></i>
               <span>${this.t.search}</span>
