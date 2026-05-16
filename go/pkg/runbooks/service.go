@@ -355,23 +355,66 @@ func loadOne(id, slug string) (RunbookRecord, string, error) {
 	return RunbookRecord{}, "", core.E("runbooks.loadOne", "not found: "+label, nil)
 }
 
-// writeRecord serialises a RunbookRecord back to disk.
+// writeRecord serialises a RunbookRecord back to disk and writes it
+// via paths.AtomicWriteWithVersion (Cascade W3, RFC §B.3 row 9).
+//
+// ifVersion is the optimistic-lock anchor — pass the Version the
+// caller observed on disk (via parseRecord through loadOne), or 0 for
+// first-writes / legacy-file upgrades. writeRecord stamps the next
+// monotonic version (ifVersion+1) into the marshalled frontmatter so
+// subsequent reads see version=1,2,3... monotonically.
+//
 // Cerberus #1486: slug lands directly in the filename; validate before
 // the join even though loadOne paths route through it.
-// Cerberus #1487 PR-1: 0o600 — owner-only at rest.
-func writeRecord(r RunbookRecord, dirPath string) error {
+// Cerberus #1487 PR-1: 0o600 — owner-only at rest (applied by the
+// primitive's atomic-rename path).
+//
+// Return shape (Mantis #1544 gating, inherited from W1+W2): on the
+// stale-write path the function returns
+// core.Fail(paths.ConflictEnvelope{...}) so the Wails-marshalled
+// Result.Value carries the lowercase-json shape
+// (`{code, current_version, current_hash}`) that
+// conflict-dispatch.ts extractEnvelope pattern-matches on. The
+// per-service Code is "runbooks.update.conflict" — the frontend
+// scopes its toast + reload-listener on this exact string.
+//
+// Audit emission is automatic via paths.AuditModeForPath —
+// runbooks/* paths route through AuditModeBatch per RFC §6.1.
+//
+// Usage example:
+//
+//	if wr := writeRecord(rec, dirPath, prior.Version); !wr.OK {
+//	    return wr
+//	}
+func writeRecord(r RunbookRecord, dirPath string, ifVersion int) core.Result {
 	if err := paths.IsValidID(r.Slug); err != nil {
-		return err
+		return core.Fail(err)
 	}
+	// Stamp the next monotonic version. ifVersion=0 (Create / legacy
+	// upgrade) yields version=1; subsequent writes increment.
+	nextVersion := ifVersion + 1
+	if nextVersion < 1 {
+		nextVersion = 1
+	}
+	r.Version = nextVersion
 	raw, err := marshalRecord(r)
 	if err != nil {
-		return err
+		return core.Fail(core.E("runbooks.writeRecord", "marshal", err))
 	}
 	target := core.PathJoin(dirPath, r.Slug+".md")
-	if w := core.WriteFile(target, raw, 0o600); !w.OK {
-		return core.E("runbooks.writeRecord", w.Error(), nil)
+	res := paths.AtomicWriteWithVersion(target, paths.WriteInput{
+		Body:      raw,
+		IfVersion: ifVersion,
+	})
+	if res.OK {
+		return res
 	}
-	return nil
+	if stale, ok := paths.VersionStaleFromError(res.Value); ok {
+		return core.Fail(paths.NewConflictEnvelope(
+			"runbooks.update.conflict", stale))
+	}
+	return core.Fail(core.E("runbooks.writeRecord",
+		"write failed: "+res.Error(), nil))
 }
 
 // fireEvent publishes a runbook event on the Core ACTION bus.
@@ -423,13 +466,28 @@ func seedAll(dirPath string) {
 		rec.LastRehearsed = now.Add(-s.rehearsedAgo)
 		rec.Body = "# " + rec.Title + "\n\nThis is a seed runbook. " +
 			"Replace this with your organisation's actual procedure.\n"
+		// Stamp the seed at version 1 so subsequent edits see the
+		// monotonic anchor immediately (Cascade W3, RFC §B.3 row 9).
+		rec.Version = 1
 		raw, err := marshalRecord(rec)
 		if err != nil {
 			continue
 		}
 		target := core.PathJoin(dirPath, rec.Slug+".md")
+		// Cascade W3 (RFC §B.3 row 9) — seed-path replaces the prior
+		// bare `core.WriteFile` with an unconditional first-write
+		// through paths.AtomicWriteWithVersion. Per RFC §3.2 lazy-
+		// migration semantics, an empty WriteInput (no IfVersion /
+		// IfMtime / IfMatchHash) treats this as a legitimate
+		// unconditional first-write. seedAll() is invoked once on
+		// first start when the runbooks directory is empty (see
+		// OnStart + List entry-points) so there's no concurrent
+		// writer to race against.
 		// 0o600 (Cerberus #1487 PR-1): runbooks carry operational
-		// secrets; even seed content uses the production mode.
-		_ = core.WriteFile(target, raw, 0o600)
+		// secrets; even seed content uses the production mode,
+		// applied inside the primitive's atomic-rename path.
+		_ = paths.AtomicWriteWithVersion(target, paths.WriteInput{
+			Body: raw,
+		})
 	}
 }

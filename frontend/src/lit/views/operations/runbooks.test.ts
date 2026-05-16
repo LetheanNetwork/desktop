@@ -119,3 +119,66 @@ describe("<lthn-view-runbooks>", () => {
     expect(el.books.length).toBe(7); // empty backend → fixture stays
   });
 });
+
+describe("<lthn-view-runbooks> — conflict-reload listener (Cascade W3)", () => {
+  beforeEach(() => {
+    (RunbooksList as unknown as { mockReset: () => void }).mockReset();
+    document.body.innerHTML = "";
+  });
+
+  it("CONFLICT_RELOAD_EVENT with matching service triggers _loadFromBackend", async () => {
+    const calls: number[] = [];
+    (RunbooksList as unknown as { mockImplementation: (fn: () => Promise<unknown>) => void })
+      .mockImplementation(() => {
+        calls.push(1);
+        return Promise.resolve({ Value: { books: [
+          { id: "R-RELOAD", title: "Reloaded runbook", area: "client", last: "1 d", health: "fresh" },
+        ] } });
+      });
+
+    const el = document.createElement("lthn-view-runbooks") as HTMLElement & {
+      books: unknown[];
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    const baseline = calls.length;
+
+    window.dispatchEvent(new CustomEvent("lthn:conflict:reload-requested", {
+      detail: { service: "runbooks.update" },
+    }));
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(calls.length).toBeGreaterThan(baseline);
+  });
+
+  it("CONFLICT_RELOAD_EVENT with non-matching service is ignored", async () => {
+    const calls: number[] = [];
+    (RunbooksList as unknown as { mockImplementation: (fn: () => Promise<unknown>) => void })
+      .mockImplementation(() => {
+        calls.push(1);
+        return Promise.resolve({ Value: { books: [] } });
+      });
+
+    const el = document.createElement("lthn-view-runbooks") as HTMLElement & {
+      books: unknown[];
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    const baseline = calls.length;
+
+    window.dispatchEvent(new CustomEvent("lthn:conflict:reload-requested", {
+      detail: { service: "incidents.update" }, // not ours
+    }));
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+
+    expect(calls.length).toBe(baseline);
+  });
+});

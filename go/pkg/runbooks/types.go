@@ -94,6 +94,18 @@ type RunbookRecord struct {
 	// Body is the markdown procedure below the frontmatter.
 	// Populated on Get(); empty during List()/Search() scans.
 	Body string `yaml:"-"`
+
+	// Version is the monotonic optimistic-lock version (Cascade W3,
+	// RFC §B.3 row 9). Stamped by writeRecord via
+	// paths.AtomicWriteWithVersion; 0 on legacy files predating the
+	// cutover, >=1 after first write through the primitive.
+	// omitempty so legacy files round-trip cleanly as Version=0; the
+	// first write stamps version=1.
+	//
+	// RunbookRecord is the persistence type (yaml-only) — Version
+	// stays inside the package; the RunbookEntry wire type consumed
+	// by the Lit frontend has no Version field by design.
+	Version int `yaml:"version,omitempty"`
 }
 
 // ListInput drives the List method.

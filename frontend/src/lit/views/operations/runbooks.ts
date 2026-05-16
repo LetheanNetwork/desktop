@@ -17,6 +17,21 @@
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
+import {
+  CONFLICT_RELOAD_EVENT,
+  type ConflictDetail,
+} from "../../conflict-dispatch";
+
+/** Service identifier the shared <lthn-conflict-toast> filters its
+ *  reload signal by. Matches the Go-side wrapped conflict code
+ *  ("runbooks.update.conflict") that pkg/runbooks.writeRecord
+ *  emits via paths.NewConflictEnvelope on optimistic-lock loss
+ *  (Cascade W3, RFC §B.3 row 9). Today only the listener side is
+ *  load-bearing — runbooks.ts has no in-view write call-site
+ *  (MarkRehearsed is invoked from elsewhere). When an in-view Edit
+ *  UI lands it MUST call handleStaleVersionConflict(result,
+ *  RUNBOOKS_SERVICE) on its update path. */
+const RUNBOOKS_SERVICE = "runbooks.update";
 
 interface RunbookEntry {
   id:     string;
@@ -65,14 +80,26 @@ class LthnViewRunbooks extends LitElement {
   }
   createRenderRoot() { return this; }
 
+  /** Cascade W3 (RFC §B.3 row 9) — listener for CONFLICT_RELOAD_EVENT
+   *  dispatched by the shared <lthn-conflict-toast>. Scope-filter on
+   *  RUNBOOKS_SERVICE so sibling views' reload signals don't trigger
+   *  our refetch. */
+  private _onConflictReload = (e: Event) => {
+    const ce = e as CustomEvent<ConflictDetail>;
+    if (ce.detail?.service !== RUNBOOKS_SERVICE) return;
+    void this._loadFromBackend();
+  };
+
   async connectedCallback() {
     super.connectedCallback();
+    window.addEventListener(CONFLICT_RELOAD_EVENT, this._onConflictReload);
     await this._loadFromBackend();
     this._timer = setInterval(() => { void this._loadFromBackend(); }, 60_000);
   }
 
   disconnectedCallback() {
     if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    window.removeEventListener(CONFLICT_RELOAD_EVENT, this._onConflictReload);
     super.disconnectedCallback();
   }
 

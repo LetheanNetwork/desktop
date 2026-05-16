@@ -162,9 +162,20 @@ func (s *Service) MarkRehearsed(input MarkInput) core.Result {
 	if err != nil {
 		return core.Fail(core.E("runbooks.MarkRehearsed", "not found: "+input.ID, err))
 	}
+	priorVersion := rec.Version
 	rec.LastRehearsed = core.Now().UTC()
-	if err := writeRecord(rec, dirPath); err != nil {
-		return core.Fail(core.E("runbooks.MarkRehearsed", "write", err))
+	// Cascade W3 (RFC §B.3 row 9) — IfVersion=priorVersion gates the
+	// write under the primitive's optimistic-lock check.
+	// priorVersion=0 (legacy file predating cutover) upgrades via an
+	// unconditional first-write that stamps Version=1. Conflict-path
+	// returns core.Fail(paths.ConflictEnvelope{...}) directly via
+	// writeRecord (Mantis #1544 gating shape inherited from W1+W2).
+	if wr := writeRecord(rec, dirPath, priorVersion); !wr.OK {
+		return wr
+	}
+	rec.Version = priorVersion + 1
+	if rec.Version < 1 {
+		rec.Version = 1
 	}
 	entry := toEntry(rec, core.Now())
 	s.fireEvent(EventRehearsed, entry)
