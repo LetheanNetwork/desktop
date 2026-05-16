@@ -2,8 +2,14 @@
 // Coding view · Repos — <lthn-view-repos>
 //
 // Lists watched repos with lang, branch, last commit, build state and
-// open-PR count. Fixtures only in v1; real workspace data via
-// core/ide/pkg/workspace is tracked as a Mantis follow-up.
+// open-PR count. Wired to pkg/repos.Service.Status() — the canonical
+// scan of $HOME/Code/{core,lthn,host-uk,lab,snider} plus any paths
+// contributed by registered SourceProviders.
+//
+// Fixture data is kept as a fallback so the view renders something
+// useful in headless dev / when the Wails binding isn't loaded.
+// Live data replaces the fixture once Status() resolves (~50ms flash
+// pattern mirrored from operations/status.ts).
 //
 // Supports the `embedded` attribute: when set, renderChrome omits the
 // titlebar / footer frame and the element fills the shell body slot.
@@ -20,6 +26,51 @@ interface RepoRow {
   commit: string;
   build:  "passing" | "running" | "failing";
   prs:    number;
+}
+
+/** Backend row shape from pkg/repos.Status — JSON-tagged Go struct. */
+interface BackendRepoStatus {
+  name?:      string;
+  path?:      string;
+  branch?:    string;
+  modified?:  number;
+  untracked?: number;
+  staged?:    number;
+  ahead?:     number;
+  behind?:    number;
+  dirty?:     boolean;
+  error?:     string;
+}
+
+/**
+ * Map a backend Status row into the view's RepoRow shape.
+ *
+ * Field-mapping notes:
+ *   - name/branch: direct.
+ *   - lang: the backend doesn't classify language today — default "Go"
+ *     since the canonical scan roots are dev workspaces. Refining this
+ *     (extension probe / .git/config heuristic) is a Mantis follow-up.
+ *   - commit: Status doesn't carry a SHA — placeholder "—" until the
+ *     scm/git surface grows a head-sha field.
+ *   - build: derived from { error, dirty } — error → failing,
+ *     dirty/ahead/behind → running, clean → passing. Good-enough
+ *     mapping until CI integration lands.
+ *   - prs: backend has no PR count surface — use `ahead` (commits not
+ *     yet pushed) as the closest "outstanding work" proxy. Real PR
+ *     count is a Mantis follow-up (needs forge/github introspection).
+ */
+function mapBackendRow(r: BackendRepoStatus): RepoRow {
+  const err = (r.error ?? "").trim() !== "";
+  const churn = (r.ahead ?? 0) + (r.behind ?? 0) + (r.modified ?? 0) + (r.untracked ?? 0) + (r.staged ?? 0);
+  const build: RepoRow["build"] = err ? "failing" : (r.dirty || churn > 0) ? "running" : "passing";
+  return {
+    name:   r.name   ?? "",
+    lang:   "Go",
+    branch: r.branch ?? "",
+    commit: "—",
+    build,
+    prs:    r.ahead ?? 0,
+  };
 }
 
 /** Map lang string to the dot colour used in the design reference. */
@@ -50,8 +101,8 @@ class LthnViewRepos extends LitElement {
     w:        { type: Number },
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },
-    /** Fixture data — replace with a live backend call when
-     *  core/ide/pkg/workspace bindings land (Mantis follow-up). */
+    /** Live data from pkg/repos.Service.Status(); falls back to the
+     *  constructor-seeded fixture when the binding is unavailable. */
     repos:    { state: true },
   };
 
@@ -60,13 +111,16 @@ class LthnViewRepos extends LitElement {
   declare embedded: boolean;
   declare repos: RepoRow[];
 
+  /** Repo state changes slowly — 60s refresh is plenty. */
+  private _timer: ReturnType<typeof setInterval> | null = null;
+
   constructor() {
     super();
     this.w = 1180; this.h = 720; this.embedded = false;
     // Design-reference fixtures — identical names + data to the Claude
     // Design reference impl (lit-views-coding.js) so the rendered output
-    // matches the approved mockup. Mantis follow-up: replace with a live
-    // call to the workspace service once bindings exist.
+    // matches the approved mockup. Used as fallback when the Wails
+    // binding isn't loaded (headless dev / tests without the bridge).
     this.repos = [
       { name: "lethean/desktop",  lang: "Go",   branch: "main",  commit: "a3f12c", build: "passing", prs: 3 },
       { name: "lethean/runtime",  lang: "Go",   branch: "main",  commit: "7b2901", build: "passing", prs: 1 },
@@ -78,6 +132,55 @@ class LthnViewRepos extends LitElement {
   }
 
   createRenderRoot() { return this; }
+
+  async connectedCallback() {
+    super.connectedCallback();
+    // Fire the first load after the constructor's fixture seed so the
+    // panel always renders something (~50ms flash pattern shared with
+    // operations/status.ts). On success the fixture is replaced; on
+    // failure the fixture stays as a useful dev fallback.
+    await this._loadFromBackend();
+    // 60s cadence — repo state churns far slower than uptime probes,
+    // so a minute between scans keeps the panel fresh without thrashing
+    // `git status` across the canonical roots.
+    this._timer = setInterval(() => { void this._loadFromBackend(); }, 60_000);
+  }
+
+  disconnectedCallback() {
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    super.disconnectedCallback();
+  }
+
+  /**
+   * Pull live repo data from pkg/repos.Service.Status() and replace
+   * `this.repos`. On any failure (binding missing in dev, Status()
+   * rejected, malformed response) the existing repos array is kept
+   * untouched so the view continues to render the fixture fallback.
+   */
+  async _loadFromBackend() {
+    try {
+      // Lazy-import so a missing binding (e.g. happy-dom test runs
+      // without the wails3 generated tree) doesn't blow up module
+      // load. Same defensive pattern as operations/status.ts.
+      const svc = await import("@desktop/repos/service").catch(() => null);
+      if (!svc || typeof (svc as { Status?: unknown }).Status !== "function") {
+        console.warn("[repos] @desktop/repos/service unavailable — keeping fixture");
+        return;
+      }
+      const r = await (svc as { Status: (input: unknown) => Promise<{ Value?: { repos?: BackendRepoStatus[] } }> }).Status({});
+      const rows = r?.Value?.repos;
+      if (!Array.isArray(rows)) {
+        console.warn("[repos] Status() returned no repos array — keeping fixture", r);
+        return;
+      }
+      // Drop entries with no name (malformed rows from the backend).
+      this.repos = rows
+        .filter((row) => (row?.name ?? "").trim() !== "")
+        .map(mapBackendRow);
+    } catch (e: unknown) {
+      console.warn("[repos] Status() failed — keeping fixture:", e);
+    }
+  }
 
   /** Count repos by build state for the footer summary. */
   _summary(): { passing: number; failing: number } {
@@ -156,7 +259,7 @@ class LthnViewRepos extends LitElement {
       subtitle: `${this.repos.length} watched`,
       w: this.w, h: this.h,
       body,
-      footer: html`${sum.passing} passing · ${sum.failing} failing · fixtures (workspace bindings pending) · workspace: ~/Code/lethean`,
+      footer: html`${sum.passing} passing · ${sum.failing} failing · pkg/repos · refreshed every 60 s · workspace: ~/Code/{core,lthn,host-uk,lab,snider}`,
       embedded: this.embedded,
     });
   }
