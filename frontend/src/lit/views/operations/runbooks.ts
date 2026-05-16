@@ -44,12 +44,15 @@ class LthnViewRunbooks extends LitElement {
     embedded: { type: Boolean, reflect: true },
     books:    { state: true },
     filter:   { state: true },
+    loading:  { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare books: RunbookEntry[];
   declare filter: string;
+  declare loading: boolean;
+  private _timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
@@ -58,8 +61,44 @@ class LthnViewRunbooks extends LitElement {
     this.embedded = false;
     this.books = FIXTURE_BOOKS;
     this.filter = "";
+    this.loading = false;
   }
   createRenderRoot() { return this; }
+
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+    this._timer = setInterval(() => { void this._loadFromBackend(); }, 60_000);
+  }
+
+  disconnectedCallback() {
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    super.disconnectedCallback();
+  }
+
+  async _loadFromBackend() {
+    if (this.loading) return;
+    this.loading = true;
+    try {
+      const svc = await import("@desktop/runbooks/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
+        return;
+      }
+      const r = await (svc as {
+        List: (input: { health: string; area: string; limit: number }) => Promise<{
+          Value?: { books?: RunbookEntry[] }
+        }>
+      }).List({ health: "", area: "", limit: 50 });
+      const rows = r?.Value?.books;
+      if (rows && rows.length > 0) {
+        this.books = rows;
+      }
+    } catch {
+      // Backend unavailable — keep fixture data in place.
+    } finally {
+      this.loading = false;
+    }
+  }
 
   private _healthColor(h: RunbookEntry["health"]): string {
     return ({

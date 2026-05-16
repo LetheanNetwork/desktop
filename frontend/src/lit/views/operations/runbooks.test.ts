@@ -1,6 +1,14 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+
+// Module-level mock — overridden per test via the imported `List` ref.
+vi.mock("@desktop/runbooks/service", () => ({
+  List: vi.fn(),
+}));
+
+import { List as RunbooksList } from "@desktop/runbooks/service";
+
 import "./runbooks";
 
 async function mount(attrs: Record<string, string | boolean> = {}) {
@@ -23,7 +31,10 @@ async function mount(attrs: Record<string, string | boolean> = {}) {
 }
 
 describe("<lthn-view-runbooks>", () => {
-  beforeEach(() => { document.body.innerHTML = ""; });
+  beforeEach(() => {
+    (RunbooksList as unknown as { mockReset: () => void }).mockReset();
+    document.body.innerHTML = "";
+  });
 
   it("renders all 7 fixture runbooks", async () => {
     const el = await mount();
@@ -72,5 +83,39 @@ describe("<lthn-view-runbooks>", () => {
   it("mentions ~/Lethean/runbooks/ as the canonical storage", async () => {
     const el = await mount();
     expect(el.textContent).toContain("~/Lethean/runbooks/");
+  });
+
+  it("replaces fixture with backend rows when List() returns books", async () => {
+    (RunbooksList as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: { books: [
+        { id: "R-99", title: "Bootstrap a fresh M3 dev box", area: "client", last: "1 d", health: "fresh" },
+        { id: "R-98", title: "Restore the rebuilt ~/Lethean/", area: "client", last: "3 d", health: "fresh" },
+      ] },
+    });
+    const el = await mount();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.books.length).toBe(2);
+    expect(el.textContent).toContain("Bootstrap a fresh M3 dev box");
+    expect(el.textContent).not.toContain("Rotate runtime API keys"); // fixture pushed out
+  });
+
+  it("keeps fixture data when List() rejects", async () => {
+    (RunbooksList as unknown as { mockRejectedValue: (v: unknown) => void }).mockRejectedValue(new Error("no binding"));
+    const el = await mount();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.books.length).toBe(7); // FIXTURE_BOOKS retained
+    expect(el.textContent).toContain("Rotate runtime API keys");
+  });
+
+  it("keeps fixture data when List() returns empty books", async () => {
+    (RunbooksList as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: { books: [] },
+    });
+    const el = await mount();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.books.length).toBe(7); // empty backend → fixture stays
   });
 });
