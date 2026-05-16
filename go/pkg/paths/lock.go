@@ -183,24 +183,12 @@ func tryAcquireSentinel(sentinel string) bool {
 }
 
 // releaseSentinel unlinks the sentinel file so subsequent acquisitions
-// can succeed. Logged via core.Warn on failure (other than file-not-
-// found, which is the reclaim-already-happened race and benign) —
-// release errors do not propagate to the caller because fn has
-// already executed and a failed unlink leaves a recoverable stale
-// lock the next reclaim pass will collect.
+// can succeed. Remove errors are not propagated — fn has already
+// executed and a leaked sentinel is recoverable by the next reclaim
+// pass. The most common error is the benign reclaim-already-removed
+// race; logging it as a warning would just be noise.
 func releaseSentinel(sentinel string) {
-	r := core.Remove(sentinel)
-	if r.OK {
-		return
-	}
-	// File-not-found means a contending acquirer already reclaimed
-	// the sentinel after observing the holder as either dead or
-	// PID-recycled; race is benign.
-	if stat := core.Stat(sentinel); !stat.OK {
-		return
-	}
-	core.Warn("paths.WithFileLock: release failed",
-		"sentinel", sentinel, "err", r.Error())
+	_ = core.Remove(sentinel)
 }
 
 // maybeReclaim inspects an existing sentinel. Returns true when the
