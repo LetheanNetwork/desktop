@@ -54,6 +54,11 @@ import { AUTH_401_EVENT, AUTH_OK_EVENT, type AuthGateState } from "./auth-gate";
 import "./view-switcher";
 import "./lthn-plugin-view";
 import "./plugin-view-opencode-shim";
+// Cascade W1 (Mantis #1540) — single-mount shared toast that surfaces
+// stale-version write conflicts dispatched at wails-call-sites via
+// handleStaleVersionConflict. Mounted once near the top of the shell
+// render so it overlays any view body without per-view duplication.
+import "./lthn-conflict-toast";
 import { VIEW_SWITCHER_SELECT_EVENT } from "./view-switcher";
 import {
   PLUGIN_VIEW_MOUNT_TIMEOUT_EVENT,
@@ -1465,6 +1470,11 @@ class LthnAppShell extends LitElement {
     const active = NAV.find(n => n.id === this.active);
     return html`
       ${this._renderPalette()}
+      <!-- Cascade W1 (Mantis #1540) — shared conflict-toast overlay.
+           Renders only when a CONFLICT_409_EVENT fires; otherwise emits
+           nothing into the DOM. Single mount avoids per-view toast
+           duplication that would multi-fire on the same event. -->
+      <lthn-conflict-toast></lthn-conflict-toast>
       <div style="
         position:fixed; inset:0;
         display:grid;
