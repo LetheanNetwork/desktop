@@ -35,6 +35,33 @@
 let cachedToken: string | null = null;
 let inflightTokenFetch: Promise<string> | null = null;
 
+// Stage E.C — session-token chokepoint. When the unlock flow succeeds,
+// auth-gate calls setSessionToken(t) with the LTHN-SESS-1.<…> token
+// returned by /v1/account/unlock. While set, apiFetch prefers this over
+// the static LocalKey bearer so user-data endpoints route through the
+// session tier (per RFC.stage-e §4).
+//
+// Closure-only discipline per Cerberus #1465 + RFC.stage-e §3.2 — the
+// token lives in this module-scope binding ONLY. NO localStorage, NO
+// sessionStorage, NO cookie, NO IndexedDB. App restart = re-unlock.
+// `clearSessionToken()` zeros the binding on lock / 401 / expiry so
+// the next apiFetch falls back to LocalKey for local-tier reads.
+let cachedSessionToken: string | null = null;
+
+/** Replace the in-memory session-token. Called by auth-gate after a
+ *  successful unlock. Passing an empty string is equivalent to
+ *  clearSessionToken — the falsy branch falls back to LocalKey. */
+export function setSessionToken(token: string): void {
+  cachedSessionToken = typeof token === "string" && token.length > 0 ? token : null;
+}
+
+/** Drop the session-token. Called by the lock handler, by apiFetch on
+ *  401 against a session-tier route (the token expired or was rotated
+ *  server-side), and by the gate's _onWreathIn retry path. */
+export function clearSessionToken(): void {
+  cachedSessionToken = null;
+}
+
 /** Internal — resolve the local bearer token via the Wails apikey
  *  service. Cached after first successful resolution. Returns the
  *  empty string when the binding is unavailable or returns empty —
@@ -92,13 +119,26 @@ export async function apiFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
-  const token = await loadToken();
+  // Session-token (post-unlock) takes precedence over the static
+  // LocalKey. RFC.stage-e §4 — session-tier routes require it;
+  // local-tier routes accept either. Falling back to LocalKey when no
+  // session is present keeps /health + setup-flow probes working
+  // before the user unlocks. Authorization-header on init wins outright
+  // so callers can override per-request when needed.
+  const session = cachedSessionToken;
+  const token = session ?? await loadToken();
   const headers = new Headers(init?.headers ?? {});
   if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
   }
   const response = await fetch(input, { ...init, headers });
   if (response.status === 401) {
+    // Session-tier 401 means the token expired / was rotated server-side.
+    // Drop it so the next apiFetch falls back to LocalKey (which 401s on
+    // session-tier routes, surfacing the gate). Without this clear, the
+    // expired token sticks and every subsequent request burns the same
+    // expired-401 cycle.
+    if (session) cachedSessionToken = null;
     // Surface the request-id from the server response so the gate's
     // error frame can show the same trace id the server-side logs
     // index by. Header name follows the api gateway's existing

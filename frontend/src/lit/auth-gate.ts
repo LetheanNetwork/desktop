@@ -46,6 +46,7 @@
 
 import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { renderChrome } from "./chrome";
+import { setSessionToken } from "./api-fetch";
 
 /** Concrete state names the gate cycles between. Kept as a string-
  *  union so the property reflects to an attribute and the test harness
@@ -63,23 +64,42 @@ export const AUTH_OK_EVENT = "lthn:auth:ok";
 /** Minimal binding shape — we only access the JSON-tagged fields. The
  *  Wails-generated bindings return `core.Result` whose `Value` is the
  *  Go struct serialised to JSON, so the TS keys mirror the `json:"…"`
- *  tags on AccountStatusOutput / BootstrapTokenOutput. */
-interface AccountStatusValue { has_user_account?: boolean }
+ *  tags on AccountStatusOutput / BootstrapTokenOutput / UnlockOutput. */
+interface AccountStatusValue { has_user_account?: boolean; account_id?: string }
 interface BootstrapTokenValue { token?: string; expires_at?: number }
+interface UnlockResponseBody {
+  session_token?: string;
+  expires_at?: number;
+  account_id?: string;
+}
+interface ErrorResponseBody {
+  error?: { code?: string; message?: string };
+  meta?: { request_id?: string };
+}
+
+/** Stable id attribute on the passphrase input so _onWreathIn can read
+ *  the typed value via querySelector without holding a Lit ref on
+ *  `this`. The value is read once, copied into a local variable, and
+ *  the field cleared after the response — closure-only discipline per
+ *  Cerberus #1465 applied to the user-typed passphrase. */
+const UNLOCK_INPUT_ID = "lthn-auth-gate-passphrase";
 
 class LthnAuthGate extends LitElement {
   static readonly properties = {
-    state:        { type: String, reflect: true },
-    title:        { type: String },
-    subtitle:     { type: String },
-    w:            { type: Number },
-    h:            { type: Number },
-    requestId:    { type: String, attribute: "request-id" },
-    embedded:     { type: Boolean, reflect: true },
-    loading:      { state: true },
-    errorStatus:  { state: true },
-    errorMessage: { state: true },
-    errorBody:    { state: true },
+    state:           { type: String, reflect: true },
+    title:           { type: String },
+    subtitle:        { type: String },
+    w:               { type: Number },
+    h:               { type: Number },
+    requestId:       { type: String, attribute: "request-id" },
+    embedded:        { type: Boolean, reflect: true },
+    loading:         { state: true },
+    errorStatus:     { state: true },
+    errorMessage:    { state: true },
+    errorBody:       { state: true },
+    accountId:       { state: true },
+    unlockError:     { state: true },
+    lockedOutUntilSec: { state: true },
   };
 
   declare state:        AuthGateState;
@@ -102,20 +122,36 @@ class LthnAuthGate extends LitElement {
    *  panel in the error state. Falls back to the hardcoded design
    *  mockup when empty (state=error fired without a fetch context). */
   declare errorBody:    string;
+  /** Captured from AccountStatus().account_id on derive — the id the
+   *  unlock POST sends in its body. Multi-account selection is RFC.
+   *  stage-e non-goal; Stage F adds a chooser when this is ambiguous. */
+  declare accountId:    string;
+  /** Inline error message under the passphrase input in state=auth.
+   *  Cleared on next Wreath-in attempt or on input change. */
+  declare unlockError:  string;
+  /** Unix-seconds timestamp until which the unlock button stays
+   *  disabled after a lockout response (account.unlock.locked_out).
+   *  0 when not locked-out. RFC.stage-e §5 — 60s default cooldown,
+   *  the actual value comes from the server's "try again in N seconds"
+   *  message so backend rotations are picked up automatically. */
+  declare lockedOutUntilSec: number;
 
   constructor() {
     super();
-    this.state        = "setup";
-    this.title        = "Lethean Desktop";
-    this.subtitle     = "first-run · setup";
-    this.w            = 920;
-    this.h            = 620;
-    this.requestId    = "";
-    this.embedded     = false;
-    this.loading      = false;
-    this.errorStatus  = 0;
-    this.errorMessage = "";
-    this.errorBody    = "";
+    this.state             = "setup";
+    this.title             = "Lethean Desktop";
+    this.subtitle          = "first-run · setup";
+    this.w                 = 920;
+    this.h                 = 620;
+    this.requestId         = "";
+    this.embedded          = false;
+    this.loading           = false;
+    this.errorStatus       = 0;
+    this.errorMessage      = "";
+    this.errorBody         = "";
+    this.accountId         = "";
+    this.unlockError       = "";
+    this.lockedOutUntilSec = 0;
   }
 
   // Light DOM — same shape as every other shell child so tokens.css +
@@ -158,6 +194,7 @@ class LthnAuthGate extends LitElement {
       if (!r || !r.OK) return;
       const v = r.Value as AccountStatusValue | undefined;
       this.state = v?.has_user_account ? "auth" : "setup";
+      this.accountId = typeof v?.account_id === "string" ? v.account_id : "";
     } catch {
       // Binding unavailable — leave state alone. The 401 listener will
       // pick up real failures from in-flight apiFetch calls.
@@ -235,14 +272,210 @@ class LthnAuthGate extends LitElement {
     }
   }
 
-  /** Wreath-in click handler — placeholder for the Stage D unlock flow
-   *  that wires the passphrase field into LetheanAccount.Unlock. For
-   *  Stage C we no-op (the UI still renders the form so the design is
-   *  testable end-to-end). When Stage D lands this handler reads the
-   *  input value + calls into the unlock binding. */
-  _onWreathIn(): void {
-    // intentionally a no-op for Stage C — wired in Stage D.
+  /** Wreath-in click handler — RFC.stage-e §5 end-to-end unlock.
+   *
+   *  Closure-only discipline (Cerberus #1465 applied to the typed
+   *  passphrase): the value lives in the local `pp` variable only.
+   *  Never assigned to `this`, never logged, never cached. The input
+   *  field is cleared after the call so a stale value can't be
+   *  re-submitted from a later click without the user re-typing.
+   *
+   *  Flow per RFC §2:
+   *  1. read passphrase from <input id={UNLOCK_INPUT_ID}>
+   *  2. mint bootstrap-token with scope="account.unlock"
+   *  3. POST /v1/account/unlock with {account_id, passphrase} body +
+   *     Authorization: Bootstrap <token>
+   *  4. on 200 → setSessionToken(session_token), dispatch
+   *     AUTH_OK_EVENT, state="ok"
+   *  5. on 401 bad_passphrase → inline error, stay on state="auth"
+   *  6. on 429 locked_out → disable button + show server's "try again
+   *     in N seconds" message, stay on state="auth"
+   *  7. on any other failure → state="error" with captured body
+   *
+   *  Lockout countdown comes from the server-side cooldown deadline
+   *  parsed out of the locked_out message (RFC §5: "too many attempts
+   *  — try again in N seconds"). lockedOutUntilSec is consulted by
+   *  the button's disabled attribute + the inline-error renderer. */
+  async _onWreathIn(): Promise<void> {
+    if (this.loading) return;
+    if (this._isLockedOut()) return;
+
+    const input = this.querySelector("#" + UNLOCK_INPUT_ID) as HTMLInputElement | null;
+    const pp = input?.value ?? "";
+    if (pp.length === 0) {
+      this.unlockError = "Enter your passphrase to unlock your account.";
+      return;
+    }
+    if (this.accountId.length === 0) {
+      // _deriveState didn't find an account_id — either a race against
+      // unmount or AccountStatus regressed. Fall back to the framed
+      // error view so the user can retry.
+      this.unlockError = "";
+      this.state = "error";
+      this.errorStatus = 0;
+      this.errorMessage = "No Lethean Account is registered on this Mac.";
+      this.errorBody = "";
+      return;
+    }
+
+    this.loading = true;
+    this.unlockError = "";
+    try {
+      // Mint a fresh bootstrap-token scoped to the unlock endpoint.
+      // Per RFC §2.3 + Cerberus #1467 path-scope discipline: re-using
+      // the create-scope token here would skip the unlock-only gate.
+      const svc = await import("@desktop/serverkey/service");
+      const tokR = await svc.IssueBootstrapTokenForScope("account.unlock");
+      if (!tokR || !tokR.OK) {
+        this.state = "error";
+        this.errorStatus = 0;
+        this.errorMessage = "Couldn't mint an unlock token.";
+        this.errorBody = "";
+        return;
+      }
+      const tok = (tokR.Value as BootstrapTokenValue | undefined)?.token;
+      if (typeof tok !== "string" || tok.length === 0) {
+        this.state = "error";
+        this.errorStatus = 0;
+        this.errorMessage = "Server returned an empty unlock token.";
+        this.errorBody = "";
+        return;
+      }
+
+      const res = await fetch("/v1/account/unlock", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bootstrap " + tok,
+          "Content-Type":  "application/json",
+        },
+        body: JSON.stringify({ account_id: this.accountId, passphrase: pp }),
+      });
+
+      if (res.ok) {
+        const json = await res.json().catch(() => null) as
+          { Value?: UnlockResponseBody; value?: UnlockResponseBody } | null;
+        const out = json?.Value ?? json?.value ?? null;
+        const sessionToken = out?.session_token;
+        if (typeof sessionToken !== "string" || sessionToken.length === 0) {
+          this.state = "error";
+          this.errorStatus = res.status;
+          this.errorMessage = "Server returned an empty session token.";
+          this.errorBody = "";
+          return;
+        }
+        // Closure-only handoff — setSessionToken stores in api-fetch's
+        // module-scope binding. NEVER persisted (RFC §3.2 + #1465).
+        setSessionToken(sessionToken);
+        // Clear the DOM input even on success — Lit unmounts the
+        // element on state=ok but the reference still holds .value
+        // until the next render flush. Wipe so a re-rendered gate
+        // (post-Lock + back to auth) never inherits a stale passphrase.
+        if (input) input.value = "";
+        this.state = "ok";
+        window.dispatchEvent(new CustomEvent(AUTH_OK_EVENT));
+        return;
+      }
+
+      // Non-OK — read the body once. coreapi.Fail returns
+      // {"success":false, "error":{"code":..., "message":...}, ...}
+      const txt = await res.text().catch(() => "");
+      let body: ErrorResponseBody | null = null;
+      try { body = JSON.parse(txt) as ErrorResponseBody; } catch {}
+      const code = body?.error?.code ?? "";
+      const msg  = body?.error?.message ?? "";
+      const rid  = res.headers.get("X-Request-Id")
+                || res.headers.get("X-Request-ID")
+                || body?.meta?.request_id
+                || "";
+      if (rid) this.requestId = rid;
+
+      if (code === "account.unlock.bad_passphrase") {
+        // Stay on state=auth, show inline error. Backend message is
+        // already user-facing ("passphrase didn't unlock your account
+        // — N attempts remaining"). Surface verbatim — copy lives
+        // server-side per design.
+        this.unlockError = msg || "Passphrase didn't unlock your account.";
+        if (input) input.value = "";
+        return;
+      }
+      if (code === "account.unlock.locked_out") {
+        const seconds = this._parseLockoutSeconds(msg);
+        this.lockedOutUntilSec = Math.floor(Date.now() / 1000) + seconds;
+        this.unlockError = msg || "Too many attempts. Try again in a moment.";
+        if (input) input.value = "";
+        // Schedule a re-render the moment the lockout expires so the
+        // button + inline error self-recover without the user clicking.
+        if (seconds > 0) {
+          window.setTimeout(() => {
+            this.lockedOutUntilSec = 0;
+            this.unlockError = "";
+            this.requestUpdate();
+          }, seconds * 1000);
+        }
+        return;
+      }
+      if (code === "account.unlock.passphrase.required") {
+        this.unlockError = "Enter your passphrase to unlock your account.";
+        return;
+      }
+      // Any other failure (corrupted_key, server_misconfigured, 5xx) —
+      // flip to the framed error view per RFC §1 state machine.
+      this.errorStatus = res.status;
+      this.errorBody = txt;
+      this.errorMessage = msg;
+      this.state = "error";
+    } catch {
+      this.state = "error";
+      this.errorStatus = 0;
+      this.errorMessage = "Couldn't reach the runner.";
+      this.errorBody = "";
+    } finally {
+      this.loading = false;
+      // `pp` falls out of scope here — garbage collector reclaims the
+      // string. No `this.passphrase`, no module cache, no DOM read-back
+      // (input.value was cleared on every non-OK code path above).
+    }
   }
+
+  /** Parse the "N seconds" out of the locked_out message. Backend
+   *  format is "too many attempts — try again in 60 seconds" (RFC §5
+   *  + unlock.go:106/127/176). Returns 60 as a safe default if the
+   *  message shape ever drifts so the UI doesn't hang locked forever. */
+  private _parseLockoutSeconds(msg: string): number {
+    const m = /(\d+)\s*seconds?/i.exec(msg);
+    if (m && m[1]) {
+      const n = parseInt(m[1], 10);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return 60;
+  }
+
+  /** True when the unlock button should stay disabled because the
+   *  account is in cooldown. Consulted by _onWreathIn (entry guard)
+   *  + by _auth() (button disabled attribute). */
+  private _isLockedOut(): boolean {
+    if (this.lockedOutUntilSec <= 0) return false;
+    return Math.floor(Date.now() / 1000) < this.lockedOutUntilSec;
+  }
+
+  /** Clear the inline error the moment the user starts typing again.
+   *  Avoids a stale "wrong passphrase, 3 left" lingering while the
+   *  user re-types the correct one. */
+  private _onPassphraseInput = () => {
+    if (this.unlockError.length > 0 && !this._isLockedOut()) {
+      this.unlockError = "";
+    }
+  };
+
+  /** Enter-key submits the unlock form from inside the passphrase
+   *  input — keeps the keyboard-only flow snappy without forcing the
+   *  user to tab to the button. */
+  private _onPassphraseKeydown = (ev: KeyboardEvent) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      void this._onWreathIn();
+    }
+  };
 
   /** Retry click handler — re-runs the state derivation so the gate
    *  picks up whichever state is now correct. */
@@ -361,18 +594,26 @@ class LthnAuthGate extends LitElement {
             </div>
           </div>
           <div style="display:flex; flex-direction:column; gap:10px; max-width:380px;">
-            <label style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase;">
+            <label for=${UNLOCK_INPUT_ID} style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3); letter-spacing:0.06em; text-transform:uppercase;">
               Passphrase
             </label>
             <div style="display:flex; align-items:center; gap:0; background:rgba(0,0,0,0.30);
                         border:1px solid rgba(64,193,197,0.30); border-radius:8px;
                         padding:0 12px; height:40px;">
               <i class="fa-solid fa-lock" style="font-size:11px; color:var(--fg-3); margin-right:10px;"></i>
-              <input type="password" placeholder="••••••••••••"
+              <input id=${UNLOCK_INPUT_ID} type="password" placeholder="••••••••••••"
+                autocomplete="current-password"
+                ?disabled=${this.loading || this._isLockedOut()}
+                @input=${this._onPassphraseInput}
+                @keydown=${this._onPassphraseKeydown}
                 style="flex:1; background:transparent; border:none; outline:none;
                        color:var(--fg-0); font-family:var(--font-mono); font-size:13px; letter-spacing:0.04em;" />
               <i class="fa-regular fa-eye" style="font-size:11px; color:var(--fg-3); margin-left:8px; cursor:pointer;"></i>
             </div>
+            ${this.unlockError ? html`
+              <div role="alert" style="font-size:11.5px; color:var(--err-400); line-height:1.5; margin-top:2px;">
+                ${this.unlockError}
+              </div>` : nothing}
             <label style="display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--fg-2); margin-top:2px;">
               <!-- Cerberus #1492 (A1) — default UNCHECKED. Passphrase-once is
                    weaker than passphrase-per-launch; making it the default would
@@ -383,9 +624,11 @@ class LthnAuthGate extends LitElement {
             </label>
           </div>
           <div style="display:flex; gap:10px; align-items:center; margin-top:2px;">
-            <lthn-btn tone="primary" size="lg" @click=${() => this._onWreathIn()}>
+            <lthn-btn tone="primary" size="lg"
+              ?disabled=${this.loading || this._isLockedOut()}
+              @click=${() => this._onWreathIn()}>
               <i class="fa-solid fa-arrow-right-to-bracket" style="font-size:11px;"></i>
-              Wreath in
+              ${this.loading ? "Unlocking…" : "Wreath in"}
             </lthn-btn>
             <lthn-btn tone="quiet" size="lg">Use a different keypair…</lthn-btn>
           </div>

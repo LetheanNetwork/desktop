@@ -22,16 +22,18 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // element under test — Vitest hoists vi.mock to the top of the file
 // so the mock factory wins over the real binding module.
 vi.mock("@desktop/serverkey/service", () => ({
-  AccountStatus:        vi.fn(),
-  IssueBootstrapToken:  vi.fn(),
-  Bootstrap:            vi.fn(),
-  VerifyBootstrapToken: vi.fn(),
-  WAccountStatus:       vi.fn(),
-  WIssueBootstrapToken: vi.fn(),
+  AccountStatus:                vi.fn(),
+  IssueBootstrapToken:          vi.fn(),
+  IssueBootstrapTokenForScope:  vi.fn(),
+  Bootstrap:                    vi.fn(),
+  VerifyBootstrapToken:         vi.fn(),
+  WAccountStatus:               vi.fn(),
+  WIssueBootstrapToken:         vi.fn(),
 }));
 
-import { AccountStatus, IssueBootstrapToken } from "@desktop/serverkey/service";
+import { AccountStatus, IssueBootstrapToken, IssueBootstrapTokenForScope } from "@desktop/serverkey/service";
 import { AUTH_401_EVENT, AUTH_OK_EVENT } from "./auth-gate";
+import { setSessionToken } from "./api-fetch";
 import "./auth-gate";
 
 type GateEl = HTMLElement & {
@@ -39,8 +41,12 @@ type GateEl = HTMLElement & {
   requestId: string;
   loading: boolean;
   embedded: boolean;
+  accountId: string;
+  unlockError: string;
+  lockedOutUntilSec: number;
   updateComplete: Promise<boolean>;
   _onRunSetup(): Promise<void>;
+  _onWreathIn(): Promise<void>;
   _deriveState(): Promise<void>;
 };
 
@@ -375,5 +381,198 @@ describe("<lthn-auth-gate> — Cerberus #1465: bootstrap-token closure-scope onl
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const headers = new Headers(init.headers);
     expect(headers.get("Authorization")).toBe("Bootstrap LTHN-BOOT-1.second.attempt");
+  });
+});
+
+describe("<lthn-auth-gate> — Wreath-in unlock flow (RFC.stage-e §5)", () => {
+  const SESSION = "LTHN-SESS-1.headerstub.sigstub";
+  const UNLOCK_TOKEN = "LTHN-BOOT-1.unlock.attempt1";
+  const ACCOUNT_ID = "abc123def4567890";
+
+  beforeEach(() => {
+    asMockFn(AccountStatus).mockReset();
+    asMockFn(IssueBootstrapToken).mockReset();
+    asMockFn(IssueBootstrapTokenForScope).mockReset();
+    document.body.innerHTML = "";
+    asMockFn(AccountStatus).mockResolvedValue({
+      OK: true, Value: { has_user_account: true, account_id: ACCOUNT_ID },
+    });
+    asMockFn(IssueBootstrapTokenForScope).mockResolvedValue({
+      OK: true, Value: { token: UNLOCK_TOKEN, expires_at: Date.now() / 1000 + 60 },
+    });
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        success: true,
+        Value: { session_token: SESSION, expires_at: Date.now() / 1000 + 900, account_id: ACCOUNT_ID },
+      }), { status: 200, headers: { "Content-Type": "application/json" } })
+    ) as unknown as typeof fetch;
+    // Clear any session-token from prior tests in this run.
+    setSessionToken("");
+  });
+
+  it("captures account_id from AccountStatus", async () => {
+    const el = await mount();
+    expect(el.state).toBe("auth");
+    expect(el.accountId).toBe(ACCOUNT_ID);
+  });
+
+  it("on click — mints unlock-scoped bootstrap token + POSTs /v1/account/unlock", async () => {
+    const el = await mount();
+    const inp = el.querySelector("#lthn-auth-gate-passphrase") as HTMLInputElement;
+    inp.value = "correct horse battery staple";
+
+    await el._onWreathIn();
+    await el.updateComplete;
+
+    expect(IssueBootstrapTokenForScope).toHaveBeenCalledWith("account.unlock");
+    const fetchMock = globalThis.fetch as unknown as { mock: { calls: unknown[][] } };
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/v1/account/unlock");
+    expect(init.method).toBe("POST");
+    const headers = new Headers(init.headers);
+    expect(headers.get("Authorization")).toBe("Bootstrap " + UNLOCK_TOKEN);
+    const body = JSON.parse(init.body as string) as { account_id: string; passphrase: string };
+    expect(body.account_id).toBe(ACCOUNT_ID);
+    expect(body.passphrase).toBe("correct horse battery staple");
+  });
+
+  it("on 200 — sets session token, dispatches lthn:auth:ok, state=ok", async () => {
+    const el = await mount();
+    let okFired = false;
+    window.addEventListener(AUTH_OK_EVENT, () => { okFired = true; }, { once: true });
+    const inp = el.querySelector("#lthn-auth-gate-passphrase") as HTMLInputElement;
+    inp.value = "correct horse battery staple";
+
+    await el._onWreathIn();
+    await el.updateComplete;
+
+    expect(el.state).toBe("ok");
+    expect(okFired).toBe(true);
+  });
+
+  it("on 401 bad_passphrase — stays on auth + shows inline error", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        success: false,
+        error: {
+          code: "account.unlock.bad_passphrase",
+          message: "passphrase didn't unlock your account — 3 attempts remaining",
+        },
+      }), { status: 401 })
+    ) as unknown as typeof fetch;
+    const el = await mount();
+    (el.querySelector("#lthn-auth-gate-passphrase") as HTMLInputElement).value = "wrong";
+
+    await el._onWreathIn();
+    await el.updateComplete;
+
+    expect(el.state).toBe("auth");
+    expect(el.unlockError).toContain("3 attempts remaining");
+    // Input cleared so a stale value can't re-submit on next click.
+    expect((el.querySelector("#lthn-auth-gate-passphrase") as HTMLInputElement).value).toBe("");
+  });
+
+  it("on 429 locked_out — disables button + records cooldown deadline", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        success: false,
+        error: {
+          code: "account.unlock.locked_out",
+          message: "too many attempts — try again in 60 seconds",
+        },
+      }), { status: 429 })
+    ) as unknown as typeof fetch;
+    const el = await mount();
+    (el.querySelector("#lthn-auth-gate-passphrase") as HTMLInputElement).value = "wrong";
+
+    await el._onWreathIn();
+    await el.updateComplete;
+
+    expect(el.state).toBe("auth");
+    expect(el.unlockError).toContain("60 seconds");
+    expect(el.lockedOutUntilSec).toBeGreaterThan(Math.floor(Date.now() / 1000));
+  });
+
+  it("on empty passphrase — does not call the endpoint", async () => {
+    const el = await mount();
+    await el._onWreathIn();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(el.unlockError).toContain("Enter your passphrase");
+  });
+
+  it("on 5xx — flips to error state with captured body", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        success: false,
+        error: { code: "account.unlock.corrupted_key", message: "couldn't read your account file" },
+      }), { status: 500 })
+    ) as unknown as typeof fetch;
+    const el = await mount();
+    (el.querySelector("#lthn-auth-gate-passphrase") as HTMLInputElement).value = "anything";
+
+    await el._onWreathIn();
+    await el.updateComplete;
+
+    expect(el.state).toBe("error");
+  });
+
+  it("Cerberus #1465 (applied to passphrase) — never persists the typed passphrase", async () => {
+    // The passphrase MUST stay closure-only — same discipline as the
+    // bootstrap-token. Type a canary, fire the handler, and assert no
+    // storage / element field / cookie carries the canary substring.
+    const CANARY = "passphrase-canary-cerberus-1465-extended";
+    const el = await mount();
+    const inp = el.querySelector("#lthn-auth-gate-passphrase") as HTMLInputElement;
+    inp.value = CANARY;
+
+    await el._onWreathIn();
+    await el.updateComplete;
+
+    // localStorage clean
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      expect(localStorage.getItem(k) ?? "").not.toContain(CANARY);
+    }
+    // sessionStorage clean
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (!k) continue;
+      expect(sessionStorage.getItem(k) ?? "").not.toContain(CANARY);
+    }
+    // No own-enumerable property on the element holds the canary.
+    for (const k of Object.keys(el)) {
+      const v = (el as unknown as Record<string, unknown>)[k];
+      if (typeof v === "string") expect(v).not.toContain(CANARY);
+    }
+    // document.cookie clean.
+    expect(document.cookie).not.toContain(CANARY);
+    // Input field was cleared on success path (or non-OK path).
+    expect(inp.value).not.toBe(CANARY);
+  });
+
+  it("Cerberus #1465 (applied to session token) — token never persists to storage", async () => {
+    const el = await mount();
+    (el.querySelector("#lthn-auth-gate-passphrase") as HTMLInputElement).value = "anything";
+    await el._onWreathIn();
+    await el.updateComplete;
+
+    // The session token MUST stay in api-fetch.ts module-scope only.
+    // No localStorage / sessionStorage / cookie / element-field leak.
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      expect(localStorage.getItem(k) ?? "").not.toContain(SESSION);
+    }
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (!k) continue;
+      expect(sessionStorage.getItem(k) ?? "").not.toContain(SESSION);
+    }
+    expect(document.cookie).not.toContain(SESSION);
+    for (const k of Object.keys(el)) {
+      const v = (el as unknown as Record<string, unknown>)[k];
+      if (typeof v === "string") expect(v).not.toContain(SESSION);
+    }
   });
 });
