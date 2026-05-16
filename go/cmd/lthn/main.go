@@ -28,9 +28,9 @@ package main
 import (
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
+	lthn "dappco.re/lthn/desktop"
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/desktop"
-	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/gateway"
 	"dappco.re/lthn/desktop/pkg/keys"
@@ -41,9 +41,6 @@ import (
 	"dappco.re/lthn/desktop/pkg/server"
 	"golang.org/x/term"
 )
-
-// version is the lthn binary's release tag. Updated per Mantis ticket.
-const version = "0.1.0"
 
 func main() {
 	args := core.Args()[1:]
@@ -163,8 +160,15 @@ func cmdDefault(args []string) int {
 //
 //	rc := cmdVersion(nil) // prints "lthn vX.Y.Z" and returns 0
 func cmdVersion(args []string) int {
-	core.Print(core.Stdout(), "lthn v%s\n", version)
+	core.Print(core.Stdout(), "lthn %s\n", cmdVersionLabel())
 	return 0
+}
+
+func cmdVersionLabel() string {
+	if core.HasPrefix(lthn.Version, "v") {
+		return lthn.Version
+	}
+	return "v" + lthn.Version
 }
 
 // cmdHelp handles `lthn help [subcommand]`. Built-in help text.
@@ -250,7 +254,7 @@ func cmdGUI(args []string) int {
 	s := server.NewService(server.Options{
 		Runner:   r,
 		LocalKey: key,
-		Brand:    server.Brand{Version: firstlaunch.Version},
+		Brand:    server.Brand{Version: lthn.Version},
 		Core:     c,
 	})
 	if rr := c.RegisterService("server", s); !rr.OK {
@@ -395,7 +399,7 @@ func cmdServe(args []string) int {
 		Addr:        core.Concat(":", port),
 		Runner:      r,
 		LocalKey:    key,
-		Brand:       server.Brand{Version: firstlaunch.Version},
+		Brand:       server.Brand{Version: lthn.Version},
 		ExtraGroups: extras,
 		Core:        c,
 	})
@@ -417,7 +421,7 @@ func cmdServe(args []string) int {
 			mdnsSvc.Configure(mdns.Options{
 				Port: portInt.Value.(int),
 				TXT: []string{
-					"version=" + firstlaunch.Version,
+					"version=" + lthn.Version,
 					"marketplace=v1",
 					"gateway=v1",
 				},

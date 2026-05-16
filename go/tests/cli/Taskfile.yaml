@@ -37,7 +37,10 @@ tasks:
     desc: Build the lthn binary the tests will exercise
     dir: ../../..
     cmds:
-      - go build -o go/tests/cli/bin/lthn ./go/cmd/lthn
+      - go build -ldflags "-X dappco.re/lthn/desktop.Version={{.LTHN_VERSION}}" -o go/tests/cli/bin/lthn ./go/cmd/lthn
+    vars:
+      LTHN_VERSION:
+        sh: git describe --tags --always --dirty 2>/dev/null || echo dev
 
   clean:
     desc: Remove the test binary

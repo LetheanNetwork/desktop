@@ -5,6 +5,16 @@
 // that mutates as plugins Start / Stop. coreapi.Engine has no
 // Unregister API today (Phase 1 design note), so the indirection
 // here keeps the host's lifecycle simple.
+//
+// Auth: routes land inside the engine-global bearer-auth middleware
+// (coreapi.WithBearerAuth, applied in pkg/server via Mantis #1430).
+// Unauthenticated requests are rejected at the middleware layer before
+// dispatch() is reached.
+//
+// X-Lthn-User: the forwarded header carries a stable per-session
+// fingerprint derived from the Authorization header (SHA-256, first
+// 16 hex chars). Plugins use this to keyspace state per caller without
+// the host leaking the raw bearer credential upstream.
 
 package plugin
 
@@ -54,20 +64,11 @@ func (g *ProxyGroup) Set(code, targetURL string) {
 	if err != nil {
 		return
 	}
+	// httputil's default Director rewrites the target host while
+	// preserving the request path. Path rewriting (strip /v1/api/plugin/
+	// prefix, prepend code namespace) happens in dispatch() at call
+	// time so the Director stays unmodified.
 	rp := httputil.NewSingleHostReverseProxy(u)
-	// Customise the Director so we get path preservation right.
-	// httputil's default appends Request.URL.Path to the target's
-	// path; we want the request to land at <target>/<namespace>/...
-	// where the gin wildcard captured "*proxyPath" as <namespace>/...
-	// (because the gin route is /:code/*proxyPath; Phase 1 spec
-	// says code == namespace by default so the namespace prefix is
-	// effectively preserved).
-	originalDirector := rp.Director
-	rp.Director = func(req *core.Request) {
-		originalDirector(req)
-		// Inject X-Lthn-User for plugins that want to keyspace state.
-		req.Header.Set("X-Lthn-User", "local")
-	}
 	g.mu.Lock()
 	g.targets[code] = rp
 	g.mu.Unlock()
@@ -110,5 +111,18 @@ func (g *ProxyGroup) dispatch(c *gin.Context) {
 	// gin's "*proxyPath" includes the leading slash.
 	proxyPath := c.Param("proxyPath")
 	c.Request.URL.Path = "/" + code + proxyPath
+
+	// Inject X-Lthn-User so plugins can keyspace per-caller state.
+	// The bearer gate (coreapi.WithBearerAuth) already validated the
+	// Authorization header before this handler runs, so the header is
+	// guaranteed non-empty for authenticated requests. We forward a
+	// stable fingerprint — SHA-256(Authorization)[0:16] — so plugins
+	// get a stable, opaque, per-session identity without the host
+	// leaking the raw bearer credential upstream.
+	// Cerberus Mantis #1437.
+	authHeader := c.GetHeader("Authorization")
+	userID := core.SHA256HexString(authHeader)[:16]
+	c.Request.Header.Set("X-Lthn-User", userID)
+
 	rp.ServeHTTP(c.Writer, c.Request)
 }

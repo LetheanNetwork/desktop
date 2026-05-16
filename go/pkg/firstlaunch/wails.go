@@ -10,14 +10,9 @@ import (
 	"runtime"
 
 	core "dappco.re/go"
+	lthn "dappco.re/lthn/desktop"
 	"dappco.re/lthn/desktop/pkg/paths"
 )
-
-// Version is the lthn binary release tag. Kept here so the
-// firstlaunch service can surface it to the About panel via the
-// Wails binding without depending on cmd/lthn (which would create
-// an import cycle).
-const Version = "0.1.0"
 
 // BuildInfo bundles the runtime + build identification the About
 // panel renders. JSON tags use snake_case so the generated TS
@@ -75,7 +70,7 @@ func (s *WailsService) Detect() core.Result {
 //	console.log(b.version, b.go_version, b.goos, b.goarch);
 func (s *WailsService) Build() core.Result {
 	return core.Ok(BuildInfo{
-		Version:   Version,
+		Version:   core.TrimPrefix(lthn.Version, "v"),
 		GoVersion: runtime.Version(),
 		GoOS:      runtime.GOOS,
 		GoArch:    runtime.GOARCH,

@@ -2,11 +2,10 @@
 
 // Package update wraps the upstream dappco.re/go/update service for
 // lthn/desktop. The upstream package compares its build-embedded
-// Version constant (set via `-ldflags "-X dappco.re/go/update.Version=…"`
-// at task build time) against the latest GitHub release on
-// LetheanNetwork/desktop. lthn never hardcodes a version number — the
-// build chain stamps it in, the service reads it, releases hand it
-// back at check time.
+// Version constant against the latest GitHub release on
+// LetheanNetwork/desktop. lthn stamps dappco.re/lthn/desktop.Version
+// at build time, and this wrapper syncs that single value into
+// go-update before checks run.
 //
 // Today the service is registered with CheckOnStartup = NoCheck so no
 // network traffic fires at boot; consumers call Service.Start() to
@@ -25,6 +24,7 @@ package update
 import (
 	core "dappco.re/go"
 	upstream "dappco.re/go/update"
+	lthn "dappco.re/lthn/desktop"
 )
 
 // Service is the lthn-side owner of the upstream update.UpdateService.
@@ -59,6 +59,7 @@ const DefaultChannel = "stable"
 //	    CheckOnStartup: upstream.NoCheck,
 //	})
 func New(cfg upstream.UpdateServiceConfig) core.Result {
+	syncUpstreamVersion()
 	r := upstream.NewUpdateService(cfg)
 	if !r.OK {
 		core.Warn("update.New: upstream construction failed, registering degraded Service", "err", r.Error())
@@ -78,6 +79,7 @@ func New(cfg upstream.UpdateServiceConfig) core.Result {
 //
 //	core.New(core.WithName("update", update.Register))
 func Register(c *core.Core) core.Result {
+	syncUpstreamVersion()
 	return New(upstream.UpdateServiceConfig{
 		RepoURL:        DefaultRepoURL,
 		Channel:        DefaultChannel,
@@ -99,6 +101,7 @@ func (s *Service) Start() core.Result {
 	if s.inner == nil {
 		return core.Fail(core.NewError("update: service unavailable (construction failed at boot)"))
 	}
+	syncUpstreamVersion()
 	return s.inner.Start()
 }
 
@@ -109,7 +112,14 @@ func (s *Service) Start() core.Result {
 // Usage example:
 //
 //	core.Println("running:", svc.Version())
-func (s *Service) Version() string { return upstream.Version }
+func (s *Service) Version() string {
+	syncUpstreamVersion()
+	return lthn.Version
+}
+
+func syncUpstreamVersion() {
+	upstream.Version = lthn.Version
+}
 
 // Config returns the upstream config the service was registered with.
 // Useful for inspection (UI: "checking github.com/foo/bar on the

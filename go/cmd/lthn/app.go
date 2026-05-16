@@ -3,7 +3,6 @@
 package main
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/api"
 	"dappco.re/go/config"
@@ -14,25 +13,25 @@ import (
 	"dappco.re/go/process"
 	"dappco.re/go/store"
 	"dappco.re/go/stream"
+	lthnai "dappco.re/lthn/desktop/pkg/ai"
 	"dappco.re/lthn/desktop/pkg/bridge"
+	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/gateway"
 	lthni18n "dappco.re/lthn/desktop/pkg/i18n"
+	"dappco.re/lthn/desktop/pkg/keys"
 	"dappco.re/lthn/desktop/pkg/marketplace"
 	"dappco.re/lthn/desktop/pkg/mdns"
+	lthnml "dappco.re/lthn/desktop/pkg/ml"
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/paths"
-	lthnai "dappco.re/lthn/desktop/pkg/ai"
-	"dappco.re/lthn/desktop/pkg/fleet"
-	"dappco.re/lthn/desktop/pkg/keys"
-	lthnml "dappco.re/lthn/desktop/pkg/ml"
 	"dappco.re/lthn/desktop/pkg/plugin"
-	lthnupdate "dappco.re/lthn/desktop/pkg/update"
 	lthnprocess "dappco.re/lthn/desktop/pkg/process"
 	"dappco.re/lthn/desktop/pkg/queue"
 	"dappco.re/lthn/desktop/pkg/repos"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/sandbox"
 	"dappco.re/lthn/desktop/pkg/tasks"
+	lthnupdate "dappco.re/lthn/desktop/pkg/update"
 )
 
 // newAppCore constructs the shared *core.Core for any lthn CLI verb
@@ -203,8 +202,8 @@ func newAppCore() *core.Core {
 		// GitHub release feed. Constructed with CheckOnStartup =
 		// NoCheck so registering is offline-cheap; consumers call
 		// Service.Start() to fire the check. Current version flows
-		// from `-ldflags -X dappco.re/go/update.Version=...` at task
-		// build time, removing the manually-bumped version constant.
+		// from `-ldflags -X dappco.re/lthn/desktop.Version=...` at
+		// task build time, and pkg/update syncs that into go-update.
 		core.WithName("update", lthnupdate.Register),
 	)
 

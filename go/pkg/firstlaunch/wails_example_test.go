@@ -4,6 +4,7 @@ package firstlaunch_test
 
 import (
 	core "dappco.re/go"
+	lthn "dappco.re/lthn/desktop"
 	subject "dappco.re/lthn/desktop/pkg/firstlaunch"
 )
 
@@ -152,6 +153,18 @@ func TestWails_WailsService_Build_Good(t *core.T) {
 	typeName := core.Sprintf("%T", ref)
 	core.AssertContains(t, typeName, "func")
 	core.AssertNotEmpty(t, "WailsService_Build")
+}
+
+func TestWails_WailsService_Build_Good_UsesSharedDesktopVersion(t *core.T) {
+	original := lthn.Version
+	t.Cleanup(func() { lthn.Version = original })
+	lthn.Version = "v8.7.6-test"
+
+	r := subject.NewWailsService().Build()
+
+	core.AssertTrue(t, r.OK)
+	info := r.Value.(subject.BuildInfo)
+	core.AssertEqual(t, "8.7.6-test", info.Version)
 }
 
 func TestWails_WailsService_Build_Bad(t *core.T) {
