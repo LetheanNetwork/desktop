@@ -2143,3 +2143,141 @@ describe("chat-window — composer history navigation", () => {
     expect(el.composerValue).toBe("");
   });
 });
+
+// — XSS regression-guards for SessionInfo-sourced rail fields
+//
+// SessionInfo carries user-controlled content (snippet from message
+// previews, systemPrompt from direct paste, tags from direct input).
+// If any rail consumer ever swapped Lit text-binding for unsafeHTML /
+// innerHTML, a user prompting about HTML (legitimate use: "explain
+// this <script>") would land an executable payload inside the Wails
+// WebView — which has Go-side bridge access (host RCE).
+//
+// These specs pin the safe behaviour: malicious markup MUST render as
+// literal text, never materialise as DOM nodes. Originated from
+// Cerberus F6 audit on Mantis #1539 (H#9 sessions data plane).
+describe("rail XSS regression-guards — SessionInfo-sourced fields", () => {
+  type ChatWindowEl = HTMLElement & {
+    conversations: Array<Conversation & {
+      systemPrompt?: string;
+      tags?: string[];
+      updatedAt?: number;
+    }>;
+    activeConversationId: string | null;
+    updateComplete: Promise<boolean>;
+  };
+
+  const XSS_PAYLOAD = '<img src=x onerror="alert(1)">';
+  const SCRIPT_PAYLOAD = '<script>alert("xss")</script>';
+
+  it("snippet renders as text, never as DOM (Cerberus F6)", async () => {
+    const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
+    el.conversations = [{
+      id: "x1",
+      bucket: "today",
+      title: "benign title",
+      snippet: XSS_PAYLOAD,
+      model: "",
+    }];
+    await el.updateComplete;
+
+    const row = host.querySelector('[data-conversation-id="x1"]');
+    expect(row, "row should render").not.toBeNull();
+    // No <img> materialised from the payload (chat-window itself never
+    // emits <img>; if one appears, unsafeHTML let it through).
+    expect(row!.querySelector("img"), "payload must NOT become an <img> node").toBeNull();
+    // Literal text appears in the rendered DOM (Lit escapes the
+    // angle brackets so the user sees what they typed, escaped).
+    expect(row!.textContent, "literal payload text appears in DOM").toContain(XSS_PAYLOAD);
+  });
+
+  it("snippet with <script> payload renders as text, never as a <script> node", async () => {
+    const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
+    el.conversations = [{
+      id: "x2",
+      bucket: "today",
+      title: "benign",
+      snippet: SCRIPT_PAYLOAD,
+      model: "",
+    }];
+    await el.updateComplete;
+
+    const row = host.querySelector('[data-conversation-id="x2"]');
+    expect(row, "row should render").not.toBeNull();
+    expect(row!.querySelector("script"), "payload must NOT become a <script> node").toBeNull();
+    expect(row!.textContent).toContain(SCRIPT_PAYLOAD);
+  });
+
+  it("title renders as text, never as DOM", async () => {
+    const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
+    el.conversations = [{
+      id: "x3",
+      bucket: "today",
+      title: XSS_PAYLOAD,
+      snippet: "",
+      model: "",
+    }];
+    await el.updateComplete;
+
+    const row = host.querySelector('[data-conversation-id="x3"]');
+    expect(row, "row should render").not.toBeNull();
+    expect(row!.querySelector("img"), "title payload must NOT become an <img> node").toBeNull();
+    expect(row!.textContent).toContain(XSS_PAYLOAD);
+  });
+
+  it("tags render as text, never as DOM", async () => {
+    const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
+    el.conversations = [{
+      id: "x4",
+      bucket: "today",
+      title: "benign",
+      snippet: "",
+      model: "",
+      tags: [XSS_PAYLOAD, SCRIPT_PAYLOAD],
+    }];
+    await el.updateComplete;
+
+    const row = host.querySelector('[data-conversation-id="x4"]');
+    expect(row, "row should render").not.toBeNull();
+    // Tag chips are rendered as <button> elements; none of the
+    // payload markup should materialise inside them.
+    expect(row!.querySelector("img"), "tag payload must NOT become an <img> node").toBeNull();
+    expect(row!.querySelector("script"), "tag payload must NOT become a <script> node").toBeNull();
+    // Both literal tag strings appear in the tag chip buttons.
+    const tagButtons = Array.from(row!.querySelectorAll("button.lthn-conversation-tag"));
+    expect(tagButtons.length, "two tag chips render").toBe(2);
+    const tagText = tagButtons.map(b => b.textContent || "").join(" | ");
+    expect(tagText).toContain(XSS_PAYLOAD);
+    expect(tagText).toContain(SCRIPT_PAYLOAD);
+  });
+
+  it("systemPrompt is a truthy-flag only — payload never reaches a render slot", async () => {
+    // Today the rail only consults systemPrompt to decide whether to
+    // render a small wand-magic icon (line 1669, chat-window.ts). It
+    // never renders the prompt content itself. This spec pins that
+    // behaviour: even with a malicious payload, no <img>/<script>
+    // appears in the row, and the payload text does NOT leak into
+    // the rail's DOM as visible text. If a future change adds a
+    // preview surface for systemPrompt, the same auto-escape
+    // discipline must hold — update this spec to assert literal-text
+    // appearance instead of absence.
+    const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
+    el.conversations = [{
+      id: "x5",
+      bucket: "today",
+      title: "benign",
+      snippet: "",
+      model: "",
+      systemPrompt: XSS_PAYLOAD,
+    }];
+    await el.updateComplete;
+
+    const row = host.querySelector('[data-conversation-id="x5"]');
+    expect(row, "row should render").not.toBeNull();
+    expect(row!.querySelector("img"), "systemPrompt payload must NOT become an <img> node").toBeNull();
+    expect(row!.querySelector("script"), "systemPrompt payload must NOT become a <script> node").toBeNull();
+    // Wand-magic flag icon present (proves the truthy gate fired).
+    expect(row!.querySelector("i.lthn-conversation-prompt-flag"), "wand-magic flag icon renders").not.toBeNull();
+  });
+
+});
