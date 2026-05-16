@@ -44,6 +44,7 @@ import { highlightMatch } from "../highlight";
 import { ComposerHistoryController } from "./composer-history.controller";
 import { FindController } from "./find.controller";
 import { SlashMenuController } from "./slash-menu.controller";
+import { ContextMenuController } from "./context-menu.controller";
 // Pure helpers + persistence + constants live in chat-window.helpers
 // (Athena split 2026-05-16). Import only what the class methods +
 // render templates actually call internally; the rest is re-exported
@@ -158,7 +159,10 @@ class LthnChatWindow extends LitElement {
     // (Athena 2026-05-16, lane 3 of the chat-window controllers plan).
     // Host exposes getter/setter shim below that delegates to the
     // controller; templates + existing tests keep their access path.
-    contextMenuFor: { state: true },
+    // contextMenuFor moved to ContextMenuController
+    // (Athena 2026-05-16, lane 4 of the chat-window controllers plan).
+    // Host exposes getter/setter shim below that delegates to the
+    // controller; templates + existing tests keep their access path.
     helpOpen: { state: true },
     // findOpen / findQuery / findCursor moved to FindController
     // (Athena 2026-05-16, lane 2 of the chat-window controllers plan).
@@ -230,8 +234,18 @@ class LthnChatWindow extends LitElement {
   /** Right-click context menu state. null = closed. When open, carries
    *  the conversation id the user right-clicked plus the menu's screen
    *  coordinates (clientX/Y from the contextmenu event). Closes on
-   *  outside-click, Escape, or after an item is chosen. */
-  declare contextMenuFor: { id: string; x: number; y: number } | null;
+   *  outside-click, Escape, or after an item is chosen. Owned by
+   *  ContextMenuController; this is a thin getter/setter shim so
+   *  render templates + existing tests keep their access path
+   *  (e.g. `this.contextMenuFor.id`, `el.contextMenuFor = {...}`). */
+  get contextMenuFor(): { id: string; x: number; y: number } | null {
+    return this._contextMenuController.for;
+  }
+  set contextMenuFor(v: { id: string; x: number; y: number } | null) {
+    if (this._contextMenuController.for === v) return;
+    this._contextMenuController.for = v;
+    this.requestUpdate();
+  }
   /** Whether the keyboard-shortcut help overlay is showing. Opened by
    *  the /help slash command (and ? key in future). Closed by outside
    *  click, Escape, or the X button. State-only. */
@@ -327,6 +341,14 @@ class LthnChatWindow extends LitElement {
    *  (§6 of the controllers plan). See slash-menu.controller.ts
    *  (Athena 2026-05-16, lane 3 of the chat-window controllers plan). */
   private _slashMenuController = new SlashMenuController(this);
+  /** Right-click context-menu mechanics — Reactive Controller. Owns
+   *  the open/coords state, openAt(), window outside-click listener,
+   *  Escape hand-off and the viewport-clamp position math. The menu
+   *  ACTIONS (rename / pin / duplicate / export / delete) stay on
+   *  this host — they mutate conversation state, not menu mechanics
+   *  (§6 of the controllers plan). See context-menu.controller.ts
+   *  (Athena 2026-05-16, lane 4 of the chat-window controllers plan). */
+  private _contextMenuController = new ContextMenuController(this);
   declare railErr: string;
   declare liveTurns: ChatTurn[] | null;
   declare composerValue: string;
@@ -366,7 +388,9 @@ class LthnChatWindow extends LitElement {
     // slashMenuOpen now lives on SlashMenuController (default: closed —
     // matching the previous host init). Setting it here would fire the
     // shim's no-op early-return, so we skip it.
-    this.contextMenuFor = null;
+    // contextMenuFor now lives on ContextMenuController (default: null —
+    // matching the previous host init). Setting it here would fire the
+    // shim's no-op early-return, so we skip it.
     this.helpOpen = false;
     // findOpen / findQuery / findCursor now live on FindController
     // (defaults: closed, empty, 0 — matching the previous host inits).
@@ -459,9 +483,8 @@ class LthnChatWindow extends LitElement {
     // Escape when nothing's open; we only intercept when there's
     // something to dismiss.
     if (ev.key === "Escape") {
-      if (this.contextMenuFor) {
+      if (this._contextMenuController.tryHandleEscape()) {
         ev.preventDefault();
-        this.contextMenuFor = null;
         return;
       }
       if (this.helpOpen) {
@@ -519,41 +542,35 @@ class LthnChatWindow extends LitElement {
   // in hostConnected + strips it in hostDisconnected; no host-side
   // wiring needed (lane 3, Athena 2026-05-16).
 
-  /** Outside-click close for the right-click context menu. Walks the
-   *  composedPath looking for the menu's anchor class — clicks INSIDE
-   *  the menu (item presses, gap clicks) don't close it from here
-   *  because item handlers explicitly close after dispatching. */
-  private _onOutsideClickForContext = (ev: MouseEvent) => {
-    if (!this.contextMenuFor) return;
-    const path = (ev.composedPath?.() || []) as Element[];
-    for (const node of path) {
-      if (node instanceof Element &&
-          node.classList?.contains("lthn-conversation-context-menu")) {
-        return;
-      }
-    }
-    this.contextMenuFor = null;
-  };
+  // _onOutsideClickForContext moved to ContextMenuController.
+  // The controller installs its window-level outside-click listener
+  // in hostConnected + strips it in hostDisconnected; no host-side
+  // wiring needed (lane 4, Athena 2026-05-16).
 
   /** Right-click handler bound per rail row. Captures the conversation
-   *  id + viewport coordinates so the menu can position itself, then
-   *  sets activeConversationId so the rest of the UI tracks the
-   *  conversation the user is operating on. */
+   *  id + viewport coordinates, opens the menu via the controller,
+   *  and sets activeConversationId so the rest of the UI tracks the
+   *  conversation the user is operating on. The surrounding ceremony
+   *  (preventDefault, stopPropagation, slash-menu close, active-id
+   *  assignment) is session-state — stays on the host. The menu's
+   *  open/coords state lives on ContextMenuController. */
   private _onContextMenuRailRow(ev: MouseEvent, c: Conversation) {
     ev.preventDefault();
     ev.stopPropagation();
     this.activeConversationId = c.id;
-    this.contextMenuFor = { id: c.id, x: ev.clientX, y: ev.clientY };
+    this._contextMenuController.openAt(c.id, ev.clientX, ev.clientY);
     // Close the slash menu if it was open — they're mutually
     // exclusive overlays and the context menu is the newer summon.
     this.slashMenuOpen = false;
   }
 
-  /** Run a context-menu action then dismiss the menu. Centralises the
-   *  close-after-fire pattern so item handlers stay one-liners. */
+  /** Run a context-menu action then dismiss the menu. Delegator —
+   *  the close-after-fire pattern lives on ContextMenuController.
+   *  The action callbacks (rename / pin / duplicate / export / delete)
+   *  stay on this host because they mutate conversation state, not
+   *  menu mechanics. */
   private _runContextMenuAction(fn: () => unknown) {
-    this.contextMenuFor = null;
-    void fn();
+    this._contextMenuController.runAction(fn);
   }
 
   /** Set or clear the rail's tag filter. Calling with a tag that's
@@ -698,9 +715,9 @@ class LthnChatWindow extends LitElement {
   }
   async connectedCallback() {
     super.connectedCallback();
-    // SlashMenuController self-installs its window outside-click listener
-    // in hostConnected — no host-side wiring needed.
-    window.addEventListener("click", this._onOutsideClickForContext, true);
+    // SlashMenuController + ContextMenuController self-install their
+    // window outside-click listeners in hostConnected — no host-side
+    // wiring needed.
     window.addEventListener("keydown", this._onKeyDownForCmdK);
     const [
       title, subtitle, rs, bt, by, bw, re, rn,
@@ -793,9 +810,9 @@ class LthnChatWindow extends LitElement {
    *  handler when the element unmounts so we don't leak across
    *  mount/unmount cycles. */
   disconnectedCallback() {
-    // SlashMenuController self-strips its window outside-click listener
-    // in hostDisconnected — no host-side wiring needed.
-    window.removeEventListener("click", this._onOutsideClickForContext, true);
+    // SlashMenuController + ContextMenuController self-strip their
+    // window outside-click listeners in hostDisconnected — no
+    // host-side wiring needed.
     window.removeEventListener("keydown", this._onKeyDownForCmdK);
     super.disconnectedCallback();
   }
@@ -1851,15 +1868,10 @@ class LthnChatWindow extends LitElement {
     const cm = this.contextMenuFor;
     if (!cm) return nothing;
     const pinned = this.pinnedConversations.has(cm.id);
-    // Clamp the menu inside the viewport so a click near the right
-    // edge doesn't push it off-screen. 180px wide × ~165px tall is
-    // the rendered footprint; bias by 8px so the cursor lands
-    // inside the menu (predictable arrow-keys + click-through).
-    const W = 180, H = 165, PAD = 8;
-    const maxX = (typeof window !== "undefined" ? window.innerWidth  : cm.x + W) - W - PAD;
-    const maxY = (typeof window !== "undefined" ? window.innerHeight : cm.y + H) - H - PAD;
-    const x = Math.max(PAD, Math.min(cm.x, maxX));
-    const y = Math.max(PAD, Math.min(cm.y, maxY));
+    // Viewport-clamp math lives on ContextMenuController (lane 4,
+    // Athena 2026-05-16). `clampedPosition()` returns null when the
+    // menu is closed; the early-return above guards that path.
+    const { x, y } = this._contextMenuController.clampedPosition()!;
     return html`
       <div
         class="lthn-conversation-context-menu"
@@ -1867,7 +1879,7 @@ class LthnChatWindow extends LitElement {
         data-conversation-id=${cm.id}
         style="
           position:fixed; left:${x}px; top:${y}px;
-          z-index:9000; width:${W}px;
+          z-index:9000; width:180px;
           background:rgba(18,20,24,0.96);
           border:1px solid rgba(255,255,255,0.08);
           border-radius:8px;
