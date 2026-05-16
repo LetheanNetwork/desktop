@@ -170,22 +170,70 @@ func SetCurrentAccountIDProvider(fn func() string) {
 //     office/documents/, office/mail/<folder>/threads.md,
 //     office/files/, conf/)
 //
+// F4 (Cerberus DREAD-r2, Mantis #1528): fail-safe default. Any path
+// that workspaceRel could not place under Root (returns the input
+// verbatim) routes to AuditModeSync. Without this fail-safe an
+// attacker-influenced path outside Root, a case-folded prefix on
+// APFS/NTFS, or a "../" traversal escapee silently downgrades to
+// Batch — auth-substrate writes lose their crash-safety guarantee.
+//
+// The cleaned + (optionally) case-folded rel is matched against the
+// auth-substrate prefixes; unknown shapes default to Sync.
+//
 // Usage example:
 //
 //	mode := paths.AuditModeForPath(fpath)
 //	if mode == paths.AuditModeSync { ... }
 func AuditModeForPath(p string) AuditMode {
 	rel := workspaceRel(p)
-	if core.HasPrefix(rel, "wallets/") {
+	if rel == p {
+		// Out-of-Root path — workspaceRel passed it through
+		// unchanged. Fail-safe: assume the strictest mode so
+		// callers cannot accidentally degrade auth-substrate
+		// crash-safety by handing in an unexpected path shape.
 		return AuditModeSync
 	}
-	if core.HasPrefix(rel, "account/") {
+	// Normalise traversal segments so "../wallets/" or
+	// "office//../wallets/foo" cannot bypass the prefix table.
+	cleaned := core.CleanPath(rel, "/")
+	if cleaned == "." || core.HasPrefix(cleaned, "../") || cleaned == ".." {
+		// CleanPath could not resolve under-root — also fail-safe.
 		return AuditModeSync
 	}
-	if rel == "office/mail/_accounts.enc" {
+	// On case-insensitive filesystems (APFS / NTFS), case-folded
+	// variants of the auth-substrate prefixes resolve to the same
+	// on-disk inode. Lower-case the cleaned rel so the prefix
+	// table comparison stays sound.
+	match := cleaned
+	if r := RootFSType(); r.OK {
+		if isCaseInsensitiveFS(r.Value.(string)) {
+			match = core.Lower(cleaned)
+		}
+	}
+	if core.HasPrefix(match, "wallets/") {
+		return AuditModeSync
+	}
+	if core.HasPrefix(match, "account/") {
+		return AuditModeSync
+	}
+	if match == "office/mail/_accounts.enc" {
 		return AuditModeSync
 	}
 	return AuditModeBatch
+}
+
+// isCaseInsensitiveFS reports whether the supplied fstype is known
+// to treat paths case-insensitively. APFS (default on macOS), HFS+,
+// FAT family, NTFS, exFAT, and SMB are the practical members of
+// this set on the platforms lthn targets. Conservative default is
+// false (case-sensitive) for unknown identifiers.
+func isCaseInsensitiveFS(fstype string) bool {
+	switch fstype {
+	case "apfs", "hfs", "hfsplus", "msdos", "fat", "fat32", "exfat",
+		"ntfs", "smbfs", "cifs":
+		return true
+	}
+	return false
 }
 
 // PathHashInfo returns the HKDF info-string used to derive the

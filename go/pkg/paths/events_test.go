@@ -233,6 +233,84 @@ func TestSubscribeLockEvents_Fanout(t *core.T) {
 	core.AssertGreater(t, len(got), 0, "subscriber MUST receive at least one event")
 }
 
+// TestAuditModeForPath_OutOfRootDefaultsToSync_Ugly — Cerberus
+// DREAD-r2 F4 (Mantis #1528). A path that workspaceRel could not
+// place under Root MUST default to AuditModeSync rather than
+// silently downgrading auth-substrate crash-safety to Batch.
+func TestAuditModeForPath_OutOfRootDefaultsToSync_Ugly(t *core.T) {
+	homeFixture(t)
+	// Path well outside Root, structurally absolute.
+	got := paths.AuditModeForPath("/var/log/elsewhere/x.md")
+	core.AssertEqual(t, paths.AuditModeSync, got,
+		"out-of-Root path MUST fail-safe to Sync mode")
+
+	// Empty path — also out-of-Root by construction.
+	got = paths.AuditModeForPath("")
+	core.AssertEqual(t, paths.AuditModeSync, got,
+		"empty path MUST fail-safe to Sync mode")
+}
+
+// TestAuditModeForPath_TraversalNormalised_Ugly — Cerberus DREAD-r2
+// F4 (Mantis #1528). Traversal segments embedded in a path under
+// Root MUST resolve before the prefix table runs so a constructed
+// "../wallets/..." cannot bypass the auth-substrate routing.
+func TestAuditModeForPath_TraversalNormalised_Ugly(t *core.T) {
+	homeFixture(t)
+	root := paths.Root().Value.(string)
+
+	// office//../wallets/server.key → wallets/server.key
+	// Both representations MUST land on Sync via the auth prefix.
+	dirty := core.PathJoin(root, "office", "..", "wallets", "server.key")
+	core.AssertEqual(t, paths.AuditModeSync,
+		paths.AuditModeForPath(dirty),
+		"traversal-normalised wallets/ path MUST route to Sync")
+
+	// office/documents/../../wallets/foo also resolves under wallets/.
+	dirty2 := core.PathJoin(root, "office", "documents", "..", "..", "wallets", "foo")
+	core.AssertEqual(t, paths.AuditModeSync,
+		paths.AuditModeForPath(dirty2),
+		"deep traversal resolving to wallets/ MUST route to Sync")
+
+	// A path that traverses ABOVE Root (after stripping root prefix
+	// the result would resolve to "../..") MUST also fail-safe to
+	// Sync rather than silently match nothing.
+	abovetraverse := core.PathJoin(root, "..", "..", "etc", "passwd")
+	core.AssertEqual(t, paths.AuditModeSync,
+		paths.AuditModeForPath(abovetraverse),
+		"above-Root traversal MUST fail-safe to Sync")
+}
+
+// TestAuditModeForPath_CaseFoldOnAPFS_Ugly — Cerberus DREAD-r2 F4
+// (Mantis #1528). On case-insensitive filesystems (APFS / NTFS)
+// case-mangled prefixes resolve to the same on-disk inode; the
+// audit-mode routing MUST treat them identically to the canonical
+// lowercase form.
+func TestAuditModeForPath_CaseFoldOnAPFS_Ugly(t *core.T) {
+	homeFixture(t)
+	// Force APFS detection regardless of actual test-host fstype.
+	paths.SetRootFSTypeForTest("apfs")
+	t.Cleanup(func() { paths.SetRootFSTypeForTest("") })
+
+	root := paths.Root().Value.(string)
+	// Case-mangled wallets prefix MUST still route to Sync on APFS.
+	mangled := core.PathJoin(root, "Wallets", "server.key")
+	core.AssertEqual(t, paths.AuditModeSync,
+		paths.AuditModeForPath(mangled),
+		"case-mangled wallets/ on APFS MUST route to Sync")
+
+	mangled2 := core.PathJoin(root, "ACCOUNT", "abc", "private.key")
+	core.AssertEqual(t, paths.AuditModeSync,
+		paths.AuditModeForPath(mangled2),
+		"case-mangled account/ on APFS MUST route to Sync")
+
+	// Same input on a case-sensitive filesystem (ext4) MUST route
+	// to the cascade mode — case-folding stays opt-in by fstype.
+	paths.SetRootFSTypeForTest("ext4")
+	got := paths.AuditModeForPath(mangled)
+	core.AssertEqual(t, paths.AuditModeBatch, got,
+		"case-mangled wallets/ on ext4 MUST stay case-sensitive (Batch)")
+}
+
 // TestEmitLockEvent_DroppedWhenSecretUnavailable_Bad — Cerberus
 // DREAD-r2 F2 (Mantis #1526). When the HKDF audit secret is
 // unavailable the emit site MUST drop the event (the empty
