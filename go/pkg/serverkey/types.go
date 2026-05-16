@@ -257,10 +257,12 @@ var (
 // half of the lockstep).
 //
 // Stage E.B adds account.unlock alongside account.create — the only
-// two scopes bootstrap-tokens authorise today.
+// two scopes bootstrap-tokens authorise today. Stage X.B adds
+// account.provision for the server-side keygen flow.
 var bootstrapAllowedScopes = map[string]bool{
-	scopeAccountCreate: true,
-	scopeAccountUnlock: true,
+	scopeAccountCreate:    true,
+	scopeAccountUnlock:    true,
+	scopeAccountProvision: true,
 }
 
 const (
@@ -313,6 +315,14 @@ const (
 	// this scope so the same single-use + signed-by-server-key
 	// discipline as account-create applies to unlock).
 	scopeAccountUnlock = "account.unlock"
+
+	// scopeAccountProvision is the bootstrap-token scope minted for
+	// the server-side keygen + account-write flow (Stage X.B per
+	// RFC.stage-x.md §2.1 / §3.1 — the /v1/account/provision POST
+	// is gated by a fresh bootstrap-token with this scope so a
+	// token issued for /create cannot be cross-replayed against the
+	// keygen endpoint).
+	scopeAccountProvision = "account.provision"
 
 	// scopeSession is the session-token scope embedded in the
 	// LTHN-SESS-1. header. Per RFC §3.1 + Cerberus #1467 scope-
