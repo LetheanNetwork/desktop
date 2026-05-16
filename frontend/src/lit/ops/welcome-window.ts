@@ -72,6 +72,7 @@ class LthnWelcomeWindow extends LitElement {
     endpoint:  { state: true },
     version:   { state: true },
     stepLabels:{ state: true },
+    selectedModelIdx: { state: true },
     t:         { state: true },
   };
   declare step: number;
@@ -85,6 +86,11 @@ class LthnWelcomeWindow extends LitElement {
   declare endpoint: string;
   declare version: string;
   declare stepLabels: { l: string; h: string }[];
+  /** Index into the step 2 model list of the currently-selected row.
+   *  Default 0 = the recommended model. Reset to 0 when the wizard
+   *  resets (replay tour, etc.). Click on any row sets this; the
+   *  forward button reads it when the download wire lands. */
+  declare selectedModelIdx: number;
   declare t: {
     s1Title: string; s1Body: string; s1LayoutHint: string; s1Choose: string;
     s2Title: string; s2Body: string; s2Recommended: string;
@@ -115,6 +121,7 @@ class LthnWelcomeWindow extends LitElement {
     this.chrome = { title: "Welcome to lthn", subtitleFmt: "step %s of 4" };
     this.modelsDir = "~/Lethean/conf/models/";
     this.fresh = true;
+    this.selectedModelIdx = 0;
     this.clients = [];
     this.endpoint = "http://localhost:8000/v1";
     this.version = "0.2.0-rc1";
@@ -206,10 +213,11 @@ class LthnWelcomeWindow extends LitElement {
     // welcome on subsequent launches.
     try {
       const fl = await import("@desktop/firstlaunch/wailsservice");
+      const { unwrap } = await import("../result");
       const [paths, state, build] = await Promise.all([
-        fl.Paths(),
-        fl.Detect(),
-        fl.Build().catch(() => null),
+        unwrap<{ models_dir?: string }>(fl.Paths(), {}),
+        unwrap<{ fresh?: boolean }>(fl.Detect(), {}),
+        unwrap<{ version?: string }>(fl.Build(), {}),
       ]);
       if (paths?.models_dir) {
         this.modelsDir = displayHome(paths.models_dir);
@@ -365,10 +373,84 @@ class LthnWelcomeWindow extends LitElement {
               ${this.t.s1LayoutHint}
             </div>
           </div>
-          <lthn-btn tone="ghost" size="md">${this.t.s1Choose}</lthn-btn>
+          <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
+            <lthn-btn class="lthn-welcome-choose-folder"
+                      tone="ghost" size="md"
+                      @click=${() => void this._chooseModelsFolder()}>
+              ${this.t.s1Choose}
+            </lthn-btn>
+            <button class="lthn-welcome-reset-folder"
+                    @click=${() => void this._resetModelsFolder()}
+                    title="Restore the default ~/Lethean/conf/models/ path"
+                    style="
+                      background:transparent; border:none; cursor:pointer;
+                      font:inherit; font-size:10.5px;
+                      color:var(--fg-3);
+                      padding:0; letter-spacing:0.01em;
+                      --wails-draggable: no-drag;
+                    "
+                    onmouseover="this.style.color='var(--fg-1)';"
+                    onmouseout="this.style.color='var(--fg-3)';">
+              Reset to default
+            </button>
+          </div>
         </div>
       </div>
     `;
+  }
+
+  /** Reset the models-dir override so paths.ModelsDir falls back to
+   *  ~/Lethean/conf/models/. Refreshes the visible path on success.
+   *  Public so the test harness can drive without simulating a click. */
+  async _resetModelsFolder() {
+    try {
+      const fl = await import("@desktop/firstlaunch/wailsservice");
+      const { demand } = await import("../result");
+      await demand<unknown>(fl.ClearModelsDir());
+      // Re-fetch the default path so the rendered modelsDir updates.
+      const { unwrap } = await import("../result");
+      const paths = await unwrap<{ models_dir?: string }>(fl.Paths(), {});
+      if (paths?.models_dir) {
+        this.modelsDir = displayHome(paths.models_dir);
+      }
+    } catch (err: unknown) {
+      console.warn("welcome: ClearModelsDir failed:", err);
+    }
+  }
+
+  /** Fire the native folder picker, then persist the result via
+   *  FirstLaunch.SetModelsDir. Refreshes the visible modelsDir on
+   *  success. Split from the @click so tests can drive the wire
+   *  without the native dialog. */
+  async _chooseModelsFolder() {
+    try {
+      const dlg = await import("@wailsio/runtime").then(m => m.Dialogs);
+      const picked = await dlg.OpenFile({
+        Title: "Choose models folder",
+        ButtonText: "Use folder",
+        CanChooseFiles: false,
+        CanChooseDirectories: true,
+      });
+      if (!picked || typeof picked !== "string") return;
+      await this._adoptModelsFolder(picked);
+    } catch (err: unknown) {
+      console.warn("welcome: choose folder dialog failed:", err);
+    }
+  }
+
+  /** Persist the chosen folder + update the visible modelsDir.
+   *  Public so tests can drive without firing the native dialog. */
+  async _adoptModelsFolder(path: string) {
+    if (!path) return;
+    try {
+      const fl = await import("@desktop/firstlaunch/wailsservice");
+      const { demand } = await import("../result");
+      const resolved = await demand<string>(fl.SetModelsDir(path));
+      this.modelsDir = displayHome(resolved || path);
+    } catch (err: unknown) {
+      console.warn("welcome: SetModelsDir failed:", err);
+      throw err;
+    }
   }
 
   _step2() {
@@ -388,14 +470,22 @@ class LthnWelcomeWindow extends LitElement {
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:8px;">
-          ${models.map(m => html`
-            <div style="display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:10px;
-                        background:${m.rec ? "rgba(64,193,197,0.06)" : "rgba(255,255,255,0.03)"};
-                        border:1px solid ${m.rec ? "rgba(64,193,197,0.22)" : "rgba(255,255,255,0.06)"};">
+          ${models.map((m, idx) => {
+            const sel = idx === this.selectedModelIdx;
+            return html`
+            <div class="lthn-welcome-model-row"
+                 data-idx=${idx}
+                 ?data-selected=${sel}
+                 @click=${() => { this.selectedModelIdx = idx; }}
+                 style="display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:10px;
+                        background:${sel ? "rgba(64,193,197,0.06)" : "rgba(255,255,255,0.03)"};
+                        border:1px solid ${sel ? "rgba(64,193,197,0.22)" : "rgba(255,255,255,0.06)"};
+                        cursor:pointer;
+                        --wails-draggable: no-drag;">
               <div style="width:18px; height:18px; border-radius:50%;
-                          border:1.5px solid ${m.rec ? "var(--brand-400)" : "rgba(255,255,255,0.18)"};
+                          border:1.5px solid ${sel ? "var(--brand-400)" : "rgba(255,255,255,0.18)"};
                           display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                ${m.rec ? html`<div style="width:8px; height:8px; border-radius:50%; background:var(--brand-400);"></div>` : nothing}
+                ${sel ? html`<div style="width:8px; height:8px; border-radius:50%; background:var(--brand-400);"></div>` : nothing}
               </div>
               <div style="flex:1;">
                 <div style="display:flex; align-items:baseline; gap:8px;">
@@ -410,7 +500,8 @@ class LthnWelcomeWindow extends LitElement {
                 <div style="margin-top:2px;">${m.ram} RAM</div>
               </div>
             </div>
-          `)}
+          `;
+          })}
         </div>
       </div>
     `;

@@ -139,7 +139,10 @@ switch (surface) {
         // to the design literal so canvas preview reads coherently.
         footerVersion:    (await i18n.T("tray.footer.version")).replace(
           "%s",
-          await fl.Build().then(b => b?.version || "0.1.0").catch(() => "0.1.0"),
+          await fl.Build().then(b => {
+            const v = (b?.OK ? (b.Value as { version?: string })?.version : undefined);
+            return v || "0.1.0";
+          }).catch(() => "0.1.0"),
         ),
       });
       /* Locale state for the flag-button switcher. Available locales
