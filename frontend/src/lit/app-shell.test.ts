@@ -800,3 +800,62 @@ describe("lthn-app-shell — ⌘⇧[ / ⌘⇧] view cycling", () => {
     }
   });
 });
+
+describe("lthn-app-shell — auth-gate mount (Stage C)", () => {
+  // Stage C wiring: when _authState !== "ok" the body slot renders
+  // <lthn-auth-gate> in place of the normal pane. Side-nav + status
+  // bar remain — the gate sits INSIDE the body, not replacing the
+  // shell. Existing app-shell tests already prove _authState defaults
+  // to "ok" so the normal body path stays intact when nothing 401s.
+  type ShellWithAuth = HTMLElement & {
+    active: string;
+    _authState: "setup" | "auth" | "error" | "ok";
+    _authRequestId: string;
+    updateComplete: Promise<boolean>;
+  };
+
+  it("_authState='ok' renders the normal pane (no gate)", async () => {
+    const { host } = await mountWindow<ShellWithAuth>("lthn-app-shell");
+    // Default state — no gate mounted, normal body slot lives.
+    expect(host.querySelector("lthn-auth-gate")).toBeNull();
+  });
+
+  it("_authState='error' mounts <lthn-auth-gate state=error>", async () => {
+    const { el, host } = await mountWindow<ShellWithAuth>("lthn-app-shell");
+    el._authState = "error";
+    el._authRequestId = "req-shell-test-001";
+    await el.updateComplete;
+    const gate = host.querySelector("lthn-auth-gate");
+    expect(gate).not.toBeNull();
+    expect(gate?.getAttribute("state")).toBe("error");
+    expect(gate?.getAttribute("request-id")).toBe("req-shell-test-001");
+    // Embedded attribute so the gate's renderChrome skips the
+    // standalone card — the shell already owns the chrome.
+    expect(gate?.hasAttribute("embedded")).toBe(true);
+  });
+
+  it("lthn:auth:401 event flips _authState to error + captures requestId", async () => {
+    const { el, host } = await mountWindow<ShellWithAuth>("lthn-app-shell");
+    expect(el._authState).toBe("ok");
+    window.dispatchEvent(new CustomEvent("lthn:auth:401", {
+      detail: { requestId: "req-from-event-abc" },
+    }));
+    await el.updateComplete;
+    expect(el._authState).toBe("error");
+    expect(el._authRequestId).toBe("req-from-event-abc");
+    expect(host.querySelector("lthn-auth-gate")).not.toBeNull();
+  });
+
+  it("lthn:auth:ok event flips _authState back to ok (gate unmounts)", async () => {
+    const { el, host } = await mountWindow<ShellWithAuth>("lthn-app-shell");
+    el._authState = "error";
+    await el.updateComplete;
+    expect(host.querySelector("lthn-auth-gate")).not.toBeNull();
+
+    window.dispatchEvent(new CustomEvent("lthn:auth:ok"));
+    await el.updateComplete;
+    expect(el._authState).toBe("ok");
+    expect(el._authRequestId).toBe("");
+    expect(host.querySelector("lthn-auth-gate")).toBeNull();
+  });
+});

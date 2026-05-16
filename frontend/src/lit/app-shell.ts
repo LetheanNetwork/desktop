@@ -45,6 +45,7 @@
 import { LitElement, html, nothing } from "lit";
 import { ref as litRef } from "lit/directives/ref.js";
 import { T } from "@lthn/i18n/coreservice";
+import { AUTH_401_EVENT, AUTH_OK_EVENT, type AuthGateState } from "./auth-gate";
 
 /** Filter a list of file paths down to those ending in `.gguf`
  *  (case-insensitive). Drives the drag-and-drop import wire — Wails
@@ -281,6 +282,8 @@ class LthnAppShell extends LitElement {
     paletteQuery: { state: true },
     paletteIndex: { state: true },
     switcherOpen: { state: true },
+    _authState:   { state: true },
+    _authRequestId: { state: true },
     t:         { state: true },
   };
   /** Active view id — drives the side-nav contents + status-bar
@@ -318,6 +321,19 @@ class LthnAppShell extends LitElement {
   /** Whether the view-switcher dropdown is open. Pure UI state; never
    *  persisted. Closes on any click outside (document listener). */
   declare switcherOpen: boolean;
+
+  /** Auth-gate mount state. Starts at "ok" so the shell paints the
+   *  normal body slot on first render; flips to "error" when
+   *  api-fetch.ts dispatches lthn:auth:401, back to "ok" when the
+   *  gate dispatches lthn:auth:ok after a successful setup/unlock.
+   *  The gate itself derives "setup" vs "auth" on its own
+   *  connectedCallback via ServerKey.AccountStatus() — the shell
+   *  just decides whether to mount it at all. */
+  declare _authState: AuthGateState;
+  /** Request-id carried from the lthn:auth:401 event detail. Passed
+   *  through to the mounted gate so the error frame surfaces the
+   *  same trace id the server-side logs index by. */
+  declare _authRequestId: string;
 
   /** localStorage key for the last-active view. Restored on mount so
    *  the user lands on whichever role surface they were last using.
@@ -385,6 +401,13 @@ class LthnAppShell extends LitElement {
     this.paletteOpen  = false;
     this.paletteQuery = "";
     this.paletteIndex = -1;
+    // Auth-gate state defaults to "ok" — the gate only mounts when an
+    // in-flight apiFetch returns 401 (window event). Stage D will
+    // change this to derive from the AccountStatus binding on boot
+    // so first-launch lands directly on the setup gate without a
+    // first-paint 401 flash; Stage C keeps the additive shape.
+    this._authState     = "ok";
+    this._authRequestId = "";
     this.running = true;
     this.model = "gemma-4-e2b";
     this.tps = "47.2";
@@ -408,6 +431,25 @@ class LthnAppShell extends LitElement {
     };
   }
   createRenderRoot() { return this; }
+
+  /** Window-level listener — apiFetch dispatches this on every 401
+   *  response (see api-fetch.ts). The shell flips _authState into
+   *  "error" so the next render mounts <lthn-auth-gate state="error">
+   *  in place of the normal body pane. */
+  private _onAuth401 = (ev: Event) => {
+    const detail = (ev as CustomEvent<{ requestId?: string }>).detail;
+    if (detail && typeof detail.requestId === "string") {
+      this._authRequestId = detail.requestId;
+    }
+    this._authState = "error";
+  };
+
+  /** Window-level listener — the auth-gate dispatches this after a
+   *  successful setup/unlock so the shell can remount the body slot. */
+  private _onAuthOk = () => {
+    this._authState     = "ok";
+    this._authRequestId = "";
+  };
 
   /** Window-level keydown — ⌘P / Ctrl+P toggles the command palette.
    *  Bound up-front so the shortcut works before async i18n lands. */
@@ -528,6 +570,12 @@ class LthnAppShell extends LitElement {
     window.addEventListener("keydown", this._onKeyDownForPalette);
     window.addEventListener("keydown", this._onKeyDownForViewSwitch);
     window.addEventListener("keydown", this._onKeyDownForViewCycle);
+    // Auth-gate triggers — apiFetch fires 401 from anywhere in the
+    // app; the gate fires ok after a successful setup or unlock.
+    // Mirror the palette/switcher pattern so both listeners share the
+    // same connected/disconnected lifecycle.
+    window.addEventListener(AUTH_401_EVENT, this._onAuth401);
+    window.addEventListener(AUTH_OK_EVENT, this._onAuthOk);
     // Outside-click closes the view-switcher dropdown.
     document.addEventListener("click", this._onDocClickForSwitcher);
     const [
@@ -621,6 +669,8 @@ class LthnAppShell extends LitElement {
     window.removeEventListener("keydown", this._onKeyDownForPalette);
     window.removeEventListener("keydown", this._onKeyDownForViewSwitch);
     window.removeEventListener("keydown", this._onKeyDownForViewCycle);
+    window.removeEventListener(AUTH_401_EVENT, this._onAuth401);
+    window.removeEventListener(AUTH_OK_EVENT, this._onAuthOk);
     document.removeEventListener("click", this._onDocClickForSwitcher);
     if (this._unsubSetPane) {
       this._unsubSetPane();
@@ -848,6 +898,21 @@ class LthnAppShell extends LitElement {
   }
 
   _renderBody() {
+    // Auth-gate stands ahead of every body view. When _authState is
+    // anything other than "ok" we render <lthn-auth-gate> in the
+    // body area instead of the matching pane; the gate itself decides
+    // setup vs auth via ServerKey.AccountStatus on its connectedCallback.
+    // Side-nav + titlebar + status-bar remain visible (gate sits INSIDE
+    // body slot, not replacing the shell) per RFC §5.
+    if (this._authState !== "ok") {
+      return html`<div style="flex:1; min-height:0; display:flex; overflow:hidden; background:radial-gradient(1200px 600px at 50% 30%, rgba(64,193,197,0.03), transparent 60%);">
+        <lthn-auth-gate
+          embedded
+          state=${this._authState}
+          request-id=${this._authRequestId}
+        ></lthn-auth-gate>
+      </div>`;
+    }
     const node = this.querySelector('[slot="body"]');
     if (node) return html`<slot name="body"></slot>`;
     const entry = navForView(this.view).find(n => n.id === this.active);
