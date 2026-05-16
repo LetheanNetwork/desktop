@@ -60,6 +60,13 @@ type Contact struct {
 //	    Next: "call · Fri",
 //	}
 type ContactRecord struct {
+	// Version is the monotonic optimistic-lock version (Cascade W1,
+	// Mantis #1540). Stamped into the frontmatter by atomicWriteFile;
+	// 0 on legacy files predating the cutover, ≥1 after first write
+	// through paths.AtomicWriteWithVersion. The IfVersion check in
+	// the primitive uses this exact value.
+	Version int `yaml:"version,omitempty"`
+
 	// ID is the canonical contact identifier (matches filename slug).
 	ID string `yaml:"id"`
 

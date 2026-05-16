@@ -158,13 +158,18 @@ func (s *Service) Create(input CreateInput) core.Result {
 		Next:      input.Next,
 	}
 
+	// Cascade W1 (Mantis #1540) — stamp version=1 on creation. Route
+	// through paths.AtomicWriteWithVersion with IfVersion=0 so the
+	// primitive performs an unconditional first-write (the Create-path
+	// pre-checks Stat above for the exists-rejection).
+	rec.Version = 1
+
 	raw, err := marshalContact(rec)
 	if err != nil {
 		return core.Fail(core.E("contacts.Create", "marshal", err))
 	}
-	// 0o600 (Cerberus #1487 PR-1): PII at rest — owner-only.
-	if w := core.WriteFile(fpath, raw, 0o600); !w.OK {
-		return core.Fail(core.E("contacts.Create", w.Error(), nil))
+	if err := atomicWriteFile(fpath, raw, 0); err != nil {
+		return core.Fail(core.E("contacts.Create", err.Error(), err))
 	}
 
 	contact := toContact(rec, core.Now())
@@ -213,16 +218,74 @@ func (s *Service) Update(input UpdateInput) core.Result {
 		rec.Notes = input.Notes
 	}
 
+	// Cascade W1 (Mantis #1540) — bump version + route through
+	// paths.AtomicWriteWithVersion. IfVersion=rec.Version (the value
+	// observed on disk via parseContact) gates the write under the
+	// primitive's optimistic-lock check. rec.Version=0 (legacy file
+	// predating cutover) skips the check and stamps version=1 on the
+	// upgrade write.
+	priorVersion := rec.Version
+	rec.Version = priorVersion + 1
+	if rec.Version < 1 {
+		rec.Version = 1
+	}
+
 	updated, err := marshalContact(rec)
 	if err != nil {
 		return core.Fail(core.E("contacts.Update", "marshal", err))
 	}
-	// 0o600 (Cerberus #1487 PR-1): PII at rest — owner-only.
-	if w := core.WriteFile(fpath, updated, 0o600); !w.OK {
-		return core.Fail(core.E("contacts.Update", w.Error(), nil))
+	if err := atomicWriteFile(fpath, updated, priorVersion); err != nil {
+		return core.Fail(core.E("contacts.Update", err.Error(), err))
 	}
 
 	contact := toContact(rec, core.Now())
 	s.fireEvent(EventContactUpdated, contact)
 	return core.Ok(contact)
+}
+
+// atomicWriteFile routes contact writes through paths.AtomicWriteWithVersion
+// (Cascade W1, Mantis #1540). The IfVersion gate uses the version the
+// caller observed on disk; pass 0 for first-writes / legacy upgrades so
+// the primitive performs an unconditional write. Stale writes surface as
+// "contacts.update.conflict" (or "contacts.create.conflict" on the
+// create path) preserving the paths.VersionStale envelope under the
+// returned error's cause — recoverable via paths.VersionStaleFromError.
+//
+// Audit emission is automatic via paths.AuditModeForPath (sales/* paths
+// route through AuditModeBatch per RFC §6.1) — callers do not need to
+// emit RecordSync/RecordBatch manually.
+//
+// Usage example:
+//
+//	if err := atomicWriteFile(fpath, body, prior.Version); err != nil {
+//	    return core.Fail(core.E("contacts.Update", err.Error(), err))
+//	}
+func atomicWriteFile(path string, content []byte, ifVersion int) error {
+	r := paths.AtomicWriteWithVersion(path, paths.WriteInput{
+		Body:      content,
+		IfVersion: ifVersion,
+	})
+	if r.OK {
+		return nil
+	}
+	if core.Contains(r.Error(), paths.CodeVersionStale) {
+		// Wrap the primitive's typed VersionStale envelope so callers
+		// keep matching on the contacts.<verb>.conflict code while the
+		// structured payload remains accessible via
+		// paths.VersionStaleFromError.
+		return core.E("contacts.atomicWriteFile", "contacts.update.conflict",
+			versionStaleAsError(r.Value))
+	}
+	return core.E("contacts.atomicWriteFile", "write failed: "+r.Error(), nil)
+}
+
+// versionStaleAsError extracts the structured paths.VersionStale payload
+// from a Result.Value and returns it as an error whose Error() reports
+// the canonical "contacts.update.conflict" code. The envelope stays
+// accessible via paths.VersionStaleFromError on the returned cause.
+func versionStaleAsError(v any) error {
+	if e, ok := v.(error); ok {
+		return e
+	}
+	return core.NewCode("contacts.update.conflict", "version_stale")
 }
