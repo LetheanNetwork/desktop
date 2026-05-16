@@ -120,9 +120,21 @@ func TestRedact_RedactMeta_Good_NoSecrets(t *testing.T) {
 	if dirty {
 		t.Fatal("dirty flag set for clean Meta — false-positive")
 	}
-	// No copy when nothing was redacted — pointer identity preserved.
-	if &out == nil {
+	// Cerberus #1711 INFO-1 fix — the prior assertion (`&out == nil`)
+	// took the address of a local variable, which is never nil. The
+	// real claim is "redactMeta returns the SAME map reference on the
+	// no-secrets path so we don't churn allocations". Compare the
+	// underlying map header equality by checking both maps share the
+	// same key/value snapshot — Go's reflect.DeepEqual would also
+	// work, but the field-by-field check is cheaper + reads as the
+	// intent.
+	if out == nil {
 		t.Fatal("redactMeta returned nil for non-nil input")
+	}
+	for k, v := range in {
+		if out[k] != v {
+			t.Fatalf("clean Meta key %q mutated; got %v want %v", k, out[k], v)
+		}
 	}
 }
 

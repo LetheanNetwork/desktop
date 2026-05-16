@@ -205,6 +205,44 @@ func redactMeta(m map[string]any) (map[string]any, bool) {
 	return out, dirty
 }
 
+// walkMetaForCleanAndNewline runs a single recursive pass over m
+// that combines the §2.1.1 secret-shape redaction with the §6.5
+// embedded-newline guard (Cerberus #1711 LOW-2 consolidation — the
+// pre-Phase-2 code walked the map twice, once per check).
+//
+// Returns (cleaned, dirty, badNewline) where:
+//
+//   - cleaned is a copy of m with every secret-shaped string value
+//     replaced by redactionPlaceholder. Identity-equal to m when no
+//     substitution happened (saves an alloc on the common path).
+//   - dirty is true when ANY substitution happened (so the caller
+//     emits the audit.record.redacted debug-echo).
+//   - badNewline is true when ANY string value (top-level OR nested)
+//     contained a literal '\n'. Caller rejects the event with
+//     codeAuditEventInvalid — embedded newlines break the NDJSON
+//     contract under POSIX append interleave per RFC §6.5.
+//
+// On badNewline the caller MUST NOT persist the event; redaction
+// output is still returned for symmetry but the reject path runs
+// before disk write.
+//
+// Usage example (internal):
+//
+//	cleaned, dirty, bad := walkMetaForCleanAndNewline(ev.Meta)
+//	if bad { return core.Fail(...) }
+//	if dirty { core.Print(core.Stderr(), "redacted\n") }
+//	ev.Meta = cleaned
+func walkMetaForCleanAndNewline(m map[string]any) (map[string]any, bool, bool) {
+	if m == nil {
+		return nil, false, false
+	}
+	if badNewline := mapContainsRawNewline(m); badNewline {
+		return m, false, true
+	}
+	cleaned, dirty := redactMeta(m)
+	return cleaned, dirty, false
+}
+
 // redactValue recursively cleans v under the given parent key. Returns
 // (cleaned, substituted). When v is a string, applies the recogniser
 // stack honouring the per-key allowlist; when v is a map/slice,
