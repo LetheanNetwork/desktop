@@ -69,35 +69,53 @@ interface BootstrapTokenValue { token?: string; expires_at?: number }
 
 class LthnAuthGate extends LitElement {
   static readonly properties = {
-    state:     { type: String, reflect: true },
-    title:     { type: String },
-    subtitle:  { type: String },
-    w:         { type: Number },
-    h:         { type: Number },
-    requestId: { type: String, attribute: "request-id" },
-    embedded:  { type: Boolean, reflect: true },
-    loading:   { state: true },
+    state:        { type: String, reflect: true },
+    title:        { type: String },
+    subtitle:     { type: String },
+    w:            { type: Number },
+    h:            { type: Number },
+    requestId:    { type: String, attribute: "request-id" },
+    embedded:     { type: Boolean, reflect: true },
+    loading:      { state: true },
+    errorStatus:  { state: true },
+    errorMessage: { state: true },
+    errorBody:    { state: true },
   };
 
-  declare state:     AuthGateState;
-  declare title:     string;
-  declare subtitle:  string;
-  declare w:         number;
-  declare h:         number;
-  declare requestId: string;
-  declare embedded:  boolean;
-  declare loading:   boolean;
+  declare state:        AuthGateState;
+  declare title:        string;
+  declare subtitle:     string;
+  declare w:            number;
+  declare h:            number;
+  declare requestId:    string;
+  declare embedded:     boolean;
+  declare loading:      boolean;
+  /** HTTP status of the failed request that triggered state=error.
+   *  0 when the gate is in state=error from a CustomEvent rather than
+   *  a click-handler fetch (e.g. apiFetch interceptor 401). */
+  declare errorStatus:  number;
+  /** Human-readable error message — the design used to hardcode
+   *  "missing authorization header" but the real response body's
+   *  error.message is the truth. */
+  declare errorMessage: string;
+  /** Raw response body (or JSON-stringified) for the framed text
+   *  panel in the error state. Falls back to the hardcoded design
+   *  mockup when empty (state=error fired without a fetch context). */
+  declare errorBody:    string;
 
   constructor() {
     super();
-    this.state    = "setup";
-    this.title    = "Lethean Desktop";
-    this.subtitle = "first-run · setup";
-    this.w        = 920;
-    this.h        = 620;
-    this.requestId = "";
-    this.embedded = false;
-    this.loading  = false;
+    this.state        = "setup";
+    this.title        = "Lethean Desktop";
+    this.subtitle     = "first-run · setup";
+    this.w            = 920;
+    this.h            = 620;
+    this.requestId    = "";
+    this.embedded     = false;
+    this.loading      = false;
+    this.errorStatus  = 0;
+    this.errorMessage = "";
+    this.errorBody    = "";
   }
 
   // Light DOM — same shape as every other shell child so tokens.css +
@@ -185,6 +203,23 @@ class LthnAuthGate extends LitElement {
         // Endpoint absent (404 until Stage B' lands) or refused — fall
         // back to the error frame so the user can retry. The state
         // machine handles "endpoint error" via state=error per RFC §1.
+        //
+        // Capture the real response so the error frame renders the
+        // actual server message instead of the design's hardcoded
+        // mockup. Without this, every error looks like "missing
+        // authorization header" even when the real cause is
+        // bad-body / wrong-scope / endpoint-missing.
+        this.errorStatus = res.status;
+        try {
+          const txt = await res.text();
+          this.errorBody = txt;
+          try {
+            const parsed = JSON.parse(txt) as { error?: { message?: string } };
+            this.errorMessage = parsed?.error?.message ?? "";
+          } catch { this.errorMessage = ""; }
+        } catch { this.errorBody = ""; }
+        const rid = res.headers.get("X-Request-Id");
+        if (rid) this.requestId = rid;
         this.state = "error";
         return;
       }
@@ -367,16 +402,33 @@ class LthnAuthGate extends LitElement {
 
   /* ── error · framed raw response with retry ──────────────────────── */
   private _error(): TemplateResult {
+    // Use the captured real response when available; fall back to the
+    // design mockup so the gate still renders something coherent when
+    // state=error was fired by a CustomEvent without fetch context.
+    const status   = this.errorStatus > 0 ? this.errorStatus : 401;
+    const statusLabel = status === 401 ? "unauthorised"
+                      : status === 403 ? "forbidden"
+                      : status === 404 ? "not found"
+                      : status === 422 ? "unprocessable"
+                      : status === 503 ? "server misconfigured"
+                      : "error";
+    const headline = this.errorMessage
+                  || (status === 401 ? "Missing authorization header."
+                     : status === 422 ? "The request was rejected."
+                     : status === 503 ? "Server isn't fully configured."
+                     : `Request failed (${status}).`);
+    const body = this.errorBody
+              || `{"error":{"code":"unauthorised","message":"missing authorization header"},"meta":{"request_id":"${this.requestId || "—"}"},"success":false}`;
     return html`
       <div style="flex:1; display:flex; flex-direction:column; padding:32px 36px; gap:18px; min-height:0;">
         <div style="display:flex; align-items:center; gap:12px;">
           <lthn-status-dot variant="err"></lthn-status-dot>
           <div style="font-family:var(--font-mono); font-size:11px; color:var(--err-400); letter-spacing:0.10em; text-transform:uppercase;">
-            401 · unauthorised
+            ${status} · ${statusLabel}
           </div>
         </div>
         <div style="font-size:18px; font-weight:600; color:var(--fg-0); letter-spacing:-0.015em;">
-          Missing authorization header.
+          ${headline}
         </div>
         <div style="font-size:13px; color:var(--fg-2); line-height:1.6; max-width:560px;">
           The runner is up but the request didn't carry credentials. This usually
@@ -386,10 +438,7 @@ class LthnAuthGate extends LitElement {
         <div style="background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.06);
                     border-radius:8px; padding:14px 16px;
                     font-family:var(--font-mono); font-size:11px; color:var(--fg-2);
-                    line-height:1.7; overflow:auto;">
-          {"error":{"code":"unauthorised","message":"missing authorization header"},
-          "meta":{"request_id":"${this.requestId || "—"}"},"success":false}
-        </div>
+                    line-height:1.7; overflow:auto; white-space:pre-wrap;">${body}</div>
         <div style="display:flex; gap:10px;">
           <lthn-btn tone="primary" size="lg" @click=${() => this._onWreathIn()}>
             <i class="fa-solid fa-arrow-right-to-bracket" style="font-size:11px;"></i>
