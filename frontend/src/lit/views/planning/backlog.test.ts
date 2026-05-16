@@ -1,10 +1,20 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window-fixture";
 import { projectBacklog } from "./backlog";
 import "./backlog";
+
+// Mock the @desktop/tasks/service module so we can drive _loadFromBackend()
+// under happy-dom. The binding is gitignored (regenerated at build) so we
+// cannot statically import from it — vi.hoisted lifts the mock fn to
+// vi.mock's hoist plane, and tests grab the mock through the hoisted
+// reference. Mirrors the dynamic-import pattern in backlog.ts itself.
+const { tasksListMock } = vi.hoisted(() => ({ tasksListMock: vi.fn() }));
+vi.mock("@desktop/tasks/service", () => ({
+  List: tasksListMock,
+}));
 
 interface BacklogEl extends LitElement {
   setQuery: (q: string) => void;
@@ -63,6 +73,53 @@ describe("lthn-view-backlog — smoke", () => {
     el.setSort("impact");
     expect(el.data.sortBy).toBe("impact");
     expect(el.data.sortDir).toBe("desc");
+  });
+});
+
+describe("lthn-view-backlog — backend wiring", () => {
+  beforeEach(() => {
+    tasksListMock.mockReset();
+  });
+
+  it("keeps the fixture when the binding rejects", async () => {
+    tasksListMock.mockRejectedValue(new Error("no binding"));
+    const { host } = await mountWindow("lthn-view-backlog");
+    // Allow the connectedCallback's _loadFromBackend to settle.
+    await new Promise((r) => setTimeout(r, 0));
+    const rows = host.querySelectorAll(".lthn-backlog-row");
+    // Original 8 fixture rows still render.
+    expect(rows.length).toBe(8);
+  });
+
+  it("replaces the fixture when List() returns issues", async () => {
+    tasksListMock.mockResolvedValue({
+      Value: {
+        issues: [
+          { ID: "T-1", Summary: "Wire backend probe", Project: "lthn",      Priority: "high"   },
+          { ID: "T-2", Summary: "Ship calendar grid", Project: "lthn",      Priority: "normal" },
+          { ID: "T-3", Summary: "Retro template",      Project: "host-uk", Priority: "low"    },
+        ],
+      },
+    });
+    const { el, host } = await mountWindow<LitElement & { updateComplete: Promise<boolean> }>("lthn-view-backlog");
+    // _loadFromBackend resolves async; give the microtask queue a tick
+    // then await the Lit render flush.
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    const text = host.textContent ?? "";
+    expect(text).toContain("Wire backend probe");
+    expect(text).toContain("Ship calendar grid");
+    expect(text).toContain("Retro template");
+    // Project name surfaces as the theme column.
+    expect(text).toContain("host-uk");
+  });
+
+  it("keeps the fixture when List() returns an empty issues array", async () => {
+    tasksListMock.mockResolvedValue({ Value: { issues: [] } });
+    const { host } = await mountWindow("lthn-view-backlog");
+    await new Promise((r) => setTimeout(r, 0));
+    const rows = host.querySelectorAll(".lthn-backlog-row");
+    expect(rows.length).toBe(8);
   });
 });
 

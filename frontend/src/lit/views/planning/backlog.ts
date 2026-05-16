@@ -7,9 +7,15 @@
 // a column header re-orders the list. Top N items shaded brand to hint
 // "this fits the next sprint".
 //
-// Backed by core/ide pkg/tasks. Today fixtures-only — when the
-// Wails binding lands, _loadFromBackend() pulls open-state Issues
-// (or a future "backlog" state once added) and computes the score.
+// Backed by pkg/tasks via the Wails surface. _loadFromBackend()
+// lazy-imports @desktop/tasks/service and pulls open-state Issues
+// when the binding is present; falls back to the fixture array
+// otherwise so dev / headless runs stay useful.
+//
+// RICE fields (impact, effort, confidence, theme) are not yet on
+// the Issue schema — see deferred Mantis follow-up. Until then the
+// row mapper synthesises sensible placeholders from existing fields
+// (priority → score, project → theme, fixed 3-dot bars).
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
@@ -43,6 +49,44 @@ interface BacklogData {
   /** Active sort key + direction. */
   sortBy: SortKey;
   sortDir: "asc" | "desc";
+}
+
+/** Backend Issue shape from pkg/tasks.List — JSON-tagged Go struct. */
+interface BackendIssue {
+  ID?:       string;
+  Project?:  string;
+  Summary?:  string;
+  State?:    string;
+  Severity?: string;
+  Priority?: string;
+}
+
+/** Map a backend Issue into the view's BacklogItem shape.
+ *
+ *  Mapping notes (until extended Issue fields land — see deferred
+ *  Mantis follow-up):
+ *    - score: derived from Priority (immediate/urgent/high/normal/
+ *      low/none → 95/85/75/60/40/20). Replace with real RICE compute
+ *      once Estimate / Impact / Confidence columns exist.
+ *    - impact/effort/conf: placeholder dots (3/3/3). Avoids empty
+ *      rails without misrepresenting unknown values as zero.
+ *    - theme: Issue.Project so multi-project backlogs at least group
+ *      visually by source. Theme field on the schema is a follow-up.
+ */
+function mapBackendIssue(it: BackendIssue): BacklogItem {
+  const PRIORITY_SCORE: Record<string, number> = {
+    immediate: 95, urgent: 85, high: 75, normal: 60, low: 40, none: 20,
+  };
+  const priority = (it.Priority ?? "normal").toLowerCase();
+  return {
+    id:     it.ID      ?? "",
+    title:  it.Summary ?? "(untitled)",
+    score:  PRIORITY_SCORE[priority] ?? 60,
+    impact: 3,
+    effort: 3,
+    conf:   3,
+    theme:  it.Project ?? "",
+  };
 }
 
 const BACKLOG_FIXTURE: BacklogData = {
@@ -99,8 +143,46 @@ class LthnViewBacklog extends LitElement {
     void this._loadFromBackend();
   }
 
-  /** Pending pkg/tasks Wails binding. Today: keep fixture. */
-  async _loadFromBackend(): Promise<void> { /* no-op */ }
+  /**
+   * Pull live backlog data from pkg/tasks.Service.List() and replace
+   * `this.data.items`. On any failure (binding missing in dev,
+   * List() rejected, malformed response) the existing fixture array
+   * is kept untouched so the view continues to render usefully.
+   *
+   * Defensive shape mirrors operations/status.ts + coding/repos.ts —
+   * lazy-import + typeof guard + try/catch + console.warn on the
+   * fall-through paths.
+   */
+  async _loadFromBackend(): Promise<void> {
+    try {
+      // Lazy-import so a missing binding (e.g. happy-dom test runs
+      // without the wails3 generated tree) doesn't blow up module
+      // load. Same defensive pattern as coding/repos.ts.
+      const svc = await import("@desktop/tasks/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
+        console.warn("[backlog] @desktop/tasks/service unavailable — keeping fixture");
+        return;
+      }
+      const r = await (svc as { List: (input: unknown) => Promise<{ Value?: { issues?: BackendIssue[] } }> })
+        .List({ state: "open" });
+      const rows = r?.Value?.issues;
+      if (!Array.isArray(rows)) {
+        console.warn("[backlog] List() returned no issues array — keeping fixture", r);
+        return;
+      }
+      const mapped = rows
+        .filter((row) => (row?.Summary ?? "").trim() !== "")
+        .map(mapBackendIssue);
+      // Only replace when the backend gave us something — empty array
+      // could mean "no open tasks" OR "service half-wired"; keep the
+      // fixture instead of flashing an empty pane in dev.
+      if (mapped.length > 0) {
+        this.data = { ...this.data, items: mapped };
+      }
+    } catch (e: unknown) {
+      console.warn("[backlog] List() failed — keeping fixture:", e);
+    }
+  }
 
   /** Update the active filter query. Public for the test suite. */
   setQuery(q: string): void {
