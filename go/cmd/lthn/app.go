@@ -45,6 +45,9 @@ import (
 	"dappco.re/lthn/desktop/pkg/marketing/social"
 	"dappco.re/lthn/desktop/pkg/marketing/audience"
 	"dappco.re/lthn/desktop/pkg/marketing/analytics"
+	"dappco.re/lthn/desktop/pkg/office/documents"
+	"dappco.re/lthn/desktop/pkg/office/mail"
+	"dappco.re/lthn/desktop/pkg/office/files"
 	"dappco.re/lthn/desktop/pkg/serverkey"
 )
 
@@ -266,6 +269,18 @@ func newAppCore() *core.Core {
 		// self-hosted Plausible install; returns fixture data when unconfigured.
 		// Wails: Analytics.Get. No events (read-only).
 		core.WithName("marketing-analytics", analytics.Register),
+		// office/documents — Office role document catalogue. Reads and
+		// indexes markdown files from ~/Lethean/office/docs/. Wails
+		// surface: Documents.List / Get. Read-only in v1.
+		core.WithName("office-documents", documents.Register),
+		// office/mail — Office role mailbox catalogue (v1). Reads
+		// ~/Lethean/office/mail/{folder-slug}/threads.md — YAML thread
+		// frontmatter, no IMAP fetch. Wails: Mail.ListFolders / ListThreads.
+		core.WithName("office-mail", mail.Register),
+		// office/files — Office role filesystem browser. Surfaces canonical
+		// workspace locations, recent files, and disk usage. Read-only v1.
+		// Wails: Files.ListLocations / ListRecent / GetDiskUsage.
+		core.WithName("office-files", files.Register),
 		// serverkey — Stage B of the first-run auth-gate (Mantis #1474,
 		// plans RFC at code/lthn/desktop/auth-gate/RFC.md). Owns the
 		// "base egg" PGP key at ~/Lethean/wallets/server.key + its

@@ -81,6 +81,9 @@ import (
 	"dappco.re/lthn/desktop/pkg/marketing/social"
 	"dappco.re/lthn/desktop/pkg/marketing/audience"
 	"dappco.re/lthn/desktop/pkg/marketing/analytics"
+	"dappco.re/lthn/desktop/pkg/office/documents"
+	"dappco.re/lthn/desktop/pkg/office/mail"
+	officefile "dappco.re/lthn/desktop/pkg/office/files"
 	"github.com/gin-gonic/gin"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -345,6 +348,12 @@ func (s *Service) Run() core.Result {
 	audienceSvc, _ := core.ServiceFor[*audience.Service](s.opts.Core, "marketing-audience")
 	// marketing/analytics — web analytics rollup (read-only). Core-registered.
 	analyticsSvc, _ := core.ServiceFor[*analytics.Service](s.opts.Core, "marketing-analytics")
+	// office/documents — Office document catalogue. Core-registered; read-only v1.
+	documentsSvc, _ := core.ServiceFor[*documents.Service](s.opts.Core, "office-documents")
+	// office/mail — Office mailbox catalogue. Core-registered; read-only v1.
+	mailSvc, _ := core.ServiceFor[*mail.Service](s.opts.Core, "office-mail")
+	// office/files — Office filesystem browser. Core-registered; read-only v1.
+	filesSvc, _ := core.ServiceFor[*officefile.Service](s.opts.Core, "office-files")
 	// serverkey — Stage B first-run auth-gate. Core-registered + Bootstrap()ed
 	// from cmd/lthn/app.go::newAppCore so the in-memory key + verifier are
 	// live by the time the WebView mounts <lthn-auth-gate> and calls
@@ -422,6 +431,9 @@ func (s *Service) Run() core.Result {
 		application.NewService(socialSvc),
 		application.NewService(audienceSvc),
 		application.NewService(analyticsSvc),
+		application.NewService(documentsSvc),
+		application.NewService(mailSvc),
+		application.NewService(filesSvc),
 		application.NewService(serverkeySvc),
 		application.NewService(accountSvc),
 		application.NewService(s.opts.Fleet),
