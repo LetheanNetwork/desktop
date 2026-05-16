@@ -1,7 +1,14 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window-fixture";
+
+vi.mock("@desktop/tasks/service", () => ({
+  List: vi.fn(),
+}));
+
+import { List as TasksList } from "@desktop/tasks/service";
+
 import "./today";
 
 describe("lthn-view-today — smoke", () => {
@@ -65,5 +72,60 @@ describe("lthn-view-today — two-shell", () => {
     const { host } = await mountWindow("lthn-view-today");
     expect(isEmbedded(host)).toBe(false);
     expect(host.querySelector("header")).not.toBeNull();
+  });
+});
+
+describe("lthn-view-today — backend wire", () => {
+  type TodayEl = HTMLElement & {
+    data: {
+      focus: Array<{ t: string; urgency: string; due: string }>;
+      agenda: unknown[];
+      shipped: unknown[];
+      velocity: unknown;
+    };
+    updateComplete: Promise<boolean>;
+  };
+
+  it("replaces fixture focus cards with high-priority Issues from tasks.List", async () => {
+    (TasksList as unknown as { mockReset: () => void }).mockReset();
+    (TasksList as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: { issues: [
+        { ID: "i1", Summary: "Ship Stage B serverkey package", Priority: "urgent" },
+        { ID: "i2", Summary: "Review Cerberus DREAD findings",   Priority: "immediate" },
+        { ID: "i3", Summary: "Wire Sales pipeline view",         Priority: "high" },
+        { ID: "i4", Summary: "Update telemetry chart",           Priority: "normal" },
+      ] },
+    });
+    const { el } = await mountWindow<TodayEl>("lthn-view-today");
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.data.focus.length).toBe(3); // capped at 3
+    expect(el.data.focus[0].t).toContain("Ship Stage B");
+    expect(el.data.focus[0].urgency).toBe("high"); // urgent → high
+    expect(el.data.focus[1].urgency).toBe("high"); // immediate → high
+    expect(el.data.focus[2].urgency).toBe("med");  // high → med
+    expect(el.data.focus.map(f => f.t)).not.toContain("Update telemetry chart"); // normal filtered out
+  });
+
+  it("keeps fixture when no high-priority Issues are returned", async () => {
+    (TasksList as unknown as { mockReset: () => void }).mockReset();
+    (TasksList as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: { issues: [
+        { ID: "i5", Summary: "Polish dropdown animation", Priority: "low" },
+      ] },
+    });
+    const { el } = await mountWindow<TodayEl>("lthn-view-today");
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.data.focus[0].t).toBe("Lethean v0.2 release prep"); // fixture preserved
+  });
+
+  it("keeps fixture when backend rejects", async () => {
+    (TasksList as unknown as { mockReset: () => void }).mockReset();
+    (TasksList as unknown as { mockRejectedValue: (v: unknown) => void }).mockRejectedValue(new Error("no binding"));
+    const { el } = await mountWindow<TodayEl>("lthn-view-today");
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.data.focus[0].t).toBe("Lethean v0.2 release prep"); // fixture preserved
   });
 });

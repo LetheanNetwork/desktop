@@ -104,14 +104,45 @@ class LthnViewToday extends LitElement {
     void this._loadFromBackend();
   }
 
-  /** Async data loader. Today: a no-op that keeps the fixture in
-   *  place. Tomorrow: dynamic-import a Wails binding for pkg/tasks
-   *  and rebuild TodayData from real Issue rows + activity events.
-   *  Public-named (single underscore) so tests can drive it without
-   *  reflection tricks. */
+  /** Async data loader. Dynamic-imports the @desktop/tasks/service
+   *  binding and rebuilds the `focus` band from open Issues with high
+   *  priority. Agenda + shipped stay on fixture until calendar/
+   *  activity primitives ship (RFC.runbooks / Mantis #463 follow-ons).
+   *  Public-named (single underscore) so tests can drive it. */
   async _loadFromBackend(): Promise<void> {
-    // Backend not wired yet (see go/pkg/tasks/wails.go — pending).
-    // Keep TODAY_FIXTURE so design preview + tests stay green.
+    try {
+      const svc = await import("@desktop/tasks/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
+        return;
+      }
+      const r = await (svc as {
+        List: (input: { state: string; limit: number }) => Promise<{
+          Value?: {
+            issues?: Array<{ ID?: string; Summary?: string; Priority?: string }>
+          }
+        }>
+      }).List({ state: "open", limit: 50 });
+      const issues = r?.Value?.issues ?? [];
+      const URGENT = new Set(["immediate", "urgent", "high"]);
+      const highPrio = issues.filter(it =>
+        URGENT.has((it.Priority ?? "").toLowerCase()),
+      ).slice(0, 3);
+      if (highPrio.length === 0) return;
+      const focus: FocusItem[] = highPrio.map(it => {
+        const prio = (it.Priority ?? "").toLowerCase();
+        const urgency: FocusItem["urgency"] =
+          prio === "immediate" || prio === "urgent" ? "high" : "med";
+        return {
+          t:       it.Summary ?? "(untitled)",
+          s:       "code",
+          urgency,
+          due:     prio === "immediate" ? "now" : "today",
+        };
+      });
+      this.data = { ...this.data, focus };
+    } catch {
+      // Backend unavailable — keep TODAY_FIXTURE.
+    }
   }
 
   private _focusIcon(s: FocusItem["s"]): string {
