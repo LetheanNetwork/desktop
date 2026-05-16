@@ -68,6 +68,17 @@ func (s *Service) Unlock(input UnlockInput) core.Result {
 	if input.AccountID == "" {
 		return core.Fail(core.NewCode(codeAccountIDRequired, "account_id is required"))
 	}
+	// Cerberus Stage E.B DREAD ADD-HIGH-2 (Mantis #1488-class compound
+	// finding) — account_id is concatenated directly into private.key
+	// path below. Without paths.IsValidID gating, a malicious id like
+	// "../../wallets/lethean-default" lets core.Stat follow the
+	// resolved path → measurable timing oracle (stat-hit vs stat-miss
+	// path-cache deltas) + lockout-map DoS (unbounded growth on
+	// unique traversal strings). The shape check rejects '/', '..',
+	// leading '.', NUL, and >255 bytes before any disk touch.
+	if err := paths.IsValidID(input.AccountID); err != nil {
+		return core.Fail(err)
+	}
 	if input.Passphrase == "" {
 		return core.Fail(core.NewCode(codeUnlockPassphraseRequired, "passphrase is required"))
 	}
@@ -197,6 +208,14 @@ func (s *Service) Unlock(input UnlockInput) core.Result {
 func (s *Service) Lock(input LockInput) core.Result {
 	if input.AccountID == "" {
 		return core.Fail(core.NewCode(codeAccountIDRequired, "account_id is required"))
+	}
+	// Cerberus Stage E.B DREAD ADD-HIGH-2 — same shape-validation
+	// gate as Unlock. Lock doesn't touch disk but the audit-event
+	// emit writes a structured field with the literal account_id;
+	// unvalidated input here lets the attacker pollute audit logs
+	// with traversal strings the operator later greps.
+	if err := paths.IsValidID(input.AccountID); err != nil {
+		return core.Fail(err)
 	}
 	s.mu.Lock()
 	delete(s.unlocked, input.AccountID)

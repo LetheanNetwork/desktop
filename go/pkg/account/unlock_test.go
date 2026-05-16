@@ -344,3 +344,61 @@ func TestAccount_Unlock_ServerMisconfigured_Bad(t *core.T) {
 	core.AssertFalse(t, r.OK)
 	core.AssertEqual(t, "account.unlock.server_misconfigured", r.Code())
 }
+
+// --- Cerberus Stage E.B DREAD ADD-HIGH-2 — path traversal in
+// AccountID. Mirrors the #1486/#1498 compound-finding pattern: any
+// AccountID with '/', '..', leading '.', NUL, or > 255 bytes must
+// reject at paths.IsValidID before any disk touch.
+
+func TestAccount_Unlock_PathTraversal_Bad_DREAD_ADD_HIGH_2(t *core.T) {
+	_ = homeFixture(t)
+	svc := newUnlockable(t, "")
+
+	// Every shape paths.IsValidID rejects MUST surface as a Fail
+	// from Unlock — proving the gate runs BEFORE any stat/lockout
+	// machinery (which would leak timing OR balloon the lockout map).
+	// Mirrors the pkg/sales/pipeline #1486 regression-test shape.
+	for _, evil := range []string{
+		"../../wallets/lethean-default", // classic traversal
+		"..",                            // double-dot only
+		".hidden",                       // leading dot
+		"foo/bar",                       // path separator
+		"foo\\bar",                      // windows separator
+		"foo\x00bar",                    // NUL byte
+	} {
+		r := svc.Unlock(subject.UnlockInput{
+			AccountID:  evil,
+			Passphrase: "anything",
+		})
+		core.AssertFalse(t, r.OK, "Unlock("+evil+") MUST reject")
+		// Error message MUST namespace under paths.invalid_id so
+		// the operator can grep audit logs for the compound-finding
+		// signature uniformly across Office/Sales/Account surfaces.
+		core.AssertTrue(t, core.Contains(r.Error(), "paths.invalid_id"),
+			"Unlock("+evil+") error message MUST carry paths.invalid_id (Cerberus DREAD ADD-HIGH-2)")
+	}
+
+	// Negative invariant — rejected traversal IDs MUST NOT show as
+	// unlocked. Defends against the half-state where the audit said
+	// rejected but the map was already mutated.
+	core.AssertFalse(t, svc.HasUnlocked("../../wallets/lethean-default"),
+		"rejected traversal id MUST NOT show as unlocked")
+}
+
+func TestAccount_Lock_PathTraversal_Bad_DREAD_ADD_HIGH_2(t *core.T) {
+	_ = homeFixture(t)
+	svc := newUnlockable(t, "")
+
+	for _, evil := range []string{
+		"../../wallets/lethean-default",
+		"..",
+		".hidden",
+		"foo/bar",
+		"foo\x00bar",
+	} {
+		r := svc.Lock(subject.LockInput{AccountID: evil})
+		core.AssertFalse(t, r.OK, "Lock("+evil+") MUST reject")
+		core.AssertTrue(t, core.Contains(r.Error(), "paths.invalid_id"),
+			"Lock("+evil+") error message MUST carry paths.invalid_id")
+	}
+}
