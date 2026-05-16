@@ -61,6 +61,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/sandbox"
 	"dappco.re/lthn/desktop/pkg/server"
+	"dappco.re/lthn/desktop/pkg/tasks"
 	lthnservices "dappco.re/lthn/desktop/pkg/services"
 	"dappco.re/lthn/desktop/pkg/sessions"
 	"dappco.re/lthn/desktop/pkg/telemetry"
@@ -356,6 +357,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(sandboxSvc),
 		application.NewService(opencode.NewWailsService(opencodeSvc)),
 		application.NewService(reposSvc),
+		application.NewService(tasks.NewService(s.opts.Core)),
 		application.NewService(viSvc),
 		application.NewService(s.opts.Fleet),
 		application.NewService(s.opts.Keys),
