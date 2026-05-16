@@ -87,10 +87,28 @@ func New() core.Result {
 // Register adopts the canonical Service shape (Mantis #1336).
 // Constructs a Service and registers it on Core under "keys".
 //
+// Cerberus Mantis #1440 (Stage A — Athena's doc-and-warning shim) —
+// the user-facing LetheanAccount canon (memory
+// `project_lethean_account_pgp_armoured.md`) says identity is an
+// armoured PGP key gated by a passphrase. This package's CURRENT
+// implementation is a local ChaCha20-Poly1305 master key with NO
+// passphrase + NO PGP-armoured account + NO unlock gate. The master
+// key file at `~/Lethean/data/keys/.master` is recoverable by
+// anyone with the file (mode 0o600 helps; full-disk encryption from
+// the host is the only at-rest protection today). Lose the master
+// → lose every encrypted secret. The startup Warn surfaces this in
+// operator logs while Stage B implementation is queued.
+//
+// Stage B wires firstlaunch.Phase1 → Enchantrix `pgp.GenerateKeyPair`
+// + passphrase prompt + SymmetricallyEncrypt-wrap + unlock-at-start
+// gate. Tracking ticket: Mantis #1440.
+//
 // Usage example:
 //
 //	if r := keys.Register(c); !r.OK { return r }
 func Register(c *core.Core) core.Result {
+	core.Warn("keys: backup ~/Lethean/data/keys/.master — " +
+		"no passphrase gate yet (Mantis #1440 Stage B)")
 	return New()
 }
 
