@@ -10,10 +10,11 @@
 // chrome) when mounted by <lthn-app-shell>. Mirrors the welcome /
 // settings window pattern documented in design_two_shell_pattern.md.
 //
-// Data: fixture array only for v1. Real source is a future
-// `pkg/sales/pipeline` Go service that maps a CRM rollup into the same
-// { id, label, value, deals[] } shape this design intentionally codifies.
-// See HANDOVER-VIEWS.md.
+// Data: _loadFromBackend() tries pkg/sales/pipeline via the Wails binding
+// (lazy-imported, falls back to fixture when the binding is absent — e.g.
+// in tests or non-Wails contexts). The pipeline binding returns
+// { Value: { columns: PipelineColumn[], totalValue: string, totalDeals: number } }.
+// On failure the fixture stays in place so the view is always renderable.
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
@@ -78,15 +79,18 @@ class LthnViewPipeline extends LitElement {
     w:        { type: Number },
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },
-    /** Fixture data — replace with a live backend call when
-     *  pkg/sales/pipeline bindings land (Mantis follow-up). */
+    /** Pipeline columns — starts with fixture; replaced by backend data
+     *  once _loadFromBackend() resolves. */
     columns:  { state: true },
+    /** Backend load state — "idle" | "loading" | "ok" | "err". */
+    _loadState: { state: true },
   };
 
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare columns: PipelineColumn[];
+  declare _loadState: "idle" | "loading" | "ok" | "err";
 
   constructor() {
     super();
@@ -94,9 +98,43 @@ class LthnViewPipeline extends LitElement {
     this.h = 720;
     this.embedded = false;
     this.columns = FIXTURE_PIPELINE;
+    this._loadState = "idle";
   }
 
   createRenderRoot() { return this; }
+
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+  }
+
+  /** Load pipeline data from the pkg/sales/pipeline Wails binding.
+   *  Falls back to the fixture silently on any failure (binding absent,
+   *  network error, or non-Wails context such as tests). */
+  async _loadFromBackend() {
+    if (this._loadState === "loading") return;
+    this._loadState = "loading";
+    try {
+      // Lazy-import so a missing binding in tests doesn't kill module load.
+      const svc = await import("@desktop/sales/pipeline/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
+        this._loadState = "idle";
+        return;
+      }
+      type ListFn = (input: { stage?: string }) => Promise<{ Value?: { columns?: PipelineColumn[] } }>;
+      const r = await (svc as { List: ListFn }).List({});
+      const cols = r?.Value?.columns;
+      if (Array.isArray(cols) && cols.length > 0) {
+        this.columns = cols;
+        this._loadState = "ok";
+      } else {
+        this._loadState = "idle";
+      }
+    } catch {
+      this._loadState = "err";
+      // Fixture stays in place — no user-visible error for a backend miss.
+    }
+  }
 
   render() {
     const cols = this.columns;

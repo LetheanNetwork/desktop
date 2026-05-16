@@ -99,3 +99,37 @@ describe("lthn-view-pipeline — two-shell", () => {
     expect(host.querySelectorAll(".lthn-view-pipeline-column").length).toBe(4);
   });
 });
+
+describe("lthn-view-pipeline — backend mock", () => {
+  it("accepts backend data replacing fixture columns", async () => {
+    // Simulate what the backend returns: two custom columns.
+    const { el } = await mountWindow<PipelineEl>("lthn-view-pipeline");
+    el.columns = [
+      {
+        id: "engage" as const, label: "Engaging", value: "£24 K",
+        deals: [{ c: "Heritage Law LLP", v: "£24 K", t: "GDPR + privilege" }],
+      },
+      {
+        id: "propose" as const, label: "Proposal", value: "£0",
+        deals: [],
+      },
+    ];
+    await el.updateComplete;
+    expect(el.columns.length).toBe(2);
+    expect(el.columns[0].deals.length).toBe(1);
+    expect(el.columns[0].deals[0].c).toBe("Heritage Law LLP");
+  });
+
+  it("_loadFromBackend falls back to fixture when binding is absent", async () => {
+    // In JSDOM the @desktop/sales/pipeline/service import fails → null.
+    // The element should keep fixture data and loadState should be "idle".
+    const { el } = await mountWindow<PipelineEl>("lthn-view-pipeline");
+    // Reset to fixture to simulate a fresh element before connectedCallback.
+    const FIXTURE_COUNT = el.columns.reduce((n, c) => n + c.deals.length, 0);
+    await (el as PipelineEl & { _loadFromBackend: () => Promise<void> })._loadFromBackend();
+    await el.updateComplete;
+    // Fixture must still be intact (11 deals across 4 fixture columns).
+    const stillFixture = el.columns.reduce((n, c) => n + c.deals.length, 0);
+    expect(stillFixture).toBe(FIXTURE_COUNT);
+  });
+});
