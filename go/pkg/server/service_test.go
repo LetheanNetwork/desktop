@@ -278,6 +278,89 @@ func (g *fakeGroup) RegisterRoutes(rg *gin.RouterGroup) {
 	}
 }
 
+// TestService_WebViewEngineRoutesTiered_Good walks the WEBVIEW
+// engine's gin route tree and asserts every path is classified —
+// the missing-coverage pair of TestService_AllRoutesTiered_Good
+// (which walks only the public engine).
+//
+// Cerberus Stage E.B re-DREAD ADD-CRIT-2 (Mantis #1708) — the
+// cutover `f4f93bf` broke /v1/api/process/* because the webview
+// engine inherits the same auth middleware as the public engine
+// but /v1/api/process was missing from both RouteTiers AND
+// RouteTierPrefixes. WebView same-origin fetches hit deny-by-
+// default and 401. The bare public-engine test could never have
+// caught this — /v1/api/process is webview-only-mounted (Mantis
+// #1449 Path 3) and never appears on the public engine.
+//
+// This test stands up a stub `lthn-process` route group, registers
+// it via Core auto-discovery + WebViewOnlyGroups filter, and walks
+// the webview engine's routes through the same tier-classification
+// pipeline. Fix-verification: /v1/api/process now in
+// RouteTierPrefixes → the probe route classifies → assertion holds.
+func TestService_WebViewEngineRoutesTiered_Good(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// Reuse the stubGroup + newCoreWithProvider scaffold from
+	// webview_split_test.go (same package). The lthn-process group
+	// lands on the webview engine via the default WebViewOnly
+	// filter set.
+	const processGroupName = "lthn-process"
+	const processBasePath = "/v1/api/process"
+	c := newCoreWithProvider(&stubGroup{name: processGroupName, base: processBasePath})
+
+	svc := server.NewService(server.Options{
+		Addr:              ":0",
+		LocalKey:          "test-key",
+		Core:              c,
+		WebViewOnlyGroups: []string{processGroupName},
+	})
+
+	wvEng := svc.WebViewEngine()
+	core.AssertTrue(t, wvEng != nil,
+		"service.WebViewEngine() MUST be non-nil when WebViewOnlyGroups is non-empty")
+
+	h := wvEng.Handler()
+	eng, ok := h.(*gin.Engine)
+	core.AssertTrue(t, ok, "coreapi.Engine.Handler must be a *gin.Engine")
+
+	// Sanity assert — the stub group's probe route IS on the
+	// webview engine. Defends against a future regression where
+	// the filter wiring silently breaks and the test goes vacuous.
+	var seenProbe bool
+	for _, r := range eng.Routes() {
+		if r.Path == "/v1/api/process/probe" {
+			seenProbe = true
+			break
+		}
+	}
+	core.AssertTrue(t, seenProbe,
+		"/v1/api/process/probe MUST be on the webview engine (vacuous test guard)")
+
+	missing := []string{}
+	for _, r := range eng.Routes() {
+		if isRouteTierSkip(r.Path) {
+			continue
+		}
+		if _, inScopes := server.BootstrapPathScopes[r.Path]; inScopes {
+			continue
+		}
+		if isRouteTierClassified(r.Path) {
+			continue
+		}
+		missing = append(missing, r.Method+" "+r.Path)
+	}
+	if len(missing) > 0 {
+		buf := "WEBVIEW engine routes missing from RouteTiers / RouteTierPrefixes / BootstrapPathScopes / skip-list (Cerberus ADD-CRIT-2):"
+		for _, m := range missing {
+			buf += "\n  - " + m
+		}
+		buf += "\n\nAdd entries to pkg/server.RouteTiers (exact match) or RouteTierPrefixes (group). " +
+			"This test pairs with TestService_AllRoutesTiered_Good — the public-engine variant. " +
+			"Both engines share middleware so both need classification coverage."
+		t.Fatal(buf)
+	}
+}
+
 // silence the coreapi import — referenced indirectly via
 // server.Options (which embeds coreapi types), but Go requires the
 // import marker to keep the file compileable in isolation.

@@ -274,6 +274,17 @@ var RouteTierPrefixes = map[string]RouteTier{
 	"/v1/api/plugin":   TierLocal,
 	"/v1/api/gateway":  TierLocal,
 	"/v1/runner":       TierLocal,
+	// Cerberus Stage E.B re-DREAD ADD-CRIT-2 (Mantis #1708) —
+	// /v1/api/process/* is webview-only-mounted (Mantis #1449
+	// Path 3) but the webviewEngine inherits the same auth
+	// middleware as the public engine. Without this entry, the
+	// WebView's same-origin process-API fetches hit deny-by-
+	// default and 401. Process routes were ALWAYS reachable with
+	// the static LocalKey when called from in-WebView pre-cutover;
+	// TierLocal restores that posture. The WebView-only mount
+	// (separate engine) keeps process unreachable from external
+	// HTTP clients — the network-level reach restriction stands.
+	"/v1/api/process": TierLocal,
 }
 
 // RouteTierSkipList names paths that bypass routeTiers classification
