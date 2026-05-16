@@ -645,6 +645,11 @@ switch (surface) {
     app.innerHTML = `<lthn-vi-sites-window></lthn-vi-sites-window>`;
     break;
   }
+  case "vi-activity": {
+    await import("./lit/vi/activity-window");
+    app.innerHTML = `<lthn-vi-activity-window></lthn-vi-activity-window>`;
+    break;
+  }
   case "php": {
     await import("./lit/ide/php-window");
     app.innerHTML = `<lthn-php-window></lthn-php-window>`;
