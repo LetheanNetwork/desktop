@@ -6,6 +6,7 @@
 package bridge
 
 import (
+	"net/http"
 
 	core "dappco.re/go"
 	guiwindow "dappco.re/go/gui/pkg/window"
@@ -67,6 +68,11 @@ func (s *Service) handleInternalConsole(w core.ResponseWriter, r *core.Request) 
 		w.WriteHeader(core.StatusMethodNotAllowed)
 		return
 	}
+	// Cerberus pass-6 MEDIUM — body cap on the auth-free console
+	// endpoint. Without this, a localhost POST loop with multi-MB
+	// messages OOMs the ring buffer. http.MaxBytesReader closes the
+	// connection past the limit so the JSON decoder fails cleanly.
+	r.Body = http.MaxBytesReader(w, r.Body, maxInternalBodyBytes)
 	var entry ConsoleEntry
 	if rr := readJSON(r, &entry); !rr.OK {
 		w.WriteHeader(core.StatusBadRequest)
@@ -75,6 +81,11 @@ func (s *Service) handleInternalConsole(w core.ResponseWriter, r *core.Request) 
 	}
 	if entry.At.IsZero() {
 		entry.At = core.Now()
+	}
+	// Belt + braces — clamp the Message field even if the JSON came
+	// in under the body cap with most of the bytes packed there.
+	if len(entry.Message) > maxEntryMessageBytes {
+		entry.Message = entry.Message[:maxEntryMessageBytes] + " […truncated]"
 	}
 	s.consoleMu.Lock()
 	s.consoleBuf = append(s.consoleBuf, entry)
@@ -95,6 +106,8 @@ func (s *Service) handleInternalError(w core.ResponseWriter, r *core.Request) {
 		w.WriteHeader(core.StatusMethodNotAllowed)
 		return
 	}
+	// Same cap as /internal/console (Cerberus pass-6 MEDIUM).
+	r.Body = http.MaxBytesReader(w, r.Body, maxInternalBodyBytes)
 	var entry ErrorEntry
 	if rr := readJSON(r, &entry); !rr.OK {
 		w.WriteHeader(core.StatusBadRequest)
@@ -103,6 +116,12 @@ func (s *Service) handleInternalError(w core.ResponseWriter, r *core.Request) {
 	}
 	if entry.At.IsZero() {
 		entry.At = core.Now()
+	}
+	if len(entry.Message) > maxEntryMessageBytes {
+		entry.Message = entry.Message[:maxEntryMessageBytes] + " […truncated]"
+	}
+	if len(entry.Stack) > maxEntryMessageBytes {
+		entry.Stack = entry.Stack[:maxEntryMessageBytes] + " […truncated]"
 	}
 	s.errorMu.Lock()
 	s.errorBuf = append(s.errorBuf, entry)

@@ -53,6 +53,22 @@ const DefaultWindow = "tray"
 // consoleBufLimit caps the ring buffer for console + error events.
 const consoleBufLimit = 1000
 
+// maxInternalBodyBytes caps the request body on /internal/console
+// and /internal/error. Cerberus pass-6 MEDIUM — the previous handlers
+// were ring-buffer-capped (1000 entries) but per-entry size was
+// unbounded. A localhost POST loop of 10 MB messages would pin
+// ~10 GB resident memory before rotation; an over-eager MCP client
+// during an interactive debug session could OOM the lthn process.
+// 64 KiB per entry is generous for a real console message
+// (typical: <500 bytes) and a real error (typical: <4 KiB with
+// stack).
+const maxInternalBodyBytes = 64 * 1024
+
+// maxEntryMessageBytes is the post-decode clamp on the per-entry
+// Message field. Belt + braces to maxInternalBodyBytes — a tightly-
+// packed 64 KiB JSON could have a Message that's nearly all 64 KiB.
+const maxEntryMessageBytes = 16 * 1024
+
 // Options configures the bridge HTTP server.
 //
 // Usage example:
