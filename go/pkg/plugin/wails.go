@@ -65,11 +65,21 @@ func (s *Service) Install(input InstallInput) core.Result {
 		// composed with the now-mandatory checksum gives a two-layer
 		// defence: even within $HOME, the bytes must match the
 		// manifest's declared sha256.
-		if r := allowedLocalPath(input.LocalPath); !r.OK {
+		// Cerberus Mantis #1447 — read from the resolved path returned by
+		// allowedLocalPath, NOT from the unresolved input. The previous
+		// (#1444) implementation called allowedLocalPath but then
+		// ReadFile'd input.LocalPath verbatim, leaving a TOCTOU window:
+		// between gate and read an attacker with write access to the
+		// path's parent directory could replace the file or symlink and
+		// the ReadFile would follow. allowedLocalPath now returns the
+		// fully-resolved (CleanPath + EvalSymlinks) path; we read THAT.
+		safeR := allowedLocalPath(input.LocalPath)
+		if !safeR.OK {
 			return core.Fail(core.E(installOp,
-				"local_path rejected: "+r.Error(), nil))
+				"local_path rejected: "+safeR.Error(), nil))
 		}
-		read := core.ReadFile(input.LocalPath)
+		safePath, _ := safeR.Value.(string)
+		read := core.ReadFile(safePath)
 		if !read.OK {
 			return core.Fail(core.E(installOp,
 				"read local: "+read.Error(), nil))

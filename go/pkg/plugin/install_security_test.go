@@ -85,17 +85,36 @@ func TestPlugin_AllowedLocalPath_Bad_Traversal(t *core.T) {
 func TestPlugin_AllowedLocalPath_Good_UnderHome(t *core.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	// Cerberus #1447 — non-existent paths now reject; create the
+	// file first so EvalSymlinks can resolve it.
+	core.RequireTrue(t, core.MkdirAll(tmp+"/Downloads", 0o755).OK)
+	core.RequireTrue(t, core.WriteFile(tmp+"/Downloads/my-plugin.bin", []byte("ok"), 0o644).OK)
 	r := allowedLocalPath(tmp + "/Downloads/my-plugin.bin")
 	core.AssertTrue(t, r.OK,
-		"absolute path under HOME must be allowed")
+		"absolute path under HOME that resolves to an existing file must be allowed")
 }
 
 func TestPlugin_AllowedLocalPath_Good_DeepUnderHome(t *core.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	core.RequireTrue(t, core.MkdirAll(tmp+"/Lethean/conf/plugin-staging", 0o755).OK)
+	core.RequireTrue(t, core.WriteFile(tmp+"/Lethean/conf/plugin-staging/x.bin", []byte("ok"), 0o644).OK)
 	r := allowedLocalPath(tmp + "/Lethean/conf/plugin-staging/x.bin")
 	core.AssertTrue(t, r.OK,
-		"deeply nested path under HOME must be allowed")
+		"deeply nested existing path under HOME must be allowed")
+}
+
+// TestPlugin_AllowedLocalPath_Bad_NonExistent — Cerberus #1447: the
+// previous #1444 implementation proceeded when EvalSymlinks failed
+// (path doesn't exist yet), creating a TOCTOU window between the
+// gate and the caller's ReadFile. Now fails-closed: non-existent
+// paths reject. A legitimate caller would have a real file ready.
+func TestPlugin_AllowedLocalPath_Bad_NonExistent(t *core.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	r := allowedLocalPath(tmp + "/Downloads/does-not-exist.bin")
+	core.AssertFalse(t, r.OK,
+		"non-existent path must reject (closes #1447 TOCTOU)")
 }
 
 // Cerberus Mantis #1436 — plugin code + binary-path traversal gates.
