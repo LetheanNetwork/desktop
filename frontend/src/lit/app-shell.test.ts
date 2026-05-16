@@ -12,7 +12,19 @@
 // shape so a regression that breaks _instantiate's setAttribute call
 // fails loudly.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// Stage D — mock the serverkey binding at module scope so app-shell's
+// _probeAuthState() resolves to a controllable stub. Vitest hoists
+// vi.mock calls above imports, so the dynamic-import inside
+// _probeAuthState resolves to this stub on the FIRST mount.
+vi.mock("@desktop/serverkey/service", () => ({
+  AccountStatus: vi.fn(() => Promise.resolve({ OK: true, Value: { has_user_account: true } })),
+  IssueBootstrapToken: vi.fn(() => Promise.resolve({ OK: true, Value: { token: "x", expires_at: 0 } })),
+}));
+
+import { AccountStatus as ServerKeyAccountStatus } from "@desktop/serverkey/service";
+
 import { mountWindow } from "../test/window-fixture";
 import { filterGgufPaths, MODELS_REFRESH_EVENT, filterPaletteEntries } from "./app-shell";
 
@@ -857,5 +869,51 @@ describe("lthn-app-shell — auth-gate mount (Stage C)", () => {
     expect(el._authState).toBe("ok");
     expect(el._authRequestId).toBe("");
     expect(host.querySelector("lthn-auth-gate")).toBeNull();
+  });
+});
+
+describe("lthn-app-shell — Stage D: boot-time _probeAuthState", () => {
+  type ShellWithAuth = HTMLElement & {
+    _authState: "ok" | "setup" | "auth" | "error";
+    _probeAuthState: () => Promise<void>;
+    updateComplete: Promise<boolean>;
+  };
+
+  it("_probeAuthState sets state=setup when backend reports no account", async () => {
+    const { el } = await mountWindow<ShellWithAuth>("lthn-app-shell");
+    el._authState = "ok"; // reset to baseline
+    // Mount-time has already run _probeAuthState once; re-run with a
+    // direct mock to drive the no-account branch deterministically.
+    (ServerKeyAccountStatus as unknown as { mockResolvedValueOnce: (v: unknown) => void })
+      .mockResolvedValueOnce({ OK: true, Value: { has_user_account: false } });
+    await el._probeAuthState();
+    expect(el._authState).toBe("setup");
+  });
+
+  it("_probeAuthState keeps state=ok when backend reports account exists", async () => {
+    const { el } = await mountWindow<ShellWithAuth>("lthn-app-shell");
+    el._authState = "ok";
+    (ServerKeyAccountStatus as unknown as { mockResolvedValueOnce: (v: unknown) => void })
+      .mockResolvedValueOnce({ OK: true, Value: { has_user_account: true } });
+    await el._probeAuthState();
+    expect(el._authState).toBe("ok");
+  });
+
+  it("_probeAuthState degrades to ok when backend rejects", async () => {
+    const { el } = await mountWindow<ShellWithAuth>("lthn-app-shell");
+    el._authState = "ok";
+    (ServerKeyAccountStatus as unknown as { mockRejectedValueOnce: (v: unknown) => void })
+      .mockRejectedValueOnce(new Error("no binding"));
+    await el._probeAuthState();
+    expect(el._authState).toBe("ok");
+  });
+
+  it("_probeAuthState keeps state=ok when r.OK is false", async () => {
+    const { el } = await mountWindow<ShellWithAuth>("lthn-app-shell");
+    el._authState = "ok";
+    (ServerKeyAccountStatus as unknown as { mockResolvedValueOnce: (v: unknown) => void })
+      .mockResolvedValueOnce({ OK: false, Value: undefined });
+    await el._probeAuthState();
+    expect(el._authState).toBe("ok");
   });
 });

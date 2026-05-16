@@ -451,6 +451,39 @@ class LthnAppShell extends LitElement {
     this._authRequestId = "";
   };
 
+  /** Boot-time auth-state derivation (Stage D — closes the
+   *  first-launch 401-flash gap Stage C's Hephaestus flagged). Calls
+   *  `ServerKey.AccountStatus()` once before first paint; if the
+   *  user has no LetheanAccount yet, sets `_authState = "setup"` so
+   *  the gate mounts immediately on first paint (no view-render →
+   *  401 → flash → gate transition).
+   *
+   *  Failure modes:
+   *  - Binding not present (headless dev / pre-Wails build) → keep
+   *    `_authState = "ok"`. The 401 fallback still catches unauth.
+   *  - AccountStatus rejects → same — degrade to 401-fallback path.
+   *  - has_user_account === true → keep "ok". Session-lock state
+   *    transitions ("auth" gate) ship in a later sweep alongside
+   *    LetheanAccount unlock wiring. */
+  async _probeAuthState(): Promise<void> {
+    try {
+      const svc = await import("@desktop/serverkey/service").catch(() => null);
+      if (!svc || typeof (svc as { AccountStatus?: unknown }).AccountStatus !== "function") {
+        return;
+      }
+      const r = await (svc as {
+        AccountStatus: () => Promise<{ OK?: boolean; Value?: { has_user_account?: boolean } }>
+      }).AccountStatus();
+      if (r?.OK === false) return;
+      const has = r?.Value?.has_user_account;
+      if (has === false) {
+        this._authState = "setup";
+      }
+    } catch {
+      // Binding unavailable — degrade silently to 401-fallback path.
+    }
+  }
+
   /** Window-level keydown — ⌘P / Ctrl+P toggles the command palette.
    *  Bound up-front so the shortcut works before async i18n lands. */
   private _onKeyDownForPalette = (ev: KeyboardEvent) => {
@@ -576,6 +609,10 @@ class LthnAppShell extends LitElement {
     // same connected/disconnected lifecycle.
     window.addEventListener(AUTH_401_EVENT, this._onAuth401);
     window.addEventListener(AUTH_OK_EVENT, this._onAuthOk);
+    // Boot-time auth-state derivation — closes the first-launch
+    // 401-flash gap. Awaited so the first paint after this point
+    // already reflects "setup" if the user has no LetheanAccount.
+    await this._probeAuthState();
     // Outside-click closes the view-switcher dropdown.
     document.addEventListener("click", this._onDocClickForSwitcher);
     const [
