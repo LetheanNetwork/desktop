@@ -139,6 +139,14 @@ type UnlockInput struct {
 	// closure-only discipline Cerberus #1465 demanded for bootstrap-
 	// tokens, applied to passphrases too.
 	Passphrase string `json:"passphrase"`
+
+	// RequestID is the originating gin request-id threaded into the
+	// auth.session.issued audit event on success (Cerberus #1711
+	// Stage F.B Phase 2.5 punch-list). Optional — empty is acceptable
+	// for non-HTTP callers (CLI / tests). When non-empty the audit
+	// event carries request_id=<id> so a forensic Query can JOIN
+	// session-mint events back to their HTTP request.
+	RequestID string `json:"request_id,omitempty"`
 }
 
 // UnlockOutput is the success-shape returned on a 200 OK to
@@ -188,7 +196,18 @@ type LockOutput struct {
 //
 //	svc.SetServerKey(serverkeySvc) // *serverkey.Service satisfies this
 type SessionTokenIssuer interface {
+	// IssueSessionToken mints a session token authorising accountID.
+	// Pre-Stage-F.B-Phase-2.5 surface — kept on the interface for
+	// callers (CLI / tests) that don't carry a gin request-id.
 	IssueSessionToken(accountID string) core.Result
+
+	// IssueSessionTokenWithRequest mints a session token AND threads
+	// the originating gin request-id into the auth.session.issued
+	// audit event Meta so forensic Query can join session-mint events
+	// to their originating HTTP request (Cerberus #1711 Stage F.B
+	// Phase 2.5 punch-list). Empty requestID is acceptable — the
+	// audit event simply omits the field.
+	IssueSessionTokenWithRequest(accountID, requestID string) core.Result
 }
 
 // ProvisionInput is the request body the frontend sends to

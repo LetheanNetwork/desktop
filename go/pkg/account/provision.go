@@ -183,7 +183,11 @@ func (s *Service) Provision(input ProvisionInput) core.Result {
 	// here leaves the account on disk in a valid state — the user
 	// can simply reload + unlock — but the response surfaces the
 	// distinct code so the UX can guide them to retry.
-	tokR := s.serverkey.IssueSessionToken(canonical)
+	// Thread input.RequestID through so the emitted
+	// auth.session.issued event carries the same join-key the
+	// auth.account.provisioned event uses (Cerberus #1711 Phase 2.5
+	// punch-list — request_id threading).
+	tokR := s.serverkey.IssueSessionTokenWithRequest(canonical, input.RequestID)
 	if !tokR.OK {
 		return core.Fail(core.NewCode(codeProvisionSessionMintFailed,
 			"account written but session-token mint failed: "+tokR.Error()))

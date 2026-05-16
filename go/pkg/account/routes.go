@@ -227,6 +227,14 @@ func (g *routesProvider) handleUnlock(c *gin.Context) {
 		return
 	}
 
+	// Cerberus #1711 Phase 2.5 — thread the gin request-id into the
+	// downstream auth.session.issued audit event. Request body's
+	// request_id (if supplied) takes precedence over the gin-injected
+	// header so an idempotency-key style caller controls the join-key.
+	if input.RequestID == "" {
+		input.RequestID = c.GetHeader("X-Request-Id")
+	}
+
 	r := g.svc.Unlock(input)
 	if r.OK {
 		out, _ := r.Value.(UnlockOutput)

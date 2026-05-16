@@ -254,6 +254,28 @@ func (s *Service) VerifyBootstrapToken(token, wantScope string) core.Result {
 //	    _ = out.Token  // LTHN-SESS-1.…
 //	}
 func (s *Service) IssueSessionToken(accountID string) core.Result {
+	return s.IssueSessionTokenWithRequest(accountID, "")
+}
+
+// IssueSessionTokenWithRequest mints a session token AND threads the
+// originating gin request-id through to the emitted auth.session.issued
+// audit event so a forensic Query can JOIN session-mint events to
+// their HTTP request via the same key.
+//
+// Cerberus #1711 Stage F.B Phase 2.5 punch-list — request_id threading.
+// Added as a separate method (rather than widening the original
+// signature) to keep IssueSessionToken's call-site shape stable for
+// existing non-HTTP callers + tests. The unlock / provision paths
+// upgrade to the new method; CLI + test callers stay on the original.
+//
+// Empty requestID is acceptable — the audit event simply doesn't
+// carry a request_id field.
+//
+// Usage example:
+//
+//	r := svc.IssueSessionTokenWithRequest("abc123def4567890", c.GetString("RequestID"))
+//	if r.OK { out := r.Value.(SessionTokenOutput); _ = out.Token }
+func (s *Service) IssueSessionTokenWithRequest(accountID, requestID string) core.Result {
 	if accountID == "" {
 		return core.Fail(core.NewCode("auth.session.account_id",
 			"account_id is required to mint a session token"))
@@ -323,6 +345,7 @@ func (s *Service) IssueSessionToken(accountID string) core.Result {
 		Exp:       exp,
 		Scope:     scopeSession,
 		Outcome:   audit.OutcomeOK,
+		RequestID: requestID,
 	})
 
 	token := sessionTokenPrefix + core.Base64URLEncode(canon) + "." + core.Base64URLEncode(sig)

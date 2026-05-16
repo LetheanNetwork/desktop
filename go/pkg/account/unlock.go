@@ -211,7 +211,13 @@ func (s *Service) Unlock(input UnlockInput) core.Result {
 	s.mu.Unlock()
 
 	// Mint the session token. Verifier is wired at construction.
-	tokR := s.serverkey.IssueSessionToken(input.AccountID)
+	// Threads input.RequestID into the auth.session.issued audit
+	// event so a forensic Query can join the mint event back to
+	// the originating HTTP request (Cerberus #1711 Phase 2.5
+	// punch-list). Empty RequestID is acceptable for non-HTTP
+	// callers (CLI / tests) — the audit event simply omits the
+	// request_id field.
+	tokR := s.serverkey.IssueSessionTokenWithRequest(input.AccountID, input.RequestID)
 	if !tokR.OK {
 		// Mint failure is a server-internal error — surface as a
 		// 500-shaped code so the route mapping in statusForCode

@@ -87,6 +87,15 @@ func (a *fakeSessionTokenIssuerAdapter) IssueSessionToken(accountID string) core
 	})
 }
 
+// IssueSessionTokenWithRequest satisfies the Phase 2.5 addition to
+// SessionTokenIssuer. Threads through to the bare IssueSessionToken
+// (no audit-event emission from the fake) — the request_id field
+// is consumed but not surfaced because the fake doesn't fire the
+// audit recorder.
+func (a *fakeSessionTokenIssuerAdapter) IssueSessionTokenWithRequest(accountID, _ string) core.Result {
+	return a.IssueSessionToken(accountID)
+}
+
 // --- Unlock — Good ---
 
 func TestAccount_Unlock_Good(t *core.T) {
