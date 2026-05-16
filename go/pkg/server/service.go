@@ -37,6 +37,7 @@ import (
 
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
+	"dappco.re/lthn/desktop/pkg/serverkey"
 	"github.com/gin-gonic/gin"
 )
 
@@ -163,6 +164,41 @@ type Options struct {
 	// Path 3 reach reduction depends on the default filter being
 	// active.
 	DisableDefaultWebViewOnly bool
+
+	// ServerKey is the bootstrap-token verifier produced by
+	// pkg/serverkey.Service. When non-nil, NewService installs the
+	// combined bootstrap-plus-bearer middleware (WithBootstrapAuth)
+	// instead of the standalone bearer middleware, gating the paths
+	// in BootstrapPathScopes with verifier.VerifyBootstrapToken. When
+	// nil, the bearer-only middleware is installed (pre-Stage-B
+	// behaviour) and any /v1/account/create request 401s on the
+	// missing bootstrap header.
+	//
+	// Stage B' (Mantis #1474 successor) wires this from cmd/lthn/app.go
+	// via core.ServiceFor[*serverkey.Service](c, "serverkey") so the
+	// same verifier the Wails surface uses (ServerKey.IssueBootstrapToken)
+	// is the one the HTTP middleware accepts tokens against.
+	ServerKey serverkey.Verifier
+}
+
+// BootstrapPathScopes names every HTTP path the bootstrap-auth
+// middleware gates, mapped to its required token scope. Adding an
+// entry here is a security-policy decision per Cerberus #1467 —
+// each path is bound to exactly one scope, so a token minted for
+// scope X cannot satisfy a different path's scope, even if both
+// paths are in the allowlist. New entries REQUIRE a new Mantis
+// ticket + new Cerberus DREAD review.
+//
+// Today's single entry: /v1/account/create requires a token minted
+// with scope=account.create. pkg/account.APIBasePath + "/create"
+// is the canonical path and MUST match this map's key verbatim.
+//
+// Usage example (inside NewService):
+//
+//	apiOpts = append(apiOpts,
+//	    WithBootstrapAuth(opts.ServerKey, opts.LocalKey, BootstrapPathScopes))
+var BootstrapPathScopes = map[string]string{
+	"/v1/account/create": "account.create",
 }
 
 // RoutesProvider is the contract a Core-registered service implements to
@@ -269,7 +305,19 @@ func NewService(opts Options) *Service {
 	// Authorization: Bearer on every same-origin API request. Without
 	// this, every local process can reach every API endpoint without
 	// authentication.
-	if opts.LocalKey != "" {
+	//
+	// Stage B' wiring (Mantis #1474 successor): when ServerKey is
+	// supplied, the combined bootstrap-plus-bearer middleware replaces
+	// the standalone bearer — the same chain entry handles both auth
+	// schemes so /v1/account/create can be gated by a bootstrap-token
+	// while every other route keeps its normal bearer requirement.
+	// When ServerKey is nil, fall back to plain bearer auth (pre-
+	// Stage-B behaviour) so non-desktop callers (CLI, tests) still
+	// authenticate correctly.
+	if opts.ServerKey != nil {
+		apiOpts = append(apiOpts,
+			WithBootstrapAuth(opts.ServerKey, opts.LocalKey, BootstrapPathScopes))
+	} else if opts.LocalKey != "" {
 		apiOpts = append(apiOpts, coreapi.WithBearerAuth(opts.LocalKey))
 	}
 	if opts.SPAHandler != nil {
