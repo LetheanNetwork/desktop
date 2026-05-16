@@ -27,6 +27,48 @@ interface IssueRow {
 
 type SidebarFilter = "all" | "mine" | "mentions" | "closed";
 
+/** Wails-shaped Issue from pkg/tasks — partial type matching the
+ *  fields the binding emits. Optional because regen drift shouldn't
+ *  blow up the mapper. */
+interface BackendIssue {
+  ID?:       string;
+  Project?:  string;
+  Summary?:  string;
+  State?:    string;
+  Severity?: string;
+  Priority?: string;
+}
+
+/** Map a backend Issue into the view's IssueRow shape.
+ *  - n: deterministic short-hash → small int. Replace when issues
+ *    grow native numeric IDs (Mantis schema gap).
+ *  - repo: Issue.Project. Until per-issue repo metadata lands the
+ *    project IS the repo for routing purposes.
+ *  - labels: derived from Severity + Priority for visual cues
+ *    until tag/label fields ship on the schema.
+ *  - age: empty for now (Issue lacks created/updated timestamps in
+ *    the v1 surface). Refine when schema extends.
+ *  - assignee: null — Assignee field exists in api.go but not in
+ *    the Wails List output v1; will populate once the binding
+ *    surfaces it. */
+function mapBackendIssue(it: BackendIssue): IssueRow {
+  const idHash = (it.ID ?? "0").slice(0, 4);
+  const n = parseInt(idHash, 16) % 9999;
+  const labels: string[] = [];
+  const sev = (it.Severity ?? "").toLowerCase();
+  const prio = (it.Priority ?? "").toLowerCase();
+  if (sev === "block" || sev === "crash" || sev === "major") labels.push("bug");
+  if (prio === "urgent" || prio === "immediate") labels.push("urgent");
+  return {
+    n,
+    title:    it.Summary ?? "(untitled)",
+    repo:     it.Project ?? "—",
+    labels,
+    age:      "",
+    assignee: null,
+  };
+}
+
 /** Label → CSS colour. Kept local so the element needs no shared util. */
 function labelColour(label: string): string {
   const map: Record<string, string> = {
@@ -58,6 +100,8 @@ class LthnViewIssues extends LitElement {
   declare sideFilter: SidebarFilter;
   declare labelFilter: string | null;
   declare issues: IssueRow[];
+  private _loading = false;
+  private _timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
@@ -76,6 +120,39 @@ class LthnViewIssues extends LitElement {
   }
 
   createRenderRoot() { return this; }
+
+  async connectedCallback() {
+    super.connectedCallback();
+    await this._loadFromBackend();
+    this._timer = setInterval(() => { void this._loadFromBackend(); }, 60_000);
+  }
+
+  disconnectedCallback() {
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    super.disconnectedCallback();
+  }
+
+  async _loadFromBackend(): Promise<void> {
+    if (this._loading) return;
+    this._loading = true;
+    try {
+      const svc = await import("@desktop/tasks/service").catch(() => null);
+      if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
+        return;
+      }
+      const r = await (svc as {
+        List: (input: { state: string; limit: number }) => Promise<{ Value?: { issues?: BackendIssue[] } }>
+      }).List({ state: "open", limit: 50 });
+      const rows = r?.Value?.issues;
+      if (rows && rows.length > 0) {
+        this.issues = rows.map(mapBackendIssue);
+      }
+    } catch {
+      // Backend unavailable — fixture stays.
+    } finally {
+      this._loading = false;
+    }
+  }
 
   /** Issues visible after applying the active sidebar + label filter. */
   _visible(): IssueRow[] {

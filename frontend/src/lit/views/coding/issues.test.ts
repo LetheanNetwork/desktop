@@ -1,8 +1,15 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window-fixture";
+
+vi.mock("@desktop/tasks/service", () => ({
+  List: vi.fn(),
+}));
+
+import { List as TasksList } from "@desktop/tasks/service";
+
 import "./issues";
 
 interface IssuesTestElement extends LitElement {
@@ -106,5 +113,45 @@ describe("lthn-view-issues — empty state", () => {
     el.sideFilter = "mine"; // assignee !== "you" → empty
     await el.updateComplete;
     expect(host.textContent ?? "").toContain("No issues match");
+  });
+});
+
+describe("lthn-view-issues — backend wire", () => {
+  it("replaces fixtures with backend rows when tasks.List returns issues", async () => {
+    (TasksList as unknown as { mockReset: () => void }).mockReset();
+    (TasksList as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: { issues: [
+        { ID: "a1b2c3", Project: "lthn", Summary: "Stage B: ship serverkey package", State: "open", Severity: "major", Priority: "urgent" },
+        { ID: "d4e5f6", Project: "core", Summary: "AX sweep CoreGO export gaps", State: "open", Severity: "minor", Priority: "normal" },
+      ] },
+    });
+    const { el } = await mountWindow<IssuesTestElement>("lthn-view-issues");
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.issues.length).toBe(2);
+    expect(el.issues[0].title).toBe("Stage B: ship serverkey package");
+    expect(el.issues[0].repo).toBe("lthn");
+    expect(el.issues[0].labels).toContain("bug");    // Severity major → bug
+    expect(el.issues[0].labels).toContain("urgent"); // Priority urgent → urgent
+  });
+
+  it("keeps fixtures when backend rejects", async () => {
+    (TasksList as unknown as { mockReset: () => void }).mockReset();
+    (TasksList as unknown as { mockRejectedValue: (v: unknown) => void }).mockRejectedValue(new Error("no binding"));
+    const { el } = await mountWindow<IssuesTestElement>("lthn-view-issues");
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.issues.length).toBe(6); // original fixture count
+  });
+
+  it("keeps fixtures when backend returns empty", async () => {
+    (TasksList as unknown as { mockReset: () => void }).mockReset();
+    (TasksList as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: { issues: [] },
+    });
+    const { el } = await mountWindow<IssuesTestElement>("lthn-view-issues");
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.issues.length).toBe(6); // fixture preserved
   });
 });
