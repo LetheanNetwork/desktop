@@ -15,6 +15,22 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../../chrome";
+import {
+  CONFLICT_RELOAD_EVENT,
+  type ConflictDetail,
+} from "../../conflict-dispatch";
+
+/** Service identifier the shared <lthn-conflict-toast> filters its
+ *  reload signal by. Matches the Go-side wrapped conflict code
+ *  ("incidents.update.conflict") that pkg/incidents.writeRecord
+ *  emits via paths.NewConflictEnvelope on optimistic-lock loss
+ *  (Cascade W3, RFC §B.3 row 8). Today only the listener side is
+ *  load-bearing — incidents.ts has no in-view write call-site
+ *  (Create / UpdateState / AddPostmortem are invoked from elsewhere).
+ *  When an in-view Edit UI lands it MUST call
+ *  handleStaleVersionConflict(result, INCIDENTS_SERVICE) on its
+ *  update path. */
+const INCIDENTS_SERVICE = "incidents.update";
 
 interface IncidentEntry {
   ts:        string;
@@ -63,8 +79,19 @@ class LthnViewIncidents extends LitElement {
   }
   createRenderRoot() { return this; }
 
+  /** Cascade W3 (RFC §B.3 row 8) — listener for CONFLICT_RELOAD_EVENT
+   *  dispatched by the shared <lthn-conflict-toast>. Scope-filter on
+   *  INCIDENTS_SERVICE so sibling views' reload signals don't trigger
+   *  our refetch. */
+  private _onConflictReload = (e: Event) => {
+    const ce = e as CustomEvent<ConflictDetail>;
+    if (ce.detail?.service !== INCIDENTS_SERVICE) return;
+    void this._loadFromBackend();
+  };
+
   async connectedCallback() {
     super.connectedCallback();
+    window.addEventListener(CONFLICT_RELOAD_EVENT, this._onConflictReload);
     await this._loadFromBackend();
     // Re-poll every 60 s — incidents change infrequently; no need to hammer.
     this._timer = setInterval(() => { void this._loadFromBackend(); }, 60_000);
@@ -72,6 +99,7 @@ class LthnViewIncidents extends LitElement {
 
   disconnectedCallback() {
     if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    window.removeEventListener(CONFLICT_RELOAD_EVENT, this._onConflictReload);
     super.disconnectedCallback();
   }
 

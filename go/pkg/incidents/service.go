@@ -347,23 +347,65 @@ func loadOne(id string) (IncidentRecord, string, error) {
 	return IncidentRecord{}, "", core.E("incidents.loadOne", "incident not found: "+id, nil)
 }
 
-// writeRecord serialises a record back to disk. dirPath must be the
-// directory that already contains the file.
+// writeRecord serialises a record back to disk and writes it via
+// paths.AtomicWriteWithVersion (Cascade W3, RFC §B.3 row 8).
+//
+// ifVersion is the optimistic-lock anchor — pass the Version the
+// caller observed on disk (via parseRecord through loadOne), or 0 for
+// first-writes / legacy-file upgrades. writeRecord stamps the next
+// monotonic version (ifVersion+1) into the marshalled frontmatter so
+// subsequent reads see version=1,2,3... monotonically.
+//
 // Cerberus #1486: rec.ID lands in the filename — validate before join.
-// Cerberus #1487 PR-1: 0o600 — owner-only at rest.
-func writeRecord(r IncidentRecord, dirPath string) error {
+// Cerberus #1487 PR-1: 0o600 — owner-only at rest (applied by the
+// primitive's atomic-rename path).
+//
+// Return shape (Mantis #1544 gating, inherited from W1+W2): on the
+// stale-write path the function returns
+// core.Fail(paths.ConflictEnvelope{...}) so the Wails-marshalled
+// Result.Value carries the lowercase-json shape
+// (`{code, current_version, current_hash}`) that
+// conflict-dispatch.ts extractEnvelope pattern-matches on. The
+// per-service Code is "incidents.update.conflict" — the frontend
+// scopes its toast + reload-listener on this exact string.
+//
+// Audit emission is automatic via paths.AuditModeForPath —
+// incidents/* paths route through AuditModeBatch per RFC §6.1.
+//
+// Usage example:
+//
+//	if wr := writeRecord(rec, dirPath, prior.Version); !wr.OK {
+//	    return wr
+//	}
+func writeRecord(r IncidentRecord, dirPath string, ifVersion int) core.Result {
 	if err := paths.IsValidID(r.ID); err != nil {
-		return err
+		return core.Fail(err)
 	}
+	// Stamp the next monotonic version. ifVersion=0 (Create / legacy
+	// upgrade) yields version=1; subsequent writes increment.
+	nextVersion := ifVersion + 1
+	if nextVersion < 1 {
+		nextVersion = 1
+	}
+	r.Version = nextVersion
 	raw, err := marshalRecord(r)
 	if err != nil {
-		return err
+		return core.Fail(core.E("incidents.writeRecord", "marshal", err))
 	}
 	target := core.PathJoin(dirPath, r.ID+".md")
-	if w := core.WriteFile(target, raw, 0o600); !w.OK {
-		return core.E("incidents.writeRecord", w.Error(), nil)
+	res := paths.AtomicWriteWithVersion(target, paths.WriteInput{
+		Body:      raw,
+		IfVersion: ifVersion,
+	})
+	if res.OK {
+		return res
 	}
-	return nil
+	if stale, ok := paths.VersionStaleFromError(res.Value); ok {
+		return core.Fail(paths.NewConflictEnvelope(
+			"incidents.update.conflict", stale))
+	}
+	return core.Fail(core.E("incidents.writeRecord",
+		"write failed: "+res.Error(), nil))
 }
 
 // countMonthFiles returns the number of .md files in a month directory.

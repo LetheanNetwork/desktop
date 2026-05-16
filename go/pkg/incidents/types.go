@@ -105,6 +105,18 @@ type IncidentRecord struct {
 	// PostMortem is the markdown body below the frontmatter delimiter.
 	// Populated on Get(); empty during List() scans for performance.
 	PostMortem string `yaml:"-"`
+
+	// Version is the monotonic optimistic-lock version (Cascade W3,
+	// RFC §B.3 row 8). Stamped by writeRecord via
+	// paths.AtomicWriteWithVersion; 0 on legacy files predating the
+	// cutover, >=1 after first write through the primitive.
+	// omitempty so legacy files round-trip cleanly as Version=0; the
+	// first write stamps version=1.
+	//
+	// IncidentRecord is the persistence type (yaml-only) — Version
+	// stays inside the package; the IncidentEntry wire type consumed
+	// by the Lit frontend has no Version field by design.
+	Version int `yaml:"version,omitempty"`
 }
 
 // IncidentDetail extends IncidentEntry with the full post-mortem body.
