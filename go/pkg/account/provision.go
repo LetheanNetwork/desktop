@@ -6,6 +6,7 @@ import (
 	"crypto"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/serverkey"
 	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
@@ -38,8 +39,14 @@ import (
 //   - request_id 5-minute idempotency dedup (Q5)
 //   - Null-byte rejection (LOW)
 //   - Strength meter / weak / common code surface
-//   - auth.account.provisioned + auth.session.issued typed events
-//     (Stage F wiring lands separately)
+//
+// Stage F.B Phase 1 wiring landed:
+//
+//   - auth.account.provisioned typed event via pkg/audit.Default (this
+//     file, post-mint emit below)
+//   - auth.session.issued typed event via pkg/serverkey/token.go cross-
+//     cut (commit 50678bb) — fires from the IssueSessionToken call
+//     below, NOT duplicated at the Provision site.
 //
 // Usage example:
 //
@@ -186,6 +193,32 @@ func (s *Service) Provision(input ProvisionInput) core.Result {
 		return core.Fail(core.NewCode(codeProvisionSessionMintFailed,
 			"session-token issuer returned an empty token"))
 	}
+
+	// Stage F.B Phase 1 — emit auth.account.provisioned per
+	// RFC.stage-x.md §3 step 11 Q2 ruling. The sibling auth.session.issued
+	// event ALSO fires for this provision — but it fires from
+	// serverkey.IssueSessionToken (commit 50678bb cross-cut), NOT here.
+	// Emitting it from Provision too would land a duplicate line for the
+	// same logical session-mint event, polluting the audit-tail's pivot
+	// counts. The forensic record still shows BOTH events because the
+	// serverkey emission lands first (during the tokR call above) and
+	// the provisioned emission lands here — they share the same
+	// account_id + adjacent timestamps so a future Query for "what
+	// happened during this account creation" sees the pair atomically.
+	//
+	// Recorder write failure ignored — audit failures MUST NEVER block
+	// the auth path, especially not the just-succeeded provision.
+	_ = audit.Default().Record(audit.Event{
+		Event:     audit.EventAuthAccountProvisioned,
+		AccountID: canonical,
+		TS:        core.Now().UTC().Unix(),
+		Scope:     "account.create",
+		Outcome:   audit.OutcomeOK,
+		RequestID: input.RequestID,
+		Meta: map[string]any{
+			"path": dir,
+		},
+	})
 
 	return core.Ok(ProvisionOutput{
 		AccountID:    canonical,
