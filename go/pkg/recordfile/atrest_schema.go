@@ -279,7 +279,7 @@ func ValidateString(v any) error {
 //
 //	bucket := recordfile.MonthBucket(1747440000)  // → "2026-05"
 func MonthBucket(unixSeconds int64) string {
-	t := core.Unix(unixSeconds, 0).UTC()
+	t := core.UnixTime(unixSeconds).UTC()
 	return core.Sprintf("%04d-%02d", t.Year(), int(t.Month()))
 }
 
