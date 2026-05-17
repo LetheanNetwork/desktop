@@ -47,11 +47,12 @@ func TestPipeline_UpdateYAMLField_FrontmatterStampWorks_Good(t *testing.T) {
 // the frontmatter and MUST leave a body line literally starting
 // "version: " untouched (Mantis #1545 — primary harm: optimistic-lock
 // permanently bypassed when setVersionField returns without
-// stamping).
+// stamping). Insertion goes at the frontmatter tail (Mantis #1550 —
+// preserves the author's field ordering on legacy-file upgrade).
 func TestPipeline_SetVersionField_BodyVersionStringPreserved_Ugly(t *testing.T) {
 	raw := []byte("---\nid: legacy\nstage: engage\n---\n## notes\n\nversion: 1.2.3 of the contract\n")
 	out := setVersionField(raw, 7)
-	want := "---\nversion: 7\nid: legacy\nstage: engage\n---\n## notes\n\nversion: 1.2.3 of the contract\n"
+	want := "---\nid: legacy\nstage: engage\nversion: 7\n---\n## notes\n\nversion: 1.2.3 of the contract\n"
 	if string(out) != want {
 		t.Fatalf("setVersionField outcome wrong:\nwant: %q\ngot:  %q", want, out)
 	}
@@ -124,5 +125,31 @@ func TestPipeline_SetVersionField_UpdatesIndentedInPlace_Good(t *testing.T) {
 	want := "---\nid: deal-1\n  version: 6\nstage: engage\n---\nbody\n"
 	if string(out) != want {
 		t.Fatalf("indented in-place update wrong:\nwant: %q\ngot:  %q", want, out)
+	}
+}
+
+// TestPipeline_SetVersionField_PreservesOrder_Good — when inserting
+// a fresh version field into a legacy file with no prior version,
+// the new line lands immediately BEFORE the closing "---" so that
+// the author's existing field ordering (title, tags, ...) survives
+// the upgrade. Top-of-frontmatter insertion would reorder
+// Snider-ordered fields on every legacy stamp (Mantis #1550).
+func TestPipeline_SetVersionField_PreservesOrder_Good(t *testing.T) {
+	raw := []byte("---\ntitle: foo\ntags: [bar]\n---\nbody\n")
+	out := setVersionField(raw, 1)
+	want := "---\ntitle: foo\ntags: [bar]\nversion: 1\n---\nbody\n"
+	if string(out) != want {
+		t.Fatalf("frontmatter ordering not preserved:\nwant: %q\ngot:  %q", want, out)
+	}
+}
+
+// TestPipeline_SetVersionField_NoCloser_Ugly — without a closing
+// "---" line, setVersionField returns the file unchanged (matches
+// updateYAMLField's refuse-to-guess discipline).
+func TestPipeline_SetVersionField_NoCloser_Ugly(t *testing.T) {
+	raw := []byte("---\nid: x\ntitle: foo\n")
+	out := setVersionField(raw, 1)
+	if string(out) != string(raw) {
+		t.Fatalf("unclosed frontmatter modified by setVersionField:\nwant: %q\ngot:  %q", raw, out)
 	}
 }

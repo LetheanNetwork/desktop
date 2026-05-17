@@ -276,9 +276,15 @@ func setVersionField(raw []byte, v int) []byte {
 	if hasVersionInFrontmatter(raw) {
 		return updateYAMLField(raw, "version", valueStr)
 	}
-	// No version field in frontmatter — insert one after the opening
-	// "---\n". Refuse to touch raw if it lacks a frontmatter opener
-	// (matches updateYAMLField's "no opener → unchanged" discipline).
+	// No version field in frontmatter — insert one immediately BEFORE
+	// the closing "---" line (Mantis #1550). Inserting at the top
+	// would reorder Snider-ordered frontmatter on every legacy-file
+	// upgrade (cosmetic but persistent churn). Tail-insert preserves
+	// the author's field ordering.
+	//
+	// Refuse to touch raw if it lacks a frontmatter opener OR a
+	// closing "---" line (matches updateYAMLField's boundary
+	// discipline — never guess the frontmatter boundary).
 	open := []byte("---\n")
 	if len(raw) < len(open) {
 		return raw
@@ -288,12 +294,24 @@ func setVersionField(raw []byte, v int) []byte {
 			return raw
 		}
 	}
-	line := "version: " + valueStr
-	ins := make([]byte, 0, len(raw)+len(line)+1)
-	ins = append(ins, open...)
+	fmStart := len(open)
+	closeIdx := -1
+	for i := fmStart; i+2 < len(raw); i++ {
+		if raw[i] == '-' && raw[i+1] == '-' && raw[i+2] == '-' {
+			if i == fmStart || raw[i-1] == '\n' {
+				closeIdx = i
+				break
+			}
+		}
+	}
+	if closeIdx < 0 {
+		return raw
+	}
+	line := "version: " + valueStr + "\n"
+	ins := make([]byte, 0, len(raw)+len(line))
+	ins = append(ins, raw[:closeIdx]...)
 	ins = append(ins, []byte(line)...)
-	ins = append(ins, '\n')
-	ins = append(ins, raw[len(open):]...)
+	ins = append(ins, raw[closeIdx:]...)
 	return ins
 }
 
