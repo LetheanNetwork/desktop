@@ -313,6 +313,37 @@ func newAppCore() *core.Core {
 		core.WithName("update", lthnupdate.Register),
 	)
 
+	// Mantis #1522 — audit.Default() init promoted ahead of
+	// c.ServiceStartup so the noop recorder window (between
+	// audit's package-level lazy default and the explicit boot wire)
+	// can't swallow events fired from service OnStart hooks. Today
+	// no registered OnStart emits audit (grep-verified), but Stage X.B
+	// Phase 2c moves serverkey.AccountStatus / account.Provision boot
+	// probes earlier in the lifecycle — first-boot setup-flow events
+	// from those probes would otherwise land in the noopRecorder.
+	//
+	// Constructed with Options{} so AuditSecret defaults to a
+	// process-local random fallback. The "non-persistent" warning
+	// fires at New-time per the audit.New contract. Once serverkey
+	// .Bootstrap lands ~/Lethean/wallets/.seed below, we swap to the
+	// serverkey-derived HMAC via auditSvc.SetSecret so account_id
+	// hashing for the rest of the process matches the canonical
+	// HKDF derivation (RFC.stage-f.md §6.4). Events emitted between
+	// here and SetSecret carry account_id hashed under the random
+	// fallback — they survive the process for queries within this
+	// session but won't cross-correlate to events from later runs,
+	// which is the same posture audit.New documents for Options{}
+	// users generally.
+	//
+	// RegisterService wires the Service into the core's IPC discovery
+	// path so pkg/server's RoutesProvider auto-discovery picks up the
+	// GET /v1/audit/events surface from pkg/audit's RouteGroups().
+	auditSvc := audit.New(c, audit.Options{})
+	audit.SetDefault(auditSvc)
+	if r := c.RegisterService("audit", auditSvc); !r.OK {
+		core.Print(core.Stderr(), "lthn: audit RegisterService failed: %s\n", r.Error())
+	}
+
 	if r := c.ServiceStartup(core.Background(), nil); !r.OK {
 		core.Print(core.Stderr(), "lthn: startup failed: %s\n", r.Error())
 		return nil
@@ -345,29 +376,22 @@ func newAppCore() *core.Core {
 			accountSvc.SetServerKey(serverkeySvc)
 		}
 
-		// Stage F.B Phase 2 boot wiring (Mantis #1509) — construct
-		// pkg/audit with the serverkey-derived HMAC secret so the
-		// at-rest account_id hashing (RFC.stage-f.md §6.4) survives
-		// process restarts. Registers POST-Bootstrap because
-		// AuditHMACSecret reads ~/Lethean/wallets/.seed which only
-		// exists after serverkey.Bootstrap landed it. Uses the
-		// explicit audit.New + SetDefault + c.RegisterService path
-		// (rather than core.WithName("audit", audit.Register)) so the
-		// Options{} fallback warning — "process-local random fallback;
-		// account_id-keyed Query results will NOT survive a process
-		// restart" — never fires for the lthn primary binary.
+		// Stage F.B Phase 2 boot wiring (Mantis #1509, refined by
+		// Mantis #1522) — swap the audit Service's HMAC secret to the
+		// serverkey-derived value so the at-rest account_id hashing
+		// (RFC.stage-f.md §6.4) survives process restarts. The Service
+		// itself was constructed pre-ServiceStartup above so the
+		// noopRecorder window can't swallow OnStart-emitted events
+		// (Mantis #1522 LOW). Calling SetSecret here (rather than
+		// reconstructing the Service) preserves the live day-file
+		// handle + rotation goroutine + already-landed events.
 		//
-		// audit.Register stays usable by tests / sub-binaries (lthn-mlx
-		// future work per RFC §6.5) that don't have a serverkey wired;
-		// the lthn primary binary always takes the explicit boot path.
-		// Registered via c.RegisterService so server.NewService's
-		// RoutesProvider auto-discovery (server.go:480) picks up the
-		// GET /v1/audit/events surface from pkg/audit's RouteGroups().
-		auditSvc := audit.New(c, audit.Options{AuditSecret: serverkeySvc.AuditHMACSecret()})
-		audit.SetDefault(auditSvc)
-		if r := c.RegisterService("audit", auditSvc); !r.OK {
-			core.Print(core.Stderr(), "lthn: audit RegisterService failed: %s\n", r.Error())
-		}
+		// AuditHMACSecret reads ~/Lethean/wallets/.seed which only
+		// exists after serverkey.Bootstrap landed it; calling SetSecret
+		// from outside the serverkeySvc != nil branch would deadlock on
+		// .seed-not-yet-written. Inside this branch we know Bootstrap
+		// returned OK so the secret is available.
+		auditSvc.SetSecret(serverkeySvc.AuditHMACSecret())
 
 		// Stage F.B paths-audit wire (Mantis #1521) — the H#4 atomic-
 		// write substrate (pkg/paths/events.go) fires LockEvents on

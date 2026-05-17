@@ -63,7 +63,11 @@ type Service struct {
 	// secret is the resolved HMAC key for §6.4 account_id hashing.
 	// Either Options.AuditSecret verbatim OR a process-local random
 	// fallback (with the "non-persistent" warning logged at New-time).
-	secret []byte
+	// Guarded by secretMu so SetSecret (Mantis #1522 boot-order fix) can
+	// swap the random fallback for the serverkey-derived HMAC after
+	// serverkey.Bootstrap lands ~/Lethean/wallets/.seed.
+	secret   []byte
+	secretMu core.RWMutex
 
 	// noopCounter increments per dropped event when the active sink
 	// is a noopRecorder (i.e. root resolution failed). Re-emits a
@@ -158,6 +162,38 @@ func New(c *core.Core, in Options) *Service {
 	return s
 }
 
+// SetSecret swaps the HMAC secret used for §6.4 account_id hashing.
+// Designed for the Mantis #1522 boot-order fix: cmd/lthn/app.go
+// constructs the audit Service immediately after core.New (with
+// Options{} → process-local random fallback) so events from earliest
+// service OnStart hooks land in the file sink rather than the
+// noopRecorder. Once serverkey.Bootstrap lands ~/Lethean/wallets/.seed,
+// the boot wire calls SetSecret(serverkeySvc.AuditHMACSecret()) so the
+// at-rest account_id hashing matches the canonical HKDF derivation for
+// the rest of the process lifetime.
+//
+// Passing an empty []byte is a no-op — the existing secret stays in
+// place (callers MUST NOT use SetSecret to clear the secret; that would
+// regress to the random-fallback warning state without the warning).
+//
+// Safe for concurrent use against in-flight Record calls — the secret
+// is snapshotted under secretMu.RLock at the start of every recordCommon.
+//
+// Usage example (boot wire):
+//
+//	auditSvc := audit.New(c, audit.Options{}) // random fallback secret
+//	audit.SetDefault(auditSvc)
+//	// ... serverkey.Bootstrap runs ...
+//	auditSvc.SetSecret(serverkeySvc.AuditHMACSecret())
+func (s *Service) SetSecret(secret []byte) {
+	if len(secret) == 0 {
+		return
+	}
+	s.secretMu.Lock()
+	s.secret = secret
+	s.secretMu.Unlock()
+}
+
 // Record satisfies Recorder. Routes auth.* events through the sync
 // path; everything else takes the batched cascade path. The sync/batch
 // split mirrors RFC §4.2 — auth volume is sparse + load-bearing for
@@ -243,9 +279,15 @@ func (s *Service) recordCommon(ev Event, sync bool) core.Result {
 
 	// Hash account_id under the HMAC secret BEFORE any field walk so
 	// downstream paths (redaction, serialisation, query) all see the
-	// hashed form on disk (RFC §6.4).
+	// hashed form on disk (RFC §6.4). Snapshot the secret under
+	// secretMu so a concurrent SetSecret (boot-order swap from random
+	// fallback to serverkey-derived HMAC, Mantis #1522) sees a stable
+	// value for this event.
 	if ev.AccountID != "" {
-		ev.AccountID = hashAccountID(s.secret, ev.AccountID)
+		s.secretMu.RLock()
+		secret := s.secret
+		s.secretMu.RUnlock()
+		ev.AccountID = hashAccountID(secret, ev.AccountID)
 	}
 
 	// §2.1.1 secret-shape detector + RFC §6.5 newline guard run in
