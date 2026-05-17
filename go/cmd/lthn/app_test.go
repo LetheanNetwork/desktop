@@ -33,8 +33,12 @@ import (
 	"testing"
 
 	core "dappco.re/go"
+	"dappco.re/go/config"
+
 	lthn "dappco.re/lthn/desktop"
 	"dappco.re/lthn/desktop/pkg/audit"
+	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/lthn/desktop/pkg/runner"
 )
 
 // TestApp_AuditSetSecret_Good_SwapsInPlaceForSubsequentRecord pins
@@ -384,4 +388,118 @@ func noopServiceFactory(_ *core.Core) core.Result {
 func TestApp_WailsBindingCatalogue_CountPinned_Good(t *testing.T) {
 	core.AssertEqual(t, 47, len(wailsBindingCatalogue),
 		"wailsBindingCatalogue length must equal 47 — drift gate: update catalogue + this pin together when intentionally adding/removing a Wails binding in pkg/desktop/desktop.go")
+}
+
+// TestApp_PostUnlock_TriggersMigrateLegacyKeys_Good pins the H#250 /
+// Mantis #1657 wire that cmd/lthn/app.go installs immediately after
+// SetKEKProvider inside the accountSvc-wire block: when the tier-1
+// KEK provider is live (post-unlock equivalent), a call to
+// runner.MigrateLegacyKeys(c) MUST drain any plaintext `api_key:`
+// route on disk into the tier-1 substrate and rewrite the config
+// with `api_key:` empty + `api_key_ref:` populated.
+//
+// The test mirrors the production wire shape (config + keys + runner
+// services on a real on-disk config file) rather than calling the
+// full newAppCore — newAppCore needs every registered service's
+// dependencies (paths.WalletsDir / serverkey.Bootstrap / .seed /
+// orm.DuckDB) which is more substrate than this one-line wire
+// warrants. The pin is on the symbol resolution + call shape: any
+// drift in runner.MigrateLegacyKeys's signature breaks this test
+// before it breaks the cmd/lthn binary build, and the wire-in-
+// app.go-after-SetKEKProvider invariant stays observable from the
+// cmd/lthn test surface.
+//
+// SECURITY-NOTE — the boot-time call in app.go is best-effort: at
+// cold boot no account is unlocked so the production wire returns
+// 0 and the boot-scan
+// EventProviderCredentialMigrationPendingObserved row carries the
+// deferred signal. A true post-unlock retry needs an unlock-event
+// subscription surface in pkg/account that doesn't exist today;
+// captured as a separate ticket per H#250 surfacing. This test
+// exercises the post-unlock equivalent (tier-1 KEK pre-wired) to
+// prove the wire's semantic when the unlock-hook surface lands.
+//
+// Usage example:
+//
+//	migrated := runner.MigrateLegacyKeys(c)
+//	core.AssertEqual(t, 1, migrated)
+func TestApp_PostUnlock_TriggersMigrateLegacyKeys_Good(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	cfgFile := core.PathJoin(tmp, "lthn.yaml")
+	core.AssertTrue(t,
+		core.WriteFile(cfgFile, []byte("routes: {}\n"), 0o644).OK,
+		"seed config file must succeed")
+
+	// Build the minimal Core the wire depends on: config + keys +
+	// runner. Mirrors credentialFixture in pkg/runner so the
+	// MigrateLegacyKeys call path matches the production wire
+	// exactly.
+	c := core.New(
+		core.WithName("config", config.NewConfigServiceWith(config.ServiceOptions{
+			Path:      cfgFile,
+			EnvPrefix: "LTHN_TEST_H250",
+		})),
+		core.WithName("keys", keys.Register),
+		core.WithName("runner", runner.Register),
+	)
+	core.RequireTrue(t, c.ServiceStartup(core.Background(), nil).OK,
+		"core ServiceStartup must succeed")
+	t.Cleanup(func() { _ = c.ServiceShutdown(core.Background()) })
+
+	// Wire the tier-0 + tier-1 KEK providers — the post-unlock
+	// equivalent the production wire installs at app.go line 498
+	// (SetKEKProvider). Deterministic 32-byte keys mirror
+	// credentialFixture.
+	keysSvc, _ := core.ServiceFor[*keys.Service](c, "keys")
+	core.RequireTrue(t, keysSvc != nil, "keys service must be registered")
+	keysSvc.SetKEKProviderTier0(func() ([]byte, bool) {
+		k := make([]byte, 32)
+		for i := range k {
+			k[i] = 0x42
+		}
+		return k, true
+	})
+	keysSvc.SetKEKProvider(func() ([]byte, bool) {
+		k := make([]byte, 32)
+		for i := range k {
+			k[i] = 0x77
+		}
+		return k, true
+	})
+	keysSvc.SetCore(c)
+
+	// Seed a plaintext route — the H#250 wire's load-bearing input.
+	cfgSvc, _ := core.ServiceFor[*config.Service](c, "config")
+	core.RequireTrue(t, cfgSvc != nil, "config service must be wired")
+	core.AssertTrue(t, cfgSvc.Set("routes", map[string]runner.RouteConfig{
+		"openai": {Kind: "openai", BaseURL: "x", APIKey: "sk-legacy", Model: "gpt"},
+	}).OK, "seeding plaintext route must succeed")
+	core.AssertTrue(t, cfgSvc.Commit().OK, "config commit must succeed")
+
+	// The wire call — the literal line app.go installs after
+	// SetKEKProvider. Any signature drift in runner.MigrateLegacyKeys
+	// trips here before it trips the cmd/lthn binary build.
+	migrated := runner.MigrateLegacyKeys(c)
+	core.AssertEqual(t, 1, migrated,
+		"post-unlock wire must drain one plaintext route into tier-1")
+
+	// Tier-1 substrate now holds the credential under the synthesised
+	// ref — proves the dispatch path landed, not just the call shape.
+	hasR := keysSvc.HasTier1("openai-migrated")
+	core.AssertTrue(t, hasR.OK,
+		"HasTier1 must succeed for the migrated ref")
+	core.AssertEqual(t, true, hasR.Value.(bool),
+		"tier-1 substrate must hold the migrated credential")
+
+	// Config no longer carries plaintext — round-trip proves the
+	// rewrite-and-commit path fired, not just the in-memory mutation.
+	var raw map[string]runner.RouteConfig
+	core.AssertTrue(t, cfgSvc.Get("routes", &raw).OK,
+		"routes Get must succeed post-migration")
+	rc := raw["openai"]
+	core.AssertEqual(t, "", rc.APIKey,
+		"plaintext must be stripped post-migration")
+	core.AssertEqual(t, "openai-migrated", rc.APIKeyRef,
+		"api_key_ref must point at the synthesised tier-1 ref")
 }

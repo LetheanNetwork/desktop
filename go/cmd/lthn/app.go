@@ -525,6 +525,33 @@ func newAppCore() *core.Core {
 					return kek, true
 				})
 			}
+
+			// Mantis #1657 / RFC.provider-creds-tier1.md §6 Option A —
+			// drain any deferred plaintext `api_key:` routes into the
+			// tier-1 substrate as soon as the KEK provider is wired.
+			// MigrateLegacyKeys is idempotent + best-effort: at cold
+			// boot no account is unlocked yet so the tier-1 PutTier1
+			// call short-circuits with no_tier1_provider and migrated
+			// returns 0 — the boot-scan
+			// EventProviderCredentialMigrationPendingObserved row from
+			// runner.ServiceStartup carries the deferred signal to
+			// observability while the latch waits for first unlock.
+			//
+			// SECURITY-NOTE — true post-unlock drain requires an
+			// unlock-event subscription surface in pkg/account that
+			// doesn't exist today (no OnUnlock hook, no event-bus
+			// broadcast from account.Service.Unlock). Until that lands
+			// the deferred plaintext stays on disk between cold boot
+			// and the next MigrateLegacyKeys trigger; calling at boot
+			// gives the foundational anchor + an idempotent retry
+			// shape for any caller that re-invokes after unlock.
+			// Surface as a separate ticket (account.Service unlock-
+			// hook surface) — keeping it out of this wire so the
+			// path allowlist stays clean.
+			if n := runner.MigrateLegacyKeys(c); n > 0 {
+				core.Print(core.Stdout(),
+					"lthn: migrated %d legacy provider credential(s) into tier-1\n", n)
+			}
 		}
 
 		// Stage F.B Phase 2 boot wiring (Mantis #1509, refined by
