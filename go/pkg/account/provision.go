@@ -218,7 +218,14 @@ func (s *Service) Provision(input ProvisionInput) core.Result {
 	// emission so an operator tailing stderr sees the same event-name
 	// the audit log carries. Same dual-emit shape used by the unlock /
 	// lockout / lock / session.issued / session.verify_failed paths.
+	//
+	// Meta carries path_hash (SHA-256 hex of the canonical account
+	// directory) — NEVER the raw path. Cerberus #1465 closure-only
+	// scope discipline applies to filesystem layout (username /
+	// install location) too. Mirrors Service.Create's emit-site shape
+	// verbatim per the parity-grep contract (commit 7feaa8b, #1574).
 	now := core.Now().UTC().Unix()
+	pathHash := core.SHA256HexString(dir)
 	core.Print(core.Stderr(),
 		"event=auth.account.provisioned account_id=%s ts=%d\n",
 		canonical, now)
@@ -230,7 +237,7 @@ func (s *Service) Provision(input ProvisionInput) core.Result {
 		Outcome:   audit.OutcomeOK,
 		RequestID: input.RequestID,
 		Meta: map[string]any{
-			"path": dir,
+			"path_hash": pathHash,
 		},
 	})
 

@@ -19,6 +19,7 @@ package account_test
 import (
 	core "dappco.re/go"
 	subject "dappco.re/lthn/desktop/pkg/account"
+	"dappco.re/lthn/desktop/pkg/audit"
 )
 
 // TestAccount_Provision_Good — happy round-trip. Provision returns
@@ -160,4 +161,43 @@ func TestProvision_NFKCCrossPlatformParity_Ugly(t *core.T) {
 	})
 	core.AssertTrue(t, unlockR.OK,
 		"NFC-typed passphrase MUST unlock account provisioned with NFD — cross-platform parity")
+}
+
+// TestProvision_EmitsAuditEvent_PathHashDiscipline_Good pins the
+// Mantis #1577 contract: the auth.account.provisioned emission at
+// provision.go:225 MUST carry Meta.path_hash (SHA-256 hex of the
+// canonical account directory) and MUST NOT carry the raw path bytes.
+// Mirrors the sibling Service.Create emit-site shape (commit 7feaa8b,
+// Mantis #1574) — Cerberus #1465 closure-only-scope discipline
+// applies to filesystem layout (username / install location) too.
+func TestProvision_EmitsAuditEvent_PathHashDiscipline_Good(t *core.T) {
+	home := homeFixture(t)
+	svc := newUnlockable(t, home)
+
+	rec := &recordingRecorder{}
+	audit.SetDefault(rec)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	r := svc.Provision(subject.ProvisionInput{
+		Passphrase: "correct horse battery staple",
+		RequestID:  "test-req-1577",
+	})
+	core.AssertTrue(t, r.OK, "Provision must succeed for the audit-emit assertion")
+
+	core.AssertEqual(t, 1, len(rec.events),
+		"Provision must emit exactly one audit event on success")
+	ev := rec.events[0]
+	core.AssertEqual(t, audit.EventAuthAccountProvisioned, ev.Event)
+	core.AssertEqual(t, audit.OutcomeOK, ev.Outcome)
+	core.AssertEqual(t, "account.create", ev.Scope)
+	core.AssertEqual(t, "test-req-1577", ev.RequestID)
+
+	// Meta MUST carry path_hash (SHA-256 hex string, 64 chars) and
+	// MUST NOT carry the raw path bytes — Mantis #1577 / Cerberus
+	// #1465 closure-only-scope discipline.
+	pathHash, ok := ev.Meta["path_hash"].(string)
+	core.AssertTrue(t, ok, "Meta.path_hash must be present as string")
+	core.AssertLen(t, pathHash, 64, "path_hash must be SHA-256 hex (64 chars)")
+	_, hasRawPath := ev.Meta["path"]
+	core.AssertFalse(t, hasRawPath, "Meta MUST NOT carry raw path (Cerberus #1465 discipline)")
 }
