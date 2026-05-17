@@ -166,7 +166,17 @@ func dispatch(c *core.Core, job Job) {
 		job.EnqueuerSubject,
 		job.EnqueuerSource,
 	)
-	result := action.Run(dispatchCtx, decodeOptions(job.Payload))
+	// Unseal Payload before dispatch (Mantis #1727 at-rest). Legacy
+	// plaintext values round-trip unchanged; sealed envelopes
+	// decrypt under the unlocked private key. A sealed-but-
+	// unreadable Payload (account locked, MAC tampered) fails the
+	// job closed rather than dispatching with ciphertext bytes.
+	plainPayload, ok := unsealPayload(c, job.Payload)
+	if !ok {
+		markFailed(c, job, "queue.worker: sealed payload unreadable (account locked or MAC invalid)", core.Now().UTC())
+		return
+	}
+	result := action.Run(dispatchCtx, decodeOptions(plainPayload))
 	if !result.OK {
 		markFailed(c, job, result.Error(), core.Now().UTC())
 		return

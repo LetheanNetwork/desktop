@@ -161,10 +161,18 @@ func EnqueueWithOptions(c *core.Core, kind string, opts EnqueueOptions) core.Res
 	if scheduled.IsZero() {
 		scheduled = now
 	}
+	// At-rest sealing (Mantis #1727) — Payload carries user-prompt
+	// strings (lint paths, agent dispatch text, runner instructions);
+	// seal under the unlocked account public key before persisting so
+	// a disk snapshot cannot leak the prompt. sealPayload returns
+	// (input, false) when sealing isn't possible — caller writes
+	// plaintext in that case so the operator flow survives the
+	// locked-account window without losing data.
+	sealedPayloadValue, _ := sealPayload(c, opts.Payload)
 	job := Job{
 		ID:           newJobID(),
 		Kind:         kind,
-		Payload:      opts.Payload,
+		Payload:      sealedPayloadValue,
 		Status:       StatusPending,
 		ScheduledFor: scheduled,
 		Project:      opts.Project,
@@ -182,12 +190,17 @@ func EnqueueWithOptions(c *core.Core, kind string, opts EnqueueOptions) core.Res
 	if r := orm.Insert(c, &job); !r.OK {
 		return r
 	}
+	// Restore plaintext Payload for the IPC broadcast + the Ok value
+	// so listeners + callers see the human-readable string; the
+	// at-rest envelope only lives on disk.
+	broadcastJob := job
+	broadcastJob.Payload = opts.Payload
 	c.ACTION(JobChanged{
 		Phase: PhaseEnqueued,
-		Job:   job,
+		Job:   broadcastJob,
 		At:    now,
 	})
-	return core.Ok(job)
+	return core.Ok(broadcastJob)
 }
 
 // Cancel marks a job as cancelled if it's still pending. Running
@@ -267,17 +280,54 @@ func List(c *core.Core, filter ListFilter) core.Result {
 	if filter.Offset > 0 {
 		bridge = bridge.Offset(filter.Offset)
 	}
-	return bridge.Get()
+	r := bridge.Get()
+	if !r.OK {
+		return r
+	}
+	// Unseal Payload columns at the read boundary (Mantis #1727).
+	// Orchestration fields (kind/status/project/etc.) stay plain so
+	// the Where()-filtered query still hits the right rows; only the
+	// user-prompt body needs unsealing. Sealed-but-unreadable values
+	// surface as empty Payload — listeners + the panel UI render
+	// kind-only summaries when the operator is locked.
+	jobs, ok := r.Value.([]Job)
+	if !ok {
+		return r
+	}
+	for i := range jobs {
+		if plaintext, ok := unsealPayload(c, jobs[i].Payload); ok {
+			jobs[i].Payload = plaintext
+		} else {
+			jobs[i].Payload = ""
+		}
+	}
+	return core.Ok(jobs)
 }
 
-// Get returns one Job by id.
+// Get returns one Job by id. Sealed Payload fields (Mantis #1727)
+// are decrypted via unsealPayload when the unlocked account state
+// can satisfy the decrypt; legacy plaintext values round-trip
+// unchanged.
 //
 // Usage example:
 //
 //	r := queue.Get(c, "j-1735…")
 //	if r.OK { job, _, _ := orm.Detail[queue.Job](r); _ = job }
 func Get(c *core.Core, id string) core.Result {
-	return orm.Of[Job](c).Find(id)
+	r := orm.Of[Job](c).Find(id)
+	if !r.OK {
+		return r
+	}
+	job, _, ok := orm.Detail[Job](r)
+	if !ok {
+		return r
+	}
+	if plaintext, ok := unsealPayload(c, job.Payload); ok {
+		job.Payload = plaintext
+	} else {
+		job.Payload = ""
+	}
+	return core.Ok(job)
 }
 
 // joinPermittedTiers renders a PermittedTiers slice as a comma-

@@ -48,7 +48,7 @@ func Create(c *core.Core, input CreateInput) core.Result {
 		ID:            newID(),
 		Project:       input.Project,
 		Summary:       input.Summary,
-		Description:   input.Description,
+		Description:   SealField(c, input.Description),
 		State:         StateOpen,
 		Severity:      defaultIfEmpty(input.Severity, SeverityMinor),
 		Priority:      defaultIfEmpty(input.Priority, PriorityNormal),
@@ -70,7 +70,10 @@ func Create(c *core.Core, input CreateInput) core.Result {
 	return core.Ok(issue)
 }
 
-// Get returns the issue identified by id.
+// Get returns the issue identified by id. Sealed Description fields
+// (Mantis #1727) are decrypted via UnsealField when the unlocked
+// account state can satisfy the decrypt; legacy plaintext values
+// round-trip unchanged.
 //
 // Usage example:
 //
@@ -78,7 +81,16 @@ func Create(c *core.Core, input CreateInput) core.Result {
 //	if !r.OK { return r }
 //	issue, _, _ := orm.Detail[tasks.Issue](r)
 func Get(c *core.Core, id string) core.Result {
-	return orm.Of[Issue](c).Find(id)
+	r := orm.Of[Issue](c).Find(id)
+	if !r.OK {
+		return r
+	}
+	issue, _, ok := orm.Detail[Issue](r)
+	if !ok {
+		return r
+	}
+	issue.Description = UnsealField(c, issue.Description)
+	return core.Ok(issue)
 }
 
 // List returns issues matching the filter, newest updated_at first.
@@ -109,7 +121,22 @@ func List(c *core.Core, filter ListFilter) core.Result {
 	if filter.Offset > 0 {
 		bridge = bridge.Offset(filter.Offset)
 	}
-	return bridge.Get()
+	r := bridge.Get()
+	if !r.OK {
+		return r
+	}
+	// Sealed Description fields (Mantis #1727) decrypt at the
+	// boundary. Orchestration columns (project/state/severity/etc.)
+	// stay plain so this Where()-filtered query still hits the right
+	// rows; only the user-prompt body needs unsealing.
+	issues, ok := r.Value.([]Issue)
+	if !ok {
+		return r
+	}
+	for i := range issues {
+		issues[i].Description = UnsealField(c, issues[i].Description)
+	}
+	return core.Ok(issues)
 }
 
 // Update applies partial-field changes to the named issue. Returns the
@@ -152,6 +179,9 @@ func Update(c *core.Core, id string, input UpdateInput) core.Result {
 		mutated = true
 	}
 	if input.Description != nil {
+		// Plaintext until the pre-save reseal below. Keeping the
+		// in-memory shape unsealed lets the IssueChange.Before /
+		// .Issue payload listeners see the human-readable string.
 		issue.Description = *input.Description
 		mutated = true
 	}
@@ -211,9 +241,18 @@ func Update(c *core.Core, id string, input UpdateInput) core.Result {
 	}
 	now := core.Now().UTC()
 	issue.UpdatedAt = now
+	// Snapshot the plaintext Description so the Ok value + the
+	// IssueChange.Issue payload surface the human-readable string to
+	// listeners. SealField the on-disk value just for the orm.Save
+	// round-trip; SealField is a no-op when the input is empty or
+	// when no account is unlocked, so the legacy plaintext path is
+	// preserved on the locked-window first-launch flow.
+	plaintextDescription := issue.Description
+	issue.Description = SealField(c, plaintextDescription)
 	if saveResult := orm.Save(c, &issue); !saveResult.OK {
 		return saveResult
 	}
+	issue.Description = plaintextDescription
 	// Closed transitions get the dedicated KindClosed event so
 	// listeners (PR-watcher, audit, agent-prep) can subscribe to
 	// "issue closed" without diffing every state field. Other
@@ -261,16 +300,21 @@ func AddNote(c *core.Core, issueID, body, author string) core.Result {
 		return core.Fail(core.E("tasks.AddNote", "body is required", nil))
 	}
 	now := core.Now().UTC()
+	plaintextBody := body
 	note := Note{
 		ID:        newID(),
 		IssueID:   issueID,
-		Body:      body,
+		Body:      SealField(c, body),
 		Author:    author,
 		CreatedAt: now,
 	}
 	if r := orm.Insert(c, &note); !r.OK {
 		return r
 	}
+	// Restore plaintext Body for the IssueChange payload + the
+	// Ok value so listeners + callers see the human-readable
+	// string; the at-rest envelope only lives on disk.
+	note.Body = plaintextBody
 	// Broadcast KindNoted so listeners that aggregate activity
 	// (Vi.Activity feed, audit log, PR-watcher commenting) can
 	// react. Best-effort fetch of the parent Issue snapshot —
@@ -290,7 +334,9 @@ func AddNote(c *core.Core, issueID, body, author string) core.Result {
 	return core.Ok(note)
 }
 
-// ListNotes returns all notes on an issue, oldest first.
+// ListNotes returns all notes on an issue, oldest first. Sealed
+// Body fields (Mantis #1727) are decrypted via UnsealField at the
+// boundary; legacy plaintext values round-trip unchanged.
 //
 // Usage example:
 //
@@ -298,7 +344,18 @@ func AddNote(c *core.Core, issueID, body, author string) core.Result {
 //	if !r.OK { return r }
 //	notes, _ := orm.Cast[[]Note](r)
 func ListNotes(c *core.Core, issueID string) core.Result {
-	return orm.Of[Note](c).Where("issue_id", "=", issueID).Order("created_at", "asc").Get()
+	r := orm.Of[Note](c).Where("issue_id", "=", issueID).Order("created_at", "asc").Get()
+	if !r.OK {
+		return r
+	}
+	notes, ok := r.Value.([]Note)
+	if !ok {
+		return r
+	}
+	for i := range notes {
+		notes[i].Body = UnsealField(c, notes[i].Body)
+	}
+	return core.Ok(notes)
 }
 
 func defaultIfEmpty(value, fallback string) string {
