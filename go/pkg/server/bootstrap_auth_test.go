@@ -23,6 +23,7 @@ import (
 
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
+	"dappco.re/lthn/desktop/pkg/auth"
 	"dappco.re/lthn/desktop/pkg/server"
 	"dappco.re/lthn/desktop/pkg/serverkey"
 	"github.com/gin-gonic/gin"
@@ -287,6 +288,193 @@ func TestBootstrapAuth_NoLocalKey_WithServerKey_BootstrapPathStillWorks_Good(t *
 
 // silence the testing import.
 var _ = testing.Short
+
+// --- B4 / RFC §4.6.1 gin → *core.Core CallerIdentity bridge (Mantis #1735) ---
+
+// newBridgeTestEngine wires a coreapi.Engine with the Stage E.B auth
+// middleware + the §4.6.1 Option A bridge against the supplied
+// *core.Core. The handler at handlerPath calls capture(c) so the test
+// can assert what auth.Caller(coreInstance) returns DURING the request
+// (i.e. what a downstream service-method dispatch would see).
+//
+// capture is called inside the gin handler — the bridge has set the
+// caller via auth.SetCaller(c, ident) at that point. After the handler
+// returns the bridge's deferred ClearCaller runs, so test assertions
+// against the *coreInstance after the request will see TierInternal
+// (the bridge cleans up). The test captures the live value into the
+// returned channel to assert against.
+func newBridgeTestEngine(
+	t *core.T,
+	c *core.Core,
+	verifier serverkey.Verifier,
+	bearer string,
+	pathScopes map[string]string,
+	routeTiers map[string]server.RouteTier,
+	handlerPath string,
+	capture func(*core.Core),
+) *coreapi.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	eng, err := coreapi.New(
+		server.WithBootstrapAndSessionAuth(verifier, bearer, pathScopes, routeTiers, nil),
+		server.WithCallerBridge(c),
+	)
+	if err != nil {
+		t.Fatalf("coreapi.New: %v", err)
+	}
+	base, leaf := splitPath(handlerPath)
+	eng.Register(&captureRouteGroup{basePath: base, leaf: leaf, core: c, capture: capture})
+	return eng
+}
+
+// captureRouteGroup is an echo handler that invokes capture(c) before
+// responding 200. Used by the B4 bridge tests to observe what a
+// downstream service-method dispatch would see when it calls
+// auth.Caller(c).
+type captureRouteGroup struct {
+	basePath string
+	leaf     string
+	core     *core.Core
+	capture  func(*core.Core)
+}
+
+func (g *captureRouteGroup) Name() string     { return "bridge-test" }
+func (g *captureRouteGroup) BasePath() string { return g.basePath }
+func (g *captureRouteGroup) RegisterRoutes(rg *gin.RouterGroup) {
+	rg.GET(g.leaf, func(c *gin.Context) {
+		if g.capture != nil {
+			g.capture(g.core)
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+}
+
+// TestBootstrapAuth_BridgesCallerToCore_Good — RFC §4.6.1 §10 done-
+// criteria (Phase 1 Unit B.4). A bootstrap-path request with a valid
+// Bootstrap token results in the handler-time auth.Caller(c) reading
+// TierOperator with Source="http-bootstrap". The Subject is empty
+// because the bootstrap path is pre-identity per RFC §4.6 line 248
+// (the LetheanAccount has not been created yet).
+func TestBootstrapAuth_BridgesCallerToCore_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := serverkey.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	c := core.New()
+	var captured auth.CallerIdentity
+	pathScopes := map[string]string{"/v1/account/create": "account.create"}
+	tiers := map[string]server.RouteTier{}
+	eng := newBridgeTestEngine(t, c, svc, "static-bearer", pathScopes, tiers,
+		"/v1/account/create",
+		func(inner *core.Core) { captured = auth.Caller(inner) })
+
+	out := svc.IssueBootstrapToken().Value.(serverkey.BootstrapTokenOutput)
+	rr := doGET(eng, "/v1/account/create", "Bootstrap "+out.Token)
+	core.AssertEqual(t, http.StatusOK, rr.Code,
+		"bootstrap-path with valid token → 200 (auth resolved)")
+	core.AssertEqual(t, auth.TierOperator, captured.Tier,
+		"bridge MUST stamp TierOperator on bootstrap-path per RFC §4.6 line 248")
+	core.AssertEqual(t, "", captured.Subject,
+		"bootstrap-path Subject MUST be empty — bootstrap is pre-identity (RFC §4.6 line 248)")
+	core.AssertEqual(t, "http-bootstrap", captured.Source,
+		"bridge MUST stamp Source='http-bootstrap' for audit grep")
+}
+
+// TestSessionAuth_BridgesCallerToCore_Good — RFC §4.6.1 §10 done-
+// criteria. A session-token request results in the handler-time
+// auth.Caller(c) reading TierOperator with Subject=account_id (the
+// VerifySessionToken-recovered claim) and Source="http-session". This
+// is the canonical Phase-1 wiring shape: HTTP request → middleware
+// resolves credential → bridge promotes to *core.Core → downstream
+// service.Method(c, ...) sees the identity via auth.Caller(c).
+func TestSessionAuth_BridgesCallerToCore_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := serverkey.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	c := core.New()
+	var captured auth.CallerIdentity
+	pathScopes := map[string]string{"/v1/account/unlock": "account.unlock"}
+	tiers := map[string]server.RouteTier{"/v1/api/data": server.TierSession}
+	eng := newBridgeTestEngine(t, c, svc, "static-bearer", pathScopes, tiers,
+		"/v1/api/data",
+		func(inner *core.Core) { captured = auth.Caller(inner) })
+
+	const acct = "abc123def4567890"
+	out := svc.IssueSessionToken(acct).Value.(serverkey.SessionTokenOutput)
+	rr := doGET(eng, "/v1/api/data", "Bearer "+out.Token)
+	core.AssertEqual(t, http.StatusOK, rr.Code,
+		"session-tier route with valid session token → 200")
+	core.AssertEqual(t, auth.TierOperator, captured.Tier,
+		"bridge MUST stamp TierOperator on session-token path per RFC §4.6 line 250")
+	core.AssertEqual(t, acct, captured.Subject,
+		"bridge MUST carry account_id as Subject (Cerberus #1735 done-criteria)")
+	core.AssertEqual(t, "http-session", captured.Source,
+		"bridge MUST stamp Source='http-session' for audit grep")
+}
+
+// TestBootstrapAuth_ClearsCallerOnExit_Good — RFC §4.6.1 cleanup
+// guard. The bridge's deferred auth.ClearCaller(c) MUST clear the
+// sidecar stamp before the response returns, so a subsequent
+// auth.Caller(c) read OUTSIDE the request handler observes
+// TierInternal (the floor). Without this guard the *core.Core would
+// retain the last request's identity across the inter-request gap —
+// the exact bleed the auth.SetCaller doc-string warns against.
+func TestBootstrapAuth_ClearsCallerOnExit_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := serverkey.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	c := core.New()
+	pathScopes := map[string]string{"/v1/account/unlock": "account.unlock"}
+	tiers := map[string]server.RouteTier{"/v1/api/data": server.TierSession}
+	// No capture closure — we only care about the post-request state.
+	eng := newBridgeTestEngine(t, c, svc, "static-bearer", pathScopes, tiers,
+		"/v1/api/data", nil)
+
+	const acct = "abc123def4567890"
+	out := svc.IssueSessionToken(acct).Value.(serverkey.SessionTokenOutput)
+	rr := doGET(eng, "/v1/api/data", "Bearer "+out.Token)
+	core.AssertEqual(t, http.StatusOK, rr.Code,
+		"session-tier route with valid session token → 200")
+
+	// After the request, the deferred ClearCaller must have fired.
+	// A fresh auth.Caller(c) read MUST return the TierInternal floor
+	// (per RFC §4.1: zero-value resolves to TierInternal).
+	after := auth.Caller(c)
+	core.AssertEqual(t, auth.TierInternal, after.Tier,
+		"after-request Caller MUST be TierInternal floor — defer ClearCaller(c) cleanup guard")
+	core.AssertEqual(t, "", after.Subject,
+		"after-request Subject MUST be cleared")
+}
+
+// TestBootstrapAuth_NoAuth_LeavesFloor_Good — RFC §4.6.1 + §4.1
+// deny-by-default. A request that is REJECTED by the auth middleware
+// (e.g. no credential to a session-tier route) MUST NOT leak a
+// CallerIdentity stamp onto *core.Core. The bridge runs ONLY when the
+// auth middleware called c.Next() (i.e. on the authenticated branch);
+// AbortWithStatusJSON short-circuits the chain so the bridge never
+// reaches SetCaller. A post-request auth.Caller(c) read MUST return
+// TierInternal floor.
+func TestBootstrapAuth_NoAuth_LeavesFloor_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := serverkey.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	c := core.New()
+	pathScopes := map[string]string{"/v1/account/unlock": "account.unlock"}
+	tiers := map[string]server.RouteTier{"/v1/api/data": server.TierSession}
+	eng := newBridgeTestEngine(t, c, svc, "static-bearer", pathScopes, tiers,
+		"/v1/api/data", nil)
+
+	rr := doGET(eng, "/v1/api/data", "")
+	core.AssertEqual(t, http.StatusUnauthorized, rr.Code,
+		"session-tier route with no auth → 401")
+	// The middleware aborted; bridge never ran; sidecar untouched.
+	after := auth.Caller(c)
+	core.AssertEqual(t, auth.TierInternal, after.Tier,
+		"unauth request MUST NOT stamp any tier — Caller stays at TierInternal floor")
+}
 
 // --- Stage E.B session-tier middleware coverage ---
 

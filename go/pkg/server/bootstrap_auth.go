@@ -33,6 +33,7 @@ import (
 
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
+	"dappco.re/lthn/desktop/pkg/auth"
 	"dappco.re/lthn/desktop/pkg/serverkey"
 	"github.com/gin-gonic/gin"
 )
@@ -344,6 +345,16 @@ func BootstrapAndSessionAuthMiddleware(
 				return
 			}
 			c.Set("auth_via", "bootstrap")
+			// B4 / RFC §4.6.1 + §4.6 table — bootstrap-token path
+			// stamps TierOperator with empty Subject (bootstrap is
+			// pre-identity per RFC §4.6 line 248). Source breadcrumb
+			// "http-bootstrap" so audit grep can attribute the call.
+			// The gin keys are read by WithCallerBridge (Option A
+			// promotes to *core.Core SetCaller) and by handler-level
+			// auth.FromGin fallbacks (gin-only handlers per §4.6.1).
+			c.Set(auth.GinKeyTier, string(auth.TierOperator))
+			c.Set(auth.GinKeySubject, "")
+			c.Set(auth.GinKeySource, "http-bootstrap")
 			c.Next()
 			return
 		}
@@ -389,6 +400,14 @@ func BootstrapAndSessionAuthMiddleware(
 			out, _ := r.Value.(serverkey.SessionVerifyOutput)
 			c.Set("auth_via", "session")
 			c.Set("account_id", out.AccountID)
+			// B4 / RFC §4.6.1 + §4.6 table — session-token path
+			// stamps TierOperator with Subject=account_id (the
+			// VerifySessionToken-recovered claim). Source breadcrumb
+			// "http-session" so audit grep can distinguish session
+			// from bootstrap or static-bearer call paths.
+			c.Set(auth.GinKeyTier, string(auth.TierOperator))
+			c.Set(auth.GinKeySubject, out.AccountID)
+			c.Set(auth.GinKeySource, "http-session")
 			c.Next()
 			return
 		}
@@ -423,6 +442,13 @@ func BootstrapAndSessionAuthMiddleware(
 			return
 		}
 		c.Set("auth_via", "local")
+		// B4 / RFC §4.6.1 + §4.6 table — LocalKey static-bearer path
+		// stamps TierOperator with empty Subject (static key has no
+		// account_id claim per RFC §4.6 line 249). Source breadcrumb
+		// "http-local" so audit grep can distinguish from session.
+		c.Set(auth.GinKeyTier, string(auth.TierOperator))
+		c.Set(auth.GinKeySubject, "")
+		c.Set(auth.GinKeySource, "http-local")
 		c.Next()
 	}
 }
@@ -524,6 +550,15 @@ func BootstrapAuthMiddleware(verifier serverkey.Verifier, bearerToken string, pa
 				return
 			}
 			c.Set("auth_via", "bootstrap")
+			// B4 / RFC §4.6.1 — mirror the BootstrapAndSession path
+			// so the legacy WithBootstrapAuth callers (pre-Stage-E
+			// surfaces) ALSO populate the gin keys the bridge reads.
+			// Without this, a WithBootstrapAuth-wired server would
+			// emit no Caller on bootstrap-path requests even with
+			// WithCallerBridge installed downstream.
+			c.Set(auth.GinKeyTier, string(auth.TierOperator))
+			c.Set(auth.GinKeySubject, "")
+			c.Set(auth.GinKeySource, "http-bootstrap")
 			c.Next()
 			return
 		}
@@ -566,6 +601,109 @@ func BootstrapAuthMiddleware(verifier serverkey.Verifier, bearerToken string, pa
 				coreapi.Fail("unauthorised", "invalid bearer token"))
 			return
 		}
+		// B4 / RFC §4.6.1 — legacy WithBootstrapAuth bearer arm
+		// stamps TierOperator/empty/http-local for parity with the
+		// Stage E.B middleware. Without this, downstream Caller
+		// reads would default to TierInternal even for an
+		// authenticated request, breaking gates that require
+		// TierOperator at the substrate.
+		c.Set("auth_via", "local")
+		c.Set(auth.GinKeyTier, string(auth.TierOperator))
+		c.Set(auth.GinKeySubject, "")
+		c.Set(auth.GinKeySource, "http-local")
 		c.Next()
+	}
+}
+
+// WithCallerBridge returns a coreapi.Option that installs the §4.6.1
+// Option A gin → *core.Core CallerIdentity bridge (Mantis #1735,
+// RFC.tier-auth-substrate.md §4.6.1).
+//
+// Wiring: registered AFTER WithBootstrapAuth / WithBootstrapAndSessionAuth
+// in the coreapi.Option chain. Per request, the bridge:
+//
+//  1. Reads the auth.GinKey* values stamped by the auth middleware.
+//  2. If a Tier is present (auth resolved), calls auth.SetCaller(c, ident)
+//     so that downstream service-method dispatches via auth.Caller(c) see
+//     the resolved identity.
+//  3. Defers auth.ClearCaller(c) so the stamp does not leak across
+//     requests when the same *core.Core is reused (the common case for
+//     pkg/server callers — opts.Core is one shared instance).
+//  4. Calls gctx.Next() to continue the handler chain.
+//
+// When c is nil this Option installs no middleware — the gin-key stamps
+// are still set by the auth middleware, so handler-level
+// auth.FromGin(gctx, coreCtx) fallbacks still work for gin-only handlers
+// (per RFC §4.6.1 last paragraph). The bridge ONLY engages when the
+// caller wires a *core.Core (the production wire at service.go does
+// this when opts.Core is non-nil).
+//
+// Cerberus #1735 / RFC §4.6.1 Option A — the bridge is single-site
+// (this middleware) so new handlers do not need to remember a per-call
+// prelude. The substrate is additive: handlers that never reach a
+// substrate-gated service method see no behaviour change.
+//
+// Usage example:
+//
+//	opts := []coreapi.Option{
+//	    server.WithBootstrapAndSessionAuth(verifier, key,
+//	        server.BootstrapPathScopes, server.RouteTiers, server.RouteTierPrefixes),
+//	    server.WithCallerBridge(opts.Core),
+//	}
+func WithCallerBridge(c *core.Core) coreapi.Option {
+	if c == nil {
+		return func(_ *coreapi.Engine) {}
+	}
+	mw := CallerBridgeMiddleware(c)
+	if mw == nil {
+		return func(_ *coreapi.Engine) {}
+	}
+	return coreapi.WithMiddleware(mw)
+}
+
+// CallerBridgeMiddleware returns the gin handler that promotes the
+// auth.GinKey* stamps onto the supplied *core.Core via auth.SetCaller.
+// Returns nil when c is nil so the caller can chain it safely.
+//
+// Behaviour:
+//
+//   - No gin-key stamp present (auth middleware did not run, or
+//     skip-list path bypass) → no SetCaller, c.Next() unchanged. Caller
+//     reads return the TierInternal floor — deny-by-default at gates.
+//   - Gin-key stamp present → SetCaller(c, {Tier,Subject,Source}) +
+//     defer ClearCaller(c) + c.Next().
+//
+// The defer-clear pattern matches the RFC §4.6.1 wiring shape and the
+// auth.SetCaller doc-string guidance (HTTP middleware MUST call
+// ClearCaller when reusing *core.Core across requests).
+//
+//	mw := server.CallerBridgeMiddleware(coreInstance)
+//	engine.Use(mw)
+func CallerBridgeMiddleware(c *core.Core) gin.HandlerFunc {
+	if c == nil {
+		return nil
+	}
+	return func(gctx *gin.Context) {
+		tier, _ := gctx.Get(auth.GinKeyTier)
+		tierStr, _ := tier.(string)
+		if tierStr == "" {
+			// Auth middleware did not stamp (skip-list, static asset,
+			// or an unauthenticated request that the auth middleware
+			// already aborted). No SetCaller; downstream Caller(c)
+			// returns TierInternal floor per RFC §4.1.
+			gctx.Next()
+			return
+		}
+		subject, _ := gctx.Get(auth.GinKeySubject)
+		source, _ := gctx.Get(auth.GinKeySource)
+		subjectStr, _ := subject.(string)
+		sourceStr, _ := source.(string)
+		auth.SetCaller(c, auth.CallerIdentity{
+			Tier:    auth.CallerTier(tierStr),
+			Subject: subjectStr,
+			Source:  sourceStr,
+		})
+		defer auth.ClearCaller(c)
+		gctx.Next()
 	}
 }

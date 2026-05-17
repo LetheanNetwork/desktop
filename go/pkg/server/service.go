@@ -547,6 +547,16 @@ func NewService(opts Options) *Service {
 	} else if opts.LocalKey != "" {
 		authOpts = append(authOpts, coreapi.WithBearerAuth(opts.LocalKey))
 	}
+	// B4 / RFC §4.6.1 Option A (Mantis #1735) — bridge resolved
+	// gin-context CallerIdentity stamps onto opts.Core so downstream
+	// service-method dispatches that read via auth.Caller(c) see the
+	// same identity the HTTP middleware resolved. Bridge is no-op when
+	// opts.Core is nil (e.g. CLI / test callers without a Core handle);
+	// the gin-key stamps still exist for handler-level
+	// auth.FromGin(gctx, coreCtx) fallbacks per §4.6.1.
+	if opts.Core != nil {
+		authOpts = append(authOpts, WithCallerBridge(opts.Core))
+	}
 	tailOpts := []coreapi.Option{}
 	if opts.SPAHandler != nil {
 		tailOpts = append(tailOpts, coreapi.WithNoRoute(opts.SPAHandler))
