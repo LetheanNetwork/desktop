@@ -12,6 +12,30 @@ import (
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
+// stubSessionGate is the test double for the consumer-defined
+// SessionGate interface (RFC.stage-e-unlockgate v2 §4.2 stub shape —
+// Mantis #1613 B.2). Duplicated per-pkg rather than shared so test
+// files keep zero cross-pkg testing/... deps.
+type stubSessionGate struct{ ids []string }
+
+func (s *stubSessionGate) UnlockedAccountIDs() []string { return s.ids }
+
+// newTestSvc constructs a campaigns.Service pre-wired with a SessionGate
+// reporting a single unlocked account so write methods pass the gate
+// by default. Tests that need to assert the locked-state path call
+// SetSessionGate explicitly with an empty stub (or instantiate
+// campaigns.NewService directly for the nil-gate fail-safe path).
+//
+// Usage example:
+//
+//	svc := newTestSvc(t)
+//	r := svc.Create(campaigns.CreateInput{Name: "..."})
+func newTestSvc(_ *testing.T) *campaigns.Service {
+	svc := campaigns.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
+	return svc
+}
+
 // TestList_Empty_Good — empty dir → empty slice, zero counts.
 func TestList_Empty_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
@@ -32,7 +56,7 @@ func TestList_Empty_Good(t *testing.T) {
 // TestCreate_Defaults_Good — Create with name only applies all defaults.
 func TestCreate_Defaults_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := campaigns.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(campaigns.CreateInput{Name: "Product Hunt launch"})
 	if !r.OK {
 		t.Fatalf("Create failed: %s", r.Error())
@@ -61,7 +85,7 @@ func TestCreate_Defaults_Good(t *testing.T) {
 // TestCreate_Name_Bad — empty name returns core.Fail.
 func TestCreate_Name_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := campaigns.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(campaigns.CreateInput{Name: ""})
 	if r.OK {
 		t.Fatalf("expected failure for empty name, got OK")
@@ -71,7 +95,7 @@ func TestCreate_Name_Bad(t *testing.T) {
 // TestUpdate_State_Good — Update state field persists.
 func TestUpdate_State_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := campaigns.NewService(nil)
+	svc := newTestSvc(t)
 	cr := svc.Create(campaigns.CreateInput{Name: "Test campaign"})
 	if !cr.OK {
 		t.Fatalf("Create failed: %s", cr.Error())
@@ -111,7 +135,7 @@ func TestGet_NotFound_Bad(t *testing.T) {
 // TestList_StateFilter_Good — List with state filter returns only matching campaigns.
 func TestList_StateFilter_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := campaigns.NewService(nil)
+	svc := newTestSvc(t)
 	svc.Create(campaigns.CreateInput{Name: "Draft A", State: "draft"})
 	svc.Create(campaigns.CreateInput{Name: "Live A", State: "live"})
 	svc.Create(campaigns.CreateInput{Name: "Live B", State: "live"})
@@ -145,7 +169,7 @@ func TestServiceName_Good(t *testing.T) {
 // carries the same.
 func TestAtomicCutover_MarketingCampaigns_Create_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := campaigns.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(campaigns.CreateInput{
 		Name:    "Product Hunt launch",
 		Channel: "earned",
@@ -173,7 +197,7 @@ func TestAtomicCutover_MarketingCampaigns_Create_Good(t *testing.T) {
 // Update bumps the stored version monotonically (1 -> 2).
 func TestAtomicCutover_MarketingCampaigns_Update_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := campaigns.NewService(nil)
+	svc := newTestSvc(t)
 	cr := svc.Create(campaigns.CreateInput{Name: "Probe campaign", Channel: "earned"})
 	if !cr.OK {
 		t.Fatalf("Create failed: %s", cr.Error())
@@ -214,7 +238,7 @@ func TestAtomicCutover_MarketingCampaigns_Update_Good(t *testing.T) {
 // wrapped as ConflictEnvelope by campaigns.writeCampaign.
 func TestAtomicCutover_MarketingCampaigns_Update_VersionStale_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := campaigns.NewService(nil)
+	svc := newTestSvc(t)
 	cr := svc.Create(campaigns.CreateInput{Name: "Race campaign", Channel: "earned"})
 	if !cr.OK {
 		t.Fatalf("Create failed: %s", cr.Error())
@@ -304,7 +328,7 @@ func TestAtomicCutover_MarketingCampaigns_Update_VersionStale_Ugly(t *testing.T)
 // upgrades it via an unconditional first-write that stamps version=1.
 func TestAtomicCutover_MarketingCampaigns_LegacyFile_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := campaigns.NewService(nil)
+	svc := newTestSvc(t)
 	dirR := core.UserHomeDir()
 	if !dirR.OK {
 		t.Fatalf("UserHomeDir: %s", dirR.Error())
@@ -344,7 +368,7 @@ func TestAtomicCutover_MarketingCampaigns_LegacyFile_Ugly(t *testing.T) {
 // fires) and marketing/campaigns/* falls under AuditModeBatch per RFC §6.1.
 func TestAtomicCutover_MarketingCampaigns_AuditEmissionRecordBatch_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := campaigns.NewService(nil)
+	svc := newTestSvc(t)
 	paths.SetAuditSecretProvider(func() []byte {
 		return []byte("campaigns-cutover-test-secret-32-byt")
 	})
@@ -377,5 +401,165 @@ func TestAtomicCutover_MarketingCampaigns_AuditEmissionRecordBatch_Good(t *testi
 	mode := paths.AuditModeForPath(fpath)
 	if mode != paths.AuditModeBatch {
 		t.Fatalf("expected AuditModeBatch for marketing/campaigns path, got %v", mode)
+	}
+}
+
+// ---- SessionGate retrofit (RFC.stage-e-unlockgate v2 §4.2 / Mantis #1613 B.2)
+
+// TestCampaigns_NilGate_WarnsOnce_FailsClosed — a Service constructed
+// without SetSessionGate fails-closed on writes. Second + third writes
+// continue to fail-closed (one-shot warn semantics — the second call
+// must remain quiet but its caller-visible result must be the same
+// fail-closed shape).
+func TestCampaigns_NilGate_WarnsOnce_FailsClosed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := campaigns.NewService(nil) // NO SetSessionGate — exercises §2.2 fail-safe.
+
+	r1 := svc.Create(campaigns.CreateInput{Name: "Probe A", Channel: "earned"})
+	if r1.OK {
+		t.Fatal("expected Create to fail-closed when gate is nil")
+	}
+	if !core.Contains(r1.Error(), "campaigns.session.locked") {
+		t.Fatalf("expected campaigns.session.locked on first Create, got %q", r1.Error())
+	}
+
+	// Second write — nilWarned already true; CompareAndSwap returns
+	// false and core.Warn is NOT called again. Behaviour from the
+	// caller's perspective: same fail-closed result.
+	r2 := svc.Create(campaigns.CreateInput{Name: "Probe B", Channel: "earned"})
+	if r2.OK {
+		t.Fatal("expected second Create to fail-closed when gate is nil")
+	}
+	if !core.Contains(r2.Error(), "campaigns.session.locked") {
+		t.Fatalf("expected campaigns.session.locked on second Create, got %q", r2.Error())
+	}
+
+	// Third write via Update — same fail-closed behaviour persists.
+	r3 := svc.Update(campaigns.UpdateInput{ID: "some-id", State: "live"})
+	if r3.OK {
+		t.Fatal("expected Update to fail-closed when gate is nil")
+	}
+	if !core.Contains(r3.Error(), "campaigns.session.locked") {
+		t.Fatalf("expected campaigns.session.locked on Update, got %q", r3.Error())
+	}
+}
+
+// TestCampaigns_UnlockedGate_AllowsCreate — Create succeeds when the
+// live-read gate reports at least one unlocked account.
+func TestCampaigns_UnlockedGate_AllowsCreate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := campaigns.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	r := svc.Create(campaigns.CreateInput{Name: "Launch probe", Channel: "earned"})
+	if !r.OK {
+		t.Fatalf("Create should succeed with gate reporting unlocked acct, got: %s", r.Error())
+	}
+}
+
+// TestCampaigns_UnlockedGate_AllowsUpdate — Update succeeds when the
+// live-read gate reports at least one unlocked account.
+func TestCampaigns_UnlockedGate_AllowsUpdate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := campaigns.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	cr := svc.Create(campaigns.CreateInput{Name: "Update probe", Channel: "earned"})
+	if !cr.OK {
+		t.Fatalf("Create: %s", cr.Error())
+	}
+	id := cr.Value.(campaigns.Campaign).ID
+	ur := svc.Update(campaigns.UpdateInput{ID: id, State: "live"})
+	if !ur.OK {
+		t.Fatalf("Update should succeed with gate reporting unlocked acct, got: %s", ur.Error())
+	}
+}
+
+// TestCampaigns_LockedGate_FailsCreate_session_locked — Create rejects
+// when the live-read gate reports zero unlocked accounts. The Create is
+// gated BEFORE the empty-name check, so the session.locked code surfaces
+// in preference to any later validation error.
+func TestCampaigns_LockedGate_FailsCreate_session_locked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := campaigns.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.Create(campaigns.CreateInput{Name: "Locked probe", Channel: "earned"})
+	if r.OK {
+		t.Fatal("expected Create to be rejected when gate reports zero unlocked accounts")
+	}
+	if !core.Contains(r.Error(), "campaigns.session.locked") {
+		t.Fatalf("expected campaigns.session.locked, got %q", r.Error())
+	}
+}
+
+// TestCampaigns_LockedGate_FailsUpdate_session_locked — Update rejects
+// when the live-read gate reports zero unlocked accounts. Gated BEFORE
+// IsValidID + filesystem read.
+func TestCampaigns_LockedGate_FailsUpdate_session_locked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Seed records while unlocked, then flip to locked + try to update.
+	svc := newTestSvc(t)
+	cr := svc.Create(campaigns.CreateInput{Name: "Seed probe", Channel: "earned"})
+	if !cr.OK {
+		t.Fatalf("Create: %s", cr.Error())
+	}
+	id := cr.Value.(campaigns.Campaign).ID
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.Update(campaigns.UpdateInput{ID: id, State: "live"})
+	if r.OK {
+		t.Fatal("expected Update to be rejected when gate reports zero unlocked accounts")
+	}
+	if !core.Contains(r.Error(), "campaigns.session.locked") {
+		t.Fatalf("expected campaigns.session.locked, got %q", r.Error())
+	}
+}
+
+// TestCampaigns_StopNilsGate — Stop() severs the SessionGate; subsequent
+// writes fail-closed even though the gate WAS wired (Cerberus #28 ADD-5
+// — Stop drain hygiene mirrors mail).
+func TestCampaigns_StopNilsGate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := newTestSvc(t) // gate wired with unlocked stub
+
+	// Pre-Stop: write succeeds.
+	if r := svc.Create(campaigns.CreateInput{Name: "Pre-stop probe", Channel: "earned"}); !r.OK {
+		t.Fatalf("Create should succeed pre-Stop, got: %s", r.Error())
+	}
+
+	// Stop nils the gate reference.
+	if r := svc.Stop(core.Background()); !r.OK {
+		t.Fatalf("Stop should succeed, got: %s", r.Error())
+	}
+
+	// Post-Stop: write fails-closed via the nil-gate path.
+	r := svc.Create(campaigns.CreateInput{Name: "Post-stop probe", Channel: "earned"})
+	if r.OK {
+		t.Fatal("expected Create to fail-closed after Stop nils the gate")
+	}
+	if !core.Contains(r.Error(), "campaigns.session.locked") {
+		t.Fatalf("expected campaigns.session.locked, got %q", r.Error())
+	}
+}
+
+// TestCampaigns_LockedGate_ReadStillWorks — List + Get are not gated by
+// the session-lock (RFC §3.1 — reads stay open while locked).
+func TestCampaigns_LockedGate_ReadStillWorks(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Seed unlocked, then flip to locked.
+	svc := newTestSvc(t)
+	cr := svc.Create(campaigns.CreateInput{Name: "Read probe", Channel: "earned"})
+	if !cr.OK {
+		t.Fatalf("Create: %s", cr.Error())
+	}
+	id := cr.Value.(campaigns.Campaign).ID
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	if r := svc.List(campaigns.ListInput{}); !r.OK {
+		t.Fatalf("List should succeed when session locked, got: %s", r.Error())
+	}
+	if g := svc.Get(id); !g.OK {
+		t.Fatalf("Get should succeed when session locked, got: %s", g.Error())
 	}
 }

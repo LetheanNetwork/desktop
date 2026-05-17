@@ -93,6 +93,9 @@ func (s *Service) Get(id string) core.Result {
 //	r := svc.Create(campaigns.CreateInput{Name: "Product Hunt launch", Channel: "earned"})
 //	if r.OK { c := r.Value.(campaigns.Campaign) }
 func (s *Service) Create(input CreateInput) core.Result {
+	if fail, ok := s.assertUnlocked("campaigns.Create"); !ok {
+		return fail
+	}
 	if input.Name == "" {
 		return core.Fail(core.E("campaigns.Create", "name is required", nil))
 	}
@@ -161,6 +164,9 @@ func (s *Service) Create(input CreateInput) core.Result {
 //	r := svc.Update(campaigns.UpdateInput{ID: "v02-launch-20260516", State: "complete"})
 //	if r.OK { c := r.Value.(campaigns.Campaign) }
 func (s *Service) Update(input UpdateInput) core.Result {
+	if fail, ok := s.assertUnlocked("campaigns.Update"); !ok {
+		return fail
+	}
 	if err := paths.IsValidID(input.ID); err != nil {
 		return core.Fail(err)
 	}

@@ -14,7 +14,7 @@ import (
 
 func TestGet_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := campaigns.NewService(nil)
+	svc := newTestSvc(t)
 	for _, evil := range []string{
 		"../../wallets/lethean-default",
 		"..",
@@ -33,7 +33,7 @@ func TestGet_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 
 func TestUpdate_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := campaigns.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Update(campaigns.UpdateInput{ID: "../../wallets/x", State: "live"})
 	if r.OK {
 		t.Fatal("Update with traversal ID must reject")
@@ -43,7 +43,7 @@ func TestUpdate_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := campaigns.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(campaigns.CreateInput{Name: "Product Hunt launch", Channel: "earned"})
 	if !r.OK {
 		t.Fatalf("Create failed: %s", r.Error())
@@ -64,7 +64,7 @@ func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 func TestCampaignsDir_Mode0700_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := campaigns.NewService(nil)
+	svc := newTestSvc(t)
 	_ = svc.Create(campaigns.CreateInput{Name: "x"})
 	dir := core.PathJoin(home, "Lethean", "marketing", "campaigns")
 	stat := core.Stat(dir)
