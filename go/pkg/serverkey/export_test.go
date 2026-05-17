@@ -121,16 +121,3 @@ func ExportedBootstrapAllowedScopes() map[string]bool {
 	}
 	return out
 }
-
-// ExportedBootstrapAllowedScopes returns a copy of the closed
-// allow-list IssueBootstrapTokenForScope mints against. Test-only
-// surface for the Mantis #1467 lockstep parity check — the matching
-// pkg/server.BootstrapPathScopes map MUST carry the same scope set,
-// and the parity test asserts it. Returns a copy so callers cannot
-// mutate package state.
-func ExportedBootstrapAllowedScopes() map[string]bool {
-	out := make(map[string]bool, len(bootstrapAllowedScopes))
-	for k, v := range bootstrapAllowedScopes {
-		out[k] = v
-	}
-	return out
