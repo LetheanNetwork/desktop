@@ -11,6 +11,7 @@ import (
 	core "dappco.re/go"
 	"dappco.re/go/orm"
 
+	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/auth"
 )
 
@@ -108,9 +109,33 @@ func EnqueueWithOptions(c *core.Core, kind string, opts EnqueueOptions) core.Res
 			}
 		}
 		if !allowed {
-			return core.Fail(core.NewCode(ErrTierNotPermittedForKind,
+			r := core.Fail(core.NewCode(ErrTierNotPermittedForKind,
 				"queue.Enqueue: tier "+id.Tier.String()+
 					" not permitted for kind: "+kind))
+			// Inner-gate substrate emit (Cerberus #79 ADD / Mantis #1766).
+			// Outer auth.Require already emits EventTierReject for the
+			// tier-not-allowed cluster; the inner per-kind PermittedTiers
+			// gate was silent and split the F-3+F-4 forensic trail. Emit
+			// the same substrate row here so a forensic walker greps ONE
+			// literal across all tier-reject sites (outer Require + inner
+			// per-kind narrow). op=`queue.enqueue.kind` distinguishes the
+			// inner site from the outer `auth.Require` call-site.
+			_ = audit.Default().Record(audit.Event{
+				Event:   audit.EventTierReject,
+				TS:      core.Now().UTC().Unix(),
+				Scope:   "queue",
+				Outcome: audit.OutcomeDenied,
+				Meta: map[string]any{
+					"op":             "queue.enqueue.kind",
+					"caller_tier":    id.Tier.String(),
+					"caller_subject": id.Subject,
+					"caller_source":  id.Source,
+					"allowed_tiers":  joinPermittedTiers(tiers),
+					"kind":           kind,
+					"error_code":     audit.ErrorCode(r),
+				},
+			})
+			return r
 		}
 	}
 	// Atomic depth-check + insert. Per-Core named mutex serialises
@@ -253,6 +278,30 @@ func List(c *core.Core, filter ListFilter) core.Result {
 //	if r.OK { job, _, _ := orm.Detail[queue.Job](r); _ = job }
 func Get(c *core.Core, id string) core.Result {
 	return orm.Of[Job](c).Find(id)
+}
+
+// joinPermittedTiers renders a PermittedTiers slice as a comma-
+// separated literal for the substrate EventTierReject row Meta
+// (`allowed_tiers` field). Mirrors pkg/auth.joinTiers so a forensic
+// walker can distinguish a renderer-against-operator-only deny from
+// a renderer-against-cron-only deny without re-running the call-site.
+//
+// Usage example (internal):
+//
+//	joinPermittedTiers([]auth.CallerTier{auth.TierOperator, auth.TierCascade})
+//	// "operator,cascade"
+func joinPermittedTiers(tiers []auth.CallerTier) string {
+	if len(tiers) == 0 {
+		return ""
+	}
+	out := ""
+	for i, t := range tiers {
+		if i > 0 {
+			out += ","
+		}
+		out += t.String()
+	}
+	return out
 }
 
 // newJobID is a small wrapper around core.RandomString so the

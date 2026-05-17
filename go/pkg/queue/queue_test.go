@@ -6,6 +6,7 @@ import (
 	core "dappco.re/go"
 	"dappco.re/go/orm"
 
+	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/auth"
 	"dappco.re/lthn/desktop/pkg/queue"
 )
@@ -450,6 +451,7 @@ func TestQueue_Enqueue_TierPermitted_Good(t *core.T) {
 // TierRenderer broadly (RFC §5.0 BOTH-not-either composition closes
 // the kind-string forge gap from Cerberus #73 F-3 / Mantis #1757).
 func TestQueue_Enqueue_TierNotPermitted_Bad(t *core.T) {
+	rec := installAuditRecorder(t)
 	c := newQueueCore(t)
 	core.RequireTrue(t, queue.RegisterKind(c, queue.HandlerOptions{
 		Kind:           "backup.nightly",
@@ -469,6 +471,24 @@ func TestQueue_Enqueue_TierNotPermitted_Bad(t *core.T) {
 	r := queue.Enqueue(c, "backup.nightly", core.NewOptions())
 	core.AssertFalse(t, r.OK)
 	core.AssertEqual(t, queue.ErrTierNotPermittedForKind, r.Code())
+
+	// Inner-gate substrate-emit (Cerberus #79 ADD / Mantis #1766): the
+	// per-kind PermittedTiers deny MUST land EventTierReject on the
+	// audit substrate. Closes the F-3+F-4 forensic-split where the
+	// outer auth.Require emitted but the inner per-kind gate was silent.
+	rows := rec.filterByName(audit.EventTierReject)
+	core.AssertEqual(t, 1, len(rows),
+		"inner per-kind deny MUST emit EventTierReject substrate row")
+	row := rows[0]
+	core.AssertEqual(t, audit.OutcomeDenied, row.Outcome)
+	core.AssertEqual(t, "queue", row.Scope)
+	core.AssertEqual(t, "queue.enqueue.kind", row.Meta["op"])
+	core.AssertEqual(t, string(auth.TierRenderer), row.Meta["caller_tier"])
+	core.AssertEqual(t, "account-renderer", row.Meta["caller_subject"])
+	core.AssertEqual(t, "wails", row.Meta["caller_source"])
+	core.AssertEqual(t, "operator,cascade", row.Meta["allowed_tiers"])
+	core.AssertEqual(t, "backup.nightly", row.Meta["kind"])
+	core.AssertEqual(t, queue.ErrTierNotPermittedForKind, row.Meta["error_code"])
 }
 
 // TestQueue_Enqueue_CascadeFanout_PreservesTierAuth_Good — a cascade-
