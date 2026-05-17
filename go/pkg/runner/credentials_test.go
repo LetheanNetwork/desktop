@@ -415,3 +415,69 @@ func TestCredentials_MigrateLegacyKeys_StripsPlaintext_Good(t *core.T) {
 	core.AssertEqual(t, "config", migratedEv.Meta["source"])
 	core.AssertEqual(t, "openai", migratedEv.Meta["provider"])
 }
+
+// TestWSetDynamicRoutes_PartialFailure_RollsBack_Bad — Mantis #1760 /
+// Cerberus #75 ADD-1 two-phase commit. Route[0] carries a valid name
+// (Phase-2 PutTier1 succeeds for ref "ok-name-migrated"); route[1]
+// carries an invalid name containing "/" (Phase-2 PutTier1 fails at
+// keyPath validation BEFORE any disk touch — load-bearing because
+// keyPath rejects path-separator chars). The rollback path must
+// DeleteTier1 the prior ref so no orphan ciphertext survives at rest;
+// saveRouteConfigsToCore must NOT have fired (config still at the
+// fixture seed `routes: {}`).
+//
+// Validates the load-bearing contract: a partial-failure leaves zero
+// at-rest state changes — the operator can retry without inheriting
+// orphan refs that produce indistinguishable-from-rotation audit rows.
+func TestWSetDynamicRoutes_PartialFailure_RollsBack_Bad(t *core.T) {
+	_ = installRecorder(t)
+	c, keysSvc, runnerSvc := credentialFixture(t)
+
+	// Two routes: first valid, second has a "/" in the name so the
+	// migration ref "bad/name-migrated" fails keyPath validation.
+	r := runnerSvc.WSetDynamicRoutes([]runner.RouteInput{
+		{
+			Name:    "ok-name",
+			Kind:    "openai",
+			BaseURL: "https://api.openai.com/v1",
+			APIKey:  "sk-first-must-roll-back",
+			Model:   "gpt-4o-mini",
+		},
+		{
+			Name:    "bad/name",
+			Kind:    "openai",
+			BaseURL: "https://api.openai.com/v1",
+			APIKey:  "sk-second-fails-validation",
+			Model:   "gpt-4o-mini",
+		},
+	})
+	core.AssertFalse(t, r.OK,
+		"WSetDynamicRoutes must fail when any route's PutTier1 fails")
+
+	// Phase-2 rollback contract: route[0]'s ref must NOT exist at rest.
+	hasR := keysSvc.HasTier1("ok-name-migrated")
+	core.AssertTrue(t, hasR.OK)
+	core.AssertEqual(t, false, hasR.Value.(bool),
+		"partial-failure rollback must delete the prior tier-1 ref")
+
+	// saveRouteConfigsToCore must NOT have fired — the persisted
+	// `routes:` map stays at the fixture's `{}` seed. The fixture
+	// wires the config service; LoadRoutesFromCore is the same
+	// read-path the production loader takes, and a partial-failure
+	// must leave it returning zero routes.
+	loaded := runner.LoadRoutesFromCore(c)
+	core.AssertEqual(t, 0, len(loaded),
+		"partial-failure must not persist any RouteConfig entries")
+
+	// Pin: keysSvc.ListTier1 must NOT show the orphan ref either.
+	// The rollback path is what makes this true; without it the
+	// "ok-name-migrated" file would survive at rest with no route
+	// pointing at it (STRIDE-T credential survival).
+	listR := keysSvc.ListTier1()
+	core.AssertTrue(t, listR.OK)
+	for _, ref := range listR.Value.([]string) {
+		core.AssertFalse(t, ref == "ok-name-migrated",
+			"rollback must remove ok-name-migrated from tier-1 partition")
+	}
+	_ = c
+}

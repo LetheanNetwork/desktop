@@ -1757,6 +1757,36 @@ const (
 	// EventProviderCredentialMigrated, which fires AFTER the unlock
 	// completes and the deferred migration drains.
 	EventProviderCredentialMigrationPendingObserved = "provider.credential.migration_pending_observed"
+
+	// EventProviderCredentialStoredOrphan fires when pkg/runner's
+	// WSetDynamicRoutes two-phase commit attempts to roll back a
+	// previously-stored tier-1 ref (after a sibling PutTier1 failed
+	// mid-loop OR the post-commit saveRouteConfigsToCore failed) AND
+	// the rollback DeleteTier1 itself fails — leaving a tier-1
+	// ciphertext at rest with no RouteConfig binding (Mantis #1760 /
+	// Cerberus #75 ADD-1 option (b) safety-net).
+	//
+	// Without this row the orphan ciphertext would survive silently;
+	// the operator-retry path then dispatches PutTier1 again, which
+	// fires Tier1KeyChanged{Kind: Tier1KeyReplaced} — visually
+	// indistinguishable from a routine credential rotation in the
+	// audit log. The Orphan row makes the partial-failure path
+	// distinguishable + grep-able for forensic walkers.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   ref    — opaque tier-1 reference handle that survived the
+	//            rollback attempt; this is the audit handle, NEVER
+	//            the credential bytes
+	//   reason — Error().String() of the DeleteTier1 cause (file-
+	//            permission denial, disk failure, etc.); recorded so
+	//            an incident review can correlate the orphan with the
+	//            underlying substrate failure
+	//
+	// The credential bytes are NEVER in Meta — the tier-1 ciphertext
+	// stays sealed under the tier-1 master; this row records the
+	// fact-of-orphan, not the credential.
+	EventProviderCredentialStoredOrphan = "provider.credential.stored_orphan"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the

@@ -214,23 +214,55 @@ type RouteInput struct {
 	Model     string `json:"model"`
 }
 
+// tier1Deleter is the slice of keys.Service the rollback helper needs.
+// Declared narrow so the rollback-fails safety-net test can drive
+// rollbackTier1Refs with a stub whose DeleteTier1 fails deterministically
+// (the in-process keys.Service has no failure-injection seam).
+type tier1Deleter interface {
+	DeleteTier1(ref string) core.Result
+}
+
+// dynamicRouteIntent is the Phase-1 pre-validated record describing one
+// (name, RouteConfig, optional plaintext-import) tuple. Built before any
+// PutTier1 dispatch so Phase 2 can either commit-all or roll-back-all
+// without re-walking the input slice.
+type dynamicRouteIntent struct {
+	name      string
+	provider  string // route name (== audit Meta `provider` key)
+	rc        RouteConfig
+	importRef string // non-empty when Phase 2 must PutTier1 plaintext
+	plaintext []byte // copied — caller-supplied bytes may be mutated
+}
+
 func (s *Service) WSetDynamicRoutes(routes []RouteInput) core.Result {
 	if s == nil || s.core == nil {
 		return core.Fail(core.E("runner.Service.WSetDynamicRoutes",
 			"runner has no core wire", nil))
 	}
 	keysSvc, _ := core.ServiceFor[*keys.Service](s.core, "keys")
-	out := map[string]RouteConfig{}
+
+	// Phase 1 — validate every input + build intent set. No tier-1
+	// side-effects yet. A validation failure here means zero state
+	// has changed; Phase 2 is the load-bearing all-or-nothing commit.
+	// Mantis #1760 / Cerberus #75 ADD-1 — the prior shape early-
+	// returned mid-loop, leaving route[0..i-1] orphan tier-1 refs at
+	// rest with no RouteConfig pointer; operator-retry then produced
+	// indistinguishable-from-rotation Tier1KeyReplaced audit rows.
+	intents := make([]dynamicRouteIntent, 0, len(routes))
 	for i, in := range routes {
 		if in.Name == "" {
 			return core.Fail(core.E("runner.Service.WSetDynamicRoutes",
 				core.Sprintf("route[%d] missing required name", i), nil))
 		}
-		rc := RouteConfig{
-			Kind:      in.Kind,
-			BaseURL:   in.BaseURL,
-			APIKeyRef: in.APIKeyRef,
-			Model:     in.Model,
+		intent := dynamicRouteIntent{
+			name:     in.Name,
+			provider: in.Name,
+			rc: RouteConfig{
+				Kind:      in.Kind,
+				BaseURL:   in.BaseURL,
+				APIKeyRef: in.APIKeyRef,
+				Model:     in.Model,
+			},
 		}
 		// Server-side discrimination: plaintext arrives only via the
 		// migration window — auto-import into tier-1 and strip before
@@ -241,40 +273,114 @@ func (s *Service) WSetDynamicRoutes(routes []RouteInput) core.Result {
 					"keys service unavailable; cannot import plaintext credential", nil))
 			}
 			ref := in.Name + migrationRefSuffix
-			if r := keysSvc.PutTier1(ref, []byte(in.APIKey)); !r.OK {
-				// Tier-1 KEK provider not live (account locked) is
-				// the load-bearing failure mode — surface a typed
-				// error the UI can render as the "unlock to use
-				// this provider" prompt rather than a raw stack.
-				return core.Fail(core.E("runner.Service.WSetDynamicRoutes",
-					"tier-1 dispatch failed (unlock account?)", r.Value.(error)))
-			}
-			rc.APIKeyRef = ref
-			_ = audit.Default().Record(audit.Event{
-				Event:   audit.EventProviderCredentialStored,
-				TS:      core.Now().Unix(),
-				Scope:   "runner",
-				Outcome: audit.OutcomeOK,
-				Meta: map[string]any{
-					"provider": in.Name,
-					"ref":      ref,
-					"source":   migrationSourceWailsInput,
-				},
-			})
+			intent.importRef = ref
+			intent.plaintext = append([]byte(nil), in.APIKey...)
+			intent.rc.APIKeyRef = ref
 		} else if in.APIKey != "" && in.APIKeyRef != "" {
 			// Operator dispatched a ref AND left plaintext in the
 			// payload — ref wins per loader contract, plaintext
 			// dropped on the floor (defence-in-depth strip).
 		}
-		out[in.Name] = rc
+		intents = append(intents, intent)
+	}
+
+	// Phase 2 — commit every tier-1 import. Track stored refs so a
+	// mid-loop failure can roll back the prior writes; without the
+	// rollback, partial-failure leaves orphan ciphertext at rest with
+	// no RouteConfig binding (STRIDE-T credential survival + audit
+	// deception). On any rollback DeleteTier1 failure, emit the
+	// orphan safety-net audit row per Cerberus #75 ADD-1 option (b).
+	stored := make([]string, 0, len(intents))
+	for _, intent := range intents {
+		if intent.importRef == "" {
+			continue
+		}
+		if r := keysSvc.PutTier1(intent.importRef, intent.plaintext); !r.OK {
+			// Roll back every previously-stored ref before surfacing.
+			// rollbackTier1Refs handles per-ref delete failures by
+			// emitting the orphan safety-net audit row.
+			rollbackTier1Refs(keysSvc, stored)
+			// Tier-1 KEK provider not live (account locked) is the
+			// dominant failure mode — preserve the typed error the
+			// UI renders as the "unlock to use this provider"
+			// prompt rather than a raw stack.
+			cause, _ := r.Value.(error)
+			return core.Fail(core.E("runner.Service.WSetDynamicRoutes",
+				"tier-1 dispatch failed (unlock account?)", cause))
+		}
+		stored = append(stored, intent.importRef)
+	}
+
+	// Phase 3 — persist the route map AND emit the per-import Stored
+	// audit rows. Audit emit lives here (not Phase 2) so the row only
+	// fires when the credential is bound to a persisted RouteConfig,
+	// keeping audit-row semantics aligned with at-rest state.
+	out := make(map[string]RouteConfig, len(intents))
+	for _, intent := range intents {
+		out[intent.name] = intent.rc
 	}
 	if r := saveRouteConfigsToCore(s.core, out); !r.OK {
+		// Config write failed AFTER tier-1 commits landed — roll the
+		// tier-1 writes back so at-rest stays consistent. Same
+		// safety-net contract: rollback failure emits the orphan row.
+		rollbackTier1Refs(keysSvc, stored)
 		return r
+	}
+	for _, intent := range intents {
+		if intent.importRef == "" {
+			continue
+		}
+		_ = audit.Default().Record(audit.Event{
+			Event:   audit.EventProviderCredentialStored,
+			TS:      core.Now().Unix(),
+			Scope:   "runner",
+			Outcome: audit.OutcomeOK,
+			Meta: map[string]any{
+				"provider": intent.provider,
+				"ref":      intent.importRef,
+				"source":   migrationSourceWailsInput,
+			},
+		})
 	}
 	// Reload static route set so the next inference call sees the
 	// new shape without process restart.
 	RebuildStaticRoutes(s.core, s)
 	return core.Ok(nil)
+}
+
+// rollbackTier1Refs deletes every ref in refs from the tier-1 substrate,
+// emitting the orphan safety-net audit row per failed delete. Bounded
+// pass (no retry loop) — the safety-net audit is the operator-visible
+// signal that a tier-1 ciphertext survived at rest with no RouteConfig
+// binding. Mantis #1760 / Cerberus #75 ADD-1 option (b).
+//
+// Usage example (internal — called from WSetDynamicRoutes on Phase 2
+// or Phase 3 failure):
+//
+//	rollbackTier1Refs(keysSvc, stored)
+func rollbackTier1Refs(d tier1Deleter, refs []string) {
+	if d == nil {
+		return
+	}
+	for _, ref := range refs {
+		if r := d.DeleteTier1(ref); !r.OK {
+			cause, _ := r.Value.(error)
+			reason := ""
+			if cause != nil {
+				reason = cause.Error()
+			}
+			_ = audit.Default().Record(audit.Event{
+				Event:   audit.EventProviderCredentialStoredOrphan,
+				TS:      core.Now().Unix(),
+				Scope:   "runner",
+				Outcome: audit.OutcomeError,
+				Meta: map[string]any{
+					"ref":    ref,
+					"reason": reason,
+				},
+			})
+		}
+	}
 }
 
 // WForceDeleteTier1 is the operator-confirmed force-delete escape per
