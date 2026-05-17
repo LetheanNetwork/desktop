@@ -492,6 +492,34 @@ func NewService(opts Options) *Service {
 		// not via <script> tags — webview_eval bypass is unaffected by CSP.
 		coreapi.WithMiddleware(cspMiddleware()),
 	}
+	// Mantis #1458 — explicit 404 for webview-only prefixes on the
+	// public engine. Without this, an unmatched /v1/api/process/* on
+	// `lthn serve` falls through to coreapi.responseMetaMiddleware
+	// which forces the response to 200 with an empty body. The 200+
+	// empty leaks "something might be here" — a 404 makes the OPSEC
+	// signal clean: process REST is webview-only, the public surface
+	// genuinely does not host it.
+	//
+	// The slice is mutated in the group-registration loop below as
+	// webview-only groups are routed off the public engine; the
+	// closure captures the pointer so build() reads the up-to-date
+	// list on every Handler() call. Empty slice = middleware is a
+	// no-op (no webview-only mounts in play), preserving the legacy
+	// shape for callers that opt out via DisableDefaultWebViewOnly.
+	//
+	// Cerberus C#17 F-1 (2026-05-17) — the reject middleware is
+	// appended to publicOpts BEFORE auth (WithBootstrapAndSessionAuth /
+	// WithBearerAuth). Gin runs middleware in append order; reject
+	// must fire first so an unmatched webview-only path returns 404
+	// instead of 401. Reversing this order regresses Mantis #1458:
+	// production `lthn serve` would surface "Unauthorized" on
+	// /v1/api/process/* and tip off attackers that there is a
+	// resource behind the auth gate.
+	var webviewOnlyPrefixes []string
+	publicOpts := append([]coreapi.Option(nil), apiOpts...)
+	publicOpts = append(publicOpts,
+		coreapi.WithMiddleware(webViewOnlyRejectMiddleware(&webviewOnlyPrefixes)))
+
 	// Cerberus Mantis #1430 (2026-05-16) — bearer auth re-enabled. The
 	// WebView fetch interceptor lives at frontend/src/lit/api-fetch.ts;
 	// it loads the token via apikey.Reveal() on first call + injects
@@ -507,51 +535,44 @@ func NewService(opts Options) *Service {
 	// tier endpoints accept either source. When ServerKey is nil we
 	// fall back to plain bearer auth (pre-Stage-B behaviour) so
 	// non-desktop callers (CLI, tests) still authenticate correctly.
+	//
+	// Cerberus C#17 F-1 (2026-05-17) — auth appends after reject on
+	// publicOpts. apiOpts (the webview-engine base) does NOT get the
+	// reject middleware, so it appends auth in the same position and
+	// preserves the legacy ordering for webview routes.
+	authOpts := []coreapi.Option{}
 	if opts.ServerKey != nil {
-		apiOpts = append(apiOpts,
+		authOpts = append(authOpts,
 			WithBootstrapAndSessionAuth(opts.ServerKey, opts.LocalKey, BootstrapPathScopes, RouteTiers, RouteTierPrefixes))
 	} else if opts.LocalKey != "" {
-		apiOpts = append(apiOpts, coreapi.WithBearerAuth(opts.LocalKey))
+		authOpts = append(authOpts, coreapi.WithBearerAuth(opts.LocalKey))
 	}
+	tailOpts := []coreapi.Option{}
 	if opts.SPAHandler != nil {
-		apiOpts = append(apiOpts, coreapi.WithNoRoute(opts.SPAHandler))
+		tailOpts = append(tailOpts, coreapi.WithNoRoute(opts.SPAHandler))
 	}
 	if !opts.DisableSpec {
-		apiOpts = append(apiOpts, coreapi.WithOpenAPISpec())
+		tailOpts = append(tailOpts, coreapi.WithOpenAPISpec())
 	}
 	if !opts.DisableSDKGen {
-		apiOpts = append(apiOpts, coreapi.WithSDKGen())
+		tailOpts = append(tailOpts, coreapi.WithSDKGen())
 	}
 	if !opts.DisableSwagger {
-		apiOpts = append(apiOpts,
+		tailOpts = append(tailOpts,
 			coreapi.WithSwagger(brand.Title, brand.Description, brand.Version),
 		)
 	}
 	if opts.RateLimit > 0 {
-		apiOpts = append(apiOpts, coreapi.WithRateLimit(opts.RateLimit))
+		tailOpts = append(tailOpts, coreapi.WithRateLimit(opts.RateLimit))
 	}
 	if opts.TracingName != "" {
-		apiOpts = append(apiOpts, coreapi.WithTracing(opts.TracingName))
+		tailOpts = append(tailOpts, coreapi.WithTracing(opts.TracingName))
 	}
 
-	// Mantis #1458 — explicit 404 for webview-only prefixes on the
-	// public engine. Without this, an unmatched /v1/api/process/* on
-	// `lthn serve` falls through to coreapi.responseMetaMiddleware
-	// which forces the response to 200 with an empty body. The 200+
-	// empty leaks "something might be here" — a 404 makes the OPSEC
-	// signal clean: process REST is webview-only, the public surface
-	// genuinely does not host it.
-	//
-	// The slice is mutated in the group-registration loop below as
-	// webview-only groups are routed off the public engine; the
-	// closure captures the pointer so build() reads the up-to-date
-	// list on every Handler() call. Empty slice = middleware is a
-	// no-op (no webview-only mounts in play), preserving the legacy
-	// shape for callers that opt out via DisableDefaultWebViewOnly.
-	var webviewOnlyPrefixes []string
-	publicOpts := append([]coreapi.Option(nil), apiOpts...)
-	publicOpts = append(publicOpts,
-		coreapi.WithMiddleware(webViewOnlyRejectMiddleware(&webviewOnlyPrefixes)))
+	apiOpts = append(apiOpts, authOpts...)
+	apiOpts = append(apiOpts, tailOpts...)
+	publicOpts = append(publicOpts, authOpts...)
+	publicOpts = append(publicOpts, tailOpts...)
 
 	engine, _ := coreapi.New(publicOpts...) // current New always returns nil err
 	s := &Service{opts: opts, engine: engine}

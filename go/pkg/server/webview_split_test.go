@@ -31,6 +31,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"dappco.re/lthn/desktop/pkg/server"
+	"dappco.re/lthn/desktop/pkg/serverkey"
 )
 
 // stubGroup is a minimal coreapi.RouteGroup carrying one probe GET so
@@ -535,4 +536,95 @@ func TestServerWebViewSplit_Health_Good_StillServedByCompositeHandler(t *core.T)
 		"composite must fall through to the public engine for non-process paths")
 	core.AssertTrue(t, core.Contains(w.Body.String(), `"data":"healthy"`),
 		"/health body via composite must be intact: body=%q", w.Body.String())
+}
+
+// --- Cerberus C#17 F-1 — middleware ordering regression ---
+
+// TestServeListener_ProcessRoute_404NotAuth_Bad asserts the load-bearing
+// ordering invariant the Cerberus C#17 F-1 finding caught: under the
+// PRODUCTION wire shape (ServerKey present → WithBootstrapAndSessionAuth
+// installs the bootstrap-plus-bearer middleware), an unmatched webview-
+// only /v1/api/process/* path on the public engine must still return
+// 404 — NOT 401.
+//
+// Pre-fix history: webViewOnlyRejectMiddleware was appended to
+// publicOpts AFTER auth in service.go, so gin ran auth first. With
+// ServerKey wired (the production shape), the request 401'd before
+// reject ever ran. That regressed Mantis #1458 OPSEC intent — a 401
+// signals "there is a resource behind the auth gate" while a 404 says
+// "the public surface genuinely does not host this route". The existing
+// #1458 tests (TestServerWebViewSplit_Process_Good_ServeListener_*) all
+// ran WITHOUT ServerKey so auth was never installed; the ordering bug
+// was masked.
+//
+// Fix shape: publicOpts now appends reject BEFORE auth, and the
+// webview engine continues to receive auth without reject (the webview
+// engine must serve those routes, not 404 them). This test is the
+// guard rail: any future restructure that puts auth before reject on
+// publicOpts will fail here.
+func TestServeListener_ProcessRoute_404NotAuth_Bad(t *core.T) {
+	_ = homeFixture(t)
+	svc := serverkey.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK, "serverkey.Bootstrap must succeed")
+
+	c := newCoreWithProvider(&stubGroup{name: processGroupName, base: processBasePath})
+	s := server.NewService(server.Options{
+		Core:              c,
+		ServerKey:         svc,
+		LocalKey:          "bearer-secret-1234567890abcdef",
+		WebViewOnlyGroups: []string{processGroupName},
+	})
+
+	paths := []string{
+		"/v1/api/process",                       // exact prefix
+		"/v1/api/process/foo",                   // shallow
+		"/v1/api/process/processes/list/active", // deep
+	}
+	for _, p := range paths {
+		req := httptest.NewRequest(core.MethodGet, p, nil)
+		// Deliberately no Authorization header — proves reject fires
+		// before auth even though auth would have rejected this too.
+		w := httptest.NewRecorder()
+		s.Engine().Handler().ServeHTTP(w, req)
+
+		if w.Code == core.StatusUnauthorized {
+			t.Fatalf("path %q: reject middleware must fire BEFORE auth (Cerberus C#17 F-1) — got 401 leaks resource existence, expected 404 OPSEC-clean per Mantis #1458; body=%q",
+				p, w.Body.String())
+		}
+		if w.Code != core.StatusNotFound {
+			t.Fatalf("path %q: production-shape (ServerKey wired) public engine must 404 webview-only prefix — got status=%d body=%q",
+				p, w.Code, w.Body.String())
+		}
+	}
+}
+
+// TestServeListener_AuthStillProtectsNonWebviewPaths_Good is the
+// counterpart assertion to F-1: the ordering fix moved reject before
+// auth, but auth still must run for paths reject lets through. A
+// /v1/api/chat request with no auth header must 401 (the path is not
+// webview-only, so reject is a no-op, and auth then rejects).
+//
+// Guards against an over-correction where reject swallows EVERY
+// request and auth never runs.
+func TestServeListener_AuthStillProtectsNonWebviewPaths_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := serverkey.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK, "serverkey.Bootstrap must succeed")
+
+	c := newCoreWithProvider(&stubGroup{name: processGroupName, base: processBasePath})
+	s := server.NewService(server.Options{
+		Core:              c,
+		ServerKey:         svc,
+		LocalKey:          "bearer-secret-1234567890abcdef",
+		WebViewOnlyGroups: []string{processGroupName},
+	})
+
+	// /v1/api/chat is NOT in WebViewOnlyGroups, so reject is a no-op
+	// and auth must run. No Authorization header → 401.
+	req := httptest.NewRequest(core.MethodGet, "/v1/api/chat", nil)
+	w := httptest.NewRecorder()
+	s.Engine().Handler().ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusUnauthorized, w.Code,
+		"non-webview path with no auth must still 401 — reject must not swallow every request")
 }
