@@ -41,6 +41,27 @@ const (
 	// becomes a 48-char hex string. 192 bits of entropy is plenty
 	// for a local-only auth secret.
 	serverPasswordBytes = 24
+
+	// installIDStoreGroup holds the per-install identifier used to
+	// gate container adoption — see Mantis #1599 (Cerberus #22):
+	// without this label, any sibling user on the host could spawn a
+	// `lthn-opencode-*`-named container that Reconcile would pick up
+	// and front with the per-install bearer header, redirecting
+	// upstream proxy traffic to attacker-controlled code.
+	installIDStoreGroup = "opencode.install"
+	// installIDKey is the key inside installIDStoreGroup.
+	installIDKey = "install_id"
+	// installIDBytes is the random source width — 16 bytes becomes a
+	// 32-char hex string. The identifier is a non-secret tag (it
+	// shows up in `docker ps --format '{{.Labels}}'`); 128 bits is
+	// plenty to avoid collisions between sibling lthn installs on
+	// the same host.
+	installIDBytes = 16
+
+	// InstallIDLabel is the docker label key Reconcile gates on.
+	// Exported so tests + downstream auditors can grep for one
+	// canonical constant.
+	InstallIDLabel = "lthn.opencode.install_id"
 )
 
 // ServerPassword returns the persisted OPENCODE_SERVER_PASSWORD,
@@ -98,4 +119,42 @@ func (s *Service) applyAuth(r *core.Request) {
 	if h := s.authHeader(); h != "" {
 		r.Header.Set("Authorization", h)
 	}
+}
+
+// InstallID returns the persisted per-install identifier, generating
+// + storing a new one on first call. Idempotent — subsequent calls
+// return the same value.
+//
+// The identifier is used as the value of the
+// "lthn.opencode.install_id" docker label attached to every container
+// spawned by Start, and as the gate Reconcile uses to decide which
+// surviving containers it is safe to adopt (Mantis #1599 Cerberus
+// #22 — without this gate, a sibling user on the host could spawn a
+// look-alike `lthn-opencode-*` container and have lthn front it with
+// the per-install bearer header).
+//
+// Usage example:
+//
+//	r := svc.InstallID()
+//	if r.OK { id := r.Value.(string); _ = id }
+func (s *Service) InstallID() core.Result {
+	st, r := kv()
+	if !r.OK {
+		return r
+	}
+	if existing, err := st.Get(installIDStoreGroup, installIDKey); err == nil && existing != "" {
+		return core.Ok(existing)
+	} else if err != nil && !core.Is(err, goiostore.NotFoundError) {
+		return core.Fail(err)
+	}
+	// First call ever — generate + persist.
+	buf := make([]byte, installIDBytes)
+	if r := core.RandRead(buf); !r.OK {
+		return core.Fail(core.E("opencode.InstallID", "rand read failed", r.Value.(error)))
+	}
+	id := core.HexEncode(buf)
+	if err := st.Set(installIDStoreGroup, installIDKey, id); err != nil {
+		return core.Fail(err)
+	}
+	return core.Ok(id)
 }

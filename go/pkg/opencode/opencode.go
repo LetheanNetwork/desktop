@@ -227,6 +227,18 @@ func (s *Service) Start(profileName string) core.Result {
 	}
 	password, _ := pwR.Value.(string)
 
+	// Per-install identifier stamped on every container as a docker
+	// label so Reconcile can distinguish our containers from a
+	// sibling user's look-alike (Mantis #1599 Cerberus #22). Resolve
+	// BEFORE the run — generation failure must abort Start rather
+	// than silently spawn an unlabelled container that Reconcile
+	// would later refuse to adopt.
+	idR := s.InstallID()
+	if !idR.OK {
+		return idR
+	}
+	installID, _ := idR.Value.(string)
+
 	// Inline-config via OPENCODE_CONFIG_CONTENT — opencode reads this
 	// at startup before any provider initialisation, so the narrowed
 	// profile (provider.lthn, tool/skill allow-lists, etc.) is the
@@ -238,6 +250,9 @@ func (s *Service) Start(profileName string) core.Result {
 		"-p", core.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort),
 		"-e", "OPENCODE_CONFIG_CONTENT=" + profile.ToOpenCodeWire(),
 		"-e", "OPENCODE_SERVER_PASSWORD=" + password,
+		// Adoption gate per Mantis #1599 — Reconcile only attaches
+		// to containers carrying this label with our install_id.
+		"--label", InstallIDLabel + "=" + installID,
 		"--name", ContainerName(id),
 		s.image(),
 		// `opencode web` serves the same /global/*, /provider, /session
