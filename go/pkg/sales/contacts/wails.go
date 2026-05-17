@@ -131,6 +131,9 @@ func (s *Service) Get(input GetInput) core.Result {
 //	    Next: "call · Fri",
 //	})
 func (s *Service) Create(input CreateInput) core.Result {
+	if fail, ok := s.assertUnlocked("contacts.Create"); !ok {
+		return fail
+	}
 	if input.Name == "" {
 		return core.Fail(core.E("contacts.Create", "name is required", nil))
 	}
@@ -196,6 +199,9 @@ func (s *Service) Create(input CreateInput) core.Result {
 //	    ID: "ada-penley", Next: "contract", LastTouch: core.Now(),
 //	})
 func (s *Service) Update(input UpdateInput) core.Result {
+	if fail, ok := s.assertUnlocked("contacts.Update"); !ok {
+		return fail
+	}
 	if err := paths.IsValidID(input.ID); err != nil {
 		return core.Fail(err)
 	}

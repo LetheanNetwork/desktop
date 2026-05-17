@@ -12,10 +12,34 @@ import (
 	"dappco.re/lthn/desktop/pkg/sales/contacts"
 )
 
+// stubSessionGate is the test double for the consumer-defined
+// SessionGate interface (RFC.stage-e-unlockgate v2 §4.2 stub shape —
+// Mantis #1613 B.2). Duplicated per-pkg rather than shared so test
+// files keep zero cross-pkg testing/... deps.
+type stubSessionGate struct{ ids []string }
+
+func (s *stubSessionGate) UnlockedAccountIDs() []string { return s.ids }
+
+// newTestSvc constructs a contacts.Service pre-wired with a SessionGate
+// reporting a single unlocked account so write methods pass the gate
+// by default. Tests that need to assert the locked-state path call
+// SetSessionGate explicitly with an empty stub (or instantiate
+// contacts.NewService directly for the nil-gate fail-safe path).
+//
+// Usage example:
+//
+//	svc := newTestSvc(t)
+//	r := svc.Create(contacts.CreateInput{Name: "Ada Penley"})
+func newTestSvc(_ *testing.T) *contacts.Service {
+	svc := contacts.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
+	return svc
+}
+
 // TestList_Empty_Good — empty contacts dir produces an empty list.
 func TestList_Empty_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.List(contacts.ListInput{})
 	if !r.OK {
 		t.Fatalf("List failed: %s", r.Error())
@@ -32,7 +56,7 @@ func TestList_Empty_Good(t *testing.T) {
 // TestCreate_WritesFile_Good — Create writes a Trix file with correct slug.
 func TestCreate_WritesFile_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(contacts.CreateInput{
 		Name: "Ada Penley",
 		Role: "CTO · Heritage Law",
@@ -53,7 +77,7 @@ func TestCreate_WritesFile_Good(t *testing.T) {
 // TestList_ReturnsCreated_Good — List returns the created entry.
 func TestList_ReturnsCreated_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	svc.Create(contacts.CreateInput{Name: "Ada Penley", Role: "CTO · Heritage Law"})
 	svc.Create(contacts.CreateInput{Name: "Marcus Stannard", Role: "Partner · Stannard"})
 
@@ -73,7 +97,7 @@ func TestList_ReturnsCreated_Good(t *testing.T) {
 // TestList_FilterByWarmth_Good — warmth filter excludes non-matching contacts.
 func TestList_FilterByWarmth_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 
 	// Touch one contact just now (hot) and one 30 days ago (cool).
 	svc.Create(contacts.CreateInput{
@@ -103,7 +127,7 @@ func TestList_FilterByWarmth_Good(t *testing.T) {
 // TestUpdate_MutatesRole_Good — Update partial-updates role field.
 func TestUpdate_MutatesRole_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	svc.Create(contacts.CreateInput{Name: "Ada Penley", Role: "CTO · Heritage Law"})
 
 	r := svc.Update(contacts.UpdateInput{
@@ -122,7 +146,7 @@ func TestUpdate_MutatesRole_Good(t *testing.T) {
 // TestWarmth_HotWithinWeek_Good — warmthFor returns hot for ≤7 days.
 func TestWarmth_HotWithinWeek_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	svc.Create(contacts.CreateInput{
 		Name:      "Recent",
 		LastTouch: core.Now().Add(-3 * 24 * core.Hour),
@@ -143,7 +167,7 @@ func TestWarmth_HotWithinWeek_Good(t *testing.T) {
 // TestWarmth_CoolOverThreeWeeks_Bad — warmthFor returns cool for >21 days.
 func TestWarmth_CoolOverThreeWeeks_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	svc.Create(contacts.CreateInput{
 		Name:      "Old Contact",
 		LastTouch: core.Now().Add(-30 * 24 * core.Hour),
@@ -164,7 +188,7 @@ func TestWarmth_CoolOverThreeWeeks_Bad(t *testing.T) {
 // TestCreate_DuplicateName_Bad — second Create for same slug returns core.Fail.
 func TestCreate_DuplicateName_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	svc.Create(contacts.CreateInput{Name: "Ada Penley"})
 	r := svc.Create(contacts.CreateInput{Name: "Ada Penley"})
 	if r.OK {
@@ -175,7 +199,7 @@ func TestCreate_DuplicateName_Bad(t *testing.T) {
 // TestCreate_EmptyName_Ugly — Create with empty name returns core.Fail.
 func TestCreate_EmptyName_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(contacts.CreateInput{Name: ""})
 	if r.OK {
 		t.Fatalf("expected failure for empty name, got OK")
@@ -190,7 +214,7 @@ func TestCreate_EmptyName_Ugly(t *testing.T) {
 // ReadVersion.
 func TestAtomicCutover_Contacts_Create_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(contacts.CreateInput{Name: "Ada Penley", Role: "CTO · Heritage"})
 	if !r.OK {
 		t.Fatalf("Create failed: %s", r.Error())
@@ -218,7 +242,7 @@ func TestAtomicCutover_Contacts_Create_Good(t *testing.T) {
 // stored version monotonically (1 → 2).
 func TestAtomicCutover_Contacts_Update_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	cr := svc.Create(contacts.CreateInput{Name: "Marcus Stannard", Role: "Partner"})
 	if !cr.OK {
 		t.Fatalf("Create failed: %s", cr.Error())
@@ -262,7 +286,7 @@ func TestAtomicCutover_Contacts_Update_Good(t *testing.T) {
 // by contacts.atomicWriteFile.
 func TestAtomicCutover_Contacts_Update_VersionStale_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	cr := svc.Create(contacts.CreateInput{Name: "Tom Pemberton", Role: "COO"})
 	if !cr.OK {
 		t.Fatalf("Create failed: %s", cr.Error())
@@ -368,7 +392,7 @@ func TestAtomicCutover_Contacts_Update_VersionStale_Ugly(t *testing.T) {
 // version=1.
 func TestAtomicCutover_Contacts_LegacyFile_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	// Seed a contacts dir + a legacy file with NO version frontmatter.
 	dirR := core.UserHomeDir()
 	if !dirR.OK {
@@ -413,7 +437,7 @@ func TestAtomicCutover_Contacts_LegacyFile_Ugly(t *testing.T) {
 // classifies sales/contacts/* under AuditModeBatch.
 func TestAtomicCutover_Contacts_AuditEmissionRecordBatch_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	// The primitive drops LockEvents when the HKDF audit secret is
 	// unavailable (Cerberus DREAD-r2 F2, Mantis #1526). Install a
 	// deterministic test secret so the emit path is reachable.
@@ -506,4 +530,160 @@ func splitLines(raw []byte) [][]byte {
 	}
 	out = append(out, raw[start:])
 	return out
+}
+
+// ---- SessionGate retrofit (RFC.stage-e-unlockgate v2 §4.2 / Mantis #1613 B.2)
+
+// TestContacts_NilGate_WarnsOnce_FailsClosed — a Service constructed
+// without SetSessionGate fails-closed on writes. Second + third writes
+// continue to fail-closed (one-shot warn semantics — the second call
+// must remain quiet but its caller-visible result must be the same
+// fail-closed shape). The warn-once field assertion lives in the
+// internal-package test surface (documents pkg precedent); this
+// external test pins the observable contract.
+func TestContacts_NilGate_WarnsOnce_FailsClosed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := contacts.NewService(nil) // NO SetSessionGate — exercises §2.2 fail-safe.
+
+	r1 := svc.Create(contacts.CreateInput{Name: "Ada Penley"})
+	if r1.OK {
+		t.Fatal("expected Create to fail-closed when gate is nil")
+	}
+	if !core.Contains(r1.Error(), "contacts.session.locked") {
+		t.Fatalf("expected contacts.session.locked on first Create, got %q", r1.Error())
+	}
+
+	// Second write — nilWarned already true; CompareAndSwap returns
+	// false and core.Warn is NOT called again. Behaviour from the
+	// caller's perspective: same fail-closed result.
+	r2 := svc.Update(contacts.UpdateInput{ID: "ada-penley", Next: "ping"})
+	if r2.OK {
+		t.Fatal("expected Update to fail-closed when gate is nil")
+	}
+	if !core.Contains(r2.Error(), "contacts.session.locked") {
+		t.Fatalf("expected contacts.session.locked on Update, got %q", r2.Error())
+	}
+
+	// Third write — same fail-closed behaviour persists.
+	r3 := svc.Create(contacts.CreateInput{Name: "Marcus Stannard"})
+	if r3.OK {
+		t.Fatal("expected third Create to fail-closed when gate is nil")
+	}
+	if !core.Contains(r3.Error(), "contacts.session.locked") {
+		t.Fatalf("expected contacts.session.locked on third Create, got %q", r3.Error())
+	}
+}
+
+// TestContacts_UnlockedGate_AllowsCreate — Create succeeds when the
+// live-read gate reports at least one unlocked account.
+func TestContacts_UnlockedGate_AllowsCreate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := contacts.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	r := svc.Create(contacts.CreateInput{Name: "Ada Penley", Role: "CTO"})
+	if !r.OK {
+		t.Fatalf("Create should succeed with gate reporting unlocked acct, got: %s", r.Error())
+	}
+}
+
+// TestContacts_UnlockedGate_AllowsUpdate — Update succeeds when the
+// live-read gate reports at least one unlocked account.
+func TestContacts_UnlockedGate_AllowsUpdate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := contacts.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	cr := svc.Create(contacts.CreateInput{Name: "Ada Penley", Role: "CTO"})
+	if !cr.OK {
+		t.Fatalf("seed Create failed: %s", cr.Error())
+	}
+	ur := svc.Update(contacts.UpdateInput{ID: "ada-penley", Next: "follow up"})
+	if !ur.OK {
+		t.Fatalf("Update should succeed with gate reporting unlocked acct, got: %s", ur.Error())
+	}
+}
+
+// TestContacts_LockedGate_FailsCreate_session_locked — Create rejects
+// when the live-read gate reports zero unlocked accounts.
+func TestContacts_LockedGate_FailsCreate_session_locked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := contacts.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.Create(contacts.CreateInput{Name: "Ada Penley"})
+	if r.OK {
+		t.Fatal("expected Create to be rejected when gate reports zero unlocked accounts")
+	}
+	if !core.Contains(r.Error(), "contacts.session.locked") {
+		t.Fatalf("expected contacts.session.locked, got %q", r.Error())
+	}
+}
+
+// TestContacts_LockedGate_FailsUpdate_session_locked — Update rejects
+// when the live-read gate reports zero unlocked accounts. The Update
+// is gated BEFORE the IsValidID check + filesystem read, so the
+// session.locked code surfaces in preference to any later error.
+func TestContacts_LockedGate_FailsUpdate_session_locked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Seed a record while unlocked, then flip to locked + try to update.
+	svc := newTestSvc(t)
+	cr := svc.Create(contacts.CreateInput{Name: "Marcus Stannard", Role: "Partner"})
+	if !cr.OK {
+		t.Fatalf("seed Create failed: %s", cr.Error())
+	}
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.Update(contacts.UpdateInput{ID: "marcus-stannard", Next: "ping"})
+	if r.OK {
+		t.Fatal("expected Update to be rejected when gate reports zero unlocked accounts")
+	}
+	if !core.Contains(r.Error(), "contacts.session.locked") {
+		t.Fatalf("expected contacts.session.locked, got %q", r.Error())
+	}
+}
+
+// TestContacts_StopNilsGate — Stop() severs the SessionGate; subsequent
+// writes fail-closed even though the gate WAS wired (Cerberus #27
+// ADD-5 — Stop drain hygiene mirrors mail).
+func TestContacts_StopNilsGate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := newTestSvc(t) // gate wired with unlocked stub
+
+	// Pre-Stop: write succeeds.
+	if r := svc.Create(contacts.CreateInput{Name: "Ada Penley"}); !r.OK {
+		t.Fatalf("Create should succeed pre-Stop, got: %s", r.Error())
+	}
+
+	// Stop nils the gate reference.
+	if r := svc.Stop(core.Background()); !r.OK {
+		t.Fatalf("Stop should succeed, got: %s", r.Error())
+	}
+
+	// Post-Stop: write fails-closed via the nil-gate path.
+	r := svc.Create(contacts.CreateInput{Name: "Marcus Stannard"})
+	if r.OK {
+		t.Fatal("expected Create to fail-closed after Stop nils the gate")
+	}
+	if !core.Contains(r.Error(), "contacts.session.locked") {
+		t.Fatalf("expected contacts.session.locked, got %q", r.Error())
+	}
+}
+
+// TestContacts_LockedGate_ReadStillWorks — List + Get are not gated by
+// the session-lock (RFC §3.1 — reads stay open while locked).
+func TestContacts_LockedGate_ReadStillWorks(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Seed unlocked, then flip to locked.
+	svc := newTestSvc(t)
+	svc.Create(contacts.CreateInput{Name: "Ada Penley", Role: "CTO"})
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.List(contacts.ListInput{})
+	if !r.OK {
+		t.Fatalf("List should succeed when session locked, got: %s", r.Error())
+	}
+	if g := svc.Get(contacts.GetInput{ID: "ada-penley"}); !g.OK {
+		t.Fatalf("Get should succeed when session locked, got: %s", g.Error())
+	}
 }

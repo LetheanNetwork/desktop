@@ -18,7 +18,7 @@ import (
 // {ID:"../../wallets/lethean-default"} reading the wallet keystore.
 func TestGet_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	for _, evil := range []string{
 		"../../wallets/lethean-default",
 		"..",
@@ -38,7 +38,7 @@ func TestGet_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 // TestUpdate_PathTraversal_Bad_Cerberus1486 — same threat surface on Update.
 func TestUpdate_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Update(contacts.UpdateInput{ID: "../../wallets/x", Role: "x"})
 	if r.OK {
 		t.Fatal("Update with traversal ID must reject")
@@ -51,7 +51,7 @@ func TestUpdate_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(contacts.CreateInput{Name: "Ada Penley", Role: "CTO"})
 	if !r.OK {
 		t.Fatalf("Create failed: %s", r.Error())
@@ -73,7 +73,7 @@ func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 func TestContactsDir_Mode0700_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := contacts.NewService(nil)
+	svc := newTestSvc(t)
 	// Touch the directory via Create.
 	_ = svc.Create(contacts.CreateInput{Name: "Ada"})
 	dir := core.PathJoin(home, "Lethean", "sales", "contacts")

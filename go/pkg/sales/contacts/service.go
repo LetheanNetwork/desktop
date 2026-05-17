@@ -5,8 +5,13 @@
 // No queue, no orm — filesystem is the persistence layer.
 //
 // Lifecycle:
-//   - Register(c)   wires the service into the Core container
-//   - ServiceName() returns "Contacts" for the Wails namespace
+//   - Register(c)        wires the service into the Core container
+//   - ServiceName()      returns "Contacts" for the Wails namespace
+//   - SetSessionGate(g)  wired post-construction in cmd/lthn/app.go
+//     against *account.Service (live-read pattern — mirrors
+//     office/mail.AccountProvider; no cached bool, no event bus).
+//   - Stop(ctx)          nils the SessionGate reference so a draining
+//     Service fails-closed on any late-arriving write.
 //
 // All I/O uses CoreGO wrappers (core.ReadFile / core.WriteFile /
 // core.ReadDir / core.DirFS / core.MkdirAll / core.PathJoin).
@@ -16,18 +21,56 @@
 package contacts
 
 import (
+	"sync"
+	"sync/atomic"
+
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"gopkg.in/yaml.v3"
 )
+
+// SessionGate is the minimal consumer-defined interface satisfied by
+// *account.Service. Live-read at every gate check — no cached bool, no
+// subscribe/event bus (RFC.stage-e-unlockgate v2 §1.1 — Pushback 2
+// CONFIRMED by Cerberus #27). When the returned slice is empty the
+// session is locked; when non-empty at least one Lethean account is
+// unlocked and writes may proceed.
+//
+// Wired in cmd/lthn/app.go (Mantis #1613 B.3, deferred to that lane):
+//
+//	contactsSvc.SetSessionGate(accountSvc)
+//
+// AX-8 compliance: this interface is defined in the consumer
+// (contacts) and satisfied by the producer (*account.Service). No
+// pkg/account import lands in pkg/sales/contacts.
+type SessionGate interface {
+	UnlockedAccountIDs() []string
+}
 
 // Service owns the contacts surface.
 //
 // Usage example:
 //
 //	svc := contacts.NewService(c)
+//	svc.SetSessionGate(accountSvc)
 type Service struct {
 	core *core.Core
+
+	// gateMu guards reads/writes of the session gate reference. A
+	// sync.RWMutex protects against the wire/Stop race where app.go
+	// SetSessionGate runs concurrent with a late-arriving Wails call
+	// reading the reference. Read-heavy access (every write gates
+	// once) — RWMutex.RLock is microseconds.
+	gateMu sync.RWMutex
+	// gate is the live-read session source (RFC §1.1). nil before
+	// SetSessionGate runs in app.go and after Stop nils it; the
+	// nilWarned one-shot warning fires on the first nil-hit to
+	// surface wire-ordering bugs without log spam (§2.2 ADD-1.5).
+	gate SessionGate
+	// nilWarned is the one-shot guard for the nil-gate fail-safe
+	// (§2.2 / Cerberus #27 Q2). CompareAndSwap-on-first-hit emits
+	// core.Warn exactly once per Service instance.
+	nilWarned atomic.Bool
 }
 
 // NewService constructs the contacts service against a Core container.
@@ -294,6 +337,73 @@ func (s *Service) fireEvent(name string, contact Contact) {
 		Contact:   contact,
 		At:        core.Now().UTC(),
 	})
+}
+
+// SetSessionGate wires the live-read session source. Called by
+// cmd/lthn/app.go post-construction (Mantis #1613 B.3) once
+// *account.Service exists.
+//
+// Mirrors the office/mail.AccountProvider setter pattern. Live-read on
+// every gate check — no event-bus reliability concerns, no cache
+// coherence concerns (RFC.stage-e-unlockgate v2 §1.1).
+//
+// Usage example:
+//
+//	contactsSvc.SetSessionGate(accountSvc)
+func (s *Service) SetSessionGate(g SessionGate) {
+	s.gateMu.Lock()
+	s.gate = g
+	s.gateMu.Unlock()
+}
+
+// Stop nils the SessionGate reference so a draining Service
+// fails-closed on any late-arriving write (§B.2 mirror mail's drain
+// hygiene / Cerberus #27 ADD-5). Read-only methods (List, Get)
+// continue to function — Stop only severs the write gate.
+//
+// Usage example:
+//
+//	_ = svc.Stop(core.Background())
+func (s *Service) Stop(_ core.Context) core.Result {
+	s.gateMu.Lock()
+	s.gate = nil
+	s.gateMu.Unlock()
+	return core.Ok(nil)
+}
+
+// assertUnlocked returns a Fail result when the session is locked or
+// the session gate is not wired. Called at the top of every write
+// method before any FS touch.
+//
+// Live-read semantics (RFC §1.1): consults s.gate.UnlockedAccountIDs()
+// at every call — no cached bool — so a lock transition is observable
+// on the very next write attempt.
+//
+// Fail-safe on nil gate (§2.2 / Cerberus #27 Q2): when SetSessionGate
+// has not yet wired the gate (or Stop has nilled it), the gate fails
+// LOCKED rather than panicking. The first nil-hit per Service
+// instance emits a one-shot core.Warn via CompareAndSwap so
+// wire-ordering bugs surface in dev without log spam in production.
+//
+// Usage example:
+//
+//	if fail, ok := s.assertUnlocked("contacts.Create"); !ok {
+//	    return fail
+//	}
+func (s *Service) assertUnlocked(scope string) (core.Result, bool) {
+	s.gateMu.RLock()
+	g := s.gate
+	s.gateMu.RUnlock()
+	if g == nil {
+		if s.nilWarned.CompareAndSwap(false, true) {
+			core.Warn("contacts: session gate not wired; failing locked", "scope", scope)
+		}
+		return core.Fail(core.E(scope, "contacts.session.locked", nil)), false
+	}
+	if len(g.UnlockedAccountIDs()) == 0 {
+		return core.Fail(core.E(scope, "contacts.session.locked", nil)), false
+	}
+	return core.Result{}, true
 }
 
 // containsCI reports whether haystack contains needle (case-insensitive).
