@@ -290,7 +290,15 @@ func (s *Service) SpawnLong(input SpawnLongInput) core.Result {
 
 	runR := ps.Run(ctx, rt, args...)
 	if !runR.OK {
-		return failSpawnLong(containerName, "container start failed")
+		// Cerberus #47 S-6 (Mantis #1668) — proc.Run cause propagation.
+		// Previously failSpawnLong wrapped a literal "container start
+		// failed" with nil cause and the underlying process error
+		// (typically "process exited with code N" or "process was
+		// killed") was dropped entirely, leaving operators staring at a
+		// generic message in the audit log with no signal on whether
+		// the runtime binary was missing, the image pull failed, or
+		// the container exited fast. Thread the cause through.
+		return failSpawnLongCause(containerName, "container start failed", runR)
 	}
 
 	handle := ContainerHandle{
@@ -308,7 +316,11 @@ func (s *Service) SpawnLong(input SpawnLongInput) core.Result {
 		if r := waitPortOpen(hostPort, defaultReadyTimeout); !r.OK {
 			// Best-effort cleanup.
 			ps.Run(core.Background(), rt, "rm", "-f", containerName)
-			return failSpawnLong(containerName, "container did not become ready")
+			// Cerberus #47 S-6 (Mantis #1668) — propagate waitPortOpen
+			// cause so operators see the underlying "port N did not
+			// open within Xs" detail instead of a generic readiness
+			// failure with no diagnostic surface.
+			return failSpawnLongCause(containerName, "container did not become ready", r)
 		}
 	}
 
@@ -340,16 +352,43 @@ func (s *Service) SpawnLong(input SpawnLongInput) core.Result {
 // every SpawnLong early-return path land in the audit substrate
 // without bloating each return site.
 func failSpawnLong(containerName, message string) core.Result {
-	err := core.E(spawnLongOp, message, nil)
+	return failSpawnLongCause(containerName, message, core.Result{})
+}
+
+// failSpawnLongCause is the cause-preserving variant of failSpawnLong.
+// Cerberus #47 S-6 (Mantis #1668) — the proc.Run / waitPortOpen paths
+// previously dropped their underlying error on the floor. When `cause`
+// is a non-OK Result, its message is folded into the returned error
+// (via core.E's third arg) AND surfaced in the audit Meta as
+// `cause_error` so a forensic walker can correlate the SpawnLong
+// failure with the underlying runtime symptom (e.g. "process exited
+// with code 125" → image pull denied). cause.OK == true falls back to
+// the nil-cause shape, identical to the original failSpawnLong.
+func failSpawnLongCause(containerName, message string, cause core.Result) core.Result {
+	var underlying error
+	causeMsg := ""
+	if !cause.OK {
+		if e, ok := cause.Value.(error); ok {
+			underlying = e
+			causeMsg = e.Error()
+		} else {
+			causeMsg = cause.Error()
+		}
+	}
+	err := core.E(spawnLongOp, message, underlying)
+	meta := map[string]any{
+		"error_code":     err.Error(),
+		"container_name": containerName,
+	}
+	if causeMsg != "" {
+		meta["cause_error"] = causeMsg
+	}
 	_ = audit.Default().Record(audit.Event{
 		Event:   audit.EventSandboxLongFailed,
 		TS:      core.Now().UTC().Unix(),
 		Scope:   "sandbox",
 		Outcome: audit.OutcomeFailed,
-		Meta: map[string]any{
-			"error_code":     err.Error(),
-			"container_name": containerName,
-		},
+		Meta:    meta,
 	})
 	return core.Fail(err)
 }
@@ -380,11 +419,21 @@ func (s *Service) Kill(sandboxID string) core.Result {
 		return failKill(sandboxID, "sandbox id is required")
 	}
 
+	// Cerberus #47 S-6 (Mantis #1668) — Kill mutex window vs ListHandles
+	// stale read. Previously the handle was deleted from the registry
+	// BEFORE the actual container teardown (ps.Run "rm -f"), so a
+	// concurrent ListHandles in the gap saw zero entries while the
+	// container was still being reaped by the runtime. Flip the
+	// ordering: mark Status=Stopped under the lock (visible to a
+	// concurrent List as a truthful "shutting down" entry), release the
+	// lock for the long-running ps.Run, then re-acquire briefly to
+	// remove the entry. Two short critical sections keep List + Get
+	// unblocked while preserving the "registry mirrors reality"
+	// invariant the audit ordering depends on.
 	s.mu.Lock()
 	handle, ok := s.handles[sandboxID]
 	if ok {
 		handle.Status = StatusStopped
-		delete(s.handles, sandboxID)
 	}
 	s.mu.Unlock()
 
@@ -394,6 +443,12 @@ func (s *Service) Kill(sandboxID string) core.Result {
 		// docker rm -f stops + removes in one shot; ignore failure since
 		// the container may already be gone.
 		ps.Run(core.Background(), rt, "rm", "-f", containerName)
+	}
+
+	if ok {
+		s.mu.Lock()
+		delete(s.handles, sandboxID)
+		s.mu.Unlock()
 	}
 
 	if !ok {

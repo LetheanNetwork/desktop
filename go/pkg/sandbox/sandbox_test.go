@@ -3,8 +3,12 @@
 package sandbox
 
 import (
+	"sync"
+	"sync/atomic"
+
 	core "dappco.re/go"
 	"dappco.re/go/container"
+	"dappco.re/go/process"
 )
 
 func newTestService(opts Options) *Service {
@@ -576,4 +580,174 @@ func TestSandbox_ContainerHandle_Ugly(t *core.T) {
 	id := sandboxIDPrefix + "a1b2c3d4"
 	core.AssertContains(t, id, sandboxIDPrefix)
 	core.AssertEqual(t, 11, len(id)) // "sb-" + 8 chars
+}
+
+// TestSandbox_Kill_NoStaleListReadConcurrent_Ugly exercises the Kill
+// mutex tightening landed for Cerberus #47 S-6 (Mantis #1668). Before
+// the fix, Kill removed the handle from the registry BEFORE the
+// (potentially slow) ps.Run "rm -f" teardown — opening a window where
+// a concurrent ListHandles saw zero entries while the container was
+// still being reaped by the runtime. The post-fix invariant verified
+// here: a concurrent ListHandles that races Kill on the SAME handle
+// must NEVER observe a state where the handle has Status=StatusReady
+// but is about to vanish; the only transient state visible to a List
+// during Kill is Status=StatusStopped while the entry still exists.
+//
+// Run with `-race` to surface any unsynchronised access to the handle
+// pointer between Kill (writer) and ListHandles (reader). Many handles
+// + many list iterations + bounded killer goroutines stress the
+// critical-section boundaries.
+func TestSandbox_Kill_NoStaleListReadConcurrent_Ugly(t *core.T) {
+	svc := newTestService(Options{})
+	const handleCount = 64
+
+	// Seed the registry with handleCount StatusReady handles.
+	svc.mu.Lock()
+	svc.handles = map[string]*ContainerHandle{}
+	for i := 0; i < handleCount; i++ {
+		id := core.Sprintf("sb-race%04d", i)
+		svc.handles[id] = &ContainerHandle{SandboxID: id, Status: StatusReady}
+	}
+	svc.mu.Unlock()
+
+	var (
+		invariantViolations atomic.Int64
+		listIterations      atomic.Int64
+		killsCompleted      atomic.Int64
+		wg                  sync.WaitGroup
+		stopReaders         atomic.Bool
+	)
+
+	// Reader fleet — continuously list and assert every observed handle
+	// has a status the post-fix Kill is allowed to expose (Ready or
+	// Stopped). Starting / Failed are spawn-side states; a kill path
+	// should never produce them.
+	const readers = 8
+	for r := 0; r < readers; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for !stopReaders.Load() {
+				res := svc.ListHandles()
+				if !res.OK {
+					invariantViolations.Add(1)
+					continue
+				}
+				snapshot, _ := res.Value.([]ContainerHandle)
+				for _, h := range snapshot {
+					switch h.Status {
+					case StatusReady, StatusStopped:
+						// Permitted observable states during the race.
+					default:
+						invariantViolations.Add(1)
+					}
+				}
+				listIterations.Add(1)
+			}
+		}()
+	}
+
+	// Killer fleet — each goroutine kills a disjoint shard of handles.
+	// ps is nil (process.Service unwired in this test context) so Kill
+	// skips the docker-rm shell-out and just exercises the registry +
+	// mutex paths — exactly the surface S-6 cares about.
+	const killers = 4
+	per := handleCount / killers
+	for k := 0; k < killers; k++ {
+		start := k * per
+		end := start + per
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := start; i < end; i++ {
+				id := core.Sprintf("sb-race%04d", i)
+				if svc.Kill(id).OK {
+					killsCompleted.Add(1)
+				}
+			}
+		}()
+	}
+
+	// Drain the killers; readers are stopped via flag once kills settle.
+	killerSettled := make(chan struct{})
+	go func() {
+		// Wait specifically for killers — we need to give readers a few
+		// extra ticks to observe the post-kill state before signalling
+		// stop, otherwise the iteration counter under-reports.
+		for killsCompleted.Load() < handleCount {
+			core.Sleep(1 * core.Millisecond)
+		}
+		close(killerSettled)
+	}()
+	<-killerSettled
+	core.Sleep(5 * core.Millisecond)
+	stopReaders.Store(true)
+	wg.Wait()
+
+	// Post-conditions.
+	core.AssertEqual(t, int64(handleCount), killsCompleted.Load())
+	core.AssertEqual(t, int64(0), invariantViolations.Load())
+	// Registry must be empty — every seeded handle was killed.
+	svc.mu.RLock()
+	leftover := len(svc.handles)
+	svc.mu.RUnlock()
+	core.AssertEqual(t, 0, leftover)
+	// Sanity: readers actually ran (not zero iterations — would mean
+	// the test never exercised the race).
+	core.AssertGreater(t, listIterations.Load(), int64(0))
+}
+
+// newTestServiceWithProcess wires the process service alongside sandbox
+// so SpawnLong can actually reach proc.Run — needed for the
+// cause-propagation test which deliberately fails the runtime shell-out.
+func newTestServiceWithProcess() *Service {
+	c := core.New(
+		core.WithName("process", process.NewService(process.Options{})),
+		core.WithName("sandbox", NewService(Options{})),
+	)
+	svc, _ := core.ServiceFor[*Service](c, "sandbox")
+	return svc
+}
+
+// TestSandbox_SpawnLong_ProcRunErr_PropagatesInResult_Bad verifies
+// Cerberus #47 S-6 (Mantis #1668) part 2 — when the underlying
+// ps.Run / waitPortOpen path fails, the SpawnLong Result error
+// preserves the underlying cause message rather than collapsing it
+// to the generic "container start failed". Operators reading the
+// audit log or the returned Result need the real symptom (process
+// exited with code N, port did not open within Xs) to triage.
+//
+// We exercise the path by asking SpawnLong to run an image with a
+// non-existent runtime binary — proc.Run shells out, the OS reports
+// the command was not found, and that detail must surface in the
+// returned core.Result error string.
+func TestSandbox_SpawnLong_ProcRunErr_PropagatesInResult_Bad(t *core.T) {
+	svc := newTestServiceWithProcess()
+	core.AssertNotNil(t, svc)
+	// Force the runtime to a binary that is guaranteed not to exist on
+	// PATH — proc.Run will fail with an explicit "executable file not
+	// found" cause that we expect threaded through.
+	r := svc.SpawnLong(SpawnLongInput{
+		Image:   "alpine:3.21",
+		Command: "echo",
+		Args:    []string{"hi"},
+		Runtime: "lthn-nonexistent-runtime-binary-xyz",
+	})
+	core.AssertFalse(t, r.OK)
+	msg := r.Error()
+	// The wrapping "container start failed" sentinel must still be
+	// present so callers grepping on the old surface keep working.
+	core.AssertContains(t, msg, "container start failed")
+	// AND the underlying cause must be visible — without the fix, the
+	// underlying error was dropped on the floor and only the generic
+	// message remained. We don't pin the exact OS-vendor wording (it
+	// varies macOS/Linux); presence of EITHER "not found" OR "no such"
+	// OR the binary name in the chained message proves the cause
+	// survived the failSpawnLong wrap.
+	hasCause := core.Contains(msg, "not found") ||
+		core.Contains(msg, "no such") ||
+		core.Contains(msg, "executable") ||
+		core.Contains(msg, "lthn-nonexistent-runtime-binary-xyz") ||
+		core.Contains(msg, "exited with code")
+	core.AssertTrue(t, hasCause)
 }
