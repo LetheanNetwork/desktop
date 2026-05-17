@@ -486,8 +486,16 @@ func seedAll(dirPath string) {
 		// 0o600 (Cerberus #1487 PR-1): runbooks carry operational
 		// secrets; even seed content uses the production mode,
 		// applied inside the primitive's atomic-rename path.
-		_ = paths.AtomicWriteWithVersion(target, paths.WriteInput{
+		// Mantis #1572 (Cerberus #12 F5): log on !OK rather than
+		// silently swallow — seedAll is best-effort (called from
+		// OnStart, single caller) so an individual seed failure
+		// shouldn't abort the rest, but it MUST surface.
+		if wr := paths.AtomicWriteWithVersion(target, paths.WriteInput{
 			Body: raw,
-		})
+		}); !wr.OK {
+			core.Print(core.Stderr(),
+				"runbooks: seedAll write failed for %s: %s\n",
+				rec.Slug, wr.Error())
+		}
 	}
 }
