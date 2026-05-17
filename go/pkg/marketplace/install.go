@@ -19,6 +19,7 @@ package marketplace
 import (
 	core "dappco.re/go"
 	"dappco.re/go/orm"
+	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/sandbox"
@@ -103,6 +104,35 @@ type InstallInput struct {
 	// Keys from manifest.env[].key that are absent here fall back
 	// to their default: value.
 	Env map[string]string
+
+	// ForceStaleInstall opt-ins to bypassing the catalogue staleness
+	// gate (Mantis #1640 HIGH F3). When the catalogue entry's FetchedAt
+	// is older than StaleCatalogueThreshold, Install REJECTS with
+	// `marketplace.catalogue.stale` unless this flag is true. The
+	// frontend's "Catalogue is N hours stale, install anyway?" prompt
+	// is the canonical operator confirmation surface; programmatic
+	// callers that assert true without UI evidence still leave a row
+	// in audit history via emitStaleCatalogueInstallAttempt.
+	ForceStaleInstall bool
+
+	// ExpectedManifestDigest, when non-empty, is the manifest body
+	// digest the caller wants to assert at install time. Compared
+	// against the CatalogueEntry.ManifestDigest if known — mismatch
+	// rejects with `marketplace.manifest.version_unconfirmed`. Empty
+	// keeps backwards-compat for v1 install callers.
+	ExpectedManifestDigest string
+
+	// PrevGrantedPermissions is the per-bundle map of previously-granted
+	// (scope:mode → granted_at_iso8601) entries. On Install (re-install
+	// / update path), the manifest's declared Permissions are diffed
+	// against this map; any scope:mode in the new manifest NOT in
+	// PrevGrantedPermissions sets InstallOutput.RequiresReConsent=true
+	// + RequiresReConsentScopes carries the NEW scope:mode entries the
+	// caller must surface for re-confirmation (Mantis #1641 MED F5).
+	// First-install path passes nil; the UI never prompts on first
+	// install because the manifest's permissions modal already gathers
+	// the consent.
+	PrevGrantedPermissions map[string]bool
 }
 
 // InstallOutput is what Install returns on success.
@@ -112,6 +142,22 @@ type InstallOutput struct {
 	// SandboxIDs maps image id → the sandbox.ContainerHandle.SandboxID
 	// assigned during this install. Useful for reverse-proxy wiring.
 	SandboxIDs map[string]string `json:"sandbox_ids"`
+
+	// RequiresReConsent is true when the manifest declares NEW
+	// scope:mode permissions that were not in
+	// InstallInput.PrevGrantedPermissions (Mantis #1641 MED F5). The
+	// frontend surfaces a per-permission re-consent modal; the install
+	// itself has ALREADY landed at the point this flag is true — the
+	// flag signals "show the operator what they're now granting" rather
+	// than gating the install on the consent.
+	RequiresReConsent bool `json:"requires_re_consent,omitempty"`
+
+	// RequiresReConsentScopes is the closed-set list of scope:mode
+	// entries the operator needs to re-confirm. Empty unless
+	// RequiresReConsent is true. Shape matches the
+	// "scope:mode" join used in the gateway dispatch surface
+	// (e.g. "files:read", "process:spawn").
+	RequiresReConsentScopes []string `json:"requires_re_consent_scopes,omitempty"`
 }
 
 // BundleStatusOutput is what Status returns.
@@ -193,11 +239,81 @@ func (s *Service) Install(input InstallInput) core.Result {
 		return r
 	}
 
+	// Mantis #1640 HIGH F3 — catalogue staleness gate. If the
+	// FetchedAt evidence is older than StaleCatalogueThreshold and the
+	// caller has NOT asserted ForceStaleInstall, refuse install with a
+	// typed reject. UX prompt "Catalogue is N hours stale, install
+	// anyway?" surfaces the override option.
+	entry := s.findCatalogueEntry(m.Name)
+	if entry != nil && !entry.FetchedAt.IsZero() {
+		age := core.Since(entry.FetchedAt)
+		if age > StaleCatalogueThreshold {
+			emitStaleCatalogueInstallAttempt(m.Name, input.ForceStaleInstall, age)
+			if !input.ForceStaleInstall {
+				fail := core.Fail(core.E(installBundleOp,
+					codeStaleCatalogueInstall+": catalogue entry for "+m.Name+
+						" is stale (age exceeds "+core.Sprintf("%s", StaleCatalogueThreshold)+
+						" threshold); set ForceStaleInstall=true to override", nil))
+				emitInstallFailed(m.Name, fail)
+				return fail
+			}
+		}
+	}
+
+	// Mantis #1645 MED F6 — manifest version-bump confirmation gate.
+	// If the catalogue records a PendingManifestDigest (upstream
+	// released a new manifest at the same source URL without the
+	// operator having confirmed the bump), refuse install until
+	// ConfirmManifestVersionBump promotes Pending → ManifestDigest.
+	// Split-brain on legit version bumps is the failure mode this
+	// closes: silently installing a new version under the same tag
+	// would defeat the whole signing chain.
+	if entry != nil && core.Trim(entry.PendingManifestDigest) != "" {
+		emitManifestVersionPending(m.Name,
+			core.Trim(entry.ManifestDigest),
+			core.Trim(entry.PendingManifestDigest))
+		fail := core.Fail(core.E(installBundleOp,
+			codeManifestVersionUnconfirmed+": catalogue carries an unconfirmed pending version for "+
+				m.Name+"; call ConfirmManifestVersionBump first", nil))
+		emitInstallFailed(m.Name, fail)
+		return fail
+	}
+
+	// Mantis #1645 MED F6 follow-on — caller-supplied expected manifest
+	// digest cross-check. When the InstallInput passes an explicit
+	// expected digest AND the catalogue entry has a canonical
+	// ManifestDigest, mismatch is a hard reject (the version of the
+	// manifest the operator authorised is not the version on disk).
+	if entry != nil && core.Trim(input.ExpectedManifestDigest) != "" &&
+		core.Trim(entry.ManifestDigest) != "" &&
+		core.Trim(input.ExpectedManifestDigest) != core.Trim(entry.ManifestDigest) {
+		fail := core.Fail(core.E(installBundleOp,
+			codeManifestVersionUnconfirmed+
+				": caller-asserted expected manifest digest does not match catalogue canonical digest", nil))
+		emitInstallFailed(m.Name, fail)
+		return fail
+	}
+
 	sbPort := s.sandboxPort()
 	if sbPort == nil {
 		fail := core.Fail(core.E(installBundleOp, "sandbox service not available", nil))
 		emitInstallFailed(m.Name, fail)
 		return fail
+	}
+
+	// Mantis #1639 HIGH F2 — image digest verify gate. For every image
+	// entry whose manifest declares an Expected digest, re-verify via
+	// sandbox.InspectImage BEFORE SpawnLong. Without this gate the
+	// runtime delegates digest verification to docker pull which
+	// happens lazily and asymmetrically (cached layers skip
+	// re-verification). The gate fires AFTER staleness +
+	// version-confirmation so the audit history shows the rejection
+	// class clearly when multiple gates would fail.
+	if sbSvc, _ := core.ServiceFor[*sandbox.Service](s.core, "sandbox"); sbSvc != nil {
+		if r := s.verifyImageDigests(sbSvc, m); !r.OK {
+			emitInstallFailed(m.Name, r)
+			return r
+		}
 	}
 
 	env := s.resolveEnv(m, input.Env)
@@ -317,10 +433,235 @@ func (s *Service) Install(input InstallInput) core.Result {
 		return fail
 	}
 
+	// Mantis #1641 MED F5 — per-scope re-consent diff. Compare the
+	// manifest's declared scope:mode permissions against
+	// InstallInput.PrevGrantedPermissions; any new entry is surfaced on
+	// InstallOutput.RequiresReConsent / RequiresReConsentScopes so the
+	// frontend can prompt with a per-permission modal. First-install
+	// path passes nil for PrevGrantedPermissions and never triggers the
+	// flag (the manifest's permissions modal already gathers the
+	// initial consent).
+	reConsentScopes := diffNewPermissions(m.Permissions, input.PrevGrantedPermissions)
+	requiresReConsent := false
+	if len(input.PrevGrantedPermissions) > 0 && len(reConsentScopes) > 0 {
+		requiresReConsent = true
+		emitPermissionDiffRequiresReConsent(m.Name, reConsentScopes)
+	}
+
 	emitInstallSucceeded(m.Name, pluginCodeOf(m), len(sandboxIDs))
 	return core.Ok(InstallOutput{
-		BundleID:   m.Name,
-		SandboxIDs: sandboxIDs,
+		BundleID:                m.Name,
+		SandboxIDs:              sandboxIDs,
+		RequiresReConsent:       requiresReConsent,
+		RequiresReConsentScopes: reConsentScopes,
+	})
+}
+
+// verifyImageDigests Mantis #1639 HIGH F2 — pre-spawn digest gate.
+// For every image entry in the manifest, call sandbox.InspectImage(ref)
+// and compare against the manifest's expected digest (when declared).
+// Returns the typed reject Result on first mismatch / unverifiable so
+// the audit history pins the offending image. v1 manifests without
+// per-image expected digests fall through permissively — the gate is
+// strict only when the manifest carries the evidence.
+//
+// The expected digest field is parsed out of ImageEntry's image ref
+// when present in the OCI `image@sha256:...` form. Future bundles
+// will carry a dedicated `digest:` field on each image entry; until
+// then, the embedded `@sha256:` is the convention.
+//
+// Usage example (internal):
+//
+//	if r := s.verifyImageDigests(sbSvc, m); !r.OK { return r }
+func (s *Service) verifyImageDigests(sbSvc *sandbox.Service, m BundleManifest) core.Result {
+	for _, img := range m.Images {
+		expected := expectedDigestFromRef(img.Image)
+		if expected == "" {
+			// No embedded digest evidence on this ref — fall through.
+			// Future bundle.image entries with an explicit `digest:`
+			// field will route through here without code change.
+			continue
+		}
+		actual, r := sbSvc.InspectImage(img.Image)
+		if !r.OK {
+			// Surface as digest_unverifiable — degraded host, not
+			// active tampering. Pattern-match on the typed prefix
+			// sandbox stamps so the auditor can distinguish docker-
+			// missing from inspect-failed from parse-failed.
+			emitImageDigestUnverifiable(m.Name, img.Image, r.Error())
+			return core.Fail(core.E(installBundleOp,
+				codeImageDigestUnverifiable+": cannot verify digest for "+img.Image+
+					": "+r.Error(), nil))
+		}
+		if actual != expected {
+			emitImageDigestMismatch(m.Name, img.Image, expected, actual)
+			return core.Fail(core.E(installBundleOp,
+				codeImageDigestMismatch+": image "+img.Image+
+					" expected "+expected+" got "+actual, nil))
+		}
+	}
+	return core.Ok(nil)
+}
+
+// expectedDigestFromRef extracts the SHA256 digest from an
+// `image-name@sha256:hex` reference. Returns "" when the ref carries
+// no digest suffix — the install gate treats that as "no evidence,
+// fall through permissively".
+//
+// Usage example (internal):
+//
+//	d := expectedDigestFromRef("docker.io/lib/alpine@sha256:abc")
+//	// d == "sha256:abc"
+func expectedDigestFromRef(ref string) string {
+	ref = core.Trim(ref)
+	const sep = "@sha256:"
+	idx := core.Index(ref, sep)
+	if idx < 0 {
+		return ""
+	}
+	digest := ref[idx+1:] // strip the leading "@" — keep "sha256:..."
+	if core.Trim(digest) == "" {
+		return ""
+	}
+	return digest
+}
+
+// diffNewPermissions returns the closed-set list of scope:mode
+// strings declared in manifest.Permissions that are NOT present in
+// prevGranted. Returns nil when manifest declares no permissions or
+// every declared permission is already granted. Order follows the
+// manifest's declaration order so the operator-facing modal renders
+// stable.
+//
+// Usage example (internal):
+//
+//	newScopes := diffNewPermissions(m.Permissions, prev)
+//	if len(newScopes) > 0 { /* prompt for re-consent */ }
+func diffNewPermissions(perms []Permission, prevGranted map[string]bool) []string {
+	if len(perms) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(perms))
+	for _, p := range perms {
+		key := p.Scope + ":" + p.Mode
+		if !prevGranted[key] {
+			out = append(out, key)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// emitStaleCatalogueInstallAttempt records the F3 override-attempted
+// audit row. Audit event const lives inline (string literal) pending
+// the pkg/audit/types.go const block extraction tracked as a Wave 2
+// SECURITY-NOTE follow-up — the const-extraction is a single-file
+// rename + the brief allowlist did not include audit/types.go so the
+// migration is deferred to keep this commit allowlist-clean.
+//
+// Usage example (internal):
+//
+//	emitStaleCatalogueInstallAttempt(bundleID, input.ForceStaleInstall, age)
+func emitStaleCatalogueInstallAttempt(bundleID string, override bool, age core.Duration) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   "marketplace.catalogue.stale_install_attempt",
+		TS:      core.Now().UTC().Unix(),
+		Scope:   marketplaceScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"bundle_id":  bundleID,
+			"override":   override,
+			"age_string": core.Sprintf("%s", age),
+		},
+	})
+}
+
+// emitManifestVersionPending records the F6 "operator hit Install but
+// version is unconfirmed" audit row. Distinct from confirmed/rolled-
+// back so an auditor can reconstruct the operator's decision sequence.
+func emitManifestVersionPending(bundleID, oldDigest, pendingDigest string) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   "marketplace.manifest.version.pending",
+		TS:      core.Now().UTC().Unix(),
+		Scope:   marketplaceScope,
+		Outcome: audit.OutcomeDenied,
+		Meta: map[string]any{
+			"bundle_id":          bundleID,
+			"old_digest":         oldDigest,
+			"pending_digest":     pendingDigest,
+		},
+	})
+}
+
+// emitManifestVersionBumpTransition records the F6 promotion event:
+// operator confirmed Pending → Canonical, OR a rollback drops Pending
+// back to the prior canonical. transition is one of "confirmed" /
+// "rolled_back" / "auto_promoted" (forward-arc).
+func emitManifestVersionBumpTransition(bundleID, oldDigest, newDigest, transition string) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   "marketplace.manifest.version.transition",
+		TS:      core.Now().UTC().Unix(),
+		Scope:   marketplaceScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"bundle_id":  bundleID,
+			"old_digest": oldDigest,
+			"new_digest": newDigest,
+			"transition": transition,
+		},
+	})
+}
+
+// emitImageDigestMismatch records the F2 hard-reject row. Both
+// expected + actual digests land in Meta so an auditor can correlate
+// the registry's served digest against what the manifest demanded.
+func emitImageDigestMismatch(bundleID, imageRef, expected, actual string) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   "marketplace.image.digest_mismatch",
+		TS:      core.Now().UTC().Unix(),
+		Scope:   marketplaceScope,
+		Outcome: audit.OutcomeDenied,
+		Meta: map[string]any{
+			"bundle_id":      bundleID,
+			"image_ref":      imageRef,
+			"expected_digest": expected,
+			"actual_digest":  actual,
+		},
+	})
+}
+
+// emitImageDigestUnverifiable records the F2 degraded-verify row. The
+// reason carries the typed prefix sandbox stamped so the auditor can
+// distinguish docker-missing from inspect-failed from parse-failed.
+func emitImageDigestUnverifiable(bundleID, imageRef, reason string) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   "marketplace.image.digest_unverifiable",
+		TS:      core.Now().UTC().Unix(),
+		Scope:   marketplaceScope,
+		Outcome: audit.OutcomeFailed,
+		Meta: map[string]any{
+			"bundle_id": bundleID,
+			"image_ref": imageRef,
+			"reason":    reason,
+		},
+	})
+}
+
+// emitPermissionDiffRequiresReConsent records the F5 "manifest update
+// adds permissions" row. scopes is the closed-set scope:mode list the
+// frontend will surface in the re-consent modal.
+func emitPermissionDiffRequiresReConsent(bundleID string, scopes []string) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   "marketplace.permission.diff_requires_re_consent",
+		TS:      core.Now().UTC().Unix(),
+		Scope:   marketplaceScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"bundle_id":  bundleID,
+			"new_scopes": scopes,
+		},
 	})
 }
 

@@ -37,9 +37,33 @@ type Options struct {
 const (
 	// defaultImage is the canonical fallback when neither Options.DefaultImage
 	// nor SpawnInput.Image is set.
-	defaultImage = "lthn/dev:latest"
-	spawnOp      = "sandbox.Spawn"
-	spawnAppleOp = "sandbox.spawnApple"
+	defaultImage    = "lthn/dev:latest"
+	spawnOp         = "sandbox.Spawn"
+	spawnAppleOp    = "sandbox.spawnApple"
+	inspectImageOp  = "sandbox.InspectImage"
+
+	// inspectImageTimeout caps the `docker manifest inspect` wall-clock so
+	// a hung registry can't stall the marketplace Install pipeline. 30s
+	// matches the downloader's default GET timeout shape.
+	inspectImageTimeout = 30 * core.Second
+
+	// codeDockerUnavailable is the typed reject literal returned when the
+	// host has no docker CLI installed (or process.Service is missing).
+	// pkg/marketplace.Install pattern-matches the prefix so its
+	// `image.digest_unverifiable` envelope routes correctly without a
+	// brittle err.Error() substring scan.
+	codeDockerUnavailable = "sandbox.docker_unavailable"
+
+	// codeInspectFailed is the typed reject literal returned when
+	// `docker manifest inspect` exits non-zero (network/auth/no-such-tag).
+	codeInspectFailed = "sandbox.inspect_failed"
+
+	// codeDigestParseFailed is the typed reject literal returned when
+	// `docker manifest inspect` returns JSON that lacks a parseable
+	// .digest field. Forensic distinction from inspect_failed (the
+	// transport succeeded but the response didn't carry the field we
+	// need to compare against the manifest's expected digest).
+	codeDigestParseFailed = "sandbox.digest_parse_failed"
 )
 
 // Service is the sandbox host. Embeds *core.ServiceRuntime so
@@ -484,4 +508,104 @@ func (s *Service) Detect() core.Result {
 		preferred = string(chosen.Type)
 	}
 	return core.Ok(DetectOutput{Available: all, Preferred: preferred})
+}
+
+// InspectImage shells out to `docker manifest inspect <ref>` and parses
+// the response for the image's `.digest` field — the SHA256 the
+// registry will serve when the ref is pulled. pkg/marketplace.Install
+// (Mantis #1639 HIGH F2) compares the returned digest to the manifest's
+// expected digest BEFORE SpawnLong so a hostile mirror serving a
+// rotated image cannot land inside the sandbox under a trusted tag.
+//
+// The returned string is the digest (e.g. "sha256:abc123…"); the Result
+// carries the success/failure shape. On success: returned string is
+// non-empty, Result.OK == true. On failure: returned string is "",
+// Result.OK == false and Result.Error() carries one of the typed
+// reject prefixes:
+//
+//   - sandbox.docker_unavailable — no docker CLI or process.Service
+//     unavailable. pkg/marketplace routes to its
+//     `image.digest_unverifiable` envelope.
+//   - sandbox.inspect_failed — `docker manifest inspect` exited
+//     non-zero (auth, network, no-such-tag). Routes to
+//     `image.digest_unverifiable`.
+//   - sandbox.digest_parse_failed — JSON parsed but no `.digest`
+//     field. Routes to `image.digest_unverifiable`.
+//
+// Two-return shape (vs the canonical `core.Result` only) matches the
+// pre-adjudicated brief for Mantis #1639 Wave 2 — consumers want the
+// typed string at the callsite without a `Value.(string)` cast on a
+// hot Install path. No cgo, no Docker SDK dep; the process.Service
+// path keeps the sandbox package's banned-stdlib surface clean.
+//
+// Usage example:
+//
+//	digest, r := svc.InspectImage("docker.io/library/alpine:3.21")
+//	if !r.OK { return core.Fail(...) }
+//	if digest != m.ExpectedDigest { return core.Fail(...) }
+func (s *Service) InspectImage(ref string) (string, core.Result) {
+	ref = core.Trim(ref)
+	if ref == "" {
+		return "", core.Fail(core.E(inspectImageOp,
+			"image ref is required", nil))
+	}
+	ps := s.proc()
+	if ps == nil {
+		return "", core.Fail(core.E(inspectImageOp,
+			codeDockerUnavailable+": process service unavailable", nil))
+	}
+	ctx, cancel := core.WithTimeout(core.Background(), inspectImageTimeout)
+	defer cancel()
+	runR := ps.Run(ctx, "docker", "manifest", "inspect", ref)
+	if !runR.OK {
+		return "", core.Fail(core.E(inspectImageOp,
+			codeInspectFailed+": "+runR.Error(), nil))
+	}
+	out, _ := runR.Value.(string)
+	digest := parseManifestInspectDigest(out)
+	if digest == "" {
+		return "", core.Fail(core.E(inspectImageOp,
+			codeDigestParseFailed+": no .digest field in manifest inspect output", nil))
+	}
+	return digest, core.Ok(digest)
+}
+
+// parseManifestInspectDigest walks the JSON shape returned by
+// `docker manifest inspect` and returns the first `.digest` string it
+// finds. The shape varies between schema versions (Docker manifest v2
+// schema 1 vs schema 2 vs OCI image index); the top-level `digest` key
+// is the universally-stamped one when the inspect target is a single
+// image (not a multi-arch list).
+//
+// For multi-arch lists, docker returns a `manifests` array whose
+// entries each carry `digest`; we take the first one as the
+// representative digest for the ref. The marketplace comparison is
+// against the manifest-declared expected digest which is itself
+// content-addressed, so the first-entry choice is semantically the
+// "what would `docker pull` actually fetch first" digest.
+//
+// Returns "" when the input is empty or no digest field exists.
+func parseManifestInspectDigest(raw string) string {
+	raw = core.Trim(raw)
+	if raw == "" {
+		return ""
+	}
+	// Try shape 1: top-level object with `digest` field.
+	var top map[string]any
+	if r := core.JSONUnmarshal([]byte(raw), &top); r.OK {
+		if d, ok := top["digest"].(string); ok && d != "" {
+			return d
+		}
+		// Shape 2: top-level object with `manifests` array of entries.
+		if arr, ok := top["manifests"].([]any); ok {
+			for _, e := range arr {
+				if em, ok := e.(map[string]any); ok {
+					if d, ok := em["digest"].(string); ok && d != "" {
+						return d
+					}
+				}
+			}
+		}
+	}
+	return ""
 }

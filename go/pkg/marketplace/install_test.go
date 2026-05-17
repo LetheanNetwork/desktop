@@ -580,3 +580,80 @@ func TestMarketplace_Uninstall_NoStaleRegistryEntries_Good(t *core.T) {
 	core.AssertFalse(t, present,
 		"Cerberus #54 C1 — Uninstall must drop ViewRegistry descriptors registered under plugin.code, not the bundle id")
 }
+
+// --- Wave 2 (Mantis #1639 / #1640 / #1641 / #1645) tests ---
+
+// TestInstall_InstallInput_ForceStaleInstall_Good asserts the field
+// exists, defaults to false, and round-trips on the struct.
+func TestInstall_InstallInput_ForceStaleInstall_Good(t *core.T) {
+	in := subject.InstallInput{
+		Manifest:               minimalInstallManifest,
+		ForceStaleInstall:      true,
+		ExpectedManifestDigest: "sha256:abc",
+		PrevGrantedPermissions: map[string]bool{"files:read": true},
+	}
+	core.AssertTrue(t, in.ForceStaleInstall)
+	core.AssertEqual(t, "sha256:abc", in.ExpectedManifestDigest)
+	core.AssertTrue(t, in.PrevGrantedPermissions["files:read"])
+
+	// Default zero-value: every new field is the safe shape.
+	zero := subject.InstallInput{Manifest: minimalInstallManifest}
+	core.AssertFalse(t, zero.ForceStaleInstall)
+	core.AssertEqual(t, "", zero.ExpectedManifestDigest)
+	core.AssertNil(t, zero.PrevGrantedPermissions)
+}
+
+// TestInstall_InstallOutput_RequiresReConsent_Good asserts the F5
+// fields exist + serialise on the struct.
+func TestInstall_InstallOutput_RequiresReConsent_Good(t *core.T) {
+	out := subject.InstallOutput{
+		BundleID:                "opencode",
+		SandboxIDs:              map[string]string{"app": "sb-abc"},
+		RequiresReConsent:       true,
+		RequiresReConsentScopes: []string{"files:write", "process:spawn"},
+	}
+	core.AssertTrue(t, out.RequiresReConsent)
+	core.AssertLen(t, out.RequiresReConsentScopes, 2)
+}
+
+// TestInstall_CatalogueEntry_NewFields_Good asserts the Wave 2
+// FetchedAt / PendingManifestDigest / ManifestDigest fields are
+// present and serialise on the struct.
+func TestInstall_CatalogueEntry_NewFields_Good(t *core.T) {
+	now := core.Now()
+	e := subject.CatalogueEntry{
+		Name:                  "opencode",
+		Display:               "OpenCode",
+		SourceURL:             "https://marketplace.lthn.ai/v1/opencode.yml",
+		FetchedAt:             now,
+		PendingManifestDigest: "sha256:pending",
+		ManifestDigest:        "sha256:canonical",
+	}
+	core.AssertEqual(t, "opencode", e.Name)
+	core.AssertFalse(t, e.FetchedAt.IsZero())
+	core.AssertEqual(t, "sha256:pending", e.PendingManifestDigest)
+	core.AssertEqual(t, "sha256:canonical", e.ManifestDigest)
+}
+
+// TestInstall_StaleCatalogueThreshold_Good pins the documented
+// 24h threshold so a future config-plumbing change can't quietly
+// loosen the gate.
+func TestInstall_StaleCatalogueThreshold_Good(t *core.T) {
+	core.AssertEqual(t, 24*core.Hour, subject.StaleCatalogueThreshold)
+}
+
+// TestInstall_ConfirmManifestVersionBump_Bad asserts the validation
+// reject path — empty bundleID and empty expectedNewDigest both
+// reject with the bare-string operation error.
+func TestInstall_ConfirmManifestVersionBump_Bad(t *core.T) {
+	svc := newTestMarketplaceService()
+	core.AssertNotNil(t, svc)
+
+	r := svc.ConfirmManifestVersionBump("", "sha256:abc")
+	core.AssertFalse(t, r.OK)
+	core.AssertContains(t, r.Error(), "bundle id is required")
+
+	r = svc.ConfirmManifestVersionBump("opencode", "")
+	core.AssertFalse(t, r.OK)
+	core.AssertContains(t, r.Error(), "expected new digest is required")
+}

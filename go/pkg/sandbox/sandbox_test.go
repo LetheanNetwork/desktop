@@ -880,3 +880,85 @@ func TestSandbox_buildLongRunArgs_PodmanInsertsArgvTerminator_Good(t *core.T) {
 	core.AssertEqual(t, "--", args[pos+1])
 	core.AssertEqual(t, "sh", args[pos+2])
 }
+
+// --- Mantis #1639 HIGH F2 InspectImage gate tests ---
+
+// parseManifestInspectDigest_Good covers the canonical single-image
+// shape: top-level object with `digest`.
+func TestSandbox_ParseManifestInspectDigest_Good(t *core.T) {
+	raw := `{"schemaVersion":2,"digest":"sha256:abcdef0123456789","mediaType":"application/vnd.docker.distribution.manifest.v2+json"}`
+	got := parseManifestInspectDigest(raw)
+	core.AssertEqual(t, "sha256:abcdef0123456789", got)
+}
+
+// parseManifestInspectDigest_Bad covers manifest-list (multi-arch) shape:
+// top-level `manifests` array of entries each carrying `digest`.
+func TestSandbox_ParseManifestInspectDigest_Bad(t *core.T) {
+	raw := `{"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.list.v2+json","manifests":[{"digest":"sha256:firstarch","platform":{"os":"linux","architecture":"amd64"}},{"digest":"sha256:secondarch","platform":{"os":"linux","architecture":"arm64"}}]}`
+	got := parseManifestInspectDigest(raw)
+	core.AssertEqual(t, "sha256:firstarch", got)
+}
+
+// parseManifestInspectDigest_Ugly covers empty input + malformed JSON +
+// JSON-without-digest — all must return "" so the caller can route the
+// digest_parse_failed reject without panicking.
+func TestSandbox_ParseManifestInspectDigest_Ugly(t *core.T) {
+	core.AssertEqual(t, "", parseManifestInspectDigest(""))
+	core.AssertEqual(t, "", parseManifestInspectDigest("   "))
+	core.AssertEqual(t, "", parseManifestInspectDigest("not-json-at-all"))
+	core.AssertEqual(t, "", parseManifestInspectDigest(`{"schemaVersion":2}`))
+	core.AssertEqual(t, "", parseManifestInspectDigest(`{"manifests":[]}`))
+	core.AssertEqual(t, "", parseManifestInspectDigest(`{"manifests":[{"platform":{"os":"linux"}}]}`))
+}
+
+// InspectImage_Good — when process.Service is wired, InspectImage
+// returns the digest_unverifiable / inspect_failed reject path with
+// the typed prefix surface intact. The real-docker happy path is
+// covered by the parseManifestInspectDigest_Good unit above; this
+// test pins the reject-prefix contract pkg/marketplace pattern-matches
+// against (codeInspectFailed / codeDockerUnavailable / codeDigestParseFailed).
+func TestSandbox_InspectImage_Good(t *core.T) {
+	svc := newTestServiceWithProcess()
+	core.AssertNotNil(t, svc)
+	digest, r := svc.InspectImage("lthn-nonexistent-image-for-test:never")
+	// CI / test boxes either have no docker (docker_unavailable) or
+	// docker present but the ref does not resolve (inspect_failed) —
+	// both reject prefixes are documented contract.
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, "", digest)
+	hasTypedPrefix := core.Contains(r.Error(), codeDockerUnavailable) ||
+		core.Contains(r.Error(), codeInspectFailed) ||
+		core.Contains(r.Error(), codeDigestParseFailed)
+	core.AssertTrue(t, hasTypedPrefix)
+}
+
+// InspectImage_Bad — empty ref rejects with the standard "image ref is
+// required" validation message BEFORE any process spawn. The reject
+// shape is core.Result-only so caller pattern-matches survive.
+func TestSandbox_InspectImage_Bad(t *core.T) {
+	svc := newTestService(Options{})
+	digest, r := svc.InspectImage("")
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, "", digest)
+	core.AssertContains(t, r.Error(), "image ref is required")
+
+	// Whitespace-only ref is treated as empty (defence against fixture
+	// noise / accidental "   " bindings from upstream config parsers).
+	digest, r = svc.InspectImage("   ")
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, "", digest)
+	core.AssertContains(t, r.Error(), "image ref is required")
+}
+
+// InspectImage_Ugly — when process.Service is NOT wired (svc.proc()
+// returns nil), InspectImage rejects with codeDockerUnavailable rather
+// than panicking. The Install pipeline routes this to its
+// `image.digest_unverifiable` envelope so the operator sees "we
+// couldn't verify the digest", not a crash.
+func TestSandbox_InspectImage_Ugly(t *core.T) {
+	svc := newTestService(Options{}) // no process.Service wired
+	digest, r := svc.InspectImage("docker.io/library/alpine:3.21")
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, "", digest)
+	core.AssertContains(t, r.Error(), codeDockerUnavailable)
+}

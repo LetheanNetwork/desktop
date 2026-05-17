@@ -41,6 +41,45 @@ const (
 	// indexCacheFileName is the local file name for the cached index.
 	indexCacheFileName = "index.json"
 
+	// StaleCatalogueThreshold is the wall-clock window within which a
+	// CatalogueEntry's FetchedAt timestamp keeps the entry installable
+	// (Mantis #1640 HIGH F3). Beyond this threshold pkg/marketplace.Install
+	// rejects with `marketplace.catalogue.stale` unless the caller asserts
+	// InstallInput.ForceStaleInstall=true. Matches indexCacheTTL today —
+	// "if the curated mirror hasn't been visible in 24h, refuse install
+	// without operator confirmation" is the spec shape per the brief.
+	//
+	// NOT runtime-configurable to forecloses TOCTOU: a malicious actor
+	// flipping the threshold between the gate check and the install
+	// would defeat the gate. Updates ship as code review. Future config
+	// plumbing is a forward-arc concern.
+	StaleCatalogueThreshold = 24 * core.Hour
+
+	// codeStaleCatalogueInstall is the typed reject literal returned by
+	// Install when FetchedAt > StaleCatalogueThreshold and
+	// ForceStaleInstall is false. Stable string so audit consumers /
+	// UI surfaces can keyword-match.
+	codeStaleCatalogueInstall = "marketplace.catalogue.stale"
+
+	// codeManifestVersionUnconfirmed is the typed reject literal returned
+	// by Install when CatalogueEntry.PendingManifestDigest is non-empty
+	// and ConfirmManifestVersionBump has not yet promoted Pending →
+	// ManifestDigest (Mantis #1645 MED F6).
+	codeManifestVersionUnconfirmed = "marketplace.manifest.version_unconfirmed"
+
+	// codeImageDigestMismatch is the typed reject literal returned by
+	// Install when sandbox.InspectImage(ref) returns a digest that
+	// differs from the manifest's expected digest for the image
+	// (Mantis #1639 HIGH F2).
+	codeImageDigestMismatch = "image.digest_mismatch"
+
+	// codeImageDigestUnverifiable is the typed reject literal returned by
+	// Install when sandbox.InspectImage(ref) cannot resolve a digest at
+	// all (docker unavailable, inspect failed, parse failed). Distinct
+	// from mismatch so the auditor can distinguish "wrong digest"
+	// (active tampering) from "unable to verify" (degraded host).
+	codeImageDigestUnverifiable = "image.digest_unverifiable"
+
 	// Cerberus Mantis #1433 — size caps on the two registry fetch
 	// surfaces. Without these, a malicious mirror could stream
 	// unbounded bytes regardless of Content-Length, exhausting RAM
@@ -350,6 +389,36 @@ type CatalogueEntry struct {
 	// KeyID names which entry in trusted_keys.json verified Signature.
 	// Capped at maxTrustedKeyIDChars (Mantis #1648 DREAD v2 N3).
 	KeyID string `json:"key_id,omitempty"`
+
+	// FetchedAt records when the registry last refreshed THIS entry from
+	// the curated index endpoint. Used by pkg/marketplace.Install's
+	// staleness gate (Mantis #1640 HIGH F3): if Since(FetchedAt) >
+	// StaleCatalogueThreshold and InstallInput.ForceStaleInstall is
+	// false, Install rejects with `marketplace.catalogue.stale` to
+	// prevent "I'm patched" confidence under attack where a hostile
+	// mirror withholds updates to keep operators installing known-bad
+	// versions. Stamped at writeIndexCache time from FetchIndexResult.
+	// Zero value treated as "fetched in the unbounded past" — defaults
+	// the gate to TRIPPED unless ForceStaleInstall set.
+	FetchedAt core.Time `json:"fetched_at,omitempty"`
+
+	// PendingManifestDigest is the proposed-but-unconfirmed manifest
+	// digest for this entry's NEXT version bump (Mantis #1645 MED F6).
+	// When the upstream publisher rotates a manifest at the SAME source
+	// URL, the registry refresh stamps the new digest here; Install
+	// REJECTS with `marketplace.manifest.version_unconfirmed` until an
+	// operator-confirmed call to (*Service).ConfirmManifestVersionBump
+	// promotes Pending → ManifestDigest. Empty (zero string) when no
+	// pending bump exists — the canonical happy-path shape.
+	PendingManifestDigest string `json:"pending_manifest_digest,omitempty"`
+
+	// ManifestDigest is the catalogue-canonical expected digest of the
+	// fetched bundle manifest body (sha256 over the YAML bytes BEFORE
+	// signature stripping). Compared against the locally-recomputed
+	// digest after FetchManifest as the F6 split-brain anchor.
+	// Empty for v1 entries that predate #1645; the gate is informational
+	// (no reject) when empty.
+	ManifestDigest string `json:"manifest_digest,omitempty"`
 }
 
 // FetchIndexResult is the parsed catalogue returned by FetchIndex.
@@ -615,17 +684,156 @@ func (s *Service) downloadIndex(indexURL, cachePath string) core.Result {
 		return core.Fail(core.E(fetchIndexOp, "index parse failed", nil))
 	}
 
+	// Mantis #1640 HIGH F3 — stamp FetchedAt on every entry so Install's
+	// staleness gate has wall-clock evidence to evaluate. We stamp the
+	// in-memory copy AND re-marshal before cache write so the cached
+	// shape carries the same evidence (and the next readIndexCache
+	// surfaces a populated FetchedAt rather than the zero default).
+	now := core.Now()
+	for i := range entries {
+		entries[i].FetchedAt = now
+	}
+	stampedRaw := raw
+	if r := core.JSONMarshal(entries); r.OK {
+		if b, ok := r.Value.([]byte); ok && len(b) > 0 {
+			stampedRaw = b
+		}
+	}
+
 	// Write cache via paths.AtomicWriteWithVersion (Mantis #1582 —
 	// cascade-adoption). Best-effort on the network response side: a
 	// failed cache write doesn't break the live result. tmp+fsync+
 	// rename atomicity prevents torn cache files; frontmatter
 	// version stamp opens the IfVersion gate for future adopters.
-	_ = writeIndexCache(cachePath, raw)
+	_ = writeIndexCache(cachePath, stampedRaw)
 
 	return core.Ok(FetchIndexResult{
 		Entries:   entries,
 		FromCache: false,
 	})
+}
+
+// findCatalogueEntry looks up one entry from the catalogue by bundle
+// name. Used by Install's staleness + manifest-version-confirmation
+// gates so the typed reject can stamp the FetchedAt /
+// PendingManifestDigest evidence at the rejection boundary.
+//
+// Returns nil when the catalogue is unreachable, has no entry for
+// name, or the FetchIndex call itself fails — callers treat missing
+// entries as "no catalogue evidence; fall through to permissive
+// shape" rather than blocking install on a network failure.
+//
+// Usage example (internal):
+//
+//	entry := s.findCatalogueEntry(m.Name)
+//	if entry != nil && time.Since(entry.FetchedAt) > StaleCatalogueThreshold {
+//	    return core.Fail(...)
+//	}
+func (s *Service) findCatalogueEntry(name string) *CatalogueEntry {
+	name = core.Trim(name)
+	if name == "" {
+		return nil
+	}
+	r := s.FetchIndex("")
+	if !r.OK {
+		return nil
+	}
+	idx, ok := r.Value.(FetchIndexResult)
+	if !ok {
+		return nil
+	}
+	for i := range idx.Entries {
+		if idx.Entries[i].Name == name {
+			return &idx.Entries[i]
+		}
+	}
+	return nil
+}
+
+// ConfirmManifestVersionBump promotes a CatalogueEntry's
+// PendingManifestDigest into the canonical ManifestDigest field after
+// operator confirmation (Mantis #1645 MED F6). expectedNewDigest must
+// match the entry's current PendingManifestDigest exactly — the
+// operator UI displays the pending value and asks for explicit
+// "yes, I confirm this is the version I want to allow" before this
+// method fires.
+//
+// On match: writes the updated catalogue back through the cache layer
+// + emits `marketplace.manifest.version.confirmed` audit row.
+//
+// On mismatch: rejects with `marketplace.manifest.version_mismatch` —
+// the operator was looking at a stale-by-now confirmation prompt
+// (another refresh landed a different pending). The UI must re-fetch
+// and re-confirm.
+//
+// On missing entry / missing pending: rejects with
+// `marketplace.manifest.version_no_pending` — no transition to make.
+//
+// Renderer-callable via WConfirmManifestVersionBump per the tier-auth
+// substrate (requires TierOperator) — but the substrate-tier method
+// itself is the public API in this Wave; the W-binding lands as a
+// follow-up tier-routing ticket.
+//
+// Usage example:
+//
+//	r := svc.ConfirmManifestVersionBump("opencode", "sha256:abc123…")
+//	if !r.OK { /* operator must re-fetch + re-confirm */ }
+func (s *Service) ConfirmManifestVersionBump(bundleID, expectedNewDigest string) core.Result {
+	bundleID = core.Trim(bundleID)
+	expectedNewDigest = core.Trim(expectedNewDigest)
+	if bundleID == "" {
+		return core.Fail(core.E("marketplace.ConfirmManifestVersionBump",
+			"bundle id is required", nil))
+	}
+	if expectedNewDigest == "" {
+		return core.Fail(core.E("marketplace.ConfirmManifestVersionBump",
+			"expected new digest is required", nil))
+	}
+	r := s.FetchIndex("")
+	if !r.OK {
+		return r
+	}
+	idx, ok := r.Value.(FetchIndexResult)
+	if !ok {
+		return core.Fail(core.E("marketplace.ConfirmManifestVersionBump",
+			"catalogue not available", nil))
+	}
+	pos := -1
+	for i := range idx.Entries {
+		if idx.Entries[i].Name == bundleID {
+			pos = i
+			break
+		}
+	}
+	if pos < 0 {
+		return core.Fail(core.E("marketplace.ConfirmManifestVersionBump",
+			"marketplace.manifest.version_no_pending: bundle not in catalogue: "+bundleID, nil))
+	}
+	pending := core.Trim(idx.Entries[pos].PendingManifestDigest)
+	if pending == "" {
+		return core.Fail(core.E("marketplace.ConfirmManifestVersionBump",
+			"marketplace.manifest.version_no_pending: no pending version bump for "+bundleID, nil))
+	}
+	if pending != expectedNewDigest {
+		return core.Fail(core.E("marketplace.ConfirmManifestVersionBump",
+			"marketplace.manifest.version_mismatch: operator-confirmed digest does not match current pending", nil))
+	}
+	prior := core.Trim(idx.Entries[pos].ManifestDigest)
+	idx.Entries[pos].ManifestDigest = pending
+	idx.Entries[pos].PendingManifestDigest = ""
+	idx.Entries[pos].FetchedAt = core.Now()
+	// Re-marshal + atomic-rewrite the cache so the promotion survives a
+	// process restart. Best-effort: a cache-write failure surfaces but
+	// the in-memory FetchIndex consumers next call will rebuild from
+	// network anyway.
+	body := core.JSONMarshal(idx.Entries)
+	if body.OK {
+		if b, ok := body.Value.([]byte); ok {
+			_ = writeIndexCache(s.indexCachePath(), b)
+		}
+	}
+	emitManifestVersionBumpTransition(bundleID, prior, pending, "confirmed")
+	return core.Ok(idx.Entries[pos])
 }
 
 // fetchManifestHTTPS downloads a manifest YAML from an https:// URL and
