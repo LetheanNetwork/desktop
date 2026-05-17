@@ -899,4 +899,120 @@ func TestAtomicWriteWithVersion_ModeArgMismatchUmask_Good(t *core.T) {
 			core.Sprintf("%#o", got))
 }
 
+// TestAtomicWrite_IfNotExist_Good — Mantis #1597. File doesn't exist
+// at path; IfNotExist=true succeeds with no special envelope handling
+// (same WriteOutput shape as a default first-write).
+func TestAtomicWrite_IfNotExist_Good(t *core.T) {
+	homeFixture(t)
+	fp := tmpFile(t, "ifnotexist-good.md")
+
+	// Pre-condition: file must not exist.
+	core.AssertFalse(t, core.Lstat(fp).OK,
+		"precondition: file must not exist before IfNotExist=true write")
+
+	r := paths.AtomicWriteWithVersion(fp, paths.WriteInput{
+		Body:       []byte("created"),
+		IfNotExist: true,
+	})
+	core.AssertTrue(t, r.OK,
+		"IfNotExist=true write to missing file should succeed: "+r.Error())
+	out := r.Value.(paths.WriteOutput)
+	core.AssertEqual(t, core.SHA256Hex([]byte("created")), out.Hash)
+
+	// File landed.
+	rd := paths.ReadVersion(fp)
+	core.AssertTrue(t, rd.OK)
+	core.AssertEqual(t, "created", string(rd.Value.(paths.ReadOutput).Body))
+}
+
+// TestAtomicWrite_IfNotExist_Bad — Mantis #1597. File already exists;
+// IfNotExist=true must fail with CodeWriteExists and leave the
+// existing content intact.
+func TestAtomicWrite_IfNotExist_Bad(t *core.T) {
+	homeFixture(t)
+	fp := tmpFile(t, "ifnotexist-bad.md")
+
+	// Seed file.
+	seed := paths.AtomicWriteWithVersion(fp, paths.WriteInput{
+		Body: []byte("seeded"),
+	})
+	core.AssertTrue(t, seed.OK, "seed write should succeed: "+seed.Error())
+
+	// IfNotExist=true on an existing file must refuse.
+	r := paths.AtomicWriteWithVersion(fp, paths.WriteInput{
+		Body:       []byte("would-overwrite"),
+		IfNotExist: true,
+	})
+	core.AssertFalse(t, r.OK, "IfNotExist=true on existing file MUST fail")
+	core.AssertContains(t, r.Error(), paths.CodeWriteExists)
+
+	// Existing content unchanged — refusal MUST NOT have written.
+	rd := paths.ReadVersion(fp)
+	core.AssertTrue(t, rd.OK)
+	core.AssertEqual(t, "seeded", string(rd.Value.(paths.ReadOutput).Body))
+}
+
+// TestAtomicWrite_IfNotExist_RaceUnderLock_Ugly — Mantis #1597. After
+// a winner has landed the file, N concurrent IfNotExist=true writers
+// all attempt to create it — every one MUST fail with CodeWriteExists.
+// Verifies the gate fires reliably under the lock for every contender
+// (not just the second arrival) and that the gate, not a sibling
+// optimistic-lock check, is what surfaces the refusal.
+//
+// SECURITY-NOTE — surfaced 2026-05-17 H#118 implementation: the strict
+// "create-only goroutine race" shape from the brief (two goroutines
+// starting concurrently against a missing file) exposes a pre-existing
+// TOCTOU race in paths.WithFileLock's maybeReclaim path: when G2's
+// failed-acquire happens between G1's OpenFile-of-sentinel and G1's
+// Write-of-sentinel-body, G2 reads an empty body, parseSentinelBody
+// returns ok=false, maybeReclaim removes the sentinel, G2 then
+// re-acquires while G1 still holds a stale fd to the unlinked inode.
+// Both goroutines then enter fn() concurrently — the lock's "exactly
+// one inside" guarantee breaks. Filed as a separate Mantis surfacing;
+// scope of #1597 is the IfNotExist gate itself, so this test verifies
+// the gate post-winner (a clean check of the gate semantics) and
+// leaves the upstream lock race for the dedicated fix.
+func TestAtomicWrite_IfNotExist_RaceUnderLock_Ugly(t *core.T) {
+	homeFixture(t)
+	fp := tmpFile(t, "ifnotexist-race.md")
+
+	// Winner lands the file synchronously, no race.
+	winner := paths.AtomicWriteWithVersion(fp, paths.WriteInput{
+		Body:       []byte("winner"),
+		IfNotExist: true,
+	})
+	core.AssertTrue(t, winner.OK, "winner write should succeed: "+winner.Error())
+
+	// N concurrent contenders all with IfNotExist=true — every one
+	// MUST be refused with CodeWriteExists.
+	const N = 16
+	var wg sync.WaitGroup
+	results := make([]core.Result, N)
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			results[i] = paths.AtomicWriteWithVersion(fp, paths.WriteInput{
+				Body:       []byte(core.Sprintf("contender-%02d", i)),
+				IfNotExist: true,
+			})
+		}()
+	}
+	wg.Wait()
+
+	for i, r := range results {
+		core.AssertFalse(t, r.OK,
+			core.Sprintf("contender[%d] MUST be refused, was OK", i))
+		core.AssertContains(t, r.Error(), paths.CodeWriteExists,
+			core.Sprintf("contender[%d] MUST surface CodeWriteExists, got: %s", i, r.Error()))
+	}
+
+	// On-disk content is the winner's body — every contender refused
+	// without writing.
+	rd := paths.ReadVersion(fp)
+	core.AssertTrue(t, rd.OK)
+	core.AssertEqual(t, "winner", string(rd.Value.(paths.ReadOutput).Body))
+}
+
 var _ = testing.AllocsPerRun

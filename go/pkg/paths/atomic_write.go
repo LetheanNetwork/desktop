@@ -68,6 +68,14 @@ const (
 	// per-write mode check, harmonised at the primitive boundary so
 	// every auth-substrate writer benefits without per-call ceremony.
 	CodeWriteModeTamper = "paths.write.mode_tamper"
+	// CodeWriteExists — Mantis #1597. WriteInput.IfNotExist=true and a
+	// file already exists at path under the held lock. Refuse-to-
+	// overwrite under the same atomic semantics as the version-stale
+	// check; companion primitive to Cerberus #1460 account-overwrite
+	// refusal at the consumer layer (serverkey + account + other
+	// writers route through this gate instead of doing their own
+	// stat+write race).
+	CodeWriteExists = "paths.write.exists"
 )
 
 // CurrentBodyMaxBytes is the §4.2 CRIT-1 cap on VersionStale
@@ -137,6 +145,18 @@ type WriteInput struct {
 	// (§4.2 CRIT-1). Default false. At-rest-encrypted prefixes
 	// silently ignore opt-in.
 	IncludeBody bool
+
+	// IfNotExist refuses to overwrite an existing file under the held
+	// lock — Mantis #1597. When true, AtomicWriteWithVersion fails
+	// with CodeWriteExists if a file already exists at path; the
+	// check runs inside WithFileLock so it shares the same atomic
+	// semantics as the IfVersion / IfMtime / IfMatchHash composite
+	// (no stat+write race for the consumer to manage). Default false
+	// preserves the pre-#1597 unconditional-or-composite write shape.
+	//
+	// Consumers: serverkey first-mint, account create, any writer
+	// that needs "create-only" guarantees at the substrate boundary.
+	IfNotExist bool
 }
 
 // WriteOutput is the success-path payload (returned in Result.Value
@@ -315,6 +335,20 @@ func AtomicWriteWithVersion(path string, input WriteInput) core.Result {
 			return rdR
 		}
 		cur, _ := rdR.Value.(ReadOutput)
+
+		// Mantis #1597 — IfNotExist refuse-to-overwrite gate. Runs
+		// inside WithFileLock so two concurrent writers both with
+		// IfNotExist=true cannot both observe "file missing" and race
+		// to create. The lock serialises them; whichever wins the lock
+		// first creates the file, the loser sees cur.Mtime != 0 and
+		// fails with CodeWriteExists. cur.Mtime is the existence
+		// signal: ReadVersion returns a zero ReadOutput for a missing
+		// file (Mtime zero) and info.ModTime() for a present file
+		// (Mtime always non-zero).
+		if input.IfNotExist && !cur.Mtime.IsZero() {
+			return core.Fail(core.NewCode(CodeWriteExists,
+				"IfNotExist=true and file already exists at path; refuse to overwrite"))
+		}
 
 		// Composite-or-pick-one (HIGH-1).
 		stale := false
