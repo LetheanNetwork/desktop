@@ -220,6 +220,81 @@ const (
 	// off the audit substrate; this event records the grant decision,
 	// not the credential.
 	EventPluginViewCapabilityGranted = "plugin.view.capability_granted"
+
+	// EventInferenceGenerateRequested fires when pkg/runner.Service.Generate
+	// is about to dispatch a prompt to ai.ProviderRouter.Chat. Sibling of
+	// the Completed / Failed pair below; the Requested row commits BEFORE
+	// the egress so a crash mid-call still leaves the request decision in
+	// the audit substrate (Cerberus #45 / Mantis #1658 — Shape A audit
+	// at the egress boundary per H#179 surfacing).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   provider  — first configured route name (router fallback order)
+	//   model     — first configured route ModelID
+	//   msg_count — 1 for Generate (single-prompt shape)
+	//
+	// The prompt body is NEVER in Meta — Cerberus #1465 closure-only-scope
+	// discipline keeps user-content off the audit substrate. The API key
+	// for the provider is NEVER in Meta — provider/model identifiers only.
+	EventInferenceGenerateRequested = "inference.generate.requested"
+
+	// EventInferenceGenerateCompleted fires when ai.ProviderRouter.Chat
+	// returns successfully from a pkg/runner.Service.Generate dispatch.
+	// Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   provider   — provider actually selected by the router (post-fallback)
+	//   model      — model_id actually selected by the router (post-fallback)
+	//   tokens     — generated-token count from ProviderChatResponse.Metrics
+	//   latency_ms — wall-clock duration from Requested emit to response
+	EventInferenceGenerateCompleted = "inference.generate.completed"
+
+	// EventInferenceGenerateFailed fires when ai.ProviderRouter.Chat
+	// returns a non-OK result from a pkg/runner.Service.Generate dispatch.
+	// Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   provider   — first configured route name (router fallback order)
+	//   model      — first configured route ModelID
+	//   error_code — categorical failure code (core.E scope literal); the
+	//                full error message is NOT recorded per the SECURITY-
+	//                NOTE escape valve in the H#181 brief (defensive
+	//                against provider error strings that may echo the
+	//                Authorization header / API key bytes).
+	EventInferenceGenerateFailed = "inference.generate.failed"
+
+	// EventInferenceChatRequested fires when pkg/runner.Service.Chat is
+	// about to dispatch a messages-array request to ai.ProviderRouter.Chat.
+	// Sibling of Generate's Requested above; messages-array variant.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   provider  — first configured route name (router fallback order)
+	//   model     — first configured route ModelID
+	//   msg_count — len(messages) — number of turns in the conversation
+	//
+	// The message bodies are NEVER in Meta — same closure-only-scope
+	// discipline as EventInferenceGenerateRequested.
+	EventInferenceChatRequested = "inference.chat.requested"
+
+	// EventInferenceChatCompleted fires when ai.ProviderRouter.Chat
+	// returns successfully from a pkg/runner.Service.Chat dispatch.
+	// Sibling of Requested above; messages-array variant.
+	//
+	// Meta keys match EventInferenceGenerateCompleted: provider, model,
+	// tokens, latency_ms.
+	EventInferenceChatCompleted = "inference.chat.completed"
+
+	// EventInferenceChatFailed fires when ai.ProviderRouter.Chat returns
+	// a non-OK result from a pkg/runner.Service.Chat dispatch. Sibling of
+	// Requested above; messages-array variant.
+	//
+	// Meta keys match EventInferenceGenerateFailed: provider, model,
+	// error_code.
+	EventInferenceChatFailed = "inference.chat.failed"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the

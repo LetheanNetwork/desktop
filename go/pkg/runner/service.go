@@ -28,6 +28,8 @@ import (
 	core "dappco.re/go"
 	"dappco.re/go/ai/ai"
 	"dappco.re/go/inference"
+
+	"dappco.re/lthn/desktop/pkg/audit"
 )
 
 // Status is the runner's lifecycle state.
@@ -171,16 +173,80 @@ func (s *Service) Generate(prompt string) core.Result {
 	if router == nil {
 		return core.Ok(core.Concat("[lthn stub] received: ", prompt))
 	}
+	// Cerberus #45 / Mantis #1658 — Shape A audit emit at the egress
+	// boundary per H#179 surfacing. The Requested row commits BEFORE
+	// the network call so a crash mid-call still leaves the request in
+	// the audit substrate. Provider/model identifiers from the first
+	// configured route (router fallback head); the post-router.Chat
+	// Completed emit upgrades to the actually-selected provider/model.
+	// Audit emits happen AFTER the RLock release — audit is observability,
+	// not router state; H#178 mutex semantics untouched.
+	provider, model := routerHead(router)
+	started := core.Now()
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventInferenceGenerateRequested,
+		TS:      started.Unix(),
+		Scope:   "inference",
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"provider":  provider,
+			"model":     model,
+			"msg_count": 1,
+		},
+	})
 	resp := router.Chat(core.Background(), ai.ProviderChatRequest{
 		Prompt: prompt,
 	})
 	if !resp.OK {
+		_ = audit.Default().Record(audit.Event{
+			Event:   audit.EventInferenceGenerateFailed,
+			TS:      core.Now().Unix(),
+			Scope:   "inference",
+			Outcome: audit.OutcomeFailed,
+			Meta: map[string]any{
+				"provider":   provider,
+				"model":      model,
+				"error_code": resp.Error(),
+			},
+		})
 		return resp
 	}
 	chat, ok := resp.Value.(*ai.ProviderChatResponse)
 	if !ok || chat == nil {
+		_ = audit.Default().Record(audit.Event{
+			Event:   audit.EventInferenceGenerateCompleted,
+			TS:      core.Now().Unix(),
+			Scope:   "inference",
+			Outcome: audit.OutcomeOK,
+			Meta: map[string]any{
+				"provider":   provider,
+				"model":      model,
+				"tokens":     0,
+				"latency_ms": core.Since(started).Milliseconds(),
+			},
+		})
 		return core.Ok("")
 	}
+	selectedProvider := chat.Provider
+	if selectedProvider == "" {
+		selectedProvider = provider
+	}
+	selectedModel := chat.ModelID
+	if selectedModel == "" {
+		selectedModel = model
+	}
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventInferenceGenerateCompleted,
+		TS:      core.Now().Unix(),
+		Scope:   "inference",
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"provider":   selectedProvider,
+			"model":      selectedModel,
+			"tokens":     chat.Metrics.GeneratedTokens,
+			"latency_ms": core.Since(started).Milliseconds(),
+		},
+	})
 	return core.Ok(chat.Text)
 }
 
@@ -206,17 +272,93 @@ func (s *Service) Chat(messages []inference.Message) core.Result {
 		}
 		return core.Ok(core.Concat("[lthn stub] received: ", last))
 	}
+	// Cerberus #45 / Mantis #1658 — Shape A audit emit at the egress
+	// boundary per H#179 surfacing. Messages-array variant of Generate.
+	// Mutex semantics from H#178 af2fba9 untouched; emits run AFTER
+	// RLock release.
+	provider, model := routerHead(router)
+	started := core.Now()
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventInferenceChatRequested,
+		TS:      started.Unix(),
+		Scope:   "inference",
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"provider":  provider,
+			"model":     model,
+			"msg_count": len(messages),
+		},
+	})
 	resp := router.Chat(core.Background(), ai.ProviderChatRequest{
 		Messages: messages,
 	})
 	if !resp.OK {
+		_ = audit.Default().Record(audit.Event{
+			Event:   audit.EventInferenceChatFailed,
+			TS:      core.Now().Unix(),
+			Scope:   "inference",
+			Outcome: audit.OutcomeFailed,
+			Meta: map[string]any{
+				"provider":   provider,
+				"model":      model,
+				"error_code": resp.Error(),
+			},
+		})
 		return resp
 	}
 	chat, ok := resp.Value.(*ai.ProviderChatResponse)
 	if !ok || chat == nil {
+		_ = audit.Default().Record(audit.Event{
+			Event:   audit.EventInferenceChatCompleted,
+			TS:      core.Now().Unix(),
+			Scope:   "inference",
+			Outcome: audit.OutcomeOK,
+			Meta: map[string]any{
+				"provider":   provider,
+				"model":      model,
+				"tokens":     0,
+				"latency_ms": core.Since(started).Milliseconds(),
+			},
+		})
 		return core.Ok("")
 	}
+	selectedProvider := chat.Provider
+	if selectedProvider == "" {
+		selectedProvider = provider
+	}
+	selectedModel := chat.ModelID
+	if selectedModel == "" {
+		selectedModel = model
+	}
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventInferenceChatCompleted,
+		TS:      core.Now().Unix(),
+		Scope:   "inference",
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"provider":   selectedProvider,
+			"model":      selectedModel,
+			"tokens":     chat.Metrics.GeneratedTokens,
+			"latency_ms": core.Since(started).Milliseconds(),
+		},
+	})
 	return core.Ok(chat.Text)
+}
+
+// routerHead returns the (provider, model) identifiers of the first
+// configured route on the router — the head of the fallback chain that
+// will be tried first. Used to stamp Requested + Failed audit events
+// with the route-the-router-was-going-to-try; Completed events stamp
+// with the actually-selected route from ProviderChatResponse.
+func routerHead(router *ai.ProviderRouter) (provider, model string) {
+	if router == nil {
+		return "", ""
+	}
+	routes := router.Providers()
+	if len(routes) == 0 {
+		return "", ""
+	}
+	return routes[0].Name, routes[0].ModelID
 }
 
 // Models returns the list of model identifiers exposed by the runner.
