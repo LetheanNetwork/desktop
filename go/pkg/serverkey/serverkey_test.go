@@ -481,3 +481,200 @@ func TestServerkey_SessionToken_DistinctMints_Good(t *core.T) {
 	core.AssertTrue(t, svc.VerifySessionToken(out1.Token).OK)
 	core.AssertTrue(t, svc.VerifySessionToken(out2.Token).OK)
 }
+
+// --- Cerberus #1466 / Mantis #1466 — first-launch concurrent race. ---
+
+// TestServerkey_ConcurrentBootstrap_Serialised_Ugly fires N independent
+// Service instances against the same fresh ~/Lethean/wallets/ in
+// parallel. The bootstrap lock at acquireBootstrapLock must serialise
+// them: exactly one goroutine generates + persists the keypair, the
+// remaining N-1 take the load path. End-state assertions:
+//
+//   - all N Bootstrap calls return OK
+//   - the on-disk server.key file is byte-identical to itself across
+//     repeated reads (only one writer ever wrote it)
+//   - cross-verification holds: a token minted by one service verifies
+//     against every other service (proves they all hold the same key
+//     bytes in memory, not five different freshly-generated keys)
+//
+// Pre-fix shape (no lock): each goroutine would race past the Stat
+// gate, all five would generate distinct keypairs, the last
+// atomicWrite would win on disk, and the four losers would hold
+// orphaned in-memory keys whose tokens nobody else could verify.
+func TestServerkey_ConcurrentBootstrap_Serialised_Ugly(t *core.T) {
+	home := homeFixture(t)
+	const n = 5
+
+	services := make([]*subject.Service, n)
+	for i := 0; i < n; i++ {
+		services[i] = subject.NewService(nil)
+	}
+
+	var wg core.WaitGroup
+	results := make([]core.Result, n)
+	for i := 0; i < n; i++ {
+		idx := i
+		wg.Go(func() {
+			results[idx] = services[idx].Bootstrap()
+		})
+	}
+	wg.Wait()
+
+	// Every concurrent Bootstrap must succeed — the lock serialises
+	// them but does not fail any. The five-second backoff ceiling in
+	// acquireBootstrapLock is far longer than the encrypt+write
+	// critical section (sub-100ms in practice).
+	for i, r := range results {
+		core.AssertTrue(t, r.OK,
+			"concurrent Bootstrap goroutine #"+core.Itoa(i)+" must succeed")
+	}
+
+	// The on-disk server.key must be stable — only one writer ever
+	// wrote it. Read twice; assert identical content (a flapping file
+	// would indicate the second writer landed after a load attempt).
+	keyPath := core.PathJoin(home, "Lethean", "wallets", "server.key")
+	readA := core.ReadFile(keyPath)
+	core.AssertTrue(t, readA.OK, "server.key must be readable after concurrent Bootstrap")
+	readB := core.ReadFile(keyPath)
+	core.AssertTrue(t, readB.OK, "server.key second read must succeed")
+	bytesA, _ := readA.Value.([]byte)
+	bytesB, _ := readB.Value.([]byte)
+	core.AssertEqual(t, string(bytesA), string(bytesB))
+
+	// Cross-verification: a token minted by services[0] must verify
+	// against every other service. A pre-fix split-key state would
+	// fail this — only the winning writer's service would verify its
+	// own tokens; the losers would carry orphaned in-memory keys.
+	mintR := services[0].IssueBootstrapToken()
+	core.AssertTrue(t, mintR.OK, "mint on services[0] must succeed")
+	tok := mintR.Value.(subject.BootstrapTokenOutput).Token
+	for i := 1; i < n; i++ {
+		verR := services[i].VerifyBootstrapToken(tok, "account.create")
+		core.AssertTrue(t, verR.OK,
+			"services["+core.Itoa(i)+"] must verify services[0]'s token "+
+				"(proves all goroutines hold the same key)")
+	}
+}
+
+// TestServerkey_SecondProcessLoadsFirstWriter_Good models the
+// two-CLI-invocation race that Mantis #1466 names: process A starts,
+// runs Bootstrap, persists server.key; process B starts second, sees
+// the on-disk key, must LOAD it (not regenerate). Cross-verification
+// proves B holds A's key bytes.
+//
+// This is the in-process analogue of the cross-process scenario
+// (separate Service instances in sequence, simulating
+// sequential `lthn serve` invocations). The concurrent variant lives
+// in TestServerkey_ConcurrentBootstrap_Serialised_Ugly.
+func TestServerkey_SecondProcessLoadsFirstWriter_Good(t *core.T) {
+	home := homeFixture(t)
+
+	// "Process A" — first invocation, fresh install. Generates +
+	// persists server.key.
+	procA := subject.NewService(nil)
+	core.AssertTrue(t, procA.Bootstrap().OK, "process A Bootstrap must succeed")
+
+	// Snapshot the on-disk key so we can prove process B doesn't
+	// overwrite it with a different keypair.
+	keyPath := core.PathJoin(home, "Lethean", "wallets", "server.key")
+	preR := core.ReadFile(keyPath)
+	core.AssertTrue(t, preR.OK, "server.key must be readable after process A Bootstrap")
+	preBytes, _ := preR.Value.([]byte)
+
+	// A mints a token that B must be able to verify (proves the
+	// in-memory keys match end-to-end).
+	mintR := procA.IssueBootstrapToken()
+	core.AssertTrue(t, mintR.OK, "process A mint must succeed")
+	tok := mintR.Value.(subject.BootstrapTokenOutput).Token
+
+	// "Process B" — second invocation. Sees ~/Lethean/wallets/server.key
+	// already present, must take the load path.
+	procB := subject.NewService(nil)
+	core.AssertTrue(t, procB.Bootstrap().OK, "process B Bootstrap must succeed via load path")
+
+	// Disk content must be unchanged — B didn't regenerate.
+	postR := core.ReadFile(keyPath)
+	core.AssertTrue(t, postR.OK, "server.key must be readable after process B Bootstrap")
+	postBytes, _ := postR.Value.([]byte)
+	core.AssertEqual(t, string(preBytes), string(postBytes))
+
+	// B must verify A's token — same key in memory.
+	verR := procB.VerifyBootstrapToken(tok, "account.create")
+	core.AssertTrue(t, verR.OK, "process B must verify process A's token (loaded A's key)")
+}
+
+// --- Mantis #1462 — TTL tighten + clock-skew bound. ---
+//
+// Adds the brief-prescribed test matrix on top of the existing
+// TestServerkey_TokenTTL_IssuerExp_Cerberus1462 (which already covers
+// exp - iat == 60). The two iat-side tests below pin the clock-skew
+// bound at the boundary value so future TTL constant tweaks don't
+// silently widen the accept window.
+
+// TestBootstrapToken_TTLIs60s_Good asserts the issuer stamps exp =
+// iat + 60s — i.e. issuerTTL is the brief's prescribed 60 seconds
+// (Mantis #1462 done-criterion #1). Round-trips the freshly-minted
+// token + decodes the header to read exp/iat directly so we don't
+// trust the BootstrapTokenOutput.ExpiresAt convenience field.
+func TestBootstrapToken_TTLIs60s_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	out := svc.IssueBootstrapToken().Value.(subject.BootstrapTokenOutput)
+	parts := core.Split(out.Token[len("LTHN-BOOT-1."):], ".")
+	core.AssertEqual(t, 2, len(parts))
+	headerR := core.Base64URLDecode(parts[0])
+	core.AssertTrue(t, headerR.OK, "header must base64url-decode")
+	var header map[string]any
+	core.AssertTrue(t, core.JSONUnmarshal(headerR.Value.([]byte), &header).OK,
+		"header must JSON-decode")
+
+	iat, _ := header["iat"].(float64)
+	exp, _ := header["exp"].(float64)
+	delta := int64(exp - iat)
+	core.AssertEqual(t, subject.ExportedIssuerTTL(), delta)
+	core.AssertEqual(t, int64(60), delta)
+}
+
+// TestBootstrapToken_IatInFutureRejected_Bad forges a token whose iat
+// is now + 10s — well past the 5s clock-skew tolerance — and asserts
+// VerifyBootstrapToken rejects it with an auth.bootstrap.ttl-class
+// failure. Defends against a clock-skew attack where an attacker mints
+// a token claiming future iat to widen the verifier's accept window
+// (Mantis #1462 done-criterion #2).
+func TestBootstrapToken_IatInFutureRejected_Bad(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	now := core.Now().UTC().Unix()
+	// 10s past the 5s tolerance = clearly rejected.
+	future := now + subject.ExportedClockSkewTolerance() + 5
+	tok := svc.ExportedIssueBootstrapTokenAtIat(future)
+	core.AssertTrue(t, tok != "", "forge helper must mint a token")
+
+	r := svc.VerifyBootstrapToken(tok, "account.create")
+	core.AssertTrue(t, !r.OK, "iat beyond clock-skew tolerance must reject")
+}
+
+// TestBootstrapToken_IatWithinSkewAccepted_Good forges a token whose
+// iat is now + 3s — inside the 5s clock-skew tolerance — and asserts
+// VerifyBootstrapToken accepts it. Confirms the bound is a tolerance,
+// not a strict iat <= now check (Mantis #1462 done-criterion #3).
+func TestBootstrapToken_IatWithinSkewAccepted_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	now := core.Now().UTC().Unix()
+	// 3s into the future is comfortably inside the 5s tolerance window.
+	near := now + 3
+	core.AssertTrue(t, near-now <= subject.ExportedClockSkewTolerance(),
+		"fixture must stay inside clock-skew tolerance")
+	tok := svc.ExportedIssueBootstrapTokenAtIat(near)
+	core.AssertTrue(t, tok != "", "forge helper must mint a token")
+
+	r := svc.VerifyBootstrapToken(tok, "account.create")
+	core.AssertTrue(t, r.OK, "iat within clock-skew tolerance must accept")
+}
