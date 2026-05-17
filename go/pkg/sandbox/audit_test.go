@@ -282,3 +282,117 @@ func TestSandbox_AuditMeta_NoRawArgsOrEnv_Good(t *core.T) {
 			"Meta must never carry a raw `volumes` key on lifecycle rows")
 	}
 }
+
+// TestSandbox_AuditMeta_ErrorCodeBoundedKeyspace_Bad asserts the W3
+// substrate-adoption contract per RFC.error-code-cascade.md §3 + Mantis
+// #1714 (Cerberus #61 C-2): every Spawn / SpawnLong / Kill Failed emit
+// MUST carry an `error_code` from the bounded audit.ErrorCode keyspace
+// (canonical fallback `unknown_error`, RFC §2.1 FOLD-1) — NEVER raw
+// err.Error() / r.Error() prose that could echo caller-controlled
+// input as a STRIDE-I leak surface. The negative-memory Spawn path
+// reaches the fallthrough emit site (sandbox.go:195) and the empty-
+// command SpawnLong path reaches failSpawnLongCause (sandbox_long.go).
+// Bare bash + grep for ` ` (space) inside the emitted value is the
+// cheapest invariant — every bounded code is a single dot-token
+// (e.g. "sandbox.spawn", "sandbox.long", "unknown_error") and prose
+// always contains spaces.
+func TestSandbox_AuditMeta_ErrorCodeBoundedKeyspace_Bad(t *core.T) {
+	rec := installAuditRecorder(t)
+	svc := newTestService(Options{})
+
+	// Drive Spawn Failed via negative-memory validation reject (lands at
+	// sandbox.go:189 with errCode from audit.ErrorCode fallthrough).
+	_ = NewSpawnPort(svc).Spawn(SpawnInput{
+		Image:   "alpine:3.21",
+		Command: "true",
+		Memory:  -1,
+	})
+
+	// Drive SpawnLong Failed via empty-Command validation reject (lands
+	// at failSpawnLongCause via the validation tail).
+	_ = NewSpawnPort(svc).SpawnLong(SpawnLongInput{
+		Image:   "lthn/dev:latest",
+		Command: "",
+	})
+
+	// Drive Kill Failed via unknown sandbox id (lands at failKill).
+	_ = NewSpawnPort(svc).Kill("sb-nonexistent")
+
+	failedNames := []string{
+		audit.EventSandboxSpawnFailed,
+		audit.EventSandboxLongFailed,
+		audit.EventSandboxKillFailed,
+	}
+	for _, name := range failedNames {
+		failed := rec.filterByName(name)
+		core.AssertTrue(t, len(failed) >= 1,
+			name+" must emit at least one Failed row")
+		for _, ev := range failed {
+			raw, ok := ev.Meta["error_code"]
+			core.AssertTrue(t, ok,
+				name+" Meta must carry error_code key")
+			code, isStr := raw.(string)
+			core.AssertTrue(t, isStr,
+				name+" error_code must be a string from audit.ErrorCode")
+			core.AssertTrue(t, code != "",
+				name+" error_code must be non-empty (failure path)")
+			// Bounded-keyspace canary: any space in the value means raw
+			// prose leaked through. audit.ErrorCode never returns a value
+			// with whitespace (Operation literals, Code() literals,
+			// "unknown_error" fallback are all single-token).
+			core.AssertFalse(t, core.Contains(code, " "),
+				name+" error_code must be bounded-keyspace (no spaces / prose)")
+		}
+	}
+}
+
+// TestSandbox_AuditMeta_CauseErrorBoundedKeyspace_Bad asserts the
+// FOLD-2 substrate-adoption contract per RFC.error-code-cascade.md §3
+// + Mantis #1719 (Cerberus #62 FOLD-2 HIGH): failSpawnLongCause's
+// `cause_error` Meta key — when emitted — MUST carry an audit.ErrorCode
+// bounded value, never raw err.Error() prose from the underlying
+// proc.Run / waitPortOpen path. Same leak class as #1714; same fix.
+//
+// We exercise failSpawnLongCause directly because the validation gate
+// in the public SpawnLong API runs before any cause-path emit, so the
+// only way to reach a cause_error site without a docker runtime is to
+// drive the failure tail with a synthetic cause. Driving the helper
+// directly is the same shape used by TestSandbox_VolumeReject — the
+// audit-emit contract is what we're pinning, not the public API surface.
+func TestSandbox_AuditMeta_CauseErrorBoundedKeyspace_Bad(t *core.T) {
+	rec := installAuditRecorder(t)
+
+	// Synthetic cause carrying caller-controlled prose with whitespace —
+	// the W3-pre shape would have leaked this verbatim into cause_error.
+	// audit.ErrorCode on a bare error (no scope, no Code) returns
+	// "unknown_error" per FOLD-1, which has no whitespace.
+	leakageProse := "process exited with code 125: pull access denied for /tmp/SECRET-leak"
+	cause := core.Fail(core.NewError(leakageProse))
+
+	_ = failSpawnLongCause("lthn-sandbox-sb-causebound", "spawn long failed", cause)
+
+	failed := rec.filterByName(audit.EventSandboxLongFailed)
+	core.AssertEqual(t, 1, len(failed),
+		"failSpawnLongCause must emit exactly one Failed row")
+
+	raw, ok := failed[0].Meta["cause_error"]
+	core.AssertTrue(t, ok,
+		"non-OK cause must surface a cause_error Meta key")
+	code, isStr := raw.(string)
+	core.AssertTrue(t, isStr,
+		"cause_error must be a string from audit.ErrorCode")
+	core.AssertFalse(t, core.Contains(code, " "),
+		"cause_error must be bounded-keyspace (no spaces / prose)")
+	core.AssertFalse(t, core.Contains(code, "SECRET-leak"),
+		"cause_error must NEVER echo caller-controlled prose (STRIDE-I)")
+	core.AssertFalse(t, core.Contains(code, "/tmp/"),
+		"cause_error must NEVER echo path bytes from upstream error")
+
+	// And the sibling error_code on the same row is also bounded.
+	rawEC, okEC := failed[0].Meta["error_code"]
+	core.AssertTrue(t, okEC)
+	codeEC, isStrEC := rawEC.(string)
+	core.AssertTrue(t, isStrEC)
+	core.AssertFalse(t, core.Contains(codeEC, " "),
+		"error_code must be bounded-keyspace (no spaces / prose)")
+}

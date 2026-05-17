@@ -403,30 +403,30 @@ func failSpawnLongImage(image string, gateErr error) core.Result {
 // failSpawnLongCause is the cause-preserving variant of failSpawnLong.
 // Cerberus #47 S-6 (Mantis #1668) — the proc.Run / waitPortOpen paths
 // previously dropped their underlying error on the floor. When `cause`
-// is a non-OK Result, its message is folded into the returned error
-// (via core.E's third arg) AND surfaced in the audit Meta as
-// `cause_error` so a forensic walker can correlate the SpawnLong
-// failure with the underlying runtime symptom (e.g. "process exited
-// with code 125" → image pull denied). cause.OK == true falls back to
-// the nil-cause shape, identical to the original failSpawnLong.
+// is a non-OK Result, its bounded categorical code is folded into the
+// audit Meta as `cause_error` (via audit.ErrorCode per RFC W3 / FOLD-2,
+// Mantis #1719) so a forensic walker can correlate the SpawnLong
+// failure with the underlying runtime symptom WITHOUT inheriting raw
+// upstream prose (which routinely echoes caller-controlled input —
+// STRIDE-I leak surface). `error_code` is similarly substrate-derived
+// via audit.ErrorCode on the wrapped *core.Err so the SpawnLong scope
+// literal ("sandbox.long") lands rather than err.Error() prose
+// (RFC W3, Mantis #1714). cause.OK == true falls back to the nil-cause
+// shape, identical to the original failSpawnLong.
 func failSpawnLongCause(containerName, message string, cause core.Result) core.Result {
 	var underlying error
-	causeMsg := ""
 	if !cause.OK {
 		if e, ok := cause.Value.(error); ok {
 			underlying = e
-			causeMsg = e.Error()
-		} else {
-			causeMsg = cause.Error()
 		}
 	}
 	err := core.E(spawnLongOp, message, underlying)
 	meta := map[string]any{
-		"error_code":     err.Error(),
+		"error_code":     audit.ErrorCode(core.Fail(err)),
 		"container_name": containerName,
 	}
-	if causeMsg != "" {
-		meta["cause_error"] = causeMsg
+	if !cause.OK {
+		meta["cause_error"] = audit.ErrorCode(cause)
 	}
 	_ = audit.Default().Record(audit.Event{
 		Event:   audit.EventSandboxLongFailed,
@@ -524,8 +524,10 @@ func (s *Service) kill(sandboxID string) core.Result {
 }
 
 // failKill is the Kill error tail — emits Failed audit row with
-// categorical error_code and returns the wrapped Result. Mirrors
-// failSpawnLong for shape parity.
+// substrate-derived error_code and returns the wrapped Result. Mirrors
+// failSpawnLong for shape parity. RFC W3 (Mantis #1714) — error_code
+// routes through audit.ErrorCode so the killOp scope literal lands in
+// the bounded keyspace rather than err.Error() raw prose.
 func failKill(sandboxID, message string) core.Result {
 	err := core.E(killOp, message, nil)
 	_ = audit.Default().Record(audit.Event{
@@ -535,7 +537,7 @@ func failKill(sandboxID, message string) core.Result {
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
 			"sandbox_id": sandboxID,
-			"error_code": err.Error(),
+			"error_code": audit.ErrorCode(core.Fail(err)),
 		},
 	})
 	return core.Fail(err)

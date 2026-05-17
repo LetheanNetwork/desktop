@@ -177,10 +177,12 @@ func (s *Service) spawn(input SpawnInput) core.Result {
 		// Cerberus Mantis #1667 / #1666 — when the failure is a typed
 		// imagetrust gate-reject (1:1 with Q-4 granular error_code enum),
 		// surface the stable short code (`image_empty` | `image_imds` |
-		// `image_registry_not_allowed` | …) instead of the raw error
-		// string. Non-imagetrust failures fall through to the existing
-		// res.Error() shape so we don't lose runtime-fail diagnostics.
-		errCode := res.Error()
+		// `image_registry_not_allowed` | …). Non-imagetrust failures fall
+		// through to the bounded-keyspace audit.ErrorCode substrate per
+		// RFC.error-code-cascade.md §4.2 (hybrid composition shape) —
+		// previously assigned r.Error() raw prose, which the W1 substrate
+		// (Mantis #1714) closes as a STRIDE-I leak surface.
+		errCode := audit.ErrorCode(res)
 		if causeErr, ok := res.Value.(error); ok {
 			if tag := imagetrust.ErrorCode(causeErr); tag != "" && tag != "image_invalid" {
 				errCode = tag
