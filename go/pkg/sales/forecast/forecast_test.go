@@ -31,7 +31,7 @@ func TestQuarterly_Empty_Good(t *testing.T) {
 // TestQuarterly_TwoDeals_Good — won + engage deal split correctly.
 func TestQuarterly_TwoDeals_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newUnlockedDealsSvc()
 	// Won deal = £10 K committed.
 	dealSvc.Create(deals.CreateInput{Customer: "Won Co", Stage: "won", AmountPence: 10000})
 	// Engage deal = £20 K, 30% default weight.
@@ -83,7 +83,7 @@ func TestStageWeight_All_Good(t *testing.T) {
 	for _, stage := range stages {
 		// Verify via a deal computation — indirect but avoids exporting stageWeight.
 		t.Setenv("HOME", t.TempDir())
-		dealSvc := deals.NewService(nil)
+		dealSvc := newUnlockedDealsSvc()
 		dealSvc.Create(deals.CreateInput{Customer: "X", Stage: stage, AmountPence: 10000})
 		svc := forecast.NewService(nil)
 		r := svc.Quarterly(forecast.QuarterlyInput{Quarters: 1})
