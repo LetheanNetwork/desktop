@@ -292,19 +292,3 @@ func (s *Service) Get(id string) core.Result {
 		core.Option{Key: "id", Value: id},
 	))
 }
-
-// NewAPIProvider returns the dappco.re/go/process/pkg/api provider that
-// mounts /api/process/* REST routes on the lthn server's gin engine.
-// Wired by cmd/lthn/main.go into server.Options.ExtraGroups so the
-// same action surface used by Wails + CLI is reachable over HTTP from
-// the frontend lit components.
-//
-// Usage example:
-//
-//	if procSvc, _ := core.ServiceFor[*coreprocess.Service](c, "process"); procSvc != nil {
-//	    extras = append(extras, process.NewAPIProvider(procSvc))
-//	}
-func NewAPIProvider(coreProc *coreprocess.Service) *processapi.ProcessProvider {
-	// nil registry → DefaultRegistry; nil hub → REST only (no WS push for now)
-	return processapi.NewProvider(nil, coreProc, nil)
-}
