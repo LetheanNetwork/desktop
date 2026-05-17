@@ -89,12 +89,24 @@ func (s *Service) OpenTUI(id string) core.Result {
 	case "darwin":
 		// AppleScript `do script` runs the string in a fresh
 		// Terminal shell, so POSIX env-prefix parses correctly:
-		// `VAR=val cmd args...`. Password is hex-only (no quotes
-		// / special chars from rand.Read + hex.EncodeToString) so
-		// direct concat into the AppleScript is safe.
-		shellCmd := "OPENCODE_SERVER_PASSWORD=" + password +
+		// `VAR=val cmd args...`. Password is currently hex-only
+		// but defence-in-depth: shell-quote first (single-quote
+		// the value so the shell parses it as one literal VAR=val
+		// token), then AppleScript-quote the whole command so the
+		// AppleScript string literal does not lose meta-chars to
+		// its own escape grammar.
+		// SECURITY: password passed through shellQuote + the whole
+		// shellCmd passed through appleScriptQuote; do NOT add
+		// raw % formatting or string concat for untrusted input
+		// here (Mantis #1601).
+		shellCmd := "OPENCODE_SERVER_PASSWORD=" + shellQuote(password) +
 			" opencode attach " + targetURL
-		script := `tell application "Terminal" to do script "` + shellCmd + `"`
+		quotedScript, qErr := appleScriptQuote(shellCmd)
+		if qErr != nil {
+			return core.Fail(core.E("opencode.OpenTUI",
+				"shell command contains characters unsafe for AppleScript", qErr))
+		}
+		script := `tell application "Terminal" to do script ` + quotedScript
 		runR := ps.Run(ctx, "osascript", "-e", script)
 		if !runR.OK {
 			return runR
@@ -137,7 +149,17 @@ func (s *Service) OpenTUI(id string) core.Result {
 		// cmd.exe needs `set VAR=val && cmd` rather than the POSIX
 		// `VAR=val cmd` env-prefix. Windows Terminal first; falls
 		// back to plain cmd.exe.
-		cmdLine := "set OPENCODE_SERVER_PASSWORD=" + password +
+		// SECURITY: password passed through cmdArgvQuote; do NOT
+		// add raw % formatting or string concat for untrusted
+		// input here (Mantis #1601). Without quoting, a password
+		// containing & | < > ^ " %% would break out of the `set`
+		// statement into a chained command.
+		quotedPw, qErr := cmdArgvQuote(password)
+		if qErr != nil {
+			return core.Fail(core.E("opencode.OpenTUI",
+				"password contains characters unsafe for cmd.exe", qErr))
+		}
+		cmdLine := "set OPENCODE_SERVER_PASSWORD=" + quotedPw +
 			" && opencode attach " + targetURL
 		runR := ps.Run(ctx, "wt.exe", "new-tab", "cmd", "/k", cmdLine)
 		if runR.OK {
@@ -158,6 +180,11 @@ func (s *Service) OpenTUI(id string) core.Result {
 // shellQuote single-quotes a string for safe inclusion in `sh -c`.
 // Hex passwords don't need it but the helper protects against
 // future callers that build commands with metacharacters.
+//
+// Usage example:
+//
+//	wrapped := "sh -c " + shellQuote(`echo "hello world"`)
+//	// → sh -c 'echo "hello world"'
 func shellQuote(s string) string {
 	// Single-quote everything, escape any embedded single quote as
 	// '\''. Cheap; runs once per OpenTUI invocation.
@@ -172,4 +199,102 @@ func shellQuote(s string) string {
 	}
 	b = append(b, '\'')
 	return string(b)
+}
+
+// appleScriptQuote wraps a string in a double-quoted AppleScript
+// string literal, escaping the two characters AppleScript's
+// double-quoted string grammar treats as meta: backslash (\\) and
+// double-quote (\"). Per Apple's AppleScript Language Guide
+// (Lexical Conventions §"String Literals"), `\n`, `\r`, `\t` are
+// the only legal escape sequences for control characters; raw
+// embedded control bytes are rejected by the parser. We treat
+// embedded NUL, LF, and CR as unsafe (they would terminate the
+// osascript line or be silently dropped) and return an error so
+// the caller can fail the launch rather than ship a corrupted
+// command to the user's terminal.
+//
+// Returns the quoted form ready for splicing into an osascript
+// argument (the returned value INCLUDES the surrounding double
+// quotes).
+//
+// Usage example:
+//
+//	q, err := appleScriptQuote(`hello "world"`)
+//	// → "hello \"world\"", nil
+//	q, err := appleScriptQuote("bad\nstring")
+//	// → "", err (control character rejected)
+func appleScriptQuote(s string) (string, error) {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == 0x00 || c == '\n' || c == '\r' {
+			return "", core.E("opencode.appleScriptQuote",
+				"embedded control character is not safe for AppleScript literal", nil)
+		}
+	}
+	var b []byte
+	b = append(b, '"')
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '\\':
+			b = append(b, '\\', '\\')
+		case '"':
+			b = append(b, '\\', '"')
+		default:
+			b = append(b, c)
+		}
+	}
+	b = append(b, '"')
+	return string(b), nil
+}
+
+// cmdArgvQuote wraps a string as a single quoted argv token for
+// cmd.exe. The cmd.exe parser treats `&`, `|`, `<`, `>`, `^`, `"`,
+// `%`, `!` as special: unquoted, any of these can break out of the
+// current command into a chained one or trigger variable expansion.
+// Inside double quotes `&|<>` lose their meta meaning, but `"` must
+// still be doubled (`""`) and `%`/`!` can still trigger delayed
+// expansion in some contexts.
+//
+// Strategy:
+//
+//  1. Reject embedded control characters (NUL, LF, CR) — they cannot
+//     be expressed safely in a single cmd.exe argv token.
+//  2. Always wrap in double quotes (cheap; defensive even for plain
+//     alphanumerics).
+//  3. Double any embedded `"` to `""` (cmd.exe's escape for quoted
+//     strings).
+//  4. Escape `^` to `^^` so it survives cmd's de-caret pass.
+//
+// Returns the quoted form (INCLUDES surrounding double quotes).
+//
+// Usage example:
+//
+//	q, err := cmdArgvQuote(`a&b`)
+//	// → "\"a&b\"", nil
+//	q, err := cmdArgvQuote("bad\nstring")
+//	// → "", err
+func cmdArgvQuote(s string) (string, error) {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == 0x00 || c == '\n' || c == '\r' {
+			return "", core.E("opencode.cmdArgvQuote",
+				"embedded control character is not safe for cmd.exe argv", nil)
+		}
+	}
+	var b []byte
+	b = append(b, '"')
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '"':
+			b = append(b, '"', '"')
+		case '^':
+			b = append(b, '^', '^')
+		default:
+			b = append(b, c)
+		}
+	}
+	b = append(b, '"')
+	return string(b), nil
 }
