@@ -242,8 +242,10 @@ func (s *Service) WSetDynamicRoutes(routes []RouteInput) core.Result {
 	keysSvc, _ := core.ServiceFor[*keys.Service](s.core, "keys")
 
 	// Phase 1 — validate every input + build intent set. No tier-1
-	// side-effects yet. A validation failure here means zero state
-	// has changed; Phase 2 is the load-bearing all-or-nothing commit.
+	// or config side-effects yet. A validation failure here means
+	// zero state has changed; Phases 2 + 3 are the load-bearing
+	// all-or-nothing commit (save then tier-1 dispatch — see Phase 2
+	// rationale for the Mantis #1761 broadcast-ordering reorder).
 	// Mantis #1760 / Cerberus #75 ADD-1 — the prior shape early-
 	// returned mid-loop, leaving route[0..i-1] orphan tier-1 refs at
 	// rest with no RouteConfig pointer; operator-retry then produced
@@ -284,7 +286,32 @@ func (s *Service) WSetDynamicRoutes(routes []RouteInput) core.Result {
 		intents = append(intents, intent)
 	}
 
-	// Phase 2 — commit every tier-1 import. Track stored refs so a
+	// Phase 2 — persist the new route map FIRST so the broadcast that
+	// fires from any tier-1 replace in Phase 3 sees the NEW config
+	// when the SubscribeToKeysEvents subscriber re-reads it. Mantis
+	// #1761 / Cerberus #75 ADD-2 — without this reorder, PutTier1's
+	// Tier1KeyChanged{Replaced} broadcast on a ref that an existing
+	// route already binds would trigger RebuildStaticRoutes under the
+	// OLD config, briefly serving (old BaseURL, new plaintext) — a
+	// microsecond credential-shape mismatch window. Snapshot the prior
+	// routes first so a Phase-3 PutTier1 failure can restore the
+	// at-rest map to its pre-call shape.
+	priorRoutes := loadRouteConfigsFromCore(s.core)
+	out := make(map[string]RouteConfig, len(intents))
+	for _, intent := range intents {
+		out[intent.name] = intent.rc
+	}
+	if r := saveRouteConfigsToCore(s.core, out); !r.OK {
+		// Config write failed before any tier-1 mutation — no rollback
+		// needed; nothing has changed at rest in the tier-1 partition.
+		return r
+	}
+
+	// Phase 3 — commit every tier-1 import. Broadcasts from
+	// Tier1KeyChanged{Replaced} now reach the subscriber AFTER the
+	// new config landed, so RoutesReferencing reads the post-save
+	// shape and any RebuildStaticRoutes that fires sees consistent
+	// (BaseURL, Model, plaintext) tuples. Track stored refs so a
 	// mid-loop failure can roll back the prior writes; without the
 	// rollback, partial-failure leaves orphan ciphertext at rest with
 	// no RouteConfig binding (STRIDE-T credential survival + audit
@@ -296,10 +323,18 @@ func (s *Service) WSetDynamicRoutes(routes []RouteInput) core.Result {
 			continue
 		}
 		if r := keysSvc.PutTier1(intent.importRef, intent.plaintext); !r.OK {
-			// Roll back every previously-stored ref before surfacing.
-			// rollbackTier1Refs handles per-ref delete failures by
-			// emitting the orphan safety-net audit row.
+			// Roll back every previously-stored ref AND restore the
+			// prior route map so at-rest stays consistent with the
+			// pre-call shape. rollbackTier1Refs handles per-ref delete
+			// failures by emitting the orphan safety-net audit row;
+			// the config restore is best-effort (a failing restore
+			// leaves the new map at rest, which the operator can
+			// re-attempt via a follow-up WSetDynamicRoutes call).
 			rollbackTier1Refs(keysSvc, stored)
+			if priorRoutes == nil {
+				priorRoutes = map[string]RouteConfig{}
+			}
+			_ = saveRouteConfigsToCore(s.core, priorRoutes)
 			// Tier-1 KEK provider not live (account locked) is the
 			// dominant failure mode — preserve the typed error the
 			// UI renders as the "unlock to use this provider"
@@ -311,21 +346,10 @@ func (s *Service) WSetDynamicRoutes(routes []RouteInput) core.Result {
 		stored = append(stored, intent.importRef)
 	}
 
-	// Phase 3 — persist the route map AND emit the per-import Stored
-	// audit rows. Audit emit lives here (not Phase 2) so the row only
-	// fires when the credential is bound to a persisted RouteConfig,
-	// keeping audit-row semantics aligned with at-rest state.
-	out := make(map[string]RouteConfig, len(intents))
-	for _, intent := range intents {
-		out[intent.name] = intent.rc
-	}
-	if r := saveRouteConfigsToCore(s.core, out); !r.OK {
-		// Config write failed AFTER tier-1 commits landed — roll the
-		// tier-1 writes back so at-rest stays consistent. Same
-		// safety-net contract: rollback failure emits the orphan row.
-		rollbackTier1Refs(keysSvc, stored)
-		return r
-	}
+	// Audit emit fires AFTER both phases land — the row only records
+	// when the credential is bound to a persisted RouteConfig AND the
+	// at-rest tier-1 write succeeded, keeping audit-row semantics
+	// aligned with at-rest state.
 	for _, intent := range intents {
 		if intent.importRef == "" {
 			continue
@@ -343,7 +367,8 @@ func (s *Service) WSetDynamicRoutes(routes []RouteInput) core.Result {
 		})
 	}
 	// Reload static route set so the next inference call sees the
-	// new shape without process restart.
+	// new shape without process restart. Idempotent against the
+	// per-route SubscribeToKeysEvents rebuilds that fired in Phase 3.
 	RebuildStaticRoutes(s.core, s)
 	return core.Ok(nil)
 }

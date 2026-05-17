@@ -481,3 +481,98 @@ func TestWSetDynamicRoutes_PartialFailure_RollsBack_Bad(t *core.T) {
 	}
 	_ = c
 }
+
+// TestWSetDynamicRoutes_BroadcastAfterSave_Good — Mantis #1761 /
+// Cerberus #75 ADD-2. Pins the broadcast-ordering invariant: when
+// PutTier1 fires Tier1KeyChanged{Replaced} during WSetDynamicRoutes,
+// the persisted route map must ALREADY reflect the new shape so any
+// downstream subscriber re-reading config sees consistent (BaseURL,
+// Model, plaintext) tuples — never the brief microsecond window where
+// the OLD route shape pairs with the NEW credential.
+//
+// Threat shape (pre-fix): subscriber fires inside Phase 2, walks
+// RoutesReferencing under the OLD config (pre-save), and rebuilds the
+// static route set with the OLD BaseURL bound to the NEW plaintext.
+// Post-fix: save runs FIRST, so the broadcast that fires from PutTier1
+// reaches the subscriber AFTER the config write landed; RoutesReferencing
+// sees the post-save shape; RebuildStaticRoutes pairs NEW BaseURL with
+// NEW plaintext.
+//
+// Mechanism: pre-seed a route binding ref X with plaintext A, then call
+// WSetDynamicRoutes with the same name + same APIKeyRef but a DIFFERENT
+// BaseURL and a DIFFERENT plaintext B. Register a probe subscriber that
+// snapshots the on-disk BaseURL at the moment it observes the
+// Tier1KeyChanged{Replaced} broadcast. Assert the snapshot carries the
+// NEW BaseURL — proves save preceded broadcast.
+func TestWSetDynamicRoutes_BroadcastAfterSave_Good(t *core.T) {
+	_ = installRecorder(t)
+	c, _, runnerSvc := credentialFixture(t)
+
+	// Seed: WSetDynamicRoutes with plaintext to drive the migration
+	// auto-import path — produces a route "openai" with APIKeyRef
+	// "openai-migrated" pre-bound, BaseURL = OLD URL, plaintext A
+	// stored at rest.
+	core.AssertTrue(t, runnerSvc.WSetDynamicRoutes([]runner.RouteInput{
+		{
+			Name:    "openai",
+			Kind:    "openai",
+			BaseURL: "https://old.example/v1",
+			APIKey:  "sk-old",
+			Model:   "gpt-4o-mini",
+		},
+	}).OK, "seed route + tier-1 auto-import must succeed")
+
+	cfg, _ := core.ServiceFor[*config.Service](c, "config")
+	core.AssertTrue(t, cfg != nil, "config service must be registered")
+
+	// Probe subscriber: capture the on-disk BaseURL bound to the ref
+	// at the moment Tier1KeyChanged{Replaced} is observed. The probe
+	// registers on the same bus as the production SubscribeToKeysEvents
+	// handler and runs synchronously (c.ACTION is synchronous today —
+	// the LOW->MED threat-model concern in the brief). Reads config
+	// directly via the same config.Service the production
+	// loadRouteConfigsFromCore reaches into — proves the at-rest map
+	// the subscriber would see has the post-save shape.
+	var observedAtBroadcast string
+	c.RegisterAction(func(c *core.Core, msg core.Message) core.Result {
+		ev, ok := msg.(keys.Tier1KeyChanged)
+		if !ok || ev.Kind != keys.Tier1KeyReplaced || ev.Ref != "openai-migrated" {
+			return core.Ok(nil)
+		}
+		var raw map[string]runner.RouteConfig
+		if r := cfg.Get("routes", &raw); !r.OK {
+			return core.Ok(nil)
+		}
+		for _, route := range raw {
+			if route.APIKeyRef == "openai-migrated" {
+				observedAtBroadcast = route.BaseURL
+				break
+			}
+		}
+		return core.Ok(nil)
+	})
+
+	// Trigger: same route name, NEW BaseURL, NEW plaintext (no
+	// APIKeyRef — drives the auto-import path again, which calls
+	// PutTier1 on the existing "openai-migrated" ref → Replaced
+	// broadcast. Pre-fix this would broadcast under the OLD config
+	// (BaseURL = OLD); post-fix the broadcast fires after save, so the
+	// probe reads NEW.
+	r := runnerSvc.WSetDynamicRoutes([]runner.RouteInput{
+		{
+			Name:    "openai",
+			Kind:    "openai",
+			BaseURL: "https://new.example/v1",
+			APIKey:  "sk-new",
+			Model:   "gpt-4o-mini",
+		},
+	})
+	core.AssertTrue(t, r.OK, "WSetDynamicRoutes must succeed on replace")
+
+	// Load-bearing assertion: the probe must have fired (broadcast did
+	// happen) AND it must have observed the NEW BaseURL.
+	core.AssertFalse(t, observedAtBroadcast == "",
+		"probe must observe at least one Tier1KeyChanged{Replaced} broadcast")
+	core.AssertEqual(t, "https://new.example/v1", observedAtBroadcast,
+		"broadcast must fire AFTER saveRouteConfigsToCore — probe must see NEW BaseURL, not OLD; pre-fix this assertion fails because PutTier1 broadcasts before save lands")
+}
