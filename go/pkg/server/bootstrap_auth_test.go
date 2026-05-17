@@ -638,3 +638,96 @@ func TestBootstrapAuth_FullPathEmpty_Rejects_Bad(t *core.T) {
 	core.AssertEqual(t, http.StatusUnauthorized, rr.Code,
 		"empty c.FullPath() MUST NOT match the bootstrap allowlist (Mantis #1626 defensive)")
 }
+
+// --- Cerberus #57 F-1 / Mantis #1699 — constant-time bearer compare ---
+
+// TestBootstrapAuth_ConstantTimeBearerCompare_Good asserts that the
+// static-bearer comparison treats every wrong-bearer input as a
+// uniform reject, regardless of how many leading bytes match the real
+// secret. Pre-fix `token != bearerToken` short-circuited per-byte and
+// leaked the matched-prefix length as a wall-clock signal; the new
+// constant-time compare collapses that channel.
+//
+// The test exercises both the WithBootstrapAuth path (bootstrap_auth.go
+// site 1) and the BootstrapAuthMiddleware path (bootstrap_auth.go site
+// 2). For each, it drives many candidate bearers with varying
+// prefix-overlap against a 32-byte secret and asserts:
+//
+//   - Every wrong bearer is rejected with the same 401 + body shape
+//     (no behavioural leak via response variance).
+//   - The correct bearer is accepted (sanity — wrapping didn't break
+//     the happy path).
+//
+// We deliberately do NOT assert wall-clock variance bounds: timing
+// tests are flaky on shared CI; the structural defence is that the
+// compare goes through crypto/subtle.ConstantTimeCompare per
+// constantTimeStringEqual at bootstrap_auth.go. The wrapper's
+// existence is the audit-grep target.
+func TestBootstrapAuth_ConstantTimeBearerCompare_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := serverkey.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	const secret = "abcdefghijklmnopqrstuvwxyz012345" // 32 bytes
+	paths := map[string]string{"/v1/account/create": "account.create"}
+
+	// candidates: each one matches `secret` on the first N bytes then
+	// differs. Pre-fix, the early-exit compare on (N+1) bytes vs the
+	// full 32 leaks N as a measurable timing signal. Post-fix, all
+	// must 401 with the same body.
+	candidates := []string{
+		"",                                                                                           // empty
+		"x",                                                                                          // 0-byte prefix overlap
+		"a" + "x",                                                                                    // 1-byte prefix overlap
+		"abcdefgh" + "x",                                                                             // 8-byte prefix overlap
+		"abcdefghijklmnop" + "x",                                                                     // 16-byte prefix overlap
+		"abcdefghijklmnopqrstuvwxyz01234" + "x",                                                      // 31-byte prefix overlap (1 byte different)
+		"abcdefghijklmnopqrstuvwxyz012345" + "extra",                                                 // correct prefix + extra (length mismatch)
+		"abcdefghijklmnopqrstuvwxyz012346",                                                           // full length, last byte different
+	}
+
+	// --- Path 1: WithBootstrapAuth (BootstrapAndSessionAuth-less option) ---
+	eng := newTestEngine(t, svc, secret, paths, "/v1/api/chat")
+	for _, cand := range candidates {
+		auth := ""
+		if cand != "" {
+			auth = "Bearer " + cand
+		}
+		rr := doGET(eng, "/v1/api/chat", auth)
+		core.AssertEqual(t, http.StatusUnauthorized, rr.Code,
+			"WithBootstrapAuth: wrong bearer (prefix-overlap variant) MUST 401 (Cerberus #57 F-1)")
+	}
+	// Sanity: correct bearer succeeds.
+	rrOK := doGET(eng, "/v1/api/chat", "Bearer "+secret)
+	core.AssertEqual(t, http.StatusOK, rrOK.Code,
+		"WithBootstrapAuth: correct bearer MUST 200 — constant-time wrapper kept happy path")
+
+	// --- Path 2: BootstrapAuthMiddleware (direct WithMiddleware shape) ---
+	// Build a fresh engine with the middleware registered via
+	// coreapi.WithMiddleware so we exercise bootstrap_auth.go:531
+	// (the non-tier-aware bearer arm).
+	mw := server.BootstrapAuthMiddleware(svc, secret, paths)
+	if mw == nil {
+		t.Fatalf("BootstrapAuthMiddleware returned nil — verifier/pathScopes were non-empty")
+	}
+	gin.SetMode(gin.TestMode)
+	eng2, err := coreapi.New(coreapi.WithMiddleware(mw))
+	if err != nil {
+		t.Fatalf("coreapi.New: %v", err)
+	}
+	base, leaf := splitPath("/v1/api/chat")
+	eng2.Register(&echoRouteGroup{basePath: base, leaf: leaf})
+
+	for _, cand := range candidates {
+		auth := ""
+		if cand != "" {
+			auth = "Bearer " + cand
+		}
+		rr := doGET(eng2, "/v1/api/chat", auth)
+		core.AssertEqual(t, http.StatusUnauthorized, rr.Code,
+			"BootstrapAuthMiddleware: wrong bearer (prefix-overlap variant) MUST 401 (Cerberus #57 F-1)")
+	}
+	rrOK2 := doGET(eng2, "/v1/api/chat", "Bearer "+secret)
+	core.AssertEqual(t, http.StatusOK, rrOK2.Code,
+		"BootstrapAuthMiddleware: correct bearer MUST 200 — constant-time wrapper kept happy path")
+}

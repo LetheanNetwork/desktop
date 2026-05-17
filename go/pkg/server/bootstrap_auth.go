@@ -28,6 +28,7 @@
 package server
 
 import (
+	"crypto/subtle"
 	"net/http"
 
 	core "dappco.re/go"
@@ -35,6 +36,29 @@ import (
 	"dappco.re/lthn/desktop/pkg/serverkey"
 	"github.com/gin-gonic/gin"
 )
+
+// constantTimeStringEqual compares two strings in constant time relative
+// to their length. Wraps crypto/subtle.ConstantTimeCompare so the
+// caller's intent ("close the timing oracle") reads at the call site.
+//
+// Cerberus #57 F-1 / Mantis #1699 — the previous `a != b` bytewise
+// compares at bootstrap_auth.go:392 + :531 short-circuited on the first
+// mismatched byte, leaking the matched-prefix length as a wall-clock
+// timing signal. A localhost attacker can recover an N-byte LocalKey
+// with ~256·N samples; ~10⁵ requests is enough at typical loopback
+// jitter. ConstantTimeCompare normalises the comparison cost so the
+// timing channel collapses.
+//
+// crypto/subtle.ConstantTimeCompare returns 1 iff len(a)==len(b) AND
+// the byte slices match; otherwise 0. This wrapper lifts that to a
+// `bool` and accepts string inputs so it drops in for the existing
+// `token != bearerToken` shape. CoreGO has no ConstantTimeCompare
+// wrapper yet — surfaced as a CoreGO export gap so a future stack-wide
+// adoption can fix N+1 sites at once (sibling case for upstream
+// core/api/middleware.go:58 / Mantis #1451).
+func constantTimeStringEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
 
 // bootstrapAuthHeaderPrefix names the Authorization-header scheme the
 // frontend uses to deliver a bootstrap token. Mirrors the "Bearer "
@@ -389,7 +413,11 @@ func BootstrapAndSessionAuthMiddleware(
 				coreapi.Fail("server_misconfigured", "no bearer source configured"))
 			return
 		}
-		if token != bearerToken {
+		// Cerberus #57 F-1 / Mantis #1699 — constant-time compare
+		// closes the localhost timing-oracle that would otherwise
+		// leak LocalKey one byte at a time via early-exit on first
+		// mismatched byte.
+		if !constantTimeStringEqual(token, bearerToken) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized,
 				coreapi.Fail("unauthorised", "invalid bearer token"))
 			return
@@ -528,7 +556,12 @@ func BootstrapAuthMiddleware(verifier serverkey.Verifier, bearerToken string, pa
 			return
 		}
 		parts := core.SplitN(header, " ", 2)
-		if len(parts) != 2 || core.Lower(parts[0]) != "bearer" || parts[1] != bearerToken {
+		// Cerberus #57 F-1 / Mantis #1699 — constant-time compare on
+		// the bearer-secret arm of BootstrapAuthMiddleware (mirrors
+		// the WithBootstrapAuth path above). The scheme+length checks
+		// stay early-exit; only the secret compare needs the timing
+		// defence.
+		if len(parts) != 2 || core.Lower(parts[0]) != "bearer" || !constantTimeStringEqual(parts[1], bearerToken) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized,
 				coreapi.Fail("unauthorised", "invalid bearer token"))
 			return
