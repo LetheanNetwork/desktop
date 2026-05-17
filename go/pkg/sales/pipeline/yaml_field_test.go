@@ -90,3 +90,39 @@ func TestPipeline_UpdateYAMLField_NoCloser_Ugly(t *testing.T) {
 		t.Fatalf("unclosed frontmatter modified:\nwant: %q\ngot:  %q", raw, out)
 	}
 }
+
+// TestPipeline_HasVersionInFrontmatter_HandlesIndented_Good — an
+// indented frontmatter "  version: N" line must be visible to the
+// writer (mirrors paths.matchVersionLine's leading-whitespace trim).
+// Without this, setVersionField takes the insert path and produces a
+// duplicate key on every legacy-file upgrade (Mantis #1549).
+func TestPipeline_HasVersionInFrontmatter_HandlesIndented_Good(t *testing.T) {
+	raw := []byte("---\nid: deal-1\n  version: 5\nstage: engage\n---\nbody\n")
+	if !hasVersionInFrontmatter(raw) {
+		t.Fatalf("indented version line invisible to hasVersionInFrontmatter")
+	}
+}
+
+// TestPipeline_UpdateYAMLField_HandlesIndented_Good — updating an
+// indented frontmatter version line preserves the original indentation
+// instead of rewriting at column 0.
+func TestPipeline_UpdateYAMLField_HandlesIndented_Good(t *testing.T) {
+	raw := []byte("---\nid: deal-1\n  version: 5\nstage: engage\n---\nbody\n")
+	out := updateYAMLField(raw, "version", "6")
+	want := "---\nid: deal-1\n  version: 6\nstage: engage\n---\nbody\n"
+	if string(out) != want {
+		t.Fatalf("indented update wrong:\nwant: %q\ngot:  %q", want, out)
+	}
+}
+
+// TestPipeline_SetVersionField_UpdatesIndentedInPlace_Good — combined
+// proof of #1549: a legacy file with an indented version line gets
+// updated in place (no duplicate key insertion).
+func TestPipeline_SetVersionField_UpdatesIndentedInPlace_Good(t *testing.T) {
+	raw := []byte("---\nid: deal-1\n  version: 5\nstage: engage\n---\nbody\n")
+	out := setVersionField(raw, 6)
+	want := "---\nid: deal-1\n  version: 6\nstage: engage\n---\nbody\n"
+	if string(out) != want {
+		t.Fatalf("indented in-place update wrong:\nwant: %q\ngot:  %q", want, out)
+	}
+}

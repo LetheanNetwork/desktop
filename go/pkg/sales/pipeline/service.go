@@ -298,9 +298,15 @@ func setVersionField(raw []byte, v int) []byte {
 }
 
 // hasVersionInFrontmatter reports whether raw's frontmatter block
-// contains a line starting with "version: " — used by setVersionField
-// to decide between in-place update and prepend-insert without
-// scanning the body (Mantis #1545).
+// contains a line starting with "version:" (after optional leading
+// whitespace) — used by setVersionField to decide between in-place
+// update and tail-insert without scanning the body (Mantis #1545).
+//
+// Leading-whitespace trim mirrors paths.matchVersionLine (atomic_write.go)
+// so reader + writer agree on what counts as a version line. Without
+// the trim, an indented "  version: 5" frontmatter line is invisible
+// to the writer but visible to the reader, producing duplicate version
+// keys on subsequent writes (Mantis #1549).
 //
 // Returns false when raw lacks the leading "---\n" delimiter or the
 // closing "---" line, mirroring updateYAMLField's boundary discipline.
@@ -327,16 +333,22 @@ func hasVersionInFrontmatter(raw []byte) bool {
 	if closeIdx < 0 {
 		return false
 	}
-	prefix := []byte("version: ")
+	prefix := []byte("version:")
 	lineStart := fmStart
 	for i := fmStart; i <= closeIdx; i++ {
 		atEnd := i == closeIdx
 		if atEnd || raw[i] == '\n' {
 			line := raw[lineStart:i]
-			if len(line) >= len(prefix) {
+			// Skip leading whitespace to mirror paths.matchVersionLine.
+			ws := 0
+			for ws < len(line) && (line[ws] == ' ' || line[ws] == '\t') {
+				ws++
+			}
+			trimmed := line[ws:]
+			if len(trimmed) >= len(prefix) {
 				match := true
 				for j := range prefix {
-					if line[j] != prefix[j] {
+					if trimmed[j] != prefix[j] {
 						match = false
 						break
 					}
@@ -393,24 +405,35 @@ func updateYAMLField(raw []byte, key, value string) []byte {
 		return raw
 	}
 	// Walk the frontmatter block line-by-line for an existing "key: "
-	// occurrence. Replace in place; leave the rest of the file alone.
-	prefix := []byte(key + ": ")
+	// occurrence. Leading whitespace is trimmed before prefix-matching to
+	// mirror paths.matchVersionLine (Mantis #1549 — reader and writer
+	// agree on indented frontmatter; without the trim, indented entries
+	// are invisible to the writer and a duplicate key gets inserted on
+	// the next stamp). Original indentation is preserved on rewrite.
+	prefix := []byte(key + ":")
 	lineStart := fmStart
 	for i := fmStart; i <= closeIdx; i++ {
 		atEnd := i == closeIdx
 		if atEnd || raw[i] == '\n' {
 			line := raw[lineStart:i]
-			if len(line) >= len(prefix) {
+			ws := 0
+			for ws < len(line) && (line[ws] == ' ' || line[ws] == '\t') {
+				ws++
+			}
+			trimmed := line[ws:]
+			if len(trimmed) >= len(prefix) {
 				match := true
 				for j := range prefix {
-					if line[j] != prefix[j] {
+					if trimmed[j] != prefix[j] {
 						match = false
 						break
 					}
 				}
 				if match {
+					indent := line[:ws]
 					result := make([]byte, 0, len(raw)+len(value))
 					result = append(result, raw[:lineStart]...)
+					result = append(result, indent...)
 					result = append(result, []byte(key+": "+value)...)
 					result = append(result, raw[i:]...)
 					return result
