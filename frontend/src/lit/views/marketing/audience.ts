@@ -18,6 +18,7 @@ import {
   CONFLICT_RELOAD_EVENT,
   type ConflictDetail,
 } from "../../conflict-dispatch";
+import { clampRows } from "../_bounds";
 
 /** Service identifier the shared <lthn-conflict-toast> filters its
  *  reload signal by. Matches the Go-side wrapped conflict code
@@ -108,8 +109,9 @@ class LthnViewAudience extends LitElement {
       const r = await (svc as {
         List: (input: Record<string, never>) => Promise<{ Value?: { segments?: Segment[] } }>
       }).List({});
-      const segments = r?.Value?.segments;
-      if (segments && segments.length > 0) this.segments = segments;
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      const segments = clampRows<Segment>(r?.Value?.segments);
+      if (segments.length > 0) this.segments = segments;
     } catch {
       // Binding unavailable — keep fixture data.
     } finally {

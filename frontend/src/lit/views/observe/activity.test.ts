@@ -166,6 +166,21 @@ describe("<lthn-view-observe-activity>", () => {
     expect(el.hasAttribute("embedded")).toBe(true);
   });
 
+  // Mantis #1491 regression — oversized backend response is capped by
+  // `clampRows` on the events array. Smoke-test the bound at the view
+  // boundary on the apiFetch shape (REST envelope, not Wails binding).
+  it("Test_Activity_loadFromBackend_OversizedRowsCapped_Bad", async () => {
+    const oversized = Array.from({ length: 10_000 }, (_, i) => ({
+      event: `synthetic.event.${i}`, ts: 1000 + i, outcome: "ok",
+    }));
+    (apiFetch as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue(fetchOK({ data: { events: oversized } }));
+    const el = await mount();
+    // DEFAULT_MAX_ROWS = 2000; the view MUST cap at that boundary so a
+    // misbehaving backend can't drown the audit timeline renderer.
+    expect(el.events.length).toBeLessThanOrEqual(2000);
+  });
+
   it("system event (no account_id) renders the em-dash placeholder", async () => {
     (apiFetch as unknown as { mockResolvedValue: (v: unknown) => void })
       .mockResolvedValue(fetchOK({

@@ -20,6 +20,7 @@
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
+import { clampRows } from "../_bounds";
 
 /** Per-quarter forecast row. Numbers are in £000 so a pure-number
  *  bar chart can scale all four lines against a single max. */
@@ -117,10 +118,11 @@ class LthnViewForecast extends LitElement {
           Value?: { rows?: ForecastRow[]; kpis?: ForecastKpi[] }
         }>
       }).Quarterly({ quarters: 4 });
-      const rows = r?.Value?.rows;
-      const kpis = r?.Value?.kpis;
-      if (rows && rows.length > 0) this.rows = rows;
-      if (kpis && kpis.length > 0) this.kpis = kpis;
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      const rows = clampRows<ForecastRow>(r?.Value?.rows);
+      const kpis = clampRows<ForecastKpi>(r?.Value?.kpis);
+      if (rows.length > 0) this.rows = rows;
+      if (kpis.length > 0) this.kpis = kpis;
     } catch {
       // Backend unavailable — keep fixtures.
     }

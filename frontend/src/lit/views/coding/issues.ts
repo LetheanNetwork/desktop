@@ -13,6 +13,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../../chrome";
+import { clampRows } from "../_bounds";
 
 /** An issue row as rendered. Derived from tasks.Issue on the Go side;
  *  fixtures mirror the Claude Design reference layout. */
@@ -143,8 +144,9 @@ class LthnViewIssues extends LitElement {
       const r = await (svc as {
         List: (input: { state: string; limit: number }) => Promise<{ Value?: { issues?: BackendIssue[] } }>
       }).List({ state: "open", limit: 50 });
-      const rows = r?.Value?.issues;
-      if (rows && rows.length > 0) {
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      const rows = clampRows<BackendIssue>(r?.Value?.issues);
+      if (rows.length > 0) {
         this.issues = rows.map(mapBackendIssue);
       }
     } catch {

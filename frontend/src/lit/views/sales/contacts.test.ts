@@ -177,6 +177,25 @@ describe("lthn-view-contacts — conflict-reload listener (Cascade W1)", () => {
     expect(reloaded.length).toBeGreaterThan(initial);
   });
 
+  // Mantis #1491 regression — oversized backend response is capped by
+  // `clampRows` to DEFAULT_MAX_ROWS so the renderer never sees a
+  // 10K-row array. Smoke-test the bound at the view boundary.
+  it("Test_Contacts_loadFromBackend_OversizedRowsCapped_Bad", async () => {
+    (ContactsList as unknown as { mockReset: () => void }).mockReset();
+    const oversized = Array.from({ length: 10_000 }, (_, i) => ({
+      name: `Contact ${i}`, role: "x", last: "now", warmth: "warm" as const, next: "y",
+    }));
+    (ContactsList as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      Value: { contacts: oversized },
+    });
+    const { el } = await mountWindow<ContactsEl>("lthn-view-contacts");
+    await new Promise(r => setTimeout(r, 0));
+    await el.updateComplete;
+    // DEFAULT_MAX_ROWS = 2000 in _bounds.ts; the view MUST cap at that
+    // boundary so a misbehaving backend can't blow up Lit's diff loop.
+    expect(el.contacts.length).toBeLessThanOrEqual(2000);
+  });
+
   it("CONFLICT_RELOAD_EVENT with non-matching service is ignored", async () => {
     (ContactsList as unknown as { mockReset: () => void }).mockReset();
     const calls: number[] = [];

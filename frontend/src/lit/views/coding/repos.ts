@@ -17,6 +17,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../../chrome";
+import { clampRows } from "../_bounds";
 
 /** Shape of one watched-repo fixture row. */
 interface RepoRow {
@@ -168,8 +169,11 @@ class LthnViewRepos extends LitElement {
         return;
       }
       const r = await (svc as { Status: (input: unknown) => Promise<{ Value?: { repos?: BackendRepoStatus[] } }> }).Status({});
-      const rows = r?.Value?.repos;
-      if (!Array.isArray(rows)) {
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      // clampRows returns [] for non-arrays so the !Array.isArray branch
+      // collapses into "no rows → keep fixture".
+      const rows = clampRows<BackendRepoStatus>(r?.Value?.repos);
+      if (rows.length === 0) {
         console.warn("[repos] Status() returned no repos array — keeping fixture", r);
         return;
       }

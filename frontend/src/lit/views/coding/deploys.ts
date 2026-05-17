@@ -12,6 +12,7 @@
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
+import { clampRows } from "../_bounds";
 
 /** One live deployment target. */
 interface EnvRow {
@@ -106,10 +107,11 @@ class LthnViewDeploys extends LitElement {
         List: (input: { env?: string; limit?: number }) => Promise<{ Value?: { envs?: EnvRow[]; history?: DeployRow[] } }>;
       };
       const r = await deploysSvc.List({});
-      const envs = r?.Value?.envs;
-      if (envs && envs.length > 0) this.envs = envs;
-      const history = r?.Value?.history;
-      if (history && history.length > 0) this.history = history;
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      const envs = clampRows<EnvRow>(r?.Value?.envs);
+      const history = clampRows<DeployRow>(r?.Value?.history);
+      if (envs.length > 0) this.envs = envs;
+      if (history.length > 0) this.history = history;
     } catch { } finally {
       this.loading = false;
     }

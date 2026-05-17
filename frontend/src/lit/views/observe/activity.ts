@@ -22,6 +22,7 @@
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
 import { apiFetch } from "../../api-fetch";
+import { clampRows } from "../_bounds";
 
 interface ActivityEvent {
   event:        string;
@@ -124,14 +125,13 @@ class LthnViewObserveActivity extends LitElement {
       const wrapper = await res.json();
       // coreapi.Response envelope — extract data field.
       const data = (wrapper as { data?: ActivityQueryResponse })?.data;
-      const events = data?.events;
-      if (!Array.isArray(events)) {
-        // Unexpected shape — keep fixture / current state.
-        return;
-      }
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      // clampRows returns [] on non-array (the prior !Array.isArray
+      // branch collapses into "no rows → keep current state").
+      const events = clampRows<ActivityEvent>(data?.events);
       if (events.length === 0) {
-        // Empty response — keep current state per design contract
-        // (don't blank the surface).
+        // Empty response OR unexpected shape — keep current state per
+        // design contract (don't blank the surface).
         return;
       }
       this.events = events;

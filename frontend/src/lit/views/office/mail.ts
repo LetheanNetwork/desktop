@@ -18,6 +18,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../../chrome";
+import { clampRows } from "../_bounds";
 
 /** Shape of one inbox folder. Mirrors the future pkg/mail folder API. */
 interface MailFolder {
@@ -122,13 +123,14 @@ class LthnViewMail extends LitElement {
         mailSvc.ListThreads({ folderSlug: "inbox", limit: 50 }),
       ]);
 
-      const folders = fr?.Value?.folders;
-      if (folders && folders.length > 0) {
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      const folders = clampRows<MailFolder>(fr?.Value?.folders);
+      if (folders.length > 0) {
         this.folders = folders;
       }
 
-      const threads = tr?.Value?.threads;
-      if (threads && threads.length > 0) {
+      const threads = clampRows<MailThread>(tr?.Value?.threads);
+      if (threads.length > 0) {
         this.threads = threads;
       }
     } catch {

@@ -19,6 +19,7 @@
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
+import { clampRows } from "../_bounds";
 
 /** A backlog item with RICE inputs + computed weighted score. */
 interface BacklogItem {
@@ -165,8 +166,11 @@ class LthnViewBacklog extends LitElement {
       }
       const r = await (svc as { List: (input: unknown) => Promise<{ Value?: { issues?: BackendIssue[] } }> })
         .List({ state: "open" });
-      const rows = r?.Value?.issues;
-      if (!Array.isArray(rows)) {
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      // clampRows returns [] for non-arrays so the prior !Array.isArray
+      // branch collapses into "no rows → keep fixture".
+      const rows = clampRows<BackendIssue>(r?.Value?.issues);
+      if (rows.length === 0) {
         console.warn("[backlog] List() returned no issues array — keeping fixture", r);
         return;
       }

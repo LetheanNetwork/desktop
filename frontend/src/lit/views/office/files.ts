@@ -18,6 +18,7 @@
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
+import { clampRows } from "../_bounds";
 
 /** Shape of one location row in the left rail. Mirrors the future
  *  pkg/files location API — top-level "saved" folders the user has
@@ -143,13 +144,14 @@ class LthnViewFiles extends LitElement {
         filesSvc.GetDiskUsage(),
       ]);
 
-      const locations = lr?.Value?.locations;
-      if (locations && locations.length > 0) {
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      const locations = clampRows<LocationRow>(lr?.Value?.locations);
+      if (locations.length > 0) {
         this.locations = locations;
       }
 
-      const files = rr?.Value?.files;
-      if (files && files.length > 0) {
+      const files = clampRows<RecentRow>(rr?.Value?.files);
+      if (files.length > 0) {
         this.recent = files;
       }
 

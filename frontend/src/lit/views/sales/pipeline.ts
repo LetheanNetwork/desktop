@@ -31,6 +31,7 @@ import {
   handleStaleVersionConflict,
   type ConflictDetail,
 } from "../../conflict-dispatch";
+import { clampRows } from "../_bounds";
 
 /** Service identifier used when dispatching CONFLICT_409_EVENT on a
  *  stale write — the shared toast filters its reload-signal back to
@@ -243,8 +244,9 @@ class LthnViewPipeline extends LitElement {
       }
       type ListFn = (input: { stage?: string }) => Promise<{ Value?: { columns?: PipelineColumn[] } }>;
       const r = await (svc as { List: ListFn }).List({});
-      const cols = r?.Value?.columns;
-      if (Array.isArray(cols) && cols.length > 0) {
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      const cols = clampRows<PipelineColumn>(r?.Value?.columns);
+      if (cols.length > 0) {
         this.columns = cols;
         this._loadState = "ok";
       } else {

@@ -13,6 +13,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../../chrome";
+import { clampRows } from "../_bounds";
 
 /** A kanban card. Mirrors a tasks.Issue with sprint-board overlay. */
 interface Card {
@@ -153,7 +154,8 @@ class LthnViewSprints extends LitElement {
           }> }
         }>
       }).List({ state: "", limit: 200 });
-      const issues = r?.Value?.issues ?? [];
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      const issues = clampRows<{ ID?: string; Summary?: string; State?: string; Severity?: string; Priority?: string }>(r?.Value?.issues);
       if (issues.length === 0) return;
       const todo: Card[] = [];
       const doing: Card[] = [];

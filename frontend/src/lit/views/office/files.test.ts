@@ -188,4 +188,31 @@ describe("lthn-view-files — backend wire", () => {
     const locations = host.querySelectorAll(".lthn-view-files-location");
     expect(locations.length).toBe(5);
   });
+
+  // Mantis #1491 regression — multi-array backend response is capped
+  // by `clampRows` on both locations and recent files. Smoke-test the
+  // bound at the view boundary on every adopted field.
+  it("Test_Files_loadFromBackend_OversizedRowsCapped_Bad", async () => {
+    const oversizedLocs = Array.from({ length: 5000 }, (_, i) => ({
+      name: `Loc ${i}`, count: i, size: "1 GB",
+    }));
+    const oversizedFiles = Array.from({ length: 5000 }, (_, i) => ({
+      name: `file-${i}.txt`, path: `~/Loc/${i}`, when: "now", size: "1 KB",
+    }));
+    (MockedListLocations as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { locations: oversizedLocs } });
+    (MockedListRecent as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { files: oversizedFiles } });
+    (MockedGetDiskUsage as unknown as { mockResolvedValue: (v: unknown) => void })
+      .mockResolvedValue({ Value: { free: "1 TB", total: "2 TB", used: 50 } });
+
+    const { el } = await mountWindow<FilesEl>("lthn-view-files");
+    await el._loadFromBackend();
+    await el.updateComplete;
+
+    // DEFAULT_MAX_ROWS = 2000; both arrays must be capped at that
+    // boundary so the renderer never iterates 10K entries.
+    expect(el.locations.length).toBeLessThanOrEqual(2000);
+    expect(el.recent.length).toBeLessThanOrEqual(2000);
+  });
 });

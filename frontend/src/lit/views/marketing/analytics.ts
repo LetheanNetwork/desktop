@@ -18,6 +18,7 @@
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
+import { clampRows } from "../_bounds";
 
 interface Source {
   label: string;
@@ -104,8 +105,11 @@ class LthnViewAnalytics extends LitElement {
         }>
       }).Get({ window: this.window });
       const val = r?.Value;
-      if (val?.sources && val.sources.length > 0) this.sources = val.sources;
-      if (val?.pages && val.pages.length > 0) this.pages = val.pages;
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      const sources = clampRows<Source>(val?.sources);
+      const pages   = clampRows<PageRow>(val?.pages);
+      if (sources.length > 0) this.sources = sources;
+      if (pages.length > 0) this.pages = pages;
       if (val?.sessions) this.sessions = val.sessions;
     } catch {
       // Binding unavailable — keep fixture data.

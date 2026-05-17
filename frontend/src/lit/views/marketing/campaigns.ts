@@ -21,6 +21,7 @@ import {
   CONFLICT_RELOAD_EVENT,
   type ConflictDetail,
 } from "../../conflict-dispatch";
+import { clampRows } from "../_bounds";
 
 /** Service identifier the shared <lthn-conflict-toast> filters its
  *  reload signal by. Matches the Go-side wrapped conflict code
@@ -127,8 +128,9 @@ class LthnViewCampaigns extends LitElement {
           Value?: { campaigns?: Campaign[]; liveCount?: number; scheduledCount?: number }
         }>
       }).List({ state: "" });
-      const rows = r?.Value?.campaigns;
-      if (rows && rows.length > 0) {
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      const rows = clampRows<Campaign>(r?.Value?.campaigns);
+      if (rows.length > 0) {
         this.campaigns = rows;
       }
     } catch {

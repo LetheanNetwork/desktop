@@ -18,6 +18,7 @@ import {
   CONFLICT_RELOAD_EVENT,
   type ConflictDetail,
 } from "../../conflict-dispatch";
+import { clampRows } from "../_bounds";
 
 /** Service identifier the shared <lthn-conflict-toast> filters its
  *  reload signal by. Matches the Go-side wrapped conflict code
@@ -122,8 +123,9 @@ class LthnViewSocial extends LitElement {
       const r = await (svc as {
         List: (input: { channel?: string }) => Promise<{ Value?: { posts?: SocialPost[] } }>
       }).List({});
-      const posts = r?.Value?.posts;
-      if (posts && posts.length > 0) this.allPosts = posts;
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      const posts = clampRows<SocialPost>(r?.Value?.posts);
+      if (posts.length > 0) this.allPosts = posts;
     } catch {
       // Binding unavailable — keep fixture data.
     } finally {

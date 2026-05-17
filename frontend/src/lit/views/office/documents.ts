@@ -16,6 +16,7 @@
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../../chrome";
+import { clampRows } from "../_bounds";
 
 /** Shape of one document row. Mirrors the DocRow type in
  *  pkg/office/documents/types.go — field names are canonical. */
@@ -115,8 +116,9 @@ class LthnViewDocuments extends LitElement {
           Value?: { docs?: DocRow[] }
         }>
       }).List({ state: this.filter ?? "", limit: 50 });
-      const rows = r?.Value?.docs;
-      if (rows && rows.length > 0) {
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      const rows = clampRows<DocRow>(r?.Value?.docs);
+      if (rows.length > 0) {
         this.docs = rows;
       }
     } catch {

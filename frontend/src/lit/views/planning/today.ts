@@ -14,6 +14,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../../chrome";
+import { clampRows } from "../_bounds";
 
 /** A focus card — one of the three "must do today" headline items. */
 interface FocusItem {
@@ -122,7 +123,8 @@ class LthnViewToday extends LitElement {
           }
         }>
       }).List({ state: "open", limit: 50 });
-      const issues = r?.Value?.issues ?? [];
+      // Mantis #1491 — defence-in-depth length cap on backend response.
+      const issues = clampRows<{ ID?: string; Summary?: string; Priority?: string }>(r?.Value?.issues);
       const URGENT = new Set(["immediate", "urgent", "high"]);
       const highPrio = issues.filter(it =>
         URGENT.has((it.Priority ?? "").toLowerCase()),
