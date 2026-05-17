@@ -18,6 +18,11 @@ import "./ops/process-window";
 import "./obs/benchmark-window";
 import "./obs/logs-window";
 import "./obs/telemetry-window";
+// Audit-events viewer per plans/code/lthn/desktop/auth-gate/
+// RFC.stage-e-audit-viewer.md v2 (Mantis #1612 E.C.C). Registers
+// <lthn-audit-viewer>. Sibling of logs/telemetry; renders the
+// forensic readout the operator reaches for via Activity → Audit.
+import "./obs/audit-window";
 import "./ext/integrations-window";
 import "./ext/tools-window";
 import "./ext/network-window";

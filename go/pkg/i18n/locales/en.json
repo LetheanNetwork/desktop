@@ -348,6 +348,36 @@
       "btn_pause":   "Pause",
       "btn_resume":  "Resume"
     },
+    "audit":        {
+      "title": "Audit log", "subtitle": "forensic record",
+      "filter": {
+        "event_all":   "All events",
+        "outcome_all": "All outcomes"
+      },
+      "range": {
+        "preset_1h":     "Last hour",
+        "preset_24h":    "Last 24h",
+        "preset_7d":     "Last 7 days",
+        "preset_custom": "Custom range…"
+      },
+      "btn_refresh":      "Refresh",
+      "btn_load_more":    "Load more",
+      "btn_auto_refresh": "Auto-refresh",
+      "btn_export_jsonl": "Export JSON-Lines",
+      "btn_export_csv":   "Export CSV",
+      "col": {
+        "ts":      "Time",
+        "event":   "Event",
+        "outcome": "Outcome",
+        "account": "Account",
+        "request": "Request"
+      },
+      "account_id_help":     "Paste an account ID; the server matches it privately so the typed value never leaves your machine in clear.",
+      "empty_state":         "No events match the current filter.",
+      "error_load":          "Failed to load audit events — retry, or check connection.",
+      "same_second_warning": "Events sharing this exact second may be skipped at the page boundary.",
+      "auto_refresh_caveat": "Auto-refresh pauses when the window is hidden."
+    },
     "settings":     {
       "title": "Settings", "subtitle": "lthn · v0.2.0-rc1",
       "panel_general_title": "General",
