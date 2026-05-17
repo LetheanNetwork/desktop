@@ -60,6 +60,11 @@ import "./plugin-view-opencode-shim";
 // handleStaleVersionConflict. Mounted once near the top of the shell
 // render so it overlays any view body without per-view duplication.
 import "./lthn-conflict-toast";
+// Cerberus #71 ADD-4 (Mantis #1745) — persistent banner mounted once
+// near the top of the shell render. Auto-hides when migration is
+// complete (PendingMigrationCount==0). Same overlay-region treatment
+// as the conflict toast — no per-view consumer.
+import "./lthn-cred-migration-banner";
 import { VIEW_SWITCHER_SELECT_EVENT } from "./view-switcher";
 import {
   PLUGIN_VIEW_MOUNT_TIMEOUT_EVENT,
@@ -1531,6 +1536,11 @@ class LthnAppShell extends LitElement {
            nothing into the DOM. Single mount avoids per-view toast
            duplication that would multi-fire on the same event. -->
       <lthn-conflict-toast></lthn-conflict-toast>
+      <!-- Cerberus #71 ADD-4 (Mantis #1745) — persistent provider-cred
+           migration banner. Auto-hides when PendingMigrationCount==0;
+           polls WCredentialMigrationStatus every 60s. Non-dismissable
+           by design (state persists until unlock + migration finishes). -->
+      <lthn-cred-migration-banner></lthn-cred-migration-banner>
       <div style="
         position:fixed; inset:0;
         display:grid;
