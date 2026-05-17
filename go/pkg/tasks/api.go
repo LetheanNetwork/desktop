@@ -122,6 +122,19 @@ func List(c *core.Core, filter ListFilter) core.Result {
 //	if !r.OK { return r }
 //	updated, _, _ := orm.Detail[tasks.Issue](r)
 func Update(c *core.Core, id string, input UpdateInput) core.Result {
+	// Enum gates (Mantis #1503) — caller-supplied State/Severity/Priority
+	// must match the canonical closed sets in types.go. Empty strings
+	// mean "no change" so they short-circuit. Validate BEFORE the Get
+	// round-trip so a bogus enum fails fast and does not consume orm work.
+	if input.State != "" && !IsValidState(input.State) {
+		return core.Fail(core.E("tasks.Update", "tasks.update.invalid_state: "+input.State, nil))
+	}
+	if input.Severity != "" && !IsValidSeverity(input.Severity) {
+		return core.Fail(core.E("tasks.Update", "tasks.update.invalid_severity: "+input.Severity, nil))
+	}
+	if input.Priority != "" && !IsValidPriority(input.Priority) {
+		return core.Fail(core.E("tasks.Update", "tasks.update.invalid_priority: "+input.Priority, nil))
+	}
 	r := Get(c, id)
 	if !r.OK {
 		return r

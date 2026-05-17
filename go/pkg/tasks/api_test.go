@@ -201,3 +201,61 @@ func TestApi_ListNotes_Ugly(t *core.T) {
 	core.AssertEqual(t, "first", notes[0].Body)
 	core.AssertEqual(t, "second", notes[1].Body)
 }
+
+// Mantis #1503 — Update must reject caller-supplied State/Severity/
+// Priority values that fall outside the canonical closed enum sets in
+// types.go. Per-field _Bad tests assert each gate fires independently;
+// the _Good test pins that all canonical values still pass.
+
+func TestTasks_Update_InvalidStateRejected_Bad(t *core.T) {
+	c := newTestCore(t)
+	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "bad state"})
+	issue, _, _ := orm.Detail[tasks.Issue](created)
+	result := tasks.Update(c, issue.ID, tasks.UpdateInput{State: "wontfix"})
+	core.AssertFalse(t, result.OK)
+	// Untouched on disk.
+	current, _, _ := orm.Detail[tasks.Issue](tasks.Get(c, issue.ID))
+	core.AssertEqual(t, tasks.StateOpen, current.State)
+}
+
+func TestTasks_Update_InvalidSeverityRejected_Bad(t *core.T) {
+	c := newTestCore(t)
+	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "bad severity"})
+	issue, _, _ := orm.Detail[tasks.Issue](created)
+	result := tasks.Update(c, issue.ID, tasks.UpdateInput{Severity: "p0"})
+	core.AssertFalse(t, result.OK)
+	current, _, _ := orm.Detail[tasks.Issue](tasks.Get(c, issue.ID))
+	core.AssertEqual(t, tasks.SeverityMinor, current.Severity)
+}
+
+func TestTasks_Update_InvalidPriorityRejected_Bad(t *core.T) {
+	c := newTestCore(t)
+	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "bad priority"})
+	issue, _, _ := orm.Detail[tasks.Issue](created)
+	result := tasks.Update(c, issue.ID, tasks.UpdateInput{Priority: "asap"})
+	core.AssertFalse(t, result.OK)
+	current, _, _ := orm.Detail[tasks.Issue](tasks.Get(c, issue.ID))
+	core.AssertEqual(t, tasks.PriorityNormal, current.Priority)
+}
+
+func TestTasks_Update_AllCanonicalEnumsAccepted_Good(t *core.T) {
+	c := newTestCore(t)
+	for _, state := range []string{tasks.StateOpen, tasks.StateInProgress, tasks.StateDone, tasks.StateCancelled} {
+		created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "state " + state})
+		issue, _, _ := orm.Detail[tasks.Issue](created)
+		result := tasks.Update(c, issue.ID, tasks.UpdateInput{State: state})
+		core.AssertTrue(t, result.OK)
+	}
+	for _, sev := range []string{tasks.SeverityFeature, tasks.SeverityTrivial, tasks.SeverityText, tasks.SeverityTweak, tasks.SeverityMinor, tasks.SeverityMajor, tasks.SeverityCrash, tasks.SeverityBlock} {
+		created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "sev " + sev})
+		issue, _, _ := orm.Detail[tasks.Issue](created)
+		result := tasks.Update(c, issue.ID, tasks.UpdateInput{Severity: sev})
+		core.AssertTrue(t, result.OK)
+	}
+	for _, pri := range []string{tasks.PriorityNone, tasks.PriorityLow, tasks.PriorityNormal, tasks.PriorityHigh, tasks.PriorityUrgent, tasks.PriorityImmediate} {
+		created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "pri " + pri})
+		issue, _, _ := orm.Detail[tasks.Issue](created)
+		result := tasks.Update(c, issue.ID, tasks.UpdateInput{Priority: pri})
+		core.AssertTrue(t, result.OK)
+	}
+}

@@ -71,3 +71,42 @@ func TestTypes_StateConstants_Ugly(t *core.T) {
 		seen[s] = true
 	}
 }
+
+// Mantis #1503 — closed-set validators for State/Severity/Priority.
+
+func TestTypes_IsValidState_Good(t *core.T) {
+	for _, s := range []string{StateOpen, StateInProgress, StateDone, StateCancelled} {
+		core.AssertTrue(t, IsValidState(s))
+	}
+}
+
+func TestTypes_IsValidState_Bad(t *core.T) {
+	core.AssertFalse(t, IsValidState(""))
+	core.AssertFalse(t, IsValidState("wontfix"))
+	core.AssertFalse(t, IsValidState("OPEN"))
+	core.AssertFalse(t, IsValidState("open "))
+}
+
+func TestTypes_IsValidSeverity_Good(t *core.T) {
+	for _, s := range []string{SeverityFeature, SeverityTrivial, SeverityText, SeverityTweak, SeverityMinor, SeverityMajor, SeverityCrash, SeverityBlock} {
+		core.AssertTrue(t, IsValidSeverity(s))
+	}
+}
+
+func TestTypes_IsValidSeverity_Bad(t *core.T) {
+	core.AssertFalse(t, IsValidSeverity(""))
+	core.AssertFalse(t, IsValidSeverity("p0"))
+	core.AssertFalse(t, IsValidSeverity("Major"))
+}
+
+func TestTypes_IsValidPriority_Good(t *core.T) {
+	for _, s := range []string{PriorityNone, PriorityLow, PriorityNormal, PriorityHigh, PriorityUrgent, PriorityImmediate} {
+		core.AssertTrue(t, IsValidPriority(s))
+	}
+}
+
+func TestTypes_IsValidPriority_Bad(t *core.T) {
+	core.AssertFalse(t, IsValidPriority(""))
+	core.AssertFalse(t, IsValidPriority("asap"))
+	core.AssertFalse(t, IsValidPriority("URGENT"))
+}

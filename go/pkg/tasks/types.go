@@ -137,6 +137,68 @@ const (
 	PriorityImmediate = "immediate"
 )
 
+// validStates is the closed set of acceptable Issue.State values.
+// Mantis #1503 — Update / Create must reject caller-supplied free-form
+// strings; only the canonical enum members above are honoured.
+var validStates = map[string]struct{}{
+	StateOpen:       {},
+	StateInProgress: {},
+	StateDone:       {},
+	StateCancelled:  {},
+}
+
+// validSeverities is the closed set of acceptable Issue.Severity values.
+var validSeverities = map[string]struct{}{
+	SeverityFeature: {},
+	SeverityTrivial: {},
+	SeverityText:    {},
+	SeverityTweak:   {},
+	SeverityMinor:   {},
+	SeverityMajor:   {},
+	SeverityCrash:   {},
+	SeverityBlock:   {},
+}
+
+// validPriorities is the closed set of acceptable Issue.Priority values.
+var validPriorities = map[string]struct{}{
+	PriorityNone:      {},
+	PriorityLow:       {},
+	PriorityNormal:    {},
+	PriorityHigh:      {},
+	PriorityUrgent:    {},
+	PriorityImmediate: {},
+}
+
+// IsValidState reports whether s is one of the canonical state values.
+//
+// Usage example:
+//
+//	if !tasks.IsValidState(input.State) { return reject }
+func IsValidState(s string) bool {
+	_, ok := validStates[s]
+	return ok
+}
+
+// IsValidSeverity reports whether s is one of the canonical severity values.
+//
+// Usage example:
+//
+//	if !tasks.IsValidSeverity(input.Severity) { return reject }
+func IsValidSeverity(s string) bool {
+	_, ok := validSeverities[s]
+	return ok
+}
+
+// IsValidPriority reports whether s is one of the canonical priority values.
+//
+// Usage example:
+//
+//	if !tasks.IsValidPriority(input.Priority) { return reject }
+func IsValidPriority(s string) bool {
+	_, ok := validPriorities[s]
+	return ok
+}
+
 // CreateInput captures the fields a caller must / may supply when
 // creating an issue. Required: Project, Summary. Optional defaults
 // applied by Create.
