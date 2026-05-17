@@ -48,9 +48,18 @@ const (
 const AppendRotateThreshold int64 = 50 * 1024 * 1024
 
 // AppendRotateSuffixFormat is the suffix applied during rotation:
-// "<path>.<unix>.archived". The suffix preserves the "find . -name
+// "<path>.<unixnano>.archived". The suffix preserves the "find . -name
 // *.archived" enumeration the mail-v2 reader uses to assemble a
 // composite view across the live current + rotated history.
+//
+// Mantis #1554 — nanosecond precision instead of seconds. Two
+// rotations triggered inside the same wall-clock second (test loops,
+// burst-fed IMAP fetches that cross the threshold mid-batch) used to
+// collide on identical archive filenames, with the second Rename
+// silently overwriting the first archive's content. UnixNano widens
+// the collision window from 1s to ~1ns. NTP backward-jumps still
+// produce monotonic-clock anomalies but the existing rollback path
+// (#1527) keeps the on-disk state coherent.
 const AppendRotateSuffixFormat = ".%d.archived"
 
 // appendRotateThreshold is the live override; tests rewrite it via
@@ -79,6 +88,23 @@ var rotateRecreateFaultForTest func(path string) core.Result
 // Pass nil to disable.
 func SetRotateRecreateFaultForTest(fn func(path string) core.Result) {
 	rotateRecreateFaultForTest = fn
+}
+
+// nowForRotate returns the timestamp embedded in the archive suffix.
+// Indirected so Mantis #1554's NTP-backward-jump test can drive
+// deterministic timestamps without burning a real second between
+// rotations. Production callers always read core.Now().
+var nowForRotate = func() core.Time { return core.Now() }
+
+// SetNowForRotateForTest substitutes the rotation-timestamp source
+// for the duration of a test. Always pair with t.Cleanup that resets
+// it to nil (which restores the production core.Now() source).
+func SetNowForRotateForTest(fn func() core.Time) {
+	if fn == nil {
+		nowForRotate = func() core.Time { return core.Now() }
+		return
+	}
+	nowForRotate = fn
 }
 
 // AtomicAppendLine appends line to path with kernel-atomic write
@@ -180,8 +206,12 @@ func maybeRotate(path string) core.Result {
 	if info == nil || info.Size() < appendRotateThreshold {
 		return core.Ok(nil)
 	}
+	// Mantis #1554 — UnixNano() so two rotations in the same wall-
+	// clock second produce distinct archive filenames. The previous
+	// Unix() granularity could collide under burst load + the second
+	// Rename would silently overwrite the first archive's content.
 	archived := path + core.Sprintf(AppendRotateSuffixFormat,
-		core.Now().Unix())
+		nowForRotate().UnixNano())
 	if r := core.Rename(path, archived); !r.OK {
 		return core.Fail(core.E(CodeAppendRotateFailed,
 			"rename: "+r.Error(), nil))

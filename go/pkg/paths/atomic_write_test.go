@@ -408,6 +408,102 @@ func TestAtomicAppendLine_RotationAtThreshold_Ugly(t *core.T) {
 	core.AssertTrue(t, rotatedFound, "an archived file MUST exist after rotation")
 }
 
+// TestAtomicAppend_RotateDoubleSameSecond_Good — Mantis #1554. Two
+// rotations triggered inside the same wall-clock second MUST produce
+// distinct archive filenames. The previous Unix() granularity could
+// collide and the second Rename would silently overwrite the first
+// archive's content. UnixNano widens the collision window to ~1ns.
+func TestAtomicAppend_RotateDoubleSameSecond_Good(t *core.T) {
+	homeFixture(t)
+	paths.SetAppendRotateThresholdForTest(16)
+	t.Cleanup(func() {
+		paths.SetAppendRotateThresholdForTest(paths.AppendRotateThreshold)
+	})
+
+	fp := tmpFile(t, "doublerotate.md")
+	// First seed → rotation N°1
+	for i := 0; i < 3; i++ {
+		r := paths.AtomicAppendLine(fp, []byte("rotate-1-line"))
+		core.AssertTrue(t, r.OK, "seed-1 append "+core.Itoa(i)+": "+r.Error())
+	}
+	// Second seed → rotation N°2 in the same wall-clock second.
+	for i := 0; i < 3; i++ {
+		r := paths.AtomicAppendLine(fp, []byte("rotate-2-line"))
+		core.AssertTrue(t, r.OK, "seed-2 append "+core.Itoa(i)+": "+r.Error())
+	}
+
+	root := paths.Root().Value.(string)
+	entries := core.ReadDir(core.DirFS(root), ".")
+	core.AssertTrue(t, entries.OK)
+	list, _ := entries.Value.([]core.FsDirEntry)
+	archives := 0
+	for _, e := range list {
+		if core.HasPrefix(e.Name(), "doublerotate.md.") &&
+			core.HasSuffix(e.Name(), ".archived") {
+			archives++
+		}
+	}
+	core.AssertEqual(t, 2, archives,
+		"two same-second rotations MUST produce two distinct archive files")
+}
+
+// TestAtomicAppend_RotateNTPBackwardJump_Ugly — Mantis #1554. NTP
+// can step the wall clock backward. Two rotations under
+// monotonically-decreasing timestamps MUST still produce two
+// distinct archive files; neither suffix may collide with the other
+// nor with a pre-existing archive. The nowForRotate test hook lets
+// us drive deterministic timestamps without actually skewing the
+// system clock.
+func TestAtomicAppend_RotateNTPBackwardJump_Ugly(t *core.T) {
+	homeFixture(t)
+	paths.SetAppendRotateThresholdForTest(16)
+	t.Cleanup(func() {
+		paths.SetAppendRotateThresholdForTest(paths.AppendRotateThreshold)
+	})
+
+	// Drive timestamps that step BACKWARD between rotations.
+	base := core.Now()
+	step := 0
+	paths.SetNowForRotateForTest(func() core.Time {
+		var t core.Time
+		switch step {
+		case 0:
+			t = base
+		default:
+			// Each subsequent call steps 1ms earlier than base.
+			t = base.Add(-core.Duration(step) * core.Millisecond)
+		}
+		step++
+		return t
+	})
+	t.Cleanup(func() { paths.SetNowForRotateForTest(nil) })
+
+	fp := tmpFile(t, "backwards.md")
+	// Force two rotations under the stepping-backward clock.
+	for i := 0; i < 3; i++ {
+		r := paths.AtomicAppendLine(fp, []byte("fwd-jump-line"))
+		core.AssertTrue(t, r.OK, "fwd append "+core.Itoa(i)+": "+r.Error())
+	}
+	for i := 0; i < 3; i++ {
+		r := paths.AtomicAppendLine(fp, []byte("back-jump-line"))
+		core.AssertTrue(t, r.OK, "back append "+core.Itoa(i)+": "+r.Error())
+	}
+
+	root := paths.Root().Value.(string)
+	entries := core.ReadDir(core.DirFS(root), ".")
+	core.AssertTrue(t, entries.OK)
+	list, _ := entries.Value.([]core.FsDirEntry)
+	archives := 0
+	for _, e := range list {
+		if core.HasPrefix(e.Name(), "backwards.md.") &&
+			core.HasSuffix(e.Name(), ".archived") {
+			archives++
+		}
+	}
+	core.AssertEqual(t, 2, archives,
+		"backward clock jump between rotations MUST preserve both archives")
+}
+
 // TestAtomicAppendLine_RotateRecreateFailRollsBack_Ugly — Cerberus
 // DREAD-r2 F3 (Mantis #1527). When the post-rename recreate fails,
 // maybeRotate MUST roll back the rename so callers don't observe
