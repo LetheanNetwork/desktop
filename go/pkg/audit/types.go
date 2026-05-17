@@ -1307,6 +1307,257 @@ const (
 	//   error_code  — bounded-keyspace failure literal via audit.ErrorCode(r)
 	//                 (NEVER raw Result.Error() — substrate contract above).
 	EventSessionsAppendMessageFailed = "sessions.append_message.failed"
+
+	// EventCompositionServicesRegistered fires ONCE per boot at the end of
+	// cmd/lthn/app.go newAppCore, after every Core service + Wails-binding
+	// surface has been wired and ServiceStartup has returned OK. Closes
+	// Cerberus #70 F-2 MED — STRIDE-R Repudiation + A1 forensic substrate
+	// gap. Pre-cascade the forensic question "which services were live at
+	// boot when X happened?" could not be answered from the audit trail —
+	// service-set composition was the upstream variant of the
+	// [[feedback_action_bus_zero_audit_class]] pattern (action-bus dispatch
+	// has zero default audit; service-set composition likewise dark).
+	// This row gives a forensic walker the canonical at-boot fingerprint
+	// for both the Core service-bus and the Wails-bindings surface (the TS
+	// renderer's reachable method-id set), so a later compromise / drift
+	// claim can be pinned against the row's hashes.
+	//
+	// One row per boot — trivial cost, closes the forensic question. Use
+	// audit.Default().Record (NOT RecordSync) — boot-time, the fsync
+	// latency belongs to auth events not enumeration.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   service_count       — int count of Core-registered services
+	//                         (matches c.Services() length post-startup).
+	//                         Forensic discriminator pairs with
+	//                         service_names_hash for fingerprinting.
+	//   service_names_hash  — 16-char hex prefix of SHA-256 over the
+	//                         sorted, comma-joined service-name list
+	//                         (lexicographic). Stable across boots when
+	//                         the registered-service set is unchanged;
+	//                         any drift (add / remove / rename) flips
+	//                         the hash. Hashed not raw — keeps Meta size
+	//                         constant regardless of how many services
+	//                         exist. Truncated to 16 chars (64 bits) so
+	//                         pkg/audit/redact.go's 32-char secret-shape
+	//                         floor does not flag the value as token-
+	//                         shaped; same idiom as pkg/plugin/proxy.go
+	//                         + pkg/recordfile/atrest_schema.go.
+	//   wails_binding_count — int count of Wails-binding services exposed
+	//                         to the renderer (the application.Service
+	//                         list pkg/desktop/desktop.go assembles at
+	//                         buildServerOpts time). Forensic
+	//                         discriminator for the renderer-reachable
+	//                         method-id surface.
+	//   wails_bindings_hash — 16-char hex prefix of SHA-256 over the
+	//                         sorted, comma-joined Wails binding-name
+	//                         list. Mirrors service_names_hash discipline
+	//                         for the renderer surface (same 64-bit
+	//                         truncation rationale). The binding-name
+	//                         catalogue lives in cmd/lthn/app.go alongside
+	//                         the emit-site (pkg/desktop's wailsServices
+	//                         list is intentionally NOT introspected —
+	//                         the catalogue here IS the forensic contract;
+	//                         if pkg/desktop adds a binding without
+	//                         updating the catalogue here, the resulting
+	//                         hash drift IS the regression signal per the
+	//                         H#241 SECURITY-NOTE escape valve).
+	//   version             — lthn binary release tag (dappco.re/lthn/
+	//                         desktop.Version; "dev" for unstamped builds,
+	//                         "vX.Y.Z(-N-gSHA[-dirty])" for tagged
+	//                         releases). Forensic join-key against the
+	//                         release notes / SBOM for a given boot.
+	//
+	// No raw secret-shape material is in Meta — service names, binding
+	// names, counts, hashes, and the build tag are all bounded-vocabulary
+	// public identifiers. The secret-shape redactor at recordCommon
+	// runs over Meta unconditionally as a defence-in-depth gate.
+	EventCompositionServicesRegistered = "composition.services.registered"
+
+	// EventViPRFetchRequested fires when pkg/vi.Fetch is about to dispatch
+	// the HTTPS GET to a watched repo's open-PR list. Cerberus #72 F-2
+	// (Mantis #1749) — STRIDE-R Repudiation gap close. The Vi PR-fetch
+	// path was forensically silent prior to this row; the 9th audit-
+	// cluster adoption following runner / sandbox / process / marketplace /
+	// gateway / downloader / queue / sessions. Requested commits BEFORE
+	// the network round-trip so a forensic walker can correlate caller
+	// intent (which repo, when) with the eventual Succeeded / Failed /
+	// Rejected outcome.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   provider   — backend literal ("forge" or "github"). Closed-set per
+	//                pkg/vi.ProviderForge / ProviderGitHub; safe.
+	//   repo_owner — repo owner (public metadata from watched-repo config;
+	//                e.g. "lthn", "LetheanNetwork"). Safe.
+	//   repo_name  — repo name (public metadata; e.g. "desktop"). Safe.
+	//   token_set  — bool, mirrors the existing pr_fetch.go:127 log shape.
+	//                NEVER the token bytes — closure-only-scope discipline
+	//                per Cerberus #1465. Even a hashed token is forbidden:
+	//                the bool is the forensic signal (auth attempted vs
+	//                not), the value never reaches the substrate.
+	//
+	// The raw URL / query-string is NEVER in Meta — Forgejo + GitHub PR
+	// list URLs are structurally derivable from (provider, owner, name),
+	// keeping the substrate row idempotent without round-tripping any
+	// query bytes that could embed pagination cursors / state markers.
+	EventViPRFetchRequested = "vi.pr_fetch.requested"
+
+	// EventViPRFetchSucceeded fires when pkg/vi.Fetch completes the
+	// upstream round-trip + per-row persistence loop with a non-error
+	// status (status < 400 from doFetch). Sibling of Requested above.
+	// Note: 401 / 403 / other 4xx codes route here too — the upstream
+	// responded, the auditor pairs the http_status to derive intent
+	// (auth failure vs success vs malformed body).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   provider    — backend literal (mirrors Requested)
+	//   repo_owner  — repo owner (mirrors Requested)
+	//   repo_name   — repo name (mirrors Requested)
+	//   http_status — int HTTP status code from the upstream response
+	//                 (200 / 304 on happy path; 401 / 403 on auth fail;
+	//                 forensic discriminator for the response class).
+	//   pr_count    — int number of PRActivity rows inserted this tick
+	//                 (post-unsafe-URL-drop filter). Forensic for "did
+	//                 the fetch produce any rows" without re-querying
+	//                 the orm.
+	EventViPRFetchSucceeded = "vi.pr_fetch.succeeded"
+
+	// EventViPRFetchFailed fires when pkg/vi.Fetch hits a transport-side
+	// error from doFetch (network / TLS / parse failure) so the row
+	// loop is skipped entirely. Sibling of Requested above. Distinct
+	// from Rejected — Failed is "the call could not complete";
+	// Rejected is "policy refused one or more rows".
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   provider    — backend literal (mirrors Requested; may be empty
+	//                 when the surface guard fired before provider was
+	//                 set, but Fetch's empty-owner guard runs first so
+	//                 in practice provider is always populated here).
+	//   repo_owner  — repo owner
+	//   repo_name   — repo name
+	//   http_status — int HTTP status code (0 when no response was
+	//                 produced — e.g. DNS / TLS / dial failure).
+	//   error_code  — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                 substrate (pkg/audit/errorcode.go). The doFetch
+	//                 transport-error string is NEVER recorded raw —
+	//                 the substrate derives a stable canon so caller-
+	//                 controlled URLs / TLS chain bytes cannot leak.
+	EventViPRFetchFailed = "vi.pr_fetch.failed"
+
+	// EventViPRFetchRejected fires when pkg/vi.Fetch drops a per-row
+	// upstream PR because its html_url is not https:// (pr_fetch.go:148
+	// isSafePRURL gate). This is the SECURITY-RELEVANT signal — a
+	// compromised or malicious upstream forge returning `javascript:`
+	// or `data:` URLs would land here, and an auditor can grep for
+	// reason="unsafe_url" to surface attempted XSS-via-upstream events
+	// without scanning every Succeeded row.
+	//
+	// One row per dropped PR — a flood of rejected rows in a single
+	// fetch is itself a forensic signal (compromise / hostile upstream).
+	//
+	// Closed reason set (Meta["reason"]):
+	//
+	//   unsafe_url — html_url did not start with https:// (the only
+	//                rejection class today; future per-row gates would
+	//                add closed-set literals here).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   provider   — backend literal (mirrors Requested)
+	//   repo_owner — repo owner
+	//   repo_name  — repo name
+	//   pr_number  — int upstream PR number (forensic discriminator;
+	//                pairs with provider+owner+name to identify the
+	//                offending row in upstream's PR list).
+	//   reason     — one of the closed-set literals above.
+	//
+	// The dropped URL bytes are NEVER in Meta — the raw URL is the
+	// hostile payload (e.g. `javascript:fetch(...)`); recording it
+	// would persist the attack string into a long-lived forensic
+	// surface. The (provider, owner, name, pr_number) tuple is
+	// sufficient to identify the offending upstream row for an
+	// auditor who needs to re-query the source.
+	EventViPRFetchRejected = "vi.pr_fetch.rejected"
+
+	// EventViPRTokenLoaded fires inside pkg/vi.Fetch immediately after
+	// LoadToken returns, recording the token-state observation (set vs
+	// not-set). Single event (no Requested/Succeeded/Failed trio) —
+	// LoadToken's outcome is binary at the audit substrate; failure
+	// modes (config service absent, key absent) all collapse to "token
+	// not set". Closes the forensic question "when was the watched
+	// repo's PAT first read into memory after disk-write?" raised in
+	// Cerberus #72 F-2 (Mantis #1749). Compounds the F-1 #1748 gap
+	// (no at-rest crypto on the token) by giving a load-bearing timeline
+	// row that pairs with any future at-rest decrypt event.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   provider  — backend literal (closed-set; ties the observation to
+	//               a specific watched-token namespace).
+	//   token_set — bool. NEVER the token value, NEVER a hash of the
+	//               value — the bool is sufficient forensic signal per
+	//               the closure-only-scope discipline. PII-leak canary
+	//               test in pkg/vi/audit_test.go pins this contract.
+	EventViPRTokenLoaded = "vi.pr_fetch.token_loaded"
+
+	// EventViProbeRequested fires when pkg/vi.Probe is about to dispatch
+	// the HTTPS GET to a catalogued site. Sibling of EventViPRFetchRequested.
+	// Requested commits BEFORE the network round-trip so a forensic walker
+	// can correlate caller intent (which domain, when) with the eventual
+	// Succeeded / Failed outcome. Probe lacks a Rejected event because
+	// the per-row gate (https-only via probeClient.CheckRedirect) routes
+	// through Failed rather than a policy-gate rejection — the redirect
+	// refusal is a transport error from probeClient.Do, not a per-row
+	// filter outcome.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   domain — canonical site identifier (host only, no scheme / path).
+	//            Public metadata — the configured probe set is curated,
+	//            never user-typed at the probe-fire path; safe.
+	EventViProbeRequested = "vi.probe.requested"
+
+	// EventViProbeSucceeded fires when pkg/vi.Probe completes a probe
+	// (probeClient.Do returned without transport error). Note: "Succeeded"
+	// here is "the probe ran cleanly", NOT "the upstream returned 2xx" —
+	// the probe.OK derivation lives in the SiteProbe row; the audit row
+	// records the probe ran. 4xx / 5xx upstream responses route here too,
+	// the auditor pairs http_status to derive the response class.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   domain      — canonical site identifier (mirrors Requested)
+	//   http_status — int HTTP status code from the upstream response
+	//                 (200 on healthy; 503 on degraded; 0 on transport
+	//                 error — but transport errors route to Failed).
+	//   latency_ms  — int round-trip in milliseconds. Forensic for the
+	//                 site-uptime story without re-reading the orm row.
+	EventViProbeSucceeded = "vi.probe.succeeded"
+
+	// EventViProbeFailed fires when pkg/vi.Probe hits a transport error
+	// (probeClient.Do returned non-nil err — timeout, TLS failure,
+	// non-https redirect refusal, dial error). Sibling of Requested above.
+	// The Probe surface ALSO routes through Failed when the surface
+	// guards (nil-core, non-https URL) fire OR the orm.Insert at the
+	// bottom returns non-OK (genuinely broken — orm down / disk full)
+	// so an auditor sees the failure regardless of which layer produced
+	// it.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   domain     — canonical site identifier (mirrors Requested; may be
+	//                empty when the URL-shape guard fired before domain
+	//                derivation, but DomainOf is total over any non-
+	//                empty https URL).
+	//   error_code — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                substrate. Raw doProbe error string is NEVER recorded
+	//                — the substrate derives a stable canon so caller-
+	//                controlled URLs / TLS chain bytes cannot leak.
+	EventViProbeFailed = "vi.probe.failed"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the

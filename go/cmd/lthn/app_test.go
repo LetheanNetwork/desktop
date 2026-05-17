@@ -33,6 +33,7 @@ import (
 	"testing"
 
 	core "dappco.re/go"
+	lthn "dappco.re/lthn/desktop"
 	"dappco.re/lthn/desktop/pkg/audit"
 )
 
@@ -181,4 +182,175 @@ func TestApp_AuditDefaultAfterPreStartupWire_Good(t *testing.T) {
 	_, ok := got.(*audit.Service)
 	core.AssertTrue(t, ok,
 		"audit.Default() after pre-ServiceStartup wire must return *audit.Service, not noopRecorder")
+}
+
+// TestApp_NewAppCore_EmitsServiceRegistrationAudit_Good pins the
+// Cerberus #70 F-2 MED contract: emitCompositionAudit, called at the
+// end of newAppCore, lands a single row carrying
+// EventCompositionServicesRegistered with the four-key Meta vocabulary
+// (service_count + service_names_hash + wails_binding_count +
+// wails_bindings_hash) plus the build version.
+//
+// Bypasses the full newAppCore (which would need every registered
+// service's dependencies) and exercises emitCompositionAudit directly
+// against a hand-built Core with two known service names. The hash
+// shape + count integers are deterministic for the test's Core, so the
+// assertions pin the exact on-disk Meta values not just presence.
+func TestApp_NewAppCore_EmitsServiceRegistrationAudit_Good(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	auditSvc := audit.New(nil, audit.Options{})
+	t.Cleanup(func() { _ = auditSvc.Close() })
+	audit.SetDefault(auditSvc)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	// Build a minimal Core with two known services so the
+	// service_names_hash is deterministic. core.New auto-registers a
+	// "cli" service so the total c.Services() length is 3 — that's the
+	// pinned expectation below. noopServiceFactory satisfies the
+	// core.WithName factory contract; the Service contract only requires
+	// the bus presence for c.Services() to surface the name.
+	c := core.New(
+		core.WithName("alpha", noopServiceFactory),
+		core.WithName("beta", noopServiceFactory),
+	)
+	core.RequireTrue(t, c.ServiceStartup(core.Background(), nil).OK)
+	t.Cleanup(func() { _ = c.ServiceShutdown(core.Background()) })
+
+	// Pin the version so the version Meta key is deterministic. Restore
+	// on cleanup so other tests in the same package see the original.
+	originalVersion := lthn.Version
+	t.Cleanup(func() { lthn.Version = originalVersion })
+	lthn.Version = "test-version-1.2.3"
+
+	emitCompositionAudit(c, auditSvc)
+
+	// Flush to disk so the day-file body is observable.
+	core.AssertTrue(t, auditSvc.Close().OK, "audit close must succeed")
+
+	auditDir := core.PathJoin(tmp, "Lethean", "audit")
+	entriesR := core.ReadDir(core.DirFS(auditDir), ".")
+	core.AssertTrue(t, entriesR.OK, "audit dir must be readable")
+	entries := entriesR.Value.([]core.FsDirEntry)
+	core.AssertGreater(t, len(entries), 0, "audit day-file must exist")
+
+	var dayFile string
+	for _, e := range entries {
+		if !e.IsDir() {
+			dayFile = core.PathJoin(auditDir, e.Name())
+			break
+		}
+	}
+	core.AssertNotEqual(t, "", dayFile, "audit day-file must be discoverable")
+	body := core.ReadFile(dayFile)
+	core.AssertTrue(t, body.OK, "day-file must be readable")
+	contents := string(body.Value.([]byte))
+
+	// The composition row landed under the reserved event-name literal.
+	core.AssertTrue(t,
+		core.Contains(contents, audit.EventCompositionServicesRegistered),
+		"day-file must carry "+audit.EventCompositionServicesRegistered+"; got: "+contents)
+
+	// Meta carries the four forensic-fingerprint keys and the version.
+	// service_count is 3 — core.New auto-registers a "cli" service in
+	// addition to the two test names ("alpha", "beta").
+	core.AssertTrue(t, core.Contains(contents, `"service_count":3`),
+		"Meta must carry service_count=3 (alpha + beta + auto-cli); got: "+contents)
+	core.AssertTrue(t, core.Contains(contents, `"service_names_hash":`),
+		"Meta must carry service_names_hash; got: "+contents)
+	core.AssertTrue(t, core.Contains(contents, `"wails_binding_count":`),
+		"Meta must carry wails_binding_count; got: "+contents)
+	core.AssertTrue(t, core.Contains(contents, `"wails_bindings_hash":`),
+		"Meta must carry wails_bindings_hash; got: "+contents)
+	core.AssertTrue(t, core.Contains(contents, `"version":"test-version-1.2.3"`),
+		"Meta must carry the pinned build version; got: "+contents)
+
+	// The service_names_hash for the deterministic ["alpha","beta","cli"]
+	// set (sorted-comma-joined → "alpha,beta,cli") is a stable forensic
+	// value. Hash truncated to 16 hex chars to stay under the secret-
+	// shape redactor's 32-char floor (matches the emit-site idiom).
+	expectedNamesHash := core.SHA256HexString("alpha,beta,cli")[:16]
+	core.AssertTrue(t, core.Contains(contents, `"service_names_hash":"`+expectedNamesHash+`"`),
+		"service_names_hash must equal SHA-256[:16] of 'alpha,beta,cli'; got: "+contents)
+
+	// The wails_binding_count is the catalogue length — pinned so a
+	// drift in wailsBindingCatalogue without an intentional schema bump
+	// trips the test. Update both this assertion + the catalogue
+	// together when intentionally adding a binding.
+	core.AssertGreater(t, len(wailsBindingCatalogue), 0,
+		"wailsBindingCatalogue must not be empty (otherwise emit is meaningless)")
+}
+
+// TestApp_AuditMeta_NoServiceInternals_Bad pins the Meta-PII discipline:
+// the composition row MUST carry only public identifiers (counts,
+// hashes, version, bounded vocabulary) — NEVER service-internal state
+// like config values, secret bytes, or arbitrary raw service-name
+// strings (a forensic walker reads hashes, not the underlying list).
+//
+// The intent: a regression that tried to record the literal
+// service-name LIST (instead of the hash) into Meta would leak the
+// at-rest installed-feature surface in the clear, which both bloats the
+// audit row unboundedly AND opens a reconnaissance side-channel for any
+// reader of the day-file.
+func TestApp_AuditMeta_NoServiceInternals_Bad(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	auditSvc := audit.New(nil, audit.Options{})
+	t.Cleanup(func() { _ = auditSvc.Close() })
+	audit.SetDefault(auditSvc)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	// Build a Core with services whose names embed substrings that
+	// would be embarrassing in a raw-name leak (e.g. an unrelated
+	// secret-shape token). The literal names MUST NOT appear in Meta —
+	// only the SHA-256 fingerprint over the sorted catalogue.
+	canaryName := "canary-service-must-not-leak-to-meta"
+	c := core.New(
+		core.WithName(canaryName, noopServiceFactory),
+		core.WithName("ordinary", noopServiceFactory),
+	)
+	core.RequireTrue(t, c.ServiceStartup(core.Background(), nil).OK)
+	t.Cleanup(func() { _ = c.ServiceShutdown(core.Background()) })
+
+	emitCompositionAudit(c, auditSvc)
+	core.AssertTrue(t, auditSvc.Close().OK, "audit close must succeed")
+
+	auditDir := core.PathJoin(tmp, "Lethean", "audit")
+	entriesR := core.ReadDir(core.DirFS(auditDir), ".")
+	core.AssertTrue(t, entriesR.OK, "audit dir must be readable")
+	entries := entriesR.Value.([]core.FsDirEntry)
+	core.AssertGreater(t, len(entries), 0, "audit day-file must exist")
+
+	var dayFile string
+	for _, e := range entries {
+		if !e.IsDir() {
+			dayFile = core.PathJoin(auditDir, e.Name())
+			break
+		}
+	}
+	body := core.ReadFile(dayFile)
+	core.AssertTrue(t, body.OK, "day-file must be readable")
+	contents := string(body.Value.([]byte))
+
+	// Canary service-name MUST NOT appear in Meta — only the hash.
+	core.AssertFalse(t,
+		core.Contains(contents, canaryName),
+		"composition Meta MUST NOT carry the raw service-name list — only the SHA-256 fingerprint; canary leaked into: "+contents)
+
+	// The composition row landed (defensive — guards against the
+	// FALSE-on-empty-day-file degenerate case).
+	core.AssertTrue(t,
+		core.Contains(contents, audit.EventCompositionServicesRegistered),
+		"day-file must carry the composition row; got: "+contents)
+}
+
+// noopServiceFactory satisfies the core.WithName factory contract
+// `func(*Core) Result` for tests that only need the bus to surface a
+// service-name via c.Services() — no lifecycle hooks required for the
+// composition-audit emit-shape assertions. Returns a non-nil opaque
+// payload so WithName's nil-guard (contract.go:223) passes.
+func noopServiceFactory(_ *core.Core) core.Result {
+	return core.Result{Value: struct{}{}, OK: true}
 }

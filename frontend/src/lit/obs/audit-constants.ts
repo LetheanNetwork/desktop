@@ -105,6 +105,7 @@ export const AUDIT_EVENT_NAMES = [
   "sessions.append_message.requested",
   "sessions.append_message.succeeded",
   "sessions.append_message.failed",
+  "composition.services.registered",
 ] as const;
 
 export type AuditEventName = (typeof AUDIT_EVENT_NAMES)[number];

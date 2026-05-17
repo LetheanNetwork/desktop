@@ -13,6 +13,7 @@ import (
 	"dappco.re/go/process"
 	"dappco.re/go/store"
 	"dappco.re/go/stream"
+	lthn "dappco.re/lthn/desktop"
 	"dappco.re/lthn/desktop/pkg/account"
 	lthnai "dappco.re/lthn/desktop/pkg/ai"
 	"dappco.re/lthn/desktop/pkg/audit"
@@ -689,7 +690,147 @@ func newAppCore() *core.Core {
 		})
 	}
 
+	// Cerberus #70 F-2 MED — one boot-time row stamping the at-boot
+	// service-set + Wails-binding surface fingerprint. Forensic question
+	// "which services were live at boot when X happened?" was previously
+	// unanswerable from the audit trail; this row closes the gap. See
+	// pkg/audit/types.go EventCompositionServicesRegistered for the full
+	// substrate-contract preamble + Meta-key vocabulary.
+	emitCompositionAudit(c, auditSvc)
+
 	return c
+}
+
+// wailsBindingCatalogue is the forensic-contract list of Wails-binding
+// names exposed to the renderer at boot. Mirrors the
+// `application.NewService(...)` block in pkg/desktop/desktop.go around
+// the wailsServices initialiser (the static at-boot surface bound to
+// the WebView). Hand-maintained alongside the pkg/desktop list — drift
+// IS the regression signal per the H#241 SECURITY-NOTE escape valve
+// (the hash flips when pkg/desktop adds / removes / renames a binding
+// without updating this catalogue; the next audit reader sees the
+// inconsistency immediately).
+//
+// Names are the binding-name segment of the generated TS path
+// `frontend/bindings/dappco.re/.../<pkg>/<service>` — the lowercased
+// service-pkg identifier the WebView reaches via
+// `wails-runtime → Service.Method` calls. Two-name discipline:
+// short-name when the pkg owns one canonical service-type; pkg-prefixed
+// when the pkg ships multiple (e.g. "sales/contacts").
+//
+// Sort-stability: emitCompositionAudit sorts the slice before hashing,
+// so the declared order here doesn't affect the on-disk hash; ordering
+// the slice the way pkg/desktop ships its initialiser keeps the diff
+// review cheap.
+var wailsBindingCatalogue = []string{
+	"runner",
+	"server",
+	"sessions",
+	"models",
+	"downloader",
+	"firstlaunch",
+	"integrations",
+	"apikey",
+	"git",
+	"build",
+	"container",
+	"lint",
+	"marketplace",
+	"lthnphp",
+	"plugin",
+	"sandbox",
+	"opencode",
+	"repos",
+	"tasks",
+	"vi",
+	"incidents",
+	"runbooks",
+	"sales-contacts",
+	"sales-deals",
+	"sales-pipeline",
+	"sales-forecast",
+	"marketing-campaigns",
+	"marketing-content",
+	"marketing-social",
+	"marketing-audience",
+	"marketing-analytics",
+	"office-documents",
+	"office-mail",
+	"office-files",
+	"coding-deploys",
+	"serverkey",
+	"account",
+	"fleet",
+	"keys",
+	"tools",
+	"validator",
+	"telemetry",
+	"lthnservices",
+	"i18n",
+	"config",
+	"bridge",
+	"window",
+}
+
+// emitCompositionAudit fires the single boot-time composition row per
+// Cerberus #70 F-2 MED. Idempotent at the audit layer — calling more
+// than once writes more than one row (the boot wire calls exactly once
+// from newAppCore; the test path calls once per test invocation).
+//
+// auditSvc may be nil under exotic paths (e.g. the test bench
+// constructs a Service standalone via audit.New); in that case the
+// helper degrades to audit.Default() which lands the row in whichever
+// Recorder is the package default. Same Recorder semantics as the rest
+// of the codebase — the per-callsite `_ = audit.Default().Record(...)`
+// idiom.
+//
+// Usage example (boot wire — end of newAppCore):
+//
+//	emitCompositionAudit(c, auditSvc)
+//
+// Usage example (test — exercises the emit shape):
+//
+//	auditSvc := audit.New(nil, audit.Options{})
+//	audit.SetDefault(auditSvc)
+//	c := core.New(core.WithName("alpha", svc), core.WithName("beta", svc))
+//	_ = c.ServiceStartup(core.Background(), nil)
+//	emitCompositionAudit(c, auditSvc)
+func emitCompositionAudit(c *core.Core, auditSvc *audit.Service) {
+	serviceNames := []string{}
+	if c != nil {
+		serviceNames = append(serviceNames, c.Services()...)
+	}
+	core.SliceSort(serviceNames)
+	// 16-char hex prefix (64 bits) — forensic uniqueness within a host's
+	// boot history while staying under pkg/audit/redact.go's 32-char
+	// secret-shape floor (full SHA-256 hex is 64 chars and would trip
+	// the redactor). Same truncation idiom as pkg/plugin/proxy.go:208
+	// and pkg/recordfile/atrest_schema.go:310.
+	serviceNamesHash := core.SHA256HexString(core.Join(",", serviceNames...))[:16]
+
+	bindings := append([]string{}, wailsBindingCatalogue...)
+	core.SliceSort(bindings)
+	bindingsHash := core.SHA256HexString(core.Join(",", bindings...))[:16]
+
+	ev := audit.Event{
+		Event:   audit.EventCompositionServicesRegistered,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   "composition",
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"service_count":       len(serviceNames),
+			"service_names_hash":  serviceNamesHash,
+			"wails_binding_count": len(bindings),
+			"wails_bindings_hash": bindingsHash,
+			"version":             lthn.Version,
+		},
+	}
+
+	if auditSvc != nil {
+		_ = auditSvc.Record(ev)
+		return
+	}
+	_ = audit.Default().Record(ev)
 }
 
 // pathsAuditAdapter bridges pkg/paths.AuditRecorder onto pkg/audit's
