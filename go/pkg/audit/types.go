@@ -153,18 +153,31 @@ const (
 	EventAuthAccountCreated = "auth.account.created"
 
 	// EventPluginViewCapabilityGranted fires when a plugin's iframe
-	// view receives a capability via the host-side shim's postMessage
+	// view receives a capability via the host-side broker's postMessage
 	// handshake per plans/code/lthn/desktop/views/RFC.plugin-views.md
-	// §5.1. Frontend shim POSTs /v1/plugin-view/capability-grant
-	// BEFORE delivering the token bytes to the iframe so the audit
-	// row is committed first; if the audit emit fails the shim must
-	// NOT proceed with postMessage (Mantis #1523).
+	// §5.1. Frontend broker (api-fetch.ts grantTokenToFrame) POSTs
+	// /v1/plugin-view/capability-grant BEFORE delivering the token
+	// bytes to the iframe so the audit row is committed first; if the
+	// audit emit fails the broker must NOT proceed with postMessage
+	// (Mantis #1523 + Mantis #1576).
 	//
-	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	// Meta keys per RFC.plugin-view-audit-atomicity.md v2 (Mantis #1576,
+	// target_version v1.0.0-beta.1) — Option A: ONE row per broker call:
 	//
-	//   plugin_id  — installed plugin code that owns the iframe view
-	//   capability — the brokered scope literal (e.g. "session-token")
-	//   origin     — the iframe's loopback origin (per-port allowlist)
+	//   plugin_id      — installed plugin code that owns the iframe view
+	//   capabilities   — array of brokered scope literals (e.g.
+	//                    ["session-token"]). Pre-v2 scalar `capability`
+	//                    field is REJECTED at the handler (400) per
+	//                    §5(a) hard-cutover discipline.
+	//   origin         — the iframe's loopback origin (per-port allowlist)
+	//   outcome        — reserved literal "granted" in v1; any other
+	//                    value rejected with 400 per §3.1.
+	//   correlation_id — handler-generated UUIDv4 disambiguating
+	//                    near-simultaneous grants for the same
+	//                    (plugin_id, origin, capability) tuple within
+	//                    one NDJSON day file. Request body MUST NOT
+	//                    carry a caller-asserted value (handler is the
+	//                    sole authority per §3.1).
 	//
 	// The token BYTES are NEVER in Meta — only the capability literal.
 	// The Cerberus #1465 closure-only-scope discipline keeps the bytes

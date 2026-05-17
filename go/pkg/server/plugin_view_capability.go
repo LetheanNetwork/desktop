@@ -1,12 +1,20 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-// plugin_view_capability.go — backend half of Mantis #1523. The
-// frontend shim at frontend/src/lit/plugin-view-opencode-shim.ts
+// plugin_view_capability.go — backend half of Mantis #1523 + #1576. The
+// frontend broker at frontend/src/lit/api-fetch.ts (grantTokenToFrame)
 // brokers a session-token capability into a third-party iframe via
 // the §5.1 postMessage handshake (RFC.plugin-views.md). Before the
-// shim delivers the token bytes it POSTs to /v1/plugin-view/capability-grant
-// so the audit row commits FIRST; on failure the shim aborts the
+// broker delivers the token bytes it POSTs to /v1/plugin-view/capability-grant
+// so the audit row commits FIRST; on failure the broker aborts the
 // postMessage path. This file owns the receiver.
+//
+// RFC.plugin-view-audit-atomicity.md v2 (Mantis #1576, target_version
+// v1.0.0-beta.1) closed the row-vs-grant-occurred semantic gap by
+// adopting Option A: ONE audit row per broker call carrying the
+// `capabilities: [...]` array + `outcome: "granted"` literal +
+// handler-generated `correlation_id`. Per-scope rows are no longer
+// emitted. The legacy `{capability: <scalar>}` shape is REJECTED
+// with 400 per §5(a) hard-cutover discipline.
 //
 // The endpoint:
 //
@@ -17,17 +25,21 @@
 //      optional Options.PluginInstalledChecker hook — when nil the
 //      check is skipped so non-desktop builds and tests don't have
 //      to wire pkg/plugin).
-//   3. Validates capability + origin are well-formed.
-//   4. Emits audit.EventPluginViewCapabilityGranted with
-//      {plugin_id, capability, origin} in Meta. NEVER the token bytes
-//      (Cerberus #1465 + #1468).
-//   5. Returns 200 on success, 400 on shape failure, 404 on
-//      unknown plugin_id, 500 on audit emit failure (the shim treats
-//      anything but 200 as "do not postMessage").
+//   3. Validates capabilities array (non-empty, every literal in the
+//      handler allowlist), outcome literal (== "granted"), origin.
+//   4. Generates a UUIDv4 correlation_id (handler authority per
+//      RFC v2 §3.1 — request body MUST NOT carry one).
+//   5. Emits ONE audit.EventPluginViewCapabilityGranted with
+//      {plugin_id, capabilities: [...], origin, outcome, correlation_id}
+//      in Meta. NEVER the token bytes (Cerberus #1465 + #1468).
+//   6. Returns 200 with {correlation_id} body on success, 400 on
+//      shape failure, 404 on unknown plugin_id, 500 on audit emit
+//      failure (the broker treats anything but 200 as "do not
+//      postMessage").
 //
 // Tier: TierLocal — Stage E.B's middleware gates the route on a
 // valid LocalKey OR session token. The capability-grant flow runs
-// before the iframe holds a session-token of its own; the shim's
+// before the iframe holds a session-token of its own; the broker's
 // caller (WebView app-shell) already holds the host bearer.
 
 package server
@@ -52,8 +64,8 @@ const PluginViewCapabilityGrantPath = "/v1/plugin-view/capability-grant"
 
 // MaxPluginViewGrantBodyBytes caps the request body on the
 // capability-grant receiver. 64 KiB is generous (the real payload is
-// ~300 bytes — plugin_id + capability + origin) but matches the
-// /internal/console + /internal/error cap (pkg/bridge) for consistency.
+// ~300 bytes — plugin_id + capabilities + origin + outcome) but matches
+// the /internal/console + /internal/error cap (pkg/bridge) for consistency.
 // Cerberus #1568 F1: an unbounded body lets a bearer-authorised caller
 // POST megabytes that gin streams into the JSON decoder and the
 // audit Meta map writes verbatim to disk. The wrap fires BEFORE
@@ -66,10 +78,17 @@ const MaxPluginViewGrantBodyBytes = 64 << 10 // 64 KiB
 // realistic value and matches DNS label-sum bounds.
 const MaxPluginIDBytes = 256
 
-// MaxCapabilityBytes caps the capability literal field. Today the
-// allowlist is one entry ("session-token", 13 bytes); 64 bytes leaves
+// MaxCapabilityBytes caps each capability literal in the array. Today
+// the allowlist is one entry ("session-token", 13 bytes); 64 bytes leaves
 // headroom for future capability names without admitting abuse.
 const MaxCapabilityBytes = 64
+
+// MaxCapabilitiesLen caps the length of the `capabilities` array per
+// request. Today the broker only ever sends ["session-token"] (N=1);
+// 16 leaves headroom for future bundle-grants without admitting abuse
+// (a 64 KiB body packed with 1024 four-byte capabilities would otherwise
+// reach the audit substrate before per-entry size validation could fire).
+const MaxCapabilitiesLen = 16
 
 // MaxOriginBytes caps the origin URL field. RFC 3986 has no formal URL
 // length cap; 2 KiB matches the browser-pragmatic Internet Explorer
@@ -77,31 +96,67 @@ const MaxCapabilityBytes = 64
 // origin lthn ships (`http://127.0.0.1:9876` is 22 bytes).
 const MaxOriginBytes = 2 << 10 // 2 KiB
 
+// allowedCapabilities is the authoritative gate per RFC.plugin-view-
+// audit-atomicity.md v2 §10. Adding a new capability literal anywhere
+// in the codebase REQUIRES adding it here in the same commit per
+// [[feedback_scope_allowlist_lockstep]]. Failure = Cerberus-blocking
+// ship-stop.
+var allowedCapabilities = map[string]struct{}{
+	"session-token": {},
+}
+
 // PluginInstalledChecker reports whether a plugin code corresponds
 // to a currently-installed plugin. cmd/lthn/main.go wires this via
 // (*plugin.Service).ProxyGroup().Has. Nil leaves the check off —
 // the audit event still fires but plugin_id isn't constrained.
 type PluginInstalledChecker func(code string) bool
 
-// pluginViewCapabilityGrantRequest is the JSON body the shim POSTs
+// pluginViewCapabilityGrantRequest is the JSON body the broker POSTs
 // before its postMessage call. Field names mirror the audit Meta
 // keys verbatim so on-the-wire shape == on-disk shape.
 //
-// Usage example (from frontend/src/lit/plugin-view-opencode-shim.ts):
+// RFC.plugin-view-audit-atomicity.md v2 §3.1 + §5(a) — `capabilities`
+// is ALWAYS an array (never a scalar); `outcome` literal MUST be the
+// string `"granted"`; `correlation_id` is HANDLER-generated and MUST
+// NOT appear in the request body. Legacy `capability` scalar shape
+// rejected with 400 + codePluginViewGrantInvalid per §3.1.
+//
+// Usage example (from frontend/src/lit/api-fetch.ts grantTokenToFrame):
 //
 //	await apiFetch("/v1/plugin-view/capability-grant", {
 //	    method: "POST",
 //	    headers: { "Content-Type": "application/json" },
 //	    body: JSON.stringify({
-//	        plugin_id:  desc.pluginCode,
-//	        capability: "session-token",
-//	        origin:     desc.loopbackOrigin,
+//	        plugin_id:    target.pluginCode,
+//	        capabilities: ["session-token"],
+//	        origin:       target.targetOrigin,
+//	        outcome:      "granted",
 //	    }),
 //	});
+//	// response.json() carries {success:true, data:{correlation_id:"<uuid>"}}
 type pluginViewCapabilityGrantRequest struct {
-	PluginID   string `json:"plugin_id"`
-	Capability string `json:"capability"`
-	Origin     string `json:"origin"`
+	PluginID     string   `json:"plugin_id"`
+	Capabilities []string `json:"capabilities"`
+	Origin       string   `json:"origin"`
+	Outcome      string   `json:"outcome"`
+	// LegacyCapability captures any caller still posting the pre-v2
+	// scalar shape so the handler can reject explicitly (400) instead
+	// of silently dropping the field. Per RFC v2 §5(a) hard-cutover —
+	// no transitional dual-acceptance window.
+	LegacyCapability string `json:"capability,omitempty"`
+	// LegacyCorrelationID captures any caller attempting to assert a
+	// correlation_id from the request side. Handler is the sole
+	// authority per §3.1; presence rejected with 400 so a malicious
+	// caller cannot fabricate audit-JOIN keys.
+	LegacyCorrelationID string `json:"correlation_id,omitempty"`
+}
+
+// pluginViewCapabilityGrantResponse is the success-body shape returned
+// to the broker. Carries the handler-generated correlation_id so the
+// broker can log it locally for forensic reconstruction without ever
+// asserting it on the wire.
+type pluginViewCapabilityGrantResponse struct {
+	CorrelationID string `json:"correlation_id"`
 }
 
 // Error codes the endpoint emits. Mirrors the pkg/audit + pkg/account
@@ -166,11 +221,13 @@ func isValidPostMessageOrigin(s string) bool {
 // HTTP status mapping:
 //
 //   - 400 — body parse failed / required field missing / unknown
-//           capability literal
+//           capability literal / outcome != "granted" / legacy scalar
+//           shape / caller-asserted correlation_id
 //   - 404 — plugin_id not installed (PluginInstalledChecker returned false)
-//   - 500 — audit.Default().Record returned !OK (shim must NOT
+//   - 500 — audit.Default().Record returned !OK (broker must NOT
 //           proceed with postMessage)
-//   - 200 — grant recorded; shim is clear to postMessage the token
+//   - 200 — grant recorded; response body carries correlation_id;
+//           broker is clear to postMessage the token
 func (s *Service) handlePluginViewCapabilityGrant(c *gin.Context) {
 	// Layer 1 body cap (Cerberus #1568 F1) — wraps the body reader
 	// BEFORE ShouldBindJSON so the JSON decoder errors at the cap, not
@@ -191,7 +248,24 @@ func (s *Service) handlePluginViewCapabilityGrant(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
-			"invalid request body — expect {plugin_id, capability, origin}"))
+			"invalid request body — expect {plugin_id, capabilities, origin, outcome}"))
+		return
+	}
+	// RFC v2 §5(a) hard cutover — reject the legacy {capability:<scalar>}
+	// shape explicitly with 400 instead of silently dropping it. Caller
+	// must migrate to {capabilities:[...], outcome:"granted"} from the
+	// same commit; broker (sole producer) ships the new shape in lockstep.
+	if req.LegacyCapability != "" {
+		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
+			"`capability` field deprecated; use `capabilities` array per RFC.plugin-view-audit-atomicity.md v2"))
+		return
+	}
+	// RFC v2 §3.1 — correlation_id is handler-generated. A caller-asserted
+	// value lets a compromised broker fabricate audit-JOIN keys, defeating
+	// the disambiguation property the field exists to provide. Reject.
+	if req.LegacyCorrelationID != "" {
+		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
+			"`correlation_id` is handler-generated; request body must not carry it"))
 		return
 	}
 	// Per-field caps — belt-and-braces against a 64 KiB body packing
@@ -202,19 +276,57 @@ func (s *Service) handlePluginViewCapabilityGrant(c *gin.Context) {
 			"plugin_id exceeds MaxPluginIDBytes"))
 		return
 	}
-	if len(req.Capability) > MaxCapabilityBytes {
-		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
-			"capability exceeds MaxCapabilityBytes"))
-		return
-	}
 	if len(req.Origin) > MaxOriginBytes {
 		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
 			"origin exceeds MaxOriginBytes"))
 		return
 	}
-	if req.PluginID == "" || req.Capability == "" || req.Origin == "" {
+	if req.PluginID == "" || req.Origin == "" {
 		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
-			"plugin_id, capability and origin are all required"))
+			"plugin_id and origin are required"))
+		return
+	}
+	// RFC v2 §3.1 + §4.3 — capabilities MUST be a non-empty array within
+	// MaxCapabilitiesLen, every literal within MaxCapabilityBytes, every
+	// literal in the allowlist. Empty array, oversize entries, and
+	// unlisted literals all reject with 400 + ZERO audit rows emitted
+	// per the row-IS-grant discipline-floor.
+	if len(req.Capabilities) == 0 {
+		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
+			"capabilities array required (at least one capability)"))
+		return
+	}
+	if len(req.Capabilities) > MaxCapabilitiesLen {
+		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
+			"capabilities exceeds MaxCapabilitiesLen"))
+		return
+	}
+	for _, cap := range req.Capabilities {
+		if cap == "" {
+			c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
+				"capabilities entries must be non-empty"))
+			return
+		}
+		if len(cap) > MaxCapabilityBytes {
+			c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
+				"capability literal exceeds MaxCapabilityBytes"))
+			return
+		}
+		// Allowlist gate per RFC v2 §10 — load-bearing for
+		// [[feedback_scope_allowlist_lockstep]].
+		if _, ok := allowedCapabilities[cap]; !ok {
+			c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
+				"unknown capability literal — not in handler allowlist"))
+			return
+		}
+	}
+	// RFC v2 §3.1 — outcome literal hard-locked to "granted" in v1. Any
+	// other value (including "denied", "missing", or empty) rejects with
+	// 400. Future broker outcomes require a new RFC supplanting this one
+	// + an explicit handler allowlist extension.
+	if req.Outcome != "granted" {
+		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
+			"outcome must be 'granted' (v1 broker emits no other value)"))
 		return
 	}
 	// Origin scheme + grammar validation — refuse javascript:/data:/file:
@@ -227,20 +339,24 @@ func (s *Service) handlePluginViewCapabilityGrant(c *gin.Context) {
 			"origin must be http(s)://host[:port] with no path"))
 		return
 	}
-	// Capability allowlist mirrors the frontend shim's contract
-	// (CAPABILITY_SESSION_TOKEN). New capabilities REQUIRE a new
-	// Mantis ticket — the shim, this allowlist + the audit consumer
-	// learn the literal in the same commit.
-	if req.Capability != "session-token" {
-		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
-			"unknown capability literal — only session-token is brokered today"))
-		return
-	}
 	if s.opts.PluginInstalledChecker != nil && !s.opts.PluginInstalledChecker(req.PluginID) {
 		c.JSON(http.StatusNotFound, coreapi.Fail(codePluginViewGrantUnknownPlugin,
 			"plugin not installed: "+req.PluginID))
 		return
 	}
+	// Handler-generated correlation_id (RFC v2 §3.1). Disambiguates
+	// near-simultaneous grants for the same (plugin_id, origin, capability)
+	// tuple within one NDJSON day file. Empty on RandomBytes failure —
+	// downstream readers tolerate the missing field; NOT a panic-worthy
+	// condition. CoreGO gap: core.UUIDv4 doesn't exist yet (logged at
+	// project_corego_export_gaps); mirrors pkg/account/routes.go
+	// serverRequestID() until the export lands.
+	correlationID := newCorrelationID()
+	// Defensive copy of the capabilities slice so the audit substrate
+	// never shares mutable backing with the request body. The forensic
+	// record is immutable by construction.
+	caps := make([]string, len(req.Capabilities))
+	copy(caps, req.Capabilities)
 	ev := audit.Event{
 		Event:     audit.EventPluginViewCapabilityGranted,
 		TS:        core.UnixNow(),
@@ -248,9 +364,11 @@ func (s *Service) handlePluginViewCapabilityGrant(c *gin.Context) {
 		Outcome:   audit.OutcomeOK,
 		RequestID: c.GetHeader("X-Request-Id"),
 		Meta: map[string]any{
-			"plugin_id":  req.PluginID,
-			"capability": req.Capability,
-			"origin":     req.Origin,
+			"plugin_id":      req.PluginID,
+			"capabilities":   caps,
+			"origin":         req.Origin,
+			"outcome":        req.Outcome,
+			"correlation_id": correlationID,
 		},
 	}
 	r := audit.Default().Record(ev)
@@ -259,7 +377,40 @@ func (s *Service) handlePluginViewCapabilityGrant(c *gin.Context) {
 			"audit emission failed — capability NOT delivered to iframe: "+r.Error()))
 		return
 	}
-	c.JSON(http.StatusOK, coreapi.OK(gin.H{
-		"recorded": true,
+	c.JSON(http.StatusOK, coreapi.OK(pluginViewCapabilityGrantResponse{
+		CorrelationID: correlationID,
 	}))
+}
+
+// newCorrelationID generates a UUIDv4 used as the handler-authoritative
+// correlation key for plugin-view capability-grant audit rows. Mirrors
+// pkg/account/routes.go serverRequestID() — RFC 4122 §4.4 random UUID
+// with version + variant bits set. Returns the empty string on
+// core.RandomBytes failure; the audit row tolerates the missing field.
+//
+// CoreGO gap: core.UUIDv4 doesn't exist yet (logged at
+// project_corego_export_gaps). Local stand-in until the export lands.
+//
+// Usage example:
+//
+//	correlationID := newCorrelationID()
+//	ev.Meta["correlation_id"] = correlationID
+//	c.JSON(http.StatusOK, coreapi.OK(pluginViewCapabilityGrantResponse{
+//	    CorrelationID: correlationID,
+//	}))
+func newCorrelationID() string {
+	r := core.RandomBytes(16)
+	if !r.OK {
+		return ""
+	}
+	b, ok := r.Value.([]byte)
+	if !ok || len(b) != 16 {
+		return ""
+	}
+	// RFC 4122 §4.4 — version 4 (random) UUID. Top nibble of
+	// time_hi_and_version (byte 6) = 0100 = 4. Top two bits of
+	// clock_seq_hi_and_reserved (byte 8) = 10 (variant 1).
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return core.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }

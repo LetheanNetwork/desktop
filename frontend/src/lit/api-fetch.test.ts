@@ -107,15 +107,23 @@ describe("TestApiFetch_GrantTokenToFrame_AuditBeforePostMessage_Good", () => {
     expect(postOrder).toBeDefined();
     expect(auditOrder!).toBeLessThan(postOrder!);
 
-    // Audit body carries plugin_id + capability + origin, NOT the
-    // token bytes (Cerberus #1465 + #1468).
+    // Audit body carries plugin_id + capabilities array + origin +
+    // outcome, NOT the token bytes (Cerberus #1465 + #1468).
+    // RFC.plugin-view-audit-atomicity v2 §3.1 + §4.2 — `capabilities`
+    // is ALWAYS an array, NEVER a scalar; outcome literal is "granted";
+    // request body MUST NOT carry correlation_id (handler-generated).
     const auditCall = fetchStub.mock.calls[0] as unknown as [unknown, RequestInit];
     const auditInit = auditCall[1] ?? {};
     const auditBody = JSON.parse(String(auditInit.body ?? "{}"));
     expect(auditBody.plugin_id).toBe("opencode");
-    expect(auditBody.capability).toBe("session-token");
+    expect(auditBody.capabilities).toEqual(["session-token"]);
     expect(auditBody.origin).toBe("http://127.0.0.1:4096");
+    expect(auditBody.outcome).toBe("granted");
     expect(JSON.stringify(auditBody)).not.toContain("LTHN-SESS-1");
+    // Legacy-shape regression guards — pre-v2 scalar `capability` field
+    // and request-asserted `correlation_id` MUST NOT appear in the body.
+    expect(auditBody.capability).toBeUndefined();
+    expect(auditBody.correlation_id).toBeUndefined();
 
     // postMessage carries the actual token + targetOrigin verbatim.
     const [payload, targetOrigin] = postMessage.mock.calls[0]!;
@@ -164,11 +172,136 @@ describe("TestApiFetch_GrantTokenToFrame_AuditBeforePostMessage_Good", () => {
     };
     const outcome = await mod.grantTokenToFrame(target, ["session-token"]);
 
-    // Audit still committed (audit is per-scope and not session-
-    // conditional per the broker shape).
+    // Audit still committed (audit is the atomic single-POST and not
+    // session-conditional per the broker shape).
     expect(fetchStub).toHaveBeenCalledTimes(1);
     expect(postMessage).toHaveBeenCalledTimes(0);
     expect(outcome).toEqual({ ok: false, reason: "no-session" });
+  });
+});
+
+// ─── Audit body shape — RFC v2 §4.2 structural lock-in ────────────────
+
+describe("TestApiFetch_GrantTokenToFrame_AuditBodyShape_NoCapabilityScalar_Ugly", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("serialised body does NOT contain the pre-v2 `\"capability\":` scalar substring", async () => {
+    // RFC v2 §4.2 — regression guard. If a future PR re-introduces the
+    // scalar `capability` field shape, this test fails. Pairs with the
+    // v1 hard cutover in §5 (handler 400s the legacy shape).
+    const fetchStub = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchStub);
+
+    const mod = await import("./api-fetch");
+    mod.setSessionToken("LTHN-SESS-1.body-shape-test");
+
+    const target = {
+      source: { postMessage: vi.fn() } as unknown as Window,
+      targetOrigin: "http://127.0.0.1:4096",
+      pluginCode: "opencode",
+    };
+    await mod.grantTokenToFrame(target, ["session-token"]);
+
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+    const auditCall = fetchStub.mock.calls[0] as unknown as [unknown, RequestInit];
+    const serialisedBody = String(auditCall[1]?.body ?? "");
+    // Substring assertion — `"capability":` (scalar) must not appear.
+    // `"capabilities":` (array) MUST appear.
+    expect(serialisedBody).not.toContain('"capability":');
+    expect(serialisedBody).toContain('"capabilities":');
+    // Also ensure the request body does not carry correlation_id
+    // (handler is the sole authority per §3.1).
+    expect(serialisedBody).not.toContain('"correlation_id":');
+
+    mod.clearSessionToken();
+  });
+});
+
+// ─── Correlation-id capture from response — RFC v2 §3.1 echo path ─────
+
+describe("TestApiFetch_GrantTokenToFrame_CapturesCorrelationIdFromResponse_Good", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("broker logs the handler-generated correlation_id without leaking the token", async () => {
+    // Handler echoes correlation_id in the response body. Broker reads
+    // it for forensic-reconstruction logging. Token bytes MUST NOT
+    // appear in the debug log line.
+    const correlationID = "abcdef01-2345-4678-89ab-cdef01234567";
+    const responseBody = JSON.stringify({
+      success: true,
+      data: { correlation_id: correlationID },
+    });
+    const fetchStub = vi.fn(async () => new Response(responseBody, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchStub);
+
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+
+    const mod = await import("./api-fetch");
+    mod.setSessionToken("LTHN-SESS-1.correlation-log-test");
+
+    const target = {
+      source: { postMessage: vi.fn() } as unknown as Window,
+      targetOrigin: "http://127.0.0.1:4096",
+      pluginCode: "opencode",
+    };
+    const outcome = await mod.grantTokenToFrame(target, ["session-token"]);
+
+    expect(outcome.ok).toBe(true);
+    // Debug log emitted exactly once with the correlation_id payload.
+    const matchingCalls = debugSpy.mock.calls.filter(
+      (c) => c[0] === "lthn:audit:correlation_id",
+    );
+    expect(matchingCalls.length).toBe(1);
+    const logPayload = matchingCalls[0]![1] as Record<string, unknown>;
+    expect(logPayload.correlation_id).toBe(correlationID);
+    expect(logPayload.plugin_id).toBe("opencode");
+    expect(logPayload.origin).toBe("http://127.0.0.1:4096");
+    // Token bytes MUST NOT appear anywhere in the log line.
+    expect(JSON.stringify(logPayload)).not.toContain("LTHN-SESS-1");
+
+    debugSpy.mockRestore();
+    mod.clearSessionToken();
+  });
+
+  it("response without correlation_id is still treated as audit-committed", async () => {
+    // A 200 with no parseable correlation_id is still a committed audit
+    // row from the handler's perspective. Broker proceeds to postMessage.
+    const fetchStub = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchStub);
+
+    const mod = await import("./api-fetch");
+    mod.setSessionToken("LTHN-SESS-1.no-correlation-test");
+
+    const postMessage = vi.fn();
+    const target = {
+      source: { postMessage } as unknown as Window,
+      targetOrigin: "http://127.0.0.1:4096",
+      pluginCode: "opencode",
+    };
+    const outcome = await mod.grantTokenToFrame(target, ["session-token"]);
+
+    expect(outcome.ok).toBe(true);
+    expect(postMessage).toHaveBeenCalledTimes(1);
+
+    mod.clearSessionToken();
   });
 });
 

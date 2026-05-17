@@ -108,8 +108,8 @@ export type GrantOutcome =
   | { ok: false; reason: "audit-failed" | "no-session" | "postmessage-failed" };
 
 /** grantTokenToFrame — the ONLY path that releases cachedSessionToken
- *  outside api-fetch.ts. Audits server-side per scope FIRST; on any
- *  non-200 short-circuits with reason "audit-failed" and does NOT
+ *  outside api-fetch.ts. Audits server-side with ONE atomic POST FIRST;
+ *  on non-200 short-circuits with reason "audit-failed" and does NOT
  *  postMessage. On success, posts ONE grant message per call carrying
  *  the token + granted scopes to target.source with target.targetOrigin
  *  as the explicit targetOrigin (never "*").
@@ -118,11 +118,25 @@ export type GrantOutcome =
  *  the token bytes do NOT escape via the return value. The function
  *  itself is the boundary — no other code path reads cachedSessionToken.
  *
+ *  Audit shape per RFC.plugin-view-audit-atomicity.md v2 (Mantis #1576,
+ *  target_version v1.0.0-beta.1) — Option A "single-row-per-call":
+ *    - ONE POST per broker call (replaces the per-scope loop).
+ *    - Body: {plugin_id, capabilities: [...scopes], origin, outcome: "granted"}.
+ *    - `capabilities` is ALWAYS an array; legacy scalar `capability`
+ *      field is REJECTED by the handler (400) per §5(a) hard cutover.
+ *    - `outcome` literal MUST be "granted"; v1 handler rejects any
+ *      other value per §3.1.
+ *    - `correlation_id` is HANDLER-generated + returned in the response
+ *      body; broker MUST NOT assert one in the request (handler 400s).
+ *      The response correlation_id is captured here for forensic
+ *      reconstruction (logged at debug-level for now; future
+ *      out-of-band JOIN against the audit log).
+ *
  *  Closure discipline (Cerberus #1465 mechanism, not convention — RFC
  *  §3.0 broker invariant contract):
  *    (a) audit server-side BEFORE the postMessage.
  *    (b) take (target, scopes) shape so the audit row names
- *        origin + pluginCode + capability.
+ *        origin + pluginCode + capabilities.
  *    (c) return outcome-discriminator with NO state bytes.
  *    (d) read state from a closure-scoped const referenced only by
  *        the postMessage call, discarded on return.
@@ -148,30 +162,62 @@ export async function grantTokenToFrame(
   target: GrantTargetFrame,
   scopes: readonly string[],
 ): Promise<GrantOutcome> {
-  // Per-scope audit POST, abort on first failure. The shim's previous
-  // _grant loop relocated into the module that owns the token (RFC
-  // §3.0 item (a)+(e)). Server-side audit-row semantic gap: rows
-  // committed before a later-scope failure persist; readers MUST
-  // interpret "row exists" as "grant-attempted" not "grant-occurred"
-  // until the follow-up at Mantis #1576 lands.
-  for (const scope of scopes) {
-    let ok = false;
-    try {
-      const res = await apiFetch(CAPABILITY_GRANT_AUDIT_PATH, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          plugin_id:  target.pluginCode,
-          capability: scope,
-          origin:     target.targetOrigin,
-        }),
-      });
-      ok = res.ok;
-    } catch {
-      ok = false;
+  // RFC v2 §3.1 + §5(c) — ONE atomic audit POST carrying the full
+  // capabilities array + outcome literal. Replaces the pre-v2 per-scope
+  // loop (one row per scope, partial-commit-on-mid-scope-failure was
+  // the forensic-truth gap Mantis #1576 closed). Audit row presence IS
+  // grant-occurred by construction; correlation_id is handler-generated
+  // and echoed in the response body for forensic JOIN.
+  let auditOk = false;
+  try {
+    const res = await apiFetch(CAPABILITY_GRANT_AUDIT_PATH, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        plugin_id:    target.pluginCode,
+        capabilities: [...scopes],
+        origin:       target.targetOrigin,
+        outcome:      "granted",
+      }),
+    });
+    auditOk = res.ok;
+    // Capture the handler-generated correlation_id locally for forensic
+    // reconstruction. NOT propagated to the iframe + NOT stored in module
+    // state — the const is discarded on return per RFC §3.0 item (d).
+    // Parsing is best-effort: a 200 with a non-JSON body still counts as
+    // "audit committed", but the correlation_id is unavailable.
+    if (auditOk) {
+      try {
+        const json = await res.clone().json();
+        // coreapi.Response[T].Data is `json:"data"` per
+        // [[feedback_coreapi_data_envelope_not_value]]; tolerate both
+        // shapes defensively (real prod is data; older envelopes used Value).
+        const data = (json?.data ?? json?.Value ?? json?.value) as
+          | { correlation_id?: string }
+          | undefined;
+        const correlationID = typeof data?.correlation_id === "string"
+          ? data.correlation_id
+          : "";
+        // Local-only log marker — exists so future forensic reconstruction
+        // can grep `lthn:audit:correlation_id` in the WebView console.
+        // Token bytes NEVER appear in this log line.
+        if (correlationID) {
+          // eslint-disable-next-line no-console
+          console.debug("lthn:audit:correlation_id", {
+            plugin_id: target.pluginCode,
+            origin:    target.targetOrigin,
+            correlation_id: correlationID,
+          });
+        }
+      } catch {
+        // Best-effort. A 200 with no parseable body is still a committed
+        // audit row from the handler's perspective.
+      }
     }
-    if (!ok) return { ok: false, reason: "audit-failed" };
+  } catch {
+    auditOk = false;
   }
+  if (!auditOk) return { ok: false, reason: "audit-failed" };
 
   // Token read into closure-scoped const HERE — after audit, before
   // postMessage. No branch returns it; no branch persists it; no
