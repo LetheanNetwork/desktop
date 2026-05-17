@@ -15,12 +15,19 @@ import (
 // List returns the content calendar grouped into ContentColumn values.
 // When input.Col is non-empty, returns only that column.
 //
+// Dual-format aware (RFC.stage-e-encrypt-at-rest v2 §4.1, Wave 3 LAST):
+// .lthn files project HEADER-ONLY entries (T / Who / When / Col / Body
+// empty — the frontend renders an "encrypted" placeholder); .md legacy
+// files round-trip the full plaintext entry. Reads-while-locked stays
+// open — header MAC verify needs only the public key (no unlock
+// required).
+//
 // Usage example:
 //
 //	r := svc.List(content.ListInput{})
 //	if r.OK { out := r.Value.(content.ListOutput) }
 func (s *Service) List(input ListInput) core.Result {
-	items, err := loadItems()
+	items, err := s.loadItems()
 	if err != nil {
 		return core.Fail(core.E("content.List", "scan failed", err))
 	}
@@ -69,6 +76,13 @@ func (s *Service) List(input ListInput) core.Result {
 
 // Get returns a single content item by ID.
 //
+// Stage E.D.B.3 surface (RFC.stage-e-encrypt-at-rest v2 §3.1, Wave 3
+// LAST): .lthn records require an unlocked session to decrypt the
+// body. When loadOne reports the typed "content.session.locked" code
+// (either the gate is unwired or no account is unlocked), Get forwards
+// the session-locked failure verbatim so the frontend can distinguish
+// "encrypted record needs unlock" from a true not-found.
+//
 // Usage example:
 //
 //	r := svc.Get("v02-release-notes-20260516")
@@ -77,22 +91,14 @@ func (s *Service) Get(id string) core.Result {
 	if err := paths.IsValidID(id); err != nil {
 		return core.Fail(err)
 	}
-	dirR := contentDir()
-	if !dirR.OK {
-		return core.Fail(core.E("content.Get", dirR.Error(), nil))
-	}
-	// Cerberus #1486 belt: WithinDir check after the join.
-	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), id+".md")
-	if jerr != nil {
-		return core.Fail(jerr)
-	}
-	raw := core.ReadFile(fpath)
-	if !raw.OK {
-		return core.Fail(core.E("content.Get", "not found: "+id, nil))
-	}
-	item, err := parseItem(raw.Value.([]byte))
+	item, _, err := s.loadOne(id)
 	if err != nil {
-		return core.Fail(core.E("content.Get", "parse failed", err))
+		// Forward session.locked verbatim so the frontend can render
+		// the unlock-prompt distinct from not-found.
+		if core.Contains(err.Error(), "content.session.locked") {
+			return core.Fail(err)
+		}
+		return core.Fail(core.E("content.Get", "not found: "+id, err))
 	}
 	return core.Ok(item)
 }
@@ -141,7 +147,7 @@ func (s *Service) Create(input CreateInput) core.Result {
 	// marshalled frontmatter. Conflict-path (rare on Create — only
 	// fires if another goroutine races on the same slug) returns
 	// core.Fail(paths.ConflictEnvelope{...}) directly via writeItem.
-	if wr := writeItem(dirR.Value.(string), item, 0); !wr.OK {
+	if wr := s.writeItem(dirR.Value.(string), item, 0); !wr.OK {
 		return wr
 	}
 	item.Version = 1
@@ -163,23 +169,13 @@ func (s *Service) Advance(id string) core.Result {
 	if err := paths.IsValidID(id); err != nil {
 		return core.Fail(err)
 	}
-	dirR := contentDir()
-	if !dirR.OK {
-		return core.Fail(core.E("content.Advance", dirR.Error(), nil))
-	}
 
-	// Cerberus #1486 belt: WithinDir check after the join.
-	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), id+".md")
-	if jerr != nil {
-		return core.Fail(jerr)
-	}
-	raw := core.ReadFile(fpath)
-	if !raw.OK {
-		return core.Fail(core.E("content.Advance", "not found: "+id, nil))
-	}
-	item, err := parseItem(raw.Value.([]byte))
+	// loadOne handles dual-format .lthn/.md fallthrough + session-
+	// locked surfacing. For .lthn the read decrypts (session must be
+	// unlocked); the assertUnlocked above already gates that.
+	item, dir, err := s.loadOne(id)
 	if err != nil {
-		return core.Fail(core.E("content.Advance", "parse failed", err))
+		return core.Fail(core.E("content.Advance", "not found: "+id, err))
 	}
 
 	next := nextCol(item.Col)
@@ -201,7 +197,7 @@ func (s *Service) Advance(id string) core.Result {
 	// and stamps Version=1 on the upgrade write. Conflict-path returns
 	// core.Fail(paths.ConflictEnvelope{...}) directly via writeItem
 	// (Mantis #1544 gating shape inherited from W1).
-	if wr := writeItem(dirR.Value.(string), item, priorVersion); !wr.OK {
+	if wr := s.writeItem(dir, item, priorVersion); !wr.OK {
 		return wr
 	}
 	item.Version = priorVersion + 1

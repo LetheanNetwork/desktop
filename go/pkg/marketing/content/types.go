@@ -1,9 +1,14 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
 // Package content is the lthn-side marketing content calendar service.
-// Manages editorial content items at ~/Lethean/marketing/content/{id}.md
+// Manages editorial content items at ~/Lethean/marketing/content/{id}.lthn
 // — each item belongs to a pipeline column: idea → draft → review → ready
 // → live.
+//
+// Stage E.D.B.3 (Mantis #1487 wave 3 — LAST consumer): the on-disk
+// format is now the encrypted Trix envelope (`.lthn`). Legacy `.md`
+// plaintext records remain readable via the lazy-migration fallthrough
+// until a write promotes them to `.lthn` per RFC §3.1.
 //
 // Wire shapes match the ContentColumn + ContentItem interfaces consumed by
 // the <lthn-view-content> Lit element in the Marketing role view.
@@ -123,4 +128,80 @@ type UpdateInput struct {
 	Due  string `json:"due,omitempty"`
 	When string `json:"when,omitempty"`
 	Body string `json:"body,omitempty"`
+}
+
+// ContentRecord is the persistence type carried through the at-rest
+// substrate as `AtRestWriter[ContentRecord]`. Stage E.D.B.3 (Mantis
+// #1487 wave 3, LAST consumer) splits the wire type (ContentItem,
+// json-tagged) from the persistence type (ContentRecord, yaml-tagged)
+// so the encrypted body frontmatter never leaks json key names and the
+// recordfile.HeaderSchema[ContentRecord] generic stays type-pinned.
+//
+// Per-field MUST per RFC §2.4 marketing/content row:
+//
+//   - `title`  → BODY (REJECT in header — PII / editorial intent).
+//     The wire type calls this field T; ContentRecord renames to Title
+//     for at-rest persistence so the YAML key matches RFC vocabulary.
+//   - `due.at` → HEADER (MONTH-only, YYYY-MM). The wire/persisted Due
+//     field is human-shaped today ("today", "next Friday"); the
+//     HeaderFor projection emits `due.at` only when Due parses as
+//     strict YYYY-MM (Q5-friendly per sales/deals close.target
+//     pattern). Legacy free-form values stay BODY-only by being absent
+//     from the header.
+//
+// All other fields (who / when / col / body) are BODY-only — either
+// PII-adjacent (who is the author / reviewer attribution; when leaks
+// publication cadence; col exposes pipeline state) or have no RFC
+// ruling (col / body) and the substrate's default-body discipline
+// applies. SECURITY-NOTE: brief offers `status (enum if any)` escape
+// valve; RFC §2.4 does NOT name a status header key for marketing/
+// content, so col stays BODY-only per [[feedback_brief_vs_rfc_
+// deferral_check]] + [[feedback_beta_ticket_dont_gate]]. Absence is
+// the safe no-leak default.
+//
+// Usage example:
+//
+//	rec := content.ContentRecord{
+//	    ID: "v02-release-notes-1747440000", Title: "v0.2 release notes",
+//	    Who: "you", Due: "2026-05", Col: "draft", Body: "## Outline\n\n...",
+//	}
+type ContentRecord struct {
+	// ID is the canonical item identifier (matches filename slug).
+	ID string `yaml:"id"`
+
+	// Title is the content title / headline. BODY-only per RFC §2.4 —
+	// MUST NEVER appear in the at-rest header. Maps to/from
+	// ContentItem.T at the wire boundary.
+	Title string `yaml:"title"`
+
+	// Who is the author or reviewer attribution. BODY-only (PII-
+	// adjacent; visible-while-locked would expose authorship pattern).
+	Who string `yaml:"who"`
+
+	// When is the publish timestamp label for live items. BODY-only
+	// (publication cadence is intent-revealing).
+	When string `yaml:"when"`
+
+	// Due is the due-date label. Persisted in the body verbatim; the
+	// HeaderFor projection emits a `due.at` HEADER key only when Due
+	// parses as strict YYYY-MM (Q5-friendly).
+	Due string `yaml:"due"`
+
+	// Col is the pipeline column: "idea"|"draft"|"review"|"ready"|
+	// "live". BODY-only — RFC §2.4 names no header key for content
+	// pipeline state, so the substrate's default-body rule applies.
+	Col string `yaml:"col"`
+
+	// Body is the markdown body below the frontmatter delimiter — the
+	// content outline / notes. BODY-only.
+	Body string `yaml:"-"`
+
+	// Version is the monotonic optimistic-lock version (Cascade W2,
+	// RFC §B.3 row 4). Stamped by writeItem; 0 on legacy files
+	// predating the cutover, >=1 after first write through
+	// paths.AtomicWriteWithVersion / the at-rest substrate.
+	//
+	// omitempty keeps legacy round-trips clean (Version=0); the first
+	// write stamps version=1.
+	Version int `yaml:"version,omitempty"`
 }
