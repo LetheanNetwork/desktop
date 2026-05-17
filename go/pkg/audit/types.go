@@ -133,6 +133,25 @@ const (
 	EventAuthSessionVerifyFailed = "auth.session.verify_failed"
 	EventAuthAccountProvisioned = "auth.account.provisioned"
 
+	// EventAuthAccountCreated fires when pkg/account.Service.Create
+	// successfully lands a new account on disk via the
+	// /v1/account/create bootstrap-auth endpoint (Mantis #1574 / Cerberus
+	// #13). Sibling of EventAuthAccountProvisioned — Create writes the
+	// public-key + meta + private-key triple in the legacy two-step
+	// onboarding flow, Provision in the consolidated one-shot keygen +
+	// session-issue flow per RFC.stage-x.md §3.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   path_hash — SHA-256 hex of the canonical account directory path
+	//   account_id — already in AccountID; not duplicated in Meta
+	//
+	// The raw canonical pubkey bytes are NEVER in Meta — Cerberus #1465
+	// closure-only-scope discipline keeps the bytes off the audit
+	// substrate; this event records the create-success decision, not
+	// the credential.
+	EventAuthAccountCreated = "auth.account.created"
+
 	// EventPluginViewCapabilityGranted fires when a plugin's iframe
 	// view receives a capability via the host-side shim's postMessage
 	// handshake per plans/code/lthn/desktop/views/RFC.plugin-views.md

@@ -4,6 +4,7 @@ package account
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
@@ -240,6 +241,45 @@ func (s *Service) Create(input CreateInput) core.Result {
 		return core.Fail(core.NewCode(codeAccountWriteFailed,
 			"writing private.key failed: "+r.Error()))
 	}
+
+	// Mantis #1574 (MED) / Cerberus #13 — emit auth.account.created
+	// post-success. Sibling of Provision's auth.account.provisioned
+	// emission (provision.go:225) — Create owns the legacy two-step
+	// onboarding flow; Provision the consolidated one-shot. Both land
+	// the same audit row shape so the Operations panel's pivot counts
+	// stay coherent across either flow.
+	//
+	// Stage F.B Phase 2.4 parity-grep contract (RFC §3.3.1) — the
+	// core.Print debug-echo MUST appear alongside the typed Record
+	// emission so an operator tailing stderr sees the same event name
+	// the audit log carries.
+	//
+	// Cerberus #1465 closure-only-scope discipline — the canonical
+	// public-key bytes are NEVER in Meta; only the SHA-256 hex of the
+	// account directory path so an audit reader can correlate across
+	// rows without exfiltrating filesystem layout (username / install
+	// location) verbatim. RequestID is already plumbed by routes.go:148
+	// (server-generated, caller input.RequestID is dropped per Cerberus
+	// #1524).
+	//
+	// Recorder write failure ignored — audit failures MUST NEVER block
+	// the auth path, especially not the just-succeeded create.
+	now := core.Now().UTC().Unix()
+	pathHash := core.SHA256HexString(dir)
+	core.Print(core.Stderr(),
+		"event=auth.account.created account_id=%s ts=%d\n",
+		canonical, now)
+	_ = audit.Default().Record(audit.Event{
+		Event:     audit.EventAuthAccountCreated,
+		AccountID: canonical,
+		TS:        now,
+		Scope:     "account.create",
+		Outcome:   audit.OutcomeOK,
+		RequestID: input.RequestID,
+		Meta: map[string]any{
+			"path_hash": pathHash,
+		},
+	})
 
 	return core.Ok(CreateOutput{
 		AccountID: canonical,

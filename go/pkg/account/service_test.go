@@ -13,7 +13,26 @@ package account_test
 import (
 	core "dappco.re/go"
 	subject "dappco.re/lthn/desktop/pkg/account"
+	"dappco.re/lthn/desktop/pkg/audit"
 )
+
+// recordingRecorder captures every Event the audit recorder receives.
+// Mirrors pkg/server/plugin_view_capability_test.go — same fixture
+// shape so the test layer stays uniform across audit-emitting handlers.
+//
+// Usage example:
+//
+//	rec := &recordingRecorder{}
+//	audit.SetDefault(rec)
+//	t.Cleanup(func() { audit.SetDefault(nil) })
+type recordingRecorder struct {
+	events []audit.Event
+}
+
+func (r *recordingRecorder) Record(ev audit.Event) core.Result {
+	r.events = append(r.events, ev)
+	return core.Ok(nil)
+}
 
 // homeFixture rebinds $HOME to a t-scoped temp dir for the test and
 // returns the temp root. Every paths.Root() call resolves underneath
@@ -213,4 +232,72 @@ func TestAccount_AccountStatus_Good_FreshInstall(t *core.T) {
 	out := r.Value.(subject.AccountStatus)
 	core.AssertFalse(t, out.HasAccount, "fresh install — no account expected")
 	core.AssertEqual(t, "", out.AccountID)
+}
+
+// --- Create — #1574 audit emission ---
+
+// TestCreate_EmitsAuditEvent_Good pins the Mantis #1574 (MED) /
+// Cerberus #13 contract: every successful Create MUST emit a typed
+// audit.EventAuthAccountCreated row through audit.Default(). Sibling of
+// Provision's auth.account.provisioned emission — both flows feed the
+// Operations panel from the same Recorder surface.
+//
+// The Meta shape MUST carry path_hash (SHA-256 hex of the canonical
+// account directory) — NEVER the raw path (Cerberus #1465 closure-only
+// scope discipline applies to filesystem layout too). The canonical
+// account_id lands in Event.AccountID, not duplicated in Meta.
+func TestCreate_EmitsAuditEvent_Good(t *core.T) {
+	_ = homeFixture(t)
+
+	rec := &recordingRecorder{}
+	audit.SetDefault(rec)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	svc := subject.NewService(nil)
+	in := validInput()
+	in.RequestID = "test-req-1574"
+
+	r := svc.Create(in)
+	core.AssertTrue(t, r.OK, "Create must succeed for the audit-emit assertion")
+
+	core.AssertEqual(t, 1, len(rec.events),
+		"Create must emit exactly one audit event on success")
+	ev := rec.events[0]
+	core.AssertEqual(t, audit.EventAuthAccountCreated, ev.Event)
+	core.AssertEqual(t, audit.OutcomeOK, ev.Outcome)
+	core.AssertEqual(t, "account.create", ev.Scope)
+	core.AssertEqual(t, in.AccountID, ev.AccountID)
+	core.AssertEqual(t, "test-req-1574", ev.RequestID)
+
+	// Meta MUST carry path_hash (SHA-256 hex string, 64 chars) and
+	// MUST NOT carry the raw path bytes.
+	pathHash, ok := ev.Meta["path_hash"].(string)
+	core.AssertTrue(t, ok, "Meta.path_hash must be present as string")
+	core.AssertLen(t, pathHash, 64, "path_hash must be SHA-256 hex (64 chars)")
+	_, hasRawPath := ev.Meta["path"]
+	core.AssertFalse(t, hasRawPath, "Meta MUST NOT carry raw path (Cerberus #1465 discipline)")
+}
+
+// TestCreate_NoAuditOnFailure_Bad pins the inverse contract: a Create
+// that fails before reaching the success path (e.g. id_mismatch — the
+// fail-fast validation gate) MUST NOT emit an audit row. Failure-mode
+// audit events for create-attempts are a separate event-name reserved
+// for a future ticket; today's emit-site only fires post-success.
+func TestCreate_NoAuditOnFailure_Bad(t *core.T) {
+	_ = homeFixture(t)
+
+	rec := &recordingRecorder{}
+	audit.SetDefault(rec)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	svc := subject.NewService(nil)
+	in := validInput()
+	in.AccountID = "0000000000000000" // forces id_mismatch
+
+	r := svc.Create(in)
+	core.AssertFalse(t, r.OK, "Create must fail with id_mismatch fixture")
+	core.AssertEqual(t, "account.id_mismatch", r.Code())
+
+	core.AssertEqual(t, 0, len(rec.events),
+		"failed Create MUST NOT emit auth.account.created (only post-success)")
 }
