@@ -109,12 +109,17 @@ func Fetch(c *core.Core, repo PRRepo) core.Result {
 	}
 
 	token := LoadToken(c, repo.Provider)
+	emitPRTokenLoaded(repo.Provider, token != "")
+	emitPRFetchRequested(repo, token != "")
+
 	prs, status, err := doFetch(url, repo.Provider, token)
 	if err != "" {
 		core.Warn("vi: PR fetch failed",
 			"repo", RepoKey(repo),
 			"status", status,
 			"err", err)
+		emitPRFetchFailed(repo, status,
+			core.Fail(core.E("vi.Fetch", "doFetch transport error", nil)))
 		return core.Ok(0)
 	}
 	// 401 / 403 — token missing or wrong scope. Don't crash; the
@@ -150,6 +155,7 @@ func Fetch(c *core.Core, repo PRRepo) core.Result {
 				"repo", RepoKey(repo),
 				"pr", pr.Number,
 				"url", pr.HTMLURL)
+			emitPRFetchRejected(repo, pr.Number, rejectReasonUnsafeURL)
 			continue
 		}
 		row := PRActivity{
@@ -178,6 +184,7 @@ func Fetch(c *core.Core, repo PRRepo) core.Result {
 		}
 		inserted++
 	}
+	emitPRFetchSucceeded(repo, status, inserted)
 	return core.Ok(inserted)
 }
 

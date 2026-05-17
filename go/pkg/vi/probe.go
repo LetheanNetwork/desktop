@@ -70,18 +70,39 @@ var probeClient = &core.HTTPClient{
 //	if r.OK { probe := r.Value.(vi.SiteProbe); _ = probe.OK }
 func Probe(c *core.Core, cat SiteCatalogue) core.Result {
 	if c == nil {
-		return core.Fail(core.E("vi.Probe", "core is nil", nil))
+		// Surface-guard rejection — domain is unknown at this point so
+		// the Failed row carries an empty domain. error_code is bounded.
+		r := core.Fail(core.E("vi.Probe", "core is nil", nil))
+		emitProbeFailed("", r)
+		return r
 	}
 	if !core.HasPrefix(cat.URL, "https://") {
-		return core.Fail(core.E("vi.Probe", "url must start with https://", nil))
+		// Pre-derive the domain for the audit row — DomainOf is total
+		// over any string and yields an empty string when the URL is
+		// shape-invalid (which it is here), so this stays safe.
+		r := core.Fail(core.E("vi.Probe", "url must start with https://", nil))
+		emitProbeFailed(DomainOf(cat.URL), r)
+		return r
 	}
 
 	domain := DomainOf(cat.URL)
+	emitProbeRequested(domain)
 	start := core.Now().UTC()
 
 	statusCode, lastErr := doProbe(cat.URL)
 	checked := core.Now().UTC()
 	latencyMs := int(checked.Sub(start) / core.Millisecond)
+
+	if lastErr != "" {
+		// Transport error — Probe still persists the row (failed probes
+		// are part of the signal), but the audit substrate carries the
+		// Failed row so a forensic walker can pair caller intent with
+		// the transport outcome class.
+		emitProbeFailed(domain,
+			core.Fail(core.E("vi.Probe", "doProbe transport error", nil)))
+	} else {
+		emitProbeSucceeded(domain, statusCode, latencyMs)
+	}
 
 	probe := SiteProbe{
 		ID:         newProbeID(),
@@ -97,6 +118,7 @@ func Probe(c *core.Core, cat SiteCatalogue) core.Result {
 		probe.LastError = ""
 	}
 	if r := orm.Insert(c, &probe); !r.OK {
+		emitProbeFailed(domain, r)
 		return r
 	}
 	return core.Ok(probe)
