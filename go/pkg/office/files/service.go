@@ -124,8 +124,8 @@ func collectRecent(specs []locationSpec, homeDir string, limit int) ([]RecentRow
 			parentPath := spec.Path + "/"
 			all = append(all, candidate{
 				row: RecentRow{
-					Name: entry.Name(),
-					Path: collapseHome(parentPath, homeDir),
+					Name: sanitizeFilename(entry.Name()),
+					Path: sanitizeFilename(collapseHome(parentPath, homeDir)),
 					When: "", // filled after sort
 					Size: formatSize(info.Size()),
 				},
@@ -289,4 +289,48 @@ func diskMeter(path string) (DiskMeter, error) {
 		Total: totalStr,
 		Used:  usedPct,
 	}, nil
+}
+
+// sanitizeFilename replaces Unicode characters that enable Trojan Source
+// rendering attacks (CVE-2021-42574) with the U+FFFD replacement char.
+// The filename remains identifiable but cannot reorder its own glyphs
+// when rendered in a bidi-aware terminal or WebView.
+//
+// Replaced ranges (override + isolate + C0 controls):
+//   - U+202A..U+202E — bidi format controls (LRE/RLE/PDF/LRO/RLO)
+//   - U+2066..U+2069 — bidi isolate controls (LRI/RLI/FSI/PDI)
+//   - U+200E, U+200F — directional marks (softer; replaced for parity
+//     with override family — legitimate uses in standalone filenames
+//     are vanishingly rare)
+//   - U+0000..U+001F — C0 control characters, except TAB(09)/LF(0A)/CR(0D)
+//     which are still stripped because they corrupt single-line rendering
+//
+// Per Mantis #1504: a file named "legitimate‮kcatta.exe" renders as
+// "legitimateexe.attack" in a bidi-aware UI, masking the real extension.
+// Replacement (vs rejection) keeps the row visible so the user still sees
+// "legitimate�kcatta.exe" — an obviously-tampered name they can act on.
+//
+// Usage example:
+//
+//	clean := sanitizeFilename(entry.Name()) // "report.pdf" → "report.pdf"
+func sanitizeFilename(name string) string {
+	const replacement = '�'
+	changed := false
+	out := make([]rune, 0, len(name))
+	for _, r := range name {
+		switch {
+		case r >= 0x202A && r <= 0x202E,
+			r >= 0x2066 && r <= 0x2069,
+			r == 0x200E, r == 0x200F,
+			r >= 0x0000 && r <= 0x001F:
+			out = append(out, replacement)
+			changed = true
+		default:
+			out = append(out, r)
+		}
+	}
+	if !changed {
+		return name
+	}
+	return string(out)
 }

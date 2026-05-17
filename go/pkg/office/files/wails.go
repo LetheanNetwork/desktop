@@ -86,6 +86,15 @@ func (s *Service) ListRecent(input ListRecentInput) core.Result {
 		return core.Fail(core.E("files.ListRecent", "collect failed", err))
 	}
 
+	// Defence in depth: re-sanitise on the read side so any future caller
+	// constructing RecentRow without going through collectRecent still
+	// cannot smuggle bidi-override Unicode into the WebView. See
+	// sanitizeFilename in service.go for the threat model (Mantis #1504).
+	for i := range rows {
+		rows[i].Name = sanitizeFilename(rows[i].Name)
+		rows[i].Path = sanitizeFilename(rows[i].Path)
+	}
+
 	return core.Ok(ListRecentOutput{
 		Recent: rows,
 		Total:  len(rows),

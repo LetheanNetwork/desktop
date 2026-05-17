@@ -142,3 +142,127 @@ func TestScanLocation_MissingPath(t *testing.T) {
 		t.Fatalf("expected sizeB=0, got %d", sizeB)
 	}
 }
+
+// TestRecentRow_NameWithBidiOverride_Sanitised_Bad — a U+202E
+// (right-to-left override) in a filename is replaced with U+FFFD so the
+// glyphs render in source order. Mantis #1504 Trojan Source defence.
+func TestRecentRow_NameWithBidiOverride_Sanitised_Bad(t *testing.T) {
+	// "legitimate" + U+202E + "kcatta.exe" — renders as
+	// "legitimateexe.attack" in a bidi-aware UI.
+	in := "legitimate‮kcatta.exe"
+	got := sanitizeFilename(in)
+	want := "legitimate�kcatta.exe"
+	if got != want {
+		t.Fatalf("sanitizeFilename(%q) = %q, want %q", in, got, want)
+	}
+	for _, r := range got {
+		if r == '‮' {
+			t.Fatalf("sanitised output still contains U+202E: %q", got)
+		}
+	}
+}
+
+// TestRecentRow_NameWithIsolateControl_Sanitised_Bad — a U+2066
+// (left-to-right isolate) is replaced with U+FFFD.
+func TestRecentRow_NameWithIsolateControl_Sanitised_Bad(t *testing.T) {
+	in := "alpha⁦bravo⁩.txt"
+	got := sanitizeFilename(in)
+	want := "alpha�bravo�.txt"
+	if got != want {
+		t.Fatalf("sanitizeFilename(%q) = %q, want %q", in, got, want)
+	}
+}
+
+// TestRecentRow_NameWithBidiFamily_Sanitised_Bad — every replaced
+// codepoint in the documented ranges is in fact replaced. Each case
+// shows the codepoint, the input string, and the expected output.
+func TestRecentRow_NameWithBidiFamily_Sanitised_Bad(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"U+202A LRE", "a‪b", "a�b"},
+		{"U+202B RLE", "a‫b", "a�b"},
+		{"U+202C PDF", "a‬b", "a�b"},
+		{"U+202D LRO", "a‭b", "a�b"},
+		{"U+202E RLO", "a‮b", "a�b"},
+		{"U+2066 LRI", "a⁦b", "a�b"},
+		{"U+2067 RLI", "a⁧b", "a�b"},
+		{"U+2068 FSI", "a⁨b", "a�b"},
+		{"U+2069 PDI", "a⁩b", "a�b"},
+		{"U+200E LRM", "a‎b", "a�b"},
+		{"U+200F RLM", "a‏b", "a�b"},
+		{"U+0000 NUL", "a\x00b", "a�b"},
+		{"U+0009 TAB", "a\tb", "a�b"},
+		{"U+001B ESC", "a\x1bb", "a�b"},
+	}
+	for _, c := range cases {
+		got := sanitizeFilename(c.in)
+		if got != c.want {
+			t.Errorf("%s: sanitizeFilename(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}
+
+// TestRecentRow_PlainNameUnchanged_Good — alphanumeric + space + punct
+// filenames pass through untouched (no over-strip).
+func TestRecentRow_PlainNameUnchanged_Good(t *testing.T) {
+	cases := []string{
+		"report.pdf",
+		"Q3 2026 forecast.xlsx",
+		"sow-v2.md",
+		"file (1).png",
+		"archive.tar.gz",
+		"hello_world.go",
+		"data[2026-05-17].csv",
+	}
+	for _, in := range cases {
+		got := sanitizeFilename(in)
+		if got != in {
+			t.Errorf("sanitizeFilename(%q) = %q, expected unchanged", in, got)
+		}
+	}
+}
+
+// TestRecentRow_UnicodeAccentsPreserved_Good — Latin/CJK/Cyrillic
+// filenames must survive sanitisation (the sweep is bidi-control only,
+// not ASCII-only).
+func TestRecentRow_UnicodeAccentsPreserved_Good(t *testing.T) {
+	cases := []string{
+		"café.txt",
+		"naïve approach.md",
+		"über-plan.pdf",
+		"日本語.txt",
+		"Москва.doc",
+		"αβγ.md",
+		"résumé-2026.pdf",
+		"piñata.jpg",
+	}
+	for _, in := range cases {
+		got := sanitizeFilename(in)
+		if got != in {
+			t.Errorf("sanitizeFilename(%q) = %q, expected unchanged", in, got)
+		}
+	}
+}
+
+// TestRecentRow_EmptyName_Good — empty input returns empty output, no
+// allocation surprise.
+func TestRecentRow_EmptyName_Good(t *testing.T) {
+	if got := sanitizeFilename(""); got != "" {
+		t.Fatalf("sanitizeFilename(\"\") = %q, want \"\"", got)
+	}
+}
+
+// TestRecentRow_OnlyBidi_Ugly — a filename consisting ENTIRELY of bidi
+// controls collapses to a string of U+FFFD chars (still visible, still
+// distinguishable from empty — operator can see something went wrong).
+func TestRecentRow_OnlyBidi_Ugly(t *testing.T) {
+	in := "‮‮⁦"
+	got := sanitizeFilename(in)
+	want := "���"
+	if got != want {
+		t.Fatalf("sanitizeFilename(%q) = %q, want %q", in, got, want)
+	}
+}
