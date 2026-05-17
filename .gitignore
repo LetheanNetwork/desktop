@@ -12,8 +12,15 @@ frontend/dist/
 
 # Vite + Monaco — workers are copied into frontend/public/monaco/ at
 # build time from node_modules. ~120 generated worker files; never
-# tracked.
-frontend/public/
+# tracked. FontAwesome Pro Plus (Mantis #1606) is a SOURCE asset
+# bundled for self-hosted distribution, so we ignore everything under
+# frontend/public/ EXCEPT the fontawesome/ subtree. Per gitignore
+# semantics, a directory ignore can't be negated for children, so we
+# enumerate the generated subtrees explicitly.
+frontend/public/monaco/
+frontend/public/*.js
+frontend/public/*.map
+frontend/public/*.wasm
 
 # Go build cache + test artefacts
 *.test
