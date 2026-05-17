@@ -203,6 +203,64 @@ func TestDownloader_FetchVerified_HostNotAllowed_EmitsRejected_Bad(t *core.T) {
 	core.AssertEqual(t, "host_not_allowed", rejected[0].Meta["reason"])
 }
 
+// TestDownloader_AuditMeta_ErrorCodeBoundedKeyspace_Bad — STRIDE-I
+// prose-leak canary per RFC.error-code-cascade.md §3 (W4) /
+// Mantis #1716 / Cerberus #61 C-4. Forces the HTTP-500 failure path
+// (which builds a failErr whose Error() reads "downloader.Fetch: HTTP
+// 500 from http://127.0.0.1:NNN/...") and asserts the emitted Failed
+// row's Meta["error_code"] is the BOUNDED Operation literal
+// "downloader.Fetch", NOT the raw prose containing the URL. Defends
+// the audit.ErrorCode(r) substrate at the helper boundary so future
+// regressions that revert the helper signature to a raw string fall
+// loud rather than silently re-leaking caller-controlled URL bytes.
+//
+// The pre-W4 shape (emitFetchFailed(url, failErr.Error())) would have
+// landed the full "downloader.Fetch: HTTP 500 from <url>" string in
+// Meta["error_code"] — this test pins the type-system contract that
+// makes that bug class unreachable.
+func TestDownloader_AuditMeta_ErrorCodeBoundedKeyspace_Bad(t *core.T) {
+	sandboxHome(t)
+	rec := installAuditRecorder(t)
+
+	// Server returns HTTP 500 — fires the resp.StatusCode >= 400 branch
+	// in FetchVerified where failErr embeds the full URL via
+	// "HTTP 500 from <url>".
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		w.WriteHeader(500)
+	}))
+	defer srv.Close()
+
+	// Smuggle a canary token into the URL query so we can grep for any
+	// caller-controlled bytes echoing through into the audit row.
+	smuggled := srv.URL + "/?canary=LTHN-ERRORCODE-LEAK-CANARY-NOTAREALTOKEN"
+	r := FetchVerified(smuggled, "errorcode-bounded.gguf", "", nil)
+	core.AssertFalse(t, r.OK, "HTTP 500 must fail")
+
+	failed := rec.filterByName(audit.EventDownloaderFetchFailed)
+	core.AssertEqual(t, 1, len(failed),
+		"exactly one Failed row on HTTP 500 path")
+
+	// Bounded-keyspace contract: error_code is the *core.Err.Operation
+	// canon per audit.ErrorCode(r) resolution order, NOT the raw
+	// failErr.Error() prose. fetchOp == "downloader.Fetch".
+	code, ok := failed[0].Meta["error_code"].(string)
+	core.AssertTrue(t, ok, "error_code Meta value must be a string")
+	core.AssertEqual(t, fetchOp, code,
+		"error_code must be the bounded Operation literal (audit.ErrorCode), not raw prose")
+
+	// Belt-and-braces: even if a future shape returns a different
+	// bounded code, NONE of the caller-controlled URL bytes (host:port
+	// canary query) may appear in the field.
+	core.AssertFalse(t, core.Contains(code, "canary"),
+		"error_code must not echo caller-controlled URL query: got "+code)
+	core.AssertFalse(t, core.Contains(code, "LTHN-ERRORCODE-LEAK"),
+		"error_code must not echo canary marker: got "+code)
+	core.AssertFalse(t, core.Contains(code, "HTTP 500"),
+		"error_code must not echo upstream HTTP status prose: got "+code)
+	core.AssertFalse(t, core.Contains(code, "127.0.0.1"),
+		"error_code must not echo target host: got "+code)
+}
+
 // TestDownloader_AuditMeta_NoRawBearer_Bad — smuggle-surface canary
 // per the H#181 SECURITY-NOTE pattern. A URL embedding a `Bearer
 // not-a-real-token` query argument fires through the happy path; the

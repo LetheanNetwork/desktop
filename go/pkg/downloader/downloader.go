@@ -181,12 +181,12 @@ func FetchWithProgress(url, name string, onProgress Progress) core.Result {
 func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result {
 	if url == "" {
 		err := core.E(fetchOp, "url is required", nil)
-		emitFetchFailed(url, err.Error())
+		emitFetchFailed(url, core.Fail(err))
 		return core.Fail(err)
 	}
 	if name == "" {
 		err := core.E(fetchOp, "name is required", nil)
-		emitFetchFailed(url, err.Error())
+		emitFetchFailed(url, core.Fail(err))
 		return core.Fail(err)
 	}
 	// Cerberus #49 F-1 — name flows through core.PathJoin into both
@@ -199,7 +199,7 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	// Cerberus #1486. Mirror the discipline here so the model-path
 	// surface can't pivot writes/reads outside the models dir.
 	if err := paths.IsValidID(name); err != nil {
-		emitFetchFailed(url, err.Error())
+		emitFetchFailed(url, core.Fail(err))
 		return core.Fail(err)
 	}
 	// Cerberus shape-observation (audit-cluster adoption) — emit the
@@ -227,7 +227,7 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	if !parsed.OK {
 		err := core.E(fetchOp,
 			core.Concat("URL parse failed: ", url), parsed.Value.(error))
-		emitFetchFailed(url, err.Error())
+		emitFetchFailed(url, core.Fail(err))
 		return core.Fail(err)
 	}
 	if err := verifyResolvedIPNotPrivate(parsed.Value.(*core.URL).Hostname()); err != nil {
@@ -236,7 +236,7 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	}
 	dirR := paths.ModelsDir()
 	if !dirR.OK {
-		emitFetchFailed(url, dirR.Error())
+		emitFetchFailed(url, dirR)
 		return dirR
 	}
 	// Belt-and-braces partner of IsValidID — if a future regression
@@ -246,18 +246,18 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	// across sales/incidents/runbooks/marketing.
 	finalDest, escErr := paths.JoinAndCheck(dirR.Value.(string), name)
 	if escErr != nil {
-		emitFetchFailed(url, escErr.Error())
+		emitFetchFailed(url, core.Fail(escErr))
 		return core.Fail(escErr)
 	}
 
 	qdR := quarantineDir()
 	if !qdR.OK {
-		emitFetchFailed(url, qdR.Error())
+		emitFetchFailed(url, qdR)
 		return qdR
 	}
 	qDest, escErr := paths.JoinAndCheck(qdR.Value.(string), name)
 	if escErr != nil {
-		emitFetchFailed(url, escErr.Error())
+		emitFetchFailed(url, core.Fail(escErr))
 		return core.Fail(escErr)
 	}
 
@@ -271,7 +271,7 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 
 	reqR := core.NewHTTPRequest("GET", url, nil)
 	if !reqR.OK {
-		emitFetchFailed(url, reqR.Error())
+		emitFetchFailed(url, reqR)
 		return reqR
 	}
 	req := reqR.Value.(*core.Request)
@@ -283,7 +283,7 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 			_ = resp.Body.Close()
 		}
 		failErr := core.E(fetchOp, "GET failed", err)
-		emitFetchFailed(url, failErr.Error())
+		emitFetchFailed(url, core.Fail(failErr))
 		return core.Fail(failErr)
 	}
 	defer resp.Body.Close()
@@ -291,7 +291,7 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 		failErr := core.E(fetchOp,
 			core.Concat("HTTP ", core.Sprintf("%d", resp.StatusCode), " from ", url),
 			nil)
-		emitFetchFailed(url, failErr.Error())
+		emitFetchFailed(url, core.Fail(failErr))
 		return core.Fail(failErr)
 	}
 	// Cerberus #1425 — pre-check Content-Length when the server sent
@@ -305,13 +305,13 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 				" exceeds cap ",
 				core.Sprintf("%d", maxDownloadBytes)),
 			nil)
-		emitFetchFailed(url, failErr.Error())
+		emitFetchFailed(url, core.Fail(failErr))
 		return core.Fail(failErr)
 	}
 
 	createR := core.Create(qDest)
 	if !createR.OK {
-		emitFetchFailed(url, createR.Error())
+		emitFetchFailed(url, createR)
 		return createR
 	}
 	file := createR.Value.(*core.OSFile)
@@ -334,7 +334,7 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 		_ = file.Close()
 		_ = core.Remove(qDest)
 		failErr := core.E(fetchOp, "stream copy failed", copyR.Value.(error))
-		emitFetchFailed(url, failErr.Error())
+		emitFetchFailed(url, core.Fail(failErr))
 		return core.Fail(failErr)
 	}
 	written := copyR.Value.(int64)
@@ -346,7 +346,7 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 				core.Sprintf("%d", maxDownloadBytes),
 				" byte cap"),
 			nil)
-		emitFetchFailed(url, failErr.Error())
+		emitFetchFailed(url, core.Fail(failErr))
 		return core.Fail(failErr)
 	}
 	// Close before Verify + Rename so the file handle is released and
@@ -354,21 +354,21 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	if err := file.Close(); err != nil {
 		_ = core.Remove(qDest)
 		failErr := core.E(fetchOp, "quarantine close failed", err)
-		emitFetchFailed(url, failErr.Error())
+		emitFetchFailed(url, core.Fail(failErr))
 		return core.Fail(failErr)
 	}
 
 	if sha256hex != "" {
 		if r := verify(qDest, sha256hex); !r.OK {
 			_ = core.Remove(qDest)
-			emitFetchFailed(url, r.Error())
+			emitFetchFailed(url, r)
 			return r
 		}
 	}
 
 	if r := core.Rename(qDest, finalDest); !r.OK {
 		_ = core.Remove(qDest)
-		emitFetchFailed(url, r.Error())
+		emitFetchFailed(url, r)
 		return r
 	}
 	emitFetchSucceeded(url, written)

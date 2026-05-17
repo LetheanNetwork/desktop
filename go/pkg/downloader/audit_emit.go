@@ -19,11 +19,19 @@
 //
 //	emitFetchRequested(url, sha256hex)
 //	emitFetchSucceeded(url, written)
-//	if !r.OK { emitFetchFailed(url, r.Error()); return r }
+//	if !r.OK { emitFetchFailed(url, r); return r }
 //	if !AllowedSource(url) {
 //	    emitFetchRejected(url, reasonHostNotAllowed)
 //	    return ...
 //	}
+//
+// emitFetchFailed accepts a core.Result and routes through
+// audit.ErrorCode to enforce the bounded-keyspace contract per
+// plans/code/lthn/desktop/audit/RFC.error-code-cascade.md §3 (W4).
+// Bare-error sites wrap at the callsite: emitFetchFailed(url,
+// core.Fail(err)). NEVER pass raw err.Error() / r.Error() prose to
+// Meta["error_code"] — Cerberus #1716 STRIDE-I cluster prose-leak
+// closure.
 
 package downloader
 
@@ -103,10 +111,17 @@ func emitFetchSucceeded(sourceURL string, bytes int64) {
 // have their own Rejected event so the auditor can distinguish policy-
 // block from runtime / network / digest-mismatch failure).
 //
+// r is the failed core.Result whose stable, bounded error_code is
+// derived through audit.ErrorCode per W4 of the audit error-code
+// cascade RFC. Bare-error callsites wrap as core.Fail(err) before
+// calling — single boundary type keeps Meta["error_code"] inside the
+// closed keyspace and forbids raw prose leakage via err.Error().
+//
 // Usage example (internal):
 //
-//	if !r.OK { emitFetchFailed(url, r.Error()); return r }
-func emitFetchFailed(sourceURL, errorCode string) {
+//	if !r.OK { emitFetchFailed(url, r); return r }
+//	if err != nil { emitFetchFailed(url, core.Fail(err)); return core.Fail(err) }
+func emitFetchFailed(sourceURL string, r core.Result) {
 	_ = audit.Default().Record(audit.Event{
 		Event:   audit.EventDownloaderFetchFailed,
 		TS:      core.Now().UTC().Unix(),
@@ -114,7 +129,7 @@ func emitFetchFailed(sourceURL, errorCode string) {
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
 			"source_host": domainOnly(sourceURL),
-			"error_code":  errorCode,
+			"error_code":  audit.ErrorCode(r),
 		},
 	})
 }
