@@ -16,6 +16,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 
 	core "dappco.re/go"
@@ -23,6 +24,16 @@ import (
 	"dappco.re/lthn/desktop/pkg/marketplace"
 	"github.com/gin-gonic/gin"
 )
+
+// runnerCtx is the optional ctx-aware extension of Runner. Cerberus
+// #60 F-2 / Mantis #1711: HTTP handlers use this surface so a client
+// disconnect (browser tab close, fetch abort) cancels the upstream
+// inference RTT instead of letting it run to completion and burn quota.
+// Detected via type-assert so the Runner contract stays unchanged for
+// non-HTTP callers (Action-bus, CLI, Wails) that pass core.Background().
+type runnerCtx interface {
+	GenerateCtx(ctx context.Context, prompt string) core.Result
+}
 
 // modelEntry mirrors the OpenAI /v1/models entry shape.
 type modelEntry struct {
@@ -188,7 +199,7 @@ func (s *Service) handleChat(c *gin.Context) {
 		return
 	}
 	prompt := lastUserMessage(req.Messages)
-	reply := s.generate(prompt)
+	reply := s.generate(c.Request.Context(), prompt)
 	c.JSON(core.StatusOK, chatResponse{
 		ID:      core.Concat("chatcmpl-", randID()),
 		Object:  "chat.completion",
@@ -217,7 +228,7 @@ func (s *Service) handleCompletion(c *gin.Context) {
 		writeGinError(c, core.StatusBadRequest, err.Error(), "invalid_request_error")
 		return
 	}
-	reply := s.generate(req.Prompt)
+	reply := s.generate(c.Request.Context(), req.Prompt)
 	c.JSON(core.StatusOK, completionResponse{
 		ID:      core.Concat("cmpl-", randID()),
 		Object:  "text_completion",
@@ -234,11 +245,22 @@ func (s *Service) handleCompletion(c *gin.Context) {
 // generate routes a prompt through the runner when set; falls back to
 // the echo stub otherwise so the binary still serves something useful
 // before go-mlx wiring lands.
-func (s *Service) generate(prompt string) string {
+//
+// Cerberus #60 F-2 / Mantis #1711: when the concrete runner implements
+// the optional runnerCtx surface (GenerateCtx), the gin request context
+// is plumbed through so client disconnects cancel the upstream RTT
+// instead of letting it complete and burn quota. Legacy runners without
+// GenerateCtx fall back to the background-context Generate shim.
+func (s *Service) generate(ctx context.Context, prompt string) string {
 	if s.opts.Runner == nil {
 		return core.Concat("[lthn stub] received: ", prompt)
 	}
-	r := s.opts.Runner.Generate(prompt)
+	var r core.Result
+	if rc, ok := s.opts.Runner.(runnerCtx); ok {
+		r = rc.GenerateCtx(ctx, prompt)
+	} else {
+		r = s.opts.Runner.Generate(prompt)
+	}
 	if !r.OK {
 		return core.Concat("[lthn error] ", r.Error())
 	}

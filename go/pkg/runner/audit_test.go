@@ -361,3 +361,109 @@ func TestRunner_GenerateFailed_AuditHasStableCode_Good(t *core.T) {
 	core.AssertTrue(t, stable,
 		"error_code must be one of the stable Lethean codes, got: "+code)
 }
+
+// TestRunner_GenerateCtx_ClientDisconnect_Bad — Cerberus #60 F-2 /
+// Mantis #1711: when a client disconnects mid-call (browser tab close,
+// fetch abort, gin c.Request.Context() cancelled), GenerateCtx must
+// propagate the cancellation into the upstream router.Chat so the
+// in-flight provider RTT terminates instead of running to completion
+// and burning quota. ai.ProviderRouter.Chat checks ctx.Err() before
+// each route attempt and returns "request cancelled" when set.
+//
+// The Requested audit row MUST still commit (forensic correlation —
+// abandoned requests are real events worth logging); the Failed row
+// then stamps with the cancelled-ctx error_code from the router.
+func TestRunner_GenerateCtx_ClientDisconnect_Bad(t *core.T) {
+	rec := installRecorder(t)
+	s := newStubRunner(&runnerStubModel{output: "would-be-reply"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel — simulates client disconnect BEFORE inference completes
+
+	r := s.GenerateCtx(ctx, "ping")
+	core.AssertFalse(t, r.OK,
+		"cancelled ctx should propagate into router.Chat → Failed result, not OK")
+
+	events := rec.snapshot()
+	core.AssertEqual(t, 2, len(events),
+		"cancelled GenerateCtx should still emit Requested + Failed (forensic correlation)")
+	core.AssertEqual(t, audit.EventInferenceGenerateRequested, events[0].Event,
+		"Requested row commits BEFORE the network call — survives cancellation")
+	core.AssertEqual(t, audit.EventInferenceGenerateFailed, events[1].Event)
+	core.AssertEqual(t, audit.OutcomeFailed, events[1].Outcome)
+
+	code, ok := events[1].Meta["error_code"].(string)
+	core.AssertTrue(t, ok, "Failed Meta must carry error_code")
+	core.AssertEqual(t, "ai.ProviderRouter.Chat", code,
+		"router's cancellation error must surface as the stable router Operation code")
+}
+
+// TestRunner_ChatCtx_ClientDisconnect_Bad — same shape as the Generate
+// variant but on the messages-array Chat path. Both HTTP egress sites
+// (Generate via /v1/completions, Chat via /v1/chat/completions) must
+// honour client-disconnect cancellation uniformly.
+func TestRunner_ChatCtx_ClientDisconnect_Bad(t *core.T) {
+	rec := installRecorder(t)
+	s := newStubRunner(&runnerStubModel{output: "would-be-reply"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel — simulates client disconnect
+
+	r := s.ChatCtx(ctx, []inference.Message{{Role: "user", Content: "hi"}})
+	core.AssertFalse(t, r.OK,
+		"cancelled ctx should propagate into router.Chat → Failed result, not OK")
+
+	events := rec.snapshot()
+	core.AssertEqual(t, 2, len(events),
+		"cancelled ChatCtx should still emit Requested + Failed")
+	core.AssertEqual(t, audit.EventInferenceChatRequested, events[0].Event)
+	core.AssertEqual(t, audit.EventInferenceChatFailed, events[1].Event)
+	core.AssertEqual(t, audit.OutcomeFailed, events[1].Outcome)
+
+	code, ok := events[1].Meta["error_code"].(string)
+	core.AssertTrue(t, ok, "Failed Meta must carry error_code")
+	core.AssertEqual(t, "ai.ProviderRouter.Chat", code)
+}
+
+// TestRunner_Generate_BackgroundCtxShim_Good — verifies the existing
+// Generate(prompt) surface continues to work as a Background-context
+// shim around GenerateCtx. Action-bus, CLI, and Wails callers without
+// a request scope rely on this shape; the ctx variant is opt-in for
+// HTTP handlers only.
+func TestRunner_Generate_BackgroundCtxShim_Good(t *core.T) {
+	rec := installRecorder(t)
+	s := newStubRunner(&runnerStubModel{
+		output:  "shim-reply",
+		metrics: inference.GenerateMetrics{GeneratedTokens: 1},
+	})
+
+	r := s.Generate("ping")
+	core.AssertTrue(t, r.OK, "background-ctx shim must preserve existing Generate surface")
+	core.AssertEqual(t, "shim-reply", r.Value.(string))
+
+	events := rec.snapshot()
+	core.AssertEqual(t, 2, len(events))
+	core.AssertEqual(t, audit.EventInferenceGenerateRequested, events[0].Event)
+	core.AssertEqual(t, audit.EventInferenceGenerateCompleted, events[1].Event)
+	core.AssertEqual(t, audit.OutcomeOK, events[1].Outcome)
+}
+
+// TestRunner_Chat_BackgroundCtxShim_Good — Chat-path mirror of the
+// Generate background-ctx shim test. Same guarantee: existing surface
+// preserved for non-HTTP callers.
+func TestRunner_Chat_BackgroundCtxShim_Good(t *core.T) {
+	rec := installRecorder(t)
+	s := newStubRunner(&runnerStubModel{
+		output:  "shim-ack",
+		metrics: inference.GenerateMetrics{GeneratedTokens: 1},
+	})
+
+	r := s.Chat([]inference.Message{{Role: "user", Content: "hi"}})
+	core.AssertTrue(t, r.OK, "background-ctx shim must preserve existing Chat surface")
+	core.AssertEqual(t, "shim-ack", r.Value.(string))
+
+	events := rec.snapshot()
+	core.AssertEqual(t, 2, len(events))
+	core.AssertEqual(t, audit.EventInferenceChatRequested, events[0].Event)
+	core.AssertEqual(t, audit.EventInferenceChatCompleted, events[1].Event)
+}

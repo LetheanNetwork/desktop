@@ -24,6 +24,7 @@
 package runner
 
 import (
+	"context"
 
 	core "dappco.re/go"
 	"dappco.re/go/ai/ai"
@@ -158,15 +159,45 @@ func ApplyDynamicRoutes(s *Service, routes []ai.ProviderRoute) core.Result {
 // server.Runner contract. When no ai.ProviderRouter is configured the
 // runner returns an echo stub so the binary is still useful.
 //
-// Cerberus #45 / Mantis #1656 — snapshots the router pointer under
-// RLock then releases before the (potentially long) network call so
-// ApplyDynamicRoutes writes aren't blocked for the inference RTT.
+// Background-context shim for callers without an HTTP request scope
+// (Action-bus, CLI, Wails). HTTP handlers should use GenerateCtx so
+// upstream provider RTT cancels when the client disconnects (Cerberus
+// #60 F-2 / Mantis #1711 — STRIDE-D self-DoS via abandoned-request
+// quota burn).
 //
 // Usage example:
 //
 //	reply := s.Generate("hello")
 //	if reply.OK { core.Println(reply.Value) }
 func (s *Service) Generate(prompt string) core.Result {
+	return s.GenerateCtx(core.Background(), prompt)
+}
+
+// GenerateCtx is the ctx-aware variant of Generate. Plumbed through
+// pkg/server/handlers.go from gin's c.Request.Context() so a client
+// disconnect (browser tab close, fetch abort) cancels the upstream
+// router.Chat call instead of letting it run to completion and burn
+// quota against the Requested audit row.
+//
+// Cerberus #60 F-2 / Mantis #1711: ratelimit.NewWithSQLite counts every
+// Requested row against quota; before ctx-plumbing, abandoned mid-call
+// requests still completed upstream + still counted. Now ctx cancel
+// propagates into ai.ProviderRouter.Chat → underlying provider HTTP
+// client → cancels the in-flight request.
+//
+// Cerberus #45 / Mantis #1656 — snapshots the router pointer under
+// RLock then releases before the (potentially long) network call so
+// ApplyDynamicRoutes writes aren't blocked for the inference RTT.
+//
+// Audit emit shape unchanged from H#179: Requested commits BEFORE the
+// network call (so cancellation still leaves a forensic-correlatable
+// row); Failed / Completed commits after.
+//
+// Usage example:
+//
+//	reply := s.GenerateCtx(c.Request.Context(), "hello")
+//	if reply.OK { core.Println(reply.Value) }
+func (s *Service) GenerateCtx(ctx context.Context, prompt string) core.Result {
 	s.routerMu.RLock()
 	router := s.router
 	s.routerMu.RUnlock()
@@ -175,12 +206,13 @@ func (s *Service) Generate(prompt string) core.Result {
 	}
 	// Cerberus #45 / Mantis #1658 — Shape A audit emit at the egress
 	// boundary per H#179 surfacing. The Requested row commits BEFORE
-	// the network call so a crash mid-call still leaves the request in
-	// the audit substrate. Provider/model identifiers from the first
-	// configured route (router fallback head); the post-router.Chat
-	// Completed emit upgrades to the actually-selected provider/model.
-	// Audit emits happen AFTER the RLock release — audit is observability,
-	// not router state; H#178 mutex semantics untouched.
+	// the network call so a crash OR client-disconnect cancellation
+	// mid-call still leaves the request in the audit substrate. Provider/
+	// model identifiers from the first configured route (router fallback
+	// head); the post-router.Chat Completed emit upgrades to the
+	// actually-selected provider/model. Audit emits happen AFTER the
+	// RLock release — audit is observability, not router state; H#178
+	// mutex semantics untouched.
 	provider, model := routerHead(router)
 	started := core.Now()
 	_ = audit.Default().Record(audit.Event{
@@ -194,7 +226,7 @@ func (s *Service) Generate(prompt string) core.Result {
 			"msg_count": 1,
 		},
 	})
-	resp := router.Chat(core.Background(), ai.ProviderChatRequest{
+	resp := router.Chat(ctx, ai.ProviderChatRequest{
 		Prompt: prompt,
 	})
 	if !resp.OK {
@@ -250,8 +282,10 @@ func (s *Service) Generate(prompt string) core.Result {
 	return core.Ok(chat.Text)
 }
 
-// Chat is the messages-array variant of Generate. Routes a full
-// chat-completion request through ai.ProviderRouter.
+// Chat is the messages-array variant of Generate. Background-context
+// shim for callers without an HTTP request scope (Action-bus, CLI,
+// Wails). HTTP handlers should use ChatCtx so upstream provider RTT
+// cancels on client disconnect (Cerberus #60 F-2 / Mantis #1711).
 //
 // Usage example:
 //
@@ -259,6 +293,23 @@ func (s *Service) Generate(prompt string) core.Result {
 //		{Role: "user", Content: "ping"},
 //	})
 func (s *Service) Chat(messages []inference.Message) core.Result {
+	return s.ChatCtx(core.Background(), messages)
+}
+
+// ChatCtx is the ctx-aware variant of Chat. Plumbed through
+// pkg/server/handlers.go from gin's c.Request.Context() so a client
+// disconnect cancels the upstream router.Chat call instead of letting
+// it run to completion and burn quota against the Requested audit row.
+//
+// Cerberus #60 F-2 / Mantis #1711: see GenerateCtx doc-comment for the
+// full STRIDE-D self-DoS rationale.
+//
+// Usage example:
+//
+//	reply := s.ChatCtx(c.Request.Context(), []inference.Message{
+//		{Role: "user", Content: "ping"},
+//	})
+func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) core.Result {
 	s.routerMu.RLock()
 	router := s.router
 	s.routerMu.RUnlock()
@@ -289,7 +340,7 @@ func (s *Service) Chat(messages []inference.Message) core.Result {
 			"msg_count": len(messages),
 		},
 	})
-	resp := router.Chat(core.Background(), ai.ProviderChatRequest{
+	resp := router.Chat(ctx, ai.ProviderChatRequest{
 		Messages: messages,
 	})
 	if !resp.OK {
