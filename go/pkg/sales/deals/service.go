@@ -59,21 +59,13 @@ type SessionGate interface {
 	UnlockedAccountIDs() []string
 }
 
-// AccountKeyProvider is the wider runtime-assertion surface the
-// at-rest path expects on a wired SessionGate. *account.Service
-// satisfies it today (PublicKeyFor at unlock.go:903, PrivateKeyFor
-// at unlock.go:870). Test fixtures stub it independently — see the
-// stubSessionGate in deals_test.go.
-//
-// Kept package-private — consumers wire the producer-side directly
-// via SetSessionGate; this is the substrate's view of what the gate
-// must additionally satisfy to engage the encrypted write path.
+// accountKeyProvider aliases account.AccountKeyProvider so the
+// runtime-assertion call-site stays grep-stable (`gate.
+// (accountKeyProvider)`) while the contract definition lives once in
+// pkg/account (Cerberus #44 PRBW F-3 substrate extract).
 //
 //	if kp, ok := s.gate.(accountKeyProvider); ok { ... }
-type accountKeyProvider interface {
-	PublicKeyFor(accountID string) ([]byte, bool)
-	PrivateKeyFor(accountID string) (*account.PrivateKeyHandle, bool)
-}
+type accountKeyProvider = account.AccountKeyProvider
 
 // Service owns the deals surface.
 //
@@ -364,118 +356,6 @@ func isStrictYYYYMM(s string) bool {
 	return month >= 1 && month <= 12
 }
 
-// gateAccountKeys is the consumer-side adapter that satisfies
-// recordfile.AccountKeys against the deals SessionGate's wider
-// accountKeyProvider runtime assertion. The substrate never imports
-// pkg/account directly — this thin wrapper bridges the producer's
-// concrete PrivateKeyHandle type onto the substrate's interface AND
-// computes SingleUnlockedAccount from UnlockedAccountIDs (the same
-// shape pkg/office/mail's singleUnlockedAccount uses — Mantis #1591).
-//
-//	keys := gateAccountKeys{gate: dealsSvc.gate, keys: kpProvider}
-//	w := recordfile.NewAtRestWriter(recordfile.AtRestDeps[DealRecord]{Keys: keys, ...})
-type gateAccountKeys struct {
-	gate SessionGate
-	keys accountKeyProvider
-}
-
-// PublicKeyFor wraps the gate's PublicKeyFor; the (bytes, bool) shape
-// is rewritten as (bytes, error) per the substrate's contract. Missing
-// keys produce a typed error rather than a silent empty slice so the
-// substrate's len(pub)==0 check has structured context to report.
-func (g gateAccountKeys) PublicKeyFor(accountID string) ([]byte, error) {
-	pub, ok := g.keys.PublicKeyFor(accountID)
-	if !ok {
-		return nil, core.NewCode("deals.atrest.public_key_unavailable",
-			core.Sprintf("PublicKeyFor(%q) returned not-ok", accountID))
-	}
-	return pub, nil
-}
-
-// PrivateKeyFor wraps the producer's PrivateKeyFor and bridges the
-// concrete *account.PrivateKeyHandle return onto the substrate's
-// recordfile.PrivateKeyHandle interface. The concrete handle already
-// satisfies the interface shape (Use(func([]byte) error) error) — the
-// wrapper is just the type-conversion seam.
-func (g gateAccountKeys) PrivateKeyFor(accountID string) (recordfile.PrivateKeyHandle, bool) {
-	h, ok := g.keys.PrivateKeyFor(accountID)
-	if !ok || h == nil {
-		return nil, false
-	}
-	return h, true
-}
-
-// SingleUnlockedAccount mirrors pkg/office/mail's singleUnlockedAccount
-// (Mantis #1591) against the deals gate. Multi-unlock returns the same
-// typed code the substrate surfaces back to the consumer.
-func (g gateAccountKeys) SingleUnlockedAccount() (string, error) {
-	ids := g.gate.UnlockedAccountIDs()
-	if len(ids) == 0 {
-		return "", core.NewCode("deals.no_unlocked_account",
-			"no Lethean account is unlocked")
-	}
-	if len(ids) > 1 {
-		return "", core.NewCode("deals.multi_account_not_supported",
-			"deals does not yet support multiple unlocked accounts (Mantis #1591)")
-	}
-	return ids[0], nil
-}
-
-// pathsAtomicAdapter is the consumer-side adapter that satisfies
-// recordfile.AtomicWriter against the existing paths.AtomicWriteWith
-// Version + paths.ReadVersion + core.Remove primitives. The IfMatch
-// gate is wired through paths.WriteInput.IfMatchHash so the optimistic-
-// lock semantics already proven in W1+W2 inherit unchanged.
-//
-//	atomic := pathsAtomicAdapter{}
-//	w := recordfile.NewAtRestWriter(recordfile.AtRestDeps[DealRecord]{Atomic: atomic, ...})
-type pathsAtomicAdapter struct{}
-
-// Write routes through paths.AtomicWriteWithVersion. The substrate's
-// IfMatch == hex(sha256(prior ciphertext)) matches the primitive's
-// IfMatchHash semantics exactly. Empty IfMatch (first-write) means
-// the primitive skips the hash check — same as the existing legacy-
-// upgrade path. Mode is honoured verbatim (substrate defaults to 0o600
-// which matches the surface's existing #1487 PR-1 ruling).
-func (pathsAtomicAdapter) Write(req recordfile.AtomicWriteRequest) error {
-	r := paths.AtomicWriteWithVersion(req.Path, paths.WriteInput{
-		Body:        req.Payload,
-		IfMatchHash: req.IfMatch,
-		IfNotExist:  req.IfNotExist,
-	})
-	if r.OK {
-		return nil
-	}
-	return core.NewCode("deals.atrest.atomic_write_failed",
-		core.Sprintf("AtomicWriteWithVersion(%q): %s", req.Path, r.Error()))
-}
-
-// ReadFile is a thin wrapper around core.ReadFile that adapts the
-// (Result) → (bytes, error) shape the substrate expects. Missing
-// files surface as core-coded errors so the substrate's read-failed
-// path stays grep-stable.
-func (pathsAtomicAdapter) ReadFile(path string) ([]byte, error) {
-	r := core.ReadFile(path)
-	if !r.OK {
-		return nil, core.NewCode("deals.atrest.read_failed",
-			core.Sprintf("ReadFile(%q): %s", path, r.Error()))
-	}
-	b, _ := r.Value.([]byte)
-	return b, nil
-}
-
-// Remove is a thin wrapper around core.Remove. Failures are surfaced
-// but tolerated by the substrate's lazy-migration legacy-remove path
-// (RFC §3.1: warn-on-failure, do NOT abort the encrypted write).
-func (pathsAtomicAdapter) Remove(path string) error {
-	r := core.Remove(path)
-	if !r.OK {
-		return core.NewCode("deals.atrest.remove_failed",
-			core.Sprintf("Remove(%q): %s", path, r.Error()))
-	}
-	return nil
-}
-
 // atrestWriterFor returns the lazy-constructed AtRestWriter wired
 // against the live SessionGate. Returns (nil, false) when the gate is
 // not yet wired — caller falls back to legacy plaintext write.
@@ -509,10 +389,13 @@ func (s *Service) atrestWriterFor() (*recordfile.AtRestWriter[DealRecord], bool)
 	}
 	w := recordfile.NewAtRestWriter(recordfile.AtRestDeps[DealRecord]{
 		Surface: recordfile.SurfaceSalesDeals,
-		Keys:    gateAccountKeys{gate: gate, keys: keys},
-		PGP:     pgp.NewService(),
-		Schema:  dealsHeaderSchema,
-		Atomic:  pathsAtomicAdapter{},
+		Keys: account.NewAtRestKeys("deals", account.AtRestKeysDeps{
+			Gate: gate,
+			Keys: keys,
+		}),
+		PGP:    pgp.NewService(),
+		Schema: dealsHeaderSchema,
+		Atomic: paths.AtRestAdapter("deals"),
 	})
 	s.atrestWriter = w
 	return w, true
@@ -727,7 +610,7 @@ func (s *Service) headerPubKey(raw []byte) ([]byte, error) {
 		return nil, core.E("deals.headerPubKey",
 			"session gate does not provide account keys", nil)
 	}
-	accountID, err := peekTrixAccountID(raw)
+	accountID, err := recordfile.PeekAccountID(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -737,40 +620,6 @@ func (s *Service) headerPubKey(raw []byte) ([]byte, error) {
 			"PublicKeyFor("+accountID+") returned not-ok", nil)
 	}
 	return pub, nil
-}
-
-// peekTrixAccountID extracts the account.id from a raw at-rest blob
-// without going through PGP decrypt. The on-disk shape is
-// `[Magic(4)][Version(1)][HeaderLen(4)][HeaderJSON][Payload]` per RFC
-// §2.2; we read the JSON header bytes and unmarshal just the account
-// substructure.
-//
-// Returns an error when the blob is too short, the magic/length is
-// nonsense, or account.id is absent. The substrate's full DecodeHeader
-// path runs after this — so structural errors here are not
-// authoritative, they're just enough to pick the correct pub key.
-func peekTrixAccountID(raw []byte) (string, error) {
-	const headerStart = 4 + 1 + 4 // Magic + Version + HeaderLen
-	if len(raw) < headerStart {
-		return "", core.E("deals.peekTrix", "blob too short", nil)
-	}
-	hdrLen := int(uint32(raw[5])<<24 | uint32(raw[6])<<16 | uint32(raw[7])<<8 | uint32(raw[8]))
-	if hdrLen <= 0 || headerStart+hdrLen > len(raw) {
-		return "", core.E("deals.peekTrix", "header length out of bounds", nil)
-	}
-	hdrJSON := raw[headerStart : headerStart+hdrLen]
-	var probe struct {
-		Account struct {
-			ID string `json:"id"`
-		} `json:"account"`
-	}
-	if r := core.JSONUnmarshalString(string(hdrJSON), &probe); !r.OK {
-		return "", core.E("deals.peekTrix", "json unmarshal: "+r.Error(), nil)
-	}
-	if probe.Account.ID == "" {
-		return "", core.E("deals.peekTrix", "account.id missing from header", nil)
-	}
-	return probe.Account.ID, nil
 }
 
 // stringFromRaw extracts a string field from a substrate Header.Raw

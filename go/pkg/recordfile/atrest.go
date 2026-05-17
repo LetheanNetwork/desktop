@@ -755,3 +755,56 @@ func constantTimeEqualString(a, b string) bool {
 	}
 	return diff == 0
 }
+
+// --- F-4 PeekAccountID (Cerberus #44 PRBW extract) -------------------
+
+// PeekAccountID extracts the account.id from a raw at-rest blob
+// without going through PGP decrypt. The on-disk shape is
+// `[Magic(4)][Version(1)][HeaderLen(4)][HeaderJSON][Payload]` per RFC
+// §2.2; we read the JSON header bytes and unmarshal just the account
+// substructure.
+//
+// Returns an error when the blob is too short, the magic/length is
+// nonsense, or account.id is absent. The substrate's full DecodeHeader
+// path runs after this — so structural errors here are not
+// authoritative, they're just enough to pick the correct pub key for
+// the header MAC verification.
+//
+// Extracted from the wave 1/wave 2 per-consumer copies (sales/deals,
+// incidents, runbooks) per Cerberus #44 PRBW F-3 to eliminate 3x
+// duplication before wave 3 (marketing 4 sub-pkgs) lands. Error codes
+// use the `recordfile.atrest.peek.*` scope so consumer-side typed-
+// error matching surfaces the substrate boundary cleanly.
+//
+// Usage example:
+//
+//	accountID, err := recordfile.PeekAccountID(rawBytes)
+//	if err != nil { return ... }
+//	pub, ok := keys.PublicKeyFor(accountID)
+func PeekAccountID(raw []byte) (string, error) {
+	const headerStart = 4 + 1 + 4 // Magic + Version + HeaderLen
+	if len(raw) < headerStart {
+		return "", core.NewCode("recordfile.atrest.peek.blob_too_short",
+			"blob too short")
+	}
+	hdrLen := int(uint32(raw[5])<<24 | uint32(raw[6])<<16 | uint32(raw[7])<<8 | uint32(raw[8]))
+	if hdrLen <= 0 || headerStart+hdrLen > len(raw) {
+		return "", core.NewCode("recordfile.atrest.peek.header_len_oob",
+			"header length out of bounds")
+	}
+	hdrJSON := raw[headerStart : headerStart+hdrLen]
+	var probe struct {
+		Account struct {
+			ID string `json:"id"`
+		} `json:"account"`
+	}
+	if r := core.JSONUnmarshalString(string(hdrJSON), &probe); !r.OK {
+		return "", core.NewCode("recordfile.atrest.peek.json_unmarshal",
+			"json unmarshal: "+r.Error())
+	}
+	if probe.Account.ID == "" {
+		return "", core.NewCode("recordfile.atrest.peek.account_id_missing",
+			"account.id missing from header")
+	}
+	return probe.Account.ID, nil
+}
