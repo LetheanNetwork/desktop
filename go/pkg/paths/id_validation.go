@@ -38,6 +38,67 @@ import core "dappco.re/go"
 // accept can land as a file leaf without surprise truncation.
 const MaxIDBytes = 255
 
+// MaxPluginCodeBytes is the upper bound on a plugin code byte length.
+// 64 matches the pkg/plugin original isValidPluginCode cap — plugin
+// codes flow through URL routes + install directory basenames so a
+// tighter cap than MaxIDBytes keeps the surface conservative.
+const MaxPluginCodeBytes = 64
+
+// CodePluginCodeCollision is the typed error code Install-time
+// duplicate-code rejections raise (Mantis #1580). Stable for HTTP
+// envelope matching + frontend toast routing. Same shape discipline
+// as the cascade conflict codes — service-prefix + dot-separated.
+const CodePluginCodeCollision = "plugin.code.collision"
+
+// IsValidPluginCode reports whether code is a safe basename for the
+// plugin install directory + URL route. Shared between pkg/plugin
+// (binary plugins) and pkg/marketplace (lthn-vm bundle plugin block)
+// per Mantis #1580 — cousin-validator drift was the original gap
+// (pkg/marketplace had no equivalent gate so a marketplace-declared
+// plugin.code could bypass the path-traversal hardening pkg/plugin
+// got from Cerberus Mantis #1436).
+//
+// Rules (mirror of the original pkg/plugin.isValidPluginCode):
+//
+//   - Length 1..MaxPluginCodeBytes (64).
+//   - First character: ASCII alphanumeric (so `--malicious` flags
+//     can't appear as a route segment).
+//   - Remaining characters: alphanumeric or `_` or `-`.
+//   - No `/`, no `.`, no `..`, no whitespace, no control chars.
+//
+// Shape mirrors sandbox.IsValidVolumeName (same primitive on
+// adjacent surface — Cerberus's pass-3 "shape observation"). Dots
+// are allowed in volume names but NOT plugin codes; plugin codes
+// flow through URL paths too and a leading dot would surprise the
+// router.
+//
+// Usage example:
+//
+//	if !paths.IsValidPluginCode(input.Code) {
+//	    return core.Fail(core.E(op,
+//	        "invalid plugin code (must be alphanumeric basename, 1-64 chars, leading alnum): "+input.Code, nil))
+//	}
+func IsValidPluginCode(code string) bool {
+	if code == "" || len(code) > MaxPluginCodeBytes {
+		return false
+	}
+	for i, ch := range code {
+		alnum := ('a' <= ch && ch <= 'z') ||
+			('A' <= ch && ch <= 'Z') ||
+			('0' <= ch && ch <= '9')
+		if i == 0 {
+			if !alnum {
+				return false
+			}
+			continue
+		}
+		if !(alnum || ch == '_' || ch == '-') {
+			return false
+		}
+	}
+	return true
+}
+
 // IsValidID returns nil when id is safe to concatenate into a path
 // segment owned by a service directory. Returns a typed core error
 // otherwise so callers can surface "paths.invalid_id" uniformly.

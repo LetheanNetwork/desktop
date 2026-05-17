@@ -287,3 +287,57 @@ func TestIDValidation_IsValidAbsoluteUnderRoot_Ugly_RootHasTrailingSlash(t *core
 	err := paths.IsValidAbsoluteUnderRoot("/Users/x/Lethean/", "/Users/x/Lethean/sales/ada.md")
 	core.AssertNil(t, err, "trailing slash in root cleans + accepts child")
 }
+
+// --- IsValidPluginCode (Mantis #1580) — extracted shared validator ---
+//
+// Tests mirror pkg/plugin/install_security_test.go TestPlugin_IsValidPluginCode_*
+// so a future loosening of the rule trips both consumers at once.
+
+func TestIDValidation_IsValidPluginCode_Good(t *core.T) {
+	core.AssertTrue(t, paths.IsValidPluginCode("opencode"))
+	core.AssertTrue(t, paths.IsValidPluginCode("ollama"))
+	core.AssertTrue(t, paths.IsValidPluginCode("forgejo_runner"))
+	core.AssertTrue(t, paths.IsValidPluginCode("phpmyadmin-5"))
+	core.AssertTrue(t, paths.IsValidPluginCode("a"))
+	core.AssertTrue(t, paths.IsValidPluginCode("z123"))
+}
+
+func TestIDValidation_IsValidPluginCode_Bad_PathTraversal(t *core.T) {
+	core.AssertFalse(t, paths.IsValidPluginCode("../../etc"))
+	core.AssertFalse(t, paths.IsValidPluginCode(".."))
+	core.AssertFalse(t, paths.IsValidPluginCode("../foo"))
+}
+
+func TestIDValidation_IsValidPluginCode_Bad_LeadingSlash(t *core.T) {
+	core.AssertFalse(t, paths.IsValidPluginCode("/etc/passwd"))
+	core.AssertFalse(t, paths.IsValidPluginCode("/"))
+}
+
+func TestIDValidation_IsValidPluginCode_Bad_LeadingDot(t *core.T) {
+	core.AssertFalse(t, paths.IsValidPluginCode(".hidden"))
+}
+
+func TestIDValidation_IsValidPluginCode_Bad_LeadingDash(t *core.T) {
+	core.AssertFalse(t, paths.IsValidPluginCode("-rf"))
+	core.AssertFalse(t, paths.IsValidPluginCode("--privileged"))
+}
+
+func TestIDValidation_IsValidPluginCode_Bad_Empty(t *core.T) {
+	core.AssertFalse(t, paths.IsValidPluginCode(""))
+}
+
+func TestIDValidation_IsValidPluginCode_Bad_TooLong(t *core.T) {
+	long := "a"
+	for i := 0; i < paths.MaxPluginCodeBytes; i++ {
+		long += "x"
+	}
+	core.AssertFalse(t, paths.IsValidPluginCode(long))
+}
+
+func TestIDValidation_IsValidPluginCode_Bad_SpecialChars(t *core.T) {
+	core.AssertFalse(t, paths.IsValidPluginCode("code/sub"))
+	core.AssertFalse(t, paths.IsValidPluginCode("code.with.dot"))
+	core.AssertFalse(t, paths.IsValidPluginCode("code space"))
+	core.AssertFalse(t, paths.IsValidPluginCode("code;rm"))
+	core.AssertFalse(t, paths.IsValidPluginCode("code$(pwd)"))
+}

@@ -240,3 +240,61 @@ func TestManifest_ValidateManifest_Ugly(t *core.T) {
 		}
 	}
 }
+
+// TestMarketplace_ValidateManifest_RejectsTraversalPluginCode_Bad —
+// Mantis #1580 HIGH. The marketplace surface used to skip the
+// plugin-code path-traversal gate that pkg/plugin gained from
+// Cerberus #1436. ValidateManifest now delegates to the shared
+// paths.IsValidPluginCode for every non-empty Plugin.Code BEFORE any
+// path concat or registry insert.
+func TestMarketplace_ValidateManifest_RejectsTraversalPluginCode_Bad(t *core.T) {
+	base := subject.BundleManifest{
+		Schema:  "lthn-vm/v1",
+		Name:    "opencode",
+		Display: "OpenCode",
+		Images:  []subject.ImageEntry{{ID: "app", Image: "alpine:3.21"}},
+	}
+
+	attacks := []string{
+		"../../etc/passwd",
+		"..",
+		"../foo",
+		"/etc/passwd",
+		".hidden",
+		"-rf",
+		"--privileged",
+		"code/sub",
+		"code.with.dot",
+		"code space",
+		"code;rm",
+		"code$(pwd)",
+	}
+
+	for _, evil := range attacks {
+		m := base
+		m.Plugin = &subject.PluginBlock{Code: evil}
+		r := subject.ValidateManifest(m)
+		core.AssertFalse(t, r.OK, "must reject malicious plugin.code: "+evil)
+		core.AssertContains(t, r.Error(), "invalid plugin.code",
+			"reject reason must surface invalid plugin.code for: "+evil)
+	}
+}
+
+// TestMarketplace_ValidateManifest_AcceptsValidPluginCode_Good — sanity
+// check that conformant codes still pass after the gate addition.
+func TestMarketplace_ValidateManifest_AcceptsValidPluginCode_Good(t *core.T) {
+	base := subject.BundleManifest{
+		Schema:  "lthn-vm/v1",
+		Name:    "opencode",
+		Display: "OpenCode",
+		Images:  []subject.ImageEntry{{ID: "app", Image: "alpine:3.21"}},
+	}
+
+	valid := []string{"opencode", "ollama", "forgejo_runner", "phpmyadmin-5", "a", "z123"}
+	for _, code := range valid {
+		m := base
+		m.Plugin = &subject.PluginBlock{Code: code}
+		r := subject.ValidateManifest(m)
+		core.AssertTrue(t, r.OK, "must accept valid plugin.code: "+code)
+	}
+}

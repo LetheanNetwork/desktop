@@ -7,6 +7,7 @@ package plugin
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // Manifest describes one installable plugin. Stored on disk at
@@ -52,41 +53,20 @@ type UI struct {
 	Embed      string `json:"embed,omitempty"`      // "iframe" | "native"
 }
 
-// isValidPluginCode reports whether a code is a safe basename for the
-// plugin install directory + URL route. Cerberus Mantis #1436 — the
-// previous validate did "required + non-empty" only, leaving
-// `pluginDir(PathJoin(root, code))` open to path traversal via
-// `code = "../../etc"`. Rules:
+// isValidPluginCode delegates to the shared paths.IsValidPluginCode
+// per Mantis #1580 — extracted to a common helper so pkg/marketplace
+// (lthn-vm bundle plugin block) and pkg/plugin (binary plugins) gate
+// on the same rule set. The cousin-validator drift class is the gap
+// the extraction closes: a marketplace-declared plugin.code used to
+// bypass the path-traversal hardening pkg/plugin got from Cerberus
+// Mantis #1436 because the marketplace surface had no equivalent
+// validator. Now both surfaces import from one source.
 //
-//   - Length 1..64.
-//   - First character: ASCII alphanumeric (so `--malicious` flags
-//     can't appear as a route segment).
-//   - Remaining characters: alphanumeric or `_` or `-`.
-//   - No `/`, no `.`, no `..`, no whitespace, no control chars.
-//
-// Shape mirrors sandbox.IsValidVolumeName (same primitive on adjacent
-// surface — Cerberus's pass-3 "shape observation"). Dots are allowed
-// in volume names but NOT plugin codes; plugin codes flow through
-// URL paths too and a leading dot would surprise the router.
+// Wrapper kept (rather than inlining call sites) so call-site
+// references stay unchanged; future loosening / tightening of the
+// rule lives in one place.
 func isValidPluginCode(code string) bool {
-	if code == "" || len(code) > 64 {
-		return false
-	}
-	for i, ch := range code {
-		alnum := ('a' <= ch && ch <= 'z') ||
-			('A' <= ch && ch <= 'Z') ||
-			('0' <= ch && ch <= '9')
-		if i == 0 {
-			if !alnum {
-				return false
-			}
-			continue
-		}
-		if !(alnum || ch == '_' || ch == '-') {
-			return false
-		}
-	}
-	return true
+	return paths.IsValidPluginCode(code)
 }
 
 // isValidBinaryPath reports whether a Binary field is a safe

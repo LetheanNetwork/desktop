@@ -19,6 +19,7 @@ package marketplace
 import (
 	core "dappco.re/go"
 	"dappco.re/go/orm"
+	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/sandbox"
 )
@@ -147,12 +148,23 @@ func (s *Service) Install(input InstallInput) core.Result {
 		return core.Fail(core.E(installBundleOp, "invalid manifest", nil))
 	}
 
+	m := input.Manifest
+
+	// Mantis #1580 HIGH — Install-time plugin-code uniqueness gate.
+	// A marketplace bundle's plugin.code must not collide with an
+	// existing binary plugin OR an already-installed marketplace
+	// bundle's plugin code, else postMessage / proxy / view-registry
+	// dispatch becomes ambiguous (whose code is this?). Reject loudly
+	// rather than overwriting.
+	if r := s.checkPluginCodeCollision(m); !r.OK {
+		return r
+	}
+
 	sbSvc := s.sandboxSvc()
 	if sbSvc == nil {
 		return core.Fail(core.E(installBundleOp, "sandbox service not available", nil))
 	}
 
-	m := input.Manifest
 	env := s.resolveEnv(m, input.Env)
 
 	configPath := s.bundleConfigPath(m.Name)
@@ -726,6 +738,72 @@ func encodePermissions(perms []Permission) string {
 		return ""
 	}
 	return core.JSONMarshalString(perms)
+}
+
+// checkPluginCodeCollision enforces the Mantis #1580 HIGH Install-
+// time uniqueness gate. A marketplace bundle's plugin.code MUST NOT
+// collide with:
+//
+//   - an existing binary-plugin code installed under
+//     ~/Lethean/conf/plugins/<code>/plugin.json (resolved via the
+//     pkg/plugin service's List surface when registered);
+//   - an already-installed marketplace bundle whose effective plugin
+//     code (pluginCodeOf) matches this install's effective code AND
+//     whose bundle id differs (re-installing the SAME bundle id is a
+//     legitimate update path, not a collision).
+//
+// Reject with typed code paths.CodePluginCodeCollision so HTTP
+// envelope construction + frontend toast routing can pattern-match.
+//
+// Best-effort by design: when pkg/plugin is not registered (binary-
+// plugin host absent), the binary-side check is skipped — the
+// marketplace surface still gates against its own installed bundles
+// via the orm scan.
+func (s *Service) checkPluginCodeCollision(m BundleManifest) core.Result {
+	code := pluginCodeOf(m)
+	if code == "" {
+		return core.Ok(nil)
+	}
+
+	// (a) Binary-plugin collision via pkg/plugin.Service.List().
+	if s.core != nil {
+		if host, ok := core.ServiceFor[*plugin.Service](s.core, "plugin"); ok && host != nil {
+			listR := host.List()
+			if listR.OK {
+				if out, ok := listR.Value.(plugin.ListOutput); ok {
+					for _, p := range out.Plugins {
+						if p.Code == code {
+							return core.Fail(core.E(paths.CodePluginCodeCollision,
+								"plugin code already taken by an installed binary plugin: "+code, nil))
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// (b) Marketplace-bundle collision via orm scan.
+	if s.core != nil {
+		listR := orm.Of[InstalledBundle](s.core).Get()
+		if listR.OK {
+			if bundles, ok := listR.Value.([]InstalledBundle); ok {
+				for _, ib := range bundles {
+					if ib.BundleID == m.Name {
+						// Same bundle id — re-install / update path, NOT
+						// a collision. The bundle owns its own code.
+						continue
+					}
+					existing := s.resolvePluginCode(ib.BundleID)
+					if existing == code {
+						return core.Fail(core.E(paths.CodePluginCodeCollision,
+							"plugin code already taken by installed bundle "+ib.BundleID+": "+code, nil))
+					}
+				}
+			}
+		}
+	}
+
+	return core.Ok(nil)
 }
 
 // DecodePermissions parses an InstalledBundle.Permissions string back

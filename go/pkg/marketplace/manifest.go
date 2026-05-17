@@ -11,6 +11,7 @@ package marketplace
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 	"gopkg.in/yaml.v3"
 )
 
@@ -252,6 +253,21 @@ func ValidateManifest(m BundleManifest) core.Result {
 	if !isValidBundleName(m.Name) {
 		return core.Fail(core.E(validateOp,
 			"name must be alphanumeric + dash only: "+m.Name, nil))
+	}
+	// Mantis #1580 — gate the effective plugin code against
+	// paths.IsValidPluginCode BEFORE any path concat or registry
+	// insert. The marketplace surface used to skip this check while
+	// pkg/plugin (binary plugins) enforced it from Cerberus #1436;
+	// the gap let a marketplace-declared plugin.code like
+	// "../../etc/passwd" or "-rf" escape directory basenames + URL
+	// route segments. Gate uses the shared paths.IsValidPluginCode
+	// extracted to pkg/paths/id_validation.go so the rule lives in
+	// one place across both consumers.
+	if m.Plugin != nil && core.Trim(m.Plugin.Code) != "" {
+		if !paths.IsValidPluginCode(core.Trim(m.Plugin.Code)) {
+			return core.Fail(core.E(validateOp,
+				"invalid plugin.code (must be alphanumeric basename, 1-64 chars, leading alnum, no path separators): "+m.Plugin.Code, nil))
+		}
 	}
 	if len(m.Images) == 0 {
 		return core.Fail(core.E(validateOp, "at least one image entry is required", nil))
