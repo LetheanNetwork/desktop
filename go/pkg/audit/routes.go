@@ -81,6 +81,7 @@ func (s *Service) RouteGroups() []coreapi.RouteGroup {
 //
 //   - audit.query.invalid_cursor → 400 Bad Request
 //   - audit.query.invalid_param  → 400 Bad Request
+//   - audit.query.deadline       → 504 Gateway Timeout (partial result + cursor)
 //   - any other (unexpected)     → 500 Internal Server Error
 //   - success                    → 200 OK
 //
@@ -90,19 +91,35 @@ func (s *Service) RouteGroups() []coreapi.RouteGroup {
 //   - until=<unix-seconds>       — exclusive upper bound (optional)
 //   - event=<dotted.name>        — exact event-name match
 //   - account_id=<raw>           — hashed before compare (RFC §6.4)
-//   - outcome=<ok|failed|denied|error>
+//   - outcome=<ok|failed|denied|error> — closed set per Cerberus #29
+//     Q3 STRONGLY; unknown values 400 with audit.query.invalid_param.
 //   - limit=<1..5000>            — default 200, cap 5000
 //   - cursor=<opaque>            — resume from prior call
 func (g *routesProvider) handleEvents(c *gin.Context) {
-	in, ok := parseEventsQuery(c)
+	in, perr, ok := parseEventsQuery(c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, coreapi.Fail(codeAuditQueryInvalidParam,
-			"invalid query parameter — check since/until/limit are integers"))
+		c.JSON(http.StatusBadRequest, coreapi.Fail(codeAuditQueryInvalidParam, perr))
 		return
 	}
 	r := g.svc.Query(in)
 	if r.OK {
 		out, _ := r.Value.(QueryOutput)
+		// Cerberus #29 ADD-MED-3 — Service.Query signals a wall-clock
+		// deadline hit via QueryOutput.DeadlineExceeded; map to HTTP 504
+		// with the audit.query.deadline error code. The partial Events
+		// + resume NextCursor still ride along in the response body so
+		// the client can rehydrate state and resume from the cursor.
+		if out.DeadlineExceeded {
+			c.JSON(http.StatusGatewayTimeout, coreapi.Response[QueryOutput]{
+				Success: false,
+				Data:    out,
+				Error: &coreapi.Error{
+					Code:    codeAuditQueryDeadline,
+					Message: "audit query deadline exceeded; resume with next_cursor",
+				},
+			})
+			return
+		}
 		c.JSON(http.StatusOK, coreapi.OK(out))
 		return
 	}
@@ -119,22 +136,33 @@ func (g *routesProvider) handleEvents(c *gin.Context) {
 }
 
 // parseEventsQuery extracts QueryInput from the gin context's
-// query-string. Returns (in, false) when ANY supplied numeric param
-// fails to parse — caller returns 400 with codeAuditQueryInvalidParam.
+// query-string. Returns (in, "", false) when ANY supplied param fails
+// validation — caller returns 400 with codeAuditQueryInvalidParam and
+// the explanation string.
 //
 // Missing/blank fields fall through to QueryInput zero-values which
 // Service.Query interprets as "no filter on this field."
-func parseEventsQuery(c *gin.Context) (QueryInput, bool) {
+//
+// Cerberus #29 Q3 STRONGLY (RFC.stage-e-audit-viewer v2 §5.3): the
+// outcome param is validated against the closed enum {ok, failed,
+// denied, error}. Empty/missing → no filter. Unknown values fail with
+// an explicit explanation so a probe like outcome=banana can't
+// fingerprint scan-shape via the response timing/shape gap that a
+// free-string passthrough would expose.
+func parseEventsQuery(c *gin.Context) (QueryInput, string, bool) {
 	in := QueryInput{
 		Event:     c.Query("event"),
 		AccountID: c.Query("account_id"),
 		Outcome:   c.Query("outcome"),
 		Cursor:    c.Query("cursor"),
 	}
+	if in.Outcome != "" && !isValidOutcome(in.Outcome) {
+		return in, "outcome must be one of ok|failed|denied|error", false
+	}
 	if v := c.Query("since"); v != "" {
 		r := core.ParseInt(v, 10, 64)
 		if !r.OK {
-			return in, false
+			return in, "since must be a unix-seconds integer", false
 		}
 		i, _ := r.Value.(int64)
 		in.Since = time.Unix(i, 0).UTC()
@@ -142,7 +170,7 @@ func parseEventsQuery(c *gin.Context) (QueryInput, bool) {
 	if v := c.Query("until"); v != "" {
 		r := core.ParseInt(v, 10, 64)
 		if !r.OK {
-			return in, false
+			return in, "until must be a unix-seconds integer", false
 		}
 		i, _ := r.Value.(int64)
 		in.Until = time.Unix(i, 0).UTC()
@@ -150,12 +178,12 @@ func parseEventsQuery(c *gin.Context) (QueryInput, bool) {
 	if v := c.Query("limit"); v != "" {
 		r := core.Atoi(v)
 		if !r.OK {
-			return in, false
+			return in, "limit must be an integer", false
 		}
 		n, _ := r.Value.(int)
 		in.Limit = n
 	}
-	return in, true
+	return in, "", true
 }
 
 // Error codes Query path emits via coreapi.Response envelope.

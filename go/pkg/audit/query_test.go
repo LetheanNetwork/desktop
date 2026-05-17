@@ -214,3 +214,199 @@ func mustRecord(t *testing.T, svc *Service, ev Event) {
 		t.Fatalf("Record failed: %s", r.Error())
 	}
 }
+
+// --- Cerberus #29 ADD-MED-3 — default range cap + wall-clock deadline ---
+// (RFC.stage-e-audit-viewer v2 §5.7 + §8.4)
+
+// writeDayFileRaw lays down a synthetic day-file at YYYY-MM-DD.log
+// inside the service's audit root carrying the supplied events as
+// NDJSON. Used to fabricate days OLDER than the rotation goroutine
+// would naturally produce in a test run — exercises the default-clamp
+// + cursor-resume code paths without waiting real days.
+func writeDayFileRaw(t *testing.T, svc *Service, stem string, events []Event) {
+	t.Helper()
+	path := core.PathJoin(svc.root, stem+".log")
+	var body []byte
+	for _, ev := range events {
+		// Stamp the hash + process discriminator so the on-disk shape
+		// matches what Service.Record would have produced.
+		if ev.AccountID != "" {
+			ev.AccountID = hashAccountID(svc.secret, ev.AccountID)
+		}
+		if ev.Meta == nil {
+			ev.Meta = map[string]any{}
+		}
+		if _, has := ev.Meta[metaKeyProcess]; !has {
+			ev.Meta[metaKeyProcess] = svc.opts.ProcessLabel
+		}
+		bR := core.JSONMarshal(ev)
+		if !bR.OK {
+			t.Fatalf("marshal: %s", bR.Error())
+		}
+		line, _ := bR.Value.([]byte)
+		body = append(body, line...)
+		body = append(body, '\n')
+	}
+	if r := core.WriteFile(path, body, fileMode); !r.OK {
+		t.Fatalf("write %s: %s", path, r.Error())
+	}
+}
+
+// stemDaysAgo returns the YYYY-MM-DD stem `n` days before today UTC.
+func stemDaysAgo(n int) string {
+	t := core.Now().UTC().Add(-time.Duration(n) * 24 * time.Hour)
+	return dateStem(t.Unix())
+}
+
+func TestQuery_DefaultRangeClampsTo30d_Good(t *testing.T) {
+	// Cerberus #29 ADD-MED-3 — Query with Since=0 + Cursor="" against a
+	// disk holding day-files from 90 days back returns events ONLY from
+	// the last 30 days. Old-day events MUST NOT appear in the result.
+	svc := newTestService(t)
+	now := core.Now().UTC().Unix()
+
+	// Far-past day (90 days ago) — outside the default 30d cap.
+	writeDayFileRaw(t, svc, stemDaysAgo(90), []Event{{
+		Event:   EventAuthSessionIssued,
+		TS:      now - 90*24*3600,
+		Outcome: OutcomeOK,
+		Meta:    map[string]any{"canary": "far-past"},
+	}})
+	// Recent day (5 days ago) — inside the default 30d cap.
+	writeDayFileRaw(t, svc, stemDaysAgo(5), []Event{{
+		Event:   EventAuthSessionIssued,
+		TS:      now - 5*24*3600,
+		Outcome: OutcomeOK,
+		Meta:    map[string]any{"canary": "recent"},
+	}})
+
+	r := svc.Query(QueryInput{})
+	if !r.OK {
+		t.Fatalf("Query failed: %s", r.Error())
+	}
+	out, _ := r.Value.(QueryOutput)
+	for _, ev := range out.Events {
+		if marker, _ := ev.Meta["canary"].(string); marker == "far-past" {
+			t.Fatalf("ADD-MED-3: 90d-old event leaked past the default 30d clamp")
+		}
+	}
+	if len(out.Events) == 0 {
+		t.Fatal("expected the 5d-old event in result; default clamp dropped too much")
+	}
+}
+
+func TestQuery_ExplicitSinceOverridesClamp_Good(t *testing.T) {
+	// Cerberus #29 ADD-MED-3 — explicit Since reaches BEYOND the default
+	// 30d clamp. Operator opt-in for deeper forensic queries works.
+	svc := newTestService(t)
+	now := core.Now().UTC().Unix()
+
+	writeDayFileRaw(t, svc, stemDaysAgo(60), []Event{{
+		Event:   EventAuthSessionIssued,
+		TS:      now - 60*24*3600,
+		Outcome: OutcomeOK,
+		Meta:    map[string]any{"canary": "60d"},
+	}})
+
+	r := svc.Query(QueryInput{
+		Since: core.Now().UTC().Add(-90 * 24 * time.Hour),
+	})
+	if !r.OK {
+		t.Fatalf("Query failed: %s", r.Error())
+	}
+	out, _ := r.Value.(QueryOutput)
+	found := false
+	for _, ev := range out.Events {
+		if marker, _ := ev.Meta["canary"].(string); marker == "60d" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("explicit Since=90d-ago MUST surface the 60d-old event; default clamp wrongly applied")
+	}
+}
+
+func TestQuery_CursorOverridesClamp_Good(t *testing.T) {
+	// Cerberus #29 ADD-MED-3 — cursor-resume bypasses the default clamp.
+	// A cursor encoding a 45d-old file_date MUST resume there, not
+	// snap forward to the 30d boundary.
+	svc := newTestService(t)
+	now := core.Now().UTC().Unix()
+
+	farStem := stemDaysAgo(45)
+	writeDayFileRaw(t, svc, farStem, []Event{{
+		Event:   EventAuthSessionIssued,
+		TS:      now - 45*24*3600,
+		Outcome: OutcomeOK,
+		Meta:    map[string]any{"canary": "45d"},
+	}})
+
+	// Build a cursor pointing at the 45d file with no per-day floor.
+	cur := encodeCursor(farStem, 0)
+	r := svc.Query(QueryInput{Cursor: cur})
+	if !r.OK {
+		t.Fatalf("Query failed: %s", r.Error())
+	}
+	out, _ := r.Value.(QueryOutput)
+	found := false
+	for _, ev := range out.Events {
+		if marker, _ := ev.Meta["canary"].(string); marker == "45d" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("cursor-resume MUST bypass the default clamp; 45d-old event was wrongly skipped")
+	}
+}
+
+func TestQuery_DeadlineReturnsPartialCursor_Ugly(t *testing.T) {
+	// Cerberus #29 ADD-MED-3 — wall-clock deadline. Lay down enough
+	// day-files that the per-day-boundary deadline check trips before
+	// the walker completes. Helper returns OK with
+	// QueryOutput.DeadlineExceeded=true + NextCursor encoding the
+	// resume position.
+	svc := newTestService(t)
+	now := core.Now().UTC().Unix()
+
+	// 5 day-files spread across the clamp window so the walker has
+	// real work to do; we shorten the deadline via the test hook to
+	// fire mid-walk.
+	for i := 1; i <= 5; i++ {
+		stem := stemDaysAgo(i)
+		writeDayFileRaw(t, svc, stem, []Event{{
+			Event:   EventAuthSessionIssued,
+			TS:      now - int64(i)*24*3600,
+			Outcome: OutcomeOK,
+		}})
+	}
+
+	// Force the deadline to fire immediately by overriding now() via a
+	// near-zero deadline. We can't monkeypatch core.Now, so the test
+	// uses the package-internal queryWithDeadline test seam — see
+	// queryDeadlineForTest below.
+	out, hit := queryForTestWithDeadline(svc, QueryInput{}, 1)
+	if !hit {
+		t.Fatal("expected DeadlineExceeded flag to be set with an effectively-zero deadline")
+	}
+	if out.NextCursor == "" {
+		t.Fatal("deadline-fire MUST emit a NextCursor so callers can resume")
+	}
+}
+
+// queryForTestWithDeadline mirrors Service.Query but with a caller-
+// supplied deadline override. Lives in the test file so production
+// code stays free of test seams.
+func queryForTestWithDeadline(s *Service, in QueryInput, deadlineNs int64) (QueryOutput, bool) {
+	// Temporarily swap the package-level deadline override hook used by
+	// Service.Query. Test-only seam — production calls always read
+	// defaultQueryDeadline.
+	prev := queryDeadlineOverride
+	queryDeadlineOverride = time.Duration(deadlineNs)
+	defer func() { queryDeadlineOverride = prev }()
+	r := s.Query(in)
+	if !r.OK {
+		return QueryOutput{}, false
+	}
+	out, _ := r.Value.(QueryOutput)
+	return out, out.DeadlineExceeded
+}

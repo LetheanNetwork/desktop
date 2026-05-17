@@ -77,6 +77,15 @@ type QueryInput struct {
 // holds up to Limit matches in TS-ascending order; NextCursor is
 // non-empty when more results may exist beyond Limit.
 //
+// DeadlineExceeded is set when the wall-clock deadline fired mid-scan
+// (Cerberus #29 ADD-MED-3). When true, Events holds the partial
+// matches collected before the deadline + NextCursor encodes the next
+// day to scan; the REST handler maps this signal to HTTP 504 with
+// error code audit.query.deadline. The Result envelope still reports
+// OK=true so callers that don't care about the deadline distinction
+// (e.g. internal forensic scans) see the partial-but-resumable shape
+// transparently.
+//
 // Usage example:
 //
 //	for {
@@ -88,8 +97,9 @@ type QueryInput struct {
 //	    in.Cursor = out.NextCursor
 //	}
 type QueryOutput struct {
-	Events     []Event `json:"events"`
-	NextCursor string  `json:"next_cursor"`
+	Events           []Event `json:"events"`
+	NextCursor       string  `json:"next_cursor"`
+	DeadlineExceeded bool    `json:"deadline_exceeded,omitempty"`
 }
 
 // queryCursor is the decoded shape behind the opaque Cursor string.
@@ -115,6 +125,16 @@ type queryCursor struct {
 // — single-user desktop assumption. Per-account scoping is Stage F+
 // work IF multi-user desktop becomes a deploy mode.
 //
+// Cerberus #29 ADD-MED-3 (RFC.stage-e-audit-viewer v2 §5.7):
+//
+//   - Default range cap: when BOTH Cursor=="" AND Since.IsZero() the
+//     effective Since clamps to (now - defaultQueryRangeCap). Explicit
+//     Since OR cursor-resume bypass the clamp.
+//   - Wall-clock deadline: bounded by defaultQueryDeadline (30s). On
+//     deadline-fire mid-scan, returns partial Events + a resume Cursor
+//     encoding the next day to scan + a failure with code
+//     codeAuditQueryDeadline so the handler can map to HTTP 504.
+//
 // Usage example:
 //
 //	r := svc.Query(audit.QueryInput{Limit: 100})
@@ -132,6 +152,15 @@ func (s *Service) Query(in QueryInput) core.Result {
 		limit = maxQueryLimit
 	}
 
+	// Cerberus #29 ADD-MED-3 — default time-range cap. When neither
+	// Cursor nor Since supplied, clamp Since to (now - 30 days) so a
+	// wide unauthenticated-shape probe cannot trigger a full-history
+	// scan. Operator overrides via explicit Since; cursor-resume is
+	// honoured as-is so paginated walks reach back beyond the default.
+	if in.Cursor == "" && in.Since.IsZero() {
+		in.Since = core.Now().UTC().Add(-defaultQueryRangeCap)
+	}
+
 	// Hash the predicate's account_id BEFORE walking files so the
 	// inner loop compares hash-to-hash without re-hashing per event.
 	hashedAccount := ""
@@ -145,17 +174,29 @@ func (s *Service) Query(in QueryInput) core.Result {
 			"invalid cursor: "+err.Error()))
 	}
 
-	// When Since is unset AND no Cursor, jump the start cursor to the
-	// earliest YYYY-MM-DD stem actually present on disk so we don't
-	// walk thousands of empty days from the epoch forward. The cursor
-	// already lands on a valid file when supplied (no scan needed).
-	if in.Cursor == "" && in.Since.IsZero() {
-		if earliest, ok := earliestStem(s.root); ok {
+	// When Since was unset AND no Cursor AND the default-clamp produced
+	// a Since that is OLDER than the earliest day-file on disk, jump
+	// the start cursor to the earliest YYYY-MM-DD stem actually present
+	// so we don't walk thousands of empty days. The clamp itself bounds
+	// the worst case to ~30 day-iterations; this stays as a friendly
+	// fast-path when the install is younger than the cap.
+	if in.Cursor == "" {
+		if earliest, ok := earliestStem(s.root); ok && earliest > startDate {
 			startDate = earliest
 		}
 	}
 
 	endDate := dateStem(timeOrNow(in.Until).Unix())
+
+	// Cerberus #29 ADD-MED-3 — wall-clock deadline. Captured at entry
+	// so the per-day-file boundary check below stays a cheap subtraction.
+	// queryDeadlineOverride is a package-internal test seam — production
+	// callers always read defaultQueryDeadline.
+	budget := defaultQueryDeadline
+	if queryDeadlineOverride > 0 {
+		budget = queryDeadlineOverride
+	}
+	deadline := core.Now().Add(budget)
 
 	out := QueryOutput{Events: make([]Event, 0, limit)}
 
@@ -163,6 +204,19 @@ func (s *Service) Query(in QueryInput) core.Result {
 	for {
 		if cur > endDate {
 			break
+		}
+		// Cerberus #29 ADD-MED-3 — check the wall-clock deadline at
+		// the day-file boundary. We only check between files so a single
+		// large file doesn't get interrupted mid-decode (the scanner
+		// would otherwise need to hand back partial state). The cursor
+		// emitted on deadline-fire resumes from `cur` — the day we were
+		// about to scan but didn't. Returned as OK with the
+		// DeadlineExceeded flag set so the handler can map to HTTP 504
+		// while internal callers see the partial-but-resumable shape.
+		if core.Now().After(deadline) {
+			out.NextCursor = encodeCursor(cur, 0)
+			out.DeadlineExceeded = true
+			return core.Ok(out)
 		}
 		// Resolve the day-file across the suffix chain — survives
 		// rotation/compression/retention rename per RFC §4.3.
@@ -364,7 +418,31 @@ const (
 	maxQueryLimit     = 5000
 )
 
+// Cerberus #29 ADD-MED-3 — default range cap + deadline budget for
+// Service.Query. Calibrated for the single-user-desktop deploy per
+// RFC.stage-e-audit-viewer v2 §5.7; operator-overrides land in a later
+// Options bump (see RFC §6 deferred set).
+//
+//   - defaultQueryRangeCap bounds the lookback when neither Cursor nor
+//     Since is supplied. Operator explicit Since overrides; cursor
+//     resume bypasses.
+//   - defaultQueryDeadline bounds the wall-clock spend per Query call.
+//     On expiry the helper returns partial events + a resume cursor;
+//     the REST handler maps the signal to HTTP 504 audit.query.deadline.
+const (
+	defaultQueryRangeCap = 30 * 24 * core.Hour
+	defaultQueryDeadline = 30 * core.Second
+)
+
 // Error codes Query emits.
 const (
 	codeAuditQueryInvalidCursor = "audit.query.invalid_cursor"
+	codeAuditQueryDeadline      = "audit.query.deadline"
 )
+
+// queryDeadlineOverride is a package-internal test seam allowing
+// query_test.go to force the wall-clock deadline to a near-zero value
+// so the deadline-fire path lands inside a single Query call without
+// waiting real seconds. Zero (production default) means "use
+// defaultQueryDeadline". Never set from production code.
+var queryDeadlineOverride core.Duration

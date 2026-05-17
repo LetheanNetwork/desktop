@@ -321,6 +321,86 @@ func TestSeal_NoBlobSizeInAuditMeta_Bad(t *core.T) {
 	}
 }
 
+// --- Seal — Good: audit Meta carries EXACTLY {path_hash, version} ---
+// (Cerberus #29 ADD-MED-2 — backend regression guard for
+// RFC.stage-e-audit-viewer v2 §4.3)
+//
+// The frontend viewer's TestAuditWindow_SealedEventMetaShape_Good
+// catches drift at render-time; this Go-side test pins the SAME
+// invariant at emit-time so a future seal-path commit that
+// reintroduces a dropped field (e.g. blob_size_bytes / wallet_path /
+// size_bytes) trips here BEFORE shipping to the frontend.
+//
+// The shape contract per Cerberus #25 ADD-MED-3 + Cerberus #29
+// ADD-MED-2: Service.Seal's success-emit MUST carry EXACTLY two Meta
+// keys — path_hash + version — and nothing else. The service layer's
+// __process stamp lands at the Recorder boundary (audit.Service.
+// recordCommon), NOT at the emit call this recordingRecorder
+// captures; the recorder receives the pre-stamp shape so the assertion
+// stays tight against the keys seal.go itself sets.
+
+func TestSeal_AuditMetaShape_Good(t *core.T) {
+	_ = homeFixture(t)
+	id, svc := seedMarkerAccount(t)
+	rec := &recordingRecorder{}
+	audit.SetDefault(rec)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	r := svc.Seal(subject.SealInput{
+		AccountID: id,
+		Version:   1,
+		Blob:      fixtureSealBlob(),
+	})
+	core.AssertTrue(t, r.OK, "MARKER → SEALED Seal must succeed")
+
+	var sealedEvent *audit.Event
+	for i := range rec.events {
+		if rec.events[i].Event == "auth.account.sealed" {
+			sealedEvent = &rec.events[i]
+		}
+	}
+	core.AssertTrue(t, sealedEvent != nil,
+		"auth.account.sealed audit row MUST be emitted on Seal success")
+
+	// EXACT-shape assertion: only path_hash + version are allowed.
+	// Any additional key is a regression of Cerberus #25 ADD-MED-3 /
+	// Cerberus #29 ADD-MED-2 — fail loudly so the violating commit
+	// can't ship.
+	allowed := map[string]bool{
+		"path_hash": true,
+		"version":   true,
+	}
+	for k := range sealedEvent.Meta {
+		core.AssertTrue(t, allowed[k],
+			"Cerberus #29 ADD-MED-2: unexpected Meta key in auth.account.sealed: "+k)
+	}
+
+	// Positive shape: the two expected keys MUST be present + typed
+	// correctly. path_hash is SHA-256 hex (64 lowercase hex chars).
+	pathHash, has := sealedEvent.Meta["path_hash"].(string)
+	core.AssertTrue(t, has, "path_hash MUST be present and a string")
+	core.AssertEqual(t, 64, len(pathHash),
+		"path_hash MUST be SHA-256 hex (64 chars)")
+
+	version, hasV := sealedEvent.Meta["version"].(int)
+	core.AssertTrue(t, hasV, "version MUST be present and an int")
+	core.AssertEqual(t, 1, version,
+		"version MUST equal the SealInput.Version (v1 schema)")
+
+	// Negative reassertion of the Cerberus #25 ADD-MED-3 dropped field
+	// set — explicit list keeps grep-discoverability for future audits.
+	for _, dropped := range []string{
+		"blob_size_bytes",
+		"wallet_path",
+		"size_bytes",
+		"blob",
+	} {
+		_, leaked := sealedEvent.Meta[dropped]
+		core.AssertFalse(t, leaked,
+			"Cerberus #25 ADD-MED-3 dropped field leaked into Meta: "+dropped)
+	}
+}
+
 // --- handler-level: PUT /v1/account/:id/seal ---
 
 // doPUT issues a PUT against the engine with the supplied body bytes.
