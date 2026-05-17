@@ -12,6 +12,38 @@ import (
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
+// stubSessionGate is the minimal SessionGate implementation used across
+// content_test.go / security_test.go / wails_test.go. ids drives the
+// gate verdict — empty slice = locked, non-empty = unlocked. The test
+// helpers below (newTestSvc / newTestSvcWithCore) wire one of these by
+// default so write-path tests exercise the post-retrofit success path
+// (Mantis #1613 B.2).
+type stubSessionGate struct{ ids []string }
+
+func (s *stubSessionGate) UnlockedAccountIDs() []string { return s.ids }
+
+// newTestSvc returns a content.Service wired with an unlocked
+// SessionGate. Mirrors the sales/deals + sales/pipeline B.2 helper
+// shape — write-path tests SHOULD use this instead of
+// content.NewService(nil) post-retrofit so assertUnlocked permits the
+// write.
+func newTestSvc(t *testing.T) *content.Service {
+	t.Helper()
+	svc := content.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+	return svc
+}
+
+// newTestSvcWithCore is newTestSvc but takes a Core container — used by
+// tests that need ACTION-bus observation. Wired with the same unlocked
+// stub.
+func newTestSvcWithCore(t *testing.T, c *core.Core) *content.Service {
+	t.Helper()
+	svc := content.NewService(c)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+	return svc
+}
+
 // TestList_Empty_Good — empty dir → 5 columns, all empty, zero counts.
 func TestList_Empty_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
@@ -37,7 +69,7 @@ func TestList_Empty_Good(t *testing.T) {
 // TestCreate_Defaults_Good — Create with title only defaults to col=idea.
 func TestCreate_Defaults_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := content.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(content.CreateInput{T: "Watt-per-token comparison post"})
 	if !r.OK {
 		t.Fatalf("Create failed: %s", r.Error())
@@ -54,7 +86,7 @@ func TestCreate_Defaults_Good(t *testing.T) {
 // TestCreate_Title_Bad — empty title returns core.Fail.
 func TestCreate_Title_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := content.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(content.CreateInput{T: ""})
 	if r.OK {
 		t.Fatalf("expected failure for empty title, got OK")
@@ -64,7 +96,7 @@ func TestCreate_Title_Bad(t *testing.T) {
 // TestAdvance_Order_Good — Advance cycles idea → draft → review → ready → live.
 func TestAdvance_Order_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := content.NewService(nil)
+	svc := newTestSvc(t)
 	cr := svc.Create(content.CreateInput{T: "Test post", Col: "idea"})
 	if !cr.OK {
 		t.Fatalf("Create failed: %s", cr.Error())
@@ -87,7 +119,7 @@ func TestAdvance_Order_Good(t *testing.T) {
 // TestAdvance_AtLive_Bad — Advance at "live" returns core.Fail.
 func TestAdvance_AtLive_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := content.NewService(nil)
+	svc := newTestSvc(t)
 	cr := svc.Create(content.CreateInput{T: "Live post", Col: "live"})
 	if !cr.OK {
 		t.Fatalf("Create failed: %s", cr.Error())
@@ -115,7 +147,7 @@ func TestServiceName_Good(t *testing.T) {
 // carries the same.
 func TestAtomicCutover_MarketingContent_Create_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := content.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(content.CreateInput{T: "v0.2 release notes"})
 	if !r.OK {
 		t.Fatalf("Create failed: %s", r.Error())
@@ -140,7 +172,7 @@ func TestAtomicCutover_MarketingContent_Create_Good(t *testing.T) {
 // Advance bumps the stored version monotonically (1 -> 2).
 func TestAtomicCutover_MarketingContent_Update_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := content.NewService(nil)
+	svc := newTestSvc(t)
 	cr := svc.Create(content.CreateInput{T: "Draft post", Col: "idea"})
 	if !cr.OK {
 		t.Fatalf("Create failed: %s", cr.Error())
@@ -181,7 +213,7 @@ func TestAtomicCutover_MarketingContent_Update_Good(t *testing.T) {
 // wrapped as ConflictEnvelope by content.writeItem.
 func TestAtomicCutover_MarketingContent_Update_VersionStale_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := content.NewService(nil)
+	svc := newTestSvc(t)
 	// Seed in "idea" so each Advance targets "draft" — same legal
 	// transition from both goroutines, so the only failure mode is
 	// the optimistic-lock conflict.
@@ -293,7 +325,7 @@ func TestAtomicCutover_MarketingContent_Update_VersionStale_Ugly(t *testing.T) {
 // via an unconditional first-write that stamps version=1.
 func TestAtomicCutover_MarketingContent_LegacyFile_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := content.NewService(nil)
+	svc := newTestSvc(t)
 	dirR := core.UserHomeDir()
 	if !dirR.OK {
 		t.Fatalf("UserHomeDir: %s", dirR.Error())
@@ -333,7 +365,7 @@ func TestAtomicCutover_MarketingContent_LegacyFile_Ugly(t *testing.T) {
 // fires) and marketing/content/* falls under AuditModeBatch per RFC §6.1.
 func TestAtomicCutover_MarketingContent_AuditEmissionRecordBatch_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := content.NewService(nil)
+	svc := newTestSvc(t)
 	paths.SetAuditSecretProvider(func() []byte {
 		return []byte("content-cutover-test-secret-32-byte")
 	})
@@ -366,5 +398,143 @@ func TestAtomicCutover_MarketingContent_AuditEmissionRecordBatch_Good(t *testing
 	mode := paths.AuditModeForPath(fpath)
 	if mode != paths.AuditModeBatch {
 		t.Fatalf("expected AuditModeBatch for marketing/content path, got %v", mode)
+	}
+}
+
+// ---- RFC.stage-e-unlockgate v2 §4.2 SessionGate G/B/U triad ---------------
+
+// TestContent_UnlockedGate_AllowsCreate — gate returns non-empty
+// account-id slice; Create proceeds to title validation and write.
+func TestContent_UnlockedGate_AllowsCreate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := content.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+	r := svc.Create(content.CreateInput{T: "Unlocked-gate post"})
+	if !r.OK {
+		t.Fatalf("Create with unlocked gate failed: %s", r.Error())
+	}
+}
+
+// TestContent_UnlockedGate_AllowsAdvance — gate returns non-empty
+// account-id slice; Advance proceeds to read/write.
+func TestContent_UnlockedGate_AllowsAdvance(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := content.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+	cr := svc.Create(content.CreateInput{T: "Advance post", Col: "idea"})
+	if !cr.OK {
+		t.Fatalf("Create with unlocked gate failed: %s", cr.Error())
+	}
+	id := cr.Value.(content.ContentItem).ID
+	ar := svc.Advance(id)
+	if !ar.OK {
+		t.Fatalf("Advance with unlocked gate failed: %s", ar.Error())
+	}
+}
+
+// TestContent_LockedGate_FailsCreate_session_locked — gate returns
+// empty slice; Create returns content.session.locked envelope without
+// touching the filesystem.
+func TestContent_LockedGate_FailsCreate_session_locked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := content.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+	r := svc.Create(content.CreateInput{T: "Locked-gate post"})
+	if r.OK {
+		t.Fatalf("Create with locked gate must reject, returned OK")
+	}
+	if !core.Contains(r.Error(), "content.session.locked") {
+		t.Fatalf("expected content.session.locked, got %s", r.Error())
+	}
+}
+
+// TestContent_LockedGate_FailsAdvance_session_locked — gate returns
+// empty slice; Advance returns content.session.locked envelope without
+// touching the filesystem.
+func TestContent_LockedGate_FailsAdvance_session_locked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Seed an item under an unlocked gate first.
+	svc := newTestSvc(t)
+	cr := svc.Create(content.CreateInput{T: "Lock-after-create post", Col: "idea"})
+	if !cr.OK {
+		t.Fatalf("Create failed: %s", cr.Error())
+	}
+	id := cr.Value.(content.ContentItem).ID
+	// Lock the gate — live-read picks it up on the next Advance call.
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+	r := svc.Advance(id)
+	if r.OK {
+		t.Fatalf("Advance with locked gate must reject, returned OK")
+	}
+	if !core.Contains(r.Error(), "content.session.locked") {
+		t.Fatalf("expected content.session.locked, got %s", r.Error())
+	}
+}
+
+// TestContent_NilGate_WarnsOnce_FailsClosed — nil gate fails-closed
+// AND the one-shot core.Warn fires only on the first call (CompareAndSwap
+// semantics per §2.2 ADD-1.5). The second call still fails-closed but
+// must NOT re-warn — we verify nilWarned-state indirectly by asserting
+// both calls fail with the same envelope (the warn channel is a Core
+// global; observation is best-effort, but the fail-closed contract is
+// load-bearing and is what this test pins).
+func TestContent_NilGate_WarnsOnce_FailsClosed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := content.NewService(nil) // session == nil by default
+	r1 := svc.Create(content.CreateInput{T: "Nil-gate post 1"})
+	if r1.OK {
+		t.Fatalf("Create with nil gate must reject, returned OK")
+	}
+	if !core.Contains(r1.Error(), "content.session.locked") {
+		t.Fatalf("expected content.session.locked, got %s", r1.Error())
+	}
+	r2 := svc.Create(content.CreateInput{T: "Nil-gate post 2"})
+	if r2.OK {
+		t.Fatalf("second Create with nil gate must also reject, returned OK")
+	}
+	if !core.Contains(r2.Error(), "content.session.locked") {
+		t.Fatalf("expected content.session.locked, got %s", r2.Error())
+	}
+}
+
+// TestContent_StopNilsGate — Stop nils the gate reference so a
+// previously-unlocked Service fails-closed on any post-Stop write.
+func TestContent_StopNilsGate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := newTestSvc(t)
+	// Sanity: unlocked-gate Create succeeds.
+	cr := svc.Create(content.CreateInput{T: "Pre-stop post"})
+	if !cr.OK {
+		t.Fatalf("Create before Stop failed: %s", cr.Error())
+	}
+	// Stop nils the gate.
+	if sr := svc.Stop(core.Background()); !sr.OK {
+		t.Fatalf("Stop failed: %s", sr.Error())
+	}
+	// Post-Stop write fails-closed.
+	r := svc.Create(content.CreateInput{T: "Post-stop post"})
+	if r.OK {
+		t.Fatalf("Create after Stop must reject, returned OK")
+	}
+	if !core.Contains(r.Error(), "content.session.locked") {
+		t.Fatalf("expected content.session.locked, got %s", r.Error())
+	}
+}
+
+// TestContent_LockedGate_ReadStillWorks — reads (List, Get) stay open
+// per RFC §3.1 even when the session is locked. The List call uses a
+// freshly-locked service with no pre-seeded items so the assertion is
+// shape-only (no error, empty columns).
+func TestContent_LockedGate_ReadStillWorks(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := content.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+	r := svc.List(content.ListInput{})
+	if !r.OK {
+		t.Fatalf("List with locked gate failed: %s", r.Error())
+	}
+	out := r.Value.(content.ListOutput)
+	if len(out.Columns) != 5 {
+		t.Fatalf("expected 5 columns, got %d", len(out.Columns))
 	}
 }

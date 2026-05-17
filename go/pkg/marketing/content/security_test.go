@@ -33,7 +33,7 @@ func TestGet_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 
 func TestAdvance_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := content.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Advance("../../wallets/x")
 	if r.OK {
 		t.Fatal("Advance with traversal ID must reject")
@@ -43,7 +43,7 @@ func TestAdvance_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := content.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(content.CreateInput{T: "v0.2 release notes", Who: "you", Due: "today"})
 	if !r.OK {
 		t.Fatalf("Create failed: %s", r.Error())
@@ -64,7 +64,7 @@ func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 func TestContentDir_Mode0700_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := content.NewService(nil)
+	svc := newTestSvc(t)
 	_ = svc.Create(content.CreateInput{T: "x"})
 	dir := core.PathJoin(home, "Lethean", "marketing", "content")
 	stat := core.Stat(dir)

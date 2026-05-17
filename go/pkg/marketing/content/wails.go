@@ -104,6 +104,9 @@ func (s *Service) Get(id string) core.Result {
 //	r := svc.Create(content.CreateInput{T: "v0.2 release notes", Who: "you", Due: "today"})
 //	if r.OK { item := r.Value.(content.ContentItem) }
 func (s *Service) Create(input CreateInput) core.Result {
+	if fail, ok := s.assertUnlocked("content.Create"); !ok {
+		return fail
+	}
 	if input.T == "" {
 		return core.Fail(core.E("content.Create", "title (t) is required", nil))
 	}
@@ -154,6 +157,9 @@ func (s *Service) Create(input CreateInput) core.Result {
 //	r := svc.Advance("v02-release-notes-20260516")
 //	if r.OK { item := r.Value.(content.ContentItem) }
 func (s *Service) Advance(id string) core.Result {
+	if fail, ok := s.assertUnlocked("content.Advance"); !ok {
+		return fail
+	}
 	if err := paths.IsValidID(id); err != nil {
 		return core.Fail(err)
 	}
