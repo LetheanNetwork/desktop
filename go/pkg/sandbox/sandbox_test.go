@@ -137,7 +137,9 @@ func TestSandbox_buildRunArgs_Good(t *core.T) {
 		"--memory", "2048M",
 		"--cpus", "4",
 		"--storage-opt", "size=10G",
-		"alpine:3.21", "echo", "hi",
+		// Cerberus Mantis #1667 RFC v1.1 §2.5 — argv `--` terminator
+		// between IMAGE and COMMAND on Docker arm.
+		"alpine:3.21", "--", "echo", "hi",
 	}, run.Args)
 }
 
@@ -750,4 +752,131 @@ func TestSandbox_SpawnLong_ProcRunErr_PropagatesInResult_Bad(t *core.T) {
 		core.Contains(msg, "lthn-nonexistent-runtime-binary-xyz") ||
 		core.Contains(msg, "exited with code")
 	core.AssertTrue(t, hasCause)
+}
+
+// --- Cerberus Mantis #1667 (RFC.image-allowlist v1.1) gate tests ---
+
+// Spawn gate fires AFTER default-image substitution per ADD-2 — when
+// the caller passes an empty Image the default is substituted and the
+// substituted ref MUST validate. Without ADD-2 the validator would
+// reject the empty input as ErrEmptyImageRef ahead of substitution
+// and the default-image path would silently never run.
+func TestSandbox_Spawn_GateRunsAfterDefaultSubstitution_Good(t *core.T) {
+	svc := newTestService(Options{DefaultImage: "lthn/dev:latest"})
+	r := svc.prepareSpawnInput(SpawnInput{Command: "echo"})
+	core.AssertTrue(t, r.OK)
+	input := r.Value.(SpawnInput)
+	core.AssertEqual(t, "lthn/dev:latest", input.Image)
+}
+
+// Conversely, an unallowed Image at the caller surface MUST reject —
+// confirming the gate FIRES after substitution rather than being
+// skipped when Image is non-empty.
+func TestSandbox_Spawn_GateRunsAfterDefaultSubstitution_Bad(t *core.T) {
+	svc := newTestService(Options{})
+	r := svc.Spawn(SpawnInput{
+		Image:   "evil.example.com/foo",
+		Command: "sh",
+	})
+	core.AssertFalse(t, r.OK)
+	core.AssertContains(t, r.Error(), "image rejected by allowlist")
+}
+
+// IMDS reject path — the validator's IMDS pre-check (#1677 / ADD-1)
+// fires BEFORE the allowlist check, so an IMDS-shaped image is rejected
+// with the typed ErrIMDSAddress even though the registry would also be
+// flagged as not-allowlisted.
+func TestSandbox_Spawn_RejectsIMDSImage_Bad(t *core.T) {
+	svc := newTestService(Options{})
+	r := svc.Spawn(SpawnInput{
+		Image:   "169.254.169.254/x",
+		Command: "sh",
+	})
+	core.AssertFalse(t, r.OK)
+	core.AssertContains(t, r.Error(), "image rejected by allowlist")
+}
+
+// SpawnLong gate fires AFTER non-empty Image check — equivalent to
+// sandbox.go's AFTER-default-substitution per ADD-2 (SpawnLong has no
+// default-image substitution today, but the gate sees the same ref the
+// runtime would see).
+func TestSandbox_SpawnLong_RejectsDisallowedImage_Bad(t *core.T) {
+	svc := newTestService(Options{})
+	r := svc.SpawnLong(SpawnLongInput{
+		Image:   "evil.example.com/foo",
+		Command: "sh",
+	})
+	core.AssertFalse(t, r.OK)
+	core.AssertContains(t, r.Error(), "image rejected by allowlist")
+}
+
+// Argv `--` terminator on Podman arm — same shape as Docker arm so a
+// future podman flag-parser change cannot re-interpret input.Command
+// or input.Args[0] as a runtime flag. Apple arm NOT asserted here:
+// terminator discipline for Apple is delegated upstream per ADD-4.
+func TestSandbox_buildRunArgs_PodmanInsertsArgvTerminator_Good(t *core.T) {
+	svc := newTestService(Options{})
+	r := svc.buildRunArgs(container.RuntimePodman, SpawnInput{
+		Image:   "alpine:3.21",
+		Command: "echo",
+		Args:    []string{"hi"},
+	})
+	core.AssertTrue(t, r.OK)
+	run := r.Value.(runCommand)
+	core.AssertEqual(t, "podman", run.Binary)
+	// `--` MUST sit between IMAGE and COMMAND.
+	pos := -1
+	for i, a := range run.Args {
+		if a == "alpine:3.21" {
+			pos = i
+			break
+		}
+	}
+	core.AssertTrue(t, pos >= 0)
+	core.AssertTrue(t, pos+2 < len(run.Args))
+	core.AssertEqual(t, "--", run.Args[pos+1])
+	core.AssertEqual(t, "echo", run.Args[pos+2])
+}
+
+// buildLongRunArgs Docker arm — argv `--` terminator between IMAGE
+// and COMMAND.
+func TestSandbox_buildLongRunArgs_DockerInsertsArgvTerminator_Good(t *core.T) {
+	svc := newTestService(Options{})
+	args := svc.buildLongRunArgs("docker", "lthn-sandbox-sb-terminator", 0, SpawnLongInput{
+		Image:   "alpine:3.21",
+		Command: "sh",
+		Args:    []string{"-l"},
+	})
+	pos := -1
+	for i, a := range args {
+		if a == "alpine:3.21" {
+			pos = i
+			break
+		}
+	}
+	core.AssertTrue(t, pos >= 0)
+	core.AssertTrue(t, pos+2 < len(args))
+	core.AssertEqual(t, "--", args[pos+1])
+	core.AssertEqual(t, "sh", args[pos+2])
+}
+
+// buildLongRunArgs Podman arm — same `--` shape as Docker arm.
+func TestSandbox_buildLongRunArgs_PodmanInsertsArgvTerminator_Good(t *core.T) {
+	svc := newTestService(Options{})
+	args := svc.buildLongRunArgs("podman", "lthn-sandbox-sb-podterm", 0, SpawnLongInput{
+		Image:   "alpine:3.21",
+		Command: "sh",
+		Args:    []string{"-c", "echo hi"},
+	})
+	pos := -1
+	for i, a := range args {
+		if a == "alpine:3.21" {
+			pos = i
+			break
+		}
+	}
+	core.AssertTrue(t, pos >= 0)
+	core.AssertTrue(t, pos+2 < len(args))
+	core.AssertEqual(t, "--", args[pos+1])
+	core.AssertEqual(t, "sh", args[pos+2])
 }

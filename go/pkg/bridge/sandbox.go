@@ -8,6 +8,7 @@ package bridge
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/imagetrust"
 	"dappco.re/lthn/desktop/pkg/sandbox"
 )
 
@@ -39,6 +40,14 @@ func (s *Service) toolSandboxDetect() map[string]any {
 
 // toolSandboxSpawn fires a one-shot container via sandbox.Spawn.
 // params: { image, command, args?, runtime?, timeout_seconds? }
+//
+// Cerberus Mantis #1667 + #1679 (RFC v1.1 §2.4 / ADD-3) — bridge is
+// a PARALLEL runtime surface to wails-bound sandbox.Spawn. The gate
+// fires HERE at the bridge entry-point BEFORE forwarding so any
+// caller that reaches the runtime via the bridge MUST first clear
+// the same imagetrust.IsAllowedImage check the sandbox tier enforces.
+// Sandbox-tier defence-in-depth still fires inside Spawn — composing
+// two independent gates is the security property, not redundant.
 func (s *Service) toolSandboxSpawn(params map[string]any) map[string]any {
 	sb := s.sandboxSvc()
 	if sb == nil {
@@ -50,6 +59,20 @@ func (s *Service) toolSandboxSpawn(params map[string]any) map[string]any {
 		Args:           stringSliceParam(params, "args"),
 		Runtime:        paramString(params, "runtime", ""),
 		TimeoutSeconds: paramInt(params, "timeout_seconds", 0),
+	}
+	// Skip the gate only when the caller explicitly passed an empty
+	// image — sandbox.prepareSpawnInput substitutes the default and
+	// then re-validates. Allow that default-substitution path to do
+	// its own validation downstream so the bridge gate doesn't fire
+	// a false ErrEmptyImageRef ahead of the substitution.
+	if input.Image != "" {
+		if err := imagetrust.IsAllowedImage(input.Image); err != nil {
+			return map[string]any{
+				"ok":         false,
+				"error":      err.Error(),
+				"error_code": imagetrust.ErrorCode(err),
+			}
+		}
 	}
 	r := sb.Spawn(input)
 	if !r.OK {

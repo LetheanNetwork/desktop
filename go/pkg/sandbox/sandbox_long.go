@@ -23,6 +23,7 @@ import (
 	core "dappco.re/go"
 
 	"dappco.re/lthn/desktop/pkg/audit"
+	"dappco.re/lthn/desktop/pkg/imagetrust"
 )
 
 const (
@@ -260,6 +261,14 @@ func (s *Service) SpawnLong(input SpawnLongInput) core.Result {
 	if core.Trim(input.Command) == "" {
 		return failSpawnLong("", "command is required")
 	}
+	// Cerberus Mantis #1667 (RFC v1.1 §2.4) — image-allowlist gate
+	// fires AFTER the non-empty Image check. SpawnLong has no default-
+	// image substitution (caller MUST supply Image), so AFTER-non-empty
+	// is the equivalent of sandbox.go's AFTER-default-substitution (ADD-2)
+	// — the validator sees the same string the runtime will see.
+	if err := imagetrust.IsAllowedImage(input.Image); err != nil {
+		return failSpawnLongImage(input.Image, err)
+	}
 
 	ps := s.proc()
 	if ps == nil {
@@ -353,6 +362,30 @@ func (s *Service) SpawnLong(input SpawnLongInput) core.Result {
 // without bloating each return site.
 func failSpawnLong(containerName, message string) core.Result {
 	return failSpawnLongCause(containerName, message, core.Result{})
+}
+
+// failSpawnLongImage is the imagetrust-gate-reject error tail.
+// Cerberus Mantis #1667 / #1666 — the audit row's error_code must be
+// the GRANULAR Q-4 enum tag (`image_empty` / `image_imds` /
+// `image_registry_not_allowed` / …) so a forensic walker can rank
+// IMDS-shaped attempts above generic gate rejects. The returned Result
+// wraps the typed error so core.Is(res.Value.(error), imagetrust.ErrX)
+// holds at every caller boundary.
+func failSpawnLongImage(image string, gateErr error) core.Result {
+	code := imagetrust.ErrorCode(gateErr)
+	err := core.E(spawnLongOp, "image rejected by allowlist", gateErr)
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSandboxLongFailed,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   "sandbox",
+		Outcome: audit.OutcomeFailed,
+		Meta: map[string]any{
+			"error_code":     code,
+			"container_name": "",
+			"image":          image,
+		},
+	})
+	return core.Fail(err)
 }
 
 // failSpawnLongCause is the cause-preserving variant of failSpawnLong.
@@ -635,7 +668,16 @@ func (s *Service) buildLongRunArgs(rt, containerName string, hostPort int, input
 		args = append(args, "--network", input.NetworkName)
 	}
 
-	args = append(args, input.Image, input.Command)
+	// Cerberus Mantis #1667 (RFC v1.1 §2.5) — argv `--` terminator
+	// between IMAGE and COMMAND tells docker/podman to stop parsing its
+	// own flags. Neutralises a future runtime CLI flag-parser change
+	// re-interpreting `input.Command` (starting with `-`) as a runtime
+	// flag, AND covers `input.Args[0]` starting with `--`. Defence in
+	// depth on top of imagetrust.ErrLeadingDash which already rejects
+	// `-`-prefixed image positions. Apple-arm SpawnLong (if ever wired)
+	// is delegated upstream per ADD-4 — no `--` injection asserted on
+	// the Apple branch.
+	args = append(args, input.Image, "--", input.Command)
 	args = append(args, input.Args...)
 	return args
 }

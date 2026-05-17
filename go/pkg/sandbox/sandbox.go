@@ -22,6 +22,7 @@ import (
 	"dappco.re/go/process"
 
 	"dappco.re/lthn/desktop/pkg/audit"
+	"dappco.re/lthn/desktop/pkg/imagetrust"
 )
 
 // Options configures the sandbox host.
@@ -153,13 +154,25 @@ func (s *Service) Spawn(input SpawnInput) core.Result {
 	res := s.spawnDispatch(input)
 
 	if !res.OK {
+		// Cerberus Mantis #1667 / #1666 — when the failure is a typed
+		// imagetrust gate-reject (1:1 with Q-4 granular error_code enum),
+		// surface the stable short code (`image_empty` | `image_imds` |
+		// `image_registry_not_allowed` | …) instead of the raw error
+		// string. Non-imagetrust failures fall through to the existing
+		// res.Error() shape so we don't lose runtime-fail diagnostics.
+		errCode := res.Error()
+		if causeErr, ok := res.Value.(error); ok {
+			if tag := imagetrust.ErrorCode(causeErr); tag != "" && tag != "image_invalid" {
+				errCode = tag
+			}
+		}
 		_ = audit.Default().Record(audit.Event{
 			Event:   audit.EventSandboxSpawnFailed,
 			TS:      core.Now().UTC().Unix(),
 			Scope:   "sandbox",
 			Outcome: audit.OutcomeFailed,
 			Meta: map[string]any{
-				"error_code":     res.Error(),
+				"error_code":     errCode,
 				"container_name": "",
 			},
 		})
@@ -209,6 +222,16 @@ func (s *Service) spawnDispatch(input SpawnInput) core.Result {
 func (s *Service) prepareSpawnInput(input SpawnInput) core.Result {
 	if core.Trim(input.Image) == "" {
 		input.Image = s.resolveDefaultImage()
+	}
+	// Cerberus Mantis #1667 (RFC v1.1 §2.4.1, ADD-2) — image-allowlist
+	// gate fires AFTER default-image substitution so the validator sees
+	// the exact ref the runtime will see. Validating BEFORE substitution
+	// would reject an empty input.Image as ErrEmptyImageRef when the
+	// default path would have substituted a valid ref; worse, a future
+	// config-mutable default could be smuggled past the gate by passing
+	// empty. AFTER-substitution closes both.
+	if err := imagetrust.IsAllowedImage(input.Image); err != nil {
+		return core.Fail(core.E(spawnOp, "image rejected by allowlist", err))
 	}
 	if input.Memory < 0 {
 		return core.Fail(core.E(spawnOp, "memory must be >= 0", nil))
@@ -387,17 +410,29 @@ func (s *Service) buildRunArgs(rt container.RuntimeType, input SpawnInput) core.
 	switch rt {
 	case container.RuntimeDocker:
 		// Docker's `--rm` auto-removes after exit. Good for one-shot.
+		// Cerberus Mantis #1667 (RFC v1.1 §2.5) — argv `--` terminator
+		// between IMAGE and COMMAND tells docker to stop parsing its
+		// own flags. Neutralises a future docker CLI flag-parser change
+		// re-interpreting `input.Command` starting with `-` as a docker
+		// flag, AND covers `input.Args[0]` starting with `--`.
 		cmd = appendResourceArgs(cmd, input, true)
-		cmd = append(cmd, input.Image, input.Command)
+		cmd = append(cmd, input.Image, "--", input.Command)
 		cmd = append(cmd, input.Args...)
 		return core.Ok(runCommand{Binary: "docker", Args: cmd})
 	case container.RuntimePodman:
+		// Same argv `--` discipline as the Docker arm.
 		cmd = appendResourceArgs(cmd, input, true)
-		cmd = append(cmd, input.Image, input.Command)
+		cmd = append(cmd, input.Image, "--", input.Command)
 		cmd = append(cmd, input.Args...)
 		return core.Ok(runCommand{Binary: "podman", Args: cmd})
 	case container.RuntimeApple:
-		// Apple Container CLI mirrors Docker run semantics.
+		// Apple Container CLI mirrors Docker run semantics. Argv-
+		// terminator discipline for the Apple arm is delegated to
+		// dappco.re/go/container (RFC v1.1 §3.2 T-OOS-5 / ADD-4) — the
+		// Apple-arm Spawn routes through container.AppleProvider.Run
+		// upstream, not through this buildRunArgs path in production.
+		// This branch survives only for the spawnViaCLI legacy fallback;
+		// no `--` injection asserted here.
 		if input.StorageOpt != "" {
 			return core.Fail(core.E("sandbox.buildRunArgs", "storage_opt is not supported by Apple runtime", nil))
 		}

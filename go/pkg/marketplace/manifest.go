@@ -11,6 +11,7 @@ package marketplace
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/imagetrust"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"gopkg.in/yaml.v3"
 )
@@ -285,14 +286,14 @@ func ValidateManifest(m BundleManifest) core.Result {
 		// this, a malicious manifest could declare an image from any
 		// registry the host can reach (a typo-squatted Docker Hub repo,
 		// a hostile registry that serves a different binary, etc).
-		// IsAllowedImageRegistry is permissive on intent (covers the
-		// big-tent OSS registries) but strict on shape (must parse).
-		if !IsAllowedImageRegistry(img.Image) {
+		// Mantis #1667 — the validator moved to pkg/imagetrust so
+		// sandbox + bridge consult the SAME allowlist as marketplace.
+		// Typed-error rejection lets the validate chain surface the
+		// reason (registry-not-allowed vs IMDS vs malformed-digest etc)
+		// per RFC v1.1 §2.4.
+		if err := imagetrust.IsAllowedImage(img.Image); err != nil {
 			return core.Fail(core.E(validateOp,
-				core.Sprintf("images[%d].image registry not allowed: %s "+
-					"(allowed: docker.io / ghcr.io / quay.io / gcr.io / "+
-					"mcr.microsoft.com / registry.gitlab.com / lscr.io / "+
-					"forge.lthn.sh / lthn)", i, img.Image), nil))
+				core.Sprintf("images[%d].image %s: %s", i, img.Image, err.Error()), err))
 		}
 	}
 	if r := validatePluginViews(m); !r.OK {
@@ -492,118 +493,6 @@ func validateIframeViewSource(m BundleManifest, v PluginView, i int) core.Result
 	return core.Fail(core.E(validateOp,
 		core.Sprintf("plugin.views[%d].source references undeclared expose id: %s "+
 			"(no image has id=%q with expose block)", i, exposeID, exposeID), nil))
-}
-
-// allowedImageRegistries is the compile-time allowlist of OCI
-// registry domains a bundle's image may pull from when the image
-// reference includes an explicit registry. Cerberus Mantis #1448.
-// Same compile-time discipline as pkg/downloader.allowedHostSuffixes
-// (#1424) — runtime mutation would defeat the gate, so updates ship
-// as code review.
-//
-// Big-tent OSS coverage: Docker Hub (registry-explicit form),
-// GitHub Container Registry, Red Hat Quay, Google Container
-// Registry, Microsoft, GitLab, LinuxServer.io (popular in self-host
-// bundles), Codeberg (Forgejo-hosted), and our own Forge.
-//
-// For Docker Hub shorthand (bare `<org>/<name>` without registry
-// prefix), see IsAllowedImageRegistry's policy: bare orgs are
-// allowed because forcing every manifest to fully-qualify Docker
-// Hub refs would break the existing OSS bundle catalogue. The
-// supply-chain trust there is on the user reading the manifest
-// before install — the gate's value is stopping silent pulls from
-// attacker-controlled or typo-squatted REGISTRY DOMAINS, not
-// auditing every Docker Hub user-namespace.
-var allowedImageRegistries = []string{
-	"docker.io",
-	"index.docker.io",
-	"ghcr.io",
-	"quay.io",
-	"gcr.io",
-	"mcr.microsoft.com",
-	"registry.gitlab.com",
-	"lscr.io",
-	"codeberg.org",
-	"forge.lthn.sh",
-}
-
-// IsAllowedImageRegistry reports whether `image` references a
-// registry on the allowlist. Three image-ref shapes are handled:
-//
-//	<registry>/<path>[:tag][@digest]   e.g. ghcr.io/owner/img:1.0
-//	<org>/<name>[:tag][@digest]        e.g. n8nio/n8n:latest     → Docker Hub-implicit (allowed)
-//	<name>[:tag][@digest]              e.g. nginx                → docker.io/library/nginx-implicit (allowed)
-//
-// We treat the first slash-segment as a REGISTRY domain only when
-// it contains a `.` or `:` (the canonical OCI distinguisher between
-// "registry domain" and "Docker Hub org"). Registry domains must be
-// in allowedImageRegistries. Docker Hub orgs (no dot/colon in first
-// segment) are allowed unconditionally — see allowedImageRegistries
-// docstring for the supply-chain framing.
-func IsAllowedImageRegistry(image string) bool {
-	image = core.Trim(image)
-	if image == "" {
-		return false
-	}
-	// Cerberus pass-6 LOW — registry hostnames are case-insensitive
-	// per OCI distribution spec (Docker/containerd lowercase before
-	// resolve). Normalise so `GHCR.IO/owner/img` matches `ghcr.io`.
-	// Done early so all subsequent index/contains checks are case-
-	// folded.
-	image = core.Lower(image)
-	// Cerberus pass-6 LOW — `@` without a valid digest is a malformed
-	// ref that downstream OCI pullers reject, but the gate's job is
-	// to reject malformed refs at the perimeter. Require digest to be
-	// `sha256:<64-hex>` shape (the only algorithm distribution
-	// guarantees today).
-	if i := core.LastIndex(image, "@"); i > 0 {
-		digest := image[i+1:]
-		if !core.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 {
-			return false
-		}
-		image = image[:i]
-	}
-	if i := core.LastIndex(image, ":"); i > 0 {
-		// Only strip the :tag if it doesn't span a `/` (else this is
-		// a registry-with-port like `registry.gitlab.com:443/...`).
-		tail := image[i:]
-		if !core.Contains(tail, "/") {
-			image = image[:i]
-		}
-	}
-	slash := core.Index(image, "/")
-	if slash < 0 {
-		// `nginx` / `alpine` / `postgres` — Docker Hub library/*
-		// shorthand. Library is Docker's own curated namespace of
-		// official images.
-		return true
-	}
-	first := image[:slash]
-	// Cerberus pass-6 LOW — leading-slash gives empty first segment
-	// (`/evil.com/foo` → first==""). Empty first segment falls into
-	// the Docker Hub shorthand path and returned `true` previously.
-	// Reject as malformed.
-	if first == "" {
-		return false
-	}
-	// If the first segment contains . or :, it's a registry domain.
-	if core.Contains(first, ".") || core.Contains(first, ":") {
-		// Strip :port if present so `registry.gitlab.com:443` matches
-		// `registry.gitlab.com` in the allowlist.
-		host := first
-		if i := core.Index(host, ":"); i > 0 {
-			host = host[:i]
-		}
-		for _, allowed := range allowedImageRegistries {
-			if host == allowed {
-				return true
-			}
-		}
-		return false
-	}
-	// Otherwise it's a Docker Hub org shorthand — allowed (see
-	// allowedImageRegistries docstring for the framing).
-	return true
 }
 
 // MarshalManifest serialises a BundleManifest back to YAML bytes.
