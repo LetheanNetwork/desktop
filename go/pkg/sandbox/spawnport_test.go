@@ -171,6 +171,90 @@ func TestSpawnPort_NewSpawnPortNilSvc_Good(t *core.T) {
 		"NewSpawnPort(nil) MUST return nil — consumers guard on this")
 }
 
+// TestSpawnPort_AllShimsEmitRejected_Ugly — table-driven assertion that
+// EVERY uppercase Wails-table shim on *Service (Spawn / SpawnLong / Kill
+// / ListHandles / GetHandle / InstallID) emits exactly one
+// audit.EventSandboxSpawnRejected row with `reason="tier_go_only"` and
+// `surface="<sandbox.X>"`, AND returns ErrTierGoOnly.
+//
+// Closure-confirmation for Mantis #1695 / Cerberus #55 ADD-2 — the
+// chosen Shape (b) ships SHIMS that emit Rejected (not REMOVALS). A
+// removed method would surface as wails3 method-not-found at dispatch
+// and pkg/audit would never see the probe (forensic regression). Per
+// RFC v1.1 §10.2 the audit-only-shim IS the chosen path. This table
+// pins the closure structurally: any future shim removal that bypasses
+// the audit emit will fail this test immediately, surfacing the gap
+// before it becomes a forensic blind-spot.
+//
+// Each call gets its own recorder via t.Run subtests — emits do NOT
+// accumulate across rows, so "exactly one Rejected row per call"
+// holds per row.
+func TestSpawnPort_AllShimsEmitRejected_Ugly(t *core.T) {
+	type shimRow struct {
+		name    string // subtest name; matches the surface label
+		invoke  func(svc *Service) core.Result
+		surface string // expected Meta["surface"] literal
+	}
+	rows := []shimRow{
+		{
+			name:    "Spawn",
+			invoke:  func(svc *Service) core.Result { return svc.Spawn(SpawnInput{Image: "lthn/dev:latest", Command: "echo"}) },
+			surface: "sandbox.Spawn",
+		},
+		{
+			name:    "SpawnLong",
+			invoke:  func(svc *Service) core.Result { return svc.SpawnLong(SpawnLongInput{Image: "lthn/dev:latest", Command: "opencode"}) },
+			surface: "sandbox.SpawnLong",
+		},
+		{
+			name:    "Kill",
+			invoke:  func(svc *Service) core.Result { return svc.Kill("sb-anything") },
+			surface: "sandbox.Kill",
+		},
+		{
+			name:    "ListHandles",
+			invoke:  func(svc *Service) core.Result { return svc.ListHandles() },
+			surface: "sandbox.ListHandles",
+		},
+		{
+			name:    "GetHandle",
+			invoke:  func(svc *Service) core.Result { return svc.GetHandle("sb-anything") },
+			surface: "sandbox.GetHandle",
+		},
+		{
+			name:    "InstallID",
+			invoke:  func(svc *Service) core.Result { return svc.InstallID() },
+			surface: "sandbox.InstallID",
+		},
+	}
+
+	for _, row := range rows {
+		row := row // capture
+		t.Run(row.name, func(t *core.T) {
+			rec := installAuditRecorder(t)
+			svc := newTestService(Options{})
+
+			r := row.invoke(svc)
+			core.AssertFalse(t, r.OK,
+				"shim "+row.surface+" MUST reject (tier_go_only)")
+
+			cause, ok := r.Value.(error)
+			core.AssertTrue(t, ok,
+				"shim "+row.surface+" error MUST surface as error in Result.Value")
+			core.AssertTrue(t, core.Is(cause, ErrTierGoOnly),
+				"shim "+row.surface+" error MUST be ErrTierGoOnly")
+
+			rejected := rec.filterByName(audit.EventSandboxSpawnRejected)
+			core.AssertEqual(t, 1, len(rejected),
+				"shim "+row.surface+" MUST emit exactly one Rejected row")
+			core.AssertEqual(t, audit.OutcomeDenied, rejected[0].Outcome)
+			core.AssertEqual(t, "sandbox", rejected[0].Scope)
+			core.AssertEqual(t, "tier_go_only", rejected[0].Meta["reason"])
+			core.AssertEqual(t, row.surface, rejected[0].Meta["surface"])
+		})
+	}
+}
+
 // TestSandbox_SpawnPort_TierReject_UsesSubstrate_Good — the Wails-shim
 // rejection path emits BOTH the legacy EventSandboxSpawnRejected row
 // (backward grep) AND the substrate-tier audit.EventTierReject row
