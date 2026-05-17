@@ -87,6 +87,23 @@ type Options struct {
 	// events between warnings. Setting to 0 disables warnings entirely
 	// (used in tests that intentionally exercise the noop sink).
 	NoopDropWarningEvery int
+
+	// RotateAtSize is the byte-threshold above which the active
+	// day-file rotates to a sequenced sibling (YYYY-MM-DD.NNN.log)
+	// even before the day boundary. Mantis #1651 — bounds the worst-
+	// case size of any single file an operator must walk forensically
+	// and caps the recovery cost when chain verification fails mid-
+	// file. Default: 10MB. Setting to 0 disables size-based rotation
+	// (day-boundary still rotates).
+	RotateAtSize int64
+
+	// LockTimeout caps how long a Record() call may wait for the
+	// cross-process advisory lock on the active day-file. Mantis
+	// #1651 — paths.WithFileLock serialises writers across the lthn
+	// + lthn-mlx sibling-binary case where both processes share a
+	// root. Default: 2 * core.Second. Setting to 0 disables the
+	// cross-process lock (in-process s.mu is still held).
+	LockTimeout core.Duration
 }
 
 // resolved applies defaults to a caller-supplied Options literal. Pure
@@ -120,6 +137,12 @@ func resolved(in Options) Options {
 	if out.NoopDropWarningEvery == 0 {
 		out.NoopDropWarningEvery = defaultNoopDropWarningEvery
 	}
+	if out.RotateAtSize == 0 {
+		out.RotateAtSize = defaultRotateAtSize
+	}
+	if out.LockTimeout == 0 {
+		out.LockTimeout = defaultLockTimeout
+	}
 	return out
 }
 
@@ -135,6 +158,8 @@ const (
 	defaultBatchFlushInterval    = 200 * core.Millisecond
 	defaultBatchFlushEventCount  = 100
 	defaultNoopDropWarningEvery  = 100
+	defaultRotateAtSize          = 10 * 1024 * 1024 // 10 MiB
+	defaultLockTimeout           = 2 * core.Second
 )
 
 // metaKeyProcess is the reserved Meta key carrying the ProcessLabel

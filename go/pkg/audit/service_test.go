@@ -47,6 +47,13 @@ func newTestService(t *testing.T) *Service {
 		AuditSecret:           []byte("test-secret-fixture-deterministic"),
 		ProcessLabel:          "lthn-test",
 		RotationCheckInterval: time.Hour, // effectively disabled in tests
+		// LockTimeout=-1 disables the sentinel-file cross-process lock
+		// in unit tests so the cascade-latency benchmark isn't dominated
+		// by sentinel-create/release ops. Production keeps the default
+		// 2s timeout — see Options.LockTimeout doc. Negative value is
+		// the explicit "disable" marker so a zero-value test fixture
+		// still gets the resolved default.
+		LockTimeout: -1,
 	})
 	t.Cleanup(func() { _ = svc.Close() })
 	return svc

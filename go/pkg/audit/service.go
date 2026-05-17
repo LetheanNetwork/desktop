@@ -38,6 +38,15 @@ import (
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
+// audit file naming layout (Mantis #1651 size-rotation):
+//   - Sequenced day-files: <YYYY-MM-DD>.<NNN>.log  e.g. 2026-05-17.000.log
+//   - First file of each day starts at sequence 000; size-rotation
+//     opens .001, .002, ... as the threshold trips. NNN is fixed-width
+//     three-digit so lexical sort matches arrival order.
+//   - Rotation interfaces (rotation.Compress, rotation.Candidate) treat
+//     the `<date>.<NNN>.log` stem as one unit — every sequenced file
+//     rotates independently to its own .log.gz/.log.gz.candidate.
+
 // Service is the long-lived audit recorder per RFC §3. Construct via
 // audit.New; call audit.SetDefault(svc) so existing audit.Default()
 // callers route through the configured instance. One Service per
@@ -84,7 +93,15 @@ type Service struct {
 	mu          core.Mutex
 	currentFile *core.OSFile
 	currentDate string // YYYY-MM-DD of the handle's day
+	currentSeq  int    // NNN sequence within the day (Mantis #1651 size-rot)
 	currentPath string // absolute path of the handle's file
+	currentSize int64  // bytes written through the live handle
+
+	// prevChain is the hex SHA-256 digest of the previous row's chain
+	// link (Mantis #1651 tamper-resistance). Seeded from the existing
+	// file's tail on handle-open; empty string at genesis. Guarded by
+	// s.mu so concurrent Record() callers see a coherent sequence.
+	prevChain string
 
 	// batched tracks how many RecordBatch writes have happened since
 	// the last fsync; reset to 0 on every Sync. The rotation loop
@@ -312,6 +329,40 @@ func (s *Service) recordCommon(ev Event, sync bool) core.Result {
 			"event contains a raw newline in a string field"))
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Ensure the active handle is for the right day + within the
+	// size budget. Size-rotation runs INSIDE the locked region so
+	// no concurrent writer can land bytes that would push the file
+	// past the threshold while we're deciding to rotate.
+	if r := s.ensureCurrentHandleLocked(ev.TS); !r.OK {
+		return r
+	}
+
+	// Compute the chain digest BEFORE marshal-with-chain so the
+	// digest stored in __chain reflects the canonical "without
+	// chain" bytes a verifier will reconstruct. Stamp the digest
+	// into Meta then marshal the final line.
+	canonical, canonR := canonicalWithoutChain(ev)
+	if !canonR.OK {
+		return core.Fail(core.NewCode(codeAuditMarshalFailed,
+			"canonical pre-marshal failed: "+canonR.Error()))
+	}
+	digest := computeChain(s.prevChain, canonical)
+	if ev.Meta == nil {
+		ev.Meta = map[string]any{chainKey: digest}
+	} else {
+		// Copy-on-write so caller's Meta map isn't mutated with our
+		// recorder-managed key.
+		out := make(map[string]any, len(ev.Meta)+1)
+		for k, v := range ev.Meta {
+			out[k] = v
+		}
+		out[chainKey] = digest
+		ev.Meta = out
+	}
+
 	bR := core.JSONMarshal(ev)
 	if !bR.OK {
 		return core.Fail(core.NewCode(codeAuditMarshalFailed,
@@ -320,36 +371,54 @@ func (s *Service) recordCommon(ev Event, sync bool) core.Result {
 	line, _ := bR.Value.([]byte)
 	line = append(line, '\n')
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// Cross-process advisory lock (Mantis #1651 concurrent-write).
+	// Held only across the write+sync critical section so the per-
+	// event lock-acquire cost (~1-2ms via paths.WithFileLock
+	// sentinel) is bounded.
+	writeR := s.lockedWrite(line, sync)
+	if !writeR.OK {
+		return writeR
+	}
+	// Only advance prevChain AFTER the bytes are safely on disk —
+	// a failed write must not poison the next event's link.
+	s.prevChain = digest
+	s.currentSize += int64(len(line))
+	return core.Ok(nil)
+}
 
-	if r := s.ensureCurrentHandleLocked(ev.TS); !r.OK {
-		return r
-	}
-	if _, err := s.currentFile.Write(line); err != nil {
-		return core.Fail(core.NewCode(codeAuditWriteFailed,
-			"writing day-file failed: "+err.Error()))
-	}
-	if sync {
-		if err := s.currentFile.Sync(); err != nil {
+// lockedWrite executes the actual file write inside a cross-process
+// advisory lock (paths.WithFileLock). Caller MUST hold s.mu. The
+// LockTimeout=0 escape valve skips the file-lock entirely — used by
+// tests that want to verify in-process locking without paying the
+// sentinel-file cost.
+func (s *Service) lockedWrite(line []byte, sync bool) core.Result {
+	doWrite := func() core.Result {
+		if _, err := s.currentFile.Write(line); err != nil {
 			return core.Fail(core.NewCode(codeAuditWriteFailed,
-				"fsync day-file failed: "+err.Error()))
+				"writing day-file failed: "+err.Error()))
 		}
-		s.batched = 0
+		if sync {
+			if err := s.currentFile.Sync(); err != nil {
+				return core.Fail(core.NewCode(codeAuditWriteFailed,
+					"fsync day-file failed: "+err.Error()))
+			}
+			s.batched = 0
+			return core.Ok(nil)
+		}
+		s.batched++
+		if s.batched >= s.opts.BatchFlushEventCount {
+			if err := s.currentFile.Sync(); err != nil {
+				return core.Fail(core.NewCode(codeAuditWriteFailed,
+					"fsync day-file failed: "+err.Error()))
+			}
+			s.batched = 0
+		}
 		return core.Ok(nil)
 	}
-	// Cascade path — count writes; force a flush at the event-count
-	// threshold so a steady burst doesn't out-race the interval-based
-	// flusher.
-	s.batched++
-	if s.batched >= s.opts.BatchFlushEventCount {
-		if err := s.currentFile.Sync(); err != nil {
-			return core.Fail(core.NewCode(codeAuditWriteFailed,
-				"fsync day-file failed: "+err.Error()))
-		}
-		s.batched = 0
+	if s.opts.LockTimeout <= 0 {
+		return doWrite()
 	}
-	return core.Ok(nil)
+	return paths.WithFileLock(s.currentPath, s.opts.LockTimeout, doWrite)
 }
 
 // ensureCurrentHandleLocked verifies the live file handle is for the
@@ -364,7 +433,11 @@ func (s *Service) recordCommon(ev Event, sync bool) core.Result {
 // done it.
 func (s *Service) ensureCurrentHandleLocked(tsUnix int64) core.Result {
 	wantDate := dateStem(tsUnix)
-	if s.currentFile != nil && s.currentDate == wantDate {
+	dayDrift := s.currentFile != nil && s.currentDate != wantDate
+	sizeOverflow := s.currentFile != nil &&
+		s.opts.RotateAtSize > 0 &&
+		s.currentSize >= s.opts.RotateAtSize
+	if s.currentFile != nil && !dayDrift && !sizeOverflow {
 		return core.Ok(nil)
 	}
 	if s.currentFile != nil {
@@ -373,7 +446,17 @@ func (s *Service) ensureCurrentHandleLocked(tsUnix int64) core.Result {
 		s.currentFile = nil
 		s.batched = 0
 	}
-	path := core.PathJoin(s.root, wantDate+rotation.LogSuffix)
+	// Day-drift resets the sequence counter; size-overflow bumps it.
+	if dayDrift || s.currentDate == "" {
+		s.currentSeq = nextSequenceForDay(s.root, wantDate)
+		s.prevChain = ""
+	} else if sizeOverflow {
+		s.currentSeq++
+		s.prevChain = ""
+	}
+	s.currentSize = 0
+	s.currentDate = wantDate
+	path := core.PathJoin(s.root, sequencedFileName(wantDate, s.currentSeq))
 	openR := core.OpenFile(path, core.O_APPEND|core.O_CREATE|core.O_WRONLY, fileMode)
 	if !openR.OK {
 		return core.Fail(core.NewCode(codeAuditOpenFailed,
@@ -381,9 +464,119 @@ func (s *Service) ensureCurrentHandleLocked(tsUnix int64) core.Result {
 	}
 	f, _ := openR.Value.(*core.OSFile)
 	s.currentFile = f
-	s.currentDate = wantDate
 	s.currentPath = path
+	// If we just re-opened a previously written file (process restart
+	// mid-day, or rotation gap), seed currentSize + prevChain from the
+	// existing content so the new event lands at the correct byte
+	// position AND continues the existing chain.
+	if st := core.Stat(path); st.OK {
+		if fi, ok := st.Value.(core.FsFileInfo); ok {
+			s.currentSize = fi.Size()
+		}
+	}
+	if lastR, _ := readLastChainFromFile(path); lastR != "" {
+		s.prevChain = lastR
+	}
 	return core.Ok(nil)
+}
+
+// sequencedFileName returns the basename for the given day stem +
+// sequence number. Layout:
+//
+//   - seq == 0 → "<YYYY-MM-DD>.log" (the legacy unsequenced shape;
+//     keeps every consumer that resolves by date+suffix compatible
+//     with the new size-rotation code path).
+//   - seq >= 1 → "<YYYY-MM-DD>.NNN.log" (rotated sibling files,
+//     created when the active handle crosses RotateAtSize). NNN is
+//     zero-padded to three digits so a lexical sort matches arrival
+//     order.
+//
+// Mantis #1651 — keeping seq=0 unsequenced means existing tests +
+// the rotation.ResolveDayFile single-file resolver keep working for
+// every install whose audit volume stays under the rotation
+// threshold (the common case for desktop auth traffic).
+func sequencedFileName(dateStem string, seq int) string {
+	if seq <= 0 {
+		return dateStem + rotation.LogSuffix
+	}
+	return dateStem + "." + threeDigit(seq) + rotation.LogSuffix
+}
+
+// threeDigit returns the zero-padded three-digit decimal for n in
+// [0, 999]. Out-of-range inputs return the natural decimal — the
+// caller's rotation loop bounds this; we don't bounds-check here so
+// a four-digit-rotation-day stays grep-able rather than silently
+// rolling back to "000".
+func threeDigit(n int) string {
+	if n < 0 {
+		return core.Itoa(n)
+	}
+	if n < 10 {
+		return "00" + core.Itoa(n)
+	}
+	if n < 100 {
+		return "0" + core.Itoa(n)
+	}
+	return core.Itoa(n)
+}
+
+// nextSequenceForDay scans root for sequenced files matching the
+// given dateStem and returns the next available sequence number.
+// Used on day-drift (fresh day starts at 0 = unsequenced .log) and
+// on Service.New (process restart in mid-day must continue the
+// existing sequence so concurrent re-opens don't append into
+// possibly-partial-but-untrusted prior content). Returns 0 when no
+// existing file matches.
+func nextSequenceForDay(root, dateStem string) int {
+	entriesR := core.ReadDir(core.DirFS(root), ".")
+	if !entriesR.OK {
+		return 0
+	}
+	entries, _ := entriesR.Value.([]core.FsDirEntry)
+	highest := -1
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// Accept unsequenced "<date>.log" / "<date>.log.gz" / candidate
+		// as seq=0, and sequenced "<date>.NNN.{log,log.gz,candidate}"
+		// as seq=NNN.
+		if name == dateStem+rotation.LogSuffix ||
+			name == dateStem+rotation.CompressedSuffix ||
+			name == dateStem+rotation.CandidateSuffix {
+			if highest < 0 {
+				highest = 0
+			}
+			continue
+		}
+		prefix := dateStem + "."
+		if !core.HasPrefix(name, prefix) {
+			continue
+		}
+		stem := name[len(prefix):]
+		dot := -1
+		for i := 0; i < len(stem); i++ {
+			if stem[i] == '.' {
+				dot = i
+				break
+			}
+		}
+		if dot < 0 {
+			continue
+		}
+		numStr := stem[:dot]
+		nR := core.Atoi(numStr)
+		if !nR.OK {
+			continue
+		}
+		n, _ := nR.Value.(int)
+		if n > highest {
+			highest = n
+		}
+	}
+	// Return highest+1; first file of a fresh day is 0 (unsequenced).
+	return highest + 1
 }
 
 // Register is the canonical core.WithName-compatible factory. Wired
