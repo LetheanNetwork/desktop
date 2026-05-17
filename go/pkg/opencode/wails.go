@@ -247,15 +247,49 @@ func (w *WailsService) WListImportedProviders() core.Result {
 	return core.Ok(views)
 }
 
-// WUpgrade pulls the configured image (lthn/dev:latest) and
-// restarts any running sandbox if the digest changed. UI button
-// "Check for updates / Upgrade" calls this. Returns UpgradeResult
-// in Value when successful.
+// WUpgrade is the legacy zero-arg entry point. Calls Service.Upgrade
+// which, post-Cerberus #22 MED-2 / Mantis #1619, equivalent to
+// UpgradeWithConsent(UpgradeInput{}) → fail-closes with
+// "upgrade.requires_confirmation". Preserved so the pre-#1623
+// frontend caller still compiles while the dedicated frontend
+// dialog lane (filed alongside #1623) migrates to
+// WUpgradeWithConsent. Once that lane lands, this method becomes
+// a candidate for removal.
+//
+// Returns Fail("upgrade.requires_confirmation") on every call.
 func (w *WailsService) WUpgrade() core.Result {
 	if w == nil || w.svc == nil {
 		return core.Fail(core.E("opencode.WUpgrade", "service not bound", nil))
 	}
 	return w.svc.Upgrade()
+}
+
+// WUpgradeWithConsent pulls the configured image (lthn/dev:latest)
+// and — when in.RestartSandboxes is true — restarts any running
+// sandbox if the digest changed. UI button "Check for updates /
+// Upgrade" calls this with UpgradeInput{ConfirmedByUser: true}
+// after the user accepts the supply-chain warning dialog. Returns
+// UpgradeResult in Value when successful.
+//
+// Per Cerberus #22 MED-2 / Mantis #1619 + Mantis #1623 thread-through:
+// UpgradeInput.ConfirmedByUser MUST be true or the underlying
+// Service.UpgradeWithConsent refuses with
+// "upgrade.requires_confirmation" — no network call, no side
+// effects. A zero UpgradeInput{} therefore reaches the gate and
+// fails closed (matching the legacy Upgrade() fail-closed contract).
+//
+// Usage example (TS):
+//
+//	const r = await OpenCodeWails.WUpgradeWithConsent({
+//	  confirmed_by_user: true,
+//	  restart_sandboxes: false,
+//	})
+//	if (!r.OK) { /* dialog: "Please confirm upgrade" or substrate error */ }
+func (w *WailsService) WUpgradeWithConsent(in UpgradeInput) core.Result {
+	if w == nil || w.svc == nil {
+		return core.Fail(core.E("opencode.WUpgradeWithConsent", "service not bound", nil))
+	}
+	return w.svc.UpgradeWithConsent(in)
 }
 
 // WIsStudioInstalled reports whether OpenCode's native desktop

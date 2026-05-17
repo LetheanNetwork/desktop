@@ -294,13 +294,55 @@ func (g *ControlGroup) openWebWindow(c *gin.Context) {
 // changed. Returns UpgradeResult (updated flag + new digest +
 // list of restarted sandbox ids).
 //
+// Body is REQUIRED — UpgradeInput JSON with at minimum
+// {"confirmed_by_user": true} per Cerberus #22 MED-2 / Mantis #1619
+// (Mantis #1623 thread-through). A missing/empty body or
+// ConfirmedByUser=false short-circuits at the consent gate inside
+// UpgradeWithConsent and surfaces as a 400 Bad Request with audit
+// outcome=denied — the user-supplied request was rejected by the
+// substrate, distinct from substrate failure (outcome=error).
+//
 // Emits EventOpencodeUpgrade (Mantis #1602 HIGH) per call. RequestID
 // server-generated per Cerberus #18 / Mantis #1511.
+//
+// Usage example (TS):
+//
+//	await apiFetch("/v1/api/opencode/upgrade", {
+//	  method: "POST",
+//	  body: JSON.stringify({ confirmed_by_user: true, restart_sandboxes: false }),
+//	})
 func (g *ControlGroup) upgrade(c *gin.Context) {
 	srvReqID := newRequestID()
 	c.Header("X-Request-Id", srvReqID)
-	r := g.svc.Upgrade()
+	var in UpgradeInput
+	// Body is REQUIRED per Mantis #1623 — bind failures (empty body /
+	// wrong shape) leave `in` as zero, which means ConfirmedByUser=false
+	// → the consent gate inside UpgradeWithConsent fires and returns
+	// "upgrade.requires_confirmation". We tolerate bind error here so the
+	// gate (not the binder) produces the canonical error message both
+	// downstream consumers and the audit substrate already key on.
+	_ = c.ShouldBindJSON(&in)
+	r := g.svc.UpgradeWithConsent(in)
 	if !r.OK {
+		// Consent-gate refusal is a denied outcome (caller-supplied
+		// request rejected) and surfaces as 400 Bad Request so the
+		// frontend can distinguish "needs user confirmation" from
+		// "substrate broke". Any other failure stays outcome=error / 500.
+		// Consent-gate refusal is detected by the error-message
+		// prefix the gate produces — upgrade.go uses core.E (no
+		// Code set), so r.Code() is empty; the canonical refusal
+		// string is "upgrade.requires_confirmation:" per upgrade.go.
+		if core.Contains(r.Error(), "upgrade.requires_confirmation") {
+			emitControlAudit(EventOpencodeUpgrade, "opencode.upgrade",
+				audit.OutcomeDenied, srvReqID, map[string]any{
+					"error_code": "upgrade.requires_confirmation",
+				})
+			c.JSON(core.StatusBadRequest, gin.H{
+				"error": r.Error(),
+				"code":  "upgrade.requires_confirmation",
+			})
+			return
+		}
 		emitControlAudit(EventOpencodeUpgrade, "opencode.upgrade",
 			audit.OutcomeError, srvReqID, map[string]any{
 				"error_code": r.Code(),
