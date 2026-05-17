@@ -756,9 +756,18 @@ class LthnAuthGate extends LitElement {
               <!-- Cerberus #1492 (A1) — default UNCHECKED. Passphrase-once is
                    weaker than passphrase-per-launch; making it the default would
                    be a manipulative-default reducing the user's security posture
-                   without them choosing it. The user opts in. -->
-              <input type="checkbox" style="accent-color:var(--brand-400);">
-              Remember on this Mac · keep authed in Keychain
+                   without them choosing it. The user opts in.
+
+                   Label wording per Cerberus #1492 recommendation #4 — flat
+                   statement of the trade ("Store passphrase in Keychain · skip
+                   this prompt next launch") rather than the "Remember" framing
+                   that primes the user to accept. The trade is now legible: the
+                   user is storing a secret in exchange for skipping a prompt. -->
+              <input type="checkbox"
+                id="lthn-auth-gate-keychain-remember"
+                data-testid="lthn-auth-gate-keychain-remember"
+                style="accent-color:var(--brand-400);">
+              Store passphrase in Keychain · skip this prompt next launch
             </label>
           </div>
           <div style="display:flex; gap:10px; align-items:center; margin-top:2px;">

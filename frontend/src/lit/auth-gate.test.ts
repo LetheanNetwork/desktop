@@ -682,6 +682,55 @@ describe("<lthn-auth-gate> — Wreath-in unlock flow (RFC.stage-e §5)", () => {
   });
 });
 
+// Mantis #1492 (A1 consent-floor) regression guard — the "Store passphrase
+// in Keychain" checkbox in Stage C MUST default UNCHECKED so the user
+// explicitly opts in to Keychain persistence rather than having
+// passphrase-per-launch silently weakened to passphrase-once-then-Keychain
+// by a default-on visual contract. Cerberus #1492 finding.
+//
+// Scope note: the Stage D wiring (checkbox change → keychain persist) is
+// NOT yet implemented — `_onWreathIn` is the Stage C no-op for this
+// control. Tests for "opt-in fires keychain persist" + "unchecked does not
+// touch keychain" land alongside that wiring in a separate ticket; the
+// regression guard here is the structural one Cerberus called out (default
+// state + label wording) so the consent default can't silently flip back.
+describe("TestAuthGate_StageC_RememberCheckboxDefaultUnchecked_Good (Mantis #1492)", () => {
+  beforeEach(() => {
+    asMockFn(AccountStatus).mockReset();
+    asMockFn(IssueBootstrapToken).mockReset();
+    asMockFn(IssueBootstrapTokenForScope).mockReset();
+    document.body.innerHTML = "";
+    asMockFn(AccountStatus).mockResolvedValue({
+      OK: true, Value: { has_user_account: true, account_id: "abc123" },
+    });
+  });
+
+  it("checkbox renders unchecked by default in state=auth", async () => {
+    const el = await mount();
+    expect(el.state).toBe("auth");
+    const cb = el.querySelector(
+      "[data-testid='lthn-auth-gate-keychain-remember']",
+    ) as HTMLInputElement | null;
+    expect(cb).not.toBeNull();
+    expect(cb!.type).toBe("checkbox");
+    // Default state — Cerberus #1492 A1 finding: opt-in not opt-out.
+    expect(cb!.checked).toBe(false);
+    expect(cb!.hasAttribute("checked")).toBe(false);
+  });
+
+  it("label uses the flat trade wording, not 'Remember' framing", async () => {
+    const el = await mount();
+    // Cerberus #1492 recommendation #4 — surface the trade verbatim so
+    // the user reads it as a security choice, not a convenience toggle.
+    expect(el.textContent).toContain("Store passphrase in Keychain");
+    expect(el.textContent).toContain("skip this prompt next launch");
+    // The biased "Remember on this Mac · keep authed in Keychain" framing
+    // is gone — guard against regression.
+    expect(el.textContent).not.toContain("Remember on this Mac");
+    expect(el.textContent).not.toContain("keep authed in Keychain");
+  });
+});
+
 // Mantis #1515 regression guard — the parser ONLY accepts the canonical
 // coreapi.Response[T] wire shape `{success, data}`. The historical dead
 // shape `{success, Value}` (PascalCase, never emitted by coreapi) MUST
