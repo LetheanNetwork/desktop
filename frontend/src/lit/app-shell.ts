@@ -1581,11 +1581,13 @@ class LthnAppShell extends LitElement {
               active-view=${this.view}
               @lthn:view-switcher:select=${this._onViewSwitcherSelect}
             ></lthn-view-switcher>
-            <button style="display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:6px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); color:var(--fg-2); font-family:var(--font-sans); font-size:11.5px; cursor:pointer;">
+            <!-- Search ⌘K — migrated to <lthn-btn tone="ghost" size="sm">
+                 per Mantis #1512 (was raw <button> with inline tokens). -->
+            <lthn-btn tone="ghost" size="sm">
               <i class="fa-solid fa-magnifying-glass" style="font-size:10px;"></i>
               <span>${this.t.search}</span>
               <span style="font-family:var(--font-mono); font-size:9.5px; padding:0 4px; border-left:1px solid rgba(255,255,255,0.10); margin-left:4px; padding-left:8px; color:var(--fg-3);">⌘K</span>
-            </button>
+            </lthn-btn>
             <button @click=${() => this._select("settings")} title=${this.t.settingsTip} style="width:26px; height:26px; border-radius:6px; background:transparent; border:1px solid transparent; color:var(--fg-3); cursor:pointer;">
               <i class="fa-solid fa-sliders" style="font-size:11px;"></i>
             </button>

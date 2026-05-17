@@ -20,6 +20,10 @@
 // on the shell internals.
 
 import { LitElement, html, nothing } from "lit";
+// Side-effect: registers <lthn-btn> + sibling chrome elements (the
+// titlebar trigger below uses <lthn-btn tone="ghost" size="sm"> per
+// Mantis #1512).
+import "./chrome";
 
 // ViewSwitcherEntry mirrors the subset of ViewDef the switcher needs.
 // Decoupled from app-shell's ViewDef so a future plugin-view-aware
@@ -97,22 +101,18 @@ export class ViewSwitcherElement extends LitElement {
       return html`<span aria-hidden="true" style="display:inline-block; width:0;"></span>`;
     }
     return html`
-      <span style="position:relative; display:inline-flex; --wails-draggable: no-drag;">
-        <button
-          class="lthn-view-switcher-titlebar"
+      <span class="lthn-view-switcher-titlebar"
+            style="position:relative; display:inline-flex; --wails-draggable: no-drag;">
+        <lthn-btn
+          tone="ghost"
+          size="sm"
           @click=${this._toggle}
-          title=${`View · ${active.label}`}
-          style="display:inline-flex; align-items:center; gap:6px;
-                 padding:4px 10px; border-radius:6px;
-                 background:rgba(255,255,255,0.04);
-                 border:1px solid rgba(255,255,255,0.07);
-                 color:var(--fg-2); font-family:var(--font-sans);
-                 font-size:11.5px; font-weight:500; cursor:pointer;">
+          title=${`View · ${active.label}`}>
           <i class="fa-solid ${active.icon}" style="font-size:10px; color:var(--fg-2);"></i>
           <span>${active.label}</span>
           <i class="fa-solid ${this._open ? "fa-angle-up" : "fa-angle-down"}"
              style="font-size:9px; color:var(--fg-3);"></i>
-        </button>
+        </lthn-btn>
         ${this._open ? this._renderMenu() : nothing}
       </span>
     `;

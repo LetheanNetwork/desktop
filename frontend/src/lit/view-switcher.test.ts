@@ -28,7 +28,7 @@ describe("lthn-view-switcher render", () => {
       props: { views: [] },
     });
     await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
-    expect(el.querySelector("button.lthn-view-switcher-titlebar")).toBeNull();
+    expect(el.querySelector("lthn-btn")).toBeNull();
   });
 
   it("renders the active view's label + icon", async () => {
@@ -36,7 +36,7 @@ describe("lthn-view-switcher render", () => {
       props: { views: FIXTURE_VIEWS, activeView: "coding" },
     });
     await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
-    const btn = el.querySelector("button.lthn-view-switcher-titlebar");
+    const btn = el.querySelector("lthn-btn");
     expect(btn).not.toBeNull();
     expect(btn?.textContent).toContain("Coding");
   });
@@ -46,7 +46,7 @@ describe("lthn-view-switcher render", () => {
       props: { views: FIXTURE_VIEWS, activeView: "no-such-view" },
     });
     await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
-    const btn = el.querySelector("button.lthn-view-switcher-titlebar");
+    const btn = el.querySelector("lthn-btn");
     expect(btn?.textContent).toContain("Admin"); // first entry
   });
 });
@@ -57,7 +57,7 @@ describe("lthn-view-switcher dropdown interaction", () => {
       props: { views: FIXTURE_VIEWS, activeView: "admin" },
     });
     await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
-    const trigger = el.querySelector("button.lthn-view-switcher-titlebar") as HTMLButtonElement;
+    const trigger = el.querySelector("lthn-btn") as HTMLElement;
     trigger.click();
     await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
     // Menu rendered + 3 entry buttons inside (one per view).
@@ -76,7 +76,7 @@ describe("lthn-view-switcher dropdown interaction", () => {
       picked = (e as CustomEvent<{ viewId: string }>).detail.viewId;
     });
 
-    const trigger = el.querySelector("button.lthn-view-switcher-titlebar") as HTMLButtonElement;
+    const trigger = el.querySelector("lthn-btn") as HTMLElement;
     trigger.click();
     await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
 
@@ -94,7 +94,7 @@ describe("lthn-view-switcher dropdown interaction", () => {
       props: { views: FIXTURE_VIEWS, activeView: "admin" },
     });
     await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
-    const trigger = el.querySelector("button.lthn-view-switcher-titlebar") as HTMLButtonElement;
+    const trigger = el.querySelector("lthn-btn") as HTMLElement;
     trigger.click();
     await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
     // Click outside.
@@ -116,13 +116,13 @@ describe("lthn-view-switcher backend wire (4-spec contract)", () => {
       props: { views: custom, activeView: "x" },
     });
     await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
-    expect(el.querySelector("button.lthn-view-switcher-titlebar")?.textContent).toContain("X");
+    expect(el.querySelector("lthn-btn")?.textContent).toContain("X");
   });
 
   it("absent views keeps the layout-safe placeholder (no chrome shift)", async () => {
     const { el } = await mountWindow<ViewSwitcherElement>("lthn-view-switcher");
     await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
-    expect(el.querySelector("button.lthn-view-switcher-titlebar")).toBeNull();
+    expect(el.querySelector("lthn-btn")).toBeNull();
   });
 
   it("empty views[] keeps the placeholder", async () => {
@@ -130,7 +130,7 @@ describe("lthn-view-switcher backend wire (4-spec contract)", () => {
       props: { views: [] },
     });
     await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
-    expect(el.querySelector("button.lthn-view-switcher-titlebar")).toBeNull();
+    expect(el.querySelector("lthn-btn")).toBeNull();
   });
 
   it("fixture-only render path stays clickable", async () => {
@@ -138,7 +138,7 @@ describe("lthn-view-switcher backend wire (4-spec contract)", () => {
       props: { views: FIXTURE_VIEWS, activeView: "admin" },
     });
     await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
-    const trigger = el.querySelector("button.lthn-view-switcher-titlebar") as HTMLButtonElement;
+    const trigger = el.querySelector("lthn-btn") as HTMLElement;
     expect(trigger).not.toBeNull();
     trigger.click();
     await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
