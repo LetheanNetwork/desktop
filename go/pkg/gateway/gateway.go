@@ -354,7 +354,7 @@ func (s *Service) Handle(ctx *gin.Context) {
 	emitDispatchRequested(bundleID, pattern, method)
 	r := handler(s.core, bundleID, ctx)
 	if !r.OK {
-		emitDispatchFailed(bundleID, pattern, method, r.Error())
+		emitDispatchFailed(bundleID, pattern, method, r)
 		writeError(ctx, core.StatusBadRequest, "handler-failed", r.Error())
 		return
 	}

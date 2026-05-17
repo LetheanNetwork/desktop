@@ -341,3 +341,65 @@ func TestGateway_DispatchFailed_EmitsRejected_Bad(t *core.T) {
 		core.AssertEqual(t, 0, len(rec.filterByName("gateway.dispatch.succeeded")))
 	})
 }
+
+// TestGateway_AuditMeta_ErrorCodeBoundedKeyspace_Ugly — STRIDE-I
+// prose-leak canary per RFC.error-code-cascade.md §3 (W6) /
+// Mantis #1717 / Cerberus #61 C-5. Drives the handler-Failed path
+// (service.notify stub returns Fail wrapping core.E("gateway.
+// serviceNotifyInvoke", "pkg/notifications not yet implemented…")) and
+// asserts the emitted Failed row's Meta["error_code"] is the BOUNDED
+// Operation literal "gateway.serviceNotifyInvoke", NOT the raw
+// r.Error() prose containing the "pkg/notifications not yet
+// implemented" message body.
+//
+// The pre-W6 shape (emitDispatchFailed(..., r.Error())) would have
+// landed the full "gateway.serviceNotifyInvoke: pkg/notifications not
+// yet implemented — file as a separate ticket if needed" string in
+// Meta["error_code"] — and at plugin scope dispatch, that prose
+// routinely embeds upstream-provider error bodies, URLs, file paths,
+// and caller-controlled bytes. This test pins the type-system contract
+// at the gateway helper boundary so any regression that reverts the
+// helper signature to a raw string falls loud rather than silently
+// re-leaking handler-scope prose.
+func TestGateway_AuditMeta_ErrorCodeBoundedKeyspace_Ugly(t *core.T) {
+	rec := installAuditRecorder(t)
+	c := newGatewayCore(t)
+	seedBundle(t, c, "opencode", []marketplace.Permission{
+		{Scope: "service.notify", Mode: "invoke"},
+	})
+	_, r := newTestRouter(t, c)
+
+	req := httptest.NewRequest("POST", "/v1/api/gateway/service.notify/invoke", nil)
+	req.Header.Set("Bundle-ID", "opencode")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusBadRequest, w.Code,
+		"handler-fail path must surface 400 to caller")
+
+	failed := rec.filterByName("gateway.dispatch.failed")
+	core.AssertEqual(t, 1, len(failed),
+		"exactly one Failed row on handler-fail path")
+
+	// Bounded-keyspace contract: error_code is the *core.Err.Operation
+	// canon per audit.ErrorCode(r) resolution order, NOT the raw
+	// r.Error() prose. serviceNotifyInvoke wraps Operation =
+	// "gateway.serviceNotifyInvoke".
+	code, ok := failed[0].Meta["error_code"].(string)
+	core.AssertTrue(t, ok, "error_code Meta value must be a string")
+	core.AssertEqual(t, "gateway.serviceNotifyInvoke", code,
+		"error_code must be the bounded Operation literal (audit.ErrorCode), not raw prose")
+
+	// Belt-and-braces: NONE of the handler's prose body bytes may
+	// appear in Meta["error_code"]. Defends against future regressions
+	// that re-introduce a string parameter or fold raw r.Error() into
+	// a renamed key.
+	core.AssertFalse(t, strings.Contains(code, "pkg/notifications"),
+		"error_code must not echo handler prose body: got "+code)
+	core.AssertFalse(t, strings.Contains(code, "not yet implemented"),
+		"error_code must not echo handler prose body: got "+code)
+	core.AssertFalse(t, strings.Contains(code, "file as a separate ticket"),
+		"error_code must not echo handler prose body: got "+code)
+	core.AssertFalse(t, strings.Contains(code, ":"),
+		"bounded Operation literal must be the codepath alone, not ‘op: message’: got "+code)
+}

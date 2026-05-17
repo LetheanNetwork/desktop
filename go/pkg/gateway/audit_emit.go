@@ -20,7 +20,7 @@
 //
 //	emitDispatchRequested(bundleID, routePattern, ctx.Request.Method)
 //	if !r.OK {
-//	    emitDispatchFailed(bundleID, routePattern, ctx.Request.Method, r.Error())
+//	    emitDispatchFailed(bundleID, routePattern, ctx.Request.Method, r)
 //	    return
 //	}
 //	emitDispatchSucceeded(bundleID, routePattern, ctx.Request.Method)
@@ -105,16 +105,25 @@ func emitDispatchSucceeded(bundleID, pattern, method string) {
 
 // emitDispatchFailed fires the Failed row when the registered scope
 // Handler returns a non-OK Result. Sibling of Requested above.
-// errorCode is the Result.Error() string — already-scoped by core.E
-// at the handler.
+//
+// The Result is passed in (not the raw error prose string) so the
+// audit substrate stamps the BOUNDED audit.ErrorCode(r) literal in
+// the error_code Meta key instead of the raw handler prose.
+// RFC.error-code-cascade.md §3 (W6) / Mantis #1717 / Cerberus #61
+// C-5 — pre-W6 shape leaked plugin / handler-scope
+// `*core.Err.Operation: <message>` strings that routinely echo
+// caller-controlled input from upstream dependencies (HTTP error
+// bodies, file paths, etc.) into the audit substrate's STRIDE-I
+// surface. The type-system signature change makes the regression
+// unreachable.
 //
 // Usage example (internal):
 //
 //	if !r.OK {
-//	    emitDispatchFailed(bundleID, pattern, method, r.Error())
+//	    emitDispatchFailed(bundleID, pattern, method, r)
 //	    return
 //	}
-func emitDispatchFailed(bundleID, pattern, method, errorCode string) {
+func emitDispatchFailed(bundleID, pattern, method string, r core.Result) {
 	_ = audit.Default().Record(audit.Event{
 		Event:   audit.EventGatewayDispatchFailed,
 		TS:      core.Now().UTC().Unix(),
@@ -124,7 +133,7 @@ func emitDispatchFailed(bundleID, pattern, method, errorCode string) {
 			"bundle_id":     bundleID,
 			"route_pattern": pattern,
 			"method":        method,
-			"error_code":    errorCode,
+			"error_code":    audit.ErrorCode(r),
 		},
 	})
 }
