@@ -20,8 +20,6 @@
 package marketplace
 
 import (
-	"gopkg.in/yaml.v3"
-
 	core "dappco.re/go"
 )
 
@@ -87,9 +85,14 @@ func ImportCoolify(path string) core.Result {
 		}
 	}
 
+	// Mantis #1691 / Cerberus #54 C3 — same yaml-alias-bomb defence
+	// applied to compose YAML; this path also takes untrusted bundle
+	// authoring as input. Reuses decodeManifestYAMLHardened so the
+	// pre-decode size cap + panic-recover + typed-reason translation
+	// are shared with the manifest decoder.
 	var cf composeFile
-	if err := yaml.Unmarshal(composeRaw.Value.([]byte), &cf); err != nil {
-		return core.Fail(core.E(importCoolifyOp, "compose file parse failed", err))
+	if err := decodeManifestYAMLHardened(composeRaw.Value.([]byte), &cf); err != nil {
+		return core.Fail(core.E(importCoolifyOp, "compose file parse failed: "+err.Error(), err))
 	}
 	if len(cf.Services) == 0 {
 		return core.Fail(core.E(importCoolifyOp,

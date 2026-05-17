@@ -20,6 +20,14 @@ const (
 	manifestSchema  = "lthn-vm/v1"
 	parseManifestOp = "marketplace.ParseManifest"
 	validateOp      = "marketplace.ValidateManifest"
+
+	// yamlAliasBombReason is the typed reason code emitted when the
+	// decoder reports excessive aliasing (CVE-2022-28948 mitigation
+	// surface). Mantis #1691 / Cerberus #54 C3. Audit + UI callers
+	// grep for this literal. Pre-decode size cap shares the
+	// maxManifestBytes constant declared in registry.go (256 KiB) so
+	// fetch-side and parse-side speak the same ceiling.
+	yamlAliasBombReason = "yaml-alias-bomb-suspected"
 )
 
 // BundleManifest is the parsed form of a manifest.yml file.
@@ -230,10 +238,58 @@ func ParseManifestBytes(raw []byte) core.Result {
 
 func parseManifestBytes(raw []byte) core.Result {
 	var m BundleManifest
-	if err := yaml.Unmarshal(raw, &m); err != nil {
-		return core.Fail(core.E(parseManifestOp, "yaml parse failed", err))
+	if err := decodeManifestYAMLHardened(raw, &m); err != nil {
+		return core.Fail(core.E(parseManifestOp, "yaml parse failed: "+err.Error(), err))
 	}
 	return ValidateManifest(m)
+}
+
+// decodeManifestYAMLHardened wraps yaml.Unmarshal with three layered
+// defences against the yaml-alias-bomb (billion-laughs) DoS class —
+// Mantis #1691 / Cerberus #54 C3.
+//
+// Layer 1: pre-decode byte-size cap. Real manifests are <10 KiB;
+// anything >maxManifestBytes is structurally not a real manifest and
+// is rejected without invoking the decoder at all.
+//
+// Layer 2: yaml.v3 built-in alias-ratio gate. Already active in the
+// upstream decoder (allowedAliasRatio, decodeCount + aliasCount
+// thresholds — see vendor/gopkg.in/yaml.v3/decode.go ~line 485).
+// On trip the upstream raises a panic which surfaces as the error
+// string "document contains excessive aliasing". This wrapper
+// translates that to a stable typed reason code (yamlAliasBombReason)
+// so audit + UI surfaces can pattern-match without coupling to the
+// upstream string.
+//
+// Layer 3: panic-recover. Defends against any decoder bug or future
+// fork drift where excessive-alias trips a raw panic instead of an
+// error return. Recovered panics surface as the same typed reason
+// code rather than crashing the marketplace goroutine.
+//
+// Usage example:
+//
+//	var m BundleManifest
+//	if err := decodeManifestYAMLHardened(raw, &m); err != nil { ... }
+func decodeManifestYAMLHardened(raw []byte, out any) (err error) {
+	if len(raw) > maxManifestBytes {
+		return core.E(parseManifestOp,
+			core.Sprintf("manifest exceeds %d-byte cap (got %d bytes)",
+				maxManifestBytes, len(raw)), nil)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = core.E(parseManifestOp,
+				yamlAliasBombReason+": decoder panic — "+core.Sprintf("%v", r), nil)
+		}
+	}()
+	if e := yaml.Unmarshal(raw, out); e != nil {
+		if core.Contains(e.Error(), "excessive aliasing") {
+			return core.E(parseManifestOp,
+				yamlAliasBombReason+": "+e.Error(), e)
+		}
+		return e
+	}
+	return nil
 }
 
 // ValidateManifest validates a BundleManifest without I/O.
