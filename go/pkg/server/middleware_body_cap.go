@@ -52,12 +52,6 @@ const MaxBodyBytesDefault = 64 << 10 // 64 KiB
 // liveness-probe extension.
 const MaxBodyBytesHealth = 4 << 10 // 4 KiB
 
-// MaxBodyBytesMCP caps the MCP transport surfaces (/mcp/* + /v1/mcp/*).
-// MCP tool calls carry larger argument payloads (file contents,
-// transcripts, model outputs). 256 KiB is the starting point per RFC §3.2;
-// verify against external/mcp transport_http.go before bumping.
-const MaxBodyBytesMCP = 256 << 10 // 256 KiB
-
 // Gateway cap is sourced from pkg/gateway.MaxBodyBytes — single source
 // of truth per Amendment A5 (Cerberus #16 C-6). Bumping the gateway cap
 // is a one-line change in pkg/gateway and DefaultBodyCapOverrides picks
@@ -111,10 +105,18 @@ type BodyCapOverride struct {
 // Gateway cap sourced from pkg/gateway.MaxBodyBytes directly — single
 // source per Amendment A5. Tests pin this table
 // (TestBodyCap_DefaultOverrides_Good) so const drift surfaces loudly.
+//
+// Cerberus #57 F-3 (Mantis #1701): /mcp/ + /v1/mcp/ entries were
+// previously listed here but never matched a real route — the MCP
+// transport surface lives on pkg/bridge's own core.HTTPServer +
+// core.NewServeMux, not on the coreapi.Engine that this middleware
+// wraps. Dead config that misrepresented reality (a reader skimming
+// the table would assume MCP was engine-mounted at 256 KiB when in
+// fact the bridge owns its own caps entirely). Removed to keep the
+// override registry honest; if pkg/bridge ever needs an explicit
+// body cap on its mux, that's a separate ticket against the bridge.
 var DefaultBodyCapOverrides = []BodyCapOverride{
 	{Prefix: "/v1/api/gateway/", Bytes: gateway.MaxBodyBytes},
-	{Prefix: "/mcp/", Bytes: MaxBodyBytesMCP},
-	{Prefix: "/v1/mcp/", Bytes: MaxBodyBytesMCP},
 	{Prefix: "/health", Bytes: MaxBodyBytesHealth},
 }
 

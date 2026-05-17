@@ -102,21 +102,6 @@ func TestBodyCap_GatewayOverride_413_Bad(t *testing.T) {
 		"expected body.too_large envelope on gateway-override overflow")
 }
 
-// TestBodyCap_MCPOverride_413_Bad — body over MaxBodyBytesMCP on /mcp/
-// rejects at 413. Override at MaxBodyBytesMCP (256 KiB) actually used
-// here to pin the const value, not a synthetic substitute — guards
-// against MaxBodyBytesMCP being silently halved.
-func TestBodyCap_MCPOverride_413_Bad(t *testing.T) {
-	overrides := []server.BodyCapOverride{
-		{Prefix: "/mcp/", Bytes: server.MaxBodyBytesMCP},
-	}
-	eng := newCapEngine(t, server.MaxBodyBytesDefault, overrides)
-	w := postBytes(t, eng, "/mcp/v1/call", int(server.MaxBodyBytesMCP)+1)
-	core.AssertEqual(t, http.StatusRequestEntityTooLarge, w.Code)
-	core.AssertTrue(t, core.Contains(w.Body.String(), "body.too_large"),
-		"expected body.too_large envelope on MCP-override overflow")
-}
-
 // TestBodyCap_HealthOverride_413_Bad — body over MaxBodyBytesHealth on
 // /health rejects at 413. Pins the 4 KiB floor.
 func TestBodyCap_HealthOverride_413_Bad(t *testing.T) {
@@ -139,11 +124,16 @@ func TestBodyCap_HealthOverride_413_Bad(t *testing.T) {
 // Per RFC §3.2.1 — /v1/plugin-view/capability-grant deliberately is
 // NOT in this table (inner-wrap discipline). Asserting its absence
 // makes the discipline explicit.
+//
+// Cerberus #57 F-3 (Mantis #1701) — /mcp/ and /v1/mcp/ are
+// deliberately NOT in this table. The MCP transport surface lives on
+// pkg/bridge's own core.HTTPServer + core.NewServeMux, not on the
+// coreapi.Engine this middleware wraps. The previous entries here
+// were signal-leak dead config; asserting their absence pins the
+// honesty.
 func TestBodyCap_DefaultOverrides_Good(t *testing.T) {
 	expect := map[string]int64{
 		"/v1/api/gateway/": gateway.MaxBodyBytes,
-		"/mcp/":            server.MaxBodyBytesMCP,
-		"/v1/mcp/":         server.MaxBodyBytesMCP,
 		"/health":          server.MaxBodyBytesHealth,
 	}
 	got := map[string]int64{}
@@ -160,6 +150,13 @@ func TestBodyCap_DefaultOverrides_Good(t *testing.T) {
 	_, present := got["/v1/plugin-view/capability-grant"]
 	core.AssertTrue(t, !present,
 		"capability-grant MUST NOT be in DefaultBodyCapOverrides (RFC §3.2.1 inner-wrap discipline)")
+	// Per Cerberus #57 F-3 — bridge-only prefixes stay out of the registry.
+	_, mcpPresent := got["/mcp/"]
+	core.AssertTrue(t, !mcpPresent,
+		"/mcp/ MUST NOT be in DefaultBodyCapOverrides (bridge-only path, Cerberus #57 F-3)")
+	_, mcpV1Present := got["/v1/mcp/"]
+	core.AssertTrue(t, !mcpV1Present,
+		"/v1/mcp/ MUST NOT be in DefaultBodyCapOverrides (bridge-only path, Cerberus #57 F-3)")
 }
 
 // TestBodyCapMiddleware_TwoWraps_Good_InnerWins — when a handler adds
