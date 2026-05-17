@@ -13,6 +13,8 @@
 package queue
 
 import (
+	"sync"
+
 	core "dappco.re/go"
 
 	"dappco.re/lthn/desktop/pkg/auth"
@@ -32,6 +34,81 @@ type HandlerOptions struct {
 	// Payload decoded into core.Options + a context. Returns
 	// core.Ok / core.Fail per Core convention.
 	Handler core.ActionHandler
+
+	// PermittedTiers names the auth.CallerTier values that may
+	// Enqueue against this kind. RFC v3.1 §5.1 mandatory — empty
+	// is rejected at RegisterKind time with
+	// ErrPermittedTiersRequired so renderer-tier elevation via
+	// kind-string forge (Cerberus #73 F-3 / Mantis #1757) cannot
+	// land via an under-specified RegisterKind site. Composes with
+	// the outer auth.Require ALLOW gate in Enqueue (BOTH-not-
+	// either per §5.0): outer Require gates the writer-surface
+	// broadly, inner PermittedTiers narrows per-kind.
+	//
+	// Today's default-pose for migrated handlers is
+	// {TierOperator, TierCascade} — matches Phase 1.5 ALLOW + audit-
+	// emit posture. Phase 2 ratchet narrows kind-by-kind (e.g.
+	// "backup.nightly" → {TierCron} only).
+	PermittedTiers []auth.CallerTier
+}
+
+// kindRegistry is the per-Core map from kind → PermittedTiers.
+// Mirrors the sync.Map keyed by *core.Core pattern used by
+// pkg/auth/coreSidecar for CallerIdentity stamping — keeps per-Core
+// state without polluting *core.Core's public surface or requiring a
+// core/go primitive extension. Empty entry = kind not registered (or
+// registered without PermittedTiers, which RegisterKind rejects).
+var kindRegistry sync.Map // map[*core.Core]*core.Registry[[]auth.CallerTier]
+
+// permittedTiersFor returns the PermittedTiers allow-list registered
+// for the given kind on the given Core. Returns (nil, false) when the
+// kind has no entry; the caller (Enqueue) decides whether that means
+// "no handler yet — let worker.dispatch surface the missing-handler
+// failure" or "reject up-front". Today's policy: Enqueue accepts an
+// unregistered kind (matches pre-Phase-1.5 shape — the worker emits
+// the typed "no handler" failure later); per-kind gating only fires
+// when an entry exists. Phase 2 may flip to "deny-by-default at
+// Enqueue if no kind registered".
+func permittedTiersFor(c *core.Core, kind string) ([]auth.CallerTier, bool) {
+	if c == nil || kind == "" {
+		return nil, false
+	}
+	v, ok := kindRegistry.Load(c)
+	if !ok {
+		return nil, false
+	}
+	reg, ok := v.(*core.Registry[[]auth.CallerTier])
+	if !ok {
+		return nil, false
+	}
+	r := reg.Get(kind)
+	if !r.OK {
+		return nil, false
+	}
+	tiers, ok := r.Value.([]auth.CallerTier)
+	if !ok {
+		return nil, false
+	}
+	return tiers, true
+}
+
+// rememberPermittedTiers persists the per-kind PermittedTiers
+// allow-list into the per-Core registry. RegisterKind calls this
+// after validating opts.PermittedTiers is non-empty.
+func rememberPermittedTiers(c *core.Core, kind string, tiers []auth.CallerTier) {
+	if c == nil || kind == "" {
+		return
+	}
+	v, _ := kindRegistry.LoadOrStore(c, core.NewRegistry[[]auth.CallerTier]())
+	reg, ok := v.(*core.Registry[[]auth.CallerTier])
+	if !ok {
+		return
+	}
+	// Copy the slice so a caller mutating opts.PermittedTiers after
+	// RegisterKind returns can't retroactively widen the gate.
+	cp := make([]auth.CallerTier, len(tiers))
+	copy(cp, tiers)
+	reg.Set(kind, cp)
 }
 
 // actionNamePrefix is the namespace under which all kind handlers
@@ -54,13 +131,17 @@ func ActionName(kind string) string {
 
 // Register installs a handler for a job kind. Overwrites any
 // existing handler under the same name (last-write-wins, matches
-// Core's c.Action semantics).
+// Core's c.Action semantics). PermittedTiers is mandatory per RFC
+// v3.1 §5.1 (Cerberus #73 F-3 / Mantis #1757) — empty rejects with
+// ErrPermittedTiersRequired to close the renderer-tier elevation via
+// kind-string forge.
 //
 // Usage example:
 //
 //	queue.RegisterKind(c, queue.HandlerOptions{
 //	    Kind: "lint",
 //	    Description: "Run go vet on a path",
+//	    PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade},
 //	    Handler: func(ctx core.Context, opts core.Options) core.Result {
 //	        path := opts.String("path")
 //	        return c.Process().Run(ctx, "go", "vet", path)
@@ -76,6 +157,16 @@ func RegisterKind(c *core.Core, opts HandlerOptions) core.Result {
 	if opts.Handler == nil {
 		return core.Fail(core.E("queue.Register", "handler is required", nil))
 	}
+	if len(opts.PermittedTiers) == 0 {
+		// Deny-by-construction: an unspecified PermittedTiers is a
+		// MISUSE, not "allow all". Per RFC v3.1 §5.1 / Cerberus #73
+		// F-3: every kind MUST declare which tiers may Enqueue
+		// against it. NewCode populates Err.Code so callers can
+		// branch on r.Code() == ErrPermittedTiersRequired.
+		return core.Fail(core.NewCode(ErrPermittedTiersRequired,
+			"queue.Register: PermittedTiers is required for kind: "+opts.Kind))
+	}
+	rememberPermittedTiers(c, opts.Kind, opts.PermittedTiers)
 	c.Action(ActionName(opts.Kind), opts.Handler)
 	return core.Ok(opts.Kind)
 }

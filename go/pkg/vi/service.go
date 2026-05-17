@@ -24,6 +24,8 @@ package vi
 
 import (
 	core "dappco.re/go"
+
+	"dappco.re/lthn/desktop/pkg/auth"
 	"dappco.re/lthn/desktop/pkg/queue"
 )
 
@@ -97,6 +99,11 @@ func (s *Service) OnStart() core.Result {
 	register := queue.RegisterKind(c, queue.HandlerOptions{
 		Kind:        ProbeKind,
 		Description: "Vi: probe one configured site for uptime + latency",
+		// Vi probe-jobs self-reschedule from within their own handler
+		// (TierCascade once the worker stamps the dispatch Context) and
+		// are seeded from OnStart under TierInternal. Operator covers
+		// human-triggered immediate-probe via the CLI/Wails surface.
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade, auth.TierInternal},
 		Handler: func(ctx core.Context, opts core.Options) core.Result {
 			return s.handleProbeJob(ctx, opts)
 		},
@@ -125,6 +132,9 @@ func (s *Service) OnStart() core.Result {
 	prRegister := queue.RegisterKind(c, queue.HandlerOptions{
 		Kind:        FetchPRKind,
 		Description: "Vi: poll one configured repo for open pull requests",
+		// Same posture as ProbeKind — self-rescheduling cadence under
+		// TierCascade after the first OnStart-seeded TierInternal hop.
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade, auth.TierInternal},
 		Handler: func(ctx core.Context, opts core.Options) core.Result {
 			return s.handleFetchPRJob(ctx, opts)
 		},

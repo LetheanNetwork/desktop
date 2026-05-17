@@ -19,6 +19,7 @@ import (
 	core "dappco.re/go"
 
 	"dappco.re/lthn/desktop/pkg/audit"
+	"dappco.re/lthn/desktop/pkg/auth"
 	"dappco.re/lthn/desktop/pkg/queue"
 )
 
@@ -93,7 +94,8 @@ func TestQueueAudit_EmitsTrio_Good(t *core.T) {
 	queue.AttachAudit(c)
 
 	queue.RegisterKind(c, queue.HandlerOptions{
-		Kind: "echo",
+		Kind:           "echo",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade, auth.TierInternal},
 		Handler: func(_ core.Context, _ core.Options) core.Result {
 			return core.Ok("done")
 		},
@@ -160,7 +162,8 @@ func TestQueueAudit_EmitsFailed_Bad(t *core.T) {
 	queue.AttachAudit(c)
 
 	queue.RegisterKind(c, queue.HandlerOptions{
-		Kind: "boom",
+		Kind:           "boom",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade, auth.TierInternal},
 		Handler: func(_ core.Context, _ core.Options) core.Result {
 			return core.Fail(core.E("test", "intentional", nil))
 		},

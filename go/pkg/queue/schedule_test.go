@@ -5,6 +5,8 @@ package queue_test
 import (
 	core "dappco.re/go"
 	"dappco.re/go/orm"
+
+	"dappco.re/lthn/desktop/pkg/auth"
 	"dappco.re/lthn/desktop/pkg/queue"
 )
 
@@ -16,8 +18,9 @@ func TestSchedule_Schedule_Good(t *core.T) {
 	var ran core.WaitGroup
 	ran.Add(1)
 	queue.RegisterKind(c, queue.HandlerOptions{
-		Kind:    "imm",
-		Handler: func(core.Context, core.Options) core.Result { ran.Done(); return core.Ok(nil) },
+		Kind:           "imm",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade, auth.TierInternal},
+		Handler:        func(core.Context, core.Options) core.Result { ran.Done(); return core.Ok(nil) },
 	})
 
 	svc := queue.NewService(queue.Options{PollInterval: 30 * core.Millisecond})(c).
@@ -54,8 +57,9 @@ func TestSchedule_Schedule_Ugly(t *core.T) {
 
 	var fired bool
 	queue.RegisterKind(c, queue.HandlerOptions{
-		Kind:    "future",
-		Handler: func(core.Context, core.Options) core.Result { fired = true; return core.Ok(nil) },
+		Kind:           "future",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade, auth.TierInternal},
+		Handler:        func(core.Context, core.Options) core.Result { fired = true; return core.Ok(nil) },
 	})
 
 	svc := queue.NewService(queue.Options{PollInterval: 30 * core.Millisecond})(c).
@@ -81,8 +85,9 @@ func TestSchedule_ScheduleAfter_Good(t *core.T) {
 	var ran core.WaitGroup
 	ran.Add(1)
 	queue.RegisterKind(c, queue.HandlerOptions{
-		Kind:    "delayed",
-		Handler: func(core.Context, core.Options) core.Result { ran.Done(); return core.Ok(nil) },
+		Kind:           "delayed",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade, auth.TierInternal},
+		Handler:        func(core.Context, core.Options) core.Result { ran.Done(); return core.Ok(nil) },
 	})
 
 	svc := queue.NewService(queue.Options{PollInterval: 20 * core.Millisecond})(c).
@@ -123,7 +128,8 @@ func TestSchedule_ScheduleAfter_Ugly(t *core.T) {
 	var done core.WaitGroup
 	done.Add(1)
 	queue.RegisterKind(c, queue.HandlerOptions{
-		Kind: "retry-twice",
+		Kind:           "retry-twice",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade, auth.TierInternal},
 		Handler: func(_ core.Context, _ core.Options) core.Result {
 			attempts++
 			if attempts < 3 {

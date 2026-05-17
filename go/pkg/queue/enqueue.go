@@ -89,6 +89,30 @@ func EnqueueWithOptions(c *core.Core, kind string, opts EnqueueOptions) core.Res
 		return core.Fail(core.E("queue.Enqueue",
 			"tier not permitted: "+id.Tier.String(), nil))
 	}
+	// Inner per-kind PermittedTiers gate (RFC v3.1 §5.0 BOTH-not-
+	// either, §5.1 / Cerberus #73 F-3 / Mantis #1757). The outer
+	// Require above gates the writer-surface broadly; this inner
+	// gate narrows per-kind so a renderer claiming any kind-string
+	// cannot forge dispatch to a TierCron- or TierOperator-only
+	// handler. Unregistered kinds (no entry in the per-Core
+	// registry) bypass this gate — the worker emits the typed
+	// "no handler registered" failure later, preserving today's
+	// shape of "Enqueue accepts, worker fails late" rather than
+	// flipping to deny-by-default at Enqueue (a Phase 2 ratchet).
+	if tiers, present := permittedTiersFor(c, kind); present {
+		allowed := false
+		for _, t := range tiers {
+			if t == id.Tier {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return core.Fail(core.NewCode(ErrTierNotPermittedForKind,
+				"queue.Enqueue: tier "+id.Tier.String()+
+					" not permitted for kind: "+kind))
+		}
+	}
 	// Atomic depth-check + insert. Per-Core named mutex serialises
 	// concurrent Enqueue paths; worker claim mutates Status outside
 	// this lock but only ever lowers pending-count, so reading depth

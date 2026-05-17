@@ -338,8 +338,9 @@ func TestQueue_Get_Ugly(t *core.T) {
 func TestQueue_RegisterKind_Good(t *core.T) {
 	c := newQueueCore(t)
 	r := queue.RegisterKind(c, queue.HandlerOptions{
-		Kind:    "lint",
-		Handler: func(core.Context, core.Options) core.Result { return core.Ok(nil) },
+		Kind:           "lint",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade},
+		Handler:        func(core.Context, core.Options) core.Result { return core.Ok(nil) },
 	})
 	core.RequireTrue(t, r.OK)
 	kinds := queue.Kinds(c)
@@ -354,10 +355,14 @@ func TestQueue_RegisterKind_Bad(t *core.T) {
 
 	c := newQueueCore(t)
 	r = queue.RegisterKind(c, queue.HandlerOptions{
-		Handler: func(core.Context, core.Options) core.Result { return core.Ok(nil) },
+		PermittedTiers: []auth.CallerTier{auth.TierOperator},
+		Handler:        func(core.Context, core.Options) core.Result { return core.Ok(nil) },
 	})
 	core.AssertFalse(t, r.OK)
-	r = queue.RegisterKind(c, queue.HandlerOptions{Kind: "x"})
+	r = queue.RegisterKind(c, queue.HandlerOptions{
+		Kind:           "x",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator},
+	})
 	core.AssertFalse(t, r.OK)
 }
 
@@ -367,12 +372,14 @@ func TestQueue_RegisterKind_Bad(t *core.T) {
 func TestQueue_RegisterKind_Ugly(t *core.T) {
 	c := newQueueCore(t)
 	core.RequireTrue(t, queue.RegisterKind(c, queue.HandlerOptions{
-		Kind:    "lint",
-		Handler: func(core.Context, core.Options) core.Result { return core.Ok("first") },
+		Kind:           "lint",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade},
+		Handler:        func(core.Context, core.Options) core.Result { return core.Ok("first") },
 	}).OK)
 	core.RequireTrue(t, queue.RegisterKind(c, queue.HandlerOptions{
-		Kind:    "lint",
-		Handler: func(core.Context, core.Options) core.Result { return core.Ok("second") },
+		Kind:           "lint",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade},
+		Handler:        func(core.Context, core.Options) core.Result { return core.Ok("second") },
 	}).OK)
 	count := 0
 	for _, k := range queue.Kinds(c) {
@@ -381,6 +388,121 @@ func TestQueue_RegisterKind_Ugly(t *core.T) {
 		}
 	}
 	core.AssertEqual(t, 1, count)
+}
+
+// TestQueue_RegisterKind_RequiresPermittedTiers_Bad — empty
+// PermittedTiers rejects with ErrPermittedTiersRequired per RFC
+// v3.1 §5.1 / Cerberus #73 F-3 / Mantis #1757. Deny-by-construction:
+// a missing PermittedTiers is misuse, not "allow all", so renderer-
+// tier elevation via kind-string forge cannot land via an under-
+// specified RegisterKind site.
+func TestQueue_RegisterKind_RequiresPermittedTiers_Bad(t *core.T) {
+	c := newQueueCore(t)
+	r := queue.RegisterKind(c, queue.HandlerOptions{
+		Kind:    "lint",
+		Handler: func(core.Context, core.Options) core.Result { return core.Ok(nil) },
+		// PermittedTiers intentionally omitted.
+	})
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, queue.ErrPermittedTiersRequired, r.Code())
+
+	// Explicit nil slice (caller wrote `PermittedTiers: nil`) also
+	// rejects — len(nil) == 0, treated identically to missing.
+	r = queue.RegisterKind(c, queue.HandlerOptions{
+		Kind:           "lint2",
+		PermittedTiers: nil,
+		Handler:        func(core.Context, core.Options) core.Result { return core.Ok(nil) },
+	})
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, queue.ErrPermittedTiersRequired, r.Code())
+}
+
+// TestQueue_Enqueue_TierPermitted_Good — a caller stamped with a tier
+// inside the kind's PermittedTiers allow-list enqueues successfully.
+// Demonstrates the inner per-kind gate's HAPPY path under the BOTH-
+// not-either composition (outer auth.Require ALLOW + inner allow-list
+// both pass).
+func TestQueue_Enqueue_TierPermitted_Good(t *core.T) {
+	c := newQueueCore(t)
+	core.RequireTrue(t, queue.RegisterKind(c, queue.HandlerOptions{
+		Kind:           "lint",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade},
+		Handler:        func(core.Context, core.Options) core.Result { return core.Ok(nil) },
+	}).OK)
+
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier:    auth.TierOperator,
+		Subject: "account-snider",
+		Source:  "http-session:LTHN-SESS-1",
+	})
+	t.Cleanup(func() { auth.ClearCaller(c) })
+
+	r := queue.Enqueue(c, "lint", core.NewOptions())
+	core.RequireTrue(t, r.OK)
+	core.AssertEqual(t, queue.StatusPending, r.Value.(queue.Job).Status)
+}
+
+// TestQueue_Enqueue_TierNotPermitted_Bad — a caller stamped with a
+// tier OUTSIDE the kind's PermittedTiers allow-list rejects with
+// ErrTierNotPermittedForKind. Concretely: a TierRenderer caller
+// claiming an operator+cascade-only kind cannot land the Enqueue
+// even though the outer auth.Require ALLOW gate currently admits
+// TierRenderer broadly (RFC §5.0 BOTH-not-either composition closes
+// the kind-string forge gap from Cerberus #73 F-3 / Mantis #1757).
+func TestQueue_Enqueue_TierNotPermitted_Bad(t *core.T) {
+	c := newQueueCore(t)
+	core.RequireTrue(t, queue.RegisterKind(c, queue.HandlerOptions{
+		Kind:           "backup.nightly",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade},
+		Handler:        func(core.Context, core.Options) core.Result { return core.Ok(nil) },
+	}).OK)
+
+	// Stamp TierRenderer: outer Require admits, inner allow-list
+	// rejects — the forge surface Cerberus #73 F-3 names.
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier:    auth.TierRenderer,
+		Subject: "account-renderer",
+		Source:  "wails",
+	})
+	t.Cleanup(func() { auth.ClearCaller(c) })
+
+	r := queue.Enqueue(c, "backup.nightly", core.NewOptions())
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, queue.ErrTierNotPermittedForKind, r.Code())
+}
+
+// TestQueue_Enqueue_CascadeFanout_PreservesTierAuth_Good — a cascade-
+// fanout caller (TierCascade per H#242 worker-reconstruction) is
+// allowed by a per-kind allowlist that names TierCascade. Exercises
+// the worker-internal re-Enqueue flow: a handler dispatched under a
+// TierCascade-stamped Context that itself calls queue.Enqueue must
+// land cleanly against any kind whose PermittedTiers includes
+// TierCascade. The cascade chain doesn't degrade beyond the worker's
+// initial inherit-not-promote stamp.
+func TestQueue_Enqueue_CascadeFanout_PreservesTierAuth_Good(t *core.T) {
+	c := newQueueCore(t)
+	core.RequireTrue(t, queue.RegisterKind(c, queue.HandlerOptions{
+		Kind:           "cascade-follow-on",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade},
+		Handler:        func(core.Context, core.Options) core.Result { return core.Ok(nil) },
+	}).OK)
+
+	// Stamp TierCascade directly — emulates the worker-dispatch
+	// context handlers see (per pkg/queue/worker.go dispatchCtx via
+	// auth.AsCascade) without spinning up the full Service loop.
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier:    auth.TierCascade,
+		Subject: "account-original-trigger",
+		Source:  "wails",
+	})
+	t.Cleanup(func() { auth.ClearCaller(c) })
+
+	r := queue.Enqueue(c, "cascade-follow-on", core.NewOptions())
+	core.RequireTrue(t, r.OK)
+	core.AssertEqual(t, queue.StatusPending, r.Value.(queue.Job).Status)
+	// Enqueuer identity persists the cascade Subject so the worker
+	// can preserve it on the next dispatch hop.
+	core.AssertEqual(t, "account-original-trigger", r.Value.(queue.Job).EnqueuerSubject)
 }
 
 // TestQueue_ActionName_Good — ActionName composes the canonical
@@ -408,12 +530,14 @@ func TestQueue_ActionName_Ugly(t *core.T) {
 func TestQueue_Kinds_Good(t *core.T) {
 	c := newQueueCore(t)
 	queue.RegisterKind(c, queue.HandlerOptions{
-		Kind:    "lint",
-		Handler: func(core.Context, core.Options) core.Result { return core.Ok(nil) },
+		Kind:           "lint",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade},
+		Handler:        func(core.Context, core.Options) core.Result { return core.Ok(nil) },
 	})
 	queue.RegisterKind(c, queue.HandlerOptions{
-		Kind:    "build",
-		Handler: func(core.Context, core.Options) core.Result { return core.Ok(nil) },
+		Kind:           "build",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade},
+		Handler:        func(core.Context, core.Options) core.Result { return core.Ok(nil) },
 	})
 	kinds := queue.Kinds(c)
 	core.AssertGreaterOrEqual(t, len(kinds), 2)
@@ -567,7 +691,8 @@ func TestQueue_Worker_DispatchesAndCompletes(t *core.T) {
 	ran.Add(1)
 	var receivedPath string
 	queue.RegisterKind(c, queue.HandlerOptions{
-		Kind: "echo",
+		Kind:           "echo",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade, auth.TierInternal},
 		Handler: func(_ core.Context, opts core.Options) core.Result {
 			receivedPath = opts.String("path")
 			ran.Done()
@@ -616,7 +741,8 @@ func TestQueue_Worker_FailureMarksFailedWithError(t *core.T) {
 	c := newQueueCore(t)
 
 	queue.RegisterKind(c, queue.HandlerOptions{
-		Kind: "boom",
+		Kind:           "boom",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCascade, auth.TierInternal},
 		Handler: func(_ core.Context, _ core.Options) core.Result {
 			return core.Fail(core.E("test", "intentional", nil))
 		},
@@ -698,7 +824,8 @@ func TestQueue_Worker_ReconstructsTierCascade_Good(t *core.T) {
 	var ran core.WaitGroup
 	ran.Add(1)
 	queue.RegisterKind(c, queue.HandlerOptions{
-		Kind: "cascade-probe",
+		Kind:           "cascade-probe",
+		PermittedTiers: []auth.CallerTier{auth.TierRenderer, auth.TierOperator, auth.TierCascade},
 		Handler: func(ctx core.Context, _ core.Options) core.Result {
 			seen = auth.CallerFromContext(ctx)
 			ran.Done()
@@ -752,7 +879,8 @@ func TestQueue_AsCron_StampsTierCron_Good(t *core.T) {
 	var ran core.WaitGroup
 	ran.Add(1)
 	queue.RegisterKind(c, queue.HandlerOptions{
-		Kind: "backup.nightly",
+		Kind:           "backup.nightly",
+		PermittedTiers: []auth.CallerTier{auth.TierOperator, auth.TierCron, auth.TierCascade},
 		Handler: queue.AsCron(func(ctx core.Context, _ core.Options) core.Result {
 			seen = auth.CallerFromContext(ctx)
 			ran.Done()

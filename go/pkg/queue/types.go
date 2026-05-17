@@ -201,3 +201,34 @@ const MaxQueueDepth = 10000
 //	    // queue saturated — caller-side backoff
 //	}
 const ErrQueueFullCode = "queue.full"
+
+// ErrPermittedTiersRequired is the typed-error op-string RegisterKind
+// returns when HandlerOptions.PermittedTiers is empty. Per RFC v3.1
+// §5.1 / Cerberus #73 F-3: deny-by-construction — every registered
+// kind MUST declare which CallerTiers may Enqueue against it. A
+// missing PermittedTiers is treated as a misuse, not "allow all", so
+// renderer-tier elevation via kind-string forge cannot land via a
+// poorly-written RegisterKind site.
+//
+// Usage example:
+//
+//	r := queue.RegisterKind(c, queue.HandlerOptions{Kind: "lint", Handler: h})
+//	if !r.OK && r.Code() == queue.ErrPermittedTiersRequired {
+//	    // forgot to declare PermittedTiers
+//	}
+const ErrPermittedTiersRequired = "queue.permitted_tiers_required"
+
+// ErrTierNotPermittedForKind is the typed-error op-string Enqueue
+// returns when the caller's CallerTier is not in the registered
+// kind's PermittedTiers allow-list. Per RFC v3.1 §5.0: composes with
+// the outer auth.Require ALLOW gate (BOTH-not-either) so a
+// renderer-tier caller cannot elevate to a kind whose handler trusts
+// only TierOperator + TierCascade.
+//
+// Usage example:
+//
+//	r := queue.Enqueue(c, "lint", core.NewOptions())
+//	if !r.OK && r.Code() == queue.ErrTierNotPermittedForKind {
+//	    // caller tier rejected by per-kind allow-list
+//	}
+const ErrTierNotPermittedForKind = "queue.tier_not_permitted_for_kind"
