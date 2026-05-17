@@ -1,0 +1,12 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Fixture — should be flagged.
+//
+// Two violations expected: isValidID and isValidSlug both at
+// package-private scope, both without the opt-out pragma.
+
+package fixture
+
+func isValidID(id string) bool { return id != "" }
+
+func isValidSlug(slug string) bool { return slug != "" }

@@ -80,6 +80,14 @@ tasks:
     cmds:
       - cd "{{.GO_DIR}}" && go test ./pkg/...
 
+  lint:cousinvalidator:
+    summary: Run the cousin-validator lint (forbid local isValidID/isValidSlug
+      outside pkg/paths/ — Mantis #1505). Enforced as a normal test inside
+      pkg/lint/cousinvalidator, so `task test:go` already catches drift; this
+      target is the operator shortcut for a focused run.
+    cmds:
+      - cd "{{.GO_DIR}}" && go test ./pkg/lint/cousinvalidator/...
+
   test:frontend:
     summary: Run the frontend Vitest suite (Lit + chrome + windows)
     cmds:

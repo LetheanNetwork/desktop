@@ -1,0 +1,19 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Fixture — should NOT be flagged.
+//
+// None of these function names appear in ForbiddenNames. They are
+// closed-set enum validators, URL validators, and similar adjacent
+// helpers the rule deliberately permits.
+
+package fixture
+
+func isValidStage(id string) bool { return id != "" }
+
+func isValidOutcome(o string) bool { return o != "" }
+
+func isValidBundleName(name string) bool { return name != "" }
+
+func isValidPostMessageOrigin(s string) bool { return s != "" }
+
+func isValidCustomElementTag(tag string) bool { return tag != "" }

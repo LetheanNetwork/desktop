@@ -1,0 +1,16 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Fixture — should be flagged.
+//
+// This file declares a local isValidID at package-private scope
+// outside pkg/paths/ with no //nolint:cousinvalidator pragma.
+// The cousinvalidator scan must report it as a Finding.
+
+package fixture
+
+func isValidID(id string) bool {
+	if id == "" {
+		return false
+	}
+	return true
+}

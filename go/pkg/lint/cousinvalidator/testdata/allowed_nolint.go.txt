@@ -1,0 +1,18 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Fixture — should NOT be flagged.
+//
+// The func has the //nolint:cousinvalidator pragma in its doc
+// comment immediately above. Thin-delegation rationale follows
+// the marker as required.
+
+package fixture
+
+// isValidID wraps paths.IsValidID so existing call sites stay
+// unchanged while the migration to the canonical surface lands.
+//
+//nolint:cousinvalidator — thin delegation to paths.IsValidID
+func isValidID(id string) bool {
+	// real impl would call paths.IsValidID(id) == nil
+	return id != ""
+}
