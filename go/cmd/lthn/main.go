@@ -34,6 +34,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/gateway"
 	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/lthn/desktop/pkg/marketplace"
 	"dappco.re/lthn/desktop/pkg/mdns"
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/plugin"
@@ -271,8 +272,25 @@ func cmdGUI(args []string) int {
 	// checker so the capability-grant audit endpoint can gate plugin_id
 	// against the live install set. Nil checker = audit row emits but
 	// the 404-on-unknown-plugin gate stays open.
-	if pluginSvc, _ := core.ServiceFor[*plugin.Service](c, "plugin"); pluginSvc != nil {
-		opts.PluginInstalledChecker = pluginSvc.ProxyGroup().Has
+	//
+	// Mantis #1581 — composite the two install surfaces: pkg/plugin
+	// owns the binary-plugin tier (ProxyGroup().Has) and pkg/marketplace
+	// owns the bundle tier (IsInstalled). The capability-grant 404 gate
+	// must cover BOTH or a marketplace-installed plugin_id slips past
+	// while a binary plugin gets rejected (asymmetric since H#42 added
+	// the marketplace install lane).
+	pluginSvc, _ := core.ServiceFor[*plugin.Service](c, "plugin")
+	marketplaceSvc, _ := core.ServiceFor[*marketplace.Service](c, "marketplace")
+	if pluginSvc != nil || marketplaceSvc != nil {
+		opts.PluginInstalledChecker = func(code string) bool {
+			if pluginSvc != nil && pluginSvc.ProxyGroup().Has(code) {
+				return true
+			}
+			if marketplaceSvc != nil && marketplaceSvc.IsInstalled(code) {
+				return true
+			}
+			return false
+		}
 	}
 	s := server.NewService(opts)
 	if rr := c.RegisterService("server", s); !rr.OK {
@@ -440,8 +458,23 @@ func cmdServe(args []string) int {
 	// Mantis #1562 follow-up to #1523 — same wire as cmdGUI; pluginSvc
 	// was resolved above for ExtraGroups and bundle-token plumbing, so
 	// reuse it here to gate plugin_id on capability-grant audit.
-	if pluginSvc != nil {
-		opts.PluginInstalledChecker = pluginSvc.ProxyGroup().Has
+	//
+	// Mantis #1581 — composite the marketplace-bundle tier alongside
+	// the binary-plugin tier. See cmdGUI for the why; the headless
+	// serve path needs the same coverage so a marketplace-installed
+	// plugin_id doesn't slip past the capability-grant 404 gate when
+	// the REST API is reached without a Wails GUI.
+	marketplaceSvc, _ := core.ServiceFor[*marketplace.Service](c, "marketplace")
+	if pluginSvc != nil || marketplaceSvc != nil {
+		opts.PluginInstalledChecker = func(code string) bool {
+			if pluginSvc != nil && pluginSvc.ProxyGroup().Has(code) {
+				return true
+			}
+			if marketplaceSvc != nil && marketplaceSvc.IsInstalled(code) {
+				return true
+			}
+			return false
+		}
 	}
 	s := server.NewService(opts)
 	if rr := c.RegisterService("server", s); !rr.OK {

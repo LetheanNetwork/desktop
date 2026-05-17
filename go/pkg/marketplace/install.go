@@ -665,6 +665,50 @@ func (s *Service) ListInstalled() core.Result {
 	return orm.Of[InstalledBundle](s.core).Get()
 }
 
+// IsInstalled reports whether the given plugin code resolves to an
+// installed marketplace bundle. Used by cmd/lthn/main.go as the
+// marketplace-tier branch of the composite PluginInstalledChecker
+// (Mantis #1581): pkg/plugin owns the binary-plugin tier via
+// (*plugin.Service).ProxyGroup().Has; marketplace owns the bundle
+// tier via this method. Together they ensure the
+// /v1/plugin-view/capability-grant 404 gate covers both install
+// surfaces.
+//
+// A bundle's effective plugin code is the explicit plugin.code from
+// its on-disk manifest (when present) falling back to the bundle id
+// — same rule as pluginCodeOf used by checkPluginCodeCollision, so
+// the "this is a real installed plugin" check is symmetric across
+// install-time uniqueness and runtime capability-grant gating.
+//
+// Best-effort by design: when ListInstalled fails (orm outage,
+// schema not yet migrated) the method returns false rather than
+// failing loud — the audit row still emits, only the plugin_id
+// gate is degraded. Empty code returns false.
+//
+// Usage example:
+//
+//	if svc.IsInstalled("opencode") { /* bundle present */ }
+func (s *Service) IsInstalled(code string) bool {
+	code = core.Trim(code)
+	if code == "" {
+		return false
+	}
+	listR := s.ListInstalled()
+	if !listR.OK {
+		return false
+	}
+	bundles, ok := listR.Value.([]InstalledBundle)
+	if !ok {
+		return false
+	}
+	for _, b := range bundles {
+		if s.resolvePluginCode(b.BundleID) == code {
+			return true
+		}
+	}
+	return false
+}
+
 // findInstalledBundle looks up one bundle record by ID.
 func (s *Service) findInstalledBundle(bundleID string) core.Result {
 	if s.core == nil {

@@ -383,3 +383,81 @@ func TestCapabilityGrant_ValidOrigin_Good(t *testing.T) {
 		})
 	}
 }
+
+// TestServer_PluginViewCapabilityGrant_CompositeChecker covers the
+// Mantis #1581 composite-checker contract: a wiring-site closure
+// that ORs the binary-plugin tier (pkg/plugin.Service.ProxyGroup().
+// Has) and the marketplace-bundle tier (pkg/marketplace.Service.
+// IsInstalled). The fixture mirrors the cmdGUI / cmdServe wire by
+// presenting two independent installed-sets; the gate MUST accept
+// codes from EITHER without leaking codes from NEITHER.
+//
+// Good — code present in binary set only → 200 (gate passes).
+// Good — code present in marketplace set only → 200 (gate passes).
+// Bad  — code absent from both sets → 404 (gate denies).
+func TestServer_PluginViewCapabilityGrant_CompositeChecker_Good(t *testing.T) {
+	rec := &recordingRecorder{}
+	audit.SetDefault(rec)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	// Mirror the wire-site closure shape: two independent install
+	// surfaces, OR-composed. Either source MUST be honoured.
+	binarySet := map[string]bool{"binary-plugin": true}
+	marketSet := map[string]bool{"market-bundle": true}
+	composite := func(code string) bool {
+		if binarySet[code] {
+			return true
+		}
+		if marketSet[code] {
+			return true
+		}
+		return false
+	}
+	s := server.NewService(server.Options{PluginInstalledChecker: composite})
+
+	for _, code := range []string{"binary-plugin", "market-bundle"} {
+		body := `{"plugin_id":"` + code +
+			`","capability":"session-token","origin":"http://127.0.0.1:4096"}`
+		req := httptest.NewRequest(core.MethodPost,
+			server.PluginViewCapabilityGrantPath, core.NewBufferReader([]byte(body)))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, req)
+
+		core.AssertEqual(t, core.StatusOK, w.Code)
+		core.AssertTrue(t, core.Contains(w.Body.String(), `"success":true`))
+	}
+	core.AssertEqual(t, 2, len(rec.events))
+	core.AssertEqual(t, "binary-plugin", rec.events[0].Meta["plugin_id"])
+	core.AssertEqual(t, "market-bundle", rec.events[1].Meta["plugin_id"])
+}
+
+func TestServer_PluginViewCapabilityGrant_CompositeChecker_Bad(t *testing.T) {
+	rec := &recordingRecorder{}
+	audit.SetDefault(rec)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	binarySet := map[string]bool{"binary-plugin": true}
+	marketSet := map[string]bool{"market-bundle": true}
+	composite := func(code string) bool {
+		if binarySet[code] {
+			return true
+		}
+		if marketSet[code] {
+			return true
+		}
+		return false
+	}
+	s := server.NewService(server.Options{PluginInstalledChecker: composite})
+
+	body := `{"plugin_id":"ghost-from-neither","capability":"session-token","origin":"http://127.0.0.1:4096"}`
+	req := httptest.NewRequest(core.MethodPost,
+		server.PluginViewCapabilityGrantPath, core.NewBufferReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusNotFound, w.Code)
+	core.AssertTrue(t, core.Contains(w.Body.String(), "plugin_view.grant.unknown_plugin"))
+	core.AssertEqual(t, 0, len(rec.events))
+}
