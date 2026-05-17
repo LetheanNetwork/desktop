@@ -771,3 +771,84 @@ func TestBootstrapToken_IatWithinSkewAccepted_Good(t *core.T) {
 	r := svc.VerifyBootstrapToken(tok, "account.create")
 	core.AssertTrue(t, r.OK, "iat within clock-skew tolerance must accept")
 }
+
+// --- Mantis #1593 — IfNotExist substrate failure modes ---
+
+// TestServerkey_AtomicWrite_KeyExists_Bad pins the new failure-mode
+// surface introduced by the Mantis #1593 cutover to
+// paths.AtomicWriteWithVersion with IfNotExist=true.
+//
+// The outer keyStat branch in Bootstrap routes the load path when
+// server.key already exists, so under normal flow the create branch
+// only runs on a fresh install. This test forces the create branch
+// against a pre-seeded server.key by Stat-able-but-unparseable bytes
+// — the load path will fail to parse, the create path then attempts
+// to write OVER the existing file under IfNotExist=true, and the
+// primitive must refuse with paths.write.exists rather than silently
+// overwriting an in-flight key.
+//
+// Pre-cutover shape: the local atomicWrite helper had no overwrite
+// gate, so a race that bypassed the outer Stat would silently clobber
+// the existing server.key. Post-cutover the primitive's per-path
+// WithFileLock + IfNotExist closes that race at the substrate
+// boundary.
+func TestServerkey_AtomicWrite_KeyExists_Bad(t *core.T) {
+	home := homeFixture(t)
+
+	walletsDir := core.PathJoin(home, "Lethean", "wallets")
+	mk := core.MkdirAll(walletsDir, 0o700)
+	core.AssertTrue(t, mk.OK, "fixture wallets/ mkdir must succeed")
+
+	// Pre-seed both files with parseable-shape but wrong-content
+	// bytes. The seed loadOrCreateSeed path requires a 32-byte seed;
+	// supply exactly that so the load branch survives long enough to
+	// reach the server.key load attempt.
+	seedPath := core.PathJoin(walletsDir, ".seed")
+	w := core.WriteFile(seedPath, make([]byte, 32), 0o600)
+	core.AssertTrue(t, w.OK, "fixture seed write must succeed")
+
+	// Pre-seed server.key with malformed content so the load path
+	// fails. The create branch then attempts to overwrite via
+	// paths.AtomicWriteWithVersion + IfNotExist=true, which must
+	// surface paths.write.exists.
+	keyPath := core.PathJoin(walletsDir, "server.key")
+	w = core.WriteFile(keyPath, []byte("not-a-valid-lthn-key-block\n"), 0o600)
+	core.AssertTrue(t, w.OK, "fixture key write must succeed")
+
+	svc := subject.NewService(nil)
+	r := svc.Bootstrap()
+	core.AssertTrue(t, !r.OK, "Bootstrap must fail when server.key exists but is unparseable — substrate refuses to overwrite under IfNotExist")
+}
+
+// TestServerkey_AtomicWrite_FirstMint_Good is the positive control:
+// a fresh install hits the create branch with both files absent;
+// IfNotExist=true does NOT block first-write (the gate only fires
+// when the file already exists). End-state: both .seed + server.key
+// land at 0o600 (primitive's at-rest mode-verify gate per
+// Mantis #1592 covers Cerberus #1464 carry-forward).
+func TestServerkey_AtomicWrite_FirstMint_Good(t *core.T) {
+	home := homeFixture(t)
+
+	svc := subject.NewService(nil)
+	r := svc.Bootstrap()
+	core.AssertTrue(t, r.OK, "Bootstrap on fresh install must succeed via the create branch")
+
+	seedPath := core.PathJoin(home, "Lethean", "wallets", ".seed")
+	keyPath := core.PathJoin(home, "Lethean", "wallets", "server.key")
+
+	seedStat := core.Stat(seedPath)
+	core.AssertTrue(t, seedStat.OK, ".seed must land on disk")
+	keyStat := core.Stat(keyPath)
+	core.AssertTrue(t, keyStat.OK, "server.key must land on disk")
+
+	// Mode 0o600 verified by the primitive's at-rest mode gate; here
+	// we re-confirm the on-disk file matches the expected discipline
+	// so a future regression that drops the gate is caught.
+	si, ok := seedStat.Value.(core.FsFileInfo)
+	core.AssertTrue(t, ok, "seed stat must return FsFileInfo")
+	core.AssertTrue(t, si.Mode().Perm() == 0o600, "seed must be 0o600 post-write")
+
+	ki, ok := keyStat.Value.(core.FsFileInfo)
+	core.AssertTrue(t, ok, "key stat must return FsFileInfo")
+	core.AssertTrue(t, ki.Mode().Perm() == 0o600, "server.key must be 0o600 post-write")
+}

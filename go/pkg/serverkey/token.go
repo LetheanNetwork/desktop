@@ -740,36 +740,13 @@ func (s *Service) loadServerKey(path string, passphrase []byte) ([]byte, []byte,
 	return pub, plain, core.Ok(nil)
 }
 
-// atomicWrite writes data to tmp + fsync + rename(tmp, path) so a
-// crash mid-write doesn't leave a half-written sensitive file.
-// Cerberus #1460 — partial state must not be reachable.
-func atomicWrite(path string, data []byte, mode core.FileMode) core.Result {
-	tmp := path + ".tmp"
-	openR := core.OpenFile(tmp, core.O_CREATE|core.O_WRONLY|core.O_TRUNC, mode)
-	if !openR.OK {
-		return core.Fail(core.E("serverkey.atomicWrite", "open temp", openR.Value.(error)))
-	}
-	f, _ := openR.Value.(*core.OSFile)
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		_ = core.Remove(tmp)
-		return core.Fail(core.E("serverkey.atomicWrite", "write temp", err))
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		_ = core.Remove(tmp)
-		return core.Fail(core.E("serverkey.atomicWrite", "fsync temp", err))
-	}
-	if err := f.Close(); err != nil {
-		_ = core.Remove(tmp)
-		return core.Fail(core.E("serverkey.atomicWrite", "close temp", err))
-	}
-	if r := core.Rename(tmp, path); !r.OK {
-		_ = core.Remove(tmp)
-		return core.Fail(core.E("serverkey.atomicWrite", "rename temp", r.Value.(error)))
-	}
-	return core.Ok(nil)
-}
+// Mantis #1593 — the local atomicWrite helper has been removed in
+// favour of paths.AtomicWriteWithVersion (cascade-sibling pkg/account
+// #1578 at 7b3a36e). The Cerberus #1460 partial-state defence migrates
+// to the primitive's tmp+fsync+rename pipeline; the Cerberus #1464
+// mode-verify carry-forward migrates to the primitive's at-rest
+// mode-verify gate (Mantis #1592) which fires on every "wallets/"
+// prefix write.
 
 // indexOf returns the byte offset of substr in s, or -1 when absent.
 // Local helper so we don't add `strings` to the banned-import list.

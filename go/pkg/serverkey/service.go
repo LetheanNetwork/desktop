@@ -204,15 +204,18 @@ func (s *Service) Bootstrap() core.Result {
 	}
 
 	blob := marshalServerKey(pub, priv)
-	if r := atomicWrite(keyPath, blob, fileMode); !r.OK {
+	// Mantis #1593 — cutover from the local atomicWrite helper to the
+	// canonical paths.AtomicWriteWithVersion substrate (mirrors
+	// pkg/account #1578 cascade-sibling at 7b3a36e). IfNotExist=true
+	// makes the refuse-to-overwrite gate atomic under the primitive's
+	// per-path WithFileLock (Mantis #1597) — strictly narrower than the
+	// pre-cutover Stat+write race the outer keyStat branch managed.
+	// The primitive's at-rest mode-verify gate (Cerberus #19 §5.1
+	// Option C, Mantis #1592) fires automatically for the "wallets/"
+	// prefix and replaces the post-rename mode-verify block below
+	// verbatim — same defence, owned in one place.
+	if r := paths.AtomicWriteWithVersion(keyPath, paths.WriteInput{Body: blob, IfNotExist: true}); !r.OK {
 		return r
-	}
-	// Re-Stat + verify mode is exactly 0o600 — umask / mount-option
-	// quirks can drop bits on WriteFile (Cerberus #1464).
-	if statR := core.Stat(keyPath); statR.OK {
-		if modeR := s.verifyMode(statR, fileMode, keyPath); !modeR.OK {
-			return modeR
-		}
 	}
 
 	s.publicKey = pub
@@ -244,15 +247,12 @@ func (s *Service) loadOrCreateSeed(seedPath string) core.Result {
 		return core.Fail(core.E("serverkey.loadSeed", "generate seed", randR.Value.(error)))
 	}
 	seed, _ := randR.Value.([]byte)
-	if r := atomicWrite(seedPath, seed, fileMode); !r.OK {
+	// Mantis #1593 — paths.AtomicWriteWithVersion + IfNotExist=true
+	// (see analogous comment at the keyPath write above). The seed
+	// path falls under the at-rest "wallets/" prefix so the primitive's
+	// mode-verify gate covers the Cerberus #1464 carry-forward.
+	if r := paths.AtomicWriteWithVersion(seedPath, paths.WriteInput{Body: seed, IfNotExist: true}); !r.OK {
 		return r
-	}
-	// Re-Stat + verify mode (Cerberus #1464 — open-time verification,
-	// not just write-time).
-	if statR := core.Stat(seedPath); statR.OK {
-		if modeR := s.verifyMode(statR, fileMode, seedPath); !modeR.OK {
-			return modeR
-		}
 	}
 	return core.Ok(seed)
 }
