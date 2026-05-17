@@ -256,6 +256,16 @@ func (s *Service) Update(input UpdateInput) core.Result {
 // *core.Err shape marshalled PascalCase + empty Code field, so the
 // frontend toast never rendered.
 //
+// The "contacts.update.conflict" envelope code is intentional (Mantis
+// #1546): the stale-write branch is only reachable from Update. The
+// Create path pre-checks core.Stat(fpath) for existence-rejection and
+// then calls atomicWriteFile with IfVersion=0, which makes
+// AtomicWriteWithVersion perform an unconditional first-write — the
+// VersionStale envelope cannot be produced on that path. Keeping the
+// "update.conflict" naming therefore accurately describes the only
+// reachable failure shape rather than implying a phantom Create-side
+// conflict branch.
+//
 // On non-conflict failures the function returns the underlying
 // core.Fail unchanged so audit/diagnostic information propagates.
 //
