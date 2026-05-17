@@ -1394,3 +1394,116 @@ func TestUnlock_RecordFailedAttempt_StaleEntriesPruned_Good(t *core.T) {
 			"slate must be clean after successful unlock")
 	}
 }
+
+// TestUnlock_StalePruneClock_EntryExpired_DroppedOnNextRecord —
+// Mantis #1596 LOW (forward-arc from #1586 Option 3). Verifies the
+// stale-prune walker drops an account_id's lockout entry once its
+// rolling window has fully elapsed AND its cooldown is no longer
+// active. The clock seam is the nowUnix parameter on
+// pruneStaleLockoutsLocked (exposed via subject.PruneStaleLockoutsForTest)
+// — production callers feed core.Now() in; the test feeds a future
+// timestamp PAST the window so the walker observes the entry as stale.
+//
+// Fixture shape: pre-seed account A with a single attempt at t=0 and
+// no active cooldown (unlockAt=0). Advance the mocked clock to
+// (lockoutWindowSeconds + 1) so cutoff = t+1 > 0 → the attempt
+// at t=0 falls out of the window. Trigger the prune → A drops.
+func TestUnlock_StalePruneClock_EntryExpired_DroppedOnNextRecord(t *core.T) {
+	_ = homeFixture(t) // not strictly needed (we don't go through Unlock), but
+	// keeps Service construction's paths.Root() resolvable under tests that
+	// run -race / -parallel via $HOME isolation.
+	svc := newUnlockable(t, "")
+
+	_, window, _ := subject.LockoutConstantsForTest()
+
+	// Single in-window attempt at baseline (t=0). No active cooldown.
+	const baseTS int64 = 0
+	subject.SeedLockoutEntryForTest(svc, "stale-account-aaa", []int64{baseTS}, 0)
+
+	// Pre-condition: entry is present.
+	core.AssertTrue(t, subject.LockoutHasEntryForTest(svc, "stale-account-aaa"),
+		"fixture must seed the entry before the prune")
+	core.AssertEqual(t, 1, subject.LockoutMapSizeForTest(svc))
+
+	// Advance the mocked clock past the rolling window. cutoff =
+	// (baseTS + window + 1) - window = baseTS + 1, which is strictly
+	// greater than baseTS, so the attempt falls out of the window AND
+	// unlockAt (0) is not > nowUnix — the entry is pure overhead.
+	futureNow := baseTS + window + 1
+	subject.PruneStaleLockoutsForTest(svc, futureNow)
+
+	core.AssertFalse(t, subject.LockoutHasEntryForTest(svc, "stale-account-aaa"),
+		"window-expired entry must drop on prune")
+	core.AssertEqual(t, 0, subject.LockoutMapSizeForTest(svc))
+}
+
+// TestUnlock_StalePruneClock_EntryRecent_PreservedOnNextRecord —
+// Mantis #1596 LOW. Mirrors the EntryExpired case but advances the
+// mocked clock by HALF the window — the entry's single attempt is
+// still inside the rolling window, so the prune walker MUST keep it
+// (otherwise a probe attacker would wipe the counter mid-window and
+// reset their attempt budget). Per pruneStaleLockoutsLocked's "at
+// least one in-window attempt → keep" branch (unlock.go:728-731).
+func TestUnlock_StalePruneClock_EntryRecent_PreservedOnNextRecord(t *core.T) {
+	_ = homeFixture(t)
+	svc := newUnlockable(t, "")
+
+	_, window, _ := subject.LockoutConstantsForTest()
+
+	const baseTS int64 = 0
+	subject.SeedLockoutEntryForTest(svc, "recent-account-bbb", []int64{baseTS}, 0)
+
+	// Half-window advance — cutoff = (baseTS + window/2) - window =
+	// baseTS - window/2, which is strictly less than baseTS → the
+	// attempt at baseTS is still inside the window.
+	halfWindowNow := baseTS + window/2
+	subject.PruneStaleLockoutsForTest(svc, halfWindowNow)
+
+	core.AssertTrue(t, subject.LockoutHasEntryForTest(svc, "recent-account-bbb"),
+		"in-window entry must NOT drop on prune — the counter still accumulates")
+	core.AssertEqual(t, 1, subject.LockoutMapSizeForTest(svc))
+}
+
+// TestUnlock_StalePruneClock_AllEntriesExpired_AllDroppedOnNextRecord —
+// Mantis #1596 LOW. Bulk-drop variant of EntryExpired — seeds 5 stale
+// entries with attempt timestamps spread across the pre-window epoch,
+// advances the clock past the window, asserts all 5 drop in a single
+// prune. Defends the O(N) walker invariant: prune cost is proportional
+// to map size, NOT to which specific entries are stale; partial-prune
+// regressions (e.g. an early `break` instead of `continue`) surface as
+// a non-zero residual map count.
+func TestUnlock_StalePruneClock_AllEntriesExpired_AllDroppedOnNextRecord(t *core.T) {
+	_ = homeFixture(t)
+	svc := newUnlockable(t, "")
+
+	_, window, _ := subject.LockoutConstantsForTest()
+
+	// Seed 5 entries at different pre-window timestamps so a buggy
+	// walker that special-cases the first/last/equal entry surfaces
+	// as a missed drop. unlockAt=0 (no active cooldown).
+	ids := []string{
+		"stale-id-001",
+		"stale-id-002",
+		"stale-id-003",
+		"stale-id-004",
+		"stale-id-005",
+	}
+	for i, id := range ids {
+		subject.SeedLockoutEntryForTest(svc, id, []int64{int64(i)}, 0)
+	}
+	core.AssertEqual(t, 5, subject.LockoutMapSizeForTest(svc),
+		"fixture must seed all 5 entries before the prune")
+
+	// Advance past the window relative to the LATEST seeded attempt
+	// (i=4) so every entry's most-recent attempt falls out of the
+	// rolling window.
+	futureNow := int64(len(ids)-1) + window + 1
+	subject.PruneStaleLockoutsForTest(svc, futureNow)
+
+	core.AssertEqual(t, 0, subject.LockoutMapSizeForTest(svc),
+		"all 5 window-expired entries must drop in a single prune walk")
+	for _, id := range ids {
+		core.AssertFalse(t, subject.LockoutHasEntryForTest(svc, id),
+			"entry "+id+" must drop on prune")
+	}
+}
