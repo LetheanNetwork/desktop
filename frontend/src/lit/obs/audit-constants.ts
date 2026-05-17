@@ -124,6 +124,11 @@ export const AUDIT_EVENT_NAMES = [
   "provider.credential.force_deleted",
   "provider.credential.migration_pending_observed",
   "provider.credential.stored_orphan",
+  "keys.tier0.stored",
+  "keys.tier0.deleted",
+  "keys.tier1.stored",
+  "keys.tier1.replaced",
+  "keys.tier1.deleted",
 ] as const;
 
 export type AuditEventName = (typeof AUDIT_EVENT_NAMES)[number];

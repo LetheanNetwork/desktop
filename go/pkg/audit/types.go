@@ -1842,6 +1842,138 @@ const (
 	// stays sealed under the tier-1 master; this row records the
 	// fact-of-orphan, not the credential.
 	EventProviderCredentialStoredOrphan = "provider.credential.stored_orphan"
+
+	// EventKeysTier0Stored fires when pkg/keys.Service.PutTier0
+	// successfully writes a tier-0 (pre-unlock substrate) ciphertext
+	// to disk. Tier-0 holds machine-local secrets that survive across
+	// account-lock cycles (today: the SingleInstance IPC key the
+	// Wails second-instance bridge authenticates against — Mantis
+	// #1625 / Cerberus #1442). Mantis #1763 / Cerberus #77 F-1 —
+	// 10th audit-cluster adoption; closes the STRIDE-R Repudiation +
+	// A2/A3 audit-trail gap on operator-tier credential-mutation
+	// verbs in pkg/keys.
+	//
+	// The broadcastTier1Change event-bus broadcast in this package
+	// is a consumer-cache flush signal — NOT an audit substrate; the
+	// forensic-trail discipline this row provides is orthogonal to
+	// that pub/sub channel.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   ref    — opaque tier-0 reference handle (e.g. "single-
+	//            instance"); this is the audit handle, NEVER the
+	//            key bytes or any derived material
+	//   kind   — literal "tier0" — pins the partition the mutation
+	//            landed in so a forensic walker can grep cleanly
+	//   tier   — duplicate of kind, retained as a stable cluster-
+	//            canon meta key per the keys.* family discipline
+	//   source — origin discriminator: "internal" for Go-side calls
+	//            (boot SingleInstanceKey, GetOrCreateTier0); the
+	//            tier-0 surface has no Wails binding by design
+	//            (RFC.stage-e-keys-partition §4.3 Q4) so "wails_input"
+	//            never appears for this event
+	//
+	// The key bytes are NEVER in Meta — Cerberus #1465 closure-only-
+	// scope discipline keeps the plaintext off the audit substrate;
+	// this row records the storage decision, not the credential.
+	EventKeysTier0Stored = "keys.tier0.stored"
+
+	// EventKeysTier0Deleted fires when pkg/keys.Service.DeleteTier0
+	// actually removes a tier-0 ciphertext (the non-idempotent path —
+	// the no-op variant where the file did not exist emits nothing,
+	// mirroring the broadcastTier1Change discipline on the tier-1
+	// twin DeleteTier1 at service.go:1394). Mantis #1763 / Cerberus
+	// #77 F-1.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   ref    — opaque tier-0 reference handle that was removed
+	//   kind   — literal "tier0"
+	//   tier   — duplicate of kind (cluster-canon meta key)
+	//   source — "internal" (no Wails surface for tier-0 per
+	//            RFC.stage-e-keys-partition §4.3 Q4)
+	//
+	// The key bytes are NEVER in Meta — DeleteTier0 unlinks the
+	// ciphertext from disk and emits this row; the row records the
+	// deletion decision, not the credential.
+	EventKeysTier0Deleted = "keys.tier0.deleted"
+
+	// EventKeysTier1Stored fires when pkg/keys.Service.PutTier1
+	// successfully writes a tier-1 (post-unlock provider-credential)
+	// ciphertext to disk AND no prior ciphertext existed under the
+	// same ref (the "first-write" path; the EXISTING-ref overwrite
+	// path emits EventKeysTier1Replaced instead). The wasPresent
+	// gate at service.go:1332 distinguishes the two shapes.
+	//
+	// Sibling of EventProviderCredentialStored (which fires from the
+	// pkg/runner Wails-input + boot-scan paths in addition to this
+	// row) — pkg/keys emits at the at-rest mutation site; pkg/runner
+	// emits at the higher-level credential-import decision site;
+	// both rows land for the same Wails-input flow so the forensic
+	// trail covers the entire pipeline. Mantis #1763 / Cerberus #77
+	// F-1.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   ref    — opaque tier-1 reference handle (e.g. "openai-
+	//            default"); this is the audit handle, NEVER the
+	//            credential bytes
+	//   kind   — literal "tier1"
+	//   tier   — duplicate of kind (cluster-canon meta key)
+	//   source — origin discriminator: "wails_input" for calls
+	//            via WPutTier1 (renderer-reachable surface),
+	//            "internal" for Go-side calls (GetOrCreateTier1,
+	//            cmd/lthn wiring)
+	//
+	// The credential bytes are NEVER in Meta — Cerberus #1465
+	// closure-only-scope discipline keeps the plaintext off the
+	// audit substrate; this row records the storage decision, not
+	// the credential.
+	EventKeysTier1Stored = "keys.tier1.stored"
+
+	// EventKeysTier1Replaced fires when pkg/keys.Service.PutTier1
+	// successfully writes a tier-1 ciphertext over an existing ref
+	// (the wasPresent path at service.go:1342 that also fires the
+	// Tier1KeyChanged{Kind: Tier1KeyReplaced} consumer-cache flush
+	// broadcast). Distinguished from EventKeysTier1Stored so a
+	// forensic walker can grep the rotate-credential path separately
+	// from the first-write path; without this split, every overwrite
+	// would be visually indistinguishable from a fresh storage.
+	// Mantis #1763 / Cerberus #77 F-1.
+	//
+	// Meta keys: identical shape to EventKeysTier1Stored (ref / kind
+	// / tier / source). The two events share Meta shape on purpose —
+	// the only difference at the audit-row level is the event name
+	// reflecting first-write vs overwrite.
+	EventKeysTier1Replaced = "keys.tier1.replaced"
+
+	// EventKeysTier1Deleted fires when pkg/keys.Service.DeleteTier1
+	// actually removes a tier-1 ciphertext (the non-idempotent path
+	// at service.go:1406 that also fires the Tier1KeyChanged{Kind:
+	// Tier1KeyDeleted} consumer-cache flush broadcast). The no-op
+	// idempotent variant — DeleteTier1 called against a ref with no
+	// ciphertext on disk — emits nothing, mirroring the broadcast
+	// gate.
+	//
+	// Sibling of EventProviderCredentialForceDeleted: that row fires
+	// from the pkg/runner WForceDeleteTier1 escape path with the
+	// `referenced_by` blast-radius Meta; this row fires from the
+	// default-path DeleteTier1 at the at-rest substrate level.
+	// Mantis #1763 / Cerberus #77 F-1.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   ref    — opaque tier-1 reference handle that was removed
+	//   kind   — literal "tier1"
+	//   tier   — duplicate of kind (cluster-canon meta key)
+	//   source — "wails_input" for calls via WDeleteTier1
+	//            (renderer-reachable surface), "internal" for Go-
+	//            side calls
+	//
+	// The credential bytes are NEVER in Meta — DeleteTier1 unlinks
+	// the ciphertext from disk and emits this row; the row records
+	// the deletion decision, not the credential.
+	EventKeysTier1Deleted = "keys.tier1.deleted"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the

@@ -60,6 +60,7 @@ package keys
 import (
 	core "dappco.re/go"
 	"dappco.re/go/io/sigil"
+	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
@@ -258,6 +259,63 @@ func (s *Service) broadcastTier1Change(kind, ref string) {
 		return
 	}
 	c.ACTION(Tier1KeyChanged{Kind: kind, Ref: ref})
+}
+
+// auditSource* enumerate the audit.* event Meta `source` discriminator
+// values used by the credential-mutation emit-sites in this package
+// (Mantis #1763 / Cerberus #77 F-1). The two values are declared as
+// named consts so the emit-sites read literally rather than as magic
+// strings and the parity-grep test joins 1:1 against the audit-
+// constants.ts mirror.
+const (
+	auditSourceInternal   = "internal"
+	auditSourceWailsInput = "wails_input"
+)
+
+// auditTier* enumerate the audit.* event Meta `kind` / `tier`
+// discriminator values that pin which on-disk partition a credential-
+// mutation row pertains to.
+const (
+	auditTier0Kind = "tier0"
+	auditTier1Kind = "tier1"
+)
+
+// emitKeysAudit records a credential-mutation audit row via the
+// audit.Default() singleton. Called from the six credential-mutation
+// emit-sites in this file (PutTier0, DeleteTier0, PutTier1,
+// DeleteTier1, WPutTier1, WDeleteTier1) AFTER the at-rest substrate
+// mutation has been attempted. Mantis #1763 / Cerberus #77 F-1.
+//
+// Meta hygiene per Cerberus #1465 closure-only-scope discipline: the
+// key bytes / passphrase content MUST NEVER appear in Meta — only the
+// opaque ref handle + categorical tier/source discriminators + the
+// audit.ErrorCode substrate value on failure. The keys package never
+// returns plaintext to the audit substrate; the rec[ord here records
+// the mutation decision, not the credential.
+//
+// errCode is the audit.ErrorCode(r) value on failure (Outcome=error)
+// and the empty string on success (Outcome=ok); the helper picks the
+// right Outcome from the empty-vs-non-empty shape so callers stay
+// declarative at the emit-site.
+func emitKeysAudit(event, ref, kind, source, errCode string) {
+	outcome := audit.OutcomeOK
+	meta := map[string]any{
+		"ref":    ref,
+		"kind":   kind,
+		"tier":   kind,
+		"source": source,
+	}
+	if errCode != "" {
+		outcome = audit.OutcomeError
+		meta["error_code"] = errCode
+	}
+	_ = audit.Default().Record(audit.Event{
+		Event:   event,
+		TS:      core.Now().Unix(),
+		Scope:   "keys",
+		Outcome: outcome,
+		Meta:    meta,
+	})
 }
 
 const (
@@ -1221,11 +1279,29 @@ func (s *Service) getLocked(t tier, ref string, master []byte) core.Result {
 //
 //	r := svc.PutTier0("single-instance", key32)
 func (s *Service) PutTier0(ref string, plaintext []byte) core.Result {
+	return s.putTier0WithSource(ref, plaintext, auditSourceInternal)
+}
+
+// putTier0WithSource is the internal entry every PutTier0 path routes
+// through; it performs the at-rest tier-0 write and emits the
+// EventKeysTier0Stored audit row carrying the supplied source
+// discriminator. Mantis #1763 / Cerberus #77 F-1 — tier-0 has no
+// Wails binding by design (RFC.stage-e-keys-partition §4.3 Q4) so
+// source today is always auditSourceInternal; the parameter is
+// retained for forward symmetry with the tier-1 twin.
+func (s *Service) putTier0WithSource(ref string, plaintext []byte, source string) core.Result {
 	masterR := s.ensureMaster(tier0)
 	if !masterR.OK {
+		emitKeysAudit(audit.EventKeysTier0Stored, ref, auditTier0Kind, source, audit.ErrorCode(masterR))
 		return masterR
 	}
-	return s.putLocked(tier0, ref, plaintext, masterR.Value.([]byte))
+	r := s.putLocked(tier0, ref, plaintext, masterR.Value.([]byte))
+	errCode := ""
+	if !r.OK {
+		errCode = audit.ErrorCode(r)
+	}
+	emitKeysAudit(audit.EventKeysTier0Stored, ref, auditTier0Kind, source, errCode)
+	return r
 }
 
 // GetTier0 reads and decrypts plaintext stored under ref in the
@@ -1266,17 +1342,33 @@ func (s *Service) HasTier0(ref string) core.Result {
 //
 //	r := svc.DeleteTier0("single-instance")
 func (s *Service) DeleteTier0(ref string) core.Result {
+	return s.deleteTier0WithSource(ref, auditSourceInternal)
+}
+
+// deleteTier0WithSource is the internal entry every DeleteTier0 path
+// routes through; it removes the at-rest ciphertext when present and
+// emits the EventKeysTier0Deleted audit row carrying the supplied
+// source discriminator. Mirrors the broadcastTier1Change discipline
+// on the tier-1 twin: the idempotent no-op path (file did not exist)
+// emits nothing because no mutation happened. Mantis #1763 /
+// Cerberus #77 F-1.
+func (s *Service) deleteTier0WithSource(ref, source string) core.Result {
 	pR := keyPath(ref, tier0)
 	if !pR.OK {
+		emitKeysAudit(audit.EventKeysTier0Deleted, ref, auditTier0Kind, source, audit.ErrorCode(pR))
 		return pR
 	}
 	path := pR.Value.(string)
 	if statR := core.Stat(path); !statR.OK {
+		// Idempotent no-op — file already absent. No mutation, no row.
 		return core.Ok(nil)
 	}
 	if r := core.Remove(path); !r.OK {
-		return core.Fail(core.E("keys.DeleteTier0", "remove ciphertext", r.Value.(error)))
+		failR := core.Fail(core.E("keys.DeleteTier0", "remove ciphertext", r.Value.(error)))
+		emitKeysAudit(audit.EventKeysTier0Deleted, ref, auditTier0Kind, source, audit.ErrorCode(failR))
+		return failR
 	}
+	emitKeysAudit(audit.EventKeysTier0Deleted, ref, auditTier0Kind, source, "")
 	return core.Ok(nil)
 }
 
@@ -1322,8 +1414,29 @@ func (s *Service) GetOrCreateTier0(ref string, generate func() ([]byte, error)) 
 // AFTER the at-rest write succeeds so cached-plaintext consumers (today:
 // pkg/runner) can flush their per-backend caches.
 func (s *Service) PutTier1(ref string, plaintext []byte) core.Result {
+	return s.putTier1WithSource(ref, plaintext, auditSourceInternal)
+}
+
+// putTier1WithSource is the internal entry every PutTier1 path routes
+// through; it performs the at-rest tier-1 write, fires the
+// Tier1KeyChanged{Replaced} consumer-cache flush broadcast on the
+// overwrite path, and emits the credential-mutation audit row
+// (EventKeysTier1Stored or EventKeysTier1Replaced — the wasPresent
+// gate distinguishes) carrying the supplied source discriminator.
+// Mantis #1763 / Cerberus #77 F-1.
+func (s *Service) putTier1WithSource(ref string, plaintext []byte, source string) core.Result {
 	masterR := s.ensureMaster(tier1)
 	if !masterR.OK {
+		// Pre-write event-name decision needs HasTier1, which is safe
+		// to call before ensureMaster (Stat only). Use Stored as the
+		// first-write default when HasTier1 returns false / errors.
+		event := audit.EventKeysTier1Stored
+		if r := s.HasTier1(ref); r.OK {
+			if existed, ok := r.Value.(bool); ok && existed {
+				event = audit.EventKeysTier1Replaced
+			}
+		}
+		emitKeysAudit(event, ref, auditTier1Kind, source, audit.ErrorCode(masterR))
 		return masterR
 	}
 	// Pre-write existence snapshot — distinguishes the "replaced
@@ -1336,12 +1449,18 @@ func (s *Service) PutTier1(ref string, plaintext []byte) core.Result {
 		}
 	}
 	putR := s.putLocked(tier1, ref, plaintext, masterR.Value.([]byte))
+	event := audit.EventKeysTier1Stored
+	if wasPresent {
+		event = audit.EventKeysTier1Replaced
+	}
 	if !putR.OK {
+		emitKeysAudit(event, ref, auditTier1Kind, source, audit.ErrorCode(putR))
 		return putR
 	}
 	if wasPresent {
 		s.broadcastTier1Change(Tier1KeyReplaced, ref)
 	}
+	emitKeysAudit(event, ref, auditTier1Kind, source, "")
 	return putR
 }
 
@@ -1392,18 +1511,35 @@ func (s *Service) HasTier1(ref string) core.Result {
 // backend caches. Without this the deleted credential survives in
 // process memory until ServiceShutdown.
 func (s *Service) DeleteTier1(ref string) core.Result {
+	return s.deleteTier1WithSource(ref, auditSourceInternal)
+}
+
+// deleteTier1WithSource is the internal entry every DeleteTier1 path
+// routes through; it removes the at-rest tier-1 ciphertext when
+// present, fires the Tier1KeyChanged{Deleted} consumer-cache flush
+// broadcast on successful removal, and emits the
+// EventKeysTier1Deleted audit row carrying the supplied source
+// discriminator. Mirrors deleteTier0WithSource: the idempotent no-op
+// path (file already absent) emits nothing because no mutation
+// happened. Mantis #1763 / Cerberus #77 F-1.
+func (s *Service) deleteTier1WithSource(ref, source string) core.Result {
 	pR := keyPath(ref, tier1)
 	if !pR.OK {
+		emitKeysAudit(audit.EventKeysTier1Deleted, ref, auditTier1Kind, source, audit.ErrorCode(pR))
 		return pR
 	}
 	path := pR.Value.(string)
 	if statR := core.Stat(path); !statR.OK {
+		// Idempotent no-op — file already absent. No mutation, no row.
 		return core.Ok(nil)
 	}
 	if r := core.Remove(path); !r.OK {
-		return core.Fail(core.E("keys.DeleteTier1", "remove ciphertext", r.Value.(error)))
+		failR := core.Fail(core.E("keys.DeleteTier1", "remove ciphertext", r.Value.(error)))
+		emitKeysAudit(audit.EventKeysTier1Deleted, ref, auditTier1Kind, source, audit.ErrorCode(failR))
+		return failR
 	}
 	s.broadcastTier1Change(Tier1KeyDeleted, ref)
+	emitKeysAudit(audit.EventKeysTier1Deleted, ref, auditTier1Kind, source, "")
 	return core.Ok(nil)
 }
 
@@ -1532,7 +1668,11 @@ func (s *Service) ServiceShutdown() core.Result {
 //	import { WPutTier1 } from "@desktop/keys/service";
 //	await WPutTier1("openai-default", "sk-abc123");
 func (s *Service) WPutTier1(ref, plaintext string) core.Result {
-	return s.PutTier1(ref, []byte(plaintext))
+	// Mantis #1763 / Cerberus #77 F-1 — Wails-surface call routes
+	// through the internal helper with source="wails_input" so the
+	// audit row distinguishes renderer-reachable mutations from Go-
+	// side internal calls (boot wiring, GetOrCreateTier1).
+	return s.putTier1WithSource(ref, []byte(plaintext), auditSourceWailsInput)
 }
 
 // WListTier1 is the Wails-binding-friendly ListTier1.
@@ -1541,8 +1681,13 @@ func (s *Service) WListTier1() core.Result { return s.ListTier1() }
 // WHasTier1 reports tier-1 presence without decrypting.
 func (s *Service) WHasTier1(ref string) core.Result { return s.HasTier1(ref) }
 
-// WDeleteTier1 removes a tier-1 ref. Idempotent.
-func (s *Service) WDeleteTier1(ref string) core.Result { return s.DeleteTier1(ref) }
+// WDeleteTier1 removes a tier-1 ref. Idempotent. Mantis #1763 /
+// Cerberus #77 F-1 — Wails-surface call routes through the internal
+// helper with source="wails_input" so the audit row distinguishes
+// renderer-reachable mutations from Go-side internal calls.
+func (s *Service) WDeleteTier1(ref string) core.Result {
+	return s.deleteTier1WithSource(ref, auditSourceWailsInput)
+}
 
 // singleInstanceRef is the stable key name for the per-install
 // SingleInstance encryption key — tier-0 (pre-unlock substrate).

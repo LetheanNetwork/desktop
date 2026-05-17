@@ -14,6 +14,7 @@ import (
 
 	core "dappco.re/go"
 	"dappco.re/go/io/sigil"
+	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/keys"
 )
 
@@ -1398,4 +1399,180 @@ func TestService_Migrate_Tier0OnDiskNoProvider_RetrySuccess_Good(t *core.T) {
 	copy(wantKey[:], sealedKey)
 	core.AssertEqual(t, wantKey, gotKey,
 		"SingleInstanceKey must return the originally sealed payload — proves tier-0 master loaded correctly and SI re-seal used it")
+}
+
+// --- Audit emit tests (Mantis #1763 / Cerberus #77 F-1) ---
+
+// keysRecordingRecorder captures every audit.Event the keys service
+// emits during a test. Mirror of the pkg/runner / pkg/account fixture
+// shape; the goroutine-safe variant guards against any future
+// concurrent emit path (today every emit is synchronous, but the
+// guard keeps the fixture forward-safe).
+type keysRecordingRecorder struct {
+	mu     sync.Mutex
+	events []audit.Event
+}
+
+func (r *keysRecordingRecorder) Record(ev audit.Event) core.Result {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, ev)
+	return core.Ok(nil)
+}
+
+func (r *keysRecordingRecorder) snapshot() []audit.Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]audit.Event, len(r.events))
+	copy(out, r.events)
+	return out
+}
+
+// installKeysRecorder wires a keysRecordingRecorder as audit.Default
+// and restores the prior default at test end.
+//
+// Usage example:
+//
+//	rec := installKeysRecorder(t)
+//	... drive service ...
+//	events := rec.snapshot()
+func installKeysRecorder(t *core.T) *keysRecordingRecorder {
+	t.Helper()
+	rec := &keysRecordingRecorder{}
+	audit.SetDefault(rec)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+	return rec
+}
+
+// findKeysEvent returns the most-recent event whose Event field
+// matches name, or nil if none. Used by the emit-shape tests below.
+func findKeysEvent(events []audit.Event, name string) *audit.Event {
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Event == name {
+			return &events[i]
+		}
+	}
+	return nil
+}
+
+// TestKeys_PutTier1_EmitsAudit_Good — PutTier1 first-write fires
+// EventKeysTier1Stored with source="internal" and the canonical Meta
+// shape (ref / kind / tier / source); overwrite fires the Replaced
+// variant. Mantis #1763 / Cerberus #77 F-1.
+func TestKeys_PutTier1_EmitsAudit_Good(t *core.T) {
+	rec := installKeysRecorder(t)
+	svc := tier1Fixture(t)
+
+	// First write — Stored.
+	r := svc.PutTier1("openai-default", []byte("sk-do-not-leak-1763"))
+	core.AssertTrue(t, r.OK)
+
+	stored := findKeysEvent(rec.snapshot(), audit.EventKeysTier1Stored)
+	core.AssertTrue(t, stored != nil,
+		"EventKeysTier1Stored must fire on first-write PutTier1")
+	core.AssertEqual(t, audit.OutcomeOK, stored.Outcome)
+	core.AssertEqual(t, "keys", stored.Scope)
+	core.AssertEqual(t, "openai-default", stored.Meta["ref"])
+	core.AssertEqual(t, "tier1", stored.Meta["kind"])
+	core.AssertEqual(t, "tier1", stored.Meta["tier"])
+	core.AssertEqual(t, "internal", stored.Meta["source"])
+
+	// Overwrite — Replaced.
+	r2 := svc.PutTier1("openai-default", []byte("sk-do-not-leak-rotated"))
+	core.AssertTrue(t, r2.OK)
+	replaced := findKeysEvent(rec.snapshot(), audit.EventKeysTier1Replaced)
+	core.AssertTrue(t, replaced != nil,
+		"EventKeysTier1Replaced must fire on overwrite PutTier1")
+	core.AssertEqual(t, audit.OutcomeOK, replaced.Outcome)
+	core.AssertEqual(t, "openai-default", replaced.Meta["ref"])
+	core.AssertEqual(t, "internal", replaced.Meta["source"])
+}
+
+// TestKeys_DeleteTier1_EmitsAudit_Good — DeleteTier1 against a present
+// ref fires EventKeysTier1Deleted with source="internal" and the
+// canonical Meta shape; the idempotent no-op path (file absent) emits
+// nothing. Mantis #1763 / Cerberus #77 F-1.
+func TestKeys_DeleteTier1_EmitsAudit_Good(t *core.T) {
+	rec := installKeysRecorder(t)
+	svc := tier1Fixture(t)
+
+	// Seed a ref to delete.
+	core.AssertTrue(t, svc.PutTier1("openai-default", []byte("sk-seed")).OK)
+	preCount := len(rec.snapshot())
+
+	// Idempotent no-op against an absent ref — no emit.
+	r := svc.DeleteTier1("never-existed")
+	core.AssertTrue(t, r.OK)
+	idempotentSnap := rec.snapshot()
+	core.AssertEqual(t, preCount, len(idempotentSnap),
+		"idempotent no-op DeleteTier1 must NOT emit an audit row")
+
+	// Actual removal — Deleted.
+	core.AssertTrue(t, svc.DeleteTier1("openai-default").OK)
+	deleted := findKeysEvent(rec.snapshot(), audit.EventKeysTier1Deleted)
+	core.AssertTrue(t, deleted != nil,
+		"EventKeysTier1Deleted must fire on actual at-rest removal")
+	core.AssertEqual(t, audit.OutcomeOK, deleted.Outcome)
+	core.AssertEqual(t, "keys", deleted.Scope)
+	core.AssertEqual(t, "openai-default", deleted.Meta["ref"])
+	core.AssertEqual(t, "tier1", deleted.Meta["kind"])
+	core.AssertEqual(t, "tier1", deleted.Meta["tier"])
+	core.AssertEqual(t, "internal", deleted.Meta["source"])
+}
+
+// TestKeys_AuditMeta_NoKeyBytes_Bad — PII canary: drives PutTier0 /
+// PutTier1 / WPutTier1 / DeleteTier1 with a recognisable plaintext
+// sentinel, then asserts the sentinel never appears in any audit row
+// Meta string value (Cerberus #1465 closure-only-scope discipline).
+// Mantis #1763 / Cerberus #77 F-1.
+func TestKeys_AuditMeta_NoKeyBytes_Bad(t *core.T) {
+	rec := installKeysRecorder(t)
+	svc := tier1Fixture(t)
+
+	const sentinel = "sk-canary-do-not-persist-1763"
+
+	core.AssertTrue(t, svc.PutTier0("single-instance", []byte(sentinel)).OK)
+	core.AssertTrue(t, svc.PutTier1("openai-default", []byte(sentinel)).OK)
+	core.AssertTrue(t, svc.WPutTier1("anthropic-default", sentinel).OK)
+	core.AssertTrue(t, svc.DeleteTier1("openai-default").OK)
+	core.AssertTrue(t, svc.DeleteTier0("single-instance").OK)
+
+	events := rec.snapshot()
+	core.AssertTrue(t, len(events) > 0, "must have emitted at least one audit row")
+	for i := range events {
+		for k, v := range events[i].Meta {
+			vs, ok := v.(string)
+			if !ok {
+				continue
+			}
+			core.AssertFalse(t, core.Contains(vs, sentinel),
+				"event["+events[i].Event+"].Meta["+k+"] must not echo plaintext credential")
+		}
+	}
+}
+
+// TestKeys_WPutTier1_EmitsAudit_Good — Wails-surface WPutTier1 fires
+// EventKeysTier1Stored with source="wails_input", distinguishing the
+// renderer-reachable call path from the Go-internal PutTier1 path.
+// WDeleteTier1 mirrors the same source discipline. Mantis #1763 /
+// Cerberus #77 F-1.
+func TestKeys_WPutTier1_EmitsAudit_Good(t *core.T) {
+	rec := installKeysRecorder(t)
+	svc := tier1Fixture(t)
+
+	core.AssertTrue(t, svc.WPutTier1("openai-default", "sk-wails-shape").OK)
+	stored := findKeysEvent(rec.snapshot(), audit.EventKeysTier1Stored)
+	core.AssertTrue(t, stored != nil,
+		"EventKeysTier1Stored must fire from WPutTier1")
+	core.AssertEqual(t, "wails_input", stored.Meta["source"],
+		"Wails-surface call must carry source=wails_input")
+	core.AssertEqual(t, "openai-default", stored.Meta["ref"])
+	core.AssertEqual(t, "tier1", stored.Meta["kind"])
+
+	// WDeleteTier1 mirrors the same source discrimination.
+	core.AssertTrue(t, svc.WDeleteTier1("openai-default").OK)
+	deleted := findKeysEvent(rec.snapshot(), audit.EventKeysTier1Deleted)
+	core.AssertTrue(t, deleted != nil,
+		"EventKeysTier1Deleted must fire from WDeleteTier1")
+	core.AssertEqual(t, "wails_input", deleted.Meta["source"])
 }
