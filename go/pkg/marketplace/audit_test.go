@@ -385,3 +385,79 @@ func TestMarketplace_AuditMeta_NoRawSecrets_Bad(t *core.T) {
 		core.AssertFalse(t, hasQuery, "Meta must never carry a raw `query` key")
 	}
 }
+
+// TestMarketplace_AuditMeta_ErrorCodeBoundedKeyspace_Ugly — STRIDE-I
+// prose-leak canary per RFC.error-code-cascade.md §3 (W5) /
+// Mantis #1715 / Cerberus #61 C-3. Drives every Failed-emitting
+// lifecycle entry against rejection inputs whose underlying err.Error()
+// prose embeds caller-supplied bytes (URLs, ids, manifest names) and
+// asserts the emitted Meta["error_code"] is the BOUNDED *core.Err
+// .Operation literal (e.g. "marketplace.Install"), NOT the raw prose.
+// Defends the audit.ErrorCode(r) substrate at the helper boundary so
+// future regressions that revert the helper signature to a raw string
+// fall loud rather than silently re-leaking caller-controlled bytes.
+//
+// The pre-W5 shape (emitInstallFailed(id, r.Error())) would have landed
+// the full "marketplace.Install: orm save failed — rolled back ...: ..."
+// string in Meta["error_code"] — this test pins the type-system contract
+// that makes that bug class unreachable for the 6 marketplace helpers.
+func TestMarketplace_AuditMeta_ErrorCodeBoundedKeyspace_Ugly(t *core.T) {
+	rec := installAuditRecorder(t)
+	svc := newTestMarketplaceService()
+
+	const canary = "LTHN-MARKETPLACE-LEAK-CANARY-NOTAREALTOKEN"
+
+	// Drive each Failed-emitting entrypoint with caller bytes embedded
+	// in the rejection input. None of the resulting Meta["error_code"]
+	// values may carry the canary.
+	_ = svc.Install(subject.InstallInput{
+		Manifest: subject.BundleManifest{
+			Schema:  "lthn-vm/v1",
+			Name:    "id-with-" + canary,
+			Display: "X",
+			Images:  []subject.ImageEntry{{ID: "app", Image: "alpine:3.21"}},
+		},
+	})
+	_ = svc.Uninstall("id-with-" + canary)
+	_ = svc.Launch("id-with-" + canary)
+	_ = svc.Stop("id-with-" + canary)
+	_ = svc.FetchManifest("oci://example.com/" + canary)
+	_ = subject.ValidateManifest(subject.BundleManifest{
+		Schema: "wrong-schema-" + canary,
+		Name:   "v-bundle",
+	})
+
+	// Closed bounded keyspace per audit.ErrorCode(r) resolution order.
+	// Every Failed row must land an error_code from this set; any value
+	// outside it = a regression that flipped the helper signature back.
+	bounded := map[string]bool{
+		"marketplace.Install":          true,
+		"marketplace.Uninstall":        true,
+		"marketplace.Launch":           true,
+		"marketplace.Stop":             true,
+		"marketplace.FetchManifest":    true,
+		"marketplace.ValidateManifest": true,
+	}
+
+	failedNames := []string{
+		"marketplace.install.failed",
+		"marketplace.uninstall.failed",
+		"marketplace.launch.failed",
+		"marketplace.stop.failed",
+		"marketplace.fetch_manifest.failed",
+		"marketplace.validate_manifest.failed",
+	}
+	for _, name := range failedNames {
+		for _, ev := range rec.filterByName(name) {
+			code, ok := ev.Meta["error_code"].(string)
+			core.AssertTrue(t, ok,
+				"error_code Meta value must be a string (event="+name+")")
+			core.AssertTrue(t, bounded[code],
+				"error_code must be the bounded *core.Err.Operation literal "+
+					"(audit.ErrorCode), got "+code+" (event="+name+")")
+			core.AssertFalse(t, core.Contains(code, canary),
+				"error_code must not echo caller-supplied canary bytes "+
+					"(event="+name+", got "+code+")")
+		}
+	}
+}

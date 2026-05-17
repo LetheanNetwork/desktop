@@ -14,11 +14,20 @@
 // image_count / error_code / reason) are accepted; raw manifest /
 // env / image-ref / fetch-URL-path bytes never reach the substrate.
 //
+// Failed helpers take a core.Result and resolve Meta["error_code"]
+// through audit.ErrorCode(r) — bounded *core.Err.Operation literal
+// rather than raw err.Error() prose. This is the W5 cascade adoption
+// per RFC.error-code-cascade.md §3 / Mantis #1715 / Cerberus #61 C-3:
+// caller-controlled bytes (URLs, manifest names, error wrap strings)
+// can no longer reach the audit substrate via the helper boundary.
+// Bare-string sites construct core.Fail(core.E(op, msg, nil)) before
+// emit so the single boundary type holds across the whole package.
+//
 // Usage example (internal):
 //
 //	emitInstallRequested(bundleID, pluginCode)
 //	emitInstallSucceeded(bundleID, pluginCode, len(sandboxIDs))
-//	if !r.OK { emitInstallFailed(bundleID, r.Error()) }
+//	if !r.OK { emitInstallFailed(bundleID, r) }
 
 package marketplace
 
@@ -86,12 +95,20 @@ func emitInstallSucceeded(bundleID, pluginCode string, imageCount int) {
 // emitInstallFailed fires the Failed row on any non-OK Install Result
 // (validation, sandbox-spawn, orm-save, rollback). bundleID may be
 // empty when ValidateManifest rejected the input before Name resolved.
-// errorCode is the Result.Error() string — already-scoped by core.E.
+//
+// r is the failed core.Result whose stable, bounded error_code is
+// derived through audit.ErrorCode per W5 of the audit error-code
+// cascade RFC. Bare-string sites wrap as core.Fail(core.E(op, msg,
+// nil)) before calling — single boundary type keeps Meta["error_code"]
+// inside the closed keyspace and forbids raw prose leakage via
+// err.Error().
 //
 // Usage example (internal):
 //
-//	if !r.OK { emitInstallFailed(m.Name, r.Error()); return r }
-func emitInstallFailed(bundleID, errorCode string) {
+//	if !r.OK { emitInstallFailed(m.Name, r); return r }
+//	fail := core.Fail(core.E(installBundleOp, "sandbox service not available", nil))
+//	emitInstallFailed(m.Name, fail); return fail
+func emitInstallFailed(bundleID string, r core.Result) {
 	_ = audit.Default().Record(audit.Event{
 		Event:   audit.EventMarketplaceInstallFailed,
 		TS:      core.Now().UTC().Unix(),
@@ -99,7 +116,7 @@ func emitInstallFailed(bundleID, errorCode string) {
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
 			"bundle_id":  bundleID,
-			"error_code": errorCode,
+			"error_code": audit.ErrorCode(r),
 		},
 	})
 }
@@ -144,12 +161,13 @@ func emitUninstallSucceeded(bundleID, pluginCode string) {
 }
 
 // emitUninstallFailed fires the Failed row on any non-OK Uninstall
-// Result (empty id, orm delete failure post-sandbox-teardown).
+// Result (empty id, orm delete failure post-sandbox-teardown). See
+// emitInstallFailed for the W5 audit.ErrorCode(r) contract.
 //
 // Usage example (internal):
 //
-//	if !r.OK { emitUninstallFailed(bundleID, r.Error()); return r }
-func emitUninstallFailed(bundleID, errorCode string) {
+//	if !r.OK { emitUninstallFailed(bundleID, r); return r }
+func emitUninstallFailed(bundleID string, r core.Result) {
 	_ = audit.Default().Record(audit.Event{
 		Event:   audit.EventMarketplaceUninstallFailed,
 		TS:      core.Now().UTC().Unix(),
@@ -157,7 +175,7 @@ func emitUninstallFailed(bundleID, errorCode string) {
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
 			"bundle_id":  bundleID,
-			"error_code": errorCode,
+			"error_code": audit.ErrorCode(r),
 		},
 	})
 }
@@ -203,11 +221,12 @@ func emitLaunchSucceeded(bundleID string, imageCount int) {
 
 // emitLaunchFailed fires the Failed row on any non-OK Launch Result
 // (empty id, bundle not installed, manifest missing, orm save failure).
+// See emitInstallFailed for the W5 audit.ErrorCode(r) contract.
 //
 // Usage example (internal):
 //
-//	if !r.OK { emitLaunchFailed(bundleID, r.Error()); return r }
-func emitLaunchFailed(bundleID, errorCode string) {
+//	if !r.OK { emitLaunchFailed(bundleID, r); return r }
+func emitLaunchFailed(bundleID string, r core.Result) {
 	_ = audit.Default().Record(audit.Event{
 		Event:   audit.EventMarketplaceLaunchFailed,
 		TS:      core.Now().UTC().Unix(),
@@ -215,7 +234,7 @@ func emitLaunchFailed(bundleID, errorCode string) {
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
 			"bundle_id":  bundleID,
-			"error_code": errorCode,
+			"error_code": audit.ErrorCode(r),
 		},
 	})
 }
@@ -256,11 +275,12 @@ func emitStopSucceeded(bundleID string) {
 }
 
 // emitStopFailed fires the Failed row on any non-OK Stop Result.
+// See emitInstallFailed for the W5 audit.ErrorCode(r) contract.
 //
 // Usage example (internal):
 //
-//	if !r.OK { emitStopFailed(bundleID, r.Error()); return r }
-func emitStopFailed(bundleID, errorCode string) {
+//	if !r.OK { emitStopFailed(bundleID, r); return r }
+func emitStopFailed(bundleID string, r core.Result) {
 	_ = audit.Default().Record(audit.Event{
 		Event:   audit.EventMarketplaceStopFailed,
 		TS:      core.Now().UTC().Unix(),
@@ -268,7 +288,7 @@ func emitStopFailed(bundleID, errorCode string) {
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
 			"bundle_id":  bundleID,
-			"error_code": errorCode,
+			"error_code": audit.ErrorCode(r),
 		},
 	})
 }
@@ -318,12 +338,13 @@ func emitFetchManifestSucceeded(sourceURL, bundleID string) {
 // emitFetchManifestFailed fires the Failed row on any non-OK
 // FetchManifest Result EXCEPT the host-allowlist rejection (which has
 // its own Rejected event so the auditor can distinguish policy-block
-// from network/parse failure).
+// from network/parse failure). See emitInstallFailed for the W5
+// audit.ErrorCode(r) contract.
 //
 // Usage example (internal):
 //
-//	if !r.OK { emitFetchManifestFailed(sourceURL, r.Error()); return r }
-func emitFetchManifestFailed(sourceURL, errorCode string) {
+//	if !r.OK { emitFetchManifestFailed(sourceURL, r); return r }
+func emitFetchManifestFailed(sourceURL string, r core.Result) {
 	_ = audit.Default().Record(audit.Event{
 		Event:   audit.EventMarketplaceFetchManifestFailed,
 		TS:      core.Now().UTC().Unix(),
@@ -331,7 +352,7 @@ func emitFetchManifestFailed(sourceURL, errorCode string) {
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
 			"domain_only": domainOnly(sourceURL),
-			"error_code":  errorCode,
+			"error_code":  audit.ErrorCode(r),
 		},
 	})
 }
@@ -373,8 +394,10 @@ func emitFetchManifestRejected(sourceURL string) {
 //
 // Usage example (internal):
 //
-//	if !r.OK { emitValidateManifestFailed(m.Name, r.Error()); return r }
-func emitValidateManifestFailed(bundleID, errorCode string) {
+//	if !r.OK { emitValidateManifestFailed(m.Name, r); return r }
+//
+// See emitInstallFailed for the W5 audit.ErrorCode(r) contract.
+func emitValidateManifestFailed(bundleID string, r core.Result) {
 	_ = audit.Default().Record(audit.Event{
 		Event:   audit.EventMarketplaceValidateManifestFailed,
 		TS:      core.Now().UTC().Unix(),
@@ -382,7 +405,7 @@ func emitValidateManifestFailed(bundleID, errorCode string) {
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
 			"bundle_id":  bundleID,
-			"error_code": errorCode,
+			"error_code": audit.ErrorCode(r),
 		},
 	})
 }

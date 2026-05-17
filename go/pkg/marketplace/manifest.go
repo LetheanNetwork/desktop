@@ -308,7 +308,7 @@ func decodeManifestYAMLHardened(raw []byte, out any) (err error) {
 func ValidateManifest(m BundleManifest) core.Result {
 	r := validateManifestImpl(m)
 	if !r.OK {
-		emitValidateManifestFailed(m.Name, r.Error())
+		emitValidateManifestFailed(m.Name, r)
 	}
 	return r
 }

@@ -164,8 +164,9 @@ func (s *Service) Install(input InstallInput) core.Result {
 		// at its own boundary — the Install pipeline only wraps with the
 		// InstallFailed sibling so a forensic walker can pair the two
 		// rows via TS proximity.
-		emitInstallFailed(input.Manifest.Name, r.Error())
-		return core.Fail(core.E(installBundleOp, "invalid manifest", nil))
+		fail := core.Fail(core.E(installBundleOp, "invalid manifest", nil))
+		emitInstallFailed(input.Manifest.Name, fail)
+		return fail
 	}
 
 	m := input.Manifest
@@ -188,22 +189,24 @@ func (s *Service) Install(input InstallInput) core.Result {
 	// dispatch becomes ambiguous (whose code is this?). Reject loudly
 	// rather than overwriting.
 	if r := s.checkPluginCodeCollision(m); !r.OK {
-		emitInstallFailed(m.Name, r.Error())
+		emitInstallFailed(m.Name, r)
 		return r
 	}
 
 	sbPort := s.sandboxPort()
 	if sbPort == nil {
-		emitInstallFailed(m.Name, "sandbox service not available")
-		return core.Fail(core.E(installBundleOp, "sandbox service not available", nil))
+		fail := core.Fail(core.E(installBundleOp, "sandbox service not available", nil))
+		emitInstallFailed(m.Name, fail)
+		return fail
 	}
 
 	env := s.resolveEnv(m, input.Env)
 
 	configPath := s.bundleConfigPath(m.Name)
 	if r := core.MkdirAll(configPath, 0o755); !r.OK {
-		emitInstallFailed(m.Name, "config dir creation failed")
-		return core.Fail(core.E(installBundleOp, "config dir creation failed", nil))
+		fail := core.Fail(core.E(installBundleOp, "config dir creation failed", nil))
+		emitInstallFailed(m.Name, fail)
+		return fail
 	}
 
 	// Mantis #1689 HIGH (Cerberus #54 C1) — persist the validated
@@ -216,7 +219,7 @@ func (s *Service) Install(input InstallInput) core.Result {
 	// frame-src allowlist + postMessage origin table retain dead
 	// entries past uninstall).
 	if r := s.persistManifest(configPath, m); !r.OK {
-		emitInstallFailed(m.Name, r.Error())
+		emitInstallFailed(m.Name, r)
 		return r
 	}
 
@@ -283,9 +286,10 @@ func (s *Service) Install(input InstallInput) core.Result {
 		// (now-rejected) record state, then return the orm error.
 		if r := orm.Of[InstalledBundle](s.core).Save(&rec); !r.OK {
 			rollbackSpawnedSandboxes(sbPort, sandboxIDs)
-			emitInstallFailed(m.Name, "orm save failed: "+r.Error())
-			return core.Fail(core.E(installBundleOp,
+			fail := core.Fail(core.E(installBundleOp,
 				"orm save failed — rolled back spawned containers: "+r.Error(), nil))
+			emitInstallFailed(m.Name, fail)
+			return fail
 		}
 	}
 
@@ -308,8 +312,9 @@ func (s *Service) Install(input InstallInput) core.Result {
 	fireBundleChanged(s.core, PhaseInstalled, rec, InstalledBundle{})
 
 	if lastErr != "" {
-		emitInstallFailed(m.Name, "one or more images failed to start: "+lastErr)
-		return core.Fail(core.E(installBundleOp, "one or more images failed to start: "+lastErr, nil))
+		fail := core.Fail(core.E(installBundleOp, "one or more images failed to start: "+lastErr, nil))
+		emitInstallFailed(m.Name, fail)
+		return fail
 	}
 
 	emitInstallSucceeded(m.Name, pluginCodeOf(m), len(sandboxIDs))
@@ -379,8 +384,9 @@ func (s *Service) Launch(bundleID string) core.Result {
 	emitLaunchRequested(bundleID)
 
 	if core.Trim(bundleID) == "" {
-		emitLaunchFailed(bundleID, "bundle id is required")
-		return core.Fail(core.E(launchBundleOp, "bundle id is required", nil))
+		fail := core.Fail(core.E(launchBundleOp, "bundle id is required", nil))
+		emitLaunchFailed(bundleID, fail)
+		return fail
 	}
 
 	// Mantis #1583 MED — single-flight per bundleID.
@@ -390,32 +396,36 @@ func (s *Service) Launch(bundleID string) core.Result {
 
 	recR := s.findInstalledBundle(bundleID)
 	if !recR.OK {
-		// Categorical error_code (no caller-supplied bytes echoed) so
-		// the NoRawSecrets canary stays clean — bundle_id is already in
-		// the sibling Requested row's Meta for forensic pairing.
-		emitLaunchFailed(bundleID, "bundle_not_installed")
-		return core.Fail(core.E(launchBundleOp, "bundle not installed: "+bundleID, nil))
+		// Bounded *core.Err.Operation literal (no caller-supplied bytes
+		// echoed) so the NoRawSecrets canary stays clean — bundle_id is
+		// already in the sibling Requested row's Meta for forensic pairing.
+		fail := core.Fail(core.E(launchBundleOp, "bundle not installed: "+bundleID, nil))
+		emitLaunchFailed(bundleID, fail)
+		return fail
 	}
 
 	configPath := s.bundleConfigPath(bundleID)
 	manifestPath := core.JoinPath(configPath, "manifest.yml")
 	readR := core.ReadFile(manifestPath)
 	if !readR.OK {
-		emitLaunchFailed(bundleID, "manifest not found")
-		return core.Fail(core.E(launchBundleOp, "manifest not found at: "+manifestPath, nil))
+		fail := core.Fail(core.E(launchBundleOp, "manifest not found at: "+manifestPath, nil))
+		emitLaunchFailed(bundleID, fail)
+		return fail
 	}
 	raw, _ := readR.Value.([]byte)
 	mR := ParseManifestBytes(raw)
 	if !mR.OK {
-		emitLaunchFailed(bundleID, "manifest parse failed")
-		return core.Fail(core.E(launchBundleOp, "manifest parse failed", nil))
+		fail := core.Fail(core.E(launchBundleOp, "manifest parse failed", nil))
+		emitLaunchFailed(bundleID, fail)
+		return fail
 	}
 	m := mR.Value.(BundleManifest)
 
 	sbPort := s.sandboxPort()
 	if sbPort == nil {
-		emitLaunchFailed(bundleID, "sandbox service not available")
-		return core.Fail(core.E(launchBundleOp, "sandbox service not available", nil))
+		fail := core.Fail(core.E(launchBundleOp, "sandbox service not available", nil))
+		emitLaunchFailed(bundleID, fail)
+		return fail
 	}
 
 	// Mantis #1670 — same install/bundle stamping as the Install
@@ -464,9 +474,10 @@ func (s *Service) Launch(bundleID string) core.Result {
 		// Kill and surface the orm error to the caller.
 		if r := orm.Of[InstalledBundle](s.core).Save(&rec); !r.OK {
 			rollbackSpawnedSandboxes(sbPort, launchedIDs)
-			emitLaunchFailed(bundleID, "orm save failed: "+r.Error())
-			return core.Fail(core.E(launchBundleOp,
+			fail := core.Fail(core.E(launchBundleOp,
 				"orm save failed — rolled back spawned containers: "+r.Error(), nil))
+			emitLaunchFailed(bundleID, fail)
+			return fail
 		}
 	}
 	fireBundleChanged(s.core, PhaseLaunched, rec, before)
@@ -489,8 +500,9 @@ func (s *Service) Stop(bundleID string) core.Result {
 	emitStopRequested(bundleID)
 
 	if core.Trim(bundleID) == "" {
-		emitStopFailed(bundleID, "bundle id is required")
-		return core.Fail(core.E(stopBundleOp, "bundle id is required", nil))
+		fail := core.Fail(core.E(stopBundleOp, "bundle id is required", nil))
+		emitStopFailed(bundleID, fail)
+		return fail
 	}
 
 	// Mantis #1583 MED — single-flight per bundleID.
@@ -500,7 +512,7 @@ func (s *Service) Stop(bundleID string) core.Result {
 
 	r := s.stopLocked(bundleID)
 	if !r.OK {
-		emitStopFailed(bundleID, r.Error())
+		emitStopFailed(bundleID, r)
 		return r
 	}
 	emitStopSucceeded(bundleID)
@@ -581,8 +593,9 @@ func (s *Service) Uninstall(bundleID string) core.Result {
 	emitUninstallRequested(bundleID, s.resolvePluginCode(bundleID))
 
 	if core.Trim(bundleID) == "" {
-		emitUninstallFailed(bundleID, "bundle id is required")
-		return core.Fail(core.E(uninstallBundleOp, "bundle id is required", nil))
+		fail := core.Fail(core.E(uninstallBundleOp, "bundle id is required", nil))
+		emitUninstallFailed(bundleID, fail)
+		return fail
 	}
 
 	// Mantis #1583 MED — single-flight per bundleID. Acquired ONCE
@@ -652,9 +665,10 @@ func (s *Service) Uninstall(bundleID string) core.Result {
 			rec := InstalledBundle{BundleID: bundleID}
 			if r := orm.Of[InstalledBundle](s.core).Delete(&rec); !r.OK {
 				fireBundleChanged(s.core, PhaseUninstalled, before, InstalledBundle{})
-				emitUninstallFailed(bundleID, "orm delete failed: "+r.Error())
-				return core.Fail(core.E(uninstallBundleOp,
+				fail := core.Fail(core.E(uninstallBundleOp,
 					"orm delete failed — registry record may be stale: "+r.Error(), nil))
+				emitUninstallFailed(bundleID, fail)
+				return fail
 			}
 		}
 	}
