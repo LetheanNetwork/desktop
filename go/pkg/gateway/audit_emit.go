@@ -48,6 +48,13 @@ const (
 	reasonMissingBundleID    = "missing_bundle_id"
 	reasonScopeUnavailable   = "scope_unavailable"
 	reasonPermissionDenied   = "permission_denied"
+	// reasonBundleIDSpoofed fires when X-Bundle-Token resolves to bundle
+	// code A but the caller-asserted Bundle-ID header is set to a non-
+	// empty value B ≠ A. Cerberus #57 F-4 (Mantis #1702) — closes the
+	// trust-asymmetry where a LocalKey-holding caller silently rebinds
+	// its asserted bundle identity (the previous "ignore on conflict"
+	// behaviour left no forensic trail of the spoof attempt).
+	reasonBundleIDSpoofed = "bundle.id_spoofed"
 )
 
 // routePattern joins the scope + mode params into the public URL path

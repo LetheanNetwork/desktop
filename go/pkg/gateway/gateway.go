@@ -322,6 +322,21 @@ func (s *Service) Handle(ctx *gin.Context) {
 			// Strip the token from the forwarded request so scope
 			// handlers never see the raw secret.
 			ctx.Request.Header.Del(headerBundleToken)
+			// Cerberus #57 F-4 (Mantis #1702) — close the trust-
+			// asymmetry where a LocalKey holder presents BOTH a valid
+			// X-Bundle-Token (resolves to A) AND a caller-asserted
+			// Bundle-ID header (claims B). The previous behaviour
+			// silently preferred the token and ignored the Bundle-ID
+			// header, leaving zero forensic trail of the rebind
+			// attempt. Reject explicitly so the audit substrate
+			// catches the spoof regardless of which header
+			// "wins" the precedence rule.
+			if claimed := ctx.GetHeader(headerBundleID); claimed != "" && claimed != bundleID {
+				emitDispatchRejected(bundleID, pattern, method, reasonBundleIDSpoofed)
+				writeError(ctx, core.StatusUnauthorized, "bundle-id-spoofed",
+					"X-Bundle-Token resolves to a different bundle than Bundle-ID claims")
+				return
+			}
 		}
 	}
 	// Fall back to the caller-asserted Bundle-ID when no token was

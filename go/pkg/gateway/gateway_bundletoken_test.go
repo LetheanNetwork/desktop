@@ -77,7 +77,9 @@ func TestGateway_BundleToken_Good_TokenResolvesToOwnCode(t *core.T) {
 
 	req := httptest.NewRequest("POST", "/v1/api/gateway/test.token/read", nil)
 	req.Header.Set("X-Bundle-Token", "secret-a")
-	// Bundle-ID is also set — when token is resolved, header is ignored.
+	// Bundle-ID matches resolved code — the legacy "ignore on conflict"
+	// rule turned into "must match" by Mantis #1702 (F-4 hardening), so
+	// the matching-claim path still 200s.
 	req.Header.Set("Bundle-ID", "plugin-a")
 	w := httptest.NewRecorder()
 	eng.ServeHTTP(w, req)
@@ -104,19 +106,53 @@ func TestGateway_BundleToken_Bad_CrossPluginSpoof(t *core.T) {
 	}}
 	_, eng := newTokenRouter(t, c, resolver)
 
-	// Plugin A carries its own bundle token but asserts Bundle-ID: plugin-b.
-	// Pre-fix: gateway would use "plugin-b", find its permission, and allow.
-	// Post-fix: gateway resolves secret-a → plugin-a; plugin-a lacks
-	// test.token:read → 403 permission-denied.
+	// Plugin A carries its own bundle token (resolves to plugin-a) but
+	// asserts Bundle-ID: plugin-b. Pre-Mantis-#1702 the gateway silently
+	// preferred the token and just used plugin-a (which lacks test.token,
+	// so 403). Post-#1702 the gateway rejects the mismatch explicitly at
+	// 401 bundle-id-spoofed so the forensic audit catches the rebind
+	// attempt regardless of which header would have "won" precedence.
 	req := httptest.NewRequest("POST", "/v1/api/gateway/test.token/read", nil)
 	req.Header.Set("X-Bundle-Token", "secret-a")
 	req.Header.Set("Bundle-ID", "plugin-b") // the spoof attempt
 	w := httptest.NewRecorder()
 	eng.ServeHTTP(w, req)
 
-	core.AssertEqual(t, core.StatusForbidden, w.Code,
-		"plugin A must not gain plugin B's permissions by forging Bundle-ID: plugin-b")
-	core.AssertContains(t, w.Body.String(), "permission-denied")
+	core.AssertEqual(t, core.StatusUnauthorized, w.Code,
+		"plugin A asserting Bundle-ID: plugin-b while presenting plugin-a's token MUST be rejected as a spoof attempt")
+	core.AssertContains(t, w.Body.String(), "bundle-id-spoofed")
+}
+
+// TestGateway_BundleIdSpoof_Bad — Mantis #1702 F-4 hardening direct
+// test. LocalKey-holder presents Bundle-ID:B while X-Bundle-Token
+// resolves to A — explicit 401 with reasonBundleIDSpoofed rather than
+// the previous silent ignore.
+func TestGateway_BundleIdSpoof_Bad(t *core.T) {
+	c := newGatewayCore(t)
+	seedBundle(t, c, "plugin-a", []marketplace.Permission{
+		{Scope: "test.token", Mode: "read"},
+	})
+	seedBundle(t, c, "plugin-b", []marketplace.Permission{
+		{Scope: "test.token", Mode: "read"},
+	})
+	resolver := &staticResolver{m: map[string]string{
+		"secret-a": "plugin-a",
+	}}
+	_, eng := newTokenRouter(t, c, resolver)
+
+	// Token resolves to plugin-a; caller claims plugin-b in Bundle-ID.
+	// Even though plugin-a HAS the requested scope (so the legacy
+	// behaviour would 200 OK and silently rebind to plugin-a), the new
+	// gate rejects at 401 with bundle-id-spoofed.
+	req := httptest.NewRequest("POST", "/v1/api/gateway/test.token/read", nil)
+	req.Header.Set("X-Bundle-Token", "secret-a")
+	req.Header.Set("Bundle-ID", "plugin-b")
+	w := httptest.NewRecorder()
+	eng.ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusUnauthorized, w.Code,
+		"mismatch between token-resolved bundle and Bundle-ID claim MUST be rejected")
+	core.AssertContains(t, w.Body.String(), "bundle-id-spoofed")
 }
 
 func TestGateway_BundleToken_Bad_UnknownToken(t *core.T) {
