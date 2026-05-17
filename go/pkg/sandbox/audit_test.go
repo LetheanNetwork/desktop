@@ -75,7 +75,7 @@ func TestSandbox_Spawn_EmitsAuditTrail_Good(t *core.T) {
 	rec := installAuditRecorder(t)
 	svc := newTestService(Options{})
 
-	r := svc.Spawn(SpawnInput{
+	r := NewSpawnPort(svc).Spawn(SpawnInput{
 		Image:   "alpine:3.21",
 		Command: "true",
 		Memory:  -1, // forces prepareSpawnInput to reject
@@ -111,7 +111,7 @@ func TestSandbox_SpawnLong_EmitsAuditTrail_Good(t *core.T) {
 	rec := installAuditRecorder(t)
 	svc := newTestService(Options{})
 
-	r := svc.SpawnLong(SpawnLongInput{
+	r := NewSpawnPort(svc).SpawnLong(SpawnLongInput{
 		Image: "lthn/dev:latest",
 		// Command intentionally empty — triggers validation reject
 	})
@@ -156,7 +156,7 @@ func TestSandbox_Kill_EmitsAuditTrail_Good(t *core.T) {
 	svc.handles[id] = &ContainerHandle{SandboxID: id, Status: StatusReady}
 	svc.mu.Unlock()
 
-	r := svc.Kill(id)
+	r := NewSpawnPort(svc).Kill(id)
 	core.AssertTrue(t, r.OK)
 
 	requested := rec.filterByName(audit.EventSandboxKillRequested)
@@ -233,7 +233,7 @@ func TestSandbox_AuditMeta_NoRawArgsOrEnv_Good(t *core.T) {
 
 	// Drive Spawn — validation reject by negative memory; we just want
 	// the Requested emit's Meta shape.
-	_ = svc.Spawn(SpawnInput{
+	_ = NewSpawnPort(svc).Spawn(SpawnInput{
 		Image:   "alpine:3.21",
 		Command: "true",
 		Args:    []string{sensitiveArg},
@@ -242,7 +242,7 @@ func TestSandbox_AuditMeta_NoRawArgsOrEnv_Good(t *core.T) {
 
 	// Drive SpawnLong — validation reject by empty command; pass Args
 	// + Env so the redactor would have something to redact if leaked.
-	_ = svc.SpawnLong(SpawnLongInput{
+	_ = NewSpawnPort(svc).SpawnLong(SpawnLongInput{
 		Image:   "lthn/dev:latest",
 		Command: "",
 		Args:    []string{sensitiveArg},
@@ -251,7 +251,7 @@ func TestSandbox_AuditMeta_NoRawArgsOrEnv_Good(t *core.T) {
 
 	// Drive Kill — unknown sandbox; the Requested + Failed Meta should
 	// still not carry argument bytes.
-	_ = svc.Kill("sb-nonexistent")
+	_ = NewSpawnPort(svc).Kill("sb-nonexistent")
 
 	for _, ev := range rec.snapshot() {
 		// Top-level fields must not carry the sensitive bytes.

@@ -24,21 +24,21 @@ func TestSandbox_Service_InstallID_IdempotentAcrossCalls_Good(t *core.T) {
 	svc := newTestService(Options{})
 	core.AssertNotNil(t, svc)
 
-	r1 := svc.InstallID()
+	r1 := NewSpawnPort(svc).InstallID()
 	core.AssertTrue(t, r1.OK)
 	id1, ok := r1.Value.(string)
 	core.AssertTrue(t, ok)
 	// Hex-encoded 16 bytes = 32 chars.
 	core.AssertEqual(t, 32, len(id1))
 
-	r2 := svc.InstallID()
+	r2 := NewSpawnPort(svc).InstallID()
 	core.AssertTrue(t, r2.OK)
 	id2, ok := r2.Value.(string)
 	core.AssertTrue(t, ok)
 	core.AssertEqual(t, id1, id2)
 
 	// And a third call, just to confirm steady-state.
-	r3 := svc.InstallID()
+	r3 := NewSpawnPort(svc).InstallID()
 	core.AssertTrue(t, r3.OK)
 	core.AssertEqual(t, id1, r3.Value.(string))
 }

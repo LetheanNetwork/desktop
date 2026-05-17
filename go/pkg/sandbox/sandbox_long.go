@@ -222,20 +222,32 @@ const (
 	StatusFailed   = "failed"
 )
 
-// SpawnLong starts a container detached, assigns a stable SandboxID,
-// polls readiness (when ExposedPort > 0), and registers the handle.
-// Returns the populated ContainerHandle on success.
+// SpawnLong is the Wails-table shim for the long-running container
+// surface. Returns ErrTierGoOnly + emits audit.EventSandboxSpawnRejected
+// (`reason="tier_go_only"`) — Mantis #1664 Phase B / Cerberus #55 ADD-2.
+// See Spawn for the full tier-separation rationale + spawnport.go for
+// the SpawnPort surface Go callers consume.
+func (s *Service) SpawnLong(input SpawnLongInput) core.Result {
+	emitTierReject("sandbox.SpawnLong")
+	return core.Fail(ErrTierGoOnly)
+}
+
+// spawnLong is the substrate-tier implementation. Starts a container
+// detached, assigns a stable SandboxID, polls readiness (when
+// ExposedPort > 0), and registers the handle. Returns the populated
+// ContainerHandle on success.
 //
-// Usage example:
+// Usage example (via SpawnPort):
 //
-//	r := svc.SpawnLong(sandbox.SpawnLongInput{
+//	port := sandbox.NewSpawnPort(svc)
+//	r := port.SpawnLong(sandbox.SpawnLongInput{
 //	    Image:       "lthn/dev:latest",
 //	    Command:     "opencode",
 //	    Args:        []string{"web", "--hostname", "0.0.0.0", "--port", "4096"},
 //	    ExposedPort: 4096,
 //	})
 //	if r.OK { h := r.Value.(sandbox.ContainerHandle); _ = h.SandboxID }
-func (s *Service) SpawnLong(input SpawnLongInput) core.Result {
+func (s *Service) spawnLong(input SpawnLongInput) core.Result {
 	// Cerberus #47 S-4 (Mantis #1666) — Repudiation gap close. Emit
 	// Requested BEFORE any validation / runtime work; on every early
 	// return, emit Failed with categorical error_code. The command
@@ -426,13 +438,23 @@ func failSpawnLongCause(containerName, message string, cause core.Result) core.R
 	return core.Fail(err)
 }
 
-// Kill stops the container for a given SandboxID and removes its handle.
-//
-// Usage example:
-//
-//	r := svc.Kill("sb-a1b2c3d4")
-//	if r.OK { /* container stopped */ }
+// Kill is the Wails-table shim. Returns ErrTierGoOnly + emits
+// audit.EventSandboxSpawnRejected (`reason="tier_go_only"`) — Mantis
+// #1664 Phase B / Cerberus #55 ADD-2.
 func (s *Service) Kill(sandboxID string) core.Result {
+	emitTierReject("sandbox.Kill")
+	return core.Fail(ErrTierGoOnly)
+}
+
+// kill is the substrate-tier implementation. Stops the container for
+// a given SandboxID and removes its handle.
+//
+// Usage example (via SpawnPort):
+//
+//	port := sandbox.NewSpawnPort(svc)
+//	r := port.Kill("sb-a1b2c3d4")
+//	if r.OK { /* container stopped */ }
+func (s *Service) kill(sandboxID string) core.Result {
 	// Cerberus #47 S-4 (Mantis #1666) — Repudiation gap close. The
 	// Requested row commits regardless of registry state so a forensic
 	// auditor can correlate caller intent against the moment of call.
@@ -519,13 +541,23 @@ func failKill(sandboxID, message string) core.Result {
 	return core.Fail(err)
 }
 
-// ListHandles returns all currently-registered ContainerHandles.
-//
-// Usage example:
-//
-//	r := svc.ListHandles()
-//	handles := r.Value.([]sandbox.ContainerHandle)
+// ListHandles is the Wails-table shim. Returns ErrTierGoOnly + emits
+// audit.EventSandboxSpawnRejected (`reason="tier_go_only"`) — Mantis
+// #1664 Phase B / Cerberus #55 ADD-2.
 func (s *Service) ListHandles() core.Result {
+	emitTierReject("sandbox.ListHandles")
+	return core.Fail(ErrTierGoOnly)
+}
+
+// listHandles is the substrate-tier implementation. Returns all
+// currently-registered ContainerHandles.
+//
+// Usage example (via SpawnPort):
+//
+//	port := sandbox.NewSpawnPort(svc)
+//	r := port.ListHandles()
+//	handles := r.Value.([]sandbox.ContainerHandle)
+func (s *Service) listHandles() core.Result {
 	s.mu.RLock()
 	out := make([]ContainerHandle, 0, len(s.handles))
 	for _, h := range s.handles {
@@ -535,13 +567,23 @@ func (s *Service) ListHandles() core.Result {
 	return core.Ok(out)
 }
 
-// GetHandle returns the ContainerHandle for a given SandboxID.
-//
-// Usage example:
-//
-//	r := svc.GetHandle("sb-a1b2c3d4")
-//	if r.OK { h := r.Value.(sandbox.ContainerHandle); _ = h.HostPort }
+// GetHandle is the Wails-table shim. Returns ErrTierGoOnly + emits
+// audit.EventSandboxSpawnRejected (`reason="tier_go_only"`) — Mantis
+// #1664 Phase B / Cerberus #55 ADD-2.
 func (s *Service) GetHandle(sandboxID string) core.Result {
+	emitTierReject("sandbox.GetHandle")
+	return core.Fail(ErrTierGoOnly)
+}
+
+// getHandle is the substrate-tier implementation. Returns the
+// ContainerHandle for a given SandboxID.
+//
+// Usage example (via SpawnPort):
+//
+//	port := sandbox.NewSpawnPort(svc)
+//	r := port.GetHandle("sb-a1b2c3d4")
+//	if r.OK { h := r.Value.(sandbox.ContainerHandle); _ = h.HostPort }
+func (s *Service) getHandle(sandboxID string) core.Result {
 	if core.Trim(sandboxID) == "" {
 		return core.Fail(core.E(getOp, "sandbox id is required", nil))
 	}

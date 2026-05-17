@@ -21,7 +21,7 @@ func ExampleService_ServiceName() {
 
 func ExampleService_Spawn() {
 	svc := newTestService(Options{})
-	r := svc.Spawn(SpawnInput{})
+	r := NewSpawnPort(svc).Spawn(SpawnInput{})
 	_ = r.OK
 }
 

@@ -94,22 +94,31 @@ func kv() (*goiostore.KeyValueStore, core.Result) {
 	return kvInst, core.Ok(nil)
 }
 
-// InstallID returns the persisted per-install identifier,
-// generating + storing a new one on first call. Idempotent —
-// subsequent calls return the same value.
+// InstallID is the Wails-table shim. Returns ErrTierGoOnly + emits
+// audit.EventSandboxSpawnRejected (`reason="tier_go_only"`) — Mantis
+// #1664 Phase B / Cerberus #55 ADD-2.
+func (s *Service) InstallID() core.Result {
+	emitTierReject("sandbox.InstallID")
+	return core.Fail(ErrTierGoOnly)
+}
+
+// installID is the substrate-tier implementation. Returns the
+// persisted per-install identifier, generating + storing a new one on
+// first call. Idempotent — subsequent calls return the same value.
 //
 // The identifier is used as the value of the
-// `lthn.sandbox.install_id` docker label SpawnLong stamps on
-// every long-running container, and (once a reconcile pass is
-// added) as the gate that decides which surviving containers
-// the current lthn install may safely adopt. See the package-
-// level note for the full threat-model rationale.
+// `lthn.sandbox.install_id` docker label SpawnLong stamps on every
+// long-running container, and (once a reconcile pass is added) as the
+// gate that decides which surviving containers the current lthn
+// install may safely adopt. See the package-level note for the full
+// threat-model rationale.
 //
-// Usage example:
+// Usage example (via SpawnPort):
 //
-//	r := svc.InstallID()
+//	port := sandbox.NewSpawnPort(svc)
+//	r := port.InstallID()
 //	if r.OK { id := r.Value.(string); _ = id }
-func (s *Service) InstallID() core.Result {
+func (s *Service) installID() core.Result {
 	st, r := kv()
 	if !r.OK {
 		return r

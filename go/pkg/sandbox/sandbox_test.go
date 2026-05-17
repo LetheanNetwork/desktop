@@ -101,7 +101,7 @@ func TestSandbox_Service_Spawn_Good(t *core.T) {
 
 func TestSandbox_Service_Spawn_Bad(t *core.T) {
 	svc := newTestService(Options{})
-	r := svc.Spawn(SpawnInput{})
+	r := NewSpawnPort(svc).Spawn(SpawnInput{})
 	core.AssertFalse(t, r.OK)
 	core.AssertContains(t, r.Error(), "command is required")
 }
@@ -220,7 +220,7 @@ func TestSandbox_SpawnLong_Good(t *core.T) {
 	core.AssertNotNil(t, ref)
 	// Confirm SpawnLong exists and fails with the expected error when
 	// process.Service is absent — not a runtime error, a validation error.
-	r := svc.SpawnLong(SpawnLongInput{Image: "lthn/dev:latest", Command: "opencode"})
+	r := NewSpawnPort(svc).SpawnLong(SpawnLongInput{Image: "lthn/dev:latest", Command: "opencode"})
 	// process service is wired (core.New() wires process) — but no
 	// container runtime is present in CI, so we expect either OK (unlikely)
 	// or a container-start failure — NOT a validation error.
@@ -236,12 +236,12 @@ func TestSandbox_SpawnLong_Bad(t *core.T) {
 	svc := newTestService(Options{})
 
 	// Missing image.
-	r := svc.SpawnLong(SpawnLongInput{Command: "opencode"})
+	r := NewSpawnPort(svc).SpawnLong(SpawnLongInput{Command: "opencode"})
 	core.AssertFalse(t, r.OK)
 	core.AssertContains(t, r.Error(), "image is required")
 
 	// Missing command.
-	r = svc.SpawnLong(SpawnLongInput{Image: "lthn/dev:latest"})
+	r = NewSpawnPort(svc).SpawnLong(SpawnLongInput{Image: "lthn/dev:latest"})
 	core.AssertFalse(t, r.OK)
 	core.AssertContains(t, r.Error(), "command is required")
 }
@@ -276,7 +276,7 @@ func TestSandbox_Kill_Good(t *core.T) {
 	svc.handles[id] = &ContainerHandle{SandboxID: id, Status: StatusReady}
 	svc.mu.Unlock()
 
-	r := svc.Kill(id)
+	r := NewSpawnPort(svc).Kill(id)
 	core.AssertTrue(t, r.OK)
 
 	svc.mu.RLock()
@@ -290,12 +290,12 @@ func TestSandbox_Kill_Bad(t *core.T) {
 	svc := newTestService(Options{})
 
 	// Empty ID.
-	r := svc.Kill("")
+	r := NewSpawnPort(svc).Kill("")
 	core.AssertFalse(t, r.OK)
 	core.AssertContains(t, r.Error(), "sandbox id is required")
 
 	// Unknown ID.
-	r = svc.Kill("sb-doesnotexist")
+	r = NewSpawnPort(svc).Kill("sb-doesnotexist")
 	core.AssertFalse(t, r.OK)
 	core.AssertContains(t, r.Error(), "sandbox not found")
 }
@@ -313,10 +313,10 @@ func TestSandbox_Kill_Ugly(t *core.T) {
 	svc.handles[id] = &ContainerHandle{SandboxID: id, Status: StatusReady}
 	svc.mu.Unlock()
 
-	r1 := svc.Kill(id)
+	r1 := NewSpawnPort(svc).Kill(id)
 	core.AssertTrue(t, r1.OK)
 
-	r2 := svc.Kill(id)
+	r2 := NewSpawnPort(svc).Kill(id)
 	core.AssertFalse(t, r2.OK)
 	core.AssertContains(t, r2.Error(), "sandbox not found")
 }
@@ -326,7 +326,7 @@ func TestSandbox_ListHandles_Good(t *core.T) {
 	svc := newTestService(Options{})
 
 	// Empty registry.
-	r := svc.ListHandles()
+	r := NewSpawnPort(svc).ListHandles()
 	core.AssertTrue(t, r.OK)
 	handles := r.Value.([]ContainerHandle)
 	core.AssertLen(t, handles, 0)
@@ -339,7 +339,7 @@ func TestSandbox_ListHandles_Good(t *core.T) {
 	}
 	svc.mu.Unlock()
 
-	r = svc.ListHandles()
+	r = NewSpawnPort(svc).ListHandles()
 	core.AssertTrue(t, r.OK)
 	handles = r.Value.([]ContainerHandle)
 	core.AssertLen(t, handles, 2)
@@ -348,7 +348,7 @@ func TestSandbox_ListHandles_Good(t *core.T) {
 // TestSandbox_ListHandles_Bad verifies ListHandles on nil svc does not panic.
 func TestSandbox_ListHandles_Bad(t *core.T) {
 	svc := newTestService(Options{})
-	r := svc.ListHandles()
+	r := NewSpawnPort(svc).ListHandles()
 	core.AssertTrue(t, r.OK)
 	handles := r.Value.([]ContainerHandle)
 	core.AssertNotNil(t, handles)
@@ -365,7 +365,7 @@ func TestSandbox_ListHandles_Ugly(t *core.T) {
 	}
 	svc.mu.Unlock()
 
-	r := svc.ListHandles()
+	r := NewSpawnPort(svc).ListHandles()
 	core.AssertTrue(t, r.OK)
 	listed := r.Value.([]ContainerHandle)
 	core.AssertLen(t, listed, 1)
@@ -389,7 +389,7 @@ func TestSandbox_GetHandle_Good(t *core.T) {
 	svc.handles[id] = &ContainerHandle{SandboxID: id, Image: "lthn/dev:latest", Status: StatusReady, HostPort: 4096}
 	svc.mu.Unlock()
 
-	r := svc.GetHandle(id)
+	r := NewSpawnPort(svc).GetHandle(id)
 	core.AssertTrue(t, r.OK)
 	h := r.Value.(ContainerHandle)
 	core.AssertEqual(t, id, h.SandboxID)
@@ -401,11 +401,11 @@ func TestSandbox_GetHandle_Good(t *core.T) {
 func TestSandbox_GetHandle_Bad(t *core.T) {
 	svc := newTestService(Options{})
 
-	r := svc.GetHandle("")
+	r := NewSpawnPort(svc).GetHandle("")
 	core.AssertFalse(t, r.OK)
 	core.AssertContains(t, r.Error(), "sandbox id is required")
 
-	r = svc.GetHandle("sb-missing")
+	r = NewSpawnPort(svc).GetHandle("sb-missing")
 	core.AssertFalse(t, r.OK)
 	core.AssertContains(t, r.Error(), "sandbox not found")
 }
@@ -422,7 +422,7 @@ func TestSandbox_GetHandle_Ugly(t *core.T) {
 	svc.handles[id] = &ContainerHandle{SandboxID: id, Status: StatusReady}
 	svc.mu.Unlock()
 
-	r := svc.GetHandle(id)
+	r := NewSpawnPort(svc).GetHandle(id)
 	core.AssertTrue(t, r.OK)
 	copy := r.Value.(ContainerHandle)
 	copy.Status = StatusFailed // mutate the copy
@@ -630,7 +630,7 @@ func TestSandbox_Kill_NoStaleListReadConcurrent_Ugly(t *core.T) {
 		go func() {
 			defer wg.Done()
 			for !stopReaders.Load() {
-				res := svc.ListHandles()
+				res := NewSpawnPort(svc).ListHandles()
 				if !res.OK {
 					invariantViolations.Add(1)
 					continue
@@ -663,7 +663,7 @@ func TestSandbox_Kill_NoStaleListReadConcurrent_Ugly(t *core.T) {
 			defer wg.Done()
 			for i := start; i < end; i++ {
 				id := core.Sprintf("sb-race%04d", i)
-				if svc.Kill(id).OK {
+				if NewSpawnPort(svc).Kill(id).OK {
 					killsCompleted.Add(1)
 				}
 			}
@@ -729,7 +729,7 @@ func TestSandbox_SpawnLong_ProcRunErr_PropagatesInResult_Bad(t *core.T) {
 	// Force the runtime to a binary that is guaranteed not to exist on
 	// PATH — proc.Run will fail with an explicit "executable file not
 	// found" cause that we expect threaded through.
-	r := svc.SpawnLong(SpawnLongInput{
+	r := NewSpawnPort(svc).SpawnLong(SpawnLongInput{
 		Image:   "alpine:3.21",
 		Command: "echo",
 		Args:    []string{"hi"},
@@ -774,7 +774,7 @@ func TestSandbox_Spawn_GateRunsAfterDefaultSubstitution_Good(t *core.T) {
 // skipped when Image is non-empty.
 func TestSandbox_Spawn_GateRunsAfterDefaultSubstitution_Bad(t *core.T) {
 	svc := newTestService(Options{})
-	r := svc.Spawn(SpawnInput{
+	r := NewSpawnPort(svc).Spawn(SpawnInput{
 		Image:   "evil.example.com/foo",
 		Command: "sh",
 	})
@@ -788,7 +788,7 @@ func TestSandbox_Spawn_GateRunsAfterDefaultSubstitution_Bad(t *core.T) {
 // flagged as not-allowlisted.
 func TestSandbox_Spawn_RejectsIMDSImage_Bad(t *core.T) {
 	svc := newTestService(Options{})
-	r := svc.Spawn(SpawnInput{
+	r := NewSpawnPort(svc).Spawn(SpawnInput{
 		Image:   "169.254.169.254/x",
 		Command: "sh",
 	})
@@ -802,7 +802,7 @@ func TestSandbox_Spawn_RejectsIMDSImage_Bad(t *core.T) {
 // runtime would see).
 func TestSandbox_SpawnLong_RejectsDisallowedImage_Bad(t *core.T) {
 	svc := newTestService(Options{})
-	r := svc.SpawnLong(SpawnLongInput{
+	r := NewSpawnPort(svc).SpawnLong(SpawnLongInput{
 		Image:   "evil.example.com/foo",
 		Command: "sh",
 	})

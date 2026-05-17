@@ -12,7 +12,10 @@ import (
 	"dappco.re/lthn/desktop/pkg/sandbox"
 )
 
-// sandboxSvc resolves the sandbox service.
+// sandboxSvc resolves the sandbox service. Retained for Detect access
+// (D-2a adjudication — Detect is runtime introspection, different
+// threat class from spawn-from-renderer, so it stays uppercase on
+// *Service and is reached directly rather than via SpawnPort).
 func (s *Service) sandboxSvc() *sandbox.Service {
 	if s == nil || s.ServiceRuntime == nil {
 		return nil
@@ -25,7 +28,20 @@ func (s *Service) sandboxSvc() *sandbox.Service {
 	return sb
 }
 
+// sandboxPort resolves the sandbox substrate via the SpawnPort
+// closure-adapter. Mantis #1664 Phase B (Cerberus #55 ADD-2) — Spawn /
+// SpawnLong / Kill / ListHandles / GetHandle / InstallID on *Service
+// are now Wails-table shims that reject with ErrTierGoOnly; substrate
+// access from in-Go consumers MUST route through the typed port. The
+// lazy-resolver shape mirrors sandboxSvc so existing consumers keep
+// their `if port == nil { ... }` guard pattern. D-3b adjudication — no
+// composition-root refactor; port resolved at callsite.
+func (s *Service) sandboxPort() sandbox.SpawnPort {
+	return sandbox.NewSpawnPort(s.sandboxSvc())
+}
+
 // toolSandboxDetect surfaces what container runtimes the host has.
+// Detect stays on *Service directly (D-2a — read-only runtime probe).
 func (s *Service) toolSandboxDetect() map[string]any {
 	sb := s.sandboxSvc()
 	if sb == nil {
@@ -49,8 +65,8 @@ func (s *Service) toolSandboxDetect() map[string]any {
 // Sandbox-tier defence-in-depth still fires inside Spawn — composing
 // two independent gates is the security property, not redundant.
 func (s *Service) toolSandboxSpawn(params map[string]any) map[string]any {
-	sb := s.sandboxSvc()
-	if sb == nil {
+	port := s.sandboxPort()
+	if port == nil {
 		return map[string]any{"ok": false, "error": "sandbox service unavailable"}
 	}
 	input := sandbox.SpawnInput{
@@ -74,7 +90,7 @@ func (s *Service) toolSandboxSpawn(params map[string]any) map[string]any {
 			}
 		}
 	}
-	r := sb.Spawn(input)
+	r := port.Spawn(input)
 	if !r.OK {
 		return map[string]any{"ok": false, "error": r.Error()}
 	}

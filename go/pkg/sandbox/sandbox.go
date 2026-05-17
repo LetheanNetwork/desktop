@@ -119,8 +119,28 @@ type SpawnOutput struct {
 	DurationMs int64  `json:"duration_ms"`
 }
 
-// Spawn boots a one-shot container, waits for exit, returns
-// captured output. The chosen runtime is auto-detected via
+// Spawn is the Wails-table shim for one-shot container spawn. Returns
+// ErrTierGoOnly and emits audit.EventSandboxSpawnRejected with
+// `reason="tier_go_only"` (Mantis #1664 Phase B / Cerberus #55 ADD-2).
+//
+// Renderer-tier callers (Wails-bound frontend, MCP) reach this shim
+// and get the typed reject. Go callers reach the substrate via
+// SpawnPort obtained from NewSpawnPort — see spawnport.go.
+//
+// The method is kept exported on *Service so the Wails binding
+// generator (build/Taskfile.yml `generate:bindings` walking
+// `./pkg/desktop/...`) continues to produce typed TS bindings the
+// frontend already imports. The runtime check intercepts before any
+// substrate work; the binding is preserved-with-typed-error rather
+// than stripped.
+func (s *Service) Spawn(input SpawnInput) core.Result {
+	emitTierReject("sandbox.Spawn")
+	return core.Fail(ErrTierGoOnly)
+}
+
+// spawn is the substrate-tier implementation of one-shot container
+// spawn. Reachable from Go callers only via SpawnPort.Spawn returned
+// by NewSpawnPort. The chosen runtime is auto-detected via
 // dappco.re/go/container.Detect() unless input.Runtime overrides.
 //
 // Dispatch:
@@ -130,7 +150,7 @@ type SpawnOutput struct {
 //   - Docker / Podman: shells out via process.Service. A real
 //     DockerProvider / PodmanProvider belongs upstream in
 //     go-container; lthn-desktop ships the placeholder until then.
-func (s *Service) Spawn(input SpawnInput) core.Result {
+func (s *Service) spawn(input SpawnInput) core.Result {
 	// Cerberus #47 S-4 (Mantis #1666) — Repudiation gap close. Emit
 	// Requested BEFORE any validation / runtime work so a crash mid-call
 	// still leaves the request decision in the audit substrate. The

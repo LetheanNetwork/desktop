@@ -123,14 +123,21 @@ type BundleStatusOutput struct {
 	Handles []sandbox.ContainerHandle `json:"handles,omitempty"`
 }
 
-// sandboxSvc resolves the sandbox.Service from the marketplace service's
-// Core container. Returns nil when not registered (defensive).
-func (s *Service) sandboxSvc() *sandbox.Service {
+// sandboxPort resolves the sandbox substrate via the SpawnPort
+// closure-adapter. Mantis #1664 Phase B (Cerberus #55 ADD-2) — Spawn /
+// SpawnLong / Kill / ListHandles / GetHandle / InstallID on
+// *sandbox.Service are now Wails-table shims that reject with
+// ErrTierGoOnly; substrate access from in-Go consumers MUST route
+// through the typed port. The lazy-resolver shape preserves the
+// pre-Phase-B `if svc == nil { ... }` guard pattern (NewSpawnPort
+// returns nil for nil svc). D-3b adjudication — no composition-root
+// refactor; port resolved at callsite.
+func (s *Service) sandboxPort() sandbox.SpawnPort {
 	if s == nil || s.core == nil {
 		return nil
 	}
 	svc, _ := core.ServiceFor[*sandbox.Service](s.core, "sandbox")
-	return svc
+	return sandbox.NewSpawnPort(svc)
 }
 
 // Install runs the full install lifecycle for one bundle:
@@ -185,8 +192,8 @@ func (s *Service) Install(input InstallInput) core.Result {
 		return r
 	}
 
-	sbSvc := s.sandboxSvc()
-	if sbSvc == nil {
+	sbPort := s.sandboxPort()
+	if sbPort == nil {
 		emitInstallFailed(m.Name, "sandbox service not available")
 		return core.Fail(core.E(installBundleOp, "sandbox service not available", nil))
 	}
@@ -220,7 +227,7 @@ func (s *Service) Install(input InstallInput) core.Result {
 	// the loop so every image entry shares the same value; on KV
 	// failure fall through with "" (SpawnLong omits the label
 	// for an empty value — no regression vs the pre-#1670 world).
-	installID := s.resolveSandboxInstallID(sbSvc)
+	installID := s.resolveSandboxInstallID(sbPort)
 
 	sandboxIDs := map[string]string{}
 	var lastErr string
@@ -240,7 +247,7 @@ func (s *Service) Install(input InstallInput) core.Result {
 			BundleID:  m.Name,
 		})
 
-		r := sbSvc.SpawnLong(spawnIn)
+		r := sbPort.SpawnLong(spawnIn)
 		if !r.OK {
 			lastErr = r.Error()
 			continue
@@ -275,7 +282,7 @@ func (s *Service) Install(input InstallInput) core.Result {
 		// every spawned handle via Kill so the OS state matches the
 		// (now-rejected) record state, then return the orm error.
 		if r := orm.Of[InstalledBundle](s.core).Save(&rec); !r.OK {
-			rollbackSpawnedSandboxes(sbSvc, sandboxIDs)
+			rollbackSpawnedSandboxes(sbPort, sandboxIDs)
 			emitInstallFailed(m.Name, "orm save failed: "+r.Error())
 			return core.Fail(core.E(installBundleOp,
 				"orm save failed — rolled back spawned containers: "+r.Error(), nil))
@@ -405,8 +412,8 @@ func (s *Service) Launch(bundleID string) core.Result {
 	}
 	m := mR.Value.(BundleManifest)
 
-	sbSvc := s.sandboxSvc()
-	if sbSvc == nil {
+	sbPort := s.sandboxPort()
+	if sbPort == nil {
 		emitLaunchFailed(bundleID, "sandbox service not available")
 		return core.Fail(core.E(launchBundleOp, "sandbox service not available", nil))
 	}
@@ -414,7 +421,7 @@ func (s *Service) Launch(bundleID string) core.Result {
 	// Mantis #1670 — same install/bundle stamping as the Install
 	// loop. Resolve installID once outside the loop so every
 	// image entry shares the same value.
-	installID := s.resolveSandboxInstallID(sbSvc)
+	installID := s.resolveSandboxInstallID(sbPort)
 
 	// Track sandbox handles spawned in this Launch call so a downstream
 	// orm.Save failure can roll them back (Mantis #1693 MED / Cerberus
@@ -437,7 +444,7 @@ func (s *Service) Launch(bundleID string) core.Result {
 			InstallID: installID,
 			BundleID:  m.Name,
 		})
-		spawnR := sbSvc.SpawnLong(spawnIn)
+		spawnR := sbPort.SpawnLong(spawnIn)
 		if spawnR.OK {
 			if h, ok := spawnR.Value.(sandbox.ContainerHandle); ok {
 				launchedIDs[img.ID] = h.SandboxID
@@ -456,7 +463,7 @@ func (s *Service) Launch(bundleID string) core.Result {
 		// the live containers). Roll back the just-spawned handles via
 		// Kill and surface the orm error to the caller.
 		if r := orm.Of[InstalledBundle](s.core).Save(&rec); !r.OK {
-			rollbackSpawnedSandboxes(sbSvc, launchedIDs)
+			rollbackSpawnedSandboxes(sbPort, launchedIDs)
 			emitLaunchFailed(bundleID, "orm save failed: "+r.Error())
 			return core.Fail(core.E(launchBundleOp,
 				"orm save failed — rolled back spawned containers: "+r.Error(), nil))
@@ -504,14 +511,14 @@ func (s *Service) Stop(bundleID string) core.Result {
 // also acquires bundleMutex(bundleID)) can run the same teardown
 // without recursive-lock deadlock. Mantis #1583.
 func (s *Service) stopLocked(bundleID string) core.Result {
-	sbSvc := s.sandboxSvc()
-	if sbSvc != nil {
-		listR := sbSvc.ListHandles()
+	sbPort := s.sandboxPort()
+	if sbPort != nil {
+		listR := sbPort.ListHandles()
 		if listR.OK {
 			handles := listR.Value.([]sandbox.ContainerHandle)
 			for _, h := range handles {
 				if h.BundleID == bundleID {
-					_ = sbSvc.Kill(h.SandboxID)
+					_ = sbPort.Kill(h.SandboxID)
 				}
 			}
 		}
@@ -772,15 +779,15 @@ func exposeIDFromSource(src string) string {
 //	    rollbackSpawnedSandboxes(sbSvc, sandboxIDs)
 //	    return core.Fail(...)
 //	}
-func rollbackSpawnedSandboxes(sbSvc *sandbox.Service, ids map[string]string) {
-	if sbSvc == nil {
+func rollbackSpawnedSandboxes(sbPort sandbox.SpawnPort, ids map[string]string) {
+	if sbPort == nil {
 		return
 	}
 	for _, id := range ids {
 		if id == "" {
 			continue
 		}
-		_ = sbSvc.Kill(id)
+		_ = sbPort.Kill(id)
 	}
 }
 
@@ -854,9 +861,9 @@ func (s *Service) Status(bundleID string) core.Result {
 	rec := recR.Value.(InstalledBundle)
 
 	var handles []sandbox.ContainerHandle
-	sbSvc := s.sandboxSvc()
-	if sbSvc != nil {
-		listR := sbSvc.ListHandles()
+	sbPort := s.sandboxPort()
+	if sbPort != nil {
+		listR := sbPort.ListHandles()
 		if listR.OK {
 			all := listR.Value.([]sandbox.ContainerHandle)
 			for _, h := range all {
@@ -1077,11 +1084,11 @@ func buildInstallSpawnInput(args buildInstallSpawnInputArgs) sandbox.SpawnLongIn
 // The degradation matches the pre-#1670 world — labels were
 // always empty before, so a transient KV failure can't be a worse
 // outcome than the baseline behaviour everyone has been running.
-func (s *Service) resolveSandboxInstallID(sbSvc *sandbox.Service) string {
-	if sbSvc == nil {
+func (s *Service) resolveSandboxInstallID(sbPort sandbox.SpawnPort) string {
+	if sbPort == nil {
 		return ""
 	}
-	r := sbSvc.InstallID()
+	r := sbPort.InstallID()
 	if !r.OK {
 		return ""
 	}
