@@ -96,6 +96,9 @@ func (s *Service) Get(id string) core.Result {
 //	})
 //	if r.OK { p := r.Value.(social.SocialPost) }
 func (s *Service) Create(input CreateInput) core.Result {
+	if fail, ok := s.assertUnlocked("social.Create"); !ok {
+		return fail
+	}
 	if len(input.Ch) == 0 {
 		return core.Fail(core.E("social.Create", "at least one channel is required", nil))
 	}
@@ -144,6 +147,9 @@ func (s *Service) Create(input CreateInput) core.Result {
 //	r := svc.MarkSent("post-20260516")
 //	if r.OK { p := r.Value.(social.SocialPost) }
 func (s *Service) MarkSent(id string) core.Result {
+	if fail, ok := s.assertUnlocked("social.MarkSent"); !ok {
+		return fail
+	}
 	if err := paths.IsValidID(id); err != nil {
 		return core.Fail(err)
 	}

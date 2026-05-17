@@ -12,6 +12,30 @@ import (
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
+// stubSessionGate is the test double for the consumer-defined
+// SessionGate interface (RFC.stage-e-unlockgate v2 §4.2 stub shape —
+// Mantis #1613 B.2). Duplicated per-pkg rather than shared so test
+// files keep zero cross-pkg testing/... deps.
+type stubSessionGate struct{ ids []string }
+
+func (s *stubSessionGate) UnlockedAccountIDs() []string { return s.ids }
+
+// newTestSvc constructs a social.Service pre-wired with a SessionGate
+// reporting a single unlocked account so write methods pass the gate
+// by default. Tests that need to assert the locked-state path call
+// SetSessionGate explicitly with an empty stub (or instantiate
+// social.NewService directly for the nil-gate fail-safe path).
+//
+// Usage example:
+//
+//	svc := newTestSvc(t)
+//	r := svc.Create(social.CreateInput{Ch: []string{"x"}, Text: "..."})
+func newTestSvc(_ *testing.T) *social.Service {
+	svc := social.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
+	return svc
+}
+
 // TestList_Empty_Good — empty dir → empty posts, zero scheduled.
 func TestList_Empty_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
@@ -32,7 +56,7 @@ func TestList_Empty_Good(t *testing.T) {
 // TestCreate_Defaults_Good — Create with ch+text defaults to state=draft.
 func TestCreate_Defaults_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := social.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(social.CreateInput{
 		Ch:   []string{"mastodon", "x"},
 		When: "today · 16:00",
@@ -56,7 +80,7 @@ func TestCreate_Defaults_Good(t *testing.T) {
 // TestCreate_NoChannels_Bad — empty Ch returns core.Fail.
 func TestCreate_NoChannels_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := social.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(social.CreateInput{Ch: nil, When: "today", Text: "Hello"})
 	if r.OK {
 		t.Fatalf("expected failure for empty channels, got OK")
@@ -66,7 +90,7 @@ func TestCreate_NoChannels_Bad(t *testing.T) {
 // TestCreate_NoText_Bad — empty text returns core.Fail.
 func TestCreate_NoText_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := social.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(social.CreateInput{Ch: []string{"mastodon"}, When: "today", Text: ""})
 	if r.OK {
 		t.Fatalf("expected failure for empty text, got OK")
@@ -76,7 +100,7 @@ func TestCreate_NoText_Bad(t *testing.T) {
 // TestMarkSent_Good — MarkSent transitions state to "sent".
 func TestMarkSent_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := social.NewService(nil)
+	svc := newTestSvc(t)
 	cr := svc.Create(social.CreateInput{
 		Ch:    []string{"mastodon"},
 		When:  "today · 09:00",
@@ -101,7 +125,7 @@ func TestMarkSent_Good(t *testing.T) {
 // TestList_ChannelFilter_Good — List with Channel filter returns only matching posts.
 func TestList_ChannelFilter_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := social.NewService(nil)
+	svc := newTestSvc(t)
 	svc.Create(social.CreateInput{Ch: []string{"mastodon", "x"}, When: "today", Text: "A"})
 	svc.Create(social.CreateInput{Ch: []string{"linkedin"}, When: "tomorrow", Text: "B"})
 
@@ -133,7 +157,7 @@ func TestServiceName_Good(t *testing.T) {
 // carries the same.
 func TestAtomicCutover_MarketingSocial_Create_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := social.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(social.CreateInput{
 		Ch:    []string{"mastodon"},
 		When:  "today · 16:00",
@@ -163,7 +187,7 @@ func TestAtomicCutover_MarketingSocial_Create_Good(t *testing.T) {
 // MarkSent bumps the stored version monotonically (1 -> 2).
 func TestAtomicCutover_MarketingSocial_Update_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := social.NewService(nil)
+	svc := newTestSvc(t)
 	cr := svc.Create(social.CreateInput{
 		Ch:    []string{"mastodon"},
 		When:  "today · 16:00",
@@ -209,7 +233,7 @@ func TestAtomicCutover_MarketingSocial_Update_Good(t *testing.T) {
 // wrapped as ConflictEnvelope by social.writePost.
 func TestAtomicCutover_MarketingSocial_Update_VersionStale_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := social.NewService(nil)
+	svc := newTestSvc(t)
 	cr := svc.Create(social.CreateInput{
 		Ch:    []string{"mastodon"},
 		When:  "now",
@@ -319,7 +343,7 @@ func TestAtomicCutover_MarketingSocial_Update_VersionStale_Ugly(t *testing.T) {
 // it via an unconditional first-write that stamps version=1.
 func TestAtomicCutover_MarketingSocial_LegacyFile_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := social.NewService(nil)
+	svc := newTestSvc(t)
 	dirR := core.UserHomeDir()
 	if !dirR.OK {
 		t.Fatalf("UserHomeDir: %s", dirR.Error())
@@ -359,7 +383,7 @@ func TestAtomicCutover_MarketingSocial_LegacyFile_Ugly(t *testing.T) {
 // fires) and marketing/social/* falls under AuditModeBatch per RFC §6.1.
 func TestAtomicCutover_MarketingSocial_AuditEmissionRecordBatch_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := social.NewService(nil)
+	svc := newTestSvc(t)
 	paths.SetAuditSecretProvider(func() []byte {
 		return []byte("social-cutover-test-secret-32-bytes")
 	})
@@ -397,5 +421,184 @@ func TestAtomicCutover_MarketingSocial_AuditEmissionRecordBatch_Good(t *testing.
 	mode := paths.AuditModeForPath(fpath)
 	if mode != paths.AuditModeBatch {
 		t.Fatalf("expected AuditModeBatch for marketing/social path, got %v", mode)
+	}
+}
+
+// ---- SessionGate retrofit (RFC.stage-e-unlockgate v2 §4.2 / Mantis #1613 B.2)
+
+// TestSocial_NilGate_WarnsOnce_FailsClosed — a Service constructed
+// without SetSessionGate fails-closed on writes. Second + third writes
+// continue to fail-closed (one-shot warn semantics — the second call
+// must remain quiet but its caller-visible result must be the same
+// fail-closed shape).
+func TestSocial_NilGate_WarnsOnce_FailsClosed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := social.NewService(nil) // NO SetSessionGate — exercises §2.2 fail-safe.
+
+	r1 := svc.Create(social.CreateInput{
+		Ch: []string{"mastodon"}, When: "today", Text: "Probe A.",
+	})
+	if r1.OK {
+		t.Fatal("expected Create to fail-closed when gate is nil")
+	}
+	if !core.Contains(r1.Error(), "social.session.locked") {
+		t.Fatalf("expected social.session.locked on first Create, got %q", r1.Error())
+	}
+
+	// Second write — nilWarned already true; CompareAndSwap returns
+	// false and core.Warn is NOT called again. Behaviour from the
+	// caller's perspective: same fail-closed result.
+	r2 := svc.Create(social.CreateInput{
+		Ch: []string{"x"}, When: "today", Text: "Probe B.",
+	})
+	if r2.OK {
+		t.Fatal("expected second Create to fail-closed when gate is nil")
+	}
+	if !core.Contains(r2.Error(), "social.session.locked") {
+		t.Fatalf("expected social.session.locked on second Create, got %q", r2.Error())
+	}
+
+	// Third write via MarkSent — same fail-closed behaviour persists.
+	r3 := svc.MarkSent("some-id")
+	if r3.OK {
+		t.Fatal("expected MarkSent to fail-closed when gate is nil")
+	}
+	if !core.Contains(r3.Error(), "social.session.locked") {
+		t.Fatalf("expected social.session.locked on MarkSent, got %q", r3.Error())
+	}
+}
+
+// TestSocial_UnlockedGate_AllowsCreate — Create succeeds when the
+// live-read gate reports at least one unlocked account.
+func TestSocial_UnlockedGate_AllowsCreate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := social.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	r := svc.Create(social.CreateInput{
+		Ch: []string{"mastodon"}, When: "today", Text: "Launch probe.",
+	})
+	if !r.OK {
+		t.Fatalf("Create should succeed with gate reporting unlocked acct, got: %s", r.Error())
+	}
+}
+
+// TestSocial_UnlockedGate_AllowsMarkSent — MarkSent succeeds when the
+// live-read gate reports at least one unlocked account.
+func TestSocial_UnlockedGate_AllowsMarkSent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := social.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	cr := svc.Create(social.CreateInput{
+		Ch: []string{"mastodon"}, When: "today", Text: "MarkSent probe.", State: "scheduled",
+	})
+	if !cr.OK {
+		t.Fatalf("Create: %s", cr.Error())
+	}
+	id := cr.Value.(social.SocialPost).ID
+	r := svc.MarkSent(id)
+	if !r.OK {
+		t.Fatalf("MarkSent should succeed with gate reporting unlocked acct, got: %s", r.Error())
+	}
+}
+
+// TestSocial_LockedGate_FailsCreate_session_locked — Create rejects
+// when the live-read gate reports zero unlocked accounts. The Create is
+// gated BEFORE the empty-channel / empty-text checks, so the
+// session.locked code surfaces in preference to any later validation
+// error.
+func TestSocial_LockedGate_FailsCreate_session_locked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := social.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.Create(social.CreateInput{
+		Ch: []string{"mastodon"}, When: "today", Text: "Locked probe.",
+	})
+	if r.OK {
+		t.Fatal("expected Create to be rejected when gate reports zero unlocked accounts")
+	}
+	if !core.Contains(r.Error(), "social.session.locked") {
+		t.Fatalf("expected social.session.locked, got %q", r.Error())
+	}
+}
+
+// TestSocial_LockedGate_FailsMarkSent_session_locked — MarkSent rejects
+// when the live-read gate reports zero unlocked accounts. Gated BEFORE
+// IsValidID + filesystem read.
+func TestSocial_LockedGate_FailsMarkSent_session_locked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Seed records while unlocked, then flip to locked + try to MarkSent.
+	svc := newTestSvc(t)
+	cr := svc.Create(social.CreateInput{
+		Ch: []string{"mastodon"}, When: "today", Text: "Seed.", State: "scheduled",
+	})
+	if !cr.OK {
+		t.Fatalf("Create: %s", cr.Error())
+	}
+	id := cr.Value.(social.SocialPost).ID
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.MarkSent(id)
+	if r.OK {
+		t.Fatal("expected MarkSent to be rejected when gate reports zero unlocked accounts")
+	}
+	if !core.Contains(r.Error(), "social.session.locked") {
+		t.Fatalf("expected social.session.locked, got %q", r.Error())
+	}
+}
+
+// TestSocial_StopNilsGate — Stop() severs the SessionGate; subsequent
+// writes fail-closed even though the gate WAS wired (Cerberus #28 ADD-5
+// — Stop drain hygiene mirrors mail).
+func TestSocial_StopNilsGate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := newTestSvc(t) // gate wired with unlocked stub
+
+	// Pre-Stop: write succeeds.
+	if r := svc.Create(social.CreateInput{
+		Ch: []string{"mastodon"}, When: "today", Text: "Pre-stop.",
+	}); !r.OK {
+		t.Fatalf("Create should succeed pre-Stop, got: %s", r.Error())
+	}
+
+	// Stop nils the gate reference.
+	if r := svc.Stop(core.Background()); !r.OK {
+		t.Fatalf("Stop should succeed, got: %s", r.Error())
+	}
+
+	// Post-Stop: write fails-closed via the nil-gate path.
+	r := svc.Create(social.CreateInput{
+		Ch: []string{"mastodon"}, When: "today", Text: "Post-stop.",
+	})
+	if r.OK {
+		t.Fatal("expected Create to fail-closed after Stop nils the gate")
+	}
+	if !core.Contains(r.Error(), "social.session.locked") {
+		t.Fatalf("expected social.session.locked, got %q", r.Error())
+	}
+}
+
+// TestSocial_LockedGate_ReadStillWorks — List + Get are not gated by
+// the session-lock (RFC §3.1 — reads stay open while locked).
+func TestSocial_LockedGate_ReadStillWorks(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Seed unlocked, then flip to locked.
+	svc := newTestSvc(t)
+	cr := svc.Create(social.CreateInput{
+		Ch: []string{"mastodon"}, When: "today", Text: "Read probe.",
+	})
+	if !cr.OK {
+		t.Fatalf("Create: %s", cr.Error())
+	}
+	id := cr.Value.(social.SocialPost).ID
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	if r := svc.List(social.ListInput{}); !r.OK {
+		t.Fatalf("List should succeed when session locked, got: %s", r.Error())
+	}
+	if g := svc.Get(id); !g.OK {
+		t.Fatalf("Get should succeed when session locked, got: %s", g.Error())
 	}
 }
