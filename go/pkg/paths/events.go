@@ -35,6 +35,12 @@ const (
 	EventLockReleased    = "paths.lock.released"
 	EventVersionStale    = "paths.write.version_stale"
 	EventWriteSucceeded  = "paths.write.succeeded"
+	// EventWriteFailed is emitted when AtomicWriteWithVersion's
+	// open / write / fsync / rename step hits an I/O error. The
+	// event's Code field carries the typed paths.write.<step>_failed
+	// sentinel so operators can pattern-match without parsing
+	// free-form prose. Mantis #1551.
+	EventWriteFailed     = "paths.write.failed"
 )
 
 // AuditMode enumerates the §6.1 Call 3 split. Caller MUST NOT
@@ -58,6 +64,11 @@ const (
 // path under the current account's per-domain key — raw paths NEVER
 // traverse the typed bus or hit the audit log.
 //
+// Code carries the typed sentinel for failure events
+// (paths.write.open_failed / fsync_failed / rename_failed) so
+// operators can pattern-match without parsing prose. Omitted on
+// success events. Mantis #1551.
+//
 // Usage example:
 //
 //	paths.SubscribeLockEvents(func(ev paths.LockEvent) {
@@ -67,6 +78,7 @@ type LockEvent struct {
 	Kind     string    `json:"kind"`
 	PathHash string    `json:"path_hash"`
 	Caller   string    `json:"caller,omitempty"`
+	Code     string    `json:"code,omitempty"`
 	Version  int       `json:"version,omitempty"`
 	Mode     AuditMode `json:"-"` // routing only — never serialised to log
 	At       core.Time `json:"at"`
@@ -433,6 +445,19 @@ func init() {
 			Kind:     EventVersionStale,
 			PathHash: hashPath(path),
 			Version:  currentVersion,
+			Mode:     AuditModeForPath(path),
+			At:       core.Now().UTC(),
+		})
+	}
+	// Mantis #1551 — write-step failure emission. Routes via the
+	// same AuditModeForPath policy as success events so auth-
+	// substrate failures land Sync and cascade failures land Batch.
+	// Code carries the typed CodeWrite* sentinel.
+	emitWriteFailed = func(path string, code string) {
+		emitLockEvent(LockEvent{
+			Kind:     EventWriteFailed,
+			PathHash: hashPath(path),
+			Code:     code,
 			Mode:     AuditModeForPath(path),
 			At:       core.Now().UTC(),
 		})

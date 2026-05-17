@@ -312,36 +312,47 @@ func AtomicWriteWithVersion(path string, input WriteInput) core.Result {
 
 		// Two-phase write: tmp + fsync + rename.
 		tmp := path + ".tmp"
-		openR := core.OpenFile(tmp,
-			core.O_CREATE|core.O_WRONLY|core.O_TRUNC, writeFileMode)
+		var openR core.Result
+		if writeTmpOpenFaultForTest != nil {
+			openR = writeTmpOpenFaultForTest(tmp)
+		} else {
+			openR = core.OpenFile(tmp,
+				core.O_CREATE|core.O_WRONLY|core.O_TRUNC, writeFileMode)
+		}
 		if !openR.OK {
+			emitWriteFailed(path, CodeWriteOpenFailed)
 			return core.Fail(core.E(CodeWriteOpenFailed,
 				"open tmp: "+openR.Error(), nil))
 		}
 		f, _ := openR.Value.(*core.OSFile)
 		if f == nil {
+			emitWriteFailed(path, CodeWriteOpenFailed)
 			return core.Fail(core.NewCode(CodeWriteOpenFailed,
 				"open tmp returned nil file"))
 		}
 		if _, err := f.Write(input.Body); err != nil {
 			_ = f.Close()
 			_ = core.Remove(tmp)
+			emitWriteFailed(path, CodeWriteOpenFailed)
 			return core.Fail(core.E(CodeWriteOpenFailed,
 				"write tmp", err))
 		}
 		if err := f.Sync(); err != nil {
 			_ = f.Close()
 			_ = core.Remove(tmp)
+			emitWriteFailed(path, CodeWriteFsync)
 			return core.Fail(core.E(CodeWriteFsync,
 				"fsync tmp", err))
 		}
 		if err := f.Close(); err != nil {
 			_ = core.Remove(tmp)
+			emitWriteFailed(path, CodeWriteOpenFailed)
 			return core.Fail(core.E(CodeWriteOpenFailed,
 				"close tmp", err))
 		}
 		if r := core.Rename(tmp, path); !r.OK {
 			_ = core.Remove(tmp)
+			emitWriteFailed(path, CodeWriteRename)
 			return core.Fail(core.E(CodeWriteRename,
 				"rename: "+r.Error(), nil))
 		}
@@ -513,6 +524,29 @@ func matchVersionLine(line []byte) (int, bool) {
 // circular dependency.
 var emitWriteSucceeded = func(path string, version int) {}
 var emitVersionStale = func(path string, currentVersion int) {}
+
+// emitWriteFailed reports a typed write-failure to the audit
+// recorder. Wired in events.go init() once the LockEvent bus is
+// constructed. Mantis #1551. code is one of CodeWriteOpenFailed /
+// CodeWriteFsync / CodeWriteRename so log readers can pattern-match
+// the failure step without parsing the free-form message.
+var emitWriteFailed = func(path string, code string) {}
+
+// writeTmpOpenFaultForTest is a fault-injection hook used by
+// Mantis #1551 coverage to force a deterministic write-step failure
+// without filesystem-permission trickery (which collides with the
+// lock sentinel's parent-dir sensitivity). When non-nil it overrides
+// the OpenFile call that stages the tmp file inside
+// AtomicWriteWithVersion. Production code MUST NOT touch this —
+// pair every test setter with t.Cleanup that resets it to nil.
+var writeTmpOpenFaultForTest func(tmp string) core.Result
+
+// SetWriteTmpOpenFaultForTest installs a fault-injection callback
+// that AtomicWriteWithVersion consults in place of the tmp-stage
+// OpenFile. Pass nil to disable. Test-only.
+func SetWriteTmpOpenFaultForTest(fn func(tmp string) core.Result) {
+	writeTmpOpenFaultForTest = fn
+}
 
 // unwrapErr coaxes a Result's Value into an error for IsNotExist
 // classification. core.E + core.Result conventions wrap errors in

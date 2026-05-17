@@ -485,6 +485,64 @@ func TestAtomicAppendLine_RotateRecreateFailRollsBack_Ugly(t *core.T) {
 		"normal rotation must succeed once the fault is cleared")
 }
 
+// TestAtomicWrite_FailureEmitsAuditEvent_Ugly — Mantis #1551.
+// When the open/write/fsync/rename phase fails, AtomicWriteWithVersion
+// MUST emit a paths.write.failed audit event carrying the typed
+// CodeWrite* sentinel + path_hash. Without this, write-step failures
+// are silently dropped from the forensic record — operators can only
+// see the success cases.
+//
+// Forcing uses SetWriteTmpOpenFaultForTest (mirrors the F3
+// RotateRecreateFault pattern in atomic_append.go) — filesystem-
+// permission tricks collide with WithFileLock's sentinel needing the
+// same parent dir writeable, so a typed test hook is the cleanest
+// way to inject a deterministic write-step failure.
+func TestAtomicWrite_FailureEmitsAuditEvent_Ugly(t *core.T) {
+	homeFixture(t)
+	rec := withCaptureRecorder(t)
+
+	root := paths.Root().Value.(string)
+	dir := core.PathJoin(root, "writefail")
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+	fp := core.PathJoin(dir, "target.md")
+
+	paths.SetWriteTmpOpenFaultForTest(func(tmp string) core.Result {
+		return core.Result{
+			OK:    false,
+			Value: core.NewCode("test.injected", "injected open failure"),
+		}
+	})
+	t.Cleanup(func() { paths.SetWriteTmpOpenFaultForTest(nil) })
+
+	r := paths.AtomicWriteWithVersion(fp, paths.WriteInput{
+		Body: []byte("doomed"),
+	})
+	if r.OK {
+		t.Fatalf("injected open failure should propagate Fail")
+	}
+	core.AssertContains(t, r.Error(), paths.CodeWriteOpenFailed)
+
+	// Recorder MUST have seen a write.failed event with the typed Code.
+	found := false
+	for _, ev := range rec.snapshot() {
+		if ev.Kind != paths.EventWriteFailed {
+			continue
+		}
+		// Code MUST be one of the typed CodeWrite* sentinels —
+		// open_failed is the expected step for an EACCES parent.
+		if ev.Code != paths.CodeWriteOpenFailed &&
+			ev.Code != paths.CodeWriteFsync &&
+			ev.Code != paths.CodeWriteRename {
+			t.Errorf("write.failed Code MUST be a typed CodeWrite* sentinel, got %q", ev.Code)
+		}
+		core.AssertNotEqual(t, "", ev.PathHash,
+			"write.failed event MUST carry a path_hash like every other LockEvent")
+		found = true
+	}
+	core.AssertTrue(t, found,
+		"AtomicWriteWithVersion failure MUST emit a paths.write.failed audit event")
+}
+
 func TestIsAtRestEncryptedPath_Coverage(t *core.T) {
 	homeFixture(t)
 	root := paths.Root().Value.(string)
