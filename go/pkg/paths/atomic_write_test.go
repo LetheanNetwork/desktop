@@ -543,6 +543,34 @@ func TestAtomicWrite_FailureEmitsAuditEvent_Ugly(t *core.T) {
 		"AtomicWriteWithVersion failure MUST emit a paths.write.failed audit event")
 }
 
+// TestAtomicWrite_RandomTmpSuffix_Good — Mantis #1552. Mirrors the
+// #1541 paths.json random-suffix discipline: concurrent in-process
+// writers must each own a distinct staging file so two writers
+// trying to overwrite the same target cannot stomp the same
+// "<path>.tmp" mid-stream. Asserts the legacy fixed-suffix tmp file
+// never exists post-write and no ".tmp.*" stragglers linger after
+// rename consumed them.
+func TestAtomicWrite_RandomTmpSuffix_Good(t *core.T) {
+	homeFixture(t)
+	fp := tmpFile(t, "randsuffix.md")
+	r := paths.AtomicWriteWithVersion(fp, paths.WriteInput{
+		Body: []byte("first"),
+	})
+	core.AssertTrue(t, r.OK, "write should succeed: "+r.Error())
+
+	// Legacy fixed-suffix path must NOT exist (the #1552 fix
+	// abandoned ".tmp" in favour of ".tmp.<rand>").
+	legacy := fp + ".tmp"
+	core.AssertFalse(t, core.Lstat(legacy).OK,
+		"legacy fixed-suffix .tmp must not exist after #1552 fix")
+
+	// No random-suffix stragglers — rename should have consumed
+	// every .tmp.<rand> entry into the target path.
+	stragglers := core.PathGlob(fp + ".tmp.*")
+	core.AssertEqual(t, 0, len(stragglers),
+		"no .tmp.* stragglers should remain after successful rename")
+}
+
 func TestIsAtRestEncryptedPath_Coverage(t *core.T) {
 	homeFixture(t)
 	root := paths.Root().Value.(string)

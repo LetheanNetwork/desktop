@@ -311,7 +311,26 @@ func AtomicWriteWithVersion(path string, input WriteInput) core.Result {
 		}
 
 		// Two-phase write: tmp + fsync + rename.
-		tmp := path + ".tmp"
+		//
+		// Mantis #1552 — per-call randomised tmp suffix mirrors the
+		// #1541 paths.json fix. Concurrent in-process writers to the
+		// same path used to race on a fixed ".tmp" staging path
+		// (one writer's truncate landing mid-stream of another's
+		// content). Per-call hex suffix removes that footgun
+		// structurally; each writer owns its own staging file.
+		//
+		// Random source is core.RandomString(8) → 16 hex chars; if
+		// crypto/rand is unavailable the surface returns a typed
+		// open_failed Fail rather than silently fall back to a
+		// predictable suffix.
+		var tmp string
+		if rs := core.RandomString(8); rs.OK {
+			tmp = path + ".tmp." + rs.Value.(string)
+		} else {
+			emitWriteFailed(path, CodeWriteOpenFailed)
+			return core.Fail(core.E(CodeWriteOpenFailed,
+				"random suffix: "+rs.Error(), nil))
+		}
 		var openR core.Result
 		if writeTmpOpenFaultForTest != nil {
 			openR = writeTmpOpenFaultForTest(tmp)
