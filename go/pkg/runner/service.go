@@ -56,11 +56,19 @@ type Options struct {
 
 // Service is the runner subsystem. Holds the ai.ProviderRouter (when
 // configured) and the lifecycle state the frontend observes.
+//
+// Concurrency: Cerberus #45 / Mantis #1656 — routerMu guards router +
+// dynamic against the race between renderer-driven Generate / Chat
+// reads (via WGenerate / WChat Wails bindings) and the lifecycle
+// writer that calls ApplyDynamicRoutes when opencode sandboxes start
+// or stop. The bare router pointer was being swapped while inference
+// requests were dereferencing it.
 type Service struct {
-	opts    Options
-	router  *ai.ProviderRouter
-	core    *core.Core
-	dynamic []ai.ProviderRoute
+	opts     Options
+	routerMu core.RWMutex
+	router   *ai.ProviderRouter
+	core     *core.Core
+	dynamic  []ai.ProviderRoute
 }
 
 // NewService constructs the runner with the canonical Mantis #1336
@@ -99,28 +107,37 @@ func (s *Service) Register(c *core.Core) core.Result {
 	return core.Ok(nil)
 }
 
-// SetDynamicRoutes replaces the runner's dynamic-route set and
+// ApplyDynamicRoutes replaces the runner's dynamic-route set and
 // rebuilds the ai.ProviderRouter against the merged list of static
 // (opts.Routes) + dynamic. Use for provider sources whose lifetime
 // is decoupled from process startup — opencode sandboxes start /
-// stop at runtime, and each transition triggers a SetDynamicRoutes
+// stop at runtime, and each transition triggers an ApplyDynamicRoutes
 // call from the cmdServe wire-up.
 //
 // Empty routes argument clears the dynamic set, leaving only the
 // static routes from construction. nil + nil router state is
 // allowed (the runner falls back to the echo stub).
 //
+// Cerberus #45 / Mantis #1656 — package-level function (not method)
+// so Wails3's method-set reflection never binds this onto the
+// renderer surface. Untrusted frontend code cannot trigger a
+// router-pointer swap mid-Generate / mid-Chat. The exclusive write
+// lock pairs with the RLock in Generate / Chat / Models so the
+// router pointer + dynamic slice mutate atomically.
+//
 // Usage example:
 //
-//	runnerSvc.SetDynamicRoutes(opencodeSvc.Routes())
-func (s *Service) SetDynamicRoutes(routes []ai.ProviderRoute) core.Result {
+//	runner.ApplyDynamicRoutes(runnerSvc, opencodeSvc.Routes())
+func ApplyDynamicRoutes(s *Service, routes []ai.ProviderRoute) core.Result {
 	if s == nil {
-		return core.Fail(core.E("runner.SetDynamicRoutes", "service is nil", nil))
+		return core.Fail(core.E("runner.ApplyDynamicRoutes", "service is nil", nil))
 	}
-	s.dynamic = routes
 	merged := make([]ai.ProviderRoute, 0, len(s.opts.Routes)+len(routes))
 	merged = append(merged, s.opts.Routes...)
 	merged = append(merged, routes...)
+	s.routerMu.Lock()
+	defer s.routerMu.Unlock()
+	s.dynamic = routes
 	if len(merged) == 0 {
 		s.router = nil
 		return core.Ok(nil)
@@ -139,15 +156,22 @@ func (s *Service) SetDynamicRoutes(routes []ai.ProviderRoute) core.Result {
 // server.Runner contract. When no ai.ProviderRouter is configured the
 // runner returns an echo stub so the binary is still useful.
 //
+// Cerberus #45 / Mantis #1656 — snapshots the router pointer under
+// RLock then releases before the (potentially long) network call so
+// ApplyDynamicRoutes writes aren't blocked for the inference RTT.
+//
 // Usage example:
 //
 //	reply := s.Generate("hello")
 //	if reply.OK { core.Println(reply.Value) }
 func (s *Service) Generate(prompt string) core.Result {
-	if s.router == nil {
+	s.routerMu.RLock()
+	router := s.router
+	s.routerMu.RUnlock()
+	if router == nil {
 		return core.Ok(core.Concat("[lthn stub] received: ", prompt))
 	}
-	resp := s.router.Chat(core.Background(), ai.ProviderChatRequest{
+	resp := router.Chat(core.Background(), ai.ProviderChatRequest{
 		Prompt: prompt,
 	})
 	if !resp.OK {
@@ -169,7 +193,10 @@ func (s *Service) Generate(prompt string) core.Result {
 //		{Role: "user", Content: "ping"},
 //	})
 func (s *Service) Chat(messages []inference.Message) core.Result {
-	if s.router == nil {
+	s.routerMu.RLock()
+	router := s.router
+	s.routerMu.RUnlock()
+	if router == nil {
 		last := ""
 		for i := len(messages) - 1; i >= 0; i-- {
 			if messages[i].Role == "user" {
@@ -179,7 +206,7 @@ func (s *Service) Chat(messages []inference.Message) core.Result {
 		}
 		return core.Ok(core.Concat("[lthn stub] received: ", last))
 	}
-	resp := s.router.Chat(core.Background(), ai.ProviderChatRequest{
+	resp := router.Chat(core.Background(), ai.ProviderChatRequest{
 		Messages: messages,
 	})
 	if !resp.OK {
@@ -202,10 +229,13 @@ func (s *Service) Chat(messages []inference.Message) core.Result {
 //	ids := s.Models()
 //	if ids.OK { _ = ids.Value.([]string) }
 func (s *Service) Models() core.Result {
-	if s.router == nil {
+	s.routerMu.RLock()
+	router := s.router
+	s.routerMu.RUnlock()
+	if router == nil {
 		return core.Ok([]string{})
 	}
-	routes := s.router.Providers()
+	routes := router.Providers()
 	out := make([]string, 0, len(routes))
 	for _, r := range routes {
 		if r.Name != "" {

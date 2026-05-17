@@ -404,7 +404,7 @@ func cmdServe(args []string) int {
 		// /v1/chat/completions then transparently reaches opencode-
 		// routed providers without restarting lthn serve.
 		opencodeSvc.SetOnSandboxChange(func() {
-			_ = r.SetDynamicRoutes(opencodeSvc.Routes())
+			_ = runner.ApplyDynamicRoutes(r, opencodeSvc.Routes())
 		})
 		// Reconcile FIRST — sweep the host runtime for surviving
 		// lthn-opencode-* containers and re-register them in the
@@ -431,7 +431,7 @@ func cmdServe(args []string) int {
 		}
 		// Pick up any sandboxes already running (whether resumed
 		// just now or surviving from a previous serve invocation).
-		_ = r.SetDynamicRoutes(opencodeSvc.Routes())
+		_ = runner.ApplyDynamicRoutes(r, opencodeSvc.Routes())
 	}
 	pluginSvc, _ := core.ServiceFor[*plugin.Service](c, "plugin")
 	if pluginSvc != nil {
