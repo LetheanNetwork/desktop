@@ -314,8 +314,18 @@ func appendResourceArgs(cmd []string, input SpawnInput, storageOpt bool) []strin
 // buildRunArgs constructs the `<runtime> run --rm <image> <cmd> <args...>`
 // invocation. Each runtime has slightly different flag shape; we
 // only need the lowest common denominator for proof-of-life.
+//
+// Cerberus Mantis #1663 — hardenedDefaults (cap-drop=ALL +
+// no-new-privileges + pids-limit) are applied to BOTH one-shot Spawn
+// (this path) AND long-running SpawnLong (buildLongRunArgs). The
+// defaults predate one-shot Spawn; without them a compromised renderer
+// invoking Sandbox.Spawn would get a container with default Docker
+// root caps (cap_dac_override, cap_setuid, cap_sys_chroot — standard
+// LPE primitive set). Apple Container CLI accepts the same flag names
+// via its docker-compatible run surface.
 func (s *Service) buildRunArgs(rt container.RuntimeType, input SpawnInput) core.Result {
 	cmd := []string{"run", "--rm"}
+	cmd = append(cmd, hardenedDefaults...)
 	switch rt {
 	case container.RuntimeDocker:
 		// Docker's `--rm` auto-removes after exit. Good for one-shot.

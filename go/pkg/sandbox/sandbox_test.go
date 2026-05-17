@@ -127,11 +127,44 @@ func TestSandbox_buildRunArgs_Good(t *core.T) {
 	core.AssertEqual(t, "docker", run.Binary)
 	core.AssertEqual(t, []string{
 		"run", "--rm",
+		"--cap-drop=ALL",
+		"--security-opt=no-new-privileges",
+		"--pids-limit=512",
 		"--memory", "2048M",
 		"--cpus", "4",
 		"--storage-opt", "size=10G",
 		"alpine:3.21", "echo", "hi",
 	}, run.Args)
+}
+
+// TestSandbox_buildRunArgs_AppliesHardenedDefaults verifies one-shot Spawn
+// inherits the same hardenedDefaults that SpawnLong applies (Cerberus
+// Mantis #1663 / S-1). Without this gate a compromised renderer can
+// invoke Sandbox.Spawn and get a container with default Docker root caps
+// (cap_dac_override / cap_setuid / cap_sys_chroot — LPE primitive set).
+// Asserted across all three runtimes that buildRunArgs supports.
+func TestSandbox_buildRunArgs_AppliesHardenedDefaults(t *core.T) {
+	svc := newTestService(Options{})
+	cases := []struct {
+		name string
+		rt   container.RuntimeType
+	}{
+		{"docker", container.RuntimeDocker},
+		{"podman", container.RuntimePodman},
+		{"apple", container.RuntimeApple},
+	}
+	for _, tc := range cases {
+		r := svc.buildRunArgs(tc.rt, SpawnInput{
+			Image:   "alpine:3.21",
+			Command: "echo",
+			Args:    []string{"hi"},
+		})
+		core.AssertTrue(t, r.OK)
+		run := r.Value.(runCommand)
+		core.AssertContains(t, run.Args, "--cap-drop=ALL")
+		core.AssertContains(t, run.Args, "--security-opt=no-new-privileges")
+		core.AssertContains(t, run.Args, "--pids-limit=512")
+	}
 }
 
 func TestSandbox_prepareSpawnInput_Bad(t *core.T) {
