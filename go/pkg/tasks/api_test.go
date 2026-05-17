@@ -5,6 +5,7 @@ package tasks_test
 import (
 	core "dappco.re/go"
 	"dappco.re/go/orm"
+	"dappco.re/lthn/desktop/pkg/auth"
 	"dappco.re/lthn/desktop/pkg/tasks"
 )
 
@@ -322,4 +323,148 @@ func TestTasks_Update_AllCanonicalEnumsAccepted_Good(t *core.T) {
 		result := tasks.Update(c, issue.ID, tasks.UpdateInput{Priority: pri})
 		core.AssertTrue(t, result.OK)
 	}
+}
+
+// --- B2 tier-auth gate + ENFORCE-not-claim ---------------------------------
+//
+// Mantis #1721 Phase 1 B2 / Mantis #1722 HIGH — pkg/tasks Wails surface
+// adopts the auth substrate per RFC.tier-auth-substrate.md v2 §5.1 +
+// §5.3. The Wails entry points (Create / Update / AddNote / Get / List)
+// now gate caller-tier via auth.Require and OVERWRITE caller-derived
+// attribution fields (Reporter / Author) from auth.Caller(c).Subject
+// rather than reading them from the input struct (F-pattern A).
+
+// TestTasks_Create_ReporterFromCaller_Good asserts that the Wails
+// Service.Create OVERWRITES input.Reporter from auth.Caller(c).Subject
+// — a renderer-tier caller claiming Reporter="bob" lands a record with
+// Reporter="alice" (the stamped subject). This is the F-pattern A
+// worked example: forge attempts at the Wails IPC surface are
+// neutralised at the substrate boundary, not after the data lands.
+func TestTasks_Create_ReporterFromCaller_Good(t *core.T) {
+	c := newTestCore(t)
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier:    auth.TierRenderer,
+		Subject: "alice",
+		Source:  "wails",
+	})
+	svc := tasks.NewService(c)
+	r := svc.Create(tasks.CreateIssueInput{
+		Project:  "lthn",
+		Summary:  "reporter forgery",
+		Reporter: "bob", // hostile claim
+	})
+	core.RequireTrue(t, r.OK)
+	issue, _, ok := orm.Detail[tasks.Issue](r)
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, "alice", issue.Reporter)
+}
+
+// TestTasks_AddNote_AuthorFromCaller_Good asserts that the Wails
+// Service.AddNote OVERWRITES input.Author from auth.Caller(c).Subject
+// — a renderer claiming Author="cerberus" lands a Note with
+// Author="alice" (the stamped subject). Mirrors the Create gate; this
+// is the activity-log forgery prevention (planting false trail entries).
+func TestTasks_AddNote_AuthorFromCaller_Good(t *core.T) {
+	c := newTestCore(t)
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier:    auth.TierRenderer,
+		Subject: "alice",
+		Source:  "wails",
+	})
+	svc := tasks.NewService(c)
+	r := svc.AddNote(tasks.AddNoteInput{
+		IssueID: "issue-x",
+		Body:    "false attribution",
+		Author:  "cerberus", // hostile claim
+	})
+	core.RequireTrue(t, r.OK)
+	note, _, ok := orm.Detail[tasks.Note](r)
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, "alice", note.Author)
+}
+
+// TestTasks_Create_InternalTier_Rejected_Bad asserts the Require gate
+// rejects callers stamped at the TierInternal floor (the zero-value
+// resolution) for write operations. The Wails surface permits ONLY
+// {TierOperator, TierRenderer}; intra-Go (TierInternal), cascade
+// handlers (TierCascade), and cron-worker (TierCron) lands a visible
+// Fail rather than a silent forgery surface.
+func TestTasks_Create_InternalTier_Rejected_Bad(t *core.T) {
+	c := core.New()
+	core.RequireTrue(t, orm.Register(c).OK)
+	mem := orm.NewMemium()
+	core.RequireTrue(t, orm.Mount(c, "default", mem).OK)
+	for _, schema := range tasks.Schemas() {
+		core.RequireTrue(t, orm.RegisterSchema(c, schema).OK)
+		mem.RegisterTable(schema.Name, schema)
+	}
+	// NB: no auth.SetCaller — Caller resolves to TierInternal floor.
+	svc := tasks.NewService(c)
+	r := svc.Create(tasks.CreateIssueInput{
+		Project: "lthn",
+		Summary: "internal tier should be rejected at Wails surface",
+	})
+	core.AssertFalse(t, r.OK)
+	core.AssertContains(t, r.Error(), "tier_not_permitted")
+}
+
+// TestTasks_Update_CascadeTier_Rejected_Bad asserts the Update gate
+// rejects TierCascade — write operations are operator/renderer-only
+// per RFC §5.1 table row. A cascade handler that tried to write to
+// tasks via the Wails surface would land this deny path; cascade
+// handlers MUST go through the api.go package-level Update which is
+// TierInternal-callable, not through the Wails Service shim.
+func TestTasks_Update_CascadeTier_Rejected_Bad(t *core.T) {
+	c := newTestCore(t)
+	created := tasks.Create(c, tasks.CreateInput{Project: "lthn", Summary: "seed"})
+	issue, _, _ := orm.Detail[tasks.Issue](created)
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier:    auth.TierCascade,
+		Subject: "renderer-source-account-id",
+		Source:  "queue-worker",
+	})
+	svc := tasks.NewService(c)
+	r := svc.Update(tasks.UpdateIssueInput{ID: issue.ID, State: tasks.StateInProgress})
+	core.AssertFalse(t, r.OK)
+	core.AssertContains(t, r.Error(), "tier_not_permitted")
+}
+
+// TestTasks_List_AllowsCascade_Good asserts the read gate is broader
+// than the write gate per RFC §5.1: List/Get permit TierCascade so
+// audit / agent-prep / PR-watcher subscribers can fetch issue state
+// from inside cascade handlers without needing operator elevation.
+func TestTasks_List_AllowsCascade_Good(t *core.T) {
+	c := newTestCore(t)
+	tasks.Create(c, tasks.CreateInput{Project: "lthn", Summary: "for cascade read"})
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier:    auth.TierCascade,
+		Subject: "renderer-source-account-id",
+		Source:  "queue-worker",
+	})
+	svc := tasks.NewService(c)
+	r := svc.List(tasks.ListInput{Project: "lthn"})
+	core.RequireTrue(t, r.OK)
+	out, ok := r.Value.(tasks.ListOutput)
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, 1, out.Count)
+}
+
+// TestTasks_AddNote_InternalTier_Rejected_Ugly walks the third write
+// surface (Note creation) to confirm the gate is consistent across
+// all three Wails entry points that touch persistence. Cascade-only
+// audit-trail inspectors that try to plant Notes via the Wails surface
+// land in the same deny path Create / Update use.
+func TestTasks_AddNote_InternalTier_Rejected_Ugly(t *core.T) {
+	c := core.New()
+	core.RequireTrue(t, orm.Register(c).OK)
+	mem := orm.NewMemium()
+	core.RequireTrue(t, orm.Mount(c, "default", mem).OK)
+	for _, schema := range tasks.Schemas() {
+		core.RequireTrue(t, orm.RegisterSchema(c, schema).OK)
+		mem.RegisterTable(schema.Name, schema)
+	}
+	svc := tasks.NewService(c)
+	r := svc.AddNote(tasks.AddNoteInput{IssueID: "issue-x", Body: "internal note"})
+	core.AssertFalse(t, r.OK)
+	core.AssertContains(t, r.Error(), "tier_not_permitted")
 }

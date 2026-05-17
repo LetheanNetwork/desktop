@@ -5,12 +5,20 @@ package tasks_test
 import (
 	core "dappco.re/go"
 	"dappco.re/go/orm"
+	"dappco.re/lthn/desktop/pkg/auth"
 	"dappco.re/lthn/desktop/pkg/tasks"
 )
 
 // newServiceCore wires a Service over an in-memory Memium with the
 // tasks schemas registered. Mirrors newTestCore in api_test.go so the
 // Wails surface gets the same isolated harness.
+//
+// Stamps TierOperator with subject "test-operator" via the auth
+// sidecar so the B2 Require gates in wails.go (Create / Update /
+// AddNote / List / Get) pass through. Tests that want to exercise a
+// different tier (e.g. TierRenderer for ENFORCE-not-claim forgery
+// rejection) re-stamp via auth.SetCaller(c, ...) after constructing
+// the service.
 func newServiceCore(t *core.T) (*tasks.Service, *core.Core) {
 	t.Helper()
 	c := core.New()
@@ -21,6 +29,11 @@ func newServiceCore(t *core.T) (*tasks.Service, *core.Core) {
 		core.RequireTrue(t, orm.RegisterSchema(c, schema).OK)
 		mem.RegisterTable(schema.Name, schema)
 	}
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier:    auth.TierOperator,
+		Subject: "test-operator",
+		Source:  "tasks_test",
+	})
 	return tasks.NewService(c), c
 }
 

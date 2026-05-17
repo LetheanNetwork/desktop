@@ -24,6 +24,8 @@ import (
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
+
+	"dappco.re/lthn/desktop/pkg/auth"
 )
 
 // Service owns the tasks Wails surface. Wraps *core.Core so the
@@ -82,11 +84,21 @@ type ListOutput struct {
 // Empty input returns every open issue across every project (the
 // natural shape for a global backlog view).
 //
+// Tier gate (RFC §5.1 / table row pkg/tasks read): Require permits
+// TierOperator + TierRenderer + TierCascade. Per-account filtering
+// remains the per-row concern (separate RFC).
+//
 // Usage example (TS binding):
 //
 //	const r = await List({ state: "open" });
 //	const out = r.Value as { issues: Issue[]; count: number };
 func (s *Service) List(input ListInput) core.Result {
+	id, ok := auth.Require(s.core, "tasks.Service.List",
+		auth.TierOperator, auth.TierRenderer, auth.TierCascade)
+	if !ok {
+		return core.Fail(core.E("tasks.Service.List",
+			"tasks.tier_not_permitted: "+id.Tier.String(), nil))
+	}
 	filter := ListFilter{
 		Project:  input.Project,
 		State:    input.State,
@@ -114,11 +126,20 @@ type GetInput struct {
 // Get returns the issue identified by input.ID, or a fail Result if
 // the ID is empty / not found.
 //
+// Tier gate (RFC §5.1): Require permits TierOperator + TierRenderer
+// + TierCascade. Per-row ACL deferred to Phase 2.
+//
 // Usage example (TS binding):
 //
 //	const r = await Get({ id: "abc123" });
 //	const issue = r.Value as Issue;
 func (s *Service) Get(input GetInput) core.Result {
+	id, ok := auth.Require(s.core, "tasks.Service.Get",
+		auth.TierOperator, auth.TierRenderer, auth.TierCascade)
+	if !ok {
+		return core.Fail(core.E("tasks.Service.Get",
+			"tasks.tier_not_permitted: "+id.Tier.String(), nil))
+	}
 	if input.ID == "" {
 		return core.Fail(core.E("tasks.Service.Get", "id is required", nil))
 	}
@@ -144,11 +165,29 @@ type CreateIssueInput struct {
 // Required: Project + Summary. Defaults applied for State / Severity
 // / Priority by the underlying api.go Create.
 //
+// ENFORCE-not-claim (RFC.tier-auth-substrate.md §5.3 / Mantis #1722):
+// Reporter is OVERWRITTEN from auth.Caller(s.core).Subject — the
+// input.Reporter field is SILENTLY IGNORED. A hostile renderer can
+// supply any string here; the service refuses to attribute records
+// based on caller assertion. Assignee remains input-driven (Operator
+// legitimately assigns work to others — see §5.3 row).
+//
+// Tier gate (RFC §5.1 / §10 Q-1 Phase 1 ALLOW): Require permits
+// TierOperator + TierRenderer. Other tiers (TierCascade, TierCron,
+// TierInternal) reach this surface only through misconfiguration; the
+// gate returns a visible Fail rather than silently dropping the
+// attempt so the audit trail captures the deny.
+//
 // Usage example (TS binding):
 //
 //	const r = await Create({ project: "lthn", summary: "wire backlog" });
 //	const issue = r.Value as Issue;
 func (s *Service) Create(input CreateIssueInput) core.Result {
+	id, ok := auth.Require(s.core, "tasks.Service.Create", auth.TierOperator, auth.TierRenderer)
+	if !ok {
+		return core.Fail(core.E("tasks.Service.Create",
+			"tasks.tier_not_permitted: "+id.Tier.String(), nil))
+	}
 	return Create(s.core, CreateInput{
 		Project:       input.Project,
 		Summary:       input.Summary,
@@ -156,7 +195,7 @@ func (s *Service) Create(input CreateIssueInput) core.Result {
 		Severity:      input.Severity,
 		Priority:      input.Priority,
 		Assignee:      input.Assignee,
-		Reporter:      input.Reporter,
+		Reporter:      id.Subject, // ENFORCE-not-claim — input.Reporter ignored
 		Version:       input.Version,
 		TargetVersion: input.TargetVersion,
 	})
@@ -185,11 +224,26 @@ type UpdateIssueInput struct {
 // returns the updated record on success. State transitions to
 // Done/Cancelled also set ClosedAt (handled by api.go Update).
 //
+// ENFORCE-not-claim (RFC §5.3 row 321): UpdateIssueInput today carries
+// no Editor / Reporter attribution field, so no caller-derived
+// overwrite is needed. If a future field lands (e.g. last_edited_by),
+// it MUST be sourced from auth.Caller(s.core).Subject following the
+// Create / AddNote pattern in this file.
+//
+// Tier gate (RFC §5.1): Require permits TierOperator + TierRenderer.
+// Per-row ACL (renderer touching another account's issue) is tracked
+// as a Phase 2 follow-on per RFC §10 B.2 done-criteria.
+//
 // Usage example (TS binding):
 //
 //	const r = await Update({ id: "abc123", state: "in_progress" });
 //	const updated = r.Value as Issue;
 func (s *Service) Update(input UpdateIssueInput) core.Result {
+	id, ok := auth.Require(s.core, "tasks.Service.Update", auth.TierOperator, auth.TierRenderer)
+	if !ok {
+		return core.Fail(core.E("tasks.Service.Update",
+			"tasks.tier_not_permitted: "+id.Tier.String(), nil))
+	}
 	if input.ID == "" {
 		return core.Fail(core.E("tasks.Service.Update", "id is required", nil))
 	}
@@ -220,11 +274,23 @@ type AddNoteInput struct {
 // returns the persisted Note. Broadcasts a KindNoted event so the
 // activity feed / audit log / PR-watcher can react.
 //
+// ENFORCE-not-claim (RFC §5.3 / Mantis #1722): Author is OVERWRITTEN
+// from auth.Caller(s.core).Subject — the input.Author field is
+// SILENTLY IGNORED. A hostile renderer cannot plant a false audit
+// trail by claiming to be another account.
+//
+// Tier gate (RFC §5.1): Require permits TierOperator + TierRenderer.
+//
 // Usage example (TS binding):
 //
-//	const r = await AddNote({ issue_id: "abc123", body: "shipped", author: "hephaestus" });
+//	const r = await AddNote({ issue_id: "abc123", body: "shipped" });
 //	const note = r.Value as Note;
 func (s *Service) AddNote(input AddNoteInput) core.Result {
-	return AddNote(s.core, input.IssueID, input.Body, input.Author)
+	id, ok := auth.Require(s.core, "tasks.Service.AddNote", auth.TierOperator, auth.TierRenderer)
+	if !ok {
+		return core.Fail(core.E("tasks.Service.AddNote",
+			"tasks.tier_not_permitted: "+id.Tier.String(), nil))
+	}
+	return AddNote(s.core, input.IssueID, input.Body, id.Subject) // ENFORCE-not-claim — input.Author ignored
 }
 
