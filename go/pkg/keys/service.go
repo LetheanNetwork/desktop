@@ -817,6 +817,19 @@ func (s *Service) migrateTier1Locked() {
 	// be present from Step 0b.) Skip silently if no tier-0 provider
 	// — tier-0 is independent and can be wired later, UNLESS legacy
 	// SI is present (guarded by Step 3b.5 above).
+	//
+	// Mantis #1653 (Cerberus C#19 deferred from #1625): the original
+	// 3c was write-on-absence only. On the retry path (first call
+	// deferred at 3b.5 because tier-0 KEK provider not live, then
+	// tier-0 wires + SetKEKProvider re-fires) .master-tier0 is
+	// already on disk from a prior boot — the write-on-absence
+	// branch skips, s.tier0Master stays empty, and Step 3e's
+	// defensive defer catches but only AFTER Step 3d has already
+	// written .master-tier1, bricking the next boot
+	// (legacyStat.OK && tier1Stat.OK → corruption-refuse). Add a
+	// load-on-presence branch: when the file IS present and
+	// s.tier0Master is empty, unwrap it under the live tier-0 KEK so
+	// Step 3e has the master it needs.
 	tier0Path := core.PathJoin(dir, masterTier0FileName)
 	tier0Stat := core.Stat(tier0Path)
 	if !tier0Stat.OK {
@@ -832,6 +845,47 @@ func (s *Service) migrateTier1Locked() {
 				return
 			}
 			s.tier0Master = t0master
+		}
+	} else if len(s.tier0Master) != masterKeySize {
+		// Load-on-presence path (Mantis #1653 / C#19). File present
+		// but in-memory cache empty — the retry-half-state shape.
+		// 3b.5 already verified tier-0 KEK provider is live for the
+		// SI-present case, but we re-check here defensively because
+		// the no-SI branch reaches this code too (file may be from
+		// a prior fresh-install Step 0b under a provider that has
+		// since been rewired). If the KEK provider isn't live AND
+		// no legacy SI is present, leave tier0Master empty —
+		// downstream callers will fail-closed cleanly via
+		// ensureTier0Locked when they actually need tier-0 ops.
+		if t0kek, t0ok := s.currentKEKFor(tier0); t0ok {
+			blobR := core.ReadFile(tier0Path)
+			if !blobR.OK {
+				core.Warn("keys: tier-1 migration Step 3c load tier-0 master read failed", "err", blobR.Error())
+				return
+			}
+			blob := blobR.Value.([]byte)
+			if len(blob) != kekWrappedMasterLen {
+				core.Warn("keys: tier-1 migration Step 3c on-disk tier-0 master has wrong length; refusing to use",
+					"got", core.Sprintf("%d", len(blob)))
+				return
+			}
+			kekSigil, err := sigil.NewChaChaPolySigil(t0kek, nil)
+			if err != nil {
+				core.Warn("keys: tier-1 migration Step 3c init tier-0 KEK sigil failed", "err", err.Error())
+				return
+			}
+			unwrapped, err := kekSigil.Out(blob)
+			if err != nil {
+				core.Warn("keys: tier-1 migration Step 3c unwrap tier-0 KEK envelope failed (provider key mismatch?)",
+					"err", err.Error())
+				return
+			}
+			if len(unwrapped) != masterKeySize {
+				core.Warn("keys: tier-1 migration Step 3c KEK-unwrapped tier-0 master has wrong length",
+					"got", core.Sprintf("%d", len(unwrapped)))
+				return
+			}
+			s.tier0Master = unwrapped
 		}
 	}
 

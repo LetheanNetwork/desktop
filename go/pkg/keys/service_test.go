@@ -1283,3 +1283,105 @@ func TestService_Migrate_Tier0OnDiskNoProvider_Defers_NoHalfState(t *core.T) {
 	core.AssertEqual(t, tier0Pre.Value.([]byte), tier0Post.Value.([]byte),
 		".master-tier0 must be byte-identical to seed — Step 3c must not have rewritten it")
 }
+
+// TestService_Migrate_Tier0OnDiskNoProvider_RetrySuccess_Good —
+// Mantis #1653 (Cerberus C#19 deferred from #1625): close the retry
+// path that the #40 tighten left dangling. Setup mirrors the #40
+// fixture (legacy .master + legacy single-instance.aead + on-disk
+// .master-tier0 + tier-1 KEK live + tier-0 KEK NOT live). First
+// SetKEKProvider defers per 3b.5 (covered by the #40 test). Then we
+// wire the tier-0 KEK provider and re-fire SetKEKProvider — the
+// load-on-presence branch added to Step 3c MUST unwrap the on-disk
+// .master-tier0 so Steps 3d-3g can complete cleanly.
+//
+// Assert: post-retry, .master-tier1 is written, .master is removed,
+// single-instance.t0.aead is written (legacy SI re-sealed under
+// tier-0 master), and SingleInstanceKey() returns the originally
+// sealed 32B payload — proves the in-memory tier-0 master matches
+// the on-disk one and the re-seal used the correct key.
+func TestService_Migrate_Tier0OnDiskNoProvider_RetrySuccess_Good(t *core.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := core.PathJoin(home, "Lethean", "data", "keys")
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+
+	// Same fixture shape as the #40 defer test.
+	legacyMaster := bytesOf(0x10)
+	tier1KEK := fixedTier1KEK
+	tier1Sigil, err := sigil.NewChaChaPolySigil(tier1KEK, nil)
+	core.AssertTrue(t, err == nil)
+	wrapped, err := tier1Sigil.In(legacyMaster)
+	core.AssertTrue(t, err == nil)
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, ".master"), wrapped, 0o600).OK)
+
+	// Seal a known SI payload under the legacy master so we can
+	// round-trip-verify after the migration completes.
+	sealedKey := bytesOf(0x99)
+	siSigil, err := sigil.NewChaChaPolySigil(legacyMaster, nil)
+	core.AssertTrue(t, err == nil)
+	siBlob, err := siSigil.In(sealedKey)
+	core.AssertTrue(t, err == nil)
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, "single-instance.aead"), siBlob, 0o600).OK)
+
+	// Pre-seed .master-tier0 wrapped under the tier-0 KEK we'll wire
+	// on the second SetKEKProvider call. The retry path MUST unwrap
+	// this byte-for-byte and use the resulting master to re-seal SI.
+	tier0Master := bytesOf(0x20)
+	tier0KEK := fixedTier0KEK
+	tier0Sigil, err := sigil.NewChaChaPolySigil(tier0KEK, nil)
+	core.AssertTrue(t, err == nil)
+	tier0Wrapped, err := tier0Sigil.In(tier0Master)
+	core.AssertTrue(t, err == nil)
+	tier0Path := core.PathJoin(dir, ".master-tier0")
+	core.AssertTrue(t, core.WriteFile(tier0Path, tier0Wrapped, 0o600).OK)
+	tier0Pre := core.ReadFile(tier0Path)
+	core.AssertTrue(t, tier0Pre.OK)
+
+	// First boot — tier-1 wired, tier-0 NOT wired. 3b.5 must defer.
+	r := keys.New()
+	core.AssertTrue(t, r.OK)
+	svc := r.Value.(*keys.Service)
+	svc.SetKEKProvider(func() ([]byte, bool) { return tier1KEK, true })
+
+	// Confirm the defer fired (precondition for the retry path).
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, ".master")).OK,
+		"precondition: 3b.5 must have deferred — legacy .master retained")
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, ".master-tier1")).OK,
+		"precondition: 3b.5 must have deferred — .master-tier1 not written")
+
+	// Retry: wire tier-0 KEK, then re-fire SetKEKProvider to trigger
+	// migrateTier1Locked again. Step 3c load-on-presence MUST now
+	// unwrap .master-tier0 so Steps 3d-3g complete.
+	svc.SetKEKProviderTier0(func() ([]byte, bool) { return tier0KEK, true })
+	svc.SetKEKProvider(func() ([]byte, bool) { return tier1KEK, true })
+
+	// Post-retry assertions: full migration complete.
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, ".master")).OK,
+		"legacy .master must be removed once retry completes Step 3g")
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, ".master-tier1")).OK,
+		".master-tier1 must be written after retry succeeds")
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, "single-instance.aead")).OK,
+		"legacy single-instance.aead must be removed after Step 3e re-seal")
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, "single-instance.t0.aead")).OK,
+		"single-instance.t0.aead must be written under tier-0 master")
+
+	// .master-tier0 byte-identical — Step 3c must NOT have rewritten
+	// it on the load-on-presence path (file was already there).
+	tier0Post := core.ReadFile(tier0Path)
+	core.AssertTrue(t, tier0Post.OK)
+	core.AssertEqual(t, tier0Pre.Value.([]byte), tier0Post.Value.([]byte),
+		".master-tier0 must be byte-identical to seed — load-on-presence must not rewrite")
+
+	// Round-trip via SingleInstanceKey: proves the in-memory tier-0
+	// master loaded by Step 3c matches the on-disk wrapped master,
+	// AND that Step 3e re-sealed SI using that same master (so the
+	// new .t0.aead unwraps to the original sealed payload). This is
+	// the C#19 prescription: SEEDED bytes round-trip after retry.
+	siR := svc.SingleInstanceKey()
+	core.AssertTrue(t, siR.OK, "SingleInstanceKey must succeed after retry-success")
+	gotKey := siR.Value.([32]byte)
+	var wantKey [32]byte
+	copy(wantKey[:], sealedKey)
+	core.AssertEqual(t, wantKey, gotKey,
+		"SingleInstanceKey must return the originally sealed payload — proves tier-0 master loaded correctly and SI re-seal used it")
+}
