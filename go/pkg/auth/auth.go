@@ -48,6 +48,8 @@ import (
 
 	core "dappco.re/go"
 	"github.com/gin-gonic/gin"
+
+	"dappco.re/lthn/desktop/pkg/audit"
 )
 
 // callerKey is the unexported context-value key used to attach
@@ -362,11 +364,21 @@ const (
 // the audit-emit retrofit in B2/B3 promotes it to a typed field on
 // EventTierReject.
 //
-// AUDIT-EMIT IS DEFERRED to B2/B3 per the package-doc note (cyclic
-// substrate ↔ audit dependency at bottom of import graph). Until
-// then, Require is a quiet gate; consumers that need an audit trail
-// of denied tier attempts should emit their own event around the
-// Require call site for now.
+// AUDIT-EMIT (Cerberus #73 F-4 / Mantis #1758 / RFC §4.7): on deny,
+// records audit.EventTierReject via audit.Default().Record. The cycle
+// risk noted in earlier comments was resolved by verification —
+// pkg/audit does NOT import pkg/auth (the substrate-tier audit-cluster
+// adopter pattern); the dependency is one-way. Meta-key shape mirrors
+// the EventTierReject doc-block at pkg/audit/types.go.
+//
+//	id, ok := auth.Require(c, "tasks.Service.Create",
+//	    auth.TierOperator, auth.TierRenderer)
+//	if !ok {
+//	    return core.Fail(core.E("tasks.Service.Create",
+//	        "tier not permitted: " + auth.Caller(c).Tier.String(),
+//	        nil))
+//	}
+//	issue.Reporter = id.Subject // ENFORCE-not-claim
 func Require(c *core.Core, op string, allowed ...CallerTier) (CallerIdentity, bool) {
 	id := Caller(c)
 	for _, t := range allowed {
@@ -374,7 +386,7 @@ func Require(c *core.Core, op string, allowed ...CallerTier) (CallerIdentity, bo
 			return id, true
 		}
 	}
-	_ = op // reserved for audit-emit retrofit (B2/B3)
+	emitTierReject(op, id, allowed)
 	return id, false
 }
 
@@ -392,8 +404,82 @@ func RequireFromContext(ctx core.Context, op string, allowed ...CallerTier) (Cal
 			return id, true
 		}
 	}
-	_ = op
+	emitTierReject(op, id, allowed)
 	return id, false
+}
+
+// emitTierReject records the substrate-tier audit.EventTierReject row
+// for a deny in Require / RequireFromContext. Bounded-length truncation
+// on Subject + Source defends against an upstream caller stamping a
+// longer-than-bounded breadcrumb (per Cerberus #1465 closure-only-scope
+// discipline). allowed_tiers is joined as a comma-separated literal so
+// the forensic walker can distinguish a renderer-against-operator-only
+// deny from a renderer-against-internal-only deny without re-running
+// the call-site.
+//
+//	emitTierReject("tasks.Service.Create", id, []CallerTier{TierOperator})
+func emitTierReject(op string, id CallerIdentity, allowed []CallerTier) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   EventTierRejectEventName,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   "auth",
+		Outcome: audit.OutcomeDenied,
+		Meta: map[string]any{
+			"op":             truncateMeta(op),
+			"caller_tier":    string(id.Tier),
+			"caller_subject": truncateMeta(id.Subject),
+			"caller_source":  truncateMeta(id.Source),
+			"allowed_tiers":  joinTiers(allowed),
+		},
+	})
+}
+
+// EventTierRejectEventName mirrors audit.EventTierReject through the
+// auth package so call-site greps locate the literal at the deny site
+// even if the auth package later vendors a private alias. Sourced from
+// the audit package's reserved-schema const to keep the parity-grep
+// contract intact.
+const EventTierRejectEventName = audit.EventTierReject
+
+// metaMaxLen bounds Subject / Source / op Meta values per Cerberus
+// #1465. Sized for typical session-breadcrumb lengths (account IDs,
+// session-token UUIDs, dotted op names) with headroom; anything longer
+// is an upstream caller bug and the truncated form still discriminates
+// for forensic queries.
+const metaMaxLen = 256
+
+// truncateMeta enforces metaMaxLen on a Meta string value. Empty
+// strings pass through unchanged so the forensic walker can grep
+// `caller_subject=""` literally to identify unstamped denies.
+//
+//	truncateMeta("account-snider") // "account-snider"
+//	truncateMeta(strings.Repeat("x", 1024)) // 256-char prefix
+func truncateMeta(s string) string {
+	if len(s) <= metaMaxLen {
+		return s
+	}
+	return s[:metaMaxLen]
+}
+
+// joinTiers stringifies a CallerTier slice as a comma-joined literal
+// without importing strings (banned per AX-6). Empty slice returns
+// "" so the forensic walker can distinguish "no tiers allowed"
+// (forever-locked shape) from a populated allow-list cleanly.
+//
+//	joinTiers([]CallerTier{TierOperator, TierRenderer}) // "operator,renderer"
+//	joinTiers(nil) // ""
+func joinTiers(tiers []CallerTier) string {
+	if len(tiers) == 0 {
+		return ""
+	}
+	out := ""
+	for i, t := range tiers {
+		if i > 0 {
+			out += ","
+		}
+		out += string(t)
+	}
+	return out
 }
 
 // Elevate is the explicit privilege-promotion shape. Returns a

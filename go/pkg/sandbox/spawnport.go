@@ -150,23 +150,51 @@ func (p spawnPortImpl) InstallID() core.Result {
 	return p.svc.installID()
 }
 
-// emitTierReject records a SpawnRejected audit event with the
-// canonical `reason="tier_go_only"` Meta + the supplied surface
-// label so a forensic walker can distinguish which shim fired.
+// emitTierReject records the Wails-shim TierGoOnly rejection on the
+// audit substrate. Dual-emit shape per RFC.tier-auth-substrate §4.7
+// (Cerberus #73 F-4 / Mantis #1758):
+//
+//  1. EventSandboxSpawnRejected (legacy literal) — preserved for
+//     backward grep + the existing forensic walkers that key on the
+//     sandbox-cluster event name. Meta keeps `reason="tier_go_only"`
+//     + `surface=<shim>` per the historical shape.
+//  2. EventTierReject (substrate-tier cluster) — joins the 1st
+//     substrate-tier audit adopter; audit consumers grep one literal
+//     across all tier-reject sites for the forensic trail. Meta-shape
+//     mirrors the pkg/auth.Require deny-emit so a downstream consumer
+//     sees a uniform row across the substrate. The `op` field uses the
+//     surface label so the Wails-shim site is distinguishable from
+//     auth.Require call sites.
+//
 // Centralised so every uppercase shim has identical Meta shape.
 //
 // Usage example (internal):
 //
 //	emitTierReject("sandbox.Spawn")
 func emitTierReject(surface string) {
+	ts := core.Now().UTC().Unix()
 	_ = audit.Default().Record(audit.Event{
 		Event:   audit.EventSandboxSpawnRejected,
-		TS:      core.Now().UTC().Unix(),
+		TS:      ts,
 		Scope:   "sandbox",
 		Outcome: audit.OutcomeDenied,
 		Meta: map[string]any{
 			"reason":  "tier_go_only",
 			"surface": surface,
+		},
+	})
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventTierReject,
+		TS:      ts,
+		Scope:   "sandbox",
+		Outcome: audit.OutcomeDenied,
+		Meta: map[string]any{
+			"op":             surface,
+			"caller_tier":    "renderer",
+			"caller_subject": "",
+			"caller_source":  "wails",
+			"allowed_tiers":  "internal",
+			"reason":         "tier_go_only",
 		},
 	})
 }

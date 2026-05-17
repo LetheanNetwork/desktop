@@ -217,6 +217,61 @@ const (
 	// the audit row reflects the freshly-decremented counter.
 	EventAuthAccountSealFailed = "auth.account.seal_failed"
 
+	// EventTierReject fires from the auth.Require substrate-gate deny
+	// path (pkg/auth/auth.go) when a caller's stamped tier is NOT in the
+	// method's allowed-tier set. The 9th audit-cluster adopter + 1st
+	// substrate-tier emit per RFC.tier-auth-substrate §4.7 (Cerberus #73
+	// F-4 / Mantis #1758). Closes the STRIDE-R Repudiation gap left open
+	// by Phase 1 (substrate ratchet to Phase 2 default-DENY was blind
+	// without this emit baseline).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   op             — method-name string passed into Require, convention
+	//                    "<package>.<Type>.<Method>" (e.g.
+	//                    "tasks.Service.Create"). Drives forensic queries
+	//                    `event="auth.tier.reject" AND op=<method>`.
+	//   caller_tier    — the rejected caller's stamped CallerTier (string
+	//                    form: "operator" / "renderer" / "plugin" /
+	//                    "cascade" / "cron" / "cli" / "internal"). Empty
+	//                    tier resolves to "internal" via ensureTier before
+	//                    emit so the literal set stays bounded.
+	//   caller_subject — opaque subject identifier (account_id or session
+	//                    breadcrumb); bounded-length truncation applied at
+	//                    emit per Cerberus #1465 (NEVER token bytes —
+	//                    Subject is already opaque by construction; the
+	//                    truncation defends against an upstream caller
+	//                    accidentally stamping a longer-than-bounded
+	//                    breadcrumb).
+	//   caller_source  — source breadcrumb (e.g. "cli" / "wails" /
+	//                    "http-session:LTHN-SESS-1"); bounded-length
+	//                    truncation applied at emit for the same reason.
+	//   allowed_tiers  — comma-joined CallerTier literals naming the
+	//                    set the gate accepted. Lets the forensic walker
+	//                    distinguish a renderer-against-operator-only
+	//                    deny from a renderer-against-internal-only deny
+	//                    without re-running the call-site.
+	//
+	// The raw method args / return values are NEVER in Meta — this row
+	// records the gate decision, not the call payload. The Cerberus
+	// #1465 closure-only-scope discipline binds: Meta values are
+	// short, bounded, categorical; user content stays off the substrate.
+	EventTierReject = "auth.tier.reject"
+
+	// EventTierRejectableTransitional fires alongside the Phase 1.5
+	// broad-ALLOW posture for unmigrated Wails services per RFC §4.7
+	// (Q-1 caveat). Reserved literal — registered in lockstep with
+	// EventTierReject so the parity-grep contract (Go ↔ TS mirror) sees
+	// both names today; emit sites land as §5.2 adopters migrate. Lets
+	// the operator grep audit-trail for renderer calls that WOULD be
+	// denied under Phase 2 default-DENY without the ratchet breaking
+	// renderer flows mid-cycle.
+	//
+	// Meta-shape mirrors EventTierReject so a forensic consumer can
+	// merge the two row-streams under a single facet when triaging
+	// migration candidates.
+	EventTierRejectableTransitional = "auth.tier.rejectable_transitional"
+
 	// EventPluginViewCapabilityGranted fires when a plugin's iframe
 	// view receives a capability via the host-side broker's postMessage
 	// handshake per plans/code/lthn/desktop/views/RFC.plugin-views.md

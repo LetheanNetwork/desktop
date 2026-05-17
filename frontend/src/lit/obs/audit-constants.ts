@@ -37,6 +37,8 @@ export const AUDIT_EVENT_NAMES = [
   "auth.account.created",
   "auth.account.sealed",
   "auth.account.seal_failed",
+  "auth.tier.reject",
+  "auth.tier.rejectable_transitional",
   "plugin.view.capability_granted",
   "inference.generate.requested",
   "inference.generate.completed",

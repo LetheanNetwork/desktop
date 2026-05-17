@@ -15,12 +15,60 @@
 package auth_test
 
 import (
+	"sync"
 	"testing"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/auth"
 	"github.com/gin-gonic/gin"
 )
+
+// recordingRecorder mirrors the sandbox/runner/account fixture shape
+// so an auth_test can assert on EventTierReject emission. Process-
+// global audit.SetDefault is swapped back at t.Cleanup so parallel
+// test packages do not observe each other's recorders.
+type recordingRecorder struct {
+	mu     sync.Mutex
+	events []audit.Event
+}
+
+func (r *recordingRecorder) Record(ev audit.Event) core.Result {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, ev)
+	return core.Ok(nil)
+}
+
+func (r *recordingRecorder) snapshot() []audit.Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]audit.Event, len(r.events))
+	copy(out, r.events)
+	return out
+}
+
+// filterByName returns only events whose Event field matches name.
+func (r *recordingRecorder) filterByName(name string) []audit.Event {
+	all := r.snapshot()
+	out := make([]audit.Event, 0, len(all))
+	for _, ev := range all {
+		if ev.Event == name {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// installAuditRecorder wires a recordingRecorder as audit.Default and
+// restores the prior default at test end.
+func installAuditRecorder(t *testing.T) *recordingRecorder {
+	t.Helper()
+	rec := &recordingRecorder{}
+	audit.SetDefault(rec)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+	return rec
+}
 
 // TestAuth_Caller_Good — stamp via WithCaller, read via Caller; the
 // round-trip preserves Tier/Subject/Source. Covers the Context-shaped
@@ -440,5 +488,97 @@ func TestAuth_RequireFromContext_Bad(t *testing.T) {
 	ctx := auth.AsRenderer(c.Context(), "acct-r", "wails")
 	if _, ok := auth.RequireFromContext(ctx, "op", auth.TierOperator); ok {
 		t.Fatalf("RequireFromContext renderer→operator-only: want !ok got ok")
+	}
+}
+
+// TestAuth_Require_DenyEmitsAudit_Good — Require with disallowed tier
+// emits audit.EventTierReject with the documented Meta shape per
+// RFC.tier-auth-substrate §4.7 (Cerberus #73 F-4 / Mantis #1758).
+// Defends the STRIDE-R Repudiation forensic trail: every Require deny
+// MUST land on the audit substrate before returning to the caller.
+func TestAuth_Require_DenyEmitsAudit_Good(t *testing.T) {
+	rec := installAuditRecorder(t)
+	c := core.New()
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier: auth.TierRenderer, Subject: "account-renderer", Source: "wails",
+	})
+	t.Cleanup(func() { auth.ClearCaller(c) })
+
+	_, ok := auth.Require(c, "tasks.Service.Delete",
+		auth.TierOperator, auth.TierCascade)
+	if ok {
+		t.Fatalf("Require renderer→operator-only: want !ok got ok")
+	}
+
+	rows := rec.filterByName(audit.EventTierReject)
+	if len(rows) != 1 {
+		t.Fatalf("EventTierReject row count: want 1 got %d", len(rows))
+	}
+	row := rows[0]
+	if row.Outcome != audit.OutcomeDenied {
+		t.Fatalf("Outcome: want %q got %q", audit.OutcomeDenied, row.Outcome)
+	}
+	if row.Scope != "auth" {
+		t.Fatalf("Scope: want %q got %q", "auth", row.Scope)
+	}
+	if got := row.Meta["op"]; got != "tasks.Service.Delete" {
+		t.Fatalf("Meta[op]: want %q got %v", "tasks.Service.Delete", got)
+	}
+	if got := row.Meta["caller_tier"]; got != string(auth.TierRenderer) {
+		t.Fatalf("Meta[caller_tier]: want %q got %v", auth.TierRenderer, got)
+	}
+	if got := row.Meta["caller_subject"]; got != "account-renderer" {
+		t.Fatalf("Meta[caller_subject]: want %q got %v", "account-renderer", got)
+	}
+	if got := row.Meta["caller_source"]; got != "wails" {
+		t.Fatalf("Meta[caller_source]: want %q got %v", "wails", got)
+	}
+	if got := row.Meta["allowed_tiers"]; got != "operator,cascade" {
+		t.Fatalf("Meta[allowed_tiers]: want %q got %v", "operator,cascade", got)
+	}
+}
+
+// TestAuth_Require_AllowDoesNotEmit_Good — Require with an allowed
+// tier does NOT emit EventTierReject. The allow path is the silent
+// path: only denies forensic-record. Defends against a noisy-allow
+// regression that would flood the audit substrate with non-decisions.
+func TestAuth_Require_AllowDoesNotEmit_Good(t *testing.T) {
+	rec := installAuditRecorder(t)
+	c := core.New()
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier: auth.TierOperator, Subject: "account-snider", Source: "cli",
+	})
+	t.Cleanup(func() { auth.ClearCaller(c) })
+
+	if _, ok := auth.Require(c, "tasks.Service.Create",
+		auth.TierOperator, auth.TierRenderer); !ok {
+		t.Fatalf("Require operator-permitted: want ok got !ok")
+	}
+
+	rows := rec.filterByName(audit.EventTierReject)
+	if len(rows) != 0 {
+		t.Fatalf("EventTierReject on allow: want 0 got %d", len(rows))
+	}
+}
+
+// TestAuth_RequireFromContext_DenyEmitsAudit_Good — Context-shaped
+// Require companion fires the same EventTierReject row on deny;
+// pins the dual-API parity for the forensic trail.
+func TestAuth_RequireFromContext_DenyEmitsAudit_Good(t *testing.T) {
+	rec := installAuditRecorder(t)
+	c := core.New()
+	ctx := auth.AsRenderer(c.Context(), "acct-r", "wails")
+
+	if _, ok := auth.RequireFromContext(ctx, "queue.Worker.Dispatch",
+		auth.TierOperator); ok {
+		t.Fatalf("RequireFromContext renderer→operator-only: want !ok got ok")
+	}
+
+	rows := rec.filterByName(audit.EventTierReject)
+	if len(rows) != 1 {
+		t.Fatalf("EventTierReject row count: want 1 got %d", len(rows))
+	}
+	if got := rows[0].Meta["op"]; got != "queue.Worker.Dispatch" {
+		t.Fatalf("Meta[op]: want %q got %v", "queue.Worker.Dispatch", got)
 	}
 }

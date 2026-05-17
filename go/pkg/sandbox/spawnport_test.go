@@ -170,3 +170,37 @@ func TestSpawnPort_NewSpawnPortNilSvc_Good(t *core.T) {
 	core.AssertEqual(t, nil, port,
 		"NewSpawnPort(nil) MUST return nil — consumers guard on this")
 }
+
+// TestSandbox_SpawnPort_TierReject_UsesSubstrate_Good — the Wails-shim
+// rejection path emits BOTH the legacy EventSandboxSpawnRejected row
+// (backward grep) AND the substrate-tier audit.EventTierReject row
+// (cluster coherence per RFC.tier-auth-substrate §4.7 / Cerberus #73
+// F-4 / Mantis #1758). The substrate row carries op=<surface> +
+// caller_tier="renderer" + allowed_tiers="internal" so a forensic
+// walker can merge sandbox-shim denies with pkg/auth.Require denies
+// under one facet.
+func TestSandbox_SpawnPort_TierReject_UsesSubstrate_Good(t *core.T) {
+	rec := installAuditRecorder(t)
+	svc := newTestService(Options{})
+
+	r := svc.Spawn(SpawnInput{Image: "lthn/dev:latest", Command: "echo"})
+	core.AssertFalse(t, r.OK, "shim Spawn MUST reject")
+
+	// Backward-grep: legacy row preserved.
+	legacy := rec.filterByName(audit.EventSandboxSpawnRejected)
+	core.AssertEqual(t, 1, len(legacy),
+		"legacy EventSandboxSpawnRejected MUST still fire (backward grep)")
+	core.AssertEqual(t, "tier_go_only", legacy[0].Meta["reason"])
+
+	// Substrate-tier row: new EventTierReject emitted in the same
+	// helper for cluster coherence.
+	substrate := rec.filterByName(audit.EventTierReject)
+	core.AssertEqual(t, 1, len(substrate),
+		"substrate EventTierReject MUST fire alongside legacy row")
+	core.AssertEqual(t, audit.OutcomeDenied, substrate[0].Outcome)
+	core.AssertEqual(t, "sandbox", substrate[0].Scope)
+	core.AssertEqual(t, "sandbox.Spawn", substrate[0].Meta["op"])
+	core.AssertEqual(t, "renderer", substrate[0].Meta["caller_tier"])
+	core.AssertEqual(t, "internal", substrate[0].Meta["allowed_tiers"])
+	core.AssertEqual(t, "tier_go_only", substrate[0].Meta["reason"])
+}
