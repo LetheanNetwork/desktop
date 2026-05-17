@@ -125,6 +125,35 @@ const (
 //
 // New event-name additions are reserved-schema changes — the
 // Operations panel + Stage F log-tailer learn them in the same commit.
+//
+// error_code substrate contract (RFC.error-code-cascade.md, Mantis #1718
+// W1–W7 cascade complete 2026-05-17):
+//
+// EVERY Failed-event Meta["error_code"] in this catalogue MUST be sourced
+// via the audit.ErrorCode(r core.Result) substrate at pkg/audit/errorcode.go.
+// The substrate returns a bounded keyspace — r.Code() OR (*core.Err).Operation
+// OR the canonical "unknown_error" fallback — so the chip-filter UI and the
+// forensic log-tailer can group failures by a stable, finite vocabulary.
+//
+//   // Canonical emit shape (every Failed callsite):
+//   _ = audit.Default().Record(audit.Event{
+//       Event:   audit.EventMarketplaceInstallFailed,
+//       Outcome: audit.OutcomeFailed,
+//       Meta:    map[string]any{"error_code": audit.ErrorCode(r)},
+//   })
+//
+// NEVER pass r.Error() / err.Error() / r.Value.(error).Error() directly to
+// Meta["error_code"]. Raw error prose routinely echoes caller-controlled
+// input (URLs, file paths, prompts, Authorization bytes) and defeats the
+// bounded-keyspace promise the substrate exists to enforce. The pkg/audit
+// secret-shape redactor is token-shaped, not prose-shaped — it is not a
+// substitute for upstream-of-emit code-derivation.
+//
+// References:
+//
+//   - pkg/audit/errorcode.go — canonical substrate + Usage example
+//   - plans/code/lthn/desktop/audit/RFC.error-code-cascade.md — full cascade
+//     design, FOLD-1 canonical-fallback ruling, Cerberus #62 DREAD log
 const (
 	EventAuthUnlockFailed       = "auth.unlock.failed"
 	EventAuthLockoutTriggered   = "auth.lockout.triggered"
@@ -518,9 +547,10 @@ const (
 	//
 	// Meta keys (RFC §2.1, secret-shape redactor enforced):
 	//
-	//   error_code — categorical failure reason; sourced from the upstream
-	//                Result.Error() string (already-scoped via core.E by
-	//                the upstream handler).
+	//   error_code — bounded-keyspace failure literal derived via
+	//                audit.ErrorCode(r) (pkg/audit/errorcode.go); NEVER
+	//                the raw Result.Error() / err.Error() prose — see
+	//                const-block preamble for the substrate contract.
 	EventProcessRunFailed = "process.run.failed"
 
 	// EventProcessStartRequested fires when pkg/process.Service.Start is
@@ -557,7 +587,8 @@ const (
 	//
 	// Meta keys (RFC §2.1, secret-shape redactor enforced):
 	//
-	//   error_code — categorical failure reason (upstream Result.Error()).
+	//   error_code — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                (NEVER raw Result.Error() — substrate contract above).
 	EventProcessStartFailed = "process.start.failed"
 
 	// EventProcessKillRequested fires when pkg/process.Service.Kill is
@@ -585,7 +616,8 @@ const (
 	// Meta keys (RFC §2.1, secret-shape redactor enforced):
 	//
 	//   process_id — caller-supplied registry identifier (may be empty).
-	//   error_code — categorical failure reason (upstream Result.Error()).
+	//   error_code — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                (NEVER raw Result.Error() — substrate contract above).
 	EventProcessKillFailed = "process.kill.failed"
 
 	// EventMarketplaceInstallRequested fires when pkg/marketplace.Service.Install
@@ -631,8 +663,9 @@ const (
 	//
 	//   bundle_id  — manifest.Name (may be empty when ValidateManifest
 	//                rejected the input before Name was resolved)
-	//   error_code — categorical failure reason (Result.Error() string,
-	//                already-scoped via core.E by the install path)
+	//   error_code — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                (pkg/audit/errorcode.go); NEVER raw Result.Error() prose
+	//                — substrate contract above.
 	EventMarketplaceInstallFailed = "marketplace.install.failed"
 
 	// EventMarketplaceUninstallRequested fires when pkg/marketplace.Service.Uninstall
@@ -666,7 +699,8 @@ const (
 	// Meta keys (RFC §2.1, secret-shape redactor enforced):
 	//
 	//   bundle_id  — caller-supplied identifier (may be empty)
-	//   error_code — categorical failure reason (Result.Error())
+	//   error_code — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                (NEVER raw Result.Error() — substrate contract above).
 	EventMarketplaceUninstallFailed = "marketplace.uninstall.failed"
 
 	// EventMarketplaceLaunchRequested fires when pkg/marketplace.Service.Launch
@@ -697,7 +731,8 @@ const (
 	// Meta keys (RFC §2.1, secret-shape redactor enforced):
 	//
 	//   bundle_id  — caller-supplied identifier (may be empty)
-	//   error_code — categorical failure reason (Result.Error())
+	//   error_code — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                (NEVER raw Result.Error() — substrate contract above).
 	EventMarketplaceLaunchFailed = "marketplace.launch.failed"
 
 	// EventMarketplaceStopRequested fires when pkg/marketplace.Service.Stop
@@ -727,7 +762,8 @@ const (
 	// Meta keys (RFC §2.1, secret-shape redactor enforced):
 	//
 	//   bundle_id  — caller-supplied identifier (may be empty)
-	//   error_code — categorical failure reason (Result.Error())
+	//   error_code — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                (NEVER raw Result.Error() — substrate contract above).
 	EventMarketplaceStopFailed = "marketplace.stop.failed"
 
 	// EventMarketplaceFetchManifestRequested fires when
@@ -768,7 +804,8 @@ const (
 	//
 	//   domain_only — URL hostname (when parseable; empty when the URL
 	//                 was malformed enough to reject before parse)
-	//   error_code  — categorical failure reason (Result.Error())
+	//   error_code  — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                 (NEVER raw Result.Error() — substrate contract above).
 	EventMarketplaceFetchManifestFailed = "marketplace.fetch_manifest.failed"
 
 	// EventMarketplaceFetchManifestRejected fires when FetchManifest
@@ -797,10 +834,12 @@ const (
 	//
 	//   bundle_id  — manifest.Name (may be empty when the rejection was
 	//                on the Name field itself)
-	//   error_code — categorical failure reason (Result.Error()); the
-	//                validator's typed scope literals (validateOp etc) flow
-	//                through the message so downstream chip-filter UI can
-	//                pattern-match the failure class
+	//   error_code — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                (pkg/audit/errorcode.go). The validator's typed scope
+	//                literals (validateOp etc) surface through r.Code() /
+	//                (*core.Err).Operation so the chip-filter UI can group
+	//                by the failure class; NEVER raw Result.Error() prose
+	//                — substrate contract above.
 	//
 	// NOTE: ValidateManifest succeeds quietly (no audit row on the OK
 	// path) — emitting Succeeded for every parse-then-validate call would
@@ -867,11 +906,12 @@ const (
 	//   bundle_id     — authoritative bundle code (mirrors Requested)
 	//   route_pattern — "<scope>:<mode>" join (mirrors Requested)
 	//   method        — HTTP verb (mirrors Requested)
-	//   error_code    — categorical failure code; sourced from
-	//                   Result.Error() (already-scoped via core.E by the
-	//                   handler). Raw error messages may embed handler-
-	//                   specific context; the redactor backstop trims any
-	//                   value matching the secret-shape recogniser.
+	//   error_code    — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                   (pkg/audit/errorcode.go); NEVER raw Result.Error()
+	//                   prose. The substrate derives a stable literal from
+	//                   r.Code() / (*core.Err).Operation so handler-specific
+	//                   context cannot leak into the audit error_code field
+	//                   — substrate contract above.
 	EventGatewayDispatchFailed = "gateway.dispatch.failed"
 
 	// EventGatewayDispatchRejected fires when Handle refuses to dispatch
@@ -971,10 +1011,11 @@ const (
 	//
 	//   source_host — URL hostname (when parseable; empty when the URL was
 	//                 malformed enough to reject before parse)
-	//   error_code  — categorical failure reason (Result.Error() string,
-	//                 already-scoped via core.E by the fetch path).
-	//                 Raw URL paths / Authorization bytes NEVER reach this
-	//                 field; the upstream error scopes are bounded literals.
+	//   error_code  — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                 (pkg/audit/errorcode.go); NEVER raw Result.Error() prose.
+	//                 The substrate derives the literal from r.Code() /
+	//                 (*core.Err).Operation so raw URL paths / Authorization
+	//                 bytes cannot leak — substrate contract above.
 	EventDownloaderFetchFailed = "downloader.fetch.failed"
 
 	// EventDownloaderFetchRejected fires when FetchVerified rejects the
