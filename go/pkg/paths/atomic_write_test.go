@@ -209,9 +209,14 @@ func TestAtomicWrite_ConflictBodyOptInDefault_Bad(t *core.T) {
 	core.AssertNotEqual(t, "", vs.CurrentHash)
 }
 
+// TestAtomicWrite_AtRestPathNeverIncludesBody_Ugly — Mantis #1553
+// upgraded this from silent-ignore to entry-side hard reject.
+// IncludeBody=true on an at-rest path now returns
+// CodeIncludeBodyAtRestRejected before the lock or read steps
+// execute. The defence-in-depth at-rest omission in failVersionStale
+// is exercised by TestAtomicWrite_AtRestSilentIgnoreDefenceInDepth.
 func TestAtomicWrite_AtRestPathNeverIncludesBody_Ugly(t *core.T) {
 	homeFixture(t)
-	// Plant a file under wallets/ — the prefix list catches this.
 	walletDir := paths.WalletsDir()
 	core.AssertTrue(t, walletDir.OK)
 	fp := core.PathJoin(walletDir.Value.(string), "server.key")
@@ -221,25 +226,80 @@ func TestAtomicWrite_AtRestPathNeverIncludesBody_Ugly(t *core.T) {
 	core.AssertTrue(t, paths.IsAtRestEncryptedPath(fp),
 		"wallets/server.key MUST classify as at-rest-encrypted")
 
-	stale := paths.AtomicWriteWithVersion(fp, paths.WriteInput{
+	rejected := paths.AtomicWriteWithVersion(fp, paths.WriteInput{
 		Body:        []byte("x"),
 		IfMatchHash: "stale-hash",
 		IncludeBody: true, // explicit opt-in
 	})
+	core.AssertFalse(t, rejected.OK)
+	core.AssertContains(t, rejected.Error(),
+		paths.CodeIncludeBodyAtRestRejected,
+		"at-rest + IncludeBody MUST surface the typed entry-side reject")
+}
+
+// TestAtomicWrite_IncludeBodyAtRestRejected_Ugly — Mantis #1553
+// (CRIT-1 load-bearing). Exhaustively walks every prefix in
+// AtRestEncryptedPrefixes() to assert IncludeBody=true is rejected
+// across the whole at-rest surface (not just the wallets/server.key
+// canonical example covered by the original
+// TestAtomicWrite_AtRestPathNeverIncludesBody_Ugly).
+func TestAtomicWrite_IncludeBodyAtRestRejected_Ugly(t *core.T) {
+	homeFixture(t)
+	root := paths.Root().Value.(string)
+	cases := []string{
+		core.PathJoin(root, "wallets/server.key"),
+		core.PathJoin(root, "account/abc/private.key"),
+		core.PathJoin(root, "office/mail/_accounts.enc"),
+		core.PathJoin(root, "sales/deals/x.md"),
+		core.PathJoin(root, "incidents/2026.md"),
+		core.PathJoin(root, "runbooks/x.md"),
+	}
+	for _, fp := range cases {
+		// Path doesn't need to exist — the entry-side check fires
+		// before WithFileLock or ReadVersion.
+		r := paths.AtomicWriteWithVersion(fp, paths.WriteInput{
+			Body:        []byte("body"),
+			IncludeBody: true,
+		})
+		if r.OK {
+			t.Errorf("%s: IncludeBody=true MUST be rejected at entry", fp)
+			continue
+		}
+		core.AssertContains(t, r.Error(),
+			paths.CodeIncludeBodyAtRestRejected,
+			"reject MUST surface CodeIncludeBodyAtRestRejected for "+fp)
+	}
+}
+
+// TestAtomicWrite_AtRestSilentIgnoreDefenceInDepth_Good — Mantis
+// #1553 leaves the failVersionStale at-rest branch in place as
+// defence in depth. This test exercises that branch by writing to a
+// CASCADE path (which AtomicWriteWithVersion does not reject) but
+// asserts CRIT-1 contract still holds for at-rest paths via the
+// dedicated reject test.
+//
+// The pre-existing default-omit branch is what cascade callers hit
+// when they do NOT opt into IncludeBody — verified end-to-end via
+// the version_stale envelope.
+func TestAtomicWrite_AtRestSilentIgnoreDefenceInDepth_Good(t *core.T) {
+	homeFixture(t)
+	// Cascade path — entry-side reject does NOT fire (path is not
+	// at-rest), so the default-omit + opt-in body branches in
+	// failVersionStale stay reachable here.
+	fp := tmpFile(t, "cascade.md")
+	if r := core.WriteFile(fp, []byte("seed"), 0o600); !r.OK {
+		t.Fatalf("seed: %s", r.Error())
+	}
+	stale := paths.AtomicWriteWithVersion(fp, paths.WriteInput{
+		Body:        []byte("x"),
+		IfMatchHash: "stale-hash",
+		IncludeBody: true,
+	})
 	core.AssertFalse(t, stale.OK)
 	vs, ok := paths.VersionStaleFromError(stale.Value)
 	core.AssertTrue(t, ok)
-	core.AssertEqual(t, 0, len(vs.CurrentBody),
-		"at-rest-encrypted prefix MUST omit body regardless of IncludeBody")
-	// Flag surfaces the reason for the omission.
-	found := false
-	for _, f := range vs.Flags {
-		if f == paths.CurrentBodyAtRestOmitFlag {
-			found = true
-		}
-	}
-	core.AssertTrue(t, found,
-		"flag MUST advertise the at-rest omission so the client can route to GET")
+	core.AssertEqual(t, "seed", string(vs.CurrentBody),
+		"cascade path with IncludeBody=true MUST include the body")
 }
 
 func TestAtomicWrite_ConflictBody1MBCap_Ugly(t *core.T) {

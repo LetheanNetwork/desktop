@@ -53,6 +53,12 @@ const (
 	CodeWriteFsync       = "paths.write.fsync_failed"
 	CodeWriteRename      = "paths.write.rename_failed"
 	CodeVersionStale     = "paths.write.version_stale"
+	// CodeIncludeBodyAtRestRejected — Mantis #1553 (CRIT-1
+	// load-bearing). WriteInput.IncludeBody=true on a path matching
+	// AtRestEncryptedPrefixes() is rejected at entry. The prior
+	// silent-ignore in failVersionStale was best-effort defence in
+	// depth; making the check load-bearing closes the spec gap.
+	CodeIncludeBodyAtRestRejected = "paths.write.include_body_at_rest_rejected"
 )
 
 // CurrentBodyMaxBytes is the §4.2 CRIT-1 cap on VersionStale
@@ -282,6 +288,17 @@ func AtomicWriteWithVersion(path string, input WriteInput) core.Result {
 		return core.Fail(core.NewCode(CodeWriteInvalidPath,
 			"AtomicWriteWithVersion requires a non-empty path"))
 	}
+	// Mantis #1553 (CRIT-1 load-bearing) — reject IncludeBody=true
+	// on at-rest-encrypted paths at entry, before any lock or read.
+	// The pre-existing silent-ignore in failVersionStale remains as
+	// defence in depth (commented as such there) but the load-
+	// bearing check is here: a caller asking for the at-rest body
+	// is a misuse the surface refuses outright, not a request the
+	// surface quietly downgrades.
+	if input.IncludeBody && IsAtRestEncryptedPath(path) {
+		return core.Fail(core.NewCode(CodeIncludeBodyAtRestRejected,
+			"IncludeBody=true rejected on at-rest-encrypted path; client must use the authed GET path to retrieve ciphertext"))
+	}
 	return WithFileLock(path, input.Timeout, func() core.Result {
 		// Read current state under lock.
 		rdR := ReadVersion(path)
@@ -407,6 +424,14 @@ func AtomicWriteWithVersion(path string, input WriteInput) core.Result {
 // failVersionStale builds the VersionStale envelope per §4.2 rules
 // (opt-in body, at-rest never-include, 1 MiB cap) and returns it as
 // a typed Fail Result.
+//
+// Mantis #1553 — the at-rest branch below is now defence in depth:
+// AtomicWriteWithVersion rejects IncludeBody=true on at-rest paths
+// at entry with CodeIncludeBodyAtRestRejected, so failVersionStale
+// should never see includeBody=true on such a path. The branch stays
+// in case a future caller surface bypasses the entry check (e.g. a
+// direct invocation of failVersionStale from a sibling test) — the
+// flag emission keeps the client-facing contract intact.
 func failVersionStale(path string, cur ReadOutput, includeBody bool) core.Result {
 	vs := VersionStale{
 		CurrentVersion: cur.Version,
@@ -417,6 +442,8 @@ func failVersionStale(path string, cur ReadOutput, includeBody bool) core.Result
 	case !includeBody:
 		// Default omit — no flag, plain omission.
 	case IsAtRestEncryptedPath(path):
+		// Defence in depth (#1553) — the entry-side check should
+		// have rejected this with CodeIncludeBodyAtRestRejected.
 		vs.Flags = append(vs.Flags, CurrentBodyAtRestOmitFlag)
 	case len(cur.Body) > CurrentBodyMaxBytes:
 		vs.Flags = append(vs.Flags, CurrentBodyTooLargeFlag)

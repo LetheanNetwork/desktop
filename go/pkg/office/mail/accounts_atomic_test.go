@@ -127,33 +127,27 @@ func TestMail_AccountsEnc_IncludeBodyExplicitlyFalse_Good(t *testing.T) {
 		t.Fatalf("CurrentBody MUST be empty when IncludeBody=false; got %d bytes", len(stale.CurrentBody))
 	}
 
-	// Sanity: even when a future bug flips IncludeBody=true, the
-	// at-rest gate omits + tags the flag. Defence-in-depth pin.
+	// Belt-and-braces: even when a caller flips IncludeBody=true on
+	// an at-rest path, the primitive REJECTS at the API boundary
+	// with CodeIncludeBodyAtRestRejected (Mantis #1553 load-bearing
+	// CRIT-1 upgrade — the entry-side reject fires before lock /
+	// read / version comparison, so the VersionStale envelope is
+	// NOT produced on this branch). The silent-omit behaviour at
+	// failVersionStale is retained as defence in depth and is
+	// exercised by paths.TestAtomicWrite_AtRestSilentIgnoreDefenceInDepth_Good.
 	wr2 := paths.AtomicWriteWithVersion(abs, paths.WriteInput{
 		Body:        rawR.Value.([]byte),
 		IfMatchHash: staleHash,
-		IncludeBody: true, // discipline violation — primitive MUST still omit
+		IncludeBody: true, // discipline violation — primitive MUST reject at entry
 	})
 	if wr2.OK {
-		t.Fatal("expected stale write to fail with VersionStale envelope")
+		t.Fatal("at-rest IncludeBody=true MUST be rejected at entry")
 	}
-	stale2, ok := paths.VersionStaleFromError(wr2.Value)
-	if !ok {
-		t.Fatalf("expected VersionStale on belt-and-braces probe, got %T", wr2.Value)
-	}
-	if len(stale2.CurrentBody) != 0 {
-		t.Fatalf("at-rest gate failed: CurrentBody leaked %d bytes despite AtRestEncryptedPrefixes", len(stale2.CurrentBody))
-	}
-	flagged := false
-	for _, f := range stale2.Flags {
-		if f == paths.CurrentBodyAtRestOmitFlag {
-			flagged = true
-			break
-		}
-	}
-	if !flagged {
-		t.Fatalf("at-rest body-omission MUST set %s flag; flags=%v",
-			paths.CurrentBodyAtRestOmitFlag, stale2.Flags)
+	core.AssertContains(t, wr2.Error(),
+		paths.CodeIncludeBodyAtRestRejected,
+		"at-rest IncludeBody=true MUST surface CodeIncludeBodyAtRestRejected")
+	if _, ok := paths.VersionStaleFromError(wr2.Value); ok {
+		t.Fatal("entry-side reject MUST fire before VersionStale envelope is produced")
 	}
 }
 
