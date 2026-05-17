@@ -51,27 +51,66 @@ import (
 // Nil is a valid value — the openai.Backend treats a nil Limiter
 // as "no quota tracking" and the rest of the binary keeps working
 // (useful in tests + CI where the path isn't writable).
-var outboundLimiter openai.Limiter
+//
+// Mantis #1660 / Cerberus #45 — guarded by outboundLimiterOnce so
+// concurrent first-callers serialise on the SQLite open. Prior to
+// this discipline the raw read+write race let two simultaneous
+// SetDynamicRoutes calls each invoke ratelimit.NewWithSQLite, drop
+// one Limiter on the floor, and (worse) accept either-or as the
+// "winning" pointer. The Once.Do collapses that to a single attempt
+// whose outcome (success or failure) is the canonical answer for
+// the process lifetime.
+var (
+	outboundLimiter     openai.Limiter
+	outboundLimiterOnce core.Once
+)
 
 // resolveOutboundLimiter lazily constructs the per-process limiter.
 // Called by buildRoute the first time a real route is being wired —
 // avoids spinning up the SQLite file in test paths that never touch
 // providers.
+//
+// Mantis #1660 / Cerberus #45 — explicit fail-loud log on SQLite open
+// failure so the operator can correlate "quotas not tracking" with the
+// underlying disk / permission issue. The prior shape returned nil
+// silently and let the backend treat it as "no quota tracking" with no
+// observable signal. Tests + CI paths that legitimately have no writable
+// ~/Lethean/data/ still see the nil result (operative behaviour
+// unchanged) — they just also see a one-shot stderr line explaining why.
 func resolveOutboundLimiter() openai.Limiter {
-	if outboundLimiter != nil {
-		return outboundLimiter
-	}
-	dirR := paths.DataDir()
-	if !dirR.OK {
-		return nil
-	}
-	dir, _ := dirR.Value.(string)
-	rl, err := ratelimit.NewWithSQLite(core.PathJoin(dir, "ratelimits.db"))
-	if err != nil {
-		return nil
-	}
-	outboundLimiter = rl
+	outboundLimiterOnce.Do(func() {
+		dirR := paths.DataDir()
+		if !dirR.OK {
+			core.Print(core.Stderr(),
+				"runner.outboundLimiter: data dir unresolved — quota tracking disabled (%s)\n",
+				dirR.Error())
+			return
+		}
+		dir, _ := dirR.Value.(string)
+		rl, err := ratelimit.NewWithSQLite(core.PathJoin(dir, "ratelimits.db"))
+		if err != nil {
+			core.Print(core.Stderr(),
+				"runner.outboundLimiter: SQLite open failed — quota tracking disabled (%s)\n",
+				err.Error())
+			return
+		}
+		outboundLimiter = rl
+	})
 	return outboundLimiter
+}
+
+// ResetOutboundLimiterForTests clears the cached limiter + once so a
+// test can drive the resolveOutboundLimiter path multiple times against
+// different paths.DataDir() fixtures. Test-only — production callers
+// MUST NOT invoke (the once-per-process contract is load-bearing for
+// the openai.Backend.Limiter sharing across route reloads).
+//
+// Mantis #1660 — exposed so the init-failure test can re-fire resolve
+// against a poisoned paths.DataDir() and assert the fail-loud surface
+// without contaminating the process-wide limiter state.
+func ResetOutboundLimiterForTests() {
+	outboundLimiter = nil
+	outboundLimiterOnce.Reset()
 }
 
 // LoadRoutesFromCore reads `routes:` from the registered config

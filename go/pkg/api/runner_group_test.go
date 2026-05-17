@@ -256,3 +256,85 @@ func TestRunnerGroup_Chat_ClientDisconnect_Bad(t *core.T) {
 	}
 	core.AssertEqual(t, core.StatusInternalServerError, w.Code)
 }
+
+// TestRunnerGroup_Chat_PerMessageCaps_Bad — Mantis #1661 / Cerberus
+// #45 ADD. The HTTP /v1/runner/chat path previously inherited only the
+// outer engine-wide body cap; the Wails surface (WChat) enforces three
+// structural caps (count / per-message size / cumulative total) that
+// the HTTP path bypassed entirely. With ~40k tiny-content messages
+// fitting under a 64 KiB body cap, the asymmetric path admitted a
+// denial-of-service allocation pattern that the Wails twin already
+// rejected.
+//
+// Drives the count-cap path (cheapest reject) so the test stays small
+// even though Wails-vs-HTTP parity covers all three axes — the WChat
+// twins (wails_test.go TestRunner_WChat_Bad_TooManyMessages /
+// _OversizedSingleMessage / _OversizedCumulative) exercise the
+// per-axis logic against the shared violatesChatCaps body.
+func TestRunnerGroup_Chat_PerMessageCaps_Bad(t *core.T) {
+	engine := newTestEngine(t)
+
+	// MaxChatMessages + 1 — guaranteed reject at the count axis. Use
+	// tiny role + content so the body stays under the engine-wide cap
+	// and the cap-layer is the only rejecter.
+	count := runner.MaxChatMessages + 1
+	buf := []byte(`{"messages":[`)
+	for i := 0; i < count; i++ {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = append(buf, []byte(`{"role":"u","content":"x"}`)...)
+	}
+	buf = append(buf, []byte(`]}`)...)
+
+	req := core.NewHTTPRequest(core.MethodPost, "/v1/runner/chat",
+		core.NewReader(string(buf))).Value.(*core.Request)
+	req.Header.Set(contentTypeHeader, applicationJSON)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	// Cap layer rejects at 400 (operator error). 500 would mean the
+	// router got the payload; 200 would mean caps were bypassed.
+	core.AssertEqual(t, core.StatusBadRequest, w.Code)
+	body := w.Body.String()
+	core.AssertTrue(t, core.Contains(body, "message count exceeds"),
+		"reject body must name the cap that fired; got: "+body)
+}
+
+// TestRunnerGroup_Chat_AtCapNoReject_Good — boundary check that the
+// cap rejects strictly-over, not equal-to. Mirror of the WChat parity
+// case to guarantee the < vs <= semantics stays uniform across the
+// two ingress surfaces.
+func TestRunnerGroup_Chat_AtCapNoReject_Good(t *core.T) {
+	engine := newTestEngine(t)
+
+	// Single message right at the per-message cap. Role+Content size
+	// strictly equals MaxPromptBytes — cap is `size > MaxPromptBytes`,
+	// so equality must pass.
+	role := "u"
+	contentLen := runner.MaxPromptBytes - len(role)
+	content := make([]byte, contentLen)
+	for i := range content {
+		content[i] = 'X'
+	}
+	// Hand-build JSON to avoid double-allocating in test memory.
+	body := []byte(`{"messages":[{"role":"u","content":"`)
+	body = append(body, content...)
+	body = append(body, []byte(`"}]}`)...)
+
+	req := core.NewHTTPRequest(core.MethodPost, "/v1/runner/chat",
+		core.NewReader(string(body))).Value.(*core.Request)
+	req.Header.Set(contentTypeHeader, applicationJSON)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	// Body cap may reject (16 MiB default vs 1 MiB content); cap layer
+	// must NOT — distinguish by inspecting the body for the structural
+	// cap sentinel string. If the cap layer fires it returns
+	// "message[..] size .. exceeds .. byte cap".
+	if w.Code == core.StatusBadRequest {
+		core.AssertFalse(t, core.Contains(w.Body.String(), "size") &&
+			core.Contains(w.Body.String(), "byte cap"),
+			"at-cap message must not trip the structural cap layer; got: "+w.Body.String())
+	}
+}

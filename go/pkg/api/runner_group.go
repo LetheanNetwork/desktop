@@ -29,6 +29,7 @@ package api
 import (
 	"github.com/gin-gonic/gin"
 
+	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
 	"dappco.re/go/inference"
 	"dappco.re/lthn/desktop/pkg/runner"
@@ -202,10 +203,23 @@ type chatRequest struct {
 // that handler's doc-comment. Calls runner.ChatCtx with the gin
 // request context so an abandoned request terminates the upstream
 // provider call instead of running to completion.
+//
+// Mantis #1661 / Cerberus #45 — per-message structural caps mirror
+// the Wails surface (runner.MaxChatMessages / MaxPromptBytes /
+// MaxChatTotalBytes). The HTTP path previously inherited only the
+// outer engine-wide body cap (64 KiB) which admitted ~30k empty-
+// content message structs in one allocation. Cap rejection fires at
+// 400 so the gin envelope distinguishes operator-error from upstream
+// failure. Same ordering as WChat: count first (cheap), per-message
+// next, cumulative total last.
 func (g *RunnerGroup) handleChat(c *gin.Context) {
 	var req chatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	if msg, ok := violatesChatCaps(req.Messages); !ok {
+		c.JSON(400, gin.H{"error": msg})
 		return
 	}
 	r := g.runner.ChatCtx(c.Request.Context(), req.Messages)
@@ -215,4 +229,37 @@ func (g *RunnerGroup) handleChat(c *gin.Context) {
 	}
 	reply, _ := r.Value.(string)
 	c.JSON(200, gin.H{"reply": reply})
+}
+
+// violatesChatCaps applies the Wails-side structural caps from
+// pkg/runner (MaxChatMessages / MaxPromptBytes / MaxChatTotalBytes)
+// to an inference.Message slice. Returns (diagnostic, true) on
+// success and (diagnostic, false) on the first cap violation. Ordering
+// matches the WChat surface for parity-test symmetry.
+//
+// Usage example (in handleChat):
+//
+//	if msg, ok := violatesChatCaps(req.Messages); !ok {
+//	    c.JSON(400, gin.H{"error": msg})
+//	    return
+//	}
+func violatesChatCaps(messages []inference.Message) (string, bool) {
+	if len(messages) > runner.MaxChatMessages {
+		return core.Sprintf("message count exceeds %d (got %d)",
+			runner.MaxChatMessages, len(messages)), false
+	}
+	var total int
+	for i, m := range messages {
+		size := len(m.Role) + len(m.Content)
+		if size > runner.MaxPromptBytes {
+			return core.Sprintf("message[%d] size %d exceeds %d byte cap",
+				i, size, runner.MaxPromptBytes), false
+		}
+		total += size
+		if total > runner.MaxChatTotalBytes {
+			return core.Sprintf("cumulative message size at index %d exceeds %d byte cap",
+				i, runner.MaxChatTotalBytes), false
+		}
+	}
+	return "", true
 }

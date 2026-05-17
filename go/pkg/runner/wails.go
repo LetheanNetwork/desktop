@@ -34,6 +34,11 @@ type RouteView struct {
 // inference router gets a chance to reject. These caps stop the
 // request at the binding boundary.
 //
+// Mantis #1661 / Cerberus #45 ADD — exported (Max* prefix) so the
+// pkg/api/runner_group HTTP surface can apply the same structural
+// caps before dispatching to router.Chat. Wails-vs-HTTP asymmetry
+// closure: both ingress surfaces now share one cap-source-of-truth.
+//
 // Sizing rationale:
 //   - 1 MiB single prompt fits a 200K-token Claude-class context at
 //     ~5 bytes/token, with headroom for system prompts + chat
@@ -43,9 +48,15 @@ type RouteView struct {
 //   - 2000 messages is far more than any reasonable conversation
 //     (typical: 10s; aggressive: 100s).
 const (
-	maxPromptBytes    = 1 << 20 // 1 MiB — WGenerate prompt OR per-msg
-	maxChatTotalBytes = 8 << 20 // 8 MiB — sum across all WChat messages
-	maxChatMessages   = 2000
+	MaxPromptBytes    = 1 << 20 // 1 MiB — WGenerate prompt OR per-msg
+	MaxChatTotalBytes = 8 << 20 // 8 MiB — sum across all WChat messages
+	MaxChatMessages   = 2000
+
+	// Unexported aliases retained for in-package call-sites to keep
+	// the diff localised; new external consumers use the Max* surface.
+	maxPromptBytes    = MaxPromptBytes
+	maxChatTotalBytes = MaxChatTotalBytes
+	maxChatMessages   = MaxChatMessages
 )
 
 // ServiceName / Startup / Shutdown — Wails3 lifecycle. Service was
@@ -85,7 +96,7 @@ func (s *Service) WGenerate(prompt string) core.Result {
 	}
 	r := s.Generate(prompt)
 	if !r.OK {
-		return core.Fail(core.E("runner.Service.WGenerate", "generate failed", r.Value.(error)))
+		return wrapInnerFail("runner.Service.WGenerate", "generate failed", r)
 	}
 	text, _ := r.Value.(string)
 	return core.Ok(text)
@@ -119,7 +130,7 @@ func (s *Service) WChat(messages []inference.Message) core.Result {
 	}
 	r := s.Chat(messages)
 	if !r.OK {
-		return core.Fail(core.E("runner.Service.WChat", "chat failed", r.Value.(error)))
+		return wrapInnerFail("runner.Service.WChat", "chat failed", r)
 	}
 	text, _ := r.Value.(string)
 	return core.Ok(text)
@@ -130,10 +141,29 @@ func (s *Service) WChat(messages []inference.Message) core.Result {
 func (s *Service) WModels() core.Result {
 	r := s.Models()
 	if !r.OK {
-		return core.Fail(core.E("runner.Service.WModels", "list models failed", r.Value.(error)))
+		return wrapInnerFail("runner.Service.WModels", "list models failed", r)
 	}
 	names, _ := r.Value.([]string)
 	return core.Ok(names)
+}
+
+// wrapInnerFail is the safe inner-Result error wrapper used by the
+// renderer-callable W* bindings. Mantis #1659 / Cerberus #45 ADD —
+// the prior shape unconditionally cast inner.Value.(error) and the
+// renderer-callable binding worker panicked when a future router
+// refactor returned a Fail whose Value wasn't an *core.Err (e.g.
+// typed-string sentinel from a sandbox subprocess). comma-ok the
+// assert, fall back to inner.Error() so the Fail envelope still
+// carries the diagnostic regardless of the inner Value shape.
+//
+// Usage example (only the W* methods on Service should call this):
+//
+//	if !r.OK {
+//	    return wrapInnerFail("runner.Service.WGenerate", "generate failed", r)
+//	}
+func wrapInnerFail(op, msg string, inner core.Result) core.Result {
+	cause, _ := inner.Value.(error)
+	return core.Fail(core.E(op, core.Concat(msg, ": ", inner.Error()), cause))
 }
 
 // WRoutes returns the configured provider routes for the Settings →
