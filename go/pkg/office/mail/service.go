@@ -32,6 +32,7 @@ import (
 
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/account"
+	"dappco.re/lthn/desktop/pkg/office/internal/safedir"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
 	"gopkg.in/yaml.v3"
@@ -326,20 +327,27 @@ func (s *Service) Stop(_ core.Context) core.Result {
 
 // mailDir resolves ~/Lethean/office/mail/ and creates it if missing.
 // Mode 0o700 — mail metadata is PII (Cerberus #1487 mandate).
+//
+// Symlink-pivot defence (Mantis #1499 MED, Cerberus wave-2/pass-10):
+// goes through safedir.MkdirAll so an attacker who pre-creates
+// ~/Lethean/office/mail as a symlink to /tmp/evil cannot redirect
+// mail metadata writes — safedir refuses with
+// safedir.UnsafeSymlinkParentCode.
 func mailDir() core.Result {
 	root := paths.Root()
 	if !root.OK {
 		return root
 	}
 	dir := core.PathJoin(root.Value.(string), "office", "mail")
-	if r := core.MkdirAll(dir, 0o700); !r.OK {
+	if r := safedir.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)
 }
 
 // folderDir resolves ~/Lethean/office/mail/{slug}/ and creates it.
-// Validates slug via paths.IsValidID before path join.
+// Validates slug via paths.IsValidID before path join. Goes through
+// safedir.MkdirAll — per-folder symlink-pivot defence (Mantis #1499).
 func folderDir(slug string) core.Result {
 	if err := paths.IsValidID(slug); err != nil {
 		return core.Fail(core.E("mail.folderDir", "invalid folder slug", err))
@@ -349,7 +357,7 @@ func folderDir(slug string) core.Result {
 		return base
 	}
 	dir := core.PathJoin(base.Value.(string), slug)
-	if r := core.MkdirAll(dir, 0o700); !r.OK {
+	if r := safedir.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)
@@ -374,7 +382,9 @@ func accountsEncPath() core.Result {
 	return core.Ok(core.PathJoin(base.Value.(string), accountsEncFile))
 }
 
-// stateDirPath returns ~/Lethean/office/mail/_state/{account}/ and creates it.
+// stateDirPath returns ~/Lethean/office/mail/_state/{account}/ and
+// creates it. Goes through safedir.MkdirAll — per-account symlink-pivot
+// defence (Mantis #1499 MED).
 func stateDirPath(accountName string) core.Result {
 	if err := paths.IsValidID(accountName); err != nil {
 		return core.Fail(core.E("mail.stateDirPath", "invalid account name", err))
@@ -384,7 +394,7 @@ func stateDirPath(accountName string) core.Result {
 		return base
 	}
 	dir := core.PathJoin(base.Value.(string), stateDir, accountName)
-	if r := core.MkdirAll(dir, 0o700); !r.OK {
+	if r := safedir.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)

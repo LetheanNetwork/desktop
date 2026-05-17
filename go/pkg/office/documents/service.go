@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/office/internal/safedir"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"gopkg.in/yaml.v3"
 )
@@ -61,13 +62,19 @@ func (s *Service) ServiceName() string { return "Documents" }
 
 // docsDir resolves ~/Lethean/office/docs/ and creates it if missing.
 // Mode 0o700 — documents are PII (Cerberus #1487 mandate).
+//
+// Symlink-pivot defence (Mantis #1499 MED, Cerberus wave-2/pass-10):
+// goes through safedir.MkdirAll so an attacker who pre-creates
+// ~/Lethean/office/docs as a symlink to /tmp/evil cannot redirect
+// document writes — safedir refuses with
+// safedir.UnsafeSymlinkParentCode.
 func docsDir() core.Result {
 	root := paths.Root()
 	if !root.OK {
 		return root
 	}
 	dir := core.PathJoin(root.Value.(string), "office", "docs")
-	if r := core.MkdirAll(dir, 0o700); !r.OK {
+	if r := safedir.MkdirAll(dir, 0o700); !r.OK {
 		return r
 	}
 	return core.Ok(dir)
