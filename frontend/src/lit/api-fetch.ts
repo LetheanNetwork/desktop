@@ -105,7 +105,7 @@ export interface GrantTargetFrame {
 // outcome literal + reason on deny (RFC §3.0 contract item (c)).
 export type GrantOutcome =
   | { ok: true; scopes: string[] }
-  | { ok: false; reason: "audit-failed" | "no-session" };
+  | { ok: false; reason: "audit-failed" | "no-session" | "postmessage-failed" };
 
 /** grantTokenToFrame — the ONLY path that releases cachedSessionToken
  *  outside api-fetch.ts. Audits server-side per scope FIRST; on any
@@ -184,10 +184,16 @@ export async function grantTokenToFrame(
   try {
     target.source.postMessage(payload, target.targetOrigin);
   } catch {
-    // Non-browser context — drop silently. The audit row already
-    // committed; caller still receives ok=true since the audit chain
-    // succeeded. Future test harnesses that stub source can rely on
-    // this shape.
+    // postMessage failed (target window closed, cross-origin throw,
+    // non-browser context). The audit row already committed showing
+    // outcome:granted, but no token bytes crossed. Per RFC §10
+    // row-IS-grant discipline-floor, return failure so the caller
+    // knows the grant did not actually deliver — caller's
+    // dispatchGranted/dispatchDenied branch must observe reality, not
+    // the pre-committed audit row. The audit-row semantics widen to
+    // "grant-attempted" — captured in Mantis #1585 closure note +
+    // RFC v2 §6.2/§10 footnote.
+    return { ok: false, reason: "postmessage-failed" };
   }
   return { ok: true, scopes: [...scopes] };
 }

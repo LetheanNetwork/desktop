@@ -172,6 +172,67 @@ describe("TestApiFetch_GrantTokenToFrame_AuditBeforePostMessage_Good", () => {
   });
 });
 
+// ─── postMessage failure propagation ──────────────────────────────────
+
+describe("TestApiFetch_GrantTokenToFrame_PostMessageThrowReturnsNotOk_Bad", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("postMessage throw returns ok:false reason:postmessage-failed without dispatching", async () => {
+    // Cerberus #17 / Mantis #1585. When target.source.postMessage throws
+    // (target window closed, cross-origin throw, non-browser harness),
+    // the audit row has already committed showing outcome:granted, but
+    // no token bytes actually crossed. The caller MUST observe failure
+    // so dispatchGranted does not fire on an empty delivery. Per RFC §10
+    // row-IS-grant discipline-floor, the function reports reality.
+    const fetchStub = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchStub);
+
+    const mod = await import("./api-fetch");
+    mod.setSessionToken("LTHN-SESS-1.throw-test-token");
+
+    const throwingPostMessage = vi.fn(() => {
+      throw new Error("target window closed");
+    });
+    const target = {
+      source: { postMessage: throwingPostMessage } as unknown as Window,
+      targetOrigin: "http://127.0.0.1:4096",
+      pluginCode: "opencode",
+    };
+
+    // Regression check: no caller-side window event should fire as a
+    // side-effect of the failed grant. The boundary returns failure;
+    // the caller chooses to dispatch (or not). Spy on global window
+    // dispatchEvent so any accidental event-emission inside the boundary
+    // surfaces.
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+
+    const outcome = await mod.grantTokenToFrame(target, ["session-token"]);
+
+    expect(outcome.ok).toBe(false);
+    // Discriminator narrows: TS won't let .reason read on ok:true.
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe("postmessage-failed");
+    }
+    // Audit POST still fired exactly once (audit is pre-postMessage).
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+    // postMessage was attempted exactly once and threw.
+    expect(throwingPostMessage).toHaveBeenCalledTimes(1);
+    // No window event emitted as a side-effect of the failed grant.
+    expect(dispatchSpy).not.toHaveBeenCalled();
+
+    dispatchSpy.mockRestore();
+    mod.clearSessionToken();
+  });
+});
+
 // ─── cachedSessionToken literal lives in exactly one file ──────────────
 
 describe("TestApiFetch_CachedSessionTokenLiteralAppearsInExactlyOneFile_Good", () => {
