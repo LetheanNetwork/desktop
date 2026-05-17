@@ -74,8 +74,11 @@ export function clearSessionToken(): void {
  *  Cerberus #1465 discipline: token still lives ONLY in this module's
  *  cachedSessionToken binding. Peek returns the current value; callers
  *  MUST NOT persist what they receive (localStorage / cookie / etc).
- *  The audit trail (plugin.view.capability_granted) is the observability
- *  surface, not the storage one. */
+ *  The audit trail is the observability surface, not the storage one —
+ *  registered as audit.EventPluginViewCapabilityGranted
+ *  ("plugin.view.capability_granted") in pkg/audit/types.go, emitted
+ *  by the POST /v1/plugin-view/capability-grant receiver the shim hits
+ *  BEFORE delivering token bytes via postMessage (Mantis #1523). */
 export function peekSessionToken(): string | null {
   return cachedSessionToken;
 }

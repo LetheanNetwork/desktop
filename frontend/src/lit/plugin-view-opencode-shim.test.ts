@@ -17,10 +17,18 @@
 //     → silent), empty-keeps (no descriptor → no broker), fixtures-still-pass
 //     (rendering remains the inner <lthn-plugin-view>).
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@desktop/marketplace/service", () => ({
   GetViewDescriptor: vi.fn(),
+}));
+
+// apiFetch is mocked at module scope so every test can swap the
+// response shape per scenario via mockResolvedValueOnce. The default
+// resolves to a 200 OK so the existing grant-path tests continue to
+// fire postMessage after the audit-grant POST succeeds (Mantis #1523).
+vi.mock("./api-fetch", () => ({
+  apiFetch: vi.fn(async () => new Response("{}", { status: 200 })),
 }));
 
 import { mountWindow } from "../test/window-fixture";
@@ -30,6 +38,8 @@ import {
   AUTH_DENY_TYPE,
   AUTH_GRANTED_EVENT,
   AUTH_DENIED_EVENT,
+  CAPABILITY_GRANT_AUDIT_PATH,
+  DENY_REASON_AUDIT_FAILED,
   DENY_REASON_ORIGIN_MISMATCH,
   DENY_REASON_NO_SESSION,
   DENY_REASON_UNKNOWN_SCOPE,
@@ -38,7 +48,16 @@ import {
   type TokenProvider,
 } from "./plugin-view-opencode-shim";
 import "./plugin-view-opencode-shim";
+import { apiFetch } from "./api-fetch";
 import type { PluginViewDescriptor } from "./lthn-plugin-view";
+
+// flushMicrotasks drains queued promise resolutions so the post-await
+// branch in _grant runs before the assertions inspect calls/audit.
+// jsdom MessageEvent dispatch returns synchronously but _grant POSTs
+// then awaits; one macrotask boundary lets the fetch promise resolve
+// and the postMessage/audit-dispatch path run.
+const flushMicrotasks = () =>
+  new Promise<void>((r) => setTimeout(r, 0));
 
 const FIXTURE_DESCRIPTOR: PluginViewDescriptor = {
   id: "opencode",
@@ -90,8 +109,16 @@ function fireAuthRequest(
 }
 
 beforeEach(() => {
-  // Nothing to reset — every test mounts a fresh shim, no module
-  // state in the shim itself.
+  // Reset the apiFetch mock between tests so a mockResolvedValueOnce
+  // from one test doesn't leak its response shape into the next.
+  vi.mocked(apiFetch).mockReset();
+  vi.mocked(apiFetch).mockResolvedValue(
+    new Response("{}", { status: 200 }),
+  );
+});
+
+afterEach(() => {
+  vi.mocked(apiFetch).mockReset();
 });
 
 // ─── Grant path ────────────────────────────────────────────────────────
@@ -121,8 +148,25 @@ describe("TestOpencodeShim_GrantsOnValidRequest_Good", () => {
       type: AUTH_REQUEST_TYPE,
       scopes: ["session-token"],
     });
+    // _grant POSTs then awaits the audit-grant response before
+    // postMessage'ing the token. Drain microtasks so the post-await
+    // branch runs before assertions inspect the recorded calls.
+    await flushMicrotasks();
 
     window.removeEventListener(AUTH_GRANTED_EVENT, listener);
+
+    // Mantis #1523 — audit-grant POST fires BEFORE the postMessage,
+    // carries plugin_id + capability + origin. Token bytes never
+    // appear in the request body.
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledTimes(1);
+    const [auditPath, auditInit] = vi.mocked(apiFetch).mock.calls[0]!;
+    expect(auditPath).toBe(CAPABILITY_GRANT_AUDIT_PATH);
+    expect(auditInit?.method).toBe("POST");
+    const auditBody = JSON.parse(String(auditInit?.body ?? "{}"));
+    expect(auditBody.plugin_id).toBe("opencode");
+    expect(auditBody.capability).toBe("session-token");
+    expect(auditBody.origin).toBe("http://127.0.0.1:4096");
+    expect(JSON.stringify(auditBody)).not.toContain("LTHN-SESS-1");
 
     expect(calls.length).toBe(1);
     expect(calls[0]?.targetOrigin).toBe("http://127.0.0.1:4096");
@@ -273,6 +317,86 @@ describe("TestOpencodeShim_DeniesUnknownScope_Bad", () => {
     const payload = calls[0]?.data as { type: string; reason: string };
     expect(payload.type).toBe(AUTH_DENY_TYPE);
     expect(payload.reason).toBe(DENY_REASON_UNKNOWN_SCOPE);
+  });
+});
+
+// ─── Audit-grant POST failure (Mantis #1523) ───────────────────────────
+
+describe("TestOpencodeShim_DeniesWhenAuditPostFails_Bad", () => {
+  it("denies and does NOT postMessage the token when the audit-grant POST returns non-200", async () => {
+    // Server returns 500 — simulates audit-substrate outage. Per
+    // Mantis #1523 done-criteria the shim MUST NOT proceed with
+    // postMessage; the iframe sees AUTH_DENY with audit-failed reason.
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      new Response(`{"success":false}`, { status: 500 }),
+    );
+
+    const tokenProvider: TokenProvider = () => "LTHN-SESS-1.test-token";
+    const { el } = await mountWindow<OpenCodeShimElement>(
+      "lthn-plugin-view-opencode-shim",
+      { props: { descriptor: FIXTURE_DESCRIPTOR, tokenProvider } },
+    );
+    const inner = el.querySelector("lthn-plugin-view") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    await inner.updateComplete;
+
+    const { calls, fakeWindow } = stubIframeContentWindow(el);
+
+    const grantAudit: CustomEvent[] = [];
+    const denyAudit: CustomEvent[] = [];
+    const onGrant = (e: Event) => { grantAudit.push(e as CustomEvent); };
+    const onDeny = (e: Event) => { denyAudit.push(e as CustomEvent); };
+    window.addEventListener(AUTH_GRANTED_EVENT, onGrant);
+    window.addEventListener(AUTH_DENIED_EVENT, onDeny);
+
+    fireAuthRequest(fakeWindow, "http://127.0.0.1:4096", {
+      type: AUTH_REQUEST_TYPE,
+      scopes: ["session-token"],
+    });
+    await flushMicrotasks();
+
+    window.removeEventListener(AUTH_GRANTED_EVENT, onGrant);
+    window.removeEventListener(AUTH_DENIED_EVENT, onDeny);
+
+    // The audit-grant POST fired exactly once.
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledTimes(1);
+    // The iframe received a DENY, NOT a GRANT — token bytes never
+    // crossed the boundary.
+    expect(calls.length).toBe(1);
+    const payload = calls[0]?.data as { type: string; reason: string };
+    expect(payload.type).toBe(AUTH_DENY_TYPE);
+    expect(payload.reason).toBe(DENY_REASON_AUDIT_FAILED);
+    // No grant audit event; one deny audit event.
+    expect(grantAudit.length).toBe(0);
+    expect(denyAudit.length).toBe(1);
+  });
+
+  it("denies when the audit-grant fetch rejects (network-level failure)", async () => {
+    vi.mocked(apiFetch).mockRejectedValueOnce(new Error("network down"));
+
+    const tokenProvider: TokenProvider = () => "LTHN-SESS-1.test-token";
+    const { el } = await mountWindow<OpenCodeShimElement>(
+      "lthn-plugin-view-opencode-shim",
+      { props: { descriptor: FIXTURE_DESCRIPTOR, tokenProvider } },
+    );
+    const inner = el.querySelector("lthn-plugin-view") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    await inner.updateComplete;
+
+    const { calls, fakeWindow } = stubIframeContentWindow(el);
+
+    fireAuthRequest(fakeWindow, "http://127.0.0.1:4096", {
+      type: AUTH_REQUEST_TYPE,
+      scopes: ["session-token"],
+    });
+    await flushMicrotasks();
+
+    expect(calls.length).toBe(1);
+    const payload = calls[0]?.data as { type: string; reason: string };
+    expect(payload.type).toBe(AUTH_DENY_TYPE);
+    expect(payload.reason).toBe(DENY_REASON_AUDIT_FAILED);
   });
 });
 

@@ -45,6 +45,7 @@
 import { LitElement, html } from "lit";
 import "./lthn-plugin-view";
 import type { PluginViewDescriptor } from "./lthn-plugin-view";
+import { apiFetch } from "./api-fetch";
 
 // AUTH_REQUEST_TYPE matches the §5.1 protocol literal the plugin
 // webapp posts at its parent. Strings live as exported consts so the
@@ -62,6 +63,20 @@ export const AUTH_DENIED_EVENT = "lthn:plugin-view:auth-denied";
 // honours today. Future capabilities (vi-events, marketplace) plug
 // in via the same handler shape but route through different brokers.
 export const CAPABILITY_SESSION_TOKEN = "session-token";
+
+// CAPABILITY_GRANT_AUDIT_PATH is the server-side audit-grant
+// receiver per Mantis #1523. The shim POSTs here BEFORE delivering
+// token bytes to the iframe so the audit row commits first; on
+// failure (non-200) the shim aborts the postMessage path entirely.
+// Path kept in lockstep with pkg/server.PluginViewCapabilityGrantPath.
+export const CAPABILITY_GRANT_AUDIT_PATH =
+  "/v1/plugin-view/capability-grant";
+
+// DENY_REASON_AUDIT_FAILED is the local deny-reason the shim emits
+// when the audit-grant POST returned non-200. The grant message is
+// never delivered to the iframe; the deny message tells the iframe
+// the request was rejected for an audit-side reason.
+export const DENY_REASON_AUDIT_FAILED = "audit-failed";
 
 // TokenProvider returns the current session-token bytes or null when
 // no session is unlocked. The shim invokes it on every grant request
@@ -210,12 +225,43 @@ export class OpenCodeShimElement extends LitElement {
   // _grant emits the §5.1 grant message and an audit event. Token
   // bytes pass as a call-argument; NO module-scope variable holds
   // them, NO audit-event detail field carries them (Cerberus #1468).
-  private _grant(
+  //
+  // Mantis #1523 — POSTs CAPABILITY_GRANT_AUDIT_PATH BEFORE the
+  // postMessage so the forensic audit row commits server-side first.
+  // On non-200 the iframe is denied with DENY_REASON_AUDIT_FAILED
+  // and the token bytes never cross the boundary.
+  private async _grant(
     ev: MessageEvent,
     token: string,
     grantedScopes: string[],
     targetOrigin: string,
-  ): void {
+  ): Promise<void> {
+    const pluginCode = this.descriptor?.pluginCode ?? "";
+    // The audit-grant POST iterates the granted scopes so the
+    // server-side audit row carries one entry per brokered capability.
+    // v1 only brokers session-token so this is a one-iteration loop;
+    // the shape future-proofs for vi-events / marketplace additions.
+    for (const scope of grantedScopes) {
+      let ok = false;
+      try {
+        const res = await apiFetch(CAPABILITY_GRANT_AUDIT_PATH, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            plugin_id:  pluginCode,
+            capability: scope,
+            origin:     targetOrigin,
+          }),
+        });
+        ok = res.ok;
+      } catch {
+        ok = false;
+      }
+      if (!ok) {
+        this._deny(ev, DENY_REASON_AUDIT_FAILED);
+        return;
+      }
+    }
     const payload: AuthGrantMessage = {
       type: AUTH_GRANT_TYPE,
       token,
@@ -232,15 +278,17 @@ export class OpenCodeShimElement extends LitElement {
     try {
       window.dispatchEvent(new CustomEvent(AUTH_GRANTED_EVENT, {
         detail: {
-          viewId: this.descriptor?.id ?? "",
-          pluginCode: this.descriptor?.pluginCode ?? "",
-          scopes: grantedScopes,
+          viewId:     this.descriptor?.id ?? "",
+          pluginCode: pluginCode,
+          scopes:     grantedScopes,
         },
         bubbles: true,
         composed: true,
       }));
     } catch {
-      // Audit dispatch is best-effort.
+      // Browser-CustomEvent dispatch is best-effort UI observability;
+      // the load-bearing forensic surface is the server-side audit row
+      // already committed above.
     }
   }
 
