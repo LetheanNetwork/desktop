@@ -4,6 +4,23 @@
 // provides window / document / customElements; we add a couple of
 // stubs for browser globals that some Lit primitives reach for in
 // development paths (e.g. visualViewport on Safari, Window.matchMedia).
+//
+// @wailsio/runtime mock (Mantis #1567):
+//   The Call.ByID router previously carried a hardcoded binding-id
+//   allowlist — only 1099757357 was permitted, every other id rejected.
+//   That forced cascade tests (sales / marketing / incidents /
+//   runbooks / office-mail) into per-file vi.mock redefinitions just
+//   to handle their own binding ids.
+//
+//   The router now consults a shared handler map owned by
+//   ./setup-helpers (CallRouter parked on globalThis so this hoisted
+//   factory and test-side imports share one instance). Tests register
+//   handlers via setCallHandler(id, fn) — see setup-helpers.ts for
+//   the helper surface and usage shape.
+//
+//   The default behaviour still rejects unhandled binding-ids so
+//   unexpected calls surface during development. Tests that want a
+//   permissive default call setDefaultCallHandler(async () => null).
 
 import { afterEach, vi } from "vitest";
 
@@ -27,9 +44,28 @@ vi.mock("@wailsio/runtime", () => {
     }
     return obj;
   };
+  // Router lookup happens at call time, not at hoist time. The
+  // setup-helpers module lazily initialises the shared router on the
+  // globalThis key the first time either side touches it — so the
+  // ordering between this vi.mock factory (hoisted) and the helpers
+  // import in any test file does not matter.
+  const ROUTER_KEY = "__lthnTestCallRouter__";
+  type CallHandler = (...args: unknown[]) => unknown | Promise<unknown>;
+  interface CallRouter {
+    handlers: Map<number, CallHandler>;
+    defaultHandler: CallHandler;
+  }
   const call = {
     ByID: async (id: number, ...args: unknown[]) => {
-      if (id === 1099757357) return new Promise(() => {});
+      const router = (globalThis as Record<string, unknown>)[ROUTER_KEY] as CallRouter | undefined;
+      if (router) {
+        const handler = router.handlers.get(id);
+        if (handler) return handler(...args);
+        return router.defaultHandler(id, ...args);
+      }
+      // Router not initialised yet — preserve the legacy reject so
+      // a spec that calls ByID without importing the helpers still
+      // gets the descriptive error rather than a silent undefined.
       return Promise.reject(new Error(`mock wails runtime: unhandled call ${id}`));
     },
   };

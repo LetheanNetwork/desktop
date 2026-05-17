@@ -3,75 +3,25 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window-fixture";
+import { setCallHandler, clearCallHandlers } from "../../../test/setup-helpers";
 
-// Wails binding-id router (Mantis #1543).
+// Wails binding-id router (Mantis #1543, refactored under #1567).
 //
 // `src/test/setup.ts` installs a file-wide vi.mock for `@wailsio/runtime`
-// whose `Call.ByID` REJECTS for any id not in its 1099757357 allowlist.
-// The pipeline view's `_onColumnDrop` dynamically imports the generated
-// `@desktop/sales/pipeline/service` binding which calls `$Call.ByID` with
-// the MoveDeal id 4112870272 — that path was hitting the setup mock's
-// reject path, the production catch reverted the optimistic move, and
-// the drag-to-move spec asserting the move stuck failed.
+// whose Call.ByID consults the shared router from setup-helpers. The
+// pipeline view's `_onColumnDrop` dynamically imports the generated
+// `@desktop/sales/pipeline/service` binding which calls `$Call.ByID`
+// with the MoveDeal id 4112870272 — that path now resolves through
+// whichever handler this file registers via setCallHandler.
 //
-// `vi.doMock("@desktop/sales/pipeline/service", …)` was the prior fix
-// shape, but vitest's vi.doMock does NOT intercept dynamic imports
-// performed by an already-loaded module (the import resolver is bound
-// at module-load time). The mock would land for direct test-file
-// imports but the in-view `import("@desktop/sales/pipeline/service")`
-// would still resolve to the real binding.
-//
-// Solution: override the runtime mock with a per-test handler map keyed
-// by binding-id. The setup mock stays in place for other test files;
-// this file's mock (hoisted before the setup runs in this module's
-// scope) supersedes for the pipeline binding ids. Each test sets the
-// handlers it needs in beforeEach, leaving the default to mirror the
-// setup file's reject behaviour for unrecognised ids.
-
-type CallHandler = (input: unknown) => unknown | Promise<unknown>;
-const callHandlers = new Map<number, CallHandler>();
-
-vi.mock("@wailsio/runtime", () => {
-  const any = (s: unknown) => s;
-  const array = (e: (s: unknown) => unknown) => (s: unknown) => Array.isArray(s) ? s.map(e) : [];
-  const map = (_k: (s: unknown) => unknown, v: (s: unknown) => unknown) => (s: unknown) => {
-    if (!s || typeof s !== "object") return {};
-    return Object.fromEntries(Object.entries(s as Record<string, unknown>).map(([k, val]) => [k, v(val)]));
-  };
-  const nullable = (e: (s: unknown) => unknown) => (s: unknown) => (s === null || s === undefined ? null : e(s));
-  const struct = (fields: Record<string, (s: unknown) => unknown>) => (s: unknown) => {
-    const obj = s && typeof s === "object" ? { ...(s as Record<string, unknown>) } : {};
-    for (const [name, create] of Object.entries(fields)) if (name in obj) obj[name] = create(obj[name]);
-    return obj;
-  };
-  return {
-    Call: {
-      ByID: async (id: number, input: unknown) => {
-        const h = callHandlers.get(id);
-        if (h) return h(input);
-        // Match setup.ts default — reject so unhandled paths surface.
-        return Promise.reject(new Error(`mock wails runtime: unhandled call ${id}`));
-      },
-    },
-    Create: {
-      Any: any,
-      Array: array,
-      ByteSlice: (s: unknown) => s ?? "",
-      Events: {},
-      Map: map,
-      Nullable: nullable,
-      Struct: struct,
-    },
-    Events: { Emit: async () => {}, On: () => () => {} },
-    Window: {
-      Close: async () => {}, Fullscreen: async () => {}, IsFullscreen: async () => false,
-      Minimise: async () => {}, UnFullscreen: async () => {},
-    },
-    Application: {}, Browser: {}, CancellablePromise: Promise, Clipboard: {}, Dialogs: {},
-    Flags: {}, IOS: {}, Screens: {}, System: { invoke: async () => null }, WML: {},
-    clientId: "vitest", getTransport: () => null, objectNames: {}, setTransport: () => {},
-  };
-});
+// History (#1543): a prior fix shape, vi.doMock("@desktop/.../service",
+// …), did NOT intercept dynamic imports performed by an already-loaded
+// module (the import resolver is bound at module-load time). The next
+// attempt redefined vi.mock for @wailsio/runtime at this file's scope
+// with its own per-test handler map — that worked but forced every
+// cascade test to duplicate the same mock factory. #1567 lifted the
+// per-handler-map shape into setup.ts so this file (and any sibling)
+// just imports the helpers.
 
 import "./pipeline";
 
@@ -82,9 +32,9 @@ const BID_PIPELINE_LIST = 1521012979;
 const BID_PIPELINE_MOVE = 4112870272;
 
 beforeEach(() => {
-  callHandlers.clear();
+  clearCallHandlers();
   // Default: List returns an empty result — view falls back to fixture.
-  callHandlers.set(BID_PIPELINE_LIST, async () => ({ OK: true, Value: {} }));
+  setCallHandler(BID_PIPELINE_LIST, async () => ({ OK: true, Value: {} }));
 });
 
 interface PipelineRow {
@@ -277,7 +227,7 @@ describe("lthn-view-pipeline — drag to move", () => {
 
   it("drop on a target column optimistically lifts the card across stages (MoveDeal mock OK)", async () => {
     const moveSpy = vi.fn(async () => ({ OK: true, Value: {} }));
-    callHandlers.set(BID_PIPELINE_MOVE, moveSpy);
+    setCallHandler(BID_PIPELINE_MOVE, moveSpy);
 
     const { el } = await mountWindow<PipelineEl>("lthn-view-pipeline");
     const sourceDeal = el.columns.find(c => c.id === "qual")!.deals[0];
@@ -298,7 +248,7 @@ describe("lthn-view-pipeline — drag to move", () => {
   });
 
   it("MoveDeal rejection reverts the optimistic move", async () => {
-    callHandlers.set(BID_PIPELINE_MOVE, async () => { throw new Error("backend down"); });
+    setCallHandler(BID_PIPELINE_MOVE, async () => { throw new Error("backend down"); });
 
     const { el } = await mountWindow<PipelineEl>("lthn-view-pipeline");
     const sourceDeal = el.columns.find(c => c.id === "qual")!.deals[0];
@@ -332,7 +282,7 @@ describe("lthn-view-pipeline — drag to move", () => {
   });
 
   it("successful drop dispatches lthn:sales:moved with the expected detail", async () => {
-    callHandlers.set(BID_PIPELINE_MOVE, async () => ({ OK: true, Value: {} }));
+    setCallHandler(BID_PIPELINE_MOVE, async () => ({ OK: true, Value: {} }));
 
     const { el } = await mountWindow<PipelineEl>("lthn-view-pipeline");
     const deal = el.columns.find(c => c.id === "propose")!.deals[0];
@@ -483,7 +433,7 @@ describe("lthn-view-pipeline — Vi-callout for terminal moves", () => {
 describe("lthn-view-pipeline — conflict detection + reload listener (Cascade W1)", () => {
   it("MoveDeal stale-version conflict reverts the optimistic move", async () => {
     // Stale write: backend returns { OK:false, Value:{ code:"…conflict", … } }.
-    callHandlers.set(BID_PIPELINE_MOVE, async () => ({
+    setCallHandler(BID_PIPELINE_MOVE, async () => ({
       OK: false,
       Value: {
         code: "pipeline.update.conflict",
@@ -512,11 +462,11 @@ describe("lthn-view-pipeline — conflict detection + reload listener (Cascade W
 
   it("CONFLICT_RELOAD_EVENT with matching service triggers _loadFromBackend", async () => {
     let listCalls = 0;
-    callHandlers.set(BID_PIPELINE_LIST, async () => {
+    setCallHandler(BID_PIPELINE_LIST, async () => {
       listCalls++;
       return { OK: true, Value: {} };
     });
-    callHandlers.set(BID_PIPELINE_MOVE, async () => ({ OK: true, Value: {} }));
+    setCallHandler(BID_PIPELINE_MOVE, async () => ({ OK: true, Value: {} }));
 
     const { el } = await mountWindow<PipelineEl>("lthn-view-pipeline");
     await new Promise(r => setTimeout(r, 0));
@@ -534,11 +484,11 @@ describe("lthn-view-pipeline — conflict detection + reload listener (Cascade W
 
   it("CONFLICT_RELOAD_EVENT with non-matching service is ignored", async () => {
     let listCalls = 0;
-    callHandlers.set(BID_PIPELINE_LIST, async () => {
+    setCallHandler(BID_PIPELINE_LIST, async () => {
       listCalls++;
       return { OK: true, Value: {} };
     });
-    callHandlers.set(BID_PIPELINE_MOVE, async () => ({ OK: true, Value: {} }));
+    setCallHandler(BID_PIPELINE_MOVE, async () => ({ OK: true, Value: {} }));
 
     const { el } = await mountWindow<PipelineEl>("lthn-view-pipeline");
     await new Promise(r => setTimeout(r, 0));
