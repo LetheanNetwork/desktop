@@ -113,6 +113,35 @@ func (s *WailsService) ServiceStartup(_ core.Context, _ any) core.Result {
 // nothing to do here.
 func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }
 
+// ResolveHFManifest resolves the per-file metadata
+// (sha256 digest, byte size, canonical resolve URL) for a Hugging
+// Face repo file. Exposed on the Wails surface so the model-browser
+// frontend can hand the user a "Download" path that the F-2 fail-
+// closed gate accepts: resolve → DownloadVerified(URL, name, digest).
+//
+// Two return shapes per Mantis #1686:
+//
+//   - LFS-stored file → HFManifest.Digest populated, Unverifiable=false.
+//   - Non-LFS / small file → Digest="", Unverifiable=true. The frontend
+//     decides whether to (a) refuse the download (strict) or (b) call
+//     Download() in soft-mode (accept the unverifiable trade-off, the
+//     audit log already records the choice).
+//
+// Returns the manifest as core.Result.Value so the Wails-generated TS
+// binding surfaces it as a typed object. JSON-marshalled at the
+// Wails boundary; HFManifest's exported fields render with their Go
+// names (RepoID / FileName / ResolveURL / Digest / Size /
+// Unverifiable).
+//
+// Usage example (TypeScript, post Wails binding regen):
+//
+//	const m = await ResolveHFManifest(repo, file);
+//	if (m.Unverifiable) { warnSoftMode(m); }
+//	await DownloadVerified(m.ResolveURL, m.FileName, m.Digest);
+func (s *WailsService) ResolveHFManifest(repoID, fileName string) core.Result {
+	return ResolveHFManifest(repoID, fileName)
+}
+
 // Download begins an async model fetch and returns immediately with
 // the job id the frontend uses to correlate subsequent
 // "downloader:progress" / "downloader:done" events.
@@ -206,9 +235,9 @@ func (s *WailsService) run(id, url, name string) {
 func (s *WailsService) runVerified(id, url, name, sha256hex string) {
 	if sha256hex == "" {
 		s.fire("downloader:done", map[string]any{
-			"id":    id,
-			"name":  name,
-			"ok":    false,
+			"id":   id,
+			"name": name,
+			"ok":   false,
 			"error": core.E(CodeDigestRequired,
 				"sha256 digest is required on the Wails download surface", nil).Error(),
 		})
