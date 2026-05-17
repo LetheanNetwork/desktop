@@ -18,6 +18,25 @@ interface ClientView {
 
 type SandboxState = "stopped" | "starting" | "ready" | "stopping" | "error";
 
+/** Mantis #1630 — known sandbox image digests the user can pick from
+ *  in the upgrade dialog. Backend (Cerberus #22 MED-2 / Mantis #1621)
+ *  refuses pulls without an `image_digest` matching `sha256:<64 hex>`,
+ *  so the frontend ships a hardcoded list rather than free-text entry.
+ *
+ *  TODO(Snider): replace the placeholder digest below with the real
+ *  sha256 manifest digest of the current lthn/dev:latest image
+ *  (`docker manifest inspect lthn/dev:latest | jq -r '.manifests[0].digest'`
+ *  or equivalent) before ship. The all-zero digest is a deliberately
+ *  obvious placeholder — it passes the sha256 regex but cannot match
+ *  any real registry manifest, so the backend's post-pull divergence
+ *  check at upgrade.go:214 will surface the mismatch loudly. */
+const KNOWN_DIGESTS: ReadonlyArray<{ readonly label: string; readonly digest: string }> = [
+  {
+    label:  "v2026.05.17 (current)",
+    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  },
+];
+
 class LthnIntegrationsWindow extends LitElement {
   static readonly properties = {
     w: { type: Number },
@@ -39,6 +58,7 @@ class LthnIntegrationsWindow extends LitElement {
     upgradeBusy: { state: true },
     upgradeStatus: { state: true },
     showUpgradeDialog: { state: true },
+    selectedDigest: { state: true },
     t: { state: true },
   };
   declare w: number;
@@ -63,6 +83,11 @@ class LthnIntegrationsWindow extends LitElement {
    *  warning dialog. False on construction; flips true on
    *  "Check for updates" click; flips back false on confirm/cancel. */
   declare showUpgradeDialog: boolean;
+  /** Mantis #1630 — sha256 digest currently selected in the upgrade
+   *  dialog. Initialised to KNOWN_DIGESTS[0].digest in the constructor
+   *  so confirm has a usable value even if the user never touches the
+   *  selector. */
+  declare selectedDigest: string;
   declare t: {
     railLabel: string; railEmpty: string;
     rowConfigPath: string; rowOnDisk: string; rowEndpoint: string; rowDefaultModel: string;
@@ -82,6 +107,7 @@ class LthnIntegrationsWindow extends LitElement {
     ocUpgradeFailed: string;
     ocUpgradeDialogTitle: string; ocUpgradeDialogBody: string;
     ocUpgradeDialogConfirm: string; ocUpgradeDialogCancel: string;
+    ocUpgradeDialogDigestLabel: string; ocUpgradeDialogDigestSelected: string;
     ocOpenWeb: string; ocOpenWebFailed: string;
   };
   /* Poll handle for sandbox state — cleared on disconnect. */
@@ -107,6 +133,7 @@ class LthnIntegrationsWindow extends LitElement {
     this.upgradeBusy = false;
     this.upgradeStatus = null;
     this.showUpgradeDialog = false;
+    this.selectedDigest = KNOWN_DIGESTS[0].digest;
     this.t = {
       railLabel: "Clients",
       railEmpty: "No clients enumerated yet. The integrations service is the source of truth.",
@@ -140,6 +167,8 @@ class LthnIntegrationsWindow extends LitElement {
         "This pulls lthn/dev:latest from the registry. The image is NOT signature-verified yet — pulls trust whatever the registry currently serves. Any running sandboxes will keep using their current image until you stop and restart them.",
       ocUpgradeDialogConfirm: "Pull update",
       ocUpgradeDialogCancel: "Cancel",
+      ocUpgradeDialogDigestLabel: "Image digest",
+      ocUpgradeDialogDigestSelected: "Pinned: {digest}",
       ocOpenWeb: "Open in window",
       ocOpenWebFailed: "Couldn't open the web window — see logs for details.",
     };
@@ -319,6 +348,7 @@ class LthnIntegrationsWindow extends LitElement {
       ocTUI, ocTUIFail, ocStudio,
       ocCheck, ocUpgring, ocUpNoCh, ocUpUpd, ocUpFail,
       ocUpDlgT, ocUpDlgB, ocUpDlgC, ocUpDlgX,
+      ocUpDlgDL, ocUpDlgDS,
       ocWeb, ocWebFail,
     ] = await Promise.all([
       T("window.integrations.title"),
@@ -360,6 +390,8 @@ class LthnIntegrationsWindow extends LitElement {
       T("window.integrations.oc_upgrade_dialog_body"),
       T("window.integrations.oc_upgrade_dialog_confirm"),
       T("window.integrations.oc_upgrade_dialog_cancel"),
+      T("window.integrations.oc_upgrade_dialog_digest_label"),
+      T("window.integrations.oc_upgrade_dialog_digest_selected"),
       T("window.integrations.oc_open_web"),
       T("window.integrations.oc_open_web_failed"),
     ]);
@@ -383,6 +415,7 @@ class LthnIntegrationsWindow extends LitElement {
       ocUpgradeFailed: ocUpFail,
       ocUpgradeDialogTitle: ocUpDlgT, ocUpgradeDialogBody: ocUpDlgB,
       ocUpgradeDialogConfirm: ocUpDlgC, ocUpgradeDialogCancel: ocUpDlgX,
+      ocUpgradeDialogDigestLabel: ocUpDlgDL, ocUpgradeDialogDigestSelected: ocUpDlgDS,
       ocOpenWeb: ocWeb, ocOpenWebFailed: ocWebFail,
     };
     try {
@@ -452,6 +485,7 @@ class LthnIntegrationsWindow extends LitElement {
       const oc = await import("@desktop/opencode/wailsservice");
       const r = await oc.WUpgradeWithConsent({
         confirmed_by_user: true,
+        image_digest: this.selectedDigest,
         restart_sandboxes: false,
       });
       const ok = (r as any)?.OK === true;
@@ -668,6 +702,28 @@ class LthnIntegrationsWindow extends LitElement {
           <div style="font-size:12.5px; color:var(--fg-2); line-height:1.6;">
             ${this.t.ocUpgradeDialogBody}
           </div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <label
+              for="oc-upgrade-digest"
+              style="font-size:10.5px; color:var(--fg-3); letter-spacing:0.04em; text-transform:uppercase;">
+              ${this.t.ocUpgradeDialogDigestLabel}
+            </label>
+            <select
+              id="oc-upgrade-digest"
+              data-testid="oc-upgrade-digest-select"
+              .value=${this.selectedDigest}
+              @change=${(ev: Event) => { this.selectedDigest = (ev.target as HTMLSelectElement).value; }}
+              style="padding:6px 10px; font-size:12px; background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.10); border-radius:6px; color:var(--fg-0); --wails-draggable: no-drag;">
+              ${KNOWN_DIGESTS.map(d => html`
+                <option value=${d.digest} ?selected=${d.digest === this.selectedDigest}>${d.label}</option>
+              `)}
+            </select>
+            <div
+              data-testid="oc-upgrade-digest-preview"
+              style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); line-height:1.5;">
+              ${this.t.ocUpgradeDialogDigestSelected.replace("{digest}", truncateDigest(this.selectedDigest))}
+            </div>
+          </div>
           <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:4px;">
             <button
               data-testid="oc-upgrade-cancel"
@@ -782,4 +838,14 @@ function endpointFromAddr(addr: string): string {
   if (!addr) return "http://localhost:8000/v1";
   const a = addr.startsWith(":") ? `localhost${addr}` : addr;
   return `http://${a}/v1`;
+}
+
+/** Shorten a `sha256:<64 hex>` digest to `sha256:abc…def` for preview
+ *  text in the upgrade dialog. Anything not matching the expected
+ *  shape is returned verbatim so a malformed value stays visible
+ *  rather than silently collapsing to an ellipsis. */
+function truncateDigest(digest: string): string {
+  const m = /^sha256:([0-9a-f]{64})$/i.exec(digest);
+  if (!m) return digest;
+  return `sha256:${m[1].slice(0, 6)}…${m[1].slice(-6)}`;
 }

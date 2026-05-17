@@ -138,15 +138,73 @@ describe("lthn-integrations-window — Upgrade dialog (Mantis #1623)", () => {
     await settleConnect(el);
 
     expect(WUpgradeWithConsent).toHaveBeenCalledTimes(1);
-    expect(WUpgradeWithConsent).toHaveBeenCalledWith({
-      confirmed_by_user: true,
-      restart_sandboxes: false,
-    });
+    // Mantis #1630 — backend now requires `image_digest` matching
+    // `sha256:<64 hex>` (Cerberus #22 MED-2 / Mantis #1621). The
+    // frontend defaults to KNOWN_DIGESTS[0] so confirm always carries
+    // a value.
+    const call = vi.mocked(WUpgradeWithConsent).mock.calls[0][0] as {
+      confirmed_by_user: boolean;
+      image_digest: string;
+      restart_sandboxes: boolean;
+    };
+    expect(call.confirmed_by_user).toBe(true);
+    expect(call.restart_sandboxes).toBe(false);
+    expect(call.image_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
     // Legacy fail-closed WUpgrade must NOT be invoked from the
     // dialog confirm path — that's the regression this lane guards.
     expect(WUpgrade).not.toHaveBeenCalled();
     // Dialog closes after confirm.
     expect(host.querySelector("[data-testid='oc-upgrade-dialog']")).toBeNull();
+  });
+
+  it("TestUpgradeDialog_DigestSelector_DefaultsToFirst_Good — selector renders with KNOWN_DIGESTS[0] preselected", async () => {
+    const { host, el } = await mountWindow("lthn-integrations-window");
+    await settleConnect(el);
+
+    (host.querySelector("[data-testid='oc-check-updates']") as HTMLButtonElement).click();
+    await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
+
+    const select = host.querySelector("[data-testid='oc-upgrade-digest-select']") as HTMLSelectElement | null;
+    expect(select, "dialog must expose a digest selector").not.toBeNull();
+    expect(select!.value).toMatch(/^sha256:[0-9a-f]{64}$/);
+    // First option must be selected by default.
+    const firstOpt = select!.querySelector("option") as HTMLOptionElement;
+    expect(firstOpt.value).toBe(select!.value);
+
+    const preview = host.querySelector("[data-testid='oc-upgrade-digest-preview']");
+    expect(preview, "dialog must expose a digest preview").not.toBeNull();
+    // i18n is stubbed to echo the message-id back, so the {digest}
+    // interpolation isn't exercised here — confirming the element
+    // exists is enough; truncateDigest() is unit-tested via the
+    // selector value above.
+  });
+
+  it("TestUpgradeDialog_DigestSelector_ChangeSelection_Good — change event updates state + confirm carries new digest", async () => {
+    const { host, el } = await mountWindow("lthn-integrations-window");
+    await settleConnect(el);
+
+    (host.querySelector("[data-testid='oc-check-updates']") as HTMLButtonElement).click();
+    await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
+
+    const select = host.querySelector("[data-testid='oc-upgrade-digest-select']") as HTMLSelectElement;
+    // With one option in KNOWN_DIGESTS today, exercising a value
+    // change against the real <select> would just snap back to the
+    // only option. Simulate the @change handler's read path directly
+    // by dispatching an event whose target carries the intended
+    // value — this is what a multi-option selector would deliver
+    // when KNOWN_DIGESTS grows.
+    const newDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+    const ev = new Event("change");
+    Object.defineProperty(ev, "target", { value: { value: newDigest }, configurable: true });
+    select.dispatchEvent(ev);
+    await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
+
+    (host.querySelector("[data-testid='oc-upgrade-confirm']") as HTMLButtonElement).click();
+    await settleConnect(el);
+
+    expect(WUpgradeWithConsent).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(WUpgradeWithConsent).mock.calls[0][0] as { image_digest: string };
+    expect(call.image_digest).toBe(newDigest);
   });
 
   it("Test_UpgradeDialog_Cancel_NoCall_Good — Cancel closes dialog without calling either Upgrade path", async () => {

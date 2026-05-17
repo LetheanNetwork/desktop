@@ -281,6 +281,8 @@
       "oc_upgrade_dialog_body":    "This pulls lthn/dev:latest from the registry. The image is NOT signature-verified yet — pulls trust whatever the registry currently serves. Any running sandboxes will keep using their current image until you stop and restart them.",
       "oc_upgrade_dialog_confirm": "Pull update",
       "oc_upgrade_dialog_cancel":  "Cancel",
+      "oc_upgrade_dialog_digest_label":    "Image digest",
+      "oc_upgrade_dialog_digest_selected": "Pinned: {digest}",
       "oc_open_web":           "Open in window",
       "oc_open_web_failed":    "Couldn't open the web window — see logs for details."
     },
