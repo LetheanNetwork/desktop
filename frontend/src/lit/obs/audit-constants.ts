@@ -54,6 +54,7 @@ export const AUDIT_EVENT_NAMES = [
   "sandbox.kill.succeeded",
   "sandbox.kill.failed",
   "sandbox.volume.rejected",
+  "sandbox.spawn.rejected",
   "process.run.requested",
   "process.run.succeeded",
   "process.run.failed",

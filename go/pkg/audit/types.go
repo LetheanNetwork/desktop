@@ -445,6 +445,33 @@ const (
 	//                 can categorise without re-running the validators
 	EventSandboxVolumeRejected = "sandbox.volume.rejected"
 
+	// EventSandboxSpawnRejected fires from the TierGoOnly substrate-shim
+	// when an in-process plugin spawn-request is rejected at the gate
+	// (Cerberus #55 ADD-2 / Mantis #1664 Phase A reservation). Sibling
+	// of EventSandboxSpawnFailed — Failed covers runtime/validation
+	// failures from the container path; Rejected covers the policy gate
+	// that refuses to dispatch into the substrate at all (e.g. tier
+	// mismatch, missing plugin entitlement, sandbox-substrate not wired).
+	//
+	// Phase A reserves the literal so the parity-grep contract enforces
+	// Go ↔ TS lockstep ahead of the Phase B substrate refactor (deferred
+	// pending Cladius adjudication of #1697 — internal/sandboxsubstrate
+	// shape). No emit site references this constant today; the Phase B
+	// shim will wire it in the same commit it introduces the substrate
+	// gate.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced; final list
+	// pinned at Phase B when emit sites land):
+	//
+	//   plugin_id  — installed plugin code requesting the spawn
+	//   reason     — categorical rejection reason (closed set TBD at
+	//                Phase B; expected values include "tier_mismatch" /
+	//                "substrate_unwired" / "entitlement_missing")
+	//
+	// The raw spawn args / env are NEVER in Meta — same Cerberus #1465
+	// closure-only-scope discipline as the sibling sandbox events.
+	EventSandboxSpawnRejected = "sandbox.spawn.rejected"
+
 	// EventProcessRunRequested fires when pkg/process.Service.Run is
 	// about to dispatch `process.run` (synchronous exec) via the upstream
 	// dappco.re/go/process action surface. Cerberus #50 (Mantis #1683) —
