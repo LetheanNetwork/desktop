@@ -16,8 +16,10 @@
 package server
 
 import (
+	"net/http"
 
 	core "dappco.re/go"
+	coreapi "dappco.re/go/api"
 	"dappco.re/lthn/desktop/pkg/marketplace"
 	"github.com/gin-gonic/gin"
 )
@@ -165,9 +167,23 @@ func (s *Service) handleModels(c *gin.Context) {
 
 // handleChat implements POST /v1/chat/completions. Non-streaming
 // today; SSE responses land in the next pass.
+//
+// 413 envelope discipline (Mantis #1584) — bodies that exceed the
+// engine-wide body cap (middleware_body_cap.go Layer 2) surface as
+// *http.MaxBytesError. core.As walks the wrap-chain so this fires
+// regardless of which layer (Layer 1 inner-wrap or Layer 2 outer)
+// triggered. The canonical envelope is coreapi.Fail("body.too_large",
+// ...) at HTTP 413 to match plugin_view_capability.go and so log-
+// tailers can pattern-match abuse without parsing gin-default text.
 func (s *Service) handleChat(c *gin.Context) {
 	var req chatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		var mbe *http.MaxBytesError
+		if core.As(err, &mbe) {
+			c.JSON(http.StatusRequestEntityTooLarge, coreapi.Fail("body.too_large",
+				"request body exceeds cap"))
+			return
+		}
 		writeGinError(c, core.StatusBadRequest, err.Error(), "invalid_request_error")
 		return
 	}
@@ -186,10 +202,18 @@ func (s *Service) handleChat(c *gin.Context) {
 	})
 }
 
-// handleCompletion implements POST /v1/completions.
+// handleCompletion implements POST /v1/completions. Shares the 413
+// envelope discipline of handleChat — see that handler's doc-comment
+// for the canonical Mantis #1584 pattern.
 func (s *Service) handleCompletion(c *gin.Context) {
 	var req completionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		var mbe *http.MaxBytesError
+		if core.As(err, &mbe) {
+			c.JSON(http.StatusRequestEntityTooLarge, coreapi.Fail("body.too_large",
+				"request body exceeds cap"))
+			return
+		}
 		writeGinError(c, core.StatusBadRequest, err.Error(), "invalid_request_error")
 		return
 	}
