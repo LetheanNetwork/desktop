@@ -4,6 +4,8 @@ package marketplace_test
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/sandbox"
+
 	subject "dappco.re/lthn/desktop/pkg/marketplace"
 )
 
@@ -338,4 +340,84 @@ func TestMarketplace_Install_SameBundleSameMutex_Ugly(t *core.T) {
 
 	core.AssertTrue(t, first == second,
 		"same bundle id must return identical mutex pointer across calls")
+}
+
+// TestMarketplace_InstallStampsInstallId_Good — Mantis #1670 (H#187
+// follow-on for #1665). The Install + Launch loops build their
+// sandbox.SpawnLongInput via buildInstallSpawnInput; both InstallID
+// and BundleID MUST land on the input so SpawnLong stamps the
+// `lthn.sandbox.install_id` + `lthn.sandbox.bundle_id` docker
+// labels on the resulting container. Without these, the substrate
+// shipped by H#187 is dead code — labels never get applied even
+// though the field exists.
+func TestMarketplace_InstallStampsInstallId_Good(t *core.T) {
+	img := subject.ImageEntry{
+		ID:    "app",
+		Image: "alpine:3.21",
+		Expose: &subject.ExposeBlock{
+			Port:  4096,
+			Route: "/app",
+		},
+	}
+	env := map[string]string{"FOO": "bar"}
+	vols := []sandbox.LongVolumeMount{
+		{Name: "data", Container: "/data"},
+	}
+
+	got := subject.BuildInstallSpawnInputForTest(
+		img,
+		"echo",
+		env,
+		vols,
+		"iid-deadbeefcafebabe0011223344556677",
+		"opencode",
+	)
+
+	// Identity labels — the load-bearing assertion for #1670.
+	core.AssertEqual(t, "iid-deadbeefcafebabe0011223344556677", got.InstallID)
+	core.AssertEqual(t, "opencode", got.BundleID)
+
+	// Pre-existing wiring still intact (regression guard — the helper
+	// extraction must not drop any of the fields the Install/Launch
+	// loops were already setting before #1670).
+	core.AssertEqual(t, "alpine:3.21", got.Image)
+	core.AssertEqual(t, "echo", got.Command)
+	core.AssertEqual(t, "bar", got.Env["FOO"])
+	core.AssertEqual(t, 1, len(got.Volumes))
+	core.AssertEqual(t, "data", got.Volumes[0].Name)
+	core.AssertEqual(t, "/data", got.Volumes[0].Container)
+	core.AssertEqual(t, 4096, got.ExposedPort)
+}
+
+// TestMarketplace_InstallStampsInstallId_Bad — empty install + bundle
+// identifiers pass through verbatim (they're the documented
+// degradation when sandbox.InstallID() fails — see
+// resolveSandboxInstallID's package comment). SpawnLong already
+// gates label emission on `core.Trim(...) != ""` so empty values
+// mean "skip the label", which matches the pre-#1670 baseline.
+func TestMarketplace_InstallStampsInstallId_Bad(t *core.T) {
+	img := subject.ImageEntry{ID: "app", Image: "alpine:3.21"}
+
+	got := subject.BuildInstallSpawnInputForTest(
+		img, "echo", nil, nil, "", "",
+	)
+
+	core.AssertEqual(t, "", got.InstallID)
+	core.AssertEqual(t, "", got.BundleID)
+}
+
+// TestMarketplace_InstallStampsInstallId_Ugly — Expose may be nil
+// (most opencode bundles don't expose a port at the marketplace
+// layer); the helper must not segfault and must leave ExposedPort
+// at its zero value.
+func TestMarketplace_InstallStampsInstallId_Ugly(t *core.T) {
+	img := subject.ImageEntry{ID: "headless", Image: "alpine:3.21"}
+
+	got := subject.BuildInstallSpawnInputForTest(
+		img, "sleep", nil, nil, "iid-x", "bundle-y",
+	)
+
+	core.AssertEqual(t, "iid-x", got.InstallID)
+	core.AssertEqual(t, "bundle-y", got.BundleID)
+	core.AssertEqual(t, 0, got.ExposedPort)
 }

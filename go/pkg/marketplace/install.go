@@ -183,6 +183,15 @@ func (s *Service) Install(input InstallInput) core.Result {
 		return core.Fail(core.E(installBundleOp, "config dir creation failed", nil))
 	}
 
+	// Mantis #1670 — stamp install + bundle identity on every
+	// long-running container so a future reconcile pass can gate
+	// adoption (same shape as opencode's install-id labelling,
+	// Mantis #1599 Cerberus #22). Resolve installID once outside
+	// the loop so every image entry shares the same value; on KV
+	// failure fall through with "" (SpawnLong omits the label
+	// for an empty value — no regression vs the pre-#1670 world).
+	installID := s.resolveSandboxInstallID(sbSvc)
+
 	sandboxIDs := map[string]string{}
 	var lastErr string
 
@@ -192,15 +201,14 @@ func (s *Service) Install(input InstallInput) core.Result {
 			lastErr = vr.Error()
 			continue
 		}
-		spawnIn := sandbox.SpawnLongInput{
-			Image:   img.Image,
-			Command: s.resolveImageCommand(img),
-			Env:     s.resolveImageEnv(img, env),
-			Volumes: vols,
-		}
-		if img.Expose != nil {
-			spawnIn.ExposedPort = img.Expose.Port
-		}
+		spawnIn := buildInstallSpawnInput(buildInstallSpawnInputArgs{
+			Img:       img,
+			Command:   s.resolveImageCommand(img),
+			Env:       s.resolveImageEnv(img, env),
+			Volumes:   vols,
+			InstallID: installID,
+			BundleID:  m.Name,
+		})
 
 		r := sbSvc.SpawnLong(spawnIn)
 		if !r.OK {
@@ -346,6 +354,11 @@ func (s *Service) Launch(bundleID string) core.Result {
 		return core.Fail(core.E(launchBundleOp, "sandbox service not available", nil))
 	}
 
+	// Mantis #1670 — same install/bundle stamping as the Install
+	// loop. Resolve installID once outside the loop so every
+	// image entry shares the same value.
+	installID := s.resolveSandboxInstallID(sbSvc)
+
 	for _, img := range m.Images {
 		vols, vr := s.resolveVolumes(img)
 		if !vr.OK {
@@ -355,14 +368,13 @@ func (s *Service) Launch(bundleID string) core.Result {
 			// the whole launch fail, just the offending image.
 			continue
 		}
-		spawnIn := sandbox.SpawnLongInput{
-			Image:   img.Image,
-			Command: s.resolveImageCommand(img),
-			Volumes: vols,
-		}
-		if img.Expose != nil {
-			spawnIn.ExposedPort = img.Expose.Port
-		}
+		spawnIn := buildInstallSpawnInput(buildInstallSpawnInputArgs{
+			Img:       img,
+			Command:   s.resolveImageCommand(img),
+			Volumes:   vols,
+			InstallID: installID,
+			BundleID:  m.Name,
+		})
 		_ = sbSvc.SpawnLong(spawnIn)
 	}
 
@@ -795,6 +807,75 @@ func (s *Service) resolveVolumes(img ImageEntry) ([]sandbox.LongVolumeMount, cor
 		})
 	}
 	return out, core.Ok(nil)
+}
+
+// buildInstallSpawnInputArgs is the parameter bag for
+// buildInstallSpawnInput. Keeping the call shape as a struct (vs.
+// positional args) future-proofs the wiring as more SpawnLongInput
+// fields gain bundle-side defaults — adding a field doesn't ripple
+// through every caller's argument order.
+type buildInstallSpawnInputArgs struct {
+	Img       ImageEntry
+	Command   string
+	Env       map[string]string
+	Volumes   []sandbox.LongVolumeMount
+	InstallID string
+	BundleID  string
+}
+
+// buildInstallSpawnInput constructs the sandbox.SpawnLongInput the
+// Install + Launch loops hand to sandbox.SpawnLong, stamping the
+// per-install + per-bundle identifiers (Mantis #1670 / H#187
+// follow-on for #1665).
+//
+// Extracted so the wiring is testable without spinning up the
+// sandbox service — the test asserts both identifier fields land
+// on the spawn input verbatim regardless of which loop builds it.
+//
+// Usage example:
+//
+//	spawnIn := buildInstallSpawnInput(buildInstallSpawnInputArgs{
+//	    Img:       img,
+//	    Command:   s.resolveImageCommand(img),
+//	    Env:       s.resolveImageEnv(img, env),
+//	    Volumes:   vols,
+//	    InstallID: installID,
+//	    BundleID:  m.Name,
+//	})
+func buildInstallSpawnInput(args buildInstallSpawnInputArgs) sandbox.SpawnLongInput {
+	spawnIn := sandbox.SpawnLongInput{
+		Image:     args.Img.Image,
+		Command:   args.Command,
+		Env:       args.Env,
+		Volumes:   args.Volumes,
+		InstallID: args.InstallID,
+		BundleID:  args.BundleID,
+	}
+	if args.Img.Expose != nil {
+		spawnIn.ExposedPort = args.Img.Expose.Port
+	}
+	return spawnIn
+}
+
+// resolveSandboxInstallID asks the sandbox service for its
+// persisted per-install identifier; on KV failure (e.g. HOME not
+// resolvable in a hardened test environment) the install/launch
+// loops fall through with "" so SpawnLong omits the label rather
+// than failing the whole bundle install.
+//
+// The degradation matches the pre-#1670 world — labels were
+// always empty before, so a transient KV failure can't be a worse
+// outcome than the baseline behaviour everyone has been running.
+func (s *Service) resolveSandboxInstallID(sbSvc *sandbox.Service) string {
+	if sbSvc == nil {
+		return ""
+	}
+	r := sbSvc.InstallID()
+	if !r.OK {
+		return ""
+	}
+	id, _ := r.Value.(string)
+	return id
 }
 
 // substituteTokens replaces ${env.KEY} tokens in v with the

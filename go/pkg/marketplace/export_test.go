@@ -6,7 +6,11 @@
 
 package marketplace
 
-import "sync"
+import (
+	"sync"
+
+	"dappco.re/lthn/desktop/pkg/sandbox"
+)
 
 // BundleMutexForTest exposes Service.bundleMutex so external tests
 // (the *_test package) can assert the per-bundleID single-flight
@@ -51,6 +55,37 @@ func StripCacheFrontmatterForTest(raw []byte) []byte {
 // IndexCacheVersionForTest exposes the current stamped cache
 // version constant (Mantis #1582).
 func IndexCacheVersionForTest() int { return indexCacheVersion }
+
+// BuildInstallSpawnInputForTest exposes buildInstallSpawnInput so
+// external tests can verify the Install + Launch loops stamp
+// InstallID + BundleID onto the sandbox.SpawnLongInput they hand
+// SpawnLong (Mantis #1670 / H#187 follow-on for #1665) — without
+// having to spin up the sandbox service or run a container.
+//
+// Usage example (test code):
+//
+//	got := subject.BuildInstallSpawnInputForTest(
+//	    img, "echo", env, vols, "iid-deadbeef", "opencode",
+//	)
+//	core.AssertEqual(t, "iid-deadbeef", got.InstallID)
+//	core.AssertEqual(t, "opencode",     got.BundleID)
+func BuildInstallSpawnInputForTest(
+	img ImageEntry,
+	command string,
+	env map[string]string,
+	volumes []sandbox.LongVolumeMount,
+	installID string,
+	bundleID string,
+) sandbox.SpawnLongInput {
+	return buildInstallSpawnInput(buildInstallSpawnInputArgs{
+		Img:       img,
+		Command:   command,
+		Env:       env,
+		Volumes:   volumes,
+		InstallID: installID,
+		BundleID:  bundleID,
+	})
+}
 
 // errString is the minimal error type used when a Result fails with
 // a plain string (vs a typed envelope).
