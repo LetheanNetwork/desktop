@@ -190,9 +190,13 @@ export async function grantTokenToFrame(
       try {
         const json = await res.clone().json();
         // coreapi.Response[T].Data is `json:"data"` per
-        // [[feedback_coreapi_data_envelope_not_value]]; tolerate both
-        // shapes defensively (real prod is data; older envelopes used Value).
-        const data = (json?.data ?? json?.Value ?? json?.value) as
+        // [[feedback_coreapi_data_envelope_not_value]] — single-path read
+        // off the canonical shape. The legacy `Value`/`value` fall-through
+        // was dead branch (Mantis #1515) — coreapi has NEVER produced
+        // PascalCase `Value` nor lowercase `value`. Carrying the chain
+        // let test mocks with the wrong shape silently pass; collapsing
+        // to `json?.data` makes shape-drift fail loud.
+        const data = json?.data as
           | { correlation_id?: string }
           | undefined;
         const correlationID = typeof data?.correlation_id === "string"

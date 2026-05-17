@@ -303,6 +303,50 @@ describe("TestApiFetch_GrantTokenToFrame_CapturesCorrelationIdFromResponse_Good"
 
     mod.clearSessionToken();
   });
+
+  // Mantis #1515 regression guard — the broker's correlation_id parser
+  // ONLY accepts the canonical coreapi.Response[T] wire shape
+  // `{success, data: {correlation_id}}`. The historical dead shape
+  // `{success, Value: {correlation_id}}` MUST NOT be walked via a
+  // fallback chain. The grant still succeeds (audit row committed,
+  // postMessage delivered) — the only observable is that no debug-log
+  // line is emitted for the non-canonical shape, because the
+  // correlation_id is unreachable.
+  it("response with dead {success, Value} shape is NOT walked into for correlation_id", async () => {
+    const correlationID = "deadbeef-2345-4678-89ab-cdef01234567";
+    const responseBody = JSON.stringify({
+      success: true,
+      // Dead PascalCase shape — coreapi NEVER emits this.
+      Value: { correlation_id: correlationID },
+    });
+    const fetchStub = vi.fn(async () => new Response(responseBody, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchStub);
+
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+
+    const mod = await import("./api-fetch");
+    mod.setSessionToken("LTHN-SESS-1.dead-shape-test");
+
+    const target = {
+      source: { postMessage: vi.fn() } as unknown as Window,
+      targetOrigin: "http://127.0.0.1:4096",
+      pluginCode: "opencode",
+    };
+    const outcome = await mod.grantTokenToFrame(target, ["session-token"]);
+
+    expect(outcome.ok).toBe(true);
+    // No correlation_id debug-log line — the dead shape was not walked.
+    const matchingCalls = debugSpy.mock.calls.filter(
+      (c) => c[0] === "lthn:audit:correlation_id",
+    );
+    expect(matchingCalls.length).toBe(0);
+
+    debugSpy.mockRestore();
+    mod.clearSessionToken();
+  });
 });
 
 // ─── postMessage failure propagation ──────────────────────────────────

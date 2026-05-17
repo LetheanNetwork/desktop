@@ -292,11 +292,15 @@ class LthnAuthGate extends LitElement {
       });
 
       if (res.ok) {
-        // coreapi.Response[T] envelope shape — see unlock handler above
-        // for the field-name discovery; same shape applies here.
+        // coreapi.Response[T] envelope shape — single-path read off the
+        // canonical `data` key per [[feedback_coreapi_data_envelope_not_value]]
+        // + Mantis #1515. Previously this branch tolerated `Value` / `value`
+        // as defensive fall-through; those keys never appear in real
+        // coreapi output, so the chain only served to mask test mocks
+        // shaped wrong. Collapsed to `data` so shape-drift surfaces loud.
         const json = await res.json().catch(() => null) as
-          { data?: UnlockResponseBody; Value?: UnlockResponseBody; value?: UnlockResponseBody } | null;
-        const out = json?.data ?? json?.Value ?? json?.value ?? null;
+          { data?: UnlockResponseBody } | null;
+        const out = json?.data ?? null;
         const sessionToken = out?.session_token;
         if (typeof sessionToken !== "string" || sessionToken.length === 0) {
           this.state = "error";
@@ -439,12 +443,13 @@ class LthnAuthGate extends LitElement {
       if (res.ok) {
         // coreapi.Response[T] envelope shape is `{success, data, ...}`
         // with the JSON tag `data,omitempty` (external/api/go/response.go
-        // line 15). The legacy `Value`/`value` paths cover test mocks
-        // that pre-date the discovery — keep them so unit tests stay
-        // green while real prod responses land via `data`.
+        // line 15). Single-path read off `data` per Mantis #1515 —
+        // legacy `Value`/`value` fall-through removed because coreapi
+        // never produced those keys, so the chain only hid mock-shape
+        // drift. Test fixtures must now match the real wire shape.
         const json = await res.json().catch(() => null) as
-          { data?: UnlockResponseBody; Value?: UnlockResponseBody; value?: UnlockResponseBody } | null;
-        const out = json?.data ?? json?.Value ?? json?.value ?? null;
+          { data?: UnlockResponseBody } | null;
+        const out = json?.data ?? null;
         const sessionToken = out?.session_token;
         if (typeof sessionToken !== "string" || sessionToken.length === 0) {
           this.state = "error";

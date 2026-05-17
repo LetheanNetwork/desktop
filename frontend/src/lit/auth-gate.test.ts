@@ -236,10 +236,15 @@ describe("<lthn-auth-gate> — Run setup click handler (Stage X.B Phase 3)", () 
     asMockFn(IssueBootstrapTokenForScope).mockResolvedValue({
       OK: true, Value: { token: PROV_TOKEN, expires_at: Date.now() / 1000 + 60 },
     });
+    // coreapi.Response[T] real wire shape — `{success, data}` per
+    // Mantis #1515 (lowercase `data`, never PascalCase `Value`). The
+    // earlier `Value:` fixture passed only because the parser carried
+    // a dead `?? json?.Value ?? json?.value` fallback chain that's now
+    // collapsed to `json?.data` only.
     globalThis.fetch = vi.fn(async () =>
       new Response(JSON.stringify({
         success: true,
-        Value: { session_token: SESSION, expires_at: Date.now() / 1000 + 900, account_id: "abc123" },
+        data: { session_token: SESSION, expires_at: Date.now() / 1000 + 900, account_id: "abc123" },
       }), { status: 200, headers: { "Content-Type": "application/json" } })
     ) as unknown as typeof fetch;
     setSessionToken("");
@@ -364,10 +369,11 @@ describe("<lthn-auth-gate> — Cerberus #1465 (Stage X.B): passphrase + session-
     asMockFn(IssueBootstrapTokenForScope).mockResolvedValue({
       OK: true, Value: { token: TOKEN, expires_at: Date.now() / 1000 + 60 },
     });
+    // Real coreapi.Response[T] wire shape — `{success, data}` per Mantis #1515.
     globalThis.fetch = vi.fn(async () =>
       new Response(JSON.stringify({
         success: true,
-        Value: { session_token: SESSION_CANARY, expires_at: Date.now() / 1000 + 900, account_id: "abc123" },
+        data: { session_token: SESSION_CANARY, expires_at: Date.now() / 1000 + 900, account_id: "abc123" },
       }), { status: 200, headers: { "Content-Type": "application/json" } })
     ) as unknown as typeof fetch;
     setSessionToken("");
@@ -462,7 +468,7 @@ describe("<lthn-auth-gate> — Cerberus #1465 (Stage X.B): passphrase + session-
     globalThis.fetch = vi.fn(async () =>
       new Response(JSON.stringify({
         success: true,
-        Value: { session_token: SESSION_CANARY, expires_at: Date.now() / 1000 + 900, account_id: "abc123" },
+        data: { session_token: SESSION_CANARY, expires_at: Date.now() / 1000 + 900, account_id: "abc123" },
       }), { status: 200, headers: { "Content-Type": "application/json" } })
     ) as unknown as typeof fetch;
     // After state=error the gate stops rendering the setup form;
@@ -498,10 +504,11 @@ describe("<lthn-auth-gate> — Wreath-in unlock flow (RFC.stage-e §5)", () => {
     asMockFn(IssueBootstrapTokenForScope).mockResolvedValue({
       OK: true, Value: { token: UNLOCK_TOKEN, expires_at: Date.now() / 1000 + 60 },
     });
+    // Real coreapi.Response[T] wire shape — `{success, data}` per Mantis #1515.
     globalThis.fetch = vi.fn(async () =>
       new Response(JSON.stringify({
         success: true,
-        Value: { session_token: SESSION, expires_at: Date.now() / 1000 + 900, account_id: ACCOUNT_ID },
+        data: { session_token: SESSION, expires_at: Date.now() / 1000 + 900, account_id: ACCOUNT_ID },
       }), { status: 200, headers: { "Content-Type": "application/json" } })
     ) as unknown as typeof fetch;
     // Clear any session-token from prior tests in this run.
@@ -672,5 +679,83 @@ describe("<lthn-auth-gate> — Wreath-in unlock flow (RFC.stage-e §5)", () => {
       const v = (el as unknown as Record<string, unknown>)[k];
       if (typeof v === "string") expect(v).not.toContain(SESSION);
     }
+  });
+});
+
+// Mantis #1515 regression guard — the parser ONLY accepts the canonical
+// coreapi.Response[T] wire shape `{success, data}`. The historical dead
+// shape `{success, Value}` (PascalCase, never emitted by coreapi) MUST
+// surface as an error rather than silently parse the wrong shape into
+// `undefined`. Without this guard a future "be helpful" refactor could
+// re-introduce the `?? json?.Value` fall-through and the bug would not
+// be visible to existing happy-path tests.
+describe("TestAuthGate_ResponseShape_Bad — dead coreapi shape surfaces (Mantis #1515)", () => {
+  const PASSPHRASE = "correct horse battery staple";
+  const ACCOUNT_ID = "abc123def4567890";
+  const PROV_TOKEN = "LTHN-BOOT-1.provision.bad";
+  const UNLOCK_TOKEN = "LTHN-BOOT-1.unlock.bad";
+
+  function typeSetupForm(el: HTMLElement, pp: string) {
+    const ppInput = el.querySelector("#lthn-auth-gate-setup-passphrase") as HTMLInputElement;
+    const ccInput = el.querySelector("#lthn-auth-gate-setup-confirm") as HTMLInputElement;
+    ppInput.value = pp;
+    ccInput.value = pp;
+  }
+
+  beforeEach(() => {
+    asMockFn(AccountStatus).mockReset();
+    asMockFn(IssueBootstrapToken).mockReset();
+    asMockFn(IssueBootstrapTokenForScope).mockReset();
+    document.body.innerHTML = "";
+    setSessionToken("");
+  });
+
+  it("provision flow rejects dead {success, Value} shape (no silent success)", async () => {
+    asMockFn(AccountStatus).mockResolvedValue({ OK: true, Value: { has_user_account: false } });
+    asMockFn(IssueBootstrapTokenForScope).mockResolvedValue({
+      OK: true, Value: { token: PROV_TOKEN, expires_at: Date.now() / 1000 + 60 },
+    });
+    // Server "returns" the dead PascalCase shape. The collapsed parser
+    // (`json?.data` only) MUST surface error — not extract
+    // session_token from `Value` via a fallback chain.
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        success: true,
+        Value: { session_token: "LTHN-SESS-1.must-not-load", account_id: ACCOUNT_ID },
+      }), { status: 200, headers: { "Content-Type": "application/json" } })
+    ) as unknown as typeof fetch;
+
+    const el = await mount();
+    typeSetupForm(el, PASSPHRASE);
+    await el._onRunSetup();
+    await el.updateComplete;
+
+    expect(el.state).toBe("error");
+    expect(el.state).not.toBe("ok");
+  });
+
+  it("unlock flow rejects dead {success, value} shape (no silent success)", async () => {
+    asMockFn(AccountStatus).mockResolvedValue({
+      OK: true, Value: { has_user_account: true, account_id: ACCOUNT_ID },
+    });
+    asMockFn(IssueBootstrapTokenForScope).mockResolvedValue({
+      OK: true, Value: { token: UNLOCK_TOKEN, expires_at: Date.now() / 1000 + 60 },
+    });
+    // Server "returns" the dead lowercase-value shape. Same invariant —
+    // parser MUST NOT walk a fallback chain into `value`.
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        success: true,
+        value: { session_token: "LTHN-SESS-1.must-not-load", account_id: ACCOUNT_ID },
+      }), { status: 200, headers: { "Content-Type": "application/json" } })
+    ) as unknown as typeof fetch;
+
+    const el = await mount();
+    (el.querySelector("#lthn-auth-gate-passphrase") as HTMLInputElement).value = PASSPHRASE;
+    await el._onWreathIn();
+    await el.updateComplete;
+
+    expect(el.state).toBe("error");
+    expect(el.state).not.toBe("ok");
   });
 });
