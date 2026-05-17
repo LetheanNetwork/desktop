@@ -81,12 +81,14 @@ tasks:
       - cd "{{.GO_DIR}}" && go test ./pkg/...
 
   lint:cousinvalidator:
-    summary: Run the cousin-validator lint (forbid local isValidID/isValidSlug
-      outside pkg/paths/ — Mantis #1505). Enforced as a normal test inside
-      pkg/lint/cousinvalidator, so `task test:go` already catches drift; this
-      target is the operator shortcut for a focused run.
+    summary: "Run cousin-validator lint (forbid local isValid* outside pkg/paths/, Mantis #1505) — operator shortcut for focused run; task test:go already catches drift via the embedded test"
     cmds:
       - cd "{{.GO_DIR}}" && go test ./pkg/lint/cousinvalidator/...
+
+  lint:serviceingress:
+    summary: "Run service-ingress lint (exported *Service.X(id string) → core.PathJoin must call paths.IsValidID OR live in wails.go, Mantis #1609 — Cerberus #24 Finding 2) — operator shortcut for focused run; task test:go already catches drift via the embedded test"
+    cmds:
+      - cd "{{.GO_DIR}}" && go test ./pkg/lint/serviceingress/...
 
   test:frontend:
     summary: Run the frontend Vitest suite (Lit + chrome + windows)

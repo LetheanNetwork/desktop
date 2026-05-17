@@ -1,0 +1,41 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Fixture — should NOT be flagged (v1 limit, documented).
+//
+// An exported *Service method that takes a STRUCT input carrying
+// an ID and reaches PathJoin without IsValidID. v1 does not flag
+// because resolving the struct field type requires the type
+// checker. Documented limit per the package doc; tightening to
+// struct-aware analysis is a forward-arc Mantis.
+//
+// When v2 lands, this fixture should be moved to the "violation_*"
+// set and the live-scan test will surface the consumers needing
+// migration.
+
+package fixture
+
+type CreateInput struct {
+	ID string
+}
+
+type Result struct {
+	OK bool
+}
+
+type Service struct{}
+
+func PathJoin(parts ...string) string {
+	out := ""
+	for _, p := range parts {
+		out += p + "/"
+	}
+	return out
+}
+
+// Create takes a struct input — v1 does not introspect struct
+// field types, so this is out of scope today.
+func (s *Service) Create(input CreateInput) Result {
+	path := PathJoin("/data", input.ID)
+	_ = path
+	return Result{OK: true}
+}

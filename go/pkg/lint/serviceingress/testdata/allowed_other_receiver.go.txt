@@ -1,0 +1,25 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Fixture — should NOT be flagged.
+//
+// A method on a non-Service receiver type is out of scope. Only
+// the *Service surface forms the wails-bypass ingress class that
+// Cerberus #24 Finding 2 calls out.
+
+package fixture
+
+type Helper struct{}
+
+func PathJoin(parts ...string) string {
+	out := ""
+	for _, p := range parts {
+		out += p + "/"
+	}
+	return out
+}
+
+// Build belongs to Helper, not Service — even with an unguarded
+// PathJoin it does not count under this rule.
+func (h *Helper) Build(id string) string {
+	return PathJoin("/data", id)
+}

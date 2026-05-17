@@ -1,0 +1,36 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Fixture — should NOT be flagged.
+//
+// The exported *Service method has the //nolint:serviceingress
+// pragma in its doc comment with a rationale. Used when PathJoin
+// is being assembled from caller-internal constants only and the
+// `string` param does not flow into the path.
+
+package fixture
+
+type Result struct {
+	OK bool
+}
+
+type Service struct{}
+
+func PathJoin(parts ...string) string {
+	out := ""
+	for _, p := range parts {
+		out += p + "/"
+	}
+	return out
+}
+
+// RotateInternal rebuilds the segment index from an internal
+// constant prefix; the `kind` string param classifies the
+// caller but does not reach PathJoin.
+//
+//nolint:serviceingress — caller-internal prefix, no UI ingress
+func (s *Service) RotateInternal(kind string) Result {
+	_ = kind
+	path := PathJoin("/internal", "segments")
+	_ = path
+	return Result{OK: true}
+}

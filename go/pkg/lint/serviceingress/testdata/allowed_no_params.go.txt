@@ -1,0 +1,32 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Fixture — should NOT be flagged.
+//
+// An exported *Service method that takes NO parameters cannot
+// carry user-supplied IDs into PathJoin, so v1 treats it as out
+// of scope. Status / ListRoot / similar nullary methods are the
+// most common shape this exempts.
+
+package fixture
+
+type Result struct {
+	OK bool
+}
+
+type Service struct{}
+
+func PathJoin(parts ...string) string {
+	out := ""
+	for _, p := range parts {
+		out += p + "/"
+	}
+	return out
+}
+
+// Status reports the service home dir. Takes no input from the
+// caller; PathJoin operates on a constant prefix.
+func (s *Service) Status() Result {
+	root := PathJoin("/data", "root")
+	_ = root
+	return Result{OK: true}
+}

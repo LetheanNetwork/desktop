@@ -1,0 +1,33 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Fixture — should be flagged.
+//
+// An exported *Service method that takes a literal `string` id
+// param, calls core.PathJoin directly, and never calls
+// paths.IsValidID. Lives in a synthetic service.go (not wails.go).
+// This is the canonical wails-bypass shape Cerberus #24 Finding 2
+// warns about.
+
+package fixture
+
+type Result struct {
+	OK bool
+}
+
+type Service struct{}
+
+func PathJoin(parts ...string) string {
+	out := ""
+	for _, p := range parts {
+		out += p + "/"
+	}
+	return out
+}
+
+// Create is exported, takes a literal string id, and builds a
+// filesystem path without validating the id first.
+func (s *Service) Create(id string) Result {
+	path := PathJoin("/data", id)
+	_ = path
+	return Result{OK: true}
+}

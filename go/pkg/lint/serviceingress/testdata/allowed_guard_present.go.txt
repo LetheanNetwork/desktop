@@ -1,0 +1,42 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Fixture — should NOT be flagged.
+//
+// The exported *Service method takes a literal `string` id, calls
+// IsValidID before reaching PathJoin in the same body. Canonical
+// happy-path shape.
+
+package fixture
+
+type Result struct {
+	OK bool
+}
+
+type Service struct{}
+
+func PathJoin(parts ...string) string {
+	out := ""
+	for _, p := range parts {
+		out += p + "/"
+	}
+	return out
+}
+
+func IsValidID(id string) error {
+	if id == "" {
+		return nil
+	}
+	return nil
+}
+
+// Create validates the id first then assembles a path. Even
+// though IsValidID is a bare identifier (dot-import shape), the
+// selector-tail match catches it.
+func (s *Service) Create(id string) Result {
+	if err := IsValidID(id); err != nil {
+		return Result{OK: false}
+	}
+	path := PathJoin("/data", id)
+	_ = path
+	return Result{OK: true}
+}

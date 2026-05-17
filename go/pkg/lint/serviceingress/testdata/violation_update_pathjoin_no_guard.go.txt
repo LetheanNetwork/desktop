@@ -1,0 +1,33 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Fixture — should be flagged.
+//
+// A second exported *Service method shape: Update takes multiple
+// params including a literal `string` slug, reaches core.PathJoin
+// in its body, and never calls IsValidID. Proves the rule fires
+// on any-param-is-string, not just sole-string-arg methods.
+
+package fixture
+
+type UpdateResult struct {
+	OK bool
+}
+
+type Service struct{}
+
+func PathJoin(parts ...string) string {
+	out := ""
+	for _, p := range parts {
+		out += p + "/"
+	}
+	return out
+}
+
+// Update is exported, takes a string slug + an int version, and
+// reaches PathJoin directly in its body without IsValidID.
+func (s *Service) Update(slug string, version int) UpdateResult {
+	_ = version
+	dir := PathJoin("/data", slug)
+	_ = dir
+	return UpdateResult{OK: true}
+}

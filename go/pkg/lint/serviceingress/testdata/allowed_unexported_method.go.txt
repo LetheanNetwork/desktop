@@ -1,0 +1,27 @@
+// SPDX-Licence-Identifier: EUPL-1.2
+
+// Fixture — should NOT be flagged.
+//
+// An unexported *Service method is out of scope. The rule only
+// flags exported methods because only they form the wails-bypass
+// surface (CLI / MCP / plugin-gateway dispatch can only invoke
+// exported methods).
+
+package fixture
+
+type Service struct{}
+
+func PathJoin(parts ...string) string {
+	out := ""
+	for _, p := range parts {
+		out += p + "/"
+	}
+	return out
+}
+
+// resolvePath is unexported — even though it reaches PathJoin
+// from an id without IsValidID, it cannot be reached directly
+// from outside the package via reflection-based dispatch.
+func (s *Service) resolvePath(id string) string {
+	return PathJoin("/data", id)
+}
