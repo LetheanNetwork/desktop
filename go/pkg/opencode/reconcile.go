@@ -284,10 +284,16 @@ func (s *Service) emitDenials(out, expectedInstallID string) {
 // blank lines and rows that don't have the expected 3 tab-separated
 // columns (defensive; a future docker --format change must not crash
 // the boot path).
+//
+// Per-line trimming uses TrimRight(\r) only — a full TrimSpace would
+// strip the trailing TAB on rows whose InstallID column is empty
+// (e.g. pre-#1599 legacy containers), collapsing the row from 3 tab
+// fields to 2 and dropping it. We need those rows: emitDenials must
+// see them to emit a missing_label denial event.
 func parseReconcileLines(out string) []reconcileLine {
 	var lines []reconcileLine
 	for _, raw := range core.Split(core.Trim(out), "\n") {
-		raw = core.Trim(raw)
+		raw = core.TrimRight(raw, "\r")
 		if raw == "" {
 			continue
 		}
