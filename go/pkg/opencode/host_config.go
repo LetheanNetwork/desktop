@@ -30,6 +30,7 @@ package opencode
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // hostConfigSubpath is opencode's canonical global config path,
@@ -154,8 +155,27 @@ func (s *Service) MergeHostConfig(opts MergeHostConfigOptions) core.Result {
 	existing["provider"] = existingProvider
 
 	// Ensure parent dir + write.
+	//
+	// Mode discipline (Cerberus #22 MED-1 / Mantis #1618):
+	//
+	//   - Parent dir 0o700 (user-only access). The merged file may
+	//     embed pre-existing user provider apiKey blocks (OpenAI,
+	//     Anthropic) preserved verbatim across the merge — see the
+	//     MergeHostConfigResult.Bytes type comment. A 0o755 parent
+	//     dir leaks the directory listing to other local users; an
+	//     0o644 file leaks the apiKey blocks to cross-user read.
+	//   - File written via paths.AtomicWriteWithVersion which uses
+	//     0o600 verbatim (paths.writeFileMode) AND adds the tmp +
+	//     fsync + rename atomic-write guarantee (power-failure-safe
+	//     replacement, no half-written file ever visible at path).
+	//   - WriteInput is left as the unconditional shape (no
+	//     IfVersion / IfMtime / IfMatchHash / IfNotExist) — this
+	//     surface deliberately re-writes on each merge and there is
+	//     no version field in opencode.json's schema for us to pin
+	//     against. Lock-serialisation under WithFileLock prevents
+	//     two concurrent Merge calls from racing.
 	parent := core.PathDir(path)
-	if r := core.MkdirAll(parent, 0o755); !r.OK {
+	if r := core.MkdirAll(parent, 0o700); !r.OK {
 		return r
 	}
 
@@ -164,7 +184,9 @@ func (s *Service) MergeHostConfig(opts MergeHostConfigOptions) core.Result {
 		return outR
 	}
 	outBytes, _ := outR.Value.([]byte)
-	if r := core.WriteFile(path, outBytes, 0o644); !r.OK {
+	if r := paths.AtomicWriteWithVersion(path, paths.WriteInput{
+		Body: outBytes,
+	}); !r.OK {
 		return r
 	}
 
