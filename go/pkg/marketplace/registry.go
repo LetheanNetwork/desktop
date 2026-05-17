@@ -16,6 +16,7 @@ package marketplace
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 const (
@@ -264,6 +265,12 @@ func (s *Service) indexCachePath() string {
 // readIndexCache returns the cached index if the cache file exists and is
 // younger than indexCacheTTL. Returns a Fail result when the cache is absent
 // or stale — caller should downloadIndex instead.
+//
+// Mantis #1582 — the cache body may now carry the optional version
+// frontmatter stamped by writeIndexCache via paths.AtomicWriteWithVersion.
+// stripCacheFrontmatter peels it before JSON unmarshal so legacy
+// pure-JSON caches (pre-#1582) continue to parse cleanly — lazy
+// migration per RFC §3.2.
 func (s *Service) readIndexCache(cachePath string) core.Result {
 	statR := core.Stat(cachePath)
 	if !statR.OK {
@@ -280,6 +287,7 @@ func (s *Service) readIndexCache(cachePath string) core.Result {
 		return core.Fail(core.E(fetchIndexOp, "cache read failed", nil))
 	}
 	raw, _ := readR.Value.([]byte)
+	raw = stripCacheFrontmatter(raw)
 
 	var entries []CatalogueEntry
 	if r := core.JSONUnmarshal(raw, &entries); !r.OK {
@@ -291,6 +299,94 @@ func (s *Service) readIndexCache(cachePath string) core.Result {
 		CachedAt:  info.ModTime(),
 		FromCache: true,
 	})
+}
+
+// indexCacheVersion is the current frontmatter version stamped on
+// new writes (Mantis #1582). Bump on schema-breaking cache shape
+// changes; readers handle prior versions via lazy migration in
+// stripCacheFrontmatter.
+const indexCacheVersion = 1
+
+// composeCacheBody prepends YAML frontmatter (---\nversion: N\n---\n)
+// to the JSON cache body so paths.AtomicWriteWithVersion can read
+// the version via parseFrontmatterVersion + the IfVersion gate works
+// as documented. Body shape is wire-stable across the cache TTL —
+// readers that don't know about the frontmatter (legacy pure-JSON)
+// still parse OK because stripCacheFrontmatter is the strip surface.
+//
+// Usage example:
+//
+//	body := composeCacheBody(jsonBytes, indexCacheVersion)
+//	r := paths.AtomicWriteWithVersion(cachePath, paths.WriteInput{Body: body})
+func composeCacheBody(jsonBody []byte, version int) []byte {
+	header := "---\nversion: " + core.Sprintf("%d", version) + "\n---\n"
+	out := make([]byte, 0, len(header)+len(jsonBody))
+	out = append(out, []byte(header)...)
+	out = append(out, jsonBody...)
+	return out
+}
+
+// stripCacheFrontmatter removes a leading "---\n...---\n" YAML
+// frontmatter block from raw if present, otherwise returns raw
+// unchanged. Mantis #1582 — readers tolerate both shapes during the
+// lazy-migration window so a pre-#1582 cache on disk parses without
+// a rewrite roundtrip.
+func stripCacheFrontmatter(raw []byte) []byte {
+	const open = "---\n"
+	if len(raw) < len(open) {
+		return raw
+	}
+	for i := 0; i < len(open); i++ {
+		if raw[i] != open[i] {
+			return raw
+		}
+	}
+	// Find closing "---\n" delimiter after the open.
+	rest := raw[len(open):]
+	for i := 0; i < len(rest)-3; i++ {
+		if rest[i] == '-' && rest[i+1] == '-' && rest[i+2] == '-' {
+			if i == 0 || rest[i-1] == '\n' {
+				// Skip past --- + the following newline if present.
+				end := i + 3
+				if end < len(rest) && rest[end] == '\n' {
+					end++
+				}
+				return rest[end:]
+			}
+		}
+	}
+	// Malformed frontmatter (no close) — return as-is so JSON parse
+	// can surface the real error.
+	return raw
+}
+
+// writeIndexCache performs the Mantis #1582 atomic write of the
+// cache body via paths.AtomicWriteWithVersion. The cache is a
+// single-writer surface today (only downloadIndex writes) but the
+// atomic primitive still buys us tmp+fsync+rename torn-write safety
+// + frontmatter-stamped version so future cascade adopters can
+// IfVersion-gate without a schema migration.
+//
+// On stale conflict (IfVersion mismatch), wraps the VersionStale
+// envelope as paths.ConflictEnvelope with code
+// "marketplace.index_cache.conflict" so the surface matches the
+// cascade convention.
+func writeIndexCache(cachePath string, jsonBody []byte) core.Result {
+	cacheDir := core.PathDir(cachePath)
+	_ = core.MkdirAll(cacheDir, 0o755)
+
+	body := composeCacheBody(jsonBody, indexCacheVersion)
+	r := paths.AtomicWriteWithVersion(cachePath, paths.WriteInput{
+		Body: body,
+	})
+	if !r.OK {
+		if stale, ok := paths.VersionStaleFromError(r.Value); ok {
+			return core.Fail(paths.NewConflictEnvelope(
+				"marketplace.index_cache.conflict", stale))
+		}
+		return r
+	}
+	return r
 }
 
 // downloadIndex fetches the index from indexURL, writes the cache, and returns
@@ -310,10 +406,12 @@ func (s *Service) downloadIndex(indexURL, cachePath string) core.Result {
 		return core.Fail(core.E(fetchIndexOp, "index parse failed", nil))
 	}
 
-	// Write cache — best-effort; a failed write doesn't break the response.
-	cacheDir := core.PathDir(cachePath)
-	_ = core.MkdirAll(cacheDir, 0o755)
-	_ = core.WriteFile(cachePath, raw, 0o644)
+	// Write cache via paths.AtomicWriteWithVersion (Mantis #1582 —
+	// cascade-adoption). Best-effort on the network response side: a
+	// failed cache write doesn't break the live result. tmp+fsync+
+	// rename atomicity prevents torn cache files; frontmatter
+	// version stamp opens the IfVersion gate for future adopters.
+	_ = writeIndexCache(cachePath, raw)
 
 	return core.Ok(FetchIndexResult{
 		Entries:   entries,

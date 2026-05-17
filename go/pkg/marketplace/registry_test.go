@@ -5,6 +5,7 @@ package marketplace_test
 import (
 	core "dappco.re/go"
 	subject "dappco.re/lthn/desktop/pkg/marketplace"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // sampleCatalogue is a minimal fixture for SearchCatalogue tests.
@@ -160,4 +161,81 @@ func TestRegistry_CatalogueEntry_Ugly(t *core.T) {
 
 	results = subject.SearchCatalogue(sampleCatalogue, "", "AI-AGENTS")
 	core.AssertLen(t, results, 1)
+}
+
+// TestMarketplace_RegistryWrite_AtomicAdoption_Good — Mantis #1582
+// LOW. The cache write must go through paths.AtomicWriteWithVersion
+// (cascade-adoption pattern matching W1-W4 sales/marketing/incidents
+// /runbooks/office-mail). Verify the on-disk shape carries the
+// frontmatter version stamp so future IfVersion gates can land
+// without a schema migration.
+func TestMarketplace_RegistryWrite_AtomicAdoption_Good(t *core.T) {
+	tmp := t.TempDir()
+	cachePath := tmp + "/index.json"
+
+	jsonBody := []byte(`[{"name":"opencode","display":"OpenCode","source_url":"https://marketplace.lthn.ai/v1/opencode.yml"}]`)
+	if err := subject.WriteIndexCacheForTest(cachePath, jsonBody); err != nil {
+		t.Fatalf("WriteIndexCacheForTest: %v", err)
+	}
+
+	// On-disk body MUST carry the frontmatter version stamp.
+	readR := core.ReadFile(cachePath)
+	core.RequireTrue(t, readR.OK)
+	raw, _ := readR.Value.([]byte)
+	core.AssertContains(t, string(raw), "---\nversion: 1\n---\n",
+		"cache body must carry frontmatter version stamp post-#1582")
+	core.AssertContains(t, string(raw), "opencode",
+		"cache body must still contain JSON payload after frontmatter")
+
+	// Strip parser must yield the original JSON payload byte-for-byte.
+	stripped := subject.StripCacheFrontmatterForTest(raw)
+	core.AssertEqual(t, string(jsonBody), string(stripped),
+		"strip must recover original JSON body exactly")
+}
+
+// TestMarketplace_RegistryWrite_LegacyShapeStillParses_Good — Mantis
+// #1582 lazy-migration. A pre-#1582 cache file on disk (pure JSON,
+// no frontmatter) MUST still be readable by stripCacheFrontmatter —
+// the strip function returns the input unchanged when the open
+// delimiter is absent.
+func TestMarketplace_RegistryWrite_LegacyShapeStillParses_Good(t *core.T) {
+	legacy := []byte(`[{"name":"opencode"}]`)
+	stripped := subject.StripCacheFrontmatterForTest(legacy)
+	core.AssertEqual(t, string(legacy), string(stripped),
+		"pre-#1582 pure-JSON cache must pass through strip unchanged")
+}
+
+// TestMarketplace_RegistryWrite_VersionStaleRejects_Ugly — Mantis
+// #1582 conflict path. Two writes with mismatching IfVersion must
+// produce a stale rejection via the AtomicWriteWithVersion primitive.
+// Tested at the primitive boundary (not the public writeIndexCache
+// which unconditional-writes today) — the wire-in proves the
+// primitive's IfVersion gate is reachable from the cache path's
+// frontmatter format.
+func TestMarketplace_RegistryWrite_VersionStaleRejects_Ugly(t *core.T) {
+	tmp := t.TempDir()
+	cachePath := tmp + "/index.json"
+
+	// First write at version 1.
+	body1 := subject.ComposeCacheBodyForTest([]byte(`[]`), 1)
+	r1 := paths.AtomicWriteWithVersion(cachePath, paths.WriteInput{Body: body1})
+	core.RequireTrue(t, r1.OK)
+
+	// Second write with IfVersion=99 (mismatch) MUST stale-reject.
+	body2 := subject.ComposeCacheBodyForTest([]byte(`[{"name":"x"}]`), 2)
+	r2 := paths.AtomicWriteWithVersion(cachePath, paths.WriteInput{
+		Body:      body2,
+		IfVersion: 99,
+	})
+	core.AssertFalse(t, r2.OK, "IfVersion=99 must reject when disk has version=1")
+	if _, ok := paths.VersionStaleFromError(r2.Value); !ok {
+		t.Fatalf("expected VersionStale envelope, got %v", r2.Error())
+	}
+
+	// Third write with IfVersion=1 (match) MUST succeed.
+	r3 := paths.AtomicWriteWithVersion(cachePath, paths.WriteInput{
+		Body:      body2,
+		IfVersion: 1,
+	})
+	core.AssertTrue(t, r3.OK, "IfVersion=1 must succeed when disk has version=1")
 }
