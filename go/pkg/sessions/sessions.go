@@ -937,8 +937,22 @@ func List(c *core.Core) core.Result {
 	}
 	out := make([]SessionInfo, 0, len(raw))
 	for _, encoded := range raw {
+		// Sealed manifests round-trip through unsealPayload so a
+		// locked-account List() still surfaces the entries whose
+		// envelope decodes successfully under the current unlock-
+		// state. Sealed-but-unreadable entries are skipped (audit
+		// emit on iteration is a future arc — for now silent skip
+		// matches the legacy JSON-parse-failure behaviour).
+		encodedBytes := []byte(encoded)
+		plaintext, sealed := unsealPayload(c, encodedBytes)
+		if sealed {
+			if plaintext == nil {
+				continue
+			}
+			encodedBytes = plaintext
+		}
 		var info SessionInfo
-		if ur := core.JSONUnmarshalString(encoded, &info); !ur.OK {
+		if ur := core.JSONUnmarshal(encodedBytes, &info); !ur.OK {
 			continue
 		}
 		out = append(out, info)
@@ -946,6 +960,12 @@ func List(c *core.Core) core.Result {
 	return core.Ok(out)
 }
 
+// writeMessages serialises the message log to JSON and dispatches it
+// through go-store. When an account is unlocked the JSON payload is
+// PGP-sealed under the user public key (Mantis #1736 / Cerberus #67
+// F-1); when locked the legacy plaintext write path preserves
+// pre-Stage-E behaviour so existing operator flows survive the
+// unlock-window deferral without losing data.
 func writeMessages(c *core.Core, id string, msgs []inference.Message) core.Result {
 	encoded := core.JSONMarshal(msgs)
 	if !encoded.OK {
@@ -955,6 +975,12 @@ func writeMessages(c *core.Core, id string, msgs []inference.Message) core.Resul
 	if !ok {
 		return core.Fail(core.E("sessions.writeMessages", "encode failed", nil))
 	}
+	// At-rest sealing — when unlocked, encrypt before handing to
+	// store.set. The sealed envelope is itself a JSON string so
+	// store.set's value-shape contract is preserved.
+	if sealed, ok := sealPayload(c, bytes); ok {
+		bytes = sealed
+	}
 	return c.Action("store.set").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: groupMessages},
 		core.Option{Key: "key", Value: id},
@@ -962,6 +988,13 @@ func writeMessages(c *core.Core, id string, msgs []inference.Message) core.Resul
 	))
 }
 
+// readMessages fetches the message log via go-store and decodes the
+// JSON payload. Sealed envelopes (Mantis #1736) are detected by the
+// `{"sealed":` prefix and decrypted via unsealPayload before the
+// JSON decode; legacy plaintext payloads continue to decode directly.
+// A sealed-but-unreadable payload (account locked, MAC tampered)
+// fails closed with a typed error rather than serving a phantom
+// empty message list.
 func readMessages(c *core.Core, id string) core.Result {
 	r := c.Action("store.get").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: groupMessages},
@@ -974,13 +1007,28 @@ func readMessages(c *core.Core, id string) core.Result {
 	if !ok || encoded == "" {
 		return core.Ok([]inference.Message{})
 	}
+	raw := []byte(encoded)
+	plaintext, sealed := unsealPayload(c, raw)
+	if sealed {
+		if plaintext == nil {
+			return core.Fail(core.E("sessions.readMessages",
+				"sealed payload unreadable (account locked or MAC invalid)", nil))
+		}
+		raw = plaintext
+	}
 	var msgs []inference.Message
-	if ur := core.JSONUnmarshalString(encoded, &msgs); !ur.OK {
+	if ur := core.JSONUnmarshal(raw, &msgs); !ur.OK {
 		return ur
 	}
 	return core.Ok(msgs)
 }
 
+// writeManifest serialises a SessionInfo to JSON and dispatches it
+// through go-store. When an account is unlocked the JSON payload is
+// PGP-sealed under the user public key so SystemPrompt + Tags + the
+// Snippet preview stay confidential at rest; when locked the legacy
+// plaintext write path is retained so first-launch flows can persist
+// session creation before the user unlocks.
 func writeManifest(c *core.Core, info SessionInfo) core.Result {
 	encoded := core.JSONMarshal(info)
 	if !encoded.OK {
@@ -990,6 +1038,9 @@ func writeManifest(c *core.Core, info SessionInfo) core.Result {
 	if !ok {
 		return core.Fail(core.E("sessions.writeManifest", "encode failed", nil))
 	}
+	if sealed, ok := sealPayload(c, bytes); ok {
+		bytes = sealed
+	}
 	return c.Action("store.set").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: groupManifest},
 		core.Option{Key: "key", Value: info.ID},
@@ -997,6 +1048,12 @@ func writeManifest(c *core.Core, info SessionInfo) core.Result {
 	))
 }
 
+// readManifest fetches a single SessionInfo via go-store and decodes
+// it. Sealed envelopes (Mantis #1736) are detected + unsealed before
+// the JSON decode; legacy plaintext entries decode directly. A
+// sealed-but-unreadable entry (account locked) surfaces as a typed
+// error so callers (Append / Rename / SetTags / Read) fail closed
+// rather than corrupting on a phantom-empty SessionInfo.
 func readManifest(c *core.Core, id string) core.Result {
 	r := c.Action("store.get").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: groupManifest},
@@ -1009,8 +1066,17 @@ func readManifest(c *core.Core, id string) core.Result {
 	if !ok || encoded == "" {
 		return core.Fail(core.E("sessions.readManifest", "not found", nil))
 	}
+	raw := []byte(encoded)
+	plaintext, sealed := unsealPayload(c, raw)
+	if sealed {
+		if plaintext == nil {
+			return core.Fail(core.E("sessions.readManifest",
+				"sealed manifest unreadable (account locked or MAC invalid)", nil))
+		}
+		raw = plaintext
+	}
 	var info SessionInfo
-	if ur := core.JSONUnmarshalString(encoded, &info); !ur.OK {
+	if ur := core.JSONUnmarshal(raw, &info); !ur.OK {
 		return ur
 	}
 	return core.Ok(info)
