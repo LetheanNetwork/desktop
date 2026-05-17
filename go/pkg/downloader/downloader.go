@@ -73,6 +73,13 @@ var httpClient = &core.HTTPClient{
 		if !AllowedSource(next) {
 			return core.NewError("downloader: redirect to disallowed source: " + next)
 		}
+		// Cerberus Mantis #1429 — re-gate at every hop. A 302 from an
+		// allowlisted CDN to e.g. `huggingface.co` whose DNS now points
+		// at 169.254.169.254 must reject here, not after the dialer
+		// connects to the metadata service.
+		if err := verifyResolvedIPNotPrivate(req.URL.Hostname()); err != nil {
+			return err
+		}
 		return nil
 	},
 }
@@ -193,6 +200,20 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	if !AllowedSource(url) {
 		return core.Fail(core.E(fetchOp,
 			core.Concat("source not allowed: ", url), nil))
+	}
+	// Cerberus Mantis #1429 — DNS rebinding / SSRF defence at the
+	// network-resolve tier. The hostname is on the allowlist; verify
+	// it doesn't resolve to a private / loopback / link-local / cloud-
+	// IMDS address. Reject BEFORE the HTTP request issues so no bytes
+	// flow to internal services even on a one-shot rebind. Same gate
+	// fires on each redirect hop via CheckRedirect above.
+	parsed := core.URLParse(url)
+	if !parsed.OK {
+		return core.Fail(core.E(fetchOp,
+			core.Concat("URL parse failed: ", url), parsed.Value.(error)))
+	}
+	if err := verifyResolvedIPNotPrivate(parsed.Value.(*core.URL).Hostname()); err != nil {
+		return core.Fail(err)
 	}
 	dirR := paths.ModelsDir()
 	if !dirR.OK {

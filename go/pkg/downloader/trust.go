@@ -28,6 +28,40 @@ import (
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
+// loopbackAllowlistEntries is the subset of allowedHostSuffixes that
+// is loopback-trust by construction — these entries categorically
+// resolve to private/loopback IPs and exist on the allowlist precisely
+// to enable httptest + dev workflows (see allowedHostSuffixes docstring).
+// verifyResolvedIPNotPrivate skips the IP gate for these entries so
+// the gate fires only on public-trust hostnames (huggingface.co etc.)
+// where a private-IP resolution would signal DNS rebinding or a
+// compromised resolver.
+//
+// Must stay a subset of allowedHostSuffixes; the
+// TestTrust_LoopbackEntries_AreSubset_Good invariant in dns_test.go
+// enforces this.
+var loopbackAllowlistEntries = map[string]bool{
+	"localhost": true,
+	"127.0.0.1": true,
+}
+
+// lookupHostFn is the resolver seam — production points at the system
+// resolver via core.Resolver{}.LookupHost; tests inject a stub returning
+// canned IPs (no real DNS in the test path). Mirrors the test-seam
+// pattern used by core.Now in the cleanStaleQuarantine sweep.
+//
+// Signature matches (*core.Resolver).LookupHost — context + host →
+// []string of IPs.
+var lookupHostFn = func(ctx core.Context, host string) ([]string, error) {
+	return (&core.Resolver{}).LookupHost(ctx, host)
+}
+
+// dnsLookupTimeout caps the per-fetch DNS resolution gate so a slow
+// resolver can't stall a download indefinitely before the HTTP request
+// even starts. 5s matches the conservative default used by the rest
+// of the desktop network code.
+const dnsLookupTimeout = 5 * core.Second
+
 // allowedHostSuffixes is the compile-time allowlist of safe download
 // origins. Suffix-matched against the parsed URL hostname so CDN
 // mirrors under huggingface.co work without per-CDN entries.
@@ -80,6 +114,79 @@ func AllowedSource(rawURL string) bool {
 		}
 	}
 	return false
+}
+
+// verifyResolvedIPNotPrivate resolves host via the package's lookupHostFn
+// seam and returns ErrPrivateIPResolved if any returned IP is private,
+// loopback, link-local (incl. 169.254.169.254 cloud IMDS), or
+// unspecified. Used at FetchVerified entry and in CheckRedirect so a
+// compromised DNS resolver (or DNS-rebinding attack) cannot use an
+// allowlisted public hostname like `huggingface.co` to pivot the
+// fetch onto localhost services, cloud-metadata endpoints, or RFC 1918
+// private space.
+//
+// Returns nil immediately for loopback-trust allowlist entries
+// (`localhost`, `127.0.0.1`, `::1`, the bracketed `[::1]`) — these
+// exist on allowedHostSuffixes precisely to enable httptest + dev
+// workflows where private IPs are the expected resolution.
+//
+// Cerberus Mantis #1429. The gate runs AT resolve-time on the hostname
+// from the URL — a small TOCTOU window remains between this resolve
+// and the HTTP client's own resolve at Do() / dial time. Closing that
+// fully requires a custom Transport.DialContext (option (b) in the
+// brief) which needs an http.Transport export from CoreGO that is not
+// yet available; tracked in project_corego_export_gaps. Today's gap
+// implementation is option (a): two short-window resolutions backed by
+// the OS resolver's own caching, which is materially stronger than no
+// gate at all.
+//
+// Usage example (internal):
+//
+//	if err := verifyResolvedIPNotPrivate(host); err != nil {
+//	    return core.Fail(err)
+//	}
+func verifyResolvedIPNotPrivate(host string) error {
+	if host == "" {
+		return core.E("downloader.verifyResolvedIPNotPrivate",
+			"host is required", nil)
+	}
+	// IPv6 literal hostnames arrive bracketed from url.URL.Hostname()?
+	// No — Hostname() strips the brackets. But callers (CheckRedirect)
+	// may pass the bracketed form; tolerate both.
+	bare := host
+	if len(bare) >= 2 && bare[0] == '[' && bare[len(bare)-1] == ']' {
+		bare = bare[1 : len(bare)-1]
+	}
+	if loopbackAllowlistEntries[bare] || bare == "::1" {
+		return nil
+	}
+	ctx, cancel := core.WithTimeout(core.Background(), dnsLookupTimeout)
+	defer cancel()
+	ips, err := lookupHostFn(ctx, bare)
+	if err != nil {
+		return core.E("downloader.verifyResolvedIPNotPrivate",
+			core.Concat("DNS lookup failed for ", bare), err)
+	}
+	if len(ips) == 0 {
+		return core.E("downloader.verifyResolvedIPNotPrivate",
+			core.Concat("DNS returned no addresses for ", bare), nil)
+	}
+	for _, raw := range ips {
+		ip := core.ParseIP(raw)
+		if ip == nil {
+			// Unparseable resolver output — fail closed.
+			return core.E("downloader.verifyResolvedIPNotPrivate",
+				core.Concat("resolver returned unparseable address ", raw,
+					" for ", bare), nil)
+		}
+		if ip.IsPrivate() || ip.IsLoopback() ||
+			ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+			ip.IsUnspecified() {
+			return core.E("downloader.verifyResolvedIPNotPrivate",
+				core.Concat(bare, " → ", raw), ErrPrivateIPResolved)
+		}
+	}
+	return nil
 }
 
 // verify computes the SHA-256 digest of the file at path and compares
