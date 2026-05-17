@@ -30,6 +30,9 @@ package account
 import (
 	"bytes"
 	"io"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/audit"
@@ -189,12 +192,12 @@ func (s *Service) Unlock(input UnlockInput) core.Result {
 	// happen AFTER the parser reaches the symmetric-key packet and
 	// invokes prompt. This is the H4 / RFC §10 ruling:
 	// NOT-string-match-on-error-message.
-	plaintext, kind, decryptErr := distinguishDecrypt(ciphertext, passphrase)
+	plaintext, kind, failureReason, decryptErr := distinguishDecrypt(ciphertext, passphrase)
 	if decryptErr != nil {
 		switch kind {
 		case decryptFailureBadPassphrase:
 			remaining, triggered, unlockAt := s.recordFailedAttempt(input.AccountID, now)
-			s.auditUnlockFailed(input.AccountID, remaining)
+			s.auditUnlockFailedWithReason(input.AccountID, remaining, failureReason)
 			if triggered {
 				// Cerberus DREAD ADD-HIGH-3 — surface the locked_out
 				// response on the SAME attempt that triggered, so the
@@ -209,7 +212,12 @@ func (s *Service) Unlock(input UnlockInput) core.Result {
 		default:
 			// corrupted_key — do NOT tick the lockout counter (a
 			// corrupted file isn't user error; locking the user out
-			// for the operator's repair window is hostile).
+			// for the operator's repair window is hostile). The
+			// forensic reason still rides the audit log so ops can
+			// distinguish pre-parser garbage from post-prompt body
+			// integrity issues without the user-facing response
+			// timing exposing the difference (Mantis #1531).
+			s.auditUnlockFailedWithReason(input.AccountID, 0, failureReason)
 			return core.Fail(core.NewCode(codeUnlockCorruptedKey,
 				"couldn't read your account file — run `lthn account repair` from a terminal"))
 		}
@@ -356,7 +364,26 @@ func (s *Service) HasUnlocked(accountID string) bool {
 // NOT-string-match on error message — the signal is purely type-
 // based (sentinel-identity check via core.Is, then byte-canary
 // validation). Mirrors RFC §10 H4.
-func distinguishDecrypt(ciphertext, passphrase []byte) ([]byte, decryptFailureKind, error) {
+func distinguishDecrypt(ciphertext, passphrase []byte) ([]byte, decryptFailureKind, string, error) {
+	// Mantis #1531 — single-hot-path timing bucket for ALL
+	// bad_passphrase reasons. Previously classifyPostPromptError
+	// (~4 KiB-bounded decrypt+parse) only ran on the post-
+	// cipherFunc-gate path, leaving pre-prompt parser failures
+	// (~5ms) measurably cheaper than sentinel/post-gate paths
+	// (~24ms on a typical machine). A wallclock-measuring attacker
+	// on a quiet loopback could partition rejected attempts by
+	// sub-reason and prune brute-force search space by a small
+	// constant factor.
+	//
+	// Equal-budget mechanism: snapshot the start time and pad EVERY
+	// failure path up to timingFloor (a calibrated minimum cost
+	// derived from observing the slowest path on the first SE-bearing
+	// decrypt). The forensic distinction lives in the audit Meta
+	// reason field returned alongside the kind. Damage envelope per
+	// Cerberus #1531: timing reveals nothing beyond "bad attempt".
+	start := core.Now()
+	defer padToTimingFloor(start)
+
 	buf := bytes.NewReader(ciphertext)
 	calls := 0
 	prompt := func(_ []openpgp.Key, _ bool) ([]byte, error) {
@@ -371,32 +398,151 @@ func distinguishDecrypt(ciphertext, passphrase []byte) ([]byte, decryptFailureKi
 	}
 	md, err := openpgp.ReadMessage(buf, nil, prompt, nil)
 	if err != nil {
-		if core.Is(err, errBadPassphrase) {
-			return nil, decryptFailureBadPassphrase, err
-		}
-		if calls > 0 && classifyPostPromptError(ciphertext, passphrase) {
+		// Run the post-prompt re-probe unconditionally on every
+		// failure path. On the sentinel and pre-parser paths the
+		// return value is discarded (we already know the bucket from
+		// the sentinel-identity check / calls-count); on the post-
+		// gate path the return value distinguishes bad_passphrase
+		// from corrupted (Mantis #1510). Running it always also
+		// raises the timing floor for the pre-parser path: classify
+		// itself runs cheaply on garbage (packet.Read fails fast),
+		// so the padToTimingFloor deferred pad finishes the
+		// equalisation.
+		postProbe := classifyPostPromptError(ciphertext, passphrase)
+		// Record the observed cost as a candidate timing floor — the
+		// post-gate path (which actually pays the SKE+SE decrypt
+		// cost inside classifyPostPromptError) is structurally the
+		// slowest of the failure paths, so its measurement is the
+		// right value for padToTimingFloor to target.
+		recordTimingObservation(core.Since(start))
+
+		switch {
+		case core.Is(err, errBadPassphrase):
+			return nil, decryptFailureBadPassphrase, reasonBadPassphraseSentinel, err
+		case calls > 0 && postProbe:
 			// Mantis #1510 — wrong passphrase that slipped past the
 			// openpgp FindKey cipherFunc gate. Re-probe confirmed
 			// the decrypted first byte is garbage (no RFC 4880
 			// packet-tag bit), so this is bad_passphrase, not
 			// corruption. Wrap in errBadPassphrase so callers using
 			// core.Is keep working.
-			return nil, decryptFailureBadPassphrase, core.E("account.unlock", "post-prompt decrypt yielded garbage — passphrase wrong", errBadPassphrase)
+			return nil, decryptFailureBadPassphrase, reasonBadPassphrasePostGate,
+				core.E("account.unlock", "post-prompt decrypt yielded garbage — passphrase wrong", errBadPassphrase)
+		default:
+			// calls == 0 (pre-prompt parser failure) AND calls > 0
+			// with a valid-shaped post-prompt plaintext indicate
+			// genuine corruption (DREAD ADD-MED-1).
+			if calls == 0 {
+				return nil, decryptFailureCorruptedKey, reasonCorruptedPreParser, err
+			}
+			return nil, decryptFailureCorruptedKey, reasonCorruptedPostBody, err
 		}
-		// calls == 0 (pre-prompt parser failure) AND calls > 0 with
-		// a valid-shaped post-prompt plaintext indicate genuine
-		// corruption (DREAD ADD-MED-1).
-		return nil, decryptFailureCorruptedKey, err
 	}
 	plaintext, err := io.ReadAll(md.UnverifiedBody)
 	if err != nil {
 		// Body-read failures after a successful prompt indicate
 		// integrity issues on the encrypted message body itself —
-		// corrupted_key territory.
-		return nil, decryptFailureCorruptedKey, err
+		// corrupted_key territory. Equal-budget invariant: this
+		// path follows a SUCCESSFUL openpgp.ReadMessage so it has
+		// already paid the full parse + symmetric-decrypt cost;
+		// padToTimingFloor's deferred pad still tops it up if the
+		// configured floor exceeds what this path naturally spent.
+		recordTimingObservation(core.Since(start))
+		return nil, decryptFailureCorruptedKey, reasonCorruptedBodyRead, err
 	}
-	return plaintext, decryptFailureNone, nil
+	recordTimingObservation(core.Since(start))
+	return plaintext, decryptFailureNone, reasonOK, nil
 }
+
+// timingFloorNanos is the atomic-tracked minimum total wallclock
+// duration distinguishDecrypt MUST pay before returning. Starts at
+// timingFloorSeedNanos (~25 ms — a conservative initial guess that
+// covers a typical M-series + race-test run) and ratchets UP whenever
+// recordTimingObservation sees a larger natural cost. Never ratchets
+// down — once the slowest observed path is set as the floor, all
+// future calls pay at least that much regardless of how cheap their
+// natural execution is.
+//
+// Mantis #1531 — the goal is timing-uniformity across sub-reasons,
+// NOT a fixed wallclock budget. Floor-ratcheting follows the
+// structural cost of the heaviest path so the constant-time invariant
+// survives hardware upgrades (faster boxes ratchet the floor down via
+// recompilation, not at runtime).
+var timingFloorNanos atomic.Int64
+
+// timingFloorSeedNanos is the initial floor before any observation
+// has landed. Chosen larger than a typical post-gate path on dev
+// hardware so a first-attempt sentinel-bucket Unlock can't undershoot
+// the cost of a yet-unobserved post-gate Unlock by enough for an
+// attacker to distinguish the two. Tuned conservatively.
+const timingFloorSeedNanos = int64(25 * time.Millisecond)
+
+// timingFloorInit guards a one-shot seed of timingFloorNanos so the
+// first distinguishDecrypt invocation observes a sane starting value.
+var timingFloorInit sync.Once
+
+// padToTimingFloor sleeps until at least timingFloorNanos has elapsed
+// since the supplied start time. Cheap paths (pre-parser garbage,
+// fast sentinel rejection) get padded up to the floor; paths that
+// naturally exceed the floor return immediately with no extra delay.
+//
+// Mantis #1531 single-bucket invariant: every call to
+// distinguishDecrypt's failure path returns no faster than the floor.
+func padToTimingFloor(start time.Time) {
+	timingFloorInit.Do(func() {
+		if timingFloorNanos.Load() == 0 {
+			timingFloorNanos.Store(timingFloorSeedNanos)
+		}
+	})
+	floor := timingFloorNanos.Load()
+	elapsed := core.Since(start).Nanoseconds()
+	if elapsed < floor {
+		core.Sleep(time.Duration(floor - elapsed))
+	}
+}
+
+// recordTimingObservation ratchets timingFloorNanos UP if the
+// observed cost exceeds the current floor. Never ratchets down —
+// hardware speed-ups land via recompilation (re-tuning
+// timingFloorSeedNanos), not runtime observation, so an attacker
+// can't drive the floor down by spamming cheap pre-parser failures
+// from a warm cache.
+//
+// Called on every distinguishDecrypt exit (success and failure)
+// so the success-path cost is also folded into the floor — the
+// happy-path Unlock is the only place where the full parse + body
+// decrypt cost is actually paid on a well-formed envelope.
+func recordTimingObservation(observed time.Duration) {
+	timingFloorInit.Do(func() {
+		if timingFloorNanos.Load() == 0 {
+			timingFloorNanos.Store(timingFloorSeedNanos)
+		}
+	})
+	obs := observed.Nanoseconds()
+	for {
+		cur := timingFloorNanos.Load()
+		if obs <= cur {
+			return
+		}
+		if timingFloorNanos.CompareAndSwap(cur, obs) {
+			return
+		}
+	}
+}
+
+// Mantis #1531 — forensic-only reason codes the audit Meta carries so
+// ops can partition bad_passphrase + corrupted_key buckets without the
+// response timing exposing the same distinction. The strings are stable
+// schema (consumed by the Stage F log-tailer); changing them breaks the
+// reserved-schema contract per RFC §6 M4.
+const (
+	reasonOK                    = "ok"
+	reasonBadPassphraseSentinel = "bad_passphrase.sentinel"
+	reasonBadPassphrasePostGate = "bad_passphrase.post_cipherfunc_gate"
+	reasonCorruptedPreParser    = "corrupted.pre_parser"
+	reasonCorruptedPostBody     = "corrupted.post_prompt_body"
+	reasonCorruptedBodyRead     = "corrupted.body_read"
+)
 
 // classifyPostPromptError re-probes a ciphertext that produced a
 // post-prompt non-sentinel error from openpgp.ReadMessage. The
@@ -755,19 +901,46 @@ func (s *Service) clearLockout(accountID string) {
 // ignored — audit failures MUST NEVER block the auth path that emitted
 // the event.
 func (s *Service) auditUnlockFailed(accountID string, remaining int) {
+	s.auditUnlockFailedWithReason(accountID, remaining, "")
+}
+
+// auditUnlockFailedWithReason is the Mantis #1531 reason-carrying
+// sibling of auditUnlockFailed. The reason string is forensic-only —
+// the user-facing response shape + timing is the same regardless of
+// which sub-bucket the failure landed in, so the Meta.reason field
+// gives ops a way to partition rejected attempts without the timing
+// side-channel having to carry the same signal.
+//
+// Reason values are the const set declared in distinguishDecrypt
+// (reasonBadPassphraseSentinel / reasonBadPassphrasePostGate /
+// reasonCorruptedPreParser / reasonCorruptedPostBody /
+// reasonCorruptedBodyRead). An empty reason ("") is the
+// account-not-found and lockout-cap-already-tripped legacy paths
+// which never reach distinguishDecrypt.
+func (s *Service) auditUnlockFailedWithReason(accountID string, remaining int, reason string) {
 	now := core.Now().UTC().Unix()
-	core.Print(core.Stderr(),
-		"event=auth.unlock.failed account_id=%s ts=%d attempts_remaining=%d\n",
-		accountID, now, remaining)
+	if reason == "" {
+		core.Print(core.Stderr(),
+			"event=auth.unlock.failed account_id=%s ts=%d attempts_remaining=%d\n",
+			accountID, now, remaining)
+	} else {
+		core.Print(core.Stderr(),
+			"event=auth.unlock.failed account_id=%s ts=%d attempts_remaining=%d reason=%s\n",
+			accountID, now, remaining, reason)
+	}
+	meta := map[string]any{
+		"attempts_remaining": remaining,
+	}
+	if reason != "" {
+		meta["reason"] = reason
+	}
 	_ = audit.Default().Record(audit.Event{
 		Event:     audit.EventAuthUnlockFailed,
 		AccountID: accountID,
 		TS:        now,
 		Scope:     "unlock",
 		Outcome:   audit.OutcomeFailed,
-		Meta: map[string]any{
-			"attempts_remaining": remaining,
-		},
+		Meta:      meta,
 	})
 }
 
