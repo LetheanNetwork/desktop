@@ -294,7 +294,18 @@ func BootstrapAndSessionAuthMiddleware(
 		// scope. NEVER fall through to bearer / session — a
 		// missing/invalid bootstrap token on an allowlisted path
 		// MUST 401, not slip through on a normal bearer.
-		if wantScope, ok := pathMap[path]; ok {
+		//
+		// Mantis #1626 (Cerberus #25 ADD-HIGH-1) — lookup uses
+		// c.FullPath() (gin's registered route pattern, e.g.
+		// "/v1/account/:id/seal") NOT c.Request.URL.Path (the concrete
+		// request URL with parameters interpolated). Today's
+		// BootstrapPathScopes entries are all fixed strings so literal
+		// match works, but Stage E.A's /v1/account/:id/seal is the
+		// first parametrised entry — literal lookup against
+		// "/v1/account/abc123/seal" would silently miss and the
+		// endpoint would be dead-on-arrival.
+		fullPath := c.FullPath()
+		if wantScope, ok := pathMap[fullPath]; ok && fullPath != "" {
 			header := c.GetHeader("Authorization")
 			if !core.HasPrefix(header, bootstrapAuthHeaderPrefix) {
 				c.AbortWithStatusJSON(http.StatusUnauthorized,
@@ -459,7 +470,18 @@ func BootstrapAuthMiddleware(verifier serverkey.Verifier, bearerToken string, pa
 		// scope. NEVER fall through to bearer — a missing/invalid
 		// bootstrap token on an allowlisted path MUST 401, not slip
 		// through on a normal bearer.
-		if wantScope, ok := pathMap[path]; ok {
+		//
+		// Mantis #1626 (Cerberus #25 ADD-HIGH-1) — lookup uses
+		// c.FullPath() (gin's registered route pattern, e.g.
+		// "/v1/account/:id/seal") NOT c.Request.URL.Path (the concrete
+		// request URL with parameters interpolated). Today's
+		// BootstrapPathScopes entries are all fixed strings so literal
+		// match works, but Stage E.A's /v1/account/:id/seal is the
+		// first parametrised entry — literal lookup against
+		// "/v1/account/abc123/seal" would silently miss and the
+		// endpoint would be dead-on-arrival.
+		fullPath := c.FullPath()
+		if wantScope, ok := pathMap[fullPath]; ok && fullPath != "" {
 			header := c.GetHeader("Authorization")
 			if !core.HasPrefix(header, bootstrapAuthHeaderPrefix) {
 				c.AbortWithStatusJSON(http.StatusUnauthorized,

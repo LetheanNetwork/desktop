@@ -523,3 +523,118 @@ func (h *handlerWithSleep) RegisterRoutes(rg *gin.RouterGroup) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 }
+
+// --- Mantis #1626 (Cerberus #25 ADD-HIGH-1) — pathMap lookup uses
+// c.FullPath() (gin's registered route pattern) NOT c.Request.URL.Path.
+// Today's BootstrapPathScopes entries are all fixed strings so literal
+// match works; Stage E.A introduces /v1/account/:id/seal as the FIRST
+// parametrised entry. Without FullPath, the literal-string lookup
+// against a concrete request URL like /v1/account/abc123/seal would
+// silently miss and the endpoint would be dead-on-arrival.
+
+// TestBootstrapAuth_LiteralPath_StillMatches_Good — regression: with
+// the FullPath fix in place, fixed-string bootstrap paths (today's
+// /v1/account/create + /v1/account/unlock + /v1/account/provision)
+// MUST still match.
+func TestBootstrapAuth_LiteralPath_StillMatches_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := serverkey.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	paths := map[string]string{"/v1/account/create": "account.create"}
+	eng := newTestEngine(t, svc, "bearer-secret", paths, "/v1/account/create")
+
+	out := svc.IssueBootstrapToken().Value.(serverkey.BootstrapTokenOutput)
+
+	rr := doGET(eng, "/v1/account/create", "Bootstrap "+out.Token)
+	core.AssertEqual(t, http.StatusOK, rr.Code,
+		"literal-path entry MUST still match after FullPath fix (Mantis #1626)")
+}
+
+// parametrisedEchoRouteGroup registers a GET handler at a route
+// pattern carrying a `:id` placeholder. Used by the Mantis #1626
+// FullPath-lookup test — gin's `c.FullPath()` returns the registered
+// pattern (e.g. "/v1/account/:id/seal") even when the request URL
+// carries a concrete value in the parameter position (e.g.
+// "/v1/account/abc123/seal").
+type parametrisedEchoRouteGroup struct {
+	basePath string
+	leaf     string
+}
+
+func (g *parametrisedEchoRouteGroup) Name() string     { return "bootstrap-auth-param-test" }
+func (g *parametrisedEchoRouteGroup) BasePath() string { return g.basePath }
+func (g *parametrisedEchoRouteGroup) RegisterRoutes(rg *gin.RouterGroup) {
+	rg.GET(g.leaf, func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+}
+
+// TestBootstrapAuth_ParametrisedPath_Matches_Good — the load-bearing
+// case for Mantis #1626. Registers /v1/account/:id/seal as a route
+// pattern; the bootstrap-auth allowlist names the SAME pattern; a
+// request against the concrete URL /v1/account/abc123/seal MUST match
+// via c.FullPath() and complete with 200. Without the fix, the literal
+// `pathMap[c.Request.URL.Path]` lookup would not find the registered
+// pattern and the request would fall through to bearer (and 401),
+// making the endpoint structurally unreachable for the bootstrap-token
+// flow.
+func TestBootstrapAuth_ParametrisedPath_Matches_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := serverkey.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	// Allowlist names the gin pattern, not a concrete URL.
+	paths := map[string]string{"/v1/account/:id/seal": "account.create"}
+
+	gin.SetMode(gin.TestMode)
+	eng, err := coreapi.New(server.WithBootstrapAuth(svc, "bearer-secret", paths))
+	if err != nil {
+		t.Fatalf("coreapi.New: %v", err)
+	}
+	eng.Register(&parametrisedEchoRouteGroup{basePath: "/v1/account", leaf: "/:id/seal"})
+
+	out := svc.IssueBootstrapToken().Value.(serverkey.BootstrapTokenOutput)
+
+	// Concrete request URL with hex `abc123` in the :id slot. The
+	// lookup MUST resolve via c.FullPath() → "/v1/account/:id/seal".
+	rr := doGET(eng, "/v1/account/abc123/seal", "Bootstrap "+out.Token)
+	core.AssertEqual(t, http.StatusOK, rr.Code,
+		"parametrised path MUST match via c.FullPath() (Mantis #1626 / Cerberus #25 ADD-HIGH-1)")
+}
+
+// TestBootstrapAuth_FullPathEmpty_Rejects_Bad — defensive: when
+// c.FullPath() returns "" (no registered route matched the incoming
+// path), the bootstrap lookup MUST NOT match — even if the allowlist
+// happens to carry an empty key by accident. The request falls through
+// to the standard bearer-auth branch, which 401s when the bearer is
+// missing. Confirms gin's behaviour for unregistered /v1/* paths.
+func TestBootstrapAuth_FullPathEmpty_Rejects_Bad(t *core.T) {
+	_ = homeFixture(t)
+	svc := serverkey.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	// Allowlist names a registered pattern. Request goes to an
+	// UN-registered /v1 path so c.FullPath() returns "".
+	paths := map[string]string{"/v1/account/:id/seal": "account.create"}
+
+	gin.SetMode(gin.TestMode)
+	eng, err := coreapi.New(server.WithBootstrapAuth(svc, "bearer-secret", paths))
+	if err != nil {
+		t.Fatalf("coreapi.New: %v", err)
+	}
+	// Register the parametrised handler — but the test hits a
+	// DIFFERENT path that has no registered handler.
+	eng.Register(&parametrisedEchoRouteGroup{basePath: "/v1/account", leaf: "/:id/seal"})
+
+	out := svc.IssueBootstrapToken().Value.(serverkey.BootstrapTokenOutput)
+
+	// /v1/api/never-registered has no matching route → c.FullPath() = "".
+	// The Bootstrap token (valid + matching scope) MUST NOT be enough
+	// to authorise a request to an unregistered path. Result: the
+	// non-bootstrap branch handles it and rejects with 401 (no valid
+	// bearer either).
+	rr := doGET(eng, "/v1/api/never-registered", "Bootstrap "+out.Token)
+	core.AssertEqual(t, http.StatusUnauthorized, rr.Code,
+		"empty c.FullPath() MUST NOT match the bootstrap allowlist (Mantis #1626 defensive)")
+}
