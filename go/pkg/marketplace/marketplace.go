@@ -19,13 +19,26 @@
 package marketplace
 
 import (
+	"sync"
+
 	core "dappco.re/go"
 )
 
 // Service owns the marketplace surface. Holds *core.Core for
 // late resolution of any plugin-host service that lands later.
+//
+// bundleMu (Mantis #1583 MED) holds a per-bundleID Mutex registry so
+// Install / Launch / Stop / Uninstall calls for the SAME bundle id
+// serialise — concurrent lifecycle ops for the same bundle used to
+// race on the orm record + sandbox handles, producing orphaned
+// containers or split state. Different bundle ids remain concurrent.
+// Mirror of pkg/office/mail.Service.accountMu (Mantis #1555) and the
+// sessions per-session mutex (#1417/#1418). mu guards the bundleMu
+// map itself.
 type Service struct {
-	core *core.Core
+	core     *core.Core
+	mu       sync.Mutex
+	bundleMu map[string]*sync.Mutex
 }
 
 // NewService constructs the marketplace surface against a Core
@@ -35,7 +48,35 @@ type Service struct {
 // Usage example:
 //
 //	svc := marketplace.NewService(c)
-func NewService(c *core.Core) *Service { return &Service{core: c} }
+func NewService(c *core.Core) *Service {
+	return &Service{
+		core:     c,
+		bundleMu: map[string]*sync.Mutex{},
+	}
+}
+
+// bundleMutex returns the per-bundleID Mutex, creating it on first
+// call. Install / Launch / Stop / Uninstall acquire this at entry so
+// the four lifecycle ops for the SAME bundle id serialise (Mantis
+// #1583 MED). Different bundle ids remain concurrent.
+//
+// Usage example:
+//
+//	m := s.bundleMutex(bundleID)
+//	m.Lock(); defer m.Unlock()
+func (s *Service) bundleMutex(bundleID string) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.bundleMu == nil {
+		s.bundleMu = map[string]*sync.Mutex{}
+	}
+	if m, ok := s.bundleMu[bundleID]; ok {
+		return m
+	}
+	m := &sync.Mutex{}
+	s.bundleMu[bundleID] = m
+	return m
+}
 
 // Register constructs the marketplace service for Core registration.
 //

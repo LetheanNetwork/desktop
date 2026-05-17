@@ -150,6 +150,17 @@ func (s *Service) Install(input InstallInput) core.Result {
 
 	m := input.Manifest
 
+	// Mantis #1583 MED — single-flight per bundleID. Two concurrent
+	// Install / Launch / Stop / Uninstall calls for the same bundle
+	// used to race on the orm record + sandbox handles, producing
+	// orphaned containers or split state. Acquire BEFORE the duplicate-
+	// code check (#1580) so the check + record write inside the
+	// critical section can't be raced by a sibling install for the
+	// same id. Different bundle ids remain concurrent.
+	lock := s.bundleMutex(m.Name)
+	lock.Lock()
+	defer lock.Unlock()
+
 	// Mantis #1580 HIGH — Install-time plugin-code uniqueness gate.
 	// A marketplace bundle's plugin.code must not collide with an
 	// existing binary plugin OR an already-installed marketplace
@@ -307,6 +318,11 @@ func (s *Service) Launch(bundleID string) core.Result {
 		return core.Fail(core.E(launchBundleOp, "bundle id is required", nil))
 	}
 
+	// Mantis #1583 MED — single-flight per bundleID.
+	lock := s.bundleMutex(bundleID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	recR := s.findInstalledBundle(bundleID)
 	if !recR.OK {
 		return core.Fail(core.E(launchBundleOp, "bundle not installed: "+bundleID, nil))
@@ -372,6 +388,18 @@ func (s *Service) Stop(bundleID string) core.Result {
 		return core.Fail(core.E(stopBundleOp, "bundle id is required", nil))
 	}
 
+	// Mantis #1583 MED — single-flight per bundleID.
+	lock := s.bundleMutex(bundleID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	return s.stopLocked(bundleID)
+}
+
+// stopLocked is the lock-held body of Stop. Split so Uninstall (which
+// also acquires bundleMutex(bundleID)) can run the same teardown
+// without recursive-lock deadlock. Mantis #1583.
+func (s *Service) stopLocked(bundleID string) core.Result {
 	sbSvc := s.sandboxSvc()
 	if sbSvc != nil {
 		listR := sbSvc.ListHandles()
@@ -428,6 +456,13 @@ func (s *Service) Uninstall(bundleID string) core.Result {
 		return core.Fail(core.E(uninstallBundleOp, "bundle id is required", nil))
 	}
 
+	// Mantis #1583 MED — single-flight per bundleID. Acquired ONCE
+	// at the top; the internal Stop call is routed through stopLocked
+	// to avoid the recursive-lock deadlock.
+	lock := s.bundleMutex(bundleID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	// Capture the pre-uninstall state before Stop flips status. The
 	// broadcast at the end carries this as Bundle so subscribers see
 	// the final shape; Before carries whatever Stop saved.
@@ -449,8 +484,10 @@ func (s *Service) Uninstall(bundleID string) core.Result {
 		firePluginUninstalled(s.core, pluginCode)
 	}
 
-	// Step 4 — stop all running sandboxes.
-	_ = s.Stop(bundleID)
+	// Step 4 — stop all running sandboxes. Use stopLocked (not Stop)
+	// because we already hold bundleMutex(bundleID); calling Stop
+	// would deadlock on re-acquire (Mantis #1583).
+	_ = s.stopLocked(bundleID)
 
 	// Drop five-pillar plugin entries before the orm record so a
 	// later "list installed" doesn't surface ghost route/command
