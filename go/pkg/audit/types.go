@@ -1126,6 +1126,187 @@ const (
 	//   kind     — registered handler kind (mirrors Started)
 	//   status   — "cancelled" on this path
 	EventQueueJobCancelled = "queue.job.cancelled"
+
+	// EventSessionsCreateRequested fires when pkg/sessions.Create is
+	// about to allocate a new session id + write the manifest + empty
+	// message log. Cerberus #67 F-2 (Mantis #1737) — STRIDE-R Repudiation
+	// gap close. Chat session lifecycle (create / rename / delete /
+	// message-append) was forensically silent; the 7th audit-cluster
+	// adoption following runner / sandbox / process / marketplace /
+	// gateway / downloader / queue. The Requested row commits BEFORE the
+	// id allocation so a crash mid-call still leaves caller intent in
+	// the audit substrate.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   title_len — rune count of the caller-supplied title (defensive:
+	//               raw title bytes are NEVER in Meta because session
+	//               titles routinely embed user PII per H#212 chat-content
+	//               discipline — "Q3 budget for project X", "Bob's notes",
+	//               etc. The length is forensically useful — pairs with
+	//               manifest reads when reconstructing a session's lineage —
+	//               without leaking the content.
+	//
+	// The session_id is NOT in the Meta on Requested because it has not
+	// yet been allocated — the Succeeded row stamps it. Outcome=ok per
+	// the established Requested-row convention.
+	EventSessionsCreateRequested = "sessions.create.requested"
+
+	// EventSessionsCreateSucceeded fires when pkg/sessions.Create returns
+	// OK from the manifest-write + empty-message-log-write pipeline.
+	// Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   session_id — newly-allocated session identifier (16-byte random hex
+	//                via core.RandomString; opaque to the user, safe to
+	//                record). Forensic join key for the Requested →
+	//                Succeeded pair and for every subsequent Append /
+	//                Rename / Delete on this id.
+	//   title_len  — rune count of the caller-supplied title (mirrors
+	//                Requested for symmetry).
+	EventSessionsCreateSucceeded = "sessions.create.succeeded"
+
+	// EventSessionsCreateFailed fires when pkg/sessions.Create returns a
+	// non-OK Result from any path (nil core, RandomString failure,
+	// manifest write failure, message-log write failure). Sibling of
+	// Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   error_code — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                (pkg/audit/errorcode.go); NEVER raw Result.Error() prose
+	//                — substrate contract at the top of this const block.
+	//   title_len  — rune count of the caller-supplied title (mirrors
+	//                Requested for symmetry).
+	//
+	// session_id is NOT in Meta on Failed — the id allocation may not have
+	// succeeded; recording an empty string would mislead the forensic walker.
+	EventSessionsCreateFailed = "sessions.create.failed"
+
+	// EventSessionsRenameRequested fires when pkg/sessions.Rename is about
+	// to flip a session's manifest title + bump UpdatedAt. Sibling of the
+	// Create trio. The Requested row commits BEFORE the manifest read so a
+	// crash mid-call still leaves the rename intent in the audit substrate.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   session_id — caller-supplied identifier (safe — opaque random hex).
+	//
+	// The old title and the new title are NEVER in Meta — same PII
+	// discipline as EventSessionsCreateRequested. A title_len for the
+	// new title is recorded on Succeeded but not Requested (the new
+	// title's content was the caller's input; its length sits on the
+	// post-write row alongside the resulting state).
+	EventSessionsRenameRequested = "sessions.rename.requested"
+
+	// EventSessionsRenameSucceeded fires when pkg/sessions.Rename returns
+	// OK. Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   session_id    — caller-supplied identifier
+	//   new_title_len — rune count of the new title (PII-safe forensic
+	//                   discriminator; the bytes themselves never appear).
+	EventSessionsRenameSucceeded = "sessions.rename.succeeded"
+
+	// EventSessionsRenameFailed fires when pkg/sessions.Rename returns a
+	// non-OK Result (nil core, empty id, empty title, session not found,
+	// manifest write failure). Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   session_id — caller-supplied identifier (may be empty when the
+	//                empty-id guard fired before any state was touched).
+	//   error_code — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                (NEVER raw Result.Error() — substrate contract above).
+	EventSessionsRenameFailed = "sessions.rename.failed"
+
+	// EventSessionsDeleteRequested fires when pkg/sessions.Delete is about
+	// to issue the store.delete pair (messages + manifest). Sibling of the
+	// Create trio. Delete is idempotent on a non-existent id — the
+	// Requested row commits regardless so a forensic walker can correlate
+	// caller intent against registry state at the moment of the call.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   session_id — caller-supplied identifier (safe — opaque random hex).
+	EventSessionsDeleteRequested = "sessions.delete.requested"
+
+	// EventSessionsDeleteSucceeded fires when pkg/sessions.Delete returns
+	// OK (both store.delete calls landed; idempotent on absent id).
+	// Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   session_id — caller-supplied identifier
+	EventSessionsDeleteSucceeded = "sessions.delete.succeeded"
+
+	// EventSessionsDeleteFailed fires when pkg/sessions.Delete returns a
+	// non-OK Result (nil core, empty id, store.delete failure on either
+	// group). Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   session_id — caller-supplied identifier (may be empty)
+	//   error_code — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                (NEVER raw Result.Error() — substrate contract above).
+	EventSessionsDeleteFailed = "sessions.delete.failed"
+
+	// EventSessionsAppendMessageRequested fires when pkg/sessions.Append
+	// is about to read-modify-write a session's message log (append one
+	// message + refresh manifest). Sibling of the Create trio. The
+	// Requested row commits BEFORE the read so a crash mid-call still
+	// leaves the append intent in the audit substrate.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   session_id  — caller-supplied identifier (safe — opaque random hex).
+	//   role        — closed-set message role literal ("user" / "assistant"
+	//                 / "system"). Safe — the inference contract bounds the
+	//                 role vocabulary at the runner boundary; the audit
+	//                 surface records the role-class only, never bytes the
+	//                 role identifies. Forensically useful for reconstructing
+	//                 turn-counts per actor without reading the message log.
+	//   content_len — byte count of the message content (NOT the content
+	//                 bytes themselves — chat messages routinely carry user
+	//                 PII, system_prompt material, tool-call payloads, and
+	//                 occasional bearer tokens echoed from upstream errors).
+	//                 The length pairs with the manifest Snippet (already
+	//                 capped + redacted at the manifest layer) when an
+	//                 auditor needs message-size accounting.
+	//
+	// The message content bytes are NEVER in Meta — Cerberus #1465
+	// closure-only-scope discipline plus the SECURITY-NOTE escape valve
+	// in the F-2 brief. The PII-leak canary test in audit_test.go is the
+	// load-bearing assertion that future regressions cannot reintroduce
+	// content into Meta.
+	EventSessionsAppendMessageRequested = "sessions.append_message.requested"
+
+	// EventSessionsAppendMessageSucceeded fires when pkg/sessions.Append
+	// returns OK (message-log write + manifest write both landed).
+	// Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   session_id  — caller-supplied identifier
+	//   role        — closed-set role literal (mirrors Requested)
+	//   content_len — byte count of the appended message content (mirrors
+	//                 Requested for symmetry).
+	EventSessionsAppendMessageSucceeded = "sessions.append_message.succeeded"
+
+	// EventSessionsAppendMessageFailed fires when pkg/sessions.Append
+	// returns a non-OK Result (nil core, read-failure on the message log,
+	// write-failure on the message log, manifest read-failure, manifest
+	// write-failure). Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   session_id  — caller-supplied identifier
+	//   role        — closed-set role literal (mirrors Requested)
+	//   error_code  — bounded-keyspace failure literal via audit.ErrorCode(r)
+	//                 (NEVER raw Result.Error() — substrate contract above).
+	EventSessionsAppendMessageFailed = "sessions.append_message.failed"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the

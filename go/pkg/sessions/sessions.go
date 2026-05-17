@@ -25,6 +25,8 @@ import (
 
 	core "dappco.re/go"
 	"dappco.re/go/inference"
+
+	"dappco.re/lthn/desktop/pkg/audit"
 )
 
 // SessionInfo is the manifest entry for a session — what `lthn
@@ -179,10 +181,14 @@ const (
 //	if r.OK { id := r.Value.(string); _ = id }
 func Create(c *core.Core, title string) core.Result {
 	if c == nil {
-		return core.Fail(core.E("sessions.Create", coreNilMessage, nil))
+		fail := core.Fail(core.E("sessions.Create", coreNilMessage, nil))
+		emitCreateFailed(title, fail)
+		return fail
 	}
+	emitCreateRequested(title)
 	idResult := core.RandomString(16)
 	if !idResult.OK {
+		emitCreateFailed(title, idResult)
 		return idResult
 	}
 	id := idResult.Value.(string)
@@ -195,11 +201,14 @@ func Create(c *core.Core, title string) core.Result {
 		Messages:  0,
 	}
 	if r := writeManifest(c, info); !r.OK {
+		emitCreateFailed(title, r)
 		return r
 	}
 	if r := writeMessages(c, id, []inference.Message{}); !r.OK {
+		emitCreateFailed(title, r)
 		return r
 	}
+	emitCreateSucceeded(id, title)
 	return core.Ok(id)
 }
 
@@ -211,19 +220,25 @@ func Create(c *core.Core, title string) core.Result {
 //	sessions.Append(c, id, "user", "ping")
 func Append(c *core.Core, id, role, content string) core.Result {
 	if c == nil {
-		return core.Fail(core.E("sessions.Append", coreNilMessage, nil))
+		fail := core.Fail(core.E("sessions.Append", coreNilMessage, nil))
+		emitAppendFailed(id, role, content, fail)
+		return fail
 	}
+	emitAppendRequested(id, role, content)
 	msgsR := readMessages(c, id)
 	if !msgsR.OK {
+		emitAppendFailed(id, role, content, msgsR)
 		return msgsR
 	}
 	msgs := msgsR.Value.([]inference.Message)
 	msgs = append(msgs, inference.Message{Role: role, Content: content})
 	if r := writeMessages(c, id, msgs); !r.OK {
+		emitAppendFailed(id, role, content, r)
 		return r
 	}
 	infoR := readManifest(c, id)
 	if !infoR.OK {
+		emitAppendFailed(id, role, content, infoR)
 		return infoR
 	}
 	info := infoR.Value.(SessionInfo)
@@ -232,7 +247,13 @@ func Append(c *core.Core, id, role, content string) core.Result {
 	// Refresh snippet from the just-appended message so the rail
 	// preview reflects the latest content.
 	info.Snippet = renderSnippet(content)
-	return writeManifest(c, info)
+	r := writeManifest(c, info)
+	if !r.OK {
+		emitAppendFailed(id, role, content, r)
+		return r
+	}
+	emitAppendSucceeded(id, role, content)
+	return r
 }
 
 // Read returns the full message log for the session.
@@ -356,22 +377,36 @@ func ClearMessages(c *core.Core, id string) core.Result {
 //	if !r.OK { core.Warn("rename failed", "err", r.Error()) }
 func Rename(c *core.Core, id, title string) core.Result {
 	if c == nil {
-		return core.Fail(core.E("sessions.Rename", coreNilMessage, nil))
+		fail := core.Fail(core.E("sessions.Rename", coreNilMessage, nil))
+		emitRenameFailed(id, title, fail)
+		return fail
 	}
 	if id == "" {
-		return core.Fail(core.E("sessions.Rename", "empty id", nil))
+		fail := core.Fail(core.E("sessions.Rename", "empty id", nil))
+		emitRenameFailed(id, title, fail)
+		return fail
 	}
 	if title == "" {
-		return core.Fail(core.E("sessions.Rename", "empty title", nil))
+		fail := core.Fail(core.E("sessions.Rename", "empty title", nil))
+		emitRenameFailed(id, title, fail)
+		return fail
 	}
+	emitRenameRequested(id)
 	infoR := readManifest(c, id)
 	if !infoR.OK {
+		emitRenameFailed(id, title, infoR)
 		return infoR
 	}
 	info := infoR.Value.(SessionInfo)
 	info.Title = title
 	info.UpdatedAt = core.UnixNow()
-	return writeManifest(c, info)
+	r := writeManifest(c, info)
+	if !r.OK {
+		emitRenameFailed(id, title, r)
+		return r
+	}
+	emitRenameSucceeded(id, title)
+	return r
 }
 
 // SetSystemPrompt persists the per-conversation runner steering. An
@@ -742,21 +777,33 @@ func renderMarkdown(info SessionInfo, msgs []inference.Message) string {
 //	if !r.OK { core.Warn("delete failed", "err", r.Error()) }
 func Delete(c *core.Core, id string) core.Result {
 	if c == nil {
-		return core.Fail(core.E("sessions.Delete", coreNilMessage, nil))
+		fail := core.Fail(core.E("sessions.Delete", coreNilMessage, nil))
+		emitDeleteFailed(id, fail)
+		return fail
 	}
 	if id == "" {
-		return core.Fail(core.E("sessions.Delete", "empty id", nil))
+		fail := core.Fail(core.E("sessions.Delete", "empty id", nil))
+		emitDeleteFailed(id, fail)
+		return fail
 	}
+	emitDeleteRequested(id)
 	if r := c.Action("store.delete").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: groupMessages},
 		core.Option{Key: "key", Value: id},
 	)); !r.OK {
+		emitDeleteFailed(id, r)
 		return r
 	}
-	return c.Action("store.delete").Run(core.Background(), core.NewOptions(
+	r := c.Action("store.delete").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "group", Value: groupManifest},
 		core.Option{Key: "key", Value: id},
 	))
+	if !r.OK {
+		emitDeleteFailed(id, r)
+		return r
+	}
+	emitDeleteSucceeded(id)
+	return r
 }
 
 // Search returns every session whose title OR any message content
@@ -967,4 +1014,261 @@ func readManifest(c *core.Core, id string) core.Result {
 		return ur
 	}
 	return core.Ok(info)
+}
+
+// sessionsScope is the Event.Scope literal stamped on every typed audit
+// row emitted from this package — 7th audit-cluster adoption following
+// runner / sandbox / process / marketplace / gateway / downloader / queue
+// per Cerberus #67 F-2 (Mantis #1737). The Operations panel's facet
+// chrome learns this literal in the same commit a new scope ships.
+const sessionsScope = "sessions"
+
+// emitCreateRequested fires the Requested row at the top of Create —
+// BEFORE the id allocation so a crash mid-call still leaves caller
+// intent in the audit substrate. Title bytes are NEVER in Meta — only
+// the rune count (PII discipline per H#212 chat-content).
+//
+// Usage example (internal):
+//
+//	emitCreateRequested(title)
+func emitCreateRequested(title string) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSessionsCreateRequested,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   sessionsScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"title_len": core.RuneCount(title),
+		},
+	})
+}
+
+// emitCreateSucceeded fires the Succeeded row at the end of Create
+// when the manifest-write + empty-message-log-write pipeline lands
+// without error. session_id is the freshly-allocated identifier.
+//
+// Usage example (internal):
+//
+//	emitCreateSucceeded(id, title)
+func emitCreateSucceeded(id, title string) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSessionsCreateSucceeded,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   sessionsScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"session_id": id,
+			"title_len":  core.RuneCount(title),
+		},
+	})
+}
+
+// emitCreateFailed fires the Failed row on any non-OK Create Result.
+// r is the failed core.Result whose stable, bounded error_code is
+// derived through audit.ErrorCode per the W1–W7 cascade contract — NEVER
+// raw r.Error() prose. session_id is NOT in Meta on Failed because the
+// id allocation may not have completed.
+//
+// Usage example (internal):
+//
+//	if !r.OK { emitCreateFailed(title, r); return r }
+func emitCreateFailed(title string, r core.Result) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSessionsCreateFailed,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   sessionsScope,
+		Outcome: audit.OutcomeFailed,
+		Meta: map[string]any{
+			"title_len":  core.RuneCount(title),
+			"error_code": audit.ErrorCode(r),
+		},
+	})
+}
+
+// emitRenameRequested fires the Requested row at the top of Rename
+// after the guards but BEFORE the manifest read. Empty-id / empty-title
+// guards fire emitRenameFailed directly without a paired Requested so the
+// forensic walker can pair them by absence.
+//
+// Usage example (internal):
+//
+//	emitRenameRequested(id)
+func emitRenameRequested(id string) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSessionsRenameRequested,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   sessionsScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"session_id": id,
+		},
+	})
+}
+
+// emitRenameSucceeded fires the Succeeded row at the end of Rename.
+// new_title_len is the rune count of the post-rename title (PII-safe
+// forensic discriminator).
+//
+// Usage example (internal):
+//
+//	emitRenameSucceeded(id, newTitle)
+func emitRenameSucceeded(id, newTitle string) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSessionsRenameSucceeded,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   sessionsScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"session_id":    id,
+			"new_title_len": core.RuneCount(newTitle),
+		},
+	})
+}
+
+// emitRenameFailed fires the Failed row on any non-OK Rename Result —
+// nil-core / empty-id / empty-title guards / session-not-found /
+// manifest-write-failure. session_id may be empty when the empty-id
+// guard fired. error_code is bounded via audit.ErrorCode(r).
+//
+// Usage example (internal):
+//
+//	if !r.OK { emitRenameFailed(id, title, r); return r }
+func emitRenameFailed(id, _ string, r core.Result) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSessionsRenameFailed,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   sessionsScope,
+		Outcome: audit.OutcomeFailed,
+		Meta: map[string]any{
+			"session_id": id,
+			"error_code": audit.ErrorCode(r),
+		},
+	})
+}
+
+// emitDeleteRequested fires the Requested row at the top of Delete
+// AFTER the empty-id guard. Idempotent on absent id by design — the
+// Requested row commits regardless of registry state so a forensic
+// walker can correlate caller intent against the store at the moment
+// of the call.
+//
+// Usage example (internal):
+//
+//	emitDeleteRequested(id)
+func emitDeleteRequested(id string) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSessionsDeleteRequested,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   sessionsScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"session_id": id,
+		},
+	})
+}
+
+// emitDeleteSucceeded fires the Succeeded row at the end of Delete
+// when both store.delete calls (messages + manifest) land OK.
+//
+// Usage example (internal):
+//
+//	emitDeleteSucceeded(id)
+func emitDeleteSucceeded(id string) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSessionsDeleteSucceeded,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   sessionsScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"session_id": id,
+		},
+	})
+}
+
+// emitDeleteFailed fires the Failed row on any non-OK Delete Result —
+// nil-core / empty-id / store.delete failure on either group. error_code
+// is bounded via audit.ErrorCode(r); raw r.Error() prose never reaches
+// the substrate.
+//
+// Usage example (internal):
+//
+//	if !r.OK { emitDeleteFailed(id, r); return r }
+func emitDeleteFailed(id string, r core.Result) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSessionsDeleteFailed,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   sessionsScope,
+		Outcome: audit.OutcomeFailed,
+		Meta: map[string]any{
+			"session_id": id,
+			"error_code": audit.ErrorCode(r),
+		},
+	})
+}
+
+// emitAppendRequested fires the Requested row at the top of Append —
+// BEFORE the read-modify-write of the message log so a crash mid-call
+// still leaves the append intent in the audit substrate. content bytes
+// are NEVER in Meta — only the byte count. role is the closed-set
+// inference role literal ("user" / "assistant" / "system").
+//
+// Usage example (internal):
+//
+//	emitAppendRequested(id, role, content)
+func emitAppendRequested(id, role, content string) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSessionsAppendMessageRequested,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   sessionsScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"session_id":  id,
+			"role":        role,
+			"content_len": len(content),
+		},
+	})
+}
+
+// emitAppendSucceeded fires the Succeeded row at the end of Append
+// after both message-log-write + manifest-write land OK.
+//
+// Usage example (internal):
+//
+//	emitAppendSucceeded(id, role, content)
+func emitAppendSucceeded(id, role, content string) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSessionsAppendMessageSucceeded,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   sessionsScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"session_id":  id,
+			"role":        role,
+			"content_len": len(content),
+		},
+	})
+}
+
+// emitAppendFailed fires the Failed row on any non-OK Append Result —
+// nil-core / message-log read or write failure / manifest read or write
+// failure. error_code is bounded via audit.ErrorCode(r); raw r.Error()
+// prose never reaches the substrate. content bytes still never appear
+// in Meta — only the byte count.
+//
+// Usage example (internal):
+//
+//	if !r.OK { emitAppendFailed(id, role, content, r); return r }
+func emitAppendFailed(id, role, content string, r core.Result) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSessionsAppendMessageFailed,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   sessionsScope,
+		Outcome: audit.OutcomeFailed,
+		Meta: map[string]any{
+			"session_id":  id,
+			"role":        role,
+			"content_len": len(content),
+			"error_code":  audit.ErrorCode(r),
+		},
+	})
 }

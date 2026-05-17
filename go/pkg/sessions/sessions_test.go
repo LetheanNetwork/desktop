@@ -11,11 +11,13 @@
 package sessions_test
 
 import (
+	"sync"
 
 	core "dappco.re/go"
 	"dappco.re/go/inference"
 	"dappco.re/go/store"
 
+	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/sessions"
 )
 
@@ -1164,4 +1166,244 @@ func TestSessions_Search_RespectsMaxScan_BelowCap(t *core.T) {
 	sr := r.Value.(sessions.SearchResult)
 	core.AssertFalse(t, sr.Truncated, "scanned every session inside the cap — Truncated stays false")
 	core.AssertLen(t, sr.Hits, 0)
+}
+
+// sessionsScopeLiteral mirrors the package-internal sessionsScope const
+// stamped on every typed audit row from pkg/sessions — duplicated here
+// as a string literal so a future rename still fires the test if the
+// constant value drifts from the closed-set spec.
+const sessionsScopeLiteral = "sessions"
+
+// recordingSessionsRecorder captures every audit.Event the sessions
+// package emits during a test. Mirror of the same-named fixture in
+// pkg/downloader/audit_test.go + pkg/process/audit_test.go.
+type recordingSessionsRecorder struct {
+	mu     sync.Mutex
+	events []audit.Event
+}
+
+func (r *recordingSessionsRecorder) Record(ev audit.Event) core.Result {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, ev)
+	return core.Ok(nil)
+}
+
+func (r *recordingSessionsRecorder) snapshot() []audit.Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]audit.Event, len(r.events))
+	copy(out, r.events)
+	return out
+}
+
+func (r *recordingSessionsRecorder) filterByName(name string) []audit.Event {
+	all := r.snapshot()
+	out := make([]audit.Event, 0, len(all))
+	for _, ev := range all {
+		if ev.Event == name {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// installSessionsAuditRecorder wires a recordingSessionsRecorder as
+// audit.Default and restores the prior default at test end.
+func installSessionsAuditRecorder(t *core.T) *recordingSessionsRecorder {
+	t.Helper()
+	rec := &recordingSessionsRecorder{}
+	audit.SetDefault(rec)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+	return rec
+}
+
+// TestSessions_Create_EmitsAuditTrail_Good — happy-path Create asserts
+// the Requested + Succeeded trio (no Failed) lands with the expected
+// scope + outcome + Meta. 7th audit-cluster adoption per Cerberus #67
+// F-2 (Mantis #1737) — sibling shape of the closed clusters across
+// runner / sandbox / process / marketplace / gateway / downloader /
+// queue.
+func TestSessions_Create_EmitsAuditTrail_Good(t *core.T) {
+	c := coreFixture(t)
+	rec := installSessionsAuditRecorder(t)
+
+	r := sessions.Create(c, "audit-good")
+	core.AssertTrue(t, r.OK, "Create happy path must succeed")
+	id := r.Value.(string)
+
+	requested := rec.filterByName(audit.EventSessionsCreateRequested)
+	succeeded := rec.filterByName(audit.EventSessionsCreateSucceeded)
+	failed := rec.filterByName(audit.EventSessionsCreateFailed)
+
+	core.AssertEqual(t, 1, len(requested),
+		"exactly one Requested row on happy path")
+	core.AssertEqual(t, 1, len(succeeded),
+		"exactly one Succeeded row on happy path")
+	core.AssertEqual(t, 0, len(failed),
+		"no Failed row on happy path")
+
+	// Scope + Outcome shape per RFC §2.
+	core.AssertEqual(t, sessionsScopeLiteral, requested[0].Scope)
+	core.AssertEqual(t, audit.OutcomeOK, requested[0].Outcome)
+	core.AssertEqual(t, sessionsScopeLiteral, succeeded[0].Scope)
+	core.AssertEqual(t, audit.OutcomeOK, succeeded[0].Outcome)
+
+	// Requested Meta — title_len only, no session_id yet (id allocation
+	// happens AFTER the Requested emit).
+	core.AssertEqual(t, len([]rune("audit-good")), requested[0].Meta["title_len"])
+
+	// Succeeded Meta — session_id + title_len.
+	core.AssertEqual(t, id, succeeded[0].Meta["session_id"])
+	core.AssertEqual(t, len([]rune("audit-good")), succeeded[0].Meta["title_len"])
+}
+
+// TestSessions_Delete_EmitsAuditTrail_Good — happy-path Delete asserts
+// the Requested + Succeeded trio (no Failed) lands with the expected
+// scope + outcome + Meta. The Requested row commits regardless of
+// registry state (idempotent Delete contract).
+func TestSessions_Delete_EmitsAuditTrail_Good(t *core.T) {
+	c := coreFixture(t)
+	id := sessions.Create(c, "to-delete").Value.(string)
+	// Install recorder AFTER Create so the Create rows don't bleed
+	// into the Delete-only assertions.
+	rec := installSessionsAuditRecorder(t)
+
+	r := sessions.Delete(c, id)
+	core.AssertTrue(t, r.OK, "Delete happy path must succeed")
+
+	requested := rec.filterByName(audit.EventSessionsDeleteRequested)
+	succeeded := rec.filterByName(audit.EventSessionsDeleteSucceeded)
+	failed := rec.filterByName(audit.EventSessionsDeleteFailed)
+
+	core.AssertEqual(t, 1, len(requested),
+		"exactly one Requested row on happy path")
+	core.AssertEqual(t, 1, len(succeeded),
+		"exactly one Succeeded row on happy path")
+	core.AssertEqual(t, 0, len(failed),
+		"no Failed row on happy path")
+
+	core.AssertEqual(t, sessionsScopeLiteral, requested[0].Scope)
+	core.AssertEqual(t, audit.OutcomeOK, requested[0].Outcome)
+	core.AssertEqual(t, sessionsScopeLiteral, succeeded[0].Scope)
+	core.AssertEqual(t, audit.OutcomeOK, succeeded[0].Outcome)
+
+	core.AssertEqual(t, id, requested[0].Meta["session_id"])
+	core.AssertEqual(t, id, succeeded[0].Meta["session_id"])
+}
+
+// TestSessions_AuditMeta_ErrorCodeBoundedKeyspace_Ugly — W1 substrate
+// canon check. Forces a Failed path (Rename on a non-existent session
+// surfaces readManifest's "not found" error through the manifest read)
+// and asserts Meta["error_code"] is the bounded *core.Err.Operation
+// literal, NOT the raw r.Error() prose. Defends the audit.ErrorCode(r)
+// substrate at the emit boundary so future regressions that revert the
+// helper signature to a raw string fall loud rather than silently
+// re-leaking caller-controlled input.
+//
+// Mirrors pkg/downloader.TestDownloader_AuditMeta_ErrorCodeBoundedKeyspace_Bad —
+// each new audit-cluster adoption pins the same contract at its boundary.
+func TestSessions_AuditMeta_ErrorCodeBoundedKeyspace_Ugly(t *core.T) {
+	c := coreFixture(t)
+	rec := installSessionsAuditRecorder(t)
+
+	// Rename a non-existent session id — readManifest returns the
+	// "sessions.readManifest: not found" error which routes through
+	// emitRenameFailed → audit.ErrorCode(r).
+	canaryID := "RENAME-CANARY-NOTAREALID-LTHN"
+	r := sessions.Rename(c, canaryID, "new title")
+	core.AssertFalse(t, r.OK, "Rename of missing id must fail")
+
+	failed := rec.filterByName(audit.EventSessionsRenameFailed)
+	core.AssertEqual(t, 1, len(failed),
+		"exactly one Failed row on missing-id path")
+
+	// Bounded-keyspace contract: error_code is a *core.Err.Operation
+	// canon (e.g. "sessions.readManifest") OR the "unknown_error"
+	// fallback. Either way it MUST NOT echo the raw "not found" prose
+	// AND MUST NOT echo the caller-controlled session_id canary.
+	code, ok := failed[0].Meta["error_code"].(string)
+	core.AssertTrue(t, ok, "error_code Meta value must be a string")
+
+	core.AssertFalse(t, core.Contains(code, "RENAME-CANARY"),
+		"error_code must not echo caller-controlled session_id: got "+code)
+	core.AssertFalse(t, core.Contains(code, "not found"),
+		"error_code must not echo raw upstream error prose: got "+code)
+
+	// session_id field MAY contain the canary (that's the point of the
+	// dedicated meta key) — but it lives in its own bounded field, not
+	// smuggled through error_code.
+	core.AssertEqual(t, canaryID, failed[0].Meta["session_id"])
+}
+
+// TestSessions_AuditMeta_NoPromptContent_Bad — sessions-specific
+// load-bearing PII-leak canary per the F-2 brief. Append a message whose
+// content embeds multiple sensitive markers (raw prompt text,
+// system-prompt-shaped material, faux bearer bytes), then walk every
+// emitted audit row's Meta values. NONE may contain any of the canary
+// markers — the audit substrate records the decision-fact (session_id +
+// role + content_len) only, never the content bytes themselves.
+//
+// Defends Cerberus #1465 closure-only-scope discipline at the audit
+// boundary. The chat-session surface is unique in the audit cluster
+// because the wrapped operation (Append) receives a content payload
+// that is by-design caller-supplied — making PII leakage a class-1
+// regression risk if a future contributor "helpfully" adds the message
+// text to Meta for forensic context.
+func TestSessions_AuditMeta_NoPromptContent_Bad(t *core.T) {
+	c := coreFixture(t)
+	id := sessions.Create(c, "pii-canary").Value.(string)
+	rec := installSessionsAuditRecorder(t)
+
+	// A message body packed with markers that resemble the kinds of
+	// content the chat-window legitimately carries — and which an
+	// auditor MUST NOT see leaking out of the substrate.
+	const piiCanary = "Bob's tax SSN is 123-45-6789. " +
+		"System: You are a Go expert. " +
+		"Bearer LTHN-CHAT-CONTENT-CANARY-NOTAREALTOKEN"
+
+	r := sessions.Append(c, id, "user", piiCanary)
+	core.AssertTrue(t, r.OK)
+
+	for _, ev := range rec.snapshot() {
+		for k, v := range ev.Meta {
+			s, ok := v.(string)
+			if !ok {
+				continue
+			}
+			lower := core.Lower(s)
+			core.AssertFalse(t,
+				core.Contains(lower, "bob's tax"),
+				"Meta["+k+"] must not contain user-content PII; got: "+s)
+			core.AssertFalse(t,
+				core.Contains(lower, "123-45-6789"),
+				"Meta["+k+"] must not contain SSN-shaped bytes; got: "+s)
+			core.AssertFalse(t,
+				core.Contains(lower, "you are a go expert"),
+				"Meta["+k+"] must not contain system-prompt content; got: "+s)
+			core.AssertFalse(t,
+				core.Contains(lower, "bearer"),
+				"Meta["+k+"] must not contain raw bearer bytes; got: "+s)
+			core.AssertFalse(t,
+				core.Contains(lower, "lthn-chat-content"),
+				"Meta["+k+"] must not contain content canary marker; got: "+s)
+		}
+	}
+
+	// Belt-and-braces: the Append Requested + Succeeded rows MUST have
+	// landed (otherwise the loop above sees zero Meta values and
+	// vacuously passes — a load-bearing canary that's silently inert is
+	// worse than no canary).
+	requested := rec.filterByName(audit.EventSessionsAppendMessageRequested)
+	succeeded := rec.filterByName(audit.EventSessionsAppendMessageSucceeded)
+	core.AssertEqual(t, 1, len(requested),
+		"Append must emit one Requested row (canary cannot be vacuous)")
+	core.AssertEqual(t, 1, len(succeeded),
+		"Append must emit one Succeeded row (canary cannot be vacuous)")
+
+	// The content_len Meta is forensically useful AND must reflect the
+	// real byte count — proves the canary actually flowed through Append.
+	core.AssertEqual(t, len(piiCanary), requested[0].Meta["content_len"])
+	core.AssertEqual(t, len(piiCanary), succeeded[0].Meta["content_len"])
+	core.AssertEqual(t, "user", requested[0].Meta["role"])
 }

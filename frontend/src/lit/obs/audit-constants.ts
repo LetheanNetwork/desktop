@@ -93,6 +93,18 @@ export const AUDIT_EVENT_NAMES = [
   "queue.job.succeeded",
   "queue.job.failed",
   "queue.job.cancelled",
+  "sessions.create.requested",
+  "sessions.create.succeeded",
+  "sessions.create.failed",
+  "sessions.rename.requested",
+  "sessions.rename.succeeded",
+  "sessions.rename.failed",
+  "sessions.delete.requested",
+  "sessions.delete.succeeded",
+  "sessions.delete.failed",
+  "sessions.append_message.requested",
+  "sessions.append_message.succeeded",
+  "sessions.append_message.failed",
 ] as const;
 
 export type AuditEventName = (typeof AUDIT_EVENT_NAMES)[number];
