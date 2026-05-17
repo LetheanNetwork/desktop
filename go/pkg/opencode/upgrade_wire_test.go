@@ -112,32 +112,98 @@ func TestUpgradeHTTP_RequiresConsentBody_FalseFlag_Bad(t *testing.T) {
 	assertOneEvent(t, events, EventOpencodeUpgrade, "opencode.upgrade", audit.OutcomeDenied)
 }
 
-// TestUpgradeHTTP_WithConsent_Good — POST `{"confirmed_by_user":
-// true}` MUST decode the body into UpgradeInput and thread it through
-// to Service.UpgradeWithConsent. Proof-of-wiring: the consent gate
-// does NOT fire (the 400 / outcome=denied path is NOT taken), and the
-// substrate error that does surface is the "process service
-// unavailable" one from proc()==nil (i.e. the gate was passed and the
-// call reached the substrate). The full pull integration is exercised
-// by the service-tier test that stands up a fake process runtime; here
-// we only pin the wiring.
+// validUpgradeDigest is a canonical sha256:<64 lowercase hex> digest
+// used across the _Good tests so the digest gate (Mantis #1621 / wired
+// by #1630) passes and the call reaches the substrate. Any
+// well-formed digest works — the proof is that we get past
+// validSHA256Digest, not that the digest resolves to a real image.
+const validUpgradeDigest = "sha256:ca59eb28d5ea6a1f50c45a1f1df5c1a9286343e41b389fe89fb4ffac96dbeb84"
+
+// TestUpgradeHTTP_DigestRequired_Bad — POST `{"confirmed_by_user":
+// true}` with NO image_digest field MUST surface as 400 Bad Request
+// with audit outcome=denied + code "upgrade.digest_required". Pins
+// Mantis #1630: the HTTP handler maps the digest-required gate
+// refusal to the same 400 surface as requires_confirmation so the
+// frontend can render "pick a release digest" rather than "the
+// upgrade substrate broke".
 //
-// Pins Mantis #1623: any regression that reverted the handler to call
-// the legacy parameterless Upgrade() would re-fail with
-// "upgrade.requires_confirmation" + 400 here, surfacing immediately.
-func TestUpgradeHTTP_WithConsent_Good(t *testing.T) {
+// Order matters: consent gate fires first (#1619), so a body missing
+// BOTH confirmation AND digest would surface as requires_confirmation
+// — this test threads confirmed_by_user=true to drive the digest
+// gate specifically.
+func TestUpgradeHTTP_DigestRequired_Bad(t *testing.T) {
 	w, events := runUpgradeHTTP(t, []byte(`{"confirmed_by_user": true}`))
-	// Consent gate MUST have passed — body must NOT carry the gate
-	// refusal string. The substrate-unavailable error is the expected
-	// 500 surface for a Service{} with no proc backing.
-	if w.Code == core.StatusBadRequest {
-		t.Fatalf("status = 400 (consent gate fired) — body MUST have been "+
-			"decoded + ConfirmedByUser=true threaded through; body=%q", w.Body.String())
+	if w.Code != core.StatusBadRequest {
+		t.Fatalf("status = %d; want 400 (digest-gate refusal is a 4xx — body=%q)",
+			w.Code, w.Body.String())
 	}
-	if strings.Contains(w.Body.String(), "upgrade.requires_confirmation") {
-		t.Fatalf("body carries consent-gate refusal — handler did not "+
-			"thread the JSON body through to UpgradeWithConsent. body=%q",
-			w.Body.String())
+	if !strings.Contains(w.Body.String(), "upgrade.digest_required") {
+		t.Errorf("body = %q; want substring %q", w.Body.String(), "upgrade.digest_required")
+	}
+	ev := assertOneEvent(t, events, EventOpencodeUpgrade, "opencode.upgrade", audit.OutcomeDenied)
+	if got, _ := ev.Meta["error_code"].(string); got != "upgrade.digest_required" {
+		t.Errorf("Meta.error_code = %v; want %q", ev.Meta["error_code"], "upgrade.digest_required")
+	}
+}
+
+// TestUpgradeHTTP_DigestInvalid_Bad — POST with a malformed digest
+// (missing sha256: prefix, wrong length, uppercase, etc.) MUST
+// surface as 400 + audit outcome=denied + code
+// "upgrade.digest_invalid". Distinct from digest_required so the
+// frontend can route "you forgot to pick one" vs "what you sent is
+// not a valid manifest digest" to different dialog branches. Pins
+// Mantis #1630.
+func TestUpgradeHTTP_DigestInvalid_Bad(t *testing.T) {
+	w, events := runUpgradeHTTP(t, []byte(`{"confirmed_by_user": true, "image_digest": "deadbeef"}`))
+	if w.Code != core.StatusBadRequest {
+		t.Fatalf("status = %d; want 400 (digest-invalid refusal is a 4xx — body=%q)",
+			w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "upgrade.digest_invalid") {
+		t.Errorf("body = %q; want substring %q", w.Body.String(), "upgrade.digest_invalid")
+	}
+	ev := assertOneEvent(t, events, EventOpencodeUpgrade, "opencode.upgrade", audit.OutcomeDenied)
+	if got, _ := ev.Meta["error_code"].(string); got != "upgrade.digest_invalid" {
+		t.Errorf("Meta.error_code = %v; want %q", ev.Meta["error_code"], "upgrade.digest_invalid")
+	}
+}
+
+// TestUpgradeHTTP_DigestValid_PassesGate_Good — POST with both
+// confirmed_by_user=true AND a well-formed image_digest MUST decode
+// the body into UpgradeInput and thread it through to
+// Service.UpgradeWithConsent. Proof-of-wiring: BOTH gates pass — the
+// body MUST NOT carry "upgrade.requires_confirmation" /
+// "upgrade.digest_required" / "upgrade.digest_invalid"; the substrate
+// error that surfaces is "process service unavailable" from
+// proc()==nil (i.e. the gates were passed and the call reached the
+// substrate). The full pull integration is exercised by the
+// service-tier test.
+//
+// Pins Mantis #1623 + #1630: any regression that reverted the
+// handler to call legacy Upgrade(), or stripped image_digest off the
+// JSON decode, or stopped routing valid digests through the gate
+// would surface here as a 400 + gate-code in the body.
+func TestUpgradeHTTP_DigestValid_PassesGate_Good(t *testing.T) {
+	body := []byte(`{"confirmed_by_user": true, "image_digest": "` + validUpgradeDigest + `"}`)
+	w, events := runUpgradeHTTP(t, body)
+	// Both gates MUST have passed — body must NOT carry any of the
+	// gate refusal strings. The substrate-unavailable error is the
+	// expected 500 surface for a Service{} with no proc backing.
+	if w.Code == core.StatusBadRequest {
+		t.Fatalf("status = 400 (a gate fired) — body MUST have been "+
+			"decoded + ConfirmedByUser=true + ImageDigest=<valid> threaded "+
+			"through; body=%q", w.Body.String())
+	}
+	for _, gate := range []string{
+		"upgrade.requires_confirmation",
+		"upgrade.digest_required",
+		"upgrade.digest_invalid",
+	} {
+		if strings.Contains(w.Body.String(), gate) {
+			t.Fatalf("body carries gate refusal %q — handler did not thread "+
+				"the JSON body through to UpgradeWithConsent. body=%q",
+				gate, w.Body.String())
+		}
 	}
 	// One audit row, outcome MUST be error (substrate path), not denied
 	// (gate path) — distinguishes "wiring landed" from "wiring missing".
@@ -145,7 +211,7 @@ func TestUpgradeHTTP_WithConsent_Good(t *testing.T) {
 		t.Fatalf("want exactly 1 audit event; got %d: %+v", len(events), events)
 	}
 	if events[0].Outcome == audit.OutcomeDenied {
-		t.Errorf("audit outcome = denied; want error (consent gate fired — "+
+		t.Errorf("audit outcome = denied; want error (a gate fired — "+
 			"body decode did not reach Service.UpgradeWithConsent). meta=%+v",
 			events[0].Meta)
 	}
@@ -194,35 +260,91 @@ func TestUpgradeWails_RequiresConsentParam_Bad(t *testing.T) {
 	}
 }
 
-// TestUpgradeWails_WithConsent_Good — WUpgradeWithConsent(UpgradeInput{
-// ConfirmedByUser: true}) MUST thread the input through to
-// Service.UpgradeWithConsent. Proof-of-wiring: the consent gate
-// does NOT fire (error string does NOT contain
-// "upgrade.requires_confirmation"); the substrate error that does
-// surface is "process service unavailable" from proc()==nil — i.e.
-// the gate was passed and the call reached the substrate. The full
-// pull integration is exercised by the service-tier test.
+// TestUpgradeWails_DigestRequired_Bad —
+// WUpgradeWithConsent(UpgradeInput{ConfirmedByUser: true}) with no
+// ImageDigest MUST return Fail with "upgrade.digest_required". Pins
+// Mantis #1630: the Wails binding threads ImageDigest through (or
+// doesn't, when empty) to Service.UpgradeWithConsent, and the
+// digest_required gate surfaces in the Result envelope so the
+// frontend can render "pick a release digest" rather than swallow
+// the failure as a generic substrate error.
 //
-// Pins Mantis #1623: any regression that dropped the WUpgradeWithConsent
-// thread-through — or dropped the ConfirmedByUser field on the input —
-// would re-fail with the gate refusal here, surfacing the wiring
-// regression at PR time.
-func TestUpgradeWails_WithConsent_Good(t *testing.T) {
+// Distinct from TestUpgradeWails_RequiresConsentParam_Bad: there
+// ConfirmedByUser=false fires the consent gate; here
+// ConfirmedByUser=true passes consent and reaches the digest gate.
+func TestUpgradeWails_DigestRequired_Bad(t *testing.T) {
 	w := NewWailsService(&Service{})
 	r := w.WUpgradeWithConsent(UpgradeInput{ConfirmedByUser: true})
+	if r.OK {
+		t.Fatalf("WUpgradeWithConsent(UpgradeInput{ConfirmedByUser:true}) returned OK; " +
+			"want Fail (digest gate must refuse an empty ImageDigest — Mantis #1621/#1630)")
+	}
+	if got := r.Error(); !strings.Contains(got, "upgrade.digest_required") {
+		t.Errorf("WUpgradeWithConsent(no digest) error = %q; want substring %q",
+			got, "upgrade.digest_required")
+	}
+}
+
+// TestUpgradeWails_DigestInvalid_Bad —
+// WUpgradeWithConsent(UpgradeInput{ConfirmedByUser: true, ImageDigest:
+// "deadbeef"}) MUST return Fail with "upgrade.digest_invalid".
+// Distinct error code from digest_required so the frontend can route
+// "you forgot to pick" vs "what you sent is malformed" to different
+// dialog branches. Pins Mantis #1630.
+func TestUpgradeWails_DigestInvalid_Bad(t *testing.T) {
+	w := NewWailsService(&Service{})
+	r := w.WUpgradeWithConsent(UpgradeInput{
+		ConfirmedByUser: true,
+		ImageDigest:     "deadbeef",
+	})
+	if r.OK {
+		t.Fatalf("WUpgradeWithConsent(invalid digest) returned OK; want Fail " +
+			"(digest gate must reject non-sha256:<64hex> — Mantis #1621/#1630)")
+	}
+	if got := r.Error(); !strings.Contains(got, "upgrade.digest_invalid") {
+		t.Errorf("WUpgradeWithConsent(invalid digest) error = %q; want substring %q",
+			got, "upgrade.digest_invalid")
+	}
+}
+
+// TestUpgradeWails_DigestValid_PassesGate_Good — WUpgradeWithConsent
+// with both ConfirmedByUser=true AND a well-formed ImageDigest MUST
+// thread the input through to Service.UpgradeWithConsent. Proof-of-
+// wiring: BOTH gates pass — error string MUST NOT contain
+// "upgrade.requires_confirmation" / "upgrade.digest_required" /
+// "upgrade.digest_invalid"; the substrate error that surfaces is
+// "process service unavailable" from proc()==nil (gate was passed and
+// the call reached the substrate). Full pull integration lives in the
+// service-tier test.
+//
+// Pins Mantis #1623 + #1630: a regression that dropped the
+// ImageDigest field, or skipped passing it to UpgradeWithConsent,
+// would re-fail with digest_required here.
+func TestUpgradeWails_DigestValid_PassesGate_Good(t *testing.T) {
+	w := NewWailsService(&Service{})
+	r := w.WUpgradeWithConsent(UpgradeInput{
+		ConfirmedByUser: true,
+		ImageDigest:     validUpgradeDigest,
+	})
 	if r.OK {
 		// A &Service{} cannot produce a successful pull (no proc
 		// backing) — if we somehow saw OK here something else is
 		// wrong. Treat as test-environment hazard, not a wiring
 		// regression.
-		t.Fatalf("WUpgradeWithConsent(UpgradeInput{ConfirmedByUser: true}) returned " +
-			"OK against a stub Service — expected proc-unavailable failure")
+		t.Fatalf("WUpgradeWithConsent(valid digest) returned OK against a stub " +
+			"Service — expected proc-unavailable failure")
 	}
 	got := r.Error()
-	if strings.Contains(got, "upgrade.requires_confirmation") {
-		t.Fatalf("WUpgradeWithConsent(UpgradeInput{ConfirmedByUser: true}) error "+
-			"= %q; want gate-PASS (any substrate error) — the consent flag was "+
-			"NOT threaded through to Service.UpgradeWithConsent. Mantis #1623 "+
-			"regression.", got)
+	for _, gate := range []string{
+		"upgrade.requires_confirmation",
+		"upgrade.digest_required",
+		"upgrade.digest_invalid",
+	} {
+		if strings.Contains(got, gate) {
+			t.Fatalf("WUpgradeWithConsent(valid digest) error = %q; "+
+				"carries gate refusal %q — ImageDigest was NOT threaded "+
+				"through to Service.UpgradeWithConsent. Mantis #1630 regression.",
+				got, gate)
+		}
 	}
 }

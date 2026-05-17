@@ -324,22 +324,34 @@ func (g *ControlGroup) upgrade(c *gin.Context) {
 	_ = c.ShouldBindJSON(&in)
 	r := g.svc.UpgradeWithConsent(in)
 	if !r.OK {
-		// Consent-gate refusal is a denied outcome (caller-supplied
-		// request rejected) and surfaces as 400 Bad Request so the
-		// frontend can distinguish "needs user confirmation" from
-		// "substrate broke". Any other failure stays outcome=error / 500.
-		// Consent-gate refusal is detected by the error-message
-		// prefix the gate produces — upgrade.go uses core.E (no
-		// Code set), so r.Code() is empty; the canonical refusal
-		// string is "upgrade.requires_confirmation:" per upgrade.go.
-		if core.Contains(r.Error(), "upgrade.requires_confirmation") {
+		// Consent-gate + digest-gate refusals are denied outcomes
+		// (caller-supplied request rejected) and surface as 400 Bad
+		// Request so the frontend can distinguish "needs user
+		// confirmation" / "pick a digest" from "substrate broke".
+		// Any other failure stays outcome=error / 500.
+		//
+		// Gate refusals are detected by the error-message prefix the
+		// gate produces — upgrade.go uses core.E (no Code set), so
+		// r.Code() is empty; the canonical refusal strings are
+		// "upgrade.requires_confirmation:" / "upgrade.digest_required:"
+		// / "upgrade.digest_invalid:" per upgrade.go. Order matters:
+		// the consent gate fires first (#1619), then the digest gate
+		// (#1621) — so a body missing both ConfirmedByUser and
+		// ImageDigest surfaces as requires_confirmation, never as
+		// digest_required.
+		//
+		// Mantis #1630: ImageDigest is now threaded by Wails / HTTP
+		// callers; surfaces digest_required (empty) and digest_invalid
+		// (malformed) as distinct 400 codes so the frontend can route
+		// to "pick a release digest" vs "this digest is malformed".
+		if gateCode := upgradeGateCode(r.Error()); gateCode != "" {
 			emitControlAudit(EventOpencodeUpgrade, "opencode.upgrade",
 				audit.OutcomeDenied, srvReqID, map[string]any{
-					"error_code": "upgrade.requires_confirmation",
+					"error_code": gateCode,
 				})
 			c.JSON(core.StatusBadRequest, gin.H{
 				"error": r.Error(),
-				"code":  "upgrade.requires_confirmation",
+				"code":  gateCode,
 			})
 			return
 		}
@@ -704,6 +716,45 @@ func (g *ControlGroup) profileDelete(c *gin.Context) {
 		return
 	}
 	c.JSON(core.StatusOK, gin.H{"deleted": name})
+}
+
+// upgradeGateCode classifies a Service.UpgradeWithConsent failure
+// string as one of the caller-supplied-request-rejected ("gate")
+// error codes, or returns "" for substrate failures. The classifier
+// keys on the error-message prefix that upgrade.go emits via core.E
+// (the Result.Code() is empty because core.E does not set one), so a
+// canonical-string match is the contract.
+//
+// Order matches upgrade.go's gate-fire sequence (#1619 consent first,
+// then #1621 digest_required, then digest_invalid, then
+// digest_mismatch). A missing-confirmation body that ALSO omits the
+// digest surfaces as requires_confirmation (the consent gate fires
+// first) — the HTTP layer never needs to distinguish "both gates
+// would fire" from "only consent gate fires".
+//
+// Mantis #1630 — adds digest_required + digest_invalid +
+// digest_mismatch as gate codes so the HTTP layer can return 400 +
+// the matching code, letting the frontend route to "pick a release
+// digest" / "this digest is malformed" / "registry served a different
+// image" without parsing the freeform error string.
+//
+// Usage example:
+//
+//	if code := upgradeGateCode(r.Error()); code != "" {
+//	    c.JSON(core.StatusBadRequest, gin.H{"error": r.Error(), "code": code})
+//	}
+func upgradeGateCode(errMsg string) string {
+	switch {
+	case core.Contains(errMsg, "upgrade.requires_confirmation"):
+		return "upgrade.requires_confirmation"
+	case core.Contains(errMsg, "upgrade.digest_required"):
+		return "upgrade.digest_required"
+	case core.Contains(errMsg, "upgrade.digest_invalid"):
+		return "upgrade.digest_invalid"
+	case core.Contains(errMsg, "upgrade.digest_mismatch"):
+		return "upgrade.digest_mismatch"
+	}
+	return ""
 }
 
 // emitControlAudit is the shared emit helper for every audit row this
