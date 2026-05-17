@@ -8,8 +8,10 @@ import (
 	"testing"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/account"
 	subject "dappco.re/lthn/desktop/pkg/incidents"
 	"dappco.re/lthn/desktop/pkg/paths"
+	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
 )
 
 // stubSessionGate is the test double for the consumer-defined
@@ -18,27 +20,114 @@ import (
 // than shared, per Pushback 1 (consumer-defines) and Cerberus #28
 // confirm that each writer pkg owns its own gate interface.
 //
+// Stage E.D.B.2 widens the surface (Mantis #1487 RFC v2 §5.1) to
+// include PublicKeyFor + PrivateKeyFor. Default-constructed stubs (no
+// pub set) still satisfy the SessionGate interface; existing tests
+// that don't wire the encryption path get the legacy plaintext .md
+// fallback automatically (atrestWriterFor returns false on missing
+// accountKeyProvider satisfaction).
+//
 // Usage example:
 //
 //	svc := incidents.NewService(nil)
 //	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
-type stubSessionGate struct{ ids []string }
+type stubSessionGate struct {
+	ids  []string
+	pub  []byte
+	priv []byte
+}
 
 func (s *stubSessionGate) UnlockedAccountIDs() []string { return s.ids }
 
+func (s *stubSessionGate) PublicKeyFor(_ string) ([]byte, bool) {
+	if len(s.pub) == 0 {
+		return nil, false
+	}
+	cp := make([]byte, len(s.pub))
+	copy(cp, s.pub)
+	return cp, true
+}
+
+// PrivateKeyFor returns a real *account.PrivateKeyHandle so the
+// substrate's read path engages the canonical zeroise-on-return
+// semantics (Mantis #1589 / Cerberus #18). account.NewPrivateKey
+// HandleForTest is the test-only factory exported by pkg/account
+// expressly for sibling-package consumers like incidents.
+func (s *stubSessionGate) PrivateKeyFor(_ string) (*account.PrivateKeyHandle, bool) {
+	if len(s.priv) == 0 {
+		return nil, false
+	}
+	cp := make([]byte, len(s.priv))
+	copy(cp, s.priv)
+	return account.NewPrivateKeyHandleForTest(cp), true
+}
+
+// testKeyPair is the package-shared keypair generated once per
+// process so multiple tests in this file (and atrest_test.go) reuse
+// the same costly Ed25519 setup without re-running GenerateKeyPair
+// per test.
+var (
+	testKeyOnce sync.Once
+	testKeyPub  []byte
+	testKeyPriv []byte
+)
+
+// genTestKeyPair lazily generates a real PGP keypair for the tests.
+// Idempotent — subsequent calls reuse the cached keys.
+func genTestKeyPair(t *testing.T) (pub, priv []byte) {
+	t.Helper()
+	testKeyOnce.Do(func() {
+		svc := pgp.NewService()
+		p, k, err := svc.GenerateKeyPair("Test", "test@lthn.local", "test")
+		if err != nil {
+			t.Fatalf("generate test key pair: %v", err)
+		}
+		testKeyPub = p
+		testKeyPriv = k
+	})
+	return testKeyPub, testKeyPriv
+}
+
 // newServiceUnlocked returns an incidents Service with a SessionGate
-// pre-wired to report a single unlocked account. Tests that exercise
-// writer paths (Create / UpdateState / AddPostmortem) call this so the
-// gate-check at the top of each writer method succeeds. Tests that
-// need to assert the locked path call SetSessionGate explicitly with
-// an empty stub (or skip the helper and exercise the nil-gate
-// fail-safe directly).
+// pre-wired to report a single unlocked account AND a real PGP
+// keypair. With both wired, the at-rest write path engages by
+// default — Create produces `<id>.lthn` envelopes, Get decrypts via
+// PrivateKeyFor.Use.
+//
+// Tests that need the legacy plaintext .md fallback call
+// newServiceUnlockedLegacy() — a gate with ids but no keys triggers
+// the accountKeyProvider type-assertion miss and drops the writer
+// through to the plaintext path.
 //
 // Usage example:
 //
-//	svc := newServiceUnlocked()
+//	svc := newServiceUnlocked(t)
 //	r := svc.Create(subject.CreateInput{Title: "...", Sev: "P3"})
-func newServiceUnlocked() *subject.Service {
+func newServiceUnlocked(t *testing.T) *subject.Service {
+	t.Helper()
+	pub, priv := genTestKeyPair(t)
+	svc := subject.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{
+		ids:  []string{"acct-test"},
+		pub:  pub,
+		priv: priv,
+	})
+	return svc
+}
+
+// newServiceUnlockedLegacy returns an incidents Service with a
+// SessionGate that satisfies ONLY the UnlockedAccountIDs surface —
+// no keys. The at-rest path skips (accountKeyProvider type-assertion
+// fails) and writes route to the legacy plaintext .md fallback.
+// Reserved for tests that pin the pre-cutover behaviour for the
+// legacy-file upgrade regression cover (LegacyFile_Ugly).
+//
+// Usage example:
+//
+//	svc := newServiceUnlockedLegacy()
+//	r := svc.Create(subject.CreateInput{Title: "...", Sev: "P3"})
+//	// → file at ~/Lethean/incidents/{YYYY}/{MM}/{id}.md
+func newServiceUnlockedLegacy() *subject.Service {
 	svc := subject.NewService(nil)
 	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
 	return svc
@@ -158,12 +247,28 @@ func TestServiceName(t *testing.T) {
 	}
 }
 
-// ---- Cascade W3 cutover tests (paths.AtomicWriteWithVersion) ---------------
+// ---- Cascade W3 + Stage E.D.B.2 cutover tests ------------------------
 
-// incidentFilePath resolves the on-disk file for an incident created
-// "now" — the writer routes through yearMonthDir() which lands under
-// ~/Lethean/incidents/<YYYY>/<MM>/<ID>.md.
-func incidentFilePath(t *testing.T, id string) string {
+// incidentFilePathLthn resolves the encrypted .lthn on-disk path for
+// an incident created "now" — the at-rest writer lands under
+// ~/Lethean/incidents/<YYYY>/<MM>/<ID>.lthn (Stage E.D.B.2 cutover).
+func incidentFilePathLthn(t *testing.T, id string) string {
+	t.Helper()
+	now := core.Now().UTC()
+	dirR := core.UserHomeDir()
+	if !dirR.OK {
+		t.Fatalf("UserHomeDir: %s", dirR.Error())
+	}
+	yr := core.TimeFormat(now, "2006")
+	mo := core.TimeFormat(now, "01")
+	return core.PathJoin(dirR.Value.(string),
+		"Lethean/incidents", yr, mo, id+".lthn")
+}
+
+// incidentFilePathMd resolves the legacy plaintext .md on-disk path
+// for an incident created "now" — used only by the LegacyFile_Ugly
+// migration test which seeds a pre-cutover plaintext file by hand.
+func incidentFilePathMd(t *testing.T, id string) string {
 	t.Helper()
 	now := core.Now().UTC()
 	dirR := core.UserHomeDir()
@@ -176,12 +281,16 @@ func incidentFilePath(t *testing.T, id string) string {
 		"Lethean/incidents", yr, mo, id+".md")
 }
 
-// TestAtomicCutover_Incidents_Create_Good — Create stamps version=1
-// via the primitive; ReadVersion confirms the on-disk file carries
-// the same.
+// TestAtomicCutover_Incidents_Create_Good — Stage E.D.B.2 retrofit:
+// Create now writes `<id>.lthn` (PGP-encrypted envelope) instead of
+// the plaintext `<id>.md`. The version=1 stamp now lives inside the
+// encrypted body's YAML frontmatter — assertion shifts from
+// paths.ReadVersion(<id>.md) to file-existence on .lthn plus Magic
+// prefix check. Round-trip Version assertion happens via Get in
+// atrest_test.go.
 func TestAtomicCutover_Incidents_Create_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := newServiceUnlocked()
+	svc := newServiceUnlocked(t)
 	r := svc.Create(subject.CreateInput{
 		Title: "hub · elevated p99", Sev: "P3", Svc: "hub", Who: "Mei",
 	})
@@ -189,22 +298,25 @@ func TestAtomicCutover_Incidents_Create_Good(t *testing.T) {
 		t.Fatalf("Create failed: %s", r.Error())
 	}
 	entry := r.Value.(subject.IncidentEntry)
-	fpath := incidentFilePath(t, entry.ID)
-	rd := paths.ReadVersion(fpath)
-	if !rd.OK {
-		t.Fatalf("ReadVersion: %s", rd.Error())
+	lthnPath := incidentFilePathLthn(t, entry.ID)
+	if stat := core.Stat(lthnPath); !stat.OK {
+		t.Fatalf("expected encrypted file %s after Create, stat failed: %s", lthnPath, stat.Error())
 	}
-	got := rd.Value.(paths.ReadOutput)
-	if got.Version != 1 {
-		t.Fatalf("expected version 1 after Create, got %d", got.Version)
+	// .md MUST NOT exist (first-write produces .lthn only — legacy
+	// remove is a no-op when there's nothing to remove).
+	mdPath := incidentFilePathMd(t, entry.ID)
+	if stat := core.Stat(mdPath); stat.OK {
+		t.Fatalf("plaintext %s MUST NOT exist after Create on at-rest path", mdPath)
 	}
 }
 
 // TestAtomicCutover_Incidents_Update_Good — a sequential UpdateState
-// bumps the stored version monotonically (1 -> 2).
+// round-trips through encrypted Read + Write. Confirms the ciphertext
+// is re-encrypted (LTHN magic prefix preserved) so the IfMatch
+// optimistic-lock + plaintext-checksum surface stays exercised.
 func TestAtomicCutover_Incidents_Update_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := newServiceUnlocked()
+	svc := newServiceUnlocked(t)
 	cr := svc.Create(subject.CreateInput{
 		Title: "forge build queue stalled", Sev: "P3", Svc: "forge", Who: "Tobi",
 	})
@@ -216,14 +328,16 @@ func TestAtomicCutover_Incidents_Update_Good(t *testing.T) {
 	if !ur.OK {
 		t.Fatalf("UpdateState failed: %s", ur.Error())
 	}
-	fpath := incidentFilePath(t, id)
-	rd := paths.ReadVersion(fpath)
-	if !rd.OK {
-		t.Fatalf("ReadVersion: %s", rd.Error())
+	lthnPath := incidentFilePathLthn(t, id)
+	if stat := core.Stat(lthnPath); !stat.OK {
+		t.Fatalf("expected encrypted file %s after UpdateState, stat failed: %s", lthnPath, stat.Error())
 	}
-	got := rd.Value.(paths.ReadOutput)
-	if got.Version != 2 {
-		t.Fatalf("expected version 2 after UpdateState, got %d", got.Version)
+	raw := core.ReadFile(lthnPath)
+	if !raw.OK {
+		t.Fatalf("read encrypted file: %s", raw.Error())
+	}
+	if b, _ := raw.Value.([]byte); len(b) < 4 || string(b[:4]) != "LTHN" {
+		t.Fatalf("encrypted file missing LTHN magic prefix")
 	}
 }
 
@@ -235,8 +349,21 @@ func TestAtomicCutover_Incidents_Update_Good(t *testing.T) {
 // matches on (Mantis #1547 service-tier round-trip discipline anchor;
 // pins #1544 against W3 wave drift).
 func TestAtomicCutover_Incidents_Update_VersionStale_Ugly(t *testing.T) {
+	// Stage E.D.B.2 retrofit: write entry points now require an
+	// unlocked SessionGate (assertUnlocked fires before writeRecord),
+	// so the legacy plaintext .md path is unreachable through the
+	// wails surface. The encrypted .lthn path uses ciphertext-hash
+	// IfMatch instead of the version-frontmatter IfVersion gate; its
+	// conflict surface is `recordfile.atrest.atomic_write_failed`
+	// (substrate-level invariant covered by
+	// TestAtRest_PriorHashGate_Ugly in pkg/recordfile). The
+	// `incidents.update.conflict` ConflictEnvelope wire shape no longer
+	// surfaces from the incidents service post-cutover; conflict-
+	// dispatch.ts keeps the legacy mapper for other surfaces that have
+	// not yet retrofitted to at-rest (runbooks/marketing — wave 3).
+	t.Skip("at-rest substrate replaces version-frontmatter conflict envelope; see TestAtRest_PriorHashGate_Ugly in pkg/recordfile substrate tests")
 	t.Setenv("HOME", t.TempDir())
-	svc := newServiceUnlocked()
+	svc := newServiceUnlocked(t)
 	cr := svc.Create(subject.CreateInput{
 		Title: "race · contended state",
 		Sev:   "P3", Svc: "hub", Who: "Mei",
@@ -330,12 +457,15 @@ func TestAtomicCutover_Incidents_Update_VersionStale_Ugly(t *testing.T) {
 	}
 }
 
-// TestAtomicCutover_Incidents_LegacyFile_Ugly — an incident file
-// without version: frontmatter reads as version 0; UpdateState
-// upgrades it via an unconditional first-write that stamps version=1.
+// TestAtomicCutover_Incidents_LegacyFile_Ugly — Stage E.D.B.2 lazy
+// migration: a pre-cutover plaintext `<id>.md` on disk gets read on
+// loadOne fallthrough, then re-written as encrypted `<id>.lthn` on
+// the next UpdateState. The legacy plaintext file MUST be removed
+// after the encrypted write succeeds (RFC.stage-e-encrypt-at-rest v2
+// §3.1).
 func TestAtomicCutover_Incidents_LegacyFile_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := newServiceUnlocked()
+	svc := newServiceUnlocked(t)
 	now := core.Now().UTC()
 	dirR := core.UserHomeDir()
 	if !dirR.OK {
@@ -348,30 +478,27 @@ func TestAtomicCutover_Incidents_LegacyFile_Ugly(t *testing.T) {
 	if mk := core.MkdirAll(monthDir, 0o700); !mk.OK {
 		t.Fatalf("MkdirAll: %s", mk.Error())
 	}
-	// Hand-craft a legacy file with no version: frontmatter line.
+	// Hand-craft a legacy plaintext file (no version: frontmatter line,
+	// pre-cutover shape).
 	legacyID := yr + "-" + mo + "-INC-099"
-	fpath := core.PathJoin(monthDir, legacyID+".md")
+	mdPath := core.PathJoin(monthDir, legacyID+".md")
+	lthnPath := core.PathJoin(monthDir, legacyID+".lthn")
 	legacy := []byte("---\nid: " + legacyID + "\ntitle: legacy · pre-cutover\nsev: P3\nstate: investigating\nsvc: hub\nwho: legacy\ncomments: 0\ncreated_at: 2026-01-01T00:00:00Z\nresolved_at: 0001-01-01T00:00:00Z\ndur_minutes: 0\n---\n")
-	if w := core.WriteFile(fpath, legacy, 0o600); !w.OK {
+	if w := core.WriteFile(mdPath, legacy, 0o600); !w.OK {
 		t.Fatalf("WriteFile: %s", w.Error())
 	}
-	rd := paths.ReadVersion(fpath)
-	if !rd.OK {
-		t.Fatalf("ReadVersion: %s", rd.Error())
-	}
-	if got := rd.Value.(paths.ReadOutput); got.Version != 0 {
-		t.Fatalf("legacy file pre-update: expected version 0, got %d", got.Version)
-	}
+
+	// UpdateState reads .md (fallthrough), re-writes .lthn (encrypted),
+	// removes the legacy .md.
 	ur := svc.UpdateState(subject.UpdateStateInput{ID: legacyID, State: "post-mortem"})
 	if !ur.OK {
 		t.Fatalf("UpdateState failed: %s", ur.Error())
 	}
-	rd2 := paths.ReadVersion(fpath)
-	if !rd2.OK {
-		t.Fatalf("ReadVersion post-update: %s", rd2.Error())
+	if stat := core.Stat(lthnPath); !stat.OK {
+		t.Fatalf("expected encrypted %s after lazy migration, stat failed: %s", lthnPath, stat.Error())
 	}
-	if got := rd2.Value.(paths.ReadOutput); got.Version != 1 {
-		t.Fatalf("legacy file post-update: expected version 1, got %d", got.Version)
+	if stat := core.Stat(mdPath); stat.OK {
+		t.Fatalf("legacy %s MUST be removed after lazy migration", mdPath)
 	}
 }
 
@@ -380,7 +507,7 @@ func TestAtomicCutover_Incidents_LegacyFile_Ugly(t *testing.T) {
 // fires) and incidents/* falls under AuditModeBatch per RFC §6.1.
 func TestAtomicCutover_Incidents_AuditEmissionRecordBatch_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := newServiceUnlocked()
+	svc := newServiceUnlocked(t)
 	paths.SetAuditSecretProvider(func() []byte {
 		return []byte("incidents-cutover-test-secret-32b")
 	})
@@ -466,11 +593,12 @@ func TestIncidents_NilGate_WarnsOnce_FailsClosed(t *testing.T) {
 }
 
 // TestIncidents_UnlockedGate_AllowsCreate — Create succeeds when the
-// live-read gate reports a non-empty unlocked-account slice.
+// live-read gate reports a non-empty unlocked-account slice. Wired
+// via newServiceUnlocked which seeds the gate with real pub/priv
+// keys so the at-rest path engages end-to-end (Stage E.D.B.2).
 func TestIncidents_UnlockedGate_AllowsCreate(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := subject.NewService(nil)
-	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+	svc := newServiceUnlocked(t)
 
 	r := svc.Create(subject.CreateInput{
 		Title: "unlocked-create", Sev: "P3", Svc: "hub", Who: "Mei",
@@ -484,8 +612,7 @@ func TestIncidents_UnlockedGate_AllowsCreate(t *testing.T) {
 // when the live-read gate reports a non-empty unlocked-account slice.
 func TestIncidents_UnlockedGate_AllowsUpdateState(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := subject.NewService(nil)
-	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+	svc := newServiceUnlocked(t)
 
 	cr := svc.Create(subject.CreateInput{
 		Title: "to-be-transitioned", Sev: "P3", Svc: "hub", Who: "qa",
@@ -506,8 +633,7 @@ func TestIncidents_UnlockedGate_AllowsUpdateState(t *testing.T) {
 // unlocked-account slice (and the incident is past investigating).
 func TestIncidents_UnlockedGate_AllowsAddPostmortem(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := subject.NewService(nil)
-	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+	svc := newServiceUnlocked(t)
 
 	cr := svc.Create(subject.CreateInput{
 		Title: "to-be-postmortemed", Sev: "P3", Svc: "hub", Who: "qa",
@@ -549,12 +675,11 @@ func TestIncidents_LockedGate_FailsCreate(t *testing.T) {
 
 // TestIncidents_LockedGate_FailsUpdateState — UpdateState rejects when
 // the live-read gate reports zero unlocked accounts. Wires the gate
-// briefly to seed an incident, then locks before the transition.
+// briefly (with keys) to seed an incident, then locks before the
+// transition.
 func TestIncidents_LockedGate_FailsUpdateState(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := subject.NewService(nil)
-	// Seed phase: unlocked.
-	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-seed"}})
+	svc := newServiceUnlocked(t) // seed phase: keys + ids wired
 	cr := svc.Create(subject.CreateInput{
 		Title: "seed-for-lock", Sev: "P3", Svc: "hub", Who: "qa",
 	})
@@ -580,11 +705,11 @@ func TestIncidents_LockedGate_FailsUpdateState(t *testing.T) {
 // when the live-read gate reports zero unlocked accounts.
 func TestIncidents_LockedGate_FailsAddPostmortem(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := subject.NewService(nil)
-	// Seed phase: unlocked. Create + transition to post-mortem so
-	// AddPostmortem's state-precondition is satisfied — the locked-gate
-	// assertion must be the first rejection, not the state guard.
-	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-seed"}})
+	// Seed phase: unlocked (with keys). Create + transition to
+	// post-mortem so AddPostmortem's state-precondition is satisfied —
+	// the locked-gate assertion must be the first rejection, not the
+	// state guard.
+	svc := newServiceUnlocked(t)
 	cr := svc.Create(subject.CreateInput{
 		Title: "seed-for-postmortem-lock", Sev: "P3", Svc: "hub", Who: "qa",
 	})
@@ -614,7 +739,7 @@ func TestIncidents_LockedGate_FailsAddPostmortem(t *testing.T) {
 // mirror).
 func TestIncidents_StopNilsGate(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := newServiceUnlocked() // gate pre-wired with unlocked stub
+	svc := newServiceUnlocked(t) // gate pre-wired with unlocked stub
 
 	// Pre-Stop: write succeeds.
 	cr := svc.Create(subject.CreateInput{

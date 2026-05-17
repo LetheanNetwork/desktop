@@ -52,23 +52,24 @@ func TestAddPostmortem_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := incidents.NewService(nil)
-	// Mantis #1613 B.2: writers gate on SessionGate.UnlockedAccountIDs().
-	// Wire an unlocked-stub so the gate-check passes through to the
-	// actual file-mode logic this test exercises.
-	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
+	// Stage E.D.B.2: encrypted-write path produces .lthn (substrate
+	// default 0o600). Wire the at-rest helper (with pub/priv) so the
+	// file landing on disk is the encrypted shape the production
+	// runtime emits — same 0o600 invariant applies.
+	svc := newServiceUnlocked(t)
 	r := svc.Create(incidents.CreateInput{Title: "hub · elevated p99", Sev: "P3", Svc: "hub", Who: "Mei"})
 	if !r.OK {
 		t.Fatalf("Create failed: %s", r.Error())
 	}
 	entry := r.Value.(incidents.IncidentEntry)
-	// Path: ~/Lethean/incidents/{YYYY}/{MM}/{id}.md — discover via Get.
+	// Path: ~/Lethean/incidents/{YYYY}/{MM}/{id}.lthn — discover via Get.
 	g := svc.Get(incidents.GetInput{ID: entry.ID})
 	if !g.OK {
 		t.Fatalf("Get failed: %s", g.Error())
 	}
-	// Walk filesystem to find the file (we don't know the year/month here without recomputing).
-	// Cheap approach: read the incidents dir tree and assert ANY .md is 0o600.
+	// Walk filesystem to find the file (we don't know the year/month
+	// here without recomputing). Cheap approach: read the incidents
+	// dir tree and assert ANY .lthn / .md is 0o600.
 	base := core.PathJoin(home, "Lethean", "incidents")
 	found := false
 	walk := func(dir string) {
@@ -174,11 +175,11 @@ func TestIncidents_WriteRecord_Traversal_RejectedAtService_Bad(t *testing.T) {
 func TestIncidentsDir_Mode0700_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := incidents.NewService(nil)
-	// Mantis #1613 B.2: writers gate on SessionGate.UnlockedAccountIDs().
-	// Wire an unlocked-stub so Create reaches yearMonthDir() and the
-	// 0o700 mode this test exercises is applied.
-	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
+	// Stage E.D.B.2: encrypted-write path lands .lthn under
+	// ~/Lethean/incidents/{YYYY}/{MM}/{id}.lthn — yearMonthDir creation
+	// applies 0o700 regardless of envelope shape (the dir is shared
+	// between legacy .md fallthrough and the at-rest .lthn pathway).
+	svc := newServiceUnlocked(t)
 	_ = svc.Create(incidents.CreateInput{Title: "x", Svc: "x", Who: "x"})
 	dir := core.PathJoin(home, "Lethean", "incidents")
 	stat := core.Stat(dir)

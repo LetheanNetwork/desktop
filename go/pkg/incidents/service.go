@@ -5,8 +5,13 @@
 // No queue, no orm — filesystem is the persistence layer.
 //
 // Lifecycle:
-//   - Register(c)   wires the service into the Core container
-//   - ServiceName() returns "Incidents" for the Wails namespace
+//   - Register(c)        wires the service into the Core container
+//   - ServiceName()      returns "Incidents" for the Wails namespace
+//   - SetSessionGate(g)  wired post-construction in cmd/lthn/app.go
+//     against *account.Service (live-read pattern — mirrors
+//     sales/contacts + sales/deals; no cached bool, no event bus).
+//   - Stop(ctx)          nils the SessionGate reference so a draining
+//     Service fails-closed on any late-arriving write.
 //
 // All I/O uses CoreGO wrappers (core.ReadFile / core.WriteFile /
 // core.ReadDir / core.DirFS / core.MkdirAll / core.PathJoin).
@@ -20,8 +25,10 @@ import (
 	"sync/atomic"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/recordfile"
+	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,17 +40,34 @@ import (
 // when non-empty at least one Lethean account is unlocked and writes
 // may proceed.
 //
-// Wired in cmd/lthn/app.go (Mantis #1613 B.3, deferred to that lane):
+// Wired in cmd/lthn/app.go (Mantis #1613 B.3):
 //
 //	incidentsSvc.SetSessionGate(accountSvc)
 //
 // AX-8 compliance: this interface is defined in the consumer
 // (incidents) and satisfied by the producer (*account.Service). No
-// pkg/account import lands in pkg/incidents. Each writer pkg defines
-// its OWN interface (consumer-defines per Pushback 1 / H#147+H#148+H#149
-// canonical pattern) — no shared types package.
+// pkg/account import lands in pkg/incidents purely for the gate; the
+// at-rest path below adds the import as part of the wider
+// accountKeyProvider runtime assertion (Stage E.D.B.2 RFC v2 §5.1).
+// Each writer pkg defines its OWN gate interface per Pushback 1.
 type SessionGate interface {
 	UnlockedAccountIDs() []string
+}
+
+// accountKeyProvider is the wider runtime-assertion surface the
+// at-rest path expects on a wired SessionGate. *account.Service
+// satisfies it today (PublicKeyFor at unlock.go:903, PrivateKeyFor
+// at unlock.go:870). Test fixtures stub it independently — see the
+// stubSessionGate in incidents_test.go.
+//
+// Kept package-private — consumers wire the producer-side directly
+// via SetSessionGate; this is the substrate's view of what the gate
+// must additionally satisfy to engage the encrypted write path.
+//
+//	if kp, ok := s.gate.(accountKeyProvider); ok { ... }
+type accountKeyProvider interface {
+	PublicKeyFor(accountID string) ([]byte, bool)
+	PrivateKeyFor(accountID string) (*account.PrivateKeyHandle, bool)
 }
 
 // Service owns the incidents surface.
@@ -72,6 +96,15 @@ type Service struct {
 	// Service instance. Uses stdlib sync/atomic.Bool to mirror H#147
 	// documents pattern (codebase convention — not core.AtomicBool).
 	nilWarned atomic.Bool
+
+	// atrestMu serialises lazy construction of atrestWriter so the
+	// first concurrent write doesn't double-build the substrate.
+	atrestMu sync.Mutex
+	// atrestWriter is built on first writer-access against the live
+	// SessionGate (RFC.stage-e-encrypt-at-rest v2 §5). nil before the
+	// first use; replaced on every SetSessionGate so adapter→gate
+	// remains coherent.
+	atrestWriter *recordfile.AtRestWriter[IncidentRecord]
 }
 
 // NewService constructs the incidents service against a Core container.
@@ -128,13 +161,211 @@ func yearMonthDir(t core.Time) core.Result {
 	return core.Ok(dir)
 }
 
-// filePath returns the absolute path for a given time + id.
-func filePath(t core.Time, id string) core.Result {
-	dir := yearMonthDir(t)
-	if !dir.OK {
-		return dir
+// --- At-rest substrate plumbing (RFC.stage-e-encrypt-at-rest v2) -----
+
+// incidentStateEnumOut maps the incidents-internal state vocabulary
+// (investigating / post-mortem / resolved) onto the canonical RFC §2.4
+// IncidentsStatuses enum that the at-rest header MUST emit (open or
+// closed). Body retains the original internal state via the YAML
+// frontmatter — the header is the LIST/search projection only.
+//
+//	hdrStatus := incidentStateEnumOut("investigating") // → "open"
+//	hdrStatus := incidentStateEnumOut("resolved")      // → "closed"
+func incidentStateEnumOut(internal string) string {
+	switch internal {
+	case "resolved":
+		return "closed"
+	case "investigating", "post-mortem":
+		return "open"
 	}
-	return core.Ok(core.PathJoin(dir.Value.(string), id+".md"))
+	// Unknown / legacy states project as "open" (still a valid enum
+	// member; keeps the encode-side schema validator happy and pushes
+	// the curation problem back to the wails-tier UpdateState
+	// validStates table rather than into the at-rest substrate).
+	return "open"
+}
+
+// incidentsHeaderSchema declares the RFC §2.4 per-field header
+// whitelist for the incidents surface. Status is the only consumer-
+// owned header key; it is bucketed to {open, closed} via the
+// IncidentsStatuses enum. All title / post-mortem / svc / who /
+// comments / dur / created_at / resolved_at data stays in the
+// encrypted body — never in the header.
+//
+//	w := recordfile.NewAtRestWriter(recordfile.AtRestDeps[IncidentRecord]{
+//	    ..., Schema: incidentsHeaderSchema,
+//	})
+var incidentsHeaderSchema = recordfile.HeaderSchema[IncidentRecord]{
+	Surface: recordfile.SurfaceIncidents,
+	AllowedKeys: map[string]recordfile.FieldValidator{
+		"status": recordfile.ValidateEnum(recordfile.IncidentsStatuses),
+	},
+	HeaderFor: func(r IncidentRecord) map[string]any {
+		return map[string]any{
+			"status": incidentStateEnumOut(r.State),
+		}
+	},
+	IDFor:      func(r IncidentRecord) string { return r.ID },
+	VersionFor: func(r IncidentRecord) int64 { return int64(r.Version) },
+}
+
+// gateAccountKeys is the consumer-side adapter that satisfies
+// recordfile.AccountKeys against the incidents SessionGate's wider
+// accountKeyProvider runtime assertion. The substrate never imports
+// pkg/account directly — this thin wrapper bridges the producer's
+// concrete PrivateKeyHandle type onto the substrate's interface AND
+// computes SingleUnlockedAccount from UnlockedAccountIDs (mirrors the
+// pkg/office/mail.singleUnlockedAccount shape — Mantis #1591).
+//
+//	keys := gateAccountKeys{gate: incSvc.gate, keys: kpProvider}
+//	w := recordfile.NewAtRestWriter(recordfile.AtRestDeps[IncidentRecord]{Keys: keys, ...})
+type gateAccountKeys struct {
+	gate SessionGate
+	keys accountKeyProvider
+}
+
+// PublicKeyFor wraps the gate's PublicKeyFor; the (bytes, bool) shape
+// is rewritten as (bytes, error) per the substrate's contract. Missing
+// keys produce a typed error rather than a silent empty slice so the
+// substrate's len(pub)==0 check has structured context to report.
+func (g gateAccountKeys) PublicKeyFor(accountID string) ([]byte, error) {
+	pub, ok := g.keys.PublicKeyFor(accountID)
+	if !ok {
+		return nil, core.NewCode("incidents.atrest.public_key_unavailable",
+			core.Sprintf("PublicKeyFor(%q) returned not-ok", accountID))
+	}
+	return pub, nil
+}
+
+// PrivateKeyFor wraps the producer's PrivateKeyFor and bridges the
+// concrete *account.PrivateKeyHandle return onto the substrate's
+// recordfile.PrivateKeyHandle interface. The concrete handle already
+// satisfies the interface shape (Use(func([]byte) error) error) — the
+// wrapper is just the type-conversion seam.
+func (g gateAccountKeys) PrivateKeyFor(accountID string) (recordfile.PrivateKeyHandle, bool) {
+	h, ok := g.keys.PrivateKeyFor(accountID)
+	if !ok || h == nil {
+		return nil, false
+	}
+	return h, true
+}
+
+// SingleUnlockedAccount mirrors pkg/office/mail's singleUnlockedAccount
+// (Mantis #1591) against the incidents gate. Multi-unlock returns the
+// typed code the substrate surfaces back to the consumer.
+func (g gateAccountKeys) SingleUnlockedAccount() (string, error) {
+	ids := g.gate.UnlockedAccountIDs()
+	if len(ids) == 0 {
+		return "", core.NewCode("incidents.no_unlocked_account",
+			"no Lethean account is unlocked")
+	}
+	if len(ids) > 1 {
+		return "", core.NewCode("incidents.multi_account_not_supported",
+			"incidents does not yet support multiple unlocked accounts (Mantis #1591)")
+	}
+	return ids[0], nil
+}
+
+// pathsAtomicAdapter is the consumer-side adapter that satisfies
+// recordfile.AtomicWriter against the existing paths.AtomicWriteWith
+// Version + core.ReadFile + core.Remove primitives. The IfMatch gate
+// is wired through paths.WriteInput.IfMatchHash so the optimistic-
+// lock semantics already proven in W1/W2/wave-1-deals inherit
+// unchanged.
+//
+//	atomic := pathsAtomicAdapter{}
+//	w := recordfile.NewAtRestWriter(recordfile.AtRestDeps[IncidentRecord]{Atomic: atomic, ...})
+type pathsAtomicAdapter struct{}
+
+// Write routes through paths.AtomicWriteWithVersion. The substrate's
+// IfMatch == hex(sha256(prior ciphertext)) matches the primitive's
+// IfMatchHash semantics exactly. Empty IfMatch (first-write) means
+// the primitive skips the hash check — same as the existing legacy-
+// upgrade path. Mode is honoured verbatim (substrate defaults to 0o600
+// which matches the surface's existing #1487 PR-1 ruling).
+func (pathsAtomicAdapter) Write(req recordfile.AtomicWriteRequest) error {
+	r := paths.AtomicWriteWithVersion(req.Path, paths.WriteInput{
+		Body:        req.Payload,
+		IfMatchHash: req.IfMatch,
+		IfNotExist:  req.IfNotExist,
+	})
+	if r.OK {
+		return nil
+	}
+	return core.NewCode("incidents.atrest.atomic_write_failed",
+		core.Sprintf("AtomicWriteWithVersion(%q): %s", req.Path, r.Error()))
+}
+
+// ReadFile is a thin wrapper around core.ReadFile that adapts the
+// (Result) → (bytes, error) shape the substrate expects. Missing
+// files surface as core-coded errors so the substrate's read-failed
+// path stays grep-stable.
+func (pathsAtomicAdapter) ReadFile(path string) ([]byte, error) {
+	r := core.ReadFile(path)
+	if !r.OK {
+		return nil, core.NewCode("incidents.atrest.read_failed",
+			core.Sprintf("ReadFile(%q): %s", path, r.Error()))
+	}
+	b, _ := r.Value.([]byte)
+	return b, nil
+}
+
+// Remove is a thin wrapper around core.Remove. Failures are surfaced
+// but tolerated by the substrate's lazy-migration legacy-remove path
+// (RFC §3.1: warn-on-failure, do NOT abort the encrypted write).
+func (pathsAtomicAdapter) Remove(path string) error {
+	r := core.Remove(path)
+	if !r.OK {
+		return core.NewCode("incidents.atrest.remove_failed",
+			core.Sprintf("Remove(%q): %s", path, r.Error()))
+	}
+	return nil
+}
+
+// atrestWriterFor returns the lazy-constructed AtRestWriter wired
+// against the live SessionGate. Returns (nil, false) when the gate is
+// not yet wired OR does not satisfy accountKeyProvider — caller falls
+// back to legacy plaintext write.
+//
+// Construction happens once per Service post-SetSessionGate (atrestMu
+// serialises the racy first-call path); SetSessionGate invalidates the
+// cache so re-wiring against a fresh accountSvc never reuses stale
+// adapter pointers.
+//
+//	w, ok := s.atrestWriterFor()
+//	if !ok { return s.writeRecordLegacy(rec, dir, ifVersion) }
+func (s *Service) atrestWriterFor() (*recordfile.AtRestWriter[IncidentRecord], bool) {
+	if s == nil {
+		return nil, false
+	}
+	s.gateMu.RLock()
+	gate := s.gate
+	s.gateMu.RUnlock()
+	if gate == nil {
+		return nil, false
+	}
+	// Runtime type-assert the wider keys surface. *account.Service
+	// satisfies it today (unlock.go:870 / :903); a minimal-gate stub
+	// (UnlockedAccountIDs-only) skips the at-rest path entirely and
+	// the consumer falls back to the legacy plaintext writer.
+	keys, ok := gate.(accountKeyProvider)
+	if !ok {
+		return nil, false
+	}
+	s.atrestMu.Lock()
+	defer s.atrestMu.Unlock()
+	if s.atrestWriter != nil {
+		return s.atrestWriter, true
+	}
+	w := recordfile.NewAtRestWriter(recordfile.AtRestDeps[IncidentRecord]{
+		Surface: recordfile.SurfaceIncidents,
+		Keys:    gateAccountKeys{gate: gate, keys: keys},
+		PGP:     pgp.NewService(),
+		Schema:  incidentsHeaderSchema,
+		Atomic:  pathsAtomicAdapter{},
+	})
+	s.atrestWriter = w
+	return w, true
 }
 
 // parseRecord splits a Trix file into frontmatter + body via the
@@ -150,9 +381,25 @@ func parseRecord(raw []byte) (IncidentRecord, error) {
 	return rec, nil
 }
 
+// parseAtRestRecord turns a substrate ReadResult into an
+// IncidentRecord by running the frontmatter through yaml.Unmarshal
+// (same path parseRecord uses for plaintext) and copying the body
+// text into PostMortem.
+//
+//	rec, err := parseAtRestRecord(rr.Value.(recordfile.ReadResult))
+func parseAtRestRecord(r recordfile.ReadResult) (IncidentRecord, error) {
+	var rec IncidentRecord
+	if err := yaml.Unmarshal(r.BodyYAML, &rec); err != nil {
+		return IncidentRecord{}, core.E("incidents.parseAtRest", "yaml unmarshal", err)
+	}
+	rec.PostMortem = string(r.BodyText)
+	return rec, nil
+}
+
 // marshalRecord serialises an IncidentRecord to the Trix file format
 // via the shared recordfile.Stitch helper: YAML frontmatter block
-// followed by the post-mortem markdown body.
+// followed by the post-mortem markdown body. Legacy plaintext path —
+// at-rest writes stitch via the substrate directly.
 func marshalRecord(r IncidentRecord) ([]byte, error) {
 	fm, err := yaml.Marshal(r)
 	if err != nil {
@@ -227,11 +474,35 @@ func toEntry(r IncidentRecord, now core.Time) IncidentEntry {
 	}
 }
 
+// hasSuffix mirrors core.HasSuffix without dragging the import in here
+// where the AX-6 wrapper isn't already needed for any other call.
+func hasSuffix(s, suffix string) bool {
+	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
+}
+
 // list90 scans the last two YYYY/MM directories in ~/Lethean/incidents/
 // and returns all parseable IncidentRecord values. Malformed files are
-// skipped with a warning. The body (PostMortem) is NOT loaded — use
-// loadOne for full records.
-func list90() ([]IncidentRecord, error) {
+// skipped silently. The body (PostMortem) is NOT loaded — use loadOne
+// for full records.
+//
+// Dual-format read (RFC.stage-e-encrypt-at-rest v2 §4.1):
+//   - .md files parse as legacy plaintext (full Sev / Title / Svc /
+//     Who present from yaml).
+//   - .lthn files are decoded HEADER-ONLY via the substrate's
+//     DecodeHeader path (no decrypt, MAC-verified). Title / Svc / Who
+//     stay sealed. The returned IncidentRecord has the header-visible
+//     fields populated (ID, Version, State from status enum) and the
+//     body fields empty — frontend renders "encrypted" placeholders.
+//
+// MAC-failure entries are SKIPPED (RFC §4.1: "do NOT abort whole List
+// on one bad file"). When the session is locked the .lthn branch
+// still emits a degraded record (ID + State from header) because
+// header MAC verification only needs the PUBLIC key — no unlock
+// required.
+//
+// Per-id de-dup: when both <id>.lthn and <id>.md exist in the same
+// month (mid-migration crash window), .lthn wins.
+func (s *Service) list90() ([]IncidentRecord, error) {
 	base := incidentsDir()
 	if !base.OK {
 		return nil, core.E("incidents.list90", base.Error(), nil)
@@ -260,13 +531,45 @@ func list90() ([]IncidentRecord, error) {
 			continue
 		}
 		entries, _ := entriesR.Value.([]core.FsDirEntry)
+
+		// Two-pass pick: prefer .lthn over .md when both exist for the
+		// same id. Stable name basis: filename without extension.
+		seen := map[string]bool{}
+
+		// First pass: .lthn (encrypted, header-only).
 		for _, entry := range entries {
 			if entry.IsDir() {
 				continue
 			}
 			name := entry.Name()
-			// Only process .md files.
-			if len(name) < 4 || name[len(name)-3:] != ".md" {
+			if !hasSuffix(name, ".lthn") {
+				continue
+			}
+			id := name[:len(name)-len(".lthn")]
+			fpath := core.PathJoin(dir, name)
+			rec, err := s.loadHeaderOnly(fpath)
+			if err != nil {
+				// MAC-failure / corrupt envelope / decode error — SKIP
+				// per RFC §4.1. Future audit-emission lane (#1487 PR-4)
+				// hooks in here.
+				continue
+			}
+			seen[id] = true
+			records = append(records, rec)
+		}
+
+		// Second pass: .md (legacy plaintext) for ids not already
+		// covered by the encrypted entry.
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if !hasSuffix(name, ".md") {
+				continue
+			}
+			id := name[:len(name)-len(".md")]
+			if seen[id] {
 				continue
 			}
 			fpath := core.PathJoin(dir, name)
@@ -286,11 +589,166 @@ func list90() ([]IncidentRecord, error) {
 	return records, nil
 }
 
+// loadHeaderOnly decodes a .lthn file via the substrate's
+// DecodeHeader path (no decrypt). Returns an IncidentRecord populated
+// only with header-visible fields (ID, Version, State from status
+// enum). Body fields stay zero-valued — toEntry sees empty Title /
+// Svc / Who ("encrypted" rendering is the frontend's call).
+//
+// PubKey lookup walks the SessionGate's currently-unlocked accounts;
+// when none are unlocked the header.account.id field from the raw
+// trix is used to query PublicKeyFor directly — PublicKeyFor does NOT
+// require unlock (account/unlock.go:903) so List stays open while
+// LOCKED per RFC §4.1.
+//
+// Returns an error when the gate is unwired (cannot resolve any
+// public key) OR when DecodeHeader rejects.
+func (s *Service) loadHeaderOnly(path string) (IncidentRecord, error) {
+	w, ok := s.atrestWriterFor()
+	if !ok {
+		return IncidentRecord{}, core.E("incidents.loadHeaderOnly", "session gate not wired", nil)
+	}
+	raw := core.ReadFile(path)
+	if !raw.OK {
+		return IncidentRecord{}, core.E("incidents.loadHeaderOnly", raw.Error(), nil)
+	}
+	rawBytes, _ := raw.Value.([]byte)
+	pub, perr := s.headerPubKey(rawBytes)
+	if perr != nil {
+		return IncidentRecord{}, perr
+	}
+	rr := w.DecodeHeader(rawBytes, pub)
+	if !rr.OK {
+		return IncidentRecord{}, core.E("incidents.loadHeaderOnly", rr.Error(), nil)
+	}
+	hdr, _ := rr.Value.(recordfile.Header)
+	rec := IncidentRecord{
+		ID:      hdr.ID,
+		Version: int(hdr.Version),
+		State:   incidentStateEnumIn(stringFromRaw(hdr.Raw, "status")),
+	}
+	return rec, nil
+}
+
+// headerPubKey resolves the public key bytes for the account.id
+// named in a raw at-rest blob's header. Peeks the JSON header
+// directly so the lookup is independent of whether any account is
+// unlocked — matches RFC §4.1 "List stays open while LOCKED".
+//
+// The substrate's parseHeader handles the JSON shape; we re-decode
+// just enough to extract account.id before asking the gate for the
+// public key.
+func (s *Service) headerPubKey(raw []byte) ([]byte, error) {
+	s.gateMu.RLock()
+	gate := s.gate
+	s.gateMu.RUnlock()
+	if gate == nil {
+		return nil, core.E("incidents.headerPubKey", "session gate not wired", nil)
+	}
+	keys, ok := gate.(accountKeyProvider)
+	if !ok {
+		return nil, core.E("incidents.headerPubKey",
+			"session gate does not provide account keys", nil)
+	}
+	accountID, err := peekTrixAccountID(raw)
+	if err != nil {
+		return nil, err
+	}
+	pub, ok := keys.PublicKeyFor(accountID)
+	if !ok || len(pub) == 0 {
+		return nil, core.E("incidents.headerPubKey",
+			"PublicKeyFor("+accountID+") returned not-ok", nil)
+	}
+	return pub, nil
+}
+
+// peekTrixAccountID extracts the account.id from a raw at-rest blob
+// without going through PGP decrypt. The on-disk shape is
+// `[Magic(4)][Version(1)][HeaderLen(4)][HeaderJSON][Payload]` per RFC
+// §2.2; we read the JSON header bytes and unmarshal just the account
+// substructure.
+//
+// Returns an error when the blob is too short, the magic/length is
+// nonsense, or account.id is absent. The substrate's full
+// DecodeHeader path runs after this — so structural errors here are
+// not authoritative, they're just enough to pick the correct pub key.
+func peekTrixAccountID(raw []byte) (string, error) {
+	const headerStart = 4 + 1 + 4 // Magic + Version + HeaderLen
+	if len(raw) < headerStart {
+		return "", core.E("incidents.peekTrix", "blob too short", nil)
+	}
+	hdrLen := int(uint32(raw[5])<<24 | uint32(raw[6])<<16 | uint32(raw[7])<<8 | uint32(raw[8]))
+	if hdrLen <= 0 || headerStart+hdrLen > len(raw) {
+		return "", core.E("incidents.peekTrix", "header length out of bounds", nil)
+	}
+	hdrJSON := raw[headerStart : headerStart+hdrLen]
+	var probe struct {
+		Account struct {
+			ID string `json:"id"`
+		} `json:"account"`
+	}
+	if r := core.JSONUnmarshalString(string(hdrJSON), &probe); !r.OK {
+		return "", core.E("incidents.peekTrix", "json unmarshal: "+r.Error(), nil)
+	}
+	if probe.Account.ID == "" {
+		return "", core.E("incidents.peekTrix", "account.id missing from header", nil)
+	}
+	return probe.Account.ID, nil
+}
+
+// stringFromRaw extracts a string field from a substrate Header.Raw
+// map. Missing or non-string values return "" so toEntry renders the
+// fallback empty state without panicking.
+func stringFromRaw(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// incidentStateEnumIn maps the canonical RFC §2.4 IncidentsStatuses
+// enum back to the incidents-internal state vocabulary. Symmetric
+// inverse of incidentStateEnumOut. The "open" header bucket loses
+// the investigating-vs-post-mortem distinction; the legacy / body
+// path (full record decrypt) restores it. Header-only list entries
+// therefore project as "investigating" by default — frontend can
+// distinguish via Get() once unlocked.
+//
+//	internalState := incidentStateEnumIn("open")   // → "investigating"
+//	internalState := incidentStateEnumIn("closed") // → "resolved"
+func incidentStateEnumIn(headerStatus string) string {
+	switch headerStatus {
+	case "closed":
+		return "resolved"
+	case "open":
+		return "investigating"
+	}
+	return ""
+}
+
 // loadOne finds and fully parses the incident file for the given ID,
 // returning the record with the PostMortem body populated.
+//
 // Cerberus #1486: id is validated before any directory walk so a
 // traversal payload cannot inflate ReadDir attempts across the tree.
-func loadOne(id string) (IncidentRecord, string, error) {
+//
+// Dual-format read (RFC.stage-e-encrypt-at-rest v2 §3.1):
+//   - .lthn is preferred. Decrypt requires an unlocked session; on a
+//     locked-session read this returns the typed incidents.session.locked
+//     error so callers (Get) surface the lock state instead of leaking
+//     "incident not found" confusion.
+//   - .md is the legacy plaintext fallthrough. Continues to parse via
+//     recordfile.Split + YAML unmarshal so pre-cutover records remain
+//     readable across the lazy migration.
+//
+// The s receiver may be nil for callers that only exercise the
+// legacy plaintext path (export-test shim before SessionGate exists);
+// the at-rest branch is skipped when s is nil and loadOne falls
+// through to .md.
+func (s *Service) loadOne(id string) (IncidentRecord, string, error) {
 	if err := paths.IsValidID(id); err != nil {
 		return IncidentRecord{}, "", err
 	}
@@ -321,16 +779,39 @@ func loadOne(id string) (IncidentRecord, string, error) {
 				continue
 			}
 			dirPath := core.PathJoin(yrPath, mEntry.Name())
-			// Cerberus #1486 belt-and-braces (Mantis #1607, forward-arc
-			// from H#85): WithinDir check after the join. IsValidID at
-			// the top of loadOne is the cheap shape gate; JoinAndCheck
-			// catches cousin-validator drift if a future regression
-			// loosens that shape or a non-wails caller bypasses it.
-			target, jerr := paths.JoinAndCheck(dirPath, id+".md")
+
+			// .lthn first — encrypted records take precedence when
+			// present. Cerberus #1486 belt-and-braces (Mantis #1607,
+			// forward-arc from H#85): WithinDir check after the join.
+			lthnPath, jerr := paths.JoinAndCheck(dirPath, id+".lthn")
 			if jerr != nil {
 				return IncidentRecord{}, "", jerr
 			}
-			raw := core.ReadFile(target)
+			if exists := core.Stat(lthnPath); exists.OK {
+				w, ok := s.atrestWriterFor()
+				if !ok {
+					return IncidentRecord{}, dirPath,
+						core.E("incidents.loadOne", "incidents.session.locked", nil)
+				}
+				rr := w.Read(lthnPath)
+				if !rr.OK {
+					return IncidentRecord{}, dirPath,
+						core.E("incidents.loadOne", rr.Error(), nil)
+				}
+				res, _ := rr.Value.(recordfile.ReadResult)
+				rec, perr := parseAtRestRecord(res)
+				if perr != nil {
+					return IncidentRecord{}, dirPath, perr
+				}
+				return rec, dirPath, nil
+			}
+
+			// Legacy plaintext .md fallthrough.
+			mdPath, jerr := paths.JoinAndCheck(dirPath, id+".md")
+			if jerr != nil {
+				return IncidentRecord{}, "", jerr
+			}
+			raw := core.ReadFile(mdPath)
 			if !raw.OK {
 				continue
 			}
@@ -344,8 +825,19 @@ func loadOne(id string) (IncidentRecord, string, error) {
 	return IncidentRecord{}, "", core.E("incidents.loadOne", "incident not found: "+id, nil)
 }
 
-// writeRecord serialises a record back to disk and writes it via
-// paths.AtomicWriteWithVersion (Cascade W3, RFC §B.3 row 8).
+// writeRecord serialises a record back to disk.
+//
+// Stage E.D.B.2 dual-path (RFC.stage-e-encrypt-at-rest v2 §3):
+//   - When the SessionGate is wired AND reports exactly one unlocked
+//     account, writes the encrypted .lthn envelope via the
+//     recordfile.AtRestWriter substrate. After successful encrypted
+//     write, removes the legacy <id>.md when present (lazy migration
+//     completion per §3.1).
+//   - When the gate is unwired (test fixtures pre-#1613 retrofit) the
+//     legacy paths.AtomicWriteWithVersion plaintext write executes
+//     verbatim. This preserves existing Cascade W3 behaviour for any
+//     caller not yet wired to a session source. Once #1613 ships
+//     across all consumers this branch goes away (#1487 PR-5).
 //
 // ifVersion is the optimistic-lock anchor — pass the Version the
 // caller observed on disk (via parseRecord through loadOne), or 0 for
@@ -371,10 +863,10 @@ func loadOne(id string) (IncidentRecord, string, error) {
 //
 // Usage example:
 //
-//	if wr := writeRecord(rec, dirPath, prior.Version); !wr.OK {
+//	if wr := s.writeRecord(rec, dirPath, prior.Version); !wr.OK {
 //	    return wr
 //	}
-func writeRecord(r IncidentRecord, dirPath string, ifVersion int) core.Result {
+func (s *Service) writeRecord(r IncidentRecord, dirPath string, ifVersion int) core.Result {
 	if err := paths.IsValidID(r.ID); err != nil {
 		return core.Fail(err)
 	}
@@ -385,6 +877,13 @@ func writeRecord(r IncidentRecord, dirPath string, ifVersion int) core.Result {
 		nextVersion = 1
 	}
 	r.Version = nextVersion
+
+	// At-rest path — preferred when the gate is wired.
+	if w, ok := s.atrestWriterFor(); ok {
+		return s.writeRecordAtRest(w, r, dirPath)
+	}
+
+	// Legacy plaintext fallback (gate not wired — test fixtures only).
 	raw, err := marshalRecord(r)
 	if err != nil {
 		return core.Fail(core.E("incidents.writeRecord", "marshal", err))
@@ -412,7 +911,80 @@ func writeRecord(r IncidentRecord, dirPath string, ifVersion int) core.Result {
 		"write failed: "+res.Error(), nil))
 }
 
-// countMonthFiles returns the number of .md files in a month directory.
+// writeRecordAtRest encrypts + writes via the substrate. Body is the
+// YAML frontmatter (IncidentRecord without PostMortem) + the
+// PostMortem string; header carries the bucketed status enum per
+// §2.4. After success, removes the legacy <id>.md if present (lazy
+// migration per §3.1).
+//
+// The substrate's IfMatch optimistic-lock uses hex(sha256(prior
+// ciphertext)). For first-writes (no prior file) the empty PriorHash
+// is the correct IfMatch input. For updates we read the prior
+// ciphertext bytes here so the IfMatch hash is well-formed; absence
+// means a true first-write and the substrate's first-write path
+// applies. AtRestWriter does NOT carry the version-frontmatter
+// IfVersion gate (the substrate's optimistic-lock is ciphertext-hash
+// based; per-record monotonic Version stays embedded in the body
+// frontmatter for forward-compat with future Stage F audit needs).
+func (s *Service) writeRecordAtRest(w *recordfile.AtRestWriter[IncidentRecord], r IncidentRecord, dirPath string) core.Result {
+	yamlBody, err := yaml.Marshal(r)
+	if err != nil {
+		return core.Fail(core.E("incidents.writeRecord", "yaml marshal", err))
+	}
+	target, jerr := paths.JoinAndCheck(dirPath, r.ID+".lthn")
+	if jerr != nil {
+		return core.Fail(jerr)
+	}
+	priorHash := ""
+	if existing := core.ReadFile(target); existing.OK {
+		priorHash = core.SHA256Hex(existing.Value.([]byte))
+	}
+
+	wr := w.Write(recordfile.WriteRequest[IncidentRecord]{
+		Record:    r,
+		BodyYAML:  yamlBody,
+		BodyText:  []byte(r.PostMortem),
+		DestPath:  target,
+		PriorHash: priorHash,
+		// AccountID: deliberately empty — the substrate uses the
+		// SingleUnlockedAccount() result as the canonical id; passing
+		// an explicit id would require incidents to track the unlocked
+		// id in a second place and add a drift surface.
+	})
+	if !wr.OK {
+		// Forward the typed substrate error verbatim — its Code names
+		// (recordfile.atrest.*) are the contract Stage F audit binds.
+		return wr
+	}
+
+	// Lazy-migration completion: remove the legacy plaintext file when
+	// the encrypted write landed cleanly. Failure is tolerated (RFC
+	// §3.1: warn-on-failure, do NOT abort the encrypted write) — the
+	// next read will see both files, prefer .lthn, and the cleanup can
+	// be re-attempted by the bulk-migrate CLI (§3.3).
+	mdPath, jerr := paths.JoinAndCheck(dirPath, r.ID+".md")
+	if jerr == nil {
+		if existsMd := core.Stat(mdPath); existsMd.OK {
+			if rm := core.Remove(mdPath); !rm.OK {
+				core.Warn("incidents: failed to remove legacy plaintext after encrypted write",
+					"path", mdPath, "err", rm.Error())
+			}
+		}
+	}
+
+	// Synthesise a paths.WriteOutput-shaped success Value so existing
+	// callers (writeRecord's success path returned the primitive's
+	// Result verbatim) keep their typed expectations.
+	receipt, _ := wr.Value.(recordfile.WriteReceipt)
+	return core.Ok(paths.WriteOutput{
+		Version: int(receipt.Version),
+		Hash:    "", // future: feed back from substrate when needed
+	})
+}
+
+// countMonthFiles returns the number of .md AND .lthn files in a
+// month directory. Counts BOTH formats so the {YYYY-MM}-INC-NNN
+// suffix counter advances across the cutover.
 // Used to derive the NNN suffix for a new incident ID.
 func countMonthFiles(dirPath string) int {
 	r := core.ReadDir(core.DirFS(dirPath), ".")
@@ -422,11 +994,12 @@ func countMonthFiles(dirPath string) int {
 	entries, _ := r.Value.([]core.FsDirEntry)
 	n := 0
 	for _, e := range entries {
-		if !e.IsDir() {
-			nm := e.Name()
-			if len(nm) >= 4 && nm[len(nm)-3:] == ".md" {
-				n++
-			}
+		if e.IsDir() {
+			continue
+		}
+		nm := e.Name()
+		if hasSuffix(nm, ".md") || hasSuffix(nm, ".lthn") {
+			n++
 		}
 	}
 	return n
@@ -471,9 +1044,10 @@ func (s *Service) fireEvent(name string, entry IncidentEntry) {
 // cmd/lthn/app.go post-construction (Mantis #1613 B.3) once
 // *account.Service exists.
 //
-// Mirrors the H#147 documents.SetSessionGate setter pattern. Live-read
-// on every gate check — no event-bus reliability concerns, no cache
-// coherence concerns (RFC.stage-e-unlockgate v2 §1.1).
+// Mirrors the H#147 documents.SetSessionGate + H#164 deals
+// SetSessionGate setter pattern. Live-read on every gate check — no
+// event-bus reliability concerns, no cache coherence concerns
+// (RFC.stage-e-unlockgate v2 §1.1).
 //
 // Usage example:
 //
@@ -482,6 +1056,11 @@ func (s *Service) SetSessionGate(g SessionGate) {
 	s.gateMu.Lock()
 	s.gate = g
 	s.gateMu.Unlock()
+	// Invalidate any cached AtRestWriter so a re-wire (e.g. account
+	// service rotation) rebuilds adapters against the fresh gate.
+	s.atrestMu.Lock()
+	s.atrestWriter = nil
+	s.atrestMu.Unlock()
 }
 
 // Stop nils the SessionGate reference so a draining Service
@@ -496,6 +1075,9 @@ func (s *Service) Stop(_ core.Context) core.Result {
 	s.gateMu.Lock()
 	s.gate = nil
 	s.gateMu.Unlock()
+	s.atrestMu.Lock()
+	s.atrestWriter = nil
+	s.atrestMu.Unlock()
 	return core.Ok(nil)
 }
 

@@ -51,18 +51,30 @@ func DurStringExported(minutes int) string {
 // directly (Mantis #1607). Tests assert paths.escape / paths.invalid_id
 // at the service tier rather than only at the wails tier.
 //
+// Stage E.D.B.2: loadOne is a *Service method (the at-rest path
+// resolves the writer against the live SessionGate). For
+// traversal-only tests no gate is needed — IsValidID fires first and
+// the at-rest branch is never reached. The shim allocates a fresh
+// gate-less Service so the call shape stays one-line.
+//
 // Usage example:
 //
 //	_, _, err := incidents.LoadOneExported("../../wallets/x")
 func LoadOneExported(id string) (IncidentRecord, string, error) {
-	return loadOne(id)
+	return (&Service{}).loadOne(id)
 }
 
 // WriteRecordExported exposes writeRecord for service-tier tests.
+//
+// Stage E.D.B.2: writeRecord is a *Service method (the at-rest path
+// resolves the writer against the live SessionGate). For traversal-
+// only tests no gate is needed — IsValidID fires first and the
+// at-rest branch is never reached. The shim allocates a fresh
+// gate-less Service so the call shape stays one-line.
 //
 // Usage example:
 //
 //	res := incidents.WriteRecordExported(rec, dir, 0)
 func WriteRecordExported(r IncidentRecord, dirPath string, ifVersion int) core.Result {
-	return writeRecord(r, dirPath, ifVersion)
+	return (&Service{}).writeRecord(r, dirPath, ifVersion)
 }
