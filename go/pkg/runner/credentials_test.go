@@ -235,13 +235,13 @@ func TestCredentials_WForceDeleteTier1_AckTokenAccepted_Good(t *core.T) {
 	events := rec.snapshot()
 	var forced *audit.Event
 	for i := range events {
-		if events[i].Event == audit.EventProviderCredentialForceDeleted {
+		if events[i].Event == audit.EventProviderCredentialDeleted {
 			forced = &events[i]
 			break
 		}
 	}
 	core.AssertTrue(t, forced != nil,
-		"EventProviderCredentialForceDeleted must fire post-force-delete")
+		"EventProviderCredentialDeleted must fire post-force-delete")
 	core.AssertEqual(t, "openai-default", forced.Meta["ref"])
 	core.AssertEqual(t, runner.ForceDeleteAckToken, forced.Meta["operator_confirmation"])
 	ref, ok := forced.Meta["referenced_by"].(string)
@@ -252,7 +252,7 @@ func TestCredentials_WForceDeleteTier1_AckTokenAccepted_Good(t *core.T) {
 
 // TestCredentials_CacheInvalidatedOnTier1Delete_Good — the load-
 // bearing ADD-1 behaviour: deleting a referenced tier-1 ref fires
-// EventProviderCredentialCacheInvalidated via the runner's
+// EventProviderCredentialInvalidated via the runner's
 // SubscribeToKeysEvents subscriber.
 func TestCredentials_CacheInvalidatedOnTier1Delete_Good(t *core.T) {
 	rec := installRecorder(t)
@@ -272,13 +272,13 @@ func TestCredentials_CacheInvalidatedOnTier1Delete_Good(t *core.T) {
 	events := rec.snapshot()[preCount:]
 	var invalidated *audit.Event
 	for i := range events {
-		if events[i].Event == audit.EventProviderCredentialCacheInvalidated {
+		if events[i].Event == audit.EventProviderCredentialInvalidated {
 			invalidated = &events[i]
 			break
 		}
 	}
 	core.AssertTrue(t, invalidated != nil,
-		"EventProviderCredentialCacheInvalidated must fire post-DeleteTier1")
+		"EventProviderCredentialInvalidated must fire post-DeleteTier1")
 	core.AssertEqual(t, "openai-default", invalidated.Meta["ref"])
 	core.AssertEqual(t, keys.Tier1KeyDeleted, invalidated.Meta["reason"])
 }
@@ -302,13 +302,13 @@ func TestCredentials_CacheInvalidatedOnTier1Replace_Good(t *core.T) {
 	events := rec.snapshot()[preCount:]
 	var invalidated *audit.Event
 	for i := range events {
-		if events[i].Event == audit.EventProviderCredentialCacheInvalidated {
+		if events[i].Event == audit.EventProviderCredentialInvalidated {
 			invalidated = &events[i]
 			break
 		}
 	}
 	core.AssertTrue(t, invalidated != nil,
-		"EventProviderCredentialCacheInvalidated must fire post-replace")
+		"EventProviderCredentialInvalidated must fire post-replace")
 	core.AssertEqual(t, "openai-default", invalidated.Meta["ref"])
 	core.AssertEqual(t, keys.Tier1KeyReplaced, invalidated.Meta["reason"])
 }

@@ -228,7 +228,7 @@ func RoutesReferencing(c *core.Core, ref string) []string {
 // the router; credential replace re-resolves the plaintext into a
 // fresh *openai.Backend.
 //
-// Audit emit on every event (EventProviderCredentialCacheInvalidated)
+// Audit emit on every event (EventProviderCredentialInvalidated)
 // — the audit row makes the cache-flush decision visible to a
 // forensic walker regardless of whether the subsequent rebuild
 // surfaces or skips the route.
@@ -252,7 +252,7 @@ func SubscribeToKeysEvents(c *core.Core, s *Service) {
 		// inference cluster (provider/model) stays clean.
 		if len(affected) == 0 {
 			_ = audit.Default().Record(audit.Event{
-				Event:   audit.EventProviderCredentialCacheInvalidated,
+				Event:   audit.EventProviderCredentialInvalidated,
 				TS:      core.Now().Unix(),
 				Scope:   "runner",
 				Outcome: audit.OutcomeOK,
@@ -265,7 +265,7 @@ func SubscribeToKeysEvents(c *core.Core, s *Service) {
 		}
 		for _, name := range affected {
 			_ = audit.Default().Record(audit.Event{
-				Event:   audit.EventProviderCredentialCacheInvalidated,
+				Event:   audit.EventProviderCredentialInvalidated,
 				TS:      core.Now().Unix(),
 				Scope:   "runner",
 				Outcome: audit.OutcomeOK,

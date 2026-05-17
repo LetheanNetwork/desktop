@@ -971,6 +971,60 @@ const (
 	//                        evidence — the auditor can spot the gap.
 	EventMarketplaceTrustedKeyMutated = "marketplace.trusted_key.mutated"
 
+	// Wave 2 marketplace audit emits (Mantis #1745 Cerberus #71 F-3/F-4/
+	// F-5/F-6) — extracted from pkg/marketplace/install.go inline string
+	// literals into typed constants now that the brief allowlist
+	// includes pkg/audit/types.go. The string values are unchanged from
+	// the shipped Wave 2 commit (f866c00) so on-disk audit history +
+	// the TS chip-filter golden-list keep working without migration.
+
+	// EventMarketplaceCatalogueStaleInstallAttempt fires when an
+	// operator triggers Install with `ForceStaleInstall=true` against a
+	// catalogue entry whose age exceeds the staleness threshold. F3
+	// override-attempted row — distinct from the routine install
+	// audit pair so the auditor can grep stale-override frequency.
+	EventMarketplaceCatalogueStaleInstallAttempt = "marketplace.catalogue.stale_install_attempt"
+
+	// EventMarketplaceManifestVersionPending fires when an operator
+	// hits Install on a bundle whose manifest version is Pending (i.e.
+	// the digest has not yet been confirmed by the operator's Promote
+	// action). F6 manifest-version-bump gate; Outcome=denied because
+	// the install short-circuits with a friendly "confirm the version
+	// bump first" message rather than landing the unverified payload.
+	EventMarketplaceManifestVersionPending = "marketplace.manifest.version.pending"
+
+	// EventMarketplaceManifestVersionTransition fires when the operator
+	// confirms Pending → Canonical OR a rollback drops Pending back to
+	// the prior canonical. F6 promotion lifecycle row. Meta["transition"]
+	// is one of "confirmed" / "rolled_back" / "auto_promoted" (forward-
+	// arc; auto_promoted is reserved for an idle-window auto-promotion
+	// feature not yet shipped).
+	EventMarketplaceManifestVersionTransition = "marketplace.manifest.version.transition"
+
+	// EventMarketplaceImageDigestMismatch fires when the runtime image
+	// digest the registry served differs from the digest the manifest
+	// pinned. F2 hard-reject row; Outcome=denied because the install
+	// aborts before any container starts. Both expected + actual
+	// digests land in Meta so a forensic correlation against the
+	// registry's history is direct.
+	EventMarketplaceImageDigestMismatch = "marketplace.image.digest_mismatch"
+
+	// EventMarketplaceImageDigestUnverifiable fires when the
+	// install path cannot verify the image digest at all (docker
+	// missing, inspect failed, parse failed). F2 degraded-verify row;
+	// Outcome=failed because the failure is environmental, not a
+	// security denial. Meta["reason"] carries the typed prefix the
+	// sandbox stamped so an operator can distinguish the modes.
+	EventMarketplaceImageDigestUnverifiable = "marketplace.image.digest_unverifiable"
+
+	// EventMarketplacePermissionDiffRequiresReConsent fires when a
+	// manifest update adds permissions not previously granted by the
+	// operator. F5 re-consent row; the install short-circuits and the
+	// frontend surfaces a modal with the new scope:mode pairs. The
+	// new_scopes Meta key carries the closed-set list so the auditor
+	// can grep for "what new powers did an upgrade request".
+	EventMarketplacePermissionDiffRequiresReConsent = "marketplace.permission.diff_requires_re_consent"
+
 	// EventGatewayDispatchRequested fires when pkg/gateway.Service.Handle
 	// is about to dispatch a resolved (bundle, scope, mode) tuple to its
 	// registered Handler. Cerberus #57 F-2 (Mantis #1700) — Repudiation
@@ -1835,13 +1889,21 @@ const (
 	// credential.
 	EventProviderCredentialMigrated = "provider.credential.migrated"
 
-	// EventProviderCredentialCacheInvalidated fires when pkg/runner clears
+	// EventProviderCredentialInvalidated fires when pkg/runner clears
 	// a cached resolved-plaintext from a *openai.Backend wrapper in
 	// response to a keys.tier1.{deleted,replaced} event-bus broadcast
 	// (RFC v1.1 §4 ADD-1 — Cerberus #1742 STRIDE-T survival-past-delete).
 	// Without the cache-invalidation, an operator-visible "I deleted it"
 	// would diverge from system reality because the deleted credential
 	// would survive in process memory until ServiceShutdown.
+	//
+	// Mantis #1746 / Cerberus #71 ADD-5 — name normalised from
+	// `cache_invalidated` to `invalidated` so the verb stays single-
+	// word in line with the rest of the provider.credential.* cluster
+	// (stored / migrated / deleted / observed). The `cache_` qualifier
+	// was redundant: the only thing that can be invalidated here IS
+	// the cached resolved plaintext, so it belongs in the const name
+	// not the event-name literal.
 	//
 	// Meta keys (RFC §2.1, secret-shape redactor enforced):
 	//
@@ -1853,15 +1915,25 @@ const (
 	// The cleared plaintext bytes are NEVER in Meta — the cache-flush
 	// path zeroes the cached slice and emits this row; the row records
 	// the invalidation decision, not the credential.
-	EventProviderCredentialCacheInvalidated = "provider.credential.cache_invalidated"
+	EventProviderCredentialInvalidated = "provider.credential.invalidated"
 
-	// EventProviderCredentialForceDeleted fires when an operator
+	// EventProviderCredentialDeleted fires when an operator
 	// dispatches pkg/runner.Service.WForceDeleteTier1 with the literal
 	// "operator_acknowledged_orphan" confirmation token (RFC v1.1 §5
 	// ADD-3 — Cerberus #1744 force-delete escape). The default
 	// WDeleteTier1 path REJECTS deletion when any route references the
 	// ref; force-delete bypasses that check, which can leave routes in
 	// a broken state. The audit row makes the blast-radius visible.
+	//
+	// Mantis #1746 / Cerberus #71 ADD-5 — name normalised from
+	// `force_deleted` to `deleted` so the verb stays single-word in
+	// line with the rest of the provider.credential.* cluster (stored
+	// / migrated / invalidated / observed). The "force" discriminator
+	// belongs in Meta (the literal operator_confirmation token already
+	// carries it explicitly: "operator_acknowledged_orphan"), not in
+	// the event-name literal — a future non-force deletion path would
+	// emit the same event-name with a different Meta shape rather than
+	// fork a new cluster member.
 	//
 	// Meta keys (RFC §2.1, secret-shape redactor enforced):
 	//
@@ -1878,11 +1950,13 @@ const (
 	//                           (the only accepted token). Recorded
 	//                           literally so a future token-evolution
 	//                           can be reasoned about from the substrate.
+	//                           This field IS the "force-ness" signal
+	//                           that the event-name used to carry.
 	//
 	// The credential bytes are NEVER in Meta — DeleteTier1 removes the
 	// ciphertext from disk and emits this row; the row records the
 	// deletion decision, not the credential.
-	EventProviderCredentialForceDeleted = "provider.credential.force_deleted"
+	EventProviderCredentialDeleted = "provider.credential.deleted"
 
 	// EventProviderCredentialMigrationPendingObserved fires once per
 	// boot when pkg/runner detects routes with plaintext `api_key:`
@@ -2047,7 +2121,7 @@ const (
 	// ciphertext on disk — emits nothing, mirroring the broadcast
 	// gate.
 	//
-	// Sibling of EventProviderCredentialForceDeleted: that row fires
+	// Sibling of EventProviderCredentialDeleted: that row fires
 	// from the pkg/runner WForceDeleteTier1 escape path with the
 	// `referenced_by` blast-radius Meta; this row fires from the
 	// default-path DeleteTier1 at the at-rest substrate level.

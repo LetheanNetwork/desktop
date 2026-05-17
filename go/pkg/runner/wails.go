@@ -446,7 +446,7 @@ func rollbackTier1Refs(d tier1Deleter, refs []string) {
 // not loaded, ref typo at create time, routes file corruption) where
 // the referencing-check would deadlock the operator out of cleanup.
 //
-// The audit emit (EventProviderCredentialForceDeleted) carries the
+// The audit emit (EventProviderCredentialDeleted) carries the
 // referenced_by Meta so a future incident review can correlate
 // "force-deleted X" with "routes Y, Z subsequently failed".
 //
@@ -483,7 +483,7 @@ func (s *Service) WForceDeleteTier1(ref, ack string) core.Result {
 	// override of the default referencing-check; the per-backend
 	// cache_invalidated rows fire from the subscriber.
 	_ = audit.Default().Record(audit.Event{
-		Event:   audit.EventProviderCredentialForceDeleted,
+		Event:   audit.EventProviderCredentialDeleted,
 		TS:      core.Now().Unix(),
 		Scope:   "runner",
 		Outcome: audit.OutcomeOK,

@@ -555,18 +555,16 @@ func diffNewPermissions(perms []Permission, prevGranted map[string]bool) []strin
 }
 
 // emitStaleCatalogueInstallAttempt records the F3 override-attempted
-// audit row. Audit event const lives inline (string literal) pending
-// the pkg/audit/types.go const block extraction tracked as a Wave 2
-// SECURITY-NOTE follow-up — the const-extraction is a single-file
-// rename + the brief allowlist did not include audit/types.go so the
-// migration is deferred to keep this commit allowlist-clean.
+// audit row. Event const sourced from pkg/audit/types.go per Mantis
+// #1746 housekeeping — the Wave 2 inline-literal carve-out closed
+// once the audit/types.go allowlist gate opened.
 //
 // Usage example (internal):
 //
 //	emitStaleCatalogueInstallAttempt(bundleID, input.ForceStaleInstall, age)
 func emitStaleCatalogueInstallAttempt(bundleID string, override bool, age core.Duration) {
 	_ = audit.Default().Record(audit.Event{
-		Event:   "marketplace.catalogue.stale_install_attempt",
+		Event:   audit.EventMarketplaceCatalogueStaleInstallAttempt,
 		TS:      core.Now().UTC().Unix(),
 		Scope:   marketplaceScope,
 		Outcome: audit.OutcomeOK,
@@ -583,14 +581,14 @@ func emitStaleCatalogueInstallAttempt(bundleID string, override bool, age core.D
 // back so an auditor can reconstruct the operator's decision sequence.
 func emitManifestVersionPending(bundleID, oldDigest, pendingDigest string) {
 	_ = audit.Default().Record(audit.Event{
-		Event:   "marketplace.manifest.version.pending",
+		Event:   audit.EventMarketplaceManifestVersionPending,
 		TS:      core.Now().UTC().Unix(),
 		Scope:   marketplaceScope,
 		Outcome: audit.OutcomeDenied,
 		Meta: map[string]any{
-			"bundle_id":          bundleID,
-			"old_digest":         oldDigest,
-			"pending_digest":     pendingDigest,
+			"bundle_id":      bundleID,
+			"old_digest":     oldDigest,
+			"pending_digest": pendingDigest,
 		},
 	})
 }
@@ -601,7 +599,7 @@ func emitManifestVersionPending(bundleID, oldDigest, pendingDigest string) {
 // "rolled_back" / "auto_promoted" (forward-arc).
 func emitManifestVersionBumpTransition(bundleID, oldDigest, newDigest, transition string) {
 	_ = audit.Default().Record(audit.Event{
-		Event:   "marketplace.manifest.version.transition",
+		Event:   audit.EventMarketplaceManifestVersionTransition,
 		TS:      core.Now().UTC().Unix(),
 		Scope:   marketplaceScope,
 		Outcome: audit.OutcomeOK,
@@ -619,15 +617,15 @@ func emitManifestVersionBumpTransition(bundleID, oldDigest, newDigest, transitio
 // the registry's served digest against what the manifest demanded.
 func emitImageDigestMismatch(bundleID, imageRef, expected, actual string) {
 	_ = audit.Default().Record(audit.Event{
-		Event:   "marketplace.image.digest_mismatch",
+		Event:   audit.EventMarketplaceImageDigestMismatch,
 		TS:      core.Now().UTC().Unix(),
 		Scope:   marketplaceScope,
 		Outcome: audit.OutcomeDenied,
 		Meta: map[string]any{
-			"bundle_id":      bundleID,
-			"image_ref":      imageRef,
+			"bundle_id":       bundleID,
+			"image_ref":       imageRef,
 			"expected_digest": expected,
-			"actual_digest":  actual,
+			"actual_digest":   actual,
 		},
 	})
 }
@@ -637,7 +635,7 @@ func emitImageDigestMismatch(bundleID, imageRef, expected, actual string) {
 // distinguish docker-missing from inspect-failed from parse-failed.
 func emitImageDigestUnverifiable(bundleID, imageRef, reason string) {
 	_ = audit.Default().Record(audit.Event{
-		Event:   "marketplace.image.digest_unverifiable",
+		Event:   audit.EventMarketplaceImageDigestUnverifiable,
 		TS:      core.Now().UTC().Unix(),
 		Scope:   marketplaceScope,
 		Outcome: audit.OutcomeFailed,
@@ -654,7 +652,7 @@ func emitImageDigestUnverifiable(bundleID, imageRef, reason string) {
 // frontend will surface in the re-consent modal.
 func emitPermissionDiffRequiresReConsent(bundleID string, scopes []string) {
 	_ = audit.Default().Record(audit.Event{
-		Event:   "marketplace.permission.diff_requires_re_consent",
+		Event:   audit.EventMarketplacePermissionDiffRequiresReConsent,
 		TS:      core.Now().UTC().Unix(),
 		Scope:   marketplaceScope,
 		Outcome: audit.OutcomeOK,
