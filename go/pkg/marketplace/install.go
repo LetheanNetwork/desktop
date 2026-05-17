@@ -251,7 +251,17 @@ func (s *Service) Install(input InstallInput) core.Result {
 		Permissions: encodePermissions(m.Permissions),
 	}
 	if s.core != nil {
-		_ = orm.Of[InstalledBundle](s.core).Save(&rec)
+		// Mantis #1693 MED (Cerberus #54 C5) — orm.Save was previously
+		// silently swallowed via `_ =`. On failure the sandboxes
+		// spawned above became orphans (no durable record so neither
+		// Uninstall nor a future reconcile could find them). Roll back
+		// every spawned handle via Kill so the OS state matches the
+		// (now-rejected) record state, then return the orm error.
+		if r := orm.Of[InstalledBundle](s.core).Save(&rec); !r.OK {
+			rollbackSpawnedSandboxes(sbSvc, sandboxIDs)
+			return core.Fail(core.E(installBundleOp,
+				"orm save failed — rolled back spawned containers: "+r.Error(), nil))
+		}
 	}
 
 	// Five-pillar plugin registration — wire the manifest's plugin:
@@ -372,6 +382,11 @@ func (s *Service) Launch(bundleID string) core.Result {
 	// image entry shares the same value.
 	installID := s.resolveSandboxInstallID(sbSvc)
 
+	// Track sandbox handles spawned in this Launch call so a downstream
+	// orm.Save failure can roll them back (Mantis #1693 MED / Cerberus
+	// #54 C5). Keyed by image id; values are the sandbox.ContainerHandle
+	// returned by SpawnLong so Kill can target them precisely.
+	launchedIDs := map[string]string{}
 	for _, img := range m.Images {
 		vols, vr := s.resolveVolumes(img)
 		if !vr.OK {
@@ -388,14 +403,29 @@ func (s *Service) Launch(bundleID string) core.Result {
 			InstallID: installID,
 			BundleID:  m.Name,
 		})
-		_ = sbSvc.SpawnLong(spawnIn)
+		spawnR := sbSvc.SpawnLong(spawnIn)
+		if spawnR.OK {
+			if h, ok := spawnR.Value.(sandbox.ContainerHandle); ok {
+				launchedIDs[img.ID] = h.SandboxID
+			}
+		}
 	}
 
 	before := recR.Value.(InstalledBundle)
 	rec := before
 	rec.Status = BundleStatusRunning
 	if s.core != nil {
-		_ = orm.Of[InstalledBundle](s.core).Save(&rec)
+		// Mantis #1693 MED (Cerberus #54 C5) — orm.Save was previously
+		// silently swallowed. On failure the freshly-spawned sandboxes
+		// from the loop above became orphans (no Status flip + stale
+		// "stopped" record means a follow-up Stop call wouldn't touch
+		// the live containers). Roll back the just-spawned handles via
+		// Kill and surface the orm error to the caller.
+		if r := orm.Of[InstalledBundle](s.core).Save(&rec); !r.OK {
+			rollbackSpawnedSandboxes(sbSvc, launchedIDs)
+			return core.Fail(core.E(launchBundleOp,
+				"orm save failed — rolled back spawned containers: "+r.Error(), nil))
+		}
 	}
 	fireBundleChanged(s.core, PhaseLaunched, rec, before)
 
@@ -444,7 +474,17 @@ func (s *Service) stopLocked(bundleID string) core.Result {
 		rec := before
 		rec.Status = BundleStatusStopped
 		if s.core != nil {
-			_ = orm.Of[InstalledBundle](s.core).Save(&rec)
+			// Mantis #1693 MED (Cerberus #54 C5) — orm.Save was
+			// previously silently swallowed. Sandboxes are already
+			// killed above so there's nothing to roll back; the
+			// failure mode here is a stale Status flag (record still
+			// reads "running" when the live state is "stopped"). Return
+			// the error rather than masking it as Ok — callers can then
+			// retry the Status flip or alert.
+			if r := orm.Of[InstalledBundle](s.core).Save(&rec); !r.OK {
+				return core.Fail(core.E(stopBundleOp,
+					"orm save failed — record may show stale Status: "+r.Error(), nil))
+			}
 		}
 		fireBundleChanged(s.core, PhaseStopped, rec, before)
 	}
@@ -491,9 +531,20 @@ func (s *Service) Uninstall(bundleID string) core.Result {
 	// Capture the pre-uninstall state before Stop flips status. The
 	// broadcast at the end carries this as Bundle so subscribers see
 	// the final shape; Before carries whatever Stop saved.
+	//
+	// recordExists guards the orm.Delete below — Mantis #1693 MED
+	// (Cerberus #54 C5). Before the surface change the Delete error
+	// was silently swallowed via `_ =` so Delete-on-nothing returned
+	// the same OK shape as Delete-on-real-record. Now that Delete
+	// surfaces its error, a defensive "uninstall a bundle that was
+	// never installed" call (covered by TestEvents_Uninstall_Fires)
+	// must NOT hit Delete at all — the no-op is "nothing to remove",
+	// not "removal failed".
 	var before InstalledBundle
+	recordExists := false
 	if recR := s.findInstalledBundle(bundleID); recR.OK {
 		before = recR.Value.(InstalledBundle)
+		recordExists = true
 	}
 
 	// Step 1 + 2 + 3 — drop from plugin-view registry first so
@@ -520,8 +571,28 @@ func (s *Service) Uninstall(bundleID string) core.Result {
 	// bundle ids cleanly.
 	if s.core != nil {
 		_ = plugin.UnregisterBundle(s.core, bundleID)
-		rec := InstalledBundle{BundleID: bundleID}
-		_ = orm.Of[InstalledBundle](s.core).Delete(&rec)
+		// Mantis #1693 MED (Cerberus #54 C5) — orm.Delete was
+		// previously silently swallowed. Sandboxes are already torn
+		// down above so there's nothing to roll back; the failure
+		// mode here is a stale registry record (subsequent list-
+		// installed surfaces a ghost bundle whose runtime is gone).
+		// Surface the error so the caller can retry the delete or
+		// flag the orphan record for reconcile; broadcast still fires
+		// so live UI subscribers can re-fetch.
+		//
+		// Gated on recordExists so the defensive "uninstall a bundle
+		// that was never installed" call doesn't hit Delete on a
+		// table that has no row to remove (returning a misleading
+		// Fail when the desired end-state — "no such record" — is
+		// already achieved).
+		if recordExists {
+			rec := InstalledBundle{BundleID: bundleID}
+			if r := orm.Of[InstalledBundle](s.core).Delete(&rec); !r.OK {
+				fireBundleChanged(s.core, PhaseUninstalled, before, InstalledBundle{})
+				return core.Fail(core.E(uninstallBundleOp,
+					"orm delete failed — registry record may be stale: "+r.Error(), nil))
+			}
+		}
 	}
 
 	// Step 5 — Broadcast BundleChanged. Bundle carries the captured
@@ -616,6 +687,38 @@ func exposeIDFromSource(src string) string {
 		return ""
 	}
 	return src[len(prefix) : len(src)-len(suffix)]
+}
+
+// rollbackSpawnedSandboxes Kills every sandbox handle in ids when an
+// orm.Save fails AFTER the spawn loop has landed live containers. The
+// alternative — silently dropping the orm error — leaves an orphan
+// container with no managed handle (no record in InstalledBundle so
+// Uninstall + ListHandles-driven reconcile can't find it). Mantis
+// #1693 MED (Cerberus #54 C5).
+//
+// Best-effort: each Kill is a separate Result; one Kill failing
+// doesn't stop the rest. sbSvc.Kill already emits the
+// EventSandboxKillRequested / Succeeded / Failed audit chain so the
+// rollback is traceable from audit history without a new event type.
+// nil sbSvc is tolerated (defensive — the orm.Save failure path is
+// already an unhappy branch; don't compound it with a nil-deref).
+//
+// Usage example (internal):
+//
+//	if r := orm.Of[InstalledBundle](s.core).Save(&rec); !r.OK {
+//	    rollbackSpawnedSandboxes(sbSvc, sandboxIDs)
+//	    return core.Fail(...)
+//	}
+func rollbackSpawnedSandboxes(sbSvc *sandbox.Service, ids map[string]string) {
+	if sbSvc == nil {
+		return
+	}
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		_ = sbSvc.Kill(id)
+	}
 }
 
 // persistManifest writes the validated manifest to <configPath>/manifest.yml
