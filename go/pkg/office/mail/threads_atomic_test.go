@@ -80,6 +80,17 @@ func TestMail_AppendLine_SmallRecordPrimaryPath_Good(t *testing.T) {
 // engages on size alone.
 func TestMail_AppendLine_DarwinPipeBufFallback_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+
+	// Mantis #1564: paths.HashForAudit returns "" without an audit
+	// secret provider, so the path_hash assertion below would fail
+	// in tests that don't wire the substrate's serverkey-derived
+	// HMAC key. Install a 32-byte test secret for the fallback's
+	// audit Meta to carry a non-empty path_hash.
+	paths.SetAuditSecretProvider(func() []byte {
+		return []byte("test-secret-32-bytes-1234567890ab")
+	})
+	t.Cleanup(func() { paths.SetAuditSecretProvider(nil) })
+
 	c := core.New()
 	svc := NewService(c)
 
@@ -492,6 +503,15 @@ func (f *fakeAuditRecorder) Record(ev audit.Event) core.Result {
 // carrying folder_slug + path_hash + record_size_bytes.
 func TestMail_AppendLine_FallbackEmitsAuditEvent_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+
+	// Mantis #1564: wire a test audit secret so paths.HashForAudit
+	// returns a non-empty path_hash for the audit.Event Meta the
+	// recorder captures below.
+	paths.SetAuditSecretProvider(func() []byte {
+		return []byte("test-secret-32-bytes-1234567890ab")
+	})
+	t.Cleanup(func() { paths.SetAuditSecretProvider(nil) })
+
 	c := core.New()
 	svc := NewService(c)
 

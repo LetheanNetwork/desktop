@@ -493,4 +493,60 @@ func TestEmitLockEvent_SyncPropagatesOnAppendLine_Ugly(t *core.T) {
 	core.AssertContains(t, r.Error(), paths.CodeAuditSyncRecordFailed)
 }
 
+// TestHashForAudit_MatchesInternalEmission_Good — Mantis #1564.
+// The exported HashForAudit MUST produce the same digest as the
+// substrate's internal emit-site path-hash so cross-package audit
+// emitters (e.g. office/mail fallback events) correlate with
+// LockEvent path_hash entries under the same per-account domain key.
+//
+// Parity is observed by emitting a LockEvent at a known cascade path,
+// capturing the recorder's hash, and asserting HashForAudit returns
+// the same value for the same input path. The internal hashPath
+// helper is package-private so the test pivots on emission output
+// rather than calling the unexported function directly from _test.
+func TestHashForAudit_MatchesInternalEmission_Good(t *core.T) {
+	homeFixture(t)
+	rec := withCaptureRecorder(t)
+
+	root := paths.Root().Value.(string)
+	dir := core.PathJoin(root, "office", "documents")
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+	fp := core.PathJoin(dir, "parity.md")
+
+	r := paths.AtomicWriteWithVersion(fp, paths.WriteInput{Body: []byte("p")})
+	core.AssertTrue(t, r.OK, r.Error())
+
+	internalHash := ""
+	for _, ev := range rec.snapshot() {
+		if ev.Kind == paths.EventWriteSucceeded {
+			internalHash = ev.PathHash
+		}
+	}
+	core.AssertNotEqual(t, "", internalHash,
+		"emission MUST produce a non-empty PathHash with secret installed")
+	core.AssertEqual(t, 32, len(internalHash),
+		"emission PathHash MUST be 32 hex chars")
+
+	exported := paths.HashForAudit(fp)
+	core.AssertEqual(t, internalHash, exported,
+		"HashForAudit MUST equal the substrate emit-site digest for the same path")
+	core.AssertEqual(t, 32, len(exported),
+		"HashForAudit MUST return 32 hex chars when secret is available")
+}
+
+// TestHashForAudit_EmptyWhenSecretUnavailable_Bad — Mantis #1564.
+// Pre-boot / session-locked state (audit secret provider returns nil)
+// MUST surface as an empty string so cross-package emitters can detect
+// the degraded window and either drop the event (per #1526) or emit
+// with an empty path_hash flag.
+func TestHashForAudit_EmptyWhenSecretUnavailable_Bad(t *core.T) {
+	homeFixture(t)
+	paths.SetAuditSecretProvider(func() []byte { return nil })
+	t.Cleanup(func() { paths.SetAuditSecretProvider(nil) })
+
+	got := paths.HashForAudit("/any/path/here.md")
+	core.AssertEqual(t, "", got,
+		"HashForAudit MUST return empty when audit secret is unavailable")
+}
+
 var _ = testing.AllocsPerRun

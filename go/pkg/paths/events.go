@@ -270,6 +270,28 @@ func PathHashInfo(accountID string) string {
 	return "paths.lock.v1|" + accountID
 }
 
+// HashForAudit returns the canonical audit-trail hash for a path:
+// HKDF-domain-separated HMAC over the absolute path, truncated to 32
+// hex chars. Cross-package audit emitters MUST use this to compose
+// path_hash fields in audit Event.Meta so dashboards correlate events
+// across the substrate (LockEvent) and consumer-package buses (e.g.
+// office/mail fallback events) under the same per-account domain key.
+//
+// Returns empty string when the audit secret is not yet available
+// (pre-boot or SetAuditSecretProvider returned nil) — caller should
+// either drop the event (per Mantis #1526 emit-site discipline) or
+// emit with an empty path_hash flagging the degraded window.
+//
+// Mantis #1564: migrates cross-package callers off the raw-SHA256
+// stopgap onto the substrate-canonical HKDF-domain-separated hash.
+//
+// Usage example:
+//
+//	meta := map[string]any{"path_hash": paths.HashForAudit(fpath)}
+func HashForAudit(path string) string {
+	return hashPath(path)
+}
+
 // hashPath derives the HKDF-per-domain key, then HMAC-hashes the
 // supplied path under that key. Returns "" when the audit secret
 // is unavailable (no-op recorder will drop the event regardless).

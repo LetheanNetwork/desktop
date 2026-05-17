@@ -402,18 +402,12 @@ func (s *Service) appendThreadRecord(folderSlug string, rec MailThreadRecord) er
 	//      without needing a per-package bridge.
 	//
 	// Meta keys (Mantis #1559): path_hash + record_size_bytes +
-	// pipe_buf_limit. path_hash uses core.SHA256HexString of the file
-	// path — the substrate's HKDF-domain-separated paths.hashPath is
-	// unexported (forward-gap: paths needs an exported HashForAudit
-	// helper so cross-package emitters use the same per-account
-	// domain key the LockEvent path uses). The raw-SHA256 stopgap
-	// keeps the path off the audit log while the proper helper is
-	// landed in a follow-up.
+	// pipe_buf_limit. path_hash uses paths.HashForAudit so this
+	// cross-package emitter shares the substrate-canonical HKDF-
+	// domain-separated path-hash the LockEvent path uses (Mantis
+	// #1564 — supersedes the raw-SHA256 stopgap H#25 shipped).
 	recordSize := len(payload)
-	pathHash := core.SHA256HexString(path)
-	if len(pathHash) >= 32 {
-		pathHash = pathHash[:32]
-	}
+	pathHash := paths.HashForAudit(path)
 	meta := map[string]any{
 		"path_hash":         pathHash,
 		"record_size_bytes": recordSize,
