@@ -1595,6 +1595,55 @@ const (
 	// bounded-vocab and forensically equivalent for a walker — it joins
 	// 1:1 against the installed-plugins manifest catalogue.
 	EventTrayPluginClicked = "tray.plugin.clicked"
+
+	// EventDesktopSecondInstanceFallback fires when the OnSecondInstanceLaunch
+	// handler in pkg/desktop cannot bring an existing "app" OR "tray" window
+	// forward (both restoreFocusedWindow calls returned false) and falls
+	// through to a window.open create-and-show as a last-resort UX path.
+	// Closes Cerberus #70 F-4 LOW — STRIDE-R Repudiation / defence-in-depth
+	// (UX + forensic). Pre-fix the silent-no-op path emitted only the
+	// lthn:app:second-instance bus event for renderer consumers to act on
+	// the incoming Args / WorkingDir / AdditionalData payload, while no
+	// window came forward visibly. An operator clicking the second binary
+	// would observe nothing and might launch a third — and a forensic
+	// walker had no row recording that the fallback path engaged.
+	//
+	// The fallback path itself is operator-safety value-add (a visible
+	// window is preferable to a silent dead click). The audit row is the
+	// observability value-add: every time the fallback engages the
+	// substrate carries a row a walker can grep for, regardless of
+	// whether the create-and-show itself succeeded.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   primary_targets — comma-joined ordered list of the window names
+	//                     the handler tried via restoreFocusedWindow
+	//                     before falling through. Always "app,tray" for
+	//                     the current handler shape — recorded literally
+	//                     so a future second-instance-target evolution
+	//                     can be reasoned about from the substrate.
+	//   fallback_target — name of the window the fallback path attempts
+	//                     to open via window.open. Literal "app" today
+	//                     (the unified Lethean Desktop shell — the primary
+	//                     operator-facing registry-backed surface);
+	//                     reserved as a key so a future fallback evolution
+	//                     remains grep-compatible.
+	//   fallback_via    — literal "window.open" — origin discriminator.
+	//                     Mirrors the resolved_via convention on
+	//                     EventTrayPluginClicked — keeps a forensic walker
+	//                     able to filter fallback rows by mechanism even
+	//                     once the substrate accumulates sibling fallback
+	//                     paths (e.g. Dock click, lthn:// URL fallthrough).
+	//
+	// The SecondInstanceData payload (Args, WorkingDir, AdditionalData)
+	// is NEVER in Meta — those bytes are caller-controlled and would
+	// defeat the bounded-keyspace promise the audit substrate enforces
+	// (sibling discipline to the plugin-label drop above + the URL bytes
+	// drop in EventViPRFetchRejected). The handler still emits the
+	// payload onto the lthn:app:second-instance event bus where the
+	// renderer can consume it; the audit row records the OBSERVED FACT
+	// that the fallback engaged, not the input bytes that triggered it.
+	EventDesktopSecondInstanceFallback = "desktop.second_instance.fallback"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the

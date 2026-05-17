@@ -114,6 +114,8 @@ export const AUDIT_EVENT_NAMES = [
   "vi.probe.requested",
   "vi.probe.succeeded",
   "vi.probe.failed",
+  "tray.plugin.clicked",
+  "desktop.second_instance.fallback",
 ] as const;
 
 export type AuditEventName = (typeof AUDIT_EVENT_NAMES)[number];

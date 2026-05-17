@@ -509,10 +509,13 @@ func (s *Service) Run() core.Result {
 				// tray popover back to the foreground. Restore()
 				// before Focus() handles the case where the window
 				// was minimised — Wails docs canon for the second-
-				// instance UX.
-				if !restoreFocusedWindow(s.opts.Core, "app") {
-					restoreFocusedWindow(s.opts.Core, "tray")
-				}
+				// instance UX. If neither window is registered (race
+				// during pre-create / both destroyed), fall through
+				// to a window.open create-and-show on the tray as
+				// last-resort UX + emit the fallback audit row so a
+				// forensic walker can grep for the degraded path
+				// (Cerberus #70 F-4 LOW).
+				restoreSecondInstanceWindow(s.opts.Core, s.opts)
 			},
 		},
 		// ShouldQuit fires when the OS / user requests quit. Today
@@ -860,6 +863,76 @@ func restoreFocusedWindow(c *core.Core, name string) bool {
 	return false
 }
 
+// restoreSecondInstanceWindow brings a window forward in response to a
+// second-instance launch. Tries the unified app shell first, the tray
+// popover second, and falls through to a window.open create-and-show on
+// the unified app shell if neither is registered (race during pre-create
+// or both destroyed). Always emits an EventDesktopSecondInstanceFallback
+// audit row when the fallback engages so a forensic walker can grep for
+// the degraded UX path even when the create-and-show itself fails.
+//
+// Fallback target is "app" (Lethean Desktop unified shell) rather than
+// "tray": tray is a transient menubar-utility popover and is built
+// inline at boot via a hand-spec TaskOpenWindow that pkg/desktop owns
+// (not in windowRegistry()), whereas "app" lives in the registry with
+// a complete WindowSpec and is the operator-facing primary surface. If
+// the operator double-launched the binary the user-visible intent is
+// "show me the app", not "rebuild the menubar popover that should
+// already exist".
+//
+// Cerberus #70 F-4 LOW (STRIDE-R Repudiation / defence-in-depth):
+// the pre-fix shape silently no-op'd when both restore calls returned
+// false — the bus event still fired (renderer consumers acted on the
+// SecondInstanceData payload) but no window came forward visibly, and
+// the substrate had no row recording that the path engaged. Operator
+// observability: a visible window is preferable to a silent dead
+// click. Forensic observability: the audit row is the value-add per
+// the Cerberus recommendation — even if window.open fails downstream
+// the substrate carries proof the handler reached the fallback branch.
+//
+// Usage example (internal):
+//
+//	restoreSecondInstanceWindow(s.opts.Core, s.opts)
+func restoreSecondInstanceWindow(c *core.Core, opts Options) {
+	if c == nil {
+		return
+	}
+	if restoreFocusedWindow(c, "app") {
+		return
+	}
+	if restoreFocusedWindow(c, "tray") {
+		return
+	}
+	emitSecondInstanceFallback()
+	if spec, ok := windowSpecByName("app"); ok {
+		openWindowSpec(c, spec, opts, false)
+	}
+}
+
+// windowSpecByName returns the registry entry whose Name matches the
+// supplied key. The lookup walks windowRegistry() — small fixed slice
+// (single-digit entries today) so linear scan is fine; promoting to a
+// map would just hide an O(N) scan that already runs at human latency.
+//
+// Returns the spec + true on hit, the zero value + false on miss.
+//
+// Usage example (internal):
+//
+//	spec, ok := windowSpecByName("tray")
+//	if !ok { return }
+//	openWindowSpec(c, spec, opts, false)
+func windowSpecByName(name string) (WindowSpec, bool) {
+	if name == "" {
+		return WindowSpec{}, false
+	}
+	for _, spec := range windowRegistry() {
+		if spec.Name == name {
+			return spec, true
+		}
+	}
+	return WindowSpec{}, false
+}
+
 // attachSPA mounts the embedded frontend as the coreapi.Engine's
 // no-route fallback. Anything that doesn't match an explicit lthn /
 // subsystem route gets served from the embedded dist — index.html,
@@ -1015,6 +1088,46 @@ func sanitizePluginLabel(label string) string {
 // pkg/sessions / pkg/sandbox — keeps the chip-filter in
 // <lthn-audit-viewer> grouping tray surfaces under a single facet.
 const trayScope = "tray"
+
+// desktopScope is the Event.Scope literal stamped on desktop-rooted
+// audit rows — second-instance fallback, future composition rows that
+// don't belong under the tray facet. Mirrors trayScope above; keeps
+// the chip-filter in <lthn-audit-viewer> grouping pkg/desktop emits
+// under a single facet distinct from tray clicks.
+const desktopScope = "desktop"
+
+// emitSecondInstanceFallback fires the Cerberus #70 F-4 audit row
+// when the OnSecondInstanceLaunch handler falls through to the
+// window.open create-and-show path because neither the unified app
+// shell nor the tray popover was registered (both restoreFocusedWindow
+// calls returned false). Single event — the row records "the handler
+// reached the degraded UX branch". The SecondInstanceData payload
+// (Args / WorkingDir / AdditionalData) is NEVER recorded — those bytes
+// are caller-controlled and would defeat the bounded-keyspace promise
+// of the audit substrate (sibling discipline to the plugin-label drop
+// on EventTrayPluginClicked + the URL bytes drop on
+// EventViPRFetchRejected). The fallback path runs the window.open
+// regardless of whether the audit emit succeeded — and the audit emit
+// runs regardless of whether the window.open succeeds downstream —
+// because forensic observability is the load-bearing value-add per
+// the Cerberus #70 F-4 recommendation.
+//
+// Usage example (internal):
+//
+//	emitSecondInstanceFallback()
+func emitSecondInstanceFallback() {
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventDesktopSecondInstanceFallback,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   desktopScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"primary_targets": "app,tray",
+			"fallback_target": "app",
+			"fallback_via":    "window.open",
+		},
+	})
+}
 
 // emitTrayPluginClicked fires the Cerberus #70 F-3 audit row at the
 // tray click router AFTER paths.IsValidPluginCode has accepted the
