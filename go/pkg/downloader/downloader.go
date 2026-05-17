@@ -60,10 +60,14 @@ const maxRedirects = 10
 // 302 from an allowlisted host to an arbitrary URL without re-checking
 // the trust gate.
 //
-// Built once, reused for every fetch. The default transport is fine —
-// no per-host TLS pinning is in scope today; that lands when the
-// marketplace manifest provides expected fingerprints.
+// Built once, reused for every fetch. Transport is pinnedTransport()
+// — the TLS pinning FRAMEWORK is wired even when the pin SET is
+// empty (today's default per Mantis #1428). When marketplace manifest
+// (#1438) ships SPKI fingerprints, adding a real pin is one entry in
+// tlsPinnedHosts (see tlspin.go) — no code-path change. MinVersion
+// is clamped to TLS 1.2 in the transport regardless of pin state.
 var httpClient = &core.HTTPClient{
+	Transport: pinnedTransport(),
 	CheckRedirect: func(req *core.Request, via []*core.Request) error {
 		if len(via) >= maxRedirects {
 			return core.NewError("downloader: stopped after " +
