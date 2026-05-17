@@ -43,6 +43,16 @@ const (
 	EventWriteFailed     = "paths.write.failed"
 )
 
+// CodeAuditSyncRecordFailed surfaces a Sync-mode AuditRecorder
+// failure to the AtomicWriteWithVersion / AtomicAppendLine caller.
+// Mantis #1530. Sync mode (auth-substrate paths) trades throughput
+// for crash-safety; a recorder that cannot persist the event
+// signals corruption or storage exhaustion and the write must NOT
+// silently complete. Batch mode (cascade paths) keeps the
+// pre-existing best-effort behaviour — recorder failures are logged
+// but do not break the write.
+const CodeAuditSyncRecordFailed = "paths.audit.sync_record_failed"
+
 // AuditMode enumerates the §6.1 Call 3 split. Caller MUST NOT
 // pick directly — AuditModeForPath consults the policy table.
 type AuditMode int
@@ -398,14 +408,28 @@ func FlushDegradedCount() int64 {
 	// count is observable via AuditDegradedCount() pre-flush, and
 	// SetAuditDegradedSinceForTest pins the anchor for assertions.
 	_ = auditDegradedSince
+	// FlushDegradedCount is best-effort by design — it surfaces a
+	// summary AFTER the secret has come back online; if the recorder
+	// is still degraded the count is preserved for the next flush.
+	// Sync-mode propagation here would create a recursive failure
+	// loop (caller cannot do anything useful with the Fail).
 	_ = currentAuditRecorder.RecordPathsEvent(ev)
 	return count
 }
 
 // emitLockEvent fans an event to in-process subscribers and the
-// audit recorder. Called by emitWriteSucceeded / emitVersionStale
-// (defined in init() below — overrides the no-op stubs in
-// atomic_write.go).
+// audit recorder. Called by emitWriteSucceeded / emitVersionStale /
+// emitWriteFailed (defined in init() below — overrides the no-op
+// stubs in atomic_write.go).
+//
+// Returns core.Result so Sync-mode recorder failures can propagate
+// to the AtomicWriteWithVersion / AtomicAppendLine caller (Mantis
+// #1530). Sync mode is the auth-substrate crash-safety contract;
+// a recorder that cannot persist the event is reporting either
+// storage exhaustion or a corruption signal, and the write must
+// NOT silently complete. Batch-mode recorder failures stay
+// best-effort — they're logged via the in-process subscriber list
+// but do not break the write.
 //
 // F2 (Cerberus DREAD-r2, Mantis #1526): when the HKDF audit secret
 // is unavailable the path-hash would degenerate to "" — emitting
@@ -413,11 +437,14 @@ func FlushDegradedCount() int64 {
 // per-account domain separation the hash provides. Drop the event
 // at the emit site and increment auditDegradedCount; the eventual
 // FlushDegradedCount call surfaces the running total as a single
-// summary so the audit log stays honest about the gap.
-func emitLockEvent(ev LockEvent) {
+// summary so the audit log stays honest about the gap. The drop is
+// reported as Ok so a missing-secret degraded state does NOT cascade
+// into a write-side Fail (the dedicated summary event is the
+// honest record).
+func emitLockEvent(ev LockEvent) core.Result {
 	if len(currentAuditSecret()) == 0 {
 		auditDegradedCount.Add(1)
-		return
+		return core.Ok(nil)
 	}
 	for _, fn := range lockEventSubscribers {
 		func() {
@@ -425,14 +452,29 @@ func emitLockEvent(ev LockEvent) {
 			fn(ev)
 		}()
 	}
-	_ = currentAuditRecorder.RecordPathsEvent(ev)
+	recResult := currentAuditRecorder.RecordPathsEvent(ev)
+	if !recResult.OK && ev.Mode == AuditModeSync {
+		// Mantis #1530 — Sync-mode failure propagates. Wrap the
+		// recorder's error in the typed code so the caller can
+		// pattern-match without parsing the inner message.
+		return core.Fail(core.E(CodeAuditSyncRecordFailed,
+			"sync-mode audit recorder failed: "+recResult.Error(), nil))
+	}
+	// Batch mode: silent-continue (best-effort throughput) — the
+	// recorder is responsible for its own buffering + retry policy.
+	return core.Ok(nil)
 }
 
 // init overrides the atomic_write.go stubs. After this package's
 // init runs, every write surface fires LockEvents.
+//
+// Mantis #1530 — the emit-* stubs now return core.Result so the
+// AtomicWriteWithVersion / AtomicAppendLine callers can propagate
+// Sync-mode audit-recorder failures. Batch-mode emissions return
+// Ok regardless of recorder outcome (best-effort throughput).
 func init() {
-	emitWriteSucceeded = func(path string, version int) {
-		emitLockEvent(LockEvent{
+	emitWriteSucceeded = func(path string, version int) core.Result {
+		return emitLockEvent(LockEvent{
 			Kind:     EventWriteSucceeded,
 			PathHash: hashPath(path),
 			Version:  version,
@@ -440,8 +482,8 @@ func init() {
 			At:       core.Now().UTC(),
 		})
 	}
-	emitVersionStale = func(path string, currentVersion int) {
-		emitLockEvent(LockEvent{
+	emitVersionStale = func(path string, currentVersion int) core.Result {
+		return emitLockEvent(LockEvent{
 			Kind:     EventVersionStale,
 			PathHash: hashPath(path),
 			Version:  currentVersion,
@@ -453,8 +495,8 @@ func init() {
 	// same AuditModeForPath policy as success events so auth-
 	// substrate failures land Sync and cascade failures land Batch.
 	// Code carries the typed CodeWrite* sentinel.
-	emitWriteFailed = func(path string, code string) {
-		emitLockEvent(LockEvent{
+	emitWriteFailed = func(path string, code string) core.Result {
+		return emitLockEvent(LockEvent{
 			Kind:     EventWriteFailed,
 			PathHash: hashPath(path),
 			Code:     code,

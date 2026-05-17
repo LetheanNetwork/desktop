@@ -327,7 +327,7 @@ func AtomicWriteWithVersion(path string, input WriteInput) core.Result {
 		if rs := core.RandomString(8); rs.OK {
 			tmp = path + ".tmp." + rs.Value.(string)
 		} else {
-			emitWriteFailed(path, CodeWriteOpenFailed)
+			_ = emitWriteFailed(path, CodeWriteOpenFailed)
 			return core.Fail(core.E(CodeWriteOpenFailed,
 				"random suffix: "+rs.Error(), nil))
 		}
@@ -339,39 +339,39 @@ func AtomicWriteWithVersion(path string, input WriteInput) core.Result {
 				core.O_CREATE|core.O_WRONLY|core.O_TRUNC, writeFileMode)
 		}
 		if !openR.OK {
-			emitWriteFailed(path, CodeWriteOpenFailed)
+			_ = emitWriteFailed(path, CodeWriteOpenFailed)
 			return core.Fail(core.E(CodeWriteOpenFailed,
 				"open tmp: "+openR.Error(), nil))
 		}
 		f, _ := openR.Value.(*core.OSFile)
 		if f == nil {
-			emitWriteFailed(path, CodeWriteOpenFailed)
+			_ = emitWriteFailed(path, CodeWriteOpenFailed)
 			return core.Fail(core.NewCode(CodeWriteOpenFailed,
 				"open tmp returned nil file"))
 		}
 		if _, err := f.Write(input.Body); err != nil {
 			_ = f.Close()
 			_ = core.Remove(tmp)
-			emitWriteFailed(path, CodeWriteOpenFailed)
+			_ = emitWriteFailed(path, CodeWriteOpenFailed)
 			return core.Fail(core.E(CodeWriteOpenFailed,
 				"write tmp", err))
 		}
 		if err := f.Sync(); err != nil {
 			_ = f.Close()
 			_ = core.Remove(tmp)
-			emitWriteFailed(path, CodeWriteFsync)
+			_ = emitWriteFailed(path, CodeWriteFsync)
 			return core.Fail(core.E(CodeWriteFsync,
 				"fsync tmp", err))
 		}
 		if err := f.Close(); err != nil {
 			_ = core.Remove(tmp)
-			emitWriteFailed(path, CodeWriteOpenFailed)
+			_ = emitWriteFailed(path, CodeWriteOpenFailed)
 			return core.Fail(core.E(CodeWriteOpenFailed,
 				"close tmp", err))
 		}
 		if r := core.Rename(tmp, path); !r.OK {
 			_ = core.Remove(tmp)
-			emitWriteFailed(path, CodeWriteRename)
+			_ = emitWriteFailed(path, CodeWriteRename)
 			return core.Fail(core.E(CodeWriteRename,
 				"rename: "+r.Error(), nil))
 		}
@@ -388,7 +388,17 @@ func AtomicWriteWithVersion(path string, input WriteInput) core.Result {
 
 		// Emit audit + typed event (lock-acquired-and-write-succeeded
 		// is collapsed into one event for the writer-success case).
-		emitWriteSucceeded(path, out.Version)
+		//
+		// Mantis #1530 — Sync-mode (auth-substrate) emission Failure
+		// propagates. The write is already on disk but the audit
+		// guarantee that makes auth-substrate writes load-bearing did
+		// NOT land; the caller MUST know so it can roll back / retry /
+		// alarm. Batch-mode (cascade) emission returns Ok regardless
+		// of recorder outcome — best-effort throughput is the
+		// documented contract there.
+		if r := emitWriteSucceeded(path, out.Version); !r.OK {
+			return r
+		}
 
 		return core.Ok(out)
 	})
@@ -413,7 +423,13 @@ func failVersionStale(path string, cur ReadOutput, includeBody bool) core.Result
 	default:
 		vs.CurrentBody = cur.Body
 	}
-	emitVersionStale(path, cur.Version)
+	// Mantis #1530 — Sync audit-recorder failure on the stale path
+	// is intentionally NOT propagated: the primary VersionStale
+	// payload is what the caller pattern-matches on (conflict UI,
+	// 409 response shape). Discarding the audit Result here keeps
+	// the contract single-shaped. The dropped audit count is
+	// captured via FlushDegradedCount semantics when applicable.
+	_ = emitVersionStale(path, cur.Version)
 	return core.Fail(versionStaleError{
 		stale: vs,
 	})
@@ -541,15 +557,22 @@ func matchVersionLine(line []byte) (int, bool) {
 // write surface ships independently and the events plumbing can
 // land in its own commit without forcing this file to grow a
 // circular dependency.
-var emitWriteSucceeded = func(path string, version int) {}
-var emitVersionStale = func(path string, currentVersion int) {}
+//
+// Mantis #1530 — stubs return core.Result so the in-flight
+// AtomicWriteWithVersion / AtomicAppendLine call can propagate
+// Sync-mode audit-recorder failures. The default no-op stubs
+// return Ok(nil) so packages that import paths/ but boot before
+// the events.go init() runs (test harnesses, factory-mode tools)
+// don't observe a synthetic Fail.
+var emitWriteSucceeded = func(path string, version int) core.Result { return core.Ok(nil) }
+var emitVersionStale = func(path string, currentVersion int) core.Result { return core.Ok(nil) }
 
 // emitWriteFailed reports a typed write-failure to the audit
 // recorder. Wired in events.go init() once the LockEvent bus is
 // constructed. Mantis #1551. code is one of CodeWriteOpenFailed /
 // CodeWriteFsync / CodeWriteRename so log readers can pattern-match
 // the failure step without parsing the free-form message.
-var emitWriteFailed = func(path string, code string) {}
+var emitWriteFailed = func(path string, code string) core.Result { return core.Ok(nil) }
 
 // writeTmpOpenFaultForTest is a fault-injection hook used by
 // Mantis #1551 coverage to force a deterministic write-step failure

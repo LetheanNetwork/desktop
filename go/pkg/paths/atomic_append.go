@@ -183,7 +183,14 @@ func AtomicAppendLine(path string, line []byte) core.Result {
 				out.Mtime = info.ModTime()
 			}
 		}
-		emitWriteSucceeded(path, 0)
+		// Mantis #1530 — Sync-mode emission Failure propagates so
+		// AtomicAppendLine callers writing to auth-substrate paths
+		// observe audit-recorder breakage instead of a silent green
+		// return. Batch-mode (the common cascade case) returns Ok
+		// regardless of recorder outcome.
+		if r := emitWriteSucceeded(path, 0); !r.OK {
+			return r
+		}
 		return core.Ok(out)
 	})
 }

@@ -395,4 +395,102 @@ func TestFlushDegradedCount_EmitsSummary_Good(t *core.T) {
 		"flush must emit exactly one summary event")
 }
 
+// failingRecorder is a test-only AuditRecorder that always returns
+// a Fail Result. Used by Mantis #1530 propagation coverage.
+type failingRecorder struct{}
+
+func (failingRecorder) RecordPathsEvent(_ paths.LockEvent) core.Result {
+	return core.Fail(core.NewCode("test.recorder.injected",
+		"injected recorder failure"))
+}
+
+// TestEmitLockEvent_SyncFailurePropagates_Ugly — Mantis #1530.
+// A Sync-mode audit recorder failure (auth-substrate path) MUST
+// propagate to the AtomicWriteWithVersion caller carrying the typed
+// CodeAuditSyncRecordFailed sentinel. Without this, an auth-
+// substrate write that hits disk but loses its forensic record
+// silently returns Ok — the audit guarantee that makes Sync mode
+// load-bearing is broken without operator visibility.
+func TestEmitLockEvent_SyncFailurePropagates_Ugly(t *core.T) {
+	homeFixture(t)
+	// Install a recorder that ALWAYS fails so every emission returns
+	// the injected Fail to emitLockEvent.
+	paths.SetAuditRecorder(failingRecorder{})
+	paths.SetAuditSecretProvider(func() []byte {
+		return []byte("test-secret-32-bytes-1234567890ab")
+	})
+	t.Cleanup(func() {
+		paths.SetAuditRecorder(nil)
+		paths.SetAuditSecretProvider(nil)
+	})
+
+	// Sync-mode path: wallets/server.key — auth-substrate per the
+	// AuditModeForPath policy table.
+	walletDir := paths.WalletsDir().Value.(string)
+	fp := core.PathJoin(walletDir, "server.key")
+	r := paths.AtomicWriteWithVersion(fp, paths.WriteInput{
+		Body: []byte("cipher"),
+	})
+	core.AssertFalse(t, r.OK,
+		"Sync-mode audit recorder failure MUST propagate to caller")
+	core.AssertContains(t, r.Error(), paths.CodeAuditSyncRecordFailed,
+		"Failure MUST carry the typed CodeAuditSyncRecordFailed sentinel")
+}
+
+// TestEmitLockEvent_BatchFailureSilentContinue_Good — Mantis #1530.
+// A Batch-mode audit recorder failure (cascade path) MUST be silently
+// swallowed so cascade writes maintain their throughput contract.
+// The recorder's Fail must not cascade into an AtomicWriteWithVersion
+// caller-visible failure.
+func TestEmitLockEvent_BatchFailureSilentContinue_Good(t *core.T) {
+	homeFixture(t)
+	paths.SetAuditRecorder(failingRecorder{})
+	paths.SetAuditSecretProvider(func() []byte {
+		return []byte("test-secret-32-bytes-1234567890ab")
+	})
+	t.Cleanup(func() {
+		paths.SetAuditRecorder(nil)
+		paths.SetAuditSecretProvider(nil)
+	})
+
+	root := paths.Root().Value.(string)
+	// office/documents/ is a cascade path per the policy table.
+	dir := core.PathJoin(root, "office", "documents")
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+	fp := core.PathJoin(dir, "notes.md")
+
+	r := paths.AtomicWriteWithVersion(fp, paths.WriteInput{
+		Body: []byte("body"),
+	})
+	core.AssertTrue(t, r.OK,
+		"Batch-mode audit failure MUST NOT cascade to caller; write contract is best-effort there")
+}
+
+// TestEmitLockEvent_SyncPropagatesOnAppendLine_Ugly — Mantis #1530.
+// AtomicAppendLine shares the Sync-mode propagation contract: an
+// append into an auth-substrate path whose audit recorder fails MUST
+// surface the typed sentinel rather than silent-Ok.
+func TestEmitLockEvent_SyncPropagatesOnAppendLine_Ugly(t *core.T) {
+	homeFixture(t)
+	paths.SetAuditRecorder(failingRecorder{})
+	paths.SetAuditSecretProvider(func() []byte {
+		return []byte("test-secret-32-bytes-1234567890ab")
+	})
+	t.Cleanup(func() {
+		paths.SetAuditRecorder(nil)
+		paths.SetAuditSecretProvider(nil)
+	})
+
+	// account/<id>/append.log — Sync per the auth-substrate prefix.
+	root := paths.Root().Value.(string)
+	dir := core.PathJoin(root, "account", "abc")
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+	fp := core.PathJoin(dir, "audit.log")
+
+	r := paths.AtomicAppendLine(fp, []byte("a-line"))
+	core.AssertFalse(t, r.OK,
+		"AppendLine Sync-mode audit failure MUST propagate")
+	core.AssertContains(t, r.Error(), paths.CodeAuditSyncRecordFailed)
+}
+
 var _ = testing.AllocsPerRun
