@@ -54,6 +54,28 @@ func writeEncryptedAccount(t *core.T, home, accountID, passphrase string) {
 	core.AssertTrue(t, core.WriteFile(priv, ct, 0o600).OK)
 }
 
+// writeEncryptedAccountFromPlaintext is the cache-able sibling of
+// writeEncryptedAccount: callers pre-generate the PGP plaintext-private
+// bytes ONCE and reuse them across many iterations, re-running the
+// symmetric-encrypt step inside the loop. The S2K salt is fresh per
+// SymmetricallyEncrypt call (the openpgp library samples it internally
+// per envelope), so the per-(passphrase, S2K-salt, body-ciphertext)
+// triple required by the Mantis #1510 flake-pin is still exercised —
+// only the RSA keygen is amortised. See Mantis #1579 for the rationale
+// (RSA-2048 keygen × 1000 iters × -race overhead exceeded 5m timeout).
+func writeEncryptedAccountFromPlaintext(t *core.T, home, accountID, passphrase string, privPlain []byte) {
+	t.Helper()
+	dir := core.PathJoin(home, "Lethean", "account", accountID)
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+
+	pgpSvc := pgp.NewService()
+	ct, err := pgpSvc.SymmetricallyEncrypt([]byte(passphrase), privPlain)
+	core.AssertTrue(t, err == nil, "symmetric encrypt must succeed")
+
+	priv := core.PathJoin(dir, "private.key")
+	core.AssertTrue(t, core.WriteFile(priv, ct, 0o600).OK)
+}
+
 // writeRawAccount lays down a private.key file with arbitrary bytes
 // — used by the corrupted-key sub-cases to land structurally invalid
 // content the parser will reject.
@@ -271,23 +293,36 @@ func TestUnlock_CorruptedKeyBytewiseDistinguishing_Ugly(t *core.T) {
 	//
 	// Iteration count is 1000 by default to statistically pin the
 	// residual false-allow rate against random S2K-salt rotation
-	// (Cerberus verify follow-up on commit 2128119). Each iter
-	// burns an RSA-2048 keygen + S2K (~120ms wallclock), so the
-	// full sub-case is ~2 minutes — gated behind `testing.Short()`
-	// at 50 iter to keep `go test -short` fast.
+	// (Cerberus verify follow-up on commit 2128119). Each iter burns
+	// an S2K-derive (~few ms) — the RSA-2048 keygen is amortised
+	// across all iters via the cached privPlain below. Mantis #1579:
+	// pre-fix each iter ran a fresh keygen + S2K (~120ms wallclock),
+	// pushing the -race timing past the 5m timeout; caching the
+	// keypair drops the per-iter cost to just the S2K + symenc.
 	flakeIters := 1000
 	if testing.Short() {
 		flakeIters = 50
 	}
+	// Cache the PGP plaintext-private bytes ONCE. The Mantis #1510
+	// flake-pin needs fresh S2K salts per iteration — the
+	// SymmetricallyEncrypt call samples a new salt internally per
+	// envelope, so the per-(passphrase, S2K-salt, body-ciphertext)
+	// triple is still exercised. Only the keygen is amortised. Per
+	// Mantis #1579.
+	pgpFlake := pgp.NewService()
+	_, flakePlain, err := pgpFlake.GenerateKeyPair("lthn-test", "test@lthn.local", "fixture")
+	core.AssertTrue(t, err == nil, "sub-case 5 — cached PGP keygen must succeed")
 	corruptedKeyHits := 0
 	for i := 0; i < flakeIters; i++ {
 		// Fresh account + fresh ciphertext each iteration — the
 		// flake is per-(passphrase, S2K-salt, body-ciphertext)
 		// triple, so a single fixture reused across iterations
 		// would always classify identically. We need NEW S2K salts
-		// per iteration to exercise the probability space.
+		// per iteration to exercise the probability space; the
+		// underlying plaintext-private bytes can be reused (only
+		// the symmetric-encrypt envelope varies per iter).
 		idFlake := core.Sprintf("flake%011d", i)
-		writeEncryptedAccount(t, home, idFlake, fixturePassphrase)
+		writeEncryptedAccountFromPlaintext(t, home, idFlake, fixturePassphrase, flakePlain)
 		flakeR := svc.Unlock(subject.UnlockInput{
 			AccountID:  idFlake,
 			Passphrase: fixtureWrongPassphrase,
