@@ -183,6 +183,19 @@ func (s *Service) Install(input InstallInput) core.Result {
 		return core.Fail(core.E(installBundleOp, "config dir creation failed", nil))
 	}
 
+	// Mantis #1689 HIGH (Cerberus #54 C1) — persist the validated
+	// manifest to manifest.yml under configPath. Without this the
+	// Launch + Uninstall.resolvePluginCode paths both fall through
+	// their core.ReadFile fallback (Launch fails outright with
+	// "manifest not found"; resolvePluginCode silently returns the
+	// bundle id, leaving stale ViewRegistry entries when
+	// plugin.code != bundle.Name on uninstall — descriptors + CSP
+	// frame-src allowlist + postMessage origin table retain dead
+	// entries past uninstall).
+	if r := s.persistManifest(configPath, m); !r.OK {
+		return r
+	}
+
 	// Mantis #1670 — stamp install + bundle identity on every
 	// long-running container so a future reconcile pass can gate
 	// adoption (same shape as opencode's install-id labelling,
@@ -603,6 +616,38 @@ func exposeIDFromSource(src string) string {
 		return ""
 	}
 	return src[len(prefix) : len(src)-len(suffix)]
+}
+
+// persistManifest writes the validated manifest to <configPath>/manifest.yml
+// via paths.AtomicWriteWithVersion. Mantis #1689 HIGH (Cerberus #54 C1):
+// before this step landed, Install left the config dir empty so Launch's
+// ReadFile failed outright AND resolvePluginCode silently fell back to
+// the bundle id — leaving stale ViewRegistry/CSP/postMessage entries when
+// plugin.code != bundle.Name on uninstall.
+//
+// Round-trip is covered by manifest_test.go (MarshalManifest +
+// ParseManifestBytes are inverses on a validated BundleManifest).
+// AtomicWriteWithVersion gives tmp+fsync+rename torn-write safety + a
+// 0o600 perm baseline (paths.writeFileMode). Empty WriteInput predicates
+// = unconditional first-write, which is the install-time shape (every
+// install rewrites the manifest from the validated input).
+//
+// Usage example (internal):
+//
+//	if r := s.persistManifest(configPath, m); !r.OK { return r }
+func (s *Service) persistManifest(configPath string, m BundleManifest) core.Result {
+	yamlR := MarshalManifest(m)
+	if !yamlR.OK {
+		return core.Fail(core.E(installBundleOp, "manifest serialise failed", nil))
+	}
+	manifestPath := core.JoinPath(configPath, "manifest.yml")
+	r := paths.AtomicWriteWithVersion(manifestPath, paths.WriteInput{
+		Body: yamlR.Value.([]byte),
+	})
+	if !r.OK {
+		return core.Fail(core.E(installBundleOp, "manifest write failed: "+r.Error(), nil))
+	}
+	return core.Ok(nil)
 }
 
 // resolvePluginCode returns the plugin code for an installed bundle.

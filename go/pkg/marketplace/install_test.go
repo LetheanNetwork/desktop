@@ -421,3 +421,162 @@ func TestMarketplace_InstallStampsInstallId_Ugly(t *core.T) {
 	core.AssertEqual(t, "bundle-y", got.BundleID)
 	core.AssertEqual(t, 0, got.ExposedPort)
 }
+
+// TestMarketplace_Install_WritesManifestYml_Good — Mantis #1689 HIGH
+// (Cerberus #54 C1). Install must persist the validated manifest to
+// <configPath>/manifest.yml; without it the Launch path's ReadFile
+// fails outright with "manifest not found" on every fresh install
+// (functional break) AND Uninstall's resolvePluginCode silently falls
+// back to the bundle id (security break — stale ViewRegistry / CSP
+// frame-src / postMessage origin entries when plugin.code !=
+// bundle.Name).
+//
+// The Install call itself can't run end-to-end in a unit test (no
+// sandbox / docker runtime), so this exercise drives the same
+// persistManifest helper Install calls and asserts:
+//   - manifest.yml exists at configPath
+//   - the on-disk YAML round-trips through ParseManifestBytes back to
+//     an equivalent BundleManifest (plugin.code preserved)
+//   - resolvePluginCode now returns the plugin.code, NOT the bundle id
+//     fallback (the load-bearing security assertion for the C1 bug)
+//   - file mode on disk is 0o600 per the manifest-PII baseline
+//     (paths.writeFileMode shared with the rest of the writer
+//     substrate — same protection plugin-config / wallets get)
+func TestMarketplace_Install_WritesManifestYml_Good(t *core.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := newTestMarketplaceService()
+	core.RequireTrue(t, svc != nil)
+
+	// Manifest with plugin.code intentionally differing from bundle
+	// name — this is the shape that triggered the Cerberus #54 C1
+	// uninstall security leak (resolvePluginCode would silently
+	// return "ghost-bundle" instead of "opencode", and
+	// ViewRegistry.Drop("ghost-bundle") would walk an empty
+	// byPlugin["ghost-bundle"] slice while ViewRegistry still held
+	// every descriptor under "opencode").
+	m := subject.BundleManifest{
+		Schema:  "lthn-vm/v1",
+		Name:    "ghost-bundle",
+		Display: "Ghost Bundle",
+		Images: []subject.ImageEntry{
+			{ID: "app", Image: "alpine:3.21"},
+		},
+		Plugin: &subject.PluginBlock{
+			Code: "opencode",
+		},
+	}
+
+	configPath := subject.BundleConfigPathForTest(svc, m.Name)
+	core.RequireTrue(t, core.MkdirAll(configPath, 0o755).OK)
+
+	if err := subject.PersistManifestForTest(svc, configPath, m); err != nil {
+		t.Fatalf("PersistManifestForTest: %v", err)
+	}
+
+	manifestPath := core.JoinPath(configPath, "manifest.yml")
+
+	// (a) on-disk presence
+	statR := core.Stat(manifestPath)
+	core.RequireTrue(t, statR.OK, "manifest.yml must exist after install")
+	info := statR.Value.(core.FsFileInfo)
+	core.AssertFalse(t, info.IsDir())
+
+	// (b) round-trip
+	readR := core.ReadFile(manifestPath)
+	core.RequireTrue(t, readR.OK)
+	raw, _ := readR.Value.([]byte)
+	parsedR := subject.ParseManifestBytes(raw)
+	core.RequireTrue(t, parsedR.OK, "on-disk manifest.yml must parse back")
+	parsed := parsedR.Value.(subject.BundleManifest)
+	core.AssertEqual(t, "ghost-bundle", parsed.Name)
+	core.RequireTrue(t, parsed.Plugin != nil)
+	core.AssertEqual(t, "opencode", parsed.Plugin.Code,
+		"plugin.code must round-trip to disk so resolvePluginCode reads the override, not the bundle id")
+
+	// (c) load-bearing security assertion — resolvePluginCode now
+	// walks the on-disk manifest and returns plugin.Code, not the
+	// bundle id fallback.
+	got := subject.ResolvePluginCodeForTest(svc, "ghost-bundle")
+	core.AssertEqual(t, "opencode", got,
+		"Cerberus #54 C1 — resolvePluginCode must read manifest.yml; bundle-id fallback leaks ViewRegistry state on uninstall")
+
+	// (d) file mode — paths.writeFileMode baseline (0o600).
+	mode := info.Mode().Perm()
+	core.AssertEqual(t, core.FileMode(0o600), mode,
+		"manifest.yml must inherit the writer-substrate baseline 0o600 perm")
+}
+
+// TestMarketplace_Uninstall_NoStaleRegistryEntries_Good — Mantis
+// #1689 HIGH (Cerberus #54 C1). The security half of the bug: when a
+// bundle's plugin.code differs from its name and Install never wrote
+// manifest.yml, Uninstall's resolvePluginCode silently returned the
+// bundle id; ViewRegistry.Drop(bundleID) then walked an empty
+// byPlugin[bundleID] slice while every descriptor stayed registered
+// under the real plugin.code. Result: stale descriptors + CSP
+// frame-src allowlist + postMessage origin table retained dead
+// entries past uninstall.
+//
+// With the manifest.yml write in place, resolvePluginCode resolves
+// to "opencode" (the plugin.code), Drop walks the right keyspace, and
+// every descriptor is gone after Uninstall.
+func TestMarketplace_Uninstall_NoStaleRegistryEntries_Good(t *core.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := newTestMarketplaceService()
+	core.RequireTrue(t, svc != nil)
+
+	const bundleName = "ghost-bundle"
+	const pluginCode = "opencode-ghost-test"
+	const viewID = pluginCode
+
+	m := subject.BundleManifest{
+		Schema:  "lthn-vm/v1",
+		Name:    bundleName,
+		Display: "Ghost Bundle",
+		Images: []subject.ImageEntry{
+			{ID: "app", Image: "alpine:3.21"},
+		},
+		Plugin: &subject.PluginBlock{Code: pluginCode},
+	}
+
+	// Simulate Install's manifest-write step (the bit Cerberus #54
+	// C1 was missing pre-fix).
+	configPath := subject.BundleConfigPathForTest(svc, bundleName)
+	core.RequireTrue(t, core.MkdirAll(configPath, 0o755).OK)
+	if err := subject.PersistManifestForTest(svc, configPath, m); err != nil {
+		t.Fatalf("PersistManifestForTest: %v", err)
+	}
+
+	// Register a descriptor under the REAL plugin code (this is what
+	// registerPluginViews does at install time). Use a unique view id
+	// so prior tests' ViewRegistry contents (package-level singleton)
+	// don't collide.
+	desc := subject.PluginViewDescriptor{
+		ID:         viewID,
+		Label:      "Ghost View",
+		Icon:       "fa-cube",
+		Group:      "plugin",
+		Kind:       subject.PluginViewKindIframe,
+		Source:     "${expose.app.route}",
+		PluginCode: pluginCode,
+	}
+	core.RequireTrue(t, subject.ViewRegistry.Add(pluginCode, desc).OK)
+
+	// Sanity — descriptor IS present before uninstall.
+	if _, ok := subject.ViewRegistry.Lookup(viewID); !ok {
+		t.Fatalf("descriptor must be registered before uninstall (test fixture)")
+	}
+
+	// Uninstall via the bundle id — pre-fix this called
+	// ViewRegistry.Drop(bundleName) because resolvePluginCode fell
+	// back to the bundle id; post-fix it resolves to the real plugin
+	// code and drops the descriptor cleanly.
+	r := svc.Uninstall(bundleName)
+	core.AssertTrue(t, r.OK)
+
+	// Load-bearing assertion — the descriptor MUST be gone. Before
+	// the fix this Lookup would still return ok=true because Drop
+	// walked the wrong keyspace.
+	_, present := subject.ViewRegistry.Lookup(viewID)
+	core.AssertFalse(t, present,
+		"Cerberus #54 C1 — Uninstall must drop ViewRegistry descriptors registered under plugin.code, not the bundle id")
+}
