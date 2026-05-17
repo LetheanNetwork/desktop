@@ -83,6 +83,18 @@ var backoffSteps = []core.Duration{
 	100 * core.Millisecond,
 }
 
+// emptyBodyBackoff is the short wait used when maybeReclaim observes
+// a sentinel file with zero bytes — the holder has won OpenFile but
+// has not yet completed its body Write (Mantis #1620). This window
+// is microseconds long in practice (Write+Sync+Close ≈ 50-500µs on
+// macOS APFS), so a 1ms re-poll lets us resume quickly without the
+// general backoff's 100ms cap inducing thundering-herd starvation
+// under high contention (TestAtomicAppendLine_AtomicPerRecord_Good
+// at N=100 racers fails without this distinction). The wait does
+// NOT advance the general backoff step — empty-body is not the same
+// signal as "real holder doing real work".
+const emptyBodyBackoff = 1 * core.Millisecond
+
 // WithFileLock acquires an exclusive sentinel-file lock against the
 // supplied path, runs fn with the lock held, and releases on return.
 // Locks are held on a sibling ".lockfile" rather than the target
@@ -154,16 +166,39 @@ func WithFileLock(path string, timeout core.Duration, fn func() core.Result) cor
 				"sentinel open failed: "+fatal.Error(), fatal))
 		}
 		// Contended — check whether the holder is alive.
-		if maybeReclaim(sentinel) {
+		state := maybeReclaim(sentinel)
+		if state == reclaimedRetry {
 			// Reclaimed; retry without waiting (deadline re-checked
 			// at top of next iteration per F1).
 			continue
 		}
-		// Exponential backoff bounded at 100ms.
+		if state == liveButEmpty {
+			// Holder is mid-init (sentinel exists, body not yet
+			// written). Mantis #1620 — short re-poll, do NOT
+			// advance the general backoff step; the empty-body
+			// window is typically <1ms.
+			core.Sleep(emptyBodyBackoff)
+			continue
+		}
+		// Live holder doing real work — exponential backoff
+		// bounded at 100ms, with ±25% jitter to break thundering-
+		// herd patterns when N>>1 racers all land on the same
+		// 100ms wakeup boundary. Without jitter, N=100 racers all
+		// woke together, all hit OpenFile contention, all slept
+		// another 100ms — throughput dropped to ~10 acquires/sec
+		// and TestAtomicAppendLine_AtomicPerRecord_Good timed out
+		// inside its 5s budget. Jitter staggers the wake pattern
+		// so racers re-arrive at the sentinel one-at-a-time.
 		wait := backoffSteps[len(backoffSteps)-1]
 		if step < len(backoffSteps) {
 			wait = backoffSteps[step]
 			step++
+		}
+		jitterNS := int64(wait) / 2
+		if jitterNS > 0 {
+			// Symmetric jitter: [-25%, +25%] of base wait.
+			delta := core.RandIntn(int(jitterNS)) - int(jitterNS/2)
+			wait = wait + core.Duration(delta)
 		}
 		core.Sleep(wait)
 	}
@@ -227,49 +262,85 @@ func releaseSentinel(sentinel string) {
 	_ = core.Remove(sentinel)
 }
 
-// maybeReclaim inspects an existing sentinel. Returns true when the
-// sentinel was reclaimed (caller should immediately retry acquire);
-// false when the sentinel is still owned by a live process with a
-// matching fork-time stamp.
+// reclaimState classifies what maybeReclaim observed at the
+// sentinel. WithFileLock uses it to decide whether to immediately
+// retry (reclaimed), short-poll (mid-init), or apply exponential
+// backoff (live holder doing real work).
+type reclaimState int
+
+const (
+	// reclaimedRetry — sentinel was stale/missing/reclaimed; caller
+	// should immediately attempt acquire.
+	reclaimedRetry reclaimState = iota
+	// liveButEmpty — sentinel exists with zero-byte body; holder is
+	// between OpenFile(O_EXCL) and Write. Caller should short-poll
+	// (microsecond window) without advancing the general backoff.
+	// Mantis #1620.
+	liveButEmpty
+	// liveHolder — sentinel claimed by a live process with matching
+	// fork-time stamp. Caller should apply exponential backoff.
+	liveHolder
+)
+
+// maybeReclaim inspects an existing sentinel and classifies its
+// state for the WithFileLock spin-loop.
 //
-// Reclaim triggers:
+// Returns:
 //
-//   - sentinel body unreadable / malformed → reclaim (corrupted)
-//   - recorded PID does not currently exist → reclaim (dead holder)
-//   - recorded PID exists but its current fork-time differs from
-//     the recorded stamp → reclaim (PID was recycled — MED-1)
-func maybeReclaim(sentinel string) bool {
+//   - reclaimedRetry — sentinel body unreadable, missing, malformed
+//     (non-empty), or claimed by a dead/recycled PID. The sentinel
+//     has been unlinked when applicable; caller should immediately
+//     attempt acquire.
+//   - liveButEmpty — sentinel exists with zero bytes (Mantis #1620
+//     TOCTOU window). Holder won OpenFile(O_CREATE|O_EXCL) but has
+//     not yet Written the body. Caller MUST NOT reclaim; the
+//     pre-fix behaviour of removing the empty sentinel let G2
+//     re-acquire while G1 still held the orphaned fd, breaking the
+//     lock's exactly-one-inside guarantee.
+//   - liveHolder — sentinel claimed by a live PID with matching
+//     fork-time stamp. Caller should apply exponential backoff.
+func maybeReclaim(sentinel string) reclaimState {
 	readR := core.ReadFile(sentinel)
 	if !readR.OK {
 		// File vanished between contention and reclaim — let the
 		// outer loop retry; some other waiter likely raced us to
 		// the acquire.
-		return true
+		return reclaimedRetry
 	}
 	raw, _ := readR.Value.([]byte)
+	if len(raw) == 0 {
+		// Mantis #1620: live holder has won OpenFile(O_EXCL) but
+		// has not yet Written the body — signal short-poll, do NOT
+		// reclaim. The outer loop's deadline + iteration cap ensure
+		// the wait is bounded even if the holder dies mid-init
+		// (next iteration's maybeReclaim would still see empty and
+		// eventually timeout; processAlive cannot help while the
+		// PID is unknown).
+		return liveButEmpty
+	}
 	pid, fork, ok := parseSentinelBody(raw)
 	if !ok {
-		// Malformed sentinel — reclaim.
+		// Malformed sentinel (non-empty but unparseable) — reclaim.
 		_ = core.Remove(sentinel)
-		return true
+		return reclaimedRetry
 	}
 	if !processAlive(pid) {
 		_ = core.Remove(sentinel)
-		return true
+		return reclaimedRetry
 	}
 	current := processForkTimeUnixNanos(pid)
 	if current == 0 {
 		// Couldn't read fork-time but PID exists — be conservative;
 		// do NOT reclaim. Outer loop will spin until timeout.
-		return false
+		return liveHolder
 	}
 	if current != fork {
 		// PID recycled — the original holder died and the kernel
 		// reissued the PID to a new process. Reclaim.
 		_ = core.Remove(sentinel)
-		return true
+		return reclaimedRetry
 	}
-	return false
+	return liveHolder
 }
 
 // sentinelBody renders the canonical sentinel-file bytes:
