@@ -20,6 +20,8 @@ import (
 	core "dappco.re/go"
 	"dappco.re/go/container"
 	"dappco.re/go/process"
+
+	"dappco.re/lthn/desktop/pkg/audit"
 )
 
 // Options configures the sandbox host.
@@ -128,6 +130,62 @@ type SpawnOutput struct {
 //     DockerProvider / PodmanProvider belongs upstream in
 //     go-container; lthn-desktop ships the placeholder until then.
 func (s *Service) Spawn(input SpawnInput) core.Result {
+	// Cerberus #47 S-4 (Mantis #1666) — Repudiation gap close. Emit
+	// Requested BEFORE any validation / runtime work so a crash mid-call
+	// still leaves the request decision in the audit substrate. The
+	// command bytes are NEVER in Meta — SHA-256 hash per the brief's
+	// SECURITY-NOTE escape valve (entrypoint commands occasionally
+	// embed tokens / paths). Args and env are NEVER in Meta.
+	commandHash := core.SHA256HexString(input.Command)
+	startedAt := core.Now()
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSandboxSpawnRequested,
+		TS:      startedAt.UTC().Unix(),
+		Scope:   "sandbox",
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"image":          input.Image,
+			"command_hash":   commandHash,
+			"container_name": "",
+		},
+	})
+
+	res := s.spawnDispatch(input)
+
+	if !res.OK {
+		_ = audit.Default().Record(audit.Event{
+			Event:   audit.EventSandboxSpawnFailed,
+			TS:      core.Now().UTC().Unix(),
+			Scope:   "sandbox",
+			Outcome: audit.OutcomeFailed,
+			Meta: map[string]any{
+				"error_code":     res.Error(),
+				"container_name": "",
+			},
+		})
+		return res
+	}
+
+	out, _ := res.Value.(SpawnOutput)
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSandboxSpawnSucceeded,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   "sandbox",
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"container_id": "",
+			"exit_code":    out.ExitCode,
+			"duration_ms":  out.DurationMs,
+		},
+	})
+	return res
+}
+
+// spawnDispatch is the pre-audit Spawn body — kept as a separate
+// helper so the public Spawn() wraps the dispatch in the Requested /
+// Succeeded / Failed audit pair without losing the early-return
+// shape of the original.
+func (s *Service) spawnDispatch(input SpawnInput) core.Result {
 	prepared := s.prepareSpawnInput(input)
 	if !prepared.OK {
 		return prepared

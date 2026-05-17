@@ -295,6 +295,155 @@ const (
 	// Meta keys match EventInferenceGenerateFailed: provider, model,
 	// error_code.
 	EventInferenceChatFailed = "inference.chat.failed"
+
+	// EventSandboxSpawnRequested fires when pkg/sandbox.Service.Spawn
+	// is about to dispatch a one-shot container run via the chosen
+	// runtime (Apple Container CLI or Docker/Podman via process.Service).
+	// Cerberus #47 S-4 (Mantis #1666) — Repudiation gap: lifecycle was
+	// invisible to the auditor. The Requested row commits BEFORE the
+	// container start so a crash mid-call still leaves the request
+	// decision in the audit substrate.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   image          — OCI tag the container was started from
+	//   command_hash   — SHA-256 hex of the entrypoint command. The
+	//                    raw command string is NEVER in Meta — the
+	//                    SECURITY-NOTE escape valve from the brief
+	//                    keeps API tokens / paths off the substrate
+	//                    in the (rare) case the entrypoint embeds them.
+	//   container_name — best-effort name the runtime stamps; empty for
+	//                    the one-shot path because Docker/Podman --rm
+	//                    auto-names. Always populated for the Apple path
+	//                    (lthn-sandbox-<nanos> per spawnApple()).
+	//
+	// The raw args / env are NEVER in Meta — Cerberus #1465 closure-
+	// only-scope discipline keeps user-content off the audit substrate.
+	EventSandboxSpawnRequested = "sandbox.spawn.requested"
+
+	// EventSandboxSpawnSucceeded fires when pkg/sandbox.Service.Spawn
+	// returns OK from a one-shot container run. Sibling of Requested.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   container_id — runtime-assigned identifier when surfaced (Apple
+	//                  path); empty for the CLI path (Docker --rm
+	//                  doesn't surface the container ID through the
+	//                  shell-out capture).
+	//   exit_code    — process exit status (0 = clean, -1 = runtime error)
+	//   duration_ms  — wall-clock duration of the container run
+	EventSandboxSpawnSucceeded = "sandbox.spawn.succeeded"
+
+	// EventSandboxSpawnFailed fires when pkg/sandbox.Service.Spawn
+	// returns a non-OK Result from any validation or runtime path.
+	// Sibling of Requested.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   error_code     — core.E scope literal categorising the failure
+	//   container_name — best-effort name when assigned before failure;
+	//                    empty otherwise
+	EventSandboxSpawnFailed = "sandbox.spawn.failed"
+
+	// EventSandboxLongRequested fires when pkg/sandbox.Service.SpawnLong
+	// is about to dispatch a long-running container detach via
+	// process.Service. Long-running sibling of EventSandboxSpawnRequested
+	// per Cerberus #47 S-4 (Mantis #1666). The Requested row commits
+	// BEFORE the docker-run shell-out so a crash mid-call still leaves
+	// the request decision in the audit substrate.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   image          — OCI tag the container is started from
+	//   command_hash   — SHA-256 hex of the entrypoint command. The raw
+	//                    command string is NEVER in Meta (SECURITY-NOTE
+	//                    escape valve from the brief).
+	//   container_name — runtime-stable name (lthn-sandbox-<sandbox_id>)
+	//
+	// The raw args / env / volumes / network are NEVER in Meta.
+	EventSandboxLongRequested = "sandbox.long.requested"
+
+	// EventSandboxLongSucceeded fires when pkg/sandbox.Service.SpawnLong
+	// returns OK and the resulting ContainerHandle is registered. Sibling
+	// of Requested. The emit happens AFTER the readiness wait, so a
+	// Succeeded row implies the container's exposed port responded (when
+	// ExposedPort > 0) or that the container started (when ExposedPort = 0).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   container_id — assigned sandbox_id (sb-<8-char-random>); the
+	//                  CLI-side container_name is the join key for any
+	//                  follow-up docker inspect
+	//   exit_code    — always 0 on the Succeeded path (the container is
+	//                  still running by definition); kept for shape
+	//                  parity with EventSandboxSpawnSucceeded
+	EventSandboxLongSucceeded = "sandbox.long.succeeded"
+
+	// EventSandboxLongFailed fires when pkg/sandbox.Service.SpawnLong
+	// returns a non-OK Result from any validation, runtime, or readiness
+	// path. Sibling of Requested.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   error_code     — core.E scope literal categorising the failure
+	//   container_name — best-effort name when assigned before failure
+	EventSandboxLongFailed = "sandbox.long.failed"
+
+	// EventSandboxKillRequested fires when pkg/sandbox.Service.Kill is
+	// about to dispatch `<runtime> rm -f <container>`. Cerberus #47 S-4
+	// (Mantis #1666) — even no-op kills (sandbox-not-found) emit the
+	// Requested row so a forensic auditor can correlate caller intent
+	// against the registry state at the moment of the call.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   sandbox_id     — caller-supplied identifier
+	//   container_name — derived lthn-sandbox-<sandbox_id>
+	EventSandboxKillRequested = "sandbox.kill.requested"
+
+	// EventSandboxKillSucceeded fires when pkg/sandbox.Service.Kill
+	// returns OK (the registered handle was found and removed).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   sandbox_id     — caller-supplied identifier
+	//   container_name — derived lthn-sandbox-<sandbox_id>
+	EventSandboxKillSucceeded = "sandbox.kill.succeeded"
+
+	// EventSandboxKillFailed fires when pkg/sandbox.Service.Kill returns
+	// a non-OK Result (empty id or sandbox-not-found). The docker rm -f
+	// shell-out is best-effort even on the failure path so the emit
+	// reflects caller intent regardless of registry state.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   sandbox_id     — caller-supplied identifier (may be empty)
+	//   error_code     — core.E scope literal categorising the failure
+	EventSandboxKillFailed = "sandbox.kill.failed"
+
+	// EventSandboxVolumeRejected fires from pkg/sandbox.buildLongRunArgs
+	// when a LongVolumeMount entry is dropped because it fails one of
+	// the Cerberus #1431 (host-side IsValidVolumeName) or #1446
+	// (container-side IsValidContainerPath) gates. Cerberus #47 S-4
+	// (Mantis #1666) — promotes the defence-in-depth core.Warn to a
+	// typed audit event so a future reconcile / forensic walker can
+	// flag any caller that attempts to bypass marketplace's primary
+	// volume validator (marketplace's resolveVolumes is the loud-error
+	// path; this is the silent-skip backstop).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   volume_name — caller-asserted name that failed validation; safe
+	//                 to record because IsValidVolumeName already
+	//                 rejects everything that could embed credentials
+	//                 (length 1..64, alnum + _.- only)
+	//   container   — caller-asserted container-side mount path; safe
+	//                 to record because IsValidContainerPath rejects
+	//                 NUL / control chars / colons / commas / whitespace
+	//   reason      — reserved literal "invalid_name" or
+	//                 "invalid_container_path" so a downstream consumer
+	//                 can categorise without re-running the validators
+	EventSandboxVolumeRejected = "sandbox.volume.rejected"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the

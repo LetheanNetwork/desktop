@@ -21,6 +21,8 @@ import (
 	"net"
 
 	core "dappco.re/go"
+
+	"dappco.re/lthn/desktop/pkg/audit"
 )
 
 const (
@@ -233,21 +235,40 @@ const (
 //	})
 //	if r.OK { h := r.Value.(sandbox.ContainerHandle); _ = h.SandboxID }
 func (s *Service) SpawnLong(input SpawnLongInput) core.Result {
+	// Cerberus #47 S-4 (Mantis #1666) — Repudiation gap close. Emit
+	// Requested BEFORE any validation / runtime work; on every early
+	// return, emit Failed with categorical error_code. The command
+	// bytes are NEVER in Meta — SHA-256 hash per the brief's
+	// SECURITY-NOTE escape valve. Args / env / volumes / network are
+	// NEVER in Meta.
+	commandHash := core.SHA256HexString(input.Command)
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSandboxLongRequested,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   "sandbox",
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"image":          input.Image,
+			"command_hash":   commandHash,
+			"container_name": "",
+		},
+	})
+
 	if core.Trim(input.Image) == "" {
-		return core.Fail(core.E(spawnLongOp, "image is required", nil))
+		return failSpawnLong("", "image is required")
 	}
 	if core.Trim(input.Command) == "" {
-		return core.Fail(core.E(spawnLongOp, "command is required", nil))
+		return failSpawnLong("", "command is required")
 	}
 
 	ps := s.proc()
 	if ps == nil {
-		return core.Fail(core.E(spawnLongOp, "process service unavailable", nil))
+		return failSpawnLong("", "process service unavailable")
 	}
 
 	idR := core.RandomString(8)
 	if !idR.OK {
-		return core.Fail(core.E(spawnLongOp, "id generation failed", nil))
+		return failSpawnLong("", "id generation failed")
 	}
 	sandboxID := sandboxIDPrefix + idR.Value.(string)
 	containerName := "lthn-sandbox-" + sandboxID
@@ -256,7 +277,7 @@ func (s *Service) SpawnLong(input SpawnLongInput) core.Result {
 	if input.ExposedPort > 0 {
 		portR := allocateFreePort()
 		if !portR.OK {
-			return portR
+			return failSpawnLong(containerName, "allocate host port failed")
 		}
 		hostPort = portR.Value.(int)
 	}
@@ -269,7 +290,7 @@ func (s *Service) SpawnLong(input SpawnLongInput) core.Result {
 
 	runR := ps.Run(ctx, rt, args...)
 	if !runR.OK {
-		return core.Fail(core.E(spawnLongOp, "container start failed", nil))
+		return failSpawnLong(containerName, "container start failed")
 	}
 
 	handle := ContainerHandle{
@@ -287,7 +308,7 @@ func (s *Service) SpawnLong(input SpawnLongInput) core.Result {
 		if r := waitPortOpen(hostPort, defaultReadyTimeout); !r.OK {
 			// Best-effort cleanup.
 			ps.Run(core.Background(), rt, "rm", "-f", containerName)
-			return core.Fail(core.E(spawnLongOp, "container did not become ready", nil))
+			return failSpawnLong(containerName, "container did not become ready")
 		}
 	}
 
@@ -300,7 +321,37 @@ func (s *Service) SpawnLong(input SpawnLongInput) core.Result {
 	s.handles[sandboxID] = &handle
 	s.mu.Unlock()
 
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSandboxLongSucceeded,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   "sandbox",
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"container_id": sandboxID,
+			"exit_code":    0,
+		},
+	})
 	return core.Ok(handle)
+}
+
+// failSpawnLong is the SpawnLong error tail — emits the Failed audit
+// row with the categorical error_code derived from core.E's scope
+// literal and returns the wrapped Result. Centralising the emit makes
+// every SpawnLong early-return path land in the audit substrate
+// without bloating each return site.
+func failSpawnLong(containerName, message string) core.Result {
+	err := core.E(spawnLongOp, message, nil)
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSandboxLongFailed,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   "sandbox",
+		Outcome: audit.OutcomeFailed,
+		Meta: map[string]any{
+			"error_code":     err.Error(),
+			"container_name": containerName,
+		},
+	})
+	return core.Fail(err)
 }
 
 // Kill stops the container for a given SandboxID and removes its handle.
@@ -310,8 +361,23 @@ func (s *Service) SpawnLong(input SpawnLongInput) core.Result {
 //	r := svc.Kill("sb-a1b2c3d4")
 //	if r.OK { /* container stopped */ }
 func (s *Service) Kill(sandboxID string) core.Result {
+	// Cerberus #47 S-4 (Mantis #1666) — Repudiation gap close. The
+	// Requested row commits regardless of registry state so a forensic
+	// auditor can correlate caller intent against the moment of call.
+	containerName := "lthn-sandbox-" + sandboxID
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSandboxKillRequested,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   "sandbox",
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"sandbox_id":     sandboxID,
+			"container_name": containerName,
+		},
+	})
+
 	if core.Trim(sandboxID) == "" {
-		return core.Fail(core.E(killOp, "sandbox id is required", nil))
+		return failKill(sandboxID, "sandbox id is required")
 	}
 
 	s.mu.Lock()
@@ -322,7 +388,6 @@ func (s *Service) Kill(sandboxID string) core.Result {
 	}
 	s.mu.Unlock()
 
-	containerName := "lthn-sandbox-" + sandboxID
 	ps := s.proc()
 	if ps != nil {
 		rt := s.resolveRuntimeName("")
@@ -332,9 +397,38 @@ func (s *Service) Kill(sandboxID string) core.Result {
 	}
 
 	if !ok {
-		return core.Fail(core.E(killOp, "sandbox not found: "+sandboxID, nil))
+		return failKill(sandboxID, "sandbox not found: "+sandboxID)
 	}
+
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSandboxKillSucceeded,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   "sandbox",
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"sandbox_id":     sandboxID,
+			"container_name": containerName,
+		},
+	})
 	return core.Ok(nil)
+}
+
+// failKill is the Kill error tail — emits Failed audit row with
+// categorical error_code and returns the wrapped Result. Mirrors
+// failSpawnLong for shape parity.
+func failKill(sandboxID, message string) core.Result {
+	err := core.E(killOp, message, nil)
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventSandboxKillFailed,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   "sandbox",
+		Outcome: audit.OutcomeFailed,
+		Meta: map[string]any{
+			"sandbox_id": sandboxID,
+			"error_code": err.Error(),
+		},
+	})
+	return core.Fail(err)
 }
 
 // ListHandles returns all currently-registered ContainerHandles.
@@ -446,11 +540,37 @@ func (s *Service) buildLongRunArgs(rt, containerName string, hostPort int, input
 		if !IsValidVolumeName(vol.Name) {
 			core.Warn("sandbox: refusing volume with invalid name",
 				"name", vol.Name, "container", vol.Container)
+			// Cerberus #47 S-4 (Mantis #1666) — promote the
+			// defence-in-depth warn to a typed audit event so a future
+			// reconcile / forensic walker can flag any caller bypassing
+			// marketplace's primary volume validator.
+			_ = audit.Default().Record(audit.Event{
+				Event:   audit.EventSandboxVolumeRejected,
+				TS:      core.Now().UTC().Unix(),
+				Scope:   "sandbox",
+				Outcome: audit.OutcomeDenied,
+				Meta: map[string]any{
+					"volume_name": vol.Name,
+					"container":   vol.Container,
+					"reason":      "invalid_name",
+				},
+			})
 			continue
 		}
 		if !IsValidContainerPath(vol.Container) {
 			core.Warn("sandbox: refusing volume with invalid container path (Mantis #1446)",
 				"name", vol.Name, "container", vol.Container)
+			_ = audit.Default().Record(audit.Event{
+				Event:   audit.EventSandboxVolumeRejected,
+				TS:      core.Now().UTC().Unix(),
+				Scope:   "sandbox",
+				Outcome: audit.OutcomeDenied,
+				Meta: map[string]any{
+					"volume_name": vol.Name,
+					"container":   vol.Container,
+					"reason":      "invalid_container_path",
+				},
+			})
 			continue
 		}
 		args = append(args, "-v", vol.Name+":"+vol.Container)
