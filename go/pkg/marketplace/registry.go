@@ -193,26 +193,44 @@ func requireAllowedManifestHost(op, rawURL string) core.Result {
 // Pattern mirrors pkg/downloader's two-stage gate: Content-Length
 // pre-check + LimitReader at cap+1 with post-read overflow check.
 func fetchCapped(op, url string, maxBytes int64) (raw []byte, status int, result core.Result) {
+	raw, _, status, result = fetchCappedWithETag(op, url, maxBytes)
+	return
+}
+
+// fetchCappedWithETag mirrors fetchCapped and additionally returns the
+// ETag header value. Used by the .sig + body pinned-fetch path so the
+// caller can require both fetches to land at the same ETag (DREAD v2
+// N2 / Mantis #1650 — rotation-race close). Empty ETag is tolerated
+// (origin may not stamp one); the caller's rotation-race gate fires
+// only when BOTH responses carry a non-empty ETag AND they differ.
+func fetchCappedWithETag(op, url string, maxBytes int64) (raw []byte, etag string, status int, result core.Result) {
+	return fetchCappedWithETagClient(op, url, maxBytes, httpsOnlyClient)
+}
+
+// fetchCappedWithETagClient is the inner form parameterised on the
+// HTTP client so unit tests can inject httptest.NewTLSServer().Client()
+// — the production path always passes httpsOnlyClient.
+func fetchCappedWithETagClient(op, url string, maxBytes int64, client *core.HTTPClient) (raw []byte, etag string, status int, result core.Result) {
 	reqR := core.NewHTTPRequest("GET", url, nil)
 	if !reqR.OK {
-		return nil, 0, reqR
+		return nil, "", 0, reqR
 	}
 	req := reqR.Value.(*core.Request)
-	resp, err := httpsOnlyClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		if resp != nil {
 			_ = resp.Body.Close()
 		}
-		return nil, 0, core.Fail(core.E(op, "GET failed: "+url, err))
+		return nil, "", 0, core.Fail(core.E(op, "GET failed: "+url, err))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return nil, resp.StatusCode, core.Fail(core.E(op,
+		return nil, "", resp.StatusCode, core.Fail(core.E(op,
 			core.Sprintf("HTTP %d from %s", resp.StatusCode, url), nil))
 	}
 	if resp.ContentLength > maxBytes {
-		return nil, resp.StatusCode, core.Fail(core.E(op,
+		return nil, "", resp.StatusCode, core.Fail(core.E(op,
 			core.Sprintf("Content-Length %d exceeds cap %d",
 				resp.ContentLength, maxBytes), nil))
 	}
@@ -220,14 +238,81 @@ func fetchCapped(op, url string, maxBytes int64) (raw []byte, status int, result
 	bounded := core.LimitReader(resp.Body, maxBytes+1)
 	readR := core.ReadAll(bounded)
 	if !readR.OK {
-		return nil, resp.StatusCode, core.Fail(core.E(op, "response read failed", nil))
+		return nil, "", resp.StatusCode, core.Fail(core.E(op, "response read failed", nil))
 	}
-	raw, _ = readR.Value.([]byte)
+	// core.ReadAll's Value is a string per pkg/external/go/io.go contract;
+	// convert to bytes here so callers (parsers, hashers) get the expected
+	// shape. The legacy cast-to-[]byte form silently swallowed the body and
+	// was the source of the empty-body diagnosis during Wave 1 fetch-pin
+	// test bring-up.
+	rawStr, _ := readR.Value.(string)
+	raw = []byte(rawStr)
 	if int64(len(raw)) > maxBytes {
-		return nil, resp.StatusCode, core.Fail(core.E(op,
+		return nil, "", resp.StatusCode, core.Fail(core.E(op,
 			core.Sprintf("response body exceeded %d byte cap", maxBytes), nil))
 	}
-	return raw, resp.StatusCode, core.Ok(nil)
+	etag = resp.Header.Get("ETag")
+	return raw, etag, resp.StatusCode, core.Ok(nil)
+}
+
+// FetchManifestSignedResult bundles the body + signature pair from
+// fetchManifestWithSig along with the matched ETag for forensic
+// diagnosis. Used by the install pipeline to assert ETag-pinned
+// fetch arrival before invoking Verify.
+type FetchManifestSignedResult struct {
+	Body      []byte
+	Signature []byte
+	ETag      string
+}
+
+// fetchManifestWithSig fetches `<url>` and `<url>.sig` from the same
+// origin and asserts both responses arrive with the same ETag (when
+// the origin stamps one). DREAD v2 N2 HIGH (Mantis #1650) — without
+// this gate, a mirror that briefly rotates the body between the .sig
+// fetch and the body fetch can defeat the signature check.
+//
+// Returns sigRotationRaceReason on Result.Error() when both fetches
+// land with non-empty ETags that disagree. When either side returns
+// an empty ETag (origin doesn't stamp one), the gate is informational
+// only — the verify chain still asserts cryptographic correctness, but
+// the rotation-race detection can't fire from missing wire evidence.
+//
+// Both fetches are bounded at maxManifestBytes (256 KiB) since the
+// `.sig` file is structurally tiny (64 bytes for raw ed25519) and the
+// manifest body is the cap-defining surface.
+//
+// Usage example:
+//
+//	r := fetchManifestWithSig(fetchManifestOp, "https://m.lthn.ai/x.yml")
+//	if r.OK { sr := r.Value.(FetchManifestSignedResult) }
+func fetchManifestWithSig(op, url string) core.Result {
+	return fetchManifestWithSigClient(op, url, httpsOnlyClient)
+}
+
+// fetchManifestWithSigClient is the inner form parameterised on the
+// HTTP client so unit tests can drive the rotation-race gate against
+// an httptest.NewTLSServer().Client() without ripping the production
+// httpsOnlyClient discipline out of the call path.
+func fetchManifestWithSigClient(op, url string, client *core.HTTPClient) core.Result {
+	bodyRaw, bodyETag, _, bodyResult := fetchCappedWithETagClient(op, url, maxManifestBytes, client)
+	if !bodyResult.OK {
+		return bodyResult
+	}
+	sigURL := url + ".sig"
+	sigRaw, sigETag, _, sigResult := fetchCappedWithETagClient(op, sigURL, maxManifestBytes, client)
+	if !sigResult.OK {
+		return sigResult
+	}
+	if bodyETag != "" && sigETag != "" && bodyETag != sigETag {
+		return core.Fail(core.E(op,
+			sigRotationRaceReason+": body ETag "+bodyETag+
+				" != .sig ETag "+sigETag, nil))
+	}
+	return core.Ok(FetchManifestSignedResult{
+		Body:      bodyRaw,
+		Signature: sigRaw,
+		ETag:      bodyETag,
+	})
 }
 
 // CatalogueEntry is one record in the marketplace index.
@@ -255,6 +340,16 @@ type CatalogueEntry struct {
 	RequiresVersion string `json:"requires_version,omitempty"`
 	// LastUpdated is the ISO-8601 date the registry entry was last changed.
 	LastUpdated string `json:"last_updated,omitempty"`
+	// Signature is the optional detached ed25519 signature over the
+	// CatalogueEntry's CBOR canonical encoding (CatalogueEntry with
+	// Signature nil) — new in v1.1 per Mantis #1637 DREAD F1. v1
+	// entries decode cleanly with both Signature and KeyID empty;
+	// the verify gate enforces presence only when a trusted-keys
+	// store is configured at runtime.
+	Signature []byte `json:"signature,omitempty"`
+	// KeyID names which entry in trusted_keys.json verified Signature.
+	// Capped at maxTrustedKeyIDChars (Mantis #1648 DREAD v2 N3).
+	KeyID string `json:"key_id,omitempty"`
 }
 
 // FetchIndexResult is the parsed catalogue returned by FetchIndex.

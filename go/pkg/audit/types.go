@@ -931,6 +931,46 @@ const (
 	// InstallRequested which subsumes the validate-OK signal.
 	EventMarketplaceValidateManifestFailed = "marketplace.validate_manifest.failed"
 
+	// EventMarketplaceTrustedKeyMutated fires whenever the marketplace
+	// trusted_keys.json store at ~/Lethean/conf/marketplace/trusted_keys.json
+	// is mutated (key added, key replaced, key removed). DREAD F4 HIGH
+	// (Mantis #1644) — without this row, an attacker who reaches the
+	// conf path can silently add an attacker-controlled key + serve
+	// signed manifests that pass the verify gate. The Mutated row is a
+	// privesc-grade forensic anchor: every trust-store delta carries
+	// old + new fingerprint + reason + operator-confirmation context so
+	// the auditor can replay the chain-of-custody.
+	//
+	// Outcome is OutcomeOK for mutations the operator authorised (the
+	// normal "I am adding a key" path) and OutcomeDenied for mutations
+	// the validator refused (duplicate-name-different-keyid load-time
+	// reject per DREAD N1 / Mantis #1647).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   name              — the trusted-key NAME (priority-order alias,
+	//                       e.g. "lthn-official"). Safe — gated against
+	//                       a basename regex at load time.
+	//   old_fingerprint   — SHA256 prefix of the previous pubkey for
+	//                       this name (16 hex chars, empty on add).
+	//   new_fingerprint   — SHA256 prefix of the new pubkey (16 hex
+	//                       chars, empty on remove).
+	//   reason            — closed-set literal:
+	//                         "add" — first time this name landed
+	//                         "replace" — name existed, key changed
+	//                         "remove" — name dropped
+	//                         "duplicate_name_keyid_mismatch" — DREAD N1
+	//                                                          load-time reject
+	//   operator_confirmed — bool the caller passed when invoking the
+	//                        mutation API; the host UI MUST require an
+	//                        explicit "I understand" confirmation before
+	//                        flipping this true. Replay attacks where
+	//                        a caller programmatically asserts true
+	//                        without UI confirmation still leave the
+	//                        row, just without operator-confirmation
+	//                        evidence — the auditor can spot the gap.
+	EventMarketplaceTrustedKeyMutated = "marketplace.trusted_key.mutated"
+
 	// EventGatewayDispatchRequested fires when pkg/gateway.Service.Handle
 	// is about to dispatch a resolved (bundle, scope, mode) tuple to its
 	// registered Handler. Cerberus #57 F-2 (Mantis #1700) — Repudiation

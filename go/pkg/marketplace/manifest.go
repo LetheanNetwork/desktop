@@ -31,6 +31,18 @@ const (
 )
 
 // BundleManifest is the parsed form of a manifest.yml file.
+//
+// Signature + KeyID land here for the marketplace signing substrate
+// (Mantis #1637 DREAD F1). Signature is the detached ed25519
+// signature over CanonicaliseManifest(BundleManifest{...with Signature
+// nil...}) bytes — the canonicaliser strips Signature before encoding
+// so the signed bytes are independent of the signature's presence.
+// KeyID names which trusted_keys.json entry verified the manifest.
+//
+// Both fields are NEW in v1.1; legacy v1 manifests parse cleanly
+// with both empty. Verify enforcement is the call-site's concern —
+// the parser does not refuse unsigned manifests today; that gate
+// lands as a separate ticket once Wave 2 verify enforcement does.
 type BundleManifest struct {
 	Schema      string       `yaml:"schema"`
 	Name        string       `yaml:"name"`
@@ -44,6 +56,15 @@ type BundleManifest struct {
 	Plugin      *PluginBlock `yaml:"plugin,omitempty"`
 	Env         []EnvEntry   `yaml:"env,omitempty"`
 	Permissions []Permission `yaml:"permissions,omitempty"`
+
+	// Signature carries the detached ed25519 signature over
+	// CanonicaliseManifest(m) where Signature is nil. New in v1.1
+	// per Mantis #1637 DREAD F1.
+	Signature []byte `yaml:"signature,omitempty"`
+
+	// KeyID names which entry in trusted_keys.json verified Signature.
+	// Capped at maxTrustedKeyIDChars (Mantis #1648 DREAD v2 N3).
+	KeyID string `yaml:"key_id,omitempty"`
 }
 
 // ImageEntry is one container image in a bundle. Each entry becomes

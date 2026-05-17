@@ -7,7 +7,10 @@
 package marketplace
 
 import (
+	"net/http"
 	"sync"
+
+	core "dappco.re/go"
 
 	"dappco.re/lthn/desktop/pkg/sandbox"
 )
@@ -139,4 +142,20 @@ func AllowedManifestHostSuffixesForTest() []string {
 	out := make([]string, len(allowedManifestHostSuffixes))
 	copy(out, allowedManifestHostSuffixes)
 	return out
+}
+
+// FetchManifestWithSigForTest exposes the .sig + body ETag-pinned
+// fetch primitive so external tests can drive the DREAD v2 N2 / Mantis
+// #1650 rotation-race gate against an httptest.NewTLSServer().Client()
+// without ripping the production httpsOnlyClient discipline out of
+// the in-package call path.
+//
+// Usage example (test code):
+//
+//	srv := httptest.NewTLSServer(handler)
+//	r := subject.FetchManifestWithSigForTest(srv.URL+"/x.yml", srv.Client())
+//	if !r.OK { ... }
+//	res, _ := r.Value.(subject.FetchManifestSignedResult)
+func FetchManifestWithSigForTest(url string, client *http.Client) core.Result {
+	return fetchManifestWithSigClient(fetchManifestOp, url, client)
 }

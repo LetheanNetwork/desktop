@@ -410,6 +410,41 @@ func emitValidateManifestFailed(bundleID string, r core.Result) {
 	})
 }
 
+// emitTrustedKeyMutated records an EventMarketplaceTrustedKeyMutated
+// row for the DREAD F4 / F1-cluster trust-store mutation surface
+// (Mantis #1644 / #1647). Outcome is OutcomeDenied when reason is
+// reasonDuplicate (the DREAD N1 load-time reject path); every other
+// reason is OutcomeOK (the authorised-mutation path).
+//
+// Meta keys mirror the pkg/audit/types.go const-block contract:
+// name, old_fingerprint, new_fingerprint, reason, operator_confirmed.
+// fingerprints are SHA256(pubkey) first 16 hex chars per signing.go's
+// fingerprintFrom — short enough to scan but unique enough to
+// distinguish keys forensically.
+//
+// Usage example (internal):
+//
+//	emitTrustedKeyMutated("lthn-official", "", "ab12cd...", reasonAdd, true)
+func emitTrustedKeyMutated(name, oldFp, newFp, reason string, operatorConfirmed bool) {
+	outcome := audit.OutcomeOK
+	if reason == reasonDuplicate {
+		outcome = audit.OutcomeDenied
+	}
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventMarketplaceTrustedKeyMutated,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   marketplaceScope,
+		Outcome: outcome,
+		Meta: map[string]any{
+			"name":               name,
+			"old_fingerprint":    oldFp,
+			"new_fingerprint":    newFp,
+			"reason":             reason,
+			"operator_confirmed": operatorConfirmed,
+		},
+	})
+}
+
 // domainOnly returns the URL hostname only — no scheme, no path, no
 // query, no fragment. Returns "" for malformed input; the audit emit
 // helpers tolerate the empty value (a downstream forensic walker
