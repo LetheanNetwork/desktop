@@ -15,12 +15,11 @@
 //     /v1/api/process/* to the webview engine, so the probe route's
 //     "hit":"lthn-process" body lands.
 //  3. Engine().Handler() response body — behavioural — the public
-//     engine returns an empty body for /v1/api/process/probe because
-//     the route is not registered. (coreapi.responseMetaMiddleware
-//     forces status to 200 on unmatched routes, so the assertion
-//     anchors on the absence of the probe handler's "hit" payload
-//     rather than the HTTP status code. The public engine simply does
-//     not host the handler that would emit the payload.)
+//     engine returns 404 for /v1/api/process/probe because the
+//     webViewOnlyRejectMiddleware aborts the request before the
+//     coreapi.responseMetaMiddleware can rewrite the empty 404 to
+//     a 200+empty body (Mantis #1458 — OPSEC-clean signal that the
+//     public surface genuinely does not host process REST).
 
 package server_test
 
@@ -198,10 +197,11 @@ func TestServerWebViewSplit_Process_Good_WebViewHandlerServesProbeBody(t *core.T
 // registered there. Combined with the structural assertion above this
 // is the load-bearing #1449 guarantee.
 //
-// Anchored on body content (not status code) because
-// coreapi.responseMetaMiddleware forces unmatched-route responses to
-// 200 with an empty body — the absence of the probe payload is the
-// real signal.
+// Mantis #1458 — also asserts the response is a clean 404 (not the
+// pre-fix 200+empty default coreapi.responseMetaMiddleware would
+// otherwise emit). The webViewOnlyRejectMiddleware on the public
+// engine aborts the request with 404 before responseMetaMiddleware
+// can rewrite the status.
 func TestServerWebViewSplit_Process_Bad_PublicHandlerOmitsProbeBody(t *core.T) {
 	c := newCoreWithProvider(&stubGroup{name: processGroupName, base: processBasePath})
 	s := server.NewService(server.Options{
@@ -217,6 +217,97 @@ func TestServerWebViewSplit_Process_Bad_PublicHandlerOmitsProbeBody(t *core.T) {
 		t.Fatalf("public engine must NOT serve /v1/api/process/* (Mantis #1449 Path 3) — body=%q",
 			w.Body.String())
 	}
+	if w.Code != core.StatusNotFound {
+		t.Fatalf("public engine must return 404 for /v1/api/process/* (Mantis #1458) — got status=%d body=%q",
+			w.Code, w.Body.String())
+	}
+}
+
+// TestServerWebViewSplit_Process_Good_ServeListener_Returns404OnProcessPrefix
+// is the load-bearing #1458 assertion against the surface a real
+// caller hits — the http.Handler bound by Start() for `lthn serve`.
+// Reaches into Engine().Handler() (the same handler s.http.Handler
+// wraps) and confirms every flavour of /v1/api/process/* path
+// returns a clean 404, not the pre-fix 200+empty.
+//
+// Three flavours exercised: bare prefix, deep nested path, exact
+// prefix match (no trailing). All three must 404 because pathHasPrefix
+// matches the same set the webview composite diverts on.
+func TestServerWebViewSplit_Process_Good_ServeListener_Returns404OnProcessPrefix(t *core.T) {
+	c := newCoreWithProvider(&stubGroup{name: processGroupName, base: processBasePath})
+	s := server.NewService(server.Options{
+		Core:              c,
+		WebViewOnlyGroups: []string{processGroupName},
+	})
+
+	paths := []string{
+		"/v1/api/process",                       // exact prefix
+		"/v1/api/process/probe",                 // shallow
+		"/v1/api/process/processes/list/active", // deep
+	}
+	for _, p := range paths {
+		req := httptest.NewRequest(core.MethodGet, p, nil)
+		w := httptest.NewRecorder()
+		s.Engine().Handler().ServeHTTP(w, req)
+
+		if w.Code != core.StatusNotFound {
+			t.Fatalf("serve listener must 404 webview-only prefix path %q (Mantis #1458) — got status=%d body=%q",
+				p, w.Code, w.Body.String())
+		}
+	}
+}
+
+// TestServerWebViewSplit_Process_Good_WebViewComposite_StillServesProbe
+// is the symmetric assertion: the 404 reject middleware on the public
+// engine does NOT affect the WebView composite handler. A request
+// matching the webview-only prefix on Handler() is diverted to the
+// webview engine BEFORE the public engine's middleware chain runs,
+// so the probe body still lands. Guards against a regression where
+// the #1458 fix accidentally breaks the WebView side.
+func TestServerWebViewSplit_Process_Good_WebViewComposite_StillServesProbe(t *core.T) {
+	c := newCoreWithProvider(&stubGroup{name: processGroupName, base: processBasePath})
+	s := server.NewService(server.Options{
+		Core:              c,
+		WebViewOnlyGroups: []string{processGroupName},
+	})
+
+	req := httptest.NewRequest(core.MethodGet, processProbePath, nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusOK, w.Code,
+		"WebView composite must still serve /v1/api/process/* (Mantis #1458 reject must not bleed across)")
+	core.AssertTrue(t, core.Contains(w.Body.String(), probeBodyHit),
+		"WebView composite must dispatch probe to webview engine: body=%q",
+		w.Body.String())
+}
+
+// TestServerWebViewSplit_Process_Good_LegacyShape_ServeListener_NoRejectWhenSplitDisabled
+// asserts the pre-#1449 legacy code path (DisableDefaultWebViewOnly:
+// true, empty WebViewOnlyGroups) does NOT install the reject
+// middleware. The slice is empty, the middleware is a no-op, and the
+// existing 200+empty default for unmatched routes stays in place.
+// Belt-and-braces — production callers never reach this state but
+// the legacy shape regression test (already in this file) needs the
+// reject middleware out of the way.
+func TestServerWebViewSplit_Process_Good_LegacyShape_ServeListener_NoRejectWhenSplitDisabled(t *core.T) {
+	c := newCoreWithProvider(&stubGroup{name: processGroupName, base: processBasePath})
+	s := server.NewService(server.Options{
+		Core:                      c,
+		DisableDefaultWebViewOnly: true,
+	})
+
+	// The probe IS registered on the public engine under legacy shape,
+	// so a hit should return the probe body — not 404.
+	req := httptest.NewRequest(core.MethodGet, processProbePath, nil)
+	w := httptest.NewRecorder()
+	s.Engine().Handler().ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusOK, w.Code,
+		"legacy shape must keep serving /v1/api/process/* from public engine — reject middleware must stay dormant")
+	core.AssertTrue(t, core.Contains(w.Body.String(), probeBodyHit),
+		"legacy shape public engine must serve probe body: body=%q",
+		w.Body.String())
 }
 
 // TestServerWebViewSplit_Process_Ugly_BearerLeakViaPublicListenerStillBlocked

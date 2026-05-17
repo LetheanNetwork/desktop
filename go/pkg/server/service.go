@@ -523,7 +523,26 @@ func NewService(opts Options) *Service {
 		apiOpts = append(apiOpts, coreapi.WithTracing(opts.TracingName))
 	}
 
-	engine, _ := coreapi.New(apiOpts...) // current New always returns nil err
+	// Mantis #1458 — explicit 404 for webview-only prefixes on the
+	// public engine. Without this, an unmatched /v1/api/process/* on
+	// `lthn serve` falls through to coreapi.responseMetaMiddleware
+	// which forces the response to 200 with an empty body. The 200+
+	// empty leaks "something might be here" — a 404 makes the OPSEC
+	// signal clean: process REST is webview-only, the public surface
+	// genuinely does not host it.
+	//
+	// The slice is mutated in the group-registration loop below as
+	// webview-only groups are routed off the public engine; the
+	// closure captures the pointer so build() reads the up-to-date
+	// list on every Handler() call. Empty slice = middleware is a
+	// no-op (no webview-only mounts in play), preserving the legacy
+	// shape for callers that opt out via DisableDefaultWebViewOnly.
+	var webviewOnlyPrefixes []string
+	publicOpts := append([]coreapi.Option(nil), apiOpts...)
+	publicOpts = append(publicOpts,
+		coreapi.WithMiddleware(webViewOnlyRejectMiddleware(&webviewOnlyPrefixes)))
+
+	engine, _ := coreapi.New(publicOpts...) // current New always returns nil err
 	s := &Service{opts: opts, engine: engine}
 	engine.Register(newLthnRoutes(s))
 	for _, g := range opts.ExtraGroups {
@@ -535,6 +554,10 @@ func NewService(opts Options) *Service {
 	// the same middleware chain (bearer-auth, CSP, etc.) so a stolen
 	// bearer still authenticates, but the routes simply aren't
 	// reachable from outside the Wails Asset.Handler.
+	//
+	// The webview engine uses apiOpts (NOT publicOpts) so it does NOT
+	// install the reject middleware — the whole point of the webview
+	// engine is to serve those paths.
 	webviewOnly := resolveWebViewOnly(opts)
 	if len(webviewOnly) > 0 {
 		s.webviewEngine, _ = coreapi.New(apiOpts...)
@@ -564,6 +587,17 @@ func NewService(opts Options) *Service {
 				}
 				if webviewOnly[g.Name()] && s.webviewEngine != nil {
 					s.webviewEngine.Register(g)
+					// Mantis #1458 — record the BasePath so the
+					// public engine's reject middleware returns 404
+					// for any request that matches a webview-only
+					// prefix instead of falling through to the 200+
+					// empty default. BasePath() is the same value
+					// the composite handler diverts on in
+					// webviewOnlyPrefixes() — both surfaces share
+					// the prefix tree.
+					if bp := g.BasePath(); bp != "" {
+						webviewOnlyPrefixes = append(webviewOnlyPrefixes, bp)
+					}
 					continue
 				}
 				engine.Register(g)
@@ -763,6 +797,49 @@ func (c *webViewComposite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	c.public.ServeHTTP(w, r)
+}
+
+// webViewOnlyRejectMiddleware returns a gin middleware that aborts
+// with HTTP 404 when the incoming request path matches any of the
+// webview-only prefixes. Installed only on the public engine
+// (Mantis #1458) so the standalone `lthn serve` HTTP listener returns
+// a clean 404 — the OPSEC-correct signal that the surface genuinely
+// does not host process REST.
+//
+// Without this middleware the unmatched-route path falls through to
+// coreapi.responseMetaMiddleware, which forces 200 with an empty body
+// because no handler wrote a status. 200+empty leaks "something
+// might be here"; 404 says "the public surface does not host this
+// route, and it never will".
+//
+// The middleware closes over a pointer to the prefix slice so build()
+// reads the up-to-date list on every Handler() call — prefixes get
+// appended during the group-registration loop in NewService.
+//
+// The webview engine does NOT install this middleware; it serves
+// those exact paths.
+//
+// Usage example (inside NewService):
+//
+//	var prefixes []string
+//	publicOpts := append(apiOpts,
+//	    coreapi.WithMiddleware(webViewOnlyRejectMiddleware(&prefixes)))
+//	// ... populate prefixes when groups are registered on the
+//	// webview engine ...
+func webViewOnlyRejectMiddleware(prefixes *[]string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if prefixes == nil || len(*prefixes) == 0 {
+			c.Next()
+			return
+		}
+		for _, p := range *prefixes {
+			if pathHasPrefix(c.Request.URL.Path, p) {
+				c.AbortWithStatus(http.StatusNotFound)
+				return
+			}
+		}
+		c.Next()
+	}
 }
 
 // pathHasPrefix reports whether path equals prefix or starts with
