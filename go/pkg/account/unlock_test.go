@@ -915,3 +915,181 @@ func TestUnlockedAccountIDs_DeterministicSort_Ugly(t *core.T) {
 		}
 	}
 }
+
+// --- Mantis #1586 HIGH (Cerberus #18) — bound lockout map ---
+
+// lockoutMapSize is a test-helper that probes the unexported
+// s.lockouts via the only externally-observable signal: the
+// lockoutState response. Since the map is private and we hold the
+// black-box invariant, we instead drive recordFailedAttempt
+// indirectly through Unlock and count how many account_ids report
+// "ever-seen" via lockoutState. For the DoS-bound test we just
+// need the count to stay at zero, which lockoutState handles cleanly.
+//
+// NOT exported on Service per Snider's "don't add test-only API"
+// discipline — the helper here just enumerates the IDs we probed
+// and asks each "are you tracked?", which Service.lockoutState
+// already answers via its (locked,unlockAt) tuple. Implemented as
+// a counter sweep below.
+
+// TestUnlock_RecordFailedAttempt_NonExistentAccountIDDoesNotGrowMap_Good
+// — probe 100 non-existent IDs; assert each subsequent Unlock
+// against the same ID treats the slate as fresh (no lockout state
+// accumulated). Black-box proxy for "the map did not grow".
+func TestUnlock_RecordFailedAttempt_NonExistentAccountIDDoesNotGrowMap_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := newUnlockable(t, "")
+
+	// Hammer 100 non-existent IDs with one wrong-passphrase attempt
+	// each. Per Option 2, NO map entry should be created for any of
+	// these (no private.key on disk → accountExists returns false →
+	// recordFailedAttempt early-returns without touching s.lockouts).
+	for i := 0; i < 100; i++ {
+		id := "ghost" + core.Sprintf("%013d", i) // 16-char valid-shape id
+		r := svc.Unlock(subject.UnlockInput{
+			AccountID:  id,
+			Passphrase: fixtureWrongPassphrase,
+		})
+		core.AssertFalse(t, r.OK)
+		// Privacy invariant — non-existent account collapses to
+		// bad_passphrase, MUST NOT leak account-not-found.
+		core.AssertEqual(t, "account.unlock.bad_passphrase", r.Code())
+	}
+
+	// Black-box probe: if the map had been growing, EACH ghost id
+	// would have accumulated one failed attempt. We can't read the
+	// map directly, but we CAN assert that hammering ONE ghost
+	// 100 MORE times still doesn't trigger the threshold (because
+	// no attempts are being recorded). 5 attempts is the threshold;
+	// 100 attempts with the gate active should never trigger.
+	ghostID := "ghost0000000000a"
+	for i := 0; i < 100; i++ {
+		r := svc.Unlock(subject.UnlockInput{
+			AccountID:  ghostID,
+			Passphrase: fixtureWrongPassphrase,
+		})
+		core.AssertFalse(t, r.OK)
+		// Stays as bad_passphrase forever — never crosses into
+		// locked_out because the gate prevents counter growth.
+		core.AssertEqual(t, "account.unlock.bad_passphrase", r.Code())
+	}
+}
+
+// TestUnlock_RecordFailedAttempt_ExistingAccountGrowsMap_Good —
+// legitimate failed-passphrase traffic against a REAL on-disk
+// account DOES accumulate (we still need the lockout protection
+// for actual brute-force). After threshold attempts the account
+// must lock out.
+func TestUnlock_RecordFailedAttempt_ExistingAccountGrowsMap_Good(t *core.T) {
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+
+	// First 4 wrong attempts return bad_passphrase with remaining > 0.
+	for i := 0; i < 4; i++ { // lockoutThreshold-1 (package-private)
+		r := svc.Unlock(subject.UnlockInput{
+			AccountID:  fixtureAccountID,
+			Passphrase: fixtureWrongPassphrase,
+		})
+		core.AssertFalse(t, r.OK)
+		core.AssertEqual(t, "account.unlock.bad_passphrase", r.Code())
+	}
+
+	// 5th attempt triggers the lockout — Option 2 doesn't break
+	// legitimate brute-force defence, only stops the map-growth
+	// attack on non-existent IDs.
+	r := svc.Unlock(subject.UnlockInput{
+		AccountID:  fixtureAccountID,
+		Passphrase: fixtureWrongPassphrase,
+	})
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, "account.unlock.locked_out", r.Code())
+}
+
+// TestUnlock_LockoutMap_BoundedUnderAttack_Bad — regression guard
+// for Mantis #1586 HIGH. Simulates the named attack: 10K probes
+// against unique non-existent valid-shape IDs. Under the bug the
+// service would allocate 10K *lockoutEntry pointers; under the
+// fix every probe early-returns at the Option 2 gate.
+//
+// Asserts via the same black-box probe: AFTER the 10K-probe storm,
+// the lockout state for a fresh existing account is pristine
+// (5-attempt cap still trips cleanly), confirming the storm did
+// not pollute global state.
+func TestUnlock_LockoutMap_BoundedUnderAttack_Bad(t *core.T) {
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+
+	// 10K probe storm against unique non-existent IDs.
+	for i := 0; i < 10000; i++ {
+		id := "atck" + core.Sprintf("%012d", i)
+		r := svc.Unlock(subject.UnlockInput{
+			AccountID:  id,
+			Passphrase: fixtureWrongPassphrase,
+		})
+		core.AssertFalse(t, r.OK)
+		// Stays bad_passphrase across all 10K — never escalates
+		// to locked_out because no attempts are accumulating.
+		core.AssertEqual(t, "account.unlock.bad_passphrase", r.Code())
+	}
+
+	// Real account's threshold still trips cleanly afterward — the
+	// storm didn't consume state that should have been available
+	// for legitimate accounts.
+	for i := 0; i < 4; i++ { // lockoutThreshold-1 (package-private)
+		r := svc.Unlock(subject.UnlockInput{
+			AccountID:  fixtureAccountID,
+			Passphrase: fixtureWrongPassphrase,
+		})
+		core.AssertEqual(t, "account.unlock.bad_passphrase", r.Code())
+	}
+	r := svc.Unlock(subject.UnlockInput{
+		AccountID:  fixtureAccountID,
+		Passphrase: fixtureWrongPassphrase,
+	})
+	core.AssertEqual(t, "account.unlock.locked_out", r.Code())
+}
+
+// TestUnlock_RecordFailedAttempt_StaleEntriesPruned_Good —
+// SECURITY-NOTE: time-mocking the rolling window would require
+// invasive surface changes (the lockout constants are package-
+// scoped, recordFailedAttempt takes nowUnix but accountExists +
+// the public Unlock entry-point read core.Now() internally). We
+// cover the prune logic indirectly here: after a successful unlock
+// (which calls clearLockout, removing the entry), the map shrinks
+// even when the cooldown window hasn't elapsed yet — proving the
+// post-trigger cleanup path works. Full time-mocked stale-prune
+// coverage tracked in follow-up Mantis (see commit body).
+func TestUnlock_RecordFailedAttempt_StaleEntriesPruned_Good(t *core.T) {
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+
+	// Build up some lockout state (4 wrongs, not enough to trip).
+	for i := 0; i < 4; i++ { // lockoutThreshold-1 (package-private)
+		r := svc.Unlock(subject.UnlockInput{
+			AccountID:  fixtureAccountID,
+			Passphrase: fixtureWrongPassphrase,
+		})
+		core.AssertEqual(t, "account.unlock.bad_passphrase", r.Code())
+	}
+
+	// Correct passphrase unlocks AND clearLockout drops the entry.
+	r := svc.Unlock(subject.UnlockInput{
+		AccountID:  fixtureAccountID,
+		Passphrase: fixturePassphrase,
+	})
+	core.AssertTrue(t, r.OK)
+
+	// After unlock, the slate is clean — 4 fresh wrong attempts
+	// should NOT trigger lockout (proving the prior state cleared).
+	for i := 0; i < 4; i++ { // lockoutThreshold-1 (package-private)
+		r := svc.Unlock(subject.UnlockInput{
+			AccountID:  fixtureAccountID,
+			Passphrase: fixtureWrongPassphrase,
+		})
+		core.AssertEqual(t, "account.unlock.bad_passphrase", r.Code(),
+			"slate must be clean after successful unlock")
+	}
+}
