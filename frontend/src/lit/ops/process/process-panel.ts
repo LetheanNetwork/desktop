@@ -18,12 +18,15 @@ type TabId = 'daemons' | 'processes' | 'pipelines';
  * Light-DOM Lit element rendered inside <lthn-process-window>. Composes
  * <process-daemons> / <process-list> + <process-output> / <process-runner>
  * under a header + tab bar + footer. Reads from lthn's REST mount at
- * `api-url` (defaulting to `/api/process`) and streams events from
+ * `api-url` (defaulting to `/v1/api/process` — lthn's canonical mount;
+ * matches go/pkg/process APIBasePath. Defence-in-depth against the
+ * latent silent-success drift if anyone ever mounts `/api/process`
+ * alongside — Cerberus #50 / Mantis #1685) and streams events from
  * `ws-url` when configured.
  */
 @customElement('process-panel')
 export class ProcessPanel extends LitElement {
-  @property({ attribute: 'api-url' }) apiUrl = '/api/process';
+  @property({ attribute: 'api-url' }) apiUrl = '/v1/api/process';
   @property({ attribute: 'ws-url' }) wsUrl = '';
 
   @state() private activeTab: TabId = 'daemons';

@@ -2,7 +2,7 @@
 // E2.5 · processes — <lthn-process-window>
 // Light-DOM Lit element. Composes renderChrome() from ../chrome.js.
 //
-// Renders <lthn-process-panel> against lthn's REST surface at /api/process.
+// Renders <lthn-process-panel> against lthn's REST surface at /v1/api/process.
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../chrome";
