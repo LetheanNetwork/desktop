@@ -33,7 +33,9 @@
 package server
 
 import (
+	"errors"
 	"net/http"
+	"net/url"
 
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
@@ -47,6 +49,33 @@ import (
 // and wildcard at the same depth without the wildcard swallowing
 // the literal.
 const PluginViewCapabilityGrantPath = "/v1/plugin-view/capability-grant"
+
+// MaxPluginViewGrantBodyBytes caps the request body on the
+// capability-grant receiver. 64 KiB is generous (the real payload is
+// ~300 bytes — plugin_id + capability + origin) but matches the
+// /internal/console + /internal/error cap (pkg/bridge) for consistency.
+// Cerberus #1568 F1: an unbounded body lets a bearer-authorised caller
+// POST megabytes that gin streams into the JSON decoder and the
+// audit Meta map writes verbatim to disk. The wrap fires BEFORE
+// ShouldBindJSON so the decoder errors at the cap, not after the audit
+// row commits.
+const MaxPluginViewGrantBodyBytes = 64 << 10 // 64 KiB
+
+// MaxPluginIDBytes caps the plugin_id string field. Plugin codes are
+// FQDN-shaped (e.g. "code.opencode.com") — 256 bytes is 4x the longest
+// realistic value and matches DNS label-sum bounds.
+const MaxPluginIDBytes = 256
+
+// MaxCapabilityBytes caps the capability literal field. Today the
+// allowlist is one entry ("session-token", 13 bytes); 64 bytes leaves
+// headroom for future capability names without admitting abuse.
+const MaxCapabilityBytes = 64
+
+// MaxOriginBytes caps the origin URL field. RFC 3986 has no formal URL
+// length cap; 2 KiB matches the browser-pragmatic Internet Explorer
+// historical limit and exceeds every legitimate localhost loopback
+// origin lthn ships (`http://127.0.0.1:9876` is 22 bytes).
+const MaxOriginBytes = 2 << 10 // 2 KiB
 
 // PluginInstalledChecker reports whether a plugin code corresponds
 // to a currently-installed plugin. cmd/lthn/main.go wires this via
@@ -78,11 +107,57 @@ type pluginViewCapabilityGrantRequest struct {
 // Error codes the endpoint emits. Mirrors the pkg/audit + pkg/account
 // "<namespace>.<verb>.<reason>" discipline so log-tailers + the
 // gateway-status surface can pattern-match.
+//
+// codePluginViewGrantBodyTooLarge is the canonical 413 envelope code
+// per RFC.body-cap-middleware.md Amendment A1 — emitted when
+// http.MaxBytesReader fires before ShouldBindJSON sees the body.
+// Distinct from codePluginViewGrantInvalid so log-tailers can
+// distinguish "abuse-shaped" rejection from "shape-broken request".
 const (
 	codePluginViewGrantInvalid       = "plugin_view.grant.invalid"
 	codePluginViewGrantUnknownPlugin = "plugin_view.grant.unknown_plugin"
 	codePluginViewGrantAuditFailed   = "plugin_view.grant.audit_failed"
+	codePluginViewGrantBodyTooLarge  = "body.too_large"
 )
+
+// isValidPostMessageOrigin accepts only http:// or https:// schemes
+// with a non-empty host + optional port + NO path/query/fragment.
+// Mirrors RFC 6454 origin grammar; rejects javascript:, data:, file:,
+// blob: and any bare-hostname / relative-path value. Does NOT constrain
+// the host to loopback — the manifest source can legitimately be
+// non-loopback (off-box plugin server, future remote-manifest install).
+// What this validator enforces is well-formed postMessage origin shape;
+// host allow-listing is a separate concern at install-time.
+//
+// Usage example:
+//
+//	if !isValidPostMessageOrigin(req.Origin) {
+//	    c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
+//	        "origin must be http(s)://host[:port] with no path"))
+//	    return
+//	}
+//
+// Renamed from isValidLoopbackOrigin per RFC.body-cap-middleware.md
+// Amendment A1 / Cerberus #16 C-1.
+func isValidPostMessageOrigin(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	if u.Host == "" {
+		return false
+	}
+	if u.Path != "" && u.Path != "/" {
+		return false
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	return true
+}
 
 // handlePluginViewCapabilityGrant is the gin handler. Held as a
 // method on *Service so it can read opts.PluginInstalledChecker
@@ -97,15 +172,59 @@ const (
 //           proceed with postMessage)
 //   - 200 — grant recorded; shim is clear to postMessage the token
 func (s *Service) handlePluginViewCapabilityGrant(c *gin.Context) {
+	// Layer 1 body cap (Cerberus #1568 F1) — wraps the body reader
+	// BEFORE ShouldBindJSON so the JSON decoder errors at the cap, not
+	// after the audit row commits. Per RFC.body-cap-middleware.md §3.1.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, MaxPluginViewGrantBodyBytes)
+
 	var req pluginViewCapabilityGrantRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		// Amendment A1 — distinguish "body exceeds cap" (413, canonical
+		// envelope) from "shape-invalid JSON" (400, existing envelope).
+		// errors.As walks the wrap-chain so this fires whether
+		// MaxBytesReader is the only wrap (Layer 1 alone) or stacked
+		// under the future Layer 2 middleware (Unit C).
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			c.JSON(http.StatusRequestEntityTooLarge, coreapi.Fail(codePluginViewGrantBodyTooLarge,
+				"request body exceeds MaxPluginViewGrantBodyBytes"))
+			return
+		}
 		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
 			"invalid request body — expect {plugin_id, capability, origin}"))
+		return
+	}
+	// Per-field caps — belt-and-braces against a 64 KiB body packing
+	// one 60 KiB field. Fires BEFORE audit emission so abusive payloads
+	// never reach the audit substrate.
+	if len(req.PluginID) > MaxPluginIDBytes {
+		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
+			"plugin_id exceeds MaxPluginIDBytes"))
+		return
+	}
+	if len(req.Capability) > MaxCapabilityBytes {
+		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
+			"capability exceeds MaxCapabilityBytes"))
+		return
+	}
+	if len(req.Origin) > MaxOriginBytes {
+		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
+			"origin exceeds MaxOriginBytes"))
 		return
 	}
 	if req.PluginID == "" || req.Capability == "" || req.Origin == "" {
 		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
 			"plugin_id, capability and origin are all required"))
+		return
+	}
+	// Origin scheme + grammar validation — refuse javascript:/data:/file:
+	// (XSS vectors if the audit row ever surfaces in a Lit view that
+	// renders meta.origin as a hyperlink) AND require an absolute URL
+	// (refuse "../../etc" or bare hostnames). Per RFC.body-cap-middleware.md
+	// §3.1 / Amendment A1.
+	if !isValidPostMessageOrigin(req.Origin) {
+		c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
+			"origin must be http(s)://host[:port] with no path"))
 		return
 	}
 	// Capability allowlist mirrors the frontend shim's contract
