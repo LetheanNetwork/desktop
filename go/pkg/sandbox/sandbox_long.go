@@ -35,6 +35,20 @@ const (
 	// defaultReadyTimeout is how long SpawnLong waits for the container
 	// to open its exposed port before declaring failure.
 	defaultReadyTimeout = 30 * core.Second
+
+	// InstallIDLabel is the docker label key SpawnLong stamps when
+	// SpawnLongInput.InstallID is non-empty. Parallels
+	// opencode.InstallIDLabel ("lthn.opencode.install_id"); a future
+	// sandbox-reconcile consumer can gate adoption on this label to
+	// avoid attaching to look-alike sibling-user containers
+	// (Cerberus Mantis #1665 S-3, modelled on Mantis #1599).
+	InstallIDLabel = "lthn.sandbox.install_id"
+
+	// BundleIDLabel is the docker label key SpawnLong stamps when
+	// SpawnLongInput.BundleID is non-empty. Lets a reconcile /
+	// observability consumer map a running container back to the
+	// owning marketplace bundle without re-parsing the manifest.
+	BundleIDLabel = "lthn.sandbox.bundle_id"
 )
 
 // SpawnLongInput drives SpawnLong. All fields are optional except
@@ -66,6 +80,23 @@ type SpawnLongInput struct {
 	// Runtime overrides auto-detected runtime ("docker", "podman").
 	// Empty = auto-detect from host.
 	Runtime string
+
+	// InstallID is the per-install identifier stamped as the
+	// "lthn.sandbox.install_id" docker label. Cerberus Mantis #1665
+	// (S-3) — without this label, SpawnLong containers lack the
+	// adoption-gate identifier that opencode containers carry via
+	// "lthn.opencode.install_id" (Mantis #1599). A future
+	// reconcile consumer can use the label to gate
+	// adoption + filter out look-alike sibling containers.
+	// Empty = label is omitted (callers that pre-date the wiring).
+	InstallID string
+
+	// BundleID is the marketplace bundle identifier stamped as the
+	// "lthn.sandbox.bundle_id" docker label. Lets a future reconcile
+	// / observability consumer map a running container back to the
+	// installed bundle without re-parsing the manifest. Empty =
+	// label is omitted (standalone SpawnLong outside marketplace).
+	BundleID string
 }
 
 // LongVolumeMount maps a named host volume to a container path.
@@ -384,6 +415,18 @@ var hardenedDefaults = []string{
 func (s *Service) buildLongRunArgs(rt, containerName string, hostPort int, input SpawnLongInput) []string {
 	args := []string{"run", "-d", "--name", containerName}
 	args = append(args, hardenedDefaults...)
+
+	// Cerberus Mantis #1665 (S-3) — adoption-gate labels. Empty values
+	// are omitted so pre-wiring callers (and standalone SpawnLong outside
+	// marketplace) keep working unchanged. A future sandbox reconcile
+	// consumer filters on these labels the way opencode.Reconcile filters
+	// on InstallIDLabel (Mantis #1599).
+	if core.Trim(input.InstallID) != "" {
+		args = append(args, "--label", InstallIDLabel+"="+input.InstallID)
+	}
+	if core.Trim(input.BundleID) != "" {
+		args = append(args, "--label", BundleIDLabel+"="+input.BundleID)
+	}
 
 	if hostPort > 0 {
 		args = append(args, "-p",

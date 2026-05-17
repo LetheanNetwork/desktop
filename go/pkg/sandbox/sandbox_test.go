@@ -482,6 +482,65 @@ func TestSandbox_buildLongRunArgs_Ugly(t *core.T) {
 	core.AssertTrue(t, found)
 }
 
+// TestSpawnLong_AppliesInstallIdLabel_Good verifies that SpawnLongInput
+// with non-empty InstallID + BundleID stamps both docker labels into the
+// arg vector (Cerberus Mantis #1665 S-3).
+func TestSpawnLong_AppliesInstallIdLabel_Good(t *core.T) {
+	svc := newTestService(Options{})
+	args := svc.buildLongRunArgs("docker", "lthn-sandbox-sb-labelled", 0, SpawnLongInput{
+		Image:     "alpine:3.21",
+		Command:   "sh",
+		InstallID: "abc123def4567890",
+		BundleID:  "lthn.sample.bundle",
+	})
+
+	wantInstall := InstallIDLabel + "=abc123def4567890"
+	wantBundle := BundleIDLabel + "=lthn.sample.bundle"
+	gotInstall, gotBundle := false, false
+	for i, a := range args {
+		if a == "--label" && i+1 < len(args) {
+			if args[i+1] == wantInstall {
+				gotInstall = true
+			}
+			if args[i+1] == wantBundle {
+				gotBundle = true
+			}
+		}
+	}
+	core.AssertTrue(t, gotInstall)
+	core.AssertTrue(t, gotBundle)
+}
+
+// TestSpawnLong_AppliesInstallIdLabel_Bad verifies that empty InstallID +
+// BundleID omits both labels entirely — pre-wiring callers (standalone
+// SpawnLong outside marketplace) keep their arg vector clean.
+func TestSpawnLong_AppliesInstallIdLabel_Bad(t *core.T) {
+	svc := newTestService(Options{})
+	args := svc.buildLongRunArgs("docker", "lthn-sandbox-sb-bare", 0, SpawnLongInput{
+		Image:   "alpine:3.21",
+		Command: "sh",
+	})
+	for _, a := range args {
+		core.AssertNotEqual(t, "--label", a)
+	}
+}
+
+// TestSpawnLong_AppliesInstallIdLabel_Ugly verifies that whitespace-only
+// InstallID is treated as empty (defence against fixture noise / accidental
+// "   " bindings from upstream config parsers).
+func TestSpawnLong_AppliesInstallIdLabel_Ugly(t *core.T) {
+	svc := newTestService(Options{})
+	args := svc.buildLongRunArgs("docker", "lthn-sandbox-sb-blank", 0, SpawnLongInput{
+		Image:     "alpine:3.21",
+		Command:   "sh",
+		InstallID: "   ",
+		BundleID:  "",
+	})
+	for _, a := range args {
+		core.AssertNotEqual(t, "--label", a)
+	}
+}
+
 // TestSandbox_ContainerHandle_Good verifies ContainerHandle status constants
 // and JSON tags are accessible.
 func TestSandbox_ContainerHandle_Good(t *core.T) {
