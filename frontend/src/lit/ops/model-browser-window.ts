@@ -210,39 +210,14 @@ class LthnModelBrowserWindow extends LitElement {
     this._dlUnsubscribe = [];
   }
 
-  // _startDownload calls the Wails downloader binding for a HuggingFace
-  // model result. url is the resolved .gguf direct-link; name is the
-  // filename used as the local dest under ~/Lethean/conf/models/.
-  // Fires-and-forgets — progress + done arrive on the event bus.
-  async _startDownload(url: string, name: string) {
-    // Optimistic: mark the local entry as downloading before the job id
-    // comes back so the rail reflects the intent immediately.
-    const existing = this.local.find(m => m.name === name);
-    if (!existing) {
-      this.local = [
-        ...this.local,
-        { id: modelSlug(name), name, family: modelFamily(name), size: "—", status: "downloading" },
-      ];
-    } else {
-      this.local = this.local.map(m =>
-        m.name === name ? { ...m, status: "downloading" as const } : m,
-      );
-    }
-    try {
-      const dl = await import("@desktop/downloader/wailsservice");
-      const id: string = await dl.Download(url, name);
-      // Seed the downloads map so the progress bar renders at 0% while
-      // waiting for the first progress event off the wire.
-      const next = new Map(this.downloads);
-      next.set(id, { name, written: 0, total: 0 });
-      this.downloads = next;
-    } catch {
-      // Non-Wails env or binding not yet generated — revert optimistic status.
-      this.local = this.local.map(m =>
-        m.name === name ? { ...m, status: "available" as const } : m,
-      );
-    }
-  }
+  // Download trigger on Hugging Face fixture rows is intentionally
+  // absent: until pkg/downloader can verify the file it receives matches
+  // the digest of the file Hugging Face listed, we don't expose a path
+  // that calls dl.Download / dl.DownloadVerified from this surface. See
+  // Mantis #1682 Shape B (defer) and the F-2 close on #1676. Local-rail
+  // entries still receive downloader bus events for any out-of-band
+  // download started by other surfaces (e.g. CLI), so the progress
+  // overlay in _localItem remains live.
 
   render() {
     const local: LocalModel[] = this.local;
@@ -304,6 +279,12 @@ class LthnModelBrowserWindow extends LitElement {
               <div style="flex:1"></div>
               <span style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);">${results.length} results · huggingface.co</span>
             </div>
+            <div style="font-size:11px; color:var(--fg-3); line-height:1.55; padding:2px 2px 0;">
+              Browsing is a preview — direct downloads from Hugging Face are
+              coming once we have a way to verify the file you receive matches
+              the one listed. Pin a model you'd like first and we'll let you
+              know when it's ready to fetch.
+            </div>
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
               ${["Gemma","Llama","Phi","Qwen","Mistral","≤ 5 GB","≤ 10 GB","Has vision","Has tools"].map((f, i) => html`
                 <span style="font-size:10.5px; padding:3px 9px; border-radius:999px;
@@ -315,18 +296,7 @@ class LthnModelBrowserWindow extends LitElement {
             </div>
           </div>
           <div style="flex:1; overflow:auto; padding:4px 18px 18px; display:flex; flex-direction:column; gap:8px;">
-            ${results.map((r, i) => {
-              // A result is in-flight when a local entry with the same name is downloading.
-              const inFlight = this.local.some(m => m.name === r.name && m.status === "downloading");
-              // Find the active download entry for this result to show progress.
-              const dlEntry = inFlight
-                ? [...this.downloads.values()].find(d => d.name === r.file)
-                : undefined;
-              const pct = dlEntry && dlEntry.total > 0
-                ? Math.round(100 * dlEntry.written / dlEntry.total)
-                : (inFlight ? 0 : -1);
-              const hfUrl = `https://huggingface.co/${r.hfRepo}/resolve/main/${r.file}`;
-              return html`
+            ${results.map((r, i) => html`
               <div style="padding:12px 14px; border-radius:8px;
                           background:${i === 0 ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.025)"};
                           border:1px solid ${i === 0 ? "rgba(64,193,197,0.22)" : "rgba(255,255,255,0.05)"};
@@ -347,23 +317,16 @@ class LthnModelBrowserWindow extends LitElement {
                   </div>
                   <div style="text-align:right; font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">${r.size}</div>
                   <lthn-btn
-                    tone=${inFlight ? "ghost" : i === 0 ? "primary" : "ghost"}
+                    tone="ghost"
                     size="sm"
-                    ?disabled=${inFlight}
-                    @click=${inFlight ? null : () => this._startDownload(hfUrl, r.file)}
+                    disabled
+                    title="Direct download is coming once we can verify the file matches the one listed on Hugging Face."
                     style="--wails-draggable:no-drag;">
-                    <i class="fa-solid fa-${inFlight ? "spinner fa-spin" : "arrow-down"}" style="font-size:10px;"></i>
-                    ${inFlight && pct >= 0 ? `${pct}%` : this.t.btnDownload}
+                    <i class="fa-solid fa-clock" style="font-size:10px;"></i>
+                    Coming soon
                   </lthn-btn>
                 </div>
-                ${inFlight ? html`
-                  <div style="height:2px; background:rgba(255,255,255,0.06); border-radius:1px; margin-top:8px; overflow:hidden;">
-                    <div style="width:${pct >= 0 ? pct : 0}%; height:100%; background:var(--warning-400);
-                                transition:width 250ms linear;"></div>
-                  </div>
-                ` : nothing}
-              </div>`;
-            })}
+              </div>`)}
           </div>
         </main>
 
