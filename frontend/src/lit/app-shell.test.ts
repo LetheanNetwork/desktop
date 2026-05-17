@@ -872,6 +872,176 @@ describe("lthn-app-shell — auth-gate mount (Stage C)", () => {
   });
 });
 
+// ─── Sign-Out wire (Hephaestus #105 — Stage E follow-on B) ────────────
+
+describe("lthn-app-shell — Sign-Out UI wire", () => {
+  // The Sign-Out button is the user-facing affordance for the
+  // /v1/account/lock endpoint that H#51 hardened with session-binding.
+  // Visible only when _authState === "ok" (no point during the gate).
+  // Click → POST /v1/account/lock, clear session-token, dispatch
+  // AUTH_LOCK so the gate hears "user explicitly signed out" and lands
+  // on state="auth" (clean re-unlock surface) instead of state="error"
+  // (which is the 401-fallback surface).
+  type ShellWithSignOut = HTMLElement & {
+    _authState: "setup" | "auth" | "error" | "ok";
+    _onSignOut: () => Promise<void>;
+    updateComplete: Promise<boolean>;
+  };
+
+  it("TestAppShell_SignOutButtonVisibleWhenAuthOk_Good — button renders only while signed in", async () => {
+    const { el, host } = await mountWindow<ShellWithSignOut>("lthn-app-shell");
+    // Default state is "ok" — button visible.
+    expect(el._authState).toBe("ok");
+    const button = host.querySelector('[data-testid="lthn-app-shell-sign-out"]');
+    expect(button).not.toBeNull();
+    expect(button?.getAttribute("title")).toBe("Sign out");
+
+    // Flip to gate-mounted state — button must disappear.
+    el._authState = "error";
+    await el.updateComplete;
+    expect(host.querySelector('[data-testid="lthn-app-shell-sign-out"]')).toBeNull();
+
+    // setup / auth states also hide the button.
+    el._authState = "setup";
+    await el.updateComplete;
+    expect(host.querySelector('[data-testid="lthn-app-shell-sign-out"]')).toBeNull();
+    el._authState = "auth";
+    await el.updateComplete;
+    expect(host.querySelector('[data-testid="lthn-app-shell-sign-out"]')).toBeNull();
+  });
+
+  it("TestAppShell_SignOutClickPOSTsLock_Good — clicking POSTs /v1/account/lock + dispatches AUTH_LOCK", async () => {
+    // Stub fetch BEFORE mount so api-fetch's apiFetch routes through us.
+    // Signature carries (input, init) so the assertion below can read
+    // the method off init[1] without TS narrowing the tuple to length-1.
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      // Reveal binding may run from apiFetch's token loader at module-
+      // load — we only assert on /v1/account/lock specifically.
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const events: Event[] = [];
+    const listener = (ev: Event) => events.push(ev);
+    window.addEventListener("lthn:auth:lock", listener);
+
+    try {
+      const { el, host } = await mountWindow<ShellWithSignOut>("lthn-app-shell");
+      el._authState = "ok";
+      await el.updateComplete;
+
+      const button = host.querySelector('[data-testid="lthn-app-shell-sign-out"]') as HTMLButtonElement | null;
+      expect(button).not.toBeNull();
+      // Capture the promise the click handler returns so we can
+      // await its full chain (apiFetch → dynamic import → fetch →
+      // clearSessionToken → dispatchEvent). Without this hook the
+      // handler's pending microtask chain leaks into the next test
+      // and the AUTH_LOCK dispatch fires after the listener for THIS
+      // test has been removed (or — worse — counts toward the NEXT
+      // test's event tally).
+      let inflight: Promise<void> | null = null;
+      const originalOnSignOut = el._onSignOut.bind(el);
+      el._onSignOut = () => { const p = originalOnSignOut(); inflight = p; return p; };
+      button!.click();
+      // Drain microtasks until the captured promise settles.
+      await new Promise((r) => setTimeout(r, 0));
+      if (inflight) await inflight;
+      await el.updateComplete;
+
+      // Exactly one POST to /v1/account/lock fired.
+      const lockCalls = fetchSpy.mock.calls.filter((call) => {
+        const input = call[0];
+        const url = typeof input === "string" ? input : (input as URL).toString();
+        return url.endsWith("/v1/account/lock");
+      });
+      expect(lockCalls.length).toBe(1);
+      expect(lockCalls[0]![1]?.method).toBe("POST");
+
+      // AUTH_LOCK_EVENT dispatched exactly once.
+      expect(events.length).toBe(1);
+      expect(events[0]!.type).toBe("lthn:auth:lock");
+
+      // Shell flipped to state="auth" so the gate mounts immediately.
+      expect(el._authState).toBe("auth");
+    } finally {
+      window.removeEventListener("lthn:auth:lock", listener);
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("_onSignOut still clears + dispatches when the POST rejects (transport failure)", async () => {
+    // Runner down / network blip MUST still surface the gate so the
+    // user can't be stuck on "I clicked sign-out but nothing happened".
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      throw new Error("network down");
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    // Mount FIRST so prior-test shells with gates that listen for
+    // AUTH_LOCK have settled. Then attach the test listener so it sees
+    // exactly the dispatches caused by THIS test's _onSignOut call.
+    const { el } = await mountWindow<ShellWithSignOut>("lthn-app-shell");
+    el._authState = "ok";
+    await el.updateComplete;
+
+    const events: Event[] = [];
+    const listener = (ev: Event) => events.push(ev);
+    window.addEventListener("lthn:auth:lock", listener);
+
+    try {
+      await el._onSignOut();
+      // POST attempted, AUTH_LOCK still fired, state still flipped.
+      expect(fetchSpy.mock.calls.some((call) => {
+        const input = call[0];
+        const url = typeof input === "string" ? input : (input as URL).toString();
+        return url.endsWith("/v1/account/lock");
+      })).toBe(true);
+      // Exactly one new dispatch from this call. Prior-test mounted
+      // auth-gates that listen for AUTH_LOCK call _deriveState without
+      // re-dispatching, so the test listener only sees the single
+      // direct dispatch from this _onSignOut invocation.
+      expect(events.length).toBe(1);
+      expect(el._authState).toBe("auth");
+    } finally {
+      window.removeEventListener("lthn:auth:lock", listener);
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("_onSignOut is a no-op when _authState is not ok (defensive guard)", async () => {
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response("{}", { status: 200 }),
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const events: Event[] = [];
+    const listener = (ev: Event) => events.push(ev);
+    window.addEventListener("lthn:auth:lock", listener);
+
+    try {
+      const { el } = await mountWindow<ShellWithSignOut>("lthn-app-shell");
+      el._authState = "error";
+      await el.updateComplete;
+      await el._onSignOut();
+      // Defensive guard means no POST + no event when the gate is up.
+      const lockCalls = fetchSpy.mock.calls.filter((call) => {
+        const input = call[0];
+        const url = typeof input === "string" ? input : (input as URL).toString();
+        return url.endsWith("/v1/account/lock");
+      });
+      expect(lockCalls.length).toBe(0);
+      expect(events.length).toBe(0);
+      expect(el._authState).toBe("error");
+    } finally {
+      window.removeEventListener("lthn:auth:lock", listener);
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
 describe("lthn-app-shell — Stage D: boot-time _probeAuthState", () => {
   type ShellWithAuth = HTMLElement & {
     _authState: "ok" | "setup" | "auth" | "error";

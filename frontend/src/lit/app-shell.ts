@@ -46,6 +46,7 @@ import { LitElement, html, nothing } from "lit";
 import { ref as litRef } from "lit/directives/ref.js";
 import { T } from "@lthn/i18n/coreservice";
 import { AUTH_401_EVENT, AUTH_OK_EVENT, type AuthGateState } from "./auth-gate";
+import { apiFetch, clearSessionToken, AUTH_LOCK_EVENT } from "./api-fetch";
 // Plugin-views Unit B.4 — titlebar view-switcher + iframe wrapper
 // per plans/code/lthn/desktop/views/RFC.plugin-views.md §4.1.
 // Side-effect imports register the custom elements; the named imports
@@ -604,6 +605,60 @@ class LthnAppShell extends LitElement {
     } catch {
       // Binding unavailable — degrade silently to 401-fallback path.
     }
+  }
+
+  /** Sign-Out click handler (Hephaestus #105 — Stage E follow-on B).
+   *
+   *  POST /v1/account/lock via apiFetch — session-binding is enforced
+   *  server-side (H#51), so the request only succeeds when the current
+   *  session-token matches the bound IP+UA pair. After the POST:
+   *
+   *   1. clearSessionToken() drops the in-memory token so the next
+   *      apiFetch falls back to LocalKey + the server 401s on any
+   *      session-tier route the user navigates to next.
+   *   2. AUTH_LOCK_EVENT fires so the mounted auth-gate (or the next
+   *      gate instantiation) re-derives and lands on state="auth"
+   *      (clean sign-in surface). This mirrors the AUTH_401_EVENT
+   *      shape — caller-dispatched, listener-handled, the literal
+   *      lives in api-fetch.ts so both sides import the same const.
+   *
+   *  Public visibility is gated on _authState === "ok" — the button
+   *  is only rendered when the user is actually signed in. The handler
+   *  also self-guards to noop when state isn't ok so a stale ref or
+   *  test invocation can't double-fire while the gate is mounted.
+   *
+   *  Closure discipline: no token bytes touch this handler. The POST
+   *  carries the session-token via apiFetch's Authorization header
+   *  (driven by api-fetch's module-scope binding, never exported);
+   *  the clear-then-event sequence is the entire user-facing surface. */
+  async _onSignOut(): Promise<void> {
+    if (this._authState !== "ok") return;
+    try {
+      // Fire-and-forget the lock POST. We don't branch on the response
+      // — a non-200 still terminates the local session client-side so
+      // the user can't end up "signed out per the UI but the server
+      // still holds the session". apiFetch's 401 handler will surface
+      // the auth-gate anyway if the server already considered us
+      // unauthenticated.
+      await apiFetch("/v1/account/lock", { method: "POST" });
+    } catch {
+      // Transport-level failure (runner gone, network blip) — still
+      // drop the local session + show the gate. The server's session
+      // table expires the entry on its own TTL so we don't leak it.
+    }
+    clearSessionToken();
+    try {
+      window.dispatchEvent(new CustomEvent(AUTH_LOCK_EVENT));
+    } catch {
+      // Non-browser context (SSR / worker) — dispatch is best-effort.
+    }
+    // Drive the shell back to the auth gate immediately so the user
+    // doesn't see the previous view body for a frame before the gate
+    // mounts. State="auth" because the account still exists on disk;
+    // setup is reserved for "no account yet" (the gate's own
+    // _deriveState refines this if it disagrees).
+    this._authState = "auth";
+    this._authRequestId = "";
   }
 
   /** Window-level keydown — ⌘P / Ctrl+P toggles the command palette.
@@ -1534,6 +1589,18 @@ class LthnAppShell extends LitElement {
             <button @click=${() => this._select("settings")} title=${this.t.settingsTip} style="width:26px; height:26px; border-radius:6px; background:transparent; border:1px solid transparent; color:var(--fg-3); cursor:pointer;">
               <i class="fa-solid fa-sliders" style="font-size:11px;"></i>
             </button>
+            <!-- Sign-Out (Hephaestus #105 — Stage E follow-on B).
+                 Rendered only when _authState === "ok" so the button
+                 is hidden while the gate covers the body (no point
+                 offering Sign-Out from inside the sign-in surface).
+                 data-testid is the stable hook the suite asserts on. -->
+            ${this._authState === "ok" ? html`
+              <button @click=${() => this._onSignOut()}
+                title="Sign out"
+                data-testid="lthn-app-shell-sign-out"
+                style="width:26px; height:26px; border-radius:6px; background:transparent; border:1px solid transparent; color:var(--fg-3); cursor:pointer;">
+                <i class="fa-solid fa-arrow-right-from-bracket" style="font-size:11px;"></i>
+              </button>` : nothing}
             <button title="Vi" style="width:26px; height:26px; border-radius:6px; background:rgba(64,193,197,0.10); border:1px solid rgba(64,193,197,0.22); color:var(--brand-300); cursor:pointer;">
               <i class="fa-solid fa-feather" style="font-size:11px;"></i>
             </button>

@@ -46,7 +46,7 @@
 
 import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { renderChrome } from "./chrome";
-import { setSessionToken } from "./api-fetch";
+import { setSessionToken, AUTH_LOCK_EVENT } from "./api-fetch";
 
 /** Concrete state names the gate cycles between. Kept as a string-
  *  union so the property reflects to an attribute and the test harness
@@ -183,15 +183,35 @@ class LthnAuthGate extends LitElement {
     this.state = "error";
   };
 
+  /** Bound AUTH_LOCK listener (Hephaestus #105 — Sign-Out wire) —
+   *  the app-shell Sign-Out button dispatches lthn:auth:lock AFTER
+   *  POSTing /v1/account/lock + calling clearSessionToken(). The gate
+   *  hears it and lands on state="auth" so the user sees the
+   *  passphrase prompt instead of the framed-error surface (which is
+   *  reserved for "server rejected").
+   *
+   *  Distinct branch from _on401 because the cause is different —
+   *  user explicitly signed out, the account still exists on disk,
+   *  the natural next surface is "unlock", not "something failed".
+   *  We re-derive instead of hard-setting state="auth" so a race
+   *  where the backend reports has_user_account=false (account was
+   *  deleted out-of-band between unlock + lock) still lands the user
+   *  on the setup surface rather than a stale auth screen. */
+  private _onAuthLock = () => {
+    void this._deriveState();
+  };
+
   async connectedCallback() {
     super.connectedCallback();
     window.addEventListener(AUTH_401_EVENT, this._on401);
+    window.addEventListener(AUTH_LOCK_EVENT, this._onAuthLock);
     await this._deriveState();
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener(AUTH_401_EVENT, this._on401);
+    window.removeEventListener(AUTH_LOCK_EVENT, this._onAuthLock);
   }
 
   /** Probe the backend for whether a Lethean Account exists. Sets

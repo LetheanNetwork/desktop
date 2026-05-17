@@ -291,6 +291,29 @@ export function clearApiToken(): void {
  *  dependency on the lit-element layer. */
 export const AUTH_401_EVENT = "lthn:auth:401";
 
+/** CustomEvent name dispatched on `window` after a user-initiated
+ *  Sign-Out (POST /v1/account/lock). Mirrors the AUTH_401_EVENT
+ *  shape: a constant defined here so the emitter (app-shell's
+ *  Sign-Out click handler) and the listener (auth-gate) can't drift.
+ *
+ *  Distinct from AUTH_401_EVENT because the cause is different — 401
+ *  is "server rejected", AUTH_LOCK is "user explicitly signed out".
+ *  auth-gate listens for both: 401 lands on state=error (recovery
+ *  surface), AUTH_LOCK lands on state=auth (clean re-unlock surface)
+ *  per the brief's "cleanly returns to auth state" requirement.
+ *
+ *  Usage (caller-side dispatch, mirrors AUTH_401_EVENT pattern):
+ *
+ *    import { AUTH_LOCK_EVENT, clearSessionToken } from "./api-fetch";
+ *    await apiFetch("/v1/account/lock", { method: "POST" });
+ *    clearSessionToken();
+ *    window.dispatchEvent(new CustomEvent(AUTH_LOCK_EVENT));
+ *
+ *  api-fetch does NOT dispatch AUTH_LOCK_EVENT itself — the lock POST
+ *  is a deliberate user action driven by a UI affordance, not a
+ *  transport-layer side-effect like the 401 fallback. */
+export const AUTH_LOCK_EVENT = "lthn:auth:lock";
+
 /** Same-origin fetch wrapper that injects Authorization: Bearer.
  *  Drop-in replacement for fetch — callers don't change their
  *  request/response handling. Pass the same (input, init) you'd

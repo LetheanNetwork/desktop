@@ -208,6 +208,86 @@ describe("<lthn-auth-gate> — 401 listener", () => {
   });
 });
 
+// ─── AUTH_LOCK listener (Hephaestus #105 — Stage E follow-on B) ───────
+
+import { AUTH_LOCK_EVENT } from "./api-fetch";
+
+describe("TestAuthGate_AfterSignOut_RendersAuthState_Good", () => {
+  // The Sign-Out button in app-shell dispatches AUTH_LOCK_EVENT after
+  // POSTing /v1/account/lock. The gate listens for it and re-derives
+  // state via AccountStatus — landing on "auth" when the account
+  // still exists on disk (the common case). This is distinct from the
+  // 401 listener (state=error / framed-failure surface) because the
+  // cause is user-initiated, not server-rejected.
+  beforeEach(() => {
+    asMockFn(AccountStatus).mockReset();
+    asMockFn(IssueBootstrapToken).mockReset();
+    asMockFn(IssueBootstrapTokenForScope).mockReset();
+    document.body.innerHTML = "";
+    asMockFn(AccountStatus).mockResolvedValue({
+      OK: true,
+      Value: { has_user_account: true, account_id: "act-test" },
+    });
+  });
+
+  it("AUTH_LOCK_EVENT triggers state=auth re-derivation when account exists", async () => {
+    const el = await mount();
+    expect(el.state).toBe("auth");
+    // Force state into "ok" so we can prove the listener re-derives
+    // (gate normally gets here after a successful unlock flips it).
+    el.state = "ok";
+    await el.updateComplete;
+
+    // Arm a fresh response for the AUTH_LOCK re-derivation.
+    asMockFn(AccountStatus).mockResolvedValueOnce({
+      OK: true,
+      Value: { has_user_account: true, account_id: "act-test" },
+    });
+
+    window.dispatchEvent(new CustomEvent(AUTH_LOCK_EVENT));
+    // _onAuthLock awaits _deriveState — settle microtasks + a tick.
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.state).toBe("auth");
+  });
+
+  it("AUTH_LOCK_EVENT after account-was-deleted lands on setup not auth", async () => {
+    // Edge: user deleted the account out-of-band between unlock and
+    // sign-out. Re-deriving picks up has_user_account=false and the
+    // user lands on the setup surface — better than a stale auth
+    // screen that would just bounce on the next unlock attempt.
+    const el = await mount();
+    el.state = "ok";
+    await el.updateComplete;
+
+    asMockFn(AccountStatus).mockResolvedValueOnce({
+      OK: true,
+      Value: { has_user_account: false },
+    });
+
+    window.dispatchEvent(new CustomEvent(AUTH_LOCK_EVENT));
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.state).toBe("setup");
+  });
+
+  it("AUTH_LOCK_EVENT listener detached on disconnectedCallback", async () => {
+    const el = await mount();
+    const stateBefore = el.state;
+    el.remove();
+    // After teardown, dispatching AUTH_LOCK must NOT mutate the
+    // detached element's state (the AccountStatus mock would otherwise
+    // resolve and re-set it).
+    asMockFn(AccountStatus).mockResolvedValueOnce({
+      OK: true,
+      Value: { has_user_account: false },
+    });
+    window.dispatchEvent(new CustomEvent(AUTH_LOCK_EVENT));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(el.state).toBe(stateBefore);
+  });
+});
+
 describe("<lthn-auth-gate> — Run setup click handler (Stage X.B Phase 3)", () => {
   // Stage X.B replaces the empty-body /v1/account/create flow with
   // /v1/account/provision — the gate now collects a passphrase +

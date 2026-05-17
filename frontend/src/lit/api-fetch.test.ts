@@ -48,6 +48,7 @@ describe("TestApiFetch_ExportSnapshot_Good", () => {
     expect(exportedNames).toEqual([
       "AUTH_401_EVENT",
       "AUTH_GRANT_TYPE",
+      "AUTH_LOCK_EVENT",
       "CAPABILITY_GRANT_AUDIT_PATH",
       "apiFetch",
       "clearApiToken",
@@ -407,6 +408,26 @@ describe("TestApiFetch_GrantTokenToFrame_PostMessageThrowReturnsNotOk_Bad", () =
 
     dispatchSpy.mockRestore();
     mod.clearSessionToken();
+  });
+});
+
+// ─── AUTH_LOCK_EVENT — Sign-Out wire constant (Hephaestus #105) ───────
+
+describe("TestApiFetch_AuthLockEventConstant_Good", () => {
+  it("AUTH_LOCK_EVENT is the canonical lthn:auth:lock literal", async () => {
+    const mod = await import("./api-fetch");
+    // Emitter (app-shell Sign-Out handler) and listener (auth-gate)
+    // must agree on the literal. Pin it here so a typo in either
+    // location surfaces as a test failure.
+    expect(mod.AUTH_LOCK_EVENT).toBe("lthn:auth:lock");
+  });
+
+  it("AUTH_LOCK_EVENT is distinct from AUTH_401_EVENT", async () => {
+    const mod = await import("./api-fetch");
+    // Brief done-criterion: user-initiated lock vs server-rejected 401
+    // route to different auth-gate state transitions, so the two
+    // event names MUST NOT collide.
+    expect(mod.AUTH_LOCK_EVENT).not.toBe(mod.AUTH_401_EVENT);
   });
 });
 
