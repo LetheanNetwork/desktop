@@ -125,6 +125,12 @@ func (g *lthnRoutes) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/v1/models", g.server.handleModels)
 	rg.POST("/v1/chat/completions", g.server.handleChat)
 	rg.POST("/v1/completions", g.server.handleCompletion)
+	// Mantis #1523 — plugin-view shim audit-grant receiver. POST'd
+	// by the frontend shim BEFORE postMessage'ing token bytes to the
+	// iframe so the audit row commits first; failure blocks delivery.
+	// Mounted on lthnRoutes (not the /v1/api/plugin/:code/*proxyPath
+	// wildcard) so the literal path resolves cleanly.
+	rg.POST(PluginViewCapabilityGrantPath, g.server.handlePluginViewCapabilityGrant)
 }
 
 // handleModels returns the OpenAI /v1/models list. Routes through the

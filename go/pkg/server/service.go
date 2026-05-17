@@ -179,6 +179,18 @@ type Options struct {
 	// same verifier the Wails surface uses (ServerKey.IssueBootstrapToken)
 	// is the one the HTTP middleware accepts tokens against.
 	ServerKey serverkey.Verifier
+
+	// PluginInstalledChecker, when non-nil, validates plugin_id on
+	// the /v1/plugin-view/capability-grant receiver (Mantis #1523).
+	// cmd/lthn/main.go wires this from the same pkg/plugin.Service
+	// that hosts the proxy: opts.PluginInstalledChecker =
+	// pluginSvc.ProxyGroup().Has — so a capability grant is only
+	// audited for plugins that are actually running.
+	//
+	// Nil leaves the check off — useful for tests and non-desktop
+	// builds that don't wire pkg/plugin. The audit row still emits;
+	// only the plugin_id gate is skipped.
+	PluginInstalledChecker PluginInstalledChecker
 }
 
 // BootstrapPathScopes names every HTTP path the bootstrap-auth
@@ -245,6 +257,14 @@ var RouteTiers = map[string]RouteTier{
 	// (single-user desktop assumption; per-account scoping is Stage F+
 	// work IF multi-user desktop becomes a deploy mode).
 	"/v1/audit/events": TierSession,
+	// Mantis #1523 — plugin-view capability-grant audit receiver.
+	// TierLocal because the grant happens BEFORE the iframe holds
+	// its own session-token: the WebView app-shell's host bearer
+	// (LocalKey OR an already-unlocked session) is what authorises
+	// the audit emission. Tightening to TierSession would force the
+	// user to unlock before any iframe-kind plugin can complete its
+	// §5.1 handshake, breaking the pre-unlock plugin-view flow.
+	PluginViewCapabilityGrantPath: TierLocal,
 }
 
 // RouteTierPrefixes classifies route GROUPS by URL prefix per
