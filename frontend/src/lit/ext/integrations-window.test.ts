@@ -15,7 +15,6 @@ vi.mock("@desktop/opencode/wailsservice", () => ({
   WOpenTUI:               vi.fn(async () => ({ OK: true, Value: null })),
   WOpenStudio:            vi.fn(async () => ({ OK: true, Value: null })),
   WIsStudioInstalled:     vi.fn(async () => ({ OK: true, Value: false })),
-  WUpgrade:               vi.fn(async () => ({ OK: false, Value: { Code: "upgrade.requires_confirmation" } })),
   WUpgradeWithConsent:    vi.fn(async () => ({ OK: true, Value: { updated: false } })),
 }));
 
@@ -52,7 +51,7 @@ import { setCallHandler, clearCallHandlers, setDefaultCallHandler, resetDefaultC
  *  value in. Re-using it here so the connectedCallback Promise.all
  *  resolves with a usable string per messageID rather than null. */
 const BID_I18N_T = 1099757357;
-import { WUpgrade, WUpgradeWithConsent } from "@desktop/opencode/wailsservice";
+import { WUpgradeWithConsent } from "@desktop/opencode/wailsservice";
 import "./integrations-window";
 
 /** Wait long enough for the lazy connectedCallback awaits (i18n + 4
@@ -78,7 +77,6 @@ beforeEach(() => {
   // Any other binding-id from incidental traffic resolves to null so
   // it doesn't reject and trigger Lit's unhandled rejection path.
   setDefaultCallHandler(async () => null);
-  vi.mocked(WUpgrade).mockClear();
   vi.mocked(WUpgradeWithConsent).mockClear();
 });
 
@@ -119,9 +117,8 @@ describe("lthn-integrations-window — Upgrade dialog (Mantis #1623)", () => {
     const dialog = host.querySelector("[data-testid='oc-upgrade-dialog']");
     expect(dialog, "click must open the supply-chain warning dialog").not.toBeNull();
     expect(dialog!.getAttribute("role")).toBe("dialog");
-    // Click alone must NOT fire either upgrade path — that only happens
+    // Click alone must NOT fire the upgrade path — that only happens
     // after the user confirms inside the dialog.
-    expect(WUpgrade).not.toHaveBeenCalled();
     expect(WUpgradeWithConsent).not.toHaveBeenCalled();
   });
 
@@ -150,9 +147,6 @@ describe("lthn-integrations-window — Upgrade dialog (Mantis #1623)", () => {
     expect(call.confirmed_by_user).toBe(true);
     expect(call.restart_sandboxes).toBe(false);
     expect(call.image_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
-    // Legacy fail-closed WUpgrade must NOT be invoked from the
-    // dialog confirm path — that's the regression this lane guards.
-    expect(WUpgrade).not.toHaveBeenCalled();
     // Dialog closes after confirm.
     expect(host.querySelector("[data-testid='oc-upgrade-dialog']")).toBeNull();
   });
@@ -207,7 +201,7 @@ describe("lthn-integrations-window — Upgrade dialog (Mantis #1623)", () => {
     expect(call.image_digest).toBe(newDigest);
   });
 
-  it("Test_UpgradeDialog_Cancel_NoCall_Good — Cancel closes dialog without calling either Upgrade path", async () => {
+  it("Test_UpgradeDialog_Cancel_NoCall_Good — Cancel closes dialog without calling the Upgrade path", async () => {
     const { host, el } = await mountWindow("lthn-integrations-window");
     await settleConnect(el);
 
@@ -221,7 +215,6 @@ describe("lthn-integrations-window — Upgrade dialog (Mantis #1623)", () => {
     await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete;
 
     expect(host.querySelector("[data-testid='oc-upgrade-dialog']")).toBeNull();
-    expect(WUpgrade).not.toHaveBeenCalled();
     expect(WUpgradeWithConsent).not.toHaveBeenCalled();
   });
 });

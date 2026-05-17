@@ -247,23 +247,6 @@ func (w *WailsService) WListImportedProviders() core.Result {
 	return core.Ok(views)
 }
 
-// WUpgrade is the legacy zero-arg entry point. Calls Service.Upgrade
-// which, post-Cerberus #22 MED-2 / Mantis #1619, equivalent to
-// UpgradeWithConsent(UpgradeInput{}) → fail-closes with
-// "upgrade.requires_confirmation". Preserved so the pre-#1623
-// frontend caller still compiles while the dedicated frontend
-// dialog lane (filed alongside #1623) migrates to
-// WUpgradeWithConsent. Once that lane lands, this method becomes
-// a candidate for removal.
-//
-// Returns Fail("upgrade.requires_confirmation") on every call.
-func (w *WailsService) WUpgrade() core.Result {
-	if w == nil || w.svc == nil {
-		return core.Fail(core.E("opencode.WUpgrade", "service not bound", nil))
-	}
-	return w.svc.Upgrade()
-}
-
 // WUpgradeWithConsent pulls the configured image (lthn/dev:latest)
 // and — when in.RestartSandboxes is true — restarts any running
 // sandbox if the digest changed. UI button "Check for updates /

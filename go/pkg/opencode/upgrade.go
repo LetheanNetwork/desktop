@@ -128,20 +128,6 @@ type UpgradeResult struct {
 	Restarted []string `json:"restarted"`
 }
 
-// Upgrade is the legacy entry point. It is now equivalent to
-// UpgradeWithConsent(UpgradeInput{}) — i.e. always fails with
-// "upgrade.requires_confirmation". Kept so existing call-sites
-// (control.go HTTP handler, wails.go bridge) compile while the
-// follow-up wiring tickets thread an explicit UpgradeInput through.
-//
-// Usage example:
-//
-//	r := svc.Upgrade()
-//	// r.OK == false; r.Code() == "upgrade.requires_confirmation"
-func (s *Service) Upgrade() core.Result {
-	return s.UpgradeWithConsent(UpgradeInput{})
-}
-
 // UpgradeWithConsent pulls the configured image pinned to the
 // requested in.ImageDigest when the caller has explicitly confirmed,
 // and — when in.RestartSandboxes is true — restarts any running

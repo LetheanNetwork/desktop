@@ -31,19 +31,6 @@ func TestUpgrade_RequiresConfirmation_Bad(t *testing.T) {
 		t.Errorf("UpgradeWithConsent error = %q; want substring %q",
 			got, "upgrade.requires_confirmation")
 	}
-
-	// The legacy parameterless entry point is now equivalent to
-	// UpgradeWithConsent(UpgradeInput{}) — i.e. default-deny. Any
-	// pre-existing caller that hasn't been updated to thread an
-	// UpgradeInput through reaches the gate, not the pull.
-	r2 := svc.Upgrade()
-	if r2.OK {
-		t.Fatalf("legacy Upgrade() succeeded; want default-deny Fail")
-	}
-	if got := r2.Error(); !strings.Contains(got, "upgrade.requires_confirmation") {
-		t.Errorf("legacy Upgrade() error = %q; want substring %q",
-			got, "upgrade.requires_confirmation")
-	}
 }
 
 // TestUpgrade_NoAutoRestartByDefault_Good — UpgradeInput with

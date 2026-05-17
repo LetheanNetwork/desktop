@@ -3,22 +3,19 @@
 // HTTP + Wails thread-through tests for the UpgradeInput consent gate
 // (Mantis #1623, follow-on to Cerberus #22 MED-2 / Mantis #1619).
 //
-// Before #1623 the HTTP handler at /v1/api/opencode/upgrade and the
-// Wails binding WUpgrade both called the parameterless Service.Upgrade
-// which, post-#1619, fail-closes with "upgrade.requires_confirmation"
-// — i.e. every upgrade attempt failed. These tests pin the body /
-// parameter wiring so:
+// These tests pin the body / parameter wiring so:
 //
-//   1. The HTTP handler decodes the JSON body into UpgradeInput, threads
-//      it through to Service.UpgradeWithConsent, and a missing /
-//      ConfirmedByUser=false body surfaces as 400 Bad Request with
-//      audit outcome=denied (caller-supplied request rejected, distinct
-//      from substrate failure which stays outcome=error / 500).
-//   2. The Wails WUpgrade(in UpgradeInput) binding threads the input
-//      through to Service.UpgradeWithConsent verbatim — a zero
-//      UpgradeInput{} reaches the consent gate (matching the legacy
-//      Upgrade() fail-closed contract), and an UpgradeInput with
-//      ConfirmedByUser=true passes the gate.
+//   1. The HTTP handler at /v1/api/opencode/upgrade decodes the JSON
+//      body into UpgradeInput, threads it through to
+//      Service.UpgradeWithConsent, and a missing / ConfirmedByUser=false
+//      body surfaces as 400 Bad Request with audit outcome=denied
+//      (caller-supplied request rejected, distinct from substrate
+//      failure which stays outcome=error / 500).
+//   2. The Wails WUpgradeWithConsent(in UpgradeInput) binding threads
+//      the input through to Service.UpgradeWithConsent verbatim — a zero
+//      UpgradeInput{} reaches the consent gate (fail-closed), and an
+//      UpgradeInput with ConfirmedByUser=true + valid digest passes
+//      the gate.
 //
 // "Good" success-path tests prove gate-passed rather than full
 // docker-pull integration — the Service requires a process service
@@ -214,30 +211,6 @@ func TestUpgradeHTTP_DigestValid_PassesGate_Good(t *testing.T) {
 		t.Errorf("audit outcome = denied; want error (a gate fired — "+
 			"body decode did not reach Service.UpgradeWithConsent). meta=%+v",
 			events[0].Meta)
-	}
-}
-
-// TestUpgradeWails_LegacyWUpgrade_FailClosed_Bad — the zero-arg
-// WUpgrade() legacy entry point MUST fail-close with
-// "upgrade.requires_confirmation". Preserved post-Mantis #1623 so the
-// pre-#1623 frontend caller still compiles, but the underlying
-// Service.Upgrade now equals UpgradeWithConsent(UpgradeInput{}) which
-// the consent gate refuses without side effects.
-//
-// Documents the shim contract: the legacy method is a compile-only
-// preservation. The frontend dialog lane is expected to migrate to
-// WUpgradeWithConsent; once that lands this entry point becomes a
-// removal candidate.
-func TestUpgradeWails_LegacyWUpgrade_FailClosed_Bad(t *testing.T) {
-	w := NewWailsService(&Service{})
-	r := w.WUpgrade()
-	if r.OK {
-		t.Fatalf("legacy WUpgrade() returned OK; want fail-closed Fail " +
-			"(Cerberus #22 MED-2 / Mantis #1619 + #1623)")
-	}
-	if got := r.Error(); !strings.Contains(got, "upgrade.requires_confirmation") {
-		t.Errorf("legacy WUpgrade() error = %q; want substring %q",
-			got, "upgrade.requires_confirmation")
 	}
 }
 
