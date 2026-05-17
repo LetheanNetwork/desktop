@@ -204,7 +204,15 @@ func (g *ControlGroup) listImportedProviders(c *gin.Context) {
 // Emits the EventOpencodeSandboxWebURLIssued audit event on success
 // per Cerberus #22 #1602 (audit-gap finding) — narrowed to this
 // endpoint; the broader opencode-control audit sweep is a follow-up.
+//
+// RequestID is server-generated per Cerberus #18 / Mantis #1511 / #1605
+// — caller-supplied X-Request-Id is intentionally dropped so an
+// attacker cannot mint forged audit-JOIN keys. The server's UUIDv4 is
+// echoed in the response X-Request-Id header so the legitimate caller
+// can still correlate to the audit log.
 func (g *ControlGroup) webURL(c *gin.Context) {
+	srvReqID := newRequestID()
+	c.Header("X-Request-Id", srvReqID)
 	id := core.TrimCutset(c.Param("id"), "/ ")
 	r := g.svc.WebURL(id)
 	if !r.OK {
@@ -220,7 +228,7 @@ func (g *ControlGroup) webURL(c *gin.Context) {
 		TS:        core.Now().UTC().Unix(),
 		Scope:     "opencode.sandbox.web",
 		Outcome:   audit.OutcomeOK,
-		RequestID: c.GetHeader("X-Request-Id"),
+		RequestID: srvReqID,
 		Meta: map[string]any{
 			"sandbox_id":  id,
 			"auth_scheme": info.Auth.Scheme,

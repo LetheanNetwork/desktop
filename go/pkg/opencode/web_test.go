@@ -153,13 +153,15 @@ func (r *inMemoryRecorder) snapshot() []audit.Event {
 // the heavy backing infra.
 func stubWebURLHandler(info WebInfo) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		srvReqID := newRequestID()
+		c.Header("X-Request-Id", srvReqID)
 		id := core.TrimCutset(c.Param("id"), "/ ")
 		_ = audit.Default().Record(audit.Event{
 			Event:     EventOpencodeSandboxWebURLIssued,
 			TS:        core.Now().UTC().Unix(),
 			Scope:     "opencode.sandbox.web",
 			Outcome:   audit.OutcomeOK,
-			RequestID: c.GetHeader("X-Request-Id"),
+			RequestID: srvReqID,
 			Meta: map[string]any{
 				"sandbox_id":  id,
 				"auth_scheme": info.Auth.Scheme,
@@ -246,9 +248,18 @@ func TestSandboxWebURL_AuditEmitted_Good(t *testing.T) {
 	if ev.Outcome != audit.OutcomeOK {
 		t.Fatalf("outcome = %q; want %q", ev.Outcome, audit.OutcomeOK)
 	}
-	if ev.RequestID != "req-test-1" {
-		t.Fatalf("request id = %q; want %q from X-Request-Id header",
-			ev.RequestID, "req-test-1")
+	// RequestID is server-generated per Cerberus #18 / Mantis #1511 / #1605
+	// — caller-supplied "req-test-1" header MUST be dropped (forensic
+	// deniability attack surface). Strict server-override assertion lives
+	// in TestSandboxWebURL_RequestIDOverriddenByServer_Ugly below; this
+	// test only asserts the field is populated by the server-gen UUIDv4.
+	if ev.RequestID == "req-test-1" {
+		t.Fatalf("request id = caller-forged %q — server MUST override "+
+			"per Cerberus #18 / Mantis #1511 / #1605", ev.RequestID)
+	}
+	if len(ev.RequestID) != 36 {
+		t.Fatalf("request id = %q (len %d); want server-generated UUIDv4 (36 chars)",
+			ev.RequestID, len(ev.RequestID))
 	}
 	if got, _ := ev.Meta["sandbox_id"].(string); got != "oc-aud" {
 		t.Fatalf("meta.sandbox_id = %v; want oc-aud", ev.Meta["sandbox_id"])
@@ -272,5 +283,56 @@ func TestSandboxWebURL_AuditEmitted_Good(t *testing.T) {
 		if k == "password" || k == "token" || k == "secret" || k == "userinfo" {
 			t.Fatalf("Meta carries a credential-shaped key %q = %q", k, s)
 		}
+	}
+}
+
+// TestSandboxWebURL_RequestIDOverriddenByServer_Ugly — Cerberus #18 /
+// Mantis #1511 / #1605 fold for the webURL endpoint. The pre-fix
+// handler trusted the caller's X-Request-Id header for the audit
+// RequestID, enabling forensic deniability (attacker forges the value
+// to mimic a legitimate caller's audit-JOIN key, defeating the
+// disambiguation property the field exists to provide). Caller-supplied
+// X-Request-Id MUST NOT appear in either the audit row or the response
+// header — the server's UUIDv4 must overwrite both, and the response
+// header must echo the audit row's RequestID so the legitimate caller
+// can still correlate.
+func TestSandboxWebURL_RequestIDOverriddenByServer_Ugly(t *testing.T) {
+	const attackerForged = "forged-value"
+	fake := &inMemoryRecorder{}
+	audit.SetDefault(fake)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	gin.SetMode(gin.TestMode)
+	e := gin.New()
+	e.GET("/sandbox/:id/web",
+		stubWebURLHandler(buildWebInfo(51823)))
+
+	req := httptest.NewRequest(core.MethodGet, "/sandbox/oc-ugly/web", nil)
+	req.Header.Set("X-Request-Id", attackerForged)
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+
+	if w.Code != core.StatusOK {
+		t.Fatalf("status = %d; want 200", w.Code)
+	}
+	events := fake.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("want exactly 1 audit event; got %d", len(events))
+	}
+	ev := events[0]
+	if ev.RequestID == attackerForged {
+		t.Fatalf("audit RequestID = caller-forged value %q — server MUST override "+
+			"per Cerberus #18 / Mantis #1511 / #1605", ev.RequestID)
+	}
+	if len(ev.RequestID) != 36 {
+		t.Errorf("audit RequestID = %q (len %d); want server-generated UUIDv4 (36 chars)",
+			ev.RequestID, len(ev.RequestID))
+	}
+	if got := w.Header().Get("X-Request-Id"); got == attackerForged {
+		t.Errorf("response X-Request-Id header = caller-forged %q — server MUST overwrite", got)
+	}
+	if got := w.Header().Get("X-Request-Id"); got != ev.RequestID {
+		t.Errorf("response X-Request-Id header = %q; want match audit RequestID %q "+
+			"(so legitimate caller can correlate to the audit log)", got, ev.RequestID)
 	}
 }
