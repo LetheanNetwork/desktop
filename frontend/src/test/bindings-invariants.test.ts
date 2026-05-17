@@ -38,9 +38,9 @@
 // shape-change rather than tightening the regex into false-confidence.
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, relative } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // frontend/src/test/ → frontend/ → bindings/dappco.re/go/models.ts
@@ -48,6 +48,9 @@ const MODELS_TS = resolve(
   __dirname,
   "../../bindings/dappco.re/go/models.ts",
 );
+// frontend/src/test/ → frontend/ → bindings/ (the auto-discovery root for
+// the Mantis #1694 ADD-1 nested-struct-return sweep below).
+const BINDINGS_ROOT = resolve(__dirname, "../../bindings");
 
 /** Extract the `{ … }` body of `export class Core` from the source.
  *  Brace-balanced scan from the first `{` after the class header.
@@ -142,5 +145,204 @@ describe("bindings-invariants — wails3-generator nested-struct shape", () => {
     // leave the forbidden-methods scan trivially passing.
     expect(body).toMatch(/constructor\s*\(/);
     expect(body).toMatch(/static\s+createFrom\s*\(/);
+  });
+});
+
+// Mantis #1694 (ADD-1) — generalise the Core-class invariant across
+// EVERY generated models.ts under frontend/bindings/**. The wails3
+// binding-generator's policy of marshalling nested struct returns as
+// method-less classes (constructor + static createFrom only) is the
+// load-bearing property the TierGoOnly substrate gate relies on
+// (Cerberus #55 ADD-1 / RFC.wails-surface §6). If a future wails3
+// release flips that policy — even on a sibling-pkg nested struct that
+// the Sandbox-specific test never sees — the invariant silently breaks
+// for that pkg and the substrate-tier assumption fragments.
+//
+// Auto-discover all models.ts under bindings/ and walk every
+// `export class <Name>` block. Same brace-balanced extractor + same
+// method-position scan as the Core-class pin above. Allow-list stays
+// `constructor` + `static createFrom`.
+//
+// SECURITY-NOTE escape valve: if the binding shape changes in a way
+// that makes string-matching brittle (generator switches to a non-class
+// form, minifies, emits decorators, etc.), surface the shape-change
+// rather than tightening the regex into false-confidence.
+
+function discoverModelsFiles(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      const p = resolve(dir, name);
+      let st;
+      try {
+        st = statSync(p);
+      } catch {
+        continue;
+      }
+      if (st.isDirectory()) {
+        walk(p);
+      } else if (st.isFile() && name === "models.ts") {
+        out.push(p);
+      }
+    }
+  };
+  walk(root);
+  return out.sort();
+}
+
+// extractAllClassBodies walks the source and returns
+// [{name, body}, ...] for every `export class <Name>` block, body
+// WITHOUT the enclosing braces. Brace-balanced — string literals and
+// template strings are NOT specially parsed; the generator output is
+// regular enough that this holds (no `{` or `}` inside JSDoc / type
+// annotations at class-body depth). If a future shape breaks the scan,
+// the sanity assertion at the end of the test catches the regression.
+function extractAllClassBodies(source: string): Array<{ name: string; body: string }> {
+  const out: Array<{ name: string; body: string }> = [];
+  const headerRe = /export\s+class\s+([A-Za-z_$][\w$]*)\b/g;
+  for (const m of source.matchAll(headerRe)) {
+    const name = m[1];
+    const headerIdx = m.index ?? -1;
+    if (headerIdx < 0) continue;
+    const openIdx = source.indexOf("{", headerIdx);
+    if (openIdx < 0) continue;
+    let depth = 0;
+    let bodyEnd = -1;
+    for (let i = openIdx; i < source.length; i++) {
+      const ch = source[i];
+      if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          bodyEnd = i;
+          break;
+        }
+      }
+    }
+    if (bodyEnd < 0) continue;
+    out.push({ name, body: source.slice(openIdx + 1, bodyEnd) });
+  }
+  return out;
+}
+
+describe("bindings-invariants — all nested-struct return classes (Mantis #1694)", () => {
+  const modelsFiles = discoverModelsFiles(BINDINGS_ROOT);
+
+  it("TestBindings_AllClasses_NoCallableMethods — every generated class has only constructor + static createFrom", () => {
+    // Bootstrap sanity — the sweep is load-bearing; if discovery returns
+    // zero files something is wrong with the bindings layout and the
+    // test would trivially pass.
+    expect(modelsFiles.length).toBeGreaterThan(0);
+
+    type Violation = { file: string; class: string; methods: string[] };
+    const violations: Violation[] = [];
+    let classCount = 0;
+
+    // JS reserved words / control-flow keywords that can legally appear
+    // at line-start followed by `(` inside a constructor body
+    // (`if (…)`, `for (…)`, `switch (…)` etc). Method declarations
+    // cannot use these names, so excluding them eliminates false
+    // positives without weakening the invariant.
+    const CONTROL_FLOW = new Set<string>([
+      "if",
+      "else",
+      "for",
+      "while",
+      "do",
+      "switch",
+      "case",
+      "catch",
+      "return",
+      "throw",
+      "new",
+      "typeof",
+      "delete",
+      "void",
+      "yield",
+      "await",
+      "in",
+      "of",
+    ]);
+
+    for (const file of modelsFiles) {
+      const source = readFileSync(file, "utf8");
+      const classes = extractAllClassBodies(source);
+      classCount += classes.length;
+      for (const { name, body } of classes) {
+        const stripped = body
+          // block comments /** … */
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          // line comments // …
+          .replace(/\/\/[^\n]*/g, "");
+
+        // Method-position scan that excludes nested-block content:
+        // a method declaration appears at depth-1 inside the class
+        // body (depth-0 is the class-body extracted above; nested
+        // method/constructor bodies open additional braces). Walk the
+        // stripped source tracking brace depth and only test
+        // line-prefix matches when depth === 0.
+        const forbidden: string[] = [];
+        let depth = 0;
+        const lines = stripped.split("\n");
+        for (const line of lines) {
+          // Test method-position pattern BEFORE updating depth so that
+          // the line `<name>(...) {` (which opens its own brace) is
+          // checked at depth-0 (its declaration line).
+          if (depth === 0) {
+            const m = /^\s*(?:static\s+|async\s+|public\s+|private\s+|protected\s+|get\s+|set\s+)*([A-Za-z_$][\w$]*)\s*\(/.exec(line);
+            if (m) {
+              const n = m[1];
+              if (n !== "constructor" && n !== "createFrom" && !CONTROL_FLOW.has(n)) {
+                forbidden.push(n);
+              }
+            }
+          }
+          // Update depth based on net brace count on this line.
+          for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === "{") depth++;
+            else if (ch === "}") depth--;
+          }
+        }
+        if (forbidden.length > 0) {
+          violations.push({
+            file: relative(BINDINGS_ROOT, file),
+            class: name,
+            methods: forbidden,
+          });
+        }
+      }
+    }
+
+    // Bootstrap sanity — at least one class must have been scanned;
+    // an empty sweep would trivially pass.
+    expect(classCount).toBeGreaterThan(0);
+
+    if (violations.length > 0) {
+      const detail = violations
+        .map((v) => `  ${v.file} :: ${v.class} → ${JSON.stringify(v.methods)}`)
+        .join("\n");
+      throw new Error(
+        "bindings-invariants: generated class(es) have unexpected " +
+          "callable method(s):\n" +
+          detail +
+          "\n\nThe wails3-generator should marshal nested struct " +
+          "returns as method-less classes (constructor + static " +
+          "createFrom only). The presence of instance methods on a " +
+          "generated class means the bindings boundary is exporting " +
+          "RPC handles directly — the TierGoOnly substrate gate " +
+          "(Mantis #1664 Phase B / RFC.wails-surface §6) cannot rely " +
+          "on the method-less invariant across the affected pkg. " +
+          "Re-inspect the binding shape and either fix upstream " +
+          "wails3 or update this test deliberately.",
+      );
+    }
+    expect(violations).toEqual([]);
   });
 });
