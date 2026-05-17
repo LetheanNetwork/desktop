@@ -99,7 +99,13 @@ func (s *Service) Get(input GetInput) core.Result {
 	if !dirR.OK {
 		return core.Fail(core.E("contacts.Get", dirR.Error(), nil))
 	}
-	fpath := core.PathJoin(dirR.Value.(string), input.ID+".md")
+	// Cerberus #1486 belt: WithinDir check defends against any future
+	// IsValidID-bypass / cousin-drift that lets an escape token reach
+	// the join.
+	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), input.ID+".md")
+	if jerr != nil {
+		return core.Fail(jerr)
+	}
 	raw := core.ReadFile(fpath)
 	if !raw.OK {
 		return core.Fail(core.E("contacts.Get", "not found: "+input.ID, nil))
@@ -140,7 +146,11 @@ func (s *Service) Create(input CreateInput) core.Result {
 	}
 	dir := dirR.Value.(string)
 
-	fpath := core.PathJoin(dir, id+".md")
+	// Cerberus #1486 belt: WithinDir check after the join.
+	fpath, jerr := paths.JoinAndCheck(dir, id+".md")
+	if jerr != nil {
+		return core.Fail(jerr)
+	}
 	if core.Stat(fpath).OK {
 		return core.Fail(core.E("contacts.Create", "contact already exists: "+id, nil))
 	}
@@ -194,7 +204,11 @@ func (s *Service) Update(input UpdateInput) core.Result {
 	if !dirR.OK {
 		return core.Fail(core.E("contacts.Update", dirR.Error(), nil))
 	}
-	fpath := core.PathJoin(dirR.Value.(string), input.ID+".md")
+	// Cerberus #1486 belt: WithinDir check after the join.
+	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), input.ID+".md")
+	if jerr != nil {
+		return core.Fail(jerr)
+	}
 
 	raw := core.ReadFile(fpath)
 	if !raw.OK {

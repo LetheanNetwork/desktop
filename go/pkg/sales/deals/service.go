@@ -349,7 +349,11 @@ func loadOne(id string) (DealRecord, error) {
 	if !dirR.OK {
 		return DealRecord{}, core.E("deals.loadOne", dirR.Error(), nil)
 	}
-	fpath := core.PathJoin(dirR.Value.(string), id+".md")
+	// Cerberus #1486 belt: WithinDir check after the join.
+	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), id+".md")
+	if jerr != nil {
+		return DealRecord{}, jerr
+	}
 	raw := core.ReadFile(fpath)
 	if !raw.OK {
 		return DealRecord{}, core.E("deals.loadOne", "not found: "+id, nil)
@@ -398,7 +402,11 @@ func writeRecord(r DealRecord, dir string, ifVersion int) core.Result {
 	if err != nil {
 		return core.Fail(err)
 	}
-	target := core.PathJoin(dir, r.ID+".md")
+	// Cerberus #1486 belt: WithinDir check after the join.
+	target, jerr := paths.JoinAndCheck(dir, r.ID+".md")
+	if jerr != nil {
+		return core.Fail(jerr)
+	}
 	res := paths.AtomicWriteWithVersion(target, paths.WriteInput{
 		Body:      raw,
 		IfVersion: ifVersion,

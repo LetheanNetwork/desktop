@@ -120,6 +120,46 @@ func TestIDValidation_WithinDir_Bad_EmptyCandidate(t *core.T) {
 	core.AssertFalse(t, paths.WithinDir("/Users/x", ""))
 }
 
+// --- JoinAndCheck Good ---
+
+func TestIDValidation_JoinAndCheck_Good_SimpleLeaf(t *core.T) {
+	full, err := paths.JoinAndCheck("/Users/x/Lethean/sales", "ada.md")
+	core.AssertNil(t, err, "kebab leaf should pass")
+	core.AssertEqual(t, "/Users/x/Lethean/sales/ada.md", full)
+}
+
+func TestIDValidation_JoinAndCheck_Good_MultiSegment(t *core.T) {
+	full, err := paths.JoinAndCheck("/Users/x/Lethean", "sales", "contacts", "ada.md")
+	core.AssertNil(t, err, "multi-segment join should pass")
+	core.AssertEqual(t, "/Users/x/Lethean/sales/contacts/ada.md", full)
+}
+
+// --- JoinAndCheck Bad ---
+
+func TestIDValidation_JoinAndCheck_Bad_TraversalEscape(t *core.T) {
+	// IsValidID would catch ".." but JoinAndCheck is belt — verify
+	// independently that even a bypassed shape-check is caught.
+	_, err := paths.JoinAndCheck("/Users/x/Lethean/sales", "../wallets/keystore")
+	core.AssertNotNil(t, err, "parent traversal must reject")
+}
+
+func TestIDValidation_JoinAndCheck_Bad_AbsoluteLeaf(t *core.T) {
+	// PathJoin of base + "/etc/passwd" should NOT escape /Users/x/...
+	// PathJoin treats segments as relative components, so the result
+	// lands under base regardless; verify behaviour stays safe.
+	full, err := paths.JoinAndCheck("/Users/x/Lethean/sales", "/etc/passwd")
+	// Either reject (escapes), or the join lands inside base — both
+	// safe outcomes; bias test toward documenting whichever holds.
+	if err == nil {
+		core.AssertTrue(t, paths.WithinDir("/Users/x/Lethean/sales", full))
+	}
+}
+
+func TestIDValidation_JoinAndCheck_Bad_EmptyBase(t *core.T) {
+	_, err := paths.JoinAndCheck("", "ada.md")
+	core.AssertNotNil(t, err, "empty base must reject")
+}
+
 // --- IsValidAbsoluteUnderRoot Good ---
 //
 // Per mail-v2 §3.1 — the helper validates a user-typed absolute path

@@ -146,6 +146,36 @@ func IsValidID(id string) error {
 	return nil
 }
 
+// JoinAndCheck joins base with the variadic parts via core.PathJoin
+// and verifies that the result stays under base via WithinDir.
+// Belt-and-braces partner of IsValidID — even if a future regression
+// loosens IsValidID or a cousin-validator drift opens a shape-bypass,
+// JoinAndCheck refuses to return a path that escapes the service
+// directory. Returns a typed `paths.escape` error on detection.
+//
+// Use at every wails-entry PathJoin where the leaf is user-supplied
+// (Cerberus #1486 — 20+ surfaces across sales, incidents, runbooks,
+// marketing). IsValidID stays the first gate (cheap shape check with
+// uniform error code); JoinAndCheck is the second wall.
+//
+// Usage example:
+//
+//	fpath, err := paths.JoinAndCheck(dir, input.ID+".md")
+//	if err != nil {
+//	    return core.Fail(err)
+//	}
+//	raw := core.ReadFile(fpath)
+func JoinAndCheck(base string, parts ...string) (string, error) {
+	if base == "" {
+		return "", core.E("paths.escape", "base is empty", nil)
+	}
+	full := core.PathJoin(append([]string{base}, parts...)...)
+	if !WithinDir(base, full) {
+		return "", core.E("paths.escape", "computed path escapes base", nil)
+	}
+	return full, nil
+}
+
 // WithinDir reports whether candidate resolves to a path under base
 // after canonical cleaning. Belt-and-braces partner of IsValidID — the
 // shape check rejects obvious attack tokens, this catches resolution

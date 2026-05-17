@@ -70,7 +70,12 @@ func (s *Service) Get(id string) core.Result {
 	if !dirR.OK {
 		return core.Fail(core.E("campaigns.Get", dirR.Error(), nil))
 	}
-	raw := core.ReadFile(core.PathJoin(dirR.Value.(string), id+".md"))
+	// Cerberus #1486 belt: WithinDir check after the join.
+	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), id+".md")
+	if jerr != nil {
+		return core.Fail(jerr)
+	}
+	raw := core.ReadFile(fpath)
 	if !raw.OK {
 		return core.Fail(core.E("campaigns.Get", "not found: "+id, nil))
 	}
@@ -164,7 +169,11 @@ func (s *Service) Update(input UpdateInput) core.Result {
 		return core.Fail(core.E("campaigns.Update", dirR.Error(), nil))
 	}
 
-	fpath := core.PathJoin(dirR.Value.(string), input.ID+".md")
+	// Cerberus #1486 belt: WithinDir check after the join.
+	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), input.ID+".md")
+	if jerr != nil {
+		return core.Fail(jerr)
+	}
 	raw := core.ReadFile(fpath)
 	if !raw.OK {
 		return core.Fail(core.E("campaigns.Update", "not found: "+input.ID, nil))

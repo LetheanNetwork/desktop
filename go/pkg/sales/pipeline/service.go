@@ -214,7 +214,11 @@ func writeDealStage(id, toStage string) (fromStage string, result core.Result) {
 		return "", core.Fail(core.E("pipeline.writeDealStage", dirR.Error(), nil))
 	}
 	dir := dirR.Value.(string)
-	fpath := core.PathJoin(dir, id+".md")
+	// Cerberus #1486 belt: WithinDir check after the join.
+	fpath, jerr := paths.JoinAndCheck(dir, id+".md")
+	if jerr != nil {
+		return "", core.Fail(jerr)
+	}
 
 	rd := paths.ReadVersion(fpath)
 	if !rd.OK {

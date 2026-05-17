@@ -81,7 +81,12 @@ func (s *Service) Get(id string) core.Result {
 	if !dirR.OK {
 		return core.Fail(core.E("content.Get", dirR.Error(), nil))
 	}
-	raw := core.ReadFile(core.PathJoin(dirR.Value.(string), id+".md"))
+	// Cerberus #1486 belt: WithinDir check after the join.
+	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), id+".md")
+	if jerr != nil {
+		return core.Fail(jerr)
+	}
+	raw := core.ReadFile(fpath)
 	if !raw.OK {
 		return core.Fail(core.E("content.Get", "not found: "+id, nil))
 	}
@@ -157,7 +162,12 @@ func (s *Service) Advance(id string) core.Result {
 		return core.Fail(core.E("content.Advance", dirR.Error(), nil))
 	}
 
-	raw := core.ReadFile(core.PathJoin(dirR.Value.(string), id+".md"))
+	// Cerberus #1486 belt: WithinDir check after the join.
+	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), id+".md")
+	if jerr != nil {
+		return core.Fail(jerr)
+	}
+	raw := core.ReadFile(fpath)
 	if !raw.OK {
 		return core.Fail(core.E("content.Advance", "not found: "+id, nil))
 	}
