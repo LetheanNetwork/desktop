@@ -75,14 +75,38 @@ func TestService_Register_Good(t *core.T) {
 	core.AssertTrue(t, got.OK, "fleet service discoverable after WithName")
 }
 
-func TestService_Register_Bad(t *core.T) {
+// fleet.Register is lock-tolerant + boot-tolerant by design: when the
+// master DB can't be opened (lock contention from a sibling `lthn serve`,
+// a HOME pointing at a regular file, etc.) it logs a warning and
+// registers a degraded Service (db == nil) so `lthn` boot keeps going.
+// Methods on the inert Service Fail cleanly rather than panic — the
+// observable proof of degraded mode below.
+//
+// Earlier shape asserted Register Fails on bad HOME; that contract was
+// flipped deliberately when graceful-degrade landed in service.go (see
+// the Register godoc). Do not re-roll the "Fail on bad HOME" assertion
+// — boot must not tank just because $HOME is misshapen. Mantis #1615.
+func TestService_Register_BadHome_GracefulDegrade_Good(t *core.T) {
 	tmp := t.TempDir()
 	blocker := core.PathJoin(tmp, "not-a-dir")
 	core.AssertTrue(t, core.WriteFile(blocker, []byte("x"), 0o644).OK)
 	t.Setenv("HOME", blocker)
 	c := core.New()
 	r := fleet.Register(c)
-	core.AssertFalse(t, r.OK, "Register must Fail when HOME is a regular file")
+	core.AssertTrue(t, r.OK, "Register must graceful-degrade (OK) when HOME is unusable")
+	svc, ok := r.Value.(*fleet.Service)
+	core.AssertTrue(t, ok, "Register Value must be *fleet.Service even in degraded mode")
+	core.AssertNotNil(t, svc, "degraded Service handle must be non-nil + callable")
+	// Inert-Service contract: every DB-touching method Fails cleanly
+	// (does not panic) when db == nil. Mirrors the post-Close shape
+	// asserted across the rest of this file.
+	core.AssertNotPanics(t, func() { _ = svc.Machines() })
+	core.AssertFalse(t, svc.Machines().OK, "Machines on degraded Service must Fail (db nil)")
+	core.AssertFalse(t, svc.Queue(5).OK, "Queue on degraded Service must Fail (db nil)")
+	core.AssertFalse(t, svc.Agents().OK, "Agents on degraded Service must Fail (db nil)")
+	core.AssertFalse(t, svc.RoutingRules().OK, "RoutingRules on degraded Service must Fail (db nil)")
+	// Close on the inert Service is a no-op OK (db nil branch in Close).
+	core.AssertTrue(t, svc.Close().OK, "Close on degraded Service must be safe + OK")
 }
 
 func TestService_Register_Ugly(t *core.T) {
