@@ -9,6 +9,7 @@ import (
 	"os"
 
 	core "dappco.re/go"
+	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
 )
 
 // OsChmod is the test-only stand-in for os.Chmod — CoreGO doesn't
@@ -50,6 +51,72 @@ func (s *Service) ExportedConsumedNonces() map[string]core.Time {
 	defer s.mu.RUnlock()
 	out := make(map[string]core.Time, len(s.consumedNonces))
 	for k, v := range s.consumedNonces {
+		out[k] = v
+	}
+	return out
+}
+
+// ExportedIssueBootstrapTokenAtIat mints a bootstrap token using the
+// supplied iat (UTC unix seconds) instead of the current wall-clock.
+// Test-only — production callers always mint at now via
+// IssueBootstrapToken. Lets the Cerberus #1462 clock-skew tests forge
+// a token claiming an iat slightly in the future (within tolerance) or
+// well in the future (beyond tolerance) without juggling system time.
+//
+// exp is stamped at iat + issuerTTL so the resulting token follows the
+// same shape the production mint emits.
+//
+// Usage example (test):
+//
+//	tok := svc.ExportedIssueBootstrapTokenAtIat(core.Now().UTC().Unix()+10)
+//	r := svc.VerifyBootstrapToken(tok, "account.create")
+//	if r.OK { t.Fatal("iat in future beyond tolerance must reject") }
+func (s *Service) ExportedIssueBootstrapTokenAtIat(iat int64) string {
+	s.mu.RLock()
+	priv := s.privateKey
+	s.mu.RUnlock()
+	nonceR := core.RandomBytes(nonceSize)
+	if !nonceR.OK {
+		return ""
+	}
+	nonce := core.HexEncode(nonceR.Value.([]byte))
+	header := map[string]any{
+		"iat":   iat,
+		"exp":   iat + issuerTTL,
+		"scope": scopeAccountCreate,
+		"nonce": nonce,
+	}
+	canon, canonR := canonicalise(header)
+	if !canonR.OK {
+		return ""
+	}
+	pgpSvc := pgp.NewService()
+	sig, err := pgpSvc.Sign(priv, canon)
+	if err != nil {
+		return ""
+	}
+	return tokenPrefix + core.Base64URLEncode(canon) + "." + core.Base64URLEncode(sig)
+}
+
+// ExportedClockSkewTolerance re-exposes the package-private
+// clockSkewTolerance constant so Cerberus #1462 tests can assert the
+// boundary value without re-declaring it (drift defence — a future
+// constant bump propagates to the test on the next run).
+func ExportedClockSkewTolerance() int64 { return clockSkewTolerance }
+
+// ExportedIssuerTTL re-exposes the package-private issuerTTL constant
+// for the same drift-defence reason as ExportedClockSkewTolerance.
+func ExportedIssuerTTL() int64 { return issuerTTL }
+
+// ExportedBootstrapAllowedScopes returns a copy of the closed
+// allow-list IssueBootstrapTokenForScope mints against. Test-only
+// surface for the Mantis #1467 lockstep parity check — the matching
+// pkg/server.BootstrapPathScopes map MUST carry the same scope set,
+// and the parity test asserts it. Returns a copy so callers cannot
+// mutate package state.
+func ExportedBootstrapAllowedScopes() map[string]bool {
+	out := make(map[string]bool, len(bootstrapAllowedScopes))
+	for k, v := range bootstrapAllowedScopes {
 		out[k] = v
 	}
 	return out
