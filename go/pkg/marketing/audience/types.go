@@ -1,8 +1,17 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
 // Package audience is the lthn-side subscriber segment service. Manages
-// audience segments at ~/Lethean/marketing/audience/{slug}.md — each
+// audience segments at ~/Lethean/marketing/audience/{slug}.lthn — each
 // segment carries a name, count, weekly growth label, and source tag.
+//
+// Stage E.D.B.3 (Mantis #1487 wave 3): the on-disk format is now the
+// encrypted Trix envelope (`.lthn`). Legacy `.md` plaintext records
+// remain readable via the lazy-migration fallthrough until a write
+// promotes them to `.lthn` per RFC §3.1. Header carries the segment
+// `size` projected through recordfile.LogSizeBucket (`<1k` | `1-10k` |
+// `10-100k` | `100k+`) per RFC §2.4 + Cerberus C#7 Q2 so operators see
+// bucketed magnitude while the session is LOCKED without leaking the
+// raw subscriber count.
 //
 // Wire shapes match the Segment interface consumed by the
 // <lthn-view-audience> Lit element in the Marketing role view.
@@ -86,6 +95,74 @@ type CreateInput struct {
 	Src string `json:"src"`
 	// Spark is the optional weekly series (aggregate only).
 	Spark string `json:"spark,omitempty"`
+}
+
+// SegmentRecord is the persistence type carried through the at-rest
+// substrate as `AtRestWriter[SegmentRecord]`. Stage E.D.B.3 (Mantis
+// #1487 wave 3) splits the wire type (Segment, json-tagged) from the
+// persistence type (SegmentRecord, yaml-tagged) so the encrypted body
+// frontmatter never leaks json key names and the
+// recordfile.HeaderSchema[SegmentRecord] generic stays type-pinned.
+//
+// Per-field MUST per RFC §2.4 marketing/audience row + Cerberus C#7
+// Q2 ruling:
+//
+//   - `name`   → BODY (REJECT in header — PII-adjacent / segment
+//     branding can reveal go-to-market intent).
+//   - `size`   → HEADER as LOG-BUCKET enum (recordfile.LogSizeBucket
+//     of the integer N). Raw integer N MUST NEVER appear in the
+//     plaintext header — operators see bucketed magnitude only.
+//   - segment criteria + member list → BODY (member identities are PII
+//     of the named subscribers; criteria reveals targeting strategy).
+//
+// All other fields (growth / src / spark) are BODY-only — they're
+// either reveal-rate-of-change (growth) or carry targeting / source
+// vocabulary (src / spark) that operator-while-locked should not see.
+//
+// Usage example:
+//
+//	rec := audience.SegmentRecord{
+//	    ID: "local-ai-developers", Name: "Local-AI developers",
+//	    N: 4892, Growth: "+62 / w", Src: "signup-tagged",
+//	}
+type SegmentRecord struct {
+	// ID is the canonical segment identifier (matches filename slug).
+	ID string `yaml:"id"`
+
+	// Name is the segment display name. BODY-only per RFC §2.4 —
+	// MUST NEVER appear in the at-rest header.
+	Name string `yaml:"name"`
+
+	// N is the integer subscriber count. BODY-only — the header carries
+	// only the LogSizeBucket projection (Cerberus C#7 Q2). Raw N is the
+	// sensitive value (precise audience reach), the bucket is the
+	// operator-visible-while-locked summary.
+	N int `yaml:"n"`
+
+	// Growth is the pre-formatted weekly growth label ("+184 / w").
+	// BODY-only — rate-of-change is sensitive (reveals momentum).
+	Growth string `yaml:"growth"`
+
+	// Src is the source tag: "all"|"signup-tagged"|"sales-tagged"|
+	// "manual"|"telemetry · opt-in". BODY-only — RFC §2.4 names no
+	// header key for src, default-body rule applies (also: src reveals
+	// targeting strategy / data lineage which operators-while-locked
+	// should not have).
+	Src string `yaml:"src"`
+
+	// Spark is the comma-separated weekly count series for the
+	// sparkline. BODY-only — count series reveals exact magnitudes
+	// already covered by the BODY-only N policy.
+	Spark string `yaml:"spark"`
+
+	// Version is the monotonic optimistic-lock version (Cascade W2,
+	// RFC §B.3 row 6). Stamped by writeSegment; 0 on legacy files
+	// predating the cutover, >=1 after first write through
+	// paths.AtomicWriteWithVersion / the at-rest substrate.
+	//
+	// omitempty keeps legacy round-trips clean (Version=0); the first
+	// write stamps version=1.
+	Version int `yaml:"version,omitempty"`
 }
 
 // UpdateInput drives the Update method. All fields except ID are optional patches.

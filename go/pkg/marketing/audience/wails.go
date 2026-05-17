@@ -14,12 +14,22 @@ import (
 
 // List returns all audience segments, with the "all" segment first.
 //
+// Dual-format aware (RFC.stage-e-encrypt-at-rest v2 §4.1, Wave 3):
+// .lthn files project HEADER-ONLY entries (Name / N / Growth / Src /
+// Spark empty — the frontend renders an "encrypted" placeholder); .md
+// legacy files round-trip the full plaintext entry. Reads-while-
+// locked stays open — header MAC verify needs only the public key (no
+// unlock required). The aggregate `size` LogSizeBucket lives in the
+// .lthn header for operator-visible-while-locked context but is NOT
+// projected onto the wire `n` field (wire `n` is raw subscriber count;
+// surfacing the bucket as a stand-in would conflate categories).
+//
 // Usage example:
 //
 //	r := svc.List(audience.ListInput{})
 //	if r.OK { out := r.Value.(audience.ListOutput) }
 func (s *Service) List(_ ListInput) core.Result {
-	segs, err := loadSegments()
+	segs, err := s.loadSegments()
 	if err != nil {
 		return core.Fail(core.E("audience.List", "scan failed", err))
 	}
@@ -59,6 +69,13 @@ func (s *Service) List(_ ListInput) core.Result {
 
 // Get returns a single segment by ID.
 //
+// Stage E.D.B.3 surface (RFC.stage-e-encrypt-at-rest v2 §3.1, Wave 3):
+// .lthn records require an unlocked session to decrypt the body. When
+// loadOne reports the typed "audience.session.locked" code (either
+// the gate is unwired or no account is unlocked), Get forwards the
+// session-locked failure verbatim so the frontend can distinguish
+// "encrypted record needs unlock" from a true not-found.
+//
 // Usage example:
 //
 //	r := svc.Get("local-ai-developers")
@@ -67,22 +84,14 @@ func (s *Service) Get(id string) core.Result {
 	if err := paths.IsValidID(id); err != nil {
 		return core.Fail(err)
 	}
-	dirR := audienceDir()
-	if !dirR.OK {
-		return core.Fail(core.E("audience.Get", dirR.Error(), nil))
-	}
-	// Cerberus #1486 belt: WithinDir check after the join.
-	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), id+".md")
-	if jerr != nil {
-		return core.Fail(jerr)
-	}
-	raw := core.ReadFile(fpath)
-	if !raw.OK {
-		return core.Fail(core.E("audience.Get", "not found: "+id, nil))
-	}
-	seg, err := parseSegment(raw.Value.([]byte))
+	seg, _, err := s.loadOne(id)
 	if err != nil {
-		return core.Fail(core.E("audience.Get", "parse failed", err))
+		// Forward session.locked verbatim so the frontend can render
+		// the unlock-prompt distinct from not-found.
+		if core.Contains(err.Error(), "audience.session.locked") {
+			return core.Fail(err)
+		}
+		return core.Fail(core.E("audience.Get", "not found: "+id, err))
 	}
 	return core.Ok(seg)
 }
@@ -137,7 +146,7 @@ func (s *Service) Create(input CreateInput) core.Result {
 	// marshalled frontmatter. Conflict-path (rare on Create — only
 	// fires if another goroutine races on the same slug) returns
 	// core.Fail(paths.ConflictEnvelope{...}) directly via writeSegment.
-	if wr := writeSegment(dirR.Value.(string), seg, 0); !wr.OK {
+	if wr := s.writeSegment(dirR.Value.(string), seg, 0); !wr.OK {
 		return wr
 	}
 	seg.Version = 1
@@ -158,23 +167,10 @@ func (s *Service) Update(input UpdateInput) core.Result {
 	if err := paths.IsValidID(input.ID); err != nil {
 		return core.Fail(err)
 	}
-	dirR := audienceDir()
-	if !dirR.OK {
-		return core.Fail(core.E("audience.Update", dirR.Error(), nil))
-	}
 
-	// Cerberus #1486 belt: WithinDir check after the join.
-	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), input.ID+".md")
-	if jerr != nil {
-		return core.Fail(jerr)
-	}
-	raw := core.ReadFile(fpath)
-	if !raw.OK {
-		return core.Fail(core.E("audience.Update", "not found: "+input.ID, nil))
-	}
-	seg, err := parseSegment(raw.Value.([]byte))
+	seg, dir, err := s.loadOne(input.ID)
 	if err != nil {
-		return core.Fail(core.E("audience.Update", "parse failed", err))
+		return core.Fail(core.E("audience.Update", "not found: "+input.ID, err))
 	}
 
 	priorVersion := seg.Version
@@ -199,7 +195,7 @@ func (s *Service) Update(input UpdateInput) core.Result {
 	// and stamps Version=1 on the upgrade write. Conflict-path returns
 	// core.Fail(paths.ConflictEnvelope{...}) directly via writeSegment
 	// (Mantis #1544 gating shape inherited from W1).
-	if wr := writeSegment(dirR.Value.(string), seg, priorVersion); !wr.OK {
+	if wr := s.writeSegment(dir, seg, priorVersion); !wr.OK {
 		return wr
 	}
 	seg.Version = priorVersion + 1

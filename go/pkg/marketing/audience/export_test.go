@@ -9,13 +9,16 @@ package audience
 
 import core "dappco.re/go"
 
-// WriteSegmentExported exposes writeSegment for service-tier tests
-// that need to bypass the wails IsValidID gate and exercise the
-// WithinDir belt directly (Mantis #1607).
+// WriteSegmentExported exposes the legacy plaintext write path for
+// service-tier tests that need to bypass the wails IsValidID gate and
+// exercise the WithinDir belt directly (Mantis #1607). The at-rest
+// substrate's WithinDir belt is exercised via the JoinAndCheck call
+// inside writeSegmentAtRest; this export targets the free-function
+// legacy path so existing pre-cutover tests stay byte-identical.
 //
 // Usage example:
 //
 //	res := audience.WriteSegmentExported(dir, seg, 0)
 func WriteSegmentExported(dir string, seg Segment, ifVersion int) core.Result {
-	return writeSegment(dir, seg, ifVersion)
+	return writeSegmentLegacy(dir, seg, ifVersion)
 }
