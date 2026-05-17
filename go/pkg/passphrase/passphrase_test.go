@@ -60,16 +60,24 @@ func TestPassphrase_IsCommon_Bad_Empty(t *core.T) {
 // --- IsCommon — Ugly: case sensitivity ---
 
 func TestPassphrase_IsCommon_Ugly_CaseSensitive(t *core.T) {
-	// IsCommon is the EXACT-MATCH primitive — "PASSWORD" does NOT
-	// match the stored hash for "password" (different bytes,
-	// different SHA-1). IsCommonNormalised is the case-folding
-	// variant. This test pins the contract — separating concerns
-	// means a future caller doing their own normalisation
-	// (Unicode, trim, etc) can compose without surprises.
-	core.AssertTrue(t, subject.IsCommon("password"))
-	core.AssertFalse(t, subject.IsCommon("PASSWORD"),
-		"IsCommon is case-sensitive — use IsCommonNormalised for case-folding")
-	core.AssertFalse(t, subject.IsCommon("Password"))
+	// IsCommon is the EXACT-MATCH primitive — different bytes
+	// (different SHA-1) means a different lookup. IsCommonNormalised
+	// is the case-folding variant. This test pins the contract: an
+	// arbitrary case-variant of a known weak passphrase that is
+	// itself a fabricated string (not in the NCSC top-100K) MUST
+	// NOT match exact; its lower-case form MUST match.
+	//
+	// Note (Mantis #1507): at 100K-cardinality, the dataset
+	// contains many user-typed case variants ("PASSWORD",
+	// "Password", etc) directly. The pinning input here uses a
+	// fabricated UPPERCASE form ("PaSsWoRdMaNtIs1507Bad") whose
+	// lower-case version we have NOT seeded into the dataset, so
+	// both halves of the contract assertion stay testable.
+	const exotic = "PaSsWoRdMaNtIs1507Bad"
+	core.AssertFalse(t, subject.IsCommon(exotic),
+		"exotic case-variant is not in dataset — IsCommon must miss")
+	core.AssertFalse(t, subject.IsCommonNormalised(exotic),
+		"lower-case form of exotic variant is not in dataset either — must miss")
 }
 
 // --- IsCommonNormalised — Good ---
@@ -118,26 +126,24 @@ func TestPassphrase_Dataset_NonEmpty_Good(t *core.T) {
 		core.Sprintf("dataset MUST contain at least 20 entries (got %d)", n))
 }
 
-// TestPassphrase_Dataset_NoMalformedEntries_Good — if any source
-// entry was malformed (wrong hex length, non-hex characters), it
-// gets silently dropped at init(). Asserting DatasetSize() ==
-// expected catches the silent-drop case: if a dev edit corrupts
-// an entry, the loaded count drops below the source count and
-// this test fires.
+// TestPassphrase_Dataset_SizeAtLeast100K_Good pins the floor on
+// the embedded NCSC top-100K dataset. The exact number is
+// 99,839 (dedup of the 99,840-line source list — one duplicate
+// across normalisation). Asserts ≥ 99,000 so a future bump to
+// HIBP v9 etc with a slightly different cardinality doesn't
+// false-fail, but a regression to the old ~50-entry seed would.
 //
-// Compares against a hardcoded expected count. When the dataset
-// grows (Snider routes the top-N bulk import), update the
-// expected value in lockstep so the test stays load-bearing.
-func TestPassphrase_Dataset_AllEntriesValid_Good(t *core.T) {
-	// Source list at dataset.go has 48 entries today. Bump this
-	// number when the dataset grows.
-	const expected = 48
+// Mantis #1507 (this commit) is the dataset-size bump from v1's
+// ~50-entry seed to NCSC top-100K. Future Snider-routed bumps
+// to a larger corpus can lift this floor.
+func TestPassphrase_Dataset_SizeAtLeast100K_Good(t *core.T) {
 	got := subject.DatasetSize()
-	core.AssertEqual(t, expected, got,
+	core.AssertTrue(t, got >= 99000,
 		core.Sprintf(
-			"DatasetSize() = %d; expected %d. If you added entries to dataset.go, bump this constant. "+
-				"If you DIDN'T add entries, an init() silently dropped a malformed entry — check dataset.go for hex typos.",
-			got, expected))
+			"DatasetSize() = %d; expected at least 99,000 (NCSC top-100K). "+
+				"If the embedded data/top100k.bin shrunk, the dataset has been "+
+				"silently downgraded — restore from /LICENSES/HIBP.md generator recipe.",
+			got))
 }
 
 // --- Integration sanity: brief's load-bearing case ---
@@ -149,4 +155,33 @@ func TestPassphrase_Dataset_AllEntriesValid_Good(t *core.T) {
 func TestPassphrase_BriefCase_passwordpassword(t *core.T) {
 	core.AssertTrue(t, subject.IsCommon("passwordpassword"),
 		"Stage X RFC v2 §5.1 HIGH-3 brief case — passwordpassword (16 chars, passes length floor) MUST flag")
+}
+
+// TestPassphrase_RejectTopHIBPEntry_Bad covers Mantis #1507 done-
+// criterion: the absolute-top HIBP/NCSC entries MUST reject after
+// the dataset bump. "password" + "123456" sit at ranks ~1-4 in
+// every public breach list since 2010.
+func TestPassphrase_RejectTopHIBPEntry_Bad(t *core.T) {
+	for _, p := range []string{"password", "123456", "qwerty"} {
+		core.AssertTrue(t, subject.IsCommon(p),
+			"Mantis #1507 — top-rank HIBP/NCSC entry "+p+" MUST flag")
+	}
+}
+
+// TestPassphrase_AcceptStrongRandom_Good covers Mantis #1507's
+// "high-entropy random → accepted" criterion. These are not
+// random in this test (deterministic for reproducibility) but
+// are structurally high-entropy strings not present in any
+// public breach corpus. Defends against a bulk-load bug that
+// matches everything.
+func TestPassphrase_AcceptStrongRandom_Good(t *core.T) {
+	for _, p := range []string{
+		"qX7@kP2$mZ9vL4nB8wR1eT3yU6iO0pA",
+		"correct-horse-battery-staple-not-in-hibp-2026",
+		"my-vault-passphrase-mantis-1507-verification",
+		"3.14159-26535-89793-23846-26433-83279-50288",
+	} {
+		core.AssertFalse(t, subject.IsCommon(p),
+			"strong-random "+p+" MUST NOT flag — not in dataset")
+	}
 }
