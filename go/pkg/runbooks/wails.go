@@ -22,7 +22,7 @@ import (
 //	r := svc.List(runbooks.ListInput{Health: "stale"})
 //	if r.OK { out := r.Value.(runbooks.ListOutput) }
 func (s *Service) List(input ListInput) core.Result {
-	records, err := scanAll()
+	records, err := s.scanAll()
 	if err != nil {
 		return core.Fail(core.E("runbooks.List", "scan failed", err))
 	}
@@ -33,7 +33,7 @@ func (s *Service) List(input ListInput) core.Result {
 		if dir := runbooksDir(); dir.OK {
 			seedAll(dir.Value.(string))
 			// Rescan after seeding.
-			records, _ = scanAll()
+			records, _ = s.scanAll()
 		}
 	}
 
@@ -92,11 +92,21 @@ func (s *Service) Get(input GetInput) core.Result {
 			return core.Fail(err)
 		}
 	}
-	rec, _, err := loadOne(input.ID, input.Slug)
+	rec, _, err := s.loadOne(input.ID, input.Slug)
 	if err != nil {
 		label := input.ID
 		if label == "" {
 			label = input.Slug
+		}
+		// Surface session.locked + at-rest-decrypt errors verbatim so
+		// the frontend can route them differently from a not-found
+		// path (RFC §3.1 / §4.2). The substrate's typed codes
+		// (runbooks.session.locked, recordfile.atrest.*) reach the
+		// Wails layer unchanged when present in the underlying error.
+		if core.Contains(err.Error(), "session.locked") ||
+			core.Contains(err.Error(), "multi_account_ambiguous") ||
+			core.Contains(err.Error(), "recordfile.atrest.") {
+			return core.Fail(err)
 		}
 		return core.Fail(core.E("runbooks.Get", "not found: "+label, err))
 	}
@@ -115,7 +125,7 @@ func (s *Service) Get(input GetInput) core.Result {
 //	r := svc.Search(runbooks.SearchInput{Query: "postfix"})
 //	if r.OK { out := r.Value.(runbooks.ListOutput) }
 func (s *Service) Search(input SearchInput) core.Result {
-	records, err := scanAll()
+	records, err := s.scanAll()
 	if err != nil {
 		return core.Fail(core.E("runbooks.Search", "scan failed", err))
 	}
@@ -161,19 +171,31 @@ func (s *Service) MarkRehearsed(input MarkInput) core.Result {
 	if err := paths.IsValidID(input.ID); err != nil {
 		return core.Fail(err)
 	}
-	rec, dirPath, err := loadOne(input.ID, "")
+	rec, dirPath, err := s.loadOne(input.ID, "")
 	if err != nil {
+		// session.locked / at-rest decrypt errors surface verbatim so
+		// the frontend can route them to the gate-locked UI rather
+		// than treating the call as a not-found (RFC §3.1 / §4.2).
+		if core.Contains(err.Error(), "session.locked") ||
+			core.Contains(err.Error(), "multi_account_ambiguous") ||
+			core.Contains(err.Error(), "recordfile.atrest.") {
+			return core.Fail(err)
+		}
 		return core.Fail(core.E("runbooks.MarkRehearsed", "not found: "+input.ID, err))
 	}
 	priorVersion := rec.Version
 	rec.LastRehearsed = core.Now().UTC()
-	// Cascade W3 (RFC §B.3 row 9) — IfVersion=priorVersion gates the
-	// write under the primitive's optimistic-lock check.
-	// priorVersion=0 (legacy file predating cutover) upgrades via an
-	// unconditional first-write that stamps Version=1. Conflict-path
-	// returns core.Fail(paths.ConflictEnvelope{...}) directly via
-	// writeRecord (Mantis #1544 gating shape inherited from W1+W2).
-	if wr := writeRecord(rec, dirPath, priorVersion); !wr.OK {
+	// Cascade W3 (RFC §B.3 row 9) + Wave 2 (RFC.stage-e-encrypt-at-
+	// rest v2): IfVersion=priorVersion gates the write under the
+	// primitive's optimistic-lock check. priorVersion=0 (legacy file
+	// predating cutover) upgrades via an unconditional first-write
+	// that stamps Version=1. Conflict-path returns core.Fail(paths.
+	// ConflictEnvelope{...}) directly via writeRecord (Mantis #1544
+	// gating shape inherited from W1+W2). When the SessionGate is
+	// wired, writeRecord routes through the at-rest substrate and
+	// emits a .lthn envelope; otherwise the legacy plaintext .md
+	// fallback runs.
+	if wr := s.writeRecord(rec, dirPath, priorVersion); !wr.OK {
 		return wr
 	}
 	rec.Version = priorVersion + 1

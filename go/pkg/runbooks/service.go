@@ -27,8 +27,10 @@ import (
 	"sync/atomic"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/recordfile"
+	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
 	"gopkg.in/yaml.v3"
 )
 
@@ -45,9 +47,33 @@ import (
 //
 // AX-8 compliance: this interface is defined in the consumer
 // (runbooks) and satisfied by the producer (*account.Service). No
-// pkg/account import lands in pkg/runbooks.
+// pkg/account import lands in the SessionGate interface itself; the
+// account import below is consumed only by the wider runtime-asserted
+// accountKeyProvider used by the at-rest writer path (mirrors deals).
+//
+// Stage E.D.B.2 (Mantis #1487 wave 2) adds a SEPARATE at-rest-keys
+// lookup via a runtime type-assertion against the accountKeyProvider
+// shape below. The narrow SessionGate stays minimal so the existing
+// app.go wire + sibling-consumer stubs keep working; the wider keys
+// surface is opt-in by the implementer.
 type SessionGate interface {
 	UnlockedAccountIDs() []string
+}
+
+// accountKeyProvider is the wider runtime-assertion surface the
+// at-rest path expects on a wired SessionGate. *account.Service
+// satisfies it today (PublicKeyFor at unlock.go:903, PrivateKeyFor
+// at unlock.go:870). Test fixtures stub it independently — see the
+// stubSessionGate in runbooks_test.go.
+//
+// Kept package-private — consumers wire the producer-side directly
+// via SetSessionGate; this is the substrate's view of what the gate
+// must additionally satisfy to engage the encrypted write path.
+//
+//	if kp, ok := s.gate.(accountKeyProvider); ok { ... }
+type accountKeyProvider interface {
+	PublicKeyFor(accountID string) ([]byte, bool)
+	PrivateKeyFor(accountID string) (*account.PrivateKeyHandle, bool)
 }
 
 // Freshness thresholds. Runbooks rehearsed within 30 days are "fresh";
@@ -82,6 +108,15 @@ type Service struct {
 	// (§2.2 / Cerberus #28 Q2). CompareAndSwap-on-first-hit emits
 	// core.Warn exactly once per Service instance.
 	nilWarned atomic.Bool
+
+	// atrestMu serialises lazy construction of atrestWriter so the
+	// first concurrent write doesn't double-build the substrate.
+	atrestMu sync.Mutex
+	// atrestWriter is built on first writer-access against the live
+	// SessionGate (RFC.stage-e-encrypt-at-rest v2 §5, Wave 2 — Mantis
+	// #1487). nil before the first use; replaced on every
+	// SetSessionGate so adapter→gate remains coherent.
+	atrestWriter *recordfile.AtRestWriter[RunbookRecord]
 }
 
 // NewService constructs the runbooks service against a Core container.
@@ -137,7 +172,12 @@ func runbooksDir() core.Result {
 	return core.Ok(dir)
 }
 
-// countMdFiles returns the number of *.md files in dir.
+// countMdFiles returns the number of runbook record files in dir.
+// Counts BOTH legacy ".md" plaintext AND ".lthn" encrypted records so
+// the OnStart seed short-circuit advances correctly across the
+// .md → .lthn cutover (Mantis #1487 Wave 2). Without the .lthn count
+// a post-migration directory would look empty to seedAll and trigger
+// re-seed of seven default runbooks on top of the operator's data.
 func countMdFiles(dir string) int {
 	r := core.ReadDir(core.DirFS(dir), ".")
 	if !r.OK {
@@ -146,14 +186,376 @@ func countMdFiles(dir string) int {
 	entries, _ := r.Value.([]core.FsDirEntry)
 	n := 0
 	for _, e := range entries {
-		if !e.IsDir() {
-			nm := e.Name()
-			if len(nm) >= 4 && nm[len(nm)-3:] == ".md" {
-				n++
-			}
+		if e.IsDir() {
+			continue
+		}
+		nm := e.Name()
+		if hasRecordSuffix(nm) {
+			n++
 		}
 	}
 	return n
+}
+
+// hasRecordSuffix reports whether nm ends in ".md" (legacy plaintext)
+// or ".lthn" (encrypted at-rest). Mirrors sales/deals' hasSuffix
+// helper but keeps the predicate self-describing inside this package.
+func hasRecordSuffix(nm string) bool {
+	if len(nm) >= 3 && nm[len(nm)-3:] == ".md" {
+		return true
+	}
+	if len(nm) >= 5 && nm[len(nm)-5:] == ".lthn" {
+		return true
+	}
+	return false
+}
+
+// --- At-rest substrate plumbing (RFC.stage-e-encrypt-at-rest v2 Wave 2)
+
+// runbooksHeaderSchema declares the RFC §2.4 per-field header whitelist
+// for the runbooks surface. Per the per-field MUST table:
+//
+//   - `title`   → BODY only (never in header)
+//   - `tags`    → HEADER as SHA-256 hash-tag list ([]string of
+//     16-hex-char SHA-256 truncations); full plaintext tag list stays
+//     in the encrypted body. List operations compare hashes without
+//     learning the operator's tag vocabulary.
+//   - everything else (area, last_rehearsed, body) → BODY only.
+//
+// While locked the operator sees the 16-hex-char hashes rather than
+// the plaintext tag names — that's the intent of the §2.4 ruling
+// (Cerberus C#7 Q8: tags MUST hash, free-form rejected).
+//
+//	w := recordfile.NewAtRestWriter(recordfile.AtRestDeps[RunbookRecord]{
+//	    ..., Schema: runbooksHeaderSchema,
+//	})
+var runbooksHeaderSchema = recordfile.HeaderSchema[RunbookRecord]{
+	Surface: recordfile.SurfaceRunbooks,
+	AllowedKeys: map[string]recordfile.FieldValidator{
+		"tags": recordfile.ValidateHashTagList,
+	},
+	HeaderFor: func(r RunbookRecord) map[string]any {
+		out := map[string]any{}
+		// Project plaintext tags through HashTag — the substrate's
+		// ValidateHashTagList requires []any so we widen each string
+		// individually rather than passing []string directly.
+		if len(r.Tags) > 0 {
+			hashes := make([]any, 0, len(r.Tags))
+			for _, tag := range r.Tags {
+				if tag == "" {
+					continue
+				}
+				hashes = append(hashes, recordfile.HashTag(tag))
+			}
+			if len(hashes) > 0 {
+				out["tags"] = hashes
+			}
+		}
+		return out
+	},
+	IDFor: func(r RunbookRecord) string {
+		// Runbooks identify by ID in-memory (e.g. "R-01"), but the
+		// filesystem basename is the slug (e.g. "rotate-runtime-api-
+		// keys"). The header `id` field MUST round-trip the in-memory
+		// ID so List/Get can resolve back via header peek without
+		// reading the body. Slug stays in the filename only.
+		return r.ID
+	},
+	VersionFor: func(r RunbookRecord) int64 { return int64(r.Version) },
+}
+
+// gateAccountKeys is the consumer-side adapter that satisfies
+// recordfile.AccountKeys against the runbooks SessionGate's wider
+// accountKeyProvider runtime assertion. The substrate never imports
+// pkg/account directly — this thin wrapper bridges the producer's
+// concrete PrivateKeyHandle type onto the substrate's interface AND
+// computes SingleUnlockedAccount from UnlockedAccountIDs (the same
+// shape sales/deals uses — Mantis #1487 wave 1 parity).
+//
+//	keys := gateAccountKeys{gate: rbSvc.gate, keys: kpProvider}
+//	w := recordfile.NewAtRestWriter(recordfile.AtRestDeps[RunbookRecord]{Keys: keys, ...})
+type gateAccountKeys struct {
+	gate SessionGate
+	keys accountKeyProvider
+}
+
+// PublicKeyFor wraps the gate's PublicKeyFor; the (bytes, bool) shape
+// is rewritten as (bytes, error) per the substrate's contract. Missing
+// keys produce a typed error rather than a silent empty slice so the
+// substrate's len(pub)==0 check has structured context to report.
+func (g gateAccountKeys) PublicKeyFor(accountID string) ([]byte, error) {
+	pub, ok := g.keys.PublicKeyFor(accountID)
+	if !ok {
+		return nil, core.NewCode("runbooks.atrest.public_key_unavailable",
+			core.Sprintf("PublicKeyFor(%q) returned not-ok", accountID))
+	}
+	return pub, nil
+}
+
+// PrivateKeyFor wraps the producer's PrivateKeyFor and bridges the
+// concrete *account.PrivateKeyHandle return onto the substrate's
+// recordfile.PrivateKeyHandle interface. The concrete handle already
+// satisfies the interface shape (Use(func([]byte) error) error) — the
+// wrapper is just the type-conversion seam.
+func (g gateAccountKeys) PrivateKeyFor(accountID string) (recordfile.PrivateKeyHandle, bool) {
+	h, ok := g.keys.PrivateKeyFor(accountID)
+	if !ok || h == nil {
+		return nil, false
+	}
+	return h, true
+}
+
+// SingleUnlockedAccount mirrors sales/deals + office/mail's adapter
+// (Mantis #1591) against the runbooks gate. Multi-unlock returns the
+// same typed code the substrate surfaces back to the consumer.
+func (g gateAccountKeys) SingleUnlockedAccount() (string, error) {
+	ids := g.gate.UnlockedAccountIDs()
+	if len(ids) == 0 {
+		return "", core.NewCode("runbooks.no_unlocked_account",
+			"no Lethean account is unlocked")
+	}
+	if len(ids) > 1 {
+		return "", core.NewCode("runbooks.multi_account_not_supported",
+			"runbooks does not yet support multiple unlocked accounts (Mantis #1591)")
+	}
+	return ids[0], nil
+}
+
+// pathsAtomicAdapter is the consumer-side adapter that satisfies
+// recordfile.AtomicWriter against the existing paths.AtomicWriteWith
+// Version + paths.ReadVersion + core.Remove primitives. The IfMatch
+// gate is wired through paths.WriteInput.IfMatchHash so the optimistic-
+// lock semantics already proven in wave 1 inherit unchanged.
+//
+//	atomic := pathsAtomicAdapter{}
+//	w := recordfile.NewAtRestWriter(recordfile.AtRestDeps[RunbookRecord]{Atomic: atomic, ...})
+type pathsAtomicAdapter struct{}
+
+// Write routes through paths.AtomicWriteWithVersion. The substrate's
+// IfMatch == hex(sha256(prior ciphertext)) matches the primitive's
+// IfMatchHash semantics exactly. Empty IfMatch (first-write) means
+// the primitive skips the hash check — same as the existing legacy-
+// upgrade path. Mode is honoured verbatim (substrate defaults to 0o600
+// which matches the surface's existing #1487 PR-1 ruling).
+func (pathsAtomicAdapter) Write(req recordfile.AtomicWriteRequest) error {
+	r := paths.AtomicWriteWithVersion(req.Path, paths.WriteInput{
+		Body:        req.Payload,
+		IfMatchHash: req.IfMatch,
+		IfNotExist:  req.IfNotExist,
+	})
+	if r.OK {
+		return nil
+	}
+	return core.NewCode("runbooks.atrest.atomic_write_failed",
+		core.Sprintf("AtomicWriteWithVersion(%q): %s", req.Path, r.Error()))
+}
+
+// ReadFile is a thin wrapper around core.ReadFile that adapts the
+// (Result) → (bytes, error) shape the substrate expects. Missing
+// files surface as core-coded errors so the substrate's read-failed
+// path stays grep-stable.
+func (pathsAtomicAdapter) ReadFile(path string) ([]byte, error) {
+	r := core.ReadFile(path)
+	if !r.OK {
+		return nil, core.NewCode("runbooks.atrest.read_failed",
+			core.Sprintf("ReadFile(%q): %s", path, r.Error()))
+	}
+	b, _ := r.Value.([]byte)
+	return b, nil
+}
+
+// Remove is a thin wrapper around core.Remove. Failures are surfaced
+// but tolerated by the substrate's lazy-migration legacy-remove path
+// (RFC §3.1: warn-on-failure, do NOT abort the encrypted write).
+func (pathsAtomicAdapter) Remove(path string) error {
+	r := core.Remove(path)
+	if !r.OK {
+		return core.NewCode("runbooks.atrest.remove_failed",
+			core.Sprintf("Remove(%q): %s", path, r.Error()))
+	}
+	return nil
+}
+
+// atrestWriterFor returns the lazy-constructed AtRestWriter wired
+// against the live SessionGate. Returns (nil, false) when the gate is
+// not yet wired OR when the gate doesn't satisfy the wider keys
+// surface — caller falls back to legacy plaintext write.
+//
+// Construction happens once per Service post-SetSessionGate (atrestMu
+// serialises the racy first-call path); SetSessionGate invalidates the
+// cache so re-wiring against a fresh accountSvc never reuses stale
+// adapter pointers.
+//
+//	w, ok := s.atrestWriterFor()
+//	if !ok { return writeLegacy(rec, dir, ifVersion) }
+func (s *Service) atrestWriterFor() (*recordfile.AtRestWriter[RunbookRecord], bool) {
+	if s == nil {
+		return nil, false
+	}
+	s.gateMu.RLock()
+	gate := s.gate
+	s.gateMu.RUnlock()
+	if gate == nil {
+		return nil, false
+	}
+	// Runtime type-assert the wider keys surface. *account.Service
+	// satisfies it today (unlock.go:870 / :903); a minimal-gate stub
+	// (UnlockedAccountIDs-only) skips the at-rest path entirely and
+	// the consumer falls back to the legacy plaintext writer.
+	keys, ok := gate.(accountKeyProvider)
+	if !ok {
+		return nil, false
+	}
+	s.atrestMu.Lock()
+	defer s.atrestMu.Unlock()
+	if s.atrestWriter != nil {
+		return s.atrestWriter, true
+	}
+	w := recordfile.NewAtRestWriter(recordfile.AtRestDeps[RunbookRecord]{
+		Surface: recordfile.SurfaceRunbooks,
+		Keys:    gateAccountKeys{gate: gate, keys: keys},
+		PGP:     pgp.NewService(),
+		Schema:  runbooksHeaderSchema,
+		Atomic:  pathsAtomicAdapter{},
+	})
+	s.atrestWriter = w
+	return w, true
+}
+
+// parseAtRestRecord turns a substrate ReadResult into a RunbookRecord
+// by running the frontmatter through yaml.Unmarshal (same path
+// parseRecord uses for plaintext) and copying the body text into
+// Body. Slug is stamped by the caller because the substrate doesn't
+// carry the basename.
+//
+//	rec, err := parseAtRestRecord(slug, rr.Value.(recordfile.ReadResult))
+func parseAtRestRecord(slug string, r recordfile.ReadResult) (RunbookRecord, error) {
+	var rec RunbookRecord
+	if err := yaml.Unmarshal(r.BodyYAML, &rec); err != nil {
+		return RunbookRecord{}, core.E("runbooks.parseAtRest", "yaml unmarshal", err)
+	}
+	rec.Slug = slug
+	rec.Body = string(r.BodyText)
+	// Header version takes precedence on at-rest reads (substrate
+	// stamps it via VersionFor); ensure Version reflects the persisted
+	// header value rather than any stale frontmatter copy.
+	if hdrV := int(r.Header.Version); hdrV > 0 {
+		rec.Version = hdrV
+	}
+	return rec, nil
+}
+
+// peekTrixAccountID extracts the account.id from a raw at-rest blob
+// without going through PGP decrypt. The on-disk shape is
+// `[Magic(4)][Version(1)][HeaderLen(4)][HeaderJSON][Payload]` per RFC
+// §2.2; we read the JSON header bytes and unmarshal just the account
+// substructure.
+//
+// Returns an error when the blob is too short, the magic/length is
+// nonsense, or account.id is absent. The substrate's full DecodeHeader
+// path runs after this — so structural errors here are not
+// authoritative, they're just enough to pick the correct pub key.
+func peekTrixAccountID(raw []byte) (string, error) {
+	const headerStart = 4 + 1 + 4 // Magic + Version + HeaderLen
+	if len(raw) < headerStart {
+		return "", core.E("runbooks.peekTrix", "blob too short", nil)
+	}
+	hdrLen := int(uint32(raw[5])<<24 | uint32(raw[6])<<16 | uint32(raw[7])<<8 | uint32(raw[8]))
+	if hdrLen <= 0 || headerStart+hdrLen > len(raw) {
+		return "", core.E("runbooks.peekTrix", "header length out of bounds", nil)
+	}
+	hdrJSON := raw[headerStart : headerStart+hdrLen]
+	var probe struct {
+		Account struct {
+			ID string `json:"id"`
+		} `json:"account"`
+	}
+	if r := core.JSONUnmarshalString(string(hdrJSON), &probe); !r.OK {
+		return "", core.E("runbooks.peekTrix", "json unmarshal: "+r.Error(), nil)
+	}
+	if probe.Account.ID == "" {
+		return "", core.E("runbooks.peekTrix", "account.id missing from header", nil)
+	}
+	return probe.Account.ID, nil
+}
+
+// headerPubKey resolves the public key bytes for the account.id named
+// in a raw at-rest blob's header. Peeks the JSON header directly so
+// the lookup is independent of whether any account is unlocked —
+// matches RFC §4.1 "List stays open while LOCKED".
+func (s *Service) headerPubKey(raw []byte) ([]byte, error) {
+	s.gateMu.RLock()
+	gate := s.gate
+	s.gateMu.RUnlock()
+	if gate == nil {
+		return nil, core.E("runbooks.headerPubKey", "session gate not wired", nil)
+	}
+	keys, ok := gate.(accountKeyProvider)
+	if !ok {
+		return nil, core.E("runbooks.headerPubKey",
+			"session gate does not provide account keys", nil)
+	}
+	accountID, err := peekTrixAccountID(raw)
+	if err != nil {
+		return nil, err
+	}
+	pub, ok := keys.PublicKeyFor(accountID)
+	if !ok || len(pub) == 0 {
+		return nil, core.E("runbooks.headerPubKey",
+			"PublicKeyFor("+accountID+") returned not-ok", nil)
+	}
+	return pub, nil
+}
+
+// loadHeaderOnly decodes a .lthn file via the substrate's DecodeHeader
+// path (no decrypt). Returns a RunbookRecord populated only with
+// header-visible fields (ID, Version, hash-projected Tags). Body
+// fields stay zero-valued (Title="", Area="", Body="") — toEntry sees
+// an empty Title which the frontend renders as "(encrypted)" or
+// similar.
+//
+// PubKey lookup walks the SessionGate via PublicKeyFor which does NOT
+// require unlock so List stays open while LOCKED per RFC §4.1.
+//
+// Returns an error when the gate is unwired (cannot resolve any
+// public key) OR when DecodeHeader rejects.
+func (s *Service) loadHeaderOnly(path, slug string) (RunbookRecord, error) {
+	w, ok := s.atrestWriterFor()
+	if !ok {
+		return RunbookRecord{}, core.E("runbooks.loadHeaderOnly",
+			"session gate not wired", nil)
+	}
+	raw := core.ReadFile(path)
+	if !raw.OK {
+		return RunbookRecord{}, core.E("runbooks.loadHeaderOnly", raw.Error(), nil)
+	}
+	rawBytes, _ := raw.Value.([]byte)
+	pub, perr := s.headerPubKey(rawBytes)
+	if perr != nil {
+		return RunbookRecord{}, perr
+	}
+	rr := w.DecodeHeader(rawBytes, pub)
+	if !rr.OK {
+		return RunbookRecord{}, core.E("runbooks.loadHeaderOnly", rr.Error(), nil)
+	}
+	hdr, _ := rr.Value.(recordfile.Header)
+	rec := RunbookRecord{
+		ID:      hdr.ID,
+		Slug:    slug,
+		Version: int(hdr.Version),
+	}
+	// Surface the header's hash-tag list onto rec.Tags so the
+	// header-only projection still carries SOMETHING for the frontend
+	// to render tag-shaped UI (16-hex-char hashes per RFC §2.4 — NOT
+	// plaintext tag names). The operator sees hashes while locked.
+	if rawTags, ok := hdr.Raw["tags"].([]any); ok {
+		for _, t := range rawTags {
+			if s, ok := t.(string); ok {
+				rec.Tags = append(rec.Tags, s)
+			}
+		}
+	}
+	return rec, nil
 }
 
 // parseRecord splits a Trix file (slug + raw bytes) into frontmatter
@@ -297,10 +699,33 @@ func matchSearch(r RunbookRecord, q string) bool {
 	return false
 }
 
-// scanAll reads all *.md files in ~/Lethean/runbooks/ and returns
-// RunbookRecord values with Body set. Returns empty slice (not error)
-// when the directory is missing or empty.
-func scanAll() ([]RunbookRecord, error) {
+// scanAll reads runbook files in ~/Lethean/runbooks/ and returns
+// RunbookRecord values. Returns empty slice (not error) when the
+// directory is missing or empty.
+//
+// Dual-format read (RFC.stage-e-encrypt-at-rest v2 §4.1, Wave 2):
+//   - .lthn files are decoded HEADER-ONLY via the substrate's
+//     DecodeHeader path (no decrypt, MAC-verified). Title / Area /
+//     Body / LastRehearsed / CreatedAt stay sealed. The returned
+//     RunbookRecord has header-visible fields (ID, Version, hash-
+//     projected Tags) populated.
+//   - .md files parse as legacy plaintext for backward-compat.
+//   - Prefer .lthn over .md when both exist for the same slug
+//     (cutover invariant — once the encrypted record lands the
+//     plaintext gets removed, but a crash between AtomicWrite and
+//     Remove could leave both on disk).
+//
+// MAC-failure entries are SKIPPED (RFC §4.1: "do NOT abort whole List
+// on one bad file"). When the session is locked the .lthn branch
+// still emits a degraded record (ID + Version + hash-tags from
+// header) because header MAC verification only needs the PUBLIC key —
+// no unlock required.
+//
+// The s receiver may be nil for tests of the legacy plaintext-only
+// path; the at-rest header-only branch is skipped when s is nil so
+// existing no-Service helpers (package-level scans in tests) keep
+// working.
+func (s *Service) scanAll() ([]RunbookRecord, error) {
 	dir := runbooksDir()
 	if !dir.OK {
 		return nil, core.E("runbooks.scanAll", dir.Error(), nil)
@@ -313,7 +738,40 @@ func scanAll() ([]RunbookRecord, error) {
 	}
 	entries, _ := entriesR.Value.([]core.FsDirEntry)
 
+	// Two-pass pick: prefer .lthn over .md when both exist for the
+	// same slug. Stable name basis: filename without extension.
+	seen := map[string]bool{}
 	var records []RunbookRecord
+
+	// First pass: .lthn (encrypted, header-only). Only engaged when
+	// the at-rest writer can be built — without a wired SessionGate +
+	// keys provider, the consumer falls back to legacy .md scan only
+	// (legacy services that haven't been retrofitted yet still work).
+	_, hasAtRest := s.atrestWriterFor()
+	if hasAtRest {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if len(name) < 5 || name[len(name)-5:] != ".lthn" {
+				continue
+			}
+			slug := name[:len(name)-5]
+			fpath := core.PathJoin(dirPath, name)
+			rec, err := s.loadHeaderOnly(fpath, slug)
+			if err != nil {
+				// MAC-failure / corrupt envelope / decode error —
+				// SKIP per RFC §4.1.
+				continue
+			}
+			seen[slug] = true
+			records = append(records, rec)
+		}
+	}
+
+	// Second pass: .md (legacy plaintext) for slugs not already
+	// covered.
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -323,6 +781,9 @@ func scanAll() ([]RunbookRecord, error) {
 			continue
 		}
 		slug := name[:len(name)-3]
+		if seen[slug] {
+			continue
+		}
 		fpath := core.PathJoin(dirPath, name)
 		raw := core.ReadFile(fpath)
 		if !raw.OK {
@@ -338,30 +799,90 @@ func scanAll() ([]RunbookRecord, error) {
 }
 
 // loadOne finds a runbook by ID or slug and returns the full record
-// with Body populated.
-func loadOne(id, slug string) (RunbookRecord, string, error) {
-	records, err := scanAll()
+// with Body populated. Dual-format (RFC §3.1):
+//   - .lthn is preferred. Decrypt requires an unlocked session; on a
+//     locked-session read this returns the typed runbooks.session.
+//     locked error so callers (Get) surface the lock state instead of
+//     leaking "file not found" confusion.
+//   - .md is the legacy plaintext fallthrough.
+//
+// The s receiver may be nil for tests of the legacy plaintext-only
+// path; the at-rest branch is skipped when s is nil.
+func (s *Service) loadOne(id, slug string) (RunbookRecord, string, error) {
+	dir := runbooksDir()
+	if !dir.OK {
+		return RunbookRecord{}, "", core.E("runbooks.loadOne", dir.Error(), nil)
+	}
+	dirPath := dir.Value.(string)
+
+	// Cheap-listing: scan once to translate id↔slug. Header-only
+	// projection is enough to resolve the basename, then we full-load
+	// the chosen record below.
+	records, err := s.scanAll()
 	if err != nil {
 		return RunbookRecord{}, "", err
 	}
+	target := ""
 	for _, r := range records {
 		if (id != "" && r.ID == id) || (slug != "" && r.Slug == slug) {
-			dir := runbooksDir()
-			if !dir.OK {
-				return RunbookRecord{}, "", core.E("runbooks.loadOne", dir.Error(), nil)
-			}
-			return r, dir.Value.(string), nil
+			target = r.Slug
+			break
 		}
 	}
-	label := id
-	if label == "" {
-		label = slug
+	if target == "" {
+		label := id
+		if label == "" {
+			label = slug
+		}
+		return RunbookRecord{}, "", core.E("runbooks.loadOne", "not found: "+label, nil)
 	}
-	return RunbookRecord{}, "", core.E("runbooks.loadOne", "not found: "+label, nil)
+
+	// .lthn first — encrypted records take precedence when present.
+	lthnPath, jerr := paths.JoinAndCheck(dirPath, target+".lthn")
+	if jerr != nil {
+		return RunbookRecord{}, "", jerr
+	}
+	if exists := core.Stat(lthnPath); exists.OK {
+		w, ok := s.atrestWriterFor()
+		if !ok {
+			return RunbookRecord{}, "",
+				core.E("runbooks.loadOne", "runbooks.session.locked", nil)
+		}
+		rr := w.Read(lthnPath)
+		if !rr.OK {
+			return RunbookRecord{}, "", core.E("runbooks.loadOne", rr.Error(), nil)
+		}
+		res, _ := rr.Value.(recordfile.ReadResult)
+		rec, perr := parseAtRestRecord(target, res)
+		if perr != nil {
+			return RunbookRecord{}, "", perr
+		}
+		return rec, dirPath, nil
+	}
+
+	// Legacy plaintext .md fallthrough.
+	mdPath, jerr := paths.JoinAndCheck(dirPath, target+".md")
+	if jerr != nil {
+		return RunbookRecord{}, "", jerr
+	}
+	raw := core.ReadFile(mdPath)
+	if !raw.OK {
+		return RunbookRecord{}, "",
+			core.E("runbooks.loadOne", "not found: "+target, nil)
+	}
+	rec, err := parseRecord(target, raw.Value.([]byte))
+	if err != nil {
+		return RunbookRecord{}, "", err
+	}
+	return rec, dirPath, nil
 }
 
-// writeRecord serialises a RunbookRecord back to disk and writes it
-// via paths.AtomicWriteWithVersion (Cascade W3, RFC §B.3 row 9).
+// writeRecord serialises a RunbookRecord back to disk via the legacy
+// plaintext path. Service-tier callers should use
+// `(*Service).writeRecord` (below) which dual-paths into the at-rest
+// substrate when the SessionGate is wired. This free-function shape
+// stays available for tests via WriteRecordExported and as the
+// fallback path inside the method.
 //
 // ifVersion is the optimistic-lock anchor — pass the Version the
 // caller observed on disk (via parseRecord through loadOne), or 0 for
@@ -429,6 +950,129 @@ func writeRecord(r RunbookRecord, dirPath string, ifVersion int) core.Result {
 		"write failed: "+res.Error(), nil))
 }
 
+// writeRecord is the Service-tier write entry point used by MarkRehearsed.
+//
+// Stage E.D.B.2 dual-path (RFC.stage-e-encrypt-at-rest v2 §3, Wave 2):
+//   - When the SessionGate is wired AND reports exactly one unlocked
+//     account AND satisfies accountKeyProvider, writes the encrypted
+//     .lthn envelope via the recordfile.AtRestWriter substrate. After
+//     successful encrypted write, removes the legacy <slug>.md when
+//     present (lazy migration completion per §3.1).
+//   - When the gate is unwired OR the gate doesn't satisfy the wider
+//     keys surface (test fixtures pre-#1613 retrofit), falls through
+//     to the legacy plaintext writer above. This preserves existing
+//     Cascade W3 behaviour for any caller not yet wired to a session
+//     source. Once #1613 + #1487 ship across all consumers this branch
+//     goes away.
+//
+// ifVersion is the optimistic-lock anchor — pass the Version the
+// caller observed on disk before mutating the record, or 0 for first-
+// writes / legacy-file upgrades. writeRecord stamps r.Version=
+// ifVersion+1 into the marshalled body.
+//
+// Cerberus #1486: slug lands directly in the filename; IsValidID gates
+// it before JoinAndCheck (belt-and-braces).
+//
+// Return shape (Mantis #1544): conflict path returns
+// core.Fail(paths.ConflictEnvelope{...}) with code
+// "runbooks.update.conflict". Non-conflict failures propagate via
+// core.Fail(core.E(...)).
+//
+// Usage example:
+//
+//	if wr := s.writeRecord(rec, dirPath, prior.Version); !wr.OK {
+//	    return wr
+//	}
+func (s *Service) writeRecord(r RunbookRecord, dirPath string, ifVersion int) core.Result {
+	if err := paths.IsValidID(r.Slug); err != nil {
+		return core.Fail(err)
+	}
+	// Stamp the next monotonic version. ifVersion=0 (Create / legacy
+	// upgrade) yields version=1; subsequent updates increment.
+	r.Version = ifVersion + 1
+	if r.Version < 1 {
+		r.Version = 1
+	}
+
+	// At-rest path — preferred when the gate is wired.
+	if w, ok := s.atrestWriterFor(); ok {
+		return s.writeRecordAtRest(w, r, dirPath)
+	}
+
+	// Legacy plaintext fallback — gate unwired (test fixtures only).
+	// Re-uses the free-function path so the call site stays a single
+	// place to audit for the .md write semantics.
+	return writeRecord(r, dirPath, ifVersion)
+}
+
+// writeRecordAtRest encrypts + writes via the substrate. Body is the
+// YAML frontmatter (RunbookRecord without Body) + the Body string;
+// header carries the hash-projected tags per §2.4. After success,
+// removes the legacy <slug>.md if present (lazy migration per §3.1).
+//
+// The substrate's IfMatch optimistic-lock uses hex(sha256(prior
+// ciphertext)). For first-writes (no prior file) the empty PriorHash
+// is the correct IfMatch input. For updates we read the prior
+// ciphertext bytes here so the IfMatch hash is well-formed.
+func (s *Service) writeRecordAtRest(w *recordfile.AtRestWriter[RunbookRecord], r RunbookRecord, dirPath string) core.Result {
+	// Marshal a copy without Body — substrate carries Body via the
+	// BodyText field which gets concatenated after the YAML frontmatter
+	// in the encrypted plaintext. Don't double-emit.
+	yamlSrc := r
+	yamlSrc.Body = ""
+	yamlBody, err := yaml.Marshal(yamlSrc)
+	if err != nil {
+		return core.Fail(core.E("runbooks.writeRecord", "yaml marshal", err))
+	}
+	target, jerr := paths.JoinAndCheck(dirPath, r.Slug+".lthn")
+	if jerr != nil {
+		return core.Fail(jerr)
+	}
+	priorHash := ""
+	if existing := core.ReadFile(target); existing.OK {
+		priorHash = core.SHA256Hex(existing.Value.([]byte))
+	}
+
+	wr := w.Write(recordfile.WriteRequest[RunbookRecord]{
+		Record:    r,
+		BodyYAML:  yamlBody,
+		BodyText:  []byte(r.Body),
+		DestPath:  target,
+		PriorHash: priorHash,
+		// AccountID: deliberately empty — substrate uses
+		// SingleUnlockedAccount() as the canonical id.
+	})
+	if !wr.OK {
+		// Forward the typed substrate error verbatim — its Code names
+		// (recordfile.atrest.*) are the contract Stage F audit binds.
+		return wr
+	}
+
+	// Lazy-migration completion: remove the legacy plaintext file when
+	// the encrypted write landed cleanly. Failure is tolerated (RFC
+	// §3.1: warn-on-failure, do NOT abort the encrypted write) — the
+	// next read will see both files, prefer .lthn, and the cleanup
+	// can be re-attempted by the bulk-migrate CLI (§3.3).
+	mdPath, jerr := paths.JoinAndCheck(dirPath, r.Slug+".md")
+	if jerr == nil {
+		if existsMd := core.Stat(mdPath); existsMd.OK {
+			if rm := core.Remove(mdPath); !rm.OK {
+				core.Warn("runbooks: failed to remove legacy plaintext after encrypted write",
+					"path", mdPath, "err", rm.Error())
+			}
+		}
+	}
+
+	// Synthesise a paths.WriteOutput-shaped success Value so existing
+	// callers (MarkRehearsed) keep their typed expectations. The
+	// Version field is surfaced from the substrate receipt.
+	receipt, _ := wr.Value.(recordfile.WriteReceipt)
+	return core.Ok(paths.WriteOutput{
+		Version: int(receipt.Version),
+		Hash:    "", // future: feed back from substrate when needed
+	})
+}
+
 // fireEvent publishes a runbook event on the Core ACTION bus.
 func (s *Service) fireEvent(name string, entry RunbookEntry) {
 	if s == nil || s.core == nil {
@@ -456,6 +1100,11 @@ func (s *Service) SetSessionGate(g SessionGate) {
 	s.gateMu.Lock()
 	s.gate = g
 	s.gateMu.Unlock()
+	// Invalidate any cached AtRestWriter so a re-wire (e.g. account
+	// service rotation) rebuilds adapters against the fresh gate.
+	s.atrestMu.Lock()
+	s.atrestWriter = nil
+	s.atrestMu.Unlock()
 }
 
 // Stop nils the SessionGate reference so a draining Service
@@ -470,6 +1119,9 @@ func (s *Service) Stop(_ core.Context) core.Result {
 	s.gateMu.Lock()
 	s.gate = nil
 	s.gateMu.Unlock()
+	s.atrestMu.Lock()
+	s.atrestWriter = nil
+	s.atrestMu.Unlock()
 	return core.Ok(nil)
 }
 
