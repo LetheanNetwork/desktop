@@ -236,6 +236,19 @@ func ensureTier(id CallerIdentity) CallerIdentity {
 	return id
 }
 
+// Deprecated: prefer auth.WithCaller(ctx, ident) + thread the derived
+// Context forward (Mantis #1756 partial / RFC.tier-auth-substrate v3.1
+// §4.6.2 Option 3 soft-deprecation). The sidecar map this writes to is
+// the workaround documented at the bottom of this file for the absence
+// of a CoreGO context-replacement API; once the Service-method
+// migration ships (Phase 1.5.1 follow-on ticket — closes #1756 F-2
+// cascade fully) the sidecar will be deleted and SetCaller will be
+// removed. Call sites that already hold a core.Context (gin handler
+// chain post-bridge, queue worker dispatch, tasks Service methods) MUST
+// migrate to WithCaller; SetCaller stays functional until the cascade
+// closes so the H#255 wrapper-port lane and existing pkg/server bridge
+// keep working without coordinated cutover.
+//
 // SetCaller stamps the supplied CallerIdentity onto the Core-shaped
 // sidecar map keyed by c. The stamp is observable from subsequent
 // Caller(c) reads in the SAME *core.Core instance. The Context-
@@ -264,6 +277,13 @@ func ensureTier(id CallerIdentity) CallerIdentity {
 // the WithCaller-and-thread shape) to avoid stamps leaking across
 // requests when the same *core.Core is reused. Per-request *core.Core
 // derivation is the cleaner pattern; ClearCaller is the fallback.
+//
+// Race-safety note: WithCaller is race-safe by construction because
+// core.WithValue returns an immutable derived ctx. SetCaller is also
+// race-safe (sync.Map under the hood) but pointer-identity scoping
+// across concurrent requests sharing one *core.Core is the source of
+// the H#256 surfacing — Context-derived ctx-per-request eliminates
+// the shared-pointer dimension entirely.
 func SetCaller(c *core.Core, ident CallerIdentity) {
 	if c == nil {
 		return
@@ -271,6 +291,11 @@ func SetCaller(c *core.Core, ident CallerIdentity) {
 	coreSidecar.Store(c, ensureTier(ident))
 }
 
+// Deprecated: companion to SetCaller — removed in lockstep when the
+// Phase 1.5.1 cascade closes. Prefer the WithCaller-and-thread shape
+// so the stamp clears naturally with the call chain (no explicit
+// cleanup required).
+//
 // ClearCaller removes any sidecar stamp for c. Idempotent — safe to
 // call when no stamp exists. HTTP middleware should call ClearCaller
 // in a deferred block at end of request when reusing *core.Core

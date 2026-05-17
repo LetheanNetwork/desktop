@@ -476,6 +476,83 @@ func TestBootstrapAuth_NoAuth_LeavesFloor_Good(t *core.T) {
 		"unauth request MUST NOT stamp any tier — Caller stays at TierInternal floor")
 }
 
+// TestServer_BridgeCallerContextShaped_Documentation_Good — Mantis
+// #1756 partial / RFC.tier-auth-substrate v3.1 §4.6.2 Option 3
+// soft-deprecation. Pins TWO facts about the current bridge that the
+// Phase 1.5.1 follow-on cascade migration depends on:
+//
+//  1. The bridge today calls auth.SetCaller (the documented sidecar
+//     shape); a downstream auth.Caller(c) read during the handler
+//     observes the identity. This MUST keep working until the cascade
+//     closes — H#255 wrapper-port lane and pkg/server downstream
+//     handlers both read via Caller(c).
+//  2. The Context-shaped primitive auth.WithCaller(ctx, ident) is
+//     available TODAY at the substrate. Future cascade work threads a
+//     per-request ctx through the handler chain so downstream gates
+//     read via CallerFromContext(ctx) without touching the sidecar.
+//     The Context-shaped read is race-safe by construction (immutable
+//     derived ctx); the sidecar's pointer-identity scope is the
+//     surfaced lottery (H#256).
+//
+// The test fires a real request through the bridge, captures
+// auth.Caller(c) DURING the handler, then independently derives a
+// Context with WithCaller and asserts CallerFromContext returns the
+// expected identity. Both reads MUST succeed today; the test stays in
+// place as the regression gate for the cascade migration.
+func TestServer_BridgeCallerContextShaped_Documentation_Good(t *core.T) {
+	_ = homeFixture(t)
+	svc := serverkey.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	c := core.New()
+	var sidecarCaller auth.CallerIdentity
+	var ctxCaller auth.CallerIdentity
+	pathScopes := map[string]string{"/v1/account/unlock": "account.unlock"}
+	tiers := map[string]server.RouteTier{"/v1/api/data": server.TierSession}
+
+	// Capture closure exercises BOTH read shapes during the handler:
+	//   - sidecarCaller = auth.Caller(inner) — current production path
+	//   - ctxCaller     = via WithCaller(inner.Context(), …) +
+	//                     CallerFromContext — Phase 1.5.1 forward-arc
+	eng := newBridgeTestEngine(t, c, svc, "static-bearer", pathScopes, tiers,
+		"/v1/api/data",
+		func(inner *core.Core) {
+			sidecarCaller = auth.Caller(inner)
+
+			// Independently derive a Context-shaped stamp from the
+			// handler — proves auth.WithCaller is reachable as a
+			// substrate primitive TODAY without any cascade work.
+			derived := auth.WithCaller(inner.Context(), auth.CallerIdentity{
+				Tier: auth.TierOperator, Subject: "ctx-forward-arc",
+				Source: "test-cascade-preview",
+			})
+			ctxCaller = auth.CallerFromContext(derived)
+		})
+
+	const acct = "abc123def4567890"
+	out := svc.IssueSessionToken(acct).Value.(serverkey.SessionTokenOutput)
+	rr := doGET(eng, "/v1/api/data", "Bearer "+out.Token)
+	core.AssertEqual(t, http.StatusOK, rr.Code,
+		"session-tier route with valid session token → 200")
+
+	// Sidecar shape (today's production path) carries the
+	// bridge-stamped identity.
+	core.AssertEqual(t, auth.TierOperator, sidecarCaller.Tier,
+		"bridge MUST stamp TierOperator via SetCaller (sidecar) — pre-cascade contract")
+	core.AssertEqual(t, acct, sidecarCaller.Subject,
+		"bridge MUST carry account_id via SetCaller — pre-cascade contract")
+	core.AssertEqual(t, "http-session", sidecarCaller.Source,
+		"bridge MUST stamp Source='http-session' via SetCaller — pre-cascade contract")
+
+	// Context shape (Phase 1.5.1 forward-arc) is available at the
+	// substrate TODAY; the cascade migrates handler chains to thread
+	// the derived ctx forward instead of relying on the sidecar.
+	core.AssertEqual(t, auth.TierOperator, ctxCaller.Tier,
+		"auth.WithCaller(ctx, …) MUST resolve TierOperator via CallerFromContext — Phase 1.5.1 forward-arc")
+	core.AssertEqual(t, "ctx-forward-arc", ctxCaller.Subject,
+		"auth.WithCaller(ctx, …) MUST carry the supplied Subject — Phase 1.5.1 forward-arc")
+}
+
 // --- Stage E.B session-tier middleware coverage ---
 
 // newSessionTestEngine builds a coreapi.Engine wired with the Stage

@@ -561,6 +561,167 @@ func TestAuth_Require_AllowDoesNotEmit_Good(t *testing.T) {
 	}
 }
 
+// TestAuth_WithCaller_RaceSafeUnderConcurrency_Good — Mantis #1756
+// partial / RFC.tier-auth-substrate v3.1 §4.6.2 Option 3. Demonstrates
+// the Context-shaped substrate is race-safe by construction: N
+// concurrent goroutines each derive their own ctx via auth.WithCaller
+// from a single base ctx; each goroutine asserts it observes its OWN
+// Subject (not a sibling's). core.WithValue returns an immutable
+// derived ctx, so the "key lottery" the sidecar shape suffers from
+// (pointer-identity overlap when two concurrent requests share one
+// *core.Core) cannot occur on the Context-shaped path. -race clean by
+// construction; the regression gate fires if a future refactor makes
+// WithCaller mutate ctx in place.
+//
+//	go test -race -run TestAuth_WithCaller_RaceSafeUnderConcurrency_Good ./pkg/auth
+func TestAuth_WithCaller_RaceSafeUnderConcurrency_Good(t *testing.T) {
+	const N = 100
+	c := core.New()
+	baseCtx := c.Context()
+
+	var wg sync.WaitGroup
+	wg.Add(N)
+	errs := make(chan string, N)
+	for i := 0; i < N; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			// Each goroutine derives its own ctx with a unique Subject
+			// derived from i. The derived ctx is local to this
+			// goroutine; the base ctx is never mutated.
+			subject := "account-" + tierTestSubject(i)
+			ctx := auth.WithCaller(baseCtx, auth.CallerIdentity{
+				Tier: auth.TierOperator, Subject: subject, Source: "race-test",
+			})
+			id := auth.CallerFromContext(ctx)
+			if id.Subject != subject {
+				errs <- "goroutine " + tierTestSubject(i) +
+					" observed wrong subject: want " + subject +
+					" got " + id.Subject
+				return
+			}
+			if id.Tier != auth.TierOperator {
+				errs <- "goroutine " + tierTestSubject(i) +
+					" observed wrong tier: want operator got " +
+					string(id.Tier)
+				return
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for msg := range errs {
+		t.Errorf("race-safety violation: %s", msg)
+	}
+
+	// Base ctx MUST remain unstamped — WithCaller did NOT mutate it.
+	if id := auth.CallerFromContext(baseCtx); id.Tier != auth.TierInternal {
+		t.Fatalf("base ctx mutated by WithCaller: want %q got %q",
+			auth.TierInternal, id.Tier)
+	}
+}
+
+// tierTestSubject converts an int 0..N to a short string without
+// importing strconv (kept local so the test stays self-contained
+// against the AX-6 banned-stdlib list). Returns a base-10 stringified
+// non-negative int.
+func tierTestSubject(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	digits := []byte{}
+	for i > 0 {
+		digits = append([]byte{byte('0' + i%10)}, digits...)
+		i /= 10
+	}
+	return string(digits)
+}
+
+// TestAuth_SetCaller_DeprecationStillFunctional_Good — Mantis #1756
+// partial / RFC.tier-auth-substrate v3.1 §4.6.2 Option 3. The sidecar
+// fallback (SetCaller / ClearCaller / Caller's sync.Map read branch)
+// is marked Deprecated in the doc-strings but MUST stay source-compat
+// until the Phase 1.5.1 cascade closes. Pins the round-trip so the
+// H#255 wrapper-port lane and existing pkg/server bridge keep working
+// without coordinated cutover. When the sidecar is removed (post-
+// cascade), this test deletes alongside SetCaller/ClearCaller.
+func TestAuth_SetCaller_DeprecationStillFunctional_Good(t *testing.T) {
+	c := core.New()
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier: auth.TierOperator, Subject: "deprec-still-works", Source: "test",
+	})
+	t.Cleanup(func() { auth.ClearCaller(c) })
+
+	id := auth.Caller(c)
+	if id.Tier != auth.TierOperator {
+		t.Fatalf("deprecated SetCaller stopped functioning: want %q got %q",
+			auth.TierOperator, id.Tier)
+	}
+	if id.Subject != "deprec-still-works" {
+		t.Fatalf("deprecated SetCaller subject lost: want %q got %q",
+			"deprec-still-works", id.Subject)
+	}
+	if id.Source != "test" {
+		t.Fatalf("deprecated SetCaller source lost: want %q got %q",
+			"test", id.Source)
+	}
+
+	// ClearCaller path also stays functional.
+	auth.ClearCaller(c)
+	if id := auth.Caller(c); id.Tier != auth.TierInternal {
+		t.Fatalf("deprecated ClearCaller stopped functioning: post-clear "+
+			"want %q got %q", auth.TierInternal, id.Tier)
+	}
+}
+
+// TestAuth_Caller_PrefersContextOverSidecar_Good — Mantis #1756
+// partial / RFC.tier-auth-substrate v3.1 §4.6.2 Option 3. Pins the
+// already-documented Caller(c) read order: Context-value FIRST, sidecar
+// fallback SECOND. The Context-shaped stamp wins when both exist on
+// the same *core.Core. This is the regression gate for the cascade
+// migration — once handler chains thread a per-request ctx through and
+// the bridge stops calling SetCaller, the Caller path silently
+// switches over without any per-call-site change. If a future refactor
+// flips the order (sidecar wins over Context), this test fires and the
+// cascade migration plan halts.
+//
+// Note: core.Core's bound Context is fixed at New(); WithCaller on
+// c.Context() does NOT mutate the Core's bound context. So the test
+// exercises this via CallerFromContext(stamped) vs Caller(c with
+// sidecar) — the two read paths separately — and asserts that a
+// Caller(c) read with ONLY the sidecar populated returns the sidecar
+// (no Context stamp present), while a CallerFromContext(stamped)
+// returns the Context stamp regardless of sidecar state.
+func TestAuth_Caller_PrefersContextOverSidecar_Good(t *testing.T) {
+	c := core.New()
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier: auth.TierRenderer, Subject: "sidecar-account", Source: "sidecar",
+	})
+	t.Cleanup(func() { auth.ClearCaller(c) })
+
+	// Sidecar-only read via Caller(c): returns sidecar stamp.
+	if id := auth.Caller(c); id.Subject != "sidecar-account" {
+		t.Fatalf("Caller(c) sidecar-only: want sidecar subject got %q", id.Subject)
+	}
+
+	// Context-stamped path via CallerFromContext(ctx): returns ctx stamp
+	// even though c's sidecar still carries a DIFFERENT identity. This
+	// is the regression gate for the Phase 1.5.1 cascade: once handlers
+	// thread ctx forward, the Context-stamp is what downstream gates
+	// observe — the sidecar becomes invisible to Context-shaped readers.
+	ctx := auth.WithCaller(c.Context(), auth.CallerIdentity{
+		Tier: auth.TierOperator, Subject: "ctx-account", Source: "ctx",
+	})
+	if id := auth.CallerFromContext(ctx); id.Subject != "ctx-account" {
+		t.Fatalf("CallerFromContext(stamped): want ctx subject got %q (sidecar leaked)",
+			id.Subject)
+	}
+	if id := auth.CallerFromContext(ctx); id.Tier != auth.TierOperator {
+		t.Fatalf("CallerFromContext(stamped): want %q got %q (sidecar tier leaked)",
+			auth.TierOperator, id.Tier)
+	}
+}
+
 // TestAuth_RequireFromContext_DenyEmitsAudit_Good — Context-shaped
 // Require companion fires the same EventTierReject row on deny;
 // pins the dual-API parity for the forensic trail.

@@ -679,6 +679,21 @@ func WithCallerBridge(c *core.Core) coreapi.Option {
 //
 //	mw := server.CallerBridgeMiddleware(coreInstance)
 //	engine.Use(mw)
+//
+// Forward-arc (Mantis #1756 partial / RFC.tier-auth-substrate v3.1
+// §4.6.2 Option 3 — soft-deprecate): the SetCaller/ClearCaller pair
+// this bridge uses is the documented sidecar-shaped path; the
+// Context-shaped primitive (auth.WithCaller) is race-safe by
+// construction (immutable derived ctx) and is the preferred substrate
+// for new handler-chain wiring. The bridge keeps the sidecar shape
+// until the Phase 1.5.1 follow-on ticket migrates the handler chain to
+// thread a per-request core.Context through pkg/server →
+// pkg/tasks → pkg/queue. Until then, the sidecar's pointer-identity
+// scope across concurrent requests sharing one *core.Core is the
+// surfaced lottery (H#256 surface, F-2 cascade) — the bridge's
+// defer-ClearCaller closes the inter-request leak but does not address
+// the in-flight overlap between two concurrent requests on the same
+// *core.Core (mitigated today by per-request derived Core where wired).
 func CallerBridgeMiddleware(c *core.Core) gin.HandlerFunc {
 	if c == nil {
 		return nil
