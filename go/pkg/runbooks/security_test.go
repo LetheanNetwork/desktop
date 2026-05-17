@@ -37,7 +37,7 @@ func TestGet_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 
 func TestMarkRehearsed_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := runbooks.NewService(nil)
+	svc := newTestSvc(t) // pre-wired unlocked gate so we test the IsValidID path, not session.locked
 	r := svc.MarkRehearsed(runbooks.MarkInput{ID: "../../wallets/x"})
 	if r.OK {
 		t.Fatal("MarkRehearsed with traversal ID must reject")

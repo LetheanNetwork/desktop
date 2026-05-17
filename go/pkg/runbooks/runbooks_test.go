@@ -12,6 +12,30 @@ import (
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
+// stubSessionGate is the test double for the consumer-defined
+// SessionGate interface (RFC.stage-e-unlockgate v2 §4.2 stub shape —
+// Mantis #1613 B.2). Duplicated per-pkg rather than shared so test
+// files keep zero cross-pkg testing/... deps.
+type stubSessionGate struct{ ids []string }
+
+func (s *stubSessionGate) UnlockedAccountIDs() []string { return s.ids }
+
+// newTestSvc constructs a runbooks.Service pre-wired with a SessionGate
+// reporting a single unlocked account so write methods pass the gate
+// by default. Tests that need to assert the locked-state path call
+// SetSessionGate explicitly with an empty stub (or instantiate
+// subject.NewService directly for the nil-gate fail-safe path).
+//
+// Usage example:
+//
+//	svc := newTestSvc(t)
+//	r := svc.MarkRehearsed(subject.MarkInput{ID: "R-01"})
+func newTestSvc(_ *testing.T) *subject.Service {
+	svc := subject.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
+	return svc
+}
+
 func TestParseRecord_RoundTrip(t *testing.T) {
 	now := core.Now().UTC()
 	rec := subject.RunbookRecord{
@@ -186,7 +210,7 @@ func TestAtomicCutover_Runbooks_Create_Good(t *testing.T) {
 // bumps the stored version monotonically (1 -> 2).
 func TestAtomicCutover_Runbooks_Update_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := subject.NewService(nil)
+	svc := newTestSvc(t)
 	// Seed first so MarkRehearsed has a target.
 	if r := svc.OnStart(); !r.OK {
 		t.Fatalf("OnStart: %s", r.Error())
@@ -215,7 +239,7 @@ func TestAtomicCutover_Runbooks_Update_Good(t *testing.T) {
 // pins #1544 against W3 wave drift).
 func TestAtomicCutover_Runbooks_Update_VersionStale_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := subject.NewService(nil)
+	svc := newTestSvc(t)
 	if r := svc.OnStart(); !r.OK {
 		t.Fatalf("OnStart: %s", r.Error())
 	}
@@ -300,7 +324,7 @@ func TestAtomicCutover_Runbooks_Update_VersionStale_Ugly(t *testing.T) {
 // via an unconditional first-write that stamps version=1.
 func TestAtomicCutover_Runbooks_LegacyFile_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := subject.NewService(nil)
+	svc := newTestSvc(t)
 	dirR := core.UserHomeDir()
 	if !dirR.OK {
 		t.Fatalf("UserHomeDir: %s", dirR.Error())
@@ -343,7 +367,7 @@ func TestAtomicCutover_Runbooks_LegacyFile_Ugly(t *testing.T) {
 // AuditModeBatch per RFC §6.1.
 func TestAtomicCutover_Runbooks_AuditEmissionRecordBatch_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := subject.NewService(nil)
+	svc := newTestSvc(t)
 	paths.SetAuditSecretProvider(func() []byte {
 		return []byte("runbooks-cutover-test-secret-32by")
 	})
@@ -430,5 +454,147 @@ func TestAtomicCutover_Runbooks_SeedPath_Good(t *testing.T) {
 	}
 	if got := rd.Value.(paths.ReadOutput); got.Version != 1 {
 		t.Fatalf("second OnStart should be no-op: expected version 1, got %d", got.Version)
+	}
+}
+
+// ---- SessionGate retrofit (RFC.stage-e-unlockgate v2 §4.2 / Mantis #1613 B.2)
+
+// TestRunbooks_NilGate_WarnsOnce_FailsClosed — a Service constructed
+// without SetSessionGate fails-closed on writes. Second + third writes
+// continue to fail-closed (one-shot warn semantics — the second call
+// must remain quiet but its caller-visible result must be the same
+// fail-closed shape).
+func TestRunbooks_NilGate_WarnsOnce_FailsClosed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := subject.NewService(nil) // NO SetSessionGate — exercises §2.2 fail-safe.
+	// Seed must run via a pre-wired sibling so MarkRehearsed has a real
+	// target on disk; otherwise the test would conflate "not-found"
+	// with "session.locked". We do this by spinning up a temp wired
+	// service against the same HOME, calling OnStart, then exercising
+	// the NIL-gate svc against the same files.
+	wired := newTestSvc(t)
+	if r := wired.OnStart(); !r.OK {
+		t.Fatalf("seed OnStart: %s", r.Error())
+	}
+
+	r1 := svc.MarkRehearsed(subject.MarkInput{ID: "R-01"})
+	if r1.OK {
+		t.Fatal("expected MarkRehearsed to fail-closed when gate is nil")
+	}
+	if !core.Contains(r1.Error(), "runbooks.session.locked") {
+		t.Fatalf("expected runbooks.session.locked on first MarkRehearsed, got %q", r1.Error())
+	}
+
+	// Second write — nilWarned already true; CompareAndSwap returns
+	// false and core.Warn is NOT called again. Behaviour from the
+	// caller's perspective: same fail-closed result.
+	r2 := svc.MarkRehearsed(subject.MarkInput{ID: "R-02"})
+	if r2.OK {
+		t.Fatal("expected second MarkRehearsed to fail-closed when gate is nil")
+	}
+	if !core.Contains(r2.Error(), "runbooks.session.locked") {
+		t.Fatalf("expected runbooks.session.locked on second MarkRehearsed, got %q", r2.Error())
+	}
+
+	// Third write — same fail-closed behaviour persists.
+	r3 := svc.MarkRehearsed(subject.MarkInput{ID: "R-03"})
+	if r3.OK {
+		t.Fatal("expected third MarkRehearsed to fail-closed when gate is nil")
+	}
+	if !core.Contains(r3.Error(), "runbooks.session.locked") {
+		t.Fatalf("expected runbooks.session.locked on third MarkRehearsed, got %q", r3.Error())
+	}
+}
+
+// TestRunbooks_UnlockedGate_AllowsMarkRehearsed — MarkRehearsed
+// succeeds when the live-read gate reports at least one unlocked
+// account.
+func TestRunbooks_UnlockedGate_AllowsMarkRehearsed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := subject.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	if r := svc.OnStart(); !r.OK {
+		t.Fatalf("OnStart: %s", r.Error())
+	}
+	r := svc.MarkRehearsed(subject.MarkInput{ID: "R-01"})
+	if !r.OK {
+		t.Fatalf("MarkRehearsed should succeed with gate reporting unlocked acct, got: %s", r.Error())
+	}
+}
+
+// TestRunbooks_LockedGate_FailsMarkRehearsed_session_locked —
+// MarkRehearsed rejects when the live-read gate reports zero unlocked
+// accounts. The MarkRehearsed is gated BEFORE the IsValidID check +
+// filesystem read, so the session.locked code surfaces in preference
+// to any later error.
+func TestRunbooks_LockedGate_FailsMarkRehearsed_session_locked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Seed records while unlocked, then flip to locked + try to update.
+	svc := newTestSvc(t)
+	if r := svc.OnStart(); !r.OK {
+		t.Fatalf("OnStart: %s", r.Error())
+	}
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.MarkRehearsed(subject.MarkInput{ID: "R-01"})
+	if r.OK {
+		t.Fatal("expected MarkRehearsed to be rejected when gate reports zero unlocked accounts")
+	}
+	if !core.Contains(r.Error(), "runbooks.session.locked") {
+		t.Fatalf("expected runbooks.session.locked, got %q", r.Error())
+	}
+}
+
+// TestRunbooks_StopNilsGate — Stop() severs the SessionGate;
+// subsequent writes fail-closed even though the gate WAS wired
+// (Cerberus #28 ADD-5 — Stop drain hygiene mirrors mail).
+func TestRunbooks_StopNilsGate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := newTestSvc(t) // gate wired with unlocked stub
+	if r := svc.OnStart(); !r.OK {
+		t.Fatalf("OnStart: %s", r.Error())
+	}
+
+	// Pre-Stop: write succeeds.
+	if r := svc.MarkRehearsed(subject.MarkInput{ID: "R-01"}); !r.OK {
+		t.Fatalf("MarkRehearsed should succeed pre-Stop, got: %s", r.Error())
+	}
+
+	// Stop nils the gate reference.
+	if r := svc.Stop(core.Background()); !r.OK {
+		t.Fatalf("Stop should succeed, got: %s", r.Error())
+	}
+
+	// Post-Stop: write fails-closed via the nil-gate path.
+	r := svc.MarkRehearsed(subject.MarkInput{ID: "R-02"})
+	if r.OK {
+		t.Fatal("expected MarkRehearsed to fail-closed after Stop nils the gate")
+	}
+	if !core.Contains(r.Error(), "runbooks.session.locked") {
+		t.Fatalf("expected runbooks.session.locked, got %q", r.Error())
+	}
+}
+
+// TestRunbooks_LockedGate_ReadStillWorks — List + Get + Search are
+// not gated by the session-lock (RFC §3.1 — reads stay open while
+// locked).
+func TestRunbooks_LockedGate_ReadStillWorks(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Seed unlocked, then flip to locked.
+	svc := newTestSvc(t)
+	if r := svc.OnStart(); !r.OK {
+		t.Fatalf("OnStart: %s", r.Error())
+	}
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	if r := svc.List(subject.ListInput{}); !r.OK {
+		t.Fatalf("List should succeed when session locked, got: %s", r.Error())
+	}
+	if g := svc.Get(subject.GetInput{ID: "R-01"}); !g.OK {
+		t.Fatalf("Get should succeed when session locked, got: %s", g.Error())
+	}
+	if s := svc.Search(subject.SearchInput{Query: "postfix"}); !s.OK {
+		t.Fatalf("Search should succeed when session locked, got: %s", s.Error())
 	}
 }

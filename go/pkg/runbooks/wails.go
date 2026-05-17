@@ -155,6 +155,9 @@ func (s *Service) Search(input SearchInput) core.Result {
 //	r := svc.MarkRehearsed(runbooks.MarkInput{ID: "R-05"})
 //	if r.OK { entry := r.Value.(runbooks.RunbookEntry) }
 func (s *Service) MarkRehearsed(input MarkInput) core.Result {
+	if fail, ok := s.assertUnlocked("runbooks.MarkRehearsed"); !ok {
+		return fail
+	}
 	if err := paths.IsValidID(input.ID); err != nil {
 		return core.Fail(err)
 	}
