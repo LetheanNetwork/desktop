@@ -132,6 +132,26 @@ const (
 	EventAuthSessionIssued      = "auth.session.issued"
 	EventAuthSessionVerifyFailed = "auth.session.verify_failed"
 	EventAuthAccountProvisioned = "auth.account.provisioned"
+
+	// EventPluginViewCapabilityGranted fires when a plugin's iframe
+	// view receives a capability via the host-side shim's postMessage
+	// handshake per plans/code/lthn/desktop/views/RFC.plugin-views.md
+	// §5.1. Frontend shim POSTs /v1/plugin-view/capability-grant
+	// BEFORE delivering the token bytes to the iframe so the audit
+	// row is committed first; if the audit emit fails the shim must
+	// NOT proceed with postMessage (Mantis #1523).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   plugin_id  — installed plugin code that owns the iframe view
+	//   capability — the brokered scope literal (e.g. "session-token")
+	//   origin     — the iframe's loopback origin (per-port allowlist)
+	//
+	// The token BYTES are NEVER in Meta — only the capability literal.
+	// The Cerberus #1465 closure-only-scope discipline keeps the bytes
+	// off the audit substrate; this event records the grant decision,
+	// not the credential.
+	EventPluginViewCapabilityGranted = "plugin.view.capability_granted"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the
