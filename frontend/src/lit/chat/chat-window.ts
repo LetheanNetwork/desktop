@@ -849,13 +849,20 @@ class LthnChatWindow extends LitElement {
     try {
       const svc = await import("@desktop/sessions/wailsservice");
       const { unwrap } = await import("../result");
+      // Mantis #1566 / #1538: sessions.Search now returns SearchResult
+      // ({ hits, truncated }) instead of a flat SessionInfo slice.
+      // Truncated:true means MaxSearchScan (5000) was hit before every
+      // session was examined — the surfaced hits are still real, just
+      // possibly partial. UI doesn't yet badge the truncated state;
+      // when it does, read sr.truncated here.
       type SearchHit = { id: string };
-      const hits = await unwrap<SearchHit[]>(svc.Search(q), []);
+      type SearchResult = { hits: SearchHit[] | null; truncated: boolean };
+      const sr = await unwrap<SearchResult>(svc.Search(q), { hits: [], truncated: false });
       // The user may have typed more since we fired — only commit if
       // the live query still matches our snapshot.
       if (this.searchQuery.trim() !== q) return;
       const ids = new Set<string>();
-      for (const h of (hits || [])) {
+      for (const h of (sr?.hits || [])) {
         if (h && typeof h.id === "string") ids.add(h.id);
       }
       this.contentMatchedIds = ids;
