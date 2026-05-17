@@ -562,13 +562,10 @@ type pathsAuditAdapter struct{ svc *audit.Service }
 
 // RecordPathsEvent implements paths.AuditRecorder. The returned
 // core.Result surfaces audit-side failures up through paths' emit
-// site — pkg/paths/events.go currently ignores the returned Result
-// (subscribers run on the emit goroutine; recorder errors don't
-// propagate to the AtomicWriteWithVersion caller). Flagged for
-// follow-up: an audit-write failure inside an auth-substrate
-// AtomicWriteWithVersion is silently swallowed today. Out of scope
-// for #1521 (this dispatch wires the adapter); raise as a separate
-// Cerberus surface if it warrants escalation.
+// site. Sync-audit failure propagates to the AtomicWriteWithVersion
+// caller per Mantis #1530 (commit 1303368) — auth-substrate writes
+// fail-stop when the audit recorder errors, so the silent-swallow
+// gap previously flagged here is closed.
 func (a *pathsAuditAdapter) RecordPathsEvent(ev paths.LockEvent) core.Result {
 	ae := audit.Event{
 		Event:   ev.Kind,
