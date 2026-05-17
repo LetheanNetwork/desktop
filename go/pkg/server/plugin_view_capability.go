@@ -375,6 +375,19 @@ func (s *Service) handlePluginViewCapabilityGrant(c *gin.Context) {
 	// project_corego_export_gaps); mirrors pkg/account/routes.go
 	// serverRequestID() until the export lands.
 	correlationID := newCorrelationID()
+	// Cerberus #1511 — server generates the audit RequestID. The caller's
+	// X-Request-Id header is dropped to prevent forensic deniability (an
+	// attacker forging arbitrary values to mimic a legitimate caller's
+	// audit-JOIN key, defeating the disambiguation property the field
+	// exists to provide). The server's UUID v4 is echoed in the response
+	// X-Request-Id header so the legitimate caller can still correlate
+	// their request to the audit log. RequestID and correlation_id are
+	// SEPARATE values by design — RequestID is the cross-cutting audit
+	// substrate key, correlation_id disambiguates within a single
+	// (plugin_id, origin, capability) tuple — generated independently so
+	// neither can leak the other.
+	srvReqID := newCorrelationID()
+	c.Header("X-Request-Id", srvReqID)
 	// Defensive copy of the capabilities slice so the audit substrate
 	// never shares mutable backing with the request body. The forensic
 	// record is immutable by construction.
@@ -385,7 +398,7 @@ func (s *Service) handlePluginViewCapabilityGrant(c *gin.Context) {
 		TS:        core.UnixNow(),
 		Scope:     "plugin.view",
 		Outcome:   audit.OutcomeOK,
-		RequestID: c.GetHeader("X-Request-Id"),
+		RequestID: srvReqID,
 		Meta: map[string]any{
 			"plugin_id":      req.PluginID,
 			"capabilities":   caps,

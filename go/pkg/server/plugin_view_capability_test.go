@@ -773,3 +773,60 @@ func TestCapabilityGrant_ValidOrigin_Good(t *testing.T) {
 		})
 	}
 }
+
+// TestPluginViewCapabilityGrant_RequestIDOverriddenByServer_Ugly pins
+// Cerberus #1511 — the handler MUST generate the audit RequestID
+// server-side and drop any caller-supplied X-Request-Id header. The
+// server's UUID is echoed in the response X-Request-Id header so
+// legitimate callers can still correlate; the audit row's RequestID
+// MUST NOT equal the forged client value. RequestID and correlation_id
+// are independent server-generated values — both UUIDv4-shaped, neither
+// equal to each other in a single request.
+func TestPluginViewCapabilityGrant_RequestIDOverriddenByServer_Ugly(t *testing.T) {
+	rec := &recordingRecorder{}
+	audit.SetDefault(rec)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	s := server.NewService(server.Options{})
+
+	const forgedID = "attacker-chosen-forensic-decoy-12345"
+	body := `{"plugin_id":"opencode","capabilities":["session-token"],"origin":"http://127.0.0.1:4096","outcome":"granted"}`
+	req := httptest.NewRequest(core.MethodPost,
+		server.PluginViewCapabilityGrantPath, core.NewBufferReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-Id", forgedID)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusOK, w.Code,
+		"valid grant with forged X-Request-Id → 200")
+
+	// Response MUST echo a server-generated UUID v4 — not the forged value.
+	echoed := w.Header().Get("X-Request-Id")
+	core.AssertNotEqual(t, "", echoed,
+		"server MUST echo a generated request_id in X-Request-Id response header")
+	core.AssertNotEqual(t, forgedID, echoed,
+		"server-generated id MUST NOT equal caller-supplied forged id (Cerberus #1511)")
+	core.AssertTrue(t, uuidV4Shape(echoed),
+		"server-generated id MUST be UUID v4-shaped")
+
+	// Audit row MUST carry the server-generated RequestID — never the
+	// forged client value (the forensic-deniability defence).
+	core.AssertEqual(t, 1, len(rec.events))
+	ev := rec.events[0]
+	core.AssertNotEqual(t, forgedID, ev.RequestID,
+		"audit row RequestID MUST NOT equal forged client value")
+	core.AssertEqual(t, echoed, ev.RequestID,
+		"audit row RequestID MUST equal value echoed in X-Request-Id response header")
+	core.AssertTrue(t, uuidV4Shape(ev.RequestID),
+		"audit row RequestID MUST be UUID v4-shaped")
+
+	// RequestID and correlation_id are independently generated; equal
+	// values would indicate a single source of entropy bled across
+	// fields. Each request mints two distinct UUIDs.
+	cid, _ := ev.Meta["correlation_id"].(string)
+	core.AssertTrue(t, uuidV4Shape(cid),
+		"correlation_id MUST be UUID v4-shaped")
+	core.AssertNotEqual(t, ev.RequestID, cid,
+		"RequestID and correlation_id MUST be independently generated UUIDs")
+}
