@@ -132,16 +132,12 @@ func TestRunner_Generate_EmitsRequestedAndCompleted_Good(t *core.T) {
 
 	r := s.Generate("ping")
 	core.AssertTrue(t, r.OK, "router-backed Generate should succeed with stub model")
-	// NOTE: pre-existing pointer-vs-value type-assertion mismatch in
-	// service.go (router.Chat returns ProviderChatResponse by value;
-	// service asserts *ai.ProviderChatResponse) means the assistant
-	// reply currently arrives at the caller as "" rather than "pong".
-	// Outside H#181's allowlist — surfaced as a separate Mantis follow-up.
-	// The audit Completed emit similarly stamps tokens=0 + provider/model
-	// from the router-head fallback rather than the actually-selected
-	// route. Tests assert the current (pre-fix) behaviour so a future
-	// fix lands as a deliberate test update.
-	core.AssertEqual(t, "", r.Value.(string))
+	// Mantis #1669 (fixed): router.Chat returns ProviderChatResponse by
+	// value, so the service-side type assertion is `(ai.ProviderChatResponse)`
+	// not `(*ai.ProviderChatResponse)`. With the fix the assistant reply
+	// propagates to the caller and the audit Completed emit stamps the
+	// actually-selected provider/model + real token count.
+	core.AssertEqual(t, "pong", r.Value.(string))
 
 	events := rec.snapshot()
 	core.AssertEqual(t, 2, len(events), "Generate should emit Requested + Completed")
@@ -156,11 +152,9 @@ func TestRunner_Generate_EmitsRequestedAndCompleted_Good(t *core.T) {
 	core.AssertEqual(t, audit.EventInferenceGenerateCompleted, events[1].Event)
 	core.AssertEqual(t, "inference", events[1].Scope)
 	core.AssertEqual(t, audit.OutcomeOK, events[1].Outcome)
-	// router-head fallback values (see NOTE above).
 	core.AssertEqual(t, "stub-provider", events[1].Meta["provider"])
 	core.AssertEqual(t, "stub-model", events[1].Meta["model"])
-	_, hasTokens := events[1].Meta["tokens"]
-	core.AssertTrue(t, hasTokens, "Completed Meta must carry tokens key")
+	core.AssertEqual(t, 1, events[1].Meta["tokens"], "Completed tokens reflects router-returned GeneratedTokens")
 	_, hasLatency := events[1].Meta["latency_ms"]
 	core.AssertTrue(t, hasLatency, "Completed Meta must carry latency_ms key")
 }
@@ -179,9 +173,9 @@ func TestRunner_Chat_EmitsRequestedAndCompleted_Good(t *core.T) {
 		{Role: "user", Content: "again"},
 	})
 	core.AssertTrue(t, r.OK, "router-backed Chat should succeed with stub model")
-	// See NOTE in TestRunner_Generate_EmitsRequestedAndCompleted_Good —
-	// pre-existing type-assertion mismatch returns "" not "ack".
-	core.AssertEqual(t, "", r.Value.(string))
+	// Mantis #1669 (fixed): see Generate test — reply propagates with
+	// real assistant text and Completed Meta carries real token count.
+	core.AssertEqual(t, "ack", r.Value.(string))
 
 	events := rec.snapshot()
 	core.AssertEqual(t, 2, len(events), "Chat should emit Requested + Completed")
@@ -195,6 +189,11 @@ func TestRunner_Chat_EmitsRequestedAndCompleted_Good(t *core.T) {
 
 	core.AssertEqual(t, audit.EventInferenceChatCompleted, events[1].Event)
 	core.AssertEqual(t, audit.OutcomeOK, events[1].Outcome)
+	core.AssertEqual(t, "stub-provider", events[1].Meta["provider"])
+	core.AssertEqual(t, "stub-model", events[1].Meta["model"])
+	core.AssertEqual(t, 2, events[1].Meta["tokens"], "Completed tokens reflects router-returned GeneratedTokens")
+	_, hasLatency := events[1].Meta["latency_ms"]
+	core.AssertTrue(t, hasLatency, "Completed Meta must carry latency_ms key")
 }
 
 func TestRunner_GenerateFailure_EmitsFailed_Bad(t *core.T) {

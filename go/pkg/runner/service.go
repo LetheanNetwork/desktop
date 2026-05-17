@@ -211,8 +211,8 @@ func (s *Service) Generate(prompt string) core.Result {
 		})
 		return resp
 	}
-	chat, ok := resp.Value.(*ai.ProviderChatResponse)
-	if !ok || chat == nil {
+	chat, ok := resp.Value.(ai.ProviderChatResponse)
+	if !ok {
 		_ = audit.Default().Record(audit.Event{
 			Event:   audit.EventInferenceGenerateCompleted,
 			TS:      core.Now().Unix(),
@@ -306,8 +306,8 @@ func (s *Service) Chat(messages []inference.Message) core.Result {
 		})
 		return resp
 	}
-	chat, ok := resp.Value.(*ai.ProviderChatResponse)
-	if !ok || chat == nil {
+	chat, ok := resp.Value.(ai.ProviderChatResponse)
+	if !ok {
 		_ = audit.Default().Record(audit.Event{
 			Event:   audit.EventInferenceChatCompleted,
 			TS:      core.Now().Unix(),
