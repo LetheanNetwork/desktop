@@ -950,6 +950,171 @@ func TestUnlock_CorruptedBodyClassifiedAsCorruptedKey_Ugly_DREAD_ADD_MED_1(t *co
 		"truncated-body MUST classify as corrupted_key, NOT bad_passphrase (Cerberus DREAD ADD-MED-1)")
 }
 
+// --- Mantis #1590 LOW (Cerberus #18) — Create-marker vs corruption ---
+//
+// Service.Create writes a deterministic marker (hex SHA-256 of the
+// public key, 64 ASCII chars) into private.key so the leaf-file
+// invariant (#1471) flips to has_user_account=true while the seal
+// step is still pending. Before #1590 the Unlock probe against a
+// freshly-Created account returned account.unlock.corrupted_key —
+// the marker isn't a PGP envelope, so distinguishDecrypt's parser
+// failed before prompt and routed to corrupted_key. The user then
+// saw "run `lthn account repair`" instead of a route to
+// /v1/account/provision. These tests pin the new
+// account.needs_provision code so the frontend can dispatch the
+// right UX without dropping back to the generic error screen.
+
+// TestUnlock_AfterCreateBeforeProvision_NeedsProvision_Bad pins the
+// Mantis #1590 regression — a fresh Create-marker MUST surface as
+// account.needs_provision, NOT account.unlock.corrupted_key, so the
+// frontend routes to the provision flow.
+func TestUnlock_AfterCreateBeforeProvision_NeedsProvision_Bad(t *core.T) {
+	_ = homeFixture(t)
+	svc := newUnlockable(t, "")
+
+	// Create lays down public.key + meta.json + the SHA-256 marker
+	// into private.key (service.go:240 / Stage B' contract).
+	in := validInput()
+	createR := subject.NewService(nil).Create(in)
+	core.AssertTrue(t, createR.OK, "Create must lay the marker down")
+
+	// Probe Unlock against the Create-marker — MUST return the
+	// dedicated needs_provision code so the frontend can route to
+	// /v1/account/provision rather than the generic "run repair" copy
+	// that corrupted_key surfaces.
+	r := svc.Unlock(subject.UnlockInput{
+		AccountID:  in.AccountID,
+		Passphrase: "any-passphrase-here",
+	})
+	core.AssertFalse(t, r.OK, "Unlock against Create-marker MUST fail")
+	core.AssertEqual(t, "account.needs_provision", r.Code(),
+		"Create-marker MUST surface needs_provision (Mantis #1590), NOT corrupted_key")
+
+	// HasUnlocked stays false — no half-state.
+	core.AssertFalse(t, svc.HasUnlocked(in.AccountID),
+		"Unlock against marker MUST NOT leave half-unlocked state")
+}
+
+// TestUnlock_AfterCreateAndProvision_Succeeds_Good is the post-seal
+// regression guard — once the marker has been replaced with a real
+// PGP envelope (the Stage X.B Provision / seal step), Unlock with the
+// correct passphrase MUST succeed. Simulated by Create-then-overwrite
+// because Provision allocates a fresh keypair (different account_id)
+// and would refuse-to-overwrite the Create directory; the seal
+// endpoint that bridges marker → real envelope is the contract this
+// test proxies.
+func TestUnlock_AfterCreateAndProvision_Succeeds_Good(t *core.T) {
+	home := homeFixture(t)
+	svc := newUnlockable(t, home)
+
+	// Step 1 — Create lays the marker down.
+	in := validInput()
+	createR := subject.NewService(nil).Create(in)
+	core.AssertTrue(t, createR.OK, "Create must lay the marker down")
+
+	// Sanity: marker route fires before seal.
+	probeR := svc.Unlock(subject.UnlockInput{
+		AccountID:  in.AccountID,
+		Passphrase: fixturePassphrase,
+	})
+	core.AssertEqual(t, "account.needs_provision", probeR.Code(),
+		"pre-seal probe MUST surface needs_provision")
+
+	// Step 2 — simulate the seal step by replacing private.key with a
+	// real symmetric-PGP envelope around a freshly-minted keypair. The
+	// public.key on disk stays as Create wrote it (matching in.PublicKey
+	// — fixture bytes). The marker check compares hex(SHA-256(pubkey
+	// bytes)) vs private.key content — after this overwrite the
+	// private.key content is a PGP envelope whose bytes deliberately do
+	// NOT equal hex(SHA-256(pubkey)), so isCreateMarker returns false
+	// and decrypt runs.
+	pgpSvc := pgp.NewService()
+	_, privPlain, err := pgpSvc.GenerateKeyPair("lthn-test", "test@lthn.local", "fixture")
+	core.AssertTrue(t, err == nil, "PGP keygen must succeed")
+	envelope, err := pgpSvc.SymmetricallyEncrypt([]byte(fixturePassphrase), privPlain)
+	core.AssertTrue(t, err == nil, "symmetric encrypt must succeed")
+	writeRawAccount(t, home, in.AccountID, envelope)
+
+	// Step 3 — Unlock with the correct passphrase MUST succeed against
+	// the now-sealed account.
+	r := svc.Unlock(subject.UnlockInput{
+		AccountID:  in.AccountID,
+		Passphrase: fixturePassphrase,
+	})
+	core.AssertTrue(t, r.OK, "post-seal Unlock with correct passphrase MUST succeed")
+	core.AssertTrue(t, svc.HasUnlocked(in.AccountID),
+		"post-seal Unlock MUST leave the account unlocked")
+}
+
+// TestUnlock_CorruptedKeyStillReturnsCorruptedKey_Bad pins the
+// non-conflation invariant — garbage that ISN'T the Create-marker
+// MUST still surface as account.unlock.corrupted_key, NOT
+// account.needs_provision. Defends against a regression where the
+// marker check was made too loose (e.g. shape-only on length) and
+// started swallowing real corruption events.
+func TestUnlock_CorruptedKeyStillReturnsCorruptedKey_Bad(t *core.T) {
+	home := homeFixture(t)
+	svc := newUnlockable(t, home)
+
+	// Sub-case A — garbage of arbitrary length (not 64 bytes). The
+	// marker check's length pre-gate skips immediately; decrypt runs
+	// and parser failure routes to corrupted_key.
+	idA := "ccccaaaaccccaaaa"
+	writeRawAccount(t, home, idA, []byte("totally bogus bytes that are not pgp and not the marker"))
+	rA := svc.Unlock(subject.UnlockInput{
+		AccountID:  idA,
+		Passphrase: "anything",
+	})
+	core.AssertFalse(t, rA.OK)
+	core.AssertEqual(t, "account.unlock.corrupted_key", rA.Code(),
+		"arbitrary-length garbage MUST surface corrupted_key, NOT needs_provision")
+
+	// Sub-case B — garbage of EXACTLY 64 bytes (length matches the
+	// marker shape) but content is NOT the SHA-256 of any public.key.
+	// Without a real public.key alongside, the marker check's
+	// public.key read fails and isCreateMarker returns false; decrypt
+	// runs and parser failure routes to corrupted_key. Defends against
+	// a regression where the length pre-gate alone was treated as
+	// dispositive.
+	idB := "ccccbbbbccccbbbb"
+	sixtyFour := make([]byte, 64)
+	for i := range sixtyFour {
+		sixtyFour[i] = byte('z') // ASCII 'z' — not a hex char, definitively not a SHA-256 hex string
+	}
+	writeRawAccount(t, home, idB, sixtyFour)
+	rB := svc.Unlock(subject.UnlockInput{
+		AccountID:  idB,
+		Passphrase: "anything",
+	})
+	core.AssertFalse(t, rB.OK)
+	core.AssertEqual(t, "account.unlock.corrupted_key", rB.Code(),
+		"64-byte garbage (no matching pubkey on disk) MUST surface corrupted_key, NOT needs_provision")
+
+	// Sub-case C — 64 bytes that ARE a valid hex SHA-256 string but
+	// DON'T match the public.key on disk (e.g. marker copied from a
+	// sibling account). Defends against a regression where the check
+	// shrank to "looks like 64 hex chars" and stopped binding the
+	// marker to THIS account's public key. Re-uses the Create flow to
+	// land a real public.key, then overwrites private.key with a
+	// foreign 64-hex blob.
+	in := validInput()
+	createR := subject.NewService(nil).Create(in)
+	core.AssertTrue(t, createR.OK)
+	// Overwrite private.key with hex(SHA-256("different-pubkey-bytes"))
+	// — valid hex shape, valid length, but not the canonical marker
+	// for THIS account's public.key.
+	foreign := []byte(core.SHA256HexString("different-pubkey-bytes"))
+	core.AssertEqual(t, 64, len(foreign), "SHA256HexString must be 64 hex chars")
+	writeRawAccount(t, home, in.AccountID, foreign)
+	rC := svc.Unlock(subject.UnlockInput{
+		AccountID:  in.AccountID,
+		Passphrase: "anything",
+	})
+	core.AssertFalse(t, rC.OK)
+	core.AssertEqual(t, "account.unlock.corrupted_key", rC.Code(),
+		"hex-shaped foreign content MUST surface corrupted_key (marker is bound to this account's pubkey), NOT needs_provision")
+}
+
 // TestUnlock_PostLockoutAttempt_NoDuplicateTrigger_Ugly — after the
 // lockout has triggered, subsequent attempts within the cooldown
 // MUST return locked_out via the lockoutState early-reject path

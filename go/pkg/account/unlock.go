@@ -156,6 +156,24 @@ func (s *Service) Unlock(input UnlockInput) core.Result {
 	}
 	ciphertext, _ := readR.Value.([]byte)
 
+	// Mantis #1590 LOW (Cerberus #18) — distinguish a Create-marker
+	// from genuine corruption BEFORE the PGP decrypt attempt. Per
+	// service.go:240, Service.Create writes a deterministic placeholder
+	// (hex SHA-256 of the public key, 64 ASCII chars) into private.key
+	// so the leaf-file invariant (#1471) flips to has_user_account=true
+	// while the seal-step is pending. That marker is structurally NOT a
+	// PGP envelope, so distinguishDecrypt would mis-classify it as
+	// corrupted_key + tell the user to run `lthn account repair` —
+	// hostile, since the real remedy is to call /v1/account/provision
+	// (or its Stage X.B successor). Route to a dedicated code so the
+	// frontend can dispatch the provision-prompt UX instead of the
+	// generic error screen.
+	if isCreateMarker(ciphertext, input.AccountID) {
+		s.auditUnlockNeedsProvision(input.AccountID)
+		return core.Fail(core.NewCode(codeUnlockNeedsProvision,
+			"account created but not provisioned — call /v1/account/provision to seal the private key"))
+	}
+
 	// Cerberus DREAD CRIT-1 (RFC.stage-x.md §6) — NFKC normalise the
 	// passphrase BEFORE decrypt so the same logical input typed on
 	// different OS keyboards (NFC vs NFD) unlocks the same account.
@@ -942,6 +960,99 @@ func (s *Service) UnlockedAccountIDs() []string {
 	}
 	core.SliceSort(ids)
 	return ids
+}
+
+// codeUnlockNeedsProvision is the error code Unlock returns when the
+// on-disk private.key is the Create-marker sentinel (service.go:240 —
+// hex SHA-256 of the account's public key) instead of a sealed PGP
+// envelope. Frontend keys inline-copy off this code to route the user
+// to the /v1/account/provision flow (or its Stage X.B successor)
+// instead of the generic "run lthn account repair" copy that
+// corrupted_key surfaces.
+//
+// Distinct from corrupted_key so the frontend can dispatch the right
+// UX: corrupted_key → repair flow; needs_provision → seal flow.
+// Mantis #1590 LOW / Cerberus #18.
+const codeUnlockNeedsProvision = "account.needs_provision"
+
+// isCreateMarker reports whether privBytes is the Create-time
+// placeholder Service.Create writes to private.key when the account
+// directory is laid down but no sealed PGP envelope has been pushed
+// yet (see service.go:259 — `[]byte(core.SHA256HexString(string(input.PublicKey)))`).
+//
+// The marker is deterministic — hex SHA-256 of the on-disk public.key
+// bytes, 64 ASCII hex chars. The check recomputes that hash and
+// compares bytes; any divergence (non-marker content, different
+// account's pubkey, tampered marker) falls through to the existing
+// corrupted_key path so a malicious replacement can't smuggle in a
+// "needs_provision" branch the lockout machinery would skip.
+//
+// Returns false if the public key can't be read — that branch is
+// indistinguishable from "corrupted" from the consumer's POV and the
+// existing corrupted_key path will handle it.
+//
+// Usage example:
+//
+//	if isCreateMarker(ciphertext, input.AccountID) {
+//	    return core.Fail(core.NewCode(codeUnlockNeedsProvision, "..."))
+//	}
+func isCreateMarker(privBytes []byte, accountID string) bool {
+	// Cheap shape pre-check — the marker is exactly 64 hex chars; any
+	// other length is definitively not the marker and skips the
+	// public-key disk read entirely.
+	if len(privBytes) != 64 {
+		return false
+	}
+	rootR := paths.Root()
+	if !rootR.OK {
+		return false
+	}
+	root, _ := rootR.Value.(string)
+	pubPath := core.PathJoin(root, accountDir, accountID, publicKeyFile)
+	pubR := core.ReadFile(pubPath)
+	if !pubR.OK {
+		return false
+	}
+	pubBytes, _ := pubR.Value.([]byte)
+	expected := []byte(core.SHA256HexString(string(pubBytes)))
+	return bytes.Equal(privBytes, expected)
+}
+
+// auditUnlockNeedsProvision emits the Create-marker distinguishing
+// audit row alongside the human-debug core.Print echo. Mantis #1590
+// LOW (Cerberus #18) — forensics MUST be able to tell a
+// needs_provision probe apart from a corrupted_key event so an
+// operator triaging "users blocked at unlock" can immediately route
+// to provision-flow UX vs file-integrity remediation.
+//
+// SECURITY-NOTE (path-allowlist scope, Mantis #1590): a dedicated
+// EventAuthUnlockNeedsProvision constant in pkg/audit/types.go would
+// give the parity-grep + the Stage F log-tailer a typed surface. This
+// commit lands inside the unlock.go + unlock_test.go allowlist; the
+// audit-event surface change is tracked as a follow-on so this
+// implementation stays scoped. For now we emit the existing
+// EventAuthUnlockFailed event with a distinguishing Meta key
+// (needs_provision=true) so the forensic separation lives in the
+// stored row even before the typed const lands.
+//
+// Recorder write failure ignored — audit failures MUST NEVER block
+// the auth path that emitted the event (sibling discipline to
+// auditUnlockFailed at line 754).
+func (s *Service) auditUnlockNeedsProvision(accountID string) {
+	now := core.Now().UTC().Unix()
+	core.Print(core.Stderr(),
+		"event=auth.unlock.failed account_id=%s ts=%d needs_provision=true\n",
+		accountID, now)
+	_ = audit.Default().Record(audit.Event{
+		Event:     audit.EventAuthUnlockFailed,
+		AccountID: accountID,
+		TS:        now,
+		Scope:     "unlock",
+		Outcome:   audit.OutcomeFailed,
+		Meta: map[string]any{
+			"needs_provision": true,
+		},
+	})
 }
 
 // auditLockRequested emits auth.lock.requested per RFC §6 M4 when
