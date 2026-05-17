@@ -92,6 +92,9 @@ func (s *Service) Get(input GetInput) core.Result {
 //	    Title: "hub · elevated p99", Sev: "P3", Svc: "hub", Who: "Mei",
 //	})
 func (s *Service) Create(input CreateInput) core.Result {
+	if fail, ok := s.assertUnlocked("incidents.Create"); !ok {
+		return fail
+	}
 	if input.Title == "" {
 		return core.Fail(core.E("incidents.Create", "title is required", nil))
 	}
@@ -155,6 +158,9 @@ func (s *Service) Create(input CreateInput) core.Result {
 //	    ID: "2026-05-INC-001", State: "resolved",
 //	})
 func (s *Service) UpdateState(input UpdateStateInput) core.Result {
+	if fail, ok := s.assertUnlocked("incidents.UpdateState"); !ok {
+		return fail
+	}
 	if err := paths.IsValidID(input.ID); err != nil {
 		return core.Fail(err)
 	}
@@ -211,6 +217,9 @@ func (s *Service) UpdateState(input UpdateStateInput) core.Result {
 //	    ID: "2026-05-INC-001", Body: "## Root cause\n\nDNS TTL too low.",
 //	})
 func (s *Service) AddPostmortem(input PostmortemInput) core.Result {
+	if fail, ok := s.assertUnlocked("incidents.AddPostmortem"); !ok {
+		return fail
+	}
 	if err := paths.IsValidID(input.ID); err != nil {
 		return core.Fail(err)
 	}

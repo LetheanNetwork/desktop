@@ -53,6 +53,10 @@ func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	svc := incidents.NewService(nil)
+	// Mantis #1613 B.2: writers gate on SessionGate.UnlockedAccountIDs().
+	// Wire an unlocked-stub so the gate-check passes through to the
+	// actual file-mode logic this test exercises.
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
 	r := svc.Create(incidents.CreateInput{Title: "hub · elevated p99", Sev: "P3", Svc: "hub", Who: "Mei"})
 	if !r.OK {
 		t.Fatalf("Create failed: %s", r.Error())
@@ -171,6 +175,10 @@ func TestIncidentsDir_Mode0700_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	svc := incidents.NewService(nil)
+	// Mantis #1613 B.2: writers gate on SessionGate.UnlockedAccountIDs().
+	// Wire an unlocked-stub so Create reaches yearMonthDir() and the
+	// 0o700 mode this test exercises is applied.
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
 	_ = svc.Create(incidents.CreateInput{Title: "x", Svc: "x", Who: "x"})
 	dir := core.PathJoin(home, "Lethean", "incidents")
 	stat := core.Stat(dir)

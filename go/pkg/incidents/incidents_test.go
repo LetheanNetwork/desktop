@@ -12,6 +12,38 @@ import (
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
+// stubSessionGate is the test double for the consumer-defined
+// SessionGate interface (RFC.stage-e-unlockgate v2 §4.2 stub shape).
+// Mirrors H#147 documents.stubSessionGate — duplicated per-pkg rather
+// than shared, per Pushback 1 (consumer-defines) and Cerberus #28
+// confirm that each writer pkg owns its own gate interface.
+//
+// Usage example:
+//
+//	svc := incidents.NewService(nil)
+//	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
+type stubSessionGate struct{ ids []string }
+
+func (s *stubSessionGate) UnlockedAccountIDs() []string { return s.ids }
+
+// newServiceUnlocked returns an incidents Service with a SessionGate
+// pre-wired to report a single unlocked account. Tests that exercise
+// writer paths (Create / UpdateState / AddPostmortem) call this so the
+// gate-check at the top of each writer method succeeds. Tests that
+// need to assert the locked path call SetSessionGate explicitly with
+// an empty stub (or skip the helper and exercise the nil-gate
+// fail-safe directly).
+//
+// Usage example:
+//
+//	svc := newServiceUnlocked()
+//	r := svc.Create(subject.CreateInput{Title: "...", Sev: "P3"})
+func newServiceUnlocked() *subject.Service {
+	svc := subject.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
+	return svc
+}
+
 // tempIncidentsDir sets up a fresh ~/Lethean/incidents/ in a temp
 // directory by overriding the home dir via the test environment.
 // Tests that exercise filesystem I/O use a shared NewService(nil)
@@ -149,7 +181,7 @@ func incidentFilePath(t *testing.T, id string) string {
 // the same.
 func TestAtomicCutover_Incidents_Create_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := subject.NewService(nil)
+	svc := newServiceUnlocked()
 	r := svc.Create(subject.CreateInput{
 		Title: "hub · elevated p99", Sev: "P3", Svc: "hub", Who: "Mei",
 	})
@@ -172,7 +204,7 @@ func TestAtomicCutover_Incidents_Create_Good(t *testing.T) {
 // bumps the stored version monotonically (1 -> 2).
 func TestAtomicCutover_Incidents_Update_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := subject.NewService(nil)
+	svc := newServiceUnlocked()
 	cr := svc.Create(subject.CreateInput{
 		Title: "forge build queue stalled", Sev: "P3", Svc: "forge", Who: "Tobi",
 	})
@@ -204,7 +236,7 @@ func TestAtomicCutover_Incidents_Update_Good(t *testing.T) {
 // pins #1544 against W3 wave drift).
 func TestAtomicCutover_Incidents_Update_VersionStale_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := subject.NewService(nil)
+	svc := newServiceUnlocked()
 	cr := svc.Create(subject.CreateInput{
 		Title: "race · contended state",
 		Sev:   "P3", Svc: "hub", Who: "Mei",
@@ -303,7 +335,7 @@ func TestAtomicCutover_Incidents_Update_VersionStale_Ugly(t *testing.T) {
 // upgrades it via an unconditional first-write that stamps version=1.
 func TestAtomicCutover_Incidents_LegacyFile_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := subject.NewService(nil)
+	svc := newServiceUnlocked()
 	now := core.Now().UTC()
 	dirR := core.UserHomeDir()
 	if !dirR.OK {
@@ -348,7 +380,7 @@ func TestAtomicCutover_Incidents_LegacyFile_Ugly(t *testing.T) {
 // fires) and incidents/* falls under AuditModeBatch per RFC §6.1.
 func TestAtomicCutover_Incidents_AuditEmissionRecordBatch_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := subject.NewService(nil)
+	svc := newServiceUnlocked()
 	paths.SetAuditSecretProvider(func() []byte {
 		return []byte("incidents-cutover-test-secret-32b")
 	})
@@ -384,5 +416,241 @@ func TestAtomicCutover_Incidents_AuditEmissionRecordBatch_Good(t *testing.T) {
 	mode := paths.AuditModeForPath(fpath)
 	if mode != paths.AuditModeBatch {
 		t.Fatalf("expected AuditModeBatch for incidents path, got %v", mode)
+	}
+}
+
+// ---- B.2 SessionGate live-read tests (Mantis #1613, Cerberus #28) ----
+
+// TestIncidents_NilGate_WarnsOnce_FailsClosed — nil gate fails-locked
+// on the first write; nilWarned one-shot suppresses re-warning on
+// subsequent writes (RFC §2.2 / Cerberus #28 Q2 fail-safe). Mirrors
+// H#147 documents.TestDocuments_NilGate_WarnsOnce_FailsClosed exactly.
+func TestIncidents_NilGate_WarnsOnce_FailsClosed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := subject.NewService(nil) // deliberately NO SetSessionGate
+
+	// First write — nilWarned trips false→true; behaviour: fails closed.
+	r1 := svc.Create(subject.CreateInput{
+		Title: "first-nil-hit", Sev: "P3", Svc: "hub", Who: "qa",
+	})
+	if r1.OK {
+		t.Fatal("expected Create to fail-closed when gate is nil")
+	}
+	if !core.Contains(r1.Error(), "incidents.session.locked") {
+		t.Fatalf("expected incidents.session.locked, got %q", r1.Error())
+	}
+
+	// Second write — nilWarned already true; CompareAndSwap returns
+	// false and core.Warn is NOT called again. Behaviour from the
+	// caller's perspective: same fail-closed result.
+	r2 := svc.UpdateState(subject.UpdateStateInput{
+		ID: "2026-05-INC-001", State: "resolved",
+	})
+	if r2.OK {
+		t.Fatal("expected UpdateState to fail-closed when gate is nil")
+	}
+	if !core.Contains(r2.Error(), "incidents.session.locked") {
+		t.Fatalf("expected incidents.session.locked, got %q", r2.Error())
+	}
+
+	// Third write — AddPostmortem also fail-closed.
+	r3 := svc.AddPostmortem(subject.PostmortemInput{
+		ID: "2026-05-INC-001", Body: "anything",
+	})
+	if r3.OK {
+		t.Fatal("expected AddPostmortem to fail-closed when gate is nil")
+	}
+	if !core.Contains(r3.Error(), "incidents.session.locked") {
+		t.Fatalf("expected incidents.session.locked, got %q", r3.Error())
+	}
+}
+
+// TestIncidents_UnlockedGate_AllowsCreate — Create succeeds when the
+// live-read gate reports a non-empty unlocked-account slice.
+func TestIncidents_UnlockedGate_AllowsCreate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := subject.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	r := svc.Create(subject.CreateInput{
+		Title: "unlocked-create", Sev: "P3", Svc: "hub", Who: "Mei",
+	})
+	if !r.OK {
+		t.Fatalf("Create should succeed with gate reporting unlocked acct, got: %s", r.Error())
+	}
+}
+
+// TestIncidents_UnlockedGate_AllowsUpdateState — UpdateState succeeds
+// when the live-read gate reports a non-empty unlocked-account slice.
+func TestIncidents_UnlockedGate_AllowsUpdateState(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := subject.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	cr := svc.Create(subject.CreateInput{
+		Title: "to-be-transitioned", Sev: "P3", Svc: "hub", Who: "qa",
+	})
+	if !cr.OK {
+		t.Fatalf("Create failed: %s", cr.Error())
+	}
+	id := cr.Value.(subject.IncidentEntry).ID
+
+	ur := svc.UpdateState(subject.UpdateStateInput{ID: id, State: "post-mortem"})
+	if !ur.OK {
+		t.Fatalf("UpdateState should succeed with unlocked gate, got: %s", ur.Error())
+	}
+}
+
+// TestIncidents_UnlockedGate_AllowsAddPostmortem — AddPostmortem
+// succeeds when the live-read gate reports a non-empty
+// unlocked-account slice (and the incident is past investigating).
+func TestIncidents_UnlockedGate_AllowsAddPostmortem(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := subject.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	cr := svc.Create(subject.CreateInput{
+		Title: "to-be-postmortemed", Sev: "P3", Svc: "hub", Who: "qa",
+	})
+	if !cr.OK {
+		t.Fatalf("Create failed: %s", cr.Error())
+	}
+	id := cr.Value.(subject.IncidentEntry).ID
+	// AddPostmortem requires non-investigating state.
+	if ur := svc.UpdateState(subject.UpdateStateInput{ID: id, State: "post-mortem"}); !ur.OK {
+		t.Fatalf("UpdateState failed: %s", ur.Error())
+	}
+
+	pr := svc.AddPostmortem(subject.PostmortemInput{
+		ID: id, Body: "## Root cause\n\nDNS TTL too low.",
+	})
+	if !pr.OK {
+		t.Fatalf("AddPostmortem should succeed with unlocked gate, got: %s", pr.Error())
+	}
+}
+
+// TestIncidents_LockedGate_FailsCreate — Create rejects when the
+// live-read gate reports zero unlocked accounts.
+func TestIncidents_LockedGate_FailsCreate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := subject.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.Create(subject.CreateInput{
+		Title: "locked-create", Sev: "P3", Svc: "hub", Who: "qa",
+	})
+	if r.OK {
+		t.Fatal("expected Create to be rejected when gate reports zero unlocked accounts")
+	}
+	if !core.Contains(r.Error(), "incidents.session.locked") {
+		t.Fatalf("expected incidents.session.locked, got %q", r.Error())
+	}
+}
+
+// TestIncidents_LockedGate_FailsUpdateState — UpdateState rejects when
+// the live-read gate reports zero unlocked accounts. Wires the gate
+// briefly to seed an incident, then locks before the transition.
+func TestIncidents_LockedGate_FailsUpdateState(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := subject.NewService(nil)
+	// Seed phase: unlocked.
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-seed"}})
+	cr := svc.Create(subject.CreateInput{
+		Title: "seed-for-lock", Sev: "P3", Svc: "hub", Who: "qa",
+	})
+	if !cr.OK {
+		t.Fatalf("Create (seed) failed: %s", cr.Error())
+	}
+	id := cr.Value.(subject.IncidentEntry).ID
+
+	// Transition to locked — live-read picks up the change on the next
+	// gate check.
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	ur := svc.UpdateState(subject.UpdateStateInput{ID: id, State: "post-mortem"})
+	if ur.OK {
+		t.Fatal("expected UpdateState to be rejected when gate reports zero unlocked accounts")
+	}
+	if !core.Contains(ur.Error(), "incidents.session.locked") {
+		t.Fatalf("expected incidents.session.locked, got %q", ur.Error())
+	}
+}
+
+// TestIncidents_LockedGate_FailsAddPostmortem — AddPostmortem rejects
+// when the live-read gate reports zero unlocked accounts.
+func TestIncidents_LockedGate_FailsAddPostmortem(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := subject.NewService(nil)
+	// Seed phase: unlocked. Create + transition to post-mortem so
+	// AddPostmortem's state-precondition is satisfied — the locked-gate
+	// assertion must be the first rejection, not the state guard.
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-seed"}})
+	cr := svc.Create(subject.CreateInput{
+		Title: "seed-for-postmortem-lock", Sev: "P3", Svc: "hub", Who: "qa",
+	})
+	if !cr.OK {
+		t.Fatalf("Create (seed) failed: %s", cr.Error())
+	}
+	id := cr.Value.(subject.IncidentEntry).ID
+	if ur := svc.UpdateState(subject.UpdateStateInput{ID: id, State: "post-mortem"}); !ur.OK {
+		t.Fatalf("UpdateState (seed) failed: %s", ur.Error())
+	}
+
+	// Transition to locked.
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	pr := svc.AddPostmortem(subject.PostmortemInput{ID: id, Body: "body"})
+	if pr.OK {
+		t.Fatal("expected AddPostmortem to be rejected when gate reports zero unlocked accounts")
+	}
+	if !core.Contains(pr.Error(), "incidents.session.locked") {
+		t.Fatalf("expected incidents.session.locked, got %q", pr.Error())
+	}
+}
+
+// TestIncidents_StopNilsGate — Stop() severs the SessionGate;
+// subsequent writes fail-closed even though the gate WAS wired
+// (Cerberus #28 ADD-5 / H#147 documents.TestDocuments_StopNilsGate
+// mirror).
+func TestIncidents_StopNilsGate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := newServiceUnlocked() // gate pre-wired with unlocked stub
+
+	// Pre-Stop: write succeeds.
+	cr := svc.Create(subject.CreateInput{
+		Title: "pre-stop", Sev: "P3", Svc: "hub", Who: "qa",
+	})
+	if !cr.OK {
+		t.Fatalf("Create should succeed pre-Stop, got: %s", cr.Error())
+	}
+
+	// Stop nils the gate reference.
+	if r := svc.Stop(core.Background()); !r.OK {
+		t.Fatalf("Stop should succeed, got: %s", r.Error())
+	}
+
+	// Post-Stop: write fails-closed with the nil-gate path.
+	r := svc.Create(subject.CreateInput{
+		Title: "post-stop", Sev: "P3", Svc: "hub", Who: "qa",
+	})
+	if r.OK {
+		t.Fatal("expected Create to fail-closed after Stop nils the gate")
+	}
+	if !core.Contains(r.Error(), "incidents.session.locked") {
+		t.Fatalf("expected incidents.session.locked, got %q", r.Error())
+	}
+}
+
+// TestIncidents_SessionLocked_ReadStillWorks_Good — List and Get are
+// not blocked by the session gate (RFC §3.1 — reads stay open while
+// locked). Mirrors H#147 documents test of the same name.
+func TestIncidents_SessionLocked_ReadStillWorks_Good(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := subject.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.List(subject.ListInput{})
+	if !r.OK {
+		t.Fatalf("List should succeed when session locked, got: %s", r.Error())
 	}
 }

@@ -16,19 +16,62 @@
 package incidents
 
 import (
+	"sync"
+	"sync/atomic"
+
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/recordfile"
 	"gopkg.in/yaml.v3"
 )
 
+// SessionGate is the minimal consumer-defined interface satisfied by
+// *account.Service. Live-read at every gate check — no cached bool, no
+// subscribe/event bus (RFC.stage-e-unlockgate v2 §1.1 — Pushback 2
+// CONFIRMED by Cerberus #27, B.2 inherits the same shape per Cerberus
+// #28 confirm). When the returned slice is empty the session is locked;
+// when non-empty at least one Lethean account is unlocked and writes
+// may proceed.
+//
+// Wired in cmd/lthn/app.go (Mantis #1613 B.3, deferred to that lane):
+//
+//	incidentsSvc.SetSessionGate(accountSvc)
+//
+// AX-8 compliance: this interface is defined in the consumer
+// (incidents) and satisfied by the producer (*account.Service). No
+// pkg/account import lands in pkg/incidents. Each writer pkg defines
+// its OWN interface (consumer-defines per Pushback 1 / H#147+H#148+H#149
+// canonical pattern) — no shared types package.
+type SessionGate interface {
+	UnlockedAccountIDs() []string
+}
+
 // Service owns the incidents surface.
 //
 // Usage example:
 //
 //	svc := incidents.NewService(c)
+//	svc.SetSessionGate(accountSvc)
 type Service struct {
 	core *core.Core
+
+	// gateMu guards reads/writes of the session gate reference. A
+	// sync.RWMutex protects against the wire/Stop race where app.go
+	// SetSessionGate runs concurrent with a late-arriving Wails call
+	// reading the reference. Read-heavy access (every write gates
+	// once) — RWMutex.RLock is microseconds.
+	gateMu sync.RWMutex
+	// gate is the live-read session source (RFC §1.1). nil before
+	// SetSessionGate runs in app.go and after Stop nils it; the
+	// nilWarned one-shot warning fires on the first nil-hit to
+	// surface wire-ordering bugs without log spam (§2.2 ADD-1.5).
+	gate SessionGate
+	// nilWarned is the one-shot guard for the nil-gate fail-safe
+	// (§2.2 / Cerberus #27 Q2, B.2 mirror confirmed by Cerberus #28).
+	// CompareAndSwap-on-first-hit emits core.Warn exactly once per
+	// Service instance. Uses stdlib sync/atomic.Bool to mirror H#147
+	// documents pattern (codebase convention — not core.AtomicBool).
+	nilWarned atomic.Bool
 }
 
 // NewService constructs the incidents service against a Core container.
@@ -422,4 +465,71 @@ func (s *Service) fireEvent(name string, entry IncidentEntry) {
 		Entry:     entry,
 		At:        core.Now().UTC(),
 	})
+}
+
+// SetSessionGate wires the live-read session source. Called by
+// cmd/lthn/app.go post-construction (Mantis #1613 B.3) once
+// *account.Service exists.
+//
+// Mirrors the H#147 documents.SetSessionGate setter pattern. Live-read
+// on every gate check — no event-bus reliability concerns, no cache
+// coherence concerns (RFC.stage-e-unlockgate v2 §1.1).
+//
+// Usage example:
+//
+//	incidentsSvc.SetSessionGate(accountSvc)
+func (s *Service) SetSessionGate(g SessionGate) {
+	s.gateMu.Lock()
+	s.gate = g
+	s.gateMu.Unlock()
+}
+
+// Stop nils the SessionGate reference so a draining Service
+// fails-closed on any late-arriving write (Cerberus #28 ADD-5 / H#147
+// documents.Stop mirror). Read-only methods (List, Get) continue to
+// function — Stop only severs the write gate.
+//
+// Usage example:
+//
+//	_ = svc.Stop(core.Background())
+func (s *Service) Stop(_ core.Context) core.Result {
+	s.gateMu.Lock()
+	s.gate = nil
+	s.gateMu.Unlock()
+	return core.Ok(nil)
+}
+
+// assertUnlocked returns a Fail result when the session is locked or
+// the session gate is not wired. Called at the top of every write
+// method before any FS touch.
+//
+// Live-read semantics (RFC §1.1): consults s.gate.UnlockedAccountIDs()
+// at every call — no cached bool — so a lock transition is observable
+// on the very next write attempt.
+//
+// Fail-safe on nil gate (§2.2 / Cerberus #28 Q2): when SetSessionGate
+// has not yet wired the gate (or Stop has nilled it), the gate fails
+// LOCKED rather than panicking. The first nil-hit per Service
+// instance emits a one-shot core.Warn via CompareAndSwap so
+// wire-ordering bugs surface in dev without log spam in production.
+//
+// Usage example:
+//
+//	if fail, ok := s.assertUnlocked("incidents.Create"); !ok {
+//	    return fail
+//	}
+func (s *Service) assertUnlocked(scope string) (core.Result, bool) {
+	s.gateMu.RLock()
+	g := s.gate
+	s.gateMu.RUnlock()
+	if g == nil {
+		if s.nilWarned.CompareAndSwap(false, true) {
+			core.Warn("incidents: session gate not wired; failing locked", "scope", scope)
+		}
+		return core.Fail(core.E(scope, "incidents.session.locked", nil)), false
+	}
+	if len(g.UnlockedAccountIDs()) == 0 {
+		return core.Fail(core.E(scope, "incidents.session.locked", nil)), false
+	}
+	return core.Result{}, true
 }
