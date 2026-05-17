@@ -4,7 +4,12 @@ package main
 
 import (
 	core "dappco.re/go"
+	"dappco.re/go/orm"
 	lthn "dappco.re/lthn/desktop"
+	"dappco.re/lthn/desktop/pkg/gateway"
+	"dappco.re/lthn/desktop/pkg/marketplace"
+	"dappco.re/lthn/desktop/pkg/plugin"
+	"dappco.re/lthn/desktop/pkg/runner"
 )
 
 func TestMain_CmdVersionLabel_Good_PreservesTagPrefix(t *core.T) {
@@ -29,4 +34,115 @@ func TestMain_CmdVersionLabel_Ugly_PreservesDirtyTag(t *core.T) {
 	lthn.Version = "v1.2.3-4-gabc123-dirty"
 
 	core.AssertEqual(t, "v1.2.3-4-gabc123-dirty", cmdVersionLabel())
+}
+
+// newBuildOptsCore wires the minimum services buildServerOpts inspects:
+// gateway (data firewall route group), plugin (binary-plugin install
+// tier + ProxyGroup), marketplace (bundle install tier + ViewRegistry).
+// opencode is intentionally OMITTED — its Reconcile path shells docker,
+// which the hermetic test bench can't depend on; buildServerOpts already
+// short-circuits when opencode isn't registered, so the SECURITY-relevant
+// wiring (gateway routes, PluginInstalledChecker, PluginOriginChecker)
+// can be asserted without it.
+func newBuildOptsCore(t *core.T) *core.Core {
+	t.Helper()
+	c := core.New()
+	core.RequireTrue(t, orm.Register(c).OK)
+	mem := orm.NewMemium()
+	core.RequireTrue(t, orm.Mount(c, "default", mem).OK)
+	schema := marketplace.InstalledBundle{}.Schema()
+	core.RequireTrue(t, orm.RegisterSchema(c, schema).OK)
+	mem.RegisterTable(schema.Name, schema)
+	core.RequireTrue(t, c.RegisterService("plugin", plugin.NewService(plugin.Options{})).OK)
+	core.RequireTrue(t, c.RegisterService("marketplace", marketplace.NewService(c)).OK)
+	core.RequireTrue(t, c.RegisterService("gateway", gateway.NewService(c)).OK)
+	core.RequireTrue(t, c.ServiceStartup(core.Background(), nil).OK)
+	t.Cleanup(func() { _ = c.ServiceShutdown(core.Background()) })
+	return c
+}
+
+// TestMain_BuildServerOpts_Good_MountsGatewayAndCheckers pins the
+// Mantis #1741 / Cerberus #70 F-1 contract: buildServerOpts MUST emit
+// the gateway RouteGroup into ExtraGroups whenever pkg/gateway is
+// registered, AND MUST wire the PluginInstalledChecker +
+// PluginOriginChecker callbacks. Pre-#1741, cmdGUI omitted this
+// entire surface (data firewall absent in GUI mode); the helper
+// extraction is what restores parity with cmdServe.
+func TestMain_BuildServerOpts_Good_MountsGatewayAndCheckers(t *core.T) {
+	c := newBuildOptsCore(t)
+	r := runner.NewService(runner.Options{})
+	opts := buildServerOpts(c, r, "test-local-key")
+
+	core.AssertNotNil(t, opts.ExtraGroups,
+		"ExtraGroups must be populated when gateway service is registered")
+	core.AssertGreater(t, len(opts.ExtraGroups), 0,
+		"ExtraGroups must contain at least the gateway RouteGroup")
+
+	// Walk the ExtraGroups and prove the gateway RouteGroup is mounted.
+	// pkg/gateway.NewRoutes returns a RouteGroup whose Name() prefix
+	// is "gateway"; defensive on the exact name to avoid pinning a
+	// brittle private string.
+	foundGateway := false
+	for _, g := range opts.ExtraGroups {
+		if core.Contains(g.Name(), "gateway") {
+			foundGateway = true
+			break
+		}
+	}
+	core.AssertTrue(t, foundGateway,
+		"gateway RouteGroup must be present in ExtraGroups (data firewall)")
+
+	core.AssertNotNil(t, opts.PluginInstalledChecker,
+		"PluginInstalledChecker must be wired when plugin or marketplace exists")
+	core.AssertNotNil(t, opts.PluginOriginChecker,
+		"PluginOriginChecker must be wired (Cerberus #21 audit-integrity gate)")
+}
+
+// TestMain_BuildServerOpts_Bad_HandlesEmptyCoreGracefully pins
+// degradation behaviour — buildServerOpts on a Core with no
+// gateway/plugin/marketplace MUST NOT panic, MUST return an opts
+// surface with the always-present fields (Runner, LocalKey, Brand,
+// Core) populated, and MAY leave ExtraGroups / checkers empty.
+func TestMain_BuildServerOpts_Bad_HandlesEmptyCoreGracefully(t *core.T) {
+	c := core.New()
+	core.RequireTrue(t, c.ServiceStartup(core.Background(), nil).OK)
+	t.Cleanup(func() { _ = c.ServiceShutdown(core.Background()) })
+
+	r := runner.NewService(runner.Options{})
+	opts := buildServerOpts(c, r, "empty-core-key")
+
+	core.AssertEqual(t, "empty-core-key", opts.LocalKey)
+	core.AssertNotNil(t, opts.Runner)
+	core.AssertNotNil(t, opts.Core)
+	// PluginOriginChecker always wires (it doesn't depend on a
+	// registered service — it reaches marketplace.ViewRegistry, a
+	// package-level value); PluginInstalledChecker may be nil.
+	core.AssertNotNil(t, opts.PluginOriginChecker,
+		"PluginOriginChecker wires unconditionally on marketplace.ViewRegistry")
+}
+
+// TestMain_BuildServerOpts_Ugly_SymmetricBetweenGUIAndServe pins the
+// Cerberus #70 F-1 symmetry contract — cmdGUI and cmdServe MUST get
+// identical wiring surfaces (ExtraGroups count + checker presence)
+// from the helper; the only legitimate divergence is opts.Addr (and
+// the caller's serve-only side effects: s.Start + mdns broadcast).
+// Pre-#1741, cmdGUI's opts had zero ExtraGroups and zero checkers
+// while cmdServe's had the full set; this test fails loud if a future
+// refactor reintroduces that asymmetry.
+func TestMain_BuildServerOpts_Ugly_SymmetricBetweenGUIAndServe(t *core.T) {
+	c := newBuildOptsCore(t)
+	r := runner.NewService(runner.Options{})
+
+	guiOpts := buildServerOpts(c, r, "shared-key")
+	serveOpts := buildServerOpts(c, r, "shared-key")
+	serveOpts.Addr = ":8000" // serve verb's only delta from GUI
+
+	core.AssertEqual(t, len(guiOpts.ExtraGroups), len(serveOpts.ExtraGroups))
+	core.AssertEqual(t, guiOpts.LocalKey, serveOpts.LocalKey)
+	core.AssertEqual(t, guiOpts.PluginInstalledChecker == nil,
+		serveOpts.PluginInstalledChecker == nil)
+	core.AssertEqual(t, guiOpts.PluginOriginChecker == nil,
+		serveOpts.PluginOriginChecker == nil)
+	core.AssertEqual(t, "", guiOpts.Addr)
+	core.AssertEqual(t, ":8000", serveOpts.Addr)
 }

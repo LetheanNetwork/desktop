@@ -253,56 +253,14 @@ func cmdGUI(args []string) int {
 		return 1
 	}
 	key, _ := keyR.Value.(string)
-	// Stage B' wiring (Mantis #1474 successor) — resolve the
-	// Bootstrap()ed *serverkey.Service so server.NewService can install
-	// the combined bootstrap-plus-bearer middleware (instead of the
-	// bearer-only one) and gate /v1/account/create with the short-lived
-	// PGP-signed token. The verifier is the same instance the Wails
-	// surface binds for ServerKey.IssueBootstrapToken, so a token
-	// issued to the WebView round-trips to the REST middleware.
-	serverkeySvc, _ := core.ServiceFor[*serverkey.Service](c, "serverkey")
-	opts := server.Options{
-		Runner:    r,
-		LocalKey:  key,
-		Brand:     server.Brand{Version: lthn.Version},
-		Core:      c,
-		ServerKey: serverkeySvc,
-	}
-	// Mantis #1562 follow-up to #1523 — wire the plugin-installed
-	// checker so the capability-grant audit endpoint can gate plugin_id
-	// against the live install set. Nil checker = audit row emits but
-	// the 404-on-unknown-plugin gate stays open.
-	//
-	// Mantis #1581 — composite the two install surfaces: pkg/plugin
-	// owns the binary-plugin tier (ProxyGroup().Has) and pkg/marketplace
-	// owns the bundle tier (IsInstalled). The capability-grant 404 gate
-	// must cover BOTH or a marketplace-installed plugin_id slips past
-	// while a binary plugin gets rejected (asymmetric since H#42 added
-	// the marketplace install lane).
-	pluginSvc, _ := core.ServiceFor[*plugin.Service](c, "plugin")
-	marketplaceSvc, _ := core.ServiceFor[*marketplace.Service](c, "marketplace")
-	if pluginSvc != nil || marketplaceSvc != nil {
-		opts.PluginInstalledChecker = func(code string) bool {
-			if pluginSvc != nil && pluginSvc.ProxyGroup().Has(code) {
-				return true
-			}
-			if marketplaceSvc != nil && marketplaceSvc.IsInstalled(code) {
-				return true
-			}
-			return false
-		}
-	}
-	// Mantis #1595 / Cerberus #21 — cross-check capability-grant origin
-	// against marketplace.ViewRegistry's authoritative LoopbackOriginFor
-	// record. PluginInstalledChecker proves the plugin is installed;
-	// this proves the request's `origin` matches the registry's view
-	// of that plugin's loopback origin. Closes audit-log-integrity gap
-	// where a falsified (pluginCode, origin) tuple would otherwise
-	// commit. Browser postMessage targetOrigin enforcement is the
-	// safety floor against token leakage.
-	opts.PluginOriginChecker = func(code string) (string, bool) {
-		return marketplace.ViewRegistry.LoopbackOriginFor(code)
-	}
+	// Mantis #1741 / Cerberus #70 F-1 — build the same opts shape as
+	// cmdServe (gateway routes + opencode wiring + capability checkers)
+	// so the GUI mode mounts the data firewall and lifecycle wires
+	// uniformly. GUI mode does NOT call s.Start() (the desktop service
+	// uses s.Handler() directly), so Addr is left empty here; the
+	// difference between GUI and serve is the listen verb, not the
+	// surface composition.
+	opts := buildServerOpts(c, r, key)
 	s := server.NewService(opts)
 	if rr := c.RegisterService("server", s); !rr.OK {
 		core.Print(core.Stderr(), "lthn gui: %s\n", rr.Error())
@@ -393,108 +351,13 @@ func cmdServe(args []string) int {
 		return 1
 	}
 	key, _ := keyR.Value.(string)
-	// Build the ExtraGroups slice before NewService — engine.Handler()
-	// snapshots routes at construction time, so late .Engine().Register
-	// calls don't reach the live http.Server.
-	var extras []coreapi.RouteGroup
-	if opencodeSvc, _ := core.ServiceFor[*opencode.Service](c, "opencode"); opencodeSvc != nil {
-		extras = append(extras, opencodeSvc.ProxyGroup(), opencode.NewControlGroup(opencodeSvc))
-		// Wire opencode → runner so the runner's dynamic-route set
-		// refreshes whenever an opencode sandbox starts or stops.
-		// /v1/chat/completions then transparently reaches opencode-
-		// routed providers without restarting lthn serve.
-		opencodeSvc.SetOnSandboxChange(func() {
-			_ = runner.ApplyDynamicRoutes(r, opencodeSvc.Routes())
-		})
-		// Reconcile FIRST — sweep the host runtime for surviving
-		// lthn-opencode-* containers and re-register them in the
-		// orm + reverse-proxy. The orm is in-memory (Memium), so
-		// records from the previous serve invocation are gone;
-		// the containers themselves persist on the docker daemon.
-		// Without this sweep, the auto-resume path below would see
-		// "nothing running" and spawn duplicates.
-		if rr := opencodeSvc.Reconcile(); !rr.OK {
-			core.Print(core.Stderr(),
-				"lthn serve: opencode reconcile failed: %s\n", rr.Error())
-		}
-		// Auto-resume — RFC.opencode.md §7 "Restart". If the user
-		// previously called Enable, the persisted flag is still
-		// true; ensure a sandbox is running. Idempotent via Enable's
-		// already-running short-circuit, which now sees the just-
-		// reconciled records and skips re-spawn.
-		if opencodeSvc.IsEnabled() {
-			if rr := opencodeSvc.Enable(""); !rr.OK {
-				core.Print(core.Stderr(),
-					"lthn serve: opencode auto-resume failed: %s\n", rr.Error())
-				// Continue startup — opencode is optional.
-			}
-		}
-		// Pick up any sandboxes already running (whether resumed
-		// just now or surviving from a previous serve invocation).
-		_ = runner.ApplyDynamicRoutes(r, opencodeSvc.Routes())
-	}
-	pluginSvc, _ := core.ServiceFor[*plugin.Service](c, "plugin")
-	if pluginSvc != nil {
-		extras = append(extras, pluginSvc.ProxyGroup())
-	}
-	if gatewaySvc, _ := core.ServiceFor[*gateway.Service](c, "gateway"); gatewaySvc != nil {
-		extras = append(extras, gateway.NewRoutes(gatewaySvc))
-		// Cerberus Mantis #1443 — wire the per-bundle token resolver so
-		// the gateway can verify X-Bundle-Token and derive the
-		// authoritative bundle code rather than trusting Bundle-ID.
-		if pluginSvc != nil {
-			gateway.SetBundleCodeResolver(gatewaySvc, pluginSvc)
-		}
-	}
-	// lthn-process (+ any future service implementing
-	// server.RoutesProvider) is auto-discovered via Options.Core
-	// passed to server.NewService below — no manual accumulation.
-	//
-	// Stage B' wiring (Mantis #1474 successor) — same as cmdGUI:
-	// resolve the Bootstrap()ed *serverkey.Service so the combined
-	// bootstrap-plus-bearer middleware lights up. `lthn serve` is the
-	// path a headless install reaches (no Wails), so the account-
-	// creation endpoint MUST be reachable here too once a future
-	// client (CLI or REST consumer) issues a bootstrap token.
-	serverkeySvc, _ := core.ServiceFor[*serverkey.Service](c, "serverkey")
-	opts := server.Options{
-		Addr:        core.Concat(":", port),
-		Runner:      r,
-		LocalKey:    key,
-		Brand:       server.Brand{Version: lthn.Version},
-		ExtraGroups: extras,
-		Core:        c,
-		ServerKey:   serverkeySvc,
-	}
-	// Mantis #1562 follow-up to #1523 — same wire as cmdGUI; pluginSvc
-	// was resolved above for ExtraGroups and bundle-token plumbing, so
-	// reuse it here to gate plugin_id on capability-grant audit.
-	//
-	// Mantis #1581 — composite the marketplace-bundle tier alongside
-	// the binary-plugin tier. See cmdGUI for the why; the headless
-	// serve path needs the same coverage so a marketplace-installed
-	// plugin_id doesn't slip past the capability-grant 404 gate when
-	// the REST API is reached without a Wails GUI.
-	marketplaceSvc, _ := core.ServiceFor[*marketplace.Service](c, "marketplace")
-	if pluginSvc != nil || marketplaceSvc != nil {
-		opts.PluginInstalledChecker = func(code string) bool {
-			if pluginSvc != nil && pluginSvc.ProxyGroup().Has(code) {
-				return true
-			}
-			if marketplaceSvc != nil && marketplaceSvc.IsInstalled(code) {
-				return true
-			}
-			return false
-		}
-	}
-	// Mantis #1595 / Cerberus #21 — same wire as cmdGUI; the headless
-	// serve path needs origin cross-check too. Without it a caller
-	// over the REST API can post a falsified (pluginCode, origin)
-	// tuple and commit a fabricated audit row even though the
-	// ViewRegistry holds the truth.
-	opts.PluginOriginChecker = func(code string) (string, bool) {
-		return marketplace.ViewRegistry.LoopbackOriginFor(code)
-	}
+	// Mantis #1741 / Cerberus #70 F-1 — share buildServerOpts with
+	// cmdGUI so the gateway data firewall, opencode lifecycle wires
+	// and capability checkers mount identically. The serve verb's
+	// only delta from GUI is the public listen, expressed below as
+	// Addr + s.Start() + mdns broadcast.
+	opts := buildServerOpts(c, r, key)
+	opts.Addr = core.Concat(":", port)
 	s := server.NewService(opts)
 	if rr := c.RegisterService("server", s); !rr.OK {
 		core.Print(core.Stderr(), serveErrorFormat, rr.Error())
@@ -526,6 +389,149 @@ func cmdServe(args []string) int {
 		}
 	}
 	return 0
+}
+
+// buildServerOpts assembles the server.Options surface shared by every
+// verb that constructs a pkg/server.Service from the Core (cmdGUI,
+// cmdServe, and any future verb that mounts the live HTTP engine).
+//
+// Builds in this order — order matters because engine.Handler()
+// snapshots routes at NewService construction time, so every
+// RouteGroup must be in ExtraGroups BEFORE the service is constructed
+// by the caller:
+//
+//  1. opencode — ProxyGroup + ControlGroup; wires SetOnSandboxChange
+//     so the runner's dynamic-route table refreshes when sandboxes
+//     start/stop; Reconcile sweeps surviving containers from a
+//     previous invocation; Enable auto-resume if the persisted flag
+//     is true; ApplyDynamicRoutes picks up the post-reconcile set.
+//  2. plugin — ProxyGroup (binary-plugin tier).
+//  3. gateway — NewRoutes (data firewall); SetBundleCodeResolver wires
+//     the per-bundle token verifier (Cerberus Mantis #1443).
+//  4. PluginInstalledChecker — composite (plugin || marketplace).
+//     Gates capability-grant audit 404-on-unknown-plugin (#1562/#1581).
+//  5. PluginOriginChecker — marketplace.ViewRegistry.LoopbackOriginFor
+//     cross-check (#1595 / Cerberus #21).
+//  6. ServerKey + Core for bootstrap+bearer middleware (#1474 successor).
+//
+// Verb-specific bits — Addr (serve only), s.Start() (serve only), mdns
+// (serve only), s.Handler() consumption (GUI only) — stay in the
+// caller. The HELPER is the data-firewall + lifecycle surface; the
+// VERB is the listen + lifecycle.
+//
+// Pre-Mantis #1741, cmdGUI omitted the entire ExtraGroups + opencode
+// wiring block, leaving the GUI mode without the gateway data firewall
+// and without opencode lifecycle plumbing (Cerberus #70 F-1, A1 +
+// STRIDE-T + STRIDE-E).
+//
+// Usage example:
+//
+//	c := newAppCore()
+//	r, _ := core.ServiceFor[*runner.Service](c, "runner")
+//	key, _ := apikey.GenerateOrLoad(c).Value.(string)
+//	opts := buildServerOpts(c, r, key)
+//	opts.Addr = ":8000" // serve only — GUI leaves empty + skips Start()
+//	s := server.NewService(opts)
+func buildServerOpts(c *core.Core, r *runner.Service, key string) server.Options {
+	var extras []coreapi.RouteGroup
+	if opencodeSvc, _ := core.ServiceFor[*opencode.Service](c, "opencode"); opencodeSvc != nil {
+		extras = append(extras, opencodeSvc.ProxyGroup(), opencode.NewControlGroup(opencodeSvc))
+		// Wire opencode → runner so the runner's dynamic-route set
+		// refreshes whenever an opencode sandbox starts or stops.
+		// /v1/chat/completions then transparently reaches opencode-
+		// routed providers without restarting the live server.
+		opencodeSvc.SetOnSandboxChange(func() {
+			_ = runner.ApplyDynamicRoutes(r, opencodeSvc.Routes())
+		})
+		// Reconcile FIRST — sweep the host runtime for surviving
+		// lthn-opencode-* containers and re-register them in the
+		// orm + reverse-proxy. The orm is in-memory (Memium), so
+		// records from the previous invocation are gone; the
+		// containers themselves persist on the docker daemon.
+		// Without this sweep, the auto-resume path below would see
+		// "nothing running" and spawn duplicates.
+		if rr := opencodeSvc.Reconcile(); !rr.OK {
+			core.Print(core.Stderr(),
+				"lthn: opencode reconcile failed: %s\n", rr.Error())
+		}
+		// Auto-resume — RFC.opencode.md §7 "Restart". If the user
+		// previously called Enable, the persisted flag is still
+		// true; ensure a sandbox is running. Idempotent via Enable's
+		// already-running short-circuit, which now sees the just-
+		// reconciled records and skips re-spawn.
+		if opencodeSvc.IsEnabled() {
+			if rr := opencodeSvc.Enable(""); !rr.OK {
+				core.Print(core.Stderr(),
+					"lthn: opencode auto-resume failed: %s\n", rr.Error())
+				// Continue startup — opencode is optional.
+			}
+		}
+		// Pick up any sandboxes already running (whether resumed
+		// just now or surviving from a previous invocation).
+		_ = runner.ApplyDynamicRoutes(r, opencodeSvc.Routes())
+	}
+	pluginSvc, _ := core.ServiceFor[*plugin.Service](c, "plugin")
+	if pluginSvc != nil {
+		extras = append(extras, pluginSvc.ProxyGroup())
+	}
+	if gatewaySvc, _ := core.ServiceFor[*gateway.Service](c, "gateway"); gatewaySvc != nil {
+		extras = append(extras, gateway.NewRoutes(gatewaySvc))
+		// Cerberus Mantis #1443 — wire the per-bundle token resolver so
+		// the gateway can verify X-Bundle-Token and derive the
+		// authoritative bundle code rather than trusting Bundle-ID.
+		if pluginSvc != nil {
+			gateway.SetBundleCodeResolver(gatewaySvc, pluginSvc)
+		}
+	}
+	// Stage B' wiring (Mantis #1474 successor) — resolve the
+	// Bootstrap()ed *serverkey.Service so server.NewService can install
+	// the combined bootstrap-plus-bearer middleware (instead of the
+	// bearer-only one) and gate /v1/account/create with the short-lived
+	// PGP-signed token.
+	serverkeySvc, _ := core.ServiceFor[*serverkey.Service](c, "serverkey")
+	opts := server.Options{
+		Runner:      r,
+		LocalKey:    key,
+		Brand:       server.Brand{Version: lthn.Version},
+		ExtraGroups: extras,
+		Core:        c,
+		ServerKey:   serverkeySvc,
+	}
+	// Mantis #1562 follow-up to #1523 — wire the plugin-installed
+	// checker so the capability-grant audit endpoint can gate plugin_id
+	// against the live install set. Nil checker = audit row emits but
+	// the 404-on-unknown-plugin gate stays open.
+	//
+	// Mantis #1581 — composite the two install surfaces: pkg/plugin
+	// owns the binary-plugin tier (ProxyGroup().Has) and pkg/marketplace
+	// owns the bundle tier (IsInstalled). The capability-grant 404 gate
+	// must cover BOTH or a marketplace-installed plugin_id slips past
+	// while a binary plugin gets rejected (asymmetric since H#42 added
+	// the marketplace install lane).
+	marketplaceSvc, _ := core.ServiceFor[*marketplace.Service](c, "marketplace")
+	if pluginSvc != nil || marketplaceSvc != nil {
+		opts.PluginInstalledChecker = func(code string) bool {
+			if pluginSvc != nil && pluginSvc.ProxyGroup().Has(code) {
+				return true
+			}
+			if marketplaceSvc != nil && marketplaceSvc.IsInstalled(code) {
+				return true
+			}
+			return false
+		}
+	}
+	// Mantis #1595 / Cerberus #21 — cross-check capability-grant origin
+	// against marketplace.ViewRegistry's authoritative LoopbackOriginFor
+	// record. PluginInstalledChecker proves the plugin is installed;
+	// this proves the request's `origin` matches the registry's view
+	// of that plugin's loopback origin. Closes audit-log-integrity gap
+	// where a falsified (pluginCode, origin) tuple would otherwise
+	// commit. Browser postMessage targetOrigin enforcement is the
+	// safety floor against token leakage.
+	opts.PluginOriginChecker = func(code string) (string, bool) {
+		return marketplace.ViewRegistry.LoopbackOriginFor(code)
+	}
+	return opts
 }
 
 // cmdAI handles `lthn ai <verb> [args...]`. AI subsystem dispatch.
