@@ -53,13 +53,14 @@ func TestService_New_Ugly(t *core.T) {
 
 // --- Register ---
 
+// Production wires Register via core.WithName(...); RegisterService fires
+// post-factory inside WithName. Direct-call testing of Register must use
+// WithName to model the production lifecycle (Mantis #1457).
 func TestService_Register_Good(t *core.T) {
 	t.Setenv("HOME", t.TempDir())
-	c := core.New()
-	r := keys.Register(c)
-	core.AssertTrue(t, r.OK)
+	c := core.New(core.WithName("keys", keys.Register))
 	got := c.Service("keys")
-	core.AssertTrue(t, got.OK)
+	core.AssertTrue(t, got.OK, "keys service discoverable after WithName")
 }
 
 func TestService_Register_Bad(t *core.T) {

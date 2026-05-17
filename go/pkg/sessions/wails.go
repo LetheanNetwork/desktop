@@ -13,6 +13,7 @@ import (
 
 	core "dappco.re/go"
 	"dappco.re/go/inference"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // WailsService is the WebView-facing handle on the sessions store.
@@ -106,11 +107,25 @@ func (s *WailsService) Read(id string) core.Result {
 // The chat-window's /export slash command calls this after the user
 // picks a path via Dialogs.SaveFile.
 //
+// Mantis #1420 (Cerberus M4 2026-05-17): the WailsService boundary
+// validates that path is absolute, NUL-free, path-clean, and resolves
+// under ~/Lethean/. UI convention previously kept the SaveFile picker
+// pointed at the workspace tree; an attacker-controlled WebView frame
+// (extension, embedded iframe, future plugin tier) could bypass that
+// convention and call this method with an arbitrary host-side path,
+// turning Export into a write-anywhere primitive. The package-level
+// sessions.Export stays caller-trust to keep CLI verbs + tests free
+// to write under t.TempDir(); the lockdown lives on the boundary the
+// WebView actually reaches.
+//
 // Usage example (TS):
 //
 //	import { Export } from "@desktop/sessions/wailsservice";
-//	await Export(activeId, "/Users/snider/Desktop/chat.md");
+//	await Export(activeId, "/Users/snider/Lethean/exports/chat.md");
 func (s *WailsService) Export(id, path string) core.Result {
+	if err := validateExportPath(path); err != nil {
+		return core.Fail(err)
+	}
 	r := Export(s.core, id, path)
 	if !r.OK {
 		return core.Fail(core.E("sessions.WailsService.Export", "export session failed", r.Value.(error)))
@@ -190,11 +205,19 @@ func (s *WailsService) SetSystemPrompt(id, prompt string) core.Result {
 // markdown files. Returns the count of files written. Used by the
 // chat-window's /export-all slash command.
 //
+// Mantis #1420 — same boundary-layer path lockdown as Export above.
+// dir must resolve under ~/Lethean/; an arbitrary host-side dir from
+// an attacker-controlled WebView caller would otherwise let ExportAll
+// scatter session markdown across the filesystem.
+//
 // Usage example (TS):
 //
 //	import { ExportAll } from "@desktop/sessions/wailsservice";
-//	const n = await ExportAll("/Users/snider/Documents/lthn-export");
+//	const n = await ExportAll("/Users/snider/Lethean/exports/backup");
 func (s *WailsService) ExportAll(dir string) core.Result {
+	if err := validateExportPath(dir); err != nil {
+		return core.Fail(err)
+	}
 	r := ExportAll(s.core, dir)
 	if !r.OK {
 		return core.Fail(core.E("sessions.WailsService.ExportAll", "export all failed", r.Value.(error)))
@@ -296,4 +319,36 @@ func (s *WailsService) List() core.Result {
 	}
 	infos, _ := r.Value.([]SessionInfo)
 	return core.Ok(infos)
+}
+
+// validateExportPath gates the WebView-facing Export / ExportAll
+// surface against arbitrary-write attacks (Mantis #1420, Cerberus M4
+// 2026-05-17). path must be absolute, NUL-free, path-clean, and
+// resolve under the user-visible workspace root at ~/Lethean/.
+// Resolution of the root is deferred to call time so a test that
+// re-points HOME via t.Setenv("HOME", ...) sees the test-controlled
+// tree; production callers see the real workspace.
+//
+// Failure mode unifies on the error code "sessions.export.path_invalid"
+// so the frontend gate (lit toast) can render a friendly message
+// regardless of which underlying clause tripped — empty / relative /
+// NUL / unclean / escape-from-root all collapse to one code.
+//
+// Usage example:
+//
+//	if err := validateExportPath(path); err != nil {
+//	    return core.Fail(err)
+//	}
+func validateExportPath(path string) error {
+	rootR := paths.Root()
+	if !rootR.OK {
+		return core.E("sessions.export.path_invalid",
+			"workspace root unavailable", rootR.Value.(error))
+	}
+	root, _ := rootR.Value.(string)
+	if err := paths.IsValidAbsoluteUnderRoot(root, path); err != nil {
+		return core.E("sessions.export.path_invalid",
+			"export path must be absolute and resolve under the Lethean workspace", err)
+	}
+	return nil
 }
