@@ -277,6 +277,10 @@
       "oc_upgrade_no_change":  "Already up to date.",
       "oc_upgrade_updated":    "Updated. Sandbox restarted on the new image.",
       "oc_upgrade_failed":     "Update check failed — see logs for details.",
+      "oc_upgrade_dialog_title":   "Pull a new sandbox image?",
+      "oc_upgrade_dialog_body":    "This pulls lthn/dev:latest from the registry. The image is NOT signature-verified yet — pulls trust whatever the registry currently serves. Any running sandboxes will keep using their current image until you stop and restart them.",
+      "oc_upgrade_dialog_confirm": "Pull update",
+      "oc_upgrade_dialog_cancel":  "Cancel",
       "oc_open_web":           "Open in window",
       "oc_open_web_failed":    "Couldn't open the web window — see logs for details."
     },

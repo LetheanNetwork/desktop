@@ -38,6 +38,7 @@ class LthnIntegrationsWindow extends LitElement {
     studioInstalled: { state: true },
     upgradeBusy: { state: true },
     upgradeStatus: { state: true },
+    showUpgradeDialog: { state: true },
     t: { state: true },
   };
   declare w: number;
@@ -58,6 +59,10 @@ class LthnIntegrationsWindow extends LitElement {
   declare studioInstalled: boolean;
   declare upgradeBusy: boolean;
   declare upgradeStatus: { kind: "ok" | "err"; text: string } | null;
+  /** Mantis #1623 — gate WUpgradeWithConsent behind a supply-chain
+   *  warning dialog. False on construction; flips true on
+   *  "Check for updates" click; flips back false on confirm/cancel. */
+  declare showUpgradeDialog: boolean;
   declare t: {
     railLabel: string; railEmpty: string;
     rowConfigPath: string; rowOnDisk: string; rowEndpoint: string; rowDefaultModel: string;
@@ -75,6 +80,8 @@ class LthnIntegrationsWindow extends LitElement {
     ocCheckUpdates: string; ocUpgrading: string;
     ocUpgradeNoChange: string; ocUpgradeUpdated: string;
     ocUpgradeFailed: string;
+    ocUpgradeDialogTitle: string; ocUpgradeDialogBody: string;
+    ocUpgradeDialogConfirm: string; ocUpgradeDialogCancel: string;
     ocOpenWeb: string; ocOpenWebFailed: string;
   };
   /* Poll handle for sandbox state — cleared on disconnect. */
@@ -99,6 +106,7 @@ class LthnIntegrationsWindow extends LitElement {
     this.studioInstalled = false;
     this.upgradeBusy = false;
     this.upgradeStatus = null;
+    this.showUpgradeDialog = false;
     this.t = {
       railLabel: "Clients",
       railEmpty: "No clients enumerated yet. The integrations service is the source of truth.",
@@ -127,6 +135,11 @@ class LthnIntegrationsWindow extends LitElement {
       ocUpgradeNoChange: "Already up to date.",
       ocUpgradeUpdated: "Updated. Sandbox restarted on the new image.",
       ocUpgradeFailed: "Update check failed — see logs for details.",
+      ocUpgradeDialogTitle: "Pull a new sandbox image?",
+      ocUpgradeDialogBody:
+        "This pulls lthn/dev:latest from the registry. The image is NOT signature-verified yet — pulls trust whatever the registry currently serves. Any running sandboxes will keep using their current image until you stop and restart them.",
+      ocUpgradeDialogConfirm: "Pull update",
+      ocUpgradeDialogCancel: "Cancel",
       ocOpenWeb: "Open in window",
       ocOpenWebFailed: "Couldn't open the web window — see logs for details.",
     };
@@ -305,6 +318,7 @@ class LthnIntegrationsWindow extends LitElement {
       ocML, ocCopy, ocMerge, ocMOk, ocMConflict, ocMForce, ocSHelp,
       ocTUI, ocTUIFail, ocStudio,
       ocCheck, ocUpgring, ocUpNoCh, ocUpUpd, ocUpFail,
+      ocUpDlgT, ocUpDlgB, ocUpDlgC, ocUpDlgX,
       ocWeb, ocWebFail,
     ] = await Promise.all([
       T("window.integrations.title"),
@@ -342,6 +356,10 @@ class LthnIntegrationsWindow extends LitElement {
       T("window.integrations.oc_upgrade_no_change"),
       T("window.integrations.oc_upgrade_updated"),
       T("window.integrations.oc_upgrade_failed"),
+      T("window.integrations.oc_upgrade_dialog_title"),
+      T("window.integrations.oc_upgrade_dialog_body"),
+      T("window.integrations.oc_upgrade_dialog_confirm"),
+      T("window.integrations.oc_upgrade_dialog_cancel"),
       T("window.integrations.oc_open_web"),
       T("window.integrations.oc_open_web_failed"),
     ]);
@@ -363,6 +381,8 @@ class LthnIntegrationsWindow extends LitElement {
       ocCheckUpdates: ocCheck, ocUpgrading: ocUpgring,
       ocUpgradeNoChange: ocUpNoCh, ocUpgradeUpdated: ocUpUpd,
       ocUpgradeFailed: ocUpFail,
+      ocUpgradeDialogTitle: ocUpDlgT, ocUpgradeDialogBody: ocUpDlgB,
+      ocUpgradeDialogConfirm: ocUpDlgC, ocUpgradeDialogCancel: ocUpDlgX,
       ocOpenWeb: ocWeb, ocOpenWebFailed: ocWebFail,
     };
     try {
@@ -403,17 +423,41 @@ class LthnIntegrationsWindow extends LitElement {
     }
   }
 
-  private async checkForUpdates() {
+  /** Mantis #1623 — "Check for updates" no longer fires the pull
+   *  directly. It opens a supply-chain warning dialog. Confirm
+   *  inside the dialog is what calls WUpgradeWithConsent; Cancel is
+   *  a no-op that closes the dialog. */
+  private openUpgradeDialog() {
     if (this.upgradeBusy) return;
+    this.upgradeStatus = null;
+    this.showUpgradeDialog = true;
+  }
+
+  /** User dismissed the supply-chain dialog. No backend call. */
+  private cancelUpgradeDialog() {
+    this.showUpgradeDialog = false;
+  }
+
+  /** User accepted the supply-chain warning. Fires the pull through
+   *  the consent-required wrapper with ConfirmedByUser=true. We don't
+   *  auto-restart running sandboxes — the user knows their sandbox
+   *  state better than we do; the dialog body explains the new image
+   *  takes effect on next sandbox start. */
+  private async confirmUpgrade() {
+    if (this.upgradeBusy) return;
+    this.showUpgradeDialog = false;
     this.upgradeBusy = true;
     this.upgradeStatus = null;
     try {
       const oc = await import("@desktop/opencode/wailsservice");
-      const r = await oc.WUpgrade();
+      const r = await oc.WUpgradeWithConsent({
+        confirmed_by_user: true,
+        restart_sandboxes: false,
+      });
       const ok = (r as any)?.OK === true;
       if (!ok) {
         this.upgradeStatus = { kind: "err", text: this.t.ocUpgradeFailed };
-        console.error("opencode WUpgrade failed", r);
+        console.error("opencode WUpgradeWithConsent failed", r);
       } else {
         const updated = !!(r as any)?.Value?.updated;
         this.upgradeStatus = {
@@ -423,7 +467,7 @@ class LthnIntegrationsWindow extends LitElement {
       }
     } catch (err) {
       this.upgradeStatus = { kind: "err", text: this.t.ocUpgradeFailed };
-      console.error("opencode WUpgrade threw", err);
+      console.error("opencode WUpgradeWithConsent threw", err);
     } finally {
       this.upgradeBusy = false;
     }
@@ -542,8 +586,9 @@ class LthnIntegrationsWindow extends LitElement {
               </span>
             ` : nothing}
             <button
+              data-testid="oc-check-updates"
               ?disabled=${this.upgradeBusy}
-              @click=${() => void this.checkForUpdates()}
+              @click=${() => this.openUpgradeDialog()}
               style="padding:4px 10px; font-size:10.5px; background:transparent; border:1px solid rgba(255,255,255,0.10); border-radius:5px; color:var(--fg-2); cursor:${this.upgradeBusy ? "default" : "pointer"}; opacity:${this.upgradeBusy ? 0.6 : 1}; --wails-draggable: no-drag;">
               ${this.upgradeBusy ? this.t.ocUpgrading : this.t.ocCheckUpdates}
             </button>
@@ -592,6 +637,50 @@ class LthnIntegrationsWindow extends LitElement {
                 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px; margin-right:6px;"></i>${this.t.ocOpenStudio}
               </button>
             ` : nothing}
+          </div>
+        </div>
+      </div>
+      ${this.showUpgradeDialog ? this.renderUpgradeDialog() : nothing}
+    `;
+  }
+
+  /** Mantis #1623 — supply-chain warning dialog. Inline scrim+card
+   *  (no shared lthn-confirm primitive yet — see brief escape valve).
+   *  Dark-only palette mirrors the rest of the surface. Confirm fires
+   *  WUpgradeWithConsent({confirmed_by_user: true}); Cancel closes the
+   *  dialog with no side effects. */
+  private renderUpgradeDialog() {
+    return html`
+      <div
+        data-testid="oc-upgrade-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label=${this.t.ocUpgradeDialogTitle}
+        style="position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55); --wails-draggable: no-drag;">
+        <div
+          style="max-width:480px; width:calc(100% - 64px); background:var(--bg-1, #16181c); border:1px solid rgba(255,255,255,0.10); border-radius:10px; padding:22px 24px; box-shadow:0 12px 48px rgba(0,0,0,0.55); display:flex; flex-direction:column; gap:14px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <i class="fa-solid fa-triangle-exclamation" style="font-size:14px; color:var(--warn-300, #d99);"></i>
+            <div style="font-size:14.5px; font-weight:600; color:var(--fg-0); letter-spacing:-0.01em;">
+              ${this.t.ocUpgradeDialogTitle}
+            </div>
+          </div>
+          <div style="font-size:12.5px; color:var(--fg-2); line-height:1.6;">
+            ${this.t.ocUpgradeDialogBody}
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:4px;">
+            <button
+              data-testid="oc-upgrade-cancel"
+              @click=${() => this.cancelUpgradeDialog()}
+              style="padding:6px 14px; font-size:11.5px; background:transparent; border:1px solid rgba(255,255,255,0.10); border-radius:6px; color:var(--fg-1); cursor:pointer; --wails-draggable: no-drag;">
+              ${this.t.ocUpgradeDialogCancel}
+            </button>
+            <button
+              data-testid="oc-upgrade-confirm"
+              @click=${() => void this.confirmUpgrade()}
+              style="padding:6px 14px; font-size:11.5px; background:rgba(217,153,153,0.14); border:1px solid rgba(217,153,153,0.45); border-radius:6px; color:var(--warn-300, #d99); cursor:pointer; --wails-draggable: no-drag;">
+              ${this.t.ocUpgradeDialogConfirm}
+            </button>
           </div>
         </div>
       </div>
