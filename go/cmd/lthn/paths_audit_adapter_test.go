@@ -240,6 +240,55 @@ func TestFlushDegradedCount_NoOpWhenCounterZero_Good(t *testing.T) {
 		"FlushDegradedCount must return 0 when there's nothing to flush")
 }
 
+// TestPathsAuditAdapter_RecordPathsEvent_Good_BatchPathLandsCodeInDayFile
+// end-to-end round-trip — the day-file NDJSON line MUST surface the
+// Meta.code field so operators can pattern-match on the typed failure
+// sentinel without parsing prose. Covers the production adapter (not
+// the captureAdapter helper) so the wiring stays asserted.
+func TestPathsAuditAdapter_RecordPathsEvent_Good_BatchPathLandsCodeInDayFile(t *testing.T) {
+	homeForAdapter(t)
+
+	auditSvc := audit.New(nil, audit.Options{AuditSecret: []byte("test-secret-32-bytes-padding-xx!")})
+	t.Cleanup(func() { _ = auditSvc.Close() })
+	audit.SetDefault(auditSvc)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	paths.SetAuditRecorder(&pathsAuditAdapter{svc: auditSvc})
+	t.Cleanup(func() { paths.SetAuditRecorder(nil) })
+	paths.SetAuditSecretProvider(func() []byte { return []byte("test-secret-32-bytes-padding-xx!") })
+	t.Cleanup(func() { paths.SetAuditSecretProvider(nil) })
+
+	// Drive a successful cascade write; ev.Code is empty on success
+	// events (per LockEvent docstring) so the day-file MUST include
+	// the "code" key with an empty value rather than dropping it.
+	root := paths.Root().Value.(string)
+	dir := core.PathJoin(root, "office", "documents")
+	_ = core.MkdirAll(dir, 0o700)
+	fp := core.PathJoin(dir, "code-meta-smoke.md")
+	wr := paths.AtomicWriteWithVersion(fp, paths.WriteInput{Body: []byte("hello-code")})
+	core.AssertTrue(t, wr.OK, "AtomicWriteWithVersion must succeed")
+	core.AssertTrue(t, auditSvc.Close().OK, "audit close must succeed")
+
+	auditDir := core.PathJoin(root, "audit")
+	entriesR := core.ReadDir(core.DirFS(auditDir), ".")
+	core.AssertTrue(t, entriesR.OK, "audit dir must be readable")
+	entries := entriesR.Value.([]core.FsDirEntry)
+	core.AssertGreater(t, len(entries), 0, "audit day-file must exist after a batch write")
+
+	var dayFile string
+	for _, e := range entries {
+		if !e.IsDir() {
+			dayFile = core.PathJoin(auditDir, e.Name())
+			break
+		}
+	}
+	body := core.ReadFile(dayFile)
+	core.AssertTrue(t, body.OK, "day-file must be readable")
+	contents := string(body.Value.([]byte))
+	core.AssertTrue(t, core.Contains(contents, `"code":`),
+		"day-file event must carry a 'code' key (Mantis #1569); got: "+contents)
+}
+
 // TestPathsAuditAdapter_PathsEventOutcome_Ugly_KindToOutcomeMapping
 // pins the closed-set Kind→Outcome map so a future event-schema
 // addition fails this test loud rather than silently rejecting at

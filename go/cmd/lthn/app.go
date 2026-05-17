@@ -577,6 +577,7 @@ func (a *pathsAuditAdapter) RecordPathsEvent(ev paths.LockEvent) core.Result {
 		Meta: map[string]any{
 			"path_hash": ev.PathHash,
 			"caller":    ev.Caller,
+			"code":      ev.Code,
 			"version":   ev.Version,
 		},
 	}
