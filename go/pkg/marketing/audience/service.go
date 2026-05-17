@@ -202,7 +202,15 @@ func writeSegment(dir string, seg Segment, ifVersion int) core.Result {
 	}
 	data := append([]byte("---\n"), fmBytes...)
 	data = append(data, []byte("---\n")...)
-	fpath := core.PathJoin(dir, seg.ID+".md")
+	// Cerberus #1486 belt-and-braces (Mantis #1607, forward-arc from
+	// H#85): WithinDir check after the join. IsValidID above is the
+	// cheap shape gate; JoinAndCheck refuses any path that resolves
+	// outside dir even if cousin-validator drift (slugifyAudience edge
+	// cases) weakens IsValidID.
+	fpath, jerr := paths.JoinAndCheck(dir, seg.ID+".md")
+	if jerr != nil {
+		return core.Fail(jerr)
+	}
 	res := paths.AtomicWriteWithVersion(fpath, paths.WriteInput{
 		Body:      data,
 		IfVersion: ifVersion,
@@ -244,7 +252,16 @@ func loadSegments() ([]Segment, error) {
 		if len(name) < 4 || name[len(name)-3:] != ".md" {
 			continue
 		}
-		raw := core.ReadFile(core.PathJoin(dir, name))
+		// Cerberus #1486 belt-and-braces (Mantis #1607, forward-arc from
+		// H#85): WithinDir check after the join. The leaf comes from
+		// ReadDir (filesystem-trusted), but JoinAndCheck costs nothing
+		// and closes the door on future code paths that might splice
+		// user-controlled names into this loop.
+		fpath, jerr := paths.JoinAndCheck(dir, name)
+		if jerr != nil {
+			continue
+		}
+		raw := core.ReadFile(fpath)
 		if !raw.OK {
 			continue
 		}

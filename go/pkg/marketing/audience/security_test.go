@@ -61,6 +61,36 @@ func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 	}
 }
 
+// TestAudience_WriteSegment_Traversal_RejectedAtService_Bad exercises
+// the WithinDir belt at the service tier (Mantis #1607). The wails
+// entry already rejects traversal payloads via IsValidID, but
+// writeSegment is the substrate Create / Update reach through — this
+// test bypasses wails by invoking it directly via the export_test.go
+// shim with a poisoned segment ID.
+func TestAudience_WriteSegment_Traversal_RejectedAtService_Bad(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := core.PathJoin(home, "Lethean", "marketing", "audience")
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
+		t.Fatalf("MkdirAll failed: %s", r.Error())
+	}
+	for _, evil := range []string{
+		"../../wallets/x",
+		"..",
+		".hidden",
+		"foo/bar",
+		"foo\\bar",
+		"foo\x00bar",
+		"",
+	} {
+		seg := audience.Segment{ID: evil, Name: "x", N: 1}
+		res := audience.WriteSegmentExported(dir, seg, 0)
+		if res.OK {
+			t.Fatalf("WriteSegmentExported(ID:%q) must reject, returned OK", evil)
+		}
+	}
+}
+
 func TestAudienceDir_Mode0700_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

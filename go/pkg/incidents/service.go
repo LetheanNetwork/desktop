@@ -332,7 +332,15 @@ func loadOne(id string) (IncidentRecord, string, error) {
 				continue
 			}
 			dirPath := core.PathJoin(yrPath, mEntry.Name())
-			target := core.PathJoin(dirPath, id+".md")
+			// Cerberus #1486 belt-and-braces (Mantis #1607, forward-arc
+			// from H#85): WithinDir check after the join. IsValidID at
+			// the top of loadOne is the cheap shape gate; JoinAndCheck
+			// catches cousin-validator drift if a future regression
+			// loosens that shape or a non-wails caller bypasses it.
+			target, jerr := paths.JoinAndCheck(dirPath, id+".md")
+			if jerr != nil {
+				return IncidentRecord{}, "", jerr
+			}
 			raw := core.ReadFile(target)
 			if !raw.OK {
 				continue
@@ -392,7 +400,14 @@ func writeRecord(r IncidentRecord, dirPath string, ifVersion int) core.Result {
 	if err != nil {
 		return core.Fail(core.E("incidents.writeRecord", "marshal", err))
 	}
-	target := core.PathJoin(dirPath, r.ID+".md")
+	// Cerberus #1486 belt-and-braces (Mantis #1607, forward-arc from
+	// H#85): WithinDir check after the join. IsValidID above is the
+	// cheap shape gate; JoinAndCheck refuses any path that resolves
+	// outside dirPath even if cousin-validator drift weakens IsValidID.
+	target, jerr := paths.JoinAndCheck(dirPath, r.ID+".md")
+	if jerr != nil {
+		return core.Fail(jerr)
+	}
 	res := paths.AtomicWriteWithVersion(target, paths.WriteInput{
 		Body:      raw,
 		IfVersion: ifVersion,

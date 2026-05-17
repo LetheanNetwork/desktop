@@ -45,3 +45,24 @@ func RelativeTimeExported(t, now core.Time) string {
 func DurStringExported(minutes int) string {
 	return durString(minutes)
 }
+
+// LoadOneExported exposes loadOne for service-tier tests that need to
+// bypass the wails IsValidID gate and exercise the WithinDir belt
+// directly (Mantis #1607). Tests assert paths.escape / paths.invalid_id
+// at the service tier rather than only at the wails tier.
+//
+// Usage example:
+//
+//	_, _, err := incidents.LoadOneExported("../../wallets/x")
+func LoadOneExported(id string) (IncidentRecord, string, error) {
+	return loadOne(id)
+}
+
+// WriteRecordExported exposes writeRecord for service-tier tests.
+//
+// Usage example:
+//
+//	res := incidents.WriteRecordExported(rec, dir, 0)
+func WriteRecordExported(r IncidentRecord, dirPath string, ifVersion int) core.Result {
+	return writeRecord(r, dirPath, ifVersion)
+}

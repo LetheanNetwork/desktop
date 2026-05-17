@@ -44,6 +44,36 @@ func TestMarkRehearsed_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 	}
 }
 
+// TestRunbooks_WriteRecord_Traversal_RejectedAtService_Bad exercises
+// the WithinDir belt at the service tier (Mantis #1607). The wails
+// entry already rejects traversal payloads via IsValidID, but
+// writeRecord is the substrate other callers reach for — this test
+// bypasses wails by invoking it directly through the export_test.go
+// shim with a poisoned slug.
+func TestRunbooks_WriteRecord_Traversal_RejectedAtService_Bad(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := core.PathJoin(home, "Lethean", "runbooks")
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
+		t.Fatalf("MkdirAll failed: %s", r.Error())
+	}
+	for _, evil := range []string{
+		"../../wallets/x",
+		"..",
+		".hidden",
+		"foo/bar",
+		"foo\\bar",
+		"foo\x00bar",
+		"",
+	} {
+		rec := runbooks.RunbookRecord{ID: "R-X", Slug: evil, Title: "x"}
+		res := runbooks.WriteRecordExported(rec, dir, 0)
+		if res.OK {
+			t.Fatalf("WriteRecordExported(Slug:%q) must reject, returned OK", evil)
+		}
+	}
+}
+
 func TestRunbooksDir_Mode0700_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

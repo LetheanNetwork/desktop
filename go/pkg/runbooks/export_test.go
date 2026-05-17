@@ -31,3 +31,14 @@ func RelativeTimeExported(t, now core.Time) string {
 func MatchSearchExported(r RunbookRecord, q string) bool {
 	return matchSearch(r, q)
 }
+
+// WriteRecordExported exposes writeRecord for service-tier tests that
+// need to bypass the wails IsValidID gate and exercise the WithinDir
+// belt directly (Mantis #1607).
+//
+// Usage example:
+//
+//	res := runbooks.WriteRecordExported(rec, dir, 0)
+func WriteRecordExported(r RunbookRecord, dirPath string, ifVersion int) core.Result {
+	return writeRecord(r, dirPath, ifVersion)
+}

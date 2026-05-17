@@ -401,7 +401,14 @@ func writeRecord(r RunbookRecord, dirPath string, ifVersion int) core.Result {
 	if err != nil {
 		return core.Fail(core.E("runbooks.writeRecord", "marshal", err))
 	}
-	target := core.PathJoin(dirPath, r.Slug+".md")
+	// Cerberus #1486 belt-and-braces (Mantis #1607, forward-arc from
+	// H#85): WithinDir check after the join. IsValidID above is the
+	// cheap shape gate; JoinAndCheck refuses any path that resolves
+	// outside dirPath even if cousin-validator drift weakens IsValidID.
+	target, jerr := paths.JoinAndCheck(dirPath, r.Slug+".md")
+	if jerr != nil {
+		return core.Fail(jerr)
+	}
 	res := paths.AtomicWriteWithVersion(target, paths.WriteInput{
 		Body:      raw,
 		IfVersion: ifVersion,
@@ -473,7 +480,20 @@ func seedAll(dirPath string) {
 		if err != nil {
 			continue
 		}
-		target := core.PathJoin(dirPath, rec.Slug+".md")
+		// Cerberus #1486 belt-and-braces (Mantis #1607, forward-arc from
+		// H#85): WithinDir check after the join. Seed slugs are
+		// developer-controlled constants today, but JoinAndCheck closes
+		// the door on future churn where the seed list might pull from
+		// fixtures or user-editable config without re-auditing the path
+		// surface. On escape, log + skip (consistent with the seedAll
+		// best-effort discipline established in #1572).
+		target, jerr := paths.JoinAndCheck(dirPath, rec.Slug+".md")
+		if jerr != nil {
+			core.Print(core.Stderr(),
+				"runbooks: seedAll path escape for %s: %s\n",
+				rec.Slug, jerr.Error())
+			continue
+		}
 		// Cascade W3 (RFC §B.3 row 9) — seed-path replaces the prior
 		// bare `core.WriteFile` with an unconditional first-write
 		// through paths.AtomicWriteWithVersion. Per RFC §3.2 lazy-

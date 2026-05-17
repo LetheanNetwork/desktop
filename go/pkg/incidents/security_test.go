@@ -113,6 +113,60 @@ func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 	}
 }
 
+// TestIncidents_LoadOne_Traversal_RejectedAtService_Bad exercises the
+// WithinDir belt at the service tier (Mantis #1607). The wails entry
+// (Get) already rejects traversal payloads via IsValidID, but loadOne
+// is called from other surfaces too — this test bypasses wails by
+// invoking loadOne directly through the export_test.go shim. Asserts
+// the IsValidID gate AND the JoinAndCheck belt both work end-to-end
+// without a wails frame.
+func TestIncidents_LoadOne_Traversal_RejectedAtService_Bad(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, evil := range []string{
+		"../../wallets/lethean-default",
+		"..",
+		".hidden",
+		"foo/bar",
+		"foo\\bar",
+		"foo\x00bar",
+		"",
+	} {
+		_, _, err := incidents.LoadOneExported(evil)
+		if err == nil {
+			t.Fatalf("LoadOneExported(%q) must reject, returned nil error", evil)
+		}
+	}
+}
+
+// TestIncidents_WriteRecord_Traversal_RejectedAtService_Bad exercises
+// the WithinDir belt at the service tier for the write path (Mantis
+// #1607). Bypasses the wails Create / UpdateState / AddPostmortem
+// IsValidID gates by calling writeRecord directly via the
+// export_test.go shim with a poisoned record ID.
+func TestIncidents_WriteRecord_Traversal_RejectedAtService_Bad(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := core.PathJoin(home, "Lethean", "incidents", "2026", "05")
+	if r := core.MkdirAll(dir, 0o700); !r.OK {
+		t.Fatalf("MkdirAll failed: %s", r.Error())
+	}
+	for _, evil := range []string{
+		"../../wallets/x",
+		"..",
+		".hidden",
+		"foo/bar",
+		"foo\\bar",
+		"foo\x00bar",
+		"",
+	} {
+		rec := incidents.IncidentRecord{ID: evil, Title: "x"}
+		res := incidents.WriteRecordExported(rec, dir, 0)
+		if res.OK {
+			t.Fatalf("WriteRecordExported(ID:%q) must reject, returned OK", evil)
+		}
+	}
+}
+
 func TestIncidentsDir_Mode0700_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
