@@ -309,7 +309,16 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 		return core.Fail(failErr)
 	}
 
-	createR := core.Create(qDest)
+	// Cerberus #49 F-4 (Mantis #1674) — quarantine open MUST refuse
+	// pre-existing files AND symlinks. core.Create is os.Create =
+	// O_RDWR|O_CREATE|O_TRUNC with no O_NOFOLLOW; an attacker with
+	// filesystem write access to the quarantine dir could pre-plant
+	// `quarantine/<name> -> ~/.ssh/authorized_keys` and have the
+	// downloader truncate-and-write through it. createQuarantineFile
+	// opens with O_CREATE|O_EXCL|O_WRONLY|O_NOFOLLOW (POSIX) so
+	// pre-existing entries refuse with download.quarantine_exists
+	// and symlinks refuse with download.quarantine_symlink_refused.
+	createR := createQuarantineFile(qDest)
 	if !createR.OK {
 		emitFetchFailed(url, createR)
 		return createR

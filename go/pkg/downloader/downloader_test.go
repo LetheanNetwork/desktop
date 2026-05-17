@@ -8,6 +8,7 @@ package downloader_test
 
 import (
 	"net/http/httptest"
+	"os"
 
 	core "dappco.re/go"
 
@@ -15,6 +16,11 @@ import (
 )
 
 const modelGGUF = "model.gguf"
+
+// osSymlinkDL is a test-only thin wrapper over os.Symlink. No core
+// helper exists; matches the existing os.Chtimes pattern in
+// trust_test.go where tests are allowed stdlib I/O.
+func osSymlinkDL(target, link string) error { return os.Symlink(target, link) }
 
 // homeFixture sandboxes $HOME into a t.TempDir so the downloader's
 // paths.ModelsDir() resolves under a disposable tree.
@@ -335,4 +341,102 @@ func TestDownloader_ConcurrentSameName_NoRaceBypass_Ugly(t *core.T) {
 	core.AssertTrue(t,
 		final == string(payloadA) || final == string(payloadB),
 		"final content must be exactly payloadA or payloadB, got: "+final)
+}
+
+// TestDownloader_Quarantine_FreshCreate_Good — Mantis #1674. The new
+// O_CREATE|O_EXCL|O_NOFOLLOW quarantine path must accept a fresh
+// download where nothing exists at the quarantine target. Sanity
+// floor for the F-4 hardening — proves the lockdown didn't break
+// the happy path.
+func TestDownloader_Quarantine_FreshCreate_Good(t *core.T) {
+	home := homeFixture(t)
+	payload := []byte("fresh-bytes")
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	r := downloader.Fetch(srv.URL, "fresh.gguf")
+	core.AssertTrue(t, r.OK, "fresh quarantine create must succeed")
+	dest := core.PathJoin(home, "Lethean", "conf", "models", "fresh.gguf")
+	read := core.ReadFile(dest)
+	core.AssertTrue(t, read.OK)
+	core.AssertEqual(t, string(payload), string(read.Value.([]byte)))
+}
+
+// TestDownloader_Quarantine_SymlinkRefused_Bad — Mantis #1674 /
+// Cerberus #49 F-4. Pre-plant a symlink at the quarantine path
+// pointing at a sensitive victim file outside the quarantine dir,
+// then call Fetch. Without O_NOFOLLOW the quarantine Create would
+// open through the symlink and downloaded bytes would land in the
+// victim. With O_NOFOLLOW the open returns ELOOP and Fetch refuses;
+// victim bytes survive intact.
+//
+// Uses osSymlinkDL — direct os.Symlink because there's no core
+// helper; test-only usage matches the pattern in trust_test.go.
+func TestDownloader_Quarantine_SymlinkRefused_Bad(t *core.T) {
+	home := homeFixture(t)
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		_, _ = w.Write([]byte("attacker-payload"))
+	}))
+	defer srv.Close()
+
+	// Victim file outside the quarantine + models dir.
+	victim := core.PathJoin(home, "victim-secret.gguf")
+	core.AssertTrue(t, core.WriteFile(victim, []byte("must-survive"), 0o600).OK)
+
+	// Quarantine dir lives at ~/Lethean/conf/models/.quarantine/.
+	// We need it to exist before we can plant the symlink, but
+	// downloader.quarantineDir is package-private. MkdirAll matching
+	// the layout the downloader expects is the public-API equivalent.
+	qDir := core.PathJoin(home, "Lethean", "conf", "models", ".quarantine")
+	core.AssertTrue(t, core.MkdirAll(qDir, 0o700).OK)
+
+	// Plant the malicious symlink at the quarantine path.
+	link := core.PathJoin(qDir, "attack.gguf")
+	if err := osSymlinkDL(victim, link); err != nil {
+		t.Fatalf("setup: symlink failed: %v", err)
+	}
+
+	r := downloader.Fetch(srv.URL, "attack.gguf")
+	core.AssertFalse(t, r.OK, "quarantine create through symlink must refuse")
+
+	// Victim must still have its original bytes — symlink did not
+	// flow downloader bytes through it.
+	read := core.ReadFile(victim)
+	core.AssertTrue(t, read.OK)
+	core.AssertEqual(t, "must-survive", string(read.Value.([]byte)))
+
+	// Final model dest must NOT exist — the refuse must short-circuit
+	// before the atomic-promote step.
+	finalDest := core.PathJoin(home, "Lethean", "conf", "models", "attack.gguf")
+	core.AssertFalse(t, core.Stat(finalDest).OK,
+		"final model path must not be created when quarantine refused")
+}
+
+// TestDownloader_Quarantine_ExistingFileRefused_Bad — Mantis #1674
+// EXCL half. Pre-plant a regular file in the quarantine dir at the
+// target basename, then call Fetch. O_EXCL must refuse rather than
+// truncate-and-overwrite — protects against concurrent downloads
+// pivoting bytes between each other AND against a stale partial-
+// download left from a prior crash being treated as resumable.
+func TestDownloader_Quarantine_ExistingFileRefused_Bad(t *core.T) {
+	home := homeFixture(t)
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		_, _ = w.Write([]byte("new-payload"))
+	}))
+	defer srv.Close()
+
+	qDir := core.PathJoin(home, "Lethean", "conf", "models", ".quarantine")
+	core.AssertTrue(t, core.MkdirAll(qDir, 0o700).OK)
+	stale := core.PathJoin(qDir, "stale.gguf")
+	core.AssertTrue(t, core.WriteFile(stale, []byte("stale-bytes"), 0o600).OK)
+
+	r := downloader.Fetch(srv.URL, "stale.gguf")
+	core.AssertFalse(t, r.OK, "quarantine create over existing file must refuse")
+
+	// Stale file unchanged (no truncate-and-overwrite leak).
+	read := core.ReadFile(stale)
+	core.AssertTrue(t, read.OK)
+	core.AssertEqual(t, "stale-bytes", string(read.Value.([]byte)))
 }
