@@ -1,8 +1,13 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
 // Package campaigns is the lthn-side marketing campaigns service. Manages
-// campaign threads at ~/Lethean/marketing/campaigns/{slug}.md — each
+// campaign threads at ~/Lethean/marketing/campaigns/{slug}.lthn — each
 // campaign carries name, state, reach, conversion rate, spend, and channel.
+//
+// Stage E.D.B.3 (Mantis #1487 wave 3): the on-disk format is now the
+// encrypted Trix envelope (`.lthn`). Legacy `.md` plaintext records
+// remain readable via the lazy-migration fallthrough until a write
+// promotes them to `.lthn` per RFC §3.1.
 //
 // Wire shapes match the Campaign interface consumed by the
 // <lthn-view-campaigns> Lit element in the Marketing role view.
@@ -94,6 +99,77 @@ type CreateInput struct {
 	Channel string `json:"channel,omitempty"`
 	// Body is the markdown body (campaign brief / notes).
 	Body string `json:"body,omitempty"`
+}
+
+// CampaignRecord is the persistence type carried through the at-rest
+// substrate as `AtRestWriter[CampaignRecord]`. Stage E.D.B.3 (Mantis
+// #1487 wave 3) splits the wire type (Campaign, json-tagged) from the
+// persistence type (CampaignRecord, yaml-tagged) so the encrypted body
+// frontmatter never leaks json key names and the
+// recordfile.HeaderSchema[CampaignRecord] generic stays type-pinned.
+//
+// Per-field MUST per RFC §2.4 marketing/campaigns row:
+//
+//   - `name`     → BODY (REJECT in header — PII / campaign branding)
+//   - `platform` → HEADER (= Channel field; CONFIRM via ValidateString)
+//   - `scheduled.at` → HEADER (MONTH-only, YYYY-MM); the current
+//     Campaign type has no scheduled-time field so the schema omits this
+//     header key entirely. Adding it later requires an additive field on
+//     CampaignRecord plus a HeaderFor entry; absence is correct
+//     (no-leak) for v1. See SECURITY-NOTE in service.go atrestWriterFor.
+//
+// All other fields (state / reach / convert / spend / body) are BODY-
+// only — they're either sensitive metrics (reach/convert/spend) or have
+// no RFC ruling (state) and the substrate's default-body discipline is
+// the safe choice.
+//
+// Usage example:
+//
+//	rec := campaigns.CampaignRecord{
+//	    ID: "v02-launch-1747440000", Name: "v0.2 launch",
+//	    State: "live", Channel: "earned", Body: "## Brief\n\n...",
+//	}
+type CampaignRecord struct {
+	// ID is the canonical campaign identifier (matches filename slug).
+	ID string `yaml:"id"`
+
+	// Name is the campaign display name. BODY-only per RFC §2.4 —
+	// MUST NEVER appear in the at-rest header.
+	Name string `yaml:"name"`
+
+	// State is the lifecycle state: "live" | "scheduled" | "draft" |
+	// "complete". BODY-only — RFC §2.4 names no header key for
+	// campaign-state, so the substrate's default-body rule applies.
+	State string `yaml:"state"`
+
+	// Reach is the pre-formatted audience reach. BODY-only (audience
+	// metric is sensitive — visible-while-locked would leak progress).
+	Reach string `yaml:"reach"`
+
+	// Convert is the pre-formatted conversion rate. BODY-only.
+	Convert string `yaml:"convert"`
+
+	// Spend is the pre-formatted spend with currency symbol. BODY-only
+	// (financial metric).
+	Spend string `yaml:"spend"`
+
+	// Channel is the distribution channel: "earned"|"direct"|"email"
+	// |"paid". Projects into the header `platform` key per RFC §2.4 —
+	// channel ≅ platform for the marketing/campaigns surface.
+	Channel string `yaml:"channel"`
+
+	// Body is the markdown body below the frontmatter delimiter — the
+	// campaign brief / notes. BODY-only.
+	Body string `yaml:"-"`
+
+	// Version is the monotonic optimistic-lock version (Cascade W2,
+	// RFC §B.3 row 7). Stamped by writeRecord; 0 on legacy files
+	// predating the cutover, >=1 after first write through
+	// paths.AtomicWriteWithVersion / the at-rest substrate.
+	//
+	// omitempty keeps legacy round-trips clean (Version=0); the first
+	// write stamps version=1.
+	Version int `yaml:"version,omitempty"`
 }
 
 // UpdateInput drives the Update method. All fields except ID are optional patches.

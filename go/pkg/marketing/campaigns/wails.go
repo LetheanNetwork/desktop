@@ -14,12 +14,19 @@ import (
 
 // List returns all campaigns, optionally filtered by state.
 //
+// Dual-format aware (RFC.stage-e-encrypt-at-rest v2 §4.1, Wave 3):
+// .lthn files project HEADER-ONLY entries (Name / State / Reach /
+// Convert / Spend / Body empty — the frontend renders an "encrypted"
+// placeholder); .md legacy files round-trip the full plaintext entry.
+// Reads-while-locked stays open — header MAC verify needs only the
+// public key (no unlock required).
+//
 // Usage example:
 //
 //	r := svc.List(campaigns.ListInput{})
 //	if r.OK { out := r.Value.(campaigns.ListOutput) }
 func (s *Service) List(input ListInput) core.Result {
-	cs, err := loadCampaigns()
+	cs, err := s.loadCampaigns()
 	if err != nil {
 		return core.Fail(core.E("campaigns.List", "scan failed", err))
 	}
@@ -58,6 +65,13 @@ func (s *Service) List(input ListInput) core.Result {
 
 // Get returns a single campaign by ID.
 //
+// Stage E.D.B.3 surface (RFC.stage-e-encrypt-at-rest v2 §3.1, Wave 3):
+// .lthn records require an unlocked session to decrypt the body. When
+// loadOne reports the typed "campaigns.session.locked" code (either
+// the gate is unwired or no account is unlocked), Get forwards the
+// session-locked failure verbatim so the frontend can distinguish
+// "encrypted record needs unlock" from a true not-found.
+//
 // Usage example:
 //
 //	r := svc.Get("v02-launch-20260516")
@@ -66,22 +80,14 @@ func (s *Service) Get(id string) core.Result {
 	if err := paths.IsValidID(id); err != nil {
 		return core.Fail(err)
 	}
-	dirR := campaignsDir()
-	if !dirR.OK {
-		return core.Fail(core.E("campaigns.Get", dirR.Error(), nil))
-	}
-	// Cerberus #1486 belt: WithinDir check after the join.
-	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), id+".md")
-	if jerr != nil {
-		return core.Fail(jerr)
-	}
-	raw := core.ReadFile(fpath)
-	if !raw.OK {
-		return core.Fail(core.E("campaigns.Get", "not found: "+id, nil))
-	}
-	c, err := parseCampaign(raw.Value.([]byte))
+	c, _, err := s.loadOne(id)
 	if err != nil {
-		return core.Fail(core.E("campaigns.Get", "parse failed", err))
+		// Forward session.locked verbatim so the frontend can render
+		// the unlock-prompt distinct from not-found.
+		if core.Contains(err.Error(), "campaigns.session.locked") {
+			return core.Fail(err)
+		}
+		return core.Fail(core.E("campaigns.Get", "not found: "+id, err))
 	}
 	return core.Ok(c)
 }
@@ -146,10 +152,10 @@ func (s *Service) Create(input CreateInput) core.Result {
 
 	// Cascade W2 (RFC §B.3 row 7) — Create is an unconditional first-
 	// write (ifVersion=0). writeCampaign stamps Version=1 into the
-	// marshalled frontmatter. Conflict-path (rare on Create — only
-	// fires if another goroutine races on the same slug) returns
+	// persisted record. Conflict-path (rare on Create — only fires if
+	// another goroutine races on the same slug) returns
 	// core.Fail(paths.ConflictEnvelope{...}) directly via writeCampaign.
-	if wr := writeCampaign(dirR.Value.(string), c, 0); !wr.OK {
+	if wr := s.writeCampaign(dirR.Value.(string), c, 0); !wr.OK {
 		return wr
 	}
 	c.Version = 1
@@ -170,23 +176,10 @@ func (s *Service) Update(input UpdateInput) core.Result {
 	if err := paths.IsValidID(input.ID); err != nil {
 		return core.Fail(err)
 	}
-	dirR := campaignsDir()
-	if !dirR.OK {
-		return core.Fail(core.E("campaigns.Update", dirR.Error(), nil))
-	}
 
-	// Cerberus #1486 belt: WithinDir check after the join.
-	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), input.ID+".md")
-	if jerr != nil {
-		return core.Fail(jerr)
-	}
-	raw := core.ReadFile(fpath)
-	if !raw.OK {
-		return core.Fail(core.E("campaigns.Update", "not found: "+input.ID, nil))
-	}
-	c, err := parseCampaign(raw.Value.([]byte))
+	c, dir, err := s.loadOne(input.ID)
 	if err != nil {
-		return core.Fail(core.E("campaigns.Update", "parse failed", err))
+		return core.Fail(core.E("campaigns.Update", "not found: "+input.ID, err))
 	}
 
 	priorVersion := c.Version
@@ -217,7 +210,7 @@ func (s *Service) Update(input UpdateInput) core.Result {
 	// and stamps Version=1 on the upgrade write. Conflict-path returns
 	// core.Fail(paths.ConflictEnvelope{...}) directly via writeCampaign
 	// (Mantis #1544 gating shape inherited from W1).
-	if wr := writeCampaign(dirR.Value.(string), c, priorVersion); !wr.OK {
+	if wr := s.writeCampaign(dir, c, priorVersion); !wr.OK {
 		return wr
 	}
 	c.Version = priorVersion + 1

@@ -12,19 +12,27 @@ import (
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
-// stubSessionGate is the test double for the consumer-defined
+// stubSessionGate is the test double for the consumer-defined narrow
 // SessionGate interface (RFC.stage-e-unlockgate v2 §4.2 stub shape —
-// Mantis #1613 B.2). Duplicated per-pkg rather than shared so test
-// files keep zero cross-pkg testing/... deps.
+// Mantis #1613 B.2). Satisfies ONLY UnlockedAccountIDs so the at-rest
+// runtime type-assertion against accountKeyProvider misses and the
+// service falls back to the legacy plaintext writer. Duplicated per-
+// pkg rather than shared so test files keep zero cross-pkg testing/...
+// deps.
+//
+// Tests that need at-rest .lthn writes use newAtRestTestSvc in
+// atrest_test.go (which wires a wider stub satisfying the keys
+// provider).
 type stubSessionGate struct{ ids []string }
 
 func (s *stubSessionGate) UnlockedAccountIDs() []string { return s.ids }
 
-// newTestSvc constructs a campaigns.Service pre-wired with a SessionGate
-// reporting a single unlocked account so write methods pass the gate
-// by default. Tests that need to assert the locked-state path call
-// SetSessionGate explicitly with an empty stub (or instantiate
-// campaigns.NewService directly for the nil-gate fail-safe path).
+// newTestSvc constructs a campaigns.Service pre-wired with the NARROW
+// SessionGate (ids only, no keys). The at-rest writer cannot build —
+// writes route through the legacy .md plaintext fallback. Used by
+// tests that pin Cascade W2 / SessionGate retrofit / legacy-format
+// behaviour. Tests that need the .lthn at-rest write path use
+// newAtRestTestSvc in atrest_test.go.
 //
 // Usage example:
 //
