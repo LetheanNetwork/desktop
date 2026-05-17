@@ -4,8 +4,6 @@
    purple, with brand-variant accents and an OFM slot reserved.
    ─────────────────────────────────────────────────────── */
 
-@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap");
-
 :root {
   /* ── Neutrals (ink with a barely-warm purple cast — never pure black) ── */
   --ink-0:   oklch(0.14 0.012 285);   /* deepest — page bg                */
