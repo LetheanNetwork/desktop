@@ -81,6 +81,10 @@ export const AUDIT_EVENT_NAMES = [
   "marketplace.fetch_manifest.failed",
   "marketplace.fetch_manifest.rejected",
   "marketplace.validate_manifest.failed",
+  "gateway.dispatch.requested",
+  "gateway.dispatch.succeeded",
+  "gateway.dispatch.failed",
+  "gateway.dispatch.rejected",
 ] as const;
 
 export type AuditEventName = (typeof AUDIT_EVENT_NAMES)[number];

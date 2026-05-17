@@ -807,6 +807,110 @@ const (
 	// flood the substrate; the install pipeline already emits
 	// InstallRequested which subsumes the validate-OK signal.
 	EventMarketplaceValidateManifestFailed = "marketplace.validate_manifest.failed"
+
+	// EventGatewayDispatchRequested fires when pkg/gateway.Service.Handle
+	// is about to dispatch a resolved (bundle, scope, mode) tuple to its
+	// registered Handler. Cerberus #57 F-2 (Mantis #1700) — Repudiation
+	// gap close. Plugin → host data dispatch was forensically silent;
+	// every bundle call to /v1/api/gateway/<scope>/<mode> previously
+	// emitted ZERO audit events even though the gateway is the last mute
+	// boundary in the audit cluster (sandbox / runner / process /
+	// marketplace already adopt). The Requested row commits BEFORE the
+	// scope-Handler invocation so a crash mid-call still leaves the
+	// dispatch decision in the audit substrate.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id     — authoritative bundle code resolved via
+	//                   BundleCodeResolver (X-Bundle-Token) when present;
+	//                   otherwise the caller-asserted Bundle-ID header.
+	//                   Safe — Install gates against the BundleName regex
+	//                   so the value cannot embed credentials.
+	//                   TODO (#1702 F-4 forward-arc): replace raw bundle_id
+	//                   with a per-launch forensic discriminator once the
+	//                   X-Bundle-Token-issuing path stamps one at Launch
+	//                   time so a forensic walker can distinguish
+	//                   concurrent launches of the same bundle.
+	//   route_pattern — "<scope>:<mode>" join (the public URL path shape
+	//                   stamped by pkg/server's POST route). Safe — both
+	//                   halves are gin.Context params on a registered
+	//                   route; arbitrary user-controlled strings never
+	//                   reach this field.
+	//   method        — HTTP verb (always "POST" today, kept open so a
+	//                   future GET-shape variant in the v2 schema doesn't
+	//                   need a Meta-shape migration).
+	//
+	// The request body / headers / query params / X-Bundle-Token bytes
+	// are NEVER in Meta — Cerberus #1465 closure-only-scope discipline
+	// keeps user-content and bearer secrets off the audit substrate.
+	EventGatewayDispatchRequested = "gateway.dispatch.requested"
+
+	// EventGatewayDispatchSucceeded fires when the registered scope
+	// Handler returns OK from a Handle dispatch. Sibling of Requested.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id     — authoritative bundle code (mirrors Requested)
+	//   route_pattern — "<scope>:<mode>" join (mirrors Requested)
+	//   method        — HTTP verb (mirrors Requested)
+	EventGatewayDispatchSucceeded = "gateway.dispatch.succeeded"
+
+	// EventGatewayDispatchFailed fires when the registered scope Handler
+	// returns a non-OK Result from a Handle dispatch. Sibling of
+	// Requested. Distinct from EventGatewayDispatchRejected — Failed
+	// covers handler-layer failures (validation, downstream service
+	// error) AFTER the auth/identity/permission gates passed; Rejected
+	// covers the gate paths that refuse to dispatch at all.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id     — authoritative bundle code (mirrors Requested)
+	//   route_pattern — "<scope>:<mode>" join (mirrors Requested)
+	//   method        — HTTP verb (mirrors Requested)
+	//   error_code    — categorical failure code; sourced from
+	//                   Result.Error() (already-scoped via core.E by the
+	//                   handler). Raw error messages may embed handler-
+	//                   specific context; the redactor backstop trims any
+	//                   value matching the secret-shape recogniser.
+	EventGatewayDispatchFailed = "gateway.dispatch.failed"
+
+	// EventGatewayDispatchRejected fires when Handle refuses to dispatch
+	// at one of the auth / identity / scope / permission gates BEFORE
+	// the scope Handler runs. Sibling of EventMarketplaceFetchManifestRejected
+	// (host-allowlist gate) and EventSandboxSpawnRejected (substrate
+	// policy gate) — Rejected distinguishes policy-block from runtime
+	// failure across the audit cluster.
+	//
+	// Closed reason set (Meta["reason"]):
+	//
+	//   invalid_bundle_token — X-Bundle-Token present but resolver did
+	//                          not produce a known plugin code (covers
+	//                          spoof / replay / expired-token attempts).
+	//   missing_bundle_id    — neither X-Bundle-Token nor Bundle-ID
+	//                          header produced a non-empty identity.
+	//   scope_unavailable    — (scope, mode) tuple has no registered
+	//                          Handler in the gateway's dispatch table.
+	//   permission_denied    — bundle is installed but did NOT declare
+	//                          the (scope, mode) pair in its install-
+	//                          time manifest.permissions block.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id     — best-effort bundle code at rejection time; empty
+	//                   when the rejection happened before identity
+	//                   resolution (invalid_bundle_token / missing_bundle_id).
+	//   route_pattern — "<scope>:<mode>" join. Always populated — the
+	//                   gin route already extracted both params before
+	//                   any gate fires.
+	//   method        — HTTP verb (mirrors Requested).
+	//   reason        — one of the closed-set literals above. Reserved
+	//                   so a downstream chip-filter UI / forensic walker
+	//                   can categorise without re-running the gate logic.
+	//
+	// The rejected request body / X-Bundle-Token bytes / Authorization
+	// header are NEVER in Meta — same closure-only-scope discipline as
+	// the sibling gateway events.
+	EventGatewayDispatchRejected = "gateway.dispatch.rejected"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the

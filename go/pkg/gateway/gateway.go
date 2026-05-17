@@ -291,6 +291,15 @@ func (s *Service) Handle(ctx *gin.Context) {
 	// at the boundary, regardless of which handler is dispatched.
 	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, MaxBodyBytes)
 
+	// Pre-extract route params + method for audit Meta — both halves
+	// are gin.Context params on a registered POST route so they're
+	// safe to record on the rejection paths that fire before identity
+	// resolution.
+	scope := ctx.Param("scope")
+	mode := ctx.Param("mode")
+	pattern := routePattern(scope, mode)
+	method := ctx.Request.Method
+
 	// Cerberus #1443 — derive authoritative bundle identity.
 	// Priority: X-Bundle-Token (verified) > Bundle-ID (claimed).
 	// When a resolver is wired and the token header is present, the
@@ -301,6 +310,10 @@ func (s *Service) Handle(ctx *gin.Context) {
 		if token := ctx.GetHeader(headerBundleToken); token != "" {
 			code, ok := s.resolver.LookupBundleCode(token)
 			if !ok || code == "" {
+				// Cerberus #57 F-2 — emit Rejected BEFORE writeError
+				// so a forensic auditor catches token-spoof / replay
+				// attempts even when the client drops the connection.
+				emitDispatchRejected("", pattern, method, reasonInvalidBundleToken)
 				writeError(ctx, core.StatusUnauthorized, "invalid-bundle-token",
 					"X-Bundle-Token is unknown or expired")
 				return
@@ -318,27 +331,34 @@ func (s *Service) Handle(ctx *gin.Context) {
 		bundleID = ctx.GetHeader(headerBundleID)
 	}
 	if bundleID == "" {
+		emitDispatchRejected("", pattern, method, reasonMissingBundleID)
 		writeError(ctx, core.StatusUnauthorized, "missing-bundle-id",
 			"Bundle-ID header is required (or X-Bundle-Token for verified plugin calls)")
 		return
 	}
-	scope := ctx.Param("scope")
-	mode := ctx.Param("mode")
 	handler, ok := s.handlers[scopeKey(scope, mode)]
 	if !ok {
+		emitDispatchRejected(bundleID, pattern, method, reasonScopeUnavailable)
 		writeError(ctx, core.StatusNotImplemented, "scope-unavailable",
 			"scope not implemented: "+scopeKey(scope, mode))
 		return
 	}
 	if r := CheckPermission(s.core, bundleID, scope, mode); !r.OK {
+		emitDispatchRejected(bundleID, pattern, method, reasonPermissionDenied)
 		writeError(ctx, core.StatusForbidden, "permission-denied", r.Error())
 		return
 	}
+	// Cerberus #57 F-2 — Requested row commits BEFORE the scope
+	// Handler so a crash inside the Handler still leaves the dispatch
+	// decision in the audit substrate.
+	emitDispatchRequested(bundleID, pattern, method)
 	r := handler(s.core, bundleID, ctx)
 	if !r.OK {
+		emitDispatchFailed(bundleID, pattern, method, r.Error())
 		writeError(ctx, core.StatusBadRequest, "handler-failed", r.Error())
 		return
 	}
+	emitDispatchSucceeded(bundleID, pattern, method)
 	ctx.JSON(core.StatusOK, r.Value)
 }
 
