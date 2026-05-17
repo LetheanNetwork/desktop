@@ -12,7 +12,26 @@ import (
 
 	core "dappco.re/go"
 	"github.com/gin-gonic/gin"
+
+	"dappco.re/lthn/desktop/pkg/audit"
 )
+
+// EventOpencodeSandboxWebURLIssued is the audit event the webURL
+// handler emits per successful credential-free URL issuance. Mantis
+// #1600 HIGH (Cerberus #22 #1602 audit-gap finding, narrowed to this
+// endpoint only — the wider opencode audit sweep is its own ticket).
+//
+// Meta keys:
+//
+//	sandbox_id — the opencode sandbox container identifier
+//	auth_scheme — WebAuthScheme literal ("basic")
+//	auth_via — WebAuthVia literal ("header")
+//
+// The password is NEVER in Meta — the whole point of the Mantis #1600
+// fix is to keep that byte-string off every wire shape including the
+// audit substrate. The redact.go secret-shape detector would refuse
+// the record anyway if a future contributor wired it in by mistake.
+const EventOpencodeSandboxWebURLIssued = "opencode.sandbox.web_url_issued"
 
 // ControlGroup implements coreapi.RouteGroup for the opencode HTTP
 // control surface.
@@ -133,7 +152,14 @@ func (g *ControlGroup) listImportedProviders(c *gin.Context) {
 }
 
 // webURL GET /v1/api/opencode/sandbox/:id/web → returns the direct
-// container-port URL with Basic-auth credentials embedded.
+// container-port URL plus auth-scheme metadata. CREDENTIAL-FREE per
+// Mantis #1600 HIGH (Cerberus #22) — the URL has no embedded
+// userinfo; callers inject the credential at navigation time via
+// the Authorization header per the WebInfo.Auth envelope.
+//
+// Emits the EventOpencodeSandboxWebURLIssued audit event on success
+// per Cerberus #22 #1602 (audit-gap finding) — narrowed to this
+// endpoint; the broader opencode-control audit sweep is a follow-up.
 func (g *ControlGroup) webURL(c *gin.Context) {
 	id := core.TrimCutset(c.Param("id"), "/ ")
 	r := g.svc.WebURL(id)
@@ -141,7 +167,23 @@ func (g *ControlGroup) webURL(c *gin.Context) {
 		c.JSON(core.StatusNotFound, gin.H{"error": r.Error()})
 		return
 	}
-	c.JSON(core.StatusOK, gin.H{"url": r.Value})
+	info, _ := r.Value.(WebInfo)
+	// Audit emission — failure is intentionally swallowed; audit
+	// failures MUST NEVER block an auth-adjacent path. The redact.go
+	// secret-shape detector enforces the no-password invariant.
+	_ = audit.Default().Record(audit.Event{
+		Event:     EventOpencodeSandboxWebURLIssued,
+		TS:        core.Now().UTC().Unix(),
+		Scope:     "opencode.sandbox.web",
+		Outcome:   audit.OutcomeOK,
+		RequestID: c.GetHeader("X-Request-Id"),
+		Meta: map[string]any{
+			"sandbox_id":  id,
+			"auth_scheme": info.Auth.Scheme,
+			"auth_via":    info.Auth.Via,
+		},
+	})
+	c.JSON(core.StatusOK, info)
 }
 
 // openWebWindow POST /v1/api/opencode/sandbox/:id/web → spawns an
