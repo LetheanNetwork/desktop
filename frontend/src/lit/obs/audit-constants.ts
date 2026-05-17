@@ -116,6 +116,11 @@ export const AUDIT_EVENT_NAMES = [
   "vi.probe.failed",
   "tray.plugin.clicked",
   "desktop.second_instance.fallback",
+  "provider.credential.stored",
+  "provider.credential.migrated",
+  "provider.credential.cache_invalidated",
+  "provider.credential.force_deleted",
+  "provider.credential.migration_pending_observed",
 ] as const;
 
 export type AuditEventName = (typeof AUDIT_EVENT_NAMES)[number];

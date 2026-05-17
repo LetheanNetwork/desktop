@@ -1644,6 +1644,119 @@ const (
 	// renderer can consume it; the audit row records the OBSERVED FACT
 	// that the fallback engaged, not the input bytes that triggered it.
 	EventDesktopSecondInstanceFallback = "desktop.second_instance.fallback"
+
+	// EventProviderCredentialStored fires when pkg/runner stores a
+	// provider API key into the tier-1 KEK-wrapped substrate via the
+	// WSetDynamicRoutes auto-migration path OR the auto-import-on-boot
+	// path (pkg/runner/migration.go). Mantis #1657 / RFC.provider-creds-
+	// tier1.md v1.1 §7 ADD-5 — cluster-canon naming (`.stored` mirrors
+	// the established `.stored` family rather than the v1 draft `.put`).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   provider — short provider name (e.g. "openai", "anthropic") derived
+	//              from the route entry the credential was attached to
+	//   ref      — opaque tier-1 reference handle (e.g. "openai-default");
+	//              this is the audit handle, NEVER the credential bytes
+	//   source   — origin discriminator: "wails_input" for WSetDynamicRoutes
+	//              auto-migration; "config" for boot-time import-and-strip
+	//
+	// The credential bytes are NEVER in Meta — Cerberus #1465 closure-
+	// only-scope discipline keeps the plaintext off the audit substrate;
+	// this event records the storage decision, not the credential.
+	EventProviderCredentialStored = "provider.credential.stored"
+
+	// EventProviderCredentialMigrated fires when pkg/runner auto-migrates
+	// a legacy plaintext `api_key:` field from the config file into the
+	// tier-1 substrate, rewriting the config with an opaque `api_key_ref`
+	// in place of the plaintext (RFC v1.1 §6 — Option A auto-import-and-
+	// strip). Sibling of EventProviderCredentialStored — Migrated fires
+	// from the boot-time config-scan path, Stored fires from the Wails-
+	// input path; both signal "plaintext is now sealed at-rest".
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   provider — short provider name (route entry the credential
+	//              originated from)
+	//   ref      — synthesised tier-1 ref (e.g. "openai-migrated")
+	//   source   — literal "config" — distinguishes the boot-scan path
+	//              from the Wails-input path that emits Stored
+	//
+	// The legacy plaintext bytes are NEVER in Meta — the migration path
+	// reads the plaintext into the tier-1 envelope and then zeroes the
+	// config field; the audit row records the transition, not the
+	// credential.
+	EventProviderCredentialMigrated = "provider.credential.migrated"
+
+	// EventProviderCredentialCacheInvalidated fires when pkg/runner clears
+	// a cached resolved-plaintext from a *openai.Backend wrapper in
+	// response to a keys.tier1.{deleted,replaced} event-bus broadcast
+	// (RFC v1.1 §4 ADD-1 — Cerberus #1742 STRIDE-T survival-past-delete).
+	// Without the cache-invalidation, an operator-visible "I deleted it"
+	// would diverge from system reality because the deleted credential
+	// would survive in process memory until ServiceShutdown.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   provider — short provider name
+	//   ref      — tier-1 ref whose cached plaintext was flushed
+	//   reason   — categorical: "deleted" (DeleteTier1 fired) or
+	//              "replaced" (PutTier1 fired with an existing ref)
+	//
+	// The cleared plaintext bytes are NEVER in Meta — the cache-flush
+	// path zeroes the cached slice and emits this row; the row records
+	// the invalidation decision, not the credential.
+	EventProviderCredentialCacheInvalidated = "provider.credential.cache_invalidated"
+
+	// EventProviderCredentialForceDeleted fires when an operator
+	// dispatches pkg/runner.Service.WForceDeleteTier1 with the literal
+	// "operator_acknowledged_orphan" confirmation token (RFC v1.1 §5
+	// ADD-3 — Cerberus #1744 force-delete escape). The default
+	// WDeleteTier1 path REJECTS deletion when any route references the
+	// ref; force-delete bypasses that check, which can leave routes in
+	// a broken state. The audit row makes the blast-radius visible.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   provider              — short provider name
+	//   ref                   — tier-1 ref that was force-deleted
+	//   referenced_by         — comma-joined ordered list of route names
+	//                           that held a reference to the deleted ref
+	//                           at delete-time; empty string when the
+	//                           force-delete was issued against an
+	//                           unreferenced ref (still recorded so a
+	//                           forensic walker can grep for force-delete
+	//                           invocations regardless of blast radius)
+	//   operator_confirmation — literal "operator_acknowledged_orphan"
+	//                           (the only accepted token). Recorded
+	//                           literally so a future token-evolution
+	//                           can be reasoned about from the substrate.
+	//
+	// The credential bytes are NEVER in Meta — DeleteTier1 removes the
+	// ciphertext from disk and emits this row; the row records the
+	// deletion decision, not the credential.
+	EventProviderCredentialForceDeleted = "provider.credential.force_deleted"
+
+	// EventProviderCredentialMigrationPendingObserved fires once per
+	// boot when pkg/runner detects routes with plaintext `api_key:`
+	// fields still on disk AND the tier-1 KEK provider is not yet live
+	// (the account has not unlocked, so auto-migration is deferred per
+	// RFC v1.1 §6). Drives the persistent banner per RFC §6 ADD-4 —
+	// gives external observability the same signal the operator sees
+	// in the global app-chrome banner ("N provider credentials are
+	// stored as plaintext. Unlock your account to migrate them to
+	// secure storage.").
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   count — number of route entries with non-empty `api_key:` AND
+	//           empty `api_key_ref:` observed at boot-scan time
+	//
+	// No provider/ref keys — this row records the aggregate pending
+	// state, not per-route detail. The per-route migration emit is
+	// EventProviderCredentialMigrated, which fires AFTER the unlock
+	// completes and the deferred migration drains.
+	EventProviderCredentialMigrationPendingObserved = "provider.credential.migration_pending_observed"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the

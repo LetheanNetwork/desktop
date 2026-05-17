@@ -172,6 +172,92 @@ type Service struct {
 	// SetKEKProvider invocations skip the migration sub-sequence.
 	// Guarded by mu.
 	migrationComplete bool
+
+	// coreMu guards the optional event-bus reference. Set via
+	// SetCore from the wiring code in cmd/lthn/app.go; nil-safe so
+	// tests that don't need event broadcast can omit the wire.
+	coreMu core.RWMutex
+	// core is the optional event-bus broadcast target. When non-nil,
+	// successful DeleteTier1 / PutTier1 calls fire a Tier1KeyChanged
+	// message via c.ACTION so downstream consumers (today: pkg/runner
+	// flushing cached resolved-plaintext for affected backends per
+	// RFC.provider-creds-tier1.md v1.1 §4 ADD-1 / Cerberus #1742)
+	// can react without coupling keys -> consumer (AX-8
+	// lib-never-imports-consumer). Nil by default — wiring is opt-in.
+	core *core.Core
+}
+
+// Tier1KeyChangeKind enumerates the lifecycle moments broadcast on
+// Tier1KeyChanged. Distinct from a single boolean so a future "rotated
+// in-place" or "rewrapped" event can land without breaking subscribers.
+const (
+	Tier1KeyDeleted  = "deleted"  // DeleteTier1 removed the ciphertext
+	Tier1KeyReplaced = "replaced" // PutTier1 wrote over an existing ref
+)
+
+// Tier1KeyChanged is broadcast on the Core IPC bus whenever a tier-1
+// ref's at-rest state changes via PutTier1 (replace existing) or
+// DeleteTier1 (remove). Subscribers receive the ref name + the change
+// kind; the plaintext is NEVER carried on the bus (the bus broadcast
+// is observability, not credential delivery).
+//
+// Mantis #1657 / RFC.provider-creds-tier1.md v1.1 §4 ADD-1 — wired so
+// pkg/runner can flush cached resolved-plaintext from its *openai.Backend
+// wrappers when an operator deletes or replaces a referenced credential.
+// Without this, the deleted credential would survive in process memory
+// until ServiceShutdown — operator-visible "I deleted it" would diverge
+// from system reality. Direct keys -> runner call would violate AX-8;
+// the event-bus keeps the keys package downstream-agnostic.
+//
+// Usage example (subscriber in pkg/runner):
+//
+//	c.RegisterAction(func(_ *core.Core, msg core.Message) core.Result {
+//	    if ev, ok := msg.(keys.Tier1KeyChanged); ok {
+//	        runnerSvc.invalidateCachedCredential(ev.Ref, ev.Kind)
+//	    }
+//	    return core.Ok(nil)
+//	})
+type Tier1KeyChanged struct {
+	// Kind names which lifecycle moment fired this event. One of the
+	// Tier1Key* constants above (Tier1KeyDeleted / Tier1KeyReplaced).
+	Kind string `json:"kind"`
+	// Ref is the tier-1 reference handle whose at-rest state changed.
+	// Subscribers join against this to decide whether they hold a
+	// cached resolution of this ref.
+	Ref string `json:"ref"`
+}
+
+// SetCore wires the optional event-bus target so successful
+// DeleteTier1 / PutTier1 calls broadcast Tier1KeyChanged messages.
+// Called from cmd/lthn/app.go after the Core container is constructed.
+// Nil-safe: passing a nil c disables the broadcast (test fixtures).
+//
+// Usage example (in cmd/lthn/app.go):
+//
+//	keysSvc.SetCore(c)
+func (s *Service) SetCore(c *core.Core) {
+	if s == nil {
+		return
+	}
+	s.coreMu.Lock()
+	s.core = c
+	s.coreMu.Unlock()
+}
+
+// broadcastTier1Change fires the Tier1KeyChanged event on the wired
+// Core bus when c is set; no-op otherwise. Called from PutTier1 /
+// DeleteTier1 AFTER the at-rest mutation has succeeded.
+func (s *Service) broadcastTier1Change(kind, ref string) {
+	if s == nil {
+		return
+	}
+	s.coreMu.RLock()
+	c := s.core
+	s.coreMu.RUnlock()
+	if c == nil {
+		return
+	}
+	c.ACTION(Tier1KeyChanged{Kind: kind, Ref: ref})
 }
 
 const (
@@ -1229,12 +1315,34 @@ func (s *Service) GetOrCreateTier0(ref string, generate func() ([]byte, error)) 
 // Usage example:
 //
 //	r := svc.PutTier1("openai-default", []byte("sk-abc123"))
+//
+// Mantis #1657 / RFC.provider-creds-tier1.md v1.1 §4 ADD-1 — when the
+// write replaces an existing ref AND the optional Core bus is wired
+// (SetCore), a Tier1KeyChanged{Kind: Tier1KeyReplaced} broadcast fires
+// AFTER the at-rest write succeeds so cached-plaintext consumers (today:
+// pkg/runner) can flush their per-backend caches.
 func (s *Service) PutTier1(ref string, plaintext []byte) core.Result {
 	masterR := s.ensureMaster(tier1)
 	if !masterR.OK {
 		return masterR
 	}
-	return s.putLocked(tier1, ref, plaintext, masterR.Value.([]byte))
+	// Pre-write existence snapshot — distinguishes the "replaced
+	// existing" broadcast shape from the silent "first-write" path.
+	// HasTier1 is cheap (Stat only); no master-key touch.
+	wasPresent := false
+	if r := s.HasTier1(ref); r.OK {
+		if existed, ok := r.Value.(bool); ok {
+			wasPresent = existed
+		}
+	}
+	putR := s.putLocked(tier1, ref, plaintext, masterR.Value.([]byte))
+	if !putR.OK {
+		return putR
+	}
+	if wasPresent {
+		s.broadcastTier1Change(Tier1KeyReplaced, ref)
+	}
+	return putR
 }
 
 // GetTier1 reads and decrypts plaintext stored under ref in the
@@ -1275,6 +1383,14 @@ func (s *Service) HasTier1(ref string) core.Result {
 // Usage example:
 //
 //	r := svc.DeleteTier1("openai-default")
+//
+// Mantis #1657 / RFC.provider-creds-tier1.md v1.1 §4 ADD-1 — when the
+// delete actually removes a ciphertext (not the idempotent no-op path)
+// AND the optional Core bus is wired (SetCore), a Tier1KeyChanged{Kind:
+// Tier1KeyDeleted} broadcast fires AFTER the at-rest remove succeeds so
+// cached-plaintext consumers (today: pkg/runner) can flush their per-
+// backend caches. Without this the deleted credential survives in
+// process memory until ServiceShutdown.
 func (s *Service) DeleteTier1(ref string) core.Result {
 	pR := keyPath(ref, tier1)
 	if !pR.OK {
@@ -1287,6 +1403,7 @@ func (s *Service) DeleteTier1(ref string) core.Result {
 	if r := core.Remove(path); !r.OK {
 		return core.Fail(core.E("keys.DeleteTier1", "remove ciphertext", r.Value.(error)))
 	}
+	s.broadcastTier1Change(Tier1KeyDeleted, ref)
 	return core.Ok(nil)
 }
 
