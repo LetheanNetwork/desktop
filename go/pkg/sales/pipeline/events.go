@@ -35,6 +35,10 @@ type PipelineMovedEvent struct {
 	FromStage string `json:"fromStage"`
 	// ToStage is the stage the deal moved to.
 	ToStage string `json:"toStage"`
+	// Force reflects whether the move bypassed IsLegalTransition via
+	// MoveInput.Force. Audit + downstream tooling can categorise
+	// forced moves separately per Mantis #1488.
+	Force bool `json:"force,omitempty"`
 	// At is the event timestamp.
 	At core.Time `json:"at"`
 }

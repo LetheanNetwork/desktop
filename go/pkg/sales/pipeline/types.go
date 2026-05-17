@@ -85,11 +85,22 @@ type ListOutput struct {
 // Usage example:
 //
 //	r := svc.MoveDeal(pipeline.MoveInput{DealID: "202605-DEAL-001", ToStage: "propose"})
+//	rForce := svc.MoveDeal(pipeline.MoveInput{DealID: "202605-DEAL-001", ToStage: "qual", Force: true})
 type MoveInput struct {
 	// DealID is the deal slug to move.
 	DealID string `json:"dealId"`
 	// ToStage is the target stage identifier.
 	ToStage string `json:"toStage"`
+	// Force, when true, bypasses the IsLegalTransition gate so the
+	// salesperson can perform an exceptional move (e.g. restore a
+	// "lost" deal a customer revived, multi-step rewind after a data
+	// migration). Forced moves leave a DISTINCT audit shape
+	// (outcome="forced") so the Stage F log-tailer can categorise them
+	// separately from normal-path moves and surface a pattern of forced
+	// moves as a possible misuse signal per Mantis #1488. Frontend
+	// MUST treat this flag as an explicit user gesture (confirm-dialog
+	// + reason capture) — never auto-set, never default-true.
+	Force bool `json:"force,omitempty"`
 }
 
 // LegalTransitions enumerates every from-stage → to-stage move

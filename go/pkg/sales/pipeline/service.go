@@ -464,7 +464,10 @@ func updateYAMLField(raw []byte, key, value string) []byte {
 }
 
 // fireMove publishes a pipeline move event on the Core ACTION bus.
-func (s *Service) fireMove(dealID, fromStage, toStage string) {
+// force mirrors the MoveInput.Force flag so the audit subscriber
+// (pkg/sales/pipeline/audit.go) can persist the distinction without
+// re-reading the wails-side decision (Mantis #1488).
+func (s *Service) fireMove(dealID, fromStage, toStage string, force bool) {
 	if s == nil || s.core == nil {
 		return
 	}
@@ -473,6 +476,7 @@ func (s *Service) fireMove(dealID, fromStage, toStage string) {
 		DealID:    dealID,
 		FromStage: fromStage,
 		ToStage:   toStage,
+		Force:     force,
 		At:        core.Now().UTC(),
 	})
 }
