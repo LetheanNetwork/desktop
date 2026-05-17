@@ -64,7 +64,6 @@ import {
   PLUGIN_VIEW_MOUNT_TIMEOUT_EVENT,
 } from "./lthn-plugin-view";
 import type { PluginViewDescriptor } from "./lthn-plugin-view";
-import { peekSessionToken } from "./api-fetch";
 
 // Plugin-views Unit B.5 — default-view config + 2-entry fallback +
 // consent-ratchet per RFC.plugin-views §6.
@@ -1256,17 +1255,17 @@ class LthnAppShell extends LitElement {
       </div>`;
     }
     // Tier-2: iframe + session-token capability → §5.1 handshake shim
-    // brokers postMessage on behalf of the plugin webapp; tokenProvider
-    // closure peeks api-fetch's cachedSessionToken at grant-time so the
-    // token only crosses the boundary when the shim actually responds
-    // to an iframe handshake request (Cerberus #1465 closure discipline).
+    // delegates the token release to api-fetch.grantTokenToFrame at
+    // grant-time. The token never crosses a module boundary into the
+    // shim — the broker owns the session-token closure per
+    // RFC.plugin-view-token-boundary v2 §3.0 (Cerberus #1465 mechanism,
+    // not convention).
     const needsToken = descriptor.kind === "iframe"
       && Array.isArray(descriptor.capabilities)
       && descriptor.capabilities.includes("session-token");
     if (needsToken) {
       return html`<lthn-plugin-view-opencode-shim
         .descriptor=${descriptor}
-        .tokenProvider=${peekSessionToken}
       ></lthn-plugin-view-opencode-shim>`;
     }
     // Tier-0 first-party lit OR tier-3 iframe-no-cap → raw wrapper

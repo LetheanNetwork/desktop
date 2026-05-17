@@ -16,18 +16,19 @@
 //      verification).
 //   2. Verifies `event.origin` matches the descriptor's loopback
 //      origin (rejects cross-origin impersonation).
-//   3. Brokers the granted scopes by reading from an optional
-//      `.tokenProvider` callable (closure-scope; never module-scope
-//      per Cerberus #1465).
-//   4. Responds via `postMessage(payload, targetOrigin = descriptor.loopbackOrigin)`
-//      — never `*`.
+//   3. Validates requested scopes are declared in descriptor.capabilities
+//      and forwarded to a known broker (v1 only honours session-token).
+//   4. Delegates the actual token release to api-fetch.grantTokenToFrame
+//      — the broker owns the session-token closure, audits server-side,
+//      and postMessages on success. The shim never holds token bytes
+//      (RFC.plugin-view-token-boundary v2 §3.0 broker contract).
 //   5. Emits a window CustomEvent (`lthn:plugin-view:auth-granted` /
-//      `lthn:plugin-view:auth-denied`) for the audit consumer; the
-//      token bytes are NEVER included in the event detail.
+//      `lthn:plugin-view:auth-denied`) for the UI observability
+//      consumer; the token bytes are NEVER included in the event detail.
 //
-// The shim does NOT log the token bytes. It never persists them. The
-// granted token is captured as a call-argument inside the handler and
-// discarded after postMessage returns.
+// The shim does NOT log the token bytes. It never persists them. It
+// never reads them. Token release crosses the closure boundary of one
+// module (api-fetch) — the shim only sees a GrantOutcome discriminator.
 //
 // Wiring shape: app-shell instantiates this element in place of
 // <lthn-plugin-view> for iframe-kind plugins that declare a session-
@@ -39,19 +40,19 @@
 //
 //   <lthn-plugin-view-opencode-shim
 //     .descriptor=${desc}
-//     .tokenProvider=${() => /* read from same-closure session source */ null}
 //   ></lthn-plugin-view-opencode-shim>
 
 import { LitElement, html } from "lit";
 import "./lthn-plugin-view";
 import type { PluginViewDescriptor } from "./lthn-plugin-view";
-import { apiFetch } from "./api-fetch";
+import { grantTokenToFrame } from "./api-fetch";
 
 // AUTH_REQUEST_TYPE matches the §5.1 protocol literal the plugin
 // webapp posts at its parent. Strings live as exported consts so the
 // frontend + the plugin-side contract are referenced from one place.
+// AUTH_GRANT_TYPE re-homed to api-fetch (RFC v2 §5 step b) — the
+// broker is the only emitter; importers reach for it from there.
 export const AUTH_REQUEST_TYPE = "lthn:auth:request";
-export const AUTH_GRANT_TYPE = "lthn:auth:grant";
 export const AUTH_DENY_TYPE = "lthn:auth:deny";
 
 // CustomEvent names dispatched on `window` after the handshake. The
@@ -64,37 +65,15 @@ export const AUTH_DENIED_EVENT = "lthn:plugin-view:auth-denied";
 // in via the same handler shape but route through different brokers.
 export const CAPABILITY_SESSION_TOKEN = "session-token";
 
-// CAPABILITY_GRANT_AUDIT_PATH is the server-side audit-grant
-// receiver per Mantis #1523. The shim POSTs here BEFORE delivering
-// token bytes to the iframe so the audit row commits first; on
-// failure (non-200) the shim aborts the postMessage path entirely.
-// Path kept in lockstep with pkg/server.PluginViewCapabilityGrantPath.
-export const CAPABILITY_GRANT_AUDIT_PATH =
-  "/v1/plugin-view/capability-grant";
-
 // DENY_REASON_AUDIT_FAILED is the local deny-reason the shim emits
-// when the audit-grant POST returned non-200. The grant message is
-// never delivered to the iframe; the deny message tells the iframe
-// the request was rejected for an audit-side reason.
+// when grantTokenToFrame reports the audit chain failed. The grant
+// message is never delivered to the iframe; the deny message tells
+// the iframe the request was rejected for an audit-side reason.
 export const DENY_REASON_AUDIT_FAILED = "audit-failed";
-
-// TokenProvider returns the current session-token bytes or null when
-// no session is unlocked. The shim invokes it on every grant request
-// — callers should keep the closure in the same module that owns the
-// session-token cache (per Cerberus #1465 closure-only discipline) so
-// the bytes never leak into a module-scope variable visible elsewhere.
-export type TokenProvider = () => string | null;
 
 // AuthRequestMessage is the shape the iframe posts at its parent.
 interface AuthRequestMessage {
   type: typeof AUTH_REQUEST_TYPE;
-  scopes: string[];
-}
-
-// AuthGrantMessage is the shape posted back when the request is honoured.
-interface AuthGrantMessage {
-  type: typeof AUTH_GRANT_TYPE;
-  token: string;
   scopes: string[];
 }
 
@@ -110,7 +89,6 @@ export const DENY_REASON_NO_DESCRIPTOR = "no-descriptor";
 export const DENY_REASON_NO_ORIGIN = "no-origin";
 export const DENY_REASON_ORIGIN_MISMATCH = "origin-mismatch";
 export const DENY_REASON_SOURCE_MISMATCH = "source-mismatch";
-export const DENY_REASON_NO_PROVIDER = "no-provider";
 export const DENY_REASON_NO_SESSION = "no-session";
 export const DENY_REASON_CAPABILITY_NOT_DECLARED = "capability-not-declared";
 export const DENY_REASON_UNKNOWN_SCOPE = "unknown-scope";
@@ -119,18 +97,15 @@ export class OpenCodeShimElement extends LitElement {
   static readonly properties = {
     viewId: { type: String, attribute: "view-id" },
     descriptor: { state: true },
-    tokenProvider: { state: true },
   };
 
   declare viewId: string;
   declare descriptor: PluginViewDescriptor | null;
-  declare tokenProvider: TokenProvider | null;
 
   constructor() {
     super();
     this.viewId = "";
     this.descriptor = null;
-    this.tokenProvider = null;
   }
 
   createRenderRoot() {
@@ -151,7 +126,9 @@ export class OpenCodeShimElement extends LitElement {
   // gate chain (descriptor present → source-window matches inner
   // iframe → origin matches descriptor → message shape valid) drops
   // anything that isn't a well-formed handshake request from THIS
-  // shim's wrapped iframe.
+  // shim's wrapped iframe. On a valid request the actual token
+  // release is delegated to grantTokenToFrame — the shim never holds
+  // token bytes (RFC.plugin-view-token-boundary v2 §3.0).
   private _onMessage = (ev: MessageEvent) => {
     if (!this.descriptor) {
       return;
@@ -210,85 +187,56 @@ export class OpenCodeShimElement extends LitElement {
       this._deny(ev, DENY_REASON_CAPABILITY_NOT_DECLARED);
       return;
     }
-    if (!this.tokenProvider) {
-      this._deny(ev, DENY_REASON_NO_PROVIDER);
-      return;
-    }
-    const token = this.tokenProvider();
-    if (!token) {
-      this._deny(ev, DENY_REASON_NO_SESSION);
-      return;
-    }
-    this._grant(ev, token, granted, expectedOrigin);
+    void this._broker(ev, granted, expectedOrigin);
   };
 
-  // _grant emits the §5.1 grant message and an audit event. Token
-  // bytes pass as a call-argument; NO module-scope variable holds
-  // them, NO audit-event detail field carries them (Cerberus #1468).
-  //
-  // Mantis #1523 — POSTs CAPABILITY_GRANT_AUDIT_PATH BEFORE the
-  // postMessage so the forensic audit row commits server-side first.
-  // On non-200 the iframe is denied with DENY_REASON_AUDIT_FAILED
-  // and the token bytes never cross the boundary.
-  private async _grant(
+  // _broker delegates the token release to api-fetch.grantTokenToFrame.
+  // The broker owns the session-token closure — the shim never sees
+  // token bytes; only the GrantOutcome discriminator. On success the
+  // shim dispatches the AUTH_GRANTED audit CustomEvent (token-free
+  // detail). On failure it routes the reason to _deny so the iframe
+  // sees a deny message via the same path as descriptor-side rejections.
+  private async _broker(
     ev: MessageEvent,
-    token: string,
     grantedScopes: string[],
     targetOrigin: string,
   ): Promise<void> {
     const pluginCode = this.descriptor?.pluginCode ?? "";
-    // The audit-grant POST iterates the granted scopes so the
-    // server-side audit row carries one entry per brokered capability.
-    // v1 only brokers session-token so this is a one-iteration loop;
-    // the shape future-proofs for vi-events / marketplace additions.
-    for (const scope of grantedScopes) {
-      let ok = false;
-      try {
-        const res = await apiFetch(CAPABILITY_GRANT_AUDIT_PATH, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            plugin_id:  pluginCode,
-            capability: scope,
-            origin:     targetOrigin,
-          }),
-        });
-        ok = res.ok;
-      } catch {
-        ok = false;
-      }
-      if (!ok) {
-        this._deny(ev, DENY_REASON_AUDIT_FAILED);
-        return;
-      }
-    }
-    const payload: AuthGrantMessage = {
-      type: AUTH_GRANT_TYPE,
-      token,
-      scopes: grantedScopes,
-    };
     const source = ev.source as Window | null;
-    if (source && typeof source.postMessage === "function") {
-      try {
-        source.postMessage(payload, targetOrigin);
-      } catch {
-        // Non-browser context — drop silently.
-      }
+    if (!source || typeof source.postMessage !== "function") {
+      // No usable target — drop silently; the iframe re-posts on
+      // its next connectedCallback when the inner element mounts.
+      return;
     }
-    try {
-      window.dispatchEvent(new CustomEvent(AUTH_GRANTED_EVENT, {
-        detail: {
-          viewId:     this.descriptor?.id ?? "",
-          pluginCode: pluginCode,
-          scopes:     grantedScopes,
-        },
-        bubbles: true,
-        composed: true,
-      }));
-    } catch {
-      // Browser-CustomEvent dispatch is best-effort UI observability;
-      // the load-bearing forensic surface is the server-side audit row
-      // already committed above.
+    const outcome = await grantTokenToFrame(
+      { source, targetOrigin, pluginCode },
+      grantedScopes,
+    );
+    if (outcome.ok) {
+      try {
+        window.dispatchEvent(new CustomEvent(AUTH_GRANTED_EVENT, {
+          detail: {
+            viewId:     this.descriptor?.id ?? "",
+            pluginCode: pluginCode,
+            scopes:     outcome.scopes,
+          },
+          bubbles: true,
+          composed: true,
+        }));
+      } catch {
+        // Browser-CustomEvent dispatch is best-effort UI observability;
+        // the load-bearing forensic surface is the server-side audit row
+        // grantTokenToFrame already committed.
+      }
+      return;
+    }
+    // outcome.ok === false — route the reason through _deny so the
+    // iframe receives a structured deny message + the audit CustomEvent
+    // path stays consistent with descriptor-side rejections.
+    if (outcome.reason === "audit-failed") {
+      this._deny(ev, DENY_REASON_AUDIT_FAILED);
+    } else {
+      this._deny(ev, DENY_REASON_NO_SESSION);
     }
   }
 

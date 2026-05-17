@@ -62,25 +62,134 @@ export function clearSessionToken(): void {
   cachedSessionToken = null;
 }
 
-/** Peek the current session-token without consuming or persisting it
- *  anywhere new. Intended for closure-only consumers that need a
- *  read-at-call-time view of the cache (e.g. plugin-view shims that
- *  broker the §5.1 postMessage handshake on behalf of an iframe webapp;
- *  they call peekSessionToken inside a `tokenProvider: () => string`
- *  closure passed to the shim, so the token only crosses a boundary
- *  when the shim actually needs to grant it). Returns null when no
- *  token is set OR when the user has locked.
+// AUTH_GRANT_TYPE — §5.1 protocol literal posted to the iframe when
+// grantTokenToFrame succeeds. Re-homed from plugin-view-opencode-shim
+// per RFC.plugin-view-token-boundary v2 §5 step (b): the literal
+// describes the wire shape the broker produces, so it belongs with
+// the broker (api-fetch is the only module that POSTs this payload).
+export const AUTH_GRANT_TYPE = "lthn:auth:grant";
+
+// CAPABILITY_GRANT_AUDIT_PATH — server-side audit-grant receiver per
+// Mantis #1523. grantTokenToFrame POSTs here BEFORE delivering token
+// bytes via postMessage so the audit row commits first; on non-200
+// the broker short-circuits with reason "audit-failed" and the
+// postMessage path is never reached. Path kept in lockstep with
+// pkg/server.PluginViewCapabilityGrantPath.
+export const CAPABILITY_GRANT_AUDIT_PATH = "/v1/plugin-view/capability-grant";
+
+// GrantTargetFrame — narrow shape grantTokenToFrame accepts as its
+// destination. Mirrors the inbound-verified MessageEvent fields the
+// caller (shim) already validated. api-fetch does NOT re-verify these
+// — verification is the shim's job (it has the descriptor + iframe
+// ref; api-fetch does not). api-fetch trusts what the shim passes and
+// uses targetOrigin as the explicit postMessage targetOrigin.
+//
+// Browser-enforced mitigation for forged source: a malicious internal
+// caller passing source=attackerWindow with targetOrigin=legitimateOrigin
+// does NOT escape the boundary. The browser's postMessage targetOrigin
+// enforcement silently drops the message because the actual receiving
+// window's origin does not match the named targetOrigin. The audit row
+// commits BEFORE postMessage, naming targetOrigin as legitimateOrigin
+// and pluginCode as the caller's claim — so a forged-source attempt
+// leaves a server-side forensic record under the legitimate plugin's
+// identity while the token never crosses to the attacker. See
+// RFC.plugin-view-token-boundary v2 §6.2.
+export interface GrantTargetFrame {
+  source: Window;
+  targetOrigin: string;
+  pluginCode: string;
+}
+
+// GrantOutcome — discriminator the caller branches on to dispatch
+// UI events. Token bytes are NEVER in this return value — only the
+// outcome literal + reason on deny (RFC §3.0 contract item (c)).
+export type GrantOutcome =
+  | { ok: true; scopes: string[] }
+  | { ok: false; reason: "audit-failed" | "no-session" };
+
+/** grantTokenToFrame — the ONLY path that releases cachedSessionToken
+ *  outside api-fetch.ts. Audits server-side per scope FIRST; on any
+ *  non-200 short-circuits with reason "audit-failed" and does NOT
+ *  postMessage. On success, posts ONE grant message per call carrying
+ *  the token + granted scopes to target.source with target.targetOrigin
+ *  as the explicit targetOrigin (never "*").
  *
- *  Cerberus #1465 discipline: token still lives ONLY in this module's
- *  cachedSessionToken binding. Peek returns the current value; callers
- *  MUST NOT persist what they receive (localStorage / cookie / etc).
- *  The audit trail is the observability surface, not the storage one —
- *  registered as audit.EventPluginViewCapabilityGranted
- *  ("plugin.view.capability_granted") in pkg/audit/types.go, emitted
- *  by the POST /v1/plugin-view/capability-grant receiver the shim hits
- *  BEFORE delivering token bytes via postMessage (Mantis #1523). */
-export function peekSessionToken(): string | null {
-  return cachedSessionToken;
+ *  Returns a GrantOutcome the caller uses to dispatch its UI event;
+ *  the token bytes do NOT escape via the return value. The function
+ *  itself is the boundary — no other code path reads cachedSessionToken.
+ *
+ *  Closure discipline (Cerberus #1465 mechanism, not convention — RFC
+ *  §3.0 broker invariant contract):
+ *    (a) audit server-side BEFORE the postMessage.
+ *    (b) take (target, scopes) shape so the audit row names
+ *        origin + pluginCode + capability.
+ *    (c) return outcome-discriminator with NO state bytes.
+ *    (d) read state from a closure-scoped const referenced only by
+ *        the postMessage call, discarded on return.
+ *    (e) live in the same module that owns the state's closure —
+ *        never accept state as an argument from caller.
+ *
+ *  Caller responsibilities (NOT enforced here — design intent):
+ *    - Verify ev.source === iframe.contentWindow before calling.
+ *    - Verify ev.origin === descriptor.loopbackOrigin before calling.
+ *    - Validate descriptor.capabilities includes every requested scope.
+ *    - Pass pluginCode consistent with the descriptor the user granted.
+ *
+ *  Usage:
+ *
+ *    const outcome = await grantTokenToFrame(
+ *      { source: ev.source as Window, targetOrigin: expectedOrigin, pluginCode: code },
+ *      ["session-token"],
+ *    );
+ *    if (outcome.ok) dispatchGranted(outcome.scopes);
+ *    else            dispatchDenied(outcome.reason);
+ */
+export async function grantTokenToFrame(
+  target: GrantTargetFrame,
+  scopes: readonly string[],
+): Promise<GrantOutcome> {
+  // Per-scope audit POST, abort on first failure. The shim's previous
+  // _grant loop relocated into the module that owns the token (RFC
+  // §3.0 item (a)+(e)). Server-side audit-row semantic gap: rows
+  // committed before a later-scope failure persist; readers MUST
+  // interpret "row exists" as "grant-attempted" not "grant-occurred"
+  // until the follow-up at Mantis #1576 lands.
+  for (const scope of scopes) {
+    let ok = false;
+    try {
+      const res = await apiFetch(CAPABILITY_GRANT_AUDIT_PATH, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plugin_id:  target.pluginCode,
+          capability: scope,
+          origin:     target.targetOrigin,
+        }),
+      });
+      ok = res.ok;
+    } catch {
+      ok = false;
+    }
+    if (!ok) return { ok: false, reason: "audit-failed" };
+  }
+
+  // Token read into closure-scoped const HERE — after audit, before
+  // postMessage. No branch returns it; no branch persists it; no
+  // branch logs it. JS engine reclaims on function return (RFC §3.0
+  // item (d)).
+  const token = cachedSessionToken;
+  if (!token) return { ok: false, reason: "no-session" };
+
+  const payload = { type: AUTH_GRANT_TYPE, token, scopes: [...scopes] };
+  try {
+    target.source.postMessage(payload, target.targetOrigin);
+  } catch {
+    // Non-browser context — drop silently. The audit row already
+    // committed; caller still receives ok=true since the audit chain
+    // succeeded. Future test harnesses that stub source can rely on
+    // this shape.
+  }
+  return { ok: true, scopes: [...scopes] };
 }
 
 /** Internal — resolve the local bearer token via the Wails apikey
