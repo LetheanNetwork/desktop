@@ -144,7 +144,20 @@ func (s *Service) sandboxSvc() *sandbox.Service {
 //	})
 //	if r.OK { out := r.Value.(marketplace.InstallOutput) }
 func (s *Service) Install(input InstallInput) core.Result {
+	// Cerberus #54 C4 (Mantis #1692) — Requested row commits BEFORE
+	// ValidateManifest so a forensic walker can correlate caller intent
+	// against rejection class. bundle_id may be empty here if the
+	// manifest's Name field is itself the rejection — that's the safe
+	// shape (empty bundle_id paired with InstallFailed + a sibling
+	// ValidateManifestFailed row is the auditor's signal).
+	emitInstallRequested(input.Manifest.Name, pluginCodeOf(input.Manifest))
+
 	if r := ValidateManifest(input.Manifest); !r.OK {
+		// ValidateManifest already emitted EventMarketplaceValidateManifestFailed
+		// at its own boundary — the Install pipeline only wraps with the
+		// InstallFailed sibling so a forensic walker can pair the two
+		// rows via TS proximity.
+		emitInstallFailed(input.Manifest.Name, r.Error())
 		return core.Fail(core.E(installBundleOp, "invalid manifest", nil))
 	}
 
@@ -168,11 +181,13 @@ func (s *Service) Install(input InstallInput) core.Result {
 	// dispatch becomes ambiguous (whose code is this?). Reject loudly
 	// rather than overwriting.
 	if r := s.checkPluginCodeCollision(m); !r.OK {
+		emitInstallFailed(m.Name, r.Error())
 		return r
 	}
 
 	sbSvc := s.sandboxSvc()
 	if sbSvc == nil {
+		emitInstallFailed(m.Name, "sandbox service not available")
 		return core.Fail(core.E(installBundleOp, "sandbox service not available", nil))
 	}
 
@@ -180,6 +195,7 @@ func (s *Service) Install(input InstallInput) core.Result {
 
 	configPath := s.bundleConfigPath(m.Name)
 	if r := core.MkdirAll(configPath, 0o755); !r.OK {
+		emitInstallFailed(m.Name, "config dir creation failed")
 		return core.Fail(core.E(installBundleOp, "config dir creation failed", nil))
 	}
 
@@ -193,6 +209,7 @@ func (s *Service) Install(input InstallInput) core.Result {
 	// frame-src allowlist + postMessage origin table retain dead
 	// entries past uninstall).
 	if r := s.persistManifest(configPath, m); !r.OK {
+		emitInstallFailed(m.Name, r.Error())
 		return r
 	}
 
@@ -259,6 +276,7 @@ func (s *Service) Install(input InstallInput) core.Result {
 		// (now-rejected) record state, then return the orm error.
 		if r := orm.Of[InstalledBundle](s.core).Save(&rec); !r.OK {
 			rollbackSpawnedSandboxes(sbSvc, sandboxIDs)
+			emitInstallFailed(m.Name, "orm save failed: "+r.Error())
 			return core.Fail(core.E(installBundleOp,
 				"orm save failed — rolled back spawned containers: "+r.Error(), nil))
 		}
@@ -283,9 +301,11 @@ func (s *Service) Install(input InstallInput) core.Result {
 	fireBundleChanged(s.core, PhaseInstalled, rec, InstalledBundle{})
 
 	if lastErr != "" {
+		emitInstallFailed(m.Name, "one or more images failed to start: "+lastErr)
 		return core.Fail(core.E(installBundleOp, "one or more images failed to start: "+lastErr, nil))
 	}
 
+	emitInstallSucceeded(m.Name, pluginCodeOf(m), len(sandboxIDs))
 	return core.Ok(InstallOutput{
 		BundleID:   m.Name,
 		SandboxIDs: sandboxIDs,
@@ -345,7 +365,14 @@ func manifestToPluginInput(m BundleManifest) plugin.BundleInput {
 //	r := svc.Launch("opencode")
 //	if r.OK { /* sandboxes are running */ }
 func (s *Service) Launch(bundleID string) core.Result {
+	// Cerberus #54 C4 (Mantis #1692) — Requested row commits BEFORE
+	// the empty-id check so an audit row captures every invocation,
+	// even the bad-input ones a forensic walker correlates against
+	// caller misbehaviour.
+	emitLaunchRequested(bundleID)
+
 	if core.Trim(bundleID) == "" {
+		emitLaunchFailed(bundleID, "bundle id is required")
 		return core.Fail(core.E(launchBundleOp, "bundle id is required", nil))
 	}
 
@@ -356,6 +383,10 @@ func (s *Service) Launch(bundleID string) core.Result {
 
 	recR := s.findInstalledBundle(bundleID)
 	if !recR.OK {
+		// Categorical error_code (no caller-supplied bytes echoed) so
+		// the NoRawSecrets canary stays clean — bundle_id is already in
+		// the sibling Requested row's Meta for forensic pairing.
+		emitLaunchFailed(bundleID, "bundle_not_installed")
 		return core.Fail(core.E(launchBundleOp, "bundle not installed: "+bundleID, nil))
 	}
 
@@ -363,17 +394,20 @@ func (s *Service) Launch(bundleID string) core.Result {
 	manifestPath := core.JoinPath(configPath, "manifest.yml")
 	readR := core.ReadFile(manifestPath)
 	if !readR.OK {
+		emitLaunchFailed(bundleID, "manifest not found")
 		return core.Fail(core.E(launchBundleOp, "manifest not found at: "+manifestPath, nil))
 	}
 	raw, _ := readR.Value.([]byte)
 	mR := ParseManifestBytes(raw)
 	if !mR.OK {
+		emitLaunchFailed(bundleID, "manifest parse failed")
 		return core.Fail(core.E(launchBundleOp, "manifest parse failed", nil))
 	}
 	m := mR.Value.(BundleManifest)
 
 	sbSvc := s.sandboxSvc()
 	if sbSvc == nil {
+		emitLaunchFailed(bundleID, "sandbox service not available")
 		return core.Fail(core.E(launchBundleOp, "sandbox service not available", nil))
 	}
 
@@ -423,12 +457,14 @@ func (s *Service) Launch(bundleID string) core.Result {
 		// Kill and surface the orm error to the caller.
 		if r := orm.Of[InstalledBundle](s.core).Save(&rec); !r.OK {
 			rollbackSpawnedSandboxes(sbSvc, launchedIDs)
+			emitLaunchFailed(bundleID, "orm save failed: "+r.Error())
 			return core.Fail(core.E(launchBundleOp,
 				"orm save failed — rolled back spawned containers: "+r.Error(), nil))
 		}
 	}
 	fireBundleChanged(s.core, PhaseLaunched, rec, before)
 
+	emitLaunchSucceeded(bundleID, len(launchedIDs))
 	return core.Ok(nil)
 }
 
@@ -439,7 +475,14 @@ func (s *Service) Launch(bundleID string) core.Result {
 //	r := svc.Stop("opencode")
 //	if r.OK { /* bundle is stopped */ }
 func (s *Service) Stop(bundleID string) core.Result {
+	// Cerberus #54 C4 (Mantis #1692) — Requested row commits at the
+	// public-entry boundary so the in-package stopLocked (re-entrant
+	// from Uninstall) doesn't double-fire. emitStopSucceeded/Failed
+	// pair fires inside this method against the stopLocked Result.
+	emitStopRequested(bundleID)
+
 	if core.Trim(bundleID) == "" {
+		emitStopFailed(bundleID, "bundle id is required")
 		return core.Fail(core.E(stopBundleOp, "bundle id is required", nil))
 	}
 
@@ -448,7 +491,13 @@ func (s *Service) Stop(bundleID string) core.Result {
 	lock.Lock()
 	defer lock.Unlock()
 
-	return s.stopLocked(bundleID)
+	r := s.stopLocked(bundleID)
+	if !r.OK {
+		emitStopFailed(bundleID, r.Error())
+		return r
+	}
+	emitStopSucceeded(bundleID)
+	return r
 }
 
 // stopLocked is the lock-held body of Stop. Split so Uninstall (which
@@ -517,7 +566,15 @@ func (s *Service) stopLocked(bundleID string) core.Result {
 //	r := svc.Uninstall("opencode")
 //	if r.OK { /* bundle record removed */ }
 func (s *Service) Uninstall(bundleID string) core.Result {
+	// Cerberus #54 C4 (Mantis #1692) — Requested row commits BEFORE
+	// the empty-id check + plugin-view registry drop / sandbox
+	// teardown / orm.Delete so the operator intent survives a
+	// mid-uninstall crash. plugin_code resolves via the manifest-on-
+	// disk lookup; falls back to bundleID when the manifest is missing.
+	emitUninstallRequested(bundleID, s.resolvePluginCode(bundleID))
+
 	if core.Trim(bundleID) == "" {
+		emitUninstallFailed(bundleID, "bundle id is required")
 		return core.Fail(core.E(uninstallBundleOp, "bundle id is required", nil))
 	}
 
@@ -531,7 +588,6 @@ func (s *Service) Uninstall(bundleID string) core.Result {
 	// Capture the pre-uninstall state before Stop flips status. The
 	// broadcast at the end carries this as Bundle so subscribers see
 	// the final shape; Before carries whatever Stop saved.
-	//
 	// recordExists guards the orm.Delete below — Mantis #1693 MED
 	// (Cerberus #54 C5). Before the surface change the Delete error
 	// was silently swallowed via `_ =` so Delete-on-nothing returned
@@ -589,6 +645,7 @@ func (s *Service) Uninstall(bundleID string) core.Result {
 			rec := InstalledBundle{BundleID: bundleID}
 			if r := orm.Of[InstalledBundle](s.core).Delete(&rec); !r.OK {
 				fireBundleChanged(s.core, PhaseUninstalled, before, InstalledBundle{})
+				emitUninstallFailed(bundleID, "orm delete failed: "+r.Error())
 				return core.Fail(core.E(uninstallBundleOp,
 					"orm delete failed — registry record may be stale: "+r.Error(), nil))
 			}
@@ -601,6 +658,12 @@ func (s *Service) Uninstall(bundleID string) core.Result {
 	// broadcast fires.
 	fireBundleChanged(s.core, PhaseUninstalled, before, InstalledBundle{})
 
+	// plugin_code captured at the end uses the resolved value before
+	// the orm.Delete dropped the record (resolvePluginCode reads from
+	// disk so the post-delete lookup would still work, but using the
+	// before snapshot is cheaper + carries the exact value an auditor
+	// would correlate with the matching Requested row).
+	emitUninstallSucceeded(bundleID, s.resolvePluginCode(bundleID))
 	return core.Ok(nil)
 }
 

@@ -296,7 +296,16 @@ func (s *Service) FetchIndex(indexURL string) core.Result {
 //	r := svc.FetchManifest("https://marketplace.lthn.ai/v1/opencode.yml")
 //	if r.OK { m := r.Value.(marketplace.BundleManifest) }
 func (s *Service) FetchManifest(sourceURL string) core.Result {
+	// Cerberus #54 C4 (Mantis #1692) — Requested row commits at the
+	// top so a forensic walker captures every fetch attempt regardless
+	// of the protocol-switch outcome. The Succeeded / Failed / Rejected
+	// emit happens inside fetchManifestHTTPS (the only path that
+	// reaches the host-allowlist gate + network); the other switch
+	// arms emit Failed inline.
+	emitFetchManifestRequested(sourceURL)
+
 	if core.Trim(sourceURL) == "" {
+		emitFetchManifestFailed(sourceURL, "source url is required")
 		return core.Fail(core.E(fetchManifestOp, "source url is required", nil))
 	}
 
@@ -306,15 +315,19 @@ func (s *Service) FetchManifest(sourceURL string) core.Result {
 	case core.HasPrefix(sourceURL, "http://"):
 		// Cerberus #1433 — http:// is a downgrade vector; reject
 		// loudly rather than silently upgrading.
+		emitFetchManifestFailed(sourceURL, "refusing plaintext http://")
 		return core.Fail(core.E(fetchManifestOp,
 			"refusing plaintext http:// source URL (use https://): "+sourceURL, nil))
 	case core.HasPrefix(sourceURL, "oci://"):
+		emitFetchManifestFailed(sourceURL, "oci:// unsupported in v1")
 		return core.Fail(core.E(fetchManifestOp,
 			"oci:// source URLs are not supported in v1 — use https:// instead", nil))
 	case core.HasPrefix(sourceURL, "git+https://"):
+		emitFetchManifestFailed(sourceURL, "git+https:// unsupported in v1")
 		return core.Fail(core.E(fetchManifestOp,
 			"git+https:// source URLs are not supported in v1 — use https:// instead", nil))
 	default:
+		emitFetchManifestFailed(sourceURL, "unsupported source URL protocol")
 		return core.Fail(core.E(fetchManifestOp,
 			"unsupported source URL protocol: "+sourceURL, nil))
 	}
@@ -522,14 +535,27 @@ func (s *Service) downloadIndex(indexURL, cachePath string) core.Result {
 // an agent supplying a hostile https URL via marketplace_install.
 func (s *Service) fetchManifestHTTPS(url string) core.Result {
 	if r := requireHTTPS(fetchManifestOp, url); !r.OK {
+		emitFetchManifestFailed(url, r.Error())
 		return r
 	}
+	// Cerberus #54 C4 — distinct Rejected event for the host-allowlist
+	// gate keeps "policy refused" rows separate from network/parse
+	// failures in audit history. Mirror of EventSandboxVolumeRejected.
 	if r := requireAllowedManifestHost(fetchManifestOp, url); !r.OK {
+		emitFetchManifestRejected(url)
 		return r
 	}
 	raw, _, r := fetchCapped(fetchManifestOp, url, maxManifestBytes)
 	if !r.OK {
+		emitFetchManifestFailed(url, r.Error())
 		return r
 	}
-	return ParseManifestBytes(raw)
+	parsed := ParseManifestBytes(raw)
+	if !parsed.OK {
+		emitFetchManifestFailed(url, parsed.Error())
+		return parsed
+	}
+	m, _ := parsed.Value.(BundleManifest)
+	emitFetchManifestSucceeded(url, m.Name)
+	return parsed
 }

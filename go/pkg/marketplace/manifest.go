@@ -239,11 +239,29 @@ func parseManifestBytes(raw []byte) core.Result {
 // ValidateManifest validates a BundleManifest without I/O.
 // Returns the manifest unchanged on success.
 //
+// Cerberus #54 C4 (Mantis #1692) — emits
+// EventMarketplaceValidateManifestFailed at the function boundary so
+// standalone callers (not just Install) leave a forensic row when a
+// hostile manifest is rejected. Success path emits NO Succeeded row —
+// see audit_emit.go for the brief's rationale.
+//
 // Usage example:
 //
 //	r := marketplace.ValidateManifest(m)
 //	if !r.OK { return r }
 func ValidateManifest(m BundleManifest) core.Result {
+	r := validateManifestImpl(m)
+	if !r.OK {
+		emitValidateManifestFailed(m.Name, r.Error())
+	}
+	return r
+}
+
+// validateManifestImpl is the body of ValidateManifest split so the
+// emit-wrapping shim above stays single-purpose (one emit per failed
+// call, no duplicate-emit risk from internal callers re-entering the
+// validator).
+func validateManifestImpl(m BundleManifest) core.Result {
 	if core.Trim(m.Schema) != manifestSchema {
 		return core.Fail(core.E(validateOp,
 			"schema must be \""+manifestSchema+"\"; got: "+m.Schema, nil))

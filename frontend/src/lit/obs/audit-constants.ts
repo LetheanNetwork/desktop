@@ -64,6 +64,23 @@ export const AUDIT_EVENT_NAMES = [
   "process.kill.requested",
   "process.kill.succeeded",
   "process.kill.failed",
+  "marketplace.install.requested",
+  "marketplace.install.succeeded",
+  "marketplace.install.failed",
+  "marketplace.uninstall.requested",
+  "marketplace.uninstall.succeeded",
+  "marketplace.uninstall.failed",
+  "marketplace.launch.requested",
+  "marketplace.launch.succeeded",
+  "marketplace.launch.failed",
+  "marketplace.stop.requested",
+  "marketplace.stop.succeeded",
+  "marketplace.stop.failed",
+  "marketplace.fetch_manifest.requested",
+  "marketplace.fetch_manifest.succeeded",
+  "marketplace.fetch_manifest.failed",
+  "marketplace.fetch_manifest.rejected",
+  "marketplace.validate_manifest.failed",
 ] as const;
 
 export type AuditEventName = (typeof AUDIT_EVENT_NAMES)[number];

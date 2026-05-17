@@ -587,6 +587,226 @@ const (
 	//   process_id — caller-supplied registry identifier (may be empty).
 	//   error_code — categorical failure reason (upstream Result.Error()).
 	EventProcessKillFailed = "process.kill.failed"
+
+	// EventMarketplaceInstallRequested fires when pkg/marketplace.Service.Install
+	// is about to spawn images / persist the InstalledBundle record for a
+	// validated bundle manifest. Cerberus #54 C4 (Mantis #1692) —
+	// Repudiation gap close. Install / Uninstall / Launch / Stop /
+	// FetchManifest previously emitted ZERO audit events; the bundle
+	// install surface (sandbox spawn + plugin registration + view-registry
+	// mutation) was forensically silent. The Requested row commits BEFORE
+	// the sandbox SpawnLong loop so a crash mid-call still leaves the
+	// install decision in the audit substrate.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id   — manifest.Name (validated, alphanumeric + dash)
+	//   plugin_code — pluginCodeOf(manifest) — falls back to bundle_id when
+	//                 the manifest omits plugin.code (legacy v1 shape)
+	//
+	// The raw manifest body / image refs / env values are NEVER in Meta —
+	// Cerberus #1465 closure-only-scope discipline keeps user-content off
+	// the audit substrate. The plugin_code is safe because Install gates
+	// against the BundleName regex (manifest.go:isValidBundleName) and the
+	// plugin-code uniqueness check (checkPluginCodeCollision) before the
+	// emit fires; both reject anything that could embed secrets or paths.
+	EventMarketplaceInstallRequested = "marketplace.install.requested"
+
+	// EventMarketplaceInstallSucceeded fires when pkg/marketplace.Service.Install
+	// returns OK — all images spawned, orm record persisted, plugin-view
+	// registry populated. Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id    — manifest.Name
+	//   plugin_code  — effective plugin code (pluginCodeOf)
+	//   image_count  — number of image entries successfully spawned
+	EventMarketplaceInstallSucceeded = "marketplace.install.succeeded"
+
+	// EventMarketplaceInstallFailed fires when pkg/marketplace.Service.Install
+	// returns a non-OK Result from any validation, sandbox-spawn, orm-save,
+	// or rollback path. Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id  — manifest.Name (may be empty when ValidateManifest
+	//                rejected the input before Name was resolved)
+	//   error_code — categorical failure reason (Result.Error() string,
+	//                already-scoped via core.E by the install path)
+	EventMarketplaceInstallFailed = "marketplace.install.failed"
+
+	// EventMarketplaceUninstallRequested fires when pkg/marketplace.Service.Uninstall
+	// is about to drop the plugin-view registry entry / stop sandboxes /
+	// remove the orm record for a bundle. Cerberus #54 C4 (Mantis #1692) —
+	// the Requested row commits BEFORE the multi-step teardown so a crash
+	// mid-uninstall still leaves the operator intent in the audit substrate
+	// (forensic walker can pair the Requested with whichever step landed).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id   — caller-supplied identifier
+	//   plugin_code — resolved via resolvePluginCode (manifest-on-disk
+	//                 lookup) — falls back to bundle_id when the manifest
+	//                 is missing or unparseable (legacy uninstall path)
+	EventMarketplaceUninstallRequested = "marketplace.uninstall.requested"
+
+	// EventMarketplaceUninstallSucceeded fires when Uninstall returns OK.
+	// Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id   — caller-supplied identifier
+	//   plugin_code — resolved plugin code at the moment of uninstall
+	EventMarketplaceUninstallSucceeded = "marketplace.uninstall.succeeded"
+
+	// EventMarketplaceUninstallFailed fires when Uninstall returns a
+	// non-OK Result (empty id, orm delete failure post-sandbox-teardown).
+	// Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id  — caller-supplied identifier (may be empty)
+	//   error_code — categorical failure reason (Result.Error())
+	EventMarketplaceUninstallFailed = "marketplace.uninstall.failed"
+
+	// EventMarketplaceLaunchRequested fires when pkg/marketplace.Service.Launch
+	// is about to re-spawn sandboxes for an already-installed bundle.
+	// Cerberus #54 C4 (Mantis #1692) — Launch is the second-most-common
+	// path to plugin-container live state after Install; forensic walker
+	// needs the Requested row to distinguish "Install spawned the
+	// containers" from "Launch re-spawned them after a host restart".
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id — caller-supplied identifier
+	EventMarketplaceLaunchRequested = "marketplace.launch.requested"
+
+	// EventMarketplaceLaunchSucceeded fires when Launch returns OK.
+	// Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id    — caller-supplied identifier
+	//   image_count  — number of image entries successfully re-spawned
+	EventMarketplaceLaunchSucceeded = "marketplace.launch.succeeded"
+
+	// EventMarketplaceLaunchFailed fires when Launch returns a non-OK
+	// Result (empty id, bundle not installed, manifest missing on disk,
+	// orm save failure post-spawn). Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id  — caller-supplied identifier (may be empty)
+	//   error_code — categorical failure reason (Result.Error())
+	EventMarketplaceLaunchFailed = "marketplace.launch.failed"
+
+	// EventMarketplaceStopRequested fires when pkg/marketplace.Service.Stop
+	// is about to Kill all running sandboxes for a bundle + flip the orm
+	// Status to BundleStatusStopped. Cerberus #54 C4 (Mantis #1692) —
+	// closes the lifecycle quartet (Install / Launch / Stop / Uninstall)
+	// so a forensic walker can reconstruct the per-bundle state machine
+	// from audit alone.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id — caller-supplied identifier
+	EventMarketplaceStopRequested = "marketplace.stop.requested"
+
+	// EventMarketplaceStopSucceeded fires when Stop returns OK. Sibling
+	// of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id — caller-supplied identifier
+	EventMarketplaceStopSucceeded = "marketplace.stop.succeeded"
+
+	// EventMarketplaceStopFailed fires when Stop returns a non-OK Result
+	// (empty id, orm save failure after the Kill loop). Sibling of
+	// Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id  — caller-supplied identifier (may be empty)
+	//   error_code — categorical failure reason (Result.Error())
+	EventMarketplaceStopFailed = "marketplace.stop.failed"
+
+	// EventMarketplaceFetchManifestRequested fires when
+	// pkg/marketplace.Service.FetchManifest is about to HTTP GET a bundle
+	// manifest from a caller-supplied source URL. Cerberus #54 C4 (Mantis
+	// #1692) — manifest fetch is the network-bound entry to the install
+	// pipeline; the Requested row commits BEFORE the host-allowlist gate
+	// so a forensic walker can correlate rejected hosts with caller intent.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   domain_only — URL hostname only (no path / query / fragment) per
+	//                 the brief's SECURITY-NOTE escape valve. Manifest URL
+	//                 paths occasionally embed agent identifiers in query
+	//                 strings; recording host-only keeps the audit row
+	//                 forensic without leaking path-traversal evidence
+	//                 attempts.
+	EventMarketplaceFetchManifestRequested = "marketplace.fetch_manifest.requested"
+
+	// EventMarketplaceFetchManifestSucceeded fires when FetchManifest
+	// returns OK from the full fetch + parse + validate pipeline. Sibling
+	// of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   domain_only — URL hostname (mirrors Requested)
+	//   bundle_id   — manifest.Name resolved from the parsed manifest
+	EventMarketplaceFetchManifestSucceeded = "marketplace.fetch_manifest.succeeded"
+
+	// EventMarketplaceFetchManifestFailed fires when FetchManifest returns
+	// a non-OK Result from any validation, network, parse, or downstream-
+	// validate path. Sibling of Requested above. Distinct from
+	// FetchManifestRejected (host-allowlist gate) — Failed covers every
+	// other failure mode so the auditor can distinguish "policy blocked
+	// the fetch" from "fetch happened but downstream failed".
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   domain_only — URL hostname (when parseable; empty when the URL
+	//                 was malformed enough to reject before parse)
+	//   error_code  — categorical failure reason (Result.Error())
+	EventMarketplaceFetchManifestFailed = "marketplace.fetch_manifest.failed"
+
+	// EventMarketplaceFetchManifestRejected fires when FetchManifest
+	// rejects a caller-supplied URL at the host-allowlist gate
+	// (requireAllowedManifestHost — Cerberus #1690 C2). Sibling of
+	// EventSandboxVolumeRejected — Rejected covers the policy gate that
+	// refuses to dispatch at all; Failed above covers runtime/validation
+	// failures from URLs that passed the gate.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   domain_only — URL hostname that failed the allowlist (when
+	//                 parseable; empty for malformed input)
+	//   reason      — reserved literal "host_not_allowed" so a downstream
+	//                 consumer can categorise without re-running the gate
+	EventMarketplaceFetchManifestRejected = "marketplace.fetch_manifest.rejected"
+
+	// EventMarketplaceValidateManifestFailed fires when
+	// pkg/marketplace.ValidateManifest rejects a parsed BundleManifest
+	// (bad name, unsupported schema, malformed plugin block, invalid view
+	// custom-element tag, etc). Cerberus #54 C4 (Mantis #1692) — every
+	// validation failure becomes a forensic row so a future imagetrust /
+	// yaml-bomb attack pattern leaves a trace even when no install lands.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   bundle_id  — manifest.Name (may be empty when the rejection was
+	//                on the Name field itself)
+	//   error_code — categorical failure reason (Result.Error()); the
+	//                validator's typed scope literals (validateOp etc) flow
+	//                through the message so downstream chip-filter UI can
+	//                pattern-match the failure class
+	//
+	// NOTE: ValidateManifest succeeds quietly (no audit row on the OK
+	// path) — emitting Succeeded for every parse-then-validate call would
+	// flood the substrate; the install pipeline already emits
+	// InstallRequested which subsumes the validate-OK signal.
+	EventMarketplaceValidateManifestFailed = "marketplace.validate_manifest.failed"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the
