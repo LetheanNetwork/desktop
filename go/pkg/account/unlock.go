@@ -668,6 +668,17 @@ func (s *Service) PrivateKeyFor(accountID string) ([]byte, bool) {
 	if accountID == "" {
 		return nil, false
 	}
+	// Cerberus #13 / Mantis #1573 — grep-parity gate with Unlock + Lock
+	// (lines 81 / 256). PrivateKeyFor reads s.unlocked[accountID] only,
+	// so the disk-traversal exposure shape doesn't apply here, but the
+	// lockout-map / unlocked-map can still be probed with traversal
+	// strings; rejecting at the shape gate keeps the IsValidID invariant
+	// uniform across every account-id-accepting Service method, which is
+	// what the #1505 lint rule enforces.
+	if err := paths.IsValidID(accountID); err != nil {
+		_ = err // shape-only gate; callers receive the (nil, false) contract
+		return nil, false
+	}
 	s.mu.RLock()
 	priv, ok := s.unlocked[accountID]
 	s.mu.RUnlock()
@@ -688,6 +699,18 @@ func (s *Service) PrivateKeyFor(accountID string) ([]byte, bool) {
 //	pub, ok := svc.PublicKeyFor("abc123def4567890")
 func (s *Service) PublicKeyFor(accountID string) ([]byte, bool) {
 	if accountID == "" {
+		return nil, false
+	}
+	// Cerberus #13 / Mantis #1573 (HIGH) — mirror the Unlock (line 81)
+	// + Lock (line 256) shape-validation gate. accountID is concatenated
+	// directly into pubPath below; without paths.IsValidID gating, an
+	// id like "../../wallets/lethean-default" lets core.ReadFile follow
+	// the resolved path → measurable timing oracle (read-hit vs miss
+	// path-cache deltas) and lets the bytes of any 0o600-readable file
+	// on disk leak through the returned []byte. Reject at the shape
+	// gate BEFORE any disk touch.
+	if err := paths.IsValidID(accountID); err != nil {
+		_ = err // shape-only gate; callers receive the (nil, false) contract
 		return nil, false
 	}
 	rootR := paths.Root()

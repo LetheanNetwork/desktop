@@ -569,6 +569,63 @@ func TestAccount_Lock_PathTraversal_Bad_DREAD_ADD_HIGH_2(t *core.T) {
 	}
 }
 
+// TestPublicKeyFor_RejectsInvalidID_Bad pins the Cerberus #13 /
+// Mantis #1573 (HIGH) shape gate. PublicKeyFor concatenates accountID
+// into pubPath and calls core.ReadFile; without IsValidID gating a
+// traversal id leaks the timing/contents of arbitrary 0o600 files on
+// disk. Mirror of the Unlock + Lock DREAD-ADD-HIGH-2 traversal tests.
+// The contract returns (nil, false) on any gate failure — callers can't
+// distinguish "not unlocked" from "invalid shape", which is the desired
+// shape per the existing (nil, false) on-empty contract.
+func TestPublicKeyFor_RejectsInvalidID_Bad(t *core.T) {
+	_ = homeFixture(t)
+	svc := newUnlockable(t, "")
+
+	for _, evil := range []string{
+		"",                              // empty (pre-existing reject)
+		"../../wallets/lethean-default", // classic traversal
+		"..",                            // double-dot only
+		".hidden",                       // leading dot
+		"foo/bar",                       // forward separator
+		"foo\\bar",                      // windows separator
+		"foo\x00bar",                    // NUL byte
+	} {
+		raw, ok := svc.PublicKeyFor(evil)
+		core.AssertFalse(t, ok,
+			"PublicKeyFor("+core.Sprintf("%q", evil)+") MUST return ok=false")
+		core.AssertTrue(t, raw == nil,
+			"PublicKeyFor("+core.Sprintf("%q", evil)+") MUST return nil bytes")
+	}
+}
+
+// TestPrivateKeyFor_RejectsInvalidID_Bad pins the grep-parity gate on
+// PrivateKeyFor per Mantis #1573 optional follow-on. Same shape as
+// PublicKeyFor's gate — (nil, false) on any IsValidID-rejected id.
+// The exposure here is the in-memory unlocked map (lockout/probe
+// pollution) rather than disk traversal, but the uniform invariant is
+// what the #1505 lint rule enforces across every account-id-accepting
+// Service method.
+func TestPrivateKeyFor_RejectsInvalidID_Bad(t *core.T) {
+	_ = homeFixture(t)
+	svc := newUnlockable(t, "")
+
+	for _, evil := range []string{
+		"",                              // empty (pre-existing reject)
+		"../../wallets/lethean-default", // classic traversal
+		"..",                            // double-dot only
+		".hidden",                       // leading dot
+		"foo/bar",                       // forward separator
+		"foo\\bar",                      // windows separator
+		"foo\x00bar",                    // NUL byte
+	} {
+		raw, ok := svc.PrivateKeyFor(evil)
+		core.AssertFalse(t, ok,
+			"PrivateKeyFor("+core.Sprintf("%q", evil)+") MUST return ok=false")
+		core.AssertTrue(t, raw == nil,
+			"PrivateKeyFor("+core.Sprintf("%q", evil)+") MUST return nil bytes")
+	}
+}
+
 // --- Cerberus Stage E.B DREAD ADD-HIGH-3 — trigger-attempt response
 // shape. The 5th failed attempt MUST return `locked_out`, NOT
 // `bad_passphrase + 5 remaining`. Previously the code cleared the
