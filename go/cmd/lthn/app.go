@@ -375,6 +375,45 @@ func newAppCore() *core.Core {
 		if accountSvc, _ := core.ServiceFor[*account.Service](c, "account"); accountSvc != nil {
 			accountSvc.SetServerKey(serverkeySvc)
 
+			// LTHN-SESS-1: writer session-gate wires (RFC.stage-e-unlockgate §2.1)
+			// Each writer pkg defines its own SessionGate interface (consumer-
+			// defines pattern per Cerberus #27 pushback 1); accountSvc satisfies
+			// all 10 because the interface shape is identical —
+			// UnlockedAccountIDs() []string. Explicit named lookups (NOT a
+			// dynamic loop per Cerberus #27 ADD-3 rejection) so static analysis
+			// + grep can audit the full wire surface. analytics is intentionally
+			// excluded — read-only/derived per H#159 SECURITY-NOTE.
+			if documentsSvc, _ := core.ServiceFor[*documents.Service](c, "office-documents"); documentsSvc != nil {
+				documentsSvc.SetSessionGate(accountSvc)
+			}
+			if contactsSvc, _ := core.ServiceFor[*contacts.Service](c, "sales-contacts"); contactsSvc != nil {
+				contactsSvc.SetSessionGate(accountSvc)
+			}
+			if incidentsSvc, _ := core.ServiceFor[*incidents.Service](c, "incidents"); incidentsSvc != nil {
+				incidentsSvc.SetSessionGate(accountSvc)
+			}
+			if runbooksSvc, _ := core.ServiceFor[*runbooks.Service](c, "runbooks"); runbooksSvc != nil {
+				runbooksSvc.SetSessionGate(accountSvc)
+			}
+			if dealsSvc, _ := core.ServiceFor[*deals.Service](c, "sales-deals"); dealsSvc != nil {
+				dealsSvc.SetSessionGate(accountSvc)
+			}
+			if campaignsSvc, _ := core.ServiceFor[*campaigns.Service](c, "marketing-campaigns"); campaignsSvc != nil {
+				campaignsSvc.SetSessionGate(accountSvc)
+			}
+			if audienceSvc, _ := core.ServiceFor[*audience.Service](c, "marketing-audience"); audienceSvc != nil {
+				audienceSvc.SetSessionGate(accountSvc)
+			}
+			if pipelineSvc, _ := core.ServiceFor[*pipeline.Service](c, "sales-pipeline"); pipelineSvc != nil {
+				pipelineSvc.SetSessionGate(accountSvc)
+			}
+			if socialSvc, _ := core.ServiceFor[*social.Service](c, "marketing-social"); socialSvc != nil {
+				socialSvc.SetSessionGate(accountSvc)
+			}
+			if contentSvc, _ := core.ServiceFor[*content.Service](c, "marketing-content"); contentSvc != nil {
+				contentSvc.SetSessionGate(accountSvc)
+			}
+
 			// Mantis #1624 — gate pkg/keys's master decrypt on a
 			// user-PGP-derived KEK once the account is unlocked.
 			// Pre-unlock (headless `lthn serve`, account locked) the
