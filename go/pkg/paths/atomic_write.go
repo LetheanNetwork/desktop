@@ -59,6 +59,15 @@ const (
 	// silent-ignore in failVersionStale was best-effort defence in
 	// depth; making the check load-bearing closes the spec gap.
 	CodeIncludeBodyAtRestRejected = "paths.write.include_body_at_rest_rejected"
+	// CodeWriteModeTamper — Mantis #1592 (Cerberus #19 §5.1 Option C).
+	// Post-rename mode-verify gate: on at-rest-encrypted paths the
+	// primitive snapshots the tmp file's actual permissions after
+	// Close (umask-modulated) and compares to the post-rename stat.
+	// A mismatch indicates a racing chmod between rename and verify
+	// — defence-in-depth carry-forward of pkg/account #1464's
+	// per-write mode check, harmonised at the primitive boundary so
+	// every auth-substrate writer benefits without per-call ceremony.
+	CodeWriteModeTamper = "paths.write.mode_tamper"
 )
 
 // CurrentBodyMaxBytes is the §4.2 CRIT-1 cap on VersionStale
@@ -386,11 +395,73 @@ func AtomicWriteWithVersion(path string, input WriteInput) core.Result {
 			return core.Fail(core.E(CodeWriteOpenFailed,
 				"close tmp", err))
 		}
+		// Mantis #1592 (Cerberus #19 §5.1 Option C) — snapshot tmp
+		// file's actual on-disk mode BEFORE rename so the post-rename
+		// verify compares against the same umask-modulated value that
+		// the OS produced, never a hardcoded constant. This avoids a
+		// false positive when umask filters bits the caller passed to
+		// OpenFile. Snapshot only taken on at-rest-encrypted paths —
+		// non-secret writes skip the gate to avoid the extra stat.
+		var expectMode core.FileMode
+		var modeVerify bool
+		if IsAtRestEncryptedPath(path) {
+			tmpStat := core.Lstat(tmp)
+			if !tmpStat.OK {
+				_ = core.Remove(tmp)
+				_ = emitWriteFailed(path, CodeWriteOpenFailed)
+				return core.Fail(core.E(CodeWriteOpenFailed,
+					"stat tmp for mode snapshot: "+tmpStat.Error(), nil))
+			}
+			if info, _ := tmpStat.Value.(core.FsFileInfo); info != nil {
+				expectMode = info.Mode().Perm()
+				modeVerify = true
+			}
+		}
 		if r := core.Rename(tmp, path); !r.OK {
 			_ = core.Remove(tmp)
 			_ = emitWriteFailed(path, CodeWriteRename)
 			return core.Fail(core.E(CodeWriteRename,
 				"rename: "+r.Error(), nil))
+		}
+		// Mantis #1592 — post-rename mode-verify gate. Defence-in-
+		// depth against a racing chmod between rename and the
+		// success-envelope stat (the same window pkg/account #1464
+		// closed at the call site; harmonised here so every
+		// auth-substrate writer inherits it). Window is best-effort:
+		// an attacker who can chmod inside the rename-to-stat gap
+		// AND chmod back before this Lstat would evade detection. We
+		// accept the gap per the Option C analysis (the gate raises
+		// the bar for opportunistic local tampering, not a TOCTOU-
+		// safe primitive). For TOCTOU-safe pinning the next layer is
+		// filesystem-level (xattr / immutable bit / SELinux label).
+		if modeVerify {
+			// Per H#53 SECURITY-NOTE escape-valve: post-rename verify
+			// also acts as the test-hook for the mode-tamper scenario
+			// — the test injects via core.Chmod on the final path
+			// between rename and this Lstat.
+			if hook := postRenameModeTamperForTest; hook != nil {
+				hook(path)
+			}
+			vStat := core.Lstat(path)
+			if !vStat.OK {
+				_ = emitWriteFailed(path, CodeWriteModeTamper)
+				return core.Fail(core.E(CodeWriteModeTamper,
+					"stat post-rename for mode verify: "+vStat.Error(), nil))
+			}
+			info, _ := vStat.Value.(core.FsFileInfo)
+			if info == nil {
+				_ = emitWriteFailed(path, CodeWriteModeTamper)
+				return core.Fail(core.NewCode(CodeWriteModeTamper,
+					"stat post-rename returned nil info"))
+			}
+			actual := info.Mode().Perm()
+			if actual != expectMode {
+				_ = emitWriteFailed(path, CodeWriteModeTamper)
+				return core.Fail(core.NewCode(CodeWriteModeTamper,
+					"mode tamper detected post-rename: actual="+
+						core.Sprintf("%#o", actual)+
+						" expected="+core.Sprintf("%#o", expectMode)))
+			}
 		}
 
 		// Post-write stat for the success envelope.
@@ -615,6 +686,31 @@ var writeTmpOpenFaultForTest func(tmp string) core.Result
 // OpenFile. Pass nil to disable. Test-only.
 func SetWriteTmpOpenFaultForTest(fn func(tmp string) core.Result) {
 	writeTmpOpenFaultForTest = fn
+}
+
+// postRenameModeTamperForTest is a fault-injection hook used by
+// Mantis #1592 coverage to simulate a racing chmod between rename
+// and the post-rename mode-verify Lstat. When non-nil it runs after
+// the successful rename, before the mode-verify stat — tests use it
+// to chmod the final path to a different permission and assert the
+// gate fires CodeWriteModeTamper. Production code MUST NOT touch
+// this — pair every test setter with t.Cleanup that resets it to
+// nil.
+var postRenameModeTamperForTest func(path string)
+
+// SetPostRenameModeTamperForTest installs a fault-injection callback
+// that AtomicWriteWithVersion invokes between rename and the
+// post-rename mode-verify stat. Pass nil to disable. Test-only.
+//
+// Usage example:
+//
+//	paths.SetPostRenameModeTamperForTest(func(p string) {
+//	    // simulate a racing chmod by an attacker
+//	    _ = os.Chmod(p, 0o644)
+//	})
+//	t.Cleanup(func() { paths.SetPostRenameModeTamperForTest(nil) })
+func SetPostRenameModeTamperForTest(fn func(path string)) {
+	postRenameModeTamperForTest = fn
 }
 
 // unwrapErr coaxes a Result's Value into an error for IsNotExist
