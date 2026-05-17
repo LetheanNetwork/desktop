@@ -1,145 +1,227 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
 // Package keys is the encrypted-at-rest store for the desktop's
-// secrets (provider API keys, wallet seeds, signing material). Every
-// secret is sealed with ChaCha20-Poly1305 under a 32-byte master
-// stored at $HOME/Lethean/data/keys/.master (mode 0600). The master
-// is generated on first use; rotating it requires re-encrypting
-// every stored blob (out of scope for v1).
+// secrets — partitioned into two cryptographic tiers per
+// RFC.stage-e-keys-partition v3 (Mantis #1625):
+//
+//   - Tier-0 (pre-unlock): refs that MUST be readable at process
+//     boot, BEFORE any human input. Today that's the
+//     single-instance Wails IPC authenticator. Sealed under the
+//     tier-0 master at ~/Lethean/data/keys/.master-tier0; the
+//     tier-0 master is KEK-wrapped under an HKDF derivation over
+//     ~/Lethean/wallets/.seed ("lthn-keys-kek" / "tier0-v1") that
+//     is available pre-unlock per the auth-gate v1 bootstrap.
+//   - Tier-1 (post-unlock): long-lived bearer credentials (OpenAI
+//     keys, Anthropic keys, future provider creds). Sealed under
+//     the tier-1 master at ~/Lethean/data/keys/.master-tier1; the
+//     tier-1 master is KEK-wrapped under HKDF over the unlocked
+//     LetheanAccount PGP private key. Reads/writes require the
+//     tier-1 KEK provider to be live (account unlocked).
+//
+// Tier confusion is impossible at the filesystem layer — blobs
+// carry a tier suffix (".t0.aead" / ".t1.aead"), so a tier-0 file
+// is a different file from its tier-1 namesake and never read by
+// the wrong-tier method. The keyPath validator rejects user refs
+// matching `\.t[0-9]\.aead$` to prevent callers from constructing
+// refs that would collide with the on-disk suffix scheme.
 //
 // Per design_no_hidden_user_bloat — keys/ sits visible under the
 // user's $HOME/Lethean/ tree, NOT in ~/.config or ~/Library. The
-// master file is a dotfile so it's hidden from default Finder views
-// but still discoverable via ls -A.
+// master files are dot-prefixed so they're hidden from default
+// Finder views but still discoverable via ls -A.
 //
-// Usage from another package:
+// Usage from another package — tier-1 (post-unlock provider creds):
 //
 //	svc, r := keys.New()
 //	if !r.OK { return r }
-//	if r := svc.Put("openai-default", []byte("sk-...")); !r.OK { return r }
-//	r := svc.Get("openai-default")
+//	if r := svc.PutTier1("openai-default", []byte("sk-...")); !r.OK { return r }
+//	r := svc.GetTier1("openai-default")
 //	if r.OK { plaintext := r.Value.([]byte); _ = plaintext }
 //
+// Usage from another package — tier-0 (pre-unlock single-instance key):
+//
+//	r := svc.SingleInstanceKey()
+//	if r.OK { key := r.Value.([32]byte); _ = key }
+//
 // Wails binding registers as the "Keys" service so the TS side can
-// reach it via @desktop/keys/service:
+// reach it via @desktop/keys/service — only tier-1 W-methods are
+// exposed (frontend has no legitimate tier-0 surface):
 //
-//	import { Put, List, Delete } from "@desktop/keys/service";
-//	await Put("openai-default", "sk-...");
+//	import { WPutTier1, WListTier1, WDeleteTier1 } from "@desktop/keys/service";
+//	await WPutTier1("openai-default", "sk-...");
 //
-// IMPORTANT: Get is NOT exposed to the Wails surface — plaintext
-// secrets must not cross the WebView boundary. Reading the key is
-// a Go-side action only (e.g. when the runner spawns an agent).
-// Frontend code only writes and lists.
+// IMPORTANT: GetTier1 is NOT exposed to the Wails surface —
+// plaintext secrets must not cross the WebView boundary. Reading
+// the key is a Go-side action only (e.g. when the runner spawns
+// an agent). Frontend code only writes and lists.
 
 package keys
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/io/sigil"
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 const (
-	// masterFileName is the dot-prefixed master-key file under
-	// $HOME/Lethean/data/keys/. Dot-prefix hides from default Finder
-	// without buying us actual security — the master is bound to
-	// $HOME, not the file's visibility.
-	masterFileName = ".master"
+	// legacyMasterFileName is the pre-partition master file. Read on
+	// boot for legacy-install detection (RFC §4.4 Step 0b); deleted
+	// only after the tier-1 migration completes successfully.
+	legacyMasterFileName = ".master"
 
-	// keyFileSuffix marks encrypted blobs. ".aead" telegraphs the
-	// envelope shape: nonce-prepended ChaCha20-Poly1305 ciphertext.
-	keyFileSuffix = ".aead"
+	// masterTier0FileName / masterTier1FileName are the per-tier
+	// KEK-wrapped masters. Tier-0 is wrapped under the .seed-derived
+	// KEK (available pre-unlock); tier-1 is wrapped under the
+	// unlocked-account KEK per Mantis #1624.
+	masterTier0FileName = ".master-tier0"
+	masterTier1FileName = ".master-tier1"
+
+	// legacyBlobSuffix is the pre-partition blob suffix. Read on
+	// boot for legacy-install detection; never written by
+	// post-migration code.
+	legacyBlobSuffix = ".aead"
+
+	// tier0BlobSuffix / tier1BlobSuffix encode the tier of a blob in
+	// its filename (RFC §4.1, Q1-B). Tier confusion is impossible at
+	// the filesystem layer.
+	tier0BlobSuffix = ".t0.aead"
+	tier1BlobSuffix = ".t1.aead"
 
 	// masterKeySize is the ChaCha20-Poly1305 key length.
 	masterKeySize = 32
 
 	// dirMode + fileMode — 0700 for the directory, 0600 for files.
-	// Owner-only. The master file's mode is load-bearing for the
+	// Owner-only. The master files' modes are load-bearing for the
 	// at-rest protection story.
 	dirMode  = 0o700
 	fileMode = 0o600
 )
 
+// Tier identifies which cryptographic partition a method targets.
+// Internal — callers reach a tier via the explicit per-tier
+// methods (PutTier0/PutTier1/...) rather than this enum.
+type tier int
+
+const (
+	tier0 tier = 0
+	tier1 tier = 1
+)
+
 // KEKProvider returns the 32-byte key-encryption key (KEK) that
-// wraps the on-disk master, plus a boolean reporting whether the KEK
-// is currently available. Returns (_, false) pre-unlock (headless
-// `lthn serve` boot, account locked, KEK material not yet derivable)
-// so the keys Service falls back to the legacy raw-master scheme.
-// Returns (kek, true) post-unlock — the provider is expected to
-// derive the KEK from post-unlock secret material (e.g. HKDF over
-// the account's PGP private key) and return a fresh slice every
-// call. The keys Service treats the returned bytes as opaque and
-// does not retain a reference beyond the call.
+// wraps the on-disk master for a tier, plus a boolean reporting
+// whether the KEK is currently available. The same shape services
+// both tiers (RFC §4.2):
 //
-// Mantis #1624 — gates pkg/keys's master decrypt on post-unlock
-// PGP-derived KEK without breaking pre-unlock boot paths.
+//   - Tier-0 provider derives via HKDF(.seed, "lthn-keys-kek",
+//     "tier0-v1", 32) — available pre-unlock; .seed is bootstrap
+//     substrate per the auth-gate v1.
+//   - Tier-1 provider derives via HKDF over the unlocked
+//     LetheanAccount PGP private key — returns (_, false)
+//     pre-unlock so tier-1 reads/writes fail cleanly until the
+//     account is unlocked.
+//
+// The keys Service treats the returned bytes as opaque and does
+// not retain a reference beyond the call; providers are expected
+// to return a fresh slice every invocation.
+//
+// Mantis #1624 (KEK gate) — original definition.
+// Mantis #1625 (tier partition) — extended to two tiers via
+// SetKEKProviderTier0 / SetKEKProvider.
 type KEKProvider func() ([]byte, bool)
 
 // Service owns the encrypted keys directory. Stateless beyond the
-// master-key cache; the disk is the source of truth.
+// per-tier master-key caches; the disk is the source of truth.
 type Service struct {
-	// mu guards the master-key cache. Held by ensureMaster.
+	// mu guards the per-tier master caches AND the migration
+	// sequence. Held by ensureMaster and the migration steps so
+	// concurrent readers/writers cannot observe a partial state.
 	mu core.RWMutex
 	// getOrCreateMu serialises the miss→generate→put window in
-	// GetOrCreate so two concurrent callers don't both generate
-	// distinct keys for the same ref. Separate from `mu` because
-	// Put internally takes `mu` via ensureMaster; recursive Lock
-	// would deadlock. Cerberus pass-6 MEDIUM.
+	// GetOrCreateTier0/Tier1 so two concurrent callers don't both
+	// generate distinct keys for the same ref. Separate from `mu`
+	// because PutTierN internally takes `mu` via ensureMaster;
+	// recursive Lock would deadlock. Cerberus pass-6 MEDIUM.
 	getOrCreateMu core.Mutex
-	master        []byte // 32-byte cached master; loaded on first use
 
-	// kekProviderMu guards kekProvider so SetKEKProvider can race
-	// safely against ensureMaster on a concurrent boot path. Held
-	// briefly under the slow-path of ensureMaster to snapshot the
-	// provider pointer.
+	// tier0Master / tier1Master are the 32-byte unwrapped masters
+	// for each tier. Loaded lazily on first per-tier operation.
+	tier0Master []byte
+	tier1Master []byte
+
+	// kekProviderMu guards the per-tier provider slots so
+	// SetKEKProvider / SetKEKProviderTier0 can race safely against
+	// ensureMaster on a concurrent boot path. Held briefly under
+	// the slow-path of ensureMaster to snapshot the provider
+	// pointer.
 	kekProviderMu core.RWMutex
-	// kekProvider is the post-unlock KEK source wired by app.go
-	// after the account service is constructed. Nil pre-unlock
-	// (headless `lthn serve`, account locked) — ensureMaster falls
-	// back to the legacy raw-master scheme so single-instance key
-	// generation pre-unlock keeps working. Mantis #1624.
-	kekProvider KEKProvider
+	// tier0KEKProvider derives the tier-0 KEK from .seed (wired in
+	// cmd/lthn/app.go before desktop.Run). Nil before
+	// SetKEKProviderTier0 fires; ensureMaster(tier0) Fails with a
+	// clear error rather than falling back to a raw-on-disk path
+	// (RFC §4.2 — tier-0 has no raw mode).
+	tier0KEKProvider KEKProvider
+	// tier1KEKProvider derives the tier-1 KEK from the unlocked
+	// account PGP key (wired in cmd/lthn/app.go after the account
+	// service exists). Nil pre-unlock — ensureMaster(tier1) Fails
+	// with keys.no_tier1_provider so callers cannot accidentally
+	// read provider secrets while the account is locked.
+	tier1KEKProvider KEKProvider
+
+	// migrationComplete latches once the tier-1 migration has run
+	// (or has been determined unnecessary). Subsequent
+	// SetKEKProvider invocations skip the migration sub-sequence.
+	// Guarded by mu.
+	migrationComplete bool
 }
 
 const (
-	// kekHKDFInfo is the canonical info-string the wiring closure
-	// in cmd/lthn/app.go passes to core.HKDF when deriving a KEK
-	// from the unlocked PGP private key. Exported as a constant so
-	// the call-site reads as one declaration and the salt/info
-	// pair stays grep-able from a single source.
+	// KEKHKDFSalt + KEKHKDFInfo are the canonical HKDF parameters
+	// the wiring closure in cmd/lthn/app.go passes to core.HKDF
+	// when deriving the TIER-1 KEK from the unlocked PGP private
+	// key. Exported as constants so the call-site reads as one
+	// declaration and the salt/info pair stays grep-able from a
+	// single source. (Tier-0 uses the same salt with a different
+	// info string "tier0-v1" — RFC §4.2 — to keep the derivation
+	// namespaces distinct.)
 	//
-	// Usage example (in cmd/lthn/app.go's provider closure):
+	// Usage example (in cmd/lthn/app.go's tier-1 provider closure):
 	//
-	//	kek := core.HKDF("sha256", priv, []byte(keys.KEKHKDFSalt), []byte(keys.KEKHKDFInfo), 32).Value.([]byte)
+	//	kek := core.HKDF("sha256", priv,
+	//	    []byte(keys.KEKHKDFSalt), []byte(keys.KEKHKDFInfo), 32).Value.([]byte)
 	KEKHKDFSalt = "lthn-keys-kek"
 	KEKHKDFInfo = "v1"
+
+	// KEKHKDFInfoTier0 is the HKDF info-string the tier-0 KEK
+	// provider closure in cmd/lthn/app.go (E.K.C lane) uses when
+	// deriving the tier-0 KEK from ~/Lethean/wallets/.seed. Distinct
+	// from KEKHKDFInfo so the same .seed bytes can produce a tier-0
+	// KEK alongside the server-key passphrase (which uses its own
+	// info string) without collision.
+	//
+	// Usage example (in cmd/lthn/app.go's tier-0 provider closure):
+	//
+	//	seedR := core.ReadFile(core.PathJoin(walletsDir, ".seed"))
+	//	kek := core.HKDF("sha256", seedR.Value.([]byte),
+	//	    []byte(keys.KEKHKDFSalt), []byte(keys.KEKHKDFInfoTier0), 32).Value.([]byte)
+	KEKHKDFInfoTier0 = "tier0-v1"
 
 	// kekWrappedMasterLen is the on-disk length of a KEK-wrapped
 	// master: 24-byte XChaCha20-Poly1305 nonce + 32-byte ciphertext
 	// + 16-byte Poly1305 tag = 72 bytes. (sigil.NewChaChaPolySigil
-	// defaults to the XChaCha20 variant — see crypto_sigil.go's
-	// activeNonceSize() falling through to NonceSizeX.) Used as the
-	// length sentinel that distinguishes a legacy raw 32-byte master
-	// from a KEK-wrapped envelope on read — no version field needed
-	// because the two lengths can never collide (sigil's minLen
-	// guarantees > 32 even for the smaller ChaCha20 nonce).
+	// defaults to the XChaCha20 variant.) Used as the length
+	// sentinel that distinguishes a legacy raw 32-byte master from
+	// a KEK-wrapped envelope on read — no version field needed
+	// because the two lengths can never collide.
+	// ADD-K1 — single declaration reused for both tiers.
 	kekWrappedMasterLen = 24 + masterKeySize + 16
 )
 
 // New constructs a Service and ensures $HOME/Lethean/data/keys/
-// exists. The master key is loaded (or generated) lazily on the
-// first Put/Get. Returns Result with Value=*Service.
+// exists. Per-tier masters are loaded lazily on the first
+// per-tier op.
 //
-// Cerberus Mantis #1441 — asserts dir mode is 0o700 + master file
-// (if present) is 0o600 at construction time. paths.KeysDir creates
-// the dir with 0o700 on first use, but MkdirAll silently no-ops on
-// an existing dir regardless of its mode. If the operator or a
-// rogue tool widened the perms, we surface that at startup as a
-// core.Warn rather than silently shipping under reduced protection.
-// CoreGO has no Chmod primitive today (tracked as a separate export
-// gap), so we detect-and-warn rather than detect-and-fix. The
-// operator gets a clear actionable message.
+// Cerberus Mantis #1441 — asserts dir mode is 0o700 + any
+// existing master files are 0o600 at construction time.
 //
 // Usage example:
 //
@@ -156,9 +238,10 @@ func New() core.Result {
 }
 
 // assertKeysDirMode is the Mantis #1441 startup check. Stats the
-// keys dir + master file; logs a core.Warn for any mode that's
-// wider than the expected 0o700 / 0o600. Best-effort — Stat
-// failure is silent (KeysDir would have caught a real I/O error).
+// keys dir + every per-tier master file; logs a core.Warn for any
+// mode that's wider than the expected 0o700 / 0o600. Best-effort —
+// Stat failure is silent (KeysDir would have caught a real I/O
+// error).
 func assertKeysDirMode(dir string) {
 	statR := core.Stat(dir)
 	if !statR.OK {
@@ -176,77 +259,94 @@ func assertKeysDirMode(dir string) {
 			"got", core.Sprintf("%o", gotPerm),
 			"want", core.Sprintf("%o", dirMode))
 	}
-	masterPath := core.PathJoin(dir, masterFileName)
-	mStatR := core.Stat(masterPath)
-	if !mStatR.OK {
-		return // not generated yet — first-write will use fileMode
-	}
-	mInfo, ok := mStatR.Value.(core.FsFileInfo)
-	if !ok {
-		return
-	}
-	if mPerm := mInfo.Mode().Perm(); mPerm != fileMode {
-		core.Warn("keys: master file mode wider than 0o600 — "+
-			"`chmod 600 ~/Lethean/data/keys/.master` to restore (Mantis #1441)",
-			"got", core.Sprintf("%o", mPerm),
-			"want", core.Sprintf("%o", fileMode))
+	for _, name := range []string{legacyMasterFileName, masterTier0FileName, masterTier1FileName} {
+		masterPath := core.PathJoin(dir, name)
+		mStatR := core.Stat(masterPath)
+		if !mStatR.OK {
+			continue
+		}
+		mInfo, ok := mStatR.Value.(core.FsFileInfo)
+		if !ok {
+			continue
+		}
+		if mPerm := mInfo.Mode().Perm(); mPerm != fileMode {
+			core.Warn("keys: master file mode wider than 0o600 — "+
+				"`chmod 600 ~/Lethean/data/keys/"+name+"` to restore (Mantis #1441)",
+				"file", name,
+				"got", core.Sprintf("%o", mPerm),
+				"want", core.Sprintf("%o", fileMode))
+		}
 	}
 }
 
 // Register adopts the canonical Service shape (Mantis #1336).
 // Constructs a Service and registers it on Core under "keys".
 //
-// Cerberus Mantis #1440 (Stage A — Athena's doc-and-warning shim) —
-// the user-facing LetheanAccount canon (memory
-// `project_lethean_account_pgp_armoured.md`) says identity is an
-// armoured PGP key gated by a passphrase. This package's CURRENT
-// implementation is a local ChaCha20-Poly1305 master key with NO
-// passphrase + NO PGP-armoured account + NO unlock gate. The master
-// key file at `~/Lethean/data/keys/.master` is recoverable by
-// anyone with the file (mode 0o600 helps; full-disk encryption from
-// the host is the only at-rest protection today). Lose the master
-// → lose every encrypted secret. The startup Warn surfaces this in
-// operator logs while Stage B implementation is queued.
-//
-// Stage B wires firstlaunch.Phase1 → Enchantrix `pgp.GenerateKeyPair`
-// + passphrase prompt + SymmetricallyEncrypt-wrap + unlock-at-start
-// gate. Tracking ticket: Mantis #1440.
-//
 // Usage example:
 //
 //	if r := keys.Register(c); !r.OK { return r }
 func Register(c *core.Core) core.Result {
-	core.Warn("keys: backup ~/Lethean/data/keys/.master — " +
-		"no passphrase gate yet (Mantis #1440 Stage B)")
+	core.Warn("keys: tier-partition substrate active (Mantis #1625) — " +
+		"tier-0 from .seed; tier-1 from unlocked account PGP key")
 	return New()
 }
 
-// SetKEKProvider wires the post-unlock KEK source the keys Service
-// uses to wrap / unwrap the on-disk master. Wired at boot in
-// cmd/lthn/app.go after both the keys + account services have been
-// constructed; the provider closure asks pkg/account whether the
-// user account is unlocked and, if so, derives a 32-byte KEK via
-// core.HKDF over the unlocked PGP private key bytes.
+// SetKEKProviderTier0 wires the tier-0 KEK source (RFC §4.2). The
+// provider is expected to derive a 32-byte KEK via HKDF over
+// ~/Lethean/wallets/.seed using KEKHKDFSalt + KEKHKDFInfoTier0;
+// because .seed is auto-generated pre-unlock by the auth-gate
+// bootstrap, this provider is normally live from process start
+// (wired in cmd/lthn/app.go before desktop.Run).
 //
-// Mantis #1624 — additive over the legacy raw-master scheme:
+// May be called more than once; the most recent non-nil provider
+// wins. Passing nil disables tier-0 access (test fixtures only —
+// production wiring is always non-nil after E.K.C lands).
 //
-//   - When the provider returns (_, false) the Service falls back to
-//     the legacy code path — read the master verbatim, write it
-//     verbatim. Preserves headless `lthn serve` + single-instance key
-//     generation pre-unlock.
-//   - When the provider returns (kek, true) the Service treats the
-//     master as a KEK-wrapped envelope: WRITE seals master under KEK
-//     before persisting; READ unwraps via KEK before returning.
-//   - Existing legacy-format master files (32 bytes raw) continue to
-//     decrypt — read-path detects format by length (32 = legacy,
-//     60 = KEK-wrapped) and routes accordingly. NEXT WRITE post-
-//     unlock re-persists in the wrapped format, completing the
-//     migration in-place without a separate ticket.
+// Mantis #1625 — additive over SetKEKProvider (tier-1 wire) so
+// the two providers can be wired independently at boot.
 //
-// SetKEKProvider may be called more than once during a process
-// lifetime (e.g. service reconfiguration); the most recent
-// non-nil provider wins. Passing nil disables KEK wrapping
-// entirely (test fixtures + intentional rollback).
+// Usage example (in cmd/lthn/app.go before desktop.Run):
+//
+//	walletsR := paths.WalletsDir()
+//	if !walletsR.OK { return walletsR }
+//	seedPath := core.PathJoin(walletsR.Value.(string), ".seed")
+//	keysSvc.SetKEKProviderTier0(func() ([]byte, bool) {
+//	    seedR := core.ReadFile(seedPath)
+//	    if !seedR.OK { return nil, false }
+//	    kekR := core.HKDF("sha256", seedR.Value.([]byte),
+//	        []byte(keys.KEKHKDFSalt), []byte(keys.KEKHKDFInfoTier0), 32)
+//	    if !kekR.OK { return nil, false }
+//	    return kekR.Value.([]byte), true
+//	})
+func (s *Service) SetKEKProviderTier0(provider KEKProvider) {
+	s.kekProviderMu.Lock()
+	s.tier0KEKProvider = provider
+	// Invalidate the cached tier-0 master so the next operation
+	// re-reads from disk under the new provider.
+	s.mu.Lock()
+	s.tier0Master = nil
+	s.mu.Unlock()
+	s.kekProviderMu.Unlock()
+}
+
+// SetKEKProvider wires the tier-1 KEK source — the post-unlock
+// KEK derived from the active account's PGP private key. Wired in
+// cmd/lthn/app.go after both the keys + account services have
+// been constructed.
+//
+// Mantis #1624 — original definition.
+// Mantis #1625 — clarified as the TIER-1 wire (tier-0 has its own
+// SetKEKProviderTier0). Behaviour unchanged for callers.
+//
+// When the provider returns (kek, true) the tier-1 master is
+// treated as a KEK-wrapped envelope. When the provider returns
+// (_, false) tier-1 reads/writes fail cleanly with
+// keys.no_tier1_provider — the legacy raw-fallback path is gone
+// with the A2 partition cutover (RFC §4.3).
+//
+// The first non-nil wire ALSO triggers the lazy tier-1 migration
+// from a pre-partition install (RFC §4.4 Step 1 onwards) — under
+// s.mu, atomic with the first read/write that follows.
 //
 // Usage example (in cmd/lthn/app.go after services are wired):
 //
@@ -265,33 +365,44 @@ func Register(c *core.Core) core.Result {
 //	})
 func (s *Service) SetKEKProvider(provider KEKProvider) {
 	s.kekProviderMu.Lock()
-	s.kekProvider = provider
-	// Invalidate the cached master so the next operation re-reads
-	// from disk under the new provider. Without this, a kek-provider
-	// wire that happens AFTER ensureMaster's first load would leave
-	// the in-memory master inconsistent with the on-disk format
-	// (caller reads cached legacy bytes; next write would re-seal
-	// the same plaintext under KEK, but interim reads would see the
-	// stale cache). Clearing here makes the wire observably atomic
-	// from the consumer POV.
+	s.tier1KEKProvider = provider
+	// Invalidate the cached tier-1 master so the next operation
+	// re-reads from disk under the new provider — keeps the wire
+	// observably atomic from the consumer POV (matches the #1624
+	// invalidate-on-wire shape).
 	s.mu.Lock()
-	s.master = nil
-	s.mu.Unlock()
+	s.tier1Master = nil
 	s.kekProviderMu.Unlock()
+	// Tier-1 migration from legacy install — fires once per
+	// Service instance after the first non-nil wire. Held under
+	// s.mu so concurrent ensureMaster(tier1) callers see the
+	// migrated state.
+	if provider != nil && !s.migrationComplete {
+		s.migrateTier1Locked()
+	}
+	s.mu.Unlock()
 }
 
-// currentKEK snapshots the wired provider and invokes it once.
-// Returns (nil, false) when no provider is wired, the provider
-// returns false, or the returned KEK is not 32 bytes (defensive —
-// a misbehaving provider must not crash the keys path).
+// currentKEKFor snapshots the wired provider for tier t and
+// invokes it once. Returns (nil, false) when no provider is
+// wired, the provider returns false, or the returned KEK is not
+// 32 bytes (defensive — a misbehaving provider must not crash
+// the keys path).
 //
-// Called under s.mu held by ensureMaster's slow path; the provider
-// itself MUST NOT call back into keys.Service to avoid deadlock.
-// The wiring in app.go satisfies this — the provider reads from
-// pkg/account only.
-func (s *Service) currentKEK() ([]byte, bool) {
+// Called under s.mu held by ensureMaster's slow path; the
+// provider itself MUST NOT call back into keys.Service to avoid
+// deadlock. Production wiring in app.go satisfies this — the
+// providers read from pkg/serverkey (.seed for tier-0) or
+// pkg/account (unlocked private key for tier-1) only.
+func (s *Service) currentKEKFor(t tier) ([]byte, bool) {
 	s.kekProviderMu.RLock()
-	provider := s.kekProvider
+	var provider KEKProvider
+	switch t {
+	case tier0:
+		provider = s.tier0KEKProvider
+	case tier1:
+		provider = s.tier1KEKProvider
+	}
 	s.kekProviderMu.RUnlock()
 	if provider == nil {
 		return nil, false
@@ -301,7 +412,8 @@ func (s *Service) currentKEK() ([]byte, bool) {
 		return nil, false
 	}
 	if len(kek) != masterKeySize {
-		core.Warn("keys: KEK provider returned wrong-length key — falling back to legacy path",
+		core.Warn("keys: KEK provider returned wrong-length key",
+			"tier", core.Sprintf("%d", int(t)),
 			"got", core.Sprintf("%d", len(kek)),
 			"want", core.Sprintf("%d", masterKeySize))
 		return nil, false
@@ -309,306 +421,824 @@ func (s *Service) currentKEK() ([]byte, bool) {
 	return kek, true
 }
 
-// ensureMaster loads or generates the master key. Idempotent;
-// repeated calls return the cached key.
+// masterFileNameFor returns the per-tier master filename.
+func masterFileNameFor(t tier) string {
+	if t == tier0 {
+		return masterTier0FileName
+	}
+	return masterTier1FileName
+}
+
+// blobSuffixFor returns the per-tier blob suffix.
+func blobSuffixFor(t tier) string {
+	if t == tier0 {
+		return tier0BlobSuffix
+	}
+	return tier1BlobSuffix
+}
+
+// ensureMaster loads or generates the master for tier t. Idempotent;
+// repeated calls return the cached master. Tier-0 may also fire
+// the Step 0b boot migration sub-sequence (RFC §4.4 Step 0b) on
+// legacy installs where a 32B raw .master file is present.
 //
-// Mantis #1624 — read-path is format-aware:
+// Read/write paths (RFC §4.2 — no raw-on-disk for either tier):
 //
-//   - 32 bytes on disk → legacy raw master. Returned as-is (works
-//     pre-KEK and post-KEK so existing installed users don't break).
-//   - 60 bytes on disk → KEK-wrapped envelope. Requires the KEK
-//     provider to return (kek, true) — Fail otherwise so a locked
-//     state can't accidentally hand back the wrong bytes.
-//   - any other length → corrupted/tampered, Fail.
-//
-// Write-path is provider-aware:
-//
-//   - provider available → seal new master under KEK before persist,
-//     so the on-disk format is the 60-byte envelope.
-//   - provider unavailable → persist 32 bytes verbatim (legacy).
-func (s *Service) ensureMaster() core.Result {
+//   - Tier-0: requires tier-0 KEK provider live. On-disk format is
+//     always 72-byte KEK-wrapped (.master-tier0). Step 0b legacy
+//     branch handles the one-shot migration from pre-partition
+//     installs.
+//   - Tier-1: requires tier-1 KEK provider live. On-disk format is
+//     72-byte KEK-wrapped (.master-tier1). Pre-partition installs
+//     migrate via SetKEKProvider → migrateTier1Locked (RFC §4.4
+//     Steps 3a-3h).
+func (s *Service) ensureMaster(t tier) core.Result {
 	s.mu.RLock()
-	if len(s.master) == masterKeySize {
+	if t == tier0 && len(s.tier0Master) == masterKeySize {
+		master := s.tier0Master
 		s.mu.RUnlock()
-		return core.Ok(s.master)
+		return core.Ok(master)
+	}
+	if t == tier1 && len(s.tier1Master) == masterKeySize {
+		master := s.tier1Master
+		s.mu.RUnlock()
+		return core.Ok(master)
 	}
 	s.mu.RUnlock()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.master) == masterKeySize {
-		return core.Ok(s.master)
+
+	if t == tier0 && len(s.tier0Master) == masterKeySize {
+		return core.Ok(s.tier0Master)
+	}
+	if t == tier1 && len(s.tier1Master) == masterKeySize {
+		return core.Ok(s.tier1Master)
 	}
 
 	dirR := paths.KeysDir()
 	if !dirR.OK {
 		return dirR
 	}
-	masterPath := core.PathJoin(dirR.Value.(string), masterFileName)
+	dir := dirR.Value.(string)
 
-	statR := core.Stat(masterPath)
-	if statR.OK {
-		readR := core.ReadFile(masterPath)
-		if !readR.OK {
-			return core.Fail(core.E("keys.ensureMaster", "read master", readR.Value.(error)))
-		}
-		blob := readR.Value.([]byte)
-		switch len(blob) {
-		case masterKeySize:
-			// Legacy format — raw 32-byte master. Accepted whether
-			// or not the KEK provider is available; the NEXT write
-			// (Put / GetOrCreate / SingleInstanceKey) re-persists
-			// in the wrapped format if the provider is live, which
-			// is the in-place migration shape.
-			s.master = blob
-			return core.Ok(s.master)
-		case kekWrappedMasterLen:
-			// KEK-wrapped envelope — needs the provider live to
-			// unwrap. If unwrap fails (provider returns false, KEK
-			// mismatch, tamper) the master is unreachable and we
-			// Fail so a caller doesn't operate on stale legacy bytes.
-			kek, ok := s.currentKEK()
-			if !ok {
-				return core.Fail(core.NewError("keys.ensureMaster: master is KEK-wrapped but KEK provider unavailable; unlock the account first"))
-			}
-			kekSigil, err := sigil.NewChaChaPolySigil(kek, nil)
-			if err != nil {
-				return core.Fail(core.E("keys.ensureMaster", "init KEK sigil", err))
-			}
-			unwrapped, err := kekSigil.Out(blob)
-			if err != nil {
-				return core.Fail(core.E("keys.ensureMaster", "unwrap KEK envelope", err))
-			}
-			if len(unwrapped) != masterKeySize {
-				return core.Fail(core.NewError("keys.ensureMaster: KEK-unwrapped master has wrong length"))
-			}
-			s.master = unwrapped
-			return core.Ok(s.master)
-		default:
-			return core.Fail(core.NewError("keys.ensureMaster: master file has wrong length; refusing to use"))
-		}
+	if t == tier0 {
+		return s.ensureTier0Locked(dir)
 	}
-
-	// Generate a fresh master.
-	randR := core.RandomBytes(masterKeySize)
-	if !randR.OK {
-		return core.Fail(core.E("keys.ensureMaster", "generate master", randR.Value.(error)))
-	}
-	master := randR.Value.([]byte)
-	if writeR := s.writeMasterLocked(masterPath, master); !writeR.OK {
-		return writeR
-	}
-	s.master = master
-	return core.Ok(s.master)
+	return s.ensureTier1Locked(dir)
 }
 
-// writeMasterLocked persists master to disk in the format dictated
-// by the current KEK provider state — KEK-wrapped when the provider
-// is live, raw 32-byte legacy when not. Caller MUST hold s.mu;
-// queries the provider via currentKEK which takes kekProviderMu
-// independently of s.mu.
-//
-// Mantis #1624 — single write surface so the format decision lives
-// in one place. Called from ensureMaster on first-generate AND from
-// rotateMasterToKEK on lazy-migration (the next-write-post-unlock
-// path).
-func (s *Service) writeMasterLocked(masterPath string, master []byte) core.Result {
-	kek, ok := s.currentKEK()
-	if !ok {
-		if w := core.WriteFile(masterPath, master, fileMode); !w.OK {
-			return core.Fail(core.E("keys.ensureMaster", "write master", w.Value.(error)))
+// ensureTier0Locked is the tier-0 master load/generate/migrate
+// path. Caller MUST hold s.mu. Implements RFC §4.4 Step 0b: if
+// .master-tier0 is present, KEK-unwrap and cache. Otherwise check
+// for a legacy .master file — if present + raw 32B, run the
+// tier-0-only migration sub-sequence (Steps 0b.i–0b.vi) so the
+// single-instance Wails IPC continues uninterrupted across the
+// pre→post-#1625 restart. Otherwise (fresh install) generate a
+// new tier-0 master and KEK-wrap.
+func (s *Service) ensureTier0Locked(dir string) core.Result {
+	tier0Path := core.PathJoin(dir, masterTier0FileName)
+
+	if statR := core.Stat(tier0Path); statR.OK {
+		readR := core.ReadFile(tier0Path)
+		if !readR.OK {
+			return core.Fail(core.E("keys.ensureMaster", "read tier-0 master", readR.Value.(error)))
 		}
-		return core.Ok(nil)
+		blob := readR.Value.([]byte)
+		if len(blob) != kekWrappedMasterLen {
+			return core.Fail(core.NewError("keys.ensureMaster: tier-0 master has wrong length; refusing to use"))
+		}
+		kek, ok := s.currentKEKFor(tier0)
+		if !ok {
+			return core.Fail(core.NewError("keys.no_tier0_provider: tier-0 KEK provider unavailable; .seed substrate must be wired before tier-0 ops"))
+		}
+		kekSigil, err := sigil.NewChaChaPolySigil(kek, nil)
+		if err != nil {
+			return core.Fail(core.E("keys.ensureMaster", "init tier-0 KEK sigil", err))
+		}
+		unwrapped, err := kekSigil.Out(blob)
+		if err != nil {
+			return core.Fail(core.E("keys.ensureMaster", "unwrap tier-0 KEK envelope", err))
+		}
+		if len(unwrapped) != masterKeySize {
+			return core.Fail(core.NewError("keys.ensureMaster: tier-0 KEK-unwrapped master has wrong length"))
+		}
+		s.tier0Master = unwrapped
+		return core.Ok(s.tier0Master)
 	}
+
+	// Tier-0 master absent — check for legacy install (RFC §4.4
+	// Step 0b legacy branch) before fresh-install path.
+	legacyPath := core.PathJoin(dir, legacyMasterFileName)
+	if statR := core.Stat(legacyPath); statR.OK {
+		readR := core.ReadFile(legacyPath)
+		if !readR.OK {
+			return core.Fail(core.E("keys.ensureMaster", "read legacy master for tier-0 migration", readR.Value.(error)))
+		}
+		legacy := readR.Value.([]byte)
+		switch len(legacy) {
+		case masterKeySize:
+			// 32B raw legacy — runnable now (no tier-1 KEK
+			// needed). Migrate single-instance.aead to
+			// single-instance.t0.aead atomically.
+			return s.migrateTier0FromRawLegacyLocked(dir, legacy)
+		case kekWrappedMasterLen:
+			// Post-#1624 wrapped legacy — cannot decrypt
+			// single-instance.aead without the tier-1 KEK live.
+			// Defer per RFC §4.4 Step 0b.ii — return a
+			// dedicated error so callers know the legacy unlock
+			// is required.
+			return core.Fail(core.NewError("keys.no_legacy_unlock: tier-0 sub-migration cannot run pre-unlock for post-#1624 legacy install; first interactive unlock completes the migration"))
+		default:
+			return core.Fail(core.NewError("keys.ensureMaster: legacy master file has wrong length; refusing to use"))
+		}
+	}
+
+	// Fresh install — no tier-0 master, no legacy master. Generate
+	// a new tier-0 master and KEK-wrap.
+	return s.generateTier0Locked(dir)
+}
+
+// generateTier0Locked generates a fresh tier-0 master, KEK-wraps
+// it under the live tier-0 KEK provider, and persists to
+// .master-tier0. Caller MUST hold s.mu.
+func (s *Service) generateTier0Locked(dir string) core.Result {
+	kek, ok := s.currentKEKFor(tier0)
+	if !ok {
+		return core.Fail(core.NewError("keys.no_tier0_provider: cannot generate tier-0 master without KEK provider (wire .seed substrate first)"))
+	}
+	randR := core.RandomBytes(masterKeySize)
+	if !randR.OK {
+		return core.Fail(core.E("keys.ensureMaster", "generate tier-0 master", randR.Value.(error)))
+	}
+	master := randR.Value.([]byte)
+	if w := s.writeMasterLocked(core.PathJoin(dir, masterTier0FileName), master, kek); !w.OK {
+		return w
+	}
+	s.tier0Master = master
+	return core.Ok(s.tier0Master)
+}
+
+// migrateTier0FromRawLegacyLocked runs the RFC §4.4 Step 0b
+// tier-0-only sub-sequence for a 32B-raw-legacy install: generate
+// a fresh tier-0 master, KEK-wrap it, then if a legacy
+// single-instance.aead exists, decrypt under the raw legacy
+// master and re-encrypt under the fresh tier-0 master to
+// single-instance.t0.aead (atomic-write). The legacy .master file
+// is NOT deleted — Step 3 owns that, post-unlock, after the
+// tier-1 migration completes. Caller MUST hold s.mu.
+func (s *Service) migrateTier0FromRawLegacyLocked(dir string, legacy []byte) core.Result {
+	if len(legacy) != masterKeySize {
+		return core.Fail(core.NewError("keys.migrate: legacy raw master has wrong length"))
+	}
+	kek, ok := s.currentKEKFor(tier0)
+	if !ok {
+		return core.Fail(core.NewError("keys.no_tier0_provider: cannot complete tier-0 sub-migration without KEK"))
+	}
+	// 0b.iii — generate fresh tier-0 master + KEK-wrap + persist.
+	randR := core.RandomBytes(masterKeySize)
+	if !randR.OK {
+		return core.Fail(core.E("keys.migrate", "generate tier-0 master", randR.Value.(error)))
+	}
+	tier0Master := randR.Value.([]byte)
+	if w := s.writeMasterLocked(core.PathJoin(dir, masterTier0FileName), tier0Master, kek); !w.OK {
+		return w
+	}
+	// 0b.iv — re-seal single-instance.aead if present.
+	legacySIPath := core.PathJoin(dir, singleInstanceRef+legacyBlobSuffix)
+	if statR := core.Stat(legacySIPath); statR.OK {
+		blobR := core.ReadFile(legacySIPath)
+		if !blobR.OK {
+			return core.Fail(core.E("keys.migrate", "read legacy single-instance", blobR.Value.(error)))
+		}
+		oldSigil, err := sigil.NewChaChaPolySigil(legacy, nil)
+		if err != nil {
+			return core.Fail(core.E("keys.migrate", "init legacy sigil", err))
+		}
+		plaintext, err := oldSigil.Out(blobR.Value.([]byte))
+		if err != nil {
+			return core.Fail(core.E("keys.migrate", "decrypt legacy single-instance", err))
+		}
+		newSigil, err := sigil.NewChaChaPolySigil(tier0Master, nil)
+		if err != nil {
+			return core.Fail(core.E("keys.migrate", "init tier-0 sigil", err))
+		}
+		newBlob, err := newSigil.In(plaintext)
+		if err != nil {
+			return core.Fail(core.E("keys.migrate", "re-seal single-instance under tier-0", err))
+		}
+		newSIPath := core.PathJoin(dir, singleInstanceRef+tier0BlobSuffix)
+		if w := core.WriteFile(newSIPath, newBlob, fileMode); !w.OK {
+			return core.Fail(core.E("keys.migrate", "write tier-0 single-instance", w.Value.(error)))
+		}
+		if r := core.Remove(legacySIPath); !r.OK {
+			core.Warn("keys: failed to remove legacy single-instance.aead after re-seal",
+				"err", r.Error())
+		}
+	}
+	// 0b.vi — log completion.
+	core.Info("keys: tier-0 sub-migration complete at boot (legacy install)")
+	s.tier0Master = tier0Master
+	return core.Ok(s.tier0Master)
+}
+
+// ensureTier1Locked is the tier-1 master load path. Caller MUST
+// hold s.mu. Requires the tier-1 KEK provider to be live;
+// pre-unlock callers see keys.no_tier1_provider.
+func (s *Service) ensureTier1Locked(dir string) core.Result {
+	tier1Path := core.PathJoin(dir, masterTier1FileName)
+
+	if statR := core.Stat(tier1Path); statR.OK {
+		readR := core.ReadFile(tier1Path)
+		if !readR.OK {
+			return core.Fail(core.E("keys.ensureMaster", "read tier-1 master", readR.Value.(error)))
+		}
+		blob := readR.Value.([]byte)
+		if len(blob) != kekWrappedMasterLen {
+			return core.Fail(core.NewError("keys.ensureMaster: tier-1 master has wrong length; refusing to use"))
+		}
+		kek, ok := s.currentKEKFor(tier1)
+		if !ok {
+			return core.Fail(core.NewError("keys.no_tier1_provider: tier-1 KEK provider unavailable; unlock the account first"))
+		}
+		kekSigil, err := sigil.NewChaChaPolySigil(kek, nil)
+		if err != nil {
+			return core.Fail(core.E("keys.ensureMaster", "init tier-1 KEK sigil", err))
+		}
+		unwrapped, err := kekSigil.Out(blob)
+		if err != nil {
+			return core.Fail(core.E("keys.ensureMaster", "unwrap tier-1 KEK envelope", err))
+		}
+		if len(unwrapped) != masterKeySize {
+			return core.Fail(core.NewError("keys.ensureMaster: tier-1 KEK-unwrapped master has wrong length"))
+		}
+		s.tier1Master = unwrapped
+		return core.Ok(s.tier1Master)
+	}
+
+	// Tier-1 master absent — fresh install path. Requires
+	// tier-1 KEK provider live so we can wrap the new master.
+	kek, ok := s.currentKEKFor(tier1)
+	if !ok {
+		return core.Fail(core.NewError("keys.no_tier1_provider: cannot generate tier-1 master without KEK provider (unlock the account first)"))
+	}
+	randR := core.RandomBytes(masterKeySize)
+	if !randR.OK {
+		return core.Fail(core.E("keys.ensureMaster", "generate tier-1 master", randR.Value.(error)))
+	}
+	master := randR.Value.([]byte)
+	if w := s.writeMasterLocked(tier1Path, master, kek); !w.OK {
+		return w
+	}
+	s.tier1Master = master
+	return core.Ok(s.tier1Master)
+}
+
+// migrateTier1Locked runs the RFC §4.4 Step 1-3 tier-1 migration
+// from a pre-partition install. Caller MUST hold s.mu. Idempotent
+// via s.migrationComplete latch; subsequent SetKEKProvider calls
+// skip the sub-sequence.
+func (s *Service) migrateTier1Locked() {
+	// Defensive: any error logs a core.Warn and leaves
+	// migrationComplete=false so the next SetKEKProvider retries.
+	// Tier-1 reads will fail-closed via ensureTier1Locked until
+	// migration succeeds.
+	dirR := paths.KeysDir()
+	if !dirR.OK {
+		core.Warn("keys: tier-1 migration skipped — keys dir resolve failed", "err", dirR.Error())
+		return
+	}
+	dir := dirR.Value.(string)
+
+	legacyPath := core.PathJoin(dir, legacyMasterFileName)
+	tier1Path := core.PathJoin(dir, masterTier1FileName)
+
+	legacyStat := core.Stat(legacyPath)
+	tier1Stat := core.Stat(tier1Path)
+
+	// Step 2 — branch.
+	if !legacyStat.OK && !tier1Stat.OK {
+		// Fresh tier-1 install — no migration needed.
+		s.migrationComplete = true
+		return
+	}
+	if legacyStat.OK && tier1Stat.OK {
+		// RFC §4.4 Step 2 corruption signal — both masters
+		// present means a prior migration failed mid-way.
+		// Refuse to proceed; operator must resolve manually.
+		core.Warn("keys: BOTH .master and .master-tier1 present — refusing to migrate; resolve manually before unlocking",
+			"dir", dir)
+		return
+	}
+	if tier1Stat.OK && !legacyStat.OK {
+		// Already-migrated tier-1 substrate — nothing to do.
+		s.migrationComplete = true
+		return
+	}
+
+	// Step 3 — legacy .master present, tier-1 absent. Migrate.
+	kek, ok := s.currentKEKFor(tier1)
+	if !ok {
+		// Defensive — caller guard already checks but the
+		// provider could race-flip in between. Leave latch
+		// unset so the next SetKEKProvider retries.
+		return
+	}
+
+	// 3a. Read legacy .master.
+	legacyR := core.ReadFile(legacyPath)
+	if !legacyR.OK {
+		core.Warn("keys: tier-1 migration read legacy master failed", "err", legacyR.Error())
+		return
+	}
+	legacy := legacyR.Value.([]byte)
+
+	// 3b. Unwrap if needed (post-#1624 wrapped form may have been
+	// produced by an earlier session under a different tier-1 KEK
+	// — we just need the underlying 32 bytes to re-wrap under the
+	// current KEK).
+	var legacyMaster []byte
+	switch len(legacy) {
+	case masterKeySize:
+		legacyMaster = legacy
+	case kekWrappedMasterLen:
+		kekSigil, err := sigil.NewChaChaPolySigil(kek, nil)
+		if err != nil {
+			core.Warn("keys: tier-1 migration init legacy KEK sigil failed", "err", err.Error())
+			return
+		}
+		unwrapped, err := kekSigil.Out(legacy)
+		if err != nil {
+			core.Warn("keys: tier-1 migration KEK-unwrap legacy master failed (provider key mismatch?)",
+				"err", err.Error(),
+				"len", core.Sprintf("%d", len(legacy)))
+			return
+		}
+		if len(unwrapped) != masterKeySize {
+			core.Warn("keys: tier-1 migration unwrapped legacy master wrong length",
+				"got", core.Sprintf("%d", len(unwrapped)))
+			return
+		}
+		legacyMaster = unwrapped
+	default:
+		core.Warn("keys: tier-1 migration legacy master wrong length",
+			"got", core.Sprintf("%d", len(legacy)))
+		return
+	}
+
+	// 3c. If tier-0 master is absent at this point AND we have a
+	// tier-0 KEK provider, generate + persist. (Tier-0 may already
+	// be present from Step 0b.) Skip silently if no tier-0 provider
+	// — tier-0 is independent and can be wired later.
+	tier0Path := core.PathJoin(dir, masterTier0FileName)
+	tier0Stat := core.Stat(tier0Path)
+	if !tier0Stat.OK {
+		if t0kek, t0ok := s.currentKEKFor(tier0); t0ok {
+			randR := core.RandomBytes(masterKeySize)
+			if !randR.OK {
+				core.Warn("keys: tier-1 migration Step 3c gen tier-0 master failed", "err", randR.Error())
+				return
+			}
+			t0master := randR.Value.([]byte)
+			if w := s.writeMasterLocked(tier0Path, t0master, t0kek); !w.OK {
+				core.Warn("keys: tier-1 migration Step 3c write tier-0 master failed", "err", w.Error())
+				return
+			}
+			s.tier0Master = t0master
+		}
+	}
+
+	// 3d. Re-wrap legacy master bytes under tier-1 KEK + write to
+	// .master-tier1.
+	if w := s.writeMasterLocked(tier1Path, legacyMaster, kek); !w.OK {
+		core.Warn("keys: tier-1 migration Step 3d write tier-1 master failed", "err", w.Error())
+		return
+	}
+	s.tier1Master = legacyMaster
+
+	// 3e. Re-encrypt single-instance.aead under tier-0 master,
+	// atomic-rename to single-instance.t0.aead — only if it's
+	// still present (Step 0b 32B-raw-legacy path may have already
+	// migrated it).
+	legacySIPath := core.PathJoin(dir, singleInstanceRef+legacyBlobSuffix)
+	if statR := core.Stat(legacySIPath); statR.OK {
+		// Need a live tier-0 master to re-seal.
+		if len(s.tier0Master) == masterKeySize {
+			blobR := core.ReadFile(legacySIPath)
+			if !blobR.OK {
+				core.Warn("keys: tier-1 migration Step 3e read legacy single-instance failed", "err", blobR.Error())
+				return
+			}
+			oldSigil, err := sigil.NewChaChaPolySigil(legacyMaster, nil)
+			if err != nil {
+				core.Warn("keys: tier-1 migration Step 3e init legacy sigil failed", "err", err.Error())
+				return
+			}
+			plaintext, err := oldSigil.Out(blobR.Value.([]byte))
+			if err != nil {
+				core.Warn("keys: tier-1 migration Step 3e decrypt single-instance failed", "err", err.Error())
+				return
+			}
+			newSigil, err := sigil.NewChaChaPolySigil(s.tier0Master, nil)
+			if err != nil {
+				core.Warn("keys: tier-1 migration Step 3e init tier-0 sigil failed", "err", err.Error())
+				return
+			}
+			newBlob, err := newSigil.In(plaintext)
+			if err != nil {
+				core.Warn("keys: tier-1 migration Step 3e re-seal single-instance failed", "err", err.Error())
+				return
+			}
+			newSIPath := core.PathJoin(dir, singleInstanceRef+tier0BlobSuffix)
+			if w := core.WriteFile(newSIPath, newBlob, fileMode); !w.OK {
+				core.Warn("keys: tier-1 migration Step 3e write tier-0 single-instance failed", "err", w.Error())
+				return
+			}
+			if r := core.Remove(legacySIPath); !r.OK {
+				core.Warn("keys: tier-1 migration Step 3e remove legacy single-instance failed", "err", r.Error())
+			}
+		} else {
+			core.Warn("keys: tier-1 migration Step 3e — single-instance.aead present but tier-0 master not loaded; skipping (will retry on next tier-0 op)")
+		}
+	}
+
+	// 3f. Rename every remaining .aead (non-single-instance,
+	// non-tier-suffixed) to .t1.aead — the same key bytes are now
+	// the tier-1 master, so the crypto is unchanged; this step is
+	// a pure rename per RFC §4.4 Step 3f optimisation note.
+	entriesR := core.ReadDir(core.DirFS(dir), ".")
+	if !entriesR.OK {
+		core.Warn("keys: tier-1 migration Step 3f readdir failed", "err", entriesR.Error())
+		return
+	}
+	entries := entriesR.Value.([]core.FsDirEntry)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// Only legacy .aead files; skip already-suffixed
+		// .t0.aead / .t1.aead, dot-files, and the
+		// single-instance.aead which Step 3e (or Step 0b) owns.
+		if !core.HasSuffix(name, legacyBlobSuffix) {
+			continue
+		}
+		if core.HasSuffix(name, tier0BlobSuffix) || core.HasSuffix(name, tier1BlobSuffix) {
+			continue
+		}
+		if name == singleInstanceRef+legacyBlobSuffix {
+			continue
+		}
+		ref := name[:len(name)-len(legacyBlobSuffix)]
+		oldPath := core.PathJoin(dir, name)
+		newPath := core.PathJoin(dir, ref+tier1BlobSuffix)
+		// Read + write + remove. core/go has no Rename primitive
+		// in the imported surface; copy-then-remove is equivalent
+		// for the migration window (file mode preserved).
+		blobR := core.ReadFile(oldPath)
+		if !blobR.OK {
+			core.Warn("keys: tier-1 migration Step 3f read blob failed",
+				"file", name, "err", blobR.Error())
+			return
+		}
+		if w := core.WriteFile(newPath, blobR.Value.([]byte), fileMode); !w.OK {
+			core.Warn("keys: tier-1 migration Step 3f write blob failed",
+				"file", ref+tier1BlobSuffix, "err", w.Error())
+			return
+		}
+		if r := core.Remove(oldPath); !r.OK {
+			core.Warn("keys: tier-1 migration Step 3f remove legacy blob failed",
+				"file", name, "err", r.Error())
+		}
+	}
+
+	// 3g. Delete legacy .master only after 3a-3f succeeded.
+	if r := core.Remove(legacyPath); !r.OK {
+		core.Warn("keys: tier-1 migration Step 3g remove legacy .master failed", "err", r.Error())
+		// Don't unlatch — operator can `rm .master` manually;
+		// the migration substrate is otherwise complete.
+	}
+
+	// 3h.
+	core.Info("keys: migrated to tier-partitioned scheme")
+	s.migrationComplete = true
+}
+
+// writeMasterLocked persists master to disk in KEK-wrapped form.
+// Caller MUST hold s.mu and supply a 32-byte KEK from the live
+// provider for the target tier (caller controls which tier).
+//
+// Mantis #1624 — single write surface so the format decision
+// lives in one place. Mantis #1625 — used for both tiers; the
+// caller supplies the per-tier KEK.
+func (s *Service) writeMasterLocked(masterPath string, master, kek []byte) core.Result {
 	kekSigil, err := sigil.NewChaChaPolySigil(kek, nil)
 	if err != nil {
-		return core.Fail(core.E("keys.ensureMaster", "init KEK sigil for write", err))
+		return core.Fail(core.E("keys.writeMasterLocked", "init KEK sigil", err))
 	}
 	wrapped, err := kekSigil.In(master)
 	if err != nil {
-		return core.Fail(core.E("keys.ensureMaster", "wrap master under KEK", err))
+		return core.Fail(core.E("keys.writeMasterLocked", "wrap master under KEK", err))
 	}
 	if w := core.WriteFile(masterPath, wrapped, fileMode); !w.OK {
-		return core.Fail(core.E("keys.ensureMaster", "write wrapped master", w.Value.(error)))
+		return core.Fail(core.E("keys.writeMasterLocked", "write wrapped master", w.Value.(error)))
 	}
 	return core.Ok(nil)
 }
 
-// rotateMasterToKEKIfNeeded re-persists the on-disk master under the
-// current KEK iff (a) the cached master is loaded AND (b) the disk
-// representation is still the legacy 32-byte form AND (c) the KEK
-// provider is now live. Idempotent — re-running on an already-wrapped
-// master is a no-op. Caller MUST hold s.mu.
-//
-// Mantis #1624 lazy-migration shape — invoked from Put after the
-// ciphertext is sealed so any successful write post-unlock graduates
-// the master format without changing user-observable behaviour. Read
-// always handled both formats from Mantis #1624 onwards, so the
-// migration window is closed silently on the next Put.
-func (s *Service) rotateMasterToKEKIfNeeded() {
-	if len(s.master) != masterKeySize {
-		return
-	}
-	if _, ok := s.currentKEK(); !ok {
-		return
-	}
-	dirR := paths.KeysDir()
-	if !dirR.OK {
-		return
-	}
-	masterPath := core.PathJoin(dirR.Value.(string), masterFileName)
-	statR := core.Stat(masterPath)
-	if !statR.OK {
-		return
-	}
-	readR := core.ReadFile(masterPath)
-	if !readR.OK {
-		return
-	}
-	if len(readR.Value.([]byte)) != masterKeySize {
-		return // already wrapped or unrecognised; leave alone
-	}
-	// Re-persist under KEK. Failure here is logged-and-tolerated:
-	// the cached master is still authoritative for the running
-	// process, and the next boot will retry the migration on first
-	// Put. Surfacing as core.Warn matches the sibling tamper warnings.
-	if w := s.writeMasterLocked(masterPath, s.master); !w.OK {
-		core.Warn("keys: lazy KEK-wrap of legacy master failed; will retry on next write",
-			"err", w.Error())
-	}
-}
-
-// keyPath returns the absolute path for a key's ciphertext file in
-// Result.Value (string). Ref is the caller's stable identifier
-// (e.g. "openai-default"); we never trust it to contain slashes —
-// basename only. Returns Fail for empty / traversal / dot-prefixed
-// refs.
-func keyPath(ref string) core.Result {
+// keyPath returns the absolute path for a key's ciphertext file
+// in Result.Value (string), per tier. Ref is the caller's stable
+// identifier (e.g. "openai-default"); we never trust it to
+// contain slashes — basename only. Returns Fail for empty /
+// traversal / dot-prefixed refs, AND for refs matching
+// `\.t[0-9]\.aead$` (ADD-K3) so a caller can't sneak a tier
+// suffix into the ref and shadow on-disk tier ownership.
+func keyPath(ref string, t tier) core.Result {
 	if ref == "" {
 		return core.Fail(core.NewError("keys: ref must not be empty"))
 	}
 	if core.Contains(ref, "/") || core.Contains(ref, "\\") || core.HasPrefix(ref, ".") {
 		return core.Fail(core.NewError("keys: ref must not contain path separators or start with '.'"))
 	}
+	if hasTierSuffix(ref) {
+		return core.Fail(core.NewError("keys.invalid_ref_suffix: ref must not end in .tN.aead (reserved for on-disk tier scheme)"))
+	}
 	dirR := paths.KeysDir()
 	if !dirR.OK {
 		return dirR
 	}
-	return core.Ok(core.PathJoin(dirR.Value.(string), ref+keyFileSuffix))
+	return core.Ok(core.PathJoin(dirR.Value.(string), ref+blobSuffixFor(t)))
 }
 
-// Put encrypts and stores plaintext under ref. Overwrites silently.
-//
-// Usage example:
-//
-//	r := svc.Put("openai-default", []byte("sk-abc123"))
-func (s *Service) Put(ref string, plaintext []byte) core.Result {
-	masterR := s.ensureMaster()
-	if !masterR.OK {
-		return masterR
+// hasTierSuffix reports whether ref matches `\.t[0-9]\.aead$` —
+// the on-disk tier-suffix scheme. ADD-K3 defence against a user
+// ref shadowing on-disk tier ownership.
+func hasTierSuffix(ref string) bool {
+	const suffix = ".aead"
+	if !core.HasSuffix(ref, suffix) {
+		return false
 	}
-	pR := keyPath(ref)
+	// Strip ".aead" → look for ".tN" tail where N is one digit.
+	rem := ref[:len(ref)-len(suffix)]
+	if len(rem) < 3 {
+		return false
+	}
+	if rem[len(rem)-3] != '.' || rem[len(rem)-2] != 't' {
+		return false
+	}
+	d := rem[len(rem)-1]
+	return d >= '0' && d <= '9'
+}
+
+// putLocked seals plaintext under the tier master and writes the
+// per-tier blob. Caller provides the resolved master from
+// ensureMaster.
+func (s *Service) putLocked(t tier, ref string, plaintext, master []byte) core.Result {
+	pR := keyPath(ref, t)
 	if !pR.OK {
 		return pR
 	}
 	path := pR.Value.(string)
-	cipherSigil, err := sigil.NewChaChaPolySigil(masterR.Value.([]byte), nil)
+	cipherSigil, err := sigil.NewChaChaPolySigil(master, nil)
 	if err != nil {
-		return core.Fail(core.E("keys.Put", "init sigil", err))
+		return core.Fail(core.E("keys.put", "init sigil", err))
 	}
 	blob, err := cipherSigil.In(plaintext)
 	if err != nil {
-		return core.Fail(core.E("keys.Put", "seal", err))
+		return core.Fail(core.E("keys.put", "seal", err))
 	}
 	if w := core.WriteFile(path, blob, fileMode); !w.OK {
-		return core.Fail(core.E("keys.Put", "write ciphertext", w.Value.(error)))
+		return core.Fail(core.E("keys.put", "write ciphertext", w.Value.(error)))
 	}
-	// Mantis #1624 lazy KEK-wrap of legacy master — if the master
-	// on disk is still the raw 32-byte form AND a KEK provider is
-	// now live (account unlocked), re-persist the master under KEK
-	// so the install converges on the wrapped format without an
-	// explicit migration ticket. Held under s.mu to keep the
-	// read-after-rotate window coherent.
-	s.mu.Lock()
-	s.rotateMasterToKEKIfNeeded()
-	s.mu.Unlock()
 	return core.Ok(nil)
 }
 
-// Get reads and decrypts the plaintext stored under ref. The
-// returned Result.Value is []byte; an empty ref or missing file
-// fails. NOT exposed via the Wails binding surface — plaintext
-// secrets must not cross the WebView. Internal Go callers only.
-//
-// Usage example:
-//
-//	r := svc.Get("openai-default")
-//	if r.OK { plaintext := r.Value.([]byte); _ = plaintext }
-func (s *Service) Get(ref string) core.Result {
-	masterR := s.ensureMaster()
-	if !masterR.OK {
-		return masterR
-	}
-	pR := keyPath(ref)
+// getLocked reads + decrypts the per-tier blob using master.
+func (s *Service) getLocked(t tier, ref string, master []byte) core.Result {
+	pR := keyPath(ref, t)
 	if !pR.OK {
 		return pR
 	}
 	path := pR.Value.(string)
 	readR := core.ReadFile(path)
 	if !readR.OK {
-		return core.Fail(core.E("keys.Get", "read ciphertext", readR.Value.(error)))
+		return core.Fail(core.E("keys.get", "read ciphertext", readR.Value.(error)))
 	}
-	cipherSigil, err := sigil.NewChaChaPolySigil(masterR.Value.([]byte), nil)
+	cipherSigil, err := sigil.NewChaChaPolySigil(master, nil)
 	if err != nil {
-		return core.Fail(core.E("keys.Get", "init sigil", err))
+		return core.Fail(core.E("keys.get", "init sigil", err))
 	}
 	plaintext, err := cipherSigil.Out(readR.Value.([]byte))
 	if err != nil {
-		return core.Fail(core.E("keys.Get", "open ciphertext", err))
+		return core.Fail(core.E("keys.get", "open ciphertext", err))
 	}
 	return core.Ok(plaintext)
 }
 
-// Delete removes the encrypted file. No-op (OK) when the ref
-// isn't registered.
+// --- Tier-0 API (pre-unlock substrate) ---
+
+// PutTier0 encrypts and stores plaintext under ref in the tier-0
+// partition. Tier-0 is the pre-unlock substrate — only refs that
+// MUST be readable at process boot (e.g. single-instance Wails
+// IPC key) belong here.
 //
 // Usage example:
 //
-//	r := svc.Delete("openai-default")
-func (s *Service) Delete(ref string) core.Result {
-	pR := keyPath(ref)
+//	r := svc.PutTier0("single-instance", key32)
+func (s *Service) PutTier0(ref string, plaintext []byte) core.Result {
+	masterR := s.ensureMaster(tier0)
+	if !masterR.OK {
+		return masterR
+	}
+	return s.putLocked(tier0, ref, plaintext, masterR.Value.([]byte))
+}
+
+// GetTier0 reads and decrypts plaintext stored under ref in the
+// tier-0 partition. NOT exposed via the Wails binding surface —
+// frontend has no legitimate tier-0 surface (RFC §4.3 Q4).
+//
+// Usage example:
+//
+//	r := svc.GetTier0("single-instance")
+//	if r.OK { key := r.Value.([]byte); _ = key }
+func (s *Service) GetTier0(ref string) core.Result {
+	masterR := s.ensureMaster(tier0)
+	if !masterR.OK {
+		return masterR
+	}
+	return s.getLocked(tier0, ref, masterR.Value.([]byte))
+}
+
+// HasTier0 reports whether a tier-0 blob exists for ref. Cheap;
+// doesn't touch the master key.
+//
+// Usage example:
+//
+//	r := svc.HasTier0("single-instance")
+//	if r.OK { exists := r.Value.(bool); _ = exists }
+func (s *Service) HasTier0(ref string) core.Result {
+	pR := keyPath(ref, tier0)
+	if !pR.OK {
+		return pR
+	}
+	statR := core.Stat(pR.Value.(string))
+	return core.Ok(statR.OK)
+}
+
+// DeleteTier0 removes the tier-0 encrypted file. Idempotent.
+//
+// Usage example:
+//
+//	r := svc.DeleteTier0("single-instance")
+func (s *Service) DeleteTier0(ref string) core.Result {
+	pR := keyPath(ref, tier0)
 	if !pR.OK {
 		return pR
 	}
 	path := pR.Value.(string)
-	statR := core.Stat(path)
-	if !statR.OK {
-		// Missing → success (idempotent).
+	if statR := core.Stat(path); !statR.OK {
 		return core.Ok(nil)
 	}
 	if r := core.Remove(path); !r.OK {
-		return core.Fail(core.E("keys.Delete", "remove ciphertext", r.Value.(error)))
+		return core.Fail(core.E("keys.DeleteTier0", "remove ciphertext", r.Value.(error)))
 	}
 	return core.Ok(nil)
 }
 
-// List returns every registered key ref (filenames stripped of
-// the .aead suffix). The .master file is excluded. Refs only;
+// ListTier0 returns every tier-0 ref (filenames stripped of the
+// .t0.aead suffix). Master files are excluded.
+//
+// Usage example:
+//
+//	r := svc.ListTier0()
+//	if r.OK { refs := r.Value.([]string); _ = refs }
+func (s *Service) ListTier0() core.Result {
+	return s.listTier(tier0)
+}
+
+// GetOrCreateTier0 returns the plaintext stored under ref in
+// tier-0; if no blob exists yet it calls generate(), stores the
+// result, then returns it. Concurrent callers serialise via
+// getOrCreateMu so generate fires at most once per ref.
+//
+// Usage example:
+//
+//	r := svc.GetOrCreateTier0("single-instance", func() ([]byte, error) {
+//	    return core.RandomBytes(32).Value.([]byte), nil
+//	})
+//	if r.OK { key := r.Value.([]byte); _ = key }
+func (s *Service) GetOrCreateTier0(ref string, generate func() ([]byte, error)) core.Result {
+	return s.getOrCreate(tier0, ref, generate)
+}
+
+// --- Tier-1 API (post-unlock provider creds) ---
+
+// PutTier1 encrypts and stores plaintext under ref in the tier-1
+// partition. Tier-1 holds long-lived bearer credentials (OpenAI,
+// Anthropic, ...) — requires the account to be unlocked.
+//
+// Usage example:
+//
+//	r := svc.PutTier1("openai-default", []byte("sk-abc123"))
+func (s *Service) PutTier1(ref string, plaintext []byte) core.Result {
+	masterR := s.ensureMaster(tier1)
+	if !masterR.OK {
+		return masterR
+	}
+	return s.putLocked(tier1, ref, plaintext, masterR.Value.([]byte))
+}
+
+// GetTier1 reads and decrypts plaintext stored under ref in the
+// tier-1 partition. NOT exposed via the Wails binding surface —
+// plaintext secrets must not cross the WebView. Internal Go
+// callers only.
+//
+// Usage example:
+//
+//	r := svc.GetTier1("openai-default")
+//	if r.OK { plaintext := r.Value.([]byte); _ = plaintext }
+func (s *Service) GetTier1(ref string) core.Result {
+	masterR := s.ensureMaster(tier1)
+	if !masterR.OK {
+		return masterR
+	}
+	return s.getLocked(tier1, ref, masterR.Value.([]byte))
+}
+
+// HasTier1 reports whether a tier-1 blob exists for ref. Cheap;
+// doesn't touch the master key.
+//
+// Usage example:
+//
+//	r := svc.HasTier1("openai-default")
+//	if r.OK { exists := r.Value.(bool); _ = exists }
+func (s *Service) HasTier1(ref string) core.Result {
+	pR := keyPath(ref, tier1)
+	if !pR.OK {
+		return pR
+	}
+	statR := core.Stat(pR.Value.(string))
+	return core.Ok(statR.OK)
+}
+
+// DeleteTier1 removes the tier-1 encrypted file. Idempotent.
+//
+// Usage example:
+//
+//	r := svc.DeleteTier1("openai-default")
+func (s *Service) DeleteTier1(ref string) core.Result {
+	pR := keyPath(ref, tier1)
+	if !pR.OK {
+		return pR
+	}
+	path := pR.Value.(string)
+	if statR := core.Stat(path); !statR.OK {
+		return core.Ok(nil)
+	}
+	if r := core.Remove(path); !r.OK {
+		return core.Fail(core.E("keys.DeleteTier1", "remove ciphertext", r.Value.(error)))
+	}
+	return core.Ok(nil)
+}
+
+// ListTier1 returns every tier-1 ref (filenames stripped of the
+// .t1.aead suffix). Master files are excluded. Refs only;
 // plaintext is never read.
 //
 // Usage example:
 //
-//	r := svc.List()
+//	r := svc.ListTier1()
 //	if r.OK { refs := r.Value.([]string); _ = refs }
-func (s *Service) List() core.Result {
+func (s *Service) ListTier1() core.Result {
+	return s.listTier(tier1)
+}
+
+// GetOrCreateTier1 returns the plaintext stored under ref in
+// tier-1; if no blob exists yet it calls generate(), stores the
+// result, then returns it. Concurrent callers serialise via
+// getOrCreateMu so generate fires at most once per ref.
+//
+// Usage example:
+//
+//	r := svc.GetOrCreateTier1("provider-x", func() ([]byte, error) {
+//	    return core.RandomBytes(32).Value.([]byte), nil
+//	})
+//	if r.OK { key := r.Value.([]byte); _ = key }
+func (s *Service) GetOrCreateTier1(ref string, generate func() ([]byte, error)) core.Result {
+	return s.getOrCreate(tier1, ref, generate)
+}
+
+// listTier is the shared body for ListTier0 / ListTier1.
+func (s *Service) listTier(t tier) core.Result {
 	dirR := paths.KeysDir()
 	if !dirR.OK {
 		return dirR
 	}
 	entriesR := core.ReadDir(core.DirFS(dirR.Value.(string)), ".")
 	if !entriesR.OK {
-		return core.Fail(core.E("keys.List", "read keys dir", entriesR.Value.(error)))
+		return core.Fail(core.E("keys.list", "read keys dir", entriesR.Value.(error)))
 	}
+	suffix := blobSuffixFor(t)
 	entries := entriesR.Value.([]core.FsDirEntry)
 	out := []string{}
 	for _, e := range entries {
@@ -616,29 +1246,56 @@ func (s *Service) List() core.Result {
 			continue
 		}
 		name := e.Name()
-		if !core.HasSuffix(name, keyFileSuffix) {
+		if !core.HasSuffix(name, suffix) {
 			continue
 		}
-		out = append(out, name[:len(name)-len(keyFileSuffix)])
+		out = append(out, name[:len(name)-len(suffix)])
 	}
 	return core.Ok(out)
 }
 
-// Has reports whether a ciphertext file exists for ref. Cheap;
-// doesn't touch the master key.
-//
-// Usage example:
-//
-//	r := svc.Has("openai-default")
-//	if r.OK { exists := r.Value.(bool); _ = exists }
-func (s *Service) Has(ref string) core.Result {
-	pR := keyPath(ref)
-	if !pR.OK {
-		return pR
+// getOrCreate is the shared body for GetOrCreateTier0 /
+// GetOrCreateTier1. Mirrors the Cerberus pass-6 MEDIUM lock
+// discipline: fast-path Get under no extra lock; slow-path
+// re-check under getOrCreateMu so concurrent racers don't both
+// fire generate.
+func (s *Service) getOrCreate(t tier, ref string, generate func() ([]byte, error)) core.Result {
+	get := s.getByTier(t, ref)
+	if get.OK {
+		return get
 	}
-	path := pR.Value.(string)
-	statR := core.Stat(path)
-	return core.Ok(statR.OK)
+	s.getOrCreateMu.Lock()
+	defer s.getOrCreateMu.Unlock()
+	get = s.getByTier(t, ref)
+	if get.OK {
+		return get
+	}
+	raw, err := generate()
+	if err != nil {
+		return core.Fail(core.E("keys.GetOrCreate", "generate", err))
+	}
+	if r := s.putByTier(t, ref, raw); !r.OK {
+		return r
+	}
+	return core.Ok(raw)
+}
+
+// getByTier dispatches Get to the per-tier method without
+// re-entering the public surface (avoids double validator + clear
+// lock semantics for the GetOrCreate slow-path).
+func (s *Service) getByTier(t tier, ref string) core.Result {
+	if t == tier0 {
+		return s.GetTier0(ref)
+	}
+	return s.GetTier1(ref)
+}
+
+// putByTier dispatches Put to the per-tier method.
+func (s *Service) putByTier(t tier, ref string, plaintext []byte) core.Result {
+	if t == tier0 {
+		return s.PutTier0(ref, plaintext)
+	}
+	return s.PutTier1(ref, plaintext)
 }
 
 // --- Wails-binding lifecycle ---
@@ -652,108 +1309,89 @@ func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 
-// ServiceShutdown clears the cached master from memory.
+// ServiceShutdown clears the cached per-tier masters from memory.
 func (s *Service) ServiceShutdown() core.Result {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.master = nil
+	s.tier0Master = nil
+	s.tier1Master = nil
 	return core.Ok(nil)
 }
 
-// WPut is the Wails-binding-friendly Put (string plaintext for
-// JS-ergonomic call sites — TS doesn't enjoy raw []byte). Frontend:
+// WPutTier1 is the Wails-binding-friendly PutTier1 (string
+// plaintext for JS-ergonomic call sites — TS doesn't enjoy raw
+// []byte). Tier-0 W-methods are NOT generated per RFC §4.3 Q4 —
+// frontend has no legitimate tier-0 surface.
 //
-//	import { WPut } from "@desktop/keys/service";
-//	await WPut("openai-default", "sk-abc123");
+//	import { WPutTier1 } from "@desktop/keys/service";
+//	await WPutTier1("openai-default", "sk-abc123");
+func (s *Service) WPutTier1(ref, plaintext string) core.Result {
+	return s.PutTier1(ref, []byte(plaintext))
+}
+
+// WListTier1 is the Wails-binding-friendly ListTier1.
+func (s *Service) WListTier1() core.Result { return s.ListTier1() }
+
+// WHasTier1 reports tier-1 presence without decrypting.
+func (s *Service) WHasTier1(ref string) core.Result { return s.HasTier1(ref) }
+
+// WDeleteTier1 removes a tier-1 ref. Idempotent.
+func (s *Service) WDeleteTier1(ref string) core.Result { return s.DeleteTier1(ref) }
+
+// WPut / WList / WHas / WDelete are retained as tier-1 shims
+// until the E.K.C frontend audit + Wails binding regeneration
+// pass migrates the @desktop/keys/service callers (presently the
+// configure-agent-modal in frontend/src/lit/ext/). After E.K.C
+// these methods are deleted in lockstep with the frontend.
+//
+// SECURITY-NOTE: A2 no-shim (RFC §4.3 / Cerberus ADD-K2)
+// specifically forbids untiered Put/Get on the Go-side surface
+// because callers there could route a tier-0 secret to tier-1 or
+// vice versa. The Wails surface NEVER touched tier-0 (no W-method
+// exposed it; the only tier-0 ref is single-instance, a Go-side
+// concern) — so the W-prefixed shims have no foot-gun shape: they
+// route only to tier-1, which is where every existing frontend
+// caller already wrote.
+
+// WPut routes to PutTier1 for binding continuity. Deleted in E.K.C.
 func (s *Service) WPut(ref, plaintext string) core.Result {
-	return s.Put(ref, []byte(plaintext))
+	return s.PutTier1(ref, []byte(plaintext))
 }
 
-// WList is the Wails-binding-friendly List. Same shape; named with
-// the W- prefix for binding-clarity matching the runner / server
-// W-prefixed lifecycle.
-func (s *Service) WList() core.Result { return s.List() }
+// WList routes to ListTier1 for binding continuity. Deleted in E.K.C.
+func (s *Service) WList() core.Result { return s.ListTier1() }
 
-// WHas reports presence without decrypting. Plaintext never crosses
-// the binding.
-func (s *Service) WHas(ref string) core.Result { return s.Has(ref) }
+// WHas routes to HasTier1 for binding continuity. Deleted in E.K.C.
+func (s *Service) WHas(ref string) core.Result { return s.HasTier1(ref) }
 
-// WDelete removes a ref. Idempotent.
-func (s *Service) WDelete(ref string) core.Result { return s.Delete(ref) }
-
-// GetOrCreate returns the plaintext stored under ref; if no blob exists
-// yet it calls generate(), stores the result under ref, then returns it.
-// generate must return exactly masterKeySize bytes for keys used as
-// symmetric keys (the caller is responsible for the length contract).
-//
-// Cerberus pass-6 MEDIUM — the previous implementation did Get →
-// generate() → Put without holding a lock across the sequence. Two
-// concurrent callers could both miss the Get, both generate distinct
-// random keys, both Put — the second Put silently overwrites the
-// first, but each caller returns ITS OWN generated bytes. The
-// persisted file then disagrees with one of the in-memory copies,
-// breaking any channel auth that relies on "the key on disk is the
-// one I'm using". The fix wraps the full miss→generate→put window
-// under s.mu — at most one generate() call fires per ref across
-// concurrent callers.
-//
-// In actual lthn boot today only one caller (desktop.Run's
-// SingleInstanceKey) reaches this — single goroutine, no live race.
-// But the contract is now correct for future callers (rotation,
-// multi-key schemas) without surprising them.
-//
-// Usage example:
-//
-//	r := svc.GetOrCreate("single-instance", func() ([]byte, error) {
-//	    return core.RandomBytes(32).Value.([]byte), nil
-//	})
-//	if r.OK { key := r.Value.([]byte); _ = key }
-func (s *Service) GetOrCreate(ref string, generate func() ([]byte, error)) core.Result {
-	// Fast path — unlocked Get for the common case (key already
-	// persisted from a prior boot).
-	if r := s.Get(ref); r.OK {
-		return r
-	}
-	// Slow path — take getOrCreateMu (distinct from s.mu which Put
-	// → ensureMaster already takes — recursive lock would deadlock).
-	// Re-check inside the lock so a concurrent winner's Put becomes
-	// the canonical value (both racers won't run generate twice).
-	s.getOrCreateMu.Lock()
-	defer s.getOrCreateMu.Unlock()
-	if r := s.Get(ref); r.OK {
-		return r
-	}
-	raw, err := generate()
-	if err != nil {
-		return core.Fail(core.E("keys.GetOrCreate", "generate", err))
-	}
-	if r := s.Put(ref, raw); !r.OK {
-		return r
-	}
-	return core.Ok(raw)
-}
+// WDelete routes to DeleteTier1 for binding continuity. Deleted in E.K.C.
+func (s *Service) WDelete(ref string) core.Result { return s.DeleteTier1(ref) }
 
 // singleInstanceRef is the stable key name for the per-install
-// SingleInstance encryption key.
+// SingleInstance encryption key — tier-0 (pre-unlock substrate).
 const singleInstanceRef = "single-instance"
 
 // SingleInstanceKey returns the 32-byte per-install key used to
-// authenticate the Wails single-instance IPC channel. On first call
-// it generates a cryptographically random key, persists it under
-// ~/Lethean/data/keys/single-instance.aead, and returns it. Every
-// subsequent call reloads the same persisted bytes — the key is stable
-// across restarts.
+// authenticate the Wails single-instance IPC channel. On first
+// call it generates a cryptographically random key, persists it
+// under ~/Lethean/data/keys/single-instance.t0.aead (tier-0), and
+// returns it. Every subsequent call reloads the same persisted
+// bytes — the key is stable across restarts.
 //
-// Cerberus #1442: replaces the build-time constant in pkg/desktop that
-// shared the same EncryptionKey across every installed binary on every
-// machine, defeating the authenticated-channel guarantee.
+// Cerberus #1442 — replaces the build-time constant in
+// pkg/desktop that shared the same EncryptionKey across every
+// installed binary on every machine.
+//
+// Mantis #1625 — wired to tier-0 (pre-unlock substrate) so the
+// Wails IPC continues to work before the user has unlocked an
+// account.
 //
 // Usage example:
 //
 //	r := svc.SingleInstanceKey()
 //	if r.OK { key := r.Value.([32]byte); _ = key }
 func (s *Service) SingleInstanceKey() core.Result {
-	r := s.GetOrCreate(singleInstanceRef, func() ([]byte, error) {
+	r := s.GetOrCreateTier0(singleInstanceRef, func() ([]byte, error) {
 		rr := core.RandomBytes(masterKeySize)
 		if !rr.OK {
 			return nil, rr.Value.(error)

@@ -1,7 +1,8 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-// Example*** functions for every public Service symbol — required
-// by the v0.9.0 audit. These compile and render via `go doc`.
+// Example*** functions for every public Service symbol after the
+// tier partition (RFC.stage-e-keys-partition v3 — Mantis #1625).
+// These compile and render via `go doc`.
 
 package keys_test
 
@@ -25,58 +26,134 @@ func ExampleRegister() {
 	}
 }
 
-func ExampleService_Put() {
+func ExampleService_PutTier0() {
 	r := keys.New()
 	if !r.OK {
 		return
 	}
 	svc := r.Value.(*keys.Service)
-	_ = svc.Put("openai-default", []byte("sk-abc"))
+	_ = svc.PutTier0("single-instance", []byte{0x99})
 }
 
-func ExampleService_Get() {
+func ExampleService_GetTier0() {
 	r := keys.New()
 	if !r.OK {
 		return
 	}
 	svc := r.Value.(*keys.Service)
-	got := svc.Get("openai-default")
+	got := svc.GetTier0("single-instance")
 	if got.OK {
 		_ = got.Value.([]byte)
 	}
 }
 
-func ExampleService_Delete() {
+func ExampleService_DeleteTier0() {
 	r := keys.New()
 	if !r.OK {
 		return
 	}
 	svc := r.Value.(*keys.Service)
-	_ = svc.Delete("openai-default")
+	_ = svc.DeleteTier0("single-instance")
 }
 
-func ExampleService_List() {
+func ExampleService_HasTier0() {
 	r := keys.New()
 	if !r.OK {
 		return
 	}
 	svc := r.Value.(*keys.Service)
-	l := svc.List()
+	h := svc.HasTier0("single-instance")
+	if h.OK {
+		_ = h.Value.(bool)
+	}
+}
+
+func ExampleService_ListTier0() {
+	r := keys.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*keys.Service)
+	l := svc.ListTier0()
 	if l.OK {
 		_ = l.Value.([]string)
 	}
 }
 
-func ExampleService_Has() {
+func ExampleService_GetOrCreateTier0() {
 	r := keys.New()
 	if !r.OK {
 		return
 	}
 	svc := r.Value.(*keys.Service)
-	h := svc.Has("openai-default")
+	_ = svc.GetOrCreateTier0("single-instance", func() ([]byte, error) {
+		return []byte{0x99}, nil
+	})
+}
+
+func ExampleService_PutTier1() {
+	r := keys.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*keys.Service)
+	_ = svc.PutTier1("openai-default", []byte("sk-abc"))
+}
+
+func ExampleService_GetTier1() {
+	r := keys.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*keys.Service)
+	got := svc.GetTier1("openai-default")
+	if got.OK {
+		_ = got.Value.([]byte)
+	}
+}
+
+func ExampleService_DeleteTier1() {
+	r := keys.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*keys.Service)
+	_ = svc.DeleteTier1("openai-default")
+}
+
+func ExampleService_HasTier1() {
+	r := keys.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*keys.Service)
+	h := svc.HasTier1("openai-default")
 	if h.OK {
 		_ = h.Value.(bool)
 	}
+}
+
+func ExampleService_ListTier1() {
+	r := keys.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*keys.Service)
+	l := svc.ListTier1()
+	if l.OK {
+		_ = l.Value.([]string)
+	}
+}
+
+func ExampleService_GetOrCreateTier1() {
+	r := keys.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*keys.Service)
+	_ = svc.GetOrCreateTier1("openai-default", func() ([]byte, error) {
+		return []byte("sk-generated"), nil
+	})
 }
 
 func ExampleService_ServiceName() {
@@ -106,38 +183,75 @@ func ExampleService_ServiceShutdown() {
 	_ = svc.ServiceShutdown()
 }
 
-func ExampleService_WPut() {
+func ExampleService_SetKEKProvider() {
 	r := keys.New()
 	if !r.OK {
 		return
 	}
 	svc := r.Value.(*keys.Service)
-	_ = svc.WPut("openai-default", "sk-abc")
+	svc.SetKEKProvider(func() ([]byte, bool) {
+		// Production wiring: derive via HKDF over unlocked PGP key.
+		return make([]byte, 32), true
+	})
 }
 
-func ExampleService_WList() {
+func ExampleService_SetKEKProviderTier0() {
 	r := keys.New()
 	if !r.OK {
 		return
 	}
 	svc := r.Value.(*keys.Service)
-	_ = svc.WList()
+	svc.SetKEKProviderTier0(func() ([]byte, bool) {
+		// Production wiring: derive via HKDF over .seed bytes.
+		return make([]byte, 32), true
+	})
 }
 
-func ExampleService_WHas() {
+func ExampleService_SingleInstanceKey() {
 	r := keys.New()
 	if !r.OK {
 		return
 	}
 	svc := r.Value.(*keys.Service)
-	_ = svc.WHas("openai-default")
+	// Requires SetKEKProviderTier0 wired first in production.
+	k := svc.SingleInstanceKey()
+	if k.OK {
+		_ = k.Value.([32]byte)
+	}
 }
 
-func ExampleService_WDelete() {
+func ExampleService_WPutTier1() {
 	r := keys.New()
 	if !r.OK {
 		return
 	}
 	svc := r.Value.(*keys.Service)
-	_ = svc.WDelete("openai-default")
+	_ = svc.WPutTier1("openai-default", "sk-abc")
+}
+
+func ExampleService_WListTier1() {
+	r := keys.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*keys.Service)
+	_ = svc.WListTier1()
+}
+
+func ExampleService_WHasTier1() {
+	r := keys.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*keys.Service)
+	_ = svc.WHasTier1("openai-default")
+}
+
+func ExampleService_WDeleteTier1() {
+	r := keys.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*keys.Service)
+	_ = svc.WDeleteTier1("openai-default")
 }

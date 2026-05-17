@@ -168,7 +168,12 @@ func fleetSummary() int {
 	if c != nil {
 		defer c.ServiceShutdown(core.Background())
 		if ksvc, _ := core.ServiceFor[*keys.Service](c, "keys"); ksvc != nil {
-			if l := ksvc.List(); l.OK {
+			// Tier-1 only — the fleet inspector surfaces provider
+			// creds (OpenAI / Anthropic / ...), not the tier-0
+			// single-instance Wails IPC key. Tier-0 list requires
+			// the .seed-derived KEK live; the read-only inspector
+			// boots a transient Core that doesn't wire it.
+			if l := ksvc.ListTier1(); l.OK {
 				counters = append(counters, counter{"keys (encrypted)", len(l.Value.([]string))})
 			}
 		}
@@ -415,7 +420,10 @@ func fleetKeys() int {
 		core.Print(core.Stderr(), "keys: service unavailable\n")
 		return 1
 	}
-	l := svc.List()
+	// Tier-1 only — `fleet keys` lists provider credentials the
+	// runner spawns agents with. Tier-0 (single-instance) is a
+	// Go-side concern that doesn't surface in this inspector.
+	l := svc.ListTier1()
 	if !l.OK {
 		core.Print(core.Stderr(), "keys: list failed: %s\n", l.Error())
 		return 1

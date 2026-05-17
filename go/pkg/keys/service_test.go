@@ -1,17 +1,61 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-// Tests for the encrypted-at-rest keys service. AX-7 triplet per
-// public symbol named Test<File>_<Receiver>_<Method>_<Variant> for
-// methods, Test<File>_<Symbol>_<Variant> for free funcs. Each test
-// reroutes $HOME so the real ~/Lethean/data/keys/ is never touched.
+// Tests for the encrypted-at-rest keys service after the tier
+// partition (RFC.stage-e-keys-partition v3 — Mantis #1625). AX-7
+// triplet per public symbol named Test<File>_<Receiver>_<Method>_<Variant>
+// for methods, Test<File>_<Symbol>_<Variant> for free funcs.
+// Each test reroutes $HOME so the real ~/Lethean/data/keys/ is
+// never touched.
 
 package keys_test
 
 import (
+	"sync"
+
 	core "dappco.re/go"
+	"dappco.re/go/io/sigil"
 	"dappco.re/lthn/desktop/pkg/keys"
 )
 
+// fixedKEK is a deterministic 32-byte KEK used by the per-tier
+// fixtures. Production KEKs derive via HKDF; tests use a constant
+// so the on-disk wrapped masters are reproducible across runs.
+var fixedTier0KEK = bytesOf(0x42)
+var fixedTier1KEK = bytesOf(0x77)
+
+func bytesOf(b byte) []byte {
+	out := make([]byte, 32)
+	for i := range out {
+		out[i] = b
+	}
+	return out
+}
+
+// tier0Fixture constructs a keys.Service under a temp HOME with
+// the tier-0 KEK provider wired (deterministic 0x42-fill key).
+// Use when the test exercises tier-0 ops or SingleInstanceKey.
+func tier0Fixture(t *core.T) *keys.Service {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	r := keys.New()
+	core.AssertTrue(t, r.OK, "keys.New must succeed under temp HOME")
+	svc := r.Value.(*keys.Service)
+	svc.SetKEKProviderTier0(func() ([]byte, bool) { return fixedTier0KEK, true })
+	return svc
+}
+
+// tier1Fixture extends tier0Fixture by also wiring the tier-1 KEK
+// provider — the common shape for tier-1 ops and round-trip tests.
+func tier1Fixture(t *core.T) *keys.Service {
+	t.Helper()
+	svc := tier0Fixture(t)
+	svc.SetKEKProvider(func() ([]byte, bool) { return fixedTier1KEK, true })
+	return svc
+}
+
+// homeFixture is a bare Service over a temp HOME — no KEK
+// providers wired. Use only for tests that probe the
+// no-provider-wired failure path.
 func homeFixture(t *core.T) *keys.Service {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
@@ -23,8 +67,6 @@ func homeFixture(t *core.T) *keys.Service {
 // --- New ---
 
 func TestService_New_Good(t *core.T) {
-	// Direct call (not via fixture) so the body references keys.New
-	// for the audit's unreferenced-tests check.
 	t.Setenv("HOME", t.TempDir())
 	r := keys.New()
 	core.AssertTrue(t, r.OK)
@@ -53,9 +95,6 @@ func TestService_New_Ugly(t *core.T) {
 
 // --- Register ---
 
-// Production wires Register via core.WithName(...); RegisterService fires
-// post-factory inside WithName. Direct-call testing of Register must use
-// WithName to model the production lifecycle (Mantis #1457).
 func TestService_Register_Good(t *core.T) {
 	t.Setenv("HOME", t.TempDir())
 	c := core.New(core.WithName("keys", keys.Register))
@@ -79,162 +118,366 @@ func TestService_Register_Ugly(t *core.T) {
 	core.AssertNotPanics(t, func() { _ = keys.Register(c) })
 }
 
-// --- Put / Get (round-trip) ---
+// --- PutTier0 / GetTier0 round-trip ---
 
-func TestService_Service_Put_Good(t *core.T) {
-	svc := homeFixture(t)
-	r := svc.Put("openai-default", []byte("sk-abc123"))
+func TestService_Service_PutTier0_Good(t *core.T) {
+	svc := tier0Fixture(t)
+	r := svc.PutTier0("single-instance", []byte("ipc-key"))
 	core.AssertTrue(t, r.OK)
-	// Round-trip: Get returns the same plaintext.
-	got := svc.Get("openai-default")
+	got := svc.GetTier0("single-instance")
+	core.AssertTrue(t, got.OK)
+	core.AssertEqual(t, "ipc-key", string(got.Value.([]byte)))
+}
+
+func TestService_Service_PutTier0_Bad(t *core.T) {
+	svc := tier0Fixture(t)
+	core.AssertFalse(t, svc.PutTier0("", []byte("x")).OK)
+	core.AssertFalse(t, svc.PutTier0("../escape", []byte("x")).OK)
+	core.AssertFalse(t, svc.PutTier0("nested/ref", []byte("x")).OK)
+	core.AssertFalse(t, svc.PutTier0(".sneak", []byte("x")).OK)
+}
+
+func TestService_Service_PutTier0_Ugly(t *core.T) {
+	svc := tier0Fixture(t)
+	// Without tier-0 KEK provider wired, PutTier0 Fails clearly.
+	bare := homeFixture(t)
+	core.AssertFalse(t, bare.PutTier0("x", []byte("x")).OK)
+	// Overwrite is silent — second Put replaces first.
+	core.AssertTrue(t, svc.PutTier0("x", []byte("first")).OK)
+	core.AssertTrue(t, svc.PutTier0("x", []byte("second")).OK)
+	got := svc.GetTier0("x")
+	core.AssertTrue(t, got.OK)
+	core.AssertEqual(t, "second", string(got.Value.([]byte)))
+}
+
+// --- PutTier1 / GetTier1 round-trip ---
+
+func TestService_Service_PutTier1_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	r := svc.PutTier1("openai-default", []byte("sk-abc123"))
+	core.AssertTrue(t, r.OK)
+	got := svc.GetTier1("openai-default")
 	core.AssertTrue(t, got.OK)
 	core.AssertEqual(t, "sk-abc123", string(got.Value.([]byte)))
 }
 
-func TestService_Service_Put_Bad(t *core.T) {
-	svc := homeFixture(t)
-	// Empty ref must Fail rather than panic / silently overwrite.
-	core.AssertFalse(t, svc.Put("", []byte("x")).OK)
-	// Path-separator ref must Fail (anti-traversal).
-	core.AssertFalse(t, svc.Put("../escape", []byte("x")).OK)
-	core.AssertFalse(t, svc.Put("nested/ref", []byte("x")).OK)
-	// Dot-prefixed ref reserved for internal files (.master).
-	core.AssertFalse(t, svc.Put(".sneak", []byte("x")).OK)
+func TestService_Service_PutTier1_Bad(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertFalse(t, svc.PutTier1("", []byte("x")).OK)
+	core.AssertFalse(t, svc.PutTier1("../escape", []byte("x")).OK)
+	core.AssertFalse(t, svc.PutTier1("nested/ref", []byte("x")).OK)
+	core.AssertFalse(t, svc.PutTier1(".sneak", []byte("x")).OK)
 }
 
-func TestService_Service_Put_Ugly(t *core.T) {
-	svc := homeFixture(t)
-	// Overwrite is silent — second Put replaces first.
-	core.AssertTrue(t, svc.Put("x", []byte("first")).OK)
-	core.AssertTrue(t, svc.Put("x", []byte("second")).OK)
-	got := svc.Get("x")
-	core.AssertTrue(t, got.OK)
-	core.AssertEqual(t, "second", string(got.Value.([]byte)))
-	// Empty plaintext is legal — represents a zero-byte secret.
-	core.AssertTrue(t, svc.Put("y", []byte{}).OK)
-	r := svc.Get("y")
+func TestService_Service_PutTier1_Ugly(t *core.T) {
+	svc := tier1Fixture(t)
+	// Without tier-1 KEK provider wired, PutTier1 Fails clearly.
+	bare := tier0Fixture(t)
+	core.AssertFalse(t, bare.PutTier1("x", []byte("x")).OK)
+	// Empty plaintext is legal.
+	core.AssertTrue(t, svc.PutTier1("y", []byte{}).OK)
+	r := svc.GetTier1("y")
 	core.AssertTrue(t, r.OK)
 	core.AssertEqual(t, 0, len(r.Value.([]byte)))
 }
 
-// --- Get ---
+// --- GetTier0 ---
 
-func TestService_Service_Get_Good(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertTrue(t, svc.Put("k", []byte("secret")).OK)
-	r := svc.Get("k")
+func TestService_Service_GetTier0_Good(t *core.T) {
+	svc := tier0Fixture(t)
+	core.AssertTrue(t, svc.PutTier0("k", []byte("secret")).OK)
+	r := svc.GetTier0("k")
 	core.AssertTrue(t, r.OK)
 	core.AssertEqual(t, "secret", string(r.Value.([]byte)))
 }
 
-func TestService_Service_Get_Bad(t *core.T) {
-	svc := homeFixture(t)
-	// Missing ref must Fail (no silent empty-string return).
-	core.AssertFalse(t, svc.Get("never-stored").OK)
-	core.AssertFalse(t, svc.Get("").OK)
-	core.AssertFalse(t, svc.Get("../escape").OK)
+func TestService_Service_GetTier0_Bad(t *core.T) {
+	svc := tier0Fixture(t)
+	core.AssertFalse(t, svc.GetTier0("never-stored").OK)
+	core.AssertFalse(t, svc.GetTier0("").OK)
+	core.AssertFalse(t, svc.GetTier0("../escape").OK)
 }
 
-func TestService_Service_Get_Ugly(t *core.T) {
-	svc := homeFixture(t)
-	// Repeated Get against the same ref must return consistent
-	// plaintext — nonces are per-ciphertext, deterministic decrypt.
-	core.AssertTrue(t, svc.Put("k", []byte("payload")).OK)
-	first := svc.Get("k")
+func TestService_Service_GetTier0_Ugly(t *core.T) {
+	svc := tier0Fixture(t)
+	core.AssertTrue(t, svc.PutTier0("k", []byte("payload")).OK)
+	first := svc.GetTier0("k")
 	core.AssertTrue(t, first.OK)
-	second := svc.Get("k")
+	second := svc.GetTier0("k")
 	core.AssertTrue(t, second.OK)
 	core.AssertEqual(t, string(first.Value.([]byte)), string(second.Value.([]byte)))
 }
 
-// --- Delete ---
+// --- GetTier1 ---
 
-func TestService_Service_Delete_Good(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertTrue(t, svc.Put("k", []byte("x")).OK)
-	core.AssertTrue(t, svc.Delete("k").OK)
-	core.AssertFalse(t, svc.Get("k").OK, "Get after Delete must Fail")
+func TestService_Service_GetTier1_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.PutTier1("k", []byte("secret")).OK)
+	r := svc.GetTier1("k")
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, "secret", string(r.Value.([]byte)))
 }
 
-func TestService_Service_Delete_Bad(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertFalse(t, svc.Delete("").OK)
-	core.AssertFalse(t, svc.Delete("../escape").OK)
+func TestService_Service_GetTier1_Bad(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertFalse(t, svc.GetTier1("never-stored").OK)
+	core.AssertFalse(t, svc.GetTier1("").OK)
+	core.AssertFalse(t, svc.GetTier1("../escape").OK)
 }
 
-func TestService_Service_Delete_Ugly(t *core.T) {
-	svc := homeFixture(t)
-	// Delete-of-nonexistent is OK (idempotent).
-	core.AssertTrue(t, svc.Delete("not-here").OK)
-	core.AssertTrue(t, svc.Put("k", []byte("x")).OK)
-	core.AssertTrue(t, svc.Delete("k").OK)
-	core.AssertTrue(t, svc.Delete("k").OK, "second delete on same ref idempotent")
+func TestService_Service_GetTier1_Ugly(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.PutTier1("k", []byte("payload")).OK)
+	first := svc.GetTier1("k")
+	core.AssertTrue(t, first.OK)
+	second := svc.GetTier1("k")
+	core.AssertTrue(t, second.OK)
+	core.AssertEqual(t, string(first.Value.([]byte)), string(second.Value.([]byte)))
 }
 
-// --- List ---
+// --- DeleteTier0 / DeleteTier1 ---
 
-func TestService_Service_List_Good(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertTrue(t, svc.Put("alpha", []byte("a")).OK)
-	core.AssertTrue(t, svc.Put("beta", []byte("b")).OK)
-	r := svc.List()
+func TestService_Service_DeleteTier0_Good(t *core.T) {
+	svc := tier0Fixture(t)
+	core.AssertTrue(t, svc.PutTier0("k", []byte("x")).OK)
+	core.AssertTrue(t, svc.DeleteTier0("k").OK)
+	core.AssertFalse(t, svc.GetTier0("k").OK, "Get after Delete must Fail")
+}
+
+func TestService_Service_DeleteTier0_Bad(t *core.T) {
+	svc := tier0Fixture(t)
+	core.AssertFalse(t, svc.DeleteTier0("").OK)
+	core.AssertFalse(t, svc.DeleteTier0("../escape").OK)
+}
+
+func TestService_Service_DeleteTier0_Ugly(t *core.T) {
+	svc := tier0Fixture(t)
+	core.AssertTrue(t, svc.DeleteTier0("not-here").OK)
+	core.AssertTrue(t, svc.PutTier0("k", []byte("x")).OK)
+	core.AssertTrue(t, svc.DeleteTier0("k").OK)
+	core.AssertTrue(t, svc.DeleteTier0("k").OK, "second delete on same ref idempotent")
+}
+
+func TestService_Service_DeleteTier1_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.PutTier1("k", []byte("x")).OK)
+	core.AssertTrue(t, svc.DeleteTier1("k").OK)
+	core.AssertFalse(t, svc.GetTier1("k").OK)
+}
+
+func TestService_Service_DeleteTier1_Bad(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertFalse(t, svc.DeleteTier1("").OK)
+	core.AssertFalse(t, svc.DeleteTier1("../escape").OK)
+}
+
+func TestService_Service_DeleteTier1_Ugly(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.DeleteTier1("not-here").OK)
+	core.AssertTrue(t, svc.PutTier1("k", []byte("x")).OK)
+	core.AssertTrue(t, svc.DeleteTier1("k").OK)
+	core.AssertTrue(t, svc.DeleteTier1("k").OK)
+}
+
+// --- ListTier0 / ListTier1 ---
+
+func TestService_Service_ListTier0_Good(t *core.T) {
+	svc := tier0Fixture(t)
+	core.AssertTrue(t, svc.PutTier0("alpha", []byte("a")).OK)
+	core.AssertTrue(t, svc.PutTier0("beta", []byte("b")).OK)
+	r := svc.ListTier0()
 	core.AssertTrue(t, r.OK)
 	refs := r.Value.([]string)
 	core.AssertEqual(t, 2, len(refs))
 }
 
-func TestService_Service_List_Bad(t *core.T) {
-	svc := homeFixture(t)
-	// Empty store → empty list, NOT Fail.
-	r := svc.List()
+func TestService_Service_ListTier0_Bad(t *core.T) {
+	svc := tier0Fixture(t)
+	r := svc.ListTier0()
 	core.AssertTrue(t, r.OK)
 	core.AssertEqual(t, 0, len(r.Value.([]string)))
 }
 
-func TestService_Service_List_Ugly(t *core.T) {
-	svc := homeFixture(t)
-	// .master must not appear in the list — only .aead-suffixed
-	// files surface as refs. Force-create the master via a Put.
-	core.AssertTrue(t, svc.Put("k", []byte("x")).OK)
-	r := svc.List()
+func TestService_Service_ListTier0_Ugly(t *core.T) {
+	// Tier-0 list must not surface .master / .master-tier0 /
+	// .master-tier1 / tier-1 blobs in the same dir.
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.PutTier0("k0", []byte("x")).OK)
+	core.AssertTrue(t, svc.PutTier1("k1", []byte("y")).OK)
+	r := svc.ListTier0()
 	core.AssertTrue(t, r.OK)
 	refs := r.Value.([]string)
-	core.AssertEqual(t, 1, len(refs), ".master must not surface as a ref")
-	core.AssertEqual(t, "k", refs[0])
+	core.AssertEqual(t, 1, len(refs), "ListTier0 must not surface tier-1 blobs")
+	core.AssertEqual(t, "k0", refs[0])
 }
 
-// --- Has ---
+func TestService_Service_ListTier1_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.PutTier1("alpha", []byte("a")).OK)
+	core.AssertTrue(t, svc.PutTier1("beta", []byte("b")).OK)
+	r := svc.ListTier1()
+	core.AssertTrue(t, r.OK)
+	refs := r.Value.([]string)
+	core.AssertEqual(t, 2, len(refs))
+}
 
-func TestService_Service_Has_Good(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertTrue(t, svc.Put("k", []byte("x")).OK)
-	r := svc.Has("k")
+func TestService_Service_ListTier1_Bad(t *core.T) {
+	svc := tier1Fixture(t)
+	r := svc.ListTier1()
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, 0, len(r.Value.([]string)))
+}
+
+func TestService_Service_ListTier1_Ugly(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.PutTier0("k0", []byte("x")).OK)
+	core.AssertTrue(t, svc.PutTier1("k1", []byte("y")).OK)
+	r := svc.ListTier1()
+	core.AssertTrue(t, r.OK)
+	refs := r.Value.([]string)
+	core.AssertEqual(t, 1, len(refs), "ListTier1 must not surface tier-0 blobs")
+	core.AssertEqual(t, "k1", refs[0])
+}
+
+// --- HasTier0 / HasTier1 ---
+
+func TestService_Service_HasTier0_Good(t *core.T) {
+	svc := tier0Fixture(t)
+	core.AssertTrue(t, svc.PutTier0("k", []byte("x")).OK)
+	r := svc.HasTier0("k")
 	core.AssertTrue(t, r.OK)
 	core.AssertTrue(t, r.Value.(bool))
 }
 
-func TestService_Service_Has_Bad(t *core.T) {
-	svc := homeFixture(t)
-	// Empty / traversal refs must Fail rather than report false.
-	core.AssertFalse(t, svc.Has("").OK)
-	core.AssertFalse(t, svc.Has("../escape").OK)
+func TestService_Service_HasTier0_Bad(t *core.T) {
+	svc := tier0Fixture(t)
+	core.AssertFalse(t, svc.HasTier0("").OK)
+	core.AssertFalse(t, svc.HasTier0("../escape").OK)
 }
 
-func TestService_Service_Has_Ugly(t *core.T) {
-	svc := homeFixture(t)
-	// Missing ref → OK with false.
-	r := svc.Has("missing")
+func TestService_Service_HasTier0_Ugly(t *core.T) {
+	svc := tier0Fixture(t)
+	r := svc.HasTier0("missing")
 	core.AssertTrue(t, r.OK)
 	core.AssertFalse(t, r.Value.(bool))
+}
+
+func TestService_Service_HasTier1_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.PutTier1("k", []byte("x")).OK)
+	r := svc.HasTier1("k")
+	core.AssertTrue(t, r.OK)
+	core.AssertTrue(t, r.Value.(bool))
+}
+
+func TestService_Service_HasTier1_Bad(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertFalse(t, svc.HasTier1("").OK)
+	core.AssertFalse(t, svc.HasTier1("../escape").OK)
+}
+
+func TestService_Service_HasTier1_Ugly(t *core.T) {
+	svc := tier1Fixture(t)
+	r := svc.HasTier1("missing")
+	core.AssertTrue(t, r.OK)
+	core.AssertFalse(t, r.Value.(bool))
+}
+
+// --- GetOrCreateTier0 / GetOrCreateTier1 ---
+
+func TestService_Service_GetOrCreateTier0_Good(t *core.T) {
+	svc := tier0Fixture(t)
+	calls := 0
+	r := svc.GetOrCreateTier0("new-key", func() ([]byte, error) {
+		calls++
+		return []byte("generated-secret"), nil
+	})
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, "generated-secret", string(r.Value.([]byte)))
+	core.AssertEqual(t, 1, calls)
+	r2 := svc.GetOrCreateTier0("new-key", func() ([]byte, error) {
+		calls++
+		return []byte("should-not-appear"), nil
+	})
+	core.AssertTrue(t, r2.OK)
+	core.AssertEqual(t, "generated-secret", string(r2.Value.([]byte)))
+	core.AssertEqual(t, 1, calls, "generate must not fire when key already persisted")
+}
+
+func TestService_Service_GetOrCreateTier0_Bad(t *core.T) {
+	svc := tier0Fixture(t)
+	r := svc.GetOrCreateTier0("failing-key", func() ([]byte, error) {
+		return nil, core.NewError("deliberate generate failure")
+	})
+	core.AssertFalse(t, r.OK)
+	r2 := svc.GetOrCreateTier0("", func() ([]byte, error) {
+		return []byte("x"), nil
+	})
+	core.AssertFalse(t, r2.OK)
+}
+
+func TestService_Service_GetOrCreateTier0_Ugly(t *core.T) {
+	svc := tier0Fixture(t)
+	core.AssertTrue(t, svc.PutTier0("pre-existing", []byte("original")).OK)
+	calls := 0
+	r := svc.GetOrCreateTier0("pre-existing", func() ([]byte, error) {
+		calls++
+		return []byte("override"), nil
+	})
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, "original", string(r.Value.([]byte)))
+	core.AssertEqual(t, 0, calls)
+}
+
+func TestService_Service_GetOrCreateTier1_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	calls := 0
+	r := svc.GetOrCreateTier1("new-key", func() ([]byte, error) {
+		calls++
+		return []byte("generated"), nil
+	})
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, "generated", string(r.Value.([]byte)))
+	core.AssertEqual(t, 1, calls)
+	r2 := svc.GetOrCreateTier1("new-key", func() ([]byte, error) {
+		calls++
+		return []byte("should-not-appear"), nil
+	})
+	core.AssertTrue(t, r2.OK)
+	core.AssertEqual(t, "generated", string(r2.Value.([]byte)))
+	core.AssertEqual(t, 1, calls)
+}
+
+func TestService_Service_GetOrCreateTier1_Bad(t *core.T) {
+	svc := tier1Fixture(t)
+	r := svc.GetOrCreateTier1("failing-key", func() ([]byte, error) {
+		return nil, core.NewError("deliberate generate failure")
+	})
+	core.AssertFalse(t, r.OK)
+	r2 := svc.GetOrCreateTier1("", func() ([]byte, error) {
+		return []byte("x"), nil
+	})
+	core.AssertFalse(t, r2.OK)
+}
+
+func TestService_Service_GetOrCreateTier1_Ugly(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.PutTier1("pre-existing", []byte("original")).OK)
+	calls := 0
+	r := svc.GetOrCreateTier1("pre-existing", func() ([]byte, error) {
+		calls++
+		return []byte("override"), nil
+	})
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, "original", string(r.Value.([]byte)))
+	core.AssertEqual(t, 0, calls)
 }
 
 // --- ServiceName / ServiceStartup / ServiceShutdown ---
 
 func TestService_Service_ServiceName_Good(t *core.T) {
-	svc := homeFixture(t)
-	name := svc.ServiceName()
-	core.AssertEqual(t, "Keys", name)
-	core.AssertEqual(t, 4, len(name), "literal length stable")
+	svc := tier0Fixture(t)
+	core.AssertEqual(t, "Keys", svc.ServiceName())
 }
 
 func TestService_Service_ServiceName_Bad(t *core.T) {
@@ -245,434 +488,626 @@ func TestService_Service_ServiceName_Bad(t *core.T) {
 }
 
 func TestService_Service_ServiceName_Ugly(t *core.T) {
-	svc := homeFixture(t)
+	svc := tier0Fixture(t)
 	first := svc.ServiceName()
 	second := svc.ServiceName()
 	core.AssertEqual(t, first, second)
 }
 
 func TestService_Service_ServiceStartup_Good(t *core.T) {
-	svc := homeFixture(t)
+	svc := tier0Fixture(t)
 	r := svc.ServiceStartup(core.Background(), nil)
 	core.AssertTrue(t, r.OK)
 }
 
 func TestService_Service_ServiceStartup_Bad(t *core.T) {
-	svc := homeFixture(t)
-	// any opts type accepted — startup is a no-op, never validates.
+	svc := tier0Fixture(t)
 	core.AssertTrue(t, svc.ServiceStartup(core.Background(), struct{}{}).OK)
 	core.AssertTrue(t, svc.ServiceStartup(core.Background(), "nonsense").OK)
 	core.AssertTrue(t, svc.ServiceStartup(core.Background(), 42).OK)
 }
 
 func TestService_Service_ServiceStartup_Ugly(t *core.T) {
-	svc := homeFixture(t)
+	svc := tier0Fixture(t)
 	core.AssertTrue(t, svc.ServiceStartup(core.Background(), nil).OK)
-	core.AssertTrue(t, svc.ServiceStartup(core.Background(), nil).OK, "repeated startup safe")
+	core.AssertTrue(t, svc.ServiceStartup(core.Background(), nil).OK)
 }
 
 func TestService_Service_ServiceShutdown_Good(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertTrue(t, svc.Put("k", []byte("x")).OK) // force master load
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.PutTier1("k", []byte("x")).OK)
 	r := svc.ServiceShutdown()
 	core.AssertTrue(t, r.OK)
 }
 
 func TestService_Service_ServiceShutdown_Bad(t *core.T) {
-	svc := homeFixture(t)
-	// Shutdown without prior master load is still OK (lazy master).
+	svc := tier1Fixture(t)
 	core.AssertTrue(t, svc.ServiceShutdown().OK)
-	// And the next operation still works (lazy re-load).
-	core.AssertTrue(t, svc.Put("k", []byte("x")).OK)
+	core.AssertTrue(t, svc.PutTier1("k", []byte("x")).OK, "ops re-load masters after shutdown")
 }
 
 func TestService_Service_ServiceShutdown_Ugly(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertTrue(t, svc.Put("k", []byte("x")).OK)
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.PutTier1("k", []byte("x")).OK)
 	core.AssertTrue(t, svc.ServiceShutdown().OK)
-	core.AssertTrue(t, svc.ServiceShutdown().OK, "double-shutdown safe")
-	// After shutdown, Get reloads the master (lazy) and works.
-	r := svc.Get("k")
+	core.AssertTrue(t, svc.ServiceShutdown().OK)
+	r := svc.GetTier1("k")
 	core.AssertTrue(t, r.OK)
 }
 
-// --- W-prefixed Wails wrappers ---
+// --- WPutTier1 / WListTier1 / WHasTier1 / WDeleteTier1 ---
+
+func TestService_Service_WPutTier1_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	r := svc.WPutTier1("openai-default", "sk-abc")
+	core.AssertTrue(t, r.OK)
+	got := svc.GetTier1("openai-default")
+	core.AssertTrue(t, got.OK)
+	core.AssertEqual(t, "sk-abc", string(got.Value.([]byte)))
+}
+
+func TestService_Service_WPutTier1_Bad(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertFalse(t, svc.WPutTier1("", "x").OK)
+	core.AssertFalse(t, svc.WPutTier1("../escape", "x").OK)
+}
+
+func TestService_Service_WPutTier1_Ugly(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.WPutTier1("k", "first").OK)
+	core.AssertTrue(t, svc.WPutTier1("k", "second").OK)
+	got := svc.GetTier1("k")
+	core.AssertTrue(t, got.OK)
+	core.AssertEqual(t, "second", string(got.Value.([]byte)))
+}
+
+func TestService_Service_WListTier1_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.WPutTier1("k1", "x").OK)
+	core.AssertTrue(t, svc.WPutTier1("k2", "y").OK)
+	r := svc.WListTier1()
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, 2, len(r.Value.([]string)))
+}
+
+func TestService_Service_WListTier1_Bad(t *core.T) {
+	svc := tier1Fixture(t)
+	r := svc.WListTier1()
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, 0, len(r.Value.([]string)))
+}
+
+func TestService_Service_WListTier1_Ugly(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.WPutTier1("k", "x").OK)
+	first := svc.WListTier1()
+	second := svc.WListTier1()
+	core.AssertTrue(t, first.OK && second.OK)
+	core.AssertEqual(t, len(first.Value.([]string)), len(second.Value.([]string)))
+}
+
+func TestService_Service_WHasTier1_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.WPutTier1("k", "x").OK)
+	r := svc.WHasTier1("k")
+	core.AssertTrue(t, r.OK && r.Value.(bool))
+}
+
+func TestService_Service_WHasTier1_Bad(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertFalse(t, svc.WHasTier1("").OK)
+	core.AssertFalse(t, svc.WHasTier1("../escape").OK)
+	core.AssertFalse(t, svc.WHasTier1(".master").OK)
+}
+
+func TestService_Service_WHasTier1_Ugly(t *core.T) {
+	svc := tier1Fixture(t)
+	r := svc.WHasTier1("missing")
+	core.AssertTrue(t, r.OK)
+	core.AssertFalse(t, r.Value.(bool))
+}
+
+func TestService_Service_WDeleteTier1_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.WPutTier1("k", "x").OK)
+	core.AssertTrue(t, svc.WDeleteTier1("k").OK)
+	core.AssertFalse(t, svc.GetTier1("k").OK)
+}
+
+func TestService_Service_WDeleteTier1_Bad(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertFalse(t, svc.WDeleteTier1("").OK)
+	core.AssertFalse(t, svc.WDeleteTier1("../escape").OK)
+}
+
+func TestService_Service_WDeleteTier1_Ugly(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.WDeleteTier1("not-here").OK)
+	core.AssertTrue(t, svc.WPutTier1("k", "x").OK)
+	core.AssertTrue(t, svc.WDeleteTier1("k").OK)
+	core.AssertTrue(t, svc.WDeleteTier1("k").OK)
+}
+
+// --- WPut / WList / WHas / WDelete (tier-1 shims for binding
+//      continuity until E.K.C frontend audit lands) ---
 
 func TestService_Service_WPut_Good(t *core.T) {
-	svc := homeFixture(t)
-	r := svc.WPut("openai-default", "sk-abc")
-	core.AssertTrue(t, r.OK)
-	got := svc.Get("openai-default")
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.WPut("openai-default", "sk-abc").OK)
+	got := svc.GetTier1("openai-default")
 	core.AssertTrue(t, got.OK)
 	core.AssertEqual(t, "sk-abc", string(got.Value.([]byte)))
 }
 
 func TestService_Service_WPut_Bad(t *core.T) {
-	svc := homeFixture(t)
+	svc := tier1Fixture(t)
 	core.AssertFalse(t, svc.WPut("", "x").OK)
 	core.AssertFalse(t, svc.WPut("../escape", "x").OK)
 }
 
 func TestService_Service_WPut_Ugly(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertTrue(t, svc.WPut("k", "first").OK)
-	core.AssertTrue(t, svc.WPut("k", "second").OK)
-	got := svc.Get("k")
-	core.AssertTrue(t, got.OK)
-	core.AssertEqual(t, "second", string(got.Value.([]byte)))
-}
-
-func TestService_Service_WList_Good(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertTrue(t, svc.WPut("k1", "x").OK)
-	core.AssertTrue(t, svc.WPut("k2", "y").OK)
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.WPut("k", "v").OK)
+	core.AssertTrue(t, svc.WDelete("k").OK)
+	core.AssertFalse(t, svc.WHas("k").Value.(bool))
 	r := svc.WList()
 	core.AssertTrue(t, r.OK)
-	core.AssertEqual(t, 2, len(r.Value.([]string)))
-}
-
-func TestService_Service_WList_Bad(t *core.T) {
-	svc := homeFixture(t)
-	r := svc.WList()
-	core.AssertTrue(t, r.OK, "empty list is OK, not Fail")
 	core.AssertEqual(t, 0, len(r.Value.([]string)))
 }
 
-func TestService_Service_WList_Ugly(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertTrue(t, svc.WPut("k", "x").OK)
-	first := svc.WList()
-	second := svc.WList()
-	core.AssertTrue(t, first.OK && second.OK)
-	core.AssertEqual(t, len(first.Value.([]string)), len(second.Value.([]string)))
-}
-
-func TestService_Service_WHas_Good(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertTrue(t, svc.WPut("k", "x").OK)
-	r := svc.WHas("k")
-	core.AssertTrue(t, r.OK && r.Value.(bool))
-}
-
-func TestService_Service_WHas_Bad(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertFalse(t, svc.WHas("").OK, "empty ref must Fail")
-	core.AssertFalse(t, svc.WHas("../escape").OK, "traversal ref must Fail")
-	core.AssertFalse(t, svc.WHas(".master").OK, "dot-prefixed ref must Fail")
-}
-
-func TestService_Service_WHas_Ugly(t *core.T) {
-	svc := homeFixture(t)
-	r := svc.WHas("missing")
-	core.AssertTrue(t, r.OK)
-	core.AssertFalse(t, r.Value.(bool))
-}
-
-func TestService_Service_WDelete_Good(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertTrue(t, svc.WPut("k", "x").OK)
-	core.AssertTrue(t, svc.WDelete("k").OK)
-	core.AssertFalse(t, svc.Get("k").OK)
-}
-
-func TestService_Service_WDelete_Bad(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertFalse(t, svc.WDelete("").OK, "empty ref must Fail")
-	core.AssertFalse(t, svc.WDelete("../escape").OK, "traversal ref must Fail")
-}
-
-func TestService_Service_WDelete_Ugly(t *core.T) {
-	svc := homeFixture(t)
-	core.AssertTrue(t, svc.WDelete("not-here").OK, "delete-of-nonexistent idempotent")
-	core.AssertTrue(t, svc.WPut("k", "x").OK)
-	core.AssertTrue(t, svc.WDelete("k").OK)
-	core.AssertTrue(t, svc.WDelete("k").OK)
-}
-
-// --- GetOrCreate ---
-
-func TestService_Service_GetOrCreate_Good(t *core.T) {
-	svc := homeFixture(t)
-	// Fresh install — generate fires and key is persisted.
-	calls := 0
-	r := svc.GetOrCreate("new-key", func() ([]byte, error) {
-		calls++
-		return []byte("generated-secret"), nil
-	})
-	core.AssertTrue(t, r.OK, "GetOrCreate must succeed on fresh ref")
-	core.AssertEqual(t, "generated-secret", string(r.Value.([]byte)))
-	core.AssertEqual(t, 1, calls, "generate must be called exactly once")
-
-	// Second call — reloads from disk, generate is NOT called again.
-	r2 := svc.GetOrCreate("new-key", func() ([]byte, error) {
-		calls++
-		return []byte("should-not-appear"), nil
-	})
-	core.AssertTrue(t, r2.OK)
-	core.AssertEqual(t, "generated-secret", string(r2.Value.([]byte)))
-	core.AssertEqual(t, 1, calls, "generate must not fire when key already persisted")
-}
-
-func TestService_Service_GetOrCreate_Bad(t *core.T) {
-	svc := homeFixture(t)
-	// generate() returning an error must propagate as Fail.
-	r := svc.GetOrCreate("failing-key", func() ([]byte, error) {
-		return nil, core.NewError("deliberate generate failure")
-	})
-	core.AssertFalse(t, r.OK, "GetOrCreate must Fail when generate errors")
-
-	// Empty ref must Fail (delegates to Put / Get path-validation).
-	r2 := svc.GetOrCreate("", func() ([]byte, error) {
-		return []byte("x"), nil
-	})
-	core.AssertFalse(t, r2.OK, "GetOrCreate must Fail on empty ref")
-}
-
-func TestService_Service_GetOrCreate_Ugly(t *core.T) {
-	svc := homeFixture(t)
-	// Pre-existing key written via Put must be returned without calling generate.
-	core.AssertTrue(t, svc.Put("pre-existing", []byte("original")).OK)
-	calls := 0
-	r := svc.GetOrCreate("pre-existing", func() ([]byte, error) {
-		calls++
-		return []byte("override"), nil
-	})
-	core.AssertTrue(t, r.OK)
-	core.AssertEqual(t, "original", string(r.Value.([]byte)), "pre-existing value must win")
-	core.AssertEqual(t, 0, calls, "generate must not fire when key already exists")
-}
-
-// --- SingleInstanceKey ---
+// --- SingleInstanceKey (tier-0) ---
 
 func TestService_Service_SingleInstanceKey_Good(t *core.T) {
-	svc := homeFixture(t)
-	// First boot — key is generated, returned as [32]byte.
+	svc := tier0Fixture(t)
 	r := svc.SingleInstanceKey()
-	core.AssertTrue(t, r.OK, "SingleInstanceKey must succeed on fresh install")
+	core.AssertTrue(t, r.OK)
 	key, ok := r.Value.([32]byte)
-	core.AssertTrue(t, ok, "SingleInstanceKey Value must be [32]byte")
-	// Key must not be the zero value.
+	core.AssertTrue(t, ok)
 	var zero [32]byte
-	core.AssertNotEqual(t, zero, key, "generated key must not be all-zero")
+	core.AssertNotEqual(t, zero, key)
 }
 
 func TestService_Service_SingleInstanceKey_Bad(t *core.T) {
-	// Wrong-length stored blob must Fail.
-	svc := homeFixture(t)
-	// Write a short blob directly to the ref so ensureMaster
-	// and Put/Get succeed but the length check inside
-	// SingleInstanceKey rejects it.
-	core.AssertTrue(t, svc.Put("single-instance", []byte("tooshort")).OK)
+	svc := tier0Fixture(t)
+	// Pre-seed a wrong-length blob in tier-0 to force the
+	// length-check failure inside SingleInstanceKey.
+	core.AssertTrue(t, svc.PutTier0("single-instance", []byte("tooshort")).OK)
 	r := svc.SingleInstanceKey()
-	core.AssertFalse(t, r.OK, "SingleInstanceKey must Fail when stored blob has wrong length")
+	core.AssertFalse(t, r.OK)
 }
 
 func TestService_Service_SingleInstanceKey_Ugly(t *core.T) {
-	svc := homeFixture(t)
-	// First call generates; subsequent calls return the same key.
+	svc := tier0Fixture(t)
 	r1 := svc.SingleInstanceKey()
 	core.AssertTrue(t, r1.OK)
 	key1 := r1.Value.([32]byte)
-
 	r2 := svc.SingleInstanceKey()
 	core.AssertTrue(t, r2.OK)
 	key2 := r2.Value.([32]byte)
-
-	core.AssertEqual(t, key1, key2, "SingleInstanceKey must return same key on repeat calls")
+	core.AssertEqual(t, key1, key2)
 }
 
-// --- Mantis #1624 — KEK-gate on post-unlock PGP-derived KEK ---
+// --- Cross-tier reachability (RFC §4.5 — Q1-B disjoint by construction) ---
 
-// kekFromBytes is the test-side analogue of cmd/lthn/app.go's
-// production provider closure — derives a 32-byte KEK from a fake
-// "private key" via core.HKDF using the same canonical salt/info
-// pair production code uses (keys.KEKHKDFSalt / keys.KEKHKDFInfo).
-// Returned by the helper Provider used in the tests below.
-func kekFromBytes(t *core.T, priv []byte) []byte {
-	t.Helper()
-	r := core.HKDF("sha256", priv,
-		[]byte(keys.KEKHKDFSalt), []byte(keys.KEKHKDFInfo), 32)
-	core.AssertTrue(t, r.OK, "HKDF derive must succeed")
-	return r.Value.([]byte)
+// TestKeys_CrossTier_GetTier1_WhenOnlyT0FileExists_Good — a
+// tier-0 blob at openai-default.t0.aead does NOT satisfy a
+// GetTier1("openai-default") read because tier-1 reads
+// openai-default.t1.aead exclusively. RFC §4.5 enforcement.
+func TestKeys_CrossTier_GetTier1_WhenOnlyT0FileExists_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.PutTier0("openai-default", []byte("tier0-value")).OK)
+	// Tier-1 doesn't see the tier-0 blob.
+	r := svc.GetTier1("openai-default")
+	core.AssertFalse(t, r.OK, "GetTier1 must Fail when only the .t0.aead file exists")
+	hasR := svc.HasTier1("openai-default")
+	core.AssertTrue(t, hasR.OK)
+	core.AssertFalse(t, hasR.Value.(bool), "HasTier1 must report false when only .t0.aead exists")
 }
 
-// TestKeys_KEKGate_PreUnlock_FallsBack_Good — no provider wired
-// (or provider reports unlocked=false), master persists/reads via
-// the legacy raw-32-byte path. Headless `lthn serve` boot scenario.
-func TestKeys_KEKGate_PreUnlock_FallsBack_Good(t *core.T) {
-	svc := homeFixture(t)
-	// No KEK provider wired — same scenario as headless boot.
-	core.AssertTrue(t, svc.Put("k", []byte("legacy-path")).OK)
-	r := svc.Get("k")
-	core.AssertTrue(t, r.OK)
-	core.AssertEqual(t, "legacy-path", string(r.Value.([]byte)))
-
-	// Explicit nil provider — equivalent to "not wired".
-	svc.SetKEKProvider(nil)
-	core.AssertTrue(t, svc.Put("k2", []byte("still-legacy")).OK)
-	r2 := svc.Get("k2")
-	core.AssertTrue(t, r2.OK)
-	core.AssertEqual(t, "still-legacy", string(r2.Value.([]byte)))
-
-	// Provider returns (_, false) — same fallback.
-	svc.SetKEKProvider(func() ([]byte, bool) { return nil, false })
-	core.AssertTrue(t, svc.Put("k3", []byte("locked")).OK)
-	r3 := svc.Get("k3")
-	core.AssertTrue(t, r3.OK)
-	core.AssertEqual(t, "locked", string(r3.Value.([]byte)))
+// TestKeys_CrossTier_PutTier0_WritesT0Suffix_Good — verifies the
+// on-disk filename ends `.t0.aead`.
+func TestKeys_CrossTier_PutTier0_WritesT0Suffix_Good(t *core.T) {
+	svc := tier0Fixture(t)
+	core.AssertTrue(t, svc.PutTier0("alpha", []byte("v")).OK)
+	home := core.Getenv("HOME")
+	expected := core.PathJoin(home, "Lethean", "data", "keys", "alpha.t0.aead")
+	statR := core.Stat(expected)
+	core.AssertTrue(t, statR.OK, "tier-0 blob must land at .t0.aead suffix")
 }
 
-// TestKeys_KEKGate_PostUnlock_DerivesViaPGP_Good — provider returns
-// a KEK derived via HKDF from fake private-key bytes; round-trip
-// Put/Get works and the on-disk master is the 60-byte wrapped form.
-func TestKeys_KEKGate_PostUnlock_DerivesViaPGP_Good(t *core.T) {
-	t.Setenv("HOME", t.TempDir())
+// TestKeys_CrossTier_PutTier1_WritesT1Suffix_Good — verifies the
+// on-disk filename ends `.t1.aead`.
+func TestKeys_CrossTier_PutTier1_WritesT1Suffix_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.PutTier1("alpha", []byte("v")).OK)
+	home := core.Getenv("HOME")
+	expected := core.PathJoin(home, "Lethean", "data", "keys", "alpha.t1.aead")
+	statR := core.Stat(expected)
+	core.AssertTrue(t, statR.OK, "tier-1 blob must land at .t1.aead suffix")
+}
+
+// TestKeys_CrossTier_PutTier0AndTier1_SameRef_TwoFiles_Good —
+// the same ref in both tiers produces two distinct on-disk files;
+// neither shadows the other.
+func TestKeys_CrossTier_PutTier0AndTier1_SameRef_TwoFiles_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.PutTier0("same", []byte("t0")).OK)
+	core.AssertTrue(t, svc.PutTier1("same", []byte("t1")).OK)
+	got0 := svc.GetTier0("same")
+	got1 := svc.GetTier1("same")
+	core.AssertTrue(t, got0.OK && got1.OK)
+	core.AssertEqual(t, "t0", string(got0.Value.([]byte)))
+	core.AssertEqual(t, "t1", string(got1.Value.([]byte)))
+}
+
+// --- ADD-K3 validator (`\.t[0-9]\.aead$` rejection) ---
+
+func TestKeys_RefValidator_RejectsTierSuffix_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	// Tier-1 PutTier1 with a ref ending in .t0.aead / .t1.aead /
+	// .t9.aead MUST Fail.
+	for _, bad := range []string{"foo.t0.aead", "bar.t1.aead", "baz.t9.aead"} {
+		r := svc.PutTier1(bad, []byte("x"))
+		core.AssertFalse(t, r.OK, "PutTier1 must reject ref="+bad)
+	}
+}
+
+func TestKeys_RefValidator_RejectsTierSuffix_Bad(t *core.T) {
+	svc := tier0Fixture(t)
+	// Same rule for tier-0.
+	for _, bad := range []string{"foo.t0.aead", "x.t5.aead"} {
+		r := svc.PutTier0(bad, []byte("x"))
+		core.AssertFalse(t, r.OK, "PutTier0 must reject ref="+bad)
+	}
+}
+
+func TestKeys_RefValidator_RejectsTierSuffix_Ugly(t *core.T) {
+	svc := tier0Fixture(t)
+	// Edge cases: refs that LOOK suffixed but aren't — must pass.
+	// "foo.txt" doesn't end .aead, "foo.tt.aead" has two letters
+	// after dot, "foo.taead" is short of the .tN. shape.
+	core.AssertTrue(t, svc.PutTier0("foo.txt", []byte("x")).OK)
+	// "alpha.aead" ends .aead but no tier digit — currently allowed
+	// (no ADD-K3 hit). The ref then resolves on-disk to
+	// "alpha.aead.t0.aead" which is well-formed.
+	core.AssertTrue(t, svc.PutTier0("alpha.aead", []byte("x")).OK)
+}
+
+// --- KEK provider rotation + invalidation ---
+
+// TestKeys_KEKProviderTier1_Rotation_InvalidatesCache_Good — set
+// provider A, write, swap provider, re-read with the new provider
+// from a fresh Service. The wrapped master under A is unreadable
+// under B → Get fails.
+func TestKeys_KEKProviderTier1_Rotation_InvalidatesCache_Good(t *core.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	r := keys.New()
 	core.AssertTrue(t, r.OK)
 	svc := r.Value.(*keys.Service)
 
-	fakePriv := []byte("fake-pgp-private-key-bytes-for-test-only")
-	svc.SetKEKProvider(func() ([]byte, bool) {
-		return kekFromBytes(t, fakePriv), true
-	})
+	kekA := bytesOf(0xAA)
+	svc.SetKEKProvider(func() ([]byte, bool) { return kekA, true })
+	core.AssertTrue(t, svc.PutTier1("k", []byte("under-A")).OK)
 
-	core.AssertTrue(t, svc.Put("openai", []byte("sk-secret")).OK)
-	got := svc.Get("openai")
+	// Fresh Service over same on-disk state, wire kekB — read must
+	// fail (different KEK can't unwrap).
+	svc2 := keys.New().Value.(*keys.Service)
+	kekB := bytesOf(0xBB)
+	svc2.SetKEKProvider(func() ([]byte, bool) { return kekB, true })
+	core.AssertFalse(t, svc2.GetTier1("k").OK, "fresh Service under different KEK must Fail to read tier-1 master")
+}
+
+// TestKeys_KEKProviderTier1_Reload_Good — same KEK after restart
+// works.
+func TestKeys_KEKProviderTier1_Reload_Good(t *core.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	r := keys.New()
+	core.AssertTrue(t, r.OK)
+	svc := r.Value.(*keys.Service)
+	svc.SetKEKProvider(func() ([]byte, bool) { return fixedTier1KEK, true })
+	core.AssertTrue(t, svc.PutTier1("k", []byte("payload")).OK)
+
+	svc2 := keys.New().Value.(*keys.Service)
+	svc2.SetKEKProvider(func() ([]byte, bool) { return fixedTier1KEK, true })
+	got := svc2.GetTier1("k")
 	core.AssertTrue(t, got.OK)
-	core.AssertEqual(t, "sk-secret", string(got.Value.([]byte)))
+	core.AssertEqual(t, "payload", string(got.Value.([]byte)))
+}
 
-	// Verify on-disk master is the 60-byte wrapped envelope, not raw 32.
+// TestKeys_NoProviderWired_Tier1Fails_Good — without
+// SetKEKProvider, tier-1 ops Fail with a clear error.
+func TestKeys_NoProviderWired_Tier1Fails_Good(t *core.T) {
+	svc := tier0Fixture(t) // tier-0 wired, tier-1 not
+	r := svc.PutTier1("k", []byte("x"))
+	core.AssertFalse(t, r.OK)
+}
+
+// TestKeys_NoProviderWired_Tier0Fails_Good — without
+// SetKEKProviderTier0, tier-0 ops Fail.
+func TestKeys_NoProviderWired_Tier0Fails_Good(t *core.T) {
+	svc := homeFixture(t) // neither wired
+	r := svc.PutTier0("single-instance", []byte("x"))
+	core.AssertFalse(t, r.OK)
+}
+
+// --- Tier-0 master format (KEK-wrapped, 72 bytes) ---
+
+// TestKeys_Tier0Master_KEKWrappedOnDisk_Good — after PutTier0,
+// the .master-tier0 on disk is the 72-byte KEK-wrapped envelope.
+func TestKeys_Tier0Master_KEKWrappedOnDisk_Good(t *core.T) {
+	svc := tier0Fixture(t)
+	core.AssertTrue(t, svc.PutTier0("k", []byte("x")).OK)
 	home := core.Getenv("HOME")
-	masterPath := core.PathJoin(home, "Lethean", "data", "keys", ".master")
+	masterPath := core.PathJoin(home, "Lethean", "data", "keys", ".master-tier0")
 	blobR := core.ReadFile(masterPath)
 	core.AssertTrue(t, blobR.OK)
-	blob := blobR.Value.([]byte)
-	core.AssertEqual(t, 72, len(blob),
-		"post-unlock master must be KEK-wrapped (24 XChaCha20 nonce + 32 ct + 16 tag)")
+	core.AssertEqual(t, 72, len(blobR.Value.([]byte)),
+		"tier-0 master must be KEK-wrapped (24 nonce + 32 ct + 16 tag)")
 }
 
-// TestKeys_KEKGate_LockTransition_RotatesMaster_Ugly — start
-// unlocked, write a wrapped master, then flip provider to return
-// (_, false). Subsequent writes still succeed (cache holds the
-// unwrapped master) BUT a fresh Service constructed against the
-// same on-disk state Fails to read because the wrapped envelope
-// needs the KEK that's no longer available.
-func TestKeys_KEKGate_LockTransition_RotatesMaster_Ugly(t *core.T) {
+// TestKeys_Tier1Master_KEKWrappedOnDisk_Good — after PutTier1,
+// the .master-tier1 on disk is the 72-byte KEK-wrapped envelope.
+func TestKeys_Tier1Master_KEKWrappedOnDisk_Good(t *core.T) {
+	svc := tier1Fixture(t)
+	core.AssertTrue(t, svc.PutTier1("k", []byte("x")).OK)
+	home := core.Getenv("HOME")
+	masterPath := core.PathJoin(home, "Lethean", "data", "keys", ".master-tier1")
+	blobR := core.ReadFile(masterPath)
+	core.AssertTrue(t, blobR.OK)
+	core.AssertEqual(t, 72, len(blobR.Value.([]byte)),
+		"tier-1 master must be KEK-wrapped (24 nonce + 32 ct + 16 tag)")
+}
+
+// --- Legacy install detection + migration (#1638 Step 0b) ---
+
+// seedLegacyInstall creates a pre-partition (.master raw 32B +
+// single-instance.aead sealed under it) install under the given
+// home dir. Returns the legacy master bytes so the caller can
+// assert downstream behaviour.
+func seedLegacyInstall(t *core.T, home string) []byte {
+	t.Helper()
+	dir := core.PathJoin(home, "Lethean", "data", "keys")
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+
+	// Generate a fixed-ish legacy master so tests are reproducible.
+	legacy := bytesOf(0x10)
+	masterPath := core.PathJoin(dir, ".master")
+	core.AssertTrue(t, core.WriteFile(masterPath, legacy, 0o600).OK)
+
+	// Seal a single-instance key under the legacy master, sealed
+	// in the legacy single-instance.aead.
+	sealedKey := make([]byte, 32)
+	for i := range sealedKey {
+		sealedKey[i] = 0x99
+	}
+	cipherSigil, err := sigil.NewChaChaPolySigil(legacy, nil)
+	core.AssertTrue(t, err == nil)
+	blob, err := cipherSigil.In(sealedKey)
+	core.AssertTrue(t, err == nil)
+	siPath := core.PathJoin(dir, "single-instance.aead")
+	core.AssertTrue(t, core.WriteFile(siPath, blob, 0o600).OK)
+	return legacy
+}
+
+// TestService_HeadlessLegacyInstall_PreservesSingleInstance —
+// RFC §6 / Mantis #1638. Pre-#1624 32B raw .master +
+// single-instance.aead present at boot, no tier-1 KEK provider
+// ever wired. Step 0b sub-sequence fires: tier-0 master
+// generated, single-instance.aead decrypted under legacy raw
+// master, re-encrypted under tier-0 master, written to
+// single-instance.t0.aead, legacy file deleted. Wails IPC
+// continuity assertion.
+func TestService_HeadlessLegacyInstall_PreservesSingleInstance(t *core.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	seedLegacyInstall(t, home)
+
+	// Wire tier-0 KEK provider (e.g. cmd/lthn/app.go boot path).
+	// Do NOT wire tier-1 — headless install.
+	r := keys.New()
+	core.AssertTrue(t, r.OK)
+	svc := r.Value.(*keys.Service)
+	svc.SetKEKProviderTier0(func() ([]byte, bool) { return fixedTier0KEK, true })
+
+	// First tier-0 op (SingleInstanceKey) triggers Step 0b.
+	keyR := svc.SingleInstanceKey()
+	core.AssertTrue(t, keyR.OK, "SingleInstanceKey must succeed on legacy install")
+	key := keyR.Value.([32]byte)
+	// Returned key MUST be the original sealedKey value (0x99 fill).
+	var want [32]byte
+	for i := range want {
+		want[i] = 0x99
+	}
+	core.AssertEqual(t, want, key, "SingleInstanceKey must return the pre-migration sealed bytes (IPC continuity)")
+
+	// On-disk: tier-0 master present + tier-0 single-instance
+	// present + legacy single-instance.aead removed. Legacy
+	// .master retained for tier-1 migration.
+	dir := core.PathJoin(home, "Lethean", "data", "keys")
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, ".master-tier0")).OK, ".master-tier0 must be persisted")
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, "single-instance.t0.aead")).OK, "single-instance.t0.aead must be written")
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, "single-instance.aead")).OK, "legacy single-instance.aead must be removed")
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, ".master")).OK, "legacy .master must be retained for tier-1 migration")
+
+	// Tier-1 ops must Fail (no tier-1 KEK wired) with a clear error.
+	core.AssertFalse(t, svc.PutTier1("openai", []byte("x")).OK)
+}
+
+// TestService_HeadlessPost1624Install_DefersTier0Migration —
+// RFC §6 / Mantis #1638 sibling. 72B KEK-wrapped legacy .master +
+// no tier-1 KEK provider. Step 0b detects legacy, skips
+// sub-sequence; SingleInstanceKey returns the no_legacy_unlock
+// error; on subsequent SetKEKProvider(tier1), Step 3 + Step 3e
+// complete the migration.
+func TestService_HeadlessPost1624Install_DefersTier0Migration(t *core.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := core.PathJoin(home, "Lethean", "data", "keys")
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+
+	// Build a 72B KEK-wrapped legacy .master (post-#1624 form)
+	// under the same KEK that we'll later wire as tier-1.
+	legacyMaster := bytesOf(0x10)
+	tier1KEK := fixedTier1KEK
+	tier1Sigil, err := sigil.NewChaChaPolySigil(tier1KEK, nil)
+	core.AssertTrue(t, err == nil)
+	wrapped, err := tier1Sigil.In(legacyMaster)
+	core.AssertTrue(t, err == nil)
+	core.AssertEqual(t, 72, len(wrapped))
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, ".master"), wrapped, 0o600).OK)
+
+	// Seal a single-instance key under the legacy master.
+	sealedKey := bytesOf(0x99)
+	siSigil, err := sigil.NewChaChaPolySigil(legacyMaster, nil)
+	core.AssertTrue(t, err == nil)
+	siBlob, err := siSigil.In(sealedKey)
+	core.AssertTrue(t, err == nil)
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, "single-instance.aead"), siBlob, 0o600).OK)
+
+	// Boot — tier-0 wired, tier-1 NOT wired.
+	r := keys.New()
+	core.AssertTrue(t, r.OK)
+	svc := r.Value.(*keys.Service)
+	svc.SetKEKProviderTier0(func() ([]byte, bool) { return fixedTier0KEK, true })
+
+	// Step 0b detects legacy but skips sub-sequence; tier-0 ops
+	// Fail with no_legacy_unlock.
+	keyR := svc.SingleInstanceKey()
+	core.AssertFalse(t, keyR.OK, "SingleInstanceKey must Fail pre-tier-1-unlock for 72B-wrapped legacy install")
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, "single-instance.t0.aead")).OK)
+
+	// Unlock — wire tier-1 KEK provider. Step 3 fires: legacy
+	// .master is unwrapped under tier-1 KEK, re-wrapped to
+	// .master-tier1, single-instance migrated to .t0.aead.
+	svc.SetKEKProvider(func() ([]byte, bool) { return tier1KEK, true })
+	keyR2 := svc.SingleInstanceKey()
+	core.AssertTrue(t, keyR2.OK, "SingleInstanceKey must succeed after tier-1 unlock completes migration")
+	var want [32]byte
+	for i := range want {
+		want[i] = 0x99
+	}
+	core.AssertEqual(t, want, keyR2.Value.([32]byte))
+
+	// On-disk end state: legacy .master + .aead removed, tier
+	// substrate present.
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, ".master")).OK)
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, "single-instance.aead")).OK)
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, ".master-tier0")).OK)
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, ".master-tier1")).OK)
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, "single-instance.t0.aead")).OK)
+}
+
+// TestService_Migrate_FromLegacyRawMaster_OnFirstUnlock_Good —
+// pre-#1624 raw .master + tier-1 .aead provider creds. First
+// SetKEKProvider triggers the full Step 3 migration.
+func TestService_Migrate_FromLegacyRawMaster_OnFirstUnlock_Good(t *core.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := core.PathJoin(home, "Lethean", "data", "keys")
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+
+	legacy := bytesOf(0x10)
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, ".master"), legacy, 0o600).OK)
+
+	// Seal a tier-1 cred ("openai") under legacy master.
+	legacySigil, err := sigil.NewChaChaPolySigil(legacy, nil)
+	core.AssertTrue(t, err == nil)
+	credBlob, err := legacySigil.In([]byte("sk-legacy"))
+	core.AssertTrue(t, err == nil)
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, "openai.aead"), credBlob, 0o600).OK)
+
+	// Boot — wire both providers; tier-1 SetKEKProvider triggers
+	// the full migration.
+	r := keys.New()
+	core.AssertTrue(t, r.OK)
+	svc := r.Value.(*keys.Service)
+	svc.SetKEKProviderTier0(func() ([]byte, bool) { return fixedTier0KEK, true })
+	svc.SetKEKProvider(func() ([]byte, bool) { return legacy, true })
+
+	// openai cred must read post-migration (rename to .t1.aead
+	// preserved the legacy crypto, KEK over the same key bytes).
+	got := svc.GetTier1("openai")
+	core.AssertTrue(t, got.OK, "tier-1 read of migrated cred must succeed")
+	core.AssertEqual(t, "sk-legacy", string(got.Value.([]byte)))
+
+	// On-disk: .master removed, openai.aead renamed to .t1.aead.
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, ".master")).OK)
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, "openai.aead")).OK)
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, "openai.t1.aead")).OK)
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, ".master-tier1")).OK)
+}
+
+// TestService_Migrate_BothFilesPresent_RefusesProceed_Good —
+// RFC §4.4 Step 2 corruption signal. Both .master and
+// .master-tier1 present → migration refuses; tier-1 reads continue
+// to require a clean state.
+func TestService_Migrate_BothFilesPresent_RefusesProceed_Good(t *core.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := core.PathJoin(home, "Lethean", "data", "keys")
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, ".master"), bytesOf(0x10), 0o600).OK)
+	// Plant a well-formed wrapped .master-tier1 under
+	// fixedTier1KEK so the corruption check fires (both present).
+	tier1Sigil, err := sigil.NewChaChaPolySigil(fixedTier1KEK, nil)
+	core.AssertTrue(t, err == nil)
+	wrapped, err := tier1Sigil.In(bytesOf(0x20))
+	core.AssertTrue(t, err == nil)
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, ".master-tier1"), wrapped, 0o600).OK)
 
 	r := keys.New()
 	core.AssertTrue(t, r.OK)
 	svc := r.Value.(*keys.Service)
-
-	fakePriv := []byte("session-priv-bytes")
-	unlocked := true
-	svc.SetKEKProvider(func() ([]byte, bool) {
-		if !unlocked {
-			return nil, false
-		}
-		return kekFromBytes(t, fakePriv), true
-	})
-
-	// Establish wrapped master + a stored secret while unlocked.
-	core.AssertTrue(t, svc.Put("api", []byte("first")).OK)
-	core.AssertTrue(t, svc.Get("api").OK)
-
-	// Flip to locked — subsequent writes in the SAME process still
-	// succeed because the master is cached + the next master write
-	// path falls back gracefully (no rotation back-to-legacy fires).
-	unlocked = false
-	core.AssertTrue(t, svc.Put("api2", []byte("second")).OK,
-		"cached master keeps in-process operations working post-lock")
-
-	// A fresh Service (simulates next process boot post-lock) MUST
-	// Fail to ensureMaster — the on-disk master is wrapped and the
-	// KEK provider isn't wired, so the legacy path can't decode it.
-	r2 := keys.New()
-	core.AssertTrue(t, r2.OK)
-	svc2 := r2.Value.(*keys.Service)
-	// No provider wired — represents the locked state of a fresh boot.
-	getR := svc2.Get("api")
-	core.AssertFalse(t, getR.OK,
-		"fresh Service with wrapped master + no KEK provider must Fail")
+	svc.SetKEKProvider(func() ([]byte, bool) { return fixedTier1KEK, true })
+	// Migration declines (warn logged) — tier-1 master DOES load
+	// from .master-tier1 because corruption-detect doesn't tear
+	// down a valid file. The .master file isn't touched.
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, ".master")).OK, "legacy .master must remain after refused migration")
 }
 
-// TestKeys_KEKGate_MixedFormat_LegacyMasterDecrypts_Good — install
-// has an existing raw 32-byte master + a secret stored against it
-// (the "installed user" scenario). After SetKEKProvider lands, the
-// legacy master reads unchanged, an existing secret still decrypts,
-// AND the NEXT Put migrates the master in-place to the wrapped form.
-func TestKeys_KEKGate_MixedFormat_LegacyMasterDecrypts_Good(t *core.T) {
+// TestService_Migrate_Idempotent_Good — second SetKEKProvider
+// after a successful migration is a no-op.
+func TestService_Migrate_Idempotent_Good(t *core.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	dir := core.PathJoin(home, "Lethean", "data", "keys")
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+	legacy := bytesOf(0x10)
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, ".master"), legacy, 0o600).OK)
 
-	// Pre-KEK install — write a secret while no provider is wired so
-	// the master file lands in the legacy 32-byte raw form.
-	r1 := keys.New()
-	core.AssertTrue(t, r1.OK)
-	preSvc := r1.Value.(*keys.Service)
-	core.AssertTrue(t, preSvc.Put("legacy", []byte("pre-kek-secret")).OK)
-
-	masterPath := core.PathJoin(home, "Lethean", "data", "keys", ".master")
-	preBlobR := core.ReadFile(masterPath)
-	core.AssertTrue(t, preBlobR.OK)
-	core.AssertEqual(t, 32, len(preBlobR.Value.([]byte)),
-		"pre-KEK master must be raw 32 bytes")
-
-	// Now the same install upgrades — wire a KEK provider and
-	// construct a fresh Service against the existing on-disk state.
-	r2 := keys.New()
-	core.AssertTrue(t, r2.OK)
-	postSvc := r2.Value.(*keys.Service)
-	fakePriv := []byte("upgrade-time-priv-bytes")
-	postSvc.SetKEKProvider(func() ([]byte, bool) {
-		return kekFromBytes(t, fakePriv), true
-	})
-
-	// The legacy secret MUST still decrypt — the read-path accepts
-	// the 32-byte legacy master without going through the KEK.
-	got := postSvc.Get("legacy")
-	core.AssertTrue(t, got.OK, "legacy secret must keep decrypting post-KEK-wire")
-	core.AssertEqual(t, "pre-kek-secret", string(got.Value.([]byte)))
-
-	// Next Put triggers the lazy migration: master gets re-persisted
-	// in the 60-byte wrapped form. Read it from disk to confirm.
-	core.AssertTrue(t, postSvc.Put("new", []byte("post-kek-secret")).OK)
-	postBlobR := core.ReadFile(masterPath)
-	core.AssertTrue(t, postBlobR.OK)
-	core.AssertEqual(t, 72, len(postBlobR.Value.([]byte)),
-		"first write post-KEK-wire must migrate master to wrapped form")
-
-	// And the legacy secret + the new secret BOTH still decrypt —
-	// the master plaintext is unchanged across the format rotation.
-	core.AssertEqual(t, "pre-kek-secret", string(postSvc.Get("legacy").Value.([]byte)))
-	core.AssertEqual(t, "post-kek-secret", string(postSvc.Get("new").Value.([]byte)))
-
-	// A fresh Service post-migration MUST require the provider to
-	// read the now-wrapped master.
-	r3 := keys.New()
-	core.AssertTrue(t, r3.OK)
-	freshSvc := r3.Value.(*keys.Service)
-	freshSvc.SetKEKProvider(func() ([]byte, bool) {
-		return kekFromBytes(t, fakePriv), true
-	})
-	core.AssertTrue(t, freshSvc.Get("legacy").OK,
-		"post-migration fresh Service with KEK reads legacy secret")
+	r := keys.New()
+	core.AssertTrue(t, r.OK)
+	svc := r.Value.(*keys.Service)
+	svc.SetKEKProvider(func() ([]byte, bool) { return legacy, true })
+	// First write post-migration.
+	core.AssertTrue(t, svc.PutTier1("k", []byte("v")).OK)
+	// Second SetKEKProvider call — must not re-migrate.
+	svc.SetKEKProvider(func() ([]byte, bool) { return legacy, true })
+	got := svc.GetTier1("k")
+	core.AssertTrue(t, got.OK)
+	core.AssertEqual(t, "v", string(got.Value.([]byte)))
 }
 
-// TestKeys_KEKGate_RoundTrip_Good — provider → write → read returns
-// the same bytes. The minimal end-to-end happy-path that pins the
-// contract: SetKEKProvider doesn't break the existing Put/Get
-// contract; ciphertext on disk for the *secret* is sealed under the
-// master (not under the KEK directly), and decrypt round-trips.
-func TestKeys_KEKGate_RoundTrip_Good(t *core.T) {
-	svc := homeFixture(t)
-	svc.SetKEKProvider(func() ([]byte, bool) {
-		return kekFromBytes(t, []byte("round-trip-priv")), true
-	})
-	payload := []byte("the quick brown fox jumps over the lazy dog")
-	core.AssertTrue(t, svc.Put("brown-fox", payload).OK)
-	r := svc.Get("brown-fox")
+// --- Concurrent Put under migration (RFC §6 Q2 reliability) ---
+
+// TestService_ConcurrentPutTier1_NoTornState_Ugly — parallel
+// PutTier1 calls must all succeed without producing torn state.
+// Serialised by s.mu internally.
+func TestService_ConcurrentPutTier1_NoTornState_Ugly(t *core.T) {
+	svc := tier1Fixture(t)
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			ref := core.Sprintf("ref-%d", id)
+			core.AssertTrue(t, svc.PutTier1(ref, []byte(core.Sprintf("value-%d", id))).OK)
+		}(i)
+	}
+	wg.Wait()
+	r := svc.ListTier1()
 	core.AssertTrue(t, r.OK)
-	core.AssertEqual(t, string(payload), string(r.Value.([]byte)))
+	core.AssertEqual(t, 16, len(r.Value.([]string)))
 }
