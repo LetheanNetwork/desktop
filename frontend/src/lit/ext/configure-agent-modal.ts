@@ -6,8 +6,10 @@
 // renders provider-aware fields (remote → endpoint + api key; local
 // → context length / temperature / sampling params). Save calls:
 //
-//   1. keys.WPut(ref, plaintext)  — for remote providers only
-//   2. fleet.UpsertAgent(agent)   — always
+//   1. keys.WPutTier1(ref, plaintext) — for remote providers only
+//      (tier-1: post-unlock provider creds per RFC.stage-e-keys-
+//      partition v3; the untiered WPut shim was removed in E.K.C)
+//   2. fleet.UpsertAgent(agent)       — always
 //
 // Then dispatches "lthn:fleet:agent-saved" so the host panel can
 // refresh. ESC dismisses; backdrop click dismisses; explicit Cancel
@@ -22,7 +24,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { UpsertAgent } from "@desktop/fleet/service";
-import { WPut } from "@desktop/keys/service";
+import { WPutTier1 } from "@desktop/keys/service";
 import { Agent as AgentModel } from "@desktop/fleet/models";
 import { unwrap } from "../result";
 
@@ -251,7 +253,7 @@ class LthnConfigureAgentModal extends LitElement {
     const ref = this.provider.needsKey ? `agent:${id}` : "";
     try {
       if (this.provider.needsKey && this.apiKey.trim()) {
-        const keyR = await WPut(ref, this.apiKey.trim());
+        const keyR = await WPutTier1(ref, this.apiKey.trim());
         if (!keyR.OK) {
           this.saveErr = "Failed to seal API key";
           this.saving = false;

@@ -628,33 +628,6 @@ func TestService_Service_WDeleteTier1_Ugly(t *core.T) {
 	core.AssertTrue(t, svc.WDeleteTier1("k").OK)
 }
 
-// --- WPut / WList / WHas / WDelete (tier-1 shims for binding
-//      continuity until E.K.C frontend audit lands) ---
-
-func TestService_Service_WPut_Good(t *core.T) {
-	svc := tier1Fixture(t)
-	core.AssertTrue(t, svc.WPut("openai-default", "sk-abc").OK)
-	got := svc.GetTier1("openai-default")
-	core.AssertTrue(t, got.OK)
-	core.AssertEqual(t, "sk-abc", string(got.Value.([]byte)))
-}
-
-func TestService_Service_WPut_Bad(t *core.T) {
-	svc := tier1Fixture(t)
-	core.AssertFalse(t, svc.WPut("", "x").OK)
-	core.AssertFalse(t, svc.WPut("../escape", "x").OK)
-}
-
-func TestService_Service_WPut_Ugly(t *core.T) {
-	svc := tier1Fixture(t)
-	core.AssertTrue(t, svc.WPut("k", "v").OK)
-	core.AssertTrue(t, svc.WDelete("k").OK)
-	core.AssertFalse(t, svc.WHas("k").Value.(bool))
-	r := svc.WList()
-	core.AssertTrue(t, r.OK)
-	core.AssertEqual(t, 0, len(r.Value.([]string)))
-}
-
 // --- SingleInstanceKey (tier-0) ---
 
 func TestService_Service_SingleInstanceKey_Good(t *core.T) {

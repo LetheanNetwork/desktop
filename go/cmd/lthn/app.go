@@ -366,6 +366,60 @@ func newAppCore() *core.Core {
 			core.Print(core.Stderr(), "lthn: serverkey bootstrap failed: %s\n", r.Error())
 			return nil
 		}
+
+		// Stage E.K.C tier-0 KEK provider wire (Mantis #1625,
+		// RFC.stage-e-keys-partition v3 §4.2). Derives the tier-0 KEK
+		// via HKDF over ~/Lethean/wallets/.seed using the salt+info
+		// constants from pkg/keys. The .seed file is bootstrap
+		// substrate per the auth-gate v1 ([[project_auth_gate_v1_landed_2026_05_16]])
+		// — serverkey.Bootstrap above just ensured it exists on disk,
+		// mode 0600 — so the closure is normally live from this point
+		// forward. Pattern mirrors serverkey/audit.go's AuditHMACSecret
+		// (.seed → HKDF derivation).
+		//
+		// CRITICAL — wire ORDER per Cerberus #43 + #1625 + #1653:
+		// tier-0 (SetKEKProviderTier0) MUST fire BEFORE tier-1
+		// (SetKEKProvider). The migrateTier1Locked Step 3b.5 guard
+		// (H#168, refining Cerberus #40) refuses to write
+		// .master-tier1 if legacy single-instance.aead is present and
+		// the tier-0 KEK provider isn't live — otherwise the
+		// retry-half-state path (.master-tier1 written but
+		// single-instance.aead orphaned) bites on next boot
+		// (separate ticket for the cleanup path; this wire avoids
+		// hitting it in the first place).
+		//
+		// Closure derives a fresh KEK on every call rather than
+		// caching: keys.Service treats the returned bytes as opaque
+		// per the KEKProvider contract (service.go:113-125), so
+		// repeated derivation is fine — .seed reads are cheap.
+		if keysSvc, _ := core.ServiceFor[*keys.Service](c, "keys"); keysSvc != nil {
+			walletsR := paths.WalletsDir()
+			if walletsR.OK {
+				seedPath := core.PathJoin(walletsR.Value.(string), ".seed")
+				keysSvc.SetKEKProviderTier0(func() ([]byte, bool) {
+					seedR := core.ReadFile(seedPath)
+					if !seedR.OK {
+						return nil, false
+					}
+					kekR := core.HKDF("sha256", seedR.Value.([]byte),
+						[]byte(keys.KEKHKDFSalt),
+						[]byte(keys.KEKHKDFInfoTier0), 32)
+					if !kekR.OK {
+						return nil, false
+					}
+					kek, ok := kekR.Value.([]byte)
+					if !ok || len(kek) != 32 {
+						return nil, false
+					}
+					return kek, true
+				})
+			} else {
+				core.Print(core.Stderr(),
+					"lthn: tier-0 KEK provider wire skipped — wallets dir resolve failed: %s\n",
+					walletsR.Error())
+			}
+		}
+
 		// Stage E.B integration cutover (Mantis #1480) — wire the
 		// session-token issuer into pkg/account so Unlock can mint
 		// LTHN-SESS-1.* tokens on successful passphrase decrypt. The

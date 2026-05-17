@@ -1370,35 +1370,6 @@ func (s *Service) WHasTier1(ref string) core.Result { return s.HasTier1(ref) }
 // WDeleteTier1 removes a tier-1 ref. Idempotent.
 func (s *Service) WDeleteTier1(ref string) core.Result { return s.DeleteTier1(ref) }
 
-// WPut / WList / WHas / WDelete are retained as tier-1 shims
-// until the E.K.C frontend audit + Wails binding regeneration
-// pass migrates the @desktop/keys/service callers (presently the
-// configure-agent-modal in frontend/src/lit/ext/). After E.K.C
-// these methods are deleted in lockstep with the frontend.
-//
-// SECURITY-NOTE: A2 no-shim (RFC §4.3 / Cerberus ADD-K2)
-// specifically forbids untiered Put/Get on the Go-side surface
-// because callers there could route a tier-0 secret to tier-1 or
-// vice versa. The Wails surface NEVER touched tier-0 (no W-method
-// exposed it; the only tier-0 ref is single-instance, a Go-side
-// concern) — so the W-prefixed shims have no foot-gun shape: they
-// route only to tier-1, which is where every existing frontend
-// caller already wrote.
-
-// WPut routes to PutTier1 for binding continuity. Deleted in E.K.C.
-func (s *Service) WPut(ref, plaintext string) core.Result {
-	return s.PutTier1(ref, []byte(plaintext))
-}
-
-// WList routes to ListTier1 for binding continuity. Deleted in E.K.C.
-func (s *Service) WList() core.Result { return s.ListTier1() }
-
-// WHas routes to HasTier1 for binding continuity. Deleted in E.K.C.
-func (s *Service) WHas(ref string) core.Result { return s.HasTier1(ref) }
-
-// WDelete routes to DeleteTier1 for binding continuity. Deleted in E.K.C.
-func (s *Service) WDelete(ref string) core.Result { return s.DeleteTier1(ref) }
-
 // singleInstanceRef is the stable key name for the per-install
 // SingleInstance encryption key — tier-0 (pre-unlock substrate).
 const singleInstanceRef = "single-instance"
