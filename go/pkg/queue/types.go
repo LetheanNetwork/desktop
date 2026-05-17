@@ -145,3 +145,30 @@ const (
 	// StatusCancelled — user / system cancelled before completion.
 	StatusCancelled = "cancelled"
 )
+
+// MaxQueueDepth caps the number of StatusPending jobs the queue holds
+// at any moment. Enqueue calls past the ceiling Fail with
+// ErrQueueFullCode (the op-string from core.E) so a runaway renderer
+// or cascade-rule fanout can't exhaust memory / disk / worker slots
+// via unbounded Enqueue. Cerberus #64 F-3 / Mantis #1724.
+//
+// Sized for lthn-scale: thousands of pending jobs is the design
+// envelope per design_cooperative_task_queue (capture-greedy /
+// execute-throttled). 10k headroom is ~10x typical observed depth.
+//
+// Per-source rate-limiting (token bucket) is layer 2 — deferred per
+// the ticket's beta scope; gate is depth alone for now.
+const MaxQueueDepth = 10000
+
+// ErrQueueFullCode is the core.ErrorCode op-string the depth-ceiling
+// rejection carries. Callers branch on it to distinguish "queue
+// saturated, back off and retry" from other Enqueue failures
+// (nil core, empty kind, orm insert failure).
+//
+// Usage example:
+//
+//	r := queue.Enqueue(c, "lint", core.NewOptions())
+//	if !r.OK && r.Code() == queue.ErrQueueFullCode {
+//	    // queue saturated — caller-side backoff
+//	}
+const ErrQueueFullCode = "queue.full"

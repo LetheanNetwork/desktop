@@ -53,12 +53,37 @@ func Enqueue(c *core.Core, kind string, payload core.Options) core.Result {
 
 // EnqueueWithOptions is the full-control enqueue. Persists the Job +
 // fires JobChanged{Phase: PhaseEnqueued} on the IPC bus.
+//
+// Depth ceiling (Cerberus #64 F-3 / Mantis #1724): the pending-job
+// count is checked against MaxQueueDepth under c.Lock("queue.enqueue")
+// so concurrent Enqueue calls can't all race past the cap. A concurrent
+// worker claim only DECREASES pending-count (pending → running), so
+// the cap is never spuriously breached by claim activity outside the
+// lock. Rejection returns ErrQueueFullCode via core.ErrorCode.
 func EnqueueWithOptions(c *core.Core, kind string, opts EnqueueOptions) core.Result {
 	if c == nil {
 		return core.Fail(core.E("queue.Enqueue", "core is nil", nil))
 	}
 	if kind == "" {
 		return core.Fail(core.E("queue.Enqueue", "kind is required", nil))
+	}
+	// Atomic depth-check + insert. Per-Core named mutex serialises
+	// concurrent Enqueue paths; worker claim mutates Status outside
+	// this lock but only ever lowers pending-count, so reading depth
+	// under the lock is safe.
+	lock := c.Lock("queue.enqueue")
+	lock.Lock()
+	defer lock.Unlock()
+	if r := orm.Of[Job](c).Where("status", "=", StatusPending).Count(); r.OK {
+		depth, _ := r.Value.(int64)
+		if depth >= MaxQueueDepth {
+			// NewCode populates Err.Code so Result.Code() exposes the
+			// sentinel value directly. core.E sets Operation but leaves
+			// Code empty — callers branching on r.Code() need the
+			// Code-bearing constructor.
+			return core.Fail(core.NewCode(ErrQueueFullCode,
+				"queue.Enqueue: queue at max depth (10000); reject pending Enqueue"))
+		}
 	}
 	now := core.Now().UTC()
 	scheduled := opts.ScheduledFor

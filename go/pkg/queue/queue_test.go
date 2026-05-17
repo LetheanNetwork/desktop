@@ -140,6 +140,46 @@ func TestQueue_EnqueueWithOptions_Ugly(t *core.T) {
 	core.AssertFalse(t, job.ScheduledFor.IsZero())
 }
 
+// TestQueue_Enqueue_BelowCeiling_Good — pending depth below
+// MaxQueueDepth lets Enqueue proceed normally; the depth-ceiling
+// path is transparent to the common case.
+func TestQueue_Enqueue_BelowCeiling_Good(t *core.T) {
+	c := newQueueCore(t)
+	for i := 0; i < 5; i++ {
+		r := queue.Enqueue(c, "lint", core.NewOptions())
+		core.RequireTrue(t, r.OK)
+	}
+	r := queue.List(c, queue.ListFilter{Status: queue.StatusPending})
+	core.RequireTrue(t, r.OK)
+	jobs, _ := orm.Cast[[]queue.Job](r)
+	core.AssertEqual(t, 5, len(jobs))
+}
+
+// TestQueue_Enqueue_AtCeiling_RejectsErrQueueFull_Bad — once the
+// pending depth reaches MaxQueueDepth, further Enqueue calls Fail
+// with Result.Code() == ErrQueueFullCode. Filling the production
+// 10k ceiling row-by-row would dominate test time, so this exercises
+// the gate by pre-seeding pending jobs directly through orm.Insert
+// (bypassing the depth-check) up to the cap, then probing one more.
+func TestQueue_Enqueue_AtCeiling_RejectsErrQueueFull_Bad(t *core.T) {
+	c := newQueueCore(t)
+	now := core.Now().UTC()
+	for i := 0; i < queue.MaxQueueDepth; i++ {
+		seed := queue.Job{
+			ID:           "seed-" + core.Sprintf("%d", i),
+			Kind:         "lint",
+			Status:       queue.StatusPending,
+			ScheduledFor: now,
+			EnqueuedAt:   now,
+		}
+		core.RequireTrue(t, orm.Insert(c, &seed).OK)
+	}
+
+	r := queue.Enqueue(c, "lint", core.NewOptions())
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, queue.ErrQueueFullCode, r.Code())
+}
+
 // TestQueue_Cancel_Good — cancelling a pending job moves it to
 // StatusCancelled + fires JobChanged{Phase: PhaseCancelled}.
 func TestQueue_Cancel_Good(t *core.T) {
