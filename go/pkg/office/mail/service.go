@@ -38,6 +38,22 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// SECURITY-NOTE — TIER-1 TRUSTED SURFACE (Mantis #1502, Cerberus pass-10):
+//
+// This Wails surface returns PII (mail threads / file paths / document bodies)
+// to any in-process WebView caller. Today's caller is the trusted host SPA only.
+// Post-#1421 (plugin enablement) MUST NOT inherit these methods — plugin tier
+// requires explicit user consent + a stronger boundary than the in-process Wails
+// IPC.
+//
+// Bridge bearer auth (#1423) gates only /mcp/* + /internal/* — it does NOT gate
+// this Wails surface. Per design_sandbox_is_the_safety_floor + Snider's A1 floor:
+// adding new endpoints here MUST be deliberate; new fields on existing endpoints
+// MUST be reviewed for PII propagation.
+//
+// When v2 features (#1495/#1496/#1497) populate threads / docs / file index,
+// re-audit this surface against the plugin-capability split.
+
 // AccountProvider abstracts pkg/account.Service for private-key access.
 // The mail service depends on it for decrypt; the interface avoids an
 // import cycle (lib must not import consumer — AX principle 8).
