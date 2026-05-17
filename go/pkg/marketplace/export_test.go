@@ -92,3 +92,51 @@ func BuildInstallSpawnInputForTest(
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// PersistManifestForTest exposes the same persistManifest helper that
+// Install uses internally so external tests (the *_test package) can
+// drive the manifest.yml write step without spinning up a real sandbox
+// runtime (docker / apple container). Mantis #1689 HIGH (Cerberus #54
+// C1).
+//
+// Usage example (test code):
+//
+//	dir := /* tmp dir */
+//	r := subject.PersistManifestForTest(svc, dir, m)
+//	core.AssertTrue(t, r.OK)
+func PersistManifestForTest(s *Service, configPath string, m BundleManifest) interface{ Error() string } {
+	r := s.persistManifest(configPath, m)
+	if r.OK {
+		return nil
+	}
+	if err, ok := r.Value.(error); ok {
+		return err
+	}
+	return errString(r.Error())
+}
+
+// BundleConfigPathForTest exposes Service.bundleConfigPath so external
+// tests can resolve the install-time config dir without re-encoding
+// the ~/Lethean/conf/marketplace/<id>/ convention. Mantis #1689.
+func BundleConfigPathForTest(s *Service, bundleID string) string {
+	return s.bundleConfigPath(bundleID)
+}
+
+// ResolvePluginCodeForTest exposes Service.resolvePluginCode so
+// external tests can verify Uninstall's plugin-code resolution walks
+// the on-disk manifest (Cerberus #54 C1 — when manifest.yml is absent
+// this silently falls back to bundle id, leaking ViewRegistry state on
+// uninstall whenever plugin.code != bundle.Name).
+func ResolvePluginCodeForTest(s *Service, bundleID string) string {
+	return s.resolvePluginCode(bundleID)
+}
+
+// AllowedManifestHostSuffixesForTest returns a copy of the compile-time
+// host-allowlist (Cerberus #54 C2 / Mantis #1690). External tests use
+// this to assert the sorted-and-unique invariant without exporting the
+// list itself into the production API surface.
+func AllowedManifestHostSuffixesForTest() []string {
+	out := make([]string, len(allowedManifestHostSuffixes))
+	copy(out, allowedManifestHostSuffixes)
+	return out
+}

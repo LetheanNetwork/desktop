@@ -26,6 +26,14 @@ const (
 	// defaultIndexURL is the curated catalogue endpoint.
 	defaultIndexURL = "https://marketplace.lthn.ai/v1/index.json"
 
+	// manifestHostNotAllowedMsg is the rejection message used when a
+	// FetchManifest source URL targets a host outside
+	// allowedManifestHostSuffixes. Stable string so audit consumers /
+	// UI surfaces can keyword-match without depending on core.Is
+	// classification (no typed-error sentinel today — beta-speed
+	// compile-time const per Mantis #1690 brief).
+	manifestHostNotAllowedMsg = "manifest host is not on the allowlist"
+
 	// indexCacheTTL is how long a locally cached index is considered fresh.
 	// Matches the "every 24h" cadence from the spec.
 	indexCacheTTL = 24 * core.Hour
@@ -88,6 +96,91 @@ func requireHTTPS(op, rawURL string) core.Result {
 	if !core.HasPrefix(rawURL, "https://") {
 		return core.Fail(core.E(op,
 			"only https:// URLs accepted (refusing "+rawURL+")", nil))
+	}
+	return core.Ok(nil)
+}
+
+// allowedManifestHostSuffixes is the compile-time allowlist of OCI /
+// HTTPS hosts a caller's manifest URL may target. Cerberus Mantis #1690
+// C2 — mirrors the imagetrust.IsAllowedImage shape at the manifest tier
+// (and pkg/downloader.allowedHostSuffixes at the model-bytes tier):
+// without a host gate, FetchManifest accepts any agent-supplied https
+// URL via mcpInstall.SourceURL, turning the marketplace fetch surface
+// into a fetch-anywhere primitive for any party that can reach the MCP
+// tool.
+//
+// Suffix-matched against the parsed URL hostname so CDN mirrors under
+// the same parent zone (e.g. marketplace.lthn.ai serving a manifest
+// referencing v1.marketplace.lthn.ai) work without per-CDN entries.
+//
+// Big-tent OSS coverage: our own Forge surfaces (homelab + public),
+// the canonical marketplace endpoint, and the four community git hosts
+// where third-party bundle authors are likely to publish manifest YAML
+// (GitHub, GitLab, Codeberg + raw.githubusercontent.com is reachable
+// under github.com suffix-match).
+//
+// NOT runtime-configurable to avoid TOCTOU — a malicious caller flipping
+// the list between the gate check and the HTTP fetch would defeat the
+// gate. Updates ship as code review. Same compile-time discipline as
+// imagetrust.allowedImageRegistries (#1667) and
+// downloader.allowedHostSuffixes (#1424).
+//
+// MUST stay sorted alphabetically AND contain no duplicates — invariant
+// asserted in TestMarketplace_AllowedManifestHosts_Sorted_Good.
+var allowedManifestHostSuffixes = []string{
+	"codeberg.org",
+	"forge.lthn.ai",
+	"forge.lthn.sh",
+	"github.com",
+	"githubusercontent.com",
+	"gitlab.com",
+	"marketplace.lthn.ai",
+}
+
+// isAllowedManifestHost reports whether rawURL's hostname matches a
+// suffix on allowedManifestHostSuffixes. Returns false for empty,
+// malformed, or non-https URLs — callers should require https
+// separately so the typed error class stays distinct from the
+// host-allowlist rejection.
+//
+// Usage example:
+//
+//	if !isAllowedManifestHost(url) {
+//	    return core.Fail(core.E(fetchManifestOp,
+//	        manifestHostNotAllowedMsg+": "+url, nil))
+//	}
+func isAllowedManifestHost(rawURL string) bool {
+	if rawURL == "" {
+		return false
+	}
+	r := core.URLParse(rawURL)
+	if !r.OK {
+		return false
+	}
+	u, _ := r.Value.(*core.URL)
+	if u == nil {
+		return false
+	}
+	host := core.Lower(u.Hostname())
+	if host == "" {
+		return false
+	}
+	for _, suffix := range allowedManifestHostSuffixes {
+		if host == suffix || core.HasSuffix(host, "."+suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// requireAllowedManifestHost wraps isAllowedManifestHost in the
+// core.Result idiom used at the FetchManifest / downloadIndex entry
+// boundary. Fail message carries the rejected URL so audit + UI
+// surfaces can show the operator which host was blocked.
+func requireAllowedManifestHost(op, rawURL string) core.Result {
+	if !isAllowedManifestHost(rawURL) {
+		return core.Fail(core.E(op,
+			manifestHostNotAllowedMsg+": "+rawURL, nil))
 	}
 	return core.Ok(nil)
 }
@@ -396,6 +489,9 @@ func (s *Service) downloadIndex(indexURL, cachePath string) core.Result {
 	if r := requireHTTPS(fetchIndexOp, indexURL); !r.OK {
 		return r
 	}
+	if r := requireAllowedManifestHost(fetchIndexOp, indexURL); !r.OK {
+		return r
+	}
 	raw, _, r := fetchCapped(fetchIndexOp, indexURL, maxIndexBytes)
 	if !r.OK {
 		return r
@@ -421,8 +517,14 @@ func (s *Service) downloadIndex(indexURL, cachePath string) core.Result {
 
 // fetchManifestHTTPS downloads a manifest YAML from an https:// URL and
 // parses it. Cerberus #1433 — https-only, redirect re-validated, 256 KiB cap.
+// Cerberus #1690 C2 — host-allowlist gated BEFORE any network I/O so
+// FetchManifest can never be turned into a fetch-anywhere primitive by
+// an agent supplying a hostile https URL via marketplace_install.
 func (s *Service) fetchManifestHTTPS(url string) core.Result {
 	if r := requireHTTPS(fetchManifestOp, url); !r.OK {
+		return r
+	}
+	if r := requireAllowedManifestHost(fetchManifestOp, url); !r.OK {
 		return r
 	}
 	raw, _, r := fetchCapped(fetchManifestOp, url, maxManifestBytes)
