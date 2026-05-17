@@ -14,12 +14,19 @@ import (
 
 // List returns all social posts, optionally filtered by channel or state.
 //
+// Dual-format aware (RFC.stage-e-encrypt-at-rest v2 §4.1, Wave 3):
+// .lthn files project HEADER-ONLY entries (When / State / Text / Attach
+// empty — the frontend renders an "encrypted" placeholder); .md legacy
+// files round-trip the full plaintext entry. Reads-while-locked stays
+// open — header MAC verify needs only the public key (no unlock
+// required).
+//
 // Usage example:
 //
 //	r := svc.List(social.ListInput{Channel: "mastodon"})
 //	if r.OK { out := r.Value.(social.ListOutput) }
 func (s *Service) List(input ListInput) core.Result {
-	posts, err := loadPosts()
+	posts, err := s.loadPosts()
 	if err != nil {
 		return core.Fail(core.E("social.List", "scan failed", err))
 	}
@@ -58,6 +65,13 @@ func (s *Service) List(input ListInput) core.Result {
 
 // Get returns a single social post by ID.
 //
+// Stage E.D.B.3 surface (RFC.stage-e-encrypt-at-rest v2 §3.1, Wave 3):
+// .lthn records require an unlocked session to decrypt the body. When
+// loadOne reports the typed "social.session.locked" code (either
+// the gate is unwired or no account is unlocked), Get forwards the
+// session-locked failure verbatim so the frontend can distinguish
+// "encrypted record needs unlock" from a true not-found.
+//
 // Usage example:
 //
 //	r := svc.Get("post-20260516")
@@ -66,22 +80,14 @@ func (s *Service) Get(id string) core.Result {
 	if err := paths.IsValidID(id); err != nil {
 		return core.Fail(err)
 	}
-	dirR := socialDir()
-	if !dirR.OK {
-		return core.Fail(core.E("social.Get", dirR.Error(), nil))
-	}
-	// Cerberus #1486 belt: WithinDir check after the join.
-	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), id+".md")
-	if jerr != nil {
-		return core.Fail(jerr)
-	}
-	raw := core.ReadFile(fpath)
-	if !raw.OK {
-		return core.Fail(core.E("social.Get", "not found: "+id, nil))
-	}
-	p, err := parsePost(raw.Value.([]byte))
+	p, _, err := s.loadOne(id)
 	if err != nil {
-		return core.Fail(core.E("social.Get", "parse failed", err))
+		// Forward session.locked verbatim so the frontend can render
+		// the unlock-prompt distinct from not-found.
+		if core.Contains(err.Error(), "social.session.locked") {
+			return core.Fail(err)
+		}
+		return core.Fail(core.E("social.Get", "not found: "+id, err))
 	}
 	return core.Ok(p)
 }
@@ -129,10 +135,10 @@ func (s *Service) Create(input CreateInput) core.Result {
 
 	// Cascade W2 (RFC §B.3 row 5) — Create is an unconditional first-
 	// write (ifVersion=0). writePost stamps Version=1 into the
-	// marshalled frontmatter. Conflict-path (rare on Create — only
-	// fires if another goroutine races on the same slug) returns
+	// persisted record. Conflict-path (rare on Create — only fires if
+	// another goroutine races on the same slug) returns
 	// core.Fail(paths.ConflictEnvelope{...}) directly via writePost.
-	if wr := writePost(dirR.Value.(string), p, 0); !wr.OK {
+	if wr := s.writePost(dirR.Value.(string), p, 0); !wr.OK {
 		return wr
 	}
 	p.Version = 1
@@ -153,23 +159,13 @@ func (s *Service) MarkSent(id string) core.Result {
 	if err := paths.IsValidID(id); err != nil {
 		return core.Fail(err)
 	}
-	dirR := socialDir()
-	if !dirR.OK {
-		return core.Fail(core.E("social.MarkSent", dirR.Error(), nil))
-	}
 
-	// Cerberus #1486 belt: WithinDir check after the join.
-	fpath, jerr := paths.JoinAndCheck(dirR.Value.(string), id+".md")
-	if jerr != nil {
-		return core.Fail(jerr)
-	}
-	raw := core.ReadFile(fpath)
-	if !raw.OK {
-		return core.Fail(core.E("social.MarkSent", "not found: "+id, nil))
-	}
-	p, err := parsePost(raw.Value.([]byte))
+	p, dir, err := s.loadOne(id)
 	if err != nil {
-		return core.Fail(core.E("social.MarkSent", "parse failed", err))
+		if core.Contains(err.Error(), "social.session.locked") {
+			return core.Fail(err)
+		}
+		return core.Fail(core.E("social.MarkSent", "not found: "+id, err))
 	}
 
 	priorVersion := p.Version
@@ -181,7 +177,7 @@ func (s *Service) MarkSent(id string) core.Result {
 	// and stamps Version=1 on the upgrade write. Conflict-path returns
 	// core.Fail(paths.ConflictEnvelope{...}) directly via writePost
 	// (Mantis #1544 gating shape inherited from W1).
-	if wr := writePost(dirR.Value.(string), p, priorVersion); !wr.OK {
+	if wr := s.writePost(dir, p, priorVersion); !wr.OK {
 		return wr
 	}
 	p.Version = priorVersion + 1
