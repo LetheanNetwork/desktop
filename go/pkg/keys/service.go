@@ -786,27 +786,28 @@ func (s *Service) migrateTier1Locked() {
 		return
 	}
 
-	// 3b.5. Mantis #1625 S2 (Cerberus #39) — pre-write atomicity
-	// guard. If legacy single-instance.aead is present, Step 3e
-	// will need a live tier-0 master to re-seal it. If we don't
-	// have one (tier-0 KEK provider not wired this boot AND no
-	// .master-tier0 on disk from a prior Step 0b run), we MUST
-	// defer the entire Step 3 sequence — including 3c/3d/3g —
-	// before any persistent writes happen. Otherwise Step 3d
-	// would write .master-tier1, Step 3e would skip the SI
-	// re-seal, and Step 3g would delete legacy .master, leaving
-	// single-instance.aead PERMANENTLY ORPHANED (sealed under a
-	// master we just removed, no recovery path). Leave latch
-	// unset so the next SetKEKProvider call (after tier-0 wires)
-	// can complete Steps 3c-3g atomically.
+	// 3b.5. Mantis #1625 S2 (Cerberus #39, tightened by #40) —
+	// pre-write atomicity guard. If legacy single-instance.aead
+	// is present, Step 3e will need a live tier-0 master to
+	// re-seal it. The ONLY thing that guarantees we can produce
+	// a tier-0 master at re-seal time is a live tier-0 KEK
+	// provider: file-presence (.master-tier0 on disk) is NOT
+	// sufficient because without a provider's KEK we cannot
+	// unwrap it, and Step 3c only writes-on-absence (it does
+	// NOT load-on-presence), so s.tier0Master would stay empty
+	// while Step 3d still wrote .master-tier1 and Step 3e's
+	// defensive defer fired AFTER the persistent write. Result:
+	// next boot sees legacyStat.OK && tier1Stat.OK and
+	// corruption-refuses (operator-only recovery). Provider-
+	// liveness is the gate, full stop. Leave latch unset so the
+	// next SetKEKProvider call (after tier-0 wires) can complete
+	// Steps 3c-3g atomically.
 	legacySIPath := core.PathJoin(dir, singleInstanceRef+legacyBlobSuffix)
 	siLegacyPresent := core.Stat(legacySIPath).OK
 	if siLegacyPresent {
-		tier0Path := core.PathJoin(dir, masterTier0FileName)
-		tier0OnDisk := core.Stat(tier0Path).OK
 		_, tier0ProviderLive := s.currentKEKFor(tier0)
-		if !tier0OnDisk && !tier0ProviderLive {
-			core.Warn("keys: tier-1 migration deferred — single-instance.aead present but tier-0 KEK provider not wired and .master-tier0 absent; retaining legacy .master + single-instance.aead, latch unset (will retry on next SetKEKProvider with tier-0 wired)")
+		if !tier0ProviderLive {
+			core.Warn("keys: tier-1 migration deferred — single-instance.aead present but tier-0 KEK provider not wired; retaining legacy .master + single-instance.aead, latch unset (will retry on next SetKEKProvider with tier-0 wired)")
 			return
 		}
 	}

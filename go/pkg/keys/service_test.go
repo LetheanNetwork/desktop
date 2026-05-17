@@ -1210,3 +1210,103 @@ func TestService_Migrate_Tier0NotLoaded_DefersSingleInstance_Good(t *core.T) {
 	core.AssertTrue(t, core.Stat(core.PathJoin(dir, "single-instance.t0.aead")).OK,
 		"single-instance.t0.aead must be written by Step 3e")
 }
+
+// TestService_Migrate_Tier0OnDiskNoProvider_Defers_NoHalfState —
+// Mantis #1625 Cerberus #40: tighten 3b.5 — file-presence on disk
+// (.master-tier0) does NOT imply we can unwrap it without a live
+// tier-0 KEK provider. Step 3c only writes-on-absence (it does not
+// load-on-presence), so a file-only fixture would leave
+// s.tier0Master empty while Step 3d still wrote .master-tier1 and
+// Step 3g still deleted legacy .master — bricking the install on
+// next boot (legacyStat.OK && tier1Stat.OK → corruption-refuse).
+//
+// Setup: 72B-wrapped legacy .master + legacy single-instance.aead +
+// pre-existing .master-tier0 on disk (wrapped under tier-0 KEK) +
+// tier-1 KEK provider wired + tier-0 KEK provider NOT wired.
+//
+// Assert: Step 3b.5 fires defer pre-write — NO .master-tier1 written,
+// legacy .master + single-instance.aead retained, .master-tier0 left
+// byte-identical (Step 3c never rewrote). Latch unset.
+//
+// NB Cerberus #40 SECURITY-NOTE (surfaced separately): the retry
+// path (second SetKEKProvider after tier-0 wires) does NOT complete
+// in this on-disk-file-no-provider shape — Step 3c's write-on-
+// absence path is skipped because the file is already there, so
+// s.tier0Master stays empty and Step 3e's defensive defer catches.
+// The tighten makes the FIRST-call state strictly safer (no
+// half-state, no brick), but a full fix needs an additional
+// load-on-presence path in Step 3c. Test scope here is the 3b.5
+// guard only — first-call safety. Retry-success path is the
+// follow-on ticket.
+func TestService_Migrate_Tier0OnDiskNoProvider_Defers_NoHalfState(t *core.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := core.PathJoin(home, "Lethean", "data", "keys")
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+
+	// Build a 72B KEK-wrapped legacy .master (post-#1624 form)
+	// under the KEK we'll later wire as tier-1.
+	legacyMaster := bytesOf(0x10)
+	tier1KEK := fixedTier1KEK
+	tier1Sigil, err := sigil.NewChaChaPolySigil(tier1KEK, nil)
+	core.AssertTrue(t, err == nil)
+	wrapped, err := tier1Sigil.In(legacyMaster)
+	core.AssertTrue(t, err == nil)
+	core.AssertEqual(t, 72, len(wrapped))
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, ".master"), wrapped, 0o600).OK)
+
+	// Seal a single-instance key under the legacy master.
+	sealedKey := bytesOf(0x99)
+	siSigil, err := sigil.NewChaChaPolySigil(legacyMaster, nil)
+	core.AssertTrue(t, err == nil)
+	siBlob, err := siSigil.In(sealedKey)
+	core.AssertTrue(t, err == nil)
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, "single-instance.aead"), siBlob, 0o600).OK)
+
+	// Pre-seed .master-tier0 on disk, wrapped under the tier-0 KEK
+	// (so the file is real + cryptographically valid), but DO NOT
+	// wire a tier-0 KEK provider — simulates the dangerous shape
+	// Cerberus #40 named: file-present, KEK absent.
+	tier0Master := bytesOf(0x20)
+	tier0KEK := fixedTier0KEK
+	tier0Sigil, err := sigil.NewChaChaPolySigil(tier0KEK, nil)
+	core.AssertTrue(t, err == nil)
+	tier0Wrapped, err := tier0Sigil.In(tier0Master)
+	core.AssertTrue(t, err == nil)
+	core.AssertEqual(t, 72, len(tier0Wrapped))
+	tier0Path := core.PathJoin(dir, ".master-tier0")
+	core.AssertTrue(t, core.WriteFile(tier0Path, tier0Wrapped, 0o600).OK)
+
+	// Snapshot the on-disk tier-0 master bytes so we can assert it
+	// wasn't rewritten by a half-completed Step 3c during the
+	// deferred-call window.
+	tier0Pre := core.ReadFile(tier0Path)
+	core.AssertTrue(t, tier0Pre.OK)
+
+	// Boot — tier-1 wired, tier-0 NOT wired. Pre-#40 guard would
+	// have proceeded (tier0OnDisk=true short-circuited the defer);
+	// post-#40 guard must defer because tier-0 provider isn't live.
+	r := keys.New()
+	core.AssertTrue(t, r.OK)
+	svc := r.Value.(*keys.Service)
+	svc.SetKEKProvider(func() ([]byte, bool) { return tier1KEK, true })
+
+	// Step 3b.5 must have fired pre-write defer.
+	//   - .master retained
+	//   - single-instance.aead retained
+	//   - .master-tier1 NOT written (no half-state)
+	//   - single-instance.t0.aead NOT written
+	//   - .master-tier0 byte-identical to seed (Step 3c never ran)
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, ".master")).OK,
+		"legacy .master must be retained when 3b.5 defers under file-on-disk-no-provider")
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, "single-instance.aead")).OK,
+		"legacy single-instance.aead must be retained when 3b.5 defers")
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, ".master-tier1")).OK,
+		".master-tier1 must NOT be written when 3b.5 defers — would brick on next boot")
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, "single-instance.t0.aead")).OK,
+		"single-instance.t0.aead must NOT be written when 3b.5 defers")
+	tier0Post := core.ReadFile(tier0Path)
+	core.AssertTrue(t, tier0Post.OK)
+	core.AssertEqual(t, tier0Pre.Value.([]byte), tier0Post.Value.([]byte),
+		".master-tier0 must be byte-identical to seed — Step 3c must not have rewritten it")
+}
