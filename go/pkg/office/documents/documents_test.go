@@ -788,6 +788,15 @@ func TestCreate_RoutesThroughPrimitive_Good(t *testing.T) {
 	slug := testSlug(t)
 	cleanupDoc(t, slug)
 
+	// Wire an audit secret BEFORE installing the subscriber. Per
+	// Mantis #1526, emitLockEvent drops events when the audit
+	// secret is empty (degraded mode), so without this the
+	// subscriber would never fire. See pkg/paths/events.go:445.
+	paths.SetAuditSecretProvider(func() []byte {
+		return []byte("test-secret-32-bytes-long-padding")
+	})
+	t.Cleanup(func() { paths.SetAuditSecretProvider(nil) })
+
 	var captured []paths.LockEvent
 	paths.SubscribeLockEvents(func(ev paths.LockEvent) {
 		captured = append(captured, ev)
