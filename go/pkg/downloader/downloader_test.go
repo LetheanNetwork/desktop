@@ -179,3 +179,160 @@ func TestDownloader_FetchWithProgress_Ugly(t *core.T) {
 	got := core.ReadFile(dest).Value.([]byte)
 	core.AssertEqual(t, "part-1-part-2-part-3", string(got))
 }
+
+// TestDownloader_NameTraversal_Rejects_Bad — Cerberus #49 F-1.
+// Renderer-supplied names containing traversal tokens, leading dots,
+// path separators, or NUL bytes must be rejected BEFORE any
+// core.PathJoin so a malicious model name can't pivot writes outside
+// ~/Lethean/conf/models/. Mirrors the IsValidID contract used across
+// the 20+ wails surfaces hardened by Cerberus #1486.
+func TestDownloader_NameTraversal_Rejects_Bad(t *core.T) {
+	homeFixture(t)
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		_, _ = w.Write([]byte("payload"))
+	}))
+	defer srv.Close()
+
+	cases := []struct {
+		label, name string
+	}{
+		{"parent traversal", "../escape.gguf"},
+		{"deep traversal", "../../wallets/server.key"},
+		{"absolute path", "/etc/passwd"},
+		{"leading dot", ".hidden.gguf"},
+		{"backslash", "evil\\path.gguf"},
+		{"NUL byte", "model\x00.gguf"},
+		{"bare ..", ".."},
+	}
+	for _, tc := range cases {
+		r := downloader.Fetch(srv.URL, tc.name)
+		core.AssertFalse(t, r.OK,
+			"name "+tc.label+" ("+tc.name+") must be rejected")
+		core.AssertTrue(t,
+			core.Contains(r.Error(), "paths.invalid_id") ||
+				core.Contains(r.Error(), "paths.escape"),
+			"error must carry paths.invalid_id or paths.escape; got: "+r.Error())
+	}
+}
+
+// TestDownloader_WailsEmptyDigest_Rejects_Bad — Cerberus #49 F-2.
+// Wails.Download(url, name) without a SHA-256 digest must fire
+// "downloader:done" with ok=false + error code
+// `downloader.digest_required` and MUST NOT touch the network.
+// Mirrors the opencode Upgrade pattern (Mantis #1621).
+func TestDownloader_WailsEmptyDigest_Rejects_Bad(t *core.T) {
+	homeFixture(t)
+	// Counter on the test server so we can assert NO request fired —
+	// the digest gate must reject pre-network.
+	var hits core.AtomicInt32
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte("should-never-arrive"))
+	}))
+	defer srv.Close()
+
+	// Capture the "downloader:done" event via SetEmitter — same
+	// pattern as the trust quarantine sweep test.
+	c := core.New()
+	core.AssertTrue(t, c.ServiceStartup(core.Background(), nil).OK)
+	defer func() { _ = c.ServiceShutdown(core.Background()) }()
+	svc := downloader.NewWailsService(c)
+
+	var doneMu core.Mutex
+	var done map[string]any
+	svc.SetEmitter(func(name string, data any) {
+		if name != "downloader:done" {
+			return
+		}
+		doneMu.Lock()
+		defer doneMu.Unlock()
+		done, _ = data.(map[string]any)
+	})
+
+	// Empty-digest Download — must fire done(ok=false, digest_required).
+	id := svc.Download(srv.URL, modelGGUF)
+	core.AssertTrue(t, id != "", "Download must still return a job id")
+
+	// Spawned via c.Go — give it a tick.
+	core.Sleep(50 * core.Millisecond)
+
+	doneMu.Lock()
+	got := done
+	doneMu.Unlock()
+	core.AssertTrue(t, got != nil, "downloader:done must fire")
+	core.AssertEqual(t, false, got["ok"], "ok must be false on empty digest")
+	errStr, _ := got["error"].(string)
+	core.AssertTrue(t,
+		core.Contains(errStr, "downloader.digest_required"),
+		"error must carry downloader.digest_required; got: "+errStr)
+
+	// Network MUST not have been touched.
+	core.AssertEqual(t, int32(0), hits.Load(),
+		"no HTTP request must fire when the digest gate rejects")
+
+	// DownloadVerified with explicit empty digest — same gate.
+	done = nil
+	id2 := svc.DownloadVerified(srv.URL, modelGGUF, "")
+	core.AssertTrue(t, id2 != "")
+	core.Sleep(50 * core.Millisecond)
+	doneMu.Lock()
+	got2 := done
+	doneMu.Unlock()
+	core.AssertTrue(t, got2 != nil, "downloader:done must fire for DownloadVerified('') too")
+	core.AssertEqual(t, false, got2["ok"])
+	errStr2, _ := got2["error"].(string)
+	core.AssertTrue(t,
+		core.Contains(errStr2, "downloader.digest_required"),
+		"DownloadVerified('') must also carry downloader.digest_required; got: "+errStr2)
+	core.AssertEqual(t, int32(0), hits.Load(),
+		"DownloadVerified('') must also stay pre-network")
+}
+
+// TestDownloader_ConcurrentSameName_NoRaceBypass_Ugly — Cerberus #49
+// F-3. Two parallel FetchVerified calls targeting the same name must
+// not interleave Create / Copy / Verify / Rename in a way that lets
+// bytes B promote under digest A. The per-name mutex serialises them
+// so each call sees a consistent quarantine view; one call wins and
+// the other writes against the now-existing final file.
+//
+// Pattern: spin two goroutines that fetch the SAME name from servers
+// returning DIFFERENT bodies; assert the final file content matches
+// exactly one of the two payloads (whichever won the lock). Run
+// repeatedly under -race to flush any remaining write-write hazard.
+func TestDownloader_ConcurrentSameName_NoRaceBypass_Ugly(t *core.T) {
+	home := homeFixture(t)
+	payloadA := []byte("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+	payloadB := []byte("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")
+	srvA := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		_, _ = w.Write(payloadA)
+	}))
+	defer srvA.Close()
+	srvB := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		_, _ = w.Write(payloadB)
+	}))
+	defer srvB.Close()
+
+	name := "race.gguf"
+	done := make(chan core.Result, 2)
+	go func() { done <- downloader.Fetch(srvA.URL, name) }()
+	go func() { done <- downloader.Fetch(srvB.URL, name) }()
+	r1 := <-done
+	r2 := <-done
+
+	// Both calls return Ok (each completes the full pipeline; the
+	// second overwrites the first's atomic-promoted file).
+	core.AssertTrue(t, r1.OK)
+	core.AssertTrue(t, r2.OK)
+
+	// Final on-disk content is EXACTLY one of the two payloads —
+	// never a torn mix. The mutex ensures Copy → Rename runs atomically
+	// per-name; without it a partial-write of B could overlap A's
+	// Rename and surface mixed bytes.
+	dest := core.PathJoin(home, "Lethean", "conf", "models", name)
+	got := core.ReadFile(dest)
+	core.AssertTrue(t, got.OK)
+	final := string(got.Value.([]byte))
+	core.AssertTrue(t,
+		final == string(payloadA) || final == string(payloadB),
+		"final content must be exactly payloadA or payloadB, got: "+final)
+}

@@ -29,6 +29,16 @@ import (
 // live; finer-grain measurement is wasted work.
 const progressThrottle = 250 * core.Millisecond
 
+// CodeDigestRequired is the typed error code the Wails Download /
+// DownloadVerified surfaces raise when the renderer omits the
+// SHA-256 digest. Mirrors pkg/opencode's `upgrade.digest_required`
+// pattern (Mantis #1621) — the renderer-reachable surface is
+// fail-closed; HTTP / Go-internal callers may still pass "" to
+// FetchVerified for the quarantine-only path. Cerberus #49 F-2.
+//
+// Stable for HTTP envelope matching + frontend toast routing.
+const CodeDigestRequired = "downloader.digest_required"
+
 // Emitter is the late-bound callback that ships events to the Wails
 // event bus. pkg/desktop sets it via SetEmitter once the Wails app
 // instance exists. nil = no emit (CLI/serve modes), Download still
@@ -107,14 +117,22 @@ func (s *WailsService) ServiceShutdown() core.Result { return core.Ok(nil) }
 // the job id the frontend uses to correlate subsequent
 // "downloader:progress" / "downloader:done" events.
 //
+// **DEPRECATED on the Wails surface — use DownloadVerified.** Per
+// Cerberus #49 F-2 the renderer-reachable fetch must carry a SHA-256
+// digest; Download() fires a "downloader:done" event with ok=false +
+// error code `downloader.digest_required` and does NOT touch the
+// network. The job id still returns so the frontend's correlation map
+// stays consistent. Internal Go callers wanting the quarantine-only
+// path (no verify) call FetchWithProgress directly.
+//
 // Event payloads:
 //
 //	"downloader:progress" → {id, name, written, total}
 //	"downloader:done"     → {id, name, dest, ok, error?}
 //
-// Usage example (from TS):
+// Usage example (from TS — note: emits digest_required immediately):
 //
-//	const id = await Download(url, "gemma-4-e2b.gguf");
+//	const id = await DownloadVerified(url, "gemma-4-e2b.gguf", "<sha256hex>");
 //	Events.On("downloader:progress", (e) => {
 //	    if (e.data.id === id) updateBar(e.data.written / e.data.total);
 //	});
@@ -176,7 +194,26 @@ func (s *WailsService) run(id, url, name string) {
 // runVerified is the goroutine body for both Download (sha256hex="")
 // and DownloadVerified — invokes FetchVerified with a throttled
 // progress callback, broadcasts the terminal "done" event.
+//
+// Cerberus #49 F-2 — fail-closed on empty sha256hex at the Wails
+// boundary. A renderer-reachable code path that fetches arbitrary
+// bytes WITHOUT a content-addressed identity is an unbounded
+// supply-chain surface; the marketplace + model card always carry
+// a digest, so an empty value here is a misconfiguration or a
+// bypass attempt. Internal Go callers (CLI, tests) may still call
+// FetchVerified with "" for the quarantine-only path; this gate
+// scopes to the renderer surface only.
 func (s *WailsService) runVerified(id, url, name, sha256hex string) {
+	if sha256hex == "" {
+		s.fire("downloader:done", map[string]any{
+			"id":    id,
+			"name":  name,
+			"ok":    false,
+			"error": core.E(CodeDigestRequired,
+				"sha256 digest is required on the Wails download surface", nil).Error(),
+		})
+		return
+	}
 	var lastEmit core.Time
 	onProgress := func(written, total int64) {
 		now := core.Now()

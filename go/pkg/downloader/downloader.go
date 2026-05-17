@@ -77,6 +77,40 @@ var httpClient = &core.HTTPClient{
 	},
 }
 
+// nameLocks serialises FetchVerified calls per quarantine basename
+// (Cerberus #49 F-3). The map is guarded by nameLocksMu; the values
+// are per-name *core.Mutex used to gate Create → Copy → Verify →
+// Rename so two parallel calls with the same name can't interleave
+// and let bytes B promote under digest A. Map entries are never
+// removed — a fixed maximum of distinct model names per process keeps
+// memory bounded in practice; if that assumption ever breaks, a refcount-
+// and-evict pattern can replace this without changing call sites.
+var (
+	nameLocksMu core.Mutex
+	nameLocks   = map[string]*core.Mutex{}
+)
+
+// lockName returns the unlock function for the per-name mutex
+// guarding name's quarantine path. Callers MUST defer the returned
+// function. Lazily creates the mutex on first use under nameLocksMu.
+//
+// Usage example:
+//
+//	unlock := lockName(name)
+//	defer unlock()
+//	// ... Create / Copy / Verify / Rename ...
+func lockName(name string) func() {
+	nameLocksMu.Lock()
+	mu, ok := nameLocks[name]
+	if !ok {
+		mu = &core.Mutex{}
+		nameLocks[name] = mu
+	}
+	nameLocksMu.Unlock()
+	mu.Lock()
+	return mu.Unlock
+}
+
 // Progress is the callback signature for FetchWithProgress reports.
 // Receives (bytesWritten, totalBytes) — totalBytes mirrors
 // http.Response.ContentLength: positive when the server sent a
@@ -144,6 +178,18 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	if name == "" {
 		return core.Fail(core.E(fetchOp, "name is required", nil))
 	}
+	// Cerberus #49 F-1 — name flows through core.PathJoin into both
+	// the quarantine path and the final model path. core.PathJoin
+	// COLLAPSES `..` segments but does not REJECT them, so a renderer-
+	// supplied name like "../../wallets/server" would silently land
+	// outside ~/Lethean/conf/models/. paths.IsValidID is the shared
+	// shape gate (no `/`, no `..`, no `\\`, no NUL, no leading `.`,
+	// no >255 bytes) used by the 20+ wails surfaces hardened under
+	// Cerberus #1486. Mirror the discipline here so the model-path
+	// surface can't pivot writes/reads outside the models dir.
+	if err := paths.IsValidID(name); err != nil {
+		return core.Fail(err)
+	}
 	if !AllowedSource(url) {
 		return core.Fail(core.E(fetchOp,
 			core.Concat("source not allowed: ", url), nil))
@@ -152,13 +198,32 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	if !dirR.OK {
 		return dirR
 	}
-	finalDest := core.PathJoin(dirR.Value.(string), name)
+	// Belt-and-braces partner of IsValidID — if a future regression
+	// loosens the shape gate or core.PathJoin's cleaning behaviour
+	// shifts under us, JoinAndCheck refuses to return a path that
+	// escapes the models dir. Same discipline as the cascade closure
+	// across sales/incidents/runbooks/marketing.
+	finalDest, escErr := paths.JoinAndCheck(dirR.Value.(string), name)
+	if escErr != nil {
+		return core.Fail(escErr)
+	}
 
 	qdR := quarantineDir()
 	if !qdR.OK {
 		return qdR
 	}
-	qDest := core.PathJoin(qdR.Value.(string), name)
+	qDest, escErr := paths.JoinAndCheck(qdR.Value.(string), name)
+	if escErr != nil {
+		return core.Fail(escErr)
+	}
+
+	// Cerberus #49 F-3 — serialise FetchVerified calls that target
+	// the same quarantine basename so two parallel downloads can't
+	// interleave Create / Copy / Verify / Rename and let bytes B
+	// promote under digest A. Per-name mutex keeps unrelated names
+	// running in parallel while same-name calls queue.
+	unlock := lockName(name)
+	defer unlock()
 
 	reqR := core.NewHTTPRequest("GET", url, nil)
 	if !reqR.OK {
