@@ -52,13 +52,28 @@ type MergeHostConfigOptions struct {
 }
 
 // MergeHostConfigResult is the success-shape returned to callers.
+//
+// Bytes carries the FULL pretty-printed opencode.json that landed on
+// disk — which includes any pre-existing user provider blocks (e.g.
+// OpenAI / Anthropic apiKey strings) preserved across the merge. It is
+// available to in-process callers (audit-suppression decisions, internal
+// reconciliation) but MUST NEVER reach the HTTP wire response or the
+// audit Meta map. The `json:"-"` tag is the type-system enforcement of
+// that boundary (Mantis #1617 / Cerberus #22 HIGH-2): any caller that
+// JSON-encodes a MergeHostConfigResult silently drops Bytes, so a future
+// handler that forgets to build a view-struct still cannot leak the
+// embedded apiKey blocks. Audit Meta omits Bytes explicitly at the emit
+// site (see control.go hostConfigMerge + control_test.go
+// TestHostConfigMerge_AuditEmitted_Good).
 type MergeHostConfigResult struct {
 	// Path is the absolute path of the file that was written.
 	Path string `json:"path"`
 	// Profile is the profile name that was applied.
 	Profile string `json:"profile"`
-	// Bytes is the pretty-printed JSON that landed on disk.
-	Bytes string `json:"bytes"`
+	// Bytes is the pretty-printed JSON that landed on disk. NEVER
+	// wire-encoded (see type comment above) — `json:"-"` is the
+	// load-bearing tag, not cosmetic.
+	Bytes string `json:"-"`
 	// Created is true when the file did not exist before this call.
 	Created bool `json:"created"`
 }
