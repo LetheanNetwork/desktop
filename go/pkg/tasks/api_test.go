@@ -238,6 +238,70 @@ func TestTasks_Update_InvalidPriorityRejected_Bad(t *core.T) {
 	core.AssertEqual(t, tasks.PriorityNormal, current.Priority)
 }
 
+// Mantis #1726 (Cerberus #64 F-6) — lifecycle gate: Update must reject
+// state hops outside the allowedStateTransitions matrix and must clear
+// ClosedAt when an issue is reopened from a terminal state.
+
+// TestTasks_Update_InvalidTransition_RejectsBad asserts that a transition
+// out of a terminal state to a non-allowed target is rejected with the
+// typed sentinel and that on-disk state is preserved.
+func TestTasks_Update_InvalidTransition_RejectsBad(t *core.T) {
+	c := newTestCore(t)
+	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "bad hop"})
+	issue, _, _ := orm.Detail[tasks.Issue](created)
+	// open -> done is legal; cancel from done is NOT in the matrix.
+	closeRes := tasks.Update(c, issue.ID, tasks.UpdateInput{State: tasks.StateDone})
+	core.RequireTrue(t, closeRes.OK)
+	hop := tasks.Update(c, issue.ID, tasks.UpdateInput{State: tasks.StateCancelled})
+	core.AssertFalse(t, hop.OK)
+	current, _, _ := orm.Detail[tasks.Issue](tasks.Get(c, issue.ID))
+	core.AssertEqual(t, tasks.StateDone, current.State)
+	core.AssertFalse(t, current.ClosedAt.IsZero())
+}
+
+// TestTasks_Update_ReopenClearsClosedAt_Good asserts that moving from a
+// terminal state back to open clears the ClosedAt timestamp so the
+// forensic record does not survive across the lifecycle break.
+func TestTasks_Update_ReopenClearsClosedAt_Good(t *core.T) {
+	c := newTestCore(t)
+	created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "reopen"})
+	issue, _, _ := orm.Detail[tasks.Issue](created)
+	closeRes := tasks.Update(c, issue.ID, tasks.UpdateInput{State: tasks.StateDone})
+	closed, _, _ := orm.Detail[tasks.Issue](closeRes)
+	core.RequireTrue(t, !closed.ClosedAt.IsZero())
+	reopenRes := tasks.Update(c, issue.ID, tasks.UpdateInput{State: tasks.StateOpen})
+	core.RequireTrue(t, reopenRes.OK)
+	reopened, _, _ := orm.Detail[tasks.Issue](reopenRes)
+	core.AssertEqual(t, tasks.StateOpen, reopened.State)
+	core.AssertTrue(t, reopened.ClosedAt.IsZero())
+}
+
+// TestTasks_Update_TransitionMatrix_Ugly walks the full matrix: every
+// declared (from -> to) pair is accepted; every undeclared pair is
+// rejected. Same-state moves are legal (idempotent updates).
+func TestTasks_Update_TransitionMatrix_Ugly(t *core.T) {
+	allStates := []string{tasks.StateOpen, tasks.StateInProgress, tasks.StateDone, tasks.StateCancelled}
+	for _, from := range allStates {
+		for _, to := range allStates {
+			c := newTestCore(t)
+			created := tasks.Create(c, tasks.CreateInput{Project: "ide", Summary: "walk " + from + "->" + to})
+			issue, _, _ := orm.Detail[tasks.Issue](created)
+			// Seed the from state via the allowed open -> from hop
+			// (open is the universal entry edge).
+			if from != tasks.StateOpen {
+				seed := tasks.Update(c, issue.ID, tasks.UpdateInput{State: from})
+				core.RequireTrue(t, seed.OK)
+			}
+			res := tasks.Update(c, issue.ID, tasks.UpdateInput{State: to})
+			if tasks.IsAllowedStateTransition(from, to) {
+				core.AssertTrue(t, res.OK)
+			} else {
+				core.AssertFalse(t, res.OK)
+			}
+		}
+	}
+}
+
 func TestTasks_Update_AllCanonicalEnumsAccepted_Good(t *core.T) {
 	c := newTestCore(t)
 	for _, state := range []string{tasks.StateOpen, tasks.StateInProgress, tasks.StateDone, tasks.StateCancelled} {

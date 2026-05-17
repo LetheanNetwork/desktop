@@ -156,10 +156,26 @@ func Update(c *core.Core, id string, input UpdateInput) core.Result {
 		mutated = true
 	}
 	if input.State != "" {
+		// Lifecycle gate (Mantis #1726 / Cerberus #64 F-6) — only
+		// transitions listed in allowedStateTransitions are honoured;
+		// arbitrary State hops were a data-tampering surface
+		// (STRIDE-T). Same-state moves are legal (idempotent update).
+		if !IsAllowedStateTransition(issue.State, input.State) {
+			return core.Fail(core.E(
+				"tasks.Update",
+				"tasks.state_invalid: "+issue.State+" -> "+input.State,
+				nil,
+			))
+		}
 		issue.State = input.State
 		mutated = true
-		if input.State == StateDone || input.State == StateCancelled {
+		if IsTerminalState(input.State) {
 			issue.ClosedAt = core.Now().UTC()
+		} else if IsTerminalState(before.State) {
+			// Reopen from a terminal state — clear ClosedAt so the
+			// forensic timestamp does not survive across the
+			// lifecycle break.
+			issue.ClosedAt = core.Time{}
 		}
 	}
 	if input.Severity != "" {

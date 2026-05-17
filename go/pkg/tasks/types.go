@@ -199,6 +199,70 @@ func IsValidPriority(s string) bool {
 	return ok
 }
 
+// allowedStateTransitions describes the closed set of legal Issue.State
+// transitions. Mantis #1726 (Cerberus #64 F-6) — Update must reject
+// arbitrary state hops; the lifecycle matrix codifies which moves carry
+// real workflow meaning.
+//
+// Rows: current state. Columns: target state. Same-state entries are
+// legal (idempotent update). Terminal states (done, cancelled) can be
+// reopened back to open or in_progress; the reopen branch clears
+// ClosedAt in Update so the forensic timestamp does not lie.
+var allowedStateTransitions = map[string]map[string]struct{}{
+	StateOpen: {
+		StateOpen:       {},
+		StateInProgress: {},
+		StateDone:       {},
+		StateCancelled:  {},
+	},
+	StateInProgress: {
+		StateOpen:       {},
+		StateInProgress: {},
+		StateDone:       {},
+		StateCancelled:  {},
+	},
+	StateDone: {
+		StateOpen:       {},
+		StateInProgress: {},
+		StateDone:       {},
+	},
+	StateCancelled: {
+		StateOpen:       {},
+		StateInProgress: {},
+		StateCancelled:  {},
+	},
+}
+
+// IsAllowedStateTransition reports whether moving an Issue from
+// state from to state to is permitted by the lifecycle matrix.
+// Unknown from/to values return false; callers should validate
+// individual states with IsValidState before consulting this gate.
+//
+// Usage example:
+//
+//	if !tasks.IsAllowedStateTransition(current.State, input.State) {
+//	    return reject
+//	}
+func IsAllowedStateTransition(from, to string) bool {
+	row, ok := allowedStateTransitions[from]
+	if !ok {
+		return false
+	}
+	_, ok = row[to]
+	return ok
+}
+
+// IsTerminalState reports whether s is a terminal lifecycle state
+// (one that sets ClosedAt). Used by Update to decide whether to
+// stamp / clear ClosedAt on a transition.
+//
+// Usage example:
+//
+//	if tasks.IsTerminalState(issue.State) { issue.ClosedAt = core.Now() }
+func IsTerminalState(s string) bool {
+	return s == StateDone || s == StateCancelled
+}
+
 // CreateInput captures the fields a caller must / may supply when
 // creating an issue. Required: Project, Summary. Optional defaults
 // applied by Create.
