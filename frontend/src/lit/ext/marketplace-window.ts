@@ -488,6 +488,35 @@ class LthnMarketplaceWindow extends LitElement {
           <div style="font-size:14px; font-weight:600; color:var(--fg-0);">
             ${p.entry.display} · ${p.perms.length > 0 ? this.t.permTitle : "About this plugin"}
           </div>
+          <!--
+            Mantis #1643 / Cerberus DREAD #32 F8 — tier-4 unsigned-publisher
+            warning. All bundles are unsigned in v1 (signing lands v2 per
+            plans/code/lthn/desktop/marketplace/RFC.signing.md §5.6 Q8); the
+            banner renders unconditionally today and gates on tier-4 once
+            signature-tier metadata reaches this surface. Wording per the
+            ticket's Recommendation — replaces the "self-signed" framing
+            (which carried unearned TLS-land trust connotation) with
+            "UNVERIFIED — anyone could have written this" + explainer line.
+          -->
+          <div role="alert" aria-label="Unverified publisher warning"
+               style="display:flex; gap:10px; align-items:flex-start;
+                      padding:10px 12px; border-radius:8px;
+                      background:rgba(220,53,69,0.12);
+                      border:1px solid rgba(220,53,69,0.40);">
+            <i class="fa-solid fa-triangle-exclamation"
+               style="font-size:14px; color:#f56565; margin-top:2px;"></i>
+            <div>
+              <div style="font-size:12px; font-weight:600; color:#f56565;
+                          font-family:var(--font-mono); letter-spacing:0.2px;">
+                UNVERIFIED — anyone could have written this
+              </div>
+              <div style="font-size:11px; color:var(--fg-2); margin-top:4px;
+                          line-height:1.5;">
+                lthn-desktop cannot verify who wrote this bundle.
+                Install only if you trust the source you downloaded it from.
+              </div>
+            </div>
+          </div>
           ${viewSummary}
           ${sessionPrompt}
           <div style="display:flex; flex-direction:column; gap:8px;">
