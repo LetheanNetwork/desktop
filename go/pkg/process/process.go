@@ -22,7 +22,21 @@ import (
 	coreprocess "dappco.re/go/process"
 	processapi "dappco.re/go/process/pkg/api"
 	"github.com/gin-gonic/gin"
+
+	"dappco.re/lthn/desktop/pkg/audit"
 )
+
+// processScope is the Event.Scope literal stamped on every typed audit
+// row emitted by this package. Closed-set per RFC.stage-f.md §2; the
+// Operations panel's facet chrome learns this literal in the same
+// commit a new scope ships.
+const processScope = "process"
+
+// processRuntime is the Event.Meta["runtime"] literal stamped on
+// Requested rows so a forensic walker can distinguish this dispatch
+// path from future runtime variants (e.g. sandboxed process dispatch).
+// Reserved literal — additions are reserved-schema changes.
+const processRuntime = "core-process"
 
 // APIBasePath is the canonical lthn mount for the upstream go-process
 // REST surface. Lives under /v1/api/... matching the lthn convention
@@ -112,39 +126,148 @@ func (s *Service) RouteGroups() []coreapi.RouteGroup {
 }
 
 // Run dispatches `process.run` — synchronous; returns combined output.
+// Emits the EventProcessRun{Requested,Succeeded,Failed} audit lifecycle
+// trio per Cerberus #50 (Mantis #1683) — process spawn was previously
+// forensically silent. The command bytes are NEVER in Meta (SHA-256
+// hash only); args / env / cwd are NEVER in Meta.
 //
 // Usage example:
 //
 //	r := svc.Run("echo", []string{"hello"})
 func (s *Service) Run(cmd string, args []string) core.Result {
-	return s.core.Action("process.run").Run(core.Background(), core.NewOptions(
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventProcessRunRequested,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   processScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"command_hash": core.SHA256HexString(cmd),
+			"runtime":      processRuntime,
+		},
+	})
+	r := s.core.Action("process.run").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "command", Value: cmd},
 		core.Option{Key: "args", Value: args},
 	))
+	if !r.OK {
+		_ = audit.Default().Record(audit.Event{
+			Event:   audit.EventProcessRunFailed,
+			TS:      core.Now().UTC().Unix(),
+			Scope:   processScope,
+			Outcome: audit.OutcomeFailed,
+			Meta: map[string]any{
+				"error_code": r.Error(),
+			},
+		})
+		return r
+	}
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventProcessRunSucceeded,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   processScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"exit_code": 0,
+		},
+	})
+	return r
 }
 
 // Start dispatches `process.start` — background; returns the registry
 // snapshot the caller uses to follow up with Get / Kill / etc.
+// Emits the EventProcessStart{Requested,Succeeded,Failed} audit trio
+// per Cerberus #50 (Mantis #1683). The OS-level PID is NOT recorded;
+// callers needing it perform a follow-up process.get round-trip
+// outside the audit substrate.
 //
 // Usage example:
 //
 //	r := svc.Start("sleep", []string{"60"})
 func (s *Service) Start(cmd string, args []string) core.Result {
-	return s.core.Action("process.start").Run(core.Background(), core.NewOptions(
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventProcessStartRequested,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   processScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"command_hash": core.SHA256HexString(cmd),
+			"runtime":      processRuntime,
+		},
+	})
+	r := s.core.Action("process.start").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "command", Value: cmd},
 		core.Option{Key: "args", Value: args},
 	))
+	if !r.OK {
+		_ = audit.Default().Record(audit.Event{
+			Event:   audit.EventProcessStartFailed,
+			TS:      core.Now().UTC().Unix(),
+			Scope:   processScope,
+			Outcome: audit.OutcomeFailed,
+			Meta: map[string]any{
+				"error_code": r.Error(),
+			},
+		})
+		return r
+	}
+	procID, _ := r.Value.(string)
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventProcessStartSucceeded,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   processScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"process_id": procID,
+		},
+	})
+	return r
 }
 
 // Kill dispatches `process.kill` for the given registry id.
+// Emits the EventProcessKill{Requested,Succeeded,Failed} audit trio
+// per Cerberus #50 (Mantis #1683). The Requested row commits regardless
+// of registry state so a forensic auditor can correlate caller intent
+// against the moment of call (mirrors pkg/sandbox.Service.Kill).
 //
 // Usage example:
 //
 //	r := svc.Kill("id-1-3cfc5d")
 func (s *Service) Kill(id string) core.Result {
-	return s.core.Action("process.kill").Run(core.Background(), core.NewOptions(
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventProcessKillRequested,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   processScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"process_id": id,
+		},
+	})
+	r := s.core.Action("process.kill").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "id", Value: id},
 	))
+	if !r.OK {
+		_ = audit.Default().Record(audit.Event{
+			Event:   audit.EventProcessKillFailed,
+			TS:      core.Now().UTC().Unix(),
+			Scope:   processScope,
+			Outcome: audit.OutcomeFailed,
+			Meta: map[string]any{
+				"process_id": id,
+				"error_code": r.Error(),
+			},
+		})
+		return r
+	}
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventProcessKillSucceeded,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   processScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"process_id": id,
+		},
+	})
+	return r
 }
 
 // List dispatches `process.list`. runningOnly filters to processes that

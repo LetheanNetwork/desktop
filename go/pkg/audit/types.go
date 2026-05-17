@@ -444,6 +444,122 @@ const (
 	//                 "invalid_container_path" so a downstream consumer
 	//                 can categorise without re-running the validators
 	EventSandboxVolumeRejected = "sandbox.volume.rejected"
+
+	// EventProcessRunRequested fires when pkg/process.Service.Run is
+	// about to dispatch `process.run` (synchronous exec) via the upstream
+	// dappco.re/go/process action surface. Cerberus #50 (Mantis #1683) —
+	// Repudiation gap close. process.run / process.start / process.kill
+	// previously emitted ZERO audit events; arbitrary spawn was
+	// forensically silent. The Requested row commits BEFORE the action
+	// dispatch so a crash mid-call still leaves the request decision in
+	// the audit substrate.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   command_hash — SHA-256 hex of the entrypoint command. The raw
+	//                  command string is NEVER in Meta per the brief's
+	//                  SECURITY-NOTE escape valve (entrypoint commands
+	//                  occasionally embed tokens / paths). Mirror of
+	//                  pkg/sandbox's command_hash discipline.
+	//   runtime      — reserved literal "core-process" identifying the
+	//                  dispatch path (lthn-side wrapper around upstream
+	//                  go-process Service). Reserved for forensic walker
+	//                  if a future runtime variant ships (e.g. sandboxed
+	//                  process dispatch).
+	//
+	// The raw args / env / cwd are NEVER in Meta — Cerberus #1465
+	// closure-only-scope discipline keeps user-content off the audit
+	// substrate.
+	EventProcessRunRequested = "process.run.requested"
+
+	// EventProcessRunSucceeded fires when pkg/process.Service.Run
+	// returns OK from a `process.run` action dispatch. Sibling of
+	// Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   exit_code — process exit status. Always 0 on the Succeeded path
+	//               (upstream go-process surfaces non-zero exits as a
+	//               non-OK Result with the exit code folded into the
+	//               error message); kept for shape parity with sibling
+	//               sandbox Succeeded rows.
+	EventProcessRunSucceeded = "process.run.succeeded"
+
+	// EventProcessRunFailed fires when pkg/process.Service.Run returns
+	// a non-OK Result from any validation, dispatch, or runtime path.
+	// Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   error_code — categorical failure reason; sourced from the upstream
+	//                Result.Error() string (already-scoped via core.E by
+	//                the upstream handler).
+	EventProcessRunFailed = "process.run.failed"
+
+	// EventProcessStartRequested fires when pkg/process.Service.Start is
+	// about to dispatch `process.start` (background detach) via the
+	// upstream go-process action surface. Long-running sibling of
+	// EventProcessRunRequested per Cerberus #50 (Mantis #1683).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   command_hash — SHA-256 hex of the entrypoint command (raw bytes
+	//                  never in Meta — SECURITY-NOTE escape valve).
+	//   runtime      — reserved literal "core-process" — see Requested
+	//                  above.
+	EventProcessStartRequested = "process.start.requested"
+
+	// EventProcessStartSucceeded fires when pkg/process.Service.Start
+	// returns OK from a `process.start` action dispatch. Sibling of
+	// Requested.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   process_id — upstream go-process registry identifier (Result.Value
+	//                from handleStart). Forensic join key — every
+	//                subsequent Get / Kill on this process correlates via
+	//                this id. The OS-level PID is NOT recorded here;
+	//                callers needing it perform a follow-up process.get
+	//                round-trip outside the audit substrate so the
+	//                Succeeded row commits without a second action call
+	//                in the hot path.
+	EventProcessStartSucceeded = "process.start.succeeded"
+
+	// EventProcessStartFailed fires when pkg/process.Service.Start
+	// returns a non-OK Result. Sibling of Requested.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   error_code — categorical failure reason (upstream Result.Error()).
+	EventProcessStartFailed = "process.start.failed"
+
+	// EventProcessKillRequested fires when pkg/process.Service.Kill is
+	// about to dispatch `process.kill` for a given registry id.
+	// Cerberus #50 (Mantis #1683) — even no-op kills (process-not-found)
+	// emit the Requested row so a forensic auditor can correlate caller
+	// intent against the registry state at the moment of the call.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   process_id — caller-supplied registry identifier.
+	EventProcessKillRequested = "process.kill.requested"
+
+	// EventProcessKillSucceeded fires when pkg/process.Service.Kill
+	// returns OK (the registered process was found and signalled).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   process_id — caller-supplied registry identifier.
+	EventProcessKillSucceeded = "process.kill.succeeded"
+
+	// EventProcessKillFailed fires when pkg/process.Service.Kill returns
+	// a non-OK Result (empty id, process-not-found, signal failure).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   process_id — caller-supplied registry identifier (may be empty).
+	//   error_code — categorical failure reason (upstream Result.Error()).
+	EventProcessKillFailed = "process.kill.failed"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the
