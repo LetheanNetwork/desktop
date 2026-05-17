@@ -9,6 +9,7 @@ import (
 	core "dappco.re/go"
 	"dappco.re/go/orm"
 	"dappco.re/go/process"
+	"dappco.re/lthn/desktop/pkg/audit"
 )
 
 const (
@@ -21,6 +22,26 @@ const (
 	// containerPort is opencode serve's bind port inside the
 	// container. The host-side port is dynamic.
 	containerPort = 4096
+
+	// OpencodeHostPortRangeStart/End frame the IANA dynamic/private
+	// port range (RFC 6335 §6) — allocatePort picks from inside this
+	// span so the chosen port belongs to the ephemeral pool the OS
+	// itself uses, avoiding well-known + registered ranges.
+	OpencodeHostPortRangeStart = 49152
+	OpencodeHostPortRangeEnd   = 65535
+
+	// OpencodeHostPortRetryMax bounds the per-allocation retry budget
+	// against the listen-then-close TOCTOU race window (Mantis #1604,
+	// Cerberus #22). After N busy probes we surrender with a typed
+	// Fail rather than spinning indefinitely.
+	OpencodeHostPortRetryMax = 10
+
+	// Port-allocation audit events — kept package-local (string
+	// literals) rather than promoted to control.go's Event* constants
+	// so the fix lives in a single file. Promote on the next adjacent
+	// audit-constants sweep.
+	eventOpencodePortRetry     = "opencode.port.retry"
+	eventOpencodePortExhausted = "opencode.port.exhausted"
 
 	startOp   = "opencode.Start"
 	stopOp    = "opencode.Stop"
@@ -451,16 +472,83 @@ func (s *Service) Status() core.Result {
 		Get()
 }
 
-// allocatePort grabs a free host port by listening on 127.0.0.1:0
-// and closing immediately — kernel returns a free port the docker
-// daemon can then bind. Race window between Close and docker bind
-// is negligible on a single-user dev machine.
-func allocatePort() core.Result {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+// portProbe attempts a brief listen on 127.0.0.1:<port>; returns nil
+// if the port is free at probe time. Indirected through a package var
+// so tests can simulate EADDRINUSE without binding real ports. The
+// default implementation does the real net.Listen / Close.
+//
+// Mantis #1604 Cerberus #22 — same-user adversary can still grab the
+// port in the window between probe-Close and docker bind; the retry
+// loop in allocatePort bounds the cost of losing that race rather
+// than preventing it (cf. SECURITY-NOTE in allocatePort).
+var portProbe = func(port int) error {
+	l, err := net.Listen("tcp", core.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
-		return core.Fail(core.E("opencode.allocatePort", "listen failed", err))
+		return err
 	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	return core.Ok(port)
+	return l.Close()
+}
+
+// pickPortInRange returns a random port inside the dynamic/private
+// range [OpencodeHostPortRangeStart, OpencodeHostPortRangeEnd]. Split
+// out so tests can pin the choice deterministically.
+var pickPortInRange = func() int {
+	span := OpencodeHostPortRangeEnd - OpencodeHostPortRangeStart + 1
+	return OpencodeHostPortRangeStart + core.RandIntn(span)
+}
+
+// allocatePort grabs a free host port from the IANA dynamic/private
+// range with a bounded retry loop (Mantis #1604, Cerberus #22).
+//
+// The OS-assigned port 0 + listen-then-close shape we used previously
+// guaranteed a free port but left a same-user TOCTOU window: any
+// process could grab the port between our Close and docker's bind.
+// Picking from the explicit ephemeral range + retrying on a busy
+// probe tolerates that race up to OpencodeHostPortRetryMax attempts,
+// after which we surface a typed Fail (`opencode.allocatePort` /
+// "port range exhausted") rather than spinning.
+//
+// SECURITY-NOTE: a same-user adversary aggressively binding ports
+// faster than we can probe + hand off to docker will still exhaust
+// our retry budget. The exhausted Fail audit-emits so forensic shows
+// the contention; a hostile-co-tenant defence (jitter, per-install
+// sub-range, OS bind handoff) is a forward arc — see ticket body.
+//
+// Usage example:
+//
+//	r := allocatePort()
+//	if !r.OK { return r }
+//	port := r.Value.(int)
+func allocatePort() core.Result {
+	for attempt := 1; attempt <= OpencodeHostPortRetryMax; attempt++ {
+		port := pickPortInRange()
+		if err := portProbe(port); err == nil {
+			return core.Ok(port)
+		} else {
+			emitPortAudit(eventOpencodePortRetry, audit.OutcomeError, map[string]any{
+				"attempt": attempt,
+				"port":    port,
+				"reason":  err.Error(),
+			})
+		}
+	}
+	emitPortAudit(eventOpencodePortExhausted, audit.OutcomeError, map[string]any{
+		"attempts": OpencodeHostPortRetryMax,
+		"range":    core.Sprintf("%d-%d", OpencodeHostPortRangeStart, OpencodeHostPortRangeEnd),
+	})
+	return core.Fail(core.E("opencode.allocatePort",
+		"port range exhausted after retry budget", nil))
+}
+
+// emitPortAudit records a port-allocation audit event. Failures are
+// swallowed by design — audit substrate problems MUST NEVER block
+// allocation. Mirrors the pattern in control.go for sandbox events.
+func emitPortAudit(event string, outcome string, meta map[string]any) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   event,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   "opencode.port",
+		Outcome: outcome,
+		Meta:    meta,
+	})
 }
