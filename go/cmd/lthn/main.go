@@ -260,13 +260,21 @@ func cmdGUI(args []string) int {
 	// surface binds for ServerKey.IssueBootstrapToken, so a token
 	// issued to the WebView round-trips to the REST middleware.
 	serverkeySvc, _ := core.ServiceFor[*serverkey.Service](c, "serverkey")
-	s := server.NewService(server.Options{
+	opts := server.Options{
 		Runner:    r,
 		LocalKey:  key,
 		Brand:     server.Brand{Version: lthn.Version},
 		Core:      c,
 		ServerKey: serverkeySvc,
-	})
+	}
+	// Mantis #1562 follow-up to #1523 — wire the plugin-installed
+	// checker so the capability-grant audit endpoint can gate plugin_id
+	// against the live install set. Nil checker = audit row emits but
+	// the 404-on-unknown-plugin gate stays open.
+	if pluginSvc, _ := core.ServiceFor[*plugin.Service](c, "plugin"); pluginSvc != nil {
+		opts.PluginInstalledChecker = pluginSvc.ProxyGroup().Has
+	}
+	s := server.NewService(opts)
 	if rr := c.RegisterService("server", s); !rr.OK {
 		core.Print(core.Stderr(), "lthn gui: %s\n", rr.Error())
 		return 1
@@ -420,7 +428,7 @@ func cmdServe(args []string) int {
 	// creation endpoint MUST be reachable here too once a future
 	// client (CLI or REST consumer) issues a bootstrap token.
 	serverkeySvc, _ := core.ServiceFor[*serverkey.Service](c, "serverkey")
-	s := server.NewService(server.Options{
+	opts := server.Options{
 		Addr:        core.Concat(":", port),
 		Runner:      r,
 		LocalKey:    key,
@@ -428,7 +436,14 @@ func cmdServe(args []string) int {
 		ExtraGroups: extras,
 		Core:        c,
 		ServerKey:   serverkeySvc,
-	})
+	}
+	// Mantis #1562 follow-up to #1523 — same wire as cmdGUI; pluginSvc
+	// was resolved above for ExtraGroups and bundle-token plumbing, so
+	// reuse it here to gate plugin_id on capability-grant audit.
+	if pluginSvc != nil {
+		opts.PluginInstalledChecker = pluginSvc.ProxyGroup().Has
+	}
+	s := server.NewService(opts)
 	if rr := c.RegisterService("server", s); !rr.OK {
 		core.Print(core.Stderr(), serveErrorFormat, rr.Error())
 		return 1
