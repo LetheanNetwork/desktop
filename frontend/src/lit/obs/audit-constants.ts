@@ -106,6 +106,14 @@ export const AUDIT_EVENT_NAMES = [
   "sessions.append_message.succeeded",
   "sessions.append_message.failed",
   "composition.services.registered",
+  "vi.pr_fetch.requested",
+  "vi.pr_fetch.succeeded",
+  "vi.pr_fetch.failed",
+  "vi.pr_fetch.rejected",
+  "vi.pr_fetch.token_loaded",
+  "vi.probe.requested",
+  "vi.probe.succeeded",
+  "vi.probe.failed",
 ] as const;
 
 export type AuditEventName = (typeof AUDIT_EVENT_NAMES)[number];

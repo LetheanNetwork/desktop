@@ -42,6 +42,7 @@ import (
 	coreI18n "dappco.re/go/i18n"
 	"dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/apikey"
+	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/build"
 	"dappco.re/lthn/desktop/pkg/container"
@@ -675,18 +676,10 @@ func (s *Service) Run() core.Result {
 		entriesR := pluginSvc.Menus()
 		if entriesR.OK {
 			entries, _ := entriesR.Value.([]plugin.MenuEntry)
-			if len(entries) > 0 {
+			pluginItems := buildPluginTrayItems(entries)
+			if len(pluginItems) > 0 {
 				trayMenuItems = append(trayMenuItems, guisystray.TrayMenuItem{Type: "separator"})
-				for _, e := range entries {
-					label := e.Label
-					if !e.Running {
-						label = label + " · stopped"
-					}
-					trayMenuItems = append(trayMenuItems, guisystray.TrayMenuItem{
-						Label:    label,
-						ActionID: trayPluginPrefix + e.Code,
-					})
-				}
+				trayMenuItems = append(trayMenuItems, pluginItems...)
 			}
 		}
 	}
@@ -731,9 +724,17 @@ func (s *Service) Run() core.Result {
 			))
 		default:
 			if core.HasPrefix(click.ActionID, trayPluginPrefix) {
-				if code := core.TrimPrefix(click.ActionID, trayPluginPrefix); code != "" {
+				code := core.TrimPrefix(click.ActionID, trayPluginPrefix)
+				// Re-validate at the click boundary — defence-in-depth
+				// against a race between Menus() snapshot at menu-build
+				// time and the click landing here (Cerberus #70 F-3).
+				// The build-time filter (buildPluginTrayItems) is the
+				// primary gate; this one stops a hostile ActionID that
+				// somehow bypassed it from reaching openPluginWindow.
+				if code != "" && paths.IsValidPluginCode(code) {
 					openPluginWindow(s.opts.Core, code)
 					emitCoreEvent(s.opts.Core, trayOpenEvent, "plugin:"+code)
+					emitTrayPluginClicked(code)
 				}
 			}
 		}
@@ -902,4 +903,139 @@ func ginMiddleware(engine core.Handler) application.Middleware {
 			engine.ServeHTTP(w, r)
 		})
 	}
+}
+
+// trayPluginMaxLabelBytes caps a plugin-manifest label before it lands
+// on the native tray surface. Closes Cerberus #70 F-3 MED — STRIDE-T
+// Tampering. A hostile manifest could otherwise ship a 1MB label that
+// drags tray rendering or hides downstream menu items off-screen. 64
+// bytes is generous for human-readable labels (matches the plugin
+// code's MaxPluginCodeBytes ceiling) while keeping the worst-case row
+// width bounded.
+const trayPluginMaxLabelBytes = 64
+
+// trayPluginStoppedSuffix is the textual tag appended to a plugin
+// label when the supervisor reports the plugin not running. The
+// label-cap above is applied to the BASE label (pre-suffix) so the
+// tag is always visible — a 64-byte attacker label cannot crowd out
+// the operator's "stopped" affordance.
+const trayPluginStoppedSuffix = " · stopped"
+
+// buildPluginTrayItems translates pkg/plugin.MenuEntry rows into the
+// guisystray.TrayMenuItem shape, filtering invalid plugin codes,
+// stripping control characters, and capping the label byte length.
+// Pure function — testable without an active NSApp / Wails loop.
+//
+// Filter ordering (Cerberus #70 F-3 / paths.IsValidPluginCode is the
+// authoritative validator):
+//
+//  1. paths.IsValidPluginCode(e.Code) — drops entries whose code
+//     contains path separators, leading dot/dash, NUL, or any byte
+//     outside the bounded vocabulary. A hostile manifest cannot
+//     surface "../etc" / "/bin/sh" / "code\x00sneak" to the tray.
+//  2. sanitizePluginLabel(e.Label) — strips ASCII control bytes
+//     (< 0x20 and 0x7F) so a label cannot inject newline/CR/NUL
+//     into the rendered menu surface; then byte-caps to
+//     trayPluginMaxLabelBytes.
+//  3. The "· stopped" suffix is appended AFTER the cap so the
+//     operator-facing affordance is never trimmed away by a
+//     pathological label.
+//
+// Usage example:
+//
+//	items := buildPluginTrayItems([]plugin.MenuEntry{
+//	    {Code: "opencode", Label: "OpenCode", Running: true},
+//	    {Code: "../etc",   Label: "evil",     Running: true}, // dropped
+//	})
+//	// items has one entry — the "../etc" row was rejected.
+func buildPluginTrayItems(entries []plugin.MenuEntry) []guisystray.TrayMenuItem {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]guisystray.TrayMenuItem, 0, len(entries))
+	for _, e := range entries {
+		if !paths.IsValidPluginCode(e.Code) {
+			core.Warn("desktop tray skipping plugin entry — invalid code",
+				"code_len", len(e.Code))
+			continue
+		}
+		label := sanitizePluginLabel(e.Label)
+		if !e.Running {
+			label = label + trayPluginStoppedSuffix
+		}
+		out = append(out, guisystray.TrayMenuItem{
+			Label:    label,
+			ActionID: trayPluginPrefix + e.Code,
+		})
+	}
+	return out
+}
+
+// sanitizePluginLabel strips ASCII control bytes from a label and
+// caps the byte length at trayPluginMaxLabelBytes. Control bytes
+// (< 0x20 except for SPACE 0x20, plus DEL 0x7F) are removed because
+// they can scramble the native menu renderer (newlines splitting a
+// row, NUL truncating downstream items on some platforms). TAB is
+// also stripped — tray surfaces are single-line.
+//
+// Returns the sanitised + capped label. Caller-controlled label
+// bytes never reach the native tray API; this is the boundary.
+//
+// Usage example:
+//
+//	sanitizePluginLabel("OpenCode")                // → "OpenCode"
+//	sanitizePluginLabel("evil\x00\nrow")           // → "evilrow"
+//	sanitizePluginLabel(strings.Repeat("x", 200))  // → 64-byte "xxxx…x"
+func sanitizePluginLabel(label string) string {
+	if label == "" {
+		return ""
+	}
+	// First pass — strip control chars in O(n).
+	buf := make([]byte, 0, len(label))
+	for i := 0; i < len(label); i++ {
+		b := label[i]
+		if b < 0x20 || b == 0x7F {
+			continue
+		}
+		buf = append(buf, b)
+	}
+	// Byte-cap (post-strip). Byte-level cap is intentional: the
+	// label is shipped to the native tray API which counts bytes
+	// not runes, and a multi-byte UTF-8 char truncated mid-sequence
+	// is the operator's chrome problem (not a security one). Take
+	// the prefix and let the renderer cope.
+	if len(buf) > trayPluginMaxLabelBytes {
+		buf = buf[:trayPluginMaxLabelBytes]
+	}
+	return string(buf)
+}
+
+// trayScope is the Event.Scope literal stamped on tray-rooted audit
+// rows. Mirrors the per-package scope convention across pkg/vi /
+// pkg/sessions / pkg/sandbox — keeps the chip-filter in
+// <lthn-audit-viewer> grouping tray surfaces under a single facet.
+const trayScope = "tray"
+
+// emitTrayPluginClicked fires the Cerberus #70 F-3 audit row at the
+// tray click router AFTER paths.IsValidPluginCode has accepted the
+// resolved code. Single event — the row records "the operator opened
+// plugin X via the tray"; the plugin manifest label is NEVER recorded
+// (label bytes are attacker-controlled; the plugin code is bounded
+// vocab + 1:1 against the installed-plugins manifest catalogue so a
+// walker can resolve the open-event back to a concrete plugin).
+//
+// Usage example (internal):
+//
+//	emitTrayPluginClicked(code)
+func emitTrayPluginClicked(code string) {
+	_ = audit.Default().Record(audit.Event{
+		Event:   audit.EventTrayPluginClicked,
+		TS:      core.Now().UTC().Unix(),
+		Scope:   trayScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"plugin_code":  code,
+			"resolved_via": "tray_menu",
+		},
+	})
 }
