@@ -64,10 +64,12 @@ func (g *routesProvider) Name() string { return GroupName }
 func (g *routesProvider) BasePath() string { return APIBasePath }
 
 // RegisterRoutes satisfies coreapi.RouteGroup. Stage E.B adds POST
-// /unlock + POST /lock alongside the existing /create surface.
-// Future endpoints (PUT /<id>/seal, DELETE /<id>) land here too,
-// each with a corresponding pathScopes entry in pkg/server (every
-// new path is a Mantis ticket + Cerberus DREAD review per #1467).
+// /unlock + POST /lock alongside the existing /create surface. Stage
+// E.A adds PUT /:id/seal — the marker-replacement endpoint that closes
+// the seal-step gap left dangling by the legacy create+seal flow
+// (RFC.stage-e-seal.md §1). Each new path lands a corresponding
+// pathScopes entry in pkg/server (every new path is a Mantis ticket +
+// Cerberus DREAD review per #1467).
 //
 // Usage example (inside server.NewService):
 //
@@ -79,6 +81,14 @@ func (g *routesProvider) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/provision", g.handleProvision)
 	rg.POST("/unlock", g.handleUnlock)
 	rg.POST("/lock", g.handleLock)
+	// Stage E.A per plans/code/lthn/desktop/auth-gate/RFC.stage-e-seal.md.
+	// PUT (not POST) per REST idempotency convention — repeated identical
+	// body MUST produce the same on-disk state per §2.1 / §3.3.
+	// Bootstrap-tier, scope account.seal (RFC §2.2). The route pattern
+	// "/:id/seal" is the first parametrised entry in BootstrapPathScopes;
+	// the c.FullPath() lookup substrate landed at Mantis #1626 / commit
+	// d4fdcca on dev (Cerberus #25 ADD-HIGH-1 closure).
+	rg.PUT("/:id/seal", g.handleSeal)
 }
 
 // RouteGroups satisfies pkg/server.RoutesProvider — returns the

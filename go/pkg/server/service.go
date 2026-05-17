@@ -241,6 +241,17 @@ var BootstrapPathScopes = map[string]string{
 	"/v1/account/create":    "account.create",
 	"/v1/account/provision": "account.provision",
 	"/v1/account/unlock":    "account.unlock",
+	// Stage E.A per plans/code/lthn/desktop/auth-gate/RFC.stage-e-seal.md
+	// §2.2. PUT /v1/account/:id/seal — the first parametrised entry in
+	// this map. Lookup uses c.FullPath() (gin's registered route
+	// pattern) per the Mantis #1626 substrate fix (commit d4fdcca on
+	// dev — Cerberus #25 ADD-HIGH-1 closure); literal lookup against a
+	// concrete "/v1/account/abc123/seal" would silently miss and the
+	// endpoint would be dead-on-arrival. The matching mint-side scope
+	// lives in pkg/serverkey.bootstrapAllowedScopes — the lockstep
+	// parity tests in pkg/serverkey/bootstrap_scopes_lockstep_test.go
+	// fail CI on any future drift (Cerberus #1467).
+	"/v1/account/:id/seal": "account.seal",
 }
 
 // RouteTiers classifies every non-skip-list /v1 route per

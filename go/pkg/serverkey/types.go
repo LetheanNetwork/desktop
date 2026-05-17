@@ -263,6 +263,7 @@ var bootstrapAllowedScopes = map[string]bool{
 	scopeAccountCreate:    true,
 	scopeAccountUnlock:    true,
 	scopeAccountProvision: true,
+	scopeAccountSeal:      true,
 }
 
 const (
@@ -323,6 +324,17 @@ const (
 	// token issued for /create cannot be cross-replayed against the
 	// keygen endpoint).
 	scopeAccountProvision = "account.provision"
+
+	// scopeAccountSeal is the bootstrap-token scope minted for the
+	// marker-replacement seal flow (Stage E.A per
+	// plans/code/lthn/desktop/auth-gate/RFC.stage-e-seal.md §2.2).
+	// PUT /v1/account/:id/seal is gated by a fresh bootstrap-token
+	// with this scope so a token issued for /create or /provision
+	// cannot be cross-replayed against the seal endpoint (Cerberus
+	// #1467 scope-laundering defence). Seal-once invariant in §3.2
+	// + IfMatchHash composite gate close the residual blob-
+	// substitution surface within the 60s bootstrap-TTL window.
+	scopeAccountSeal = "account.seal"
 
 	// scopeSession is the session-token scope embedded in the
 	// LTHN-SESS-1. header. Per RFC §3.1 + Cerberus #1467 scope-

@@ -333,7 +333,87 @@ const (
 	codeProvisionEncryptFailed      = "account.provision.encrypt_failed"
 	codeProvisionMisconfigured      = "account.provision.server_misconfigured"
 	codeProvisionSessionMintFailed  = "account.provision.session_mint_failed"
+
+	// Stage E.A per RFC.stage-e-seal.md §2.5 — PUT /v1/account/:id/seal
+	// failure namespace. Cerberus #25 ADD-LOW-1 — naming standardised on
+	// codeAccountSeal* prefix mirroring the existing codeAccount* family
+	// (the unlock-side family uses codeUnlock* for shortness; the seal-
+	// side stays explicit because every code is namespaced under
+	// "account.seal.*" already). Frontend keys inline-copy off these
+	// codes (already_sealed renders "Account already sealed"; blob_invalid
+	// renders "Encrypted blob malformed"; version_unsupported renders
+	// "Unsupported envelope version").
+	codeAccountNotFound             = "account.not_found"
+	codeAccountSealBlobRequired     = "account.seal.blob.required"
+	codeAccountSealBlobInvalid      = "account.seal.blob.invalid"
+	codeAccountSealVersionUnsupported = "account.seal.version_unsupported"
+	codeAccountSealAlreadySealed    = "account.seal.already_sealed"
+	codeAccountSealAccountLocked    = "account.seal.account_locked"
+	codeAccountSealWriteFailed      = "account.seal.write_failed"
 )
+
+// SealInput is the request body the frontend (or external CLI / SDK
+// caller) PUTs to /v1/account/<id>/seal per RFC.stage-e-seal.md §2.3.
+// The endpoint replaces the deterministic Create-marker at
+// ~/Lethean/account/<id>/private.key with a real user-encrypted PGP
+// envelope. Seal-once invariant — see §3.2.
+//
+// Cerberus #25 Q4 caller contract (RFC §3.3): callers MUST hold the
+// encrypted Blob across retry boundaries; re-encrypting per retry
+// produces structurally-different bytes (fresh S2K salt + IV) and the
+// second seal will 409 by design. Byte-equality is the only equality
+// the handler can compute without the passphrase.
+//
+// Usage example:
+//
+//	in := account.SealInput{
+//	    AccountID: "abc123def4567890",
+//	    Version:   1,
+//	    Blob:      pgpEnvelopeBytes,
+//	}
+type SealInput struct {
+	// AccountID echoes the URL <id> path-param. The handler rejects
+	// with account.id_mismatch when the body field diverges from the
+	// authoritative URL field (Cerberus #25 Q1 — identity binds from
+	// the URL not the body; mirrors handleLock's session-id discipline).
+	AccountID string `json:"account_id"`
+
+	// Version is the sealed envelope format version. v1 ONLY accepts 1;
+	// future format migrations (e.g. raw bytes vs base64, AES-256-GCM
+	// vs PGP-symmetric) add a new value in a new RFC. Unknown version
+	// → 400 account.seal.version_unsupported.
+	Version int `json:"version"`
+
+	// Blob is the base64-decoded sealed PGP envelope bytes. The handler
+	// length-validates (lower bound: minimum valid PGP-symmetric
+	// envelope ~64B; upper bound: inherits global MaxBodyBytesDefault
+	// 64 KiB at the middleware boundary). Deep PGP structural validation
+	// is deferred (RFC §2.3); v1 length-sanes only.
+	Blob []byte `json:"blob"`
+
+	// RequestID is the server-generated audit identifier for the seal
+	// call. Mirrors UnlockInput/ProvisionInput per Cerberus #1524 — the
+	// gin handler DROPS any caller-supplied value and overwrites with a
+	// server-side UUID v4 BEFORE invoking Service.Seal.
+	RequestID string `json:"request_id,omitempty"`
+}
+
+// SealOutput is the success-shape returned on a 200 OK from PUT
+// /v1/account/<id>/seal. SealedAt is the unix-seconds timestamp the
+// envelope landed on disk — Cerberus #26 OBS-1 sources this from
+// paths.ReadVersion(private.key).Mtime so no sidecar timestamp file is
+// needed (the seal-once invariant makes mtime the canonical
+// first-seal-time).
+//
+// Usage example:
+//
+//	out := r.Value.(account.SealOutput)
+//	_ = out.SealedAt
+type SealOutput struct {
+	AccountID string `json:"account_id"`
+	SealedAt  int64  `json:"sealed_at"`
+	Version   int    `json:"version"`
+}
 
 // Lockout policy constants per RFC.stage-e.md §5 + Cerberus DREAD M1.
 //

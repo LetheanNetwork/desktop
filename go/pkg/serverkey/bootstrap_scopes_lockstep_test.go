@@ -67,6 +67,7 @@ func TestBootstrapScopes_KnownScopesInBoth_Good(t *core.T) {
 		"account.create",    // Stage B  — initial account write
 		"account.unlock",    // Stage E.B — passphrase-unlock path
 		"account.provision", // Stage X.B — server-side keygen path
+		"account.seal",      // Stage E.A — marker-replacement seal path
 	}
 
 	allowed := subject.ExportedBootstrapAllowedScopes()
