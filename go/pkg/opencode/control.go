@@ -16,22 +16,66 @@ import (
 	"dappco.re/lthn/desktop/pkg/audit"
 )
 
-// EventOpencodeSandboxWebURLIssued is the audit event the webURL
-// handler emits per successful credential-free URL issuance. Mantis
-// #1600 HIGH (Cerberus #22 #1602 audit-gap finding, narrowed to this
-// endpoint only — the wider opencode audit sweep is its own ticket).
+// Event-name literals for the opencode HTTP control surface. Mantis
+// #1602 HIGH (Cerberus #22) — every privilege-bearing endpoint in this
+// file emits exactly one audit row per call. Reserved schema; renaming
+// a literal without a spec bump breaks the Stage F log-tailer + the
+// future Operations panel facet chrome.
 //
-// Meta keys:
+// Outcome literals are reused from pkg/audit (OutcomeOK / OutcomeError
+// / OutcomeDenied / OutcomeFailed) — see types.go in that package.
 //
-//	sandbox_id — the opencode sandbox container identifier
-//	auth_scheme — WebAuthScheme literal ("basic")
-//	auth_via — WebAuthVia literal ("header")
+// Per Cerberus #22 + the redact.go secret-shape detector, Meta values
+// MUST NEVER carry:
 //
-// The password is NEVER in Meta — the whole point of the Mantis #1600
-// fix is to keep that byte-string off every wire shape including the
-// audit substrate. The redact.go secret-shape detector would refuse
-// the record anyway if a future contributor wired it in by mistake.
-const EventOpencodeSandboxWebURLIssued = "opencode.sandbox.web_url_issued"
+//   - OPENCODE_SERVER_PASSWORD bytes (Mantis #1600 keeps it off every
+//     wire shape including audit)
+//   - profile.Provider blocks (may carry apiKey / token / bearer for
+//     upstream providers — only the profile NAME is emitted)
+//   - host-config file BYTES (may carry user-supplied provider secrets
+//     — only the resulting Path + bool Created flag are emitted)
+//
+// The redact.go detector enforces this server-side; the emit-sites
+// below structurally cannot reach the credential bytes regardless.
+const (
+	// EventOpencodeSandboxWebURLIssued — webURL handler emits per
+	// successful credential-free URL issuance (Mantis #1600 HIGH).
+	// Meta: sandbox_id, auth_scheme, auth_via.
+	EventOpencodeSandboxWebURLIssued = "opencode.sandbox.web_url_issued"
+
+	// EventOpencodeSandboxSpawn — spawn handler emits per /sandbox POST.
+	// Meta: profile, sandbox_id (on OK), error_code (on error).
+	EventOpencodeSandboxSpawn = "opencode.sandbox.spawn"
+
+	// EventOpencodeSandboxStop — stop handler emits per /sandbox/:id
+	// DELETE. Meta: sandbox_id, error_code (on error).
+	EventOpencodeSandboxStop = "opencode.sandbox.stop"
+
+	// EventOpencodeProfileSave — profileSave handler emits per
+	// /profile POST. Meta: profile_name, error_code (on error /
+	// denied). Profile.Provider block is NEVER in Meta — may carry
+	// upstream provider apiKey / token bytes.
+	EventOpencodeProfileSave = "opencode.profile.save"
+
+	// EventOpencodeEnable — enable handler emits per /enable POST.
+	// Meta: profile, sandbox_id (on OK), error_code (on error).
+	EventOpencodeEnable = "opencode.enable"
+
+	// EventOpencodeHostConfigMerge — hostConfigMerge handler emits per
+	// /host-config POST. Meta: profile, force, path, created (on OK),
+	// error_code (on error / conflict). Bytes payload is NEVER in
+	// Meta — may carry user-supplied provider secrets.
+	EventOpencodeHostConfigMerge = "opencode.host_config.merge"
+
+	// EventOpencodeTUIOpen — openTUI handler emits per /sandbox/:id/tui
+	// POST. Meta: sandbox_id, error_code (on error).
+	EventOpencodeTUIOpen = "opencode.tui.open"
+
+	// EventOpencodeUpgrade — upgrade handler emits per /upgrade POST.
+	// Meta: updated (bool), digest, restarted (count) on OK; error_code
+	// on error.
+	EventOpencodeUpgrade = "opencode.upgrade"
+)
 
 // ControlGroup implements coreapi.RouteGroup for the opencode HTTP
 // control surface.
@@ -203,25 +247,56 @@ func (g *ControlGroup) openWebWindow(c *gin.Context) {
 // restarts any running sandboxes on the new image when the digest
 // changed. Returns UpgradeResult (updated flag + new digest +
 // list of restarted sandbox ids).
+//
+// Emits EventOpencodeUpgrade (Mantis #1602 HIGH) per call. RequestID
+// server-generated per Cerberus #18 / Mantis #1511.
 func (g *ControlGroup) upgrade(c *gin.Context) {
+	srvReqID := newRequestID()
+	c.Header("X-Request-Id", srvReqID)
 	r := g.svc.Upgrade()
 	if !r.OK {
+		emitControlAudit(EventOpencodeUpgrade, "opencode.upgrade",
+			audit.OutcomeError, srvReqID, map[string]any{
+				"error_code": r.Code(),
+			})
 		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
 	res, _ := r.Value.(UpgradeResult)
+	emitControlAudit(EventOpencodeUpgrade, "opencode.upgrade",
+		audit.OutcomeOK, srvReqID, map[string]any{
+			"updated":   res.Updated,
+			"digest":    res.Digest,
+			"restarted": len(res.Restarted),
+		})
 	c.JSON(core.StatusOK, res)
 }
 
 // openTUI POST /v1/api/opencode/sandbox/:id/tui → spawns the user's
 // default terminal running `<runtime> exec -it <container> opencode`.
+//
+// Emits EventOpencodeTUIOpen (Mantis #1602 HIGH) per call. RequestID
+// server-generated per Cerberus #18 / Mantis #1511. The
+// OPENCODE_SERVER_PASSWORD that flows into the shell composition
+// inside Service.OpenTUI is NEVER in Meta — only the sandbox id.
 func (g *ControlGroup) openTUI(c *gin.Context) {
+	srvReqID := newRequestID()
+	c.Header("X-Request-Id", srvReqID)
 	id := core.TrimCutset(c.Param("id"), "/ ")
 	r := g.svc.OpenTUI(id)
 	if !r.OK {
+		emitControlAudit(EventOpencodeTUIOpen, "opencode.tui.open",
+			audit.OutcomeError, srvReqID, map[string]any{
+				"sandbox_id": id,
+				"error_code": r.Code(),
+			})
 		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
+	emitControlAudit(EventOpencodeTUIOpen, "opencode.tui.open",
+		audit.OutcomeOK, srvReqID, map[string]any{
+			"sandbox_id": id,
+		})
 	c.JSON(core.StatusOK, gin.H{"opened": id})
 }
 
@@ -250,17 +325,36 @@ func (g *ControlGroup) openStudio(c *gin.Context) {
 
 // enable POST /v1/api/opencode/enable → persists the enabled flag
 // + spawns a sandbox if none is running. Optional body {profile}.
+//
+// Emits EventOpencodeEnable (Mantis #1602 HIGH) per call. RequestID
+// server-generated per Cerberus #18 / Mantis #1511.
 func (g *ControlGroup) enable(c *gin.Context) {
+	srvReqID := newRequestID()
+	c.Header("X-Request-Id", srvReqID)
 	var req struct {
 		Profile string `json:"profile"`
 	}
 	_ = c.ShouldBindJSON(&req)
+	profile := req.Profile
+	if profile == "" {
+		profile = DefaultProfile
+	}
 	r := g.svc.Enable(req.Profile)
 	if !r.OK {
+		emitControlAudit(EventOpencodeEnable, "opencode.enable",
+			audit.OutcomeError, srvReqID, map[string]any{
+				"profile":    profile,
+				"error_code": r.Code(),
+			})
 		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
 	id, _ := r.Value.(string)
+	emitControlAudit(EventOpencodeEnable, "opencode.enable",
+		audit.OutcomeOK, srvReqID, map[string]any{
+			"profile":    profile,
+			"sandbox_id": id,
+		})
 	c.JSON(core.StatusOK, gin.H{"id": id, "enabled": true})
 }
 
@@ -301,25 +395,57 @@ func (g *ControlGroup) providerList(c *gin.Context) {
 // code in the body) when provider.lthn already exists with a
 // different baseURL and force was not passed.
 func (g *ControlGroup) hostConfigMerge(c *gin.Context) {
+	srvReqID := newRequestID()
+	c.Header("X-Request-Id", srvReqID)
 	var opts MergeHostConfigOptions
 	// Body is optional; empty body uses defaults (profile=default,
 	// force=false).
 	_ = c.ShouldBindJSON(&opts)
+	profile := opts.Profile
+	if profile == "" {
+		profile = DefaultProfile
+	}
 	r := g.svc.MergeHostConfig(opts)
 	if !r.OK {
 		// Conflict surfaces as 409 so the frontend can distinguish
-		// "needs user confirmation" from "actually broken".
+		// "needs user confirmation" from "actually broken". Conflict
+		// is OutcomeDenied (the user-supplied request was rejected by
+		// the substrate); other failures are OutcomeError (substrate
+		// itself broke).
 		if r.Code() == HostConfigConflict {
+			emitControlAudit(EventOpencodeHostConfigMerge, "opencode.host_config.merge",
+				audit.OutcomeDenied, srvReqID, map[string]any{
+					"profile":    profile,
+					"force":      opts.Force,
+					"error_code": HostConfigConflict,
+				})
 			c.JSON(core.StatusConflict, gin.H{
 				"error": r.Error(),
 				"code":  HostConfigConflict,
 			})
 			return
 		}
+		emitControlAudit(EventOpencodeHostConfigMerge, "opencode.host_config.merge",
+			audit.OutcomeError, srvReqID, map[string]any{
+				"profile":    profile,
+				"force":      opts.Force,
+				"error_code": r.Code(),
+			})
 		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
 	res, _ := r.Value.(MergeHostConfigResult)
+	// Emit success row with the path + created flag — the BYTES of the
+	// merged JSON are intentionally NOT in Meta; they may carry the
+	// user's provider apiKey / token bytes (see Profile.Provider
+	// constraints at the const-block top of this file).
+	emitControlAudit(EventOpencodeHostConfigMerge, "opencode.host_config.merge",
+		audit.OutcomeOK, srvReqID, map[string]any{
+			"profile": profile,
+			"force":   opts.Force,
+			"path":    res.Path,
+			"created": res.Created,
+		})
 	c.JSON(core.StatusOK, res)
 }
 
@@ -329,23 +455,41 @@ func (g *ControlGroup) hostConfigMerge(c *gin.Context) {
 // or missing body uses "default".
 //
 // Returns {id, url, profile} on success.
+//
+// Emits EventOpencodeSandboxSpawn (Mantis #1602 HIGH) per call —
+// OK on success with the resolved {profile, sandbox_id}; error with
+// {profile, error_code} on Service.Start failure. RequestID is
+// server-generated per Mantis #1511 / Cerberus #18 X-Request-Id
+// discipline.
 func (g *ControlGroup) spawn(c *gin.Context) {
+	srvReqID := newRequestID()
+	c.Header("X-Request-Id", srvReqID)
 	var req struct {
 		Profile string `json:"profile"`
 	}
 	// Body is optional; bind failures (empty body / wrong shape)
 	// fall through to default profile.
 	_ = c.ShouldBindJSON(&req)
-	r := g.svc.Start(req.Profile)
-	if !r.OK {
-		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
-		return
-	}
-	id, _ := r.Value.(string)
 	profile := req.Profile
 	if profile == "" {
 		profile = DefaultProfile
 	}
+	r := g.svc.Start(req.Profile)
+	if !r.OK {
+		emitControlAudit(EventOpencodeSandboxSpawn, "opencode.spawn",
+			audit.OutcomeError, srvReqID, map[string]any{
+				"profile":    profile,
+				"error_code": r.Code(),
+			})
+		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
+		return
+	}
+	id, _ := r.Value.(string)
+	emitControlAudit(EventOpencodeSandboxSpawn, "opencode.spawn",
+		audit.OutcomeOK, srvReqID, map[string]any{
+			"profile":    profile,
+			"sandbox_id": id,
+		})
 	c.JSON(core.StatusOK, gin.H{
 		"id":      id,
 		"url":     "/v1/api/sandbox/" + id,
@@ -365,13 +509,27 @@ func (g *ControlGroup) list(c *gin.Context) {
 }
 
 // stop DELETE /v1/api/opencode/sandbox/:id → stops + removes one.
+//
+// Emits EventOpencodeSandboxStop (Mantis #1602 HIGH) per call.
+// RequestID server-generated per Cerberus #18 / Mantis #1511.
 func (g *ControlGroup) stop(c *gin.Context) {
+	srvReqID := newRequestID()
+	c.Header("X-Request-Id", srvReqID)
 	id := core.TrimCutset(c.Param("id"), "/ ")
 	r := g.svc.Stop(id)
 	if !r.OK {
+		emitControlAudit(EventOpencodeSandboxStop, "opencode.stop",
+			audit.OutcomeError, srvReqID, map[string]any{
+				"sandbox_id": id,
+				"error_code": r.Code(),
+			})
 		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
+	emitControlAudit(EventOpencodeSandboxStop, "opencode.stop",
+		audit.OutcomeOK, srvReqID, map[string]any{
+			"sandbox_id": id,
+		})
 	c.JSON(core.StatusOK, gin.H{"stopped": id})
 }
 
@@ -412,17 +570,39 @@ func (g *ControlGroup) profileGet(c *gin.Context) {
 
 // profileSave POST /v1/api/opencode/profile → upsert. Body = Profile
 // JSON (must include "name"). Returns the saved record.
+//
+// Emits EventOpencodeProfileSave (Mantis #1602 HIGH) per call —
+// denied on JSON bind failure, error on Service.SaveProfile failure,
+// OK on success. Profile.Provider block is NEVER in Meta — may carry
+// upstream provider apiKey / token bytes; only the profile name is
+// emitted. RequestID server-generated per Cerberus #18 / Mantis #1511.
 func (g *ControlGroup) profileSave(c *gin.Context) {
+	srvReqID := newRequestID()
+	c.Header("X-Request-Id", srvReqID)
 	var p Profile
 	if err := c.ShouldBindJSON(&p); err != nil {
+		emitControlAudit(EventOpencodeProfileSave, "opencode.profile.save",
+			audit.OutcomeDenied, srvReqID, map[string]any{
+				"profile_name": p.Name,
+				"error_code":   "opencode.profile.invalid_json",
+			})
 		c.JSON(core.StatusBadRequest, gin.H{"error": "invalid profile JSON: " + err.Error()})
 		return
 	}
 	r := g.svc.SaveProfile(p)
 	if !r.OK {
+		emitControlAudit(EventOpencodeProfileSave, "opencode.profile.save",
+			audit.OutcomeError, srvReqID, map[string]any{
+				"profile_name": p.Name,
+				"error_code":   r.Code(),
+			})
 		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
+	emitControlAudit(EventOpencodeProfileSave, "opencode.profile.save",
+		audit.OutcomeOK, srvReqID, map[string]any{
+			"profile_name": p.Name,
+		})
 	c.JSON(core.StatusOK, p)
 }
 
@@ -436,4 +616,69 @@ func (g *ControlGroup) profileDelete(c *gin.Context) {
 		return
 	}
 	c.JSON(core.StatusOK, gin.H{"deleted": name})
+}
+
+// emitControlAudit is the shared emit helper for every audit row this
+// control surface produces. Centralised so the field shape stays
+// consistent across handlers + so a future sweep (e.g. wiring the
+// account_id hash from session context per RFC §6.4) has a single
+// site to update. Failure is intentionally swallowed — audit failures
+// MUST NEVER block an auth-adjacent path; the redact.go secret-shape
+// detector enforces the no-credential invariant server-side.
+//
+// Usage example:
+//
+//	emitControlAudit(EventOpencodeSandboxStop, "opencode.stop",
+//	    audit.OutcomeOK, srvReqID, map[string]any{"sandbox_id": id})
+func emitControlAudit(event, scope, outcome, requestID string, meta map[string]any) {
+	_ = audit.Default().Record(audit.Event{
+		Event:     event,
+		TS:        core.Now().UTC().Unix(),
+		Scope:     scope,
+		Outcome:   outcome,
+		RequestID: requestID,
+		Meta:      meta,
+	})
+}
+
+// newRequestID generates a UUIDv4 used as the server-authoritative
+// audit RequestID for every emit-site on the opencode control surface.
+// Mirrors pkg/server/plugin_view_capability.newCorrelationID() — RFC
+// 4122 §4.4 random UUID with version + variant bits set. Returns the
+// empty string on core.RandomBytes failure; the audit row tolerates
+// the missing field per the Stage F substrate contract.
+//
+// The caller's X-Request-Id header is INTENTIONALLY DROPPED per
+// Cerberus #18 / Mantis #1511 — trusting an attacker-supplied value
+// for the audit substrate JOIN key enables forensic deniability (an
+// attacker forging arbitrary values to mimic a legitimate caller's
+// audit-JOIN key, defeating the disambiguation property the field
+// exists to provide). The server's UUID is echoed in the response
+// X-Request-Id header so the legitimate caller can still correlate
+// their request to the audit log.
+//
+// CoreGO gap: core.UUIDv4 doesn't exist yet (logged at
+// project_corego_export_gaps). Local stand-in until the export lands.
+//
+// Usage example:
+//
+//	srvReqID := newRequestID()
+//	c.Header("X-Request-Id", srvReqID)
+//	emitControlAudit(EventOpencodeSandboxStop, "opencode.stop",
+//	    audit.OutcomeOK, srvReqID, map[string]any{"sandbox_id": id})
+func newRequestID() string {
+	r := core.RandomBytes(16)
+	if !r.OK {
+		return ""
+	}
+	b, ok := r.Value.([]byte)
+	if !ok || len(b) != 16 {
+		return ""
+	}
+	// RFC 4122 §4.4 — version 4 (random) UUID. Top nibble of
+	// time_hi_and_version (byte 6) = 0100 = 4. Top two bits of
+	// clock_seq_hi_and_reserved (byte 8) = 10 (variant 1).
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return core.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
