@@ -911,6 +911,100 @@ const (
 	// header are NEVER in Meta — same closure-only-scope discipline as
 	// the sibling gateway events.
 	EventGatewayDispatchRejected = "gateway.dispatch.rejected"
+
+	// EventDownloaderFetchRequested fires when pkg/downloader.FetchVerified
+	// is about to dispatch a quarantine-routed HTTP GET for a model file
+	// after the URL + name shape gates pass but BEFORE the host-allowlist
+	// + DNS-resolve-private-IP policy gates. Sibling of the marketplace
+	// FetchManifest quartet — FetchVerified is the supply-chain primary
+	// (model weights) where FetchManifest is the install-pipeline primary
+	// (bundle manifests). Both share the host-allowlist + SSRF defence so
+	// both grow the same Requested / Succeeded / Failed / Rejected shape.
+	//
+	// The Requested row commits BEFORE the policy gates so a forensic
+	// walker can correlate caller intent (which host) with the gate
+	// outcome (which policy fired). Wraps at FetchVerified so Fetch +
+	// FetchWithProgress + WailsService.Download all flow through one emit
+	// surface (no double-emit risk — the wrapper chain is single-call).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   source_host     — URL hostname only (no path / query / fragment)
+	//                     per the SECURITY-NOTE escape valve mirroring the
+	//                     marketplace FetchManifest discipline. HuggingFace
+	//                     URLs occasionally embed access tokens in query
+	//                     strings; recording host-only keeps the row
+	//                     forensic without leaking secret material.
+	//   sha256_expected — caller-supplied expected digest hex (safe — the
+	//                     expected hash is a public verification value
+	//                     drawn from a model card or marketplace manifest;
+	//                     empty when the caller routes through the
+	//                     quarantine-only path with no digest assertion).
+	//
+	// The raw URL / Authorization header / response body is NEVER in Meta —
+	// Cerberus #1465 closure-only-scope discipline keeps secret material
+	// off the audit substrate.
+	EventDownloaderFetchRequested = "downloader.fetch.requested"
+
+	// EventDownloaderFetchSucceeded fires when FetchVerified returns OK
+	// from the full pipeline (gate / GET / quarantine / digest-verify /
+	// atomic-promote). Sibling of Requested above.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   source_host — URL hostname (mirrors Requested)
+	//   bytes       — byte count of the promoted file. Forensic correlation
+	//                 size for the day-file tailer; allows pairing the
+	//                 Succeeded row against disk-usage / bandwidth
+	//                 accounting without re-stat-ing the model path.
+	EventDownloaderFetchSucceeded = "downloader.fetch.succeeded"
+
+	// EventDownloaderFetchFailed fires when FetchVerified returns a non-OK
+	// Result from any path EXCEPT the host-allowlist or private-IP gates
+	// (which have their own Rejected event so the auditor can distinguish
+	// policy-block from runtime / network / digest-mismatch failure).
+	// Covers: URL parse failure, HTTP non-2xx, body copy failure, size cap
+	// exceeded, digest mismatch, atomic-promote rename failure, and the
+	// pre-network name / URL shape gates.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   source_host — URL hostname (when parseable; empty when the URL was
+	//                 malformed enough to reject before parse)
+	//   error_code  — categorical failure reason (Result.Error() string,
+	//                 already-scoped via core.E by the fetch path).
+	//                 Raw URL paths / Authorization bytes NEVER reach this
+	//                 field; the upstream error scopes are bounded literals.
+	EventDownloaderFetchFailed = "downloader.fetch.failed"
+
+	// EventDownloaderFetchRejected fires when FetchVerified rejects the
+	// caller-supplied URL at one of the policy gates — host-allowlist
+	// (AllowedSource) or DNS-resolve-private-IP (verifyResolvedIPNotPrivate
+	// per Cerberus #1429). Sibling of EventMarketplaceFetchManifestRejected
+	// — Rejected distinguishes policy-block from runtime / network failure
+	// so a forensic walker can audit attempted SSRF / off-allowlist fetch
+	// patterns without scanning every Failed row.
+	//
+	// Closed reason set (Meta["reason"]):
+	//
+	//   host_not_allowed     — AllowedSource rejected the suffix-match
+	//                          gate (hostname not under the compile-time
+	//                          allowlist).
+	//   private_ip_resolved  — verifyResolvedIPNotPrivate fired (DNS
+	//                          rebinding / SSRF defence; the allowlisted
+	//                          hostname resolved to a private / loopback /
+	//                          link-local / cloud-IMDS address).
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   source_host — URL hostname that failed the gate (when parseable;
+	//                 empty for malformed input — those land as Failed)
+	//   reason      — one of the closed-set literals above. Reserved so a
+	//                 downstream chip-filter UI / forensic walker can
+	//                 categorise without re-running the gate logic. New
+	//                 literals require a reserved-schema bump in the same
+	//                 commit that introduces the new gate.
+	EventDownloaderFetchRejected = "downloader.fetch.rejected"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the

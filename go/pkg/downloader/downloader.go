@@ -180,10 +180,14 @@ func FetchWithProgress(url, name string, onProgress Progress) core.Result {
 //	if r.OK { dest := r.Value.(string); _ = dest }
 func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result {
 	if url == "" {
-		return core.Fail(core.E(fetchOp, "url is required", nil))
+		err := core.E(fetchOp, "url is required", nil)
+		emitFetchFailed(url, err.Error())
+		return core.Fail(err)
 	}
 	if name == "" {
-		return core.Fail(core.E(fetchOp, "name is required", nil))
+		err := core.E(fetchOp, "name is required", nil)
+		emitFetchFailed(url, err.Error())
+		return core.Fail(err)
 	}
 	// Cerberus #49 F-1 — name flows through core.PathJoin into both
 	// the quarantine path and the final model path. core.PathJoin
@@ -195,9 +199,21 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	// Cerberus #1486. Mirror the discipline here so the model-path
 	// surface can't pivot writes/reads outside the models dir.
 	if err := paths.IsValidID(name); err != nil {
+		emitFetchFailed(url, err.Error())
 		return core.Fail(err)
 	}
+	// Cerberus shape-observation (audit-cluster adoption) — emit the
+	// Requested row AFTER the input-shape gates pass but BEFORE the
+	// host-allowlist + DNS-resolve-private-IP policy gates. The pre-gate
+	// position lets a forensic walker correlate caller intent (which
+	// host) with the gate outcome (which policy fired) in the same
+	// trace; the post-shape-gate position keeps the substrate from
+	// recording rows for trivially-malformed callers that never had a
+	// parseable URL.
+	emitFetchRequested(url, sha256hex)
+
 	if !AllowedSource(url) {
+		emitFetchRejected(url, reasonHostNotAllowed)
 		return core.Fail(core.E(fetchOp,
 			core.Concat("source not allowed: ", url), nil))
 	}
@@ -209,14 +225,18 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	// fires on each redirect hop via CheckRedirect above.
 	parsed := core.URLParse(url)
 	if !parsed.OK {
-		return core.Fail(core.E(fetchOp,
-			core.Concat("URL parse failed: ", url), parsed.Value.(error)))
+		err := core.E(fetchOp,
+			core.Concat("URL parse failed: ", url), parsed.Value.(error))
+		emitFetchFailed(url, err.Error())
+		return core.Fail(err)
 	}
 	if err := verifyResolvedIPNotPrivate(parsed.Value.(*core.URL).Hostname()); err != nil {
+		emitFetchRejected(url, reasonPrivateIPResolved)
 		return core.Fail(err)
 	}
 	dirR := paths.ModelsDir()
 	if !dirR.OK {
+		emitFetchFailed(url, dirR.Error())
 		return dirR
 	}
 	// Belt-and-braces partner of IsValidID — if a future regression
@@ -226,15 +246,18 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	// across sales/incidents/runbooks/marketing.
 	finalDest, escErr := paths.JoinAndCheck(dirR.Value.(string), name)
 	if escErr != nil {
+		emitFetchFailed(url, escErr.Error())
 		return core.Fail(escErr)
 	}
 
 	qdR := quarantineDir()
 	if !qdR.OK {
+		emitFetchFailed(url, qdR.Error())
 		return qdR
 	}
 	qDest, escErr := paths.JoinAndCheck(qdR.Value.(string), name)
 	if escErr != nil {
+		emitFetchFailed(url, escErr.Error())
 		return core.Fail(escErr)
 	}
 
@@ -248,6 +271,7 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 
 	reqR := core.NewHTTPRequest("GET", url, nil)
 	if !reqR.OK {
+		emitFetchFailed(url, reqR.Error())
 		return reqR
 	}
 	req := reqR.Value.(*core.Request)
@@ -258,29 +282,36 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 		if resp != nil {
 			_ = resp.Body.Close()
 		}
-		return core.Fail(core.E(fetchOp, "GET failed", err))
+		failErr := core.E(fetchOp, "GET failed", err)
+		emitFetchFailed(url, failErr.Error())
+		return core.Fail(failErr)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return core.Fail(core.E(fetchOp,
+		failErr := core.E(fetchOp,
 			core.Concat("HTTP ", core.Sprintf("%d", resp.StatusCode), " from ", url),
-			nil))
+			nil)
+		emitFetchFailed(url, failErr.Error())
+		return core.Fail(failErr)
 	}
 	// Cerberus #1425 — pre-check Content-Length when the server sent
 	// one. Saves the disk + bandwidth of opening the body for a stream
 	// we already know will be rejected. -1 = chunked transfer; the
 	// LimitReader wrap below catches the unbounded case.
 	if resp.ContentLength > maxDownloadBytes {
-		return core.Fail(core.E(fetchOp,
+		failErr := core.E(fetchOp,
 			core.Concat("Content-Length ",
 				core.Sprintf("%d", resp.ContentLength),
 				" exceeds cap ",
 				core.Sprintf("%d", maxDownloadBytes)),
-			nil))
+			nil)
+		emitFetchFailed(url, failErr.Error())
+		return core.Fail(failErr)
 	}
 
 	createR := core.Create(qDest)
 	if !createR.OK {
+		emitFetchFailed(url, createR.Error())
 		return createR
 	}
 	file := createR.Value.(*core.OSFile)
@@ -302,36 +333,45 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	if !copyR.OK {
 		_ = file.Close()
 		_ = core.Remove(qDest)
-		return core.Fail(core.E(fetchOp, "stream copy failed", copyR.Value.(error)))
+		failErr := core.E(fetchOp, "stream copy failed", copyR.Value.(error))
+		emitFetchFailed(url, failErr.Error())
+		return core.Fail(failErr)
 	}
 	written := copyR.Value.(int64)
 	if written > maxDownloadBytes {
 		_ = file.Close()
 		_ = core.Remove(qDest)
-		return core.Fail(core.E(fetchOp,
+		failErr := core.E(fetchOp,
 			core.Concat("download exceeded ",
 				core.Sprintf("%d", maxDownloadBytes),
 				" byte cap"),
-			nil))
+			nil)
+		emitFetchFailed(url, failErr.Error())
+		return core.Fail(failErr)
 	}
 	// Close before Verify + Rename so the file handle is released and
 	// the rename(2) doesn't race with an open writer on Windows.
 	if err := file.Close(); err != nil {
 		_ = core.Remove(qDest)
-		return core.Fail(core.E(fetchOp, "quarantine close failed", err))
+		failErr := core.E(fetchOp, "quarantine close failed", err)
+		emitFetchFailed(url, failErr.Error())
+		return core.Fail(failErr)
 	}
 
 	if sha256hex != "" {
 		if r := verify(qDest, sha256hex); !r.OK {
 			_ = core.Remove(qDest)
+			emitFetchFailed(url, r.Error())
 			return r
 		}
 	}
 
 	if r := core.Rename(qDest, finalDest); !r.OK {
 		_ = core.Remove(qDest)
+		emitFetchFailed(url, r.Error())
 		return r
 	}
+	emitFetchSucceeded(url, written)
 	return core.Ok(finalDest)
 }
 
