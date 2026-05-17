@@ -14,7 +14,7 @@ import (
 
 func TestMoveDeal_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	for _, evil := range []string{
 		"../../wallets/lethean-default",
 		"..",
@@ -34,7 +34,7 @@ func TestMoveDeal_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 func TestDealsDir_Mode0700_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	_ = svc.List(pipeline.ListInput{}) // triggers MkdirAll
 	dir := core.PathJoin(home, "Lethean", "sales", "deals")
 	stat := core.Stat(dir)

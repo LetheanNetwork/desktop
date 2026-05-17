@@ -121,6 +121,9 @@ func (s *Service) List(input ListInput) core.Result {
 //	// Forced restore of a previously-lost deal:
 //	rF := svc.MoveDeal(pipeline.MoveInput{DealID: "202605-DEAL-001", ToStage: "qual", Force: true})
 func (s *Service) MoveDeal(input MoveInput) core.Result {
+	if fail, ok := s.assertUnlocked("pipeline.MoveDeal"); !ok {
+		return fail
+	}
 	if err := paths.IsValidID(input.DealID); err != nil {
 		s.auditMoveAttempt(input.DealID, "", input.ToStage, "invalid_id", err.Error(), input.Force)
 		return core.Fail(err)

@@ -13,10 +13,66 @@ import (
 	"dappco.re/lthn/desktop/pkg/sales/pipeline"
 )
 
+// stubSessionGate is the test double for the consumer-defined
+// SessionGate interface (RFC.stage-e-unlockgate v2 §4.2 stub shape —
+// mirrors sales/deals + sales/contacts test surface). Go's structural
+// typing means the single struct satisfies both pipeline.SessionGate
+// AND deals.SessionGate — the interface shape (`UnlockedAccountIDs()
+// []string`) is identical across packages per AX-8.
+type stubSessionGate struct{ ids []string }
+
+func (s *stubSessionGate) UnlockedAccountIDs() []string { return s.ids }
+
+// newTestSvc constructs a pipeline.Service pre-wired with a SessionGate
+// reporting one unlocked account so existing write-path tests continue
+// to exercise the success path post-retrofit. Tests that need to drive
+// a locked or nil-gate fail-closed path call pipeline.NewService
+// directly (or SetSessionGate explicitly with an empty stub).
+//
+// Usage example:
+//
+//	svc := newTestSvc(t)
+//	svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "engage"})
+func newTestSvc(_ *testing.T) *pipeline.Service {
+	svc := pipeline.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
+	return svc
+}
+
+// newTestSvcWithCore is the ACTION-bus variant of newTestSvc — used by
+// transition_test.go tests that need a real *core.Core to subscribe to
+// PipelineMovedEvent emissions.
+//
+// Usage example:
+//
+//	c := core.New(...)
+//	svc := newTestSvcWithCore(t, c)
+func newTestSvcWithCore(_ *testing.T, c *core.Core) *pipeline.Service {
+	svc := pipeline.NewService(c)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
+	return svc
+}
+
+// newDealSvc returns a sales/deals Service pre-wired with an unlocked
+// gate so test-seed Create calls succeed post the deals B.2 retrofit
+// (sales/deals 2e653f8 — deals.Service now requires SessionGate for
+// every writer). Pipeline tests seed deal records via this helper
+// rather than reaching directly into deals.NewService(nil).
+//
+// Usage example:
+//
+//	dealSvc := newDealSvc(t)
+//	dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "qual"})
+func newDealSvc(_ *testing.T) *deals.Service {
+	svc := deals.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
+	return svc
+}
+
 // TestList_Empty_Good — empty deals dir → each stage has zero deals.
 func TestList_Empty_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.List(pipeline.ListInput{})
 	if !r.OK {
 		t.Fatalf("List failed: %s", r.Error())
@@ -39,12 +95,12 @@ func TestList_Empty_Good(t *testing.T) {
 // TestList_GroupsByStage_Good — deals in two stages appear in correct columns.
 func TestList_GroupsByStage_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "A", Stage: "engage", AmountPence: 10000})
 	dealSvc.Create(deals.CreateInput{Customer: "B", Stage: "engage", AmountPence: 20000})
 	dealSvc.Create(deals.CreateInput{Customer: "C", Stage: "qual", AmountPence: 5000})
 
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.List(pipeline.ListInput{})
 	if !r.OK {
 		t.Fatalf("List failed: %s", r.Error())
@@ -75,7 +131,7 @@ func TestList_GroupsByStage_Good(t *testing.T) {
 // TestMoveDeal_UpdatesStage_Good — MoveDeal moves a deal to the target stage.
 func TestMoveDeal_UpdatesStage_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "qual", AmountPence: 24000})
 
 	// Get the deal ID.
@@ -83,7 +139,7 @@ func TestMoveDeal_UpdatesStage_Good(t *testing.T) {
 	lo := lr.Value.(deals.ListOutput)
 	dealID := lo.Deals[0].ID
 
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.MoveDeal(pipeline.MoveInput{DealID: dealID, ToStage: "engage"})
 	if !r.OK {
 		t.Fatalf("MoveDeal failed: %s", r.Error())
@@ -103,7 +159,7 @@ func TestMoveDeal_UpdatesStage_Good(t *testing.T) {
 // TestMoveDeal_InvalidStage_Bad — unknown stage returns core.Fail.
 func TestMoveDeal_InvalidStage_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.MoveDeal(pipeline.MoveInput{DealID: "202605-DEAL-001", ToStage: "fantasy"})
 	if r.OK {
 		t.Fatalf("expected failure for invalid stage, got OK")
@@ -113,12 +169,12 @@ func TestMoveDeal_InvalidStage_Bad(t *testing.T) {
 // TestList_ValueAggregation_Good — amount_pence sums correctly into GBP string.
 func TestList_ValueAggregation_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	// Two engage deals: 24000p (£24) + 44000p (£44) = 68000p → "£68 K"
 	dealSvc.Create(deals.CreateInput{Customer: "A", Stage: "engage", AmountPence: 24000})
 	dealSvc.Create(deals.CreateInput{Customer: "B", Stage: "engage", AmountPence: 44000})
 
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.List(pipeline.ListInput{Stage: "engage"})
 	if !r.OK {
 		t.Fatalf("List failed: %s", r.Error())
@@ -135,7 +191,7 @@ func TestList_ValueAggregation_Good(t *testing.T) {
 
 // TestServiceName_Good — ServiceName returns "Pipeline".
 func TestServiceName_Good(t *testing.T) {
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	if svc.ServiceName() != "Pipeline" {
 		t.Fatalf("expected Pipeline, got %q", svc.ServiceName())
 	}
@@ -149,8 +205,8 @@ func TestServiceName_Good(t *testing.T) {
 // the on-disk version to 2.
 func TestAtomicCutover_Pipeline_Create_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
-	pipeSvc := pipeline.NewService(nil)
+	dealSvc := newDealSvc(t)
+	pipeSvc := newTestSvc(t)
 	cr := dealSvc.Create(deals.CreateInput{
 		Customer: "Heritage Law LLP", AmountPence: 24000, Stage: "qual",
 	})
@@ -181,8 +237,8 @@ func TestAtomicCutover_Pipeline_Create_Good(t *testing.T) {
 // bump the stored version monotonically (1 → 2 → 3).
 func TestAtomicCutover_Pipeline_Update_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
-	pipeSvc := pipeline.NewService(nil)
+	dealSvc := newDealSvc(t)
+	pipeSvc := newTestSvc(t)
 	cr := dealSvc.Create(deals.CreateInput{
 		Customer: "Stannard & Co", AmountPence: 44000, Stage: "qual",
 	})
@@ -221,7 +277,7 @@ func TestAtomicCutover_Pipeline_Update_Good(t *testing.T) {
 // future drift).
 func TestAtomicCutover_Pipeline_Update_VersionStale_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	cr := dealSvc.Create(deals.CreateInput{
 		Customer: "Pemberton Capital", AmountPence: 62000, Stage: "engage",
 	})
@@ -229,7 +285,7 @@ func TestAtomicCutover_Pipeline_Update_VersionStale_Ugly(t *testing.T) {
 		t.Fatalf("Create failed: %s", cr.Error())
 	}
 	id := cr.Value.(deals.Deal).ID
-	pipeSvc := pipeline.NewService(nil)
+	pipeSvc := newTestSvc(t)
 
 	var conflict core.Result
 	var saw bool
@@ -323,7 +379,7 @@ func TestAtomicCutover_Pipeline_Update_VersionStale_Ugly(t *testing.T) {
 // stage value.
 func TestAtomicCutover_Pipeline_LegacyFile_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	pipeSvc := pipeline.NewService(nil)
+	pipeSvc := newTestSvc(t)
 	dirR := core.UserHomeDir()
 	if !dirR.OK {
 		t.Fatalf("UserHomeDir: %s", dirR.Error())
@@ -363,8 +419,8 @@ func TestAtomicCutover_Pipeline_LegacyFile_Ugly(t *testing.T) {
 // and sales/deals/* paths fall under AuditModeBatch per RFC §6.1.
 func TestAtomicCutover_Pipeline_AuditEmissionRecordBatch_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
-	pipeSvc := pipeline.NewService(nil)
+	dealSvc := newDealSvc(t)
+	pipeSvc := newTestSvc(t)
 	paths.SetAuditSecretProvider(func() []byte {
 		return []byte("pipeline-cutover-test-secret-32-byte")
 	})
@@ -405,5 +461,160 @@ func TestAtomicCutover_Pipeline_AuditEmissionRecordBatch_Good(t *testing.T) {
 	mode := paths.AuditModeForPath(fpath)
 	if mode != paths.AuditModeBatch {
 		t.Fatalf("expected AuditModeBatch for sales/deals path (pipeline writer), got %v", mode)
+	}
+}
+
+// ---- SessionGate retrofit (RFC.stage-e-unlockgate v2 §4.2 / Mantis #1613 B.2)
+
+// TestPipeline_NilGate_WarnsOnce_FailsClosed — a Service constructed
+// without SetSessionGate fails-closed on MoveDeal. Second + third
+// writes continue to fail-closed (one-shot warn semantics — the
+// second call must remain quiet but its caller-visible result must
+// be the same fail-closed shape).
+func TestPipeline_NilGate_WarnsOnce_FailsClosed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := pipeline.NewService(nil) // NO SetSessionGate — exercises §2.2 fail-safe.
+
+	r1 := svc.MoveDeal(pipeline.MoveInput{DealID: "202605-DEAL-001", ToStage: "engage"})
+	if r1.OK {
+		t.Fatal("expected MoveDeal to fail-closed when gate is nil")
+	}
+	if !core.Contains(r1.Error(), "pipeline.session.locked") {
+		t.Fatalf("expected pipeline.session.locked on first MoveDeal, got %q", r1.Error())
+	}
+
+	// Second write — nilWarned already true; CompareAndSwap returns
+	// false and core.Warn is NOT called again. Behaviour from the
+	// caller's perspective: same fail-closed result.
+	r2 := svc.MoveDeal(pipeline.MoveInput{DealID: "202605-DEAL-002", ToStage: "propose"})
+	if r2.OK {
+		t.Fatal("expected second MoveDeal to fail-closed when gate is nil")
+	}
+	if !core.Contains(r2.Error(), "pipeline.session.locked") {
+		t.Fatalf("expected pipeline.session.locked on second MoveDeal, got %q", r2.Error())
+	}
+
+	// Third write — same fail-closed behaviour persists for forced moves.
+	r3 := svc.MoveDeal(pipeline.MoveInput{DealID: "202605-DEAL-003", ToStage: "won", Force: true})
+	if r3.OK {
+		t.Fatal("expected forced MoveDeal to fail-closed when gate is nil")
+	}
+	if !core.Contains(r3.Error(), "pipeline.session.locked") {
+		t.Fatalf("expected pipeline.session.locked on forced MoveDeal, got %q", r3.Error())
+	}
+}
+
+// TestPipeline_UnlockedGate_AllowsMoveDeal — MoveDeal succeeds when the
+// live-read gate reports at least one unlocked account.
+func TestPipeline_UnlockedGate_AllowsMoveDeal(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dealSvc := newDealSvc(t)
+	cr := dealSvc.Create(deals.CreateInput{
+		Customer: "Heritage Law LLP", AmountPence: 24000, Stage: "qual",
+	})
+	if !cr.OK {
+		t.Fatalf("seed Create failed: %s", cr.Error())
+	}
+	id := cr.Value.(deals.Deal).ID
+
+	svc := pipeline.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "engage"})
+	if !r.OK {
+		t.Fatalf("MoveDeal should succeed with gate reporting unlocked acct, got: %s", r.Error())
+	}
+}
+
+// TestPipeline_LockedGate_FailsMoveDeal_session_locked — MoveDeal
+// rejects when the live-read gate reports zero unlocked accounts. The
+// gate fires BEFORE the IsValidID check + filesystem read, so the
+// session.locked code surfaces in preference to any later error
+// (RFC §1.1 — gate is the FIRST hurdle).
+func TestPipeline_LockedGate_FailsMoveDeal_session_locked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Seed unlocked, then flip to locked + try to move.
+	dealSvc := newDealSvc(t)
+	cr := dealSvc.Create(deals.CreateInput{
+		Customer: "Heritage Law LLP", AmountPence: 24000, Stage: "qual",
+	})
+	if !cr.OK {
+		t.Fatalf("seed Create failed: %s", cr.Error())
+	}
+	id := cr.Value.(deals.Deal).ID
+
+	svc := pipeline.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "engage"})
+	if r.OK {
+		t.Fatal("expected MoveDeal to be rejected when gate reports zero unlocked accounts")
+	}
+	if !core.Contains(r.Error(), "pipeline.session.locked") {
+		t.Fatalf("expected pipeline.session.locked, got %q", r.Error())
+	}
+}
+
+// TestPipeline_StopNilsGate — Stop() severs the SessionGate;
+// subsequent writes fail-closed even though the gate WAS wired
+// (Cerberus #27 ADD-5 — Stop drain hygiene mirrors mail + contacts +
+// deals).
+func TestPipeline_StopNilsGate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dealSvc := newDealSvc(t)
+	cr := dealSvc.Create(deals.CreateInput{
+		Customer: "Heritage Law LLP", AmountPence: 24000, Stage: "qual",
+	})
+	if !cr.OK {
+		t.Fatalf("seed Create failed: %s", cr.Error())
+	}
+	id := cr.Value.(deals.Deal).ID
+
+	svc := newTestSvc(t) // gate wired with unlocked stub
+
+	// Pre-Stop: MoveDeal succeeds.
+	if r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "engage"}); !r.OK {
+		t.Fatalf("MoveDeal should succeed pre-Stop, got: %s", r.Error())
+	}
+
+	// Stop nils the gate reference.
+	if r := svc.Stop(core.Background()); !r.OK {
+		t.Fatalf("Stop should succeed, got: %s", r.Error())
+	}
+
+	// Post-Stop: MoveDeal fails-closed via the nil-gate path.
+	r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "propose"})
+	if r.OK {
+		t.Fatal("expected MoveDeal to fail-closed after Stop nils the gate")
+	}
+	if !core.Contains(r.Error(), "pipeline.session.locked") {
+		t.Fatalf("expected pipeline.session.locked, got %q", r.Error())
+	}
+}
+
+// TestPipeline_LockedGate_ReadStillWorks — List is not gated by the
+// session-lock (RFC §3.1 — reads stay open while locked). The
+// pipeline derives its view from deals on disk; a locked-session
+// operator can still see the board state, only mutation is blocked.
+func TestPipeline_LockedGate_ReadStillWorks(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Seed unlocked, then flip pipeline gate to locked.
+	dealSvc := newDealSvc(t)
+	if cr := dealSvc.Create(deals.CreateInput{
+		Customer: "Heritage Law LLP", AmountPence: 24000, Stage: "engage",
+	}); !cr.OK {
+		t.Fatalf("seed Create failed: %s", cr.Error())
+	}
+
+	svc := pipeline.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.List(pipeline.ListInput{})
+	if !r.OK {
+		t.Fatalf("List should succeed when session locked, got: %s", r.Error())
+	}
+	out := r.Value.(pipeline.ListOutput)
+	if out.TotalDeals != 1 {
+		t.Fatalf("expected List to return the seeded deal under lock, got TotalDeals=%d", out.TotalDeals)
 	}
 }

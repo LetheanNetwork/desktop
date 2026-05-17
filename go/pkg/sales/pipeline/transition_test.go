@@ -113,13 +113,13 @@ func TestIsLegalTransition_IllegalEdges_Bad(t *testing.T) {
 // the engage column after the move.
 func TestMoveDeal_LegalTransition_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "qual", AmountPence: 24000})
 
 	lr := dealSvc.List(deals.ListInput{})
 	id := lr.Value.(deals.ListOutput).Deals[0].ID
 
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "engage"})
 	if !r.OK {
 		t.Fatalf("legal move qual → engage must succeed, got: %s", r.Error())
@@ -130,13 +130,13 @@ func TestMoveDeal_LegalTransition_Good(t *testing.T) {
 // transition — the one Vi-callout cares about. Confirms it lands.
 func TestMoveDeal_CloseToWon_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "close", AmountPence: 24000})
 
 	lr := dealSvc.List(deals.ListInput{})
 	id := lr.Value.(deals.ListOutput).Deals[0].ID
 
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "won"})
 	if !r.OK {
 		t.Fatalf("close → won must succeed, got: %s", r.Error())
@@ -150,13 +150,13 @@ func TestMoveDeal_CloseToWon_Good(t *testing.T) {
 // with transition_illegal, and the deal's stage MUST be unchanged.
 func TestMoveDeal_TransitionIllegal_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "qual", AmountPence: 24000})
 
 	lr := dealSvc.List(deals.ListInput{})
 	id := lr.Value.(deals.ListOutput).Deals[0].ID
 
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "won"})
 	if r.OK {
 		t.Fatalf("qual → won MUST reject — Mantis #1488 defence")
@@ -178,13 +178,13 @@ func TestMoveDeal_TransitionIllegal_Bad(t *testing.T) {
 // The "restore" verb is out of scope.
 func TestMoveDeal_TerminalOut_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "won", AmountPence: 24000})
 
 	lr := dealSvc.List(deals.ListInput{})
 	id := lr.Value.(deals.ListOutput).Deals[0].ID
 
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	for _, to := range []string{"close", "lost", "qual", "engage", "propose"} {
 		r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: to})
 		if r.OK {
@@ -201,13 +201,13 @@ func TestMoveDeal_TerminalOut_Bad(t *testing.T) {
 // reflexive entries.
 func TestMoveDeal_SelfTransition_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "qual", AmountPence: 24000})
 
 	lr := dealSvc.List(deals.ListInput{})
 	id := lr.Value.(deals.ListOutput).Deals[0].ID
 
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "qual"})
 	if r.OK {
 		t.Fatalf("self-transition qual → qual MUST reject")
@@ -223,7 +223,7 @@ func TestMoveDeal_SelfTransition_Bad(t *testing.T) {
 // deals — they look exactly like an active probe).
 func TestMoveDeal_DealNotFound_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.MoveDeal(pipeline.MoveInput{DealID: "202605-DEAL-999", ToStage: "engage"})
 	if r.OK {
 		t.Fatalf("MoveDeal on missing deal must reject")
@@ -238,13 +238,13 @@ func TestMoveDeal_DealNotFound_Bad(t *testing.T) {
 // Vi-prompt-injection introducing a synthetic "victory" stage.
 func TestMoveDeal_UnknownStage_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "qual", AmountPence: 24000})
 
 	lr := dealSvc.List(deals.ListInput{})
 	id := lr.Value.(deals.ListOutput).Deals[0].ID
 
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "fantasy"})
 	if r.OK {
 		t.Fatalf("unknown stage must reject")
@@ -264,13 +264,13 @@ func TestMoveDeal_UnknownStage_Bad(t *testing.T) {
 // a partial-state leak causes a rejected move to flip the file.
 func TestMoveDeal_ProbePattern_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Probe Target", Stage: "qual", AmountPence: 10000})
 
 	lr := dealSvc.List(deals.ListInput{})
 	id := lr.Value.(deals.ListOutput).Deals[0].ID
 
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	// Interleave legal + illegal. After all moves the deal should be
 	// at "propose" — the only path the legal moves traced.
 	attempts := []struct {
@@ -309,12 +309,12 @@ func TestMoveDeal_ProbePattern_Ugly(t *testing.T) {
 // prescribed test matrix.
 func TestMoveDeal_LinearForwardLegal_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "qual", AmountPence: 24000})
 
 	id := dealSvc.List(deals.ListInput{}).Value.(deals.ListOutput).Deals[0].ID
 
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "engage"})
 	if !r.OK {
 		t.Fatalf("qual → engage MUST land (linear forward), got: %s", r.Error())
@@ -327,12 +327,12 @@ func TestMoveDeal_LinearForwardLegal_Good(t *testing.T) {
 // silently unwind a closed deal.
 func TestMoveDeal_RewindRejected_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "won", AmountPence: 24000})
 
 	id := dealSvc.List(deals.ListInput{}).Value.(deals.ListOutput).Deals[0].ID
 
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "qual"})
 	if r.OK {
 		t.Fatalf("won → qual MUST reject — terminal-out + multi-step rewind")
@@ -347,12 +347,12 @@ func TestMoveDeal_RewindRejected_Bad(t *testing.T) {
 // reject with transition_illegal.
 func TestMoveDeal_SkipAheadRejected_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "qual", AmountPence: 24000})
 
 	id := dealSvc.List(deals.ListInput{}).Value.(deals.ListOutput).Deals[0].ID
 
-	svc := pipeline.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "won"})
 	if r.OK {
 		t.Fatalf("qual → won MUST reject — Mantis #1488 primary defence")
@@ -369,12 +369,12 @@ func TestMoveDeal_AnyToLostAllowed_Good(t *testing.T) {
 	for _, from := range []string{"qual", "engage", "propose", "close"} {
 		t.Run(from, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			dealSvc := deals.NewService(nil)
+			dealSvc := newDealSvc(t)
 			dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: from, AmountPence: 24000})
 
 			id := dealSvc.List(deals.ListInput{}).Value.(deals.ListOutput).Deals[0].ID
 
-			svc := pipeline.NewService(nil)
+			svc := newTestSvc(t)
 			r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "lost"})
 			if !r.OK {
 				t.Fatalf("%s → lost MUST land, got: %s", from, r.Error())
@@ -391,7 +391,7 @@ func TestMoveDeal_AnyToLostAllowed_Good(t *testing.T) {
 // Mantis #1488.
 func TestMoveDeal_ForceFlagAllowsRewind_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Restored Customer", Stage: "lost", AmountPence: 24000})
 
 	id := dealSvc.List(deals.ListInput{}).Value.(deals.ListOutput).Deals[0].ID
@@ -414,7 +414,7 @@ func TestMoveDeal_ForceFlagAllowsRewind_Ugly(t *testing.T) {
 		return core.Result{OK: true}
 	})
 
-	svc := pipeline.NewService(c)
+	svc := newTestSvcWithCore(t, c)
 
 	// Without Force: lost → qual rejects (no transitions out of lost).
 	r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "qual"})
@@ -449,7 +449,7 @@ func TestMoveDeal_ForceFlagAllowsRewind_Ugly(t *testing.T) {
 // (qual → engage) MUST NOT fire the terminal event.
 func TestMoveDeal_WonTransitionTriggersNotify_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "close", AmountPence: 24000})
 
 	id := dealSvc.List(deals.ListInput{}).Value.(deals.ListOutput).Deals[0].ID
@@ -468,7 +468,7 @@ func TestMoveDeal_WonTransitionTriggersNotify_Good(t *testing.T) {
 		return core.Result{OK: true}
 	})
 
-	svc := pipeline.NewService(c)
+	svc := newTestSvcWithCore(t, c)
 	r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "won"})
 	if !r.OK {
 		t.Fatalf("close → won MUST land, got: %s", r.Error())
@@ -493,7 +493,7 @@ func TestMoveDeal_WonTransitionTriggersNotify_Good(t *testing.T) {
 // explicit notify per Mantis #1488).
 func TestMoveDeal_NonTerminalSuppressesNotify_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "qual", AmountPence: 24000})
 
 	id := dealSvc.List(deals.ListInput{}).Value.(deals.ListOutput).Deals[0].ID
@@ -512,7 +512,7 @@ func TestMoveDeal_NonTerminalSuppressesNotify_Good(t *testing.T) {
 		return core.Result{OK: true}
 	})
 
-	svc := pipeline.NewService(c)
+	svc := newTestSvcWithCore(t, c)
 	if r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "engage"}); !r.OK {
 		t.Fatalf("qual → engage MUST land, got: %s", r.Error())
 	}
@@ -531,7 +531,7 @@ func TestMoveDeal_NonTerminalSuppressesNotify_Good(t *testing.T) {
 // fields.
 func TestMoveDeal_AuditEmitted_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	dealSvc := deals.NewService(nil)
+	dealSvc := newDealSvc(t)
 	dealSvc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "qual", AmountPence: 24000})
 
 	id := dealSvc.List(deals.ListInput{}).Value.(deals.ListOutput).Deals[0].ID
@@ -550,7 +550,7 @@ func TestMoveDeal_AuditEmitted_Good(t *testing.T) {
 		return core.Result{OK: true}
 	})
 
-	svc := pipeline.NewService(c)
+	svc := newTestSvcWithCore(t, c)
 	if r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: "engage"}); !r.OK {
 		t.Fatalf("qual → engage MUST land, got: %s", r.Error())
 	}
