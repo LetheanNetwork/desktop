@@ -161,11 +161,17 @@ func (s *Service) Provision(input ProvisionInput) core.Result {
 	publicPath := core.PathJoin(dir, publicKeyFile)
 	metaPath := core.PathJoin(dir, metaFile)
 
-	if r := atomicWrite(publicPath, pubArmoured); !r.OK {
+	// Mantis #1578 cutover (mirror of Service.Create §3) — all three
+	// writes route through paths.AtomicWriteWithVersion in declaration
+	// order with private.key LAST per Cerberus #1471 leaf-rule. The
+	// primitive's at-rest mode-verify gate (Cerberus #19 §5.1 Option C,
+	// Mantis #1592) fires for the "account/" prefix and inherits the
+	// #1464 mode-tamper defence verbatim.
+	if r := paths.AtomicWriteWithVersion(publicPath, paths.WriteInput{Body: pubArmoured}); !r.OK {
 		return core.Fail(core.NewCode(codeAccountWriteFailed,
 			"writing public.key failed: "+r.Error()))
 	}
-	if r := atomicWrite(metaPath, metaBytes); !r.OK {
+	if r := paths.AtomicWriteWithVersion(metaPath, paths.WriteInput{Body: metaBytes}); !r.OK {
 		return core.Fail(core.NewCode(codeAccountWriteFailed,
 			"writing meta.json failed: "+r.Error()))
 	}
@@ -173,7 +179,7 @@ func (s *Service) Provision(input ProvisionInput) core.Result {
 	// Create wrote. Once this rename lands AccountStatus reports
 	// has_user_account=true and the unlock path can decrypt against
 	// the supplied passphrase.
-	if r := atomicWrite(privatePath, encPriv); !r.OK {
+	if r := paths.AtomicWriteWithVersion(privatePath, paths.WriteInput{Body: encPriv}); !r.OK {
 		return core.Fail(core.NewCode(codeAccountWriteFailed,
 			"writing private.key failed: "+r.Error()))
 	}

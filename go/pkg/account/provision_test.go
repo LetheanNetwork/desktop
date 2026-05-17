@@ -17,9 +17,12 @@
 package account_test
 
 import (
+	"os"
+
 	core "dappco.re/go"
 	subject "dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/audit"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // TestAccount_Provision_Good — happy round-trip. Provision returns
@@ -200,4 +203,80 @@ func TestProvision_EmitsAuditEvent_PathHashDiscipline_Good(t *core.T) {
 	core.AssertLen(t, pathHash, 64, "path_hash must be SHA-256 hex (64 chars)")
 	_, hasRawPath := ev.Meta["path"]
 	core.AssertFalse(t, hasRawPath, "Meta MUST NOT carry raw path (Cerberus #1465 discipline)")
+}
+
+// --- Cutover tests (Mantis #1578) ---
+//
+// Pin the post-cutover contracts so a future regression that bypasses
+// paths.AtomicWriteWithVersion (e.g. someone reintroduces a local
+// atomicWrite shim) trips a named test. Service-tier round-trip per
+// RFC §6: invoke Provision, observe disk state + Fail codes.
+
+// TestProvision_Cutover_Atomic_Good — pins post-cutover happy-path
+// invariants: all three files (public.key, meta.json, private.key) land
+// in correct order with 0o600 mode under the canonical account dir.
+// Mirrors the service-tier round-trip discipline from RFC §6.
+func TestProvision_Cutover_Atomic_Good(t *core.T) {
+	home := homeFixture(t)
+	svc := newUnlockable(t, home)
+
+	r := svc.Provision(subject.ProvisionInput{
+		Passphrase: "cutover-good-pp",
+		RequestID:  "cutover-good",
+	})
+	core.AssertTrue(t, r.OK, "Provision MUST succeed on fresh install")
+	out, _ := r.Value.(subject.ProvisionOutput)
+
+	dir := core.PathJoin(home, "Lethean", "account", out.AccountID)
+	for _, name := range []string{"public.key", "meta.json", "private.key"} {
+		p := core.PathJoin(dir, name)
+		statR := core.Stat(p)
+		core.AssertTrue(t, statR.OK, "post-cutover Provision MUST land "+name)
+		info, _ := statR.Value.(core.FsFileInfo)
+		core.AssertEqual(t, core.FileMode(0o600), info.Mode().Perm(),
+			name+" MUST be written 0o600 by the primitive's at-rest gate")
+	}
+}
+
+// TestProvision_Cutover_PartialFail_Bad — pins the partial-fail
+// invariant: per RFC §5.2, the three writes are sequential (each owns
+// its own primitive call). If the second write (meta.json) fails via
+// the primitive's mode-tamper gate, public.key has already landed but
+// meta.json and private.key MUST NOT — so AccountStatus reports
+// has_user_account=false and the next Provision retry can recover.
+//
+// Fixture: arm SetPostRenameModeTamperForTest with a per-call counter
+// so the FIRST call (public.key) passes and the SECOND call (meta.json)
+// trips the gate.
+func TestProvision_Cutover_PartialFail_Bad(t *core.T) {
+	home := homeFixture(t)
+	svc := newUnlockable(t, home)
+
+	// Per-call counter: first invocation (public.key) is a no-op, the
+	// second invocation (meta.json) widens perms so the verify gate
+	// fires.
+	calls := 0
+	paths.SetPostRenameModeTamperForTest(func(p string) {
+		calls++
+		if calls == 2 {
+			_ = os.Chmod(p, 0o644)
+		}
+	})
+	t.Cleanup(func() { paths.SetPostRenameModeTamperForTest(nil) })
+
+	r := svc.Provision(subject.ProvisionInput{
+		Passphrase: "cutover-partial-pp",
+		RequestID:  "cutover-partial",
+	})
+	core.AssertFalse(t, r.OK, "second-write mode-tamper MUST fail Provision")
+	core.AssertContains(t, r.Error(), "meta.json",
+		"the failing write MUST be meta.json (sequence: public.key → meta.json → private.key)")
+
+	// AccountStatus MUST report has_user_account=false because
+	// private.key never landed (leaf-rule per Cerberus #1471).
+	st := svc.AccountStatus()
+	core.AssertTrue(t, st.OK)
+	statusOut, _ := st.Value.(subject.AccountStatus)
+	core.AssertFalse(t, statusOut.HasAccount,
+		"partial-write (no private.key) MUST report has_account=false")
 }

@@ -11,9 +11,12 @@
 package account_test
 
 import (
+	"os"
+
 	core "dappco.re/go"
 	subject "dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/audit"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // recordingRecorder captures every Event the audit recorder receives.
@@ -300,4 +303,72 @@ func TestCreate_NoAuditOnFailure_Bad(t *core.T) {
 
 	core.AssertEqual(t, 0, len(rec.events),
 		"failed Create MUST NOT emit auth.account.created (only post-success)")
+}
+
+// --- Cutover tests (Mantis #1578) ---
+//
+// Pin the post-cutover contracts so a future regression that bypasses
+// paths.AtomicWriteWithVersion (e.g. someone reintroduces a local
+// atomicWrite shim) trips a named test.
+
+// TestService_Cutover_Create_ModeVerify_Ugly — pins the Cerberus #1464
+// mode-tamper defence post-cutover. After cutover, the defence lives
+// in the primitive (paths.AtomicWriteWithVersion's at-rest mode-verify
+// gate per Mantis #1592 / Cerberus #19 §5.1 Option C). A racing chmod
+// between rename and the verify-Lstat MUST surface CodeWriteModeTamper
+// (the primitive's typed code) propagated to the caller — NOT the
+// legacy account.atomicWrite code, which is now deleted.
+//
+// Fixture: arm SetPostRenameModeTamperForTest on the privatePath the
+// next write will land at, then invoke Create. The primitive's gate
+// fires during the first AtomicWriteWithVersion call (public.key is
+// also under "account/" prefix), so Create fails before private.key
+// even attempts.
+func TestService_Cutover_Create_ModeVerify_Ugly(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+
+	// Arm the primitive's post-rename mode-tamper hook to simulate a
+	// racing chmod widening the perms between rename and the verify
+	// Lstat. The hook fires on EVERY at-rest path write (the primitive
+	// gates on IsAtRestEncryptedPath, which "account/" satisfies), so
+	// the first write — public.key — trips it.
+	paths.SetPostRenameModeTamperForTest(func(p string) {
+		_ = os.Chmod(p, 0o644)
+	})
+	t.Cleanup(func() { paths.SetPostRenameModeTamperForTest(nil) })
+
+	r := svc.Create(validInput())
+	core.AssertFalse(t, r.OK, "mode tamper MUST be detected post-cutover")
+	core.AssertContains(t, r.Error(), paths.CodeWriteModeTamper,
+		"tampered mode MUST surface paths.write.mode_tamper (primitive code), not legacy account.atomicWrite")
+}
+
+// TestService_Cutover_Create_RefuseOverwrite_Bad — pins the
+// refuse-to-overwrite invariant post-cutover. Pre-create the leaf
+// private.key file and assert Create fails with account.exists,
+// matching the pre-cutover behaviour. Cerberus #1460 (a) contract
+// preserved verbatim.
+//
+// SECURITY-NOTE: per RFC §5.3, the stat-then-write window is NOT
+// closed under a single lock in this cutover (WithFileLock is
+// non-reentrant; primitive doesn't yet expose IfNotExist). The
+// residual TOCTOU window matches pre-cutover behaviour — the primitive
+// strictly narrows it. Follow-up Mantis filed.
+func TestService_Cutover_Create_RefuseOverwrite_Bad(t *core.T) {
+	home := homeFixture(t)
+	svc := subject.NewService(nil)
+
+	in := validInput()
+	dir := core.PathJoin(home, "Lethean", "account", in.AccountID)
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+
+	// Pre-create the leaf signal — Create MUST refuse.
+	w := core.WriteFile(core.PathJoin(dir, "private.key"), []byte("preexisting-marker"), 0o600)
+	core.AssertTrue(t, w.OK, "fixture private.key write must succeed")
+
+	r := svc.Create(in)
+	core.AssertFalse(t, r.OK, "Create MUST refuse to overwrite existing private.key")
+	core.AssertEqual(t, "account.exists", r.Code(),
+		"refuse-to-overwrite MUST surface account.exists (Cerberus #1460 (a))")
 }

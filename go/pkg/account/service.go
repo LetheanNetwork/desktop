@@ -213,11 +213,20 @@ func (s *Service) Create(input CreateInput) core.Result {
 	publicPath := core.PathJoin(dir, publicKeyFile)
 	metaPath := core.PathJoin(dir, metaFile)
 
-	if r := atomicWrite(publicPath, input.PublicKey); !r.OK {
+	// Mantis #1578 — cutover from local atomicWrite to the canonical
+	// paths.AtomicWriteWithVersion substrate (RFC.atomicwrite-migration
+	// §1 + §3). Per-call WriteInput is the minimal first-write shape
+	// (no IfVersion / IfMtime / IfMatchHash — every account write is
+	// first-write only; refuse-to-overwrite gates above on the leaf).
+	// The primitive's at-rest mode-verify gate (Cerberus #19 §5.1
+	// Option C, Mantis #1592) automatically fires for the "account/"
+	// prefix and replaces the local atomicWrite's post-rename mode
+	// check verbatim — same defence, owned in one place.
+	if r := paths.AtomicWriteWithVersion(publicPath, paths.WriteInput{Body: input.PublicKey}); !r.OK {
 		return core.Fail(core.NewCode(codeAccountWriteFailed,
 			"writing public.key failed: "+r.Error()))
 	}
-	if r := atomicWrite(metaPath, metaBytes); !r.OK {
+	if r := paths.AtomicWriteWithVersion(metaPath, paths.WriteInput{Body: metaBytes}); !r.OK {
 		// public.key has already landed but meta.json failed — the
 		// directory is still half-built (no private.key), so the
 		// next Create call sees has_user_account=false and can
@@ -236,8 +245,19 @@ func (s *Service) Create(input CreateInput) core.Result {
 	// is expected to follow up with a PUT /v1/account/<id>/seal call
 	// (out of scope for Stage B', tracked in RFC §7) that replaces
 	// this marker with the encrypted private blob.
+	//
+	// SECURITY-NOTE (Mantis #1578 §5.3): the refuse-to-overwrite stat
+	// at line 183 is NOT inside the primitive's per-path WithFileLock.
+	// Moving it inside would require either an IfNotExist condition
+	// on WriteInput (primitive surface change) or wrapping
+	// AtomicWriteWithVersion in an outer WithFileLock on the same
+	// path — but WithFileLock is documented non-reentrant (lock.go:93)
+	// so that deadlocks. Shipping per RFC §7 escape valve: cutover
+	// proceeds, residual TOCTOU window matches pre-cutover behaviour
+	// (primitive's lock strictly narrows it, never widens). Follow-up
+	// ticket filed to add IfNotExist / IfCreateOnly to WriteInput.
 	marker := []byte(core.SHA256HexString(string(input.PublicKey)))
-	if r := atomicWrite(privatePath, marker); !r.OK {
+	if r := paths.AtomicWriteWithVersion(privatePath, paths.WriteInput{Body: marker}); !r.OK {
 		return core.Fail(core.NewCode(codeAccountWriteFailed,
 			"writing private.key failed: "+r.Error()))
 	}
@@ -363,61 +383,10 @@ func DeriveAccountID(publicKey []byte) string {
 	return deriveAccountID(publicKey)
 }
 
-// atomicWrite mirrors pkg/serverkey/token.go::atomicWrite — tmp +
-// fsync + rename so a crash mid-write doesn't leave a half-written
-// sensitive file. Cerberus #1460 (c) — partial state must not be
-// reachable on the leaf-rename path (private.key).
-//
-// Kept local rather than imported from pkg/serverkey because the
-// serverkey helper is package-private; promoting it to an exported
-// helper just so this package can re-use it would widen the
-// serverkey surface for a single internal consumer. The duplication
-// is small + identical in shape; if a third consumer appears, lift
-// to a shared pkg/atomicio helper at that time.
-func atomicWrite(path string, data []byte) core.Result {
-	tmp := path + ".tmp"
-	openR := core.OpenFile(tmp, core.O_CREATE|core.O_WRONLY|core.O_TRUNC, fileMode)
-	if !openR.OK {
-		return core.Fail(core.E("account.atomicWrite", "open temp", openR.Value.(error)))
-	}
-	f, _ := openR.Value.(*core.OSFile)
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		_ = core.Remove(tmp)
-		return core.Fail(core.E("account.atomicWrite", "write temp", err))
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		_ = core.Remove(tmp)
-		return core.Fail(core.E("account.atomicWrite", "fsync temp", err))
-	}
-	if err := f.Close(); err != nil {
-		_ = core.Remove(tmp)
-		return core.Fail(core.E("account.atomicWrite", "close temp", err))
-	}
-	if r := core.Rename(tmp, path); !r.OK {
-		_ = core.Remove(tmp)
-		return core.Fail(core.E("account.atomicWrite", "rename temp", r.Value.(error)))
-	}
-	// Re-Stat + verify mode 0o600 — umask / mount-option quirks can
-	// drop bits silently on platforms where the OpenFile mode arg
-	// isn't honoured verbatim (Cerberus #1464 carried forward).
-	statR := core.Stat(path)
-	if !statR.OK {
-		return core.Fail(core.E("account.atomicWrite", "stat after rename", statR.Value.(error)))
-	}
-	info, ok := statR.Value.(core.FsFileInfo)
-	if !ok {
-		return core.Fail(core.E("account.atomicWrite", "stat returned non-FileInfo", nil))
-	}
-	if got := info.Mode().Perm(); got != fileMode {
-		core.Warn("account: file mode wider than expected (Cerberus #1464) — refusing to ship",
-			"path", path,
-			"got", core.Sprintf("%o", got),
-			"want", core.Sprintf("%o", fileMode))
-		return core.Fail(core.E("account.atomicWrite",
-			core.Sprintf("file mode tamper: got %o want %o (path %s)", got, fileMode, path),
-			nil))
-	}
-	return core.Ok(nil)
-}
+// Mantis #1578 — the local atomicWrite helper has been removed in
+// favour of paths.AtomicWriteWithVersion (Cerberus #1464 mode-verify
+// regression closed by primitive's at-rest mode-verify gate per
+// Mantis #1592 / Cerberus #19 §5.1 Option C). All three Create writes
+// + all three Provision writes route through the primitive in
+// declaration order; the leaf-last invariant (Cerberus #1471) lives
+// in the call-site sequence, not the primitive.
