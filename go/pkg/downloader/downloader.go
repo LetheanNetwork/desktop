@@ -301,7 +301,7 @@ func FetchVerified(url, name, sha256hex string, onProgress Progress) core.Result
 	}
 
 	if sha256hex != "" {
-		if r := Verify(qDest, sha256hex); !r.OK {
+		if r := verify(qDest, sha256hex); !r.OK {
 			_ = core.Remove(qDest)
 			return r
 		}

@@ -4,9 +4,12 @@
 //
 //   - AllowedSource — host allowlist gate; bytes never read off the
 //     wire from a non-allowlisted source.
-//   - Verify — post-download SHA-256 digest check against an
+//   - verify — post-download SHA-256 digest check against an
 //     expected hex string supplied by the caller (HF model card,
-//     marketplace manifest, etc.).
+//     marketplace manifest, etc.). Unexported — confused-deputy guard
+//     per Cerberus #49 F-5 (Mantis #1675): callers outside the package
+//     must go through FetchVerified, not invoke the digest check on an
+//     arbitrary path.
 //   - Quarantine — bytes write to ~/Lethean/conf/models/.quarantine/
 //     during download; only an atomic rename(2) promotes them to the
 //     final model path. Eliminates partial-write torn-read + cache-
@@ -79,7 +82,7 @@ func AllowedSource(rawURL string) bool {
 	return false
 }
 
-// Verify computes the SHA-256 digest of the file at path and compares
+// verify computes the SHA-256 digest of the file at path and compares
 // it against the expected lowercase hex string. Returns Ok when the
 // digest matches; Fail with both the expected and computed values in
 // the error message when it doesn't.
@@ -89,16 +92,21 @@ func AllowedSource(rawURL string) bool {
 // file per RFC §5.3 — CoreGO's SHA256 wrappers operate on []byte and
 // have no streaming variant.
 //
-// Usage example:
+// Unexported by design (Cerberus #49 F-5 / Mantis #1675): public
+// callers must use FetchVerified so the digest check is bound to the
+// quarantine + atomic-promote pipeline rather than offered as a free
+// hash primitive over any caller-supplied path.
 //
-//	r := downloader.Verify(dest, expectedHex)
+// Usage example (internal):
+//
+//	r := verify(qDest, expectedHex)
 //	if !r.OK { return r }
-func Verify(path, sha256hex string) core.Result {
+func verify(path, sha256hex string) core.Result {
 	if path == "" {
-		return core.Fail(core.E("downloader.Verify", "path is required", nil))
+		return core.Fail(core.E("downloader.verify", "path is required", nil))
 	}
 	if sha256hex == "" {
-		return core.Fail(core.E("downloader.Verify", "sha256hex is required", nil))
+		return core.Fail(core.E("downloader.verify", "sha256hex is required", nil))
 	}
 	openR := core.OpenFile(path, core.O_RDONLY, 0)
 	if !openR.OK {
@@ -109,11 +117,11 @@ func Verify(path, sha256hex string) core.Result {
 
 	h := sha256.New()
 	if r := core.Copy(h, file); !r.OK {
-		return core.Fail(core.E("downloader.Verify", "stream read failed", r.Value.(error)))
+		return core.Fail(core.E("downloader.verify", "stream read failed", r.Value.(error)))
 	}
 	got := core.HexEncode(h.Sum(nil))
 	if got != sha256hex {
-		return core.Fail(core.E("downloader.Verify",
+		return core.Fail(core.E("downloader.verify",
 			core.Concat("digest mismatch: expected ", sha256hex, " got ", got),
 			nil))
 	}

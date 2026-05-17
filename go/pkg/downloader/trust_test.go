@@ -1,9 +1,13 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
 // Trust-layer tests for the downloader. Covers AllowedSource,
-// Verify, the quarantine + atomic-promote flow, and the stale
-// quarantine sweep. Aligned with the test shapes in
+// the quarantine + atomic-promote flow, and the stale quarantine
+// sweep. Aligned with the test shapes in
 // plans/code/lthn/desktop/downloader/RFC.md §7.2.
+//
+// The Verify (now unexported `verify`) tests live in
+// trust_internal_test.go under package downloader per Cerberus #49
+// F-5 / Mantis #1675.
 
 package downloader_test
 
@@ -36,40 +40,6 @@ func TestTrust_AllowedSource_Bad_EmptyURL(t *core.T) {
 	core.AssertFalse(t, downloader.AllowedSource(""))
 	core.AssertFalse(t, downloader.AllowedSource("not-a-url"))
 	core.AssertFalse(t, downloader.AllowedSource("https://"))
-}
-
-func TestTrust_Verify_Good(t *core.T) {
-	home := homeFixture(t)
-	dest := core.PathJoin(home, "Lethean", "conf", "models", "tiny.bin")
-	core.AssertTrue(t, core.MkdirAll(core.PathDir(dest), 0o755).OK)
-	payload := []byte("MOCK-PAYLOAD")
-	core.AssertTrue(t, core.WriteFile(dest, payload, 0o644).OK)
-
-	expected := core.SHA256HexString("MOCK-PAYLOAD")
-	r := downloader.Verify(dest, expected)
-	core.AssertTrue(t, r.OK)
-}
-
-func TestTrust_Verify_Bad_Mismatch(t *core.T) {
-	home := homeFixture(t)
-	dest := core.PathJoin(home, "Lethean", "conf", "models", "tiny.bin")
-	core.AssertTrue(t, core.MkdirAll(core.PathDir(dest), 0o755).OK)
-	core.AssertTrue(t, core.WriteFile(dest, []byte("ACTUAL"), 0o644).OK)
-
-	r := downloader.Verify(dest, "0000000000000000000000000000000000000000000000000000000000000000")
-	core.AssertFalse(t, r.OK)
-	// Error message includes both the expected and computed digests
-	// for log surfacing.
-	msg := r.Error()
-	core.AssertTrue(t, core.Contains(msg, "expected"))
-	core.AssertTrue(t, core.Contains(msg, "got"))
-}
-
-func TestTrust_Verify_Bad_MissingFile(t *core.T) {
-	homeFixture(t)
-	r := downloader.Verify("/nonexistent/path/nope.bin",
-		"0000000000000000000000000000000000000000000000000000000000000000")
-	core.AssertFalse(t, r.OK)
 }
 
 func TestTrust_Fetch_Bad_DisallowedSource(t *core.T) {
