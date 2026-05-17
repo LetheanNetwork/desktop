@@ -211,18 +211,24 @@ func Rename(oldName, newName string) core.Result {
 		return core.Fail(core.NewError("models.Rename: resolved path escapes models directory"))
 	}
 
-	// Cerberus M3 / Mantis #1419 2026-05-16 — Lstat (not Stat) on the
-	// source so a symlink doesn't slip through. Stat follows symlinks;
-	// a model directory containing `src.gguf -> /etc/passwd` would
-	// otherwise pass the "source is a regular file" check (the target
-	// file IS a regular file from Stat's perspective). Lstat sees the
-	// symlink itself; we refuse it.
+	// Cerberus M3 / Mantis #1419 — TWO TOCTOU gaps closed.
 	//
-	// Full atomic refuse-to-clobber semantics require renameat2
-	// RENAME_NOREPLACE (Linux only) or os.Link+os.Remove (POSIX), but
-	// `os` is a banned import. The TOCTOU window between Stat(dst) +
-	// Rename remains a known residual; Cerberus's Mantis #1419 stays
-	// open as "atomic rename" pending a core.Link helper upstream.
+	// Gap 1 (symlink-source, shipped 71d796b): Stat follows symlinks; a
+	// model directory containing `src.gguf -> /etc/passwd` would pass
+	// the "source is a regular file" check (the target file IS a
+	// regular file from Stat's perspective). Lstat sees the symlink
+	// itself; we refuse it.
+	//
+	// Gap 2 (atomic refuse-to-clobber, this commit): Stat(dst) followed
+	// by core.Rename(src, dst) has a window where a racing writer can
+	// create dst between the two calls, causing rename(2) to silently
+	// clobber. atomicRename uses link(2) + unlink(2) on POSIX —
+	// link(2) atomically fails with EEXIST when dst already exists, so
+	// the "is it there?" check IS the rename. See rename_unix.go for
+	// the platform-tagged implementation; non-POSIX falls back to
+	// core.Rename via rename_other.go (the residual on those platforms
+	// stays until renameat2 RENAME_NOREPLACE or equivalent is exported
+	// through CoreGO).
 	srcLstatR := core.Lstat(src)
 	if !srcLstatR.OK {
 		return core.Fail(core.E("models.Rename", "source not found", srcLstatR.Value.(error)))
@@ -239,14 +245,7 @@ func Rename(oldName, newName string) core.Result {
 		return core.Fail(core.NewError("models.Rename: source is a symlink — refused"))
 	}
 
-	if dstStatR := core.Stat(dst); dstStatR.OK {
-		return core.Fail(core.NewError("models.Rename: destination already exists: " + dst))
-	}
-
-	if rnR := core.Rename(src, dst); !rnR.OK {
-		return core.Fail(core.E("models.Rename", "rename failed", rnR.Value.(error)))
-	}
-	return core.Ok(dst)
+	return atomicRename(src, dst)
 }
 
 // List scans ~/Lethean/conf/models/ and returns one Entry per

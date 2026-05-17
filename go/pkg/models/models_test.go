@@ -379,3 +379,78 @@ func TestModels_Rename_Bad_SymlinkSource(t *core.T) {
 	got, _ := read.Value.([]byte)
 	core.AssertEqual(t, "must not be touched", string(got))
 }
+
+// TestModels_Rename_Ugly_AtomicNoClobber — Mantis #1419 atomic-rename
+// half. N goroutines race to rename N distinct sources to the SAME
+// destination. With the link(2)-based atomicRename, exactly one
+// winner succeeds; the other N-1 must fail without clobbering
+// the winner's bytes. With the prior Stat(dst)+Rename pair this
+// would be a race window.
+func TestModels_Rename_Ugly_AtomicNoClobber(t *core.T) {
+	dir := modelsFixture(t)
+	// Plant N distinct sources with distinguishable contents.
+	const N = 8
+	for i := 0; i < N; i++ {
+		name := "src-" + core.Sprintf("%d", i) + ".gguf"
+		body := []byte("payload-" + core.Sprintf("%d", i))
+		core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, name), body, 0o644).OK)
+	}
+
+	// Race: every goroutine targets the same destination basename.
+	const dstName = "winner.gguf"
+	results := make(chan core.Result, N)
+	start := make(chan struct{})
+	for i := 0; i < N; i++ {
+		go func(i int) {
+			<-start
+			name := "src-" + core.Sprintf("%d", i) + ".gguf"
+			results <- models.Rename(name, dstName)
+		}(i)
+	}
+	close(start)
+
+	wins, losses := 0, 0
+	for i := 0; i < N; i++ {
+		r := <-results
+		if r.OK {
+			wins++
+		} else {
+			losses++
+		}
+	}
+	core.AssertEqual(t, 1, wins, "exactly one goroutine must win the race")
+	core.AssertEqual(t, N-1, losses, "all other goroutines must fail without clobbering")
+
+	// Destination exists and is one of the source payloads.
+	dst := core.PathJoin(dir, dstName)
+	read := core.ReadFile(dst)
+	core.AssertTrue(t, read.OK)
+	got := string(read.Value.([]byte))
+	core.AssertTrue(t, len(got) > 0, "winner's bytes must be present at dst")
+}
+
+// TestModels_Rename_Bad_AtomicEexistKeepsSource — Mantis #1419. When
+// dst already exists, atomicRename must refuse via link(2) EEXIST
+// AND leave the source intact (no half-completed rename). Distinct
+// from TestModels_Rename_Bad_DestinationExists which only checks
+// the refuse path; this asserts the bytes don't move.
+func TestModels_Rename_Bad_AtomicEexistKeepsSource(t *core.T) {
+	dir := modelsFixture(t)
+	src := core.PathJoin(dir, "src.gguf")
+	dst := core.PathJoin(dir, "dst.gguf")
+	core.AssertTrue(t, core.WriteFile(src, []byte("src-bytes"), 0o644).OK)
+	core.AssertTrue(t, core.WriteFile(dst, []byte("dst-bytes"), 0o644).OK)
+
+	r := models.Rename("src.gguf", "dst.gguf")
+	core.AssertFalse(t, r.OK)
+
+	// Source still readable with original bytes.
+	srcRead := core.ReadFile(src)
+	core.AssertTrue(t, srcRead.OK)
+	core.AssertEqual(t, "src-bytes", string(srcRead.Value.([]byte)))
+
+	// Destination still has the pre-existing bytes — no clobber.
+	dstRead := core.ReadFile(dst)
+	core.AssertTrue(t, dstRead.OK)
+	core.AssertEqual(t, "dst-bytes", string(dstRead.Value.([]byte)))
+}
