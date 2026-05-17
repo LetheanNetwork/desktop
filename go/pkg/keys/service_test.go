@@ -480,3 +480,199 @@ func TestService_Service_SingleInstanceKey_Ugly(t *core.T) {
 
 	core.AssertEqual(t, key1, key2, "SingleInstanceKey must return same key on repeat calls")
 }
+
+// --- Mantis #1624 — KEK-gate on post-unlock PGP-derived KEK ---
+
+// kekFromBytes is the test-side analogue of cmd/lthn/app.go's
+// production provider closure — derives a 32-byte KEK from a fake
+// "private key" via core.HKDF using the same canonical salt/info
+// pair production code uses (keys.KEKHKDFSalt / keys.KEKHKDFInfo).
+// Returned by the helper Provider used in the tests below.
+func kekFromBytes(t *core.T, priv []byte) []byte {
+	t.Helper()
+	r := core.HKDF("sha256", priv,
+		[]byte(keys.KEKHKDFSalt), []byte(keys.KEKHKDFInfo), 32)
+	core.AssertTrue(t, r.OK, "HKDF derive must succeed")
+	return r.Value.([]byte)
+}
+
+// TestKeys_KEKGate_PreUnlock_FallsBack_Good — no provider wired
+// (or provider reports unlocked=false), master persists/reads via
+// the legacy raw-32-byte path. Headless `lthn serve` boot scenario.
+func TestKeys_KEKGate_PreUnlock_FallsBack_Good(t *core.T) {
+	svc := homeFixture(t)
+	// No KEK provider wired — same scenario as headless boot.
+	core.AssertTrue(t, svc.Put("k", []byte("legacy-path")).OK)
+	r := svc.Get("k")
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, "legacy-path", string(r.Value.([]byte)))
+
+	// Explicit nil provider — equivalent to "not wired".
+	svc.SetKEKProvider(nil)
+	core.AssertTrue(t, svc.Put("k2", []byte("still-legacy")).OK)
+	r2 := svc.Get("k2")
+	core.AssertTrue(t, r2.OK)
+	core.AssertEqual(t, "still-legacy", string(r2.Value.([]byte)))
+
+	// Provider returns (_, false) — same fallback.
+	svc.SetKEKProvider(func() ([]byte, bool) { return nil, false })
+	core.AssertTrue(t, svc.Put("k3", []byte("locked")).OK)
+	r3 := svc.Get("k3")
+	core.AssertTrue(t, r3.OK)
+	core.AssertEqual(t, "locked", string(r3.Value.([]byte)))
+}
+
+// TestKeys_KEKGate_PostUnlock_DerivesViaPGP_Good — provider returns
+// a KEK derived via HKDF from fake private-key bytes; round-trip
+// Put/Get works and the on-disk master is the 60-byte wrapped form.
+func TestKeys_KEKGate_PostUnlock_DerivesViaPGP_Good(t *core.T) {
+	t.Setenv("HOME", t.TempDir())
+	r := keys.New()
+	core.AssertTrue(t, r.OK)
+	svc := r.Value.(*keys.Service)
+
+	fakePriv := []byte("fake-pgp-private-key-bytes-for-test-only")
+	svc.SetKEKProvider(func() ([]byte, bool) {
+		return kekFromBytes(t, fakePriv), true
+	})
+
+	core.AssertTrue(t, svc.Put("openai", []byte("sk-secret")).OK)
+	got := svc.Get("openai")
+	core.AssertTrue(t, got.OK)
+	core.AssertEqual(t, "sk-secret", string(got.Value.([]byte)))
+
+	// Verify on-disk master is the 60-byte wrapped envelope, not raw 32.
+	home := core.Getenv("HOME")
+	masterPath := core.PathJoin(home, "Lethean", "data", "keys", ".master")
+	blobR := core.ReadFile(masterPath)
+	core.AssertTrue(t, blobR.OK)
+	blob := blobR.Value.([]byte)
+	core.AssertEqual(t, 72, len(blob),
+		"post-unlock master must be KEK-wrapped (24 XChaCha20 nonce + 32 ct + 16 tag)")
+}
+
+// TestKeys_KEKGate_LockTransition_RotatesMaster_Ugly — start
+// unlocked, write a wrapped master, then flip provider to return
+// (_, false). Subsequent writes still succeed (cache holds the
+// unwrapped master) BUT a fresh Service constructed against the
+// same on-disk state Fails to read because the wrapped envelope
+// needs the KEK that's no longer available.
+func TestKeys_KEKGate_LockTransition_RotatesMaster_Ugly(t *core.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	r := keys.New()
+	core.AssertTrue(t, r.OK)
+	svc := r.Value.(*keys.Service)
+
+	fakePriv := []byte("session-priv-bytes")
+	unlocked := true
+	svc.SetKEKProvider(func() ([]byte, bool) {
+		if !unlocked {
+			return nil, false
+		}
+		return kekFromBytes(t, fakePriv), true
+	})
+
+	// Establish wrapped master + a stored secret while unlocked.
+	core.AssertTrue(t, svc.Put("api", []byte("first")).OK)
+	core.AssertTrue(t, svc.Get("api").OK)
+
+	// Flip to locked — subsequent writes in the SAME process still
+	// succeed because the master is cached + the next master write
+	// path falls back gracefully (no rotation back-to-legacy fires).
+	unlocked = false
+	core.AssertTrue(t, svc.Put("api2", []byte("second")).OK,
+		"cached master keeps in-process operations working post-lock")
+
+	// A fresh Service (simulates next process boot post-lock) MUST
+	// Fail to ensureMaster — the on-disk master is wrapped and the
+	// KEK provider isn't wired, so the legacy path can't decode it.
+	r2 := keys.New()
+	core.AssertTrue(t, r2.OK)
+	svc2 := r2.Value.(*keys.Service)
+	// No provider wired — represents the locked state of a fresh boot.
+	getR := svc2.Get("api")
+	core.AssertFalse(t, getR.OK,
+		"fresh Service with wrapped master + no KEK provider must Fail")
+}
+
+// TestKeys_KEKGate_MixedFormat_LegacyMasterDecrypts_Good — install
+// has an existing raw 32-byte master + a secret stored against it
+// (the "installed user" scenario). After SetKEKProvider lands, the
+// legacy master reads unchanged, an existing secret still decrypts,
+// AND the NEXT Put migrates the master in-place to the wrapped form.
+func TestKeys_KEKGate_MixedFormat_LegacyMasterDecrypts_Good(t *core.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Pre-KEK install — write a secret while no provider is wired so
+	// the master file lands in the legacy 32-byte raw form.
+	r1 := keys.New()
+	core.AssertTrue(t, r1.OK)
+	preSvc := r1.Value.(*keys.Service)
+	core.AssertTrue(t, preSvc.Put("legacy", []byte("pre-kek-secret")).OK)
+
+	masterPath := core.PathJoin(home, "Lethean", "data", "keys", ".master")
+	preBlobR := core.ReadFile(masterPath)
+	core.AssertTrue(t, preBlobR.OK)
+	core.AssertEqual(t, 32, len(preBlobR.Value.([]byte)),
+		"pre-KEK master must be raw 32 bytes")
+
+	// Now the same install upgrades — wire a KEK provider and
+	// construct a fresh Service against the existing on-disk state.
+	r2 := keys.New()
+	core.AssertTrue(t, r2.OK)
+	postSvc := r2.Value.(*keys.Service)
+	fakePriv := []byte("upgrade-time-priv-bytes")
+	postSvc.SetKEKProvider(func() ([]byte, bool) {
+		return kekFromBytes(t, fakePriv), true
+	})
+
+	// The legacy secret MUST still decrypt — the read-path accepts
+	// the 32-byte legacy master without going through the KEK.
+	got := postSvc.Get("legacy")
+	core.AssertTrue(t, got.OK, "legacy secret must keep decrypting post-KEK-wire")
+	core.AssertEqual(t, "pre-kek-secret", string(got.Value.([]byte)))
+
+	// Next Put triggers the lazy migration: master gets re-persisted
+	// in the 60-byte wrapped form. Read it from disk to confirm.
+	core.AssertTrue(t, postSvc.Put("new", []byte("post-kek-secret")).OK)
+	postBlobR := core.ReadFile(masterPath)
+	core.AssertTrue(t, postBlobR.OK)
+	core.AssertEqual(t, 72, len(postBlobR.Value.([]byte)),
+		"first write post-KEK-wire must migrate master to wrapped form")
+
+	// And the legacy secret + the new secret BOTH still decrypt —
+	// the master plaintext is unchanged across the format rotation.
+	core.AssertEqual(t, "pre-kek-secret", string(postSvc.Get("legacy").Value.([]byte)))
+	core.AssertEqual(t, "post-kek-secret", string(postSvc.Get("new").Value.([]byte)))
+
+	// A fresh Service post-migration MUST require the provider to
+	// read the now-wrapped master.
+	r3 := keys.New()
+	core.AssertTrue(t, r3.OK)
+	freshSvc := r3.Value.(*keys.Service)
+	freshSvc.SetKEKProvider(func() ([]byte, bool) {
+		return kekFromBytes(t, fakePriv), true
+	})
+	core.AssertTrue(t, freshSvc.Get("legacy").OK,
+		"post-migration fresh Service with KEK reads legacy secret")
+}
+
+// TestKeys_KEKGate_RoundTrip_Good — provider → write → read returns
+// the same bytes. The minimal end-to-end happy-path that pins the
+// contract: SetKEKProvider doesn't break the existing Put/Get
+// contract; ciphertext on disk for the *secret* is sealed under the
+// master (not under the KEK directly), and decrypt round-trips.
+func TestKeys_KEKGate_RoundTrip_Good(t *core.T) {
+	svc := homeFixture(t)
+	svc.SetKEKProvider(func() ([]byte, bool) {
+		return kekFromBytes(t, []byte("round-trip-priv")), true
+	})
+	payload := []byte("the quick brown fox jumps over the lazy dog")
+	core.AssertTrue(t, svc.Put("brown-fox", payload).OK)
+	r := svc.Get("brown-fox")
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, string(payload), string(r.Value.([]byte)))
+}

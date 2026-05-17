@@ -374,6 +374,63 @@ func newAppCore() *core.Core {
 		// rotation skew between issue + verify possible.
 		if accountSvc, _ := core.ServiceFor[*account.Service](c, "account"); accountSvc != nil {
 			accountSvc.SetServerKey(serverkeySvc)
+
+			// Mantis #1624 — gate pkg/keys's master decrypt on a
+			// user-PGP-derived KEK once the account is unlocked.
+			// Pre-unlock (headless `lthn serve`, account locked) the
+			// provider returns (_, false) so the legacy raw-master
+			// path stays live (single-instance key generated pre-
+			// unlock keeps working). Post-unlock the provider derives
+			// a 32-byte KEK via core.HKDF over the unlocked PGP
+			// private key bytes; pkg/keys then seals/unseals the on-
+			// disk master under that KEK, so losing the unlocked
+			// account's private key (or the .seed used to encrypt it)
+			// is now sufficient to render every stored secret
+			// recoverable only by the rightful user.
+			//
+			// PrivateKeyHandle.Use zeroises the bytes on closure
+			// return — derive KEK INSIDE the Use callback, hand the
+			// derived KEK back to the keys layer, never retain a
+			// reference to the raw private key past the closure.
+			// Mantis #1589 / Cerberus #18 single-use handle discipline.
+			//
+			// When more than one account is unlocked concurrently we
+			// pick the alphabetically-first id (UnlockedAccountIDs
+			// sorts before returning). Multi-account KEK rotation is
+			// a separate ticket — Stage F design owns the routing
+			// policy. For Stage X.B v1 the first-id default matches
+			// the one-account-per-install norm.
+			if keysSvc, _ := core.ServiceFor[*keys.Service](c, "keys"); keysSvc != nil {
+				keysSvc.SetKEKProvider(func() ([]byte, bool) {
+					ids := accountSvc.UnlockedAccountIDs()
+					if len(ids) == 0 {
+						return nil, false
+					}
+					activeID := ids[0]
+					if !accountSvc.HasUnlocked(activeID) {
+						return nil, false
+					}
+					handle, ok := accountSvc.PrivateKeyFor(activeID)
+					if !ok {
+						return nil, false
+					}
+					var kek []byte
+					_ = handle.Use(func(priv []byte) error {
+						kekR := core.HKDF("sha256", priv,
+							[]byte(keys.KEKHKDFSalt),
+							[]byte(keys.KEKHKDFInfo), 32)
+						if !kekR.OK {
+							return nil
+						}
+						kek = kekR.Value.([]byte)
+						return nil
+					})
+					if len(kek) != 32 {
+						return nil, false
+					}
+					return kek, true
+				})
+			}
 		}
 
 		// Stage F.B Phase 2 boot wiring (Mantis #1509, refined by

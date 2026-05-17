@@ -61,6 +61,21 @@ const (
 	fileMode = 0o600
 )
 
+// KEKProvider returns the 32-byte key-encryption key (KEK) that
+// wraps the on-disk master, plus a boolean reporting whether the KEK
+// is currently available. Returns (_, false) pre-unlock (headless
+// `lthn serve` boot, account locked, KEK material not yet derivable)
+// so the keys Service falls back to the legacy raw-master scheme.
+// Returns (kek, true) post-unlock — the provider is expected to
+// derive the KEK from post-unlock secret material (e.g. HKDF over
+// the account's PGP private key) and return a fresh slice every
+// call. The keys Service treats the returned bytes as opaque and
+// does not retain a reference beyond the call.
+//
+// Mantis #1624 — gates pkg/keys's master decrypt on post-unlock
+// PGP-derived KEK without breaking pre-unlock boot paths.
+type KEKProvider func() ([]byte, bool)
+
 // Service owns the encrypted keys directory. Stateless beyond the
 // master-key cache; the disk is the source of truth.
 type Service struct {
@@ -72,8 +87,45 @@ type Service struct {
 	// Put internally takes `mu` via ensureMaster; recursive Lock
 	// would deadlock. Cerberus pass-6 MEDIUM.
 	getOrCreateMu core.Mutex
-	master []byte // 32-byte cached master; loaded on first use
+	master        []byte // 32-byte cached master; loaded on first use
+
+	// kekProviderMu guards kekProvider so SetKEKProvider can race
+	// safely against ensureMaster on a concurrent boot path. Held
+	// briefly under the slow-path of ensureMaster to snapshot the
+	// provider pointer.
+	kekProviderMu core.RWMutex
+	// kekProvider is the post-unlock KEK source wired by app.go
+	// after the account service is constructed. Nil pre-unlock
+	// (headless `lthn serve`, account locked) — ensureMaster falls
+	// back to the legacy raw-master scheme so single-instance key
+	// generation pre-unlock keeps working. Mantis #1624.
+	kekProvider KEKProvider
 }
+
+const (
+	// kekHKDFInfo is the canonical info-string the wiring closure
+	// in cmd/lthn/app.go passes to core.HKDF when deriving a KEK
+	// from the unlocked PGP private key. Exported as a constant so
+	// the call-site reads as one declaration and the salt/info
+	// pair stays grep-able from a single source.
+	//
+	// Usage example (in cmd/lthn/app.go's provider closure):
+	//
+	//	kek := core.HKDF("sha256", priv, []byte(keys.KEKHKDFSalt), []byte(keys.KEKHKDFInfo), 32).Value.([]byte)
+	KEKHKDFSalt = "lthn-keys-kek"
+	KEKHKDFInfo = "v1"
+
+	// kekWrappedMasterLen is the on-disk length of a KEK-wrapped
+	// master: 24-byte XChaCha20-Poly1305 nonce + 32-byte ciphertext
+	// + 16-byte Poly1305 tag = 72 bytes. (sigil.NewChaChaPolySigil
+	// defaults to the XChaCha20 variant — see crypto_sigil.go's
+	// activeNonceSize() falling through to NonceSizeX.) Used as the
+	// length sentinel that distinguishes a legacy raw 32-byte master
+	// from a KEK-wrapped envelope on read — no version field needed
+	// because the two lengths can never collide (sigil's minLen
+	// guarantees > 32 even for the smaller ChaCha20 nonce).
+	kekWrappedMasterLen = 24 + masterKeySize + 16
+)
 
 // New constructs a Service and ensures $HOME/Lethean/data/keys/
 // exists. The master key is loaded (or generated) lazily on the
@@ -169,8 +221,111 @@ func Register(c *core.Core) core.Result {
 	return New()
 }
 
+// SetKEKProvider wires the post-unlock KEK source the keys Service
+// uses to wrap / unwrap the on-disk master. Wired at boot in
+// cmd/lthn/app.go after both the keys + account services have been
+// constructed; the provider closure asks pkg/account whether the
+// user account is unlocked and, if so, derives a 32-byte KEK via
+// core.HKDF over the unlocked PGP private key bytes.
+//
+// Mantis #1624 — additive over the legacy raw-master scheme:
+//
+//   - When the provider returns (_, false) the Service falls back to
+//     the legacy code path — read the master verbatim, write it
+//     verbatim. Preserves headless `lthn serve` + single-instance key
+//     generation pre-unlock.
+//   - When the provider returns (kek, true) the Service treats the
+//     master as a KEK-wrapped envelope: WRITE seals master under KEK
+//     before persisting; READ unwraps via KEK before returning.
+//   - Existing legacy-format master files (32 bytes raw) continue to
+//     decrypt — read-path detects format by length (32 = legacy,
+//     60 = KEK-wrapped) and routes accordingly. NEXT WRITE post-
+//     unlock re-persists in the wrapped format, completing the
+//     migration in-place without a separate ticket.
+//
+// SetKEKProvider may be called more than once during a process
+// lifetime (e.g. service reconfiguration); the most recent
+// non-nil provider wins. Passing nil disables KEK wrapping
+// entirely (test fixtures + intentional rollback).
+//
+// Usage example (in cmd/lthn/app.go after services are wired):
+//
+//	keysSvc.SetKEKProvider(func() ([]byte, bool) {
+//	    if !accountSvc.HasUnlocked(activeID) { return nil, false }
+//	    handle, ok := accountSvc.PrivateKeyFor(activeID)
+//	    if !ok { return nil, false }
+//	    var kek []byte
+//	    _ = handle.Use(func(priv []byte) error {
+//	        kek = core.HKDF("sha256", priv,
+//	            []byte(keys.KEKHKDFSalt), []byte(keys.KEKHKDFInfo), 32).Value.([]byte)
+//	        return nil
+//	    })
+//	    if len(kek) != 32 { return nil, false }
+//	    return kek, true
+//	})
+func (s *Service) SetKEKProvider(provider KEKProvider) {
+	s.kekProviderMu.Lock()
+	s.kekProvider = provider
+	// Invalidate the cached master so the next operation re-reads
+	// from disk under the new provider. Without this, a kek-provider
+	// wire that happens AFTER ensureMaster's first load would leave
+	// the in-memory master inconsistent with the on-disk format
+	// (caller reads cached legacy bytes; next write would re-seal
+	// the same plaintext under KEK, but interim reads would see the
+	// stale cache). Clearing here makes the wire observably atomic
+	// from the consumer POV.
+	s.mu.Lock()
+	s.master = nil
+	s.mu.Unlock()
+	s.kekProviderMu.Unlock()
+}
+
+// currentKEK snapshots the wired provider and invokes it once.
+// Returns (nil, false) when no provider is wired, the provider
+// returns false, or the returned KEK is not 32 bytes (defensive —
+// a misbehaving provider must not crash the keys path).
+//
+// Called under s.mu held by ensureMaster's slow path; the provider
+// itself MUST NOT call back into keys.Service to avoid deadlock.
+// The wiring in app.go satisfies this — the provider reads from
+// pkg/account only.
+func (s *Service) currentKEK() ([]byte, bool) {
+	s.kekProviderMu.RLock()
+	provider := s.kekProvider
+	s.kekProviderMu.RUnlock()
+	if provider == nil {
+		return nil, false
+	}
+	kek, ok := provider()
+	if !ok {
+		return nil, false
+	}
+	if len(kek) != masterKeySize {
+		core.Warn("keys: KEK provider returned wrong-length key — falling back to legacy path",
+			"got", core.Sprintf("%d", len(kek)),
+			"want", core.Sprintf("%d", masterKeySize))
+		return nil, false
+	}
+	return kek, true
+}
+
 // ensureMaster loads or generates the master key. Idempotent;
 // repeated calls return the cached key.
+//
+// Mantis #1624 — read-path is format-aware:
+//
+//   - 32 bytes on disk → legacy raw master. Returned as-is (works
+//     pre-KEK and post-KEK so existing installed users don't break).
+//   - 60 bytes on disk → KEK-wrapped envelope. Requires the KEK
+//     provider to return (kek, true) — Fail otherwise so a locked
+//     state can't accidentally hand back the wrong bytes.
+//   - any other length → corrupted/tampered, Fail.
+//
+// Write-path is provider-aware:
+//
+//   - provider available → seal new master under KEK before persist,
+//     so the on-disk format is the 60-byte envelope.
+//   - provider unavailable → persist 32 bytes verbatim (legacy).
 func (s *Service) ensureMaster() core.Result {
 	s.mu.RLock()
 	if len(s.master) == masterKeySize {
@@ -198,11 +353,40 @@ func (s *Service) ensureMaster() core.Result {
 			return core.Fail(core.E("keys.ensureMaster", "read master", readR.Value.(error)))
 		}
 		blob := readR.Value.([]byte)
-		if len(blob) != masterKeySize {
+		switch len(blob) {
+		case masterKeySize:
+			// Legacy format — raw 32-byte master. Accepted whether
+			// or not the KEK provider is available; the NEXT write
+			// (Put / GetOrCreate / SingleInstanceKey) re-persists
+			// in the wrapped format if the provider is live, which
+			// is the in-place migration shape.
+			s.master = blob
+			return core.Ok(s.master)
+		case kekWrappedMasterLen:
+			// KEK-wrapped envelope — needs the provider live to
+			// unwrap. If unwrap fails (provider returns false, KEK
+			// mismatch, tamper) the master is unreachable and we
+			// Fail so a caller doesn't operate on stale legacy bytes.
+			kek, ok := s.currentKEK()
+			if !ok {
+				return core.Fail(core.NewError("keys.ensureMaster: master is KEK-wrapped but KEK provider unavailable; unlock the account first"))
+			}
+			kekSigil, err := sigil.NewChaChaPolySigil(kek, nil)
+			if err != nil {
+				return core.Fail(core.E("keys.ensureMaster", "init KEK sigil", err))
+			}
+			unwrapped, err := kekSigil.Out(blob)
+			if err != nil {
+				return core.Fail(core.E("keys.ensureMaster", "unwrap KEK envelope", err))
+			}
+			if len(unwrapped) != masterKeySize {
+				return core.Fail(core.NewError("keys.ensureMaster: KEK-unwrapped master has wrong length"))
+			}
+			s.master = unwrapped
+			return core.Ok(s.master)
+		default:
 			return core.Fail(core.NewError("keys.ensureMaster: master file has wrong length; refusing to use"))
 		}
-		s.master = blob
-		return core.Ok(s.master)
 	}
 
 	// Generate a fresh master.
@@ -211,11 +395,87 @@ func (s *Service) ensureMaster() core.Result {
 		return core.Fail(core.E("keys.ensureMaster", "generate master", randR.Value.(error)))
 	}
 	master := randR.Value.([]byte)
-	if writeR := core.WriteFile(masterPath, master, fileMode); !writeR.OK {
-		return core.Fail(core.E("keys.ensureMaster", "write master", writeR.Value.(error)))
+	if writeR := s.writeMasterLocked(masterPath, master); !writeR.OK {
+		return writeR
 	}
 	s.master = master
 	return core.Ok(s.master)
+}
+
+// writeMasterLocked persists master to disk in the format dictated
+// by the current KEK provider state — KEK-wrapped when the provider
+// is live, raw 32-byte legacy when not. Caller MUST hold s.mu;
+// queries the provider via currentKEK which takes kekProviderMu
+// independently of s.mu.
+//
+// Mantis #1624 — single write surface so the format decision lives
+// in one place. Called from ensureMaster on first-generate AND from
+// rotateMasterToKEK on lazy-migration (the next-write-post-unlock
+// path).
+func (s *Service) writeMasterLocked(masterPath string, master []byte) core.Result {
+	kek, ok := s.currentKEK()
+	if !ok {
+		if w := core.WriteFile(masterPath, master, fileMode); !w.OK {
+			return core.Fail(core.E("keys.ensureMaster", "write master", w.Value.(error)))
+		}
+		return core.Ok(nil)
+	}
+	kekSigil, err := sigil.NewChaChaPolySigil(kek, nil)
+	if err != nil {
+		return core.Fail(core.E("keys.ensureMaster", "init KEK sigil for write", err))
+	}
+	wrapped, err := kekSigil.In(master)
+	if err != nil {
+		return core.Fail(core.E("keys.ensureMaster", "wrap master under KEK", err))
+	}
+	if w := core.WriteFile(masterPath, wrapped, fileMode); !w.OK {
+		return core.Fail(core.E("keys.ensureMaster", "write wrapped master", w.Value.(error)))
+	}
+	return core.Ok(nil)
+}
+
+// rotateMasterToKEKIfNeeded re-persists the on-disk master under the
+// current KEK iff (a) the cached master is loaded AND (b) the disk
+// representation is still the legacy 32-byte form AND (c) the KEK
+// provider is now live. Idempotent — re-running on an already-wrapped
+// master is a no-op. Caller MUST hold s.mu.
+//
+// Mantis #1624 lazy-migration shape — invoked from Put after the
+// ciphertext is sealed so any successful write post-unlock graduates
+// the master format without changing user-observable behaviour. Read
+// always handled both formats from Mantis #1624 onwards, so the
+// migration window is closed silently on the next Put.
+func (s *Service) rotateMasterToKEKIfNeeded() {
+	if len(s.master) != masterKeySize {
+		return
+	}
+	if _, ok := s.currentKEK(); !ok {
+		return
+	}
+	dirR := paths.KeysDir()
+	if !dirR.OK {
+		return
+	}
+	masterPath := core.PathJoin(dirR.Value.(string), masterFileName)
+	statR := core.Stat(masterPath)
+	if !statR.OK {
+		return
+	}
+	readR := core.ReadFile(masterPath)
+	if !readR.OK {
+		return
+	}
+	if len(readR.Value.([]byte)) != masterKeySize {
+		return // already wrapped or unrecognised; leave alone
+	}
+	// Re-persist under KEK. Failure here is logged-and-tolerated:
+	// the cached master is still authoritative for the running
+	// process, and the next boot will retry the migration on first
+	// Put. Surfacing as core.Warn matches the sibling tamper warnings.
+	if w := s.writeMasterLocked(masterPath, s.master); !w.OK {
+		core.Warn("keys: lazy KEK-wrap of legacy master failed; will retry on next write",
+			"err", w.Error())
+	}
 }
 
 // keyPath returns the absolute path for a key's ciphertext file in
@@ -263,6 +523,15 @@ func (s *Service) Put(ref string, plaintext []byte) core.Result {
 	if w := core.WriteFile(path, blob, fileMode); !w.OK {
 		return core.Fail(core.E("keys.Put", "write ciphertext", w.Value.(error)))
 	}
+	// Mantis #1624 lazy KEK-wrap of legacy master — if the master
+	// on disk is still the raw 32-byte form AND a KEK provider is
+	// now live (account unlocked), re-persist the master under KEK
+	// so the install converges on the wrapped format without an
+	// explicit migration ticket. Held under s.mu to keep the
+	// read-after-rotate window coherent.
+	s.mu.Lock()
+	s.rotateMasterToKEKIfNeeded()
+	s.mu.Unlock()
 	return core.Ok(nil)
 }
 
