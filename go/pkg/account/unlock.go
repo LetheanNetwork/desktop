@@ -771,15 +771,85 @@ func (s *Service) auditLockoutTriggered(accountID string, unlockAt int64) {
 	})
 }
 
-// PrivateKeyFor returns the in-memory unlocked PGP private key bytes for
-// the given account_id. Returns (nil, false) when not unlocked. Used by
-// pkg/office/mail to decrypt _accounts.enc for IMAP polling (§1.2).
+// PrivateKeyHandle wraps a one-shot copy of an unlocked PGP private
+// key. Callers receive the bytes only inside the closure passed to
+// Use; the wrapper zeroises the backing slice when Use returns,
+// regardless of whether the closure errored. A handle may be used
+// AT MOST ONCE — second Use call surfaces account.private_key.not_available
+// because the slice has already been zeroised + cleared.
+//
+// Mantis #1589 / Cerberus #18 — the previous PrivateKeyFor signature
+// returned ([]byte, bool) and left zeroise to caller discipline. The
+// 5 production callsites in pkg/office/mail all leaked N copies of
+// the key bytes onto the heap per mail-poll cycle. The handle type
+// makes zeroise structural — the only path to the bytes goes through
+// Use's defer.
+//
+// Asymmetric scope: only PrivateKeyFor wraps. PublicKeyFor still
+// returns raw bytes because the public key is not sensitive.
 //
 // Usage example:
 //
-//	priv, ok := svc.PrivateKeyFor("abc123def4567890")
+//	handle, ok := svc.PrivateKeyFor("abc123def4567890")
 //	if !ok { return errLocked }
-func (s *Service) PrivateKeyFor(accountID string) ([]byte, bool) {
+//	err := handle.Use(func(priv []byte) error {
+//		// use priv inside this closure; it is zeroised on return.
+//		return nil
+//	})
+type PrivateKeyHandle struct {
+	bytes []byte
+}
+
+// Use lets fn read the unlocked private-key bytes. Zeroises the
+// backing slice on return regardless of error. Returns
+// account.private_key.not_available when the handle has already
+// been consumed or was nil.
+//
+// Usage example:
+//
+//	err := handle.Use(func(priv []byte) error { return s.decrypt(priv) })
+func (h *PrivateKeyHandle) Use(fn func([]byte) error) error {
+	if h == nil || h.bytes == nil {
+		return core.NewCode("account.private_key.not_available",
+			"private key handle not initialised or already consumed")
+	}
+	defer func() {
+		for i := range h.bytes {
+			h.bytes[i] = 0
+		}
+		h.bytes = nil
+	}()
+	return fn(h.bytes)
+}
+
+// NewPrivateKeyHandleForTest constructs a PrivateKeyHandle from raw
+// bytes for test-double use by sibling packages. The handle takes
+// ownership of the slice; Use will zeroise it on release.
+//
+// Production code MUST go through Service.PrivateKeyFor — this
+// factory exists only so pkg/office/mail tests (and any future
+// consumer's tests) can satisfy AccountProvider without reaching
+// into pkg/account internals.
+//
+// Usage example:
+//
+//	handle := account.NewPrivateKeyHandleForTest(copyOfKeyBytes)
+func NewPrivateKeyHandleForTest(b []byte) *PrivateKeyHandle {
+	return &PrivateKeyHandle{bytes: b}
+}
+
+// PrivateKeyFor returns a single-use handle wrapping the in-memory
+// unlocked PGP private key bytes for the given account_id. Returns
+// (nil, false) when not unlocked. The handle zeroises the bytes on
+// release (Mantis #1589 / Cerberus #18); see PrivateKeyHandle.Use.
+// Used by pkg/office/mail to decrypt _accounts.enc for IMAP polling (§1.2).
+//
+// Usage example:
+//
+//	handle, ok := svc.PrivateKeyFor("abc123def4567890")
+//	if !ok { return errLocked }
+//	err := handle.Use(func(priv []byte) error { return decrypt(priv) })
+func (s *Service) PrivateKeyFor(accountID string) (*PrivateKeyHandle, bool) {
 	if accountID == "" {
 		return nil, false
 	}
@@ -802,7 +872,7 @@ func (s *Service) PrivateKeyFor(accountID string) ([]byte, bool) {
 	}
 	cp := make([]byte, len(priv))
 	copy(cp, priv)
-	return cp, true
+	return &PrivateKeyHandle{bytes: cp}, true
 }
 
 // PublicKeyFor reads the on-disk public key for the given account_id.

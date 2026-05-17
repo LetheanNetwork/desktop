@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/account"
 	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
 )
 
@@ -38,13 +39,13 @@ func newTestAccountProvider(t *testing.T) *testAccountProvider {
 	}
 }
 
-func (p *testAccountProvider) PrivateKeyFor(_ string) ([]byte, bool) {
+func (p *testAccountProvider) PrivateKeyFor(_ string) (*account.PrivateKeyHandle, bool) {
 	if len(p.priv) == 0 {
 		return nil, false
 	}
 	cp := make([]byte, len(p.priv))
 	copy(cp, p.priv)
-	return cp, true
+	return account.NewPrivateKeyHandleForTest(cp), true
 }
 
 func (p *testAccountProvider) PublicKeyFor(_ string) ([]byte, bool) {
@@ -67,7 +68,7 @@ type lockedAccountProvider struct {
 	testAccountProvider
 }
 
-func (p *lockedAccountProvider) PrivateKeyFor(_ string) ([]byte, bool) {
+func (p *lockedAccountProvider) PrivateKeyFor(_ string) (*account.PrivateKeyHandle, bool) {
 	return nil, false
 }
 

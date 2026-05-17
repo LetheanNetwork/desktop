@@ -70,14 +70,22 @@ func (s *Service) Send(input SendInput) core.Result {
 	if idErr != nil {
 		return core.Fail(idErr)
 	}
-	priv, ok := s.account.PrivateKeyFor(accountID)
+	handle, ok := s.account.PrivateKeyFor(accountID)
 	if !ok {
 		return s.errLocked()
 	}
 
-	accounts, err := s.loadAccounts(priv)
-	if err != nil {
-		return core.Fail(core.E("mail.Send", "load accounts", err))
+	// Mantis #1589 / Cerberus #18 — handle zeroises bytes on release.
+	var (
+		accounts []MailAccount
+		loadErr  error
+	)
+	_ = handle.Use(func(priv []byte) error {
+		accounts, loadErr = s.loadAccounts(priv)
+		return loadErr
+	})
+	if loadErr != nil {
+		return core.Fail(core.E("mail.Send", "load accounts", loadErr))
 	}
 	var acct *MailAccount
 	for i := range accounts {

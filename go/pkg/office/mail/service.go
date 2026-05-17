@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
 	"gopkg.in/yaml.v3"
@@ -49,11 +50,15 @@ import (
 // the beta single-account invariant in code makes the multi-account
 // surface trip the assertion explicitly instead of mis-binding silently.
 //
+// PrivateKeyFor returns a single-use handle (Mantis #1589 / Cerberus
+// #18) — the bytes are zeroised inside account.PrivateKeyHandle.Use's
+// defer so per-poll key copies do not accumulate on the heap.
+//
 // Usage example:
 //
 //	svc.SetAccountService(accountSvc)
 type AccountProvider interface {
-	PrivateKeyFor(accountID string) ([]byte, bool)
+	PrivateKeyFor(accountID string) (*account.PrivateKeyHandle, bool)
 	PublicKeyFor(accountID string) ([]byte, bool)
 	UnlockedAccountIDs() []string
 }

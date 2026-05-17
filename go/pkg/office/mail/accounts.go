@@ -93,14 +93,20 @@ func (s *Service) SaveAccount(input AccountInput) core.Result {
 	// For SaveAccount: if we can't decrypt the existing list (locked), we
 	// start from an empty list — the saved cred is ADDED, not replaced.
 	// This preserves the "write without unlock" invariant (§1.2).
+	// Mantis #1589 / Cerberus #18 — PrivateKeyFor returns a single-use
+	// handle; bytes are zeroised inside Use's defer.
 	var existing []MailAccount
-	priv, hasPriv := s.account.PrivateKeyFor(accountID)
+	handle, hasPriv := s.account.PrivateKeyFor(accountID)
 	if hasPriv {
-		var err error
-		existing, err = s.loadAccounts(priv)
-		if err != nil {
-			core.Warn("mail.SaveAccount: could not decrypt existing accounts, starting fresh", "err", err)
-		}
+		_ = handle.Use(func(priv []byte) error {
+			loaded, err := s.loadAccounts(priv)
+			if err != nil {
+				core.Warn("mail.SaveAccount: could not decrypt existing accounts, starting fresh", "err", err)
+				return nil
+			}
+			existing = loaded
+			return nil
+		})
 	}
 
 	// Upsert by name.
@@ -148,14 +154,23 @@ func (s *Service) ListAccounts() core.Result {
 	if idErr != nil {
 		return core.Fail(idErr)
 	}
-	priv, ok := s.account.PrivateKeyFor(accountID)
+	handle, ok := s.account.PrivateKeyFor(accountID)
 	if !ok {
 		return s.errLocked()
 	}
 
-	accounts, err := s.loadAccounts(priv)
-	if err != nil {
-		return core.Fail(core.E("mail.ListAccounts", "decrypt accounts", err))
+	// Mantis #1589 / Cerberus #18 — handle zeroises the key bytes on
+	// release; capture result + err via outer scope.
+	var (
+		accounts []MailAccount
+		loadErr  error
+	)
+	_ = handle.Use(func(priv []byte) error {
+		accounts, loadErr = s.loadAccounts(priv)
+		return loadErr
+	})
+	if loadErr != nil {
+		return core.Fail(core.E("mail.ListAccounts", "decrypt accounts", loadErr))
 	}
 
 	// Zero secrets before returning (§1.4).
@@ -186,7 +201,7 @@ func (s *Service) RemoveAccount(name string) core.Result {
 	if idErr != nil {
 		return core.Fail(idErr)
 	}
-	priv, ok := s.account.PrivateKeyFor(accountID)
+	handle, ok := s.account.PrivateKeyFor(accountID)
 	if !ok {
 		return s.errLocked()
 	}
@@ -203,9 +218,18 @@ func (s *Service) RemoveAccount(name string) core.Result {
 		return core.Fail(core.E("mail.RemoveAccount", "read prior hash", hashErr))
 	}
 
-	accounts, err := s.loadAccounts(priv)
-	if err != nil {
-		return core.Fail(core.E("mail.RemoveAccount", "decrypt accounts", err))
+	// Mantis #1589 / Cerberus #18 — handle zeroises bytes on release;
+	// capture decrypted accounts via outer scope.
+	var (
+		accounts []MailAccount
+		loadErr  error
+	)
+	_ = handle.Use(func(priv []byte) error {
+		accounts, loadErr = s.loadAccounts(priv)
+		return loadErr
+	})
+	if loadErr != nil {
+		return core.Fail(core.E("mail.RemoveAccount", "decrypt accounts", loadErr))
 	}
 
 	filtered := accounts[:0]
