@@ -166,13 +166,22 @@ type generateRequest struct {
 }
 
 // handleGenerate serves POST /v1/runner/generate.
+//
+// Cerberus #60 F-2 / Mantis #1711 (H#220 cluster close): threads
+// c.Request.Context() into runner.GenerateCtx so a client disconnect
+// (browser tab close, fetch abort) cancels the upstream provider RTT
+// instead of letting it run to completion and burn quota against the
+// Requested audit row. Mirrors the discipline pkg/server/handlers.go
+// landed for the OpenAI-compatible /v1/chat/completions + /v1/completions
+// surface; g.runner is a concrete *runner.Service which already exposes
+// GenerateCtx, so no type-assert dance is needed here.
 func (g *RunnerGroup) handleGenerate(c *gin.Context) {
 	var req generateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	r := g.runner.Generate(req.Prompt)
+	r := g.runner.GenerateCtx(c.Request.Context(), req.Prompt)
 	if !r.OK {
 		c.JSON(500, gin.H{"error": r.Error()})
 		return
@@ -187,13 +196,19 @@ type chatRequest struct {
 }
 
 // handleChat serves POST /v1/runner/chat.
+//
+// Cerberus #60 F-2 / Mantis #1711 (H#220 cluster close): same
+// client-disconnect cancellation discipline as handleGenerate — see
+// that handler's doc-comment. Calls runner.ChatCtx with the gin
+// request context so an abandoned request terminates the upstream
+// provider call instead of running to completion.
 func (g *RunnerGroup) handleChat(c *gin.Context) {
 	var req chatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	r := g.runner.Chat(req.Messages)
+	r := g.runner.ChatCtx(c.Request.Context(), req.Messages)
 	if !r.OK {
 		c.JSON(500, gin.H{"error": r.Error()})
 		return
