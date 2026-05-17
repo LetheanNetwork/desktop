@@ -249,6 +249,44 @@ func (r *pluginViewRegistry) IframePorts() []int {
 	return out
 }
 
+// LoopbackOriginFor returns the expected loopback origin for a given
+// plugin code. Inverse of PluginCodeForOrigin: callers that already
+// know the pluginCode (e.g. the /v1/plugin-view/capability-grant
+// receiver after the PluginInstalledChecker gate) consult this to
+// cross-check the request's `origin` field against the registry's
+// authoritative LoopbackOrigin record.
+//
+// Cerberus #21 (Mantis #1595) — handler validating (plugin_id, origin)
+// INDEPENDENTLY lets a falsified (pluginCode, origin) tuple commit to
+// audit even though the registry holds the truth. The browser's
+// postMessage targetOrigin enforcement is the safety floor against
+// token leakage; this accessor closes the audit-log-integrity gap.
+//
+// Returns ("", false) when the plugin code is unknown OR is registered
+// but does not own an iframe-kind view (lit-kind plugins have no
+// loopback origin to cross-check; callers fall through to existing flow).
+//
+// Usage example:
+//
+//	expected, ok := marketplace.ViewRegistry.LoopbackOriginFor(req.PluginID)
+//	if ok && req.Origin != expected {
+//	    // 400 codePluginViewGrantInvalid + ZERO audit rows
+//	    return
+//	}
+func (r *pluginViewRegistry) LoopbackOriginFor(code string) (string, bool) {
+	code = core.Trim(code)
+	if code == "" {
+		return "", false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	port, ok := r.ports[code]
+	if !ok || port <= 0 {
+		return "", false
+	}
+	return core.Sprintf("http://127.0.0.1:%d", port), true
+}
+
 // PluginCodeForWindow looks up the plugin code that owns a given
 // loopback origin. Used by §5.1 postMessage inbound verification —
 // the host receives event.origin + needs to confirm it matches a

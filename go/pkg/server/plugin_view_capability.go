@@ -344,6 +344,29 @@ func (s *Service) handlePluginViewCapabilityGrant(c *gin.Context) {
 			"plugin not installed: "+req.PluginID))
 		return
 	}
+	// Cerberus #21 (Mantis #1595) — cross-check the request's `origin`
+	// against the marketplace ViewRegistry's authoritative
+	// LoopbackOriginFor record for the plugin code. The handler already
+	// validates plugin_id (PluginInstalledChecker) and origin grammar
+	// (isValidPostMessageOrigin) INDEPENDENTLY; without this gate a
+	// caller can post a falsified (pluginCode, origin) tuple and the
+	// audit row commits even though the registry knows the truth. The
+	// browser's postMessage targetOrigin enforcement is the safety floor
+	// against token leakage; this gate closes the audit-log-integrity
+	// gap.
+	//
+	// (ok == false) means "registry doesn't know the expected origin
+	// for this code" — lit-kind plugins (no loopback), manifest-only
+	// entries, non-iframe views. Fall through to the existing flow so
+	// non-iframe plugin grants stay accepted.
+	if s.opts.PluginOriginChecker != nil {
+		expected, ok := s.opts.PluginOriginChecker(req.PluginID)
+		if ok && req.Origin != expected {
+			c.JSON(http.StatusBadRequest, coreapi.Fail(codePluginViewGrantInvalid,
+				"origin does not match registered loopback origin for plugin"))
+			return
+		}
+	}
 	// Handler-generated correlation_id (RFC v2 §3.1). Disambiguates
 	// near-simultaneous grants for the same (plugin_id, origin, capability)
 	// tuple within one NDJSON day file. Empty on RandomBytes failure —

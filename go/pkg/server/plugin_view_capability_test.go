@@ -611,6 +611,130 @@ func TestCapabilityGrant_OriginValidation_Ugly(t *testing.T) {
 	}
 }
 
+// TestCapabilityGrant_PluginOriginChecker_MatchingOrigin_Good
+// (Cerberus #21 / Mantis #1595) — registered plugin + matching origin
+// → 200 + ONE audit row. Pins the happy-path for the (plugin_id, origin)
+// cross-check: when the checker returns (expected, true) and the
+// request's origin equals expected, the handler accepts and the audit
+// substrate sees a single grant row.
+func TestCapabilityGrant_PluginOriginChecker_MatchingOrigin_Good(t *testing.T) {
+	rec := &recordingRecorder{}
+	audit.SetDefault(rec)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	s := server.NewService(server.Options{
+		PluginOriginChecker: func(code string) (string, bool) {
+			if code == "opencode" {
+				return "http://127.0.0.1:4096", true
+			}
+			return "", false
+		},
+	})
+
+	body := `{"plugin_id":"opencode","capabilities":["session-token"],"origin":"http://127.0.0.1:4096","outcome":"granted"}`
+	req := httptest.NewRequest(core.MethodPost,
+		server.PluginViewCapabilityGrantPath, core.NewBufferReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusOK, w.Code)
+	core.AssertEqual(t, 1, len(rec.events))
+	core.AssertEqual(t, "http://127.0.0.1:4096", rec.events[0].Meta["origin"])
+}
+
+// TestCapabilityGrant_PluginOriginChecker_MismatchOrigin_Bad
+// (Cerberus #21 / Mantis #1595) — registered plugin + WRONG origin
+// → 400 + ZERO audit rows. The load-bearing assertion: a falsified
+// (pluginCode=opencode, origin=http://127.0.0.1:9999) tuple is
+// REJECTED before the audit substrate is touched, even though the
+// origin grammar is well-formed and PluginInstalledChecker would
+// accept the plugin_id. Closes the audit-log-integrity gap.
+func TestCapabilityGrant_PluginOriginChecker_MismatchOrigin_Bad(t *testing.T) {
+	rec := &recordingRecorder{}
+	audit.SetDefault(rec)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	s := server.NewService(server.Options{
+		PluginOriginChecker: func(code string) (string, bool) {
+			if code == "opencode" {
+				return "http://127.0.0.1:4096", true
+			}
+			return "", false
+		},
+	})
+
+	// origin grammar valid, plugin_id known by checker — but the
+	// origin doesn't match the registered loopback. Must reject.
+	body := `{"plugin_id":"opencode","capabilities":["session-token"],"origin":"http://127.0.0.1:9999","outcome":"granted"}`
+	req := httptest.NewRequest(core.MethodPost,
+		server.PluginViewCapabilityGrantPath, core.NewBufferReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusBadRequest, w.Code)
+	core.AssertTrue(t, core.Contains(w.Body.String(), "plugin_view.grant.invalid"))
+	core.AssertTrue(t, core.Contains(w.Body.String(), "registered loopback origin"))
+	// Audit substrate untouched — the abusive tuple never commits.
+	core.AssertEqual(t, 0, len(rec.events))
+}
+
+// TestCapabilityGrant_PluginOriginChecker_Nil_PreservesExistingBehaviour
+// (Cerberus #21 / Mantis #1595) — checker nil → existing flow preserved.
+// Non-desktop builds and tests that don't wire pkg/marketplace stay
+// clean: any origin paired with any plugin_id is accepted through the
+// existing validation gates.
+func TestCapabilityGrant_PluginOriginChecker_Nil_PreservesExistingBehaviour(t *testing.T) {
+	rec := &recordingRecorder{}
+	audit.SetDefault(rec)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	// No PluginOriginChecker wired — handler must accept any
+	// well-formed origin without consulting registry truth.
+	s := server.NewService(server.Options{})
+
+	body := `{"plugin_id":"opencode","capabilities":["session-token"],"origin":"http://127.0.0.1:9999","outcome":"granted"}`
+	req := httptest.NewRequest(core.MethodPost,
+		server.PluginViewCapabilityGrantPath, core.NewBufferReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusOK, w.Code)
+	core.AssertEqual(t, 1, len(rec.events))
+}
+
+// TestCapabilityGrant_PluginOriginChecker_UnknownPlugin_FallsThrough
+// (Cerberus #21 / Mantis #1595) — checker returns (_, false) → fall
+// through to existing flow. Lit-kind plugins, manifest-only entries,
+// and non-iframe views have no loopback origin to cross-check; the
+// handler treats "registry doesn't know" as "no cross-check possible"
+// and accepts the request through the existing validation gates.
+func TestCapabilityGrant_PluginOriginChecker_UnknownPlugin_FallsThrough(t *testing.T) {
+	rec := &recordingRecorder{}
+	audit.SetDefault(rec)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	s := server.NewService(server.Options{
+		// Checker returns ok=false for every code — simulates a
+		// registry that has no iframe-kind view for the plugin.
+		PluginOriginChecker: func(code string) (string, bool) {
+			return "", false
+		},
+	})
+
+	body := `{"plugin_id":"lit-only-plugin","capabilities":["session-token"],"origin":"http://127.0.0.1:9999","outcome":"granted"}`
+	req := httptest.NewRequest(core.MethodPost,
+		server.PluginViewCapabilityGrantPath, core.NewBufferReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusOK, w.Code)
+	core.AssertEqual(t, 1, len(rec.events))
+}
+
 // TestCapabilityGrant_ValidOrigin_Good — table-driven: every origin
 // shape that matches http(s)://host[:port] (with or without trailing
 // slash) passes validation and the audit row commits with the origin

@@ -292,6 +292,17 @@ func cmdGUI(args []string) int {
 			return false
 		}
 	}
+	// Mantis #1595 / Cerberus #21 — cross-check capability-grant origin
+	// against marketplace.ViewRegistry's authoritative LoopbackOriginFor
+	// record. PluginInstalledChecker proves the plugin is installed;
+	// this proves the request's `origin` matches the registry's view
+	// of that plugin's loopback origin. Closes audit-log-integrity gap
+	// where a falsified (pluginCode, origin) tuple would otherwise
+	// commit. Browser postMessage targetOrigin enforcement is the
+	// safety floor against token leakage.
+	opts.PluginOriginChecker = func(code string) (string, bool) {
+		return marketplace.ViewRegistry.LoopbackOriginFor(code)
+	}
 	s := server.NewService(opts)
 	if rr := c.RegisterService("server", s); !rr.OK {
 		core.Print(core.Stderr(), "lthn gui: %s\n", rr.Error())
@@ -475,6 +486,14 @@ func cmdServe(args []string) int {
 			}
 			return false
 		}
+	}
+	// Mantis #1595 / Cerberus #21 — same wire as cmdGUI; the headless
+	// serve path needs origin cross-check too. Without it a caller
+	// over the REST API can post a falsified (pluginCode, origin)
+	// tuple and commit a fabricated audit row even though the
+	// ViewRegistry holds the truth.
+	opts.PluginOriginChecker = func(code string) (string, bool) {
+		return marketplace.ViewRegistry.LoopbackOriginFor(code)
 	}
 	s := server.NewService(opts)
 	if rr := c.RegisterService("server", s); !rr.OK {

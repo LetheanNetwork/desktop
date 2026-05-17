@@ -191,6 +191,35 @@ type Options struct {
 	// builds that don't wire pkg/plugin. The audit row still emits;
 	// only the plugin_id gate is skipped.
 	PluginInstalledChecker PluginInstalledChecker
+
+	// PluginOriginChecker, when non-nil, cross-checks the request's
+	// `origin` field against the authoritative loopback origin the
+	// marketplace ViewRegistry holds for the given plugin code. Mirrors
+	// PluginInstalledChecker's shape (nil = skip) so tests and
+	// non-desktop builds that don't wire pkg/marketplace stay clean.
+	//
+	// Cerberus #21 (Mantis #1595) — fix for the (plugin_id, origin)
+	// independent-validation gap. Without this checker the handler
+	// validates plugin_id against the installed set AND origin against
+	// the postMessage grammar BUT never cross-correlates them. A caller
+	// can post (pluginCode=opencode, origin=http://127.0.0.1:9999) and
+	// the audit row commits with a falsified tuple even though
+	// ViewRegistry knows opencode runs on port 4096. Token bytes don't
+	// leak (browser postMessage targetOrigin enforcement is the safety
+	// floor) but audit-log integrity is compromised.
+	//
+	// cmd/lthn/main.go wires this alongside PluginInstalledChecker:
+	//
+	//	opts.PluginOriginChecker = func(code string) (string, bool) {
+	//	    return marketplace.ViewRegistry.LoopbackOriginFor(code)
+	//	}
+	//
+	// Returns (expectedOrigin, true) when the plugin is registered with
+	// an iframe-kind view; (_, false) means "registry doesn't know the
+	// expected origin for this code" and the handler falls through to
+	// the existing flow (lit-kind plugins, manifest-only entries,
+	// non-iframe views).
+	PluginOriginChecker func(code string) (string, bool)
 }
 
 // BootstrapPathScopes names every HTTP path the bootstrap-auth
