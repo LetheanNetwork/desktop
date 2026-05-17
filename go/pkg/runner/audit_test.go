@@ -264,3 +264,100 @@ func TestRunner_AuditMeta_NoPromptOrKey_Good(t *core.T) {
 		core.AssertFalse(t, hasMessages, "Meta must never carry a `messages` key")
 	}
 }
+
+// TestRunner_GenerateFailed_AuditNoRawBody_Bad — Cerberus #60 F-1 /
+// Mantis #1710: provider error bodies (formatted upstream as
+// `provider returned HTTP %d: %s` where %s is the raw response body)
+// routinely echo USER INPUT (OpenAI moderation refusals, vLLM
+// tokenisation errors, custom proxies that log the prompt). Putting
+// resp.Error() into Meta["error_code"] would leak that prompt fragment
+// into the operator forensic log (STRIDE-I / A1 surveillance shape).
+// Drive a stub model whose Err() mirrors the openai.go shape and
+// assert the audit emit's error_code does NOT contain the user prose.
+func TestRunner_GenerateFailed_AuditNoRawBody_Bad(t *core.T) {
+	rec := installRecorder(t)
+	const userInput = "USER_TYPED_FORBIDDEN_PROMPT_FRAGMENT"
+	// Mirror the exact shape of pkg/ai/go/providers/openai/openai.go
+	// providerError(): core.E with prose Message embedding the body.
+	providerErr := core.E("ai.openai.provider",
+		core.Sprintf("provider returned HTTP %d: %s", 400, userInput), nil)
+	s := newStubRunner(&runnerStubModel{err: providerErr})
+
+	r := s.Generate("ping")
+	core.AssertFalse(t, r.OK, "stub provider error should propagate through router")
+
+	events := rec.snapshot()
+	core.AssertEqual(t, 2, len(events), "failed Generate should emit Requested + Failed")
+	failed := events[1]
+	core.AssertEqual(t, audit.EventInferenceGenerateFailed, failed.Event)
+
+	code, ok := failed.Meta["error_code"].(string)
+	core.AssertTrue(t, ok, "error_code must be a string")
+	core.AssertFalse(t, core.Contains(code, userInput),
+		"Meta[error_code] must NOT contain raw upstream body prose")
+	core.AssertFalse(t, core.Contains(code, "HTTP 400"),
+		"Meta[error_code] must NOT contain raw upstream HTTP-status prose")
+}
+
+// TestRunner_ChatFailed_AuditNoRawBody_Bad — same shape as the Generate
+// variant but on the Chat (messages-array) emit site. Cerberus #60 F-1
+// flagged BOTH service.go:209 (Generate) AND :304 (Chat); both must
+// route through errorCode() so the redaction is uniform across the
+// inference egress audit cluster.
+func TestRunner_ChatFailed_AuditNoRawBody_Bad(t *core.T) {
+	rec := installRecorder(t)
+	const userInput = "CHAT_USER_TYPED_FORBIDDEN_FRAGMENT"
+	providerErr := core.E("ai.openai.provider",
+		core.Sprintf("provider returned HTTP %d: %s", 429, userInput), nil)
+	s := newStubRunner(&runnerStubModel{err: providerErr})
+
+	r := s.Chat([]inference.Message{{Role: "user", Content: "hi"}})
+	core.AssertFalse(t, r.OK, "stub provider error should propagate through router")
+
+	events := rec.snapshot()
+	core.AssertEqual(t, 2, len(events), "failed Chat should emit Requested + Failed")
+	failed := events[1]
+	core.AssertEqual(t, audit.EventInferenceChatFailed, failed.Event)
+
+	code, ok := failed.Meta["error_code"].(string)
+	core.AssertTrue(t, ok, "error_code must be a string")
+	core.AssertFalse(t, core.Contains(code, userInput),
+		"Meta[error_code] must NOT contain raw upstream body prose")
+	core.AssertFalse(t, core.Contains(code, "HTTP 429"),
+		"Meta[error_code] must NOT contain raw upstream HTTP-status prose")
+}
+
+// TestRunner_GenerateFailed_AuditHasStableCode_Good — verifies the
+// positive shape: the emitted error_code IS one of the stable Lethean
+// codes from errorCode()'s mapping. Today the failure path through
+// ai.ProviderRouter wraps with Operation="ai.ProviderRouter.Chat" and
+// no Code field, so errorCode() falls back to the Operation string —
+// itself a structured-not-prose identifier from the flat keyspace
+// agents grep on. The point: the value is bounded and predictable, not
+// caller-controlled prose.
+func TestRunner_GenerateFailed_AuditHasStableCode_Good(t *core.T) {
+	rec := installRecorder(t)
+	providerErr := core.E("ai.openai.provider",
+		"provider returned HTTP 500: opaque upstream prose", nil)
+	s := newStubRunner(&runnerStubModel{err: providerErr})
+
+	r := s.Generate("ping")
+	core.AssertFalse(t, r.OK)
+
+	events := rec.snapshot()
+	core.AssertEqual(t, 2, len(events))
+	code, ok := events[1].Meta["error_code"].(string)
+	core.AssertTrue(t, ok, "error_code must be a string")
+
+	// Acceptable shapes per errorCode():
+	//   - "ai.ProviderRouter.Chat" (outer router Operation — current
+	//     wrap path when the upstream *core.Err has no Code field)
+	//   - "ai.openai.provider"     (inner provider Operation, if a
+	//     future router rewrite preserves the inner *Err)
+	//   - "provider_error"         (generic fallback when neither path)
+	stable := code == "ai.ProviderRouter.Chat" ||
+		code == "ai.openai.provider" ||
+		code == "provider_error"
+	core.AssertTrue(t, stable,
+		"error_code must be one of the stable Lethean codes, got: "+code)
+}
