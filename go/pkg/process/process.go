@@ -156,7 +156,7 @@ func (s *Service) Run(cmd string, args []string) core.Result {
 			Scope:   processScope,
 			Outcome: audit.OutcomeFailed,
 			Meta: map[string]any{
-				"error_code": r.Error(),
+				"error_code": audit.ErrorCode(r),
 			},
 		})
 		return r
@@ -205,7 +205,7 @@ func (s *Service) Start(cmd string, args []string) core.Result {
 			Scope:   processScope,
 			Outcome: audit.OutcomeFailed,
 			Meta: map[string]any{
-				"error_code": r.Error(),
+				"error_code": audit.ErrorCode(r),
 			},
 		})
 		return r
@@ -253,7 +253,7 @@ func (s *Service) Kill(id string) core.Result {
 			Outcome: audit.OutcomeFailed,
 			Meta: map[string]any{
 				"process_id": id,
-				"error_code": r.Error(),
+				"error_code": audit.ErrorCode(r),
 			},
 		})
 		return r

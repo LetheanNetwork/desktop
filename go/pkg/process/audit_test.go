@@ -239,3 +239,50 @@ func TestProcess_AuditMeta_NoRawCommandOrArgs_Good(t *core.T) {
 		core.AssertFalse(t, hasCwd, "Meta must never carry a raw `cwd` key")
 	}
 }
+
+// TestProcess_AuditMeta_ErrorCodeBoundedKeyspace_Ugly drives every
+// Failed-path emit site (Run / Start / Kill) and asserts the
+// error_code Meta value belongs to the bounded keyspace audit.ErrorCode
+// produces — i.e. either a non-empty short identifier returned by
+// r.Code() or the cluster-wide canonical fallback "unknown_error". The
+// raw r.Error() prose form (Cerberus #61 C-1 / Mantis #1713 STRIDE-I
+// leak surface) MUST NOT appear: no whitespace, no colons, no leading
+// "core.E:" framing — all hallmarks of unfiltered diagnostic strings.
+func TestProcess_AuditMeta_ErrorCodeBoundedKeyspace_Ugly(t *core.T) {
+	rec := installAuditRecorder(t)
+	svc := newTestService(t)
+
+	_ = svc.Run("echo", []string{"hello"})
+	_ = svc.Start("sleep", []string{"60"})
+	_ = svc.Kill("id-1-3cfc5d")
+
+	failedNames := []string{
+		audit.EventProcessRunFailed,
+		audit.EventProcessStartFailed,
+		audit.EventProcessKillFailed,
+	}
+
+	for _, name := range failedNames {
+		failed := rec.filterByName(name)
+		core.AssertEqual(t, 1, len(failed), name+" must emit exactly one Failed")
+
+		raw, present := failed[0].Meta["error_code"]
+		core.AssertTrue(t, present, name+" Failed Meta must carry error_code key")
+
+		code, ok := raw.(string)
+		core.AssertTrue(t, ok, name+" Failed Meta error_code must be a string")
+		core.AssertFalse(t, code == "",
+			name+" Failed Meta error_code must be non-empty (bounded keyspace)")
+
+		// Prose-leak canaries — raw r.Error() output typically contains
+		// whitespace, colons, or core.E framing. audit.ErrorCode normalises
+		// to a short identifier or the "unknown_error" fallback; neither
+		// shape contains any of these markers.
+		core.AssertFalse(t, core.Contains(code, " "),
+			name+" Failed Meta error_code must not contain whitespace (prose leak)")
+		core.AssertFalse(t, core.Contains(code, ":"),
+			name+" Failed Meta error_code must not contain ':' (prose leak)")
+		core.AssertFalse(t, core.Contains(code, "core.E"),
+			name+" Failed Meta error_code must not contain 'core.E' framing (prose leak)")
+	}
+}
