@@ -424,7 +424,12 @@ func (s *Service) Run() core.Result {
 		application.NewService(sandboxSvc),
 		application.NewService(opencode.NewWailsService(opencodeSvc)),
 		application.NewService(reposSvc),
-		application.NewService(tasks.NewService(s.opts.Core)),
+		// tasks → Shape (a.i) IPC-entry wrapper (RFC v3.1 §4.4 /
+		// Cerberus #73 F-1 / Mantis #1755). The wrapper stamps
+		// TierRenderer at every Wails IPC entry so the substrate
+		// *Service.Require gate fires correctly; the bare *Service
+		// stays available via Substrate() for in-Go consumers.
+		application.NewService(tasks.NewWailsService(tasks.NewService(s.opts.Core))),
 		application.NewService(viSvc),
 		application.NewService(incidentsSvc),
 		application.NewService(runbooksSvc),

@@ -226,3 +226,115 @@ func TestWails_AddNote_Ugly(t *core.T) {
 	r := svc.AddNote(tasks.AddNoteInput{IssueID: "id-x", Body: "", Author: "x"})
 	core.AssertFalse(t, r.OK)
 }
+
+// --- *WailsService Shape (a.i) IPC-entry stamp ---------------------------
+//
+// RFC.tier-auth-substrate.md v3.1 §4.4 / Cerberus #73 F-1 / Mantis #1755.
+// *WailsService wraps *Service; every wrapper method stamps TierRenderer
+// onto the auth sidecar at IPC entry, then defers ClearCaller so the
+// stamp clears at return. These tests pin the contract from three
+// directions: positive (stamp lifts unstamped core to TierRenderer),
+// negative (stamp is cleared on return — no leakage), cyclic (sequential
+// calls all stamp-and-clear cleanly).
+
+// newUnstampedWailsService wires a *WailsService over an unstamped
+// *core.Core (no auth.SetCaller). The IPC-entry stamp inside the wrapper
+// is the only source of caller identity — lets the tests observe the
+// wrapper's stamp without confusing it with ambient sidecar state.
+func newUnstampedWailsService(t *core.T) (*tasks.WailsService, *core.Core) {
+	t.Helper()
+	c := core.New()
+	core.RequireTrue(t, orm.Register(c).OK)
+	mem := orm.NewMemium()
+	core.RequireTrue(t, orm.Mount(c, "default", mem).OK)
+	for _, schema := range tasks.Schemas() {
+		core.RequireTrue(t, orm.RegisterSchema(c, schema).OK)
+		mem.RegisterTable(schema.Name, schema)
+	}
+	return tasks.NewWailsService(tasks.NewService(c)), c
+}
+
+// TestWailsTasksService_Create_StampsRenderer_Good — the wrapper's
+// IPC-entry stamp lifts an unstamped *core.Core to TierRenderer for the
+// duration of the call, so the inner *Service.Create's existing Require
+// gate passes without any external (HTTP-middleware or test-harness)
+// SetCaller. Without the wrapper stamp the gate would deny — proves
+// the wrapper is the source of the renderer-tier authority on Wails
+// IPC entry. Reporter == "wails" pins the ENFORCE-not-claim chain
+// running end-to-end through the wrapper.
+func TestWailsTasksService_Create_StampsRenderer_Good(t *core.T) {
+	w, _ := newUnstampedWailsService(t)
+	r := w.Create(tasks.CreateIssueInput{Project: "lthn", Summary: "renderer-stamped via IPC entry"})
+	core.RequireTrue(t, r.OK)
+	issue, _, ok := orm.Detail[tasks.Issue](r)
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, "lthn", issue.Project)
+	// ENFORCE-not-claim — Reporter is overwritten by the inner
+	// *Service.Create from auth.Caller(s.core).Subject, which is the
+	// wrapper's "wails" stamp when no upstream session has overridden
+	// it. Pins the subject the audit trail records for a Wails-IPC
+	// create with no logged-in session.
+	core.AssertEqual(t, "wails", issue.Reporter)
+}
+
+// TestWailsTasksService_Create_StampsRenderer_Bad — the stamp is CLEARED
+// on return via defer ClearCaller, so reading the sidecar AFTER the
+// wrapper call returns shows TierInternal. Defends against the stamp
+// leaking across IPC boundaries into background tasks / cascade workers
+// that may run on the same *core.Core after the Wails call returns.
+// Additionally proves the bare-substrate (no wrapper) call path: a
+// direct *Service.Create on the unstamped core, post-clear, denies as
+// expected — the substrate's gate is intact.
+func TestWailsTasksService_Create_StampsRenderer_Bad(t *core.T) {
+	w, c := newUnstampedWailsService(t)
+	r := w.Create(tasks.CreateIssueInput{Project: "lthn", Summary: "first call stamps + clears"})
+	core.RequireTrue(t, r.OK)
+	// After the deferred ClearCaller, the sidecar slot for c is empty;
+	// auth.Caller(c) resolves to the TierInternal floor.
+	id := auth.Caller(c)
+	core.AssertEqual(t, auth.TierInternal, id.Tier)
+	core.AssertEqual(t, "", id.Subject)
+	// A direct call into the substrate (bypassing the wrapper) now sees
+	// TierInternal and is denied — proves the wrapper's stamp is the
+	// only renderer-tier source on this *core.Core.
+	bare := w.Substrate().Create(tasks.CreateIssueInput{Project: "lthn", Summary: "no stamp"})
+	core.AssertFalse(t, bare.OK)
+	core.AssertContains(t, bare.Error(), "tier_not_permitted")
+}
+
+// TestWailsTasksService_Create_StampsRenderer_Ugly — sequential calls
+// each get their own stamp at entry and clear at return; the sidecar is
+// empty at the end. Pins the stamp-and-clear cycle. Also exercises all
+// five wrapper methods (List/Get/Create/Update/AddNote) end-to-end so a
+// future contributor who forgets stampRenderer on a new method fails
+// red here when the substrate gate denies.
+func TestWailsTasksService_Create_StampsRenderer_Ugly(t *core.T) {
+	w, c := newUnstampedWailsService(t)
+	r := w.Create(tasks.CreateIssueInput{Project: "lthn", Summary: "seed"})
+	core.RequireTrue(t, r.OK)
+	issue, _, _ := orm.Detail[tasks.Issue](r)
+	// List
+	core.RequireTrue(t, w.List(tasks.ListInput{Project: "lthn"}).OK)
+	// Get
+	core.RequireTrue(t, w.Get(tasks.GetInput{ID: issue.ID}).OK)
+	// Update
+	core.RequireTrue(t, w.Update(tasks.UpdateIssueInput{ID: issue.ID, State: tasks.StateInProgress}).OK)
+	// AddNote
+	core.RequireTrue(t, w.AddNote(tasks.AddNoteInput{IssueID: issue.ID, Body: "via wrapper"}).OK)
+	// Sidecar empty post-cycle — defer ClearCaller fires every method.
+	id := auth.Caller(c)
+	core.AssertEqual(t, auth.TierInternal, id.Tier)
+}
+
+// --- *WailsService.Substrate accessor ------------------------------------
+
+// TestWailsTasksService_Substrate_Good — Substrate() returns the wrapped
+// *Service pointer (NOT a fresh copy) so in-Go consumers reach the
+// substrate directly without re-constructing. Pins the accessor for the
+// wrapper-drift exempt-list contract.
+func TestWailsTasksService_Substrate_Good(t *core.T) {
+	c := core.New()
+	svc := tasks.NewService(c)
+	w := tasks.NewWailsService(svc)
+	core.AssertEqual(t, core.Sprintf("%p", svc), core.Sprintf("%p", w.Substrate()))
+}

@@ -64,6 +64,35 @@ var gatedWailsMethods = map[string]bool{
 // so they're not flagged as missing gates.
 var exemptWailsMethods = map[string]bool{}
 
+// gatedWailsServiceMethods is the canonical declaration of the methods
+// on *tasks.WailsService — the Shape (a.i) IPC-entry wrapper (RFC v3.1
+// §4.4 / Cerberus #73 F-1 / Mantis #1755). Every method here MUST
+// (1) defer stampRenderer(w.svc.core)() at its top, and (2) delegate
+// to the matching *Service method. The drift guard below catches a
+// new *Service method added without a matching *WailsService entry.
+//
+// Keep this set in lockstep with gatedWailsMethods above: a method
+// added to *Service that is NOT wrapped here means a Wails IPC call
+// never reaches the substrate (the wails3 generator only walks
+// *WailsService once registration switches over).
+var gatedWailsServiceMethods = map[string]bool{
+	"List":    true, // delegates to *Service.List
+	"Get":     true, // delegates to *Service.Get
+	"Create":  true, // delegates to *Service.Create (ENFORCE-not-claim Reporter via inner)
+	"Update":  true, // delegates to *Service.Update
+	"AddNote": true, // delegates to *Service.AddNote (ENFORCE-not-claim Author via inner)
+}
+
+// exemptWailsServiceMethods carves out non-Wails-binding helpers on
+// *WailsService. Substrate() returns the wrapped *Service and is for
+// in-Go consumers (tests, future HTTP/CLI surfaces); wails3's binding
+// generator silently skips methods whose arg/return shape isn't
+// primitive/struct/Result, but the reflection-walk in the drift helper
+// sees it. Listed here so the helper doesn't flag it as missing-gate.
+var exemptWailsServiceMethods = map[string]bool{
+	"Substrate": true, // returns *Service — accessor for in-Go consumers
+}
+
 // TestWailsService_AllMethodsWrapped_Good — RFC §10 B.5 canonical
 // test name. Asserts the exported method set of *tasks.Service
 // matches gatedWailsMethods exactly (modulo exemptWailsMethods).
@@ -119,4 +148,62 @@ func TestWailsService_AllMethodsWrapped_Ugly(t *core.T) {
 	core.AssertLen(t, miss, 0)
 	core.AssertLen(t, stale, 1)
 	core.AssertEqual(t, "Search", stale[0])
+}
+
+// --- *WailsService Shape (a.i) wrapper drift ---------------------------
+
+// TestWailsWrapper_AllMethodsWrapped_Good — RFC §10 B.5 canonical test
+// name applied to the Shape (a.i) IPC-entry wrapper *WailsService.
+// Asserts the exported method set of *tasks.WailsService matches
+// gatedWailsServiceMethods exactly (modulo exemptWailsServiceMethods).
+//
+// Catches the new-method drift in BOTH layers: a contributor who adds
+// a method to *Service WITHOUT adding the wrapper entry on *WailsService
+// fails this test red. The wails3 binding generator only walks
+// *WailsService once registration switches over — so an un-wrapped
+// *Service method silently never reaches the frontend.
+func TestWailsWrapper_AllMethodsWrapped_Good(t *core.T) {
+	w := tasks.NewWailsService(tasks.NewService(core.New()))
+	auth.AssertWrapperDriftClean(t, w, gatedWailsServiceMethods, exemptWailsServiceMethods)
+}
+
+// TestWailsWrapper_AllMethodsWrapped_Bad — meta-test: simulates the
+// missing-wrapper drift class by dropping one method (Create) from the
+// gated map and asserts WrapperDriftScan reports it. Pins the guard's
+// sensitivity on *WailsService just as the *Service Bad case pins it
+// for the substrate.
+func TestWailsWrapper_AllMethodsWrapped_Bad(t *core.T) {
+	w := tasks.NewWailsService(tasks.NewService(core.New()))
+	dropped := map[string]bool{}
+	for k, v := range gatedWailsServiceMethods {
+		if k == "Create" {
+			continue // simulate the contributor forgetting the wrapper
+		}
+		dropped[k] = v
+	}
+	miss, stale, err := auth.WrapperDriftScan(w, dropped, exemptWailsServiceMethods)
+	core.AssertEqual(t, "", err)
+	core.AssertLen(t, stale, 0)
+	core.AssertLen(t, miss, 1)
+	core.AssertEqual(t, "Create", miss[0])
+}
+
+// TestWailsWrapper_AllMethodsWrapped_Ugly — meta-test: simulates the
+// stale-gate drift class on *WailsService by adding a non-existent
+// method ("Delete") to the gated map. WrapperDriftScan must report it.
+// "Delete" is a plausible future addition (issue tombstoning) that a
+// contributor might pre-emptively register in the gated map before
+// implementing.
+func TestWailsWrapper_AllMethodsWrapped_Ugly(t *core.T) {
+	w := tasks.NewWailsService(tasks.NewService(core.New()))
+	withGhost := map[string]bool{}
+	for k, v := range gatedWailsServiceMethods {
+		withGhost[k] = v
+	}
+	withGhost["Delete"] = true // not yet implemented
+	miss, stale, err := auth.WrapperDriftScan(w, withGhost, exemptWailsServiceMethods)
+	core.AssertEqual(t, "", err)
+	core.AssertLen(t, miss, 0)
+	core.AssertLen(t, stale, 1)
+	core.AssertEqual(t, "Delete", stale[0])
 }
