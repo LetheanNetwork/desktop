@@ -78,7 +78,11 @@ func (s *Service) FetchOnce(input FetchOnceInput) core.Result {
 	am.Lock()
 	defer am.Unlock()
 
-	accountID := s.account.DefaultAccountID()
+	// Mantis #1591 Option D — assert exactly one unlocked account.
+	accountID, idErr := s.singleUnlockedAccount()
+	if idErr != nil {
+		return core.Fail(idErr)
+	}
 	priv, ok := s.account.PrivateKeyFor(accountID)
 	if !ok {
 		return s.errLocked()

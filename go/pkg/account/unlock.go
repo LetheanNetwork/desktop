@@ -563,12 +563,53 @@ func (s *Service) lockoutState(accountID string, nowUnix int64) (bool, int64) {
 // Lockout counter is per-account_id per Cerberus DREAD M1 — a
 // typo-spamming user MUST NOT lock out a sibling account on the
 // same machine.
+//
+// Mantis #1586 HIGH (Cerberus #18) — the lockout map was an
+// unbounded DoS surface: every failed attempt against an
+// attacker-chosen account_id created a fresh *lockoutEntry keyed by
+// the supplied string. 10M random valid-shape IDs → ~2 GB → OOM.
+// Two-part fix below:
+//
+//   - Option 2 gate: only allocate / mutate a lockout entry when the
+//     on-disk account file exists. Probe traffic against non-existent
+//     IDs never touches the map. RFC §5 privacy invariant is
+//     preserved — caller still surfaces bad_passphrase on the
+//     Stat-fail branch (see Unlock line 122); only the in-memory
+//     bookkeeping diverges.
+//
+//   - Option 3 opportunistic prune: every recordFailedAttempt write
+//     also walks the map and drops entries whose latest attempt
+//     fell out of the rolling window AND whose cooldown has
+//     expired. Bounds map size over time without an LRU eviction
+//     lottery.
+//
+// Skips Option 1 (LRU cap) per Cerberus #18 — the cap value is a
+// guess; (2)+(3) close the attack vector AND keep legitimate
+// long-stale entries from accumulating.
 func (s *Service) recordFailedAttempt(accountID string, nowUnix int64) (remaining int, triggered bool, unlockAt int64) {
+	// Mantis #1586 Option 2 gate — only track lockout for accounts
+	// that actually exist on disk. accountExists is shape-validated
+	// already (caller ran paths.IsValidID before reaching us); Stat
+	// is path-cached after the Unlock-path Stat fired, so the
+	// duplicate check is effectively free.
+	//
+	// On non-existent IDs we return ("0 remaining" / not triggered)
+	// so the caller's bad_passphrase response is still coherent —
+	// the user sees the same message a real wrong-passphrase
+	// produces, but no map slot is created.
+	if !s.accountExists(accountID) {
+		return 0, false, 0
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.lockouts == nil {
 		s.lockouts = map[string]*lockoutEntry{}
 	}
+	// Mantis #1586 Option 3 — opportunistic prune of stale entries
+	// before the new write. Runs under the write lock; bounded by
+	// current map size so cost stays O(N) on a map already bounded
+	// by (2). pruneStaleLockouts is no-op when nothing is stale.
+	s.pruneStaleLockoutsLocked(nowUnix)
 	entry, ok := s.lockouts[accountID]
 	if !ok {
 		entry = &lockoutEntry{}
@@ -599,6 +640,80 @@ func (s *Service) recordFailedAttempt(accountID string, nowUnix int64) (remainin
 		remaining = 0
 	}
 	return remaining, false, 0
+}
+
+// accountExists reports whether ~/Lethean/account/<accountID>/private.key
+// is present on disk. Used by recordFailedAttempt (Mantis #1586) to
+// gate map growth — probe traffic against non-existent IDs MUST NOT
+// allocate a lockout entry.
+//
+// Shape validation is the caller's responsibility (Unlock runs
+// paths.IsValidID at the top of the function). This helper is
+// I/O-only; on any error (root not resolvable, stat-fail) it returns
+// false — fail-closed on the gate, which keeps the DoS-bounded path.
+//
+// Usage example:
+//
+//	if !s.accountExists(accountID) {
+//	    return 0, false, 0 // do not grow lockout map
+//	}
+func (s *Service) accountExists(accountID string) bool {
+	rootR := paths.Root()
+	if !rootR.OK {
+		return false
+	}
+	root, _ := rootR.Value.(string)
+	privatePath := core.PathJoin(root, accountDir, accountID, privateKeyFile)
+	statR := core.Stat(privatePath)
+	return statR.OK
+}
+
+// pruneStaleLockoutsLocked walks s.lockouts and drops entries that
+// have fully fallen out of the rolling window AND whose cooldown
+// has expired. Caller MUST hold s.mu (write lock); the *Locked
+// suffix mirrors Go's stdlib mutex naming convention so future
+// touchers see the requirement at the call site.
+//
+// "Stale" means: zero attempts retained inside the rolling window
+// AND no active cooldown (unlockAt has elapsed). Such entries are
+// pure overhead — the next failed attempt against the same id
+// would re-allocate identical state, so deletion is observably
+// indistinguishable from keeping them.
+//
+// Mantis #1586 Option 3 — bounds map size over time without an LRU
+// eviction lottery. Combined with the Option 2 gate in
+// recordFailedAttempt, the map size is bounded by
+//
+//	min(active-failing-accounts, accounts-on-disk)
+//
+// at any given moment.
+//
+// Usage example (caller holds s.mu):
+//
+//	s.pruneStaleLockoutsLocked(nowUnix)
+func (s *Service) pruneStaleLockoutsLocked(nowUnix int64) {
+	cutoff := nowUnix - lockoutWindowSeconds
+	for id, entry := range s.lockouts {
+		// Active cooldown — keep so lockoutState still reports
+		// "locked" until the cooldown elapses.
+		if entry.unlockAt > nowUnix {
+			continue
+		}
+		// At least one in-window attempt — keep so the counter
+		// keeps accumulating toward the threshold.
+		hasRecent := false
+		for _, ts := range entry.attempts {
+			if ts > cutoff {
+				hasRecent = true
+				break
+			}
+		}
+		if hasRecent {
+			continue
+		}
+		// No recent attempts AND no live cooldown — pure overhead.
+		delete(s.lockouts, id)
+	}
 }
 
 // clearLockout resets the lockout state for the account_id —
@@ -727,20 +842,36 @@ func (s *Service) PublicKeyFor(accountID string) ([]byte, bool) {
 	return raw, true
 }
 
-// DefaultAccountID returns the account_id of the first unlocked account,
-// or an empty string when no accounts are unlocked. Provides a fallback
-// for callers that don't manage account selection explicitly.
+// UnlockedAccountIDs returns the account_ids of every currently
+// unlocked account, sorted alphabetically. Replaces the previous
+// DefaultAccountID() (Mantis #1588) which returned a random member
+// of the unlocked map — Go map iteration is randomised per-iter, so
+// callers that assumed a stable result mis-bound under multi-unlock.
+//
+// Callers that need exactly-one semantics MUST assert it themselves
+// (see pkg/office/mail.singleUnlockedAccount — Mantis #1591 Option
+// D). Returns a fresh slice; safe to mutate.
 //
 // Usage example:
 //
-//	id := svc.DefaultAccountID()
-func (s *Service) DefaultAccountID() string {
+//	ids := svc.UnlockedAccountIDs()
+//	switch len(ids) {
+//	case 0:
+//	    // no account unlocked
+//	case 1:
+//	    // single-account path
+//	default:
+//	    // multi-account — caller policy
+//	}
+func (s *Service) UnlockedAccountIDs() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	ids := make([]string, 0, len(s.unlocked))
 	for id := range s.unlocked {
-		return id
+		ids = append(ids, id)
 	}
-	return ""
+	core.SliceSort(ids)
+	return ids
 }
 
 // auditLockRequested emits auth.lock.requested per RFC §6 M4 when

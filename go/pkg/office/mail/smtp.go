@@ -65,7 +65,11 @@ func (s *Service) Send(input SendInput) core.Result {
 	if s.account == nil {
 		return core.Fail(core.E("mail.Send", "account provider not wired", nil))
 	}
-	accountID := s.account.DefaultAccountID()
+	// Mantis #1591 Option D — assert exactly one unlocked account.
+	accountID, idErr := s.singleUnlockedAccount()
+	if idErr != nil {
+		return core.Fail(idErr)
+	}
 	priv, ok := s.account.PrivateKeyFor(accountID)
 	if !ok {
 		return s.errLocked()

@@ -40,13 +40,44 @@ import (
 // The mail service depends on it for decrypt; the interface avoids an
 // import cycle (lib must not import consumer — AX principle 8).
 //
+// UnlockedAccountIDs replaces the previous DefaultAccountID() lottery
+// (Mantis #1588 — Go map iteration randomised per-iter): every entry
+// point now ASSERTS exactly one unlocked account via
+// singleUnlockedAccount() and surfaces a loud error on zero / >1.
+// The whole-file _accounts.enc PGP envelope (Mantis #1591) is bound to
+// ONE pubkey at first-write time; reads must use THAT key. Encoding
+// the beta single-account invariant in code makes the multi-account
+// surface trip the assertion explicitly instead of mis-binding silently.
+//
 // Usage example:
 //
 //	svc.SetAccountService(accountSvc)
 type AccountProvider interface {
 	PrivateKeyFor(accountID string) ([]byte, bool)
 	PublicKeyFor(accountID string) ([]byte, bool)
-	DefaultAccountID() string
+	UnlockedAccountIDs() []string
+}
+
+// singleUnlockedAccount returns the unlocked account_id when exactly
+// one account is unlocked. Zero unlocked → mail.no_unlocked_account;
+// multiple unlocked → mail.multi_account_not_supported (Mantis #1591
+// Option D — beta invariant explicit; multi-account UX needs RFC).
+//
+// Usage example:
+//
+//	id, err := s.singleUnlockedAccount()
+//	if err != nil { return core.Fail(err) }
+func (s *Service) singleUnlockedAccount() (string, error) {
+	ids := s.account.UnlockedAccountIDs()
+	if len(ids) == 0 {
+		return "", core.NewCode("mail.no_unlocked_account",
+			"no Lethean account is unlocked")
+	}
+	if len(ids) > 1 {
+		return "", core.NewCode("mail.multi_account_not_supported",
+			"mail does not yet support multiple unlocked accounts (Mantis #1591)")
+	}
+	return ids[0], nil
 }
 
 // Service owns the Office mail catalogue surface.

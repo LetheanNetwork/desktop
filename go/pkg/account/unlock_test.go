@@ -859,3 +859,59 @@ func TestUnlock_PostLockoutAttempt_NoDuplicateTrigger_Ugly(t *core.T) {
 	core.AssertTrue(t, r1.Error() != "" && r2.Error() != "",
 		"both rejections carry error messages")
 }
+
+// --- UnlockedAccountIDs (Mantis #1591 Option D enumerator) ---
+
+// TestUnlockedAccountIDs_Empty_Good — zero unlocked accounts returns
+// an empty slice (not nil panic).
+func TestUnlockedAccountIDs_Empty_Good(t *core.T) {
+	svc := subject.NewService(nil)
+	ids := svc.UnlockedAccountIDs()
+	core.AssertEqual(t, 0, len(ids))
+}
+
+// TestUnlockedAccountIDs_SingleUnlock_Good — one unlock returns one id.
+func TestUnlockedAccountIDs_SingleUnlock_Good(t *core.T) {
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+
+	r := svc.Unlock(subject.UnlockInput{
+		AccountID:  fixtureAccountID,
+		Passphrase: fixturePassphrase,
+	})
+	core.AssertTrue(t, r.OK)
+
+	ids := svc.UnlockedAccountIDs()
+	core.AssertEqual(t, 1, len(ids))
+	core.AssertEqual(t, fixtureAccountID, ids[0])
+}
+
+// TestUnlockedAccountIDs_DeterministicSort_Ugly — repeated calls
+// return ids in the SAME sorted order regardless of map-iter
+// randomisation. Replaces the DefaultAccountID lottery (Mantis
+// #1588) with deterministic enumeration.
+func TestUnlockedAccountIDs_DeterministicSort_Ugly(t *core.T) {
+	home := homeFixture(t)
+	ids := []string{"ccc111", "aaa111", "bbb111"}
+	for _, id := range ids {
+		writeEncryptedAccount(t, home, id, fixturePassphrase)
+	}
+	svc := newUnlockable(t, home)
+	for _, id := range ids {
+		r := svc.Unlock(subject.UnlockInput{
+			AccountID: id, Passphrase: fixturePassphrase,
+		})
+		core.AssertTrue(t, r.OK, "unlock "+id)
+	}
+
+	// Sorted alphabetically — same result every call.
+	want := []string{"aaa111", "bbb111", "ccc111"}
+	for i := 0; i < 10; i++ {
+		got := svc.UnlockedAccountIDs()
+		core.AssertEqual(t, len(want), len(got))
+		for j := range want {
+			core.AssertEqual(t, want[j], got[j])
+		}
+	}
+}

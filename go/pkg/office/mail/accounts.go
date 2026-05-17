@@ -63,7 +63,14 @@ func (s *Service) SaveAccount(input AccountInput) core.Result {
 	if s.account == nil {
 		return core.Fail(core.E("mail.SaveAccount", "account provider not wired (call SetAccountService)", nil))
 	}
-	accountID := s.account.DefaultAccountID()
+	// Mantis #1591 Option D — assert exactly one unlocked account.
+	// Previous DefaultAccountID() lottery silently mis-bound under
+	// multi-unlock (Mantis #1588); the explicit error surfaces the
+	// gap instead.
+	accountID, idErr := s.singleUnlockedAccount()
+	if idErr != nil {
+		return core.Fail(idErr)
+	}
 	pub, ok := s.account.PublicKeyFor(accountID)
 	if !ok {
 		return core.Fail(core.NewCode("mail.account.no_public_key",
@@ -136,7 +143,11 @@ func (s *Service) ListAccounts() core.Result {
 	if s.account == nil {
 		return core.Fail(core.E("mail.ListAccounts", "account provider not wired", nil))
 	}
-	accountID := s.account.DefaultAccountID()
+	// Mantis #1591 Option D — assert exactly one unlocked account.
+	accountID, idErr := s.singleUnlockedAccount()
+	if idErr != nil {
+		return core.Fail(idErr)
+	}
 	priv, ok := s.account.PrivateKeyFor(accountID)
 	if !ok {
 		return s.errLocked()
@@ -170,7 +181,11 @@ func (s *Service) RemoveAccount(name string) core.Result {
 	if s.account == nil {
 		return core.Fail(core.E("mail.RemoveAccount", "account provider not wired", nil))
 	}
-	accountID := s.account.DefaultAccountID()
+	// Mantis #1591 Option D — assert exactly one unlocked account.
+	accountID, idErr := s.singleUnlockedAccount()
+	if idErr != nil {
+		return core.Fail(idErr)
+	}
 	priv, ok := s.account.PrivateKeyFor(accountID)
 	if !ok {
 		return s.errLocked()
