@@ -221,9 +221,22 @@ func (s *Service) enqueue(url string, delay core.Duration) {
 //
 // Bound to JS as `Vi.Catalogue()` — frontend uses this to render the
 // "watching N sites" hint + the per-site interval pill.
+//
+// Tier gate (RFC §5.1 / §10 Q-1 Phase 1 ALLOW): Require permits
+// TierOperator + TierRenderer + TierCascade. Read-only, no secrets in
+// output; renderer access is the load-bearing case so the Wails IPC
+// entry (via *WailsService.Catalogue stamping TierRenderer) reaches
+// here cleanly. nil-guard runs BEFORE the gate so callers passing a
+// zero-value *Service still get the stable empty envelope shape.
 func (s *Service) Catalogue() core.Result {
 	if s == nil || s.core == nil {
 		return core.Ok([]SiteCatalogue{})
+	}
+	id, ok := auth.Require(s.core, "vi.Service.Catalogue",
+		auth.TierOperator, auth.TierRenderer, auth.TierCascade)
+	if !ok {
+		return core.Fail(core.E("vi.Service.Catalogue",
+			"vi.tier_not_permitted: "+id.Tier.String(), nil))
 	}
 	return core.Ok(LoadCatalogue(s.core))
 }
@@ -239,6 +252,12 @@ func (s *Service) Catalogue() core.Result {
 func (s *Service) Sites() core.Result {
 	if s == nil || s.core == nil {
 		return core.Ok(SitesOutput{Sites: []SiteStatus{}})
+	}
+	id, ok := auth.Require(s.core, "vi.Service.Sites",
+		auth.TierOperator, auth.TierRenderer, auth.TierCascade)
+	if !ok {
+		return core.Fail(core.E("vi.Service.Sites",
+			"vi.tier_not_permitted: "+id.Tier.String(), nil))
 	}
 	catalogue := LoadCatalogue(s.core)
 	probes := LatestByDomain(s.core, catalogue)
@@ -332,6 +351,12 @@ func (s *Service) Repos() core.Result {
 	if s == nil || s.core == nil {
 		return core.Ok([]PRRepo{})
 	}
+	id, ok := auth.Require(s.core, "vi.Service.Repos",
+		auth.TierOperator, auth.TierRenderer, auth.TierCascade)
+	if !ok {
+		return core.Fail(core.E("vi.Service.Repos",
+			"vi.tier_not_permitted: "+id.Tier.String(), nil))
+	}
 	return core.Ok(LoadPRRepos(s.core))
 }
 
@@ -346,6 +371,12 @@ func (s *Service) Repos() core.Result {
 func (s *Service) Activity() core.Result {
 	if s == nil || s.core == nil {
 		return core.Ok(ActivityOutput{Items: []ActivityEntry{}})
+	}
+	id, ok := auth.Require(s.core, "vi.Service.Activity",
+		auth.TierOperator, auth.TierRenderer, auth.TierCascade)
+	if !ok {
+		return core.Fail(core.E("vi.Service.Activity",
+			"vi.tier_not_permitted: "+id.Tier.String(), nil))
 	}
 	catalogue := LoadPRRepos(s.core)
 	rows := LatestPerPR(s.core, catalogue, DefaultActivityLimit)

@@ -6,12 +6,20 @@ import (
 	core "dappco.re/go"
 	"dappco.re/go/config"
 	"dappco.re/go/orm"
+
+	"dappco.re/lthn/desktop/pkg/auth"
 	"dappco.re/lthn/desktop/pkg/vi"
 )
 
 // newServiceCore wires config + orm + the vi schema. No queue
 // service — Service.OnStart short-circuits cleanly when queue isn't
 // registered, which we exercise in TestService_OnStart_Bad.
+//
+// Stamps TierOperator with subject "test-operator" via the auth
+// sidecar so the Mantis #1750 Require gates on Catalogue / Sites /
+// Repos / Activity pass through. Tests that want to exercise a
+// different tier (e.g. TierInternal floor for deny-path coverage)
+// re-stamp via auth.SetCaller / auth.ClearCaller after construction.
 func newServiceCore(t *core.T) *core.Core {
 	t.Helper()
 	c := core.New(
@@ -27,7 +35,15 @@ func newServiceCore(t *core.T) *core.Core {
 		mem.RegisterTable(schema.Name, schema)
 	}
 	core.RequireTrue(t, c.ServiceStartup(core.Background(), nil).OK)
-	t.Cleanup(func() { _ = c.ServiceShutdown(core.Background()) })
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier:    auth.TierOperator,
+		Subject: "test-operator",
+		Source:  "vi_test",
+	})
+	t.Cleanup(func() {
+		auth.ClearCaller(c)
+		_ = c.ServiceShutdown(core.Background())
+	})
 	return c
 }
 

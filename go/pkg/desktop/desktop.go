@@ -430,7 +430,17 @@ func (s *Service) Run() core.Result {
 		// *Service.Require gate fires correctly; the bare *Service
 		// stays available via Substrate() for in-Go consumers.
 		application.NewService(tasks.NewWailsService(tasks.NewService(s.opts.Core))),
-		application.NewService(viSvc),
+		// vi → Shape (a.i) IPC-entry wrapper (RFC v3.1 §4.4 /
+		// Cerberus #72 F-3 / Mantis #1750). The wrapper stamps
+		// TierRenderer at every Wails IPC entry so the substrate's
+		// Require gate on the four read methods (Catalogue / Sites /
+		// Repos / Activity) fires correctly. OnStart / OnStop live on
+		// the substrate ONLY — the wrapper deliberately omits them so
+		// wails3 cannot bind those container-lifecycle hooks to the
+		// renderer. The Core-registered *vi.Service instance (driving
+		// the probe loop via OnStart) is still the one wrapped here;
+		// Substrate() exposes it to the composition root unchanged.
+		application.NewService(vi.NewWailsService(viSvc)),
 		application.NewService(incidentsSvc),
 		application.NewService(runbooksSvc),
 		application.NewService(contactsSvc),
