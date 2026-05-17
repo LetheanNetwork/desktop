@@ -1558,6 +1558,43 @@ const (
 	//                — the substrate derives a stable canon so caller-
 	//                controlled URLs / TLS chain bytes cannot leak.
 	EventViProbeFailed = "vi.probe.failed"
+
+	// EventTrayPluginClicked fires when the tray-menu click router in
+	// pkg/desktop dispatches a plugin-rooted ActionID (one tagged with
+	// trayPluginPrefix). Closes Cerberus #70 F-3 MED — STRIDE-T Tampering
+	// + STRIDE-R Repudiation. Pre-cascade the plugin enumeration surface
+	// on the system tray was forensic-dark: a hostile manifest could
+	// surface a plugin code via Menus() and the click handler would route
+	// to openPluginWindow without a substrate row recording that the
+	// renderer opened a (potentially attacker-named) plugin view. The
+	// click router now ALSO validates the resolved code against
+	// paths.IsValidPluginCode before opening + before this emit, so a
+	// hostile entry that slipped past the menu-build filter (race
+	// between Menus() snapshot and click resolution) still cannot reach
+	// the renderer.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   plugin_code   — validated plugin code that the click resolved
+	//                   to (post-trayPluginPrefix-strip, post-
+	//                   paths.IsValidPluginCode gate). Bounded vocab
+	//                   per the validator (lowercase ascii + dash +
+	//                   underscore, 1..MaxPluginCodeBytes=64 bytes).
+	//   resolved_via  — literal "tray_menu" — origin discriminator. A
+	//                   later instrumentation lane covering Dock-menu
+	//                   or popover-menu click surfaces can re-use the
+	//                   event with a distinct literal, keeping the
+	//                   audit substrate a single forensic-grep target.
+	//
+	// The plugin label is NEVER in Meta — labels are attacker-controlled
+	// strings out of the plugin manifest. The Cerberus #70 finding
+	// names control-char and length injection as the load-bearing risk;
+	// recording the label would persist the attack string into the
+	// long-lived forensic substrate (sibling discipline to the URL
+	// bytes drop in EventViPRFetchRejected). The plugin code is
+	// bounded-vocab and forensically equivalent for a walker — it joins
+	// 1:1 against the installed-plugins manifest catalogue.
+	EventTrayPluginClicked = "tray.plugin.clicked"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the
