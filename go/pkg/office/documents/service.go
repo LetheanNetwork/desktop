@@ -3,12 +3,17 @@
 // Service — Core integration for the Office document catalogue. Reads
 // markdown files from ~/Lethean/office/docs/ and returns typed rows to
 // the Wails frontend. v2 adds Create / Save / Delete with optimistic
-// locking (mtime + sha256 composite token) and locked-state defence.
+// locking (mtime + sha256 composite token) and live-read session-gate
+// defence (RFC.stage-e-unlockgate v2 §1.2 / Mantis #1613 B.1).
 //
 // Lifecycle:
-//   - Register(c)   wires the service into the Core container
-//   - ServiceName() returns "Documents" for the Wails namespace
-//   - SetLocked(b)  called by the desktop session layer on lock/unlock
+//   - Register(c)        wires the service into the Core container
+//   - ServiceName()      returns "Documents" for the Wails namespace
+//   - SetSessionGate(g)  wired post-construction in cmd/lthn/app.go
+//     against *account.Service (live-read pattern — mirrors
+//     office/mail.AccountProvider; no cached bool, no event bus).
+//   - Stop(ctx)          nils the SessionGate reference so a draining
+//     Service fails-closed on any late-arriving write.
 //
 // All I/O uses CoreGO wrappers (core.ReadFile / core.ReadDir /
 // core.DirFS / core.MkdirAll / core.Stat / core.UserHomeDir /
@@ -19,6 +24,7 @@
 package documents
 
 import (
+	"sync"
 	"sync/atomic"
 
 	core "dappco.re/go"
@@ -26,6 +32,24 @@ import (
 	"dappco.re/lthn/desktop/pkg/paths"
 	"gopkg.in/yaml.v3"
 )
+
+// SessionGate is the minimal consumer-defined interface satisfied by
+// *account.Service. Live-read at every gate check — no cached bool, no
+// subscribe/event bus (RFC.stage-e-unlockgate v2 §1.1 — Pushback 2
+// CONFIRMED by Cerberus #27). When the returned slice is empty the
+// session is locked; when non-empty at least one Lethean account is
+// unlocked and writes may proceed.
+//
+// Wired in cmd/lthn/app.go (Mantis #1613 B.3, deferred to that lane):
+//
+//	documentsSvc.SetSessionGate(accountSvc)
+//
+// AX-8 compliance: this interface is defined in the consumer
+// (documents) and satisfied by the producer (*account.Service). No
+// pkg/account import lands in pkg/office/documents.
+type SessionGate interface {
+	UnlockedAccountIDs() []string
+}
 
 // SECURITY-NOTE — TIER-1 TRUSTED SURFACE (Mantis #1502, Cerberus pass-10):
 //
@@ -48,9 +72,25 @@ import (
 // Usage example:
 //
 //	svc := documents.NewService(c)
+//	svc.SetSessionGate(accountSvc)
 type Service struct {
-	core   *core.Core
-	locked atomic.Bool // set by desktop session layer on lock/unlock
+	core *core.Core
+
+	// gateMu guards reads/writes of the session gate reference. A
+	// sync.RWMutex protects against the wire/Stop race where app.go
+	// SetSessionGate runs concurrent with a late-arriving Wails call
+	// reading the reference. Read-heavy access (every write gates
+	// once) — RWMutex.RLock is microseconds.
+	gateMu sync.RWMutex
+	// gate is the live-read session source (RFC §1.1). nil before
+	// SetSessionGate runs in app.go and after Stop nils it; the
+	// nilWarned one-shot warning fires on the first nil-hit to
+	// surface wire-ordering bugs without log spam (§2.2 ADD-1.5).
+	gate SessionGate
+	// nilWarned is the one-shot guard for the nil-gate fail-safe
+	// (§2.2 / Cerberus #27 Q2). CompareAndSwap-on-first-hit emits
+	// core.Warn exactly once per Service instance.
+	nilWarned atomic.Bool
 }
 
 // NewService constructs the documents service against a Core container.
@@ -363,23 +403,82 @@ func loadDoc(slug string) ([]byte, error) {
 	return raw, nil
 }
 
-// SetLocked is called by the desktop session layer to set the locked state.
-// When locked, all write methods reject with documents.session.locked.
-// Read methods (List/Get) continue to work in locked state.
+// SetSessionGate wires the live-read session source. Called by
+// cmd/lthn/app.go post-construction (Mantis #1613 B.3) once
+// *account.Service exists.
+//
+// Mirrors the office/mail.AccountProvider setter pattern. Replaces
+// the v1 SetLocked(bool) bool-cache with a live-read on every gate
+// check — no event-bus reliability concerns, no cache coherence
+// concerns (RFC.stage-e-unlockgate v2 §1.1).
 //
 // Usage example:
 //
-//	docsSvc.SetLocked(true)  // on session lock
-//	docsSvc.SetLocked(false) // on session unlock
-func (s *Service) SetLocked(locked bool) { s.locked.Store(locked) }
+//	docsSvc.SetSessionGate(accountSvc)
+func (s *Service) SetSessionGate(g SessionGate) {
+	s.gateMu.Lock()
+	s.gate = g
+	s.gateMu.Unlock()
+}
 
-// assertUnlocked returns a Fail result when the session is locked.
-// Called at the top of every write method before any FS touch.
+// Stop nils the SessionGate reference so a draining Service
+// fails-closed on any late-arriving write (§B.{1,2} mirror mail's
+// drain hygiene / Cerberus #27 ADD-5). Read-only methods (List, Get)
+// continue to function — Stop only severs the write gate.
+//
+// Usage example:
+//
+//	_ = svc.Stop(core.Background())
+func (s *Service) Stop(_ core.Context) core.Result {
+	s.gateMu.Lock()
+	s.gate = nil
+	s.gateMu.Unlock()
+	return core.Ok(nil)
+}
+
+// assertUnlocked returns a Fail result when the session is locked or
+// the session gate is not wired. Called at the top of every write
+// method before any FS touch.
+//
+// Live-read semantics (RFC §1.1): consults s.gate.UnlockedAccountIDs()
+// at every call — no cached bool — so a lock transition is observable
+// on the very next write attempt.
+//
+// Fail-safe on nil gate (§2.2 / Cerberus #27 Q2): when SetSessionGate
+// has not yet wired the gate (or Stop has nilled it), the gate fails
+// LOCKED rather than panicking. The first nil-hit per Service
+// instance emits a one-shot core.Warn via CompareAndSwap so
+// wire-ordering bugs surface in dev without log spam in production.
 func (s *Service) assertUnlocked(scope string) (core.Result, bool) {
-	if s.locked.Load() {
+	s.gateMu.RLock()
+	g := s.gate
+	s.gateMu.RUnlock()
+	if g == nil {
+		if s.nilWarned.CompareAndSwap(false, true) {
+			core.Warn("documents: session gate not wired; failing locked", "scope", scope)
+		}
+		return core.Fail(core.E(scope, "documents.session.locked", nil)), false
+	}
+	if len(g.UnlockedAccountIDs()) == 0 {
 		return core.Fail(core.E(scope, "documents.session.locked", nil)), false
 	}
 	return core.Result{}, true
+}
+
+// sessionUnlocked is a non-failing form of assertUnlocked for the
+// post-write event-emit guard. Returns true when the gate is wired
+// AND reports at least one unlocked account. Used at Save/Delete
+// success to suppress DocChanged emission if the lock transitioned
+// mid-write (RFC §non-goals: in-flight writes complete; the emit
+// gate stays best-effort, matching v1's locked.Load() check).
+func (s *Service) sessionUnlocked() bool {
+	s.gateMu.RLock()
+	g := s.gate
+	s.gateMu.RUnlock()
+	if g == nil {
+		return false
+	}
+	return len(g.UnlockedAccountIDs()) > 0
 }
 
 // reservedSlugs are route-collision candidates that must not be used as
@@ -674,7 +773,9 @@ func (s *Service) Save(input SaveInput) core.Result {
 	rec := parseDoc(input.Slug, content, modTime, sizeB)
 	before := parseDoc(input.Slug, raw, input.IfMatch, int64(len(raw)))
 
-	if !s.locked.Load() {
+	// Suppress DocChanged emission if the session locked mid-write.
+	// Best-effort live-read mirror of v1's locked.Load() guard.
+	if s.sessionUnlocked() {
 		s.core.ACTION(DocChanged{
 			Kind:   "updated",
 			Slug:   input.Slug,
@@ -741,7 +842,9 @@ func (s *Service) Delete(input DeleteInput) core.Result {
 	}
 
 	now := core.Now()
-	if !s.locked.Load() {
+	// Suppress DocChanged emission if the session locked mid-write.
+	// Best-effort live-read mirror of v1's locked.Load() guard.
+	if s.sessionUnlocked() {
 		s.core.ACTION(DocChanged{
 			Kind:   "deleted",
 			Slug:   input.Slug,

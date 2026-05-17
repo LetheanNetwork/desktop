@@ -29,9 +29,31 @@ func cleanupDoc(t *testing.T, slug string) {
 	})
 }
 
+// stubSessionGate is the test double for the consumer-defined
+// SessionGate interface. Mirrors RFC.stage-e-unlockgate v2 §4.2 stub
+// shape — duplicated per-pkg rather than shared, so test files keep
+// zero cross-pkg testing/... deps.
+type stubSessionGate struct{ ids []string }
+
+func (s *stubSessionGate) UnlockedAccountIDs() []string { return s.ids }
+
 // newTestService returns a Service backed by a fresh core.Core for
 // tests that exercise write methods. The core is minimal — no options.
+// The SessionGate is pre-wired with a single-account stub so write
+// methods pass the unlock gate by default. Tests that need to assert
+// the locked-state path call SetSessionGate explicitly with an empty
+// stub (or use newTestServiceNoGate for the nil-gate fail-safe path).
 func newTestService() *Service {
+	c := core.New()
+	svc := NewService(c)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
+	return svc
+}
+
+// newTestServiceNoGate returns a Service with NO SessionGate wired —
+// exercises the §2.2 / Cerberus #27 Q2 fail-safe path where the
+// service is constructed before app.go's SetSessionGate runs.
+func newTestServiceNoGate() *Service {
 	c := core.New()
 	return NewService(c)
 }
@@ -525,36 +547,113 @@ func TestDelete_Ugly(t *testing.T) {
 	}
 }
 
-// TestSessionLocked_SaveRejected_Bad — locked session rejects Save.
-func TestSessionLocked_SaveRejected_Bad(t *testing.T) {
+// TestDocuments_LockedGate_FailsWrite — Save rejects when the live-read
+// gate reports zero unlocked accounts (RFC.stage-e-unlockgate v2 §4.2
+// LockedSession_Bad shape — Mantis #1613 B.1).
+func TestDocuments_LockedGate_FailsWrite(t *testing.T) {
 	svc := newTestService()
-	svc.SetLocked(true)
-	r := svc.Save(SaveInput{Slug: "any", Body: "body", IfMatch: core.Now(), IfMatchHash: "abc"})
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	if r := svc.Save(SaveInput{Slug: "any", Body: "body", IfMatch: core.Now(), IfMatchHash: "abc"}); r.OK {
+		t.Fatal("expected Save to be rejected when gate reports zero unlocked accounts")
+	} else if !core.Contains(r.Error(), "documents.session.locked") {
+		t.Fatalf("expected documents.session.locked on Save, got %q", r.Error())
+	}
+
+	if r := svc.Create(CreateInput{Slug: "any", Body: "body"}); r.OK {
+		t.Fatal("expected Create to be rejected when gate reports zero unlocked accounts")
+	} else if !core.Contains(r.Error(), "documents.session.locked") {
+		t.Fatalf("expected documents.session.locked on Create, got %q", r.Error())
+	}
+
+	if r := svc.Delete(DeleteInput{Slug: "any", IfMatch: core.Now(), IfMatchHash: "abc"}); r.OK {
+		t.Fatal("expected Delete to be rejected when gate reports zero unlocked accounts")
+	} else if !core.Contains(r.Error(), "documents.session.locked") {
+		t.Fatalf("expected documents.session.locked on Delete, got %q", r.Error())
+	}
+}
+
+// TestDocuments_UnlockedGate_AllowsWrite — Create succeeds when the
+// live-read gate reports a non-empty unlocked-account slice.
+func TestDocuments_UnlockedGate_AllowsWrite(t *testing.T) {
+	svc := newTestServiceNoGate()
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+
+	if r := svc.Create(CreateInput{Slug: slug, Body: "# Unlocked\n"}); !r.OK {
+		t.Fatalf("Create should succeed with gate reporting unlocked acct, got: %v", r.Error())
+	}
+}
+
+// TestDocuments_NilGate_WarnsOnce_FailsClosed — nil gate fails-locked
+// on the first write; nilWarned one-shot suppresses re-warning on
+// subsequent writes (RFC §2.2 / Cerberus #27 Q2 fail-safe).
+func TestDocuments_NilGate_WarnsOnce_FailsClosed(t *testing.T) {
+	svc := newTestServiceNoGate()
+
+	// First write — nilWarned trips false→true; behaviour: fails closed.
+	r1 := svc.Create(CreateInput{Slug: "any", Body: "body"})
+	if r1.OK {
+		t.Fatal("expected Create to fail-closed when gate is nil")
+	}
+	if !core.Contains(r1.Error(), "documents.session.locked") {
+		t.Fatalf("expected documents.session.locked, got %q", r1.Error())
+	}
+	if !svc.nilWarned.Load() {
+		t.Fatal("expected nilWarned to be set after first nil-gate hit")
+	}
+
+	// Second write — nilWarned already true; CompareAndSwap returns
+	// false and core.Warn is NOT called again. Behaviour from the
+	// caller's perspective: same fail-closed result.
+	r2 := svc.Save(SaveInput{Slug: "any", Body: "body", IfMatch: core.Now(), IfMatchHash: "abc"})
+	if r2.OK {
+		t.Fatal("expected Save to fail-closed when gate is nil")
+	}
+	if !core.Contains(r2.Error(), "documents.session.locked") {
+		t.Fatalf("expected documents.session.locked, got %q", r2.Error())
+	}
+
+	// nilWarned must still be true (one-shot semantics — not reset).
+	if !svc.nilWarned.Load() {
+		t.Fatal("expected nilWarned to remain set across multiple nil-gate hits")
+	}
+}
+
+// TestDocuments_StopNilsGate — Stop() severs the SessionGate; subsequent
+// writes fail-closed even though the gate WAS wired (Cerberus #27 ADD-5).
+func TestDocuments_StopNilsGate(t *testing.T) {
+	svc := newTestService() // gate wired with unlocked stub
+
+	// Pre-Stop: write succeeds.
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+	if r := svc.Create(CreateInput{Slug: slug, Body: "# Pre-stop\n"}); !r.OK {
+		t.Fatalf("Create should succeed pre-Stop, got: %v", r.Error())
+	}
+
+	// Stop nils the gate reference.
+	if r := svc.Stop(core.Background()); !r.OK {
+		t.Fatalf("Stop should succeed, got: %v", r.Error())
+	}
+
+	// Post-Stop: write fails-closed with the nil-gate path.
+	r := svc.Create(CreateInput{Slug: "any-post-stop", Body: "body"})
 	if r.OK {
-		t.Fatal("expected Save to be rejected when session locked")
+		t.Fatal("expected Create to fail-closed after Stop nils the gate")
 	}
 	if !core.Contains(r.Error(), "documents.session.locked") {
 		t.Fatalf("expected documents.session.locked, got %q", r.Error())
 	}
 }
 
-// TestSessionLocked_CreateRejected_Bad — locked session rejects Create.
-func TestSessionLocked_CreateRejected_Bad(t *testing.T) {
-	svc := newTestService()
-	svc.SetLocked(true)
-	r := svc.Create(CreateInput{Slug: "any", Body: "body"})
-	if r.OK {
-		t.Fatal("expected Create to be rejected when session locked")
-	}
-	if !core.Contains(r.Error(), "documents.session.locked") {
-		t.Fatalf("expected documents.session.locked, got %q", r.Error())
-	}
-}
-
-// TestSessionLocked_ReadStillWorks_Good — List is not blocked by locked state.
+// TestSessionLocked_ReadStillWorks_Good — List is not blocked by the
+// session gate (RFC §3.1 — reads stay open while locked).
 func TestSessionLocked_ReadStillWorks_Good(t *testing.T) {
 	svc := newTestService()
-	svc.SetLocked(true)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
 	r := svc.List(ListInput{})
 	if !r.OK {
 		t.Fatalf("List should succeed when session locked, got: %v", r.Error())
