@@ -183,16 +183,54 @@ func (g *ControlGroup) listImports(c *gin.Context) {
 }
 
 // listImportedProviders GET /v1/api/opencode/imports/providers →
-// every imported provider definition + auth metadata. The auth_key
-// field IS included (local-only surface) — the frontend MUST treat
-// it as sensitive and never render it in cleartext UI.
+// every imported provider definition rendered as a ProviderView (the
+// same redacted shape the Wails surface emits — see WailsService.
+// WListImportedProviders). The raw AuthKey is NEVER on the wire;
+// callers receive only Present + Masked so any LocalKey-bearer that
+// drains this endpoint exfils nothing useful.
+//
+// Cerberus #22 HIGH-1 / Mantis #1616 — closes the asymmetric leak
+// between the Wails surface (masked since wails.go:223) and the HTTP
+// surface (previously returned raw ImportedProvider rows).
 func (g *ControlGroup) listImportedProviders(c *gin.Context) {
 	r := g.svc.ListImportedProviders()
 	if !r.OK {
 		c.JSON(core.StatusInternalServerError, gin.H{"error": r.Error()})
 		return
 	}
-	c.JSON(core.StatusOK, gin.H{"providers": r.Value})
+	rows, _ := r.Value.([]ImportedProvider)
+	c.JSON(core.StatusOK, gin.H{"providers": providersToViews(rows)})
+}
+
+// providersToViews maps a slice of ImportedProvider rows (which carry
+// the raw AuthKey, sensitive) into a slice of ProviderView (which
+// carries only Present + Masked). Single conversion point shared by
+// the HTTP listImportedProviders handler; the Wails surface ships
+// the same shape inline at wails.go:235-246 (kept in lockstep — any
+// new field added to ProviderView must land in BOTH sites).
+//
+// Returns a non-nil zero-length slice when rows is nil/empty so the
+// JSON encoder emits [] rather than null — matches the existing Wails
+// surface return shape and the frontend ProviderView[] expectation.
+//
+// Usage example:
+//
+//	views := providersToViews([]ImportedProvider{{AuthKey: "sk-…"}})
+//	// views[0].Masked == "sk-…••••••…XXXX"; views[0].AuthKey field absent
+func providersToViews(rows []ImportedProvider) []ProviderView {
+	views := make([]ProviderView, len(rows))
+	for i, p := range rows {
+		views[i] = ProviderView{
+			ID:         p.ID,
+			Source:     p.Source,
+			ProviderID: p.ProviderID,
+			Name:       p.Name,
+			AuthType:   p.AuthType,
+			Present:    p.AuthKey != "",
+			Masked:     maskProviderKey(p.AuthKey),
+		}
+	}
+	return views
 }
 
 // webURL GET /v1/api/opencode/sandbox/:id/web → returns the direct
