@@ -412,6 +412,19 @@ func NewService(opts Options) *Service {
 		coreapi.WithAddr(opts.Addr),
 		coreapi.WithRequestID(),
 		coreapi.WithResponseMeta(),
+		// Mantis #1568 Unit C / Cerberus #16 (2026-05-17) — global
+		// body-cap middleware. Wraps every inbound request body in
+		// http.MaxBytesReader at MaxBodyBytesDefault, with per-prefix
+		// overrides (longest-prefix wins) for routes that need a
+		// different cap (gateway 4 MiB, MCP 256 KiB, health 4 KiB).
+		//
+		// Prepended BEFORE CSP and auth so a 10 MiB POST from an
+		// unauthenticated caller costs ~0 bytes-read instead of full-
+		// body decode + auth verify. Layer 2 of the two-layer model
+		// per RFC.body-cap-middleware.md — Layer 1 stays in-handler
+		// for endpoints needing tighter caps + per-field validation
+		// (capability-grant). Inner-wins by construction.
+		coreapi.WithMiddleware(BodyCapMiddleware(MaxBodyBytesDefault, DefaultBodyCapOverrides)),
 		// Cerberus Mantis #1422 (2026-05-16) — CSP defence-in-depth.
 		//
 		// Primary defence: Lit auto-escapes all interpolated content in

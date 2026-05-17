@@ -73,19 +73,25 @@ type BundleCodeResolver interface {
 	LookupBundleCode(secret string) (string, bool)
 }
 
-// maxGatewayBodyBytes is the upper bound on a single incoming plugin
+// MaxBodyBytes is the upper bound on a single incoming plugin
 // request body. Cerberus Mantis #1435 — without this, a plugin
 // could submit a 10 GiB POST body, ReadAll'd by a scope handler,
 // to OOM the host. 4 MiB is generous (manifest-sized data + room
 // for batched RAG payloads); scope handlers that need bigger bodies
 // declare their cap via a future per-scope override.
 //
+// Exported per RFC.body-cap-middleware.md Amendment A5 (Cerberus #16
+// C-6) — single source of truth, eliminates the duplicate-constant
+// drift risk that v1 of the body-cap RFC nearly shipped. pkg/server's
+// DefaultBodyCapOverrides table sources the gateway cap from this
+// constant directly, so a bump here propagates automatically.
+//
 // The net/http import here is permitted (covered by AX phase 5/5b
 // migrations — gateway is the API boundary, http.MaxBytesReader is
 // the canonical primitive). core.MaxBytesReader would be the
 // preferred CoreGO wrap; tracking as project_corego_export_gaps.md
 // Gap 6 if it becomes a pattern.
-const maxGatewayBodyBytes = 4 << 20 // 4 MiB
+const MaxBodyBytes = 4 << 20 // 4 MiB
 
 // scopeKey composes Scope:Mode for the in-memory handler registry.
 // The same handler can serve multiple modes (e.g. project.metadata:
@@ -283,7 +289,7 @@ func (s *Service) Handle(ctx *gin.Context) {
 	// does ShouldBindJSON / ReadAll / etc. on this body will get
 	// an error past the cap. Stops OOM-by-large-payload attacks
 	// at the boundary, regardless of which handler is dispatched.
-	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxGatewayBodyBytes)
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, MaxBodyBytes)
 
 	// Cerberus #1443 — derive authoritative bundle identity.
 	// Priority: X-Bundle-Token (verified) > Bundle-ID (claimed).

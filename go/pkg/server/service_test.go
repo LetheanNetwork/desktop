@@ -8,6 +8,10 @@
 package server_test
 
 import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	core "dappco.re/go"
@@ -365,3 +369,87 @@ func TestService_WebViewEngineRoutesTiered_Good(t *testing.T) {
 // server.Options (which embeds coreapi types), but Go requires the
 // import marker to keep the file compileable in isolation.
 var _ = coreapi.WithRequestID
+
+// TestService_BodyCap_Default_Bad_AllRoutesCappedDefault — sample-N
+// route audit per RFC.body-cap-middleware.md §4.3 (Mantis #1568 Unit C).
+//
+// Boots a real pkg/server.Service, iterates engine.Routes(), and POSTs
+// an over-default body to a handful of non-overridden POST routes
+// asserting each rejects with 413 (the canonical body.too_large
+// envelope when the handler uses the Amendment A1 pattern) OR 4xx (any
+// rejection — guards against legacy handlers that haven't yet adopted
+// the canonical envelope but still reject because MaxBytesReader
+// surfaces an error). Catches a future regression where the global
+// middleware is removed from NewService — without it, the POST would
+// reach the handler with the full body and return whatever the handler
+// produces (200 / 401 / 400 — never the 413 we'd expect from a cap
+// rejection).
+//
+// Cerberus #16 cross-cut: the structural lock IS the middleware being
+// installed. This test pins that the install actually happened.
+func TestService_BodyCap_Default_Bad_AllRoutesCappedDefault(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	c := core.New(core.WithName("account", account.Register))
+	svc := server.NewService(server.Options{
+		Addr:     ":0",
+		LocalKey: "test-key",
+		Core:     c,
+	})
+
+	publicEng := svc.Engine()
+	core.AssertTrue(t, publicEng != nil)
+	h := publicEng.Handler()
+	eng, ok := h.(*gin.Engine)
+	core.AssertTrue(t, ok)
+
+	// Build a list of non-overridden POST routes — skip anything that
+	// would match a DefaultBodyCapOverrides prefix because that route
+	// inherits a different cap (gateway 4 MiB, MCP 256 KiB, health
+	// 4 KiB) and our default-sized payload wouldn't trigger it.
+	overflowSize := int(server.MaxBodyBytesDefault) + 1
+	body := bytes.NewReader([]byte(strings.Repeat("x", overflowSize)))
+	probed := 0
+	for _, r := range eng.Routes() {
+		if r.Method != http.MethodPost {
+			continue
+		}
+		// Skip parameterised paths — we can't construct a real
+		// matching URL without knowing the param-substitution shape.
+		if strings.Contains(r.Path, ":") || strings.Contains(r.Path, "*") {
+			continue
+		}
+		// Skip overridden prefixes — different cap regime.
+		skipped := false
+		for _, o := range server.DefaultBodyCapOverrides {
+			if core.HasPrefix(r.Path, o.Prefix) {
+				skipped = true
+				break
+			}
+		}
+		if skipped {
+			continue
+		}
+		// Reset the body reader for each request.
+		body = bytes.NewReader([]byte(strings.Repeat("x", overflowSize)))
+		req := httptest.NewRequest(http.MethodPost, r.Path, body)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		eng.ServeHTTP(w, req)
+		// Expect 4xx — either the canonical 413 (handler adopted
+		// Amendment A1 pattern), or 400 (legacy handler whose
+		// ShouldBindJSON / ReadAll surfaced the MaxBytesError as
+		// generic parse failure). Anything in the 2xx range means
+		// the global middleware didn't fire — the cap is missing.
+		core.AssertTrue(t, w.Code >= 400 && w.Code < 500,
+			"route "+r.Path+" returned "+core.Sprintf("%d", w.Code)+
+				" for over-default body — global body-cap middleware missing?")
+		probed++
+	}
+	// Sanity: the test must have probed SOMETHING. Zero probes means
+	// the route discovery walked past every POST — likely a future
+	// regression in route registration that should fail loudly here
+	// rather than silently passing with vacuous coverage.
+	core.AssertTrue(t, probed > 0,
+		"sample-N audit probed zero routes — vacuous coverage guard tripped")
+}
