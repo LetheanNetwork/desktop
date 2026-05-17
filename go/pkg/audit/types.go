@@ -152,6 +152,42 @@ const (
 	// the credential.
 	EventAuthAccountCreated = "auth.account.created"
 
+	// EventAuthAccountSealed fires when pkg/account.Service.Seal
+	// successfully replaces the Create-time marker at
+	// ~/Lethean/account/<id>/private.key with a user-encrypted PGP
+	// envelope via PUT /v1/account/:id/seal (Stage E.A per
+	// plans/code/lthn/desktop/auth-gate/RFC.stage-e-seal.md v2 / Mantis
+	// #1610 / Mantis #1631 H#141 follow-up). Seal-once invariant — the
+	// audit row marks the MARKER → SEALED transition and is the join-key
+	// for the future Stage F log-tailer's seal-event parity-grep.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   path_hash — SHA-256 hex of the canonical account directory path
+	//   version   — sealed-envelope schema version (Stage E.A v2: always 1)
+	//
+	// The canonical encrypted blob is NEVER in Meta per Cerberus #1465
+	// closure-only-scope discipline; this event records the seal-success
+	// decision, not the credential.
+	EventAuthAccountSealed = "auth.account.sealed"
+
+	// EventAuthAccountSealFailed fires when pkg/account.Service.Seal
+	// rejects a seal attempt for any reason (validation, state-conflict,
+	// version-unsupported, write-failure). Sibling of EventAuthAccountSealed
+	// per Stage F.B Phase 1 dual-emit shape.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   reason — categorical failure reason matching the Service.Seal
+	//            recordSealFailure / auditSealFailed taxonomy
+	//            (blob_required / blob_invalid / version_unsupported /
+	//            not_found / already_sealed / write_failed)
+	//
+	// Lockout-tick discipline lives at the caller (recordSealFailure
+	// runs BEFORE this emit when applicable per Cerberus #25 ADD-MED-2);
+	// the audit row reflects the freshly-decremented counter.
+	EventAuthAccountSealFailed = "auth.account.seal_failed"
+
 	// EventPluginViewCapabilityGranted fires when a plugin's iframe
 	// view receives a capability via the host-side broker's postMessage
 	// handshake per plans/code/lthn/desktop/views/RFC.plugin-views.md

@@ -288,13 +288,12 @@ func (s *Service) recordSealFailure(accountID, reason string) {
 // (Stage E.B and Stage X.B mirrors). Recorder failure ignored — audit
 // failures MUST NEVER block the auth path that emitted the event.
 //
-// SECURITY-NOTE (path-allowlist scope, this dispatch): a dedicated
-// audit.EventAuthAccountSealed constant in pkg/audit/types.go would
-// give the parity-grep + Stage F log-tailer a typed surface. This
-// commit lands inside the pkg/account allowlist; the audit-event
-// surface change is tracked as a follow-on so this implementation
-// stays scoped. We emit the literal event-name string so the on-disk
-// shape is correct from the first row.
+// References audit.EventAuthAccountSealed for the typed event-name
+// constant so the parity-grep + Stage F log-tailer have a single
+// surface to bind against (Mantis #1631 H#141 follow-up — replaced the
+// prior literal-string emit). The core.Print debug line still carries
+// the literal for grep-friendly stderr output; the on-disk shape is
+// driven by the constant.
 //
 // Cerberus #25 ADD-MED-3: blob_size_bytes is DROPPED from Meta. The
 // forensic use-case is unnamed; default-omit per Cerberus discipline.
@@ -312,7 +311,7 @@ func (s *Service) auditSealSucceeded(accountID string, version int, root, reques
 		"event=auth.account.sealed account_id=%s ts=%d version=%d\n",
 		accountID, ts, version)
 	_ = audit.Default().Record(audit.Event{
-		Event:     "auth.account.sealed",
+		Event:     audit.EventAuthAccountSealed,
 		AccountID: accountID,
 		TS:        ts,
 		Scope:     "account.seal",
@@ -331,10 +330,9 @@ func (s *Service) auditSealSucceeded(accountID string, version int, root, reques
 // freshly-decremented counter; the call order is asserted by the test
 // substrate via stub.
 //
-// SECURITY-NOTE: same EventAuthAccountSealFailed deferral as
-// auditSealSucceeded — landing the typed const is a follow-on
-// dispatch under a separate ticket so this commit stays inside the
-// pkg/account allowlist.
+// References audit.EventAuthAccountSealFailed for the typed event-name
+// constant — sibling of auditSealSucceeded per the Mantis #1631 H#141
+// follow-up that landed the typed surface.
 //
 // Usage example:
 //
@@ -346,7 +344,7 @@ func (s *Service) auditSealFailed(accountID, reason, requestID string) {
 		"event=auth.account.seal_failed account_id=%s ts=%d reason=%s\n",
 		accountID, now, reason)
 	_ = audit.Default().Record(audit.Event{
-		Event:     "auth.account.seal_failed",
+		Event:     audit.EventAuthAccountSealFailed,
 		AccountID: accountID,
 		TS:        now,
 		Scope:     "account.seal",
