@@ -302,8 +302,9 @@ func TestRunner_GenerateFailed_AuditNoRawBody_Bad(t *core.T) {
 // TestRunner_ChatFailed_AuditNoRawBody_Bad — same shape as the Generate
 // variant but on the Chat (messages-array) emit site. Cerberus #60 F-1
 // flagged BOTH service.go:209 (Generate) AND :304 (Chat); both must
-// route through errorCode() so the redaction is uniform across the
-// inference egress audit cluster.
+// route through audit.ErrorCode() so the redaction is uniform across
+// the inference egress audit cluster. RFC W7 + FOLD-1: substrate canon
+// is "unknown_error" (was local "provider_error").
 func TestRunner_ChatFailed_AuditNoRawBody_Bad(t *core.T) {
 	rec := installRecorder(t)
 	const userInput = "CHAT_USER_TYPED_FORBIDDEN_FRAGMENT"
@@ -329,12 +330,14 @@ func TestRunner_ChatFailed_AuditNoRawBody_Bad(t *core.T) {
 
 // TestRunner_GenerateFailed_AuditHasStableCode_Good — verifies the
 // positive shape: the emitted error_code IS one of the stable Lethean
-// codes from errorCode()'s mapping. Today the failure path through
-// ai.ProviderRouter wraps with Operation="ai.ProviderRouter.Chat" and
-// no Code field, so errorCode() falls back to the Operation string —
-// itself a structured-not-prose identifier from the flat keyspace
-// agents grep on. The point: the value is bounded and predictable, not
-// caller-controlled prose.
+// codes from audit.ErrorCode()'s mapping. Today the failure path
+// through ai.ProviderRouter wraps with Operation="ai.ProviderRouter.Chat"
+// and no Code field, so audit.ErrorCode() falls back to the Operation
+// string — itself a structured-not-prose identifier from the flat
+// keyspace agents grep on. The point: the value is bounded and
+// predictable, not caller-controlled prose. RFC W7 + FOLD-1: substrate
+// canon "unknown_error" replaces the runner-local "provider_error"
+// fallback (was deleted from pkg/runner/service.go in the W7 cutover).
 func TestRunner_GenerateFailed_AuditHasStableCode_Good(t *core.T) {
 	rec := installRecorder(t)
 	providerErr := core.E("ai.openai.provider",
@@ -349,15 +352,17 @@ func TestRunner_GenerateFailed_AuditHasStableCode_Good(t *core.T) {
 	code, ok := events[1].Meta["error_code"].(string)
 	core.AssertTrue(t, ok, "error_code must be a string")
 
-	// Acceptable shapes per errorCode():
+	// Acceptable shapes per audit.ErrorCode():
 	//   - "ai.ProviderRouter.Chat" (outer router Operation — current
 	//     wrap path when the upstream *core.Err has no Code field)
 	//   - "ai.openai.provider"     (inner provider Operation, if a
 	//     future router rewrite preserves the inner *Err)
-	//   - "provider_error"         (generic fallback when neither path)
+	//   - "unknown_error"          (cluster-wide canonical fallback
+	//     per RFC W1 + FOLD-1; substrate replaced runner-local
+	//     "provider_error" in W7).
 	stable := code == "ai.ProviderRouter.Chat" ||
 		code == "ai.openai.provider" ||
-		code == "provider_error"
+		code == "unknown_error"
 	core.AssertTrue(t, stable,
 		"error_code must be one of the stable Lethean codes, got: "+code)
 }

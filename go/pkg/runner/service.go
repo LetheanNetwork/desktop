@@ -238,7 +238,7 @@ func (s *Service) GenerateCtx(ctx context.Context, prompt string) core.Result {
 			Meta: map[string]any{
 				"provider":   provider,
 				"model":      model,
-				"error_code": errorCode(resp),
+				"error_code": audit.ErrorCode(resp),
 			},
 		})
 		return resp
@@ -352,7 +352,7 @@ func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) cor
 			Meta: map[string]any{
 				"provider":   provider,
 				"model":      model,
-				"error_code": errorCode(resp),
+				"error_code": audit.ErrorCode(resp),
 			},
 		})
 		return resp
@@ -394,50 +394,6 @@ func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) cor
 		},
 	})
 	return core.Ok(chat.Text)
-}
-
-// errorCode derives a stable, bounded audit error_code from a failed
-// router Result. Cerberus #60 F-1 / Mantis #1710: upstream providers
-// (e.g. ai.openai.provider) format errors as
-// `core.Sprintf("provider returned HTTP %d: %s", status, body)` where
-// `body` is the raw upstream response — and providers routinely echo
-// USER INPUT in error bodies (OpenAI moderation, vLLM tokenisation,
-// custom proxies). Putting resp.Error() into Meta["error_code"] leaks
-// caller-controlled prompt fragments into the operator forensic log
-// (STRIDE-I / A1 surveillance-shaped surface). This helper guarantees
-// the emitted code is structured-not-prose:
-//
-//  1. If the failure is a *core.Err with Code populated → use Code
-//     (the stable Lethean codespace per result.go Code()).
-//  2. Else if the failure is a *core.Err → use Operation (already
-//     structured, e.g. "ai.openai.provider" / "ai.openai.complete").
-//  3. Else → "provider_error" (generic Lethean stable code).
-//
-// Never returns the raw error string. Mirrors imagetrust.ErrorCode at
-// pkg/imagetrust/types.go:76 — bounded-keyspace discipline applied to
-// the inference egress audit emit.
-//
-// Usage example:
-//
-//	if !resp.OK {
-//	    audit.Default().Record(audit.Event{
-//	        Meta: map[string]any{"error_code": errorCode(resp)},
-//	    })
-//	}
-func errorCode(r core.Result) string {
-	if r.OK {
-		return ""
-	}
-	if code := r.Code(); code != "" {
-		return code
-	}
-	if err, ok := r.Value.(error); ok {
-		var e *core.Err
-		if core.As(err, &e) && e.Operation != "" {
-			return e.Operation
-		}
-	}
-	return "provider_error"
 }
 
 // routerHead returns the (provider, model) identifiers of the first
