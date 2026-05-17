@@ -1015,7 +1015,15 @@ func isCreateMarker(privBytes []byte, accountID string) bool {
 	}
 	pubBytes, _ := pubR.Value.([]byte)
 	expected := []byte(core.SHA256HexString(string(pubBytes)))
-	return bytes.Equal(privBytes, expected)
+	// Cerberus #59 F2 / Mantis #1708 sibling — constant-time compare.
+	// privBytes here is the on-disk private.key content (Create-marker
+	// OR sealed PGP envelope from a prior Seal); expected is the
+	// public-derived marker. Same shape as seal.go's classifier
+	// comparisons; replace bytes.Equal with constantTimeBytesEqual so
+	// the timing-channel discipline is uniform across the marker-vs-blob
+	// classifier surface. See seal.go:constantTimeBytesEqual for the
+	// banned-import exception note + the CoreGO export gap reference.
+	return constantTimeBytesEqual(privBytes, expected)
 }
 
 // auditUnlockNeedsProvision emits the Create-marker distinguishing

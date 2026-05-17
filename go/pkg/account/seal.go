@@ -46,6 +46,7 @@
 package account
 
 import (
+	"crypto/subtle"
 	"net/http"
 
 	core "dappco.re/go"
@@ -103,23 +104,67 @@ func (s *Service) Seal(input SealInput) core.Result {
 	if err := paths.IsValidID(input.AccountID); err != nil {
 		return core.Fail(err)
 	}
+
+	// Cerberus #59 F1 / Mantis #1707 — lockout pre-check BEFORE any
+	// validation gate. Mirrors unlock.go:104-109 so the per-account
+	// lockout counter (ticked by recordSealFailure on validation-failure
+	// paths via ADD-MED-2) actually short-circuits Seal once the
+	// threshold trips. Without this gate, a locked account would still
+	// pass through Seal's validation gates and tick the counter further
+	// — RFC §2.5 promises an account.seal.account_locked / 423 surface
+	// (statusForSealCode line 464) but the codepath was unreachable.
+	//
+	// Cross-flow asymmetry the fix closes (STRIDE-D): Seal failures
+	// ticked the SHARED per-account counter, but only Unlock observed
+	// it. An attacker could spam Seal with malformed blobs to lock the
+	// legitimate user out of Unlock without Seal itself ever surfacing
+	// 423. After this gate the lockout is HONOURED symmetrically — Seal
+	// and Unlock refuse on the same threshold from the same counter.
+	//
+	// NO auditLockoutTriggered re-emit on cooldown-within-window
+	// attempts (mirrors unlock.go:96-103 discipline — trigger event is
+	// reserved for the single transition-attempt; subsequent locked
+	// attempts emit auth.account.seal_failed with reason=account_locked
+	// so the Stage F log-tailer still sees the probe traffic).
+	now := core.Now().UTC().Unix()
+	if locked, unlockAt := s.lockoutState(input.AccountID, now); locked {
+		s.auditSealFailed(input.AccountID, "account_locked", input.RequestID)
+		return core.Fail(core.NewCode(codeAccountSealAccountLocked,
+			core.Sprintf("too many attempts — try again in %d seconds", unlockAt-now)))
+	}
+
 	// Version single-tier enforcement (RFC §2.3). Ticks lockout — a
 	// caller submitting version=2 is either misconfigured or probing.
 	if input.Version != 1 {
-		s.recordSealFailure(input.AccountID, "version_unsupported")
+		if triggered, unlockAt := s.recordSealFailure(input.AccountID, now); triggered {
+			s.auditLockoutTriggered(input.AccountID, unlockAt)
+			s.auditSealFailed(input.AccountID, "account_locked", input.RequestID)
+			return core.Fail(core.NewCode(codeAccountSealAccountLocked,
+				core.Sprintf("too many attempts — try again in %d seconds", unlockAt-now)))
+		}
 		s.auditSealFailed(input.AccountID, "version_unsupported", input.RequestID)
 		return core.Fail(core.NewCode(codeAccountSealVersionUnsupported,
 			"only version=1 sealed envelopes are accepted"))
 	}
 	// Blob length-sane gate (RFC §2.3). Ticks lockout.
 	if len(input.Blob) == 0 {
-		s.recordSealFailure(input.AccountID, "blob_required")
+		if triggered, unlockAt := s.recordSealFailure(input.AccountID, now); triggered {
+			s.auditLockoutTriggered(input.AccountID, unlockAt)
+			s.auditSealFailed(input.AccountID, "account_locked", input.RequestID)
+			return core.Fail(core.NewCode(codeAccountSealAccountLocked,
+				core.Sprintf("too many attempts — try again in %d seconds", unlockAt-now)))
+		}
 		s.auditSealFailed(input.AccountID, "blob_required", input.RequestID)
 		return core.Fail(core.NewCode(codeAccountSealBlobRequired,
 			"blob is required"))
 	}
 	if len(input.Blob) < minSealedBlobBytes {
-		s.recordSealFailure(input.AccountID, "blob_invalid")
+		if triggered, unlockAt := s.recordSealFailure(input.AccountID, now); triggered {
+			s.auditLockoutTriggered(input.AccountID, unlockAt)
+			s.auditSealFailed(input.AccountID, "account_locked", input.RequestID)
+			return core.Fail(core.NewCode(codeAccountSealAccountLocked,
+				core.Sprintf("too many attempts — try again in %d seconds", unlockAt-now)))
+		}
 		s.auditSealFailed(input.AccountID, "blob_invalid", input.RequestID)
 		return core.Fail(core.NewCode(codeAccountSealBlobInvalid,
 			"blob is shorter than the minimum valid PGP-symmetric envelope"))
@@ -141,7 +186,12 @@ func (s *Service) Seal(input SealInput) core.Result {
 	if !curR.OK {
 		// Read error — surface as write_failed so the operator sees
 		// the disk-touch failed without leaking which step.
-		s.recordSealFailure(input.AccountID, "write_failed")
+		if triggered, unlockAt := s.recordSealFailure(input.AccountID, now); triggered {
+			s.auditLockoutTriggered(input.AccountID, unlockAt)
+			s.auditSealFailed(input.AccountID, "account_locked", input.RequestID)
+			return core.Fail(core.NewCode(codeAccountSealAccountLocked,
+				core.Sprintf("too many attempts — try again in %d seconds", unlockAt-now)))
+		}
 		s.auditSealFailed(input.AccountID, "write_failed", input.RequestID)
 		return core.Fail(core.NewCode(codeAccountSealWriteFailed,
 			"reading current private.key state failed: "+curR.Error()))
@@ -166,7 +216,12 @@ func (s *Service) Seal(input SealInput) core.Result {
 		// structurally-impossible state under the Cerberus #1471 leaf
 		// invariant (Create writes public.key BEFORE private.key). Treat
 		// as write_failed so the operator triages the directory.
-		s.recordSealFailure(input.AccountID, "write_failed")
+		if triggered, unlockAt := s.recordSealFailure(input.AccountID, now); triggered {
+			s.auditLockoutTriggered(input.AccountID, unlockAt)
+			s.auditSealFailed(input.AccountID, "account_locked", input.RequestID)
+			return core.Fail(core.NewCode(codeAccountSealAccountLocked,
+				core.Sprintf("too many attempts — try again in %d seconds", unlockAt-now)))
+		}
 		s.auditSealFailed(input.AccountID, "write_failed", input.RequestID)
 		return core.Fail(core.NewCode(codeAccountSealWriteFailed,
 			"reading public.key failed: "+pubR.Error()))
@@ -178,9 +233,9 @@ func (s *Service) Seal(input SealInput) core.Result {
 	//   - bytes match expectedMarker → MARKER state, proceed to seal
 	//   - bytes == input.Blob        → SEALED idempotent retry, return 200 OK
 	//   - bytes ≠ marker AND ≠ blob  → SEALED with different content, 409
-	if !bytesEqual(cur.Body, expectedMarker) {
+	if !constantTimeBytesEqual(cur.Body, expectedMarker) {
 		// SEALED state — distinguish idempotent retry from real conflict.
-		if bytesEqual(cur.Body, input.Blob) {
+		if constantTimeBytesEqual(cur.Body, input.Blob) {
 			// Idempotent retry per Q4 byte-equality. NO lockout-tick.
 			// NO audit-as-failure. Stored sealed_at = current mtime per
 			// Cerberus #26 OBS-1.
@@ -218,8 +273,8 @@ func (s *Service) Seal(input SealInput) core.Result {
 			cur2R := paths.ReadVersion(privatePath)
 			if cur2R.OK {
 				cur2, _ := cur2R.Value.(paths.ReadOutput)
-				if !cur2.Mtime.IsZero() && !bytesEqual(cur2.Body, expectedMarker) {
-					if bytesEqual(cur2.Body, input.Blob) {
+				if !cur2.Mtime.IsZero() && !constantTimeBytesEqual(cur2.Body, expectedMarker) {
+					if constantTimeBytesEqual(cur2.Body, input.Blob) {
 						return core.Ok(SealOutput{
 							AccountID: input.AccountID,
 							SealedAt:  cur2.Mtime.Unix(),
@@ -232,7 +287,12 @@ func (s *Service) Seal(input SealInput) core.Result {
 				}
 			}
 		}
-		s.recordSealFailure(input.AccountID, "write_failed")
+		if triggered, unlockAt := s.recordSealFailure(input.AccountID, now); triggered {
+			s.auditLockoutTriggered(input.AccountID, unlockAt)
+			s.auditSealFailed(input.AccountID, "account_locked", input.RequestID)
+			return core.Fail(core.NewCode(codeAccountSealAccountLocked,
+				core.Sprintf("too many attempts — try again in %d seconds", unlockAt-now)))
+		}
 		s.auditSealFailed(input.AccountID, "write_failed", input.RequestID)
 		return core.Fail(core.NewCode(codeAccountSealWriteFailed,
 			"writing sealed private.key failed: "+writeR.Error()))
@@ -243,13 +303,15 @@ func (s *Service) Seal(input SealInput) core.Result {
 	// the post-write Mtime so the response matches what
 	// paths.ReadVersion(private.key).Mtime returns on subsequent
 	// idempotent retries (seal-once invariant makes mtime the
-	// canonical first-seal-time).
-	now := out.Mtime.Unix()
-	s.auditSealSucceeded(input.AccountID, input.Version, root, input.RequestID, now)
+	// canonical first-seal-time). Distinct from the outer `now`
+	// (request-arrival wall-clock used for lockout arithmetic) — sealedAt
+	// MUST reflect the post-write mtime, not the pre-write timestamp.
+	sealedAt := out.Mtime.Unix()
+	s.auditSealSucceeded(input.AccountID, input.Version, root, input.RequestID, sealedAt)
 
 	return core.Ok(SealOutput{
 		AccountID: input.AccountID,
-		SealedAt:  now,
+		SealedAt:  sealedAt,
 		Version:   input.Version,
 	})
 }
@@ -260,27 +322,43 @@ func (s *Service) Seal(input SealInput) core.Result {
 // shim so the tick-discipline lives in one place and the test substrate
 // has a single spy point.
 //
+// Returns (triggered, unlockAt) per Cerberus #59 F1 / Mantis #1707 — the
+// caller branches on triggered to emit auth.lockout.triggered + return
+// the codeAccountSealAccountLocked 423 response on the SAME attempt
+// that crossed the threshold (mirrors unlock.go:196-206 discipline so
+// the UI never sees "5 remaining" on the moment the user has zero
+// chances left). The previous void return left codeAccountSealAccountLocked
+// dead-code despite four cross-file references implying Seal honoured it.
+//
 // Exempt paths (NO call to this helper — load-bearing):
 //
 //   - account.id.required / invalid_body / id_mismatch — pre-account-bind
 //   - account.not_found — Q2 constraint, NO allocation
 //   - account.seal.already_sealed — legitimate retry path
-//   - account.seal.account_locked — already locked
+//   - account.seal.account_locked — already locked (pre-check fired)
 //
 // Reuses the existing recordFailedAttempt machinery so the per-account
 // lockout window + cooldown stay coherent across unlock failures and
 // seal failures (RFC §5.2: both flows protect the same account
 // substrate; coupling the signal is the right shape).
 //
+// Caller MUST thread `now` from the top of the request handler so the
+// lockoutState pre-check and the recordFailedAttempt tick observe the
+// same wall-clock — divergence here would corrupt the rolling-window
+// arithmetic on millisecond-boundary requests.
+//
 // Usage example:
 //
-//	s.recordSealFailure(input.AccountID, "blob_invalid")
+//	if triggered, unlockAt := s.recordSealFailure(input.AccountID, now); triggered {
+//	    s.auditLockoutTriggered(input.AccountID, unlockAt)
+//	    s.auditSealFailed(input.AccountID, "account_locked", input.RequestID)
+//	    return core.Fail(core.NewCode(codeAccountSealAccountLocked, "..."))
+//	}
 //	s.auditSealFailed(input.AccountID, "blob_invalid", input.RequestID)
 //	return core.Fail(core.NewCode(codeAccountSealBlobInvalid, "..."))
-func (s *Service) recordSealFailure(accountID, reason string) {
-	now := core.Now().UTC().Unix()
-	_, _, _ = s.recordFailedAttempt(accountID, now)
-	_ = reason // reason is captured by the sibling auditSealFailed call
+func (s *Service) recordSealFailure(accountID string, nowUnix int64) (triggered bool, unlockAt int64) {
+	_, triggered, unlockAt = s.recordFailedAttempt(accountID, nowUnix)
+	return triggered, unlockAt
 }
 
 // auditSealSucceeded emits the auth.account.sealed audit row + the
@@ -467,25 +545,40 @@ func statusForSealCode(code string) int {
 	return http.StatusInternalServerError
 }
 
-// bytesEqual is a tiny local shim that names the comparison so the
-// caller's intent is grep-able. core.* doesn't ship a bytes.Equal
-// alias today; the loop body is trivial enough to inline without
-// pulling the stdlib bytes import (which would violate AX-6 in this
-// package's go vet/lint discipline if the package doesn't already
-// import bytes — unlock.go does, but seal.go shouldn't grow the
-// dependency just for one call).
+// constantTimeBytesEqual compares two byte slices in constant time
+// relative to their length. Wraps crypto/subtle.ConstantTimeCompare so
+// the caller's intent ("close the timing oracle on cur.Body vs blob")
+// reads at the call site.
+//
+// Cerberus #59 F2 / Mantis #1708 — the previous early-exit bytewise
+// loop short-circuited on the first mismatched byte, leaking the
+// matched-prefix length as a wall-clock timing signal. Direct exploit
+// strength is low here (expectedMarker is hex(SHA256(public_key)) —
+// derived from a public value, not secret) but the cur.Body vs
+// input.Blob compare narrows the PGP envelope IV/S2K-salt prefix on
+// repeat-seal probes, and the discipline drift vs Cerberus #1699's
+// constantTimeStringEqual (pkg/server/bootstrap_auth.go:59) was the
+// load-bearing reason to mechanise the replacement.
+//
+// crypto/subtle.ConstantTimeCompare returns 1 iff len(a)==len(b) AND
+// the byte slices match; otherwise 0. This wrapper lifts that to a
+// `bool` so it drops in for the existing `if a == b` shape. CoreGO has
+// no ConstantTimeCompare wrapper yet — sibling case of Cerberus #1699's
+// constantTimeStringEqual; surface as a CoreGO export gap so a future
+// stack-wide adoption can fix N+1 sites at once (see
+// project_corego_export_gaps memory).
+//
+// SECURITY-NOTE — the crypto/subtle import is one of the AX-6 banned
+// stdlib set for general use, BUT crypto/subtle has no CoreGO wrapper
+// today and the security-critical primitive cannot be inlined safely
+// (a hand-rolled loop in Go is NOT guaranteed constant-time by the
+// compiler). Same banned-import exception pattern as
+// pkg/server/bootstrap_auth.go:31. Replace this import with the CoreGO
+// wrapper once it lands.
 //
 // Usage example:
 //
-//	if bytesEqual(cur.Body, expectedMarker) { ... }
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+//	if constantTimeBytesEqual(cur.Body, expectedMarker) { ... }
+func constantTimeBytesEqual(a, b []byte) bool {
+	return subtle.ConstantTimeCompare(a, b) == 1
 }

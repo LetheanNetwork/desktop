@@ -503,6 +503,126 @@ func TestRoutes_SealEndpoint_NotFound_404(t *core.T) {
 		"missing account → 404 account.not_found (RFC §2.5)")
 }
 
+// --- Seal — Bad: lockout-state pre-check honoured (Cerberus #59 F1 / Mantis #1707) ---
+//
+// Cerberus #59 F1 found that Service.Seal had NO lockoutState pre-check
+// despite four cross-file references (codeAccountSealAccountLocked,
+// statusForSealCode 423 mapping, RFC §2.5 status table,
+// recordSealFailure docstring exempt-path list) implying it did. The
+// attack lever: a caller probing Seal with malformed bodies ticks the
+// SHARED per-account lockout counter via recordSealFailure ->
+// recordFailedAttempt; without a lockout-state pre-check on the Seal
+// side, the counter overflowed silently for Seal probes and only
+// surfaced 423 on the Unlock-side flow (cross-flow asymmetry — STRIDE-D).
+//
+// The fix mirrors unlock.go:104-109 — a lockoutState pre-check at the
+// top of Seal (after IsValidID, before validation gates) returns
+// codeAccountSealAccountLocked / 423 once the threshold trips. Tests
+// below pin both the locked-out-blocks-seal contract AND the
+// cross-flow lockout symmetry that was the load-bearing bug.
+
+// TestSeal_LockoutStateBlocked_Bad — drive 5 failed seal attempts (the
+// lockoutThreshold), then a 6th attempt MUST return
+// account.seal.account_locked / 423 even though the request shape is
+// otherwise valid. Before the fix, the 6th request would have continued
+// through the validation gates and ticked the counter further; after
+// the fix, the pre-check short-circuits with the typed locked-out
+// response.
+func TestSeal_LockoutStateBlocked_Bad(t *core.T) {
+	_ = homeFixture(t)
+	id, svc := seedMarkerAccount(t)
+
+	threshold, _, _ := subject.LockoutConstantsForTest()
+
+	// Drive `threshold` failures via the version-unsupported branch —
+	// it's a post-IsValidID, post-account-exists validation failure that
+	// ticks the lockout counter per ADD-MED-2. The trigger-attempt
+	// (threshold-th call) emits the locked_out response itself; the
+	// (threshold+1)-th call MUST surface the pre-check rejection.
+	for i := 0; i < threshold; i++ {
+		r := svc.Seal(subject.SealInput{
+			AccountID: id,
+			Version:   2, // unsupported — ticks lockout via recordSealFailure
+			Blob:      fixtureSealBlob(),
+		})
+		core.AssertFalse(t, r.OK, "failed seal attempt MUST reject")
+	}
+
+	// Now the account is locked. A subsequent VALID request (correct
+	// version + valid blob shape) MUST surface 423 account_locked at
+	// the lockoutState pre-check BEFORE any further validation or disk
+	// touch. This is the bug Cerberus #59 F1 named: Seal previously had
+	// no pre-check, so the counter accumulated silently across probe
+	// traffic.
+	r := svc.Seal(subject.SealInput{
+		AccountID: id,
+		Version:   1,
+		Blob:      fixtureSealBlob(),
+	})
+	core.AssertFalse(t, r.OK, "post-threshold Seal MUST reject")
+	core.AssertEqual(t, "account.seal.account_locked", r.Code(),
+		"Cerberus #59 F1: locked account MUST surface account_locked, not 200/blob-pass")
+}
+
+// TestSeal_LockoutCrossFlowAsymmetry_Bad — the load-bearing
+// regression. Drive seal failures until the per-account lockout trips,
+// then a subsequent Unlock call MUST ALSO reject with locked_out. The
+// counter is SHARED across both flows (RFC §5.2: both flows protect the
+// same account substrate; coupling the signal is the right shape), so
+// seal-spam locking out unlock is the symptom that proves the counter
+// is honoured symmetrically.
+//
+// This is the cross-flow asymmetry STRIDE-D finding: before the fix,
+// Seal would tick the shared counter but never check it, while Unlock
+// would check the counter but only honoured its own ticks indirectly
+// (Seal still passed through). An attacker spamming Seal could lock
+// out the legitimate user from Unlock WITHOUT Seal ever surfacing 423
+// to forensics. Post-fix, both flows refuse on the same threshold.
+func TestSeal_LockoutCrossFlowAsymmetry_Bad(t *core.T) {
+	home := homeFixture(t)
+	// Use a REAL encrypted account so Unlock can attempt a meaningful
+	// decrypt path — this proves the lockout pre-check fires BEFORE the
+	// decrypt branch (otherwise a wrong-passphrase / bad-blob would
+	// confound the assertion).
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+
+	threshold, _, _ := subject.LockoutConstantsForTest()
+
+	// Spam Seal with version_unsupported failures — fixtureAccountID
+	// exists on disk (so accountExists gate clears) but Seal will fail
+	// validation each time AND tick the shared lockout counter per
+	// ADD-MED-2. The threshold-th attempt itself triggers + returns the
+	// account_locked response on the SAME call (mirror of unlock-side
+	// trigger discipline at unlock.go:196-206).
+	for i := 0; i < threshold; i++ {
+		r := svc.Seal(subject.SealInput{
+			AccountID: fixtureAccountID,
+			Version:   2,
+			Blob:      fixtureSealBlob(),
+		})
+		core.AssertFalse(t, r.OK, "seal probe MUST fail")
+	}
+
+	// Account is locked from Seal-side probes. A subsequent Unlock with
+	// the CORRECT passphrase MUST reject with locked_out — the counter
+	// is shared, so seal-spam must lock unlock too. Before the
+	// recordSealFailure return-shape extension, the trigger boolean was
+	// dropped on the floor and the cross-flow symmetry held only by
+	// accident (the counter accumulated, lockoutState fired on Unlock
+	// side anyway). Post-fix, the trigger event ALSO emits via Seal's
+	// own auditLockoutTriggered call so the audit log carries a
+	// consistent record of which flow tripped the lockout.
+	rUnlock := svc.Unlock(subject.UnlockInput{
+		AccountID:  fixtureAccountID,
+		Passphrase: fixturePassphrase,
+	})
+	core.AssertFalse(t, rUnlock.OK,
+		"Cerberus #59 F1: seal-side lockout MUST also block unlock (cross-flow symmetry)")
+	core.AssertEqual(t, "account.unlock.locked_out", rUnlock.Code(),
+		"unlock MUST surface its locked_out code (counter is shared per RFC §5.2)")
+}
+
 // TestRoutes_SealEndpoint_AlreadySealed_409 — second PUT with
 // different bytes against an already-sealed account → 409
 // account.seal.already_sealed. Sibling of
