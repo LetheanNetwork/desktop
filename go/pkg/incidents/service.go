@@ -18,6 +18,7 @@ package incidents
 import (
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
+	"dappco.re/lthn/desktop/pkg/recordfile"
 	"gopkg.in/yaml.v3"
 )
 
@@ -93,83 +94,28 @@ func filePath(t core.Time, id string) core.Result {
 	return core.Ok(core.PathJoin(dir.Value.(string), id+".md"))
 }
 
-// parseRecord splits a Trix file into frontmatter + body and decodes
-// the YAML header into an IncidentRecord. The body is stored in the
-// PostMortem field.
+// parseRecord splits a Trix file into frontmatter + body via the
+// shared recordfile.Split helper and decodes the YAML header into an
+// IncidentRecord. The body is stored in the PostMortem field.
 func parseRecord(raw []byte) (IncidentRecord, error) {
-	// Find the closing --- of the frontmatter block.
-	// The file starts with "---\n"; the closing delimiter is the next
-	// "---" on its own line. We scan via byte search rather than the
-	// banned `strings` package.
-	const delim = "---"
-	content := raw
-
-	// Skip the opening ---\n
-	open := []byte("---\n")
-	if len(content) >= len(open) {
-		match := true
-		for i, b := range open {
-			if content[i] != b {
-				match = false
-				break
-			}
-		}
-		if match {
-			content = content[len(open):]
-		}
-	}
-
-	// Find the closing ---
-	closeIdx := -1
-	for i := 0; i < len(content)-3; i++ {
-		if content[i] == '-' && content[i+1] == '-' && content[i+2] == '-' {
-			// Verify it's on its own line (preceded by \n or start)
-			if i == 0 || content[i-1] == '\n' {
-				closeIdx = i
-				break
-			}
-		}
-	}
-
+	fm, body := recordfile.Split(raw)
 	var rec IncidentRecord
-	var body string
-	if closeIdx < 0 {
-		// No closing delimiter — treat entire content as frontmatter.
-		if err := yaml.Unmarshal(content, &rec); err != nil {
-			return IncidentRecord{}, core.E("incidents.parse", "yaml unmarshal", err)
-		}
-	} else {
-		fm := content[:closeIdx]
-		if err := yaml.Unmarshal(fm, &rec); err != nil {
-			return IncidentRecord{}, core.E("incidents.parse", "yaml unmarshal", err)
-		}
-		// Body follows the closing --- and an optional newline.
-		rest := content[closeIdx+3:]
-		if len(rest) > 0 && rest[0] == '\n' {
-			rest = rest[1:]
-		}
-		body = string(rest)
+	if err := yaml.Unmarshal(fm, &rec); err != nil {
+		return IncidentRecord{}, core.E("incidents.parse", "yaml unmarshal", err)
 	}
-	rec.PostMortem = body
+	rec.PostMortem = string(body)
 	return rec, nil
 }
 
-// marshalRecord serialises an IncidentRecord to the Trix file format:
-// YAML frontmatter block followed by the post-mortem markdown body.
+// marshalRecord serialises an IncidentRecord to the Trix file format
+// via the shared recordfile.Stitch helper: YAML frontmatter block
+// followed by the post-mortem markdown body.
 func marshalRecord(r IncidentRecord) ([]byte, error) {
-	// Marshal the struct fields (excluding PostMortem, which is body).
 	fm, err := yaml.Marshal(r)
 	if err != nil {
 		return nil, core.E("incidents.marshal", "yaml marshal", err)
 	}
-	var out []byte
-	out = append(out, []byte("---\n")...)
-	out = append(out, fm...)
-	out = append(out, []byte("---\n")...)
-	if r.PostMortem != "" {
-		out = append(out, []byte(r.PostMortem)...)
-	}
-	return out, nil
+	return recordfile.Stitch(fm, []byte(r.PostMortem)), nil
 }
 
 // relativeTime returns a human-readable relative duration string

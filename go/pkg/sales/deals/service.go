@@ -19,6 +19,7 @@ package deals
 import (
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
+	"dappco.re/lthn/desktop/pkg/recordfile"
 	"gopkg.in/yaml.v3"
 )
 
@@ -193,70 +194,27 @@ func countDeals(dir string) int {
 	return n
 }
 
-// parseRecord splits a Trix file into frontmatter + body and decodes
-// the YAML header into a DealRecord.
+// parseRecord splits a Trix file into frontmatter + body via the
+// shared recordfile.Split helper and decodes the YAML header into a
+// DealRecord. The body is stored in the Notes field.
 func parseRecord(raw []byte) (DealRecord, error) {
-	content := raw
-
-	open := []byte("---\n")
-	if len(content) >= len(open) {
-		match := true
-		for i, b := range open {
-			if content[i] != b {
-				match = false
-				break
-			}
-		}
-		if match {
-			content = content[len(open):]
-		}
-	}
-
-	closeIdx := -1
-	for i := 0; i < len(content)-3; i++ {
-		if content[i] == '-' && content[i+1] == '-' && content[i+2] == '-' {
-			if i == 0 || content[i-1] == '\n' {
-				closeIdx = i
-				break
-			}
-		}
-	}
-
+	fm, body := recordfile.Split(raw)
 	var rec DealRecord
-	var body string
-	if closeIdx < 0 {
-		if err := yaml.Unmarshal(content, &rec); err != nil {
-			return DealRecord{}, core.E("deals.parse", "yaml unmarshal", err)
-		}
-	} else {
-		fm := content[:closeIdx]
-		if err := yaml.Unmarshal(fm, &rec); err != nil {
-			return DealRecord{}, core.E("deals.parse", "yaml unmarshal", err)
-		}
-		rest := content[closeIdx+3:]
-		if len(rest) > 0 && rest[0] == '\n' {
-			rest = rest[1:]
-		}
-		body = string(rest)
+	if err := yaml.Unmarshal(fm, &rec); err != nil {
+		return DealRecord{}, core.E("deals.parse", "yaml unmarshal", err)
 	}
-	rec.Notes = body
+	rec.Notes = string(body)
 	return rec, nil
 }
 
-// marshalRecord serialises a DealRecord to the Trix file format.
+// marshalRecord serialises a DealRecord to the Trix file format via
+// the shared recordfile.Stitch helper.
 func marshalRecord(r DealRecord) ([]byte, error) {
 	fm, err := yaml.Marshal(r)
 	if err != nil {
 		return nil, core.E("deals.marshal", "yaml marshal", err)
 	}
-	var out []byte
-	out = append(out, []byte("---\n")...)
-	out = append(out, fm...)
-	out = append(out, []byte("---\n")...)
-	if r.Notes != "" {
-		out = append(out, []byte(r.Notes)...)
-	}
-	return out, nil
+	return recordfile.Stitch(fm, []byte(r.Notes)), nil
 }
 
 // toDeal converts a DealRecord to the wire type.

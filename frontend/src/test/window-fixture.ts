@@ -52,6 +52,13 @@ export interface MountResult<T extends HTMLElement = LitElement> {
  * without the type-system rejecting non-LitElement-shaped intersections.
  * The body still treats the element as LitElement-like via the
  * `updateComplete` runtime probe, so behaviour is unchanged.
+ *
+ * Callers retain full type-specificity through T — pass an explicit
+ * type argument (`mountWindow<MyElement>(...)`) to get a strongly-typed
+ * `el` handle. Callers that need the stricter LitElement-only contract
+ * (e.g. to assert `el.requestUpdate` / `el.shadowRoot` at compile time)
+ * should use [[mountWindowLit]] instead — it constrains `T extends
+ * LitElement` and asserts the runtime probe succeeded.
  */
 export async function mountWindow<T extends HTMLElement = LitElement>(
   tag: string,
@@ -91,6 +98,41 @@ export async function mountWindow<T extends HTMLElement = LitElement>(
   }
 
   return { host, el };
+}
+
+/**
+ * Strict-LitElement sibling of [[mountWindow]]. Use when the caller
+ * actually has a LitElement subclass and wants the compile-time
+ * guarantee that `el` exposes the full LitElement surface (`updateComplete`,
+ * `requestUpdate`, `shadowRoot`, reactive properties, etc.).
+ *
+ * The body asserts the runtime probe succeeded — if the mounted element
+ * is missing `updateComplete`, this throws rather than silently falling
+ * back to a microtask flush. That throw is the type-safety pay-off:
+ * callers can dot-access LitElement members on `el` without re-narrowing.
+ *
+ * Usage:
+ *
+ *   import type { ChatWindow } from "../chat-window";
+ *   const { el } = await mountWindowLit<ChatWindow>("lthn-chat-window");
+ *   await el.updateComplete;          // typed, no `as` cast
+ *   el.requestUpdate();               // typed, no `as` cast
+ *
+ * Prefer [[mountWindow]] for inline-shape narrowing (`HTMLElement & {
+ * foo: string }`) where the test only cares about a handful of fields.
+ */
+export async function mountWindowLit<T extends LitElement = LitElement>(
+  tag: string,
+  opts: MountOptions = {},
+): Promise<MountResult<T>> {
+  const { host, el } = await mountWindow<HTMLElement & Partial<LitElement>>(tag, opts);
+  if (typeof (el as Partial<LitElement>).updateComplete?.then !== "function") {
+    throw new Error(
+      `mountWindowLit: '${tag}' does not expose LitElement.updateComplete — ` +
+        `use mountWindow() for non-LitElement custom elements`,
+    );
+  }
+  return { host, el: el as T };
 }
 
 /**

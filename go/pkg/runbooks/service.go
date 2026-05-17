@@ -16,6 +16,7 @@ package runbooks
 import (
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
+	"dappco.re/lthn/desktop/pkg/recordfile"
 	"gopkg.in/yaml.v3"
 )
 
@@ -109,72 +110,29 @@ func countMdFiles(dir string) int {
 }
 
 // parseRecord splits a Trix file (slug + raw bytes) into frontmatter
-// + body and decodes the YAML header into a RunbookRecord.
+// + body via the shared recordfile.Split helper and decodes the YAML
+// header into a RunbookRecord. The slug is stamped onto the record
+// because runbooks identify themselves by filename, not by a YAML
+// field.
 func parseRecord(slug string, raw []byte) (RunbookRecord, error) {
-	content := raw
-
-	// Skip the opening ---\n
-	open := []byte("---\n")
-	if len(content) >= len(open) {
-		match := true
-		for i, b := range open {
-			if content[i] != b {
-				match = false
-				break
-			}
-		}
-		if match {
-			content = content[len(open):]
-		}
-	}
-
-	// Find the closing ---
-	closeIdx := -1
-	for i := 0; i < len(content)-3; i++ {
-		if content[i] == '-' && content[i+1] == '-' && content[i+2] == '-' {
-			if i == 0 || content[i-1] == '\n' {
-				closeIdx = i
-				break
-			}
-		}
-	}
-
+	fm, body := recordfile.Split(raw)
 	var rec RunbookRecord
-	var body string
-	if closeIdx < 0 {
-		if err := yaml.Unmarshal(content, &rec); err != nil {
-			return RunbookRecord{}, core.E("runbooks.parse", "yaml unmarshal", err)
-		}
-	} else {
-		fm := content[:closeIdx]
-		if err := yaml.Unmarshal(fm, &rec); err != nil {
-			return RunbookRecord{}, core.E("runbooks.parse", "yaml unmarshal", err)
-		}
-		rest := content[closeIdx+3:]
-		if len(rest) > 0 && rest[0] == '\n' {
-			rest = rest[1:]
-		}
-		body = string(rest)
+	if err := yaml.Unmarshal(fm, &rec); err != nil {
+		return RunbookRecord{}, core.E("runbooks.parse", "yaml unmarshal", err)
 	}
 	rec.Slug = slug
-	rec.Body = body
+	rec.Body = string(body)
 	return rec, nil
 }
 
-// marshalRecord serialises a RunbookRecord to the Trix file format.
+// marshalRecord serialises a RunbookRecord to the Trix file format
+// via the shared recordfile.Stitch helper.
 func marshalRecord(r RunbookRecord) ([]byte, error) {
 	fm, err := yaml.Marshal(r)
 	if err != nil {
 		return nil, core.E("runbooks.marshal", "yaml marshal", err)
 	}
-	var out []byte
-	out = append(out, []byte("---\n")...)
-	out = append(out, fm...)
-	out = append(out, []byte("---\n")...)
-	if r.Body != "" {
-		out = append(out, []byte(r.Body)...)
-	}
-	return out, nil
+	return recordfile.Stitch(fm, []byte(r.Body)), nil
 }
 
 // relativeTime returns a human-readable age string ("2 d", "3 w",
