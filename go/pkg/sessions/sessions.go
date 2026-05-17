@@ -127,6 +127,43 @@ const MaxTagLength = 64
 // 2 is the same threshold every modern search field uses.
 const SearchQueryMin = 2
 
+// MaxSearchScan caps how many session manifest entries a single
+// Search call will iterate before returning partial results.
+// Cerberus H9-verify F5 / Mantis #1538: with no upper bound a user
+// holding ~50k sessions would block the rail's keystroke handler
+// for whole seconds per query; the cap bounds worst-case latency
+// at the cost of completeness. Hits beyond the cap are simply not
+// surfaced and the result is flagged Truncated so the UI can offer
+// "narrow your query" guidance. 5000 is comfortably above any
+// observed user catalogue (top observed ~600) and still finishes
+// well inside the 60ms keystroke budget on cold storage.
+const MaxSearchScan = 5000
+
+// maxSearchScanCurrent is the live cap honoured by Search. Tests
+// shrink it via SetMaxSearchScanForTest so they can prove the cap
+// without populating thousands of sessions on every run. Production
+// code must never touch this var — use the MaxSearchScan constant.
+var maxSearchScanCurrent = MaxSearchScan
+
+// SearchResult is the payload Search returns in core.Result.Value.
+// Hits is the matching SessionInfo slice (possibly empty); Truncated
+// is true when MaxSearchScan was hit before every session was
+// examined — telling the UI to surface "narrow your query" guidance
+// rather than mis-presenting an incomplete list as exhaustive.
+//
+// Usage example:
+//
+//	r := sessions.Search(c, "regex")
+//	if r.OK {
+//		sr := r.Value.(sessions.SearchResult)
+//		_ = sr.Hits       // []SessionInfo
+//		_ = sr.Truncated  // bool
+//	}
+type SearchResult struct {
+	Hits      []SessionInfo `json:"hits"`
+	Truncated bool          `json:"truncated"`
+}
+
 const (
 	groupMessages  = "sessions"
 	groupManifest  = "sessions:manifest"
@@ -734,24 +771,40 @@ func Delete(c *core.Core, id string) core.Result {
 // linear in session count, fine at the typical scale (dozens-to-
 // hundreds of sessions); revisit when stores grow past that.
 //
+// Hardened (Cerberus H9-verify F5 / Mantis #1538): scans no more
+// than MaxSearchScan sessions per call. When the cap is reached
+// the partial hit slice is returned with SearchResult.Truncated
+// set so the UI can surface "narrow your query" guidance.
+//
 // Usage example:
 //
 //	r := sessions.Search(c, "regex")
-//	if r.OK { hits := r.Value.([]SessionInfo); _ = hits }
+//	if r.OK {
+//		sr := r.Value.(sessions.SearchResult)
+//		_ = sr.Hits       // []SessionInfo
+//		_ = sr.Truncated  // bool
+//	}
 func Search(c *core.Core, query string) core.Result {
 	if c == nil {
 		return core.Fail(core.E("sessions.Search", coreNilMessage, nil))
 	}
 	q := core.Trim(query)
 	if q == "" {
-		return List(c)
+		// Empty query is "list everything" — defer to List and wrap
+		// the slice into SearchResult so callers consume one shape.
+		listR := List(c)
+		if !listR.OK {
+			return listR
+		}
+		all, _ := listR.Value.([]SessionInfo)
+		return core.Ok(SearchResult{Hits: all, Truncated: false})
 	}
 	// Cerberus H3 2026-05-16: refuse single-char queries — they
 	// trigger an N+1 disk-walk over every message body of every
 	// session per keystroke. UI debounce + min-length both close
 	// this surface; the backend guard is the load-bearing one.
 	if core.RuneCount(q) < SearchQueryMin {
-		return core.Ok([]SessionInfo{})
+		return core.Ok(SearchResult{Hits: []SessionInfo{}, Truncated: false})
 	}
 	qLow := core.Lower(q)
 
@@ -761,11 +814,21 @@ func Search(c *core.Core, query string) core.Result {
 	}
 	all, ok := listR.Value.([]SessionInfo)
 	if !ok {
-		return core.Ok([]SessionInfo{})
+		return core.Ok(SearchResult{Hits: []SessionInfo{}, Truncated: false})
 	}
 
+	cap := maxSearchScanCurrent
 	out := make([]SessionInfo, 0, len(all))
+	scanned := 0
+	truncated := false
 	for _, info := range all {
+		if scanned >= cap {
+			// Hit the worst-case bound — stop scanning + flag the
+			// result so the UI knows the answer is partial.
+			truncated = true
+			break
+		}
+		scanned++
 		if core.Contains(core.Lower(info.Title), qLow) {
 			out = append(out, info)
 			continue
@@ -785,7 +848,22 @@ func Search(c *core.Core, query string) core.Result {
 			}
 		}
 	}
-	return core.Ok(out)
+	return core.Ok(SearchResult{Hits: out, Truncated: truncated})
+}
+
+// SetMaxSearchScanForTest overrides the live MaxSearchScan cap so a
+// test can prove the truncation path without populating thousands of
+// sessions. The returned restore func MUST be deferred so a failure
+// path doesn't leak the test cap into the next test.
+//
+// Usage example:
+//
+//	defer sessions.SetMaxSearchScanForTest(50)()
+//	// ... populate 60 sessions and assert Truncated:true
+func SetMaxSearchScanForTest(n int) func() {
+	prev := maxSearchScanCurrent
+	maxSearchScanCurrent = n
+	return func() { maxSearchScanCurrent = prev }
 }
 
 // List returns the manifest entries for every session. Order is

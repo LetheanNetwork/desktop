@@ -268,17 +268,23 @@ func (s *WailsService) Delete(id string) core.Result {
 // content. Empty query is equivalent to List(). Drives the chat
 // rail's "find a past conversation by what we discussed" path.
 //
+// Returns a SearchResult (Hits + Truncated). Truncated:true means
+// MaxSearchScan was hit before every session was examined —
+// frontend should surface "narrow your query" guidance rather than
+// presenting the partial list as exhaustive (Mantis #1538).
+//
 // Usage example (TS):
 //
 //	import { Search } from "@desktop/sessions/wailsservice";
-//	const hits = await Search("regex pitfalls");
+//	const sr = await Search("regex pitfalls");
+//	// sr.hits: SessionInfo[], sr.truncated: boolean
 func (s *WailsService) Search(query string) core.Result {
 	r := Search(s.core, query)
 	if !r.OK {
 		return core.Fail(core.E("sessions.WailsService.Search", "search sessions failed", r.Value.(error)))
 	}
-	infos, _ := r.Value.([]SessionInfo)
-	return core.Ok(infos)
+	sr, _ := r.Value.(SearchResult)
+	return core.Ok(sr)
 }
 
 // List returns the session catalogue — one entry per stored

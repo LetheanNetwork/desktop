@@ -549,8 +549,9 @@ func TestSessions_Search_Bad_BelowMinLength(t *core.T) {
 
 	r := sessions.Search(c, "a")
 	core.AssertTrue(t, r.OK, "below-min-length query is OK but returns empty (Cerberus H3)")
-	hits := r.Value.([]sessions.SessionInfo)
-	core.AssertLen(t, hits, 0, "single-char query must return zero hits without scanning")
+	sr := r.Value.(sessions.SearchResult)
+	core.AssertLen(t, sr.Hits, 0, "single-char query must return zero hits without scanning")
+	core.AssertFalse(t, sr.Truncated, "below-min-length never sets Truncated")
 }
 
 func TestSessions_Search_Good_AtMinLengthScans(t *core.T) {
@@ -560,9 +561,9 @@ func TestSessions_Search_Good_AtMinLengthScans(t *core.T) {
 
 	r := sessions.Search(c, "an")
 	core.AssertTrue(t, r.OK)
-	hits := r.Value.([]sessions.SessionInfo)
-	core.AssertLen(t, hits, 1)
-	core.AssertEqual(t, id, hits[0].ID)
+	sr := r.Value.(sessions.SearchResult)
+	core.AssertLen(t, sr.Hits, 1)
+	core.AssertEqual(t, id, sr.Hits[0].ID)
 }
 
 func TestSessions_Snippet_AdversarialInputCapped(t *core.T) {
@@ -694,9 +695,10 @@ func TestSessions_Search_Good_TitleMatch(t *core.T) {
 
 	r := sessions.Search(c, "regex")
 	core.AssertTrue(t, r.OK)
-	hits := r.Value.([]sessions.SessionInfo)
-	core.AssertLen(t, hits, 1, "exactly one title match")
-	core.AssertEqual(t, idAlpha, hits[0].ID)
+	sr := r.Value.(sessions.SearchResult)
+	core.AssertLen(t, sr.Hits, 1, "exactly one title match")
+	core.AssertEqual(t, idAlpha, sr.Hits[0].ID)
+	core.AssertFalse(t, sr.Truncated, "well below cap")
 }
 
 func TestSessions_Search_Good_ContentMatch(t *core.T) {
@@ -707,9 +709,9 @@ func TestSessions_Search_Good_ContentMatch(t *core.T) {
 
 	r := sessions.Search(c, "regex anchor")
 	core.AssertTrue(t, r.OK)
-	hits := r.Value.([]sessions.SessionInfo)
-	core.AssertLen(t, hits, 1, "exactly one content match")
-	core.AssertEqual(t, idAlpha, hits[0].ID)
+	sr := r.Value.(sessions.SearchResult)
+	core.AssertLen(t, sr.Hits, 1, "exactly one content match")
+	core.AssertEqual(t, idAlpha, sr.Hits[0].ID)
 }
 
 func TestSessions_Search_Good_AssistantContentMatch(t *core.T) {
@@ -720,8 +722,8 @@ func TestSessions_Search_Good_AssistantContentMatch(t *core.T) {
 
 	r := sessions.Search(c, "Link headers")
 	core.AssertTrue(t, r.OK)
-	hits := r.Value.([]sessions.SessionInfo)
-	core.AssertLen(t, hits, 1, "assistant-side content must also match")
+	sr := r.Value.(sessions.SearchResult)
+	core.AssertLen(t, sr.Hits, 1, "assistant-side content must also match")
 }
 
 func TestSessions_Search_Good_CaseInsensitive(t *core.T) {
@@ -732,8 +734,8 @@ func TestSessions_Search_Good_CaseInsensitive(t *core.T) {
 	for _, query := range []string{"mixed", "MIXED", "MiXeD"} {
 		r := sessions.Search(c, query)
 		core.AssertTrue(t, r.OK)
-		hits := r.Value.([]sessions.SessionInfo)
-		core.AssertLen(t, hits, 1, "case-insensitive match must find the session for "+query)
+		sr := r.Value.(sessions.SearchResult)
+		core.AssertLen(t, sr.Hits, 1, "case-insensitive match must find the session for "+query)
 	}
 }
 
@@ -745,10 +747,10 @@ func TestSessions_Search_Good_TitleAndContentBoth(t *core.T) {
 
 	r := sessions.Search(c, "regex")
 	core.AssertTrue(t, r.OK)
-	hits := r.Value.([]sessions.SessionInfo)
-	core.AssertLen(t, hits, 2, "title match + content match both surface")
+	sr := r.Value.(sessions.SearchResult)
+	core.AssertLen(t, sr.Hits, 2, "title match + content match both surface")
 	gotIDs := map[string]bool{}
-	for _, h := range hits {
+	for _, h := range sr.Hits {
 		gotIDs[h.ID] = true
 	}
 	core.AssertTrue(t, gotIDs[idTitle])
@@ -762,8 +764,9 @@ func TestSessions_Search_Good_NoMatches(t *core.T) {
 
 	r := sessions.Search(c, "no-such-needle")
 	core.AssertTrue(t, r.OK, "missing matches is success with an empty slice, not failure")
-	hits := r.Value.([]sessions.SessionInfo)
-	core.AssertLen(t, hits, 0)
+	sr := r.Value.(sessions.SearchResult)
+	core.AssertLen(t, sr.Hits, 0)
+	core.AssertFalse(t, sr.Truncated)
 }
 
 func TestSessions_Search_Good_EmptyQueryReturnsAll(t *core.T) {
@@ -775,8 +778,8 @@ func TestSessions_Search_Good_EmptyQueryReturnsAll(t *core.T) {
 	for _, q := range []string{"", "   ", "\t\n"} {
 		r := sessions.Search(c, q)
 		core.AssertTrue(t, r.OK)
-		hits := r.Value.([]sessions.SessionInfo)
-		core.AssertLen(t, hits, 3, "blank query for "+core.Sprintf("%q", q)+" returns every session")
+		sr := r.Value.(sessions.SearchResult)
+		core.AssertLen(t, sr.Hits, 3, "blank query for "+core.Sprintf("%q", q)+" returns every session")
 	}
 }
 
@@ -1114,6 +1117,51 @@ func TestSessions_Search_Good_TitleMatchSkipsMessageRead(t *core.T) {
 
 	r := sessions.Search(c, "alpha")
 	core.AssertTrue(t, r.OK)
-	hits := r.Value.([]sessions.SessionInfo)
-	core.AssertLen(t, hits, 1, "title hit + content hit on the same session = one entry only")
+	sr := r.Value.(sessions.SearchResult)
+	core.AssertLen(t, sr.Hits, 1, "title hit + content hit on the same session = one entry only")
+}
+
+// TestSessions_Search_RespectsMaxScan_Good proves the worst-case bound:
+// Search stops after MaxSearchScan sessions and flags the result
+// Truncated:true instead of marching the full catalogue per keystroke
+// (Mantis #1538 / Cerberus H9-verify F5). Uses SetMaxSearchScanForTest
+// to shrink the cap so the test stays fast rather than populating 5500
+// sessions.
+func TestSessions_Search_RespectsMaxScan_Good(t *core.T) {
+	c := coreFixture(t)
+	defer sessions.SetMaxSearchScanForTest(50)()
+
+	// Populate 60 sessions whose title + body never match "needle"
+	// so the loop has to keep scanning until it hits the cap.
+	const total = 60
+	for i := 0; i < total; i++ {
+		id := sessions.Create(c, core.Sprintf("decoy-%03d", i)).Value.(string)
+		core.AssertTrue(t, sessions.Append(c, id, "user", "irrelevant body").OK)
+	}
+
+	r := sessions.Search(c, "needle")
+	core.AssertTrue(t, r.OK, "Search must succeed even when truncated")
+	sr := r.Value.(sessions.SearchResult)
+	core.AssertTrue(t, sr.Truncated, "scanning past the cap must flip Truncated:true")
+	core.AssertLen(t, sr.Hits, 0, "no decoy matches the query — hits stays empty")
+	core.AssertLessOrEqual(t, len(sr.Hits), 50, "hit count bounded by the cap")
+}
+
+// TestSessions_Search_RespectsMaxScan_BelowCap proves the inverse:
+// a catalogue smaller than the cap MUST return Truncated:false even
+// when zero matches are found — the flag means "ran out of scan
+// budget", not "found nothing".
+func TestSessions_Search_RespectsMaxScan_BelowCap(t *core.T) {
+	c := coreFixture(t)
+	defer sessions.SetMaxSearchScanForTest(50)()
+
+	for i := 0; i < 10; i++ {
+		_ = sessions.Create(c, core.Sprintf("decoy-%03d", i)).Value.(string)
+	}
+
+	r := sessions.Search(c, "needle")
+	core.AssertTrue(t, r.OK)
+	sr := r.Value.(sessions.SearchResult)
+	core.AssertFalse(t, sr.Truncated, "scanned every session inside the cap — Truncated stays false")
+	core.AssertLen(t, sr.Hits, 0)
 }
