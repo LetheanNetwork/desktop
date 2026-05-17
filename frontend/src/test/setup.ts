@@ -24,6 +24,54 @@
 
 import { afterEach, vi } from "vitest";
 
+// localStorage / sessionStorage bridge (Mantis #1575).
+//
+//   Node 22+ exposes an experimental built-in `localStorage` /
+//   `sessionStorage` global stub. The stub is inert unless Node was
+//   started with `--localstorage-file <path>` — accessing any method
+//   raises `TypeError: localStorage.removeItem is not a function`.
+//
+//   Vitest's happy-dom environment bridges Window properties onto
+//   globalThis via `populateGlobal` (node_modules/vitest/.../index.*.js),
+//   but its `getWindowKeys` filter SKIPS any property that already
+//   exists on globalThis unless it's in vitest's hardcoded KEYS list.
+//   `localStorage` is not in KEYS — so Node's broken stub wins and
+//   happy-dom's working Storage instance is never exposed.
+//
+//   Bridge them ourselves: read window.localStorage (happy-dom's real
+//   Storage) and redefine the globals so the tests see the working
+//   instance.
+// Node 22+ exposes an experimental built-in `localStorage` global on
+// globalThis. The stub is inert unless Node was started with
+// `--localstorage-file <path>` — any method call raises
+// `TypeError: localStorage.removeItem is not a function`.
+//
+// Vitest's happy-dom env aliases `window === globalThis`, then bridges
+// happy-dom Window properties onto the global. Its `getWindowKeys`
+// filter (vitest/dist/chunks/index.*.js) skips any key that is already
+// present on globalThis unless it's in vitest's hardcoded KEYS list.
+// `localStorage` is NOT in that list, so Node's broken stub wins and
+// happy-dom's real Storage is unreachable from `window` or
+// `globalThis`.
+//
+// Bridge a working Storage instance ourselves by spinning up a private
+// happy-dom Window and reading its localStorage/sessionStorage out
+// directly (synchronous, no side-effects on the test window). Redefine
+// the broken globals so bare `localStorage` / `sessionStorage` resolve
+// to the working instance.
+import { Window as HappyWindow } from "happy-dom";
+const __lthnStorageWin = new HappyWindow();
+for (const name of ["localStorage", "sessionStorage"] as const) {
+  const storage = __lthnStorageWin[name];
+  if (storage && typeof storage.removeItem === "function") {
+    Object.defineProperty(globalThis, name, {
+      configurable: true,
+      writable: true,
+      value: storage,
+    });
+  }
+}
+
 vi.mock("@wailsio/runtime", () => {
   const any = (source: unknown) => source;
   const array = (element: (source: unknown) => unknown) => (source: unknown) => {
