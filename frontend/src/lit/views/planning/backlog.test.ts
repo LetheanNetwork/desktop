@@ -6,13 +6,13 @@ import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window
 import { projectBacklog } from "./backlog";
 import "./backlog";
 
-// Mock the @desktop/tasks/service module so we can drive _loadFromBackend()
+// Mock the @desktop/tasks/wailsservice module so we can drive _loadFromBackend()
 // under happy-dom. The binding is gitignored (regenerated at build) so we
 // cannot statically import from it — vi.hoisted lifts the mock fn to
 // vi.mock's hoist plane, and tests grab the mock through the hoisted
 // reference. Mirrors the dynamic-import pattern in backlog.ts itself.
 const { tasksListMock } = vi.hoisted(() => ({ tasksListMock: vi.fn() }));
-vi.mock("@desktop/tasks/service", () => ({
+vi.mock("@desktop/tasks/wailsservice", () => ({
   List: tasksListMock,
 }));
 

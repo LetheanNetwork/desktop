@@ -143,7 +143,7 @@ class LthnViewSprints extends LitElement {
    *  Degrades to fixture on binding-missing or backend-rejected. */
   async _loadFromBackend(): Promise<void> {
     try {
-      const svc = await import("@desktop/tasks/service").catch(() => null);
+      const svc = await import("@desktop/tasks/wailsservice").catch(() => null);
       if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
         return;
       }

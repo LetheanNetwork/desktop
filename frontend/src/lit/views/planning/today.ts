@@ -105,14 +105,14 @@ class LthnViewToday extends LitElement {
     void this._loadFromBackend();
   }
 
-  /** Async data loader. Dynamic-imports the @desktop/tasks/service
+  /** Async data loader. Dynamic-imports the @desktop/tasks/wailsservice
    *  binding and rebuilds the `focus` band from open Issues with high
    *  priority. Agenda + shipped stay on fixture until calendar/
    *  activity primitives ship (RFC.runbooks / Mantis #463 follow-ons).
    *  Public-named (single underscore) so tests can drive it. */
   async _loadFromBackend(): Promise<void> {
     try {
-      const svc = await import("@desktop/tasks/service").catch(() => null);
+      const svc = await import("@desktop/tasks/wailsservice").catch(() => null);
       if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
         return;
       }

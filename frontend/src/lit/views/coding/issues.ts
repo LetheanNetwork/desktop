@@ -137,7 +137,7 @@ class LthnViewIssues extends LitElement {
     if (this._loading) return;
     this._loading = true;
     try {
-      const svc = await import("@desktop/tasks/service").catch(() => null);
+      const svc = await import("@desktop/tasks/wailsservice").catch(() => null);
       if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
         return;
       }

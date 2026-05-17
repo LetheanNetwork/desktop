@@ -5,11 +5,11 @@ import type { LitElement } from "lit";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window-fixture";
 import { filterCards } from "./sprints";
 
-vi.mock("@desktop/tasks/service", () => ({
+vi.mock("@desktop/tasks/wailsservice", () => ({
   List: vi.fn(),
 }));
 
-import { List as TasksList } from "@desktop/tasks/service";
+import { List as TasksList } from "@desktop/tasks/wailsservice";
 
 import "./sprints";
 

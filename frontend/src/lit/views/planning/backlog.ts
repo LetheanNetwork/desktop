@@ -8,7 +8,7 @@
 // "this fits the next sprint".
 //
 // Backed by pkg/tasks via the Wails surface. _loadFromBackend()
-// lazy-imports @desktop/tasks/service and pulls open-state Issues
+// lazy-imports @desktop/tasks/wailsservice and pulls open-state Issues
 // when the binding is present; falls back to the fixture array
 // otherwise so dev / headless runs stay useful.
 //
@@ -159,9 +159,9 @@ class LthnViewBacklog extends LitElement {
       // Lazy-import so a missing binding (e.g. happy-dom test runs
       // without the wails3 generated tree) doesn't blow up module
       // load. Same defensive pattern as coding/repos.ts.
-      const svc = await import("@desktop/tasks/service").catch(() => null);
+      const svc = await import("@desktop/tasks/wailsservice").catch(() => null);
       if (!svc || typeof (svc as { List?: unknown }).List !== "function") {
-        console.warn("[backlog] @desktop/tasks/service unavailable — keeping fixture");
+        console.warn("[backlog] @desktop/tasks/wailsservice unavailable — keeping fixture");
         return;
       }
       const r = await (svc as { List: (input: unknown) => Promise<{ Value?: { issues?: BackendIssue[] } }> })

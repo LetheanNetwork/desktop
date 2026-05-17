@@ -3,11 +3,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { mountWindow, expectChromeTitle, isEmbedded } from "../../../test/window-fixture";
 
-vi.mock("@desktop/tasks/service", () => ({
+vi.mock("@desktop/tasks/wailsservice", () => ({
   List: vi.fn(),
 }));
 
-import { List as TasksList } from "@desktop/tasks/service";
+import { List as TasksList } from "@desktop/tasks/wailsservice";
 
 import "./today";
 
