@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 
@@ -115,21 +116,35 @@ func TestMail_AppendLine_DarwinPipeBufFallback_Ugly(t *testing.T) {
 		t.Fatalf("fallback rewrite-merge MUST land the record; threads.md=%s", string(raw))
 	}
 
-	// (b) fallback audit event fired
+	// (b) fallback audit event fired with the typed const + Meta
+	// keys per Mantis #1559 (path_hash + record_size_bytes).
 	mu.Lock()
 	defer mu.Unlock()
 	found := false
 	for _, ev := range saw {
-		if ev.Kind == "paths.append.fell_back_to_rewrite" {
+		if ev.Kind == EventPathsAppendFellBackToRewrite {
 			found = true
 			if ev.FolderSlug != "inbox" {
 				t.Fatalf("fallback event folder: got %q want inbox", ev.FolderSlug)
+			}
+			if ev.Meta == nil {
+				t.Fatalf("fallback event MUST carry Meta map per Mantis #1559; ev=%+v", ev)
+			}
+			if ph, _ := ev.Meta["path_hash"].(string); ph == "" {
+				t.Fatalf("fallback event Meta[path_hash] MUST be non-empty per Mantis #1559; meta=%+v", ev.Meta)
+			}
+			rsRaw, ok := ev.Meta["record_size_bytes"]
+			if !ok {
+				t.Fatalf("fallback event Meta[record_size_bytes] MUST be present per Mantis #1559; meta=%+v", ev.Meta)
+			}
+			if rs, ok := rsRaw.(int); !ok || rs <= 0 {
+				t.Fatalf("fallback event Meta[record_size_bytes] MUST be positive int; got %T=%v", rsRaw, rsRaw)
 			}
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected paths.append.fell_back_to_rewrite event; saw=%v", saw)
+		t.Fatalf("expected %s event; saw=%v", EventPathsAppendFellBackToRewrite, saw)
 	}
 }
 
@@ -438,5 +453,96 @@ func TestMail_Service_StopClearsFolderMu_Good(t *testing.T) {
 	}
 	if len(svc.backoff) != 0 {
 		t.Fatalf("backoff post-Stop: got %d entries, want 0", len(svc.backoff))
+	}
+}
+
+// fakeAuditRecorder is a thread-safe in-memory Recorder for assertion
+// in tests. Captures every Event passed to Record so the test can scan
+// for cross-cascade emissions without spinning the NDJSON file sink.
+//
+// Usage example:
+//
+//	fr := &fakeAuditRecorder{}
+//	audit.SetDefault(fr)
+//	defer audit.SetDefault(nil)
+//	// ... drive code that emits ...
+//	fr.mu.Lock(); defer fr.mu.Unlock()
+//	for _, ev := range fr.events { ... }
+type fakeAuditRecorder struct {
+	mu     sync.Mutex
+	events []audit.Event
+}
+
+func (f *fakeAuditRecorder) Record(ev audit.Event) core.Result {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, ev)
+	return core.Result{OK: true}
+}
+
+// TestMail_AppendLine_FallbackEmitsAuditEvent_Good — Mantis #1561.
+// The W4 fallback path lands the fallback event via TWO channels:
+// (a) the typed MailEvent bus (covered by FallbackUgly above), AND
+// (b) the audit.Default() recorder so cross-cascade dashboards (Stage F
+// log-tailer) see the event without a per-package bridge.
+//
+// Reproduction: install a fake audit Recorder, force the fallback via
+// PipeBufLimit=64, append a record, assert the recorder received an
+// audit.Event with Event=EventPathsAppendFellBackToRewrite + Meta
+// carrying folder_slug + path_hash + record_size_bytes.
+func TestMail_AppendLine_FallbackEmitsAuditEvent_Good(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	c := core.New()
+	svc := NewService(c)
+
+	// Force fallback engagement.
+	paths.SetPipeBufLimitForTest(64)
+	t.Cleanup(func() { paths.SetPipeBufLimitForTest(0) })
+
+	// Install fake recorder so we can assert RecordBatch landed the
+	// event without spinning the NDJSON file sink.
+	fr := &fakeAuditRecorder{}
+	audit.SetDefault(fr)
+	t.Cleanup(func() { audit.SetDefault(nil) })
+
+	rec := makeRec("audit-cascade-1",
+		"Re: Re: Re: subject longer than 64 bytes so the fallback engages on every host")
+	if err := svc.appendThreadRecord("inbox", rec); err != nil {
+		t.Fatalf("appendThreadRecord: %v", err)
+	}
+
+	fr.mu.Lock()
+	defer fr.mu.Unlock()
+	if len(fr.events) == 0 {
+		t.Fatalf("expected at least one audit.Event from fallback path; got none")
+	}
+	var matched *audit.Event
+	for i := range fr.events {
+		if fr.events[i].Event == EventPathsAppendFellBackToRewrite {
+			matched = &fr.events[i]
+			break
+		}
+	}
+	if matched == nil {
+		t.Fatalf("expected audit.Event with Event=%s; got %d events: %+v",
+			EventPathsAppendFellBackToRewrite, len(fr.events), fr.events)
+	}
+	if matched.Outcome != audit.OutcomeOK {
+		t.Fatalf("fallback audit event Outcome: got %q want %q", matched.Outcome, audit.OutcomeOK)
+	}
+	if matched.Scope != "mail.append.fallback" {
+		t.Fatalf("fallback audit event Scope: got %q want %q", matched.Scope, "mail.append.fallback")
+	}
+	if matched.Meta == nil {
+		t.Fatalf("fallback audit event MUST carry Meta map; ev=%+v", matched)
+	}
+	if folder, _ := matched.Meta["folder_slug"].(string); folder != "inbox" {
+		t.Fatalf("fallback audit event Meta[folder_slug]: got %q want inbox", folder)
+	}
+	if ph, _ := matched.Meta["path_hash"].(string); ph == "" {
+		t.Fatalf("fallback audit event Meta[path_hash] MUST be non-empty; meta=%+v", matched.Meta)
+	}
+	if _, ok := matched.Meta["record_size_bytes"]; !ok {
+		t.Fatalf("fallback audit event Meta[record_size_bytes] MUST be present; meta=%+v", matched.Meta)
 	}
 }

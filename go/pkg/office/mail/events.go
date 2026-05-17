@@ -36,24 +36,44 @@ const (
 
 	// EventSessionLocked fires once per lock transition (§6 banner contract).
 	EventSessionLocked = "mail.session.locked"
+
+	// EventPathsAppendFellBackToRewrite fires when appendThreadRecord
+	// trips the Darwin PIPE_BUF size limit and lands the record via
+	// the AtomicWriteWithVersion rewrite-merge fallback instead of
+	// AtomicAppendLine. Cerberus #9 Concern 1.A — on Darwin
+	// (PIPE_BUF=512) this is the NORMAL case for thread records with
+	// long subjects + "Re: Re:" chains, NOT an edge. Distinguishable
+	// from primitive-rejection so dashboards can show "fallback
+	// engaged" vs "primitive rejected, data lost". Promoted from the
+	// in-package fellBackToRewriteCode literal in imap.go (Mantis
+	// #1560) so future cross-package consumers get a typed handle.
+	EventPathsAppendFellBackToRewrite = "paths.append.fell_back_to_rewrite"
 )
 
 // MailEvent is the typed payload for all mail events.
 // Passwords NEVER appear in any field — structural metadata only.
+//
+// Meta carries free-form per-event fields (path_hash, record-size
+// counters, etc.) introduced for Cerberus #9 Concern 1.A's fallback
+// observability per Mantis #1559. Keys are stable strings the audit
+// substrate's redactor sees verbatim — passphrases / token bytes
+// MUST NEVER be placed here.
 //
 // Usage example:
 //
 //	mail.Subscribe(c, func(_ *core.Core, ev mail.MailEvent) {
 //	    _ = ev.Kind
 //	    _ = ev.AccountName
+//	    _ = ev.Meta["path_hash"]
 //	})
 type MailEvent struct {
-	Kind        string    `json:"kind"`
-	AccountName string    `json:"account_name"`
-	FolderSlug  string    `json:"folder_slug,omitempty"`
-	ThreadID    string    `json:"thread_id,omitempty"`
-	Error       string    `json:"error,omitempty"`
-	At          core.Time `json:"at"`
+	Kind        string         `json:"kind"`
+	AccountName string         `json:"account_name"`
+	FolderSlug  string         `json:"folder_slug,omitempty"`
+	ThreadID    string         `json:"thread_id,omitempty"`
+	Error       string         `json:"error,omitempty"`
+	At          core.Time      `json:"at"`
+	Meta        map[string]any `json:"meta,omitempty"`
 }
 
 // Subscribe registers fn to receive all MailEvent payloads emitted by the

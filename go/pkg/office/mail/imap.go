@@ -30,22 +30,13 @@ import (
 	"crypto/tls"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/paths"
 	imapclient "github.com/emersion/go-imap/v2/imapclient"
 	"gopkg.in/yaml.v3"
 
 	imap "github.com/emersion/go-imap/v2"
 )
-
-// fellBackToRewrite is the audit-event code emitted when
-// appendThreadRecord trips the Darwin PIPE_BUF fallback and lands
-// the record via AtomicWriteWithVersion rewrite-merge instead of
-// AtomicAppendLine (Cerberus #9 Concern 1.A). Distinct code keeps
-// the operational visibility: on Darwin this fires for normal-case
-// long-subject messages; on Linux (4 KiB PIPE_BUF) it should be
-// rare. Distinguishable from CodeAppendRecordTooLarge so dashboards
-// can show "fallback engaged" vs "primitive rejected, data lost".
-const fellBackToRewriteCode = "paths.append.fell_back_to_rewrite"
 
 // FetchOnce performs a one-shot IMAP fetch for the given account and folder.
 // Fetches new messages since last_uid_seen, appends to threads.md,
@@ -399,13 +390,52 @@ func (s *Service) appendThreadRecord(folderSlug string, rec MailThreadRecord) er
 			"rewrite-merge fallback failed: "+wr.Error(), nil)
 	}
 	// Audit-event surface so operations can dashboard fallback rate.
-	// Fires via the typed MailEvent bus so the existing subscriber
-	// surface picks it up without a new contract.
+	// Fires via TWO channels (Mantis #1561 — Cerberus #11 cross-cascade
+	// dashboard symmetry):
+	//
+	//   1. Typed MailEvent bus — mail-specific subscribers (the
+	//      existing Subscribe surface) pick it up without a new
+	//      contract.
+	//   2. audit.Default() — lands in ~/Lethean/audit/<date>.ndjson
+	//      alongside paths.write.failed + every other cross-cascade
+	//      event so the Stage F log-tailer surface sees the fallback
+	//      without needing a per-package bridge.
+	//
+	// Meta keys (Mantis #1559): path_hash + record_size_bytes +
+	// pipe_buf_limit. path_hash uses core.SHA256HexString of the file
+	// path — the substrate's HKDF-domain-separated paths.hashPath is
+	// unexported (forward-gap: paths needs an exported HashForAudit
+	// helper so cross-package emitters use the same per-account
+	// domain key the LockEvent path uses). The raw-SHA256 stopgap
+	// keeps the path off the audit log while the proper helper is
+	// landed in a follow-up.
+	recordSize := len(payload)
+	pathHash := core.SHA256HexString(path)
+	if len(pathHash) >= 32 {
+		pathHash = pathHash[:32]
+	}
+	meta := map[string]any{
+		"path_hash":         pathHash,
+		"record_size_bytes": recordSize,
+		"pipe_buf_limit":    paths.PipeBufLimit(),
+	}
 	s.core.ACTION(MailEvent{
-		Kind:       fellBackToRewriteCode,
+		Kind:       EventPathsAppendFellBackToRewrite,
 		FolderSlug: folderSlug,
-		Error:      core.Sprintf("record_bytes=%d pipe_buf_limit=%d", len(payload), paths.PipeBufLimit()),
 		At:         core.Now(),
+		Meta:       meta,
+	})
+	_ = audit.Default().Record(audit.Event{
+		Event:   EventPathsAppendFellBackToRewrite,
+		Scope:   "mail.append.fallback",
+		Outcome: audit.OutcomeOK,
+		TS:      core.Now().UTC().Unix(),
+		Meta: map[string]any{
+			"folder_slug":       folderSlug,
+			"path_hash":         pathHash,
+			"record_size_bytes": recordSize,
+			"pipe_buf_limit":    paths.PipeBufLimit(),
+		},
 	})
 	return nil
 }
