@@ -154,6 +154,35 @@ const (
 //   - pkg/audit/errorcode.go — canonical substrate + Usage example
 //   - plans/code/lthn/desktop/audit/RFC.error-code-cascade.md — full cascade
 //     design, FOLD-1 canonical-fallback ruling, Cerberus #62 DREAD log
+//
+// Requested-emit ordering canon (Mantis #1704 — established 2026-05-17):
+//
+// The Requested row MUST commit BEFORE any policy gate (tier-auth, host-
+// allowlist, lockout-state, rate-limit, capability-resolver, image-allow).
+// Rationale — a probe attempt that the gate denies still leaves a forensic
+// record of caller intent; if Requested fired POST-gate, a denied request
+// would be invisible to the auditor and we lose the attack-walk surface
+// that the audit substrate exists to expose (Cerberus #45 / Mantis #1658
+// Shape A surfacing).
+//
+//   - Requested  — emitted at top of handler, AFTER input parsing succeeds,
+//                  BEFORE any policy gate. Outcome: ok.
+//   - Rejected   — emitted if a policy gate denies. Outcome: denied.
+//                  Carries Meta["reason"] from the package's closed-set.
+//   - Succeeded  — emitted post-handler on the OK path. Outcome: ok.
+//   - Failed     — emitted post-handler on the non-OK path. Outcome: failed
+//                  (or error for an internal/transport class). Carries
+//                  Meta["error_code"] sourced via audit.ErrorCode(r).
+//
+// EventTierReject is the substrate-level Rejected emit for tier-auth gates
+// (Mantis #1758) — it fires BEFORE the per-package Rejected helper would,
+// because tier-auth is the outermost gate. Per-package Rejected helpers
+// fire for package-internal gates (host-allowlist, image-allowlist, etc.).
+//
+// Existing adopters honouring this canon: pkg/runner (Generate/Chat),
+// pkg/sandbox (Spawn/SpawnLong/Kill), pkg/marketplace (Install/Uninstall/
+// Launch/Stop/FetchManifest), pkg/downloader, pkg/gateway, pkg/queue,
+// pkg/sessions, pkg/vi (PRFetch/Probe), pkg/process.
 const (
 	EventAuthUnlockFailed       = "auth.unlock.failed"
 	EventAuthLockoutTriggered   = "auth.lockout.triggered"
@@ -1558,6 +1587,29 @@ const (
 	//               the closure-only-scope discipline. PII-leak canary
 	//               test in pkg/vi/audit_test.go pins this contract.
 	EventViPRTokenLoaded = "vi.pr_fetch.token_loaded"
+
+	// EventViTokenMigrated fires inside pkg/vi.MigrateLegacyTokens once
+	// per provider whose legacy `vi.tokens.<provider>` config literal is
+	// dispatched into the pkg/keys tier-1 substrate under ref
+	// `vi-<provider>` and the legacy literal blanked. Closes the Stage E
+	// at-rest sealing requirement (Mantis #1748): a forensic walker can
+	// correlate "plaintext token disappeared from disk at T" with "the
+	// ciphertext was sealed at T-ε".
+	//
+	// Single-shot per provider — once migrated the source literal is
+	// empty, the scan skips that provider on subsequent calls, so the
+	// row only fires on the actual at-rest mutation tick. Pair with the
+	// existing EventViPRTokenLoaded which fires on every PR-fetch read
+	// regardless of resolution path.
+	//
+	// Meta keys (secret-shape redactor enforced):
+	//
+	//   provider — backend literal (forge / github / closed-set).
+	//   ref      — tier-1 ref the plaintext was sealed under, of shape
+	//              `vi-<provider>`. NEVER the token bytes; ref alone is
+	//              sufficient to walk back to the keys.Service audit
+	//              cluster for the EventKeysTier1Stored partner row.
+	EventViTokenMigrated = "vi.token.migrated"
 
 	// EventViProbeRequested fires when pkg/vi.Probe is about to dispatch
 	// the HTTPS GET to a catalogued site. Sibling of EventViPRFetchRequested.
