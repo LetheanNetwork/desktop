@@ -8,9 +8,10 @@
 package queue
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/orm"
+
+	"dappco.re/lthn/desktop/pkg/auth"
 )
 
 // EnqueueOptions configures an Enqueue call. Most callers use
@@ -67,6 +68,27 @@ func EnqueueWithOptions(c *core.Core, kind string, opts EnqueueOptions) core.Res
 	if kind == "" {
 		return core.Fail(core.E("queue.Enqueue", "kind is required", nil))
 	}
+	// Tier gate (RFC §5.1 row queue + §4.5.1 cascade mechanism).
+	// Phase 1 ALLOW-with-visibility per RFC §9 Q-1: permit the named
+	// tier set including TierInternal so existing intra-Go test seeds
+	// and Go-internal callers continue to land. Renderer-elevation via
+	// kind-string forge (F-pattern B / Mantis #1723) is closed
+	// downstream by the worker reconstructing CallerIdentity from the
+	// captured EnqueuerCaller columns and stamping TierCascade — the
+	// renderer's call lands BUT the dispatched handler sees TierCascade
+	// rather than the trigger's tier. Per-kind PermittedTiers allow-
+	// list ratcheting is Phase 2.
+	id, ok := auth.Require(c, "queue.Service.Enqueue",
+		auth.TierOperator,
+		auth.TierRenderer,
+		auth.TierCascade,
+		auth.TierCron,
+		auth.TierInternal,
+	)
+	if !ok {
+		return core.Fail(core.E("queue.Enqueue",
+			"tier not permitted: "+id.Tier.String(), nil))
+	}
 	// Atomic depth-check + insert. Per-Core named mutex serialises
 	// concurrent Enqueue paths; worker claim mutates Status outside
 	// this lock but only ever lowers pending-count, so reading depth
@@ -99,6 +121,14 @@ func EnqueueWithOptions(c *core.Core, kind string, opts EnqueueOptions) core.Res
 		Project:      opts.Project,
 		IssueID:      opts.IssueID,
 		EnqueuedAt:   now,
+		// Capture enqueuer identity for worker-dispatch reconstruction
+		// (RFC §4.5.1 / Mantis #1731). String-typed columns persist
+		// the CallerIdentity round-trip; the worker rebuilds via
+		// auth.CallerIdentity{Tier: CallerTier(job.EnqueuerTier), ...}
+		// before stamping the dispatch context.
+		EnqueuerTier:    id.Tier.String(),
+		EnqueuerSubject: id.Subject,
+		EnqueuerSource:  id.Source,
 	}
 	if r := orm.Insert(c, &job); !r.OK {
 		return r

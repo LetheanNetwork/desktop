@@ -19,9 +19,10 @@
 package queue
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/orm"
+
+	"dappco.re/lthn/desktop/pkg/auth"
 )
 
 // runWorker is the loop body. Exits when c.Context() cancels —
@@ -144,7 +145,28 @@ func dispatch(c *core.Core, job Job) {
 		markFailed(c, job, "no handler registered for kind: "+job.Kind, now)
 		return
 	}
-	result := action.Run(c.Context(), decodeOptions(job.Payload))
+	// Reconstruct the enqueuer-CallerIdentity from persisted columns
+	// and stamp the dispatch context as TierCascade with the original
+	// Subject + Source preserved (inherit-not-promote per RFC §4.5 /
+	// §4.5.1 / Mantis #1731). The renderer-tier elevation closure: a
+	// renderer Enqueue lands with EnqueuerTier=TierRenderer; worker
+	// stamps the handler's Context as TierCascade carrying the
+	// renderer's Subject. Cascade-rule allow-lists then decide whether
+	// the handler accepts TierCascade triggers — silent privilege
+	// promotion is structurally impossible.
+	//
+	// Cron-registered handlers (wrapped via queue.AsCron at
+	// RegisterKind time) override the TierCascade stamp inside their
+	// own wrapper body — see register.go AsCron. The worker stamps the
+	// dispatch Context unconditionally here; the cron-wrapper sees
+	// that stamp arrive, then replaces it with TierCron via
+	// auth.AsCron before delegating. This keeps the worker's
+	// reconstruction logic ignorant of per-handler tier policy.
+	dispatchCtx := auth.AsCascade(c.Context(),
+		job.EnqueuerSubject,
+		job.EnqueuerSource,
+	)
+	result := action.Run(dispatchCtx, decodeOptions(job.Payload))
 	if !result.OK {
 		markFailed(c, job, result.Error(), core.Now().UTC())
 		return

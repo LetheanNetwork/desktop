@@ -14,6 +14,8 @@ package queue
 
 import (
 	core "dappco.re/go"
+
+	"dappco.re/lthn/desktop/pkg/auth"
 )
 
 // HandlerOptions configures one registered job handler.
@@ -76,6 +78,45 @@ func RegisterKind(c *core.Core, opts HandlerOptions) core.Result {
 	}
 	c.Action(ActionName(opts.Kind), opts.Handler)
 	return core.Ok(opts.Kind)
+}
+
+// AsCron wraps a queue handler so dispatch stamps TierCron on the
+// Context before invoking the wrapped fn. Use at RegisterKind time
+// for handlers that are by-construction cron / scheduler-originated
+// (background backups, periodic reconcile, scheduled cleanups). The
+// wrapper preserves the original handler's signature — only the
+// pre-call side-effect changes the stamped tier.
+//
+// The lthn/desktop equivalent of RFC §4.5.2's auth.AsCron(handler)
+// QueueHandler wrapper. Lives in pkg/queue (not pkg/auth) because the
+// wrapper consumes a queue-handler type (core.ActionHandler, but the
+// queue is the only place that semantically registers
+// "handler-becomes-cron-via-registration"). Naming preserved between
+// substrate (auth.AsCron Context-stamper) and consumer (queue.AsCron
+// handler-wrapper) so cron-aware audits grep both surfaces with the
+// same literal.
+//
+// Per RFC §4.5.2: cron-tasks are by-construction trusted (no IPC
+// origin); the registration site is the trust root. The wrapper makes
+// the trust explicit at the place where humans audit cron
+// registrations. Cascade rules that allow-list TierCron now mean
+// "callers that came through the cron-scheduler entry point" rather
+// than "callers that happen to be intra-Go".
+//
+// Usage example:
+//
+//	queue.RegisterKind(c, queue.HandlerOptions{
+//	    Kind:    "backup.nightly",
+//	    Handler: queue.AsCron(backupHandler),
+//	})
+func AsCron(fn core.ActionHandler) core.ActionHandler {
+	if fn == nil {
+		return nil
+	}
+	return func(ctx core.Context, opts core.Options) core.Result {
+		cronCtx := auth.AsCron(ctx)
+		return fn(cronCtx, opts)
+	}
 }
 
 // Kinds returns every registered job kind (the Core actions

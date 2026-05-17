@@ -88,6 +88,27 @@ type Job struct {
 	// moment yet.
 	StartedAt   core.Time
 	CompletedAt core.Time
+
+	// EnqueuerTier / EnqueuerSubject / EnqueuerSource record the
+	// auth.CallerIdentity captured at Enqueue-time and persisted
+	// alongside the rest of the Job columns. The worker reconstructs
+	// the CallerIdentity from these three fields at dispatch + stamps
+	// the dispatch Context as TierCascade with the original Subject +
+	// Source preserved (inherit-not-promote per RFC §4.5.1 / Mantis
+	// #1731). Cron-registered handlers (queue.AsCron wrapper) override
+	// the stamp to TierCron unconditionally — cron jobs are by-
+	// construction trusted-process; the registration-time wrapper is
+	// the trust root, not the enqueuer.
+	//
+	// Defaults: empty-string columns on backfilled jobs / jobs
+	// enqueued before B3. Caller(c) on an unstamped Core resolves to
+	// TierInternal, so backfilled jobs dispatch under TierInternal
+	// rather than silently inheriting whatever tier the worker
+	// goroutine happens to carry — defense against silent elevation
+	// when the substrate retroactively gates a handler.
+	EnqueuerTier    string
+	EnqueuerSubject string
+	EnqueuerSource  string
 }
 
 // Schema declares the orm shape for Job. Registered in
@@ -119,6 +140,14 @@ func (Job) Schema() orm.Schema {
 		b.Time("enqueued_at")
 		b.Time("started_at")
 		b.Time("completed_at")
+		// Enqueuer-identity columns (RFC §4.5.1 / Mantis #1731). Stored
+		// as strings rather than NotNull-with-default per the same
+		// Memium-zero-value-as-null lesson noted on `attempts` above:
+		// pre-B3 jobs and intra-Go callers stamp empty values; the
+		// worker dispatch path treats empty Tier as TierInternal floor.
+		b.String("enqueuer_tier")
+		b.String("enqueuer_subject")
+		b.String("enqueuer_source")
 		b.Index("status")
 		b.Index("kind")
 		b.Index("scheduled_for")

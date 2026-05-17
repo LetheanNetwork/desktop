@@ -5,6 +5,8 @@ package queue_test
 import (
 	core "dappco.re/go"
 	"dappco.re/go/orm"
+
+	"dappco.re/lthn/desktop/pkg/auth"
 	"dappco.re/lthn/desktop/pkg/queue"
 )
 
@@ -640,6 +642,179 @@ func TestQueue_Worker_FailureMarksFailedWithError(t *core.T) {
 		core.Sleep(20 * core.Millisecond)
 	}
 	t.Fatalf("job never reached StatusFailed")
+}
+
+// TestQueue_Enqueue_PersistsEnqueuerCaller_Good — Enqueue from a
+// TierOperator-stamped Context captures Tier/Subject/Source onto the
+// persisted Job columns (RFC §4.5.1 / Mantis #1731 mechanism). The
+// captured identity round-trips through orm so worker dispatch can
+// reconstruct the caller without re-extracting from a (long-gone)
+// goroutine context.
+func TestQueue_Enqueue_PersistsEnqueuerCaller_Good(t *core.T) {
+	c := newQueueCore(t)
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier:    auth.TierOperator,
+		Subject: "account-snider",
+		Source:  "http-session:LTHN-SESS-1",
+	})
+	t.Cleanup(func() { auth.ClearCaller(c) })
+
+	r := queue.Enqueue(c, "lint", core.NewOptions())
+	core.RequireTrue(t, r.OK)
+	job := r.Value.(queue.Job)
+
+	core.AssertEqual(t, string(auth.TierOperator), job.EnqueuerTier)
+	core.AssertEqual(t, "account-snider", job.EnqueuerSubject)
+	core.AssertEqual(t, "http-session:LTHN-SESS-1", job.EnqueuerSource)
+
+	// orm round-trip: Get(c, id) returns the same persisted values.
+	gr := queue.Get(c, job.ID)
+	core.RequireTrue(t, gr.OK)
+	persisted, _, ok := orm.Detail[queue.Job](gr)
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, string(auth.TierOperator), persisted.EnqueuerTier)
+	core.AssertEqual(t, "account-snider", persisted.EnqueuerSubject)
+	core.AssertEqual(t, "http-session:LTHN-SESS-1", persisted.EnqueuerSource)
+}
+
+// TestQueue_Worker_ReconstructsTierCascade_Good — full round-trip of
+// the §4.5.1 cascade-mechanism: renderer Enqueue persists the
+// renderer-tier identity; worker reconstructs it at dispatch and
+// stamps TierCascade with the original Subject preserved (inherit-
+// not-promote). The handler sees TierCascade rather than TierRenderer
+// — silent privilege promotion is structurally impossible because the
+// dispatch tier is fixed at TierCascade by the worker, not derived
+// from the persisted tier value.
+func TestQueue_Worker_ReconstructsTierCascade_Good(t *core.T) {
+	c := newQueueCore(t)
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier:    auth.TierRenderer,
+		Subject: "account-renderer",
+		Source:  "wails",
+	})
+	t.Cleanup(func() { auth.ClearCaller(c) })
+
+	var seen auth.CallerIdentity
+	var ran core.WaitGroup
+	ran.Add(1)
+	queue.RegisterKind(c, queue.HandlerOptions{
+		Kind: "cascade-probe",
+		Handler: func(ctx core.Context, _ core.Options) core.Result {
+			seen = auth.CallerFromContext(ctx)
+			ran.Done()
+			return core.Ok(nil)
+		},
+	})
+
+	svc := queue.NewService(queue.Options{PollInterval: 30 * core.Millisecond})(c).
+		Value.(*queue.Service)
+	core.RequireTrue(t, svc.OnStart().OK)
+
+	r := queue.Enqueue(c, "cascade-probe", core.NewOptions())
+	core.RequireTrue(t, r.OK)
+
+	done := make(chan struct{})
+	go func() { ran.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-core.After(2 * core.Second):
+		t.Fatalf("cascade-probe handler never ran within 2s")
+	}
+
+	// Tier stamped TierCascade (inherit-not-promote — renderer cannot
+	// drive a handler with renderer-tier authority via Enqueue).
+	core.AssertEqual(t, auth.TierCascade, seen.Tier)
+	// Subject + Source preserved from the renderer trigger so audit
+	// consumers can reconstruct WHO triggered the cascade.
+	core.AssertEqual(t, "account-renderer", seen.Subject)
+	core.AssertEqual(t, "wails", seen.Source)
+}
+
+// TestQueue_AsCron_StampsTierCron_Good — handlers registered via
+// queue.AsCron(...) wrapper see TierCron on dispatch regardless of
+// the worker's TierCascade stamp. The wrapper layer overrides the
+// enqueuer-derived identity with the cron-scheduler trust-root stamp
+// per RFC §4.5.2 — the registration site is the trust root, not the
+// enqueuer or worker.
+func TestQueue_AsCron_StampsTierCron_Good(t *core.T) {
+	c := newQueueCore(t)
+	// Enqueue from an Operator-stamped Context so the worker would
+	// otherwise stamp TierCascade carrying operator Subject; the
+	// AsCron wrapper overrides that.
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier:    auth.TierOperator,
+		Subject: "account-cron-author",
+		Source:  "cli",
+	})
+	t.Cleanup(func() { auth.ClearCaller(c) })
+
+	var seen auth.CallerIdentity
+	var ran core.WaitGroup
+	ran.Add(1)
+	queue.RegisterKind(c, queue.HandlerOptions{
+		Kind: "backup.nightly",
+		Handler: queue.AsCron(func(ctx core.Context, _ core.Options) core.Result {
+			seen = auth.CallerFromContext(ctx)
+			ran.Done()
+			return core.Ok(nil)
+		}),
+	})
+
+	svc := queue.NewService(queue.Options{PollInterval: 30 * core.Millisecond})(c).
+		Value.(*queue.Service)
+	core.RequireTrue(t, svc.OnStart().OK)
+
+	r := queue.Enqueue(c, "backup.nightly", core.NewOptions())
+	core.RequireTrue(t, r.OK)
+
+	done := make(chan struct{})
+	go func() { ran.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-core.After(2 * core.Second):
+		t.Fatalf("backup.nightly handler never ran within 2s")
+	}
+
+	core.AssertEqual(t, auth.TierCron, seen.Tier)
+	// Cron stamp is by-construction subject-less + cron-worker source —
+	// the wrapper replaces both regardless of enqueuer values.
+	core.AssertEqual(t, "", seen.Subject)
+	core.AssertEqual(t, "cron-worker", seen.Source)
+}
+
+// TestQueue_AsCron_NilHandler_Bad — AsCron(nil) returns nil rather
+// than wrapping nothing; defends RegisterKind from a wrapper-around-
+// nil call site silently producing a handler that no-ops on dispatch.
+// The downstream RegisterKind guard ("handler is required") then
+// rejects with a shaped error instead of registering a broken handler.
+func TestQueue_AsCron_NilHandler_Bad(t *core.T) {
+	wrapped := queue.AsCron(nil)
+	if wrapped != nil {
+		t.Fatalf("queue.AsCron(nil): want nil got non-nil")
+	}
+}
+
+// TestQueue_Enqueue_TierRejected_Bad — the substrate gate denies
+// Enqueue when the caller stamps a tier outside the allowed set.
+// Today's allow-set is wide (Operator/Renderer/Cascade/Cron/Internal
+// per RFC §5.1 Phase 1 visibility-first ruling); the only tier that
+// rejects today is TierPlugin (Q-5 substrate-today alias of Renderer
+// at the gate but distinct enum value — Enqueue does NOT allow-list
+// TierPlugin by name to preserve forward-compat clarity once
+// @dappcore/ui plugin-identifier lands and TierPlugin gets per-plugin
+// allow-listing). The rejected enqueue produces a shaped error;
+// callers branch on r.OK as usual.
+func TestQueue_Enqueue_TierRejected_Bad(t *core.T) {
+	c := newQueueCore(t)
+	auth.SetCaller(c, auth.CallerIdentity{
+		Tier:    auth.TierPlugin,
+		Subject: "plugin-x",
+		Source:  "plugin-iframe",
+	})
+	t.Cleanup(func() { auth.ClearCaller(c) })
+
+	r := queue.Enqueue(c, "lint", core.NewOptions())
+	core.AssertFalse(t, r.OK)
 }
 
 // TestQueue_Worker_MissingHandlerFails — enqueueing for a kind
