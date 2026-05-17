@@ -746,6 +746,20 @@ func TestKeys_RefValidator_RejectsTierSuffix_Ugly(t *core.T) {
 	core.AssertTrue(t, svc.PutTier0("alpha.aead", []byte("x")).OK)
 }
 
+// TestKeys_KeyPath_NULByte_Rejected_Bad — refs containing embedded
+// NUL bytes are rejected at the keyPath validator (defensive against
+// C-string truncation path-injection primitives). Cerberus #67 F-3
+// / Mantis #1738.
+func TestKeys_KeyPath_NULByte_Rejected_Bad(t *core.T) {
+	svc := tier0Fixture(t)
+	// Embedded NUL anywhere in the ref MUST Fail — middle, trailing,
+	// leading-after-letter shapes all caught by the same gate.
+	for _, bad := range []string{"valid\x00malicious", "trail\x00", "a\x00b\x00c"} {
+		r := svc.PutTier0(bad, []byte("x"))
+		core.AssertFalse(t, r.OK, "PutTier0 must reject ref with NUL byte")
+	}
+}
+
 // --- KEK provider rotation + invalidation ---
 
 // TestKeys_KEKProviderTier1_Rotation_InvalidatesCache_Good — set

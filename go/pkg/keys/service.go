@@ -1046,6 +1046,9 @@ func keyPath(ref string, t tier) core.Result {
 	if core.Contains(ref, "/") || core.Contains(ref, "\\") || core.HasPrefix(ref, ".") {
 		return core.Fail(core.NewError("keys: ref must not contain path separators or start with '.'"))
 	}
+	if core.Contains(ref, "\x00") {
+		return core.Fail(core.NewError("keys.id_invalid: ref must not contain NUL byte"))
+	}
 	if hasTierSuffix(ref) {
 		return core.Fail(core.NewError("keys.invalid_ref_suffix: ref must not end in .tN.aead (reserved for on-disk tier scheme)"))
 	}
