@@ -14,7 +14,7 @@ import (
 
 func TestGet_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	for _, evil := range []string{
 		"../../wallets/lethean-default",
 		"../keys/account.pgp",
@@ -34,7 +34,7 @@ func TestGet_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 
 func TestUpdateStage_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.UpdateStage(deals.UpdateStageInput{ID: "../../wallets/x", Stage: "engage"})
 	if r.OK {
 		t.Fatal("UpdateStage with traversal ID must reject")
@@ -43,7 +43,7 @@ func TestUpdateStage_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 
 func TestAddActivity_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.AddActivity(deals.AddActivityInput{
 		DealID: "../../wallets/x", K: "call", Who: "x", T: "x",
 	})
@@ -55,7 +55,7 @@ func TestAddActivity_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(deals.CreateInput{
 		Customer: "Heritage Law LLP", AmountPence: 24000,
 		Stage: "engage", Owner: "Snider",
@@ -79,7 +79,7 @@ func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 func TestDealsDir_Mode0700_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	_ = svc.Create(deals.CreateInput{Customer: "X", AmountPence: 1})
 	dir := core.PathJoin(home, "Lethean", "sales", "deals")
 	stat := core.Stat(dir)

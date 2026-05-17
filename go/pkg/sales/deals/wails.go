@@ -90,6 +90,9 @@ func (s *Service) Get(input GetInput) core.Result {
 //	    Stage: "engage", Owner: "Snider",
 //	})
 func (s *Service) Create(input CreateInput) core.Result {
+	if fail, ok := s.assertUnlocked("deals.Create"); !ok {
+		return fail
+	}
 	if input.Customer == "" {
 		return core.Fail(core.E("deals.Create", "customer is required", nil))
 	}
@@ -143,6 +146,9 @@ func (s *Service) Create(input CreateInput) core.Result {
 //	    ID: "202605-DEAL-001", Stage: "propose",
 //	})
 func (s *Service) UpdateStage(input UpdateStageInput) core.Result {
+	if fail, ok := s.assertUnlocked("deals.UpdateStage"); !ok {
+		return fail
+	}
 	if err := paths.IsValidID(input.ID); err != nil {
 		return core.Fail(err)
 	}
@@ -188,6 +194,9 @@ func (s *Service) UpdateStage(input UpdateStageInput) core.Result {
 //	    T: "30-min call · privacy posture, no blockers.",
 //	})
 func (s *Service) AddActivity(input AddActivityInput) core.Result {
+	if fail, ok := s.assertUnlocked("deals.AddActivity"); !ok {
+		return fail
+	}
 	if err := paths.IsValidID(input.DealID); err != nil {
 		return core.Fail(err)
 	}

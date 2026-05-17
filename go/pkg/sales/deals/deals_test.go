@@ -12,9 +12,32 @@ import (
 	"dappco.re/lthn/desktop/pkg/sales/deals"
 )
 
+// stubSessionGate is the test double for the consumer-defined
+// SessionGate interface (RFC.stage-e-unlockgate v2 §4.2 stub shape —
+// mirrors sales/contacts test surface).
+type stubSessionGate struct{ ids []string }
+
+func (s *stubSessionGate) UnlockedAccountIDs() []string { return s.ids }
+
+// newTestSvc constructs a deals.Service pre-wired with a SessionGate
+// reporting one unlocked account so existing write-path tests continue
+// to exercise the success path post-retrofit. Tests that need to
+// drive a locked or nil-gate fail-closed path call NewService directly
+// (or SetSessionGate explicitly with an empty stub).
+//
+// Usage example:
+//
+//	svc := newTestSvc(t)
+//	svc.Create(deals.CreateInput{Customer: "Heritage Law"})
+func newTestSvc(_ *testing.T) *deals.Service {
+	svc := deals.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
+	return svc
+}
+
 func TestCreate_WritesFile_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(deals.CreateInput{
 		Customer:    "Heritage Law LLP",
 		AmountPence: 24000,
@@ -35,7 +58,7 @@ func TestCreate_WritesFile_Good(t *testing.T) {
 
 func TestList_Empty_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.List(deals.ListInput{})
 	if !r.OK {
 		t.Fatalf("List failed: %s", r.Error())
@@ -48,7 +71,7 @@ func TestList_Empty_Good(t *testing.T) {
 
 func TestList_FiltersByStage_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	svc.Create(deals.CreateInput{Customer: "A", Stage: "engage", AmountPence: 10000})
 	svc.Create(deals.CreateInput{Customer: "B", Stage: "qual", AmountPence: 5000})
 
@@ -67,7 +90,7 @@ func TestList_FiltersByStage_Good(t *testing.T) {
 
 func TestUpdateStage_Transitions_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	svc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "engage", AmountPence: 24000})
 
 	// Find the created deal ID via List.
@@ -93,7 +116,7 @@ func TestUpdateStage_Transitions_Good(t *testing.T) {
 
 func TestUpdateStage_InvalidStage_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	svc.Create(deals.CreateInput{Customer: "X", Stage: "engage", AmountPence: 1000})
 
 	lr := svc.List(deals.ListInput{})
@@ -108,7 +131,7 @@ func TestUpdateStage_InvalidStage_Bad(t *testing.T) {
 
 func TestAddActivity_Prepends_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	svc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "engage", AmountPence: 24000})
 
 	lr := svc.List(deals.ListInput{})
@@ -131,7 +154,7 @@ func TestAddActivity_Prepends_Good(t *testing.T) {
 
 func TestGet_ReturnsFullLog_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	svc.Create(deals.CreateInput{Customer: "Heritage Law", Stage: "engage", AmountPence: 24000})
 
 	lr := svc.List(deals.ListInput{})
@@ -152,7 +175,7 @@ func TestGet_ReturnsFullLog_Good(t *testing.T) {
 
 func TestAddActivity_InvalidKind_Bad(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	svc.Create(deals.CreateInput{Customer: "X", Stage: "engage", AmountPence: 1000})
 	lr := svc.List(deals.ListInput{})
 	out := lr.Value.(deals.ListOutput)
@@ -166,7 +189,7 @@ func TestAddActivity_InvalidKind_Bad(t *testing.T) {
 
 func TestCreate_EmptyCustomer_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(deals.CreateInput{Customer: "", Stage: "engage"})
 	if r.OK {
 		t.Fatalf("expected failure for empty customer, got OK")
@@ -179,7 +202,7 @@ func TestCreate_EmptyCustomer_Ugly(t *testing.T) {
 // primitive; ReadVersion confirms the on-disk file carries the same.
 func TestAtomicCutover_Deals_Create_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	r := svc.Create(deals.CreateInput{
 		Customer:    "Heritage Law LLP",
 		AmountPence: 24000,
@@ -209,7 +232,7 @@ func TestAtomicCutover_Deals_Create_Good(t *testing.T) {
 // the stored version monotonically (1 → 2).
 func TestAtomicCutover_Deals_Update_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	cr := svc.Create(deals.CreateInput{
 		Customer: "Stannard & Co", AmountPence: 44000, Stage: "engage", Owner: "Snider",
 	})
@@ -252,7 +275,7 @@ func TestAtomicCutover_Deals_Update_Good(t *testing.T) {
 // VersionStale → wrapped as ConflictEnvelope by deals.writeRecord.
 func TestAtomicCutover_Deals_Update_VersionStale_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	cr := svc.Create(deals.CreateInput{
 		Customer: "Pemberton Capital", AmountPence: 62000, Stage: "engage",
 	})
@@ -347,7 +370,7 @@ func TestAtomicCutover_Deals_Update_VersionStale_Ugly(t *testing.T) {
 // an unconditional first-write that stamps version=1.
 func TestAtomicCutover_Deals_LegacyFile_Ugly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	dirR := core.UserHomeDir()
 	if !dirR.OK {
 		t.Fatalf("UserHomeDir: %s", dirR.Error())
@@ -387,7 +410,7 @@ func TestAtomicCutover_Deals_LegacyFile_Ugly(t *testing.T) {
 // sales/deals/* falls under AuditModeBatch per RFC §6.1.
 func TestAtomicCutover_Deals_AuditEmissionRecordBatch_Good(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	svc := deals.NewService(nil)
+	svc := newTestSvc(t)
 	paths.SetAuditSecretProvider(func() []byte {
 		return []byte("deals-cutover-test-secret-32-byte")
 	})
@@ -422,5 +445,227 @@ func TestAtomicCutover_Deals_AuditEmissionRecordBatch_Good(t *testing.T) {
 	mode := paths.AuditModeForPath(fpath)
 	if mode != paths.AuditModeBatch {
 		t.Fatalf("expected AuditModeBatch for sales/deals path, got %v", mode)
+	}
+}
+
+// ---- SessionGate retrofit (RFC.stage-e-unlockgate v2 §4.2 / Mantis #1613 B.2)
+
+// TestDeals_NilGate_WarnsOnce_FailsClosed — a Service constructed
+// without SetSessionGate fails-closed on writes. Second + third writes
+// continue to fail-closed (one-shot warn semantics — the second call
+// must remain quiet but its caller-visible result must be the same
+// fail-closed shape).
+func TestDeals_NilGate_WarnsOnce_FailsClosed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := deals.NewService(nil) // NO SetSessionGate — exercises §2.2 fail-safe.
+
+	r1 := svc.Create(deals.CreateInput{Customer: "Heritage Law LLP", AmountPence: 10000, Stage: "engage"})
+	if r1.OK {
+		t.Fatal("expected Create to fail-closed when gate is nil")
+	}
+	if !core.Contains(r1.Error(), "deals.session.locked") {
+		t.Fatalf("expected deals.session.locked on first Create, got %q", r1.Error())
+	}
+
+	// Second write — nilWarned already true; CompareAndSwap returns
+	// false and core.Warn is NOT called again. Behaviour from the
+	// caller's perspective: same fail-closed result.
+	r2 := svc.UpdateStage(deals.UpdateStageInput{ID: "202605-DEAL-001", Stage: "propose"})
+	if r2.OK {
+		t.Fatal("expected UpdateStage to fail-closed when gate is nil")
+	}
+	if !core.Contains(r2.Error(), "deals.session.locked") {
+		t.Fatalf("expected deals.session.locked on UpdateStage, got %q", r2.Error())
+	}
+
+	// Third write — same fail-closed behaviour persists across method
+	// shapes (AddActivity).
+	r3 := svc.AddActivity(deals.AddActivityInput{DealID: "202605-DEAL-001", K: "call", Who: "you", T: "x"})
+	if r3.OK {
+		t.Fatal("expected AddActivity to fail-closed when gate is nil")
+	}
+	if !core.Contains(r3.Error(), "deals.session.locked") {
+		t.Fatalf("expected deals.session.locked on AddActivity, got %q", r3.Error())
+	}
+}
+
+// TestDeals_UnlockedGate_AllowsCreate — Create succeeds when the
+// live-read gate reports at least one unlocked account.
+func TestDeals_UnlockedGate_AllowsCreate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := deals.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	r := svc.Create(deals.CreateInput{
+		Customer: "Heritage Law LLP", AmountPence: 24000, Stage: "engage",
+	})
+	if !r.OK {
+		t.Fatalf("Create should succeed with gate reporting unlocked acct, got: %s", r.Error())
+	}
+}
+
+// TestDeals_UnlockedGate_AllowsUpdateStage — UpdateStage succeeds when
+// the live-read gate reports at least one unlocked account.
+func TestDeals_UnlockedGate_AllowsUpdateStage(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := deals.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	cr := svc.Create(deals.CreateInput{
+		Customer: "Heritage Law LLP", AmountPence: 24000, Stage: "engage",
+	})
+	if !cr.OK {
+		t.Fatalf("seed Create failed: %s", cr.Error())
+	}
+	id := cr.Value.(deals.Deal).ID
+	ur := svc.UpdateStage(deals.UpdateStageInput{ID: id, Stage: "propose"})
+	if !ur.OK {
+		t.Fatalf("UpdateStage should succeed with gate reporting unlocked acct, got: %s", ur.Error())
+	}
+}
+
+// TestDeals_UnlockedGate_AllowsAddActivity — AddActivity succeeds when
+// the live-read gate reports at least one unlocked account.
+func TestDeals_UnlockedGate_AllowsAddActivity(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := deals.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
+
+	cr := svc.Create(deals.CreateInput{
+		Customer: "Heritage Law LLP", AmountPence: 24000, Stage: "engage",
+	})
+	if !cr.OK {
+		t.Fatalf("seed Create failed: %s", cr.Error())
+	}
+	id := cr.Value.(deals.Deal).ID
+	ar := svc.AddActivity(deals.AddActivityInput{
+		DealID: id, K: "call", Who: "you", T: "30-min privacy chat",
+	})
+	if !ar.OK {
+		t.Fatalf("AddActivity should succeed with gate reporting unlocked acct, got: %s", ar.Error())
+	}
+}
+
+// TestDeals_LockedGate_FailsCreate_session_locked — Create rejects when
+// the live-read gate reports zero unlocked accounts.
+func TestDeals_LockedGate_FailsCreate_session_locked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := deals.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.Create(deals.CreateInput{
+		Customer: "Heritage Law LLP", AmountPence: 24000, Stage: "engage",
+	})
+	if r.OK {
+		t.Fatal("expected Create to be rejected when gate reports zero unlocked accounts")
+	}
+	if !core.Contains(r.Error(), "deals.session.locked") {
+		t.Fatalf("expected deals.session.locked, got %q", r.Error())
+	}
+}
+
+// TestDeals_LockedGate_FailsUpdateStage_session_locked — UpdateStage
+// rejects when the live-read gate reports zero unlocked accounts. The
+// gate fires BEFORE the IsValidID check + filesystem read, so the
+// session.locked code surfaces in preference to any later error.
+func TestDeals_LockedGate_FailsUpdateStage_session_locked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Seed a record while unlocked, then flip to locked + try to update.
+	svc := newTestSvc(t)
+	cr := svc.Create(deals.CreateInput{
+		Customer: "Heritage Law LLP", AmountPence: 24000, Stage: "engage",
+	})
+	if !cr.OK {
+		t.Fatalf("seed Create failed: %s", cr.Error())
+	}
+	id := cr.Value.(deals.Deal).ID
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.UpdateStage(deals.UpdateStageInput{ID: id, Stage: "propose"})
+	if r.OK {
+		t.Fatal("expected UpdateStage to be rejected when gate reports zero unlocked accounts")
+	}
+	if !core.Contains(r.Error(), "deals.session.locked") {
+		t.Fatalf("expected deals.session.locked, got %q", r.Error())
+	}
+}
+
+// TestDeals_LockedGate_FailsAddActivity_session_locked — AddActivity
+// rejects when the live-read gate reports zero unlocked accounts.
+func TestDeals_LockedGate_FailsAddActivity_session_locked(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := newTestSvc(t)
+	cr := svc.Create(deals.CreateInput{
+		Customer: "Heritage Law LLP", AmountPence: 24000, Stage: "engage",
+	})
+	if !cr.OK {
+		t.Fatalf("seed Create failed: %s", cr.Error())
+	}
+	id := cr.Value.(deals.Deal).ID
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.AddActivity(deals.AddActivityInput{
+		DealID: id, K: "call", Who: "you", T: "30-min call",
+	})
+	if r.OK {
+		t.Fatal("expected AddActivity to be rejected when gate reports zero unlocked accounts")
+	}
+	if !core.Contains(r.Error(), "deals.session.locked") {
+		t.Fatalf("expected deals.session.locked, got %q", r.Error())
+	}
+}
+
+// TestDeals_StopNilsGate — Stop() severs the SessionGate; subsequent
+// writes fail-closed even though the gate WAS wired (Cerberus #27
+// ADD-5 — Stop drain hygiene mirrors mail + contacts).
+func TestDeals_StopNilsGate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := newTestSvc(t) // gate wired with unlocked stub
+
+	// Pre-Stop: write succeeds.
+	if r := svc.Create(deals.CreateInput{
+		Customer: "Heritage Law LLP", AmountPence: 24000, Stage: "engage",
+	}); !r.OK {
+		t.Fatalf("Create should succeed pre-Stop, got: %s", r.Error())
+	}
+
+	// Stop nils the gate reference.
+	if r := svc.Stop(core.Background()); !r.OK {
+		t.Fatalf("Stop should succeed, got: %s", r.Error())
+	}
+
+	// Post-Stop: write fails-closed via the nil-gate path.
+	r := svc.Create(deals.CreateInput{
+		Customer: "Stannard & Co", AmountPence: 44000, Stage: "engage",
+	})
+	if r.OK {
+		t.Fatal("expected Create to fail-closed after Stop nils the gate")
+	}
+	if !core.Contains(r.Error(), "deals.session.locked") {
+		t.Fatalf("expected deals.session.locked, got %q", r.Error())
+	}
+}
+
+// TestDeals_LockedGate_ReadStillWorks — List + Get are not gated by
+// the session-lock (RFC §3.1 — reads stay open while locked).
+func TestDeals_LockedGate_ReadStillWorks(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Seed unlocked, then flip to locked.
+	svc := newTestSvc(t)
+	cr := svc.Create(deals.CreateInput{
+		Customer: "Heritage Law LLP", AmountPence: 24000, Stage: "engage",
+	})
+	if !cr.OK {
+		t.Fatalf("seed Create failed: %s", cr.Error())
+	}
+	id := cr.Value.(deals.Deal).ID
+	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
+
+	r := svc.List(deals.ListInput{})
+	if !r.OK {
+		t.Fatalf("List should succeed when session locked, got: %s", r.Error())
+	}
+	if g := svc.Get(deals.GetInput{ID: id}); !g.OK {
+		t.Fatalf("Get should succeed when session locked, got: %s", g.Error())
 	}
 }
