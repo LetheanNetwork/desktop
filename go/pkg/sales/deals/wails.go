@@ -21,7 +21,7 @@ import (
 //	r := svc.List(deals.ListInput{Stage: "engage"})
 //	if r.OK { out := r.Value.(deals.ListOutput) }
 func (s *Service) List(input ListInput) core.Result {
-	records, err := loadAll()
+	records, err := s.loadAll()
 	if err != nil {
 		return core.Fail(core.E("deals.List", "scan failed", err))
 	}
@@ -72,8 +72,16 @@ func (s *Service) Get(input GetInput) core.Result {
 	if err := paths.IsValidID(input.ID); err != nil {
 		return core.Fail(err)
 	}
-	rec, err := loadOne(input.ID)
+	rec, err := s.loadOne(input.ID)
 	if err != nil {
+		// Stage E.D.B.1: surface session.locked through to the caller
+		// so the frontend distinguishes "encrypted record, unlock to
+		// read" from a true not-found. The error wrapping preserves
+		// the underlying typed code (recordfile.atrest.* /
+		// deals.session.locked) via core.E's chain.
+		if core.Contains(err.Error(), "session.locked") {
+			return core.Fail(core.E("deals.Get", "deals.session.locked", err))
+		}
 		return core.Fail(core.E("deals.Get", "not found: "+input.ID, err))
 	}
 	now := core.Now()
@@ -129,7 +137,10 @@ func (s *Service) Create(input CreateInput) core.Result {
 
 	// Cascade W1 (Mantis #1540) — Create is an unconditional first-write
 	// (ifVersion=0). writeRecord stamps Version=1 into the marshalled body.
-	if wr := writeRecord(rec, dir, 0); !wr.OK {
+	// Stage E.D.B.1: routes through AtRestWriter when the SessionGate is
+	// wired (encrypted .lthn) and falls back to plaintext .md for
+	// test fixtures that haven't called SetSessionGate.
+	if wr := s.writeRecord(rec, dir, 0); !wr.OK {
 		return wr
 	}
 
@@ -162,8 +173,11 @@ func (s *Service) UpdateStage(input UpdateStageInput) core.Result {
 	}
 	dir := dirR.Value.(string)
 
-	rec, err := loadOne(input.ID)
+	rec, err := s.loadOne(input.ID)
 	if err != nil {
+		if core.Contains(err.Error(), "session.locked") {
+			return core.Fail(core.E("deals.UpdateStage", "deals.session.locked", err))
+		}
 		return core.Fail(core.E("deals.UpdateStage", "not found: "+input.ID, err))
 	}
 
@@ -176,7 +190,7 @@ func (s *Service) UpdateStage(input UpdateStageInput) core.Result {
 	// (legacy file) skips the check and stamps Version=1 on the upgrade.
 	// Conflict-path returns core.Fail(paths.ConflictEnvelope{...})
 	// directly via writeRecord (Mantis #1544 gating W2).
-	if wr := writeRecord(rec, dir, priorVersion); !wr.OK {
+	if wr := s.writeRecord(rec, dir, priorVersion); !wr.OK {
 		return wr
 	}
 
@@ -211,8 +225,11 @@ func (s *Service) AddActivity(input AddActivityInput) core.Result {
 	}
 	dir := dirR.Value.(string)
 
-	rec, err := loadOne(input.DealID)
+	rec, err := s.loadOne(input.DealID)
 	if err != nil {
+		if core.Contains(err.Error(), "session.locked") {
+			return core.Fail(core.E("deals.AddActivity", "deals.session.locked", err))
+		}
 		return core.Fail(core.E("deals.AddActivity", "not found: "+input.DealID, err))
 	}
 
@@ -235,7 +252,7 @@ func (s *Service) AddActivity(input AddActivityInput) core.Result {
 	// UpdateStage. Activity-log appends are still record-level writes.
 	// Conflict-path returns core.Fail(paths.ConflictEnvelope{...})
 	// directly via writeRecord (Mantis #1544 gating W2).
-	if wr := writeRecord(rec, dir, priorVersion); !wr.OK {
+	if wr := s.writeRecord(rec, dir, priorVersion); !wr.OK {
 		return wr
 	}
 

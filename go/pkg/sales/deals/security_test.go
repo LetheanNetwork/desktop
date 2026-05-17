@@ -52,6 +52,11 @@ func TestAddActivity_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 	}
 }
 
+// TestCreate_FileMode0600_Cerberus1487 — Stage E.D.B.1: file extension
+// shifts from .md to .lthn (PGP-encrypted envelope) per RFC.stage-e-
+// encrypt-at-rest v2 §2.3. The 0o600 owner-only POSIX-mode invariant
+// from #1487 PR-1 is unchanged — the substrate's pathsAtomicAdapter
+// passes Mode=0o600 verbatim to paths.AtomicWriteWithVersion.
 func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -64,7 +69,7 @@ func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 		t.Fatalf("Create failed: %s", r.Error())
 	}
 	d := r.Value.(deals.Deal)
-	fpath := core.PathJoin(home, "Lethean", "sales", "deals", d.ID+".md")
+	fpath := core.PathJoin(home, "Lethean", "sales", "deals", d.ID+".lthn")
 	stat := core.Stat(fpath)
 	if !stat.OK {
 		t.Fatalf("stat(%s) failed: %s", fpath, stat.Error())
