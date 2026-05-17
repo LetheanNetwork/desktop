@@ -94,6 +94,9 @@ func (s *Service) Get(id string) core.Result {
 //	r := svc.Create(audience.CreateInput{Name: "Local-AI developers", Src: "signup-tagged"})
 //	if r.OK { seg := r.Value.(audience.Segment) }
 func (s *Service) Create(input CreateInput) core.Result {
+	if fail, ok := s.assertUnlocked("audience.Create"); !ok {
+		return fail
+	}
 	if input.Name == "" {
 		return core.Fail(core.E("audience.Create", "name is required", nil))
 	}
@@ -149,6 +152,9 @@ func (s *Service) Create(input CreateInput) core.Result {
 //	r := svc.Update(audience.UpdateInput{ID: "local-ai-developers", N: 5000})
 //	if r.OK { seg := r.Value.(audience.Segment) }
 func (s *Service) Update(input UpdateInput) core.Result {
+	if fail, ok := s.assertUnlocked("audience.Update"); !ok {
+		return fail
+	}
 	if err := paths.IsValidID(input.ID); err != nil {
 		return core.Fail(err)
 	}

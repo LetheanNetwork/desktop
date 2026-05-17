@@ -15,6 +15,8 @@ import (
 func TestGet_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	svc := audience.NewService(nil)
+	// Get is a read — gate not required. Left ungated to keep the
+	// assertion focused on the path-traversal rejection.
 	for _, evil := range []string{
 		"../../wallets/lethean-default",
 		"..",
@@ -34,6 +36,9 @@ func TestGet_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 func TestUpdate_PathTraversal_Bad_Cerberus1486(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	svc := audience.NewService(nil)
+	// Wire the gate so the assertion exercises the path-traversal
+	// rejection rather than the session-locked fail-closed path.
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
 	r := svc.Update(audience.UpdateInput{ID: "../../wallets/x", N: 1})
 	if r.OK {
 		t.Fatal("Update with traversal ID must reject")
@@ -44,6 +49,7 @@ func TestCreate_FileMode0600_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	svc := audience.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
 	r := svc.Create(audience.CreateInput{Name: "Local AI devs", Src: "signup", N: 100})
 	if !r.OK {
 		t.Fatalf("Create failed: %s", r.Error())
@@ -95,6 +101,7 @@ func TestAudienceDir_Mode0700_Cerberus1487(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	svc := audience.NewService(nil)
+	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
 	_ = svc.Create(audience.CreateInput{Name: "x", Src: "x"})
 	dir := core.PathJoin(home, "Lethean", "marketing", "audience")
 	stat := core.Stat(dir)
