@@ -158,6 +158,7 @@ class LthnChatWindow extends LitElement {
     navIndex: { state: true },
     atBottom: { state: true },
     contentMatchedIds: { state: true },
+    searchTruncated: { state: true },
     systemPromptDraft: { state: true },
     tagsDraft: { state: true },
     tagFilter: { state: true },
@@ -224,6 +225,14 @@ class LthnChatWindow extends LitElement {
    *  conversations by what was discussed inside them, not just by
    *  title. State-only, reset on every query change. */
   declare contentMatchedIds: Set<string>;
+  /** True when the most recent sessions.Search response carried
+   *  truncated:true — the backend hit MaxSearchScan (5000) before
+   *  examining every session, so the surfaced hits may be partial.
+   *  Drives a small inline banner under the rail-search input that
+   *  tells the user to narrow their query for full results. Reset on
+   *  every new query + on empty-query clears. Mantis #1571 LOW —
+   *  closes the A1 truth-to-user gap on the truncated flag. */
+  declare searchTruncated: boolean;
   /** Working draft of the active conversation's system prompt. Bound
    *  to the right-rail "Instructions" textarea. Distinct from the
    *  persisted value in Conversation.systemPrompt so the user can
@@ -298,6 +307,7 @@ class LthnChatWindow extends LitElement {
   declare runnerCount: number;
   declare t: {
     railSearch: string;
+    searchTruncatedHint: string;
     bToday: string; bYesterday: string; bWeek: string;
     railEmpty: string; railNew: string;
     emptyTitle: string; emptyBody: string;
@@ -326,6 +336,7 @@ class LthnChatWindow extends LitElement {
     this.navIndex = -1;
     this.atBottom = true;
     this.contentMatchedIds = new Set();
+    this.searchTruncated = false;
     this.systemPromptDraft = "";
     this.tagsDraft = "";
     this.tagFilter = "";
@@ -339,6 +350,7 @@ class LthnChatWindow extends LitElement {
     this.runnerCount = 1;
     this.t = {
       railSearch: "Search conversations",
+      searchTruncatedHint: "Results may be partial — narrow your query for full results.",
       bToday: "Today", bYesterday: "Yesterday", bWeek: "This week",
       railEmpty: "No conversations yet. Start one from the composer.",
       railNew: "New conversation",
@@ -642,7 +654,7 @@ class LthnChatWindow extends LitElement {
     // wiring needed.
     window.addEventListener("keydown", this._onKeyDownForCmdK);
     const [
-      title, subtitle, rs, bt, by, bw, re, rn,
+      title, subtitle, rs, sTrunc, bt, by, bw, re, rn,
       et, eb, cd, cr, ca, cs, bSend, bStop,
       rMeta, sTps, sWatts, sKv, sTokens,
       lSamp, sT, sP, sMax, sCtx,
@@ -651,6 +663,7 @@ class LthnChatWindow extends LitElement {
       T("window.chat.title"),
       T("window.chat.subtitle"),
       T("window.chat.rail_search"),
+      T("window.chat.rail_search_truncated_hint"),
       T("window.chat.rail_bucket_today"),
       T("window.chat.rail_bucket_yesterday"),
       T("window.chat.rail_bucket_week"),
@@ -679,7 +692,8 @@ class LthnChatWindow extends LitElement {
     ]);
     this.chrome = { title, subtitle };
     this.t = {
-      railSearch: rs, bToday: bt, bYesterday: by, bWeek: bw, railEmpty: re, railNew: rn,
+      railSearch: rs, searchTruncatedHint: sTrunc,
+      bToday: bt, bYesterday: by, bWeek: bw, railEmpty: re, railNew: rn,
       emptyTitle: et, emptyBody: eb,
       composerDisabled: cd, composerReady: cr,
       composerAttach: ca, composerSlash: cs,
@@ -830,6 +844,9 @@ class LthnChatWindow extends LitElement {
       // Blank query — drop the content matches; the title filter
       // (instant) is the only path.
       if (this.contentMatchedIds.size > 0) this.contentMatchedIds = new Set();
+      // Truncated banner is tied to the live query — clear it too so
+      // the stale hint doesn't outlive the search that produced it.
+      if (this.searchTruncated) this.searchTruncated = false;
       return;
     }
     this._contentSearchTimer = setTimeout(() => { void this._runContentSearch(q); }, 300);
@@ -843,6 +860,7 @@ class LthnChatWindow extends LitElement {
   async _runContentSearch(q: string) {
     if (!q) {
       this.contentMatchedIds = new Set();
+      this.searchTruncated = false;
       return;
     }
     this._contentSearchQuery = q;
@@ -853,8 +871,10 @@ class LthnChatWindow extends LitElement {
       // ({ hits, truncated }) instead of a flat SessionInfo slice.
       // Truncated:true means MaxSearchScan (5000) was hit before every
       // session was examined — the surfaced hits are still real, just
-      // possibly partial. UI doesn't yet badge the truncated state;
-      // when it does, read sr.truncated here.
+      // possibly partial. Mantis #1571 (Cerberus #12 F4): we surface
+      // sr.truncated to the user via a small inline banner under the
+      // rail-search input so the partial list isn't presented as
+      // exhaustive — closes the A1 truth-to-user gap.
       type SearchHit = { id: string };
       type SearchResult = { hits: SearchHit[] | null; truncated: boolean };
       const sr = await unwrap<SearchResult>(svc.Search(q), { hits: [], truncated: false });
@@ -866,11 +886,15 @@ class LthnChatWindow extends LitElement {
         if (h && typeof h.id === "string") ids.add(h.id);
       }
       this.contentMatchedIds = ids;
+      this.searchTruncated = !!sr?.truncated;
     } catch (err: unknown) {
       console.warn("sessions.Search failed:", err);
       // Don't blank the existing content matches on transient failure
       // — the title filter still works; keep the previous set so the
-      // UI doesn't lose hits mid-typing.
+      // UI doesn't lose hits mid-typing. The truncated banner stays
+      // in whatever state the last successful response left it for
+      // the same reason — the user's view shouldn't flicker on a
+      // single transient miss.
     }
   }
 
@@ -1514,6 +1538,20 @@ class LthnChatWindow extends LitElement {
             `}
           </div>
         </div>
+        ${this.searchTruncated && hasQuery ? html`
+          <div class="lthn-conversation-search-truncated"
+               role="status"
+               aria-live="polite"
+               style="margin:0 10px 6px; display:flex; align-items:center; gap:6px;
+                      padding:4px 8px;
+                      background:rgba(232,165,73,0.08);
+                      border:1px solid rgba(232,165,73,0.20);
+                      border-radius:6px;
+                      font-size:10.5px; color:var(--fg-2); line-height:1.4;">
+            <i class="fa-solid fa-circle-info" style="font-size:10px; color:var(--warn-200,#e8a549); flex-shrink:0;"></i>
+            <span>${this.t.searchTruncatedHint}</span>
+          </div>
+        ` : nothing}
         ${hasTagFilter ? html`
           <div class="lthn-conversation-tag-filter"
                style="margin:0 10px 6px; display:flex; align-items:center; gap:6px;

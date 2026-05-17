@@ -405,6 +405,98 @@ describe("rail search — content match union", () => {
   });
 });
 
+// Mantis #1571 / Cerberus #12 F4 — surface SearchResult.truncated to
+// the user. The backend SearchResult contract carries truncated:true
+// when MaxSearchScan (5000) was hit before every session was scanned;
+// the rail must badge that state instead of presenting the partial
+// list as exhaustive.
+//
+// Notes on test shape: _runContentSearch dynamically imports the
+// @desktop/sessions/wailsservice ES module at call time. ES module
+// exports are getter-backed (non-writable), so we can't swap `Search`
+// on the namespace at runtime — and a top-level vi.mock would also
+// stub svc.List / svc.Create that _reloadRail uses, breaking the
+// mount. The unit we care about is "searchTruncated flag → DOM" so
+// we drive that boundary directly: set el.searchTruncated + assert
+// the banner renders, plus a unit test on _runContentSearch's empty
+// path resetting the flag (already covered above) and on the schedule
+// helper clearing it.
+describe("rail search — truncated banner (Mantis #1571)", () => {
+  type ChatWindowEl = HTMLElement & {
+    conversations: Conversation[];
+    searchQuery: string;
+    searchTruncated: boolean;
+    contentMatchedIds: Set<string>;
+    _runContentSearch: (q: string) => Promise<void>;
+    _scheduleContentSearch: () => void;
+    updateComplete: Promise<boolean>;
+  };
+
+  const c = (id: string, title: string): Conversation =>
+    ({ id, title, snippet: "", bucket: "today", model: "" });
+
+  // TestChatWindow_SearchTruncatedBadge_ShownWhenFlagged_Good
+  it("renders the narrow-query banner when searchTruncated is true and a query is active", async () => {
+    const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
+    // Mirror the state shape _runContentSearch produces on a truncated
+    // backend response: a populated content-match set + truncated:true.
+    el.conversations = [c("alpha", "regex deep dive")];
+    el.searchQuery = "regex";
+    el.contentMatchedIds = new Set(Array.from({ length: 50 }, (_, i) => "s" + i));
+    el.searchTruncated = true;
+    await el.updateComplete;
+
+    const banner = host.querySelector(".lthn-conversation-search-truncated");
+    expect(banner, "truncated banner present in DOM").not.toBeNull();
+    expect(banner?.textContent || "", "carries narrow-query guidance copy").toContain("narrow your query");
+    // Accessibility: status role + polite live region so screen readers
+    // announce the hint without interrupting whatever the user is doing.
+    expect(banner?.getAttribute("role")).toBe("status");
+    expect(banner?.getAttribute("aria-live")).toBe("polite");
+  });
+
+  // TestChatWindow_SearchTruncatedBadge_HiddenWhenNotFlagged_Good
+  it("does not render the banner when searchTruncated is false (exhaustive scan)", async () => {
+    const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
+    el.conversations = [c("alpha", "regex deep dive")];
+    el.searchQuery = "regex";
+    el.contentMatchedIds = new Set(["alpha"]);
+    el.searchTruncated = false;
+    await el.updateComplete;
+
+    const banner = host.querySelector(".lthn-conversation-search-truncated");
+    expect(banner, "no banner when scan was exhaustive").toBeNull();
+  });
+
+  it("does not render the banner when the query is empty even if the flag is stale", async () => {
+    // Safety net: the schedule + run helpers both clear searchTruncated
+    // on empty-query, but the render guard ALSO requires hasQuery so a
+    // stale flag never paints a banner under a blank input.
+    const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
+    el.searchQuery = "";
+    el.searchTruncated = true;
+    await el.updateComplete;
+
+    const banner = host.querySelector(".lthn-conversation-search-truncated");
+    expect(banner).toBeNull();
+  });
+
+  it("_runContentSearch('') resets searchTruncated to false", async () => {
+    const { el } = await mountWindow<ChatWindowEl>("lthn-chat-window");
+    el.searchTruncated = true;
+    await el._runContentSearch("");
+    expect(el.searchTruncated).toBe(false);
+  });
+
+  it("_scheduleContentSearch with an empty query clears a stale truncated flag", async () => {
+    const { el } = await mountWindow<ChatWindowEl>("lthn-chat-window");
+    el.searchTruncated = true;
+    el.searchQuery = "";
+    el._scheduleContentSearch();
+    expect(el.searchTruncated, "empty query → truncated banner dropped instantly").toBe(false);
+  });
+});
+
 describe("/export-all slash command", () => {
   type ChatWindowEl = HTMLElement & {
     _slashMenuController: { open: boolean; close: () => boolean; toggle: () => void };
