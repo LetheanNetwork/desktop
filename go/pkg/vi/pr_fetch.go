@@ -287,7 +287,13 @@ func doFetch(url, provider, token string) ([]upstreamPR, int, string) {
 	if !readR.OK {
 		return nil, resp.StatusCode, "response read failed"
 	}
-	raw, _ := readR.Value.([]byte)
+	// core.ReadAll's Result.Value is `string` (per pkg/external/go/io.go),
+	// NOT []byte — the legacy `Value.([]byte)` cast silently returned nil
+	// here, so the cap-check below always saw len=0 and the subsequent
+	// JSONUnmarshal silently parsed an empty payload as `null`, masking
+	// real upstream payloads. Wave 1 ReadAll sweep — fix the cast.
+	rawStr, _ := readR.Value.(string)
+	raw := []byte(rawStr)
 	if int64(len(raw)) > int64(MaxPRBodyBytes) {
 		return nil, resp.StatusCode, core.Sprintf(
 			"response body exceeded %d byte cap", MaxPRBodyBytes)
