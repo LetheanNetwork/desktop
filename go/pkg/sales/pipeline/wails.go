@@ -222,15 +222,20 @@ func (s *Service) auditMoveAttempt(dealID, fromStage, toStage, outcome, reason s
 
 // readDealStage reads the current stage frontmatter field for the
 // supplied deal id. Returns ("", err) when the file is missing or
-// unparseable. paths.IsValidID MUST run before this — the function
-// joins the id into a path without re-validating.
+// unparseable. paths.JoinAndCheck enforces traversal-rejection
+// independently of caller discipline — even if a future caller
+// forgets the upstream paths.IsValidID gate, the join here refuses
+// to resolve outside the deals directory.
 func readDealStage(id string) (string, error) {
 	dirR := dealsDir()
 	if !dirR.OK {
 		return "", core.E("pipeline.readDealStage", dirR.Error(), nil)
 	}
 	dir := dirR.Value.(string)
-	fpath := core.PathJoin(dir, id+".md")
+	fpath, err := paths.JoinAndCheck(dir, id+".md")
+	if err != nil {
+		return "", err
+	}
 
 	raw := core.ReadFile(fpath)
 	if !raw.OK {
