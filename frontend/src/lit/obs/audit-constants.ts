@@ -89,6 +89,10 @@ export const AUDIT_EVENT_NAMES = [
   "downloader.fetch.succeeded",
   "downloader.fetch.failed",
   "downloader.fetch.rejected",
+  "queue.job.started",
+  "queue.job.succeeded",
+  "queue.job.failed",
+  "queue.job.cancelled",
 ] as const;
 
 export type AuditEventName = (typeof AUDIT_EVENT_NAMES)[number];

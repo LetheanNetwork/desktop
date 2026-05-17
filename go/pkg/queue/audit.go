@@ -17,14 +17,18 @@ import (
 	"dappco.re/lthn/desktop/pkg/audit"
 )
 
-// Reserved audit event-names. Parity-grep contract (RFC §3.3.1) sees
-// these constants when walking the package AST; emit-side projects
-// the same constants so a typo fails at compile.
-const (
-	AuditEventEnqueued = "queue.enqueued"
-	AuditEventDequeued = "queue.dequeued"
-	AuditEventFailed   = "queue.failed"
-)
+// AuditEventEnqueued is the reserved audit event-name for the
+// PhaseEnqueued lifecycle moment. Sibling literal of the
+// audit.EventQueueJob* trio — Enqueued sits before the worker pickup
+// (queue accepts the Job) so it lives on its own literal rather than
+// the queue.job.* prefix the worker-side trio occupies.
+//
+// Kept in the pkg/queue namespace (not migrated into pkg/audit/types.go)
+// because Enqueued is the queue's caller-facing surface; pkg/queue
+// callers can branch on this literal without importing pkg/audit.
+// Parity-grep contract (RFC §3.3.1) still sees it via the AttachAudit
+// projection below.
+const AuditEventEnqueued = "queue.enqueued"
 
 // AttachAudit subscribes the audit recorder to JobChanged. Idempotent
 // per-Core (calling more than once would double-emit); boot path
@@ -55,20 +59,29 @@ func AttachAudit(c *core.Core) {
 	})
 }
 
-// mapPhaseToAuditEvent collapses the queue phase constants onto the
-// three reserved audit event names. Started + Done both project
-// onto queue.dequeued (the audit-tail's concern is "the job left
-// the queue," not the post-pickup lifecycle); Cancelled also folds
-// into queue.dequeued because the canonical contract is "this job
-// is no longer pending."
+// mapPhaseToAuditEvent projects each queue lifecycle phase onto its
+// own reserved audit event-name. Cerberus #64 F-5 (Mantis #1725) —
+// STRIDE-R Repudiation gap close. Pre-cascade PhaseStarted / PhaseDone
+// / PhaseCancelled all projected onto the single dequeued literal so a
+// forensic walker could not distinguish them by name; the trio split
+// mirrors the audit-cluster shape across runner / sandbox / process /
+// marketplace / gateway / downloader.
+//
+// PhaseEnqueued still projects onto pkg/queue's local AuditEventEnqueued
+// — Enqueued sits BEFORE worker pickup so it belongs to the queue-
+// substrate surface, not the worker-side queue.job.* trio.
 func mapPhaseToAuditEvent(phase string) string {
 	switch phase {
 	case PhaseEnqueued:
 		return AuditEventEnqueued
-	case PhaseStarted, PhaseDone, PhaseCancelled:
-		return AuditEventDequeued
+	case PhaseStarted:
+		return audit.EventQueueJobStarted
+	case PhaseDone:
+		return audit.EventQueueJobSucceeded
 	case PhaseFailed:
-		return AuditEventFailed
+		return audit.EventQueueJobFailed
+	case PhaseCancelled:
+		return audit.EventQueueJobCancelled
 	}
 	return ""
 }
@@ -76,7 +89,8 @@ func mapPhaseToAuditEvent(phase string) string {
 // phaseToOutcome maps the queue phase to the closed audit outcome
 // enum. PhaseFailed → OutcomeFailed; everything else → OutcomeOK
 // (PhaseStarted / Done / Cancelled all represent normal-path
-// progression from the audit's perspective).
+// progression from the audit's perspective — Cancelled is operator-
+// initiated, not an error).
 func phaseToOutcome(phase string) string {
 	if phase == PhaseFailed {
 		return audit.OutcomeFailed

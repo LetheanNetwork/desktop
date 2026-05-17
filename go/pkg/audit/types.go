@@ -1005,6 +1005,86 @@ const (
 	//                 literals require a reserved-schema bump in the same
 	//                 commit that introduces the new gate.
 	EventDownloaderFetchRejected = "downloader.fetch.rejected"
+
+	// EventQueueJobStarted fires when pkg/queue's worker loop claims a
+	// pending Job (CAS Status pending → running) and is about to dispatch
+	// its registered handler. Cerberus #64 F-5 (Mantis #1725) — STRIDE-R
+	// Repudiation gap close. Pre-cascade the pkg/queue audit emit collapsed
+	// PhaseStarted / PhaseDone / PhaseCancelled all onto the single
+	// "queue.dequeued" literal so a forensic walker could not distinguish
+	// "job started" from "job completed" from "job cancelled" by event-name
+	// alone; trio split mirrors the established audit-cluster shape across
+	// runner / sandbox / process / marketplace / gateway / downloader so
+	// the parity-grep contract enforces Go ↔ TS lockstep on lifecycle.
+	//
+	// The Started row commits as the claimNext() CAS broadcasts JobChanged
+	// onto the typed bus; pkg/queue's AttachAudit subscriber projects the
+	// PhaseStarted event onto this literal so a crash mid-handler still
+	// leaves the claim decision in the audit substrate.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   job_id   — orm-assigned job identifier (j-<ksuid>); forensic join
+	//              key for the Started → Succeeded/Failed/Cancelled trio
+	//              and for any downstream incident correlation.
+	//   kind     — registered handler kind (queue.kind.<kind> action
+	//              namespace). Safe — RegisterKind rejects empty / unknown
+	//              kinds at registration time so this literal is bounded.
+	//   status   — the job's post-CAS Status literal ("running" on the
+	//              Started path) for shape parity with sibling rows.
+	//
+	// The handler payload bytes are NEVER in Meta — Cerberus #1465 closure-
+	// only-scope discipline keeps user-content (which may carry account
+	// identifiers, paths, or downstream credentials) off the audit substrate.
+	EventQueueJobStarted = "queue.job.started"
+
+	// EventQueueJobSucceeded fires when pkg/queue's worker dispatch returns
+	// OK from a registered handler (markDone CAS Status running → done).
+	// Sibling of EventQueueJobStarted. Pre-cascade this projected onto the
+	// shared "queue.dequeued" literal alongside Started + Cancelled; the
+	// split is load-bearing for the forensic walker's lifecycle reconstruction.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   job_id   — orm-assigned job identifier (mirrors Started)
+	//   kind     — registered handler kind (mirrors Started)
+	//   status   — "done" on this path
+	EventQueueJobSucceeded = "queue.job.succeeded"
+
+	// EventQueueJobFailed fires when pkg/queue's worker dispatch returns a
+	// non-OK Result from a registered handler OR the handler panics
+	// (markFailed CAS Status running → failed). Sibling of EventQueueJobStarted.
+	// Replaces the pre-cascade "queue.failed" literal — moving onto the
+	// "queue.job.*" namespace pins the lifecycle trio onto a stable prefix
+	// the chip-filter UI can group, mirroring sandbox.spawn.* + process.run.*
+	// + marketplace.install.* family naming.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   job_id   — orm-assigned job identifier (mirrors Started)
+	//   kind     — registered handler kind (mirrors Started)
+	//   status   — "failed" on this path
+	//
+	// The handler's error message is NEVER in Meta — markFailed records the
+	// stringified error onto Job.LastError (the orm row); the audit substrate
+	// records the decision-fact only so handler errors that may embed user-
+	// content remain quarantined to the per-job persistence layer.
+	EventQueueJobFailed = "queue.job.failed"
+
+	// EventQueueJobCancelled fires when pkg/queue.Cancel transitions a
+	// pending Job to StatusCancelled (user / system cancelled before
+	// completion). Sibling of EventQueueJobStarted. Pre-cascade this
+	// projected onto the shared "queue.dequeued" literal; the split lets a
+	// forensic walker distinguish operator-initiated cancellation from
+	// worker-completed (Succeeded) and handler-error (Failed) terminal
+	// states.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   job_id   — orm-assigned job identifier (mirrors Started)
+	//   kind     — registered handler kind (mirrors Started)
+	//   status   — "cancelled" on this path
+	EventQueueJobCancelled = "queue.job.cancelled"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the
