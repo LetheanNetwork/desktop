@@ -135,6 +135,99 @@ func TestServerkey_AccountStatus_Good_AccountPresent(t *core.T) {
 	core.AssertTrue(t, out.HasUserAccount, "private.key presence must signal has_user_account=true")
 }
 
+// Mantis #1471 — re-bootstrap scenario: user deletes their LetheanAccount
+// while ~/Lethean/wallets/server.key persists. Next boot must report
+// has_user_account=false so the frontend auth-gate routes to `setup`
+// (NOT `auth` / unlock prompt) — Option B in the ticket: leave server.key
+// in place, force the frontend into the setup wizard.
+//
+// AccountStatus contract is purely a function of <id>/private.key
+// presence — it never consults server.key. These tests pin that contract
+// after Bootstrap has materialised server.key on disk, guarding against
+// any future regression that would mix server.key state into the signal.
+
+func TestServerkey_ServerKeyWithoutAccount_ReportsSetupNeeded_Good(t *core.T) {
+	// server.key present + no account/<id>/private.key → setup needed.
+	home := homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK, "Bootstrap should materialise server.key on fresh install")
+
+	// Sanity — server.key really is on disk now.
+	keyPath := core.PathJoin(home, "Lethean", "wallets", "server.key")
+	core.AssertTrue(t, core.Stat(keyPath).OK, "server.key must exist post-Bootstrap")
+
+	// No account dir at all — the post-delete steady state.
+	r := svc.AccountStatus()
+	core.AssertTrue(t, r.OK)
+	out := r.Value.(subject.AccountStatusOutput)
+	core.AssertTrue(t, !out.HasUserAccount,
+		"server.key present + no account dir must report has_user_account=false (Mantis #1471 — setup wizard, not unlock prompt)")
+	core.AssertEqual(t, "", out.AccountID)
+}
+
+func TestServerkey_ServerKeyWithoutAccount_EmptyAccountDir_ReportsSetupNeeded_Good(t *core.T) {
+	// server.key present + account dir exists but EMPTY (post-delete
+	// leaves an empty parent dir) → still setup, not unlock.
+	home := homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	accountRoot := core.PathJoin(home, "Lethean", "account")
+	mk := core.MkdirAll(accountRoot, 0o755)
+	core.AssertTrue(t, mk.OK)
+
+	r := svc.AccountStatus()
+	core.AssertTrue(t, r.OK)
+	out := r.Value.(subject.AccountStatusOutput)
+	core.AssertTrue(t, !out.HasUserAccount,
+		"server.key present + empty account dir must report has_user_account=false (Mantis #1471)")
+}
+
+func TestServerkey_ServerKeyWithoutAccount_OrphanedAccountDir_ReportsSetupNeeded_Good(t *core.T) {
+	// server.key present + account/<id>/ directory exists but private.key
+	// was deleted (the load-bearing scenario in the ticket — user removed
+	// the account leaf file). Must report setup-needed.
+	home := homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	accountRoot := core.PathJoin(home, "Lethean", "account", "abc123")
+	mk := core.MkdirAll(accountRoot, 0o700)
+	core.AssertTrue(t, mk.OK)
+	// Drop a non-private.key file so the dir isn't empty — mimics the
+	// state after a partial delete that left meta.json behind.
+	w := core.WriteFile(core.PathJoin(accountRoot, "meta.json"), []byte("{}"), 0o600)
+	core.AssertTrue(t, w.OK)
+
+	r := svc.AccountStatus()
+	core.AssertTrue(t, r.OK)
+	out := r.Value.(subject.AccountStatusOutput)
+	core.AssertTrue(t, !out.HasUserAccount,
+		"server.key present + orphaned account dir without private.key must report has_user_account=false (Mantis #1471 — Option B: setup wizard, server.key preserved)")
+}
+
+func TestServerkey_ServerKeyAndAccount_ReportsUnlockNeeded_Good(t *core.T) {
+	// Regression guard for the inverse — server.key + full account
+	// (including private.key leaf) must report has_user_account=true
+	// so the auth-gate goes to `auth` (unlock prompt).
+	home := homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, svc.Bootstrap().OK)
+
+	accountRoot := core.PathJoin(home, "Lethean", "account", "abc123")
+	mk := core.MkdirAll(accountRoot, 0o700)
+	core.AssertTrue(t, mk.OK)
+	w := core.WriteFile(core.PathJoin(accountRoot, "private.key"), []byte("armoured-key"), 0o600)
+	core.AssertTrue(t, w.OK)
+
+	r := svc.AccountStatus()
+	core.AssertTrue(t, r.OK)
+	out := r.Value.(subject.AccountStatusOutput)
+	core.AssertTrue(t, out.HasUserAccount,
+		"server.key + private.key both present must report has_user_account=true (Mantis #1471 inverse — unlock prompt)")
+	core.AssertEqual(t, "abc123", out.AccountID)
+}
+
 // --- IssueBootstrapToken / VerifyBootstrapToken (round-trip + replay) ---
 
 func TestServerkey_TokenRoundTrip_Good(t *core.T) {
