@@ -35,6 +35,32 @@ func newTestEngine(t *core.T, svc *subject.Service) *gin.Engine {
 	return r
 }
 
+// newSessionEngine wraps newTestEngine with a tiny middleware that
+// pre-sets c.Set("account_id", sessionAccountID) BEFORE the handler
+// runs — exactly what pkg/server/bootstrap_auth.go does after
+// VerifySessionToken returns OK. Used by handleLock tests (Mantis
+// #1587 / Cerberus #18) which now bind authoritative account_id
+// from session context, not from the request body.
+//
+// When sessionAccountID is empty no middleware is installed, which
+// pins the no-session-context failure path (401 session.unbound).
+func newSessionEngine(t *core.T, svc *subject.Service, sessionAccountID string) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	if sessionAccountID != "" {
+		r.Use(func(c *gin.Context) {
+			c.Set("account_id", sessionAccountID)
+			c.Next()
+		})
+	}
+	groups := svc.RouteGroups()
+	core.AssertLen(t, groups, 1, "Service must expose exactly one RouteGroup")
+	g := groups[0]
+	g.RegisterRoutes(r.Group(g.BasePath()))
+	return r
+}
+
 // doPOST issues a POST against the engine with the supplied body
 // bytes. Returns the recorder so the caller asserts on Code + Body.
 func doPOST(eng *gin.Engine, path string, body []byte) *httptest.ResponseRecorder {
@@ -371,39 +397,83 @@ func TestRoutes_UnlockEndpoint_InvalidBody_400(t *core.T) {
 	core.AssertEqual(t, "account.invalid_body", env.Error.Code)
 }
 
-// --- Lock handler (Stage E.B) ---
+// --- Lock handler (Stage E.B + Cerberus #18 / Mantis #1587) ---
+//
+// handleLock binds authoritative account_id from session context,
+// NOT from the request body. The four tests below pin the contract:
+//
+//  1. body matches session             → 200, account locks
+//  2. body ≠ session                   → 400 account_id.mismatch + B stays unlocked
+//  3. body omitted                     → 200, session id used as canonical source
+//  4. no session in context            → 401 session.unbound
+//
+// The session-binding source is pkg/server/bootstrap_auth.go ~line
+// 356 — `c.Set("account_id", out.AccountID)` after a successful
+// VerifySessionToken. newSessionEngine mirrors that wiring with a
+// one-line middleware so the handler sees an identical context.
 
-func TestRoutes_LockEndpoint_Good(t *core.T) {
+// TestHandleLock_BodyAccountIDIgnoredWhenMatchesSession_Good — session=A,
+// body=A → 200 and account A locks. The matching body field is
+// accepted (legacy clients) and the session-bound id remains the
+// canonical source handed to Service.Lock.
+func TestHandleLock_BodyAccountIDIgnoredWhenMatchesSession_Good(t *core.T) {
 	home := homeFixture(t)
 	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
 	svc := newUnlockable(t, home)
-	eng := newTestEngine(t, svc)
 
-	// Unlock first so we have state to clear.
+	// Unlock so we have state to clear. Unlock uses bootstrap-tier
+	// (no session yet) so it goes through the bare engine.
+	bootstrapEng := newTestEngine(t, svc)
 	unlockBody := core.JSONMarshal(subject.UnlockInput{
 		AccountID: fixtureAccountID, Passphrase: fixturePassphrase,
 	})
 	core.AssertTrue(t, unlockBody.OK)
-	_ = doPOST(eng, "/v1/account/unlock", unlockBody.Value.([]byte))
+	_ = doPOST(bootstrapEng, "/v1/account/unlock", unlockBody.Value.([]byte))
 	core.AssertTrue(t, svc.HasUnlocked(fixtureAccountID))
 
+	// Session-bound engine — bearer middleware would have set
+	// account_id=fixtureAccountID after verifying the session token.
+	sessionEng := newSessionEngine(t, svc, fixtureAccountID)
 	lockBody := core.JSONMarshal(subject.LockInput{AccountID: fixtureAccountID})
 	core.AssertTrue(t, lockBody.OK)
-	rr := doPOST(eng, "/v1/account/lock", lockBody.Value.([]byte))
-	core.AssertEqual(t, http.StatusOK, rr.Code, "valid Lock → 200")
+	rr := doPOST(sessionEng, "/v1/account/lock", lockBody.Value.([]byte))
+	core.AssertEqual(t, http.StatusOK, rr.Code,
+		"body matches session → 200 (Mantis #1587)")
 	core.AssertFalse(t, svc.HasUnlocked(fixtureAccountID),
-		"Lock handler MUST clear unlocked state")
+		"Lock handler MUST clear unlocked state for the session-bound account")
 }
 
-func TestRoutes_LockEndpoint_AccountIDRequired_400(t *core.T) {
-	_ = homeFixture(t)
-	svc := newUnlockable(t, "")
-	eng := newTestEngine(t, svc)
+// TestHandleLock_BodyAccountIDMismatchReturns400_Bad — session=A,
+// body=B → 400 account_id.mismatch + B remains unlocked. Pins the
+// Cerberus #18 cross-account force-lock defence: an attacker with
+// a valid session for A cannot lock B by submitting B in the body.
+func TestHandleLock_BodyAccountIDMismatchReturns400_Bad(t *core.T) {
+	const otherAccountID = "ffffffffffffffff"
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	writeEncryptedAccount(t, home, otherAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
 
-	body := core.JSONMarshal(subject.LockInput{AccountID: ""})
-	core.AssertTrue(t, body.OK)
-	rr := doPOST(eng, "/v1/account/lock", body.Value.([]byte))
-	core.AssertEqual(t, http.StatusBadRequest, rr.Code)
+	// Unlock both accounts so we can verify only the body-named one
+	// (account B) survives the rejected force-lock attempt.
+	bootstrapEng := newTestEngine(t, svc)
+	for _, id := range []string{fixtureAccountID, otherAccountID} {
+		body := core.JSONMarshal(subject.UnlockInput{
+			AccountID: id, Passphrase: fixturePassphrase,
+		})
+		core.AssertTrue(t, body.OK)
+		_ = doPOST(bootstrapEng, "/v1/account/unlock", body.Value.([]byte))
+	}
+	core.AssertTrue(t, svc.HasUnlocked(fixtureAccountID))
+	core.AssertTrue(t, svc.HasUnlocked(otherAccountID))
+
+	// Session token says A, attacker submits body asking to lock B.
+	sessionEng := newSessionEngine(t, svc, fixtureAccountID)
+	lockBody := core.JSONMarshal(subject.LockInput{AccountID: otherAccountID})
+	core.AssertTrue(t, lockBody.OK)
+	rr := doPOST(sessionEng, "/v1/account/lock", lockBody.Value.([]byte))
+	core.AssertEqual(t, http.StatusBadRequest, rr.Code,
+		"body ≠ session → 400 (Cerberus #18 cross-account force-lock)")
 
 	var env struct {
 		Error struct {
@@ -412,7 +482,72 @@ func TestRoutes_LockEndpoint_AccountIDRequired_400(t *core.T) {
 	}
 	uR := core.JSONUnmarshal(rr.Body.Bytes(), &env)
 	core.AssertTrue(t, uR.OK)
-	core.AssertEqual(t, "account.id.required", env.Error.Code)
+	core.AssertEqual(t, "account_id.mismatch", env.Error.Code,
+		"error code MUST be account_id.mismatch for forensic clarity")
+
+	// Critical post-condition: B remains unlocked. A successful
+	// silent body-override (the bug we're fixing) would have locked
+	// B here and HasUnlocked would return false.
+	core.AssertTrue(t, svc.HasUnlocked(otherAccountID),
+		"rejected force-lock MUST NOT touch the body-named account")
+	core.AssertTrue(t, svc.HasUnlocked(fixtureAccountID),
+		"rejected force-lock MUST NOT touch the session-bound account either")
+}
+
+// TestHandleLock_BodyAccountIDOmittedUsesSession_Good — session=A,
+// body={} → 200 and account A locks. The canonical-source path: a
+// well-behaved client sends an empty body once it knows the server
+// derives identity from the session.
+func TestHandleLock_BodyAccountIDOmittedUsesSession_Good(t *core.T) {
+	home := homeFixture(t)
+	writeEncryptedAccount(t, home, fixtureAccountID, fixturePassphrase)
+	svc := newUnlockable(t, home)
+
+	bootstrapEng := newTestEngine(t, svc)
+	unlockBody := core.JSONMarshal(subject.UnlockInput{
+		AccountID: fixtureAccountID, Passphrase: fixturePassphrase,
+	})
+	core.AssertTrue(t, unlockBody.OK)
+	_ = doPOST(bootstrapEng, "/v1/account/unlock", unlockBody.Value.([]byte))
+	core.AssertTrue(t, svc.HasUnlocked(fixtureAccountID))
+
+	// Empty body — session id is the only source.
+	sessionEng := newSessionEngine(t, svc, fixtureAccountID)
+	rr := doPOST(sessionEng, "/v1/account/lock", []byte(`{}`))
+	core.AssertEqual(t, http.StatusOK, rr.Code,
+		"omitted body account_id → 200 with session-bound id (Mantis #1587)")
+	core.AssertFalse(t, svc.HasUnlocked(fixtureAccountID),
+		"session-bound id MUST be the canonical source when body is empty")
+}
+
+// TestHandleLock_NoSessionAccountIDReturns401_Bad — no
+// c.Set("account_id", …) upstream → 401 session.unbound. Pins the
+// fail-closed contract: if the bearer middleware was not installed
+// or the route-tier classification in pkg/server is wrong, the
+// handler refuses rather than silently locking an attacker-chosen
+// body field.
+func TestHandleLock_NoSessionAccountIDReturns401_Bad(t *core.T) {
+	_ = homeFixture(t)
+	svc := newUnlockable(t, "")
+	// newSessionEngine with empty sessionAccountID installs NO
+	// middleware — pins the missing-session-context path.
+	eng := newSessionEngine(t, svc, "")
+
+	body := core.JSONMarshal(subject.LockInput{AccountID: fixtureAccountID})
+	core.AssertTrue(t, body.OK)
+	rr := doPOST(eng, "/v1/account/lock", body.Value.([]byte))
+	core.AssertEqual(t, http.StatusUnauthorized, rr.Code,
+		"no session account_id in context → 401 (fail-closed)")
+
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	uR := core.JSONUnmarshal(rr.Body.Bytes(), &env)
+	core.AssertTrue(t, uR.OK)
+	core.AssertEqual(t, "session.unbound", env.Error.Code,
+		"error code MUST be session.unbound for operator diagnostics")
 }
 
 // --- Route registration sanity ---

@@ -290,20 +290,62 @@ func (g *routesProvider) handleUnlock(c *gin.Context) {
 //
 // Auth: per RFC §6 + §4 routeTiers — this endpoint is session-tier
 // (a user signing themselves out must already be unlocked). The
-// bearer middleware verifies the LTHN-SESS-1.* token; route-tier
-// classification in pkg/server enforces the tier.
+// bearer middleware verifies the LTHN-SESS-1.* token and writes
+// the verified account_id to c.Set("account_id", …) via
+// pkg/server/bootstrap_auth.go ~line 356. This handler MUST bind
+// account_id from the session context — NOT from the request body
+// — so an attacker holding a session token for account A cannot
+// force-lock account B by submitting {"account_id":"B"}.
+//
+// Cerberus #18 — session-tier handlers bind authoritative identity
+// fields from session context, never body. Body account_id is still
+// accepted for backwards-compat but MUST match the session-bound id
+// (mismatch → 400 account_id.mismatch); when omitted, the session
+// id is used as the canonical source. See Mantis #1587.
 //
 // HTTP status mapping:
 //
+//   - session.unbound       → 401 Unauthorized (no session in context)
 //   - account.invalid_body  → 400 Bad Request
+//   - account_id.mismatch   → 400 Bad Request (body ≠ session)
 //   - account.id.required   → 400 Bad Request
 //   - success               → 200 OK
 func (g *routesProvider) handleLock(c *gin.Context) {
+	// Cerberus #18 / Mantis #1587 — authoritative account_id comes
+	// from the verified session, not the request body. The bearer
+	// middleware (pkg/server/bootstrap_auth.go) writes account_id
+	// after VerifySessionToken returns OK; if it's empty here, the
+	// middleware was not applied or the session-tier classification
+	// in pkg/server is wrong. Fail-closed with 401 rather than
+	// silently locking an attacker-chosen body field.
+	sessionAccountID := c.GetString("account_id")
+	if sessionAccountID == "" {
+		c.JSON(http.StatusUnauthorized,
+			coreapi.Fail("session.unbound", "session missing account_id"))
+		return
+	}
+
 	var input LockInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, coreapi.Fail(codeAccountInvalidBody, err.Error()))
 		return
 	}
+
+	// Body account_id is permitted (legacy clients) but MUST match
+	// the session-bound id when present. A non-matching body field
+	// is an attempt to force-lock a different account on the same
+	// connection — reject with 400 so the caller sees the contract
+	// violation rather than a silent body-ignored success.
+	if input.AccountID != "" && input.AccountID != sessionAccountID {
+		c.JSON(http.StatusBadRequest,
+			coreapi.Fail("account_id.mismatch",
+				"body account_id does not match session"))
+		return
+	}
+	// Canonical source — overwrite the (possibly empty, possibly
+	// matching) body field with the session-bound id before handing
+	// off to Service.Lock.
+	input.AccountID = sessionAccountID
 
 	r := g.svc.Lock(input)
 	if r.OK {
