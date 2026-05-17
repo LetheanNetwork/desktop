@@ -1111,3 +1111,102 @@ func TestService_ConcurrentPutTier1_NoTornState_Ugly(t *core.T) {
 	core.AssertTrue(t, r.OK)
 	core.AssertEqual(t, 16, len(r.Value.([]string)))
 }
+
+// --- Mantis #1625 S2 / Cerberus #39: Step 3e defers when tier-0
+//     master not loaded so legacy single-instance.aead doesn't
+//     get orphaned by Step 3g deleting legacy .master.
+
+// TestService_Migrate_Tier0NotLoaded_DefersSingleInstance_Good —
+// 72B-wrapped legacy install + legacy single-instance.aead + tier-1
+// KEK provider wired BEFORE tier-0 KEK provider. First
+// migrateTier1Locked call (triggered by SetKEKProvider tier-1) must
+// early-return at Step 3e: latch UNSET, single-instance.aead
+// RETAINED, legacy .master RETAINED. Second call (after tier-0 KEK
+// wires) must complete: latch SET, single-instance.t0.aead written,
+// single-instance.aead removed, legacy .master removed.
+func TestService_Migrate_Tier0NotLoaded_DefersSingleInstance_Good(t *core.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := core.PathJoin(home, "Lethean", "data", "keys")
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+
+	// Build a 72B KEK-wrapped legacy .master (post-#1624 form)
+	// under the KEK we'll later wire as tier-1.
+	legacyMaster := bytesOf(0x10)
+	tier1KEK := fixedTier1KEK
+	tier1Sigil, err := sigil.NewChaChaPolySigil(tier1KEK, nil)
+	core.AssertTrue(t, err == nil)
+	wrapped, err := tier1Sigil.In(legacyMaster)
+	core.AssertTrue(t, err == nil)
+	core.AssertEqual(t, 72, len(wrapped))
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, ".master"), wrapped, 0o600).OK)
+
+	// Seal a single-instance key under the legacy master.
+	sealedKey := bytesOf(0x99)
+	siSigil, err := sigil.NewChaChaPolySigil(legacyMaster, nil)
+	core.AssertTrue(t, err == nil)
+	siBlob, err := siSigil.In(sealedKey)
+	core.AssertTrue(t, err == nil)
+	core.AssertTrue(t, core.WriteFile(core.PathJoin(dir, "single-instance.aead"), siBlob, 0o600).OK)
+
+	// Boot — tier-1 wired FIRST, tier-0 NOT wired. (Real-world
+	// trigger: pre-E.K.C wire order; substrate must defend against
+	// it regardless.)
+	r := keys.New()
+	core.AssertTrue(t, r.OK)
+	svc := r.Value.(*keys.Service)
+	svc.SetKEKProvider(func() ([]byte, bool) { return tier1KEK, true })
+
+	// First migrateTier1Locked fired by SetKEKProvider. Step 3e
+	// must early-return: tier-0 master absent, single-instance.aead
+	// present.
+	//
+	// On-disk invariants:
+	//   - .master RETAINED (Step 3g did not fire)
+	//   - single-instance.aead RETAINED (Step 3e did not re-seal)
+	//   - .master-tier1 NOT written (Step 3d defers with the rest)
+	//   - .master-tier0 NOT written (no tier-0 KEK provider)
+	//   - single-instance.t0.aead NOT written
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, ".master")).OK,
+		"legacy .master must be retained when Step 3e defers")
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, "single-instance.aead")).OK,
+		"legacy single-instance.aead must be retained when tier-0 not loaded")
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, ".master-tier0")).OK,
+		".master-tier0 must NOT be written without tier-0 KEK provider")
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, "single-instance.t0.aead")).OK,
+		"single-instance.t0.aead must NOT be written without tier-0 master")
+
+	// Latch UNSET assertion via observable behaviour: wiring
+	// tier-0 KEK now MUST re-trigger migration on next
+	// SetKEKProvider call. If the latch had been set, the second
+	// SetKEKProvider would skip migrateTier1Locked entirely and
+	// the legacy files would persist forever.
+	svc.SetKEKProviderTier0(func() ([]byte, bool) { return fixedTier0KEK, true })
+	// Re-fire migration by calling SetKEKProvider again with the
+	// same tier-1 KEK. The migrationComplete latch guards this:
+	// if it were already set, this would short-circuit.
+	svc.SetKEKProvider(func() ([]byte, bool) { return tier1KEK, true })
+
+	// Now the full Step 3 sequence must have completed.
+	keyR := svc.SingleInstanceKey()
+	core.AssertTrue(t, keyR.OK,
+		"SingleInstanceKey must succeed after tier-0 wires and migration completes")
+	var want [32]byte
+	for i := range want {
+		want[i] = 0x99
+	}
+	core.AssertEqual(t, want, keyR.Value.([32]byte),
+		"recovered SI key must match pre-migration sealed bytes (IPC continuity)")
+
+	// On-disk end state: legacy gone, tier substrate present.
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, ".master")).OK,
+		"legacy .master must be removed once migration completes")
+	core.AssertFalse(t, core.Stat(core.PathJoin(dir, "single-instance.aead")).OK,
+		"legacy single-instance.aead must be removed once migration completes")
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, ".master-tier0")).OK,
+		".master-tier0 must be written by Step 3c")
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, ".master-tier1")).OK,
+		".master-tier1 must be written by Step 3d")
+	core.AssertTrue(t, core.Stat(core.PathJoin(dir, "single-instance.t0.aead")).OK,
+		"single-instance.t0.aead must be written by Step 3e")
+}

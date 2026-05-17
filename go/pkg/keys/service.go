@@ -786,10 +786,36 @@ func (s *Service) migrateTier1Locked() {
 		return
 	}
 
+	// 3b.5. Mantis #1625 S2 (Cerberus #39) — pre-write atomicity
+	// guard. If legacy single-instance.aead is present, Step 3e
+	// will need a live tier-0 master to re-seal it. If we don't
+	// have one (tier-0 KEK provider not wired this boot AND no
+	// .master-tier0 on disk from a prior Step 0b run), we MUST
+	// defer the entire Step 3 sequence — including 3c/3d/3g —
+	// before any persistent writes happen. Otherwise Step 3d
+	// would write .master-tier1, Step 3e would skip the SI
+	// re-seal, and Step 3g would delete legacy .master, leaving
+	// single-instance.aead PERMANENTLY ORPHANED (sealed under a
+	// master we just removed, no recovery path). Leave latch
+	// unset so the next SetKEKProvider call (after tier-0 wires)
+	// can complete Steps 3c-3g atomically.
+	legacySIPath := core.PathJoin(dir, singleInstanceRef+legacyBlobSuffix)
+	siLegacyPresent := core.Stat(legacySIPath).OK
+	if siLegacyPresent {
+		tier0Path := core.PathJoin(dir, masterTier0FileName)
+		tier0OnDisk := core.Stat(tier0Path).OK
+		_, tier0ProviderLive := s.currentKEKFor(tier0)
+		if !tier0OnDisk && !tier0ProviderLive {
+			core.Warn("keys: tier-1 migration deferred — single-instance.aead present but tier-0 KEK provider not wired and .master-tier0 absent; retaining legacy .master + single-instance.aead, latch unset (will retry on next SetKEKProvider with tier-0 wired)")
+			return
+		}
+	}
+
 	// 3c. If tier-0 master is absent at this point AND we have a
 	// tier-0 KEK provider, generate + persist. (Tier-0 may already
 	// be present from Step 0b.) Skip silently if no tier-0 provider
-	// — tier-0 is independent and can be wired later.
+	// — tier-0 is independent and can be wired later, UNLESS legacy
+	// SI is present (guarded by Step 3b.5 above).
 	tier0Path := core.PathJoin(dir, masterTier0FileName)
 	tier0Stat := core.Stat(tier0Path)
 	if !tier0Stat.OK {
@@ -819,46 +845,51 @@ func (s *Service) migrateTier1Locked() {
 	// 3e. Re-encrypt single-instance.aead under tier-0 master,
 	// atomic-rename to single-instance.t0.aead — only if it's
 	// still present (Step 0b 32B-raw-legacy path may have already
-	// migrated it).
-	legacySIPath := core.PathJoin(dir, singleInstanceRef+legacyBlobSuffix)
-	if statR := core.Stat(legacySIPath); statR.OK {
-		// Need a live tier-0 master to re-seal.
-		if len(s.tier0Master) == masterKeySize {
-			blobR := core.ReadFile(legacySIPath)
-			if !blobR.OK {
-				core.Warn("keys: tier-1 migration Step 3e read legacy single-instance failed", "err", blobR.Error())
-				return
-			}
-			oldSigil, err := sigil.NewChaChaPolySigil(legacyMaster, nil)
-			if err != nil {
-				core.Warn("keys: tier-1 migration Step 3e init legacy sigil failed", "err", err.Error())
-				return
-			}
-			plaintext, err := oldSigil.Out(blobR.Value.([]byte))
-			if err != nil {
-				core.Warn("keys: tier-1 migration Step 3e decrypt single-instance failed", "err", err.Error())
-				return
-			}
-			newSigil, err := sigil.NewChaChaPolySigil(s.tier0Master, nil)
-			if err != nil {
-				core.Warn("keys: tier-1 migration Step 3e init tier-0 sigil failed", "err", err.Error())
-				return
-			}
-			newBlob, err := newSigil.In(plaintext)
-			if err != nil {
-				core.Warn("keys: tier-1 migration Step 3e re-seal single-instance failed", "err", err.Error())
-				return
-			}
-			newSIPath := core.PathJoin(dir, singleInstanceRef+tier0BlobSuffix)
-			if w := core.WriteFile(newSIPath, newBlob, fileMode); !w.OK {
-				core.Warn("keys: tier-1 migration Step 3e write tier-0 single-instance failed", "err", w.Error())
-				return
-			}
-			if r := core.Remove(legacySIPath); !r.OK {
-				core.Warn("keys: tier-1 migration Step 3e remove legacy single-instance failed", "err", r.Error())
-			}
-		} else {
-			core.Warn("keys: tier-1 migration Step 3e — single-instance.aead present but tier-0 master not loaded; skipping (will retry on next tier-0 op)")
+	// migrated it). The pre-write guard at Step 3b.5 (Mantis
+	// #1625 S2 / Cerberus #39) ensures that if we reach this
+	// point with legacy SI still present, tier-0 master is
+	// loaded — so the len() check below is defence-in-depth, not
+	// the primary deferral path.
+	if siLegacyPresent && core.Stat(legacySIPath).OK {
+		// Defence-in-depth: 3b.5 should have caught this, but
+		// if a race or unexpected state path leaves us without
+		// a tier-0 master, fail loud rather than orphan SI.
+		if len(s.tier0Master) != masterKeySize {
+			core.Warn("keys: tier-1 migration Step 3e defensive — single-instance.aead present but tier-0 master not loaded at re-seal point (Step 3b.5 guard should have caught this); deferring")
+			return
+		}
+		blobR := core.ReadFile(legacySIPath)
+		if !blobR.OK {
+			core.Warn("keys: tier-1 migration Step 3e read legacy single-instance failed", "err", blobR.Error())
+			return
+		}
+		oldSigil, err := sigil.NewChaChaPolySigil(legacyMaster, nil)
+		if err != nil {
+			core.Warn("keys: tier-1 migration Step 3e init legacy sigil failed", "err", err.Error())
+			return
+		}
+		plaintext, err := oldSigil.Out(blobR.Value.([]byte))
+		if err != nil {
+			core.Warn("keys: tier-1 migration Step 3e decrypt single-instance failed", "err", err.Error())
+			return
+		}
+		newSigil, err := sigil.NewChaChaPolySigil(s.tier0Master, nil)
+		if err != nil {
+			core.Warn("keys: tier-1 migration Step 3e init tier-0 sigil failed", "err", err.Error())
+			return
+		}
+		newBlob, err := newSigil.In(plaintext)
+		if err != nil {
+			core.Warn("keys: tier-1 migration Step 3e re-seal single-instance failed", "err", err.Error())
+			return
+		}
+		newSIPath := core.PathJoin(dir, singleInstanceRef+tier0BlobSuffix)
+		if w := core.WriteFile(newSIPath, newBlob, fileMode); !w.OK {
+			core.Warn("keys: tier-1 migration Step 3e write tier-0 single-instance failed", "err", w.Error())
+			return
+		}
+		if r := core.Remove(legacySIPath); !r.OK {
+			core.Warn("keys: tier-1 migration Step 3e remove legacy single-instance failed", "err", r.Error())
 		}
 	}
 
