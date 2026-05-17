@@ -12,6 +12,7 @@
 import { html, nothing, render } from "lit";
 import { renderChrome } from "./lit/index";
 import "./lit/index";
+import { runBootProbe } from "./lit/boot-probe";
 
 const app = document.getElementById("app");
 if (!app) throw new Error("missing #app mount point in index.html");
@@ -35,15 +36,35 @@ const surface = params.get("surface") || "canvas";
 // scope inside the element; this mount doesn't change that property.
 (() => {
   let overlay: HTMLElement | null = null;
-  const mount = (state: "setup" | "auth" | "error", reqId?: string) => {
+  // mount() accepts an optional options bag so the boot-probe error
+  // path can pass through a headline + framed body — the gate's
+  // errorMessage / errorBody are state-only Lit properties so they
+  // reach the element via JS assignment, not via attribute.
+  const mount = (
+    state: "setup" | "auth" | "error",
+    options?: { requestId?: string; errorMessage?: string; errorBody?: string },
+  ) => {
+    const reqId = options?.requestId;
     if (overlay) {
       overlay.setAttribute("state", state);
       if (reqId) overlay.setAttribute("request-id", reqId);
+      if (options?.errorMessage !== undefined) {
+        (overlay as HTMLElement & { errorMessage?: string }).errorMessage = options.errorMessage;
+      }
+      if (options?.errorBody !== undefined) {
+        (overlay as HTMLElement & { errorBody?: string }).errorBody = options.errorBody;
+      }
       return;
     }
     overlay = document.createElement("lthn-auth-gate");
     overlay.setAttribute("state", state);
     if (reqId) overlay.setAttribute("request-id", reqId);
+    if (options?.errorMessage !== undefined) {
+      (overlay as HTMLElement & { errorMessage?: string }).errorMessage = options.errorMessage;
+    }
+    if (options?.errorBody !== undefined) {
+      (overlay as HTMLElement & { errorBody?: string }).errorBody = options.errorBody;
+    }
     overlay.style.cssText =
       "position:fixed;inset:0;z-index:9999;background:var(--surf-0,#0a090e);" +
       "display:flex;align-items:stretch;justify-content:stretch;";
@@ -54,26 +75,20 @@ const surface = params.get("surface") || "canvas";
   };
   window.addEventListener("lthn:auth:401", (ev: Event) => {
     const detail = (ev as CustomEvent<{ requestId?: string }>).detail;
-    mount("error", detail?.requestId);
+    mount("error", { requestId: detail?.requestId });
   });
   window.addEventListener("lthn:auth:ok", () => { unmount(); });
   // Boot-time probe — if account is absent, mount the setup gate
   // BEFORE the surface renders so the first paint is the gate, not
-  // a flash of the underlying window. Same logic as app-shell's
-  // _probeAuthState (commit 9ad8b3d) but applied at the document
-  // level so all surfaces benefit.
-  void (async () => {
-    try {
-      const svc = await import("@desktop/serverkey/service").catch(() => null);
-      if (!svc || typeof (svc as { AccountStatus?: unknown }).AccountStatus !== "function") return;
-      const r = await (svc as {
-        AccountStatus: () => Promise<{ OK?: boolean; Value?: { has_user_account?: boolean } }>
-      }).AccountStatus();
-      if (r?.OK !== false && r?.Value?.has_user_account === false) {
-        mount("setup");
-      }
-    } catch { /* binding missing → degrade silently */ }
-  })();
+  // a flash of the underlying window.
+  //
+  // Mantis #1500 — fail-CLOSED: if the probe can't determine state
+  // (binding missing, IPC rejected, Result.OK=false), mount("error")
+  // with a friendly "Cannot reach lthn server" copy and write a
+  // structured console.error breadcrumb. The previous silent-degrade
+  // (`catch { /* binding missing → degrade silently */ }`) left the
+  // underlying surface unprotected with NO visible signal.
+  void runBootProbe(mount);
 })();
 
 // Security note — innerHTML writes below (Cerberus Mantis #1422, 2026-05-16).
