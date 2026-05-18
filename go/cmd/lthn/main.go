@@ -260,7 +260,14 @@ func cmdGUI(args []string) int {
 	// uses s.Handler() directly), so Addr is left empty here; the
 	// difference between GUI and serve is the listen verb, not the
 	// surface composition.
-	opts := buildServerOpts(c, r, key)
+	//
+	// forGUI=true skips the opencode/plugin ProxyGroup extras —
+	// pkg/desktop/subsystems.go.mountSubsystems registers those
+	// directly on the engine when the desktop service runs. Without
+	// this gate, both registrations land on the same Gin engine and
+	// the wildcard at /v1/api/plugin/:code/*proxyPath conflicts with
+	// itself, panicking the binary at boot.
+	opts := buildServerOpts(c, r, key, true)
 	s := server.NewService(opts)
 	if rr := c.RegisterService("server", s); !rr.OK {
 		core.Print(core.Stderr(), "lthn gui: %s\n", rr.Error())
@@ -356,7 +363,12 @@ func cmdServe(args []string) int {
 	// and capability checkers mount identically. The serve verb's
 	// only delta from GUI is the public listen, expressed below as
 	// Addr + s.Start() + mdns broadcast.
-	opts := buildServerOpts(c, r, key)
+	//
+	// forGUI=false so extras carries the opencode/plugin ProxyGroup
+	// registrations — cmdServe has no desktop service + no
+	// mountSubsystems, so the only registration site is the extras
+	// path consumed by server.NewService.
+	opts := buildServerOpts(c, r, key, false)
 	opts.Addr = core.Concat(":", port)
 	s := server.NewService(opts)
 	if rr := c.RegisterService("server", s); !rr.OK {
@@ -432,10 +444,28 @@ func cmdServe(args []string) int {
 //	opts := buildServerOpts(c, r, key)
 //	opts.Addr = ":8000" // serve only — GUI leaves empty + skips Start()
 //	s := server.NewService(opts)
-func buildServerOpts(c *core.Core, r *runner.Service, key string) server.Options {
+// buildServerOpts assembles the server.Options shared between cmdGUI
+// and cmdServe. The forGUI flag toggles registration of route groups
+// that pkg/desktop/subsystems.go.mountSubsystems ALSO registers when
+// the GUI's desktop service runs — registering them twice on the same
+// Gin engine panics at boot (the wildcard at /v1/api/plugin/:code/
+// *proxyPath conflicts with itself, and the same shape applies to
+// the opencode reverse-proxy). For cmdServe there is no
+// mountSubsystems pass, so extras MUST carry the proxy groups; for
+// cmdGUI extras skips them and lets subsystems own that registration.
+//
+// Per-service ownership today:
+//   - opencode.ProxyGroup      — subsystems.go in GUI; extras in serve
+//   - plugin.ProxyGroup        — subsystems.go in GUI; extras in serve
+//   - opencode.NewControlGroup — extras ALWAYS (subsystems doesn't add)
+//   - gateway.NewRoutes        — extras ALWAYS (subsystems doesn't add)
+func buildServerOpts(c *core.Core, r *runner.Service, key string, forGUI bool) server.Options {
 	var extras []coreapi.RouteGroup
 	if opencodeSvc, _ := core.ServiceFor[*opencode.Service](c, "opencode"); opencodeSvc != nil {
-		extras = append(extras, opencodeSvc.ProxyGroup(), opencode.NewControlGroup(opencodeSvc))
+		if !forGUI {
+			extras = append(extras, opencodeSvc.ProxyGroup())
+		}
+		extras = append(extras, opencode.NewControlGroup(opencodeSvc))
 		// Wire opencode → runner so the runner's dynamic-route set
 		// refreshes whenever an opencode sandbox starts or stops.
 		// /v1/chat/completions then transparently reaches opencode-
@@ -471,7 +501,10 @@ func buildServerOpts(c *core.Core, r *runner.Service, key string) server.Options
 		_ = runner.ApplyDynamicRoutes(r, opencodeSvc.Routes())
 	}
 	pluginSvc, _ := core.ServiceFor[*plugin.Service](c, "plugin")
-	if pluginSvc != nil {
+	if pluginSvc != nil && !forGUI {
+		// GUI path: subsystems.go.mountSubsystems registers
+		// pluginSvc.ProxyGroup directly on the engine after
+		// server.NewService. Double-registering panics Gin.
 		extras = append(extras, pluginSvc.ProxyGroup())
 	}
 	if gatewaySvc, _ := core.ServiceFor[*gateway.Service](c, "gateway"); gatewaySvc != nil {
