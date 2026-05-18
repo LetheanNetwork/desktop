@@ -1,10 +1,109 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 // E2.1 · benchmark — <lthn-benchmark-window>
 // Light-DOM Lit element. Composes renderChrome() from ../chrome.js.
+//
+// Wires to pkg/benchmark substrate (commit fd4b9c7 + 58d2179). The
+// substrate is runner-agnostic — Run rows can come from any registered
+// Bencher (our lthn-mlx runner, llama.cpp, ollama, NIM, opencode,
+// future go-ai endpoints). The fixture rows below stay as fallback
+// for the first launch (empty history) and for tests so the design
+// surface keeps working when no adapter has registered yet.
+//
+// Wire pattern follows [[design_lit_view_backend_wire_pattern]]:
+//   * lazy dynamic import on connectedCallback
+//   * fixture default + fallback on missing / rejecting / empty
+//   * no polling (aggregate view — refreshes on user action)
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
 import { T } from "@lthn/i18n/coreservice";
+
+/** Row view-model the template renders. Mirrors the on-disk Run
+ *  shape but trims to what the table needs and pre-formats fields
+ *  for display (timestamp, mem). */
+interface RowVM {
+  id?: string;
+  ts: string;       // pretty timestamp
+  bencher: string;  // which Bencher produced this row (substrate-stamped)
+  model: string;
+  pp: number;       // pp_tok_sec
+  tg: number;       // tg_tok_sec
+  w: number;        // peak_watts (0 = not measurable, e.g. remote bencher)
+  mem: string;      // peak_mem_mb formatted ("2.4 GB") or "—" if 0
+  here?: boolean;   // latest row marker
+}
+
+interface BencherInfoVM {
+  name: string;
+  kind: string;
+  description?: string;
+}
+
+/** Backend Run shape (subset). Mirrors go/pkg/benchmark.Run JSON tags. */
+interface RunDTO {
+  id?: string;
+  timestamp?: string;        // RFC3339
+  bencher?: string;
+  model?: string;
+  ctx?: number;
+  pp_tok_sec?: number;
+  tg_tok_sec?: number;
+  prompt_len?: number;
+  output_len?: number;
+  peak_watts?: number;
+  peak_mem_mb?: number;
+  endpoint?: string;
+}
+
+/** Fixture runs — design rows that keep the surface believable on
+ *  first launch (empty backend) AND during tests. Bencher field reads
+ *  "fixture" so an operator can tell at a glance these are not real
+ *  measurements. */
+const FIXTURE_RUNS: RowVM[] = [
+  { ts: "2026-05-11 14:32", bencher: "fixture", model: "gemma-4-e2b",  pp: 4820, tg: 47.2, w: 8.4,  mem: "2.4 GB", here: true },
+  { ts: "2026-05-11 09:14", bencher: "fixture", model: "gemma-4-e2b",  pp: 4780, tg: 46.8, w: 8.5,  mem: "2.4 GB" },
+  { ts: "2026-05-10 18:02", bencher: "fixture", model: "llama-3.2-3b", pp: 3140, tg: 32.6, w: 11.8, mem: "3.6 GB" },
+  { ts: "2026-05-09 21:55", bencher: "fixture", model: "phi-3.5-mini", pp: 3960, tg: 38.4, w: 9.6,  mem: "2.9 GB" },
+  { ts: "2026-05-08 11:18", bencher: "fixture", model: "gemma-4-e2b",  pp: 4640, tg: 45.1, w: 8.6,  mem: "2.4 GB" },
+];
+
+/** Fixture curve (tg-vs-ctx) — kept as a separate fallback because
+ *  the substrate today persists individual Runs, not curve sweeps.
+ *  Future RunCurve work will derive this from History grouping. */
+const FIXTURE_CURVE = [
+  { ctx: 128,  tg: 51.8 }, { ctx: 512,  tg: 50.4 }, { ctx: 1024, tg: 48.6 },
+  { ctx: 2048, tg: 47.2 }, { ctx: 4096, tg: 43.1 }, { ctx: 6144, tg: 38.4 }, { ctx: 8192, tg: 33.6 },
+];
+
+/** Format a DTO Run into a display row. Empty / missing fields fall
+ *  back to "—" so the table never renders bare undefined. */
+function dtoToRow(d: RunDTO, isLatest: boolean): RowVM {
+  return {
+    id: d.id,
+    ts: formatTimestamp(d.timestamp),
+    bencher: d.bencher || "—",
+    model: d.model || "—",
+    pp: d.pp_tok_sec ?? 0,
+    tg: d.tg_tok_sec ?? 0,
+    w: d.peak_watts ?? 0,
+    mem: formatMem(d.peak_mem_mb),
+    here: isLatest,
+  };
+}
+
+/** "2026-05-11T14:32:00Z" → "2026-05-11 14:32". Cheap + locale-safe. */
+function formatTimestamp(ts: string | undefined): string {
+  if (!ts) return "—";
+  // RFC3339 → "YYYY-MM-DD HH:MM"
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(ts);
+  return m ? `${m[1]} ${m[2]}` : ts.slice(0, 16);
+}
+
+/** Peak memory MB → "2.4 GB" / "640 MB" / "—" when zero. */
+function formatMem(mb: number | undefined): string {
+  if (!mb || mb <= 0) return "—";
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+}
 
 class LthnBenchmarkWindow extends LitElement {
   static readonly properties = {
@@ -13,45 +112,53 @@ class LthnBenchmarkWindow extends LitElement {
     embedded: { type: Boolean, reflect: true },
     chrome: { state: true },
     t: { state: true },
+    runs: { state: true },
+    benchers: { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare chrome: { title: string; subtitle: string };
+  declare runs: RowVM[];
+  declare benchers: BencherInfoVM[];
   declare t: {
     btnPp: string; btnTg: string; btnBoth: string; btnRun: string; btnExport: string;
     labelRecent: string; labelCompare: string;
-    colTs: string; colModel: string; colPp: string; colTg: string; colPeakW: string; colMem: string;
+    colTs: string; colBencher: string; colModel: string; colPp: string; colTg: string; colPeakW: string; colMem: string;
     pillLatest: string;
     labelChart: string; labelLogX: string;
     yAxis: string; footer: string;
   };
+
   constructor() {
     super();
     this.w = 1000; this.h = 660; this.embedded = false;
     this.chrome = { title: "Benchmark", subtitle: "run · compare · export" };
+    this.runs = FIXTURE_RUNS;
+    this.benchers = [];
     this.t = {
       btnPp: "PP only", btnTg: "TG only", btnBoth: "Both",
       btnRun: "Run", btnExport: "Export",
       labelRecent: "Recent runs · click to overlay on chart",
       labelCompare: "2 selected · compare mode",
-      colTs: "Timestamp", colModel: "Model",
+      colTs: "Timestamp", colBencher: "Bencher", colModel: "Model",
       colPp: "PP tok/s", colTg: "TG tok/s",
       colPeakW: "Peak W", colMem: "Mem",
       pillLatest: "Latest",
       labelChart: "tok/s vs context length",
       labelLogX: "· log scale on x",
       yAxis: "tok/s",
-      footer: "5 runs on file · ~/.lthn/bench/results.jsonl · last run 47.2 tok/s · 8.4 W",
+      footer: "fixture rows · substrate awaits registered Bencher · ~/Lethean/orm.duckdb",
     };
   }
   createRenderRoot() { return this; }
+
   async connectedCallback() {
     super.connectedCallback();
     const [
       title, subtitle, bPp, bTg, bBoth, bRun, bExport,
       lRecent, lCompare,
-      cTs, cModel, cPp, cTg, cPeakW, cMem,
+      cTs, cBencher, cModel, cPp, cTg, cPeakW, cMem,
       pLatest, lChart, lLogX, yAx, foot,
     ] = await Promise.all([
       T("window.benchmark.title"), T("window.benchmark.subtitle"),
@@ -59,7 +166,8 @@ class LthnBenchmarkWindow extends LitElement {
       T("window.benchmark.btn_both"), T("window.benchmark.btn_run"),
       T("window.benchmark.btn_export"),
       T("window.benchmark.label_recent"), T("window.benchmark.label_compare"),
-      T("window.benchmark.col_timestamp"), T("window.benchmark.col_model"),
+      T("window.benchmark.col_timestamp"), T("window.benchmark.col_bencher"),
+      T("window.benchmark.col_model"),
       T("window.benchmark.col_pp"), T("window.benchmark.col_tg"),
       T("window.benchmark.col_peak_w"), T("window.benchmark.col_mem"),
       T("window.benchmark.pill_latest"),
@@ -70,25 +178,42 @@ class LthnBenchmarkWindow extends LitElement {
     this.t = {
       btnPp: bPp, btnTg: bTg, btnBoth: bBoth, btnRun: bRun, btnExport: bExport,
       labelRecent: lRecent, labelCompare: lCompare,
-      colTs: cTs, colModel: cModel, colPp: cPp, colTg: cTg, colPeakW: cPeakW, colMem: cMem,
+      colTs: cTs, colBencher: cBencher, colModel: cModel,
+      colPp: cPp, colTg: cTg, colPeakW: cPeakW, colMem: cMem,
       pillLatest: pLatest,
       labelChart: lChart, labelLogX: lLogX,
       yAxis: yAx, footer: foot,
     };
+    void this._loadFromBackend();
+  }
+
+  /** Pull History + ListBenchers from the substrate. Per the canonical
+   *  wire pattern: empty / reject / missing-binding keeps fixture rows
+   *  so the design surface stays believable. Non-empty replaces. */
+  async _loadFromBackend(): Promise<void> {
+    try {
+      const [benchMod, resultMod] = await Promise.all([
+        import("@desktop/benchmark/service"),
+        import("../result"),
+      ]);
+      const { unwrap } = resultMod;
+      const [runs, infos] = await Promise.all([
+        unwrap<RunDTO[]>(benchMod.History({ Limit: 50 } as Parameters<typeof benchMod.History>[0]), []),
+        unwrap<BencherInfoVM[]>(benchMod.ListBenchers(), []),
+      ]);
+      this.benchers = infos || [];
+      if (Array.isArray(runs) && runs.length > 0) {
+        this.runs = runs.map((d, i) => dtoToRow(d, i === 0));
+      }
+      // empty array → keep fixture (per design memo: "empty-keeps")
+    } catch {
+      // missing binding / reject → keep fixture (per design memo)
+    }
   }
 
   render() {
-    const runs = [
-      { ts: "2026-05-11 14:32",  model: "gemma-4-e2b",  pp: 4820, tg: 47.2, w: 8.4,  mem: "2.4 GB", here: true },
-      { ts: "2026-05-11 09:14",  model: "gemma-4-e2b",  pp: 4780, tg: 46.8, w: 8.5,  mem: "2.4 GB" },
-      { ts: "2026-05-10 18:02",  model: "llama-3.2-3b", pp: 3140, tg: 32.6, w: 11.8, mem: "3.6 GB" },
-      { ts: "2026-05-09 21:55",  model: "phi-3.5-mini", pp: 3960, tg: 38.4, w: 9.6,  mem: "2.9 GB" },
-      { ts: "2026-05-08 11:18",  model: "gemma-4-e2b",  pp: 4640, tg: 45.1, w: 8.6,  mem: "2.4 GB" },
-    ];
-    const curve = [
-      { ctx: 128,  tg: 51.8 }, { ctx: 512,  tg: 50.4 }, { ctx: 1024, tg: 48.6 },
-      { ctx: 2048, tg: 47.2 }, { ctx: 4096, tg: 43.1 }, { ctx: 6144, tg: 38.4 }, { ctx: 8192, tg: 33.6 },
-    ];
+    const runs = this.runs;
+    const curve = FIXTURE_CURVE;
     const cw = 880, ch = 220, pad = { l: 48, r: 18, t: 16, b: 28 };
     const xs = (c: number) => pad.l + (Math.log2(c / 128) / Math.log2(8192 / 128)) * (cw - pad.l - pad.r);
     const ys = (t: number) => pad.t + (1 - (t - 20) / (60 - 20)) * (ch - pad.t - pad.b);
@@ -106,6 +231,8 @@ class LthnBenchmarkWindow extends LitElement {
       <lthn-btn tone="ghost" size="sm"><i class="fa-regular fa-file-arrow-down" style="font-size:10px;"></i> ${this.t.btnExport}</lthn-btn>
     `;
 
+    const cols = "20px 1.3fr 0.9fr 1.2fr 0.7fr 0.8fr 0.7fr 0.7fr 60px";
+
     const body = html`
       <div style="flex:1; display:flex; flex-direction:column; min-height:0;">
         <!-- history table -->
@@ -115,19 +242,20 @@ class LthnBenchmarkWindow extends LitElement {
             <div style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);">${this.t.labelCompare}</div>
           </div>
           <div style="background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.06); border-radius:8px; font-family:var(--font-mono); font-size:11px;">
-            <div style="display:grid; grid-template-columns:20px 1.4fr 1.4fr 0.8fr 0.9fr 0.8fr 0.8fr 60px; padding:8px 14px; border-bottom:1px solid rgba(255,255,255,0.05); color:var(--fg-3); font-size:10px; letter-spacing:0.04em; text-transform:uppercase;">
-              <span></span><span>${this.t.colTs}</span><span>${this.t.colModel}</span><span>${this.t.colPp}</span><span>${this.t.colTg}</span><span>${this.t.colPeakW}</span><span>${this.t.colMem}</span><span></span>
+            <div style="display:grid; grid-template-columns:${cols}; padding:8px 14px; border-bottom:1px solid rgba(255,255,255,0.05); color:var(--fg-3); font-size:10px; letter-spacing:0.04em; text-transform:uppercase;">
+              <span></span><span>${this.t.colTs}</span><span>${this.t.colBencher}</span><span>${this.t.colModel}</span><span>${this.t.colPp}</span><span>${this.t.colTg}</span><span>${this.t.colPeakW}</span><span>${this.t.colMem}</span><span></span>
             </div>
             ${runs.map((r, i) => {
               const sel = i < 2;
               return html`
-                <div style="display:grid; grid-template-columns:20px 1.4fr 1.4fr 0.8fr 0.9fr 0.8fr 0.8fr 60px; padding:8px 14px; background:${r.here ? "rgba(64,193,197,0.07)" : "transparent"}; border-bottom:${i < runs.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none"}; color:var(--fg-1); align-items:center;">
+                <div style="display:grid; grid-template-columns:${cols}; padding:8px 14px; background:${r.here ? "rgba(64,193,197,0.07)" : "transparent"}; border-bottom:${i < runs.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none"}; color:var(--fg-1); align-items:center;">
                   <span style="width:12px; height:12px; border-radius:3px; background:${sel ? (i === 0 ? "var(--brand-400)" : "#a78bfa") : "transparent"}; border:${sel ? "none" : "1.5px solid rgba(255,255,255,0.18)"};"></span>
                   <span style="color:var(--fg-2); font-size:10.5px;">${r.ts}</span>
+                  <span style="color:var(--fg-2); font-size:10.5px;">${r.bencher}</span>
                   <span style="color:var(--fg-0);">${r.model}</span>
                   <span>${r.pp.toLocaleString()}</span>
                   <span style="color:${r.here ? "var(--brand-300)" : "var(--fg-0)"};">${r.tg.toFixed(1)}</span>
-                  <span>${r.w} W</span>
+                  <span>${r.w > 0 ? `${r.w} W` : "—"}</span>
                   <span style="color:var(--fg-2);">${r.mem}</span>
                   <span style="text-align:right;">${r.here ? html`<lthn-state-pill variant="latest">${this.t.pillLatest}</lthn-state-pill>` : nothing}</span>
                 </div>
