@@ -19,6 +19,30 @@ interface RouteView {
   model:    string;
 }
 
+/** PublicEndpoint mirror — the Bearer-stripped read-side shape the
+ *  openaibench WailsService exposes (matches PublicEndpoint in
+ *  go/pkg/openaibench/wails.go). The Bearer field is intentionally
+ *  absent so it can't leak through component state into the DOM. */
+interface PublicEndpoint {
+  name:         string;
+  url:          string;
+  description?: string;
+  org?:         string;
+  auth_set:     boolean;
+}
+
+/** AddEndpointForm — write-side shape used by the Add modal. The
+ *  Bearer field IS present here because the user is supplying it;
+ *  it round-trips to the Wails AddEndpoint call where pkg/keys
+ *  encrypts at rest. Cleared the moment the modal closes. */
+interface AddEndpointForm {
+  name:        string;
+  url:         string;
+  description: string;
+  bearer:      string;
+  org:         string;
+}
+
 function storedSetting(key: string, fallback = ""): string {
   try {
     const storage = globalThis.localStorage;
@@ -66,6 +90,11 @@ class LthnSettingsWindow extends LitElement {
     row:   { state: true },
     apiKey: { state: true },
     apiKeyRevealed: { state: true },
+    endpoints: { state: true },
+    addModalOpen: { state: true },
+    addForm: { state: true },
+    addErr: { state: true },
+    addSubmitting: { state: true },
   };
   declare open: string;
   declare w: number;
@@ -90,6 +119,11 @@ class LthnSettingsWindow extends LitElement {
   declare httpListening: boolean;
   declare apiKey: string;
   declare apiKeyRevealed: boolean;
+  declare endpoints: PublicEndpoint[];
+  declare addModalOpen: boolean;
+  declare addForm: AddEndpointForm;
+  declare addErr: string;
+  declare addSubmitting: boolean;
   declare panel: {
     generalT: string; generalD: string;
     menuT: string;
@@ -152,6 +186,11 @@ class LthnSettingsWindow extends LitElement {
     this.httpListening = false;
     this.apiKey = "sk-lthn-••••••••••••••••2qB7";
     this.apiKeyRevealed = false;
+    this.endpoints = [];
+    this.addModalOpen = false;
+    this.addForm = { name: "", url: "", description: "", bearer: "", org: "" };
+    this.addErr = "";
+    this.addSubmitting = false;
     this.panel = {
       generalT: "General",
       generalD: "App-wide defaults — what to show at launch, which language to speak, theme.",
@@ -463,9 +502,15 @@ class LthnSettingsWindow extends LitElement {
     this.chrome = { title, subtitle };
   }
 
-  /** Side-menu click handler — swap the body to the selected section. */
+  /** Side-menu click handler — swap the body to the selected section.
+   *  The endpoints section is the only one with backend-driven state
+   *  that needs an explicit lazy-load on first open; everything else
+   *  is either fixture-static or wired in connectedCallback. */
   _openSection(id: string) {
     this.open = id;
+    if (id === "endpoints") {
+      void this._loadEndpoints();
+    }
   }
 
   /** Picks the section body to render based on this.open. Single
@@ -479,6 +524,7 @@ class LthnSettingsWindow extends LitElement {
       case "api":          return this._sectionApi();
       case "telemetry":    return this._sectionTelemetry();
       case "integrations": return this._sectionIntegrations();
+      case "endpoints":    return this._sectionEndpoints();
       case "about":        return this._sectionAbout();
       case "leave":        return this._sectionLeave();
       default:             return this._sectionGeneral();
@@ -553,6 +599,7 @@ class LthnSettingsWindow extends LitElement {
       { id:"api",          icon:"fa-plug",         label:"API" },
       { id:"telemetry",    icon:"fa-wave-square",  label:"Telemetry" },
       { id:"integrations", icon:"fa-link",         label:"Integrations" },
+      { id:"endpoints",    icon:"fa-server",       label:"Endpoints" },
       { id:"about",        icon:"fa-circle-info",  label:"About" },
       { id:"leave",        icon:"fa-door-open",    label:"Leave App" },
     ];
@@ -860,6 +907,208 @@ class LthnSettingsWindow extends LitElement {
         `)}
       `,
     });
+  }
+
+  /** Endpoints section — manages OpenAI-compatible inference endpoints
+   *  (NIM / OpenRouter / vLLM / TGI / llama-server / LM Studio). Each
+   *  configured endpoint becomes a registered Bencher in the benchmark
+   *  substrate; the admin → Benchmark window's picker reflects them.
+   *  Mantis #1775 Stage B. */
+  _sectionEndpoints() {
+    const list = this.endpoints || [];
+    const empty = html`
+      <div style="padding:14px; border:1px dashed rgba(255,255,255,0.08); border-radius:8px;
+                  color:var(--fg-3); font-size:11.5px; line-height:1.55;">
+        No endpoints configured. Add one to point lthn at any
+        OpenAI-compatible inference server — NIM, OpenRouter, vLLM,
+        TGI, llama-server, LM Studio, or your own.
+      </div>
+    `;
+    const items = html`
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        ${list.map(ep => html`
+          <div style="display:grid; grid-template-columns: 1fr auto; gap:14px; align-items:center;
+                      padding:10px 12px; border:1px solid rgba(255,255,255,0.06); border-radius:8px;
+                      background:rgba(255,255,255,0.02);">
+            <div style="display:flex; flex-direction:column; gap:3px; min-width:0;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:12.5px; color:var(--fg-0); font-weight:500;">${ep.name}</span>
+                ${ep.auth_set
+                  ? html`<span style="font-size:9.5px; padding:1.5px 6px; border-radius:3px;
+                                       background:rgba(64,193,197,0.10); color:var(--brand-300);
+                                       letter-spacing:0.04em; text-transform:uppercase;
+                                       font-family:var(--font-mono);">key set</span>`
+                  : html`<span style="font-size:9.5px; padding:1.5px 6px; border-radius:3px;
+                                       background:rgba(255,255,255,0.05); color:var(--fg-3);
+                                       letter-spacing:0.04em; text-transform:uppercase;
+                                       font-family:var(--font-mono);">no key</span>`}
+              </div>
+              <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-2);
+                          overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${ep.url}</div>
+              ${ep.description ? html`<div style="font-size:11px; color:var(--fg-3);">${ep.description}</div>` : nothing}
+            </div>
+            <lthn-btn tone="quiet" size="sm"
+              data-testid=${"ep-delete-" + ep.name}
+              @click=${() => void this._deleteEndpoint(ep.name)}
+              title="Remove endpoint">
+              <i class="fa-regular fa-trash-can" style="font-size:11px; color:var(--error-400);"></i>
+            </lthn-btn>
+          </div>
+        `)}
+      </div>
+    `;
+    return this._section({
+      title: "Inference endpoints",
+      desc:  "OpenAI-compatible endpoints register as Benchers in admin → Benchmark. Bearer tokens encrypt at rest via the platform key store.",
+      content: html`
+        ${list.length === 0 ? empty : items}
+        <div>
+          <lthn-btn tone="primary" size="sm"
+            data-testid="ep-add-open"
+            @click=${() => this._openAddModal()}>
+            <i class="fa-solid fa-plus" style="font-size:10px;"></i> Add endpoint
+          </lthn-btn>
+        </div>
+        ${this.addModalOpen ? this._renderAddModal() : nothing}
+      `,
+    });
+  }
+
+  /** Add modal — overlay form for creating a new endpoint. Inline
+   *  rather than a separate component for v1 (low ceremony; the form
+   *  is small + tightly coupled to _submitAddEndpoint). */
+  _renderAddModal() {
+    const f = this.addForm;
+    const overlay = "position:fixed; inset:0; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; z-index:50;";
+    const card = "width:440px; background:var(--surf-1); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:20px; display:flex; flex-direction:column; gap:12px; box-shadow:0 12px 40px rgba(0,0,0,0.45);";
+    const fieldStyle = "padding:7px 10px; border-radius:5px; background:rgba(0,0,0,0.22); border:1px solid rgba(255,255,255,0.06); color:var(--fg-0); font-size:11.5px; font-family:var(--font-mono); outline:none; width:100%; box-sizing:border-box;";
+    const labelStyle = "font-size:11px; color:var(--fg-2); display:flex; flex-direction:column; gap:4px;";
+    return html`
+      <div style=${overlay} @click=${(e: Event) => e.target === e.currentTarget && this._closeAddModal()}>
+        <div style=${card} data-testid="ep-add-modal" @click=${(e: Event) => e.stopPropagation()}>
+          <div style="font-size:13.5px; font-weight:600; color:var(--fg-0);">Add OpenAI-compatible endpoint</div>
+          <label style=${labelStyle}>
+            Name
+            <input style=${fieldStyle} data-testid="ep-add-name"
+              .value=${f.name}
+              placeholder="openai-compat:nim"
+              @input=${(e: Event) => this._setAddForm("name", (e.target as HTMLInputElement).value)}>
+          </label>
+          <label style=${labelStyle}>
+            URL (include /v1)
+            <input style=${fieldStyle} data-testid="ep-add-url"
+              .value=${f.url}
+              placeholder="https://api.example/v1"
+              @input=${(e: Event) => this._setAddForm("url", (e.target as HTMLInputElement).value)}>
+          </label>
+          <label style=${labelStyle}>
+            Bearer (API key) — optional for loopback
+            <input style=${fieldStyle} type="password" data-testid="ep-add-bearer"
+              .value=${f.bearer}
+              placeholder="sk-..."
+              @input=${(e: Event) => this._setAddForm("bearer", (e.target as HTMLInputElement).value)}>
+          </label>
+          <label style=${labelStyle}>
+            Org (optional)
+            <input style=${fieldStyle} data-testid="ep-add-org"
+              .value=${f.org}
+              placeholder="org-id"
+              @input=${(e: Event) => this._setAddForm("org", (e.target as HTMLInputElement).value)}>
+          </label>
+          <label style=${labelStyle}>
+            Description (optional)
+            <input style=${fieldStyle} data-testid="ep-add-desc"
+              .value=${f.description}
+              placeholder="My production NIM cluster"
+              @input=${(e: Event) => this._setAddForm("description", (e.target as HTMLInputElement).value)}>
+          </label>
+          ${this.addErr ? html`
+            <div style="font-size:11px; color:var(--error-400); padding:6px 8px; border-radius:5px;
+                        background:rgba(248,113,113,0.06); border:1px solid rgba(248,113,113,0.18);">
+              ${this.addErr}
+            </div>
+          ` : nothing}
+          <div style="display:flex; justify-content:flex-end; gap:6px; padding-top:4px;">
+            <lthn-btn tone="quiet" size="sm" @click=${() => this._closeAddModal()}>Cancel</lthn-btn>
+            <lthn-btn tone="primary" size="sm"
+              data-testid="ep-add-submit"
+              ?disabled=${this.addSubmitting}
+              @click=${() => void this._submitAddEndpoint()}>
+              ${this.addSubmitting ? "Saving…" : "Save"}
+            </lthn-btn>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /** Pull current endpoints from the backend. Fail silently on
+   *  binding-missing / unwrap-empty so the section degrades to the
+   *  "no endpoints configured" empty state. */
+  async _loadEndpoints(): Promise<void> {
+    try {
+      const m = await import("@desktop/openaibench/wailsservice");
+      const list = await unwrap<PublicEndpoint[]>(m.ListEndpoints(), []);
+      this.endpoints = Array.isArray(list) ? list : [];
+    } catch {
+      this.endpoints = [];
+    }
+  }
+
+  _openAddModal() {
+    this.addForm = { name: "", url: "", description: "", bearer: "", org: "" };
+    this.addErr = "";
+    this.addSubmitting = false;
+    this.addModalOpen = true;
+  }
+
+  _closeAddModal() {
+    this.addModalOpen = false;
+    this.addErr = "";
+    // Clear the form so the bearer doesn't linger in component state
+    // longer than necessary — the secret is gone the moment the modal
+    // closes (Save path consumes it before closing too).
+    this.addForm = { name: "", url: "", description: "", bearer: "", org: "" };
+  }
+
+  _setAddForm(field: keyof AddEndpointForm, value: string) {
+    this.addForm = { ...this.addForm, [field]: value };
+  }
+
+  async _submitAddEndpoint(): Promise<void> {
+    if (this.addSubmitting) return;
+    const f = this.addForm;
+    if (!f.name || !f.url) {
+      this.addErr = "Name and URL are required.";
+      return;
+    }
+    this.addSubmitting = true;
+    this.addErr = "";
+    try {
+      const m = await import("@desktop/openaibench/wailsservice");
+      await demand<unknown>(m.AddEndpoint({
+        name: f.name, url: f.url, description: f.description,
+        bearer: f.bearer, org: f.org,
+      } as Parameters<typeof m.AddEndpoint>[0]));
+      this._closeAddModal();
+      await this._loadEndpoints();
+    } catch (e: unknown) {
+      this.addErr = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.addSubmitting = false;
+    }
+  }
+
+  async _deleteEndpoint(name: string): Promise<void> {
+    if (!name) return;
+    try {
+      const m = await import("@desktop/openaibench/wailsservice");
+      await demand<unknown>(m.RemoveEndpoint(name));
+      await this._loadEndpoints();
+    } catch {
+      // Re-load anyway so the UI reflects whatever the backend has.
+      await this._loadEndpoints();
+    }
   }
 
   _sectionAbout() {
