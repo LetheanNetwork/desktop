@@ -16,6 +16,7 @@ vi.mock("@desktop/opencode/wailsservice", () => ({
   WOpenStudio:            vi.fn(async () => ({ OK: true, Value: null })),
   WIsStudioInstalled:     vi.fn(async () => ({ OK: true, Value: false })),
   WUpgradeWithConsent:    vi.fn(async () => ({ OK: true, Value: { updated: false } })),
+  WImportFromHost:        vi.fn(async () => ({ OK: true, Value: { providers: 3, projects: 5 } })),
 }));
 
 vi.mock("@desktop/integrations/wailsservice", () => ({
@@ -51,7 +52,7 @@ import { setCallHandler, clearCallHandlers, setDefaultCallHandler, resetDefaultC
  *  value in. Re-using it here so the connectedCallback Promise.all
  *  resolves with a usable string per messageID rather than null. */
 const BID_I18N_T = 1099757357;
-import { WUpgradeWithConsent } from "@desktop/opencode/wailsservice";
+import { WUpgradeWithConsent, WImportFromHost } from "@desktop/opencode/wailsservice";
 import "./integrations-window";
 
 /** Wait long enough for the lazy connectedCallback awaits (i18n + 4
@@ -216,5 +217,48 @@ describe("lthn-integrations-window — Upgrade dialog (Mantis #1623)", () => {
 
     expect(host.querySelector("[data-testid='oc-upgrade-dialog']")).toBeNull();
     expect(WUpgradeWithConsent).not.toHaveBeenCalled();
+  });
+});
+
+describe("lthn-integrations-window — Import-from-host (Mantis #1775 follow-on)", () => {
+  beforeEach(() => {
+    vi.mocked(WImportFromHost).mockClear();
+  });
+
+  it("renders the Import-from-host button on the opencode card", async () => {
+    const { host, el } = await mountWindow("lthn-integrations-window");
+    await settleConnect(el);
+    const btn = host.querySelector("[data-testid='oc-import-host']") as HTMLButtonElement | null;
+    expect(btn, "opencode card must render the Import button").not.toBeNull();
+    expect(btn!.textContent).toContain("Import from host opencode");
+  });
+
+  it("Import click fires WImportFromHost and renders success summary", async () => {
+    const { host, el } = await mountWindow("lthn-integrations-window");
+    await settleConnect(el);
+    const btn = host.querySelector("[data-testid='oc-import-host']") as HTMLButtonElement | null;
+    expect(btn).not.toBeNull();
+    btn!.click();
+    // Let the import promise + render settle.
+    await settleConnect(el);
+    expect(WImportFromHost).toHaveBeenCalledTimes(1);
+    const status = host.querySelector("[data-testid='oc-import-status']");
+    expect(status, "status banner must render after import").not.toBeNull();
+    // Mock returns {providers: 3, projects: 5} — summary substitutes
+    // those into the %p / %j placeholders.
+    expect(status!.textContent).toContain("3 providers");
+    expect(status!.textContent).toContain("5 projects");
+  });
+
+  it("Import failure renders an actionable error message", async () => {
+    vi.mocked(WImportFromHost).mockResolvedValueOnce({ OK: false, Value: "opencode binary not found" } as never);
+    const { host, el } = await mountWindow("lthn-integrations-window");
+    await settleConnect(el);
+    const btn = host.querySelector("[data-testid='oc-import-host']") as HTMLButtonElement | null;
+    btn!.click();
+    await settleConnect(el);
+    const status = host.querySelector("[data-testid='oc-import-status']");
+    expect(status, "status banner must render on failure too").not.toBeNull();
+    expect(status!.textContent).toContain("Import failed");
   });
 });

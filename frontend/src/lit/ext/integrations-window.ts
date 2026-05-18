@@ -54,6 +54,8 @@ class LthnIntegrationsWindow extends LitElement {
     mergeBusy: { state: true },
     mergeStatus: { state: true },
     busyStart: { state: true },
+    busyImport: { state: true },
+    importStatus: { state: true },
     studioInstalled: { state: true },
     upgradeBusy: { state: true },
     upgradeStatus: { state: true },
@@ -76,6 +78,8 @@ class LthnIntegrationsWindow extends LitElement {
   declare mergeBusy: boolean;
   declare mergeStatus: { kind: "ok" | "err"; text: string } | null;
   declare busyStart: boolean;
+  declare busyImport: boolean;
+  declare importStatus: { kind: "ok" | "err"; text: string } | null;
   declare studioInstalled: boolean;
   declare upgradeBusy: boolean;
   declare upgradeStatus: { kind: "ok" | "err"; text: string } | null;
@@ -109,6 +113,9 @@ class LthnIntegrationsWindow extends LitElement {
     ocUpgradeDialogConfirm: string; ocUpgradeDialogCancel: string;
     ocUpgradeDialogDigestLabel: string; ocUpgradeDialogDigestSelected: string;
     ocOpenWeb: string; ocOpenWebFailed: string;
+    ocImport: string; ocImporting: string;
+    ocImportSummary: string;
+    ocImportFailed: string;
   };
   /* Poll handle for sandbox state — cleared on disconnect. */
   private pollId: number | null = null;
@@ -129,6 +136,8 @@ class LthnIntegrationsWindow extends LitElement {
     this.mergeBusy = false;
     this.mergeStatus = null;
     this.busyStart = false;
+    this.busyImport = false;
+    this.importStatus = null;
     this.studioInstalled = false;
     this.upgradeBusy = false;
     this.upgradeStatus = null;
@@ -171,6 +180,10 @@ class LthnIntegrationsWindow extends LitElement {
       ocUpgradeDialogDigestSelected: "Pinned: {digest}",
       ocOpenWeb: "Open in window",
       ocOpenWebFailed: "Couldn't open the web window — see logs for details.",
+      ocImport: "Import from host opencode",
+      ocImporting: "Importing…",
+      ocImportSummary: "Imported %p providers · %j projects from host opencode.",
+      ocImportFailed: "Import failed — is the opencode CLI installed + logged in on the host?",
     };
   }
   createRenderRoot() { return this; }
@@ -255,6 +268,47 @@ class LthnIntegrationsWindow extends LitElement {
       this.sandboxId = "";
       this.sandboxCreatedAt = "";
       this.sandboxState = "stopped";
+    }
+  }
+
+  /** Import the operator's host-side opencode credentials (~/.local/
+   *  share/opencode/auth.json) + project list into the lthn orm, so a
+   *  spawned sandbox opencode-serve can talk to the same providers
+   *  the host CLI already authenticated against (your opencode
+   *  subscription's free models + DeepSeek + paid tiers).
+   *
+   *  ImportFromHost is idempotent — re-running is safe + re-syncs
+   *  any credentials that changed on the host side since the last
+   *  import (e.g. you ran `opencode auth login` against a new
+   *  provider). The running sandbox picks the new providers up on
+   *  its next /provider refresh, which the runner already polls
+   *  for the dynamic-route set. */
+  private async importHost() {
+    if (this.busyImport) return;
+    this.busyImport = true;
+    this.importStatus = null;
+    try {
+      const oc = await import("@desktop/opencode/wailsservice");
+      const r = await oc.WImportFromHost();
+      const ok = (r as { OK?: boolean })?.OK === true;
+      if (!ok) {
+        this.importStatus = { kind: "err", text: this.t.ocImportFailed };
+        return;
+      }
+      const summary = (r as { Value?: { providers?: number; projects?: number } })?.Value;
+      const providers = summary?.providers ?? 0;
+      const projects = summary?.projects ?? 0;
+      this.importStatus = {
+        kind: "ok",
+        text: this.t.ocImportSummary
+          .replace("%p", String(providers))
+          .replace("%j", String(projects)),
+      };
+    } catch (err) {
+      console.error("opencode WImportFromHost threw", err);
+      this.importStatus = { kind: "err", text: this.t.ocImportFailed };
+    } finally {
+      this.busyImport = false;
     }
   }
 
@@ -417,6 +471,13 @@ class LthnIntegrationsWindow extends LitElement {
       ocUpgradeDialogConfirm: ocUpDlgC, ocUpgradeDialogCancel: ocUpDlgX,
       ocUpgradeDialogDigestLabel: ocUpDlgDL, ocUpgradeDialogDigestSelected: ocUpDlgDS,
       ocOpenWeb: ocWeb, ocOpenWebFailed: ocWebFail,
+      // Import-from-host (Mantis #1775 follow-on): default copy
+      // shipped inline. i18n keys can land later if these prove
+      // load-bearing for the FR/ZH locales.
+      ocImport: "Import from host opencode",
+      ocImporting: "Importing…",
+      ocImportSummary: "Imported %p providers · %j projects from host opencode.",
+      ocImportFailed: "Import failed — is the opencode CLI installed + logged in on the host?",
     };
     try {
       const [integrations, runner, server, ak, resultMod] = await Promise.all([
@@ -671,7 +732,25 @@ class LthnIntegrationsWindow extends LitElement {
                 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px; margin-right:6px;"></i>${this.t.ocOpenStudio}
               </button>
             ` : nothing}
+            <button
+              data-testid="oc-import-host"
+              ?disabled=${this.busyImport}
+              @click=${() => void this.importHost()}
+              style="padding:6px 12px; font-size:11.5px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.10); border-radius:6px; color:var(--fg-0); cursor:${this.busyImport ? "default" : "pointer"}; opacity:${this.busyImport ? 0.6 : 1}; --wails-draggable: no-drag;">
+              <i class="fa-solid ${this.busyImport ? "fa-spinner fa-spin" : "fa-file-import"}" style="font-size:10px; margin-right:6px;"></i>
+              ${this.busyImport ? this.t.ocImporting : this.t.ocImport}
+            </button>
           </div>
+          ${this.importStatus ? html`
+            <div
+              data-testid="oc-import-status"
+              style="padding:6px 8px; border-radius:5px; font-size:11px;
+                     background:${this.importStatus.kind === "ok" ? "rgba(64,193,197,0.08)" : "rgba(248,113,113,0.06)"};
+                     border:1px solid ${this.importStatus.kind === "ok" ? "rgba(64,193,197,0.20)" : "rgba(248,113,113,0.18)"};
+                     color:${this.importStatus.kind === "ok" ? "var(--brand-300)" : "var(--error-400)"};">
+              ${this.importStatus.text}
+            </div>
+          ` : nothing}
         </div>
       </div>
       ${this.showUpgradeDialog ? this.renderUpgradeDialog() : nothing}
