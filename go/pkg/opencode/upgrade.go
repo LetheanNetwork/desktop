@@ -112,6 +112,43 @@ type UpgradeInput struct {
 	// caller schedules a restart out-of-band. The Restarted field
 	// of UpgradeResult is empty when this is false.
 	RestartSandboxes bool `json:"restart_sandboxes"`
+
+	// SignatureBytes is the operator-supplied ed25519 detached
+	// signature over the canonical pull bytes (digest + "\n" + tag +
+	// "\n" + release_id) per Cerberus #22 MED-2 / Mantis #1622.
+	// When Options.UpgradeRequireSignature is true OR this field is
+	// non-empty, UpgradeWithConsent runs the signature-verification
+	// path BEFORE the docker pull side-effect. Verification failure
+	// surfaces as "upgrade.signature_invalid" + emits
+	// EventOpencodeImageSignatureRejected.
+	//
+	// When require_signature=false AND this field is empty, the
+	// signature gate is bypassed (legacy / bootstrap path) and only
+	// the digest-pin contract from Mantis #1621 is enforced.
+	SignatureBytes []byte `json:"signature_bytes,omitempty"`
+
+	// PublicKeyBase64 is the base64-encoded raw ed25519 public key
+	// (32 bytes pre-encoding) the operator pinned for this release.
+	// The key MUST also be present in
+	// ~/Lethean/conf/opencode/trusted_publishers.json — supplying a
+	// fresh keypair alongside a malicious signature does NOT bypass
+	// verification because the pubkey-in-trust-store cross-check is
+	// the load-bearing gate per the Mantis #1622 threat model.
+	//
+	// Shape: base64 raw key, NOT PEM-armoured. Mirrors marketplace's
+	// trusted_keys.json discipline (PEM parsers have historically
+	// been a source of signature-bypass CVEs).
+	PublicKeyBase64 []byte `json:"public_key_base64,omitempty"`
+
+	// ReleaseID is the opaque release identifier the release
+	// engineer included in the signed canonical bytes — typically a
+	// monotonically-increasing version tag ("v1.2.3") or a tracker
+	// ID. The signed bytes are digest + "\n" + tag + "\n" + release_id
+	// so an attacker who replays a previously-signed (digest, tag)
+	// pair against a NEW release_id cannot reuse the signature.
+	// MUST NOT contain newline characters; verification rejects with
+	// "release_id.newline_forbidden" if it does.
+	ReleaseID string `json:"release_id,omitempty"`
 }
 
 // UpgradeResult captures the outcome of a pull + restart cycle.
@@ -182,6 +219,39 @@ func (s *Service) UpgradeWithConsent(in UpgradeInput) core.Result {
 		return core.Fail(core.E("opencode.Upgrade",
 			"upgrade.digest_invalid: ImageDigest must be sha256:<64 lowercase hex> (Mantis #1621)",
 			nil))
+	}
+
+	// Signature gate — runs BEFORE the side-effect docker pull so a
+	// failed verification produces NO network traffic toward the
+	// registry (closes the timing-channel attack where pull-then-
+	// verify could leak the digest the operator was about to install).
+	// Cerberus #22 MED-2 / Mantis #1622.
+	//
+	// Fast-path bypass: when require_signature=false AND no signature
+	// was supplied, skip the gate entirely. Keeps the legacy /
+	// bootstrap path zero-cost and avoids touching s.image() on
+	// services constructed via &Service{} (which existing tests rely
+	// on to exercise gate ordering without a Core runtime).
+	requireSig := s.requireSignature()
+	hasSig := len(in.SignatureBytes) > 0 && len(in.PublicKeyBase64) > 0
+	if requireSig || hasSig {
+		// Tag is parsed from the configured image so the signed
+		// canonical bytes commit to (digest, tag, release_id) — the
+		// operator's release engineer signs this triple, and a
+		// registry that swaps any one of them invalidates the
+		// signature.
+		canon, canonOK := canonicalSigningBytes(in.ImageDigest, imageTag(s.image()), in.ReleaseID)
+		if !canonOK {
+			emitSignatureRejected(in.ImageDigest, "", sigReasonNoNewLine, core.Fail(core.E(sigVerifyOp,
+				"upgrade.signature_invalid: "+sigReasonNoNewLine,
+				nil)))
+			return core.Fail(core.E("opencode.Upgrade",
+				"upgrade.signature_invalid: "+sigReasonNoNewLine+" (release_id contained newline)",
+				nil))
+		}
+		if r := verifySignatureForUpgrade(s, in, canon); !r.OK {
+			return r
+		}
 	}
 
 	ps := s.proc()
@@ -330,6 +400,27 @@ func pinnedPullRef(image string, digest string) string {
 		}
 	}
 	return repo + "@" + digest
+}
+
+// imageTag extracts the ":<tag>" suffix from a configured image
+// reference. Returns "latest" when the image has no explicit tag
+// (matches docker's implicit-tag default). Registry-port colons
+// (e.g. "registry.example.com:5000/lthn/dev:latest") are preserved
+// — only a tag colon AFTER the last slash is considered.
+//
+//	imageTag("lthn/dev:latest")                                 // "latest"
+//	imageTag("lthn/dev")                                        // "latest"
+//	imageTag("registry.example.com:5000/lthn/dev:v1.2.3")       // "v1.2.3"
+func imageTag(image string) string {
+	slash := core.LastIndex(image, "/")
+	tail := image
+	if slash >= 0 {
+		tail = image[slash+1:]
+	}
+	if colon := core.Index(tail, ":"); colon >= 0 {
+		return tail[colon+1:]
+	}
+	return "latest"
 }
 
 // equalDigest compares two sha256 digests case-insensitively on the

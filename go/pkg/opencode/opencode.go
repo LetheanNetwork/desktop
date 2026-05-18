@@ -59,6 +59,21 @@ type Options struct {
 	// future iteration that adds "lthn-vm" as the canonical option).
 	Runtime string
 
+	// UpgradeRequireSignature is the operator-level policy gate for
+	// Cerberus #22 MED-2 / Mantis #1622 — when true, every Upgrade
+	// call MUST supply UpgradeInput.SignatureBytes + PublicKeyBase64
+	// that verify under a key listed in
+	// ~/Lethean/conf/opencode/trusted_publishers.json. Default false
+	// preserves bootstrap deployments where no release-engineer
+	// signing infrastructure is wired yet (signatures still verify
+	// when supplied as defence-in-depth — the policy only changes
+	// whether ABSENCE is acceptable).
+	//
+	// Distinct from UpgradeInput.SignatureBytes which is per-call
+	// data: this is per-deployment policy. The operator chooses once
+	// whether their deployment requires signed upgrades; the upgrade
+	// RPC surface stays single-shape regardless of policy.
+	UpgradeRequireSignature bool
 }
 
 // Service is the opencode host. Embeds *core.ServiceRuntime[Options]
@@ -195,6 +210,18 @@ func (s *Service) image() string {
 		return defaultImage
 	}
 	return img
+}
+
+// requireSignature returns the configured signature-verification
+// policy for UpgradeWithConsent (Cerberus #22 MED-2 / Mantis #1622).
+// Defaults false on a zero Service — keeps unit tests that construct
+// `&Service{}` directly able to exercise the upgrade gates without
+// also setting up trusted_publishers.json.
+func (s *Service) requireSignature() bool {
+	if s == nil || s.ServiceRuntime == nil {
+		return false
+	}
+	return s.Options().UpgradeRequireSignature
 }
 
 // Start spawns a new opencode-serve container, persists the

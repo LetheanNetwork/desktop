@@ -137,6 +137,8 @@ export const AUDIT_EVENT_NAMES = [
   "keys.tier1.stored",
   "keys.tier1.replaced",
   "keys.tier1.deleted",
+  "opencode.image.signature_verified",
+  "opencode.image.signature_rejected",
 ] as const;
 
 export type AuditEventName = (typeof AUDIT_EVENT_NAMES)[number];

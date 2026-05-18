@@ -2167,6 +2167,60 @@ const (
 	// the ciphertext from disk and emits this row; the row records
 	// the deletion decision, not the credential.
 	EventKeysTier1Deleted = "keys.tier1.deleted"
+
+	// EventOpencodeImageSignatureVerified fires when pkg/opencode.Service.
+	// UpgradeWithConsent successfully verifies the operator-supplied
+	// ed25519 signature over the canonical pull bytes (digest + tag +
+	// release_id) BEFORE the actual docker pull side-effect runs.
+	// Cerberus #22 MED-2 / Mantis #1622 — the supply-chain trust chain
+	// previously ended at the registry; pin-by-digest blocks a tag-swap
+	// attack but does not protect against the case where the attacker
+	// controls both the registry AND the pin-registration path. Binding
+	// the digest to a release-engineer key the operator pins out-of-band
+	// via ~/Lethean/conf/opencode/trusted_publishers.json closes the
+	// loop.
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   image_digest — the sha256:<64hex> manifest digest that was
+	//                   signature-verified
+	//   keyid        — the trusted publisher keyid that the signature
+	//                   verified under (alias resolved via
+	//                   trusted_publishers.json; never raw pubkey bytes)
+	//
+	// The signature bytes themselves are NEVER in Meta — the row records
+	// the verification decision, not the credential or signing material.
+	EventOpencodeImageSignatureVerified = "opencode.image.signature_verified"
+
+	// EventOpencodeImageSignatureRejected fires when pkg/opencode.Service.
+	// UpgradeWithConsent rejects the supplied signature. Reasons cover
+	// the closed-set surface from pkg/marketplace.Verify (sig.corrupt
+	// for wrong-length / encoding error, sig.invalid for parses-but-
+	// mismatch) plus a "key_not_found" facet when the manifest's KeyID
+	// is not present in trusted_publishers.json and a "signature_missing"
+	// facet when require_signature=true but no signature was supplied.
+	//
+	// Cerberus #22 MED-2 / Mantis #1622 — the row makes signature-
+	// verification failures grep-able from the audit log so a forensic
+	// walker can rank "registry served signed-but-untrusted artefact"
+	// above "user clicked update on the wrong release".
+	//
+	// Meta keys (RFC §2.1, secret-shape redactor enforced):
+	//
+	//   image_digest — the sha256:<64hex> manifest digest that failed
+	//                   verification
+	//   keyid        — the manifest's declared KeyID (may be empty when
+	//                   reason="signature_missing")
+	//   reason       — one of: sig.corrupt / sig.invalid / key_not_found
+	//                   / signature_missing
+	//   error_code   — substrate-derived per audit.ErrorCode (canonical
+	//                   "opencode.SignatureVerify" scope)
+	//   error_scope  — substrate-derived per audit.ErrorScope (Mantis
+	//                   #1720 v2 dual-key)
+	//
+	// The signature bytes themselves are NEVER in Meta — the row records
+	// the verification decision, not the credential or signing material.
+	EventOpencodeImageSignatureRejected = "opencode.image.signature_rejected"
 )
 
 // Error codes the package emits via core.NewCode. Mirrors the
