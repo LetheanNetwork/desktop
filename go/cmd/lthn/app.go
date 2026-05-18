@@ -17,6 +17,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/account"
 	lthnai "dappco.re/lthn/desktop/pkg/ai"
 	"dappco.re/lthn/desktop/pkg/audit"
+	"dappco.re/lthn/desktop/pkg/benchmark"
 	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/gateway"
@@ -681,6 +682,10 @@ func newAppCore() *core.Core {
 	// data contract. One row per probe tick; LatestByDomain rolls
 	// up to the per-site latest for the Wails Sites() response.
 	schemas = append(schemas, vi.Schemas()...)
+	// benchmark subsystem — runner-agnostic results substrate. Stores
+	// inference benchmark Runs from any registered Bencher adapter
+	// (own runner, llama.cpp, ollama, NIM, opencode, future go-ai).
+	schemas = append(schemas, benchmark.Schemas()...)
 	for _, schema := range schemas {
 		if r := orm.RegisterSchema(c, schema); !r.OK {
 			core.Print(core.Stderr(), "lthn: orm schema %s failed: %s\n", schema.Name, r.Error())

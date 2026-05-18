@@ -43,6 +43,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/audit"
+	"dappco.re/lthn/desktop/pkg/benchmark"
 	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/build"
 	"dappco.re/lthn/desktop/pkg/container"
@@ -383,6 +384,18 @@ func (s *Service) Run() core.Result {
 		})
 	}
 
+	// Benchmark — runner-agnostic results substrate. Constructed +
+	// registered here so the Wails binding has a fully-wired *Service
+	// with s.core set before any RegisterBencher / History call. Per
+	// today's substrate-only ship: no adapters registered — frontend
+	// + fixture-mode picks up the empty ListBenchers / History until
+	// real adapters land in their owner packages (pkg/runner /
+	// pkg/opencode / future pkg/llamacpp / pkg/ollama / pkg/nim).
+	benchmarkSvc := benchmark.NewService(benchmark.Options{})
+	if r := benchmarkSvc.Register(s.opts.Core); !r.OK {
+		core.Warn("desktop.benchmark.register", "error", r.Error())
+	}
+
 	// Downloader → Wails event bus. The downloader spawns its fetch
 	// via c.Go and reports progress + terminal state through this
 	// emitter; the WebView listens for "downloader:progress" +
@@ -463,6 +476,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(tools.NewWailsService(s.opts.Core)),
 		application.NewService(validator.NewWailsService()),
 		application.NewService(telemetry.NewService(telemetry.Options{})),
+		application.NewService(benchmarkSvc),
 		application.NewService(lthnservices.NewWailsService()),
 		// Upstream dappco.re/go services — register the Core-built
 		// instances directly. Bindings land at frontend/bindings/
