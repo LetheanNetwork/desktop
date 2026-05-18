@@ -208,6 +208,13 @@ type Diff struct {
 //   - CanBench(req) is a fast pre-flight check; the substrate calls it
 //     before Bench() to fail-fast on unsupported requests (e.g. a
 //     remote bencher with no provisioning for the requested model).
+//   - Models(c) returns the model IDs the bencher currently serves —
+//     ollama lists /api/tags entries, openai-compat lists /v1/models,
+//     a local runner lists installed gguf basenames. Returns an empty
+//     slice with OK=true when the bencher is reachable but advertises
+//     nothing; Fail when the lookup itself errored. The frontend uses
+//     this to populate the model picker without each consumer pkg
+//     having to know how a given bencher discovers its inventory.
 //   - Bench(c, req) does the actual measurement and returns either a
 //     core.Ok(Run{...}) or a core.Fail wrapping the underlying error.
 //     Bencher SHOULD populate Run.ID (substrate will fill if empty),
@@ -220,6 +227,7 @@ type Diff struct {
 //	func (b *myBencher) Name() string             { return "ollama-localhost" }
 //	func (b *myBencher) Kind() benchmark.Kind     { return benchmark.KindRemoteHTTP }
 //	func (b *myBencher) CanBench(_ benchmark.Bench) bool { return true }
+//	func (b *myBencher) Models(c core.Context) core.Result { /* GET /api/tags */ }
 //	func (b *myBencher) Bench(c core.Context, req benchmark.Bench) core.Result {
 //	    // ...POST to localhost:11434/api/generate, time it, build Run
 //	}
@@ -227,5 +235,6 @@ type Bencher interface {
 	Name() string
 	Kind() Kind
 	CanBench(req Bench) bool
+	Models(c core.Context) core.Result
 	Bench(c core.Context, req Bench) core.Result
 }

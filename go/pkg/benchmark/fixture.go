@@ -29,8 +29,11 @@ type FixtureBencher struct {
 	BencherName string
 	BencherKind Kind
 	BencherDesc string
-	Canned      []Run
-	pos         int
+	// ModelList overrides the auto-derived model list returned by
+	// Models(). Empty → derive unique models from Canned.
+	ModelList []string
+	Canned    []Run
+	pos       int
 }
 
 // Name implements Bencher.
@@ -46,6 +49,37 @@ func (f *FixtureBencher) Describe() string { return f.BencherDesc }
 // CanBench returns true for any request — the fixture is a generic
 // stand-in. Real adapters narrow this to declared support.
 func (f *FixtureBencher) CanBench(_ Bench) bool { return true }
+
+// Models returns ModelList when set; otherwise derives a unique list
+// of models from Canned (so a fixture seeded with Run rows
+// automatically advertises those models in the picker without the
+// caller having to repeat them).
+//
+// Usage example:
+//
+//	fx := &benchmark.FixtureBencher{ModelList: []string{"gemma-4-e2b"}}
+//	r := fx.Models(core.Background())
+//	if r.OK { ids := r.Value.([]string); _ = ids }
+func (f *FixtureBencher) Models(_ core.Context) core.Result {
+	if len(f.ModelList) > 0 {
+		out := make([]string, len(f.ModelList))
+		copy(out, f.ModelList)
+		return core.Ok(out)
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(f.Canned))
+	for _, r := range f.Canned {
+		if r.Model == "" {
+			continue
+		}
+		if _, ok := seen[r.Model]; ok {
+			continue
+		}
+		seen[r.Model] = struct{}{}
+		out = append(out, r.Model)
+	}
+	return core.Ok(out)
+}
 
 // Bench returns the next canned Run, or a synthesised baseline when
 // the canned slice is empty / exhausted. The substrate fills in ID +

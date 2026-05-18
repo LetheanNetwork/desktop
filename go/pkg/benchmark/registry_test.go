@@ -19,6 +19,9 @@ type stubBencher struct {
 func (b *stubBencher) Name() string                  { return b.name }
 func (b *stubBencher) Kind() Kind                    { return b.kind }
 func (b *stubBencher) CanBench(_ Bench) bool         { return true }
+func (b *stubBencher) Models(_ core.Context) core.Result {
+	return core.Ok([]string{"stub-model"})
+}
 func (b *stubBencher) Bench(_ core.Context, _ Bench) core.Result {
 	return core.Ok(Run{})
 }

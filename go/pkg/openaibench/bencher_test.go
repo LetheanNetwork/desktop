@@ -197,6 +197,43 @@ func TestBench_EmptyModelFails(t *core.T) {
 	core.AssertFalse(t, r.OK)
 }
 
+func TestModels_HappyPath(t *core.T) {
+	srv := fakeOpenAI(func(w core.ResponseWriter, r *core.Request) {
+		if r.URL.Path == "/v1/models" {
+			_, _ = w.Write([]byte(modelsBody))
+			return
+		}
+		w.WriteHeader(404)
+	})
+	defer srv.Close()
+	b := openaibench.NewBencher(openaibench.Options{Name: "x", Endpoint: srv.URL + "/v1"})
+	r := b.Models(core.Background())
+	core.RequireTrue(t, r.OK)
+	ids := r.Value.([]string)
+	core.AssertEqual(t, 2, len(ids))
+	core.AssertEqual(t, "gpt-4o-mini", ids[0])
+	core.AssertEqual(t, "meta-llama/Llama-3-8b", ids[1])
+}
+
+func TestModels_EndpointDownFails(t *core.T) {
+	b := openaibench.NewBencher(openaibench.Options{Name: "x", Endpoint: "http://127.0.0.1:1/v1"})
+	r := b.Models(core.Background())
+	core.AssertFalse(t, r.OK)
+}
+
+func TestModels_EmptyDataReturnsEmptySlice(t *core.T) {
+	// llama-server case: returns {data: []} because it serves a single
+	// implicit model. Should be OK with empty slice, not Fail.
+	srv := fakeOpenAI(func(w core.ResponseWriter, _ *core.Request) {
+		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+	})
+	defer srv.Close()
+	b := openaibench.NewBencher(openaibench.Options{Name: "x", Endpoint: srv.URL + "/v1"})
+	r := b.Models(core.Background())
+	core.RequireTrue(t, r.OK)
+	core.AssertEqual(t, 0, len(r.Value.([]string)))
+}
+
 func TestBench_RegistersWithSubstrate(t *core.T) {
 	c := newTestCoreWithBenchmark(t)
 	svc := benchmark.NewService(benchmark.Options{})

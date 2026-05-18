@@ -79,6 +79,121 @@ describe("lthn-benchmark-window — backend wire", () => {
   });
 });
 
+describe("lthn-benchmark-window — picker + Run wire", () => {
+  it("renders bencher dropdown options from ListBenchers", async () => {
+    vi.doMock("@desktop/benchmark/service", () => ({
+      History: vi.fn().mockResolvedValue({ OK: true, Value: [] }),
+      ListBenchers: vi.fn().mockResolvedValue({
+        OK: true,
+        Value: [{ name: "ollama", kind: "remote-http" }, { name: "fixture-x", kind: "local" }],
+      }),
+      ModelsForBencher: vi.fn().mockResolvedValue({ OK: true, Value: ["llama3"] }),
+      Bench: vi.fn(),
+    }));
+    const { host, el } = await mountWindow<HTMLElement & { updateComplete: Promise<boolean>; _loadFromBackend: () => Promise<void> }>("lthn-benchmark-window");
+    await el._loadFromBackend();
+    await el.updateComplete;
+    const selects = host.querySelectorAll("select");
+    expect(selects.length).toBe(2);
+    const bencherOpts = Array.from(selects[0].querySelectorAll("option")).map(o => o.value);
+    expect(bencherOpts).toContain("ollama");
+    expect(bencherOpts).toContain("fixture-x");
+    vi.doUnmock("@desktop/benchmark/service");
+  });
+
+  it("loads models for the selected bencher", async () => {
+    const modelsFn = vi.fn().mockResolvedValue({ OK: true, Value: ["llama3", "mistral", "phi3"] });
+    vi.doMock("@desktop/benchmark/service", () => ({
+      History: vi.fn().mockResolvedValue({ OK: true, Value: [] }),
+      ListBenchers: vi.fn().mockResolvedValue({
+        OK: true,
+        Value: [{ name: "ollama", kind: "remote-http" }],
+      }),
+      ModelsForBencher: modelsFn,
+      Bench: vi.fn(),
+    }));
+    const { host, el } = await mountWindow<HTMLElement & {
+      updateComplete: Promise<boolean>;
+      _loadFromBackend: () => Promise<void>;
+      _loadModels: (name: string) => Promise<void>;
+    }>("lthn-benchmark-window");
+    await el._loadFromBackend();
+    await el._loadModels("ollama");
+    await el.updateComplete;
+    expect(modelsFn).toHaveBeenCalledWith("ollama");
+    const selects = host.querySelectorAll("select");
+    const modelOpts = Array.from(selects[1].querySelectorAll("option")).map(o => o.value);
+    expect(modelOpts).toEqual(["llama3", "mistral", "phi3"]);
+    vi.doUnmock("@desktop/benchmark/service");
+  });
+
+  it("Run button calls Bench with selected bencher + model", async () => {
+    const benchFn = vi.fn().mockResolvedValue({
+      OK: true,
+      Value: { id: "new-run", timestamp: "2026-05-18T12:00:00Z", bencher: "ollama", model: "llama3", ctx: 2048, pp_tok_sec: 800, tg_tok_sec: 40 },
+    });
+    vi.doMock("@desktop/benchmark/service", () => ({
+      History: vi.fn().mockResolvedValue({ OK: true, Value: [] }),
+      ListBenchers: vi.fn().mockResolvedValue({
+        OK: true,
+        Value: [{ name: "ollama", kind: "remote-http" }],
+      }),
+      ModelsForBencher: vi.fn().mockResolvedValue({ OK: true, Value: ["llama3"] }),
+      Bench: benchFn,
+    }));
+    const { el } = await mountWindow<HTMLElement & {
+      updateComplete: Promise<boolean>;
+      _loadFromBackend: () => Promise<void>;
+      _loadModels: (name: string) => Promise<void>;
+      _runBench: () => Promise<void>;
+      selectedBencher: string;
+      selectedModel: string;
+      models: string[];
+      runErr: string;
+    }>("lthn-benchmark-window");
+    await el._loadFromBackend();
+    await el._loadModels("ollama");
+    await el.updateComplete;
+    expect(el.selectedBencher).toBe("ollama");
+    expect(el.selectedModel).toBe("llama3");
+    expect(el.models).toEqual(["llama3"]);
+    await el._runBench();
+    expect(el.runErr).toBe("");
+    expect(benchFn).toHaveBeenCalledTimes(1);
+    const [req, name] = benchFn.mock.calls[0];
+    expect(name).toBe("ollama");
+    expect(req.Model).toBe("llama3");
+    expect(req.Ctx).toBe(2048);
+    expect(req.Prompt.length).toBeGreaterThan(50);
+    vi.doUnmock("@desktop/benchmark/service");
+  });
+
+  it("Run failure renders an error banner", async () => {
+    vi.doMock("@desktop/benchmark/service", () => ({
+      History: vi.fn().mockResolvedValue({ OK: true, Value: [] }),
+      ListBenchers: vi.fn().mockResolvedValue({
+        OK: true,
+        Value: [{ name: "ollama", kind: "remote-http" }],
+      }),
+      ModelsForBencher: vi.fn().mockResolvedValue({ OK: true, Value: ["llama3"] }),
+      Bench: vi.fn().mockResolvedValue({ OK: false, Value: "ollama: model not found" }),
+    }));
+    const { host, el } = await mountWindow<HTMLElement & {
+      updateComplete: Promise<boolean>;
+      _loadFromBackend: () => Promise<void>;
+      _loadModels: (name: string) => Promise<void>;
+      _runBench: () => Promise<void>;
+    }>("lthn-benchmark-window");
+    await el._loadFromBackend();
+    await el._loadModels("ollama");
+    await el.updateComplete;
+    await el._runBench();
+    await el.updateComplete;
+    expect(host.textContent).toContain("ollama: model not found");
+    vi.doUnmock("@desktop/benchmark/service");
+  });
+});
+
 describe("lthn-benchmark-window — two-shell", () => {
   it("embedded mode collapses the chrome", async () => {
     const { host } = await mountWindow("lthn-benchmark-window", { attrs: { embedded: "" } });

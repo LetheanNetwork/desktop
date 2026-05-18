@@ -191,6 +191,58 @@ func (b *Bencher) CanBench(req benchmark.Bench) bool {
 	return false
 }
 
+// Models returns the model IDs the endpoint advertises via
+// /v1/models. Frontend uses this to populate the model picker once
+// the operator has chosen this bencher. Unlike CanBench (which
+// soft-fails to true so Bench surfaces the real error), Models returns
+// Fail when the endpoint is unreachable + returns an empty slice
+// (with OK=true) when the endpoint responds but advertises nothing
+// — some endpoints (llama-server) intentionally serve a single
+// implicit model without listing it.
+//
+// Usage example:
+//
+//	r := b.Models(c.Context())
+//	if r.OK { ids := r.Value.([]string); _ = ids }
+func (b *Bencher) Models(ctx core.Context) core.Result {
+	url := core.Concat(b.opts.Endpoint, "/models")
+	rr := core.NewHTTPRequestContext(ctx, "GET", url, nil)
+	if !rr.OK {
+		return rr
+	}
+	httpReq := rr.Value.(*core.Request)
+	if b.opts.Bearer != "" {
+		httpReq.Header.Set("Authorization", core.Concat("Bearer ", b.opts.Bearer))
+	}
+	if b.opts.Org != "" {
+		httpReq.Header.Set("OpenAI-Organization", b.opts.Org)
+	}
+	resp, err := b.client.Do(httpReq)
+	if err != nil {
+		return core.Fail(core.Errorf("openaibench.Models HTTP: %w", err))
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != 200 {
+		return core.Fail(core.E("openaibench.Models", core.Concat("status=", core.Sprintf("%d", resp.StatusCode)), nil))
+	}
+	br := core.ReadAll(resp.Body)
+	if !br.OK {
+		return br
+	}
+	bodyStr, _ := br.Value.(string)
+	var ml modelsResponse
+	if r := core.JSONUnmarshalString(bodyStr, &ml); !r.OK {
+		return r
+	}
+	out := make([]string, 0, len(ml.Data))
+	for _, m := range ml.Data {
+		if m.ID != "" {
+			out = append(out, m.ID)
+		}
+	}
+	return core.Ok(out)
+}
+
 // Bench executes one inference round through /v1/chat/completions,
 // measures wall-clock total, and returns a benchmark.Run with
 // pp_tok_sec / tg_tok_sec / prompt_len / output_len populated from

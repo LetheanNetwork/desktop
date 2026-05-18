@@ -158,6 +158,50 @@ func (b *Bencher) CanBench(req benchmark.Bench) bool {
 	return false
 }
 
+// Models returns the model names the ollama daemon currently
+// advertises via /api/tags. Frontend uses this to populate the model
+// picker once the operator has chosen this bencher. Unlike CanBench
+// (which soft-fails to true so the eventual Bench surfaces the real
+// error), Models returns Fail when /api/tags is unreachable so the
+// picker can render an actionable "ollama isn't running" affordance
+// instead of an empty dropdown.
+//
+// Usage example:
+//
+//	r := b.Models(c.Context())
+//	if r.OK { names := r.Value.([]string); _ = names }
+func (b *Bencher) Models(ctx core.Context) core.Result {
+	tagsURL := core.Concat(b.opts.Endpoint, "/api/tags")
+	rr := core.NewHTTPRequestContext(ctx, "GET", tagsURL, nil)
+	if !rr.OK {
+		return rr
+	}
+	resp, err := b.client.Do(rr.Value.(*core.Request))
+	if err != nil {
+		return core.Fail(core.Errorf("ollama.Models HTTP: %w", err))
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != 200 {
+		return core.Fail(core.E("ollama.Models", core.Concat("status=", core.Sprintf("%d", resp.StatusCode)), nil))
+	}
+	br := core.ReadAll(resp.Body)
+	if !br.OK {
+		return br
+	}
+	bodyStr, _ := br.Value.(string)
+	var tags tagsResponse
+	if r := core.JSONUnmarshalString(bodyStr, &tags); !r.OK {
+		return r
+	}
+	out := make([]string, 0, len(tags.Models))
+	for _, m := range tags.Models {
+		if m.Name != "" {
+			out = append(out, m.Name)
+		}
+	}
+	return core.Ok(out)
+}
+
 // Bench executes one inference round through ollama's /api/generate,
 // parses the timing markers from the response, and returns a
 // benchmark.Run with pp_tok_sec / tg_tok_sec / prompt_len / output_len

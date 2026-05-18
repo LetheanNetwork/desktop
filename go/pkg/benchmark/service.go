@@ -123,6 +123,37 @@ func (s *Service) ListBenchers() core.Result {
 	return core.Ok(s.reg.infos())
 }
 
+// ModelsForBencher returns the model IDs the named Bencher currently
+// serves. Delegates to Bencher.Models. Lets the frontend populate a
+// model picker without consumer packages needing direct adapter
+// imports — same uniform surface across ollama / openai-compat /
+// future llama-bench / lthn-mlx.
+//
+// Returns Fail when the name is not registered. Bencher.Models may
+// itself return Fail when its discovery endpoint is unreachable; the
+// substrate passes that through unchanged so callers see the real
+// failure mode.
+//
+// Usage example:
+//
+//	r := svc.ModelsForBencher("ollama")
+//	if r.OK { ids := r.Value.([]string); _ = ids }
+func (s *Service) ModelsForBencher(bencherName string) core.Result {
+	if bencherName == "" {
+		return core.Fail(core.E("benchmark.ModelsForBencher", "bencher name is required", nil))
+	}
+	lookup := s.reg.bencher(bencherName)
+	if !lookup.OK {
+		return lookup
+	}
+	b := lookup.Value.(Bencher)
+	ctx := core.Background()
+	if s.core != nil {
+		ctx = s.core.Context()
+	}
+	return b.Models(ctx)
+}
+
 // ----- Run storage surface ---------------------------------------------
 
 // Record persists a Run produced outside the substrate's dispatch

@@ -176,6 +176,45 @@ func TestBench_DivisionByZeroIsZeroNotNaN(t *core.T) {
 	core.AssertEqual(t, 0.0, run.TgTokSec)
 }
 
+func TestModels_HappyPath(t *core.T) {
+	srv := fakeOllama(func(w core.ResponseWriter, r *core.Request) {
+		if r.URL.Path == "/api/tags" {
+			_, _ = w.Write([]byte(tagsBody))
+			return
+		}
+		w.WriteHeader(404)
+	})
+	defer srv.Close()
+	b := ollama.NewBencher(ollama.Options{Endpoint: srv.URL})
+	r := b.Models(core.Background())
+	core.RequireTrue(t, r.OK)
+	names := r.Value.([]string)
+	core.AssertEqual(t, 1, len(names))
+	core.AssertEqual(t, "llama3", names[0])
+}
+
+func TestModels_DaemonDownFails(t *core.T) {
+	b := ollama.NewBencher(ollama.Options{Endpoint: "http://127.0.0.1:1"})
+	r := b.Models(core.Background())
+	// Unlike CanBench (soft-fail to true), Models surfaces real failure.
+	core.AssertFalse(t, r.OK)
+}
+
+func TestModels_EmptyDaemonReturnsEmptySlice(t *core.T) {
+	srv := fakeOllama(func(w core.ResponseWriter, r *core.Request) {
+		if r.URL.Path == "/api/tags" {
+			_, _ = w.Write([]byte(`{"models":[]}`))
+			return
+		}
+		w.WriteHeader(404)
+	})
+	defer srv.Close()
+	b := ollama.NewBencher(ollama.Options{Endpoint: srv.URL})
+	r := b.Models(core.Background())
+	core.RequireTrue(t, r.OK)
+	core.AssertEqual(t, 0, len(r.Value.([]string)))
+}
+
 func TestBench_RegistersWithSubstrate(t *core.T) {
 	// End-to-end: register through the substrate + ensure dispatch
 	// produces a stored Run with the right Bencher attribution.

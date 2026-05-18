@@ -228,6 +228,9 @@ type rejectorBencher struct{}
 func (rejectorBencher) Name() string                  { return "rejector" }
 func (rejectorBencher) Kind() benchmark.Kind          { return benchmark.KindLocal }
 func (rejectorBencher) CanBench(_ benchmark.Bench) bool { return false }
+func (rejectorBencher) Models(_ core.Context) core.Result {
+	return core.Ok([]string{})
+}
 func (rejectorBencher) Bench(_ core.Context, _ benchmark.Bench) core.Result {
 	return core.Fail(core.E("rejector.Bench", "should not be reached", nil))
 }
@@ -279,6 +282,57 @@ func TestUnregisteredService_Fails(t *core.T) {
 	core.AssertFalse(t, svc.History(benchmark.Filter{}).OK)
 	core.AssertFalse(t, svc.Compare("a", "b").OK)
 	core.AssertFalse(t, svc.Bench(core.Background(), benchmark.Bench{}, "x").OK)
+}
+
+// Models surface ------------------------------------------------------
+
+func TestModelsForBencher_FromCannedRuns(t *core.T) {
+	svc := newRegisteredService(t)
+	fx := &benchmark.FixtureBencher{
+		BencherName: "fix",
+		BencherKind: benchmark.KindLocal,
+		Canned: []benchmark.Run{
+			{Model: "gemma-4-e2b"},
+			{Model: "llama-3"},
+			{Model: "gemma-4-e2b"}, // dup — should dedup
+		},
+	}
+	core.RequireTrue(t, svc.RegisterBencher(fx).OK)
+	r := svc.ModelsForBencher("fix")
+	core.RequireTrue(t, r.OK)
+	ids := r.Value.([]string)
+	core.AssertEqual(t, 2, len(ids))
+	core.AssertEqual(t, "gemma-4-e2b", ids[0])
+	core.AssertEqual(t, "llama-3", ids[1])
+}
+
+func TestModelsForBencher_FromModelList(t *core.T) {
+	svc := newRegisteredService(t)
+	fx := &benchmark.FixtureBencher{
+		BencherName: "fix",
+		BencherKind: benchmark.KindLocal,
+		ModelList:   []string{"explicit-a", "explicit-b"},
+		Canned:      []benchmark.Run{{Model: "from-canned"}},
+	}
+	core.RequireTrue(t, svc.RegisterBencher(fx).OK)
+	r := svc.ModelsForBencher("fix")
+	core.RequireTrue(t, r.OK)
+	ids := r.Value.([]string)
+	// ModelList takes precedence; canned-derived list ignored.
+	core.AssertEqual(t, 2, len(ids))
+	core.AssertEqual(t, "explicit-a", ids[0])
+}
+
+func TestModelsForBencher_UnknownBencherFails(t *core.T) {
+	svc := newRegisteredService(t)
+	r := svc.ModelsForBencher("does-not-exist")
+	core.AssertFalse(t, r.OK)
+}
+
+func TestModelsForBencher_EmptyNameFails(t *core.T) {
+	svc := newRegisteredService(t)
+	r := svc.ModelsForBencher("")
+	core.AssertFalse(t, r.OK)
 }
 
 // Wails Service interface --------------------------------------------
