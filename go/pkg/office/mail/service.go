@@ -143,6 +143,14 @@ type Service struct {
 	// not need to wire a retry loop. Lock is acquired at FetchOnce
 	// entry, released on exit.
 	accountMu map[string]*sync.Mutex
+
+	// bodyFetchOverride lets tests inject a synthetic IMAP body
+	// fetcher so FetchBody's at-rest write contract (Cerberus #9
+	// Concern 3.A / Mantis #1556) can be exercised without a real
+	// IMAP server. nil in production — the real IMAP wire-up will
+	// live in fetchBodyFromIMAP when §4.2 lazy-fetch lands. Tests
+	// set this to a closure returning canned RFC822 bytes.
+	bodyFetchOverride func(FetchBodyInput) ([]byte, error)
 }
 
 // imapConn is one pooled IMAP connection with its LRU timestamp.
