@@ -408,6 +408,19 @@ func (s *Service) Run() core.Result {
 	if r := benchmarkSvc.RegisterBencher(ollama.NewBencher(ollama.Options{})); !r.OK {
 		core.Warn("desktop.benchmark.ollama_register", "error", r.Error())
 	}
+	// Queue substrate wiring (Mantis #1770) — "benchmark.gpu" kind
+	// handler registered against pkg/queue so EnqueueBench from the
+	// Wails surface dispatches via the substrate's single-worker
+	// throttle. Concurrent Run clicks queue cleanly instead of
+	// contending for GPU. Completion event ferries the BenchCompleted
+	// Core action through to the WebView so benchmark-window can
+	// refresh History without polling.
+	if r := benchmark.RegisterQueueHandler(s.opts.Core, benchmarkSvc); !r.OK {
+		core.Warn("desktop.benchmark.queue_register", "error", r.Error())
+	}
+	benchmark.SubscribeCompleted(s.opts.Core, func(_ *core.Core, ev benchmark.BenchCompleted) {
+		emitCoreEvent(s.opts.Core, "benchmark:completed", ev)
+	})
 
 	// Downloader → Wails event bus. The downloader spawns its fetch
 	// via c.Go and reports progress + terminal state through this

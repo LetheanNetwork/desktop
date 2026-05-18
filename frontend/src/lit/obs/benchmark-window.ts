@@ -161,6 +161,11 @@ class LthnBenchmarkWindow extends LitElement {
     yAxis: string; footer: string;
   };
 
+  /** Wails Events.On teardown — captured from connectedCallback so
+   *  disconnectedCallback can detach. The queue-substrate completion
+   *  event refreshes History without polling; null when not attached. */
+  private _unsubCompleted: (() => void) | null = null;
+
   constructor() {
     super();
     this.w = 1000; this.h = 660; this.embedded = false;
@@ -221,6 +226,28 @@ class LthnBenchmarkWindow extends LitElement {
       yAxis: yAx, footer: foot,
     };
     void this._loadFromBackend();
+    // Subscribe to the queue substrate's completion event so the table
+    // refreshes the moment a Run finishes — no polling needed. The
+    // backend bridge emits "benchmark:completed" on every BenchCompleted
+    // Core action, regardless of success/failure. Detached in
+    // disconnectedCallback.
+    try {
+      const { Events } = await import("@wailsio/runtime");
+      this._unsubCompleted = Events.On("benchmark:completed", () => {
+        this.running = false;
+        void this._loadFromBackend();
+      });
+    } catch {
+      // wails runtime not available in some test contexts — silent skip.
+    }
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this._unsubCompleted) {
+      this._unsubCompleted();
+      this._unsubCompleted = null;
+    }
   }
 
   /** Pull History + ListBenchers from the substrate. Per the canonical
@@ -292,11 +319,16 @@ class LthnBenchmarkWindow extends LitElement {
     }
   }
 
-  /** Trigger one benchmark run via the substrate dispatch path. The
-   *  substrate looks up the named bencher, calls its Bench() method,
-   *  persists the resulting Run, and we refresh History to surface it.
-   *  Button stays disabled while inflight; errors render below the
-   *  toolbar until the next successful run. */
+  /** Enqueue one benchmark run via the queue substrate (Mantis #1770).
+   *  EnqueueBench returns the Job record immediately; the queue worker
+   *  picks it up + dispatches via Bencher.Bench. When the run finishes
+   *  (success OR failure), the backend emits "benchmark:completed"
+   *  which our Events.On subscription catches → clears `running` +
+   *  refreshes History.
+   *
+   *  Why queue-based: concurrent Run clicks (multi-window, multi-agent)
+   *  queue cleanly instead of contending for the GPU. Per
+   *  [[design_cooperative_task_queue]]: capture-greedy / execute-throttled. */
   async _runBench(): Promise<void> {
     if (this.running) return;
     if (!this.selectedBencher || !this.selectedModel) {
@@ -316,13 +348,17 @@ class LthnBenchmarkWindow extends LitElement {
         Prompt: SAMPLE_PROMPT,
         Ctx: DEFAULT_RUN_CTX,
         MaxOutput: DEFAULT_RUN_MAX_OUTPUT,
-      } as Parameters<typeof benchMod.Bench>[0];
-      await demand<RunDTO>(benchMod.Bench(req, this.selectedBencher));
-      // Refresh history so the new row shows at the top of the table.
-      await this._loadFromBackend();
+      } as Parameters<typeof benchMod.EnqueueBench>[0];
+      // demand throws when EnqueueBench fails (validation / queue full).
+      // Successful enqueue returns the Job record; we don't need it
+      // here — the completion event refreshes History when work lands.
+      await demand<unknown>(benchMod.EnqueueBench(req, this.selectedBencher));
+      // Stay in `running` until benchmark:completed fires. If the worker
+      // never reports (boot order race, daemon misconfig), the next user
+      // click will see `running=true` and short-circuit — a refresh
+      // resets state. Future polish: timeout watchdog.
     } catch (e: unknown) {
       this.runErr = e instanceof Error ? e.message : String(e);
-    } finally {
       this.running = false;
     }
   }
