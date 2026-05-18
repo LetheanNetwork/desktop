@@ -13,7 +13,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { AUDIT_EVENT_NAMES, AUDIT_OUTCOMES } from "./audit-constants";
+import { AUDIT_EVENT_NAMES, AUDIT_OUTCOMES, AUDIT_META_KEYS } from "./audit-constants";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // frontend/src/lit/obs/ → repo root → go/pkg/audit/types.go.
@@ -65,14 +65,25 @@ describe("audit-constants — golden-list parity with go/pkg/audit/types.go", ()
     expect(tsOutcomes.length).toBe(goOutcomes.length);
   });
 
-  it("TestAuditConstants_GoldenListMirrorsBackend_Good — combined parity assertion across both sets", () => {
+  it("TestAuditConstants_MetaKeys_Match_Good — Meta-key literals mirror Go MetaKey* const block (Mantis #1720 v2)", () => {
+    const goMetaKeys = literalsForPrefix(source, "MetaKey");
+    const tsMetaKeys = [...AUDIT_META_KEYS];
+    expect(new Set(tsMetaKeys)).toEqual(new Set(goMetaKeys));
+    expect(tsMetaKeys.length).toBe(goMetaKeys.length);
+  });
+
+  it("TestAuditConstants_GoldenListMirrorsBackend_Good — combined parity assertion across all sets", () => {
     // Single-call combined assertion for the brief's named test. Same
-    // discipline as the two specs above, surfaced under the canonical
+    // discipline as the three specs above, surfaced under the canonical
     // name from the dispatch note so a failure shows the operator the
-    // top-line invariant violated.
+    // top-line invariant violated. Mantis #1720 v2 — MetaKey set folded
+    // alongside Event / Outcome so the dual-key shape stays in lockstep
+    // across the Go ↔ TS mirror.
     const goEventNames = new Set(literalsForPrefix(source, "Event"));
     const goOutcomes = new Set(literalsForPrefix(source, "Outcome"));
+    const goMetaKeys = new Set(literalsForPrefix(source, "MetaKey"));
     expect(new Set(AUDIT_EVENT_NAMES)).toEqual(goEventNames);
     expect(new Set(AUDIT_OUTCOMES)).toEqual(goOutcomes);
+    expect(new Set(AUDIT_META_KEYS)).toEqual(goMetaKeys);
   });
 });

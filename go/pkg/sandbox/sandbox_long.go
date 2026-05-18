@@ -392,9 +392,10 @@ func failSpawnLongImage(image string, gateErr error) core.Result {
 		Scope:   "sandbox",
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
-			"error_code":     code,
-			"container_name": "",
-			"image":          image,
+			audit.MetaKeyErrorCode:  code,
+			audit.MetaKeyErrorScope: audit.ErrorScope(core.Fail(err)),
+			"container_name":        "",
+			"image":                 image,
 		},
 	})
 	return core.Fail(err)
@@ -422,11 +423,13 @@ func failSpawnLongCause(containerName, message string, cause core.Result) core.R
 	}
 	err := core.E(spawnLongOp, message, underlying)
 	meta := map[string]any{
-		"error_code":     audit.ErrorCode(core.Fail(err)),
-		"container_name": containerName,
+		audit.MetaKeyErrorCode:  audit.ErrorCode(core.Fail(err)),
+		audit.MetaKeyErrorScope: audit.ErrorScope(core.Fail(err)),
+		"container_name":        containerName,
 	}
 	if !cause.OK {
 		meta["cause_error"] = audit.ErrorCode(cause)
+		meta["cause_scope"] = audit.ErrorScope(cause)
 	}
 	_ = audit.Default().Record(audit.Event{
 		Event:   audit.EventSandboxLongFailed,
@@ -536,8 +539,9 @@ func failKill(sandboxID, message string) core.Result {
 		Scope:   "sandbox",
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
-			"sandbox_id": sandboxID,
-			"error_code": audit.ErrorCode(core.Fail(err)),
+			"sandbox_id":            sandboxID,
+			audit.MetaKeyErrorCode:  audit.ErrorCode(core.Fail(err)),
+			audit.MetaKeyErrorScope: audit.ErrorScope(core.Fail(err)),
 		},
 	})
 	return core.Fail(err)

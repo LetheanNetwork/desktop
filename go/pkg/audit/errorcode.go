@@ -1,11 +1,62 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-// errorcode.go — bounded-keyspace audit error_code substrate per
-// plans/code/lthn/desktop/audit/RFC.error-code-cascade.md §1
-// (CLEAN-FOR-IMPL, v2 — Cerberus #62 DREAD folded). The cluster-wide
-// promise: the result of ErrorCode is the ONLY value that may be
-// assigned to audit Event Meta["error_code"]. Type-system enforcement
-// of the bounded-keyspace contract — not docstring discipline.
+// errorcode.go — bounded-keyspace audit error_code + error_scope
+// substrate per plans/code/lthn/desktop/audit/RFC.error-code-cascade.md
+// §1 (CLEAN-FOR-IMPL, v2 — Cerberus #62 DREAD folded; Mantis #1720
+// dual-key shape). The cluster-wide promise: the result of ErrorCode
+// and ErrorScope are the ONLY values that may be assigned to audit
+// Event Meta["error_code"] / Meta["error_scope"]. Type-system
+// enforcement of the bounded-keyspace contract — not docstring
+// discipline.
+//
+// Canonical codespace registry — the closed set of canonical Lethean
+// codespace strings (r.Code()) that the substrate may surface in
+// Meta["error_code"]. Adding a new codespace is a reserved-schema
+// change: register here in the same commit that introduces the
+// emitter, so the forensic walker, chip-filter UI, and log scrapers
+// learn the new code with the schema bump and the bounded-vocabulary
+// promise stays type-anchored rather than docstring-anchored.
+//
+// Per-package canonical codespace prefixes (Mantis #1720 v2 registry):
+//
+//   - "ai.*"            — AI provider router / model invocation
+//                          (e.g. "ai.openai.provider", "ai.vllm.timeout")
+//   - "marketplace.*"   — pkg/marketplace install / launch / fetch
+//                          (e.g. "marketplace.install", "marketplace.fetch_manifest")
+//   - "sandbox.*"       — pkg/sandbox spawn / kill / long-run lifecycle
+//                          (e.g. "sandbox.spawn", "sandbox.long.run")
+//   - "process.*"       — pkg/process run / start / kill
+//                          (e.g. "process.run", "process.start")
+//   - "downloader.*"    — pkg/downloader fetch / verify / resolve
+//                          (e.g. "downloader.fetch", "downloader.digest_mismatch")
+//   - "gateway.*"       — pkg/gateway dispatch
+//                          (e.g. "gateway.dispatch")
+//   - "runner.*"        — pkg/runner inference orchestration
+//                          (e.g. "runner.generate", "runner.chat")
+//   - "image.*"         — pkg/imagetrust typed-enum specialisation
+//                          (e.g. "image_empty", "image_imds" — non-dotted,
+//                          legacy shape preserved per RFC §4.2)
+//   - "unknown_error"   — substrate fallback (FOLD-1 canon, no prefix)
+//
+// New top-level prefix (e.g. "queue.*", "sessions.*") requires:
+//   1. Registration in this comment block.
+//   2. Mantis ticket recording the schema bump.
+//   3. Mirror update in frontend/src/lit/obs/audit-constants.ts so the
+//      chip-filter UI surfaces the new keyspace.
+//
+// Two-key shape (Mantis #1720 ADD-1, RFC §7 Q-4 v2):
+//
+//   - ErrorCode returns the canonical Lethean codespace (e.g.
+//     "ai.openai.provider") — "WHY the failure occurred" — sourced from
+//     r.Code() or *core.Err.Operation or "unknown_error" fallback.
+//   - ErrorScope returns the operation scope (*core.Err.Operation only)
+//     — "WHAT failed at the package / operation boundary" (e.g.
+//     "marketplace.install"). Returns "" when no scope is available.
+//
+// The walker disambiguates by reading BOTH keys: error_code answers
+// the categorical question, error_scope answers the boundary question.
+// v1 flattened these into a single Meta["error_code"] which forced the
+// auditor to guess whether a string was canonical-code or scope-name.
 //
 // Motivation — Cerberus #1710 / Mantis #1718 cluster verdict: upstream
 // providers (OpenAI / vLLM / docker / process stderr / HTTP error
@@ -107,4 +158,54 @@ func ErrorCode(r core.Result) string {
 		}
 	}
 	return codeUnknown
+}
+
+// ErrorScope derives the operation-scope literal from a failed
+// core.Result — the "WHAT failed at the package / operation boundary"
+// half of the Mantis #1720 v2 dual-key shape. ErrorScope returns
+// (*core.Err).Operation when the underlying error wraps a *core.Err,
+// or "" otherwise. The function NEVER returns r.Code() — that branch
+// is owned by ErrorCode and emitting the codespace as a scope would
+// conflate the two semantic axes the dual-key shape exists to keep
+// apart.
+//
+// Resolution order (RFC §7 Q-4 v2 / Mantis #1720):
+//
+//  1. r.OK == true → "" (no error, no scope).
+//  2. (*core.Err).Operation if r.Value wraps a *core.Err and
+//     Operation is non-empty (e.g. "marketplace.install").
+//  3. "" — no operation scope available (bare error or non-*core.Err
+//     value).
+//
+// Co-emit both keys per the canonical dual-key shape:
+//
+//	_ = audit.Default().Record(audit.Event{
+//	    Event:   audit.EventMarketplaceInstallFailed,
+//	    Outcome: audit.OutcomeFailed,
+//	    Meta: map[string]any{
+//	        "error_code":  audit.ErrorCode(r),
+//	        "error_scope": audit.ErrorScope(r),
+//	    },
+//	})
+//
+// The forensic walker reads BOTH keys: error_code answers "WHY"
+// (canonical code), error_scope answers "WHAT" (operation boundary).
+// Either may be "" — error_code is "" only on OK Results, error_scope
+// is "" whenever no *core.Err is wrapped (e.g. bare errors.New value).
+//
+// The same prose-leak protection that ErrorCode pins applies here:
+// only the Operation literal is surfaced — never the *core.Err.Message
+// field, never any underlying cause prose. The bounded-keyspace
+// promise is enforced by the resolution order, not by docstring.
+func ErrorScope(r core.Result) string {
+	if r.OK {
+		return ""
+	}
+	if err, ok := r.Value.(error); ok {
+		var e *core.Err
+		if core.As(err, &e) && e.Operation != "" {
+			return e.Operation
+		}
+	}
+	return ""
 }

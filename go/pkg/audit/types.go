@@ -117,6 +117,33 @@ const (
 	OutcomeError  = "error"
 )
 
+// MetaKey* literals — the reserved keys the substrate writes into
+// Event.Meta. Exported as named constants so callsites and the TS
+// mirror (frontend/src/lit/obs/audit-constants.ts AUDIT_META_KEYS)
+// stay in lockstep, and so a forensic walker can grep on a single
+// canonical literal rather than the bare "error_code" string.
+//
+// Mantis #1720 v2 dual-key shape — MetaKeyErrorCode answers WHY
+// (canonical Lethean codespace, sourced via audit.ErrorCode), and
+// MetaKeyErrorScope answers WHAT (operation-scope boundary, sourced
+// via audit.ErrorScope). See pkg/audit/errorcode.go canonical
+// codespace registry for the closed set of per-package prefixes.
+//
+// Canonical emit shape (every Failed callsite per the dual-key spec):
+//
+//	_ = audit.Default().Record(audit.Event{
+//	    Event:   audit.EventMarketplaceInstallFailed,
+//	    Outcome: audit.OutcomeFailed,
+//	    Meta: map[string]any{
+//	        audit.MetaKeyErrorCode:  audit.ErrorCode(r),
+//	        audit.MetaKeyErrorScope: audit.ErrorScope(r),
+//	    },
+//	})
+const (
+	MetaKeyErrorCode  = "error_code"
+	MetaKeyErrorScope = "error_scope"
+)
+
 // Event-name literals reserved by Stage E + Stage F + Stage X. Declared
 // at package scope so callers stay in lockstep with the parity-grep
 // contract that Phase 2 lands (RFC §3.3.1) and so a typo in a caller's

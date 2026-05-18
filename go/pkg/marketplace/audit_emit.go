@@ -115,8 +115,9 @@ func emitInstallFailed(bundleID string, r core.Result) {
 		Scope:   marketplaceScope,
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
-			"bundle_id":  bundleID,
-			"error_code": audit.ErrorCode(r),
+			"bundle_id":             bundleID,
+			audit.MetaKeyErrorCode:  audit.ErrorCode(r),
+			audit.MetaKeyErrorScope: audit.ErrorScope(r),
 		},
 	})
 }
@@ -174,8 +175,9 @@ func emitUninstallFailed(bundleID string, r core.Result) {
 		Scope:   marketplaceScope,
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
-			"bundle_id":  bundleID,
-			"error_code": audit.ErrorCode(r),
+			"bundle_id":             bundleID,
+			audit.MetaKeyErrorCode:  audit.ErrorCode(r),
+			audit.MetaKeyErrorScope: audit.ErrorScope(r),
 		},
 	})
 }
@@ -233,8 +235,9 @@ func emitLaunchFailed(bundleID string, r core.Result) {
 		Scope:   marketplaceScope,
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
-			"bundle_id":  bundleID,
-			"error_code": audit.ErrorCode(r),
+			"bundle_id":             bundleID,
+			audit.MetaKeyErrorCode:  audit.ErrorCode(r),
+			audit.MetaKeyErrorScope: audit.ErrorScope(r),
 		},
 	})
 }
@@ -287,8 +290,9 @@ func emitStopFailed(bundleID string, r core.Result) {
 		Scope:   marketplaceScope,
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
-			"bundle_id":  bundleID,
-			"error_code": audit.ErrorCode(r),
+			"bundle_id":             bundleID,
+			audit.MetaKeyErrorCode:  audit.ErrorCode(r),
+			audit.MetaKeyErrorScope: audit.ErrorScope(r),
 		},
 	})
 }
@@ -351,8 +355,9 @@ func emitFetchManifestFailed(sourceURL string, r core.Result) {
 		Scope:   marketplaceScope,
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
-			"domain_only": domainOnly(sourceURL),
-			"error_code":  audit.ErrorCode(r),
+			"domain_only":           domainOnly(sourceURL),
+			audit.MetaKeyErrorCode:  audit.ErrorCode(r),
+			audit.MetaKeyErrorScope: audit.ErrorScope(r),
 		},
 	})
 }
@@ -404,8 +409,9 @@ func emitValidateManifestFailed(bundleID string, r core.Result) {
 		Scope:   marketplaceScope,
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
-			"bundle_id":  bundleID,
-			"error_code": audit.ErrorCode(r),
+			"bundle_id":             bundleID,
+			audit.MetaKeyErrorCode:  audit.ErrorCode(r),
+			audit.MetaKeyErrorScope: audit.ErrorScope(r),
 		},
 	})
 }

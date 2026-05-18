@@ -173,3 +173,200 @@ func TestErrorCode_Ugly(t *testing.T) {
 		}
 	})
 }
+
+// TestErrorScope_Good — the happy-shape rows for the Mantis #1720 v2
+// dual-key shape. ErrorScope surfaces (*core.Err).Operation, never
+// r.Code() — the codespace branch is owned by ErrorCode.
+func TestErrorScope_Good(t *testing.T) {
+	// Row 1: r.OK == true → "".
+	if got := ErrorScope(core.Ok(nil)); got != "" {
+		t.Errorf("ErrorScope(OK) = %q, want \"\"", got)
+	}
+
+	// Row 1b: r.OK with non-nil value still returns "".
+	if got := ErrorScope(core.Ok("anything")); got != "" {
+		t.Errorf("ErrorScope(Ok(anything)) = %q, want \"\"", got)
+	}
+
+	// Row 2: Operation populated → returns Operation literal.
+	opErr := core.E("marketplace.install", "spawn failed", nil)
+	if got := ErrorScope(core.Fail(opErr)); got != "marketplace.install" {
+		t.Errorf("ErrorScope(Fail(E(op))) = %q, want \"marketplace.install\"", got)
+	}
+
+	// Row 3: Operation populated AND Code populated → Operation still
+	// wins. ErrorScope never consults Code — codespace is ErrorCode's
+	// branch. The dual-key shape is exactly this disambiguation.
+	codedErr := &core.Err{
+		Operation: "ai.openai.complete",
+		Message:   "should not leak",
+		Code:      "ai.openai.provider",
+	}
+	if got := ErrorScope(core.Fail(codedErr)); got != "ai.openai.complete" {
+		t.Errorf("ErrorScope(Fail(coded+op)) = %q, want \"ai.openai.complete\"", got)
+	}
+}
+
+// TestErrorScope_Bad — guard rows for the no-scope-available shapes.
+// ErrorScope returns "" (not "unknown_error") when the underlying
+// error is bare or carries no Operation — the empty literal IS the
+// signal that no boundary scope is recoverable.
+func TestErrorScope_Bad(t *testing.T) {
+	// Bare error (not a *core.Err) → "".
+	bare := core.NewError("plain old error")
+	if got := ErrorScope(core.Fail(bare)); got != "" {
+		t.Errorf("ErrorScope(Fail(bare)) = %q, want \"\"", got)
+	}
+
+	// *core.Err with empty Operation → "".
+	emptyOp := core.E("", "message with no op", nil)
+	if got := ErrorScope(core.Fail(emptyOp)); got != "" {
+		t.Errorf("ErrorScope(Fail(E(\"\"))) = %q, want \"\"", got)
+	}
+
+	// *core.Err with empty Operation but populated Code → "" because
+	// ErrorScope never falls back to Code. This is the load-bearing
+	// distinction from ErrorCode and is the reason the two functions
+	// exist as a pair.
+	codeOnly := &core.Err{Code: "ai.openai.provider"}
+	if got := ErrorScope(core.Fail(codeOnly)); got != "" {
+		t.Errorf("ErrorScope(Fail(code-only)) = %q, want \"\" (codespace is ErrorCode's branch)", got)
+	}
+
+	// Non-error r.Value → "".
+	weirdShape := core.Result{Value: "some string value", OK: false}
+	if got := ErrorScope(weirdShape); got != "" {
+		t.Errorf("ErrorScope(non-error Value) = %q, want \"\"", got)
+	}
+}
+
+// TestErrorScope_Ugly — the bounded-keyspace security promise for the
+// scope branch. Every row pins that caller-controlled prose CANNOT
+// bleed through ErrorScope into the audit substrate's Meta map. Same
+// shape as TestErrorCode_Ugly — the dual-key has the same guarantee.
+func TestErrorScope_Ugly(t *testing.T) {
+	// Ugly 1 — NoProseLeak via bare error. ErrorScope MUST drop the
+	// prose entirely (returns "") — never echo error.Error().
+	t.Run("NoProseLeak", func(t *testing.T) {
+		leakage := "user-prompt-12345-LEAKED"
+		got := ErrorScope(core.Fail(core.NewError(leakage)))
+		if core.Contains(got, "user-prompt-12345") {
+			t.Errorf("ErrorScope leaked caller-controlled prose: got %q", got)
+		}
+		if got != "" {
+			t.Errorf("ErrorScope(Fail(bare-leak)) = %q, want \"\"", got)
+		}
+	})
+
+	// Ugly 2 — NoProseLeak via *core.Err.Message. Message NEVER
+	// escapes — only Operation does.
+	t.Run("NoProseLeakViaCoreErrMessage", func(t *testing.T) {
+		leakage := "user-prompt-12345-LEAKED"
+		errWithLeak := core.E("scope.bounded", leakage, nil)
+		got := ErrorScope(core.Fail(errWithLeak))
+		if core.Contains(got, "user-prompt-12345") {
+			t.Errorf("ErrorScope leaked *core.Err.Message: got %q", got)
+		}
+		if got != "scope.bounded" {
+			t.Errorf("ErrorScope(Fail(E(op, leak))) = %q, want \"scope.bounded\"", got)
+		}
+	})
+
+	// Ugly 3 — HTTPBodyJSON wrapping. Realistic leak shape: provider
+	// returns a JSON body, caller wraps in bare errors.New, the audit
+	// substrate must NOT receive upstream-secret-xyz via the scope key.
+	t.Run("HTTPBodyJSON", func(t *testing.T) {
+		body := `{"error":{"message":"upstream-secret-xyz"}}`
+		got := ErrorScope(core.Fail(core.NewError(body)))
+		if core.Contains(got, "upstream-secret-xyz") {
+			t.Errorf("ErrorScope leaked HTTP body: got %q", got)
+		}
+		if got != "" {
+			t.Errorf("ErrorScope(Fail(HTTPBody)) = %q, want \"\"", got)
+		}
+	})
+
+	// Ugly 4 — 4KB stress. Verify bounded output regardless of input
+	// size. For ErrorScope the bound is "" (no Operation recoverable
+	// from bare errors).
+	t.Run("FourKBStress", func(t *testing.T) {
+		buf := make([]byte, 4096)
+		for i := range buf {
+			buf[i] = 'A'
+		}
+		stress := string(buf) + "TAIL-MARKER"
+		got := ErrorScope(core.Fail(core.NewError(stress)))
+		if len(got) > 64 {
+			t.Errorf("ErrorScope(4KB) returned %d chars, want <= 64", len(got))
+		}
+		if core.Contains(got, "TAIL-MARKER") {
+			t.Errorf("ErrorScope leaked 4KB tail marker: got %q", got)
+		}
+		if got != "" {
+			t.Errorf("ErrorScope(Fail(4KB)) = %q, want \"\"", got)
+		}
+	})
+
+	// Ugly 5 — depth-2 cause chain. The outer Operation wins
+	// extraction; inner Message + cause prose MUST NOT bleed through.
+	t.Run("DepthTwoCauseChain", func(t *testing.T) {
+		base := core.NewError("base-SECRET")
+		inner := core.E("scope.inner", "inner-SECRET", base)
+		outer := core.E("scope.outer", "outer", inner)
+		got := ErrorScope(core.Fail(outer))
+		if core.Contains(got, "inner-SECRET") {
+			t.Errorf("ErrorScope leaked inner cause Message: got %q", got)
+		}
+		if core.Contains(got, "base-SECRET") {
+			t.Errorf("ErrorScope leaked base cause prose: got %q", got)
+		}
+		if got != "scope.outer" {
+			t.Errorf("ErrorScope(Fail(depth-2)) = %q, want \"scope.outer\"", got)
+		}
+	})
+}
+
+// TestErrorCodeScope_DualKey_Good — the load-bearing co-emit assertion
+// for Mantis #1720. Confirms that ErrorCode + ErrorScope, when called
+// on the same Result, return semantically distinct values per the v2
+// dual-key shape (canonical-code vs operation-scope).
+func TestErrorCodeScope_DualKey_Good(t *testing.T) {
+	// Shape 1 — Code populated, Operation populated. ErrorCode wins
+	// Code; ErrorScope wins Operation. Walker disambiguates.
+	dual := &core.Err{
+		Operation: "marketplace.install",
+		Message:   "should not leak",
+		Code:      "marketplace.spawn_rejected",
+	}
+	wantCode := "marketplace.spawn_rejected"
+	wantScope := "marketplace.install"
+	if got := ErrorCode(core.Fail(dual)); got != wantCode {
+		t.Errorf("ErrorCode(dual) = %q, want %q", got, wantCode)
+	}
+	if got := ErrorScope(core.Fail(dual)); got != wantScope {
+		t.Errorf("ErrorScope(dual) = %q, want %q", got, wantScope)
+	}
+
+	// Shape 2 — Operation populated, Code empty. ErrorCode falls back
+	// to Operation; ErrorScope returns Operation directly. Both keys
+	// carry the same value — acceptable per v2 spec (the disambiguator
+	// is the SHAPE of the emit, not value equality).
+	scopeOnly := core.E("sandbox.spawn", "msg", nil)
+	if got := ErrorCode(core.Fail(scopeOnly)); got != "sandbox.spawn" {
+		t.Errorf("ErrorCode(scope-only) = %q, want \"sandbox.spawn\"", got)
+	}
+	if got := ErrorScope(core.Fail(scopeOnly)); got != "sandbox.spawn" {
+		t.Errorf("ErrorScope(scope-only) = %q, want \"sandbox.spawn\"", got)
+	}
+
+	// Shape 3 — bare error. ErrorCode falls back to "unknown_error";
+	// ErrorScope returns "" (no Operation recoverable). The dual-key
+	// shape makes the absence of scope grep-visible.
+	bare := core.NewError("foo")
+	if got := ErrorCode(core.Fail(bare)); got != codeUnknown {
+		t.Errorf("ErrorCode(bare) = %q, want %q", got, codeUnknown)
+	}
+	if got := ErrorScope(core.Fail(bare)); got != "" {
+		t.Errorf("ErrorScope(bare) = %q, want \"\"", got)
+	}
+}

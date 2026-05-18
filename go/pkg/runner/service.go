@@ -236,9 +236,10 @@ func (s *Service) GenerateCtx(ctx context.Context, prompt string) core.Result {
 			Scope:   "inference",
 			Outcome: audit.OutcomeFailed,
 			Meta: map[string]any{
-				"provider":   provider,
-				"model":      model,
-				"error_code": audit.ErrorCode(resp),
+				"provider":              provider,
+				"model":                 model,
+				audit.MetaKeyErrorCode:  audit.ErrorCode(resp),
+				audit.MetaKeyErrorScope: audit.ErrorScope(resp),
 			},
 		})
 		return resp
@@ -350,9 +351,10 @@ func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) cor
 			Scope:   "inference",
 			Outcome: audit.OutcomeFailed,
 			Meta: map[string]any{
-				"provider":   provider,
-				"model":      model,
-				"error_code": audit.ErrorCode(resp),
+				"provider":              provider,
+				"model":                 model,
+				audit.MetaKeyErrorCode:  audit.ErrorCode(resp),
+				audit.MetaKeyErrorScope: audit.ErrorScope(resp),
 			},
 		})
 		return resp

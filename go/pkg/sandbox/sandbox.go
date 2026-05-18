@@ -218,8 +218,9 @@ func (s *Service) spawn(input SpawnInput) core.Result {
 			Scope:   "sandbox",
 			Outcome: audit.OutcomeFailed,
 			Meta: map[string]any{
-				"error_code":     errCode,
-				"container_name": "",
+				audit.MetaKeyErrorCode:  errCode,
+				audit.MetaKeyErrorScope: audit.ErrorScope(res),
+				"container_name":        "",
 			},
 		})
 		return res

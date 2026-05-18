@@ -137,10 +137,11 @@ func emitDispatchFailed(bundleID, pattern, method string, r core.Result) {
 		Scope:   gatewayScope,
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
-			"bundle_id":     bundleID,
-			"route_pattern": pattern,
-			"method":        method,
-			"error_code":    audit.ErrorCode(r),
+			"bundle_id":             bundleID,
+			"route_pattern":         pattern,
+			"method":                method,
+			audit.MetaKeyErrorCode:  audit.ErrorCode(r),
+			audit.MetaKeyErrorScope: audit.ErrorScope(r),
 		},
 	})
 }

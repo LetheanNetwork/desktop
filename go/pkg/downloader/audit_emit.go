@@ -128,8 +128,9 @@ func emitFetchFailed(sourceURL string, r core.Result) {
 		Scope:   downloaderScope,
 		Outcome: audit.OutcomeFailed,
 		Meta: map[string]any{
-			"source_host": domainOnly(sourceURL),
-			"error_code":  audit.ErrorCode(r),
+			"source_host":           domainOnly(sourceURL),
+			audit.MetaKeyErrorCode:  audit.ErrorCode(r),
+			audit.MetaKeyErrorScope: audit.ErrorScope(r),
 		},
 	})
 }

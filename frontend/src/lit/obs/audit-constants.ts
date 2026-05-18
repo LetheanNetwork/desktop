@@ -153,3 +153,23 @@ export const AUDIT_OUTCOMES = [
 ] as const;
 
 export type AuditOutcome = (typeof AUDIT_OUTCOMES)[number];
+
+/** Reserved Meta keys — mirror of the const block at the top of the
+ *  `MetaKey*` declaration in `go/pkg/audit/types.go` (Mantis #1720 v2
+ *  dual-key shape). The chip-filter UI in <lthn-audit-viewer> reads
+ *  from these keys to surface the closed set of substrate-emitted Meta
+ *  values so the operator can group / filter on a stable vocabulary
+ *  rather than free-text Meta map keys.
+ *
+ *  v2 dual-key contract (RFC.error-code-cascade §7 Q-4 v2 / #1720):
+ *  every Failed-event substrate emit MUST carry BOTH `error_code`
+ *  (canonical Lethean codespace, answers WHY) and `error_scope`
+ *  (operation-scope boundary, answers WHAT). v1 cascade emitted a
+ *  single `error_code` key that conflated the two semantic axes — v2
+ *  splits them so a forensic walker can correlate by either axis. */
+export const AUDIT_META_KEYS = [
+  "error_code",
+  "error_scope",
+] as const;
+
+export type AuditMetaKey = (typeof AUDIT_META_KEYS)[number];
