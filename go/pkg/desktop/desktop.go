@@ -45,6 +45,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/benchmark"
 	"dappco.re/lthn/desktop/pkg/bridge"
+	"dappco.re/lthn/desktop/pkg/ollama"
 	"dappco.re/lthn/desktop/pkg/build"
 	"dappco.re/lthn/desktop/pkg/container"
 	"dappco.re/lthn/desktop/pkg/downloader"
@@ -386,14 +387,26 @@ func (s *Service) Run() core.Result {
 
 	// Benchmark — runner-agnostic results substrate. Constructed +
 	// registered here so the Wails binding has a fully-wired *Service
-	// with s.core set before any RegisterBencher / History call. Per
-	// today's substrate-only ship: no adapters registered — frontend
-	// + fixture-mode picks up the empty ListBenchers / History until
-	// real adapters land in their owner packages (pkg/runner /
-	// pkg/opencode / future pkg/llamacpp / pkg/ollama / pkg/nim).
+	// with s.core set before any RegisterBencher / History call.
+	//
+	// Bencher adapters self-register against this Service. Ollama
+	// auto-registers against the default localhost endpoint — if the
+	// daemon isn't running, CanBench soft-fails and Bench reports a
+	// clean HTTP error; the bencher stays inert but visible in the
+	// picker so users see the "ollama isn't running" affordance. The
+	// openaibench adapter (#1769) ships as a library — users add
+	// endpoints via Settings → Integrations (separate ticket); each
+	// configured endpoint gets a distinct registered Bencher.
+	//
+	// Future: pkg/runner Bencher (lthn-mlx, #1768) lands once the
+	// runner subsystem is benchmark-ready; pure-subprocess llama-bench
+	// (separate ticket) for power users who don't run llama-server.
 	benchmarkSvc := benchmark.NewService(benchmark.Options{})
 	if r := benchmarkSvc.Register(s.opts.Core); !r.OK {
 		core.Warn("desktop.benchmark.register", "error", r.Error())
+	}
+	if r := benchmarkSvc.RegisterBencher(ollama.NewBencher(ollama.Options{})); !r.OK {
+		core.Warn("desktop.benchmark.ollama_register", "error", r.Error())
 	}
 
 	// Downloader → Wails event bus. The downloader spawns its fetch
