@@ -7,7 +7,7 @@
 // different projection of the same data: tabular grid instead of cards,
 // with build-check state, diff stats, and per-PR state pills.
 //
-// Backend: Vi.Activity() from @desktop/vi/service — imported dynamically
+// Backend: Vi.Activity() from @desktop/vi/wailsservice — imported dynamically
 // so tests run without the Wails runtime. Same polling pattern as
 // lthn-vi-activity-window (60s interval, refresh button).
 //
@@ -164,7 +164,7 @@ class LthnViewPRs extends LitElement {
       // Dynamic import keeps the Wails binding off the module-load
       // critical path so tests that mock @desktop/* work without
       // the runtime available.
-      const svc = await import("@desktop/vi/service");
+      const svc = await import("@desktop/vi/wailsservice");
       const r = await (svc as { Activity: () => Promise<{ Value: ActivityOutput }> }).Activity();
       const out = r?.Value ?? { items: [], scanned: 0 };
       this.items = out.items || [];

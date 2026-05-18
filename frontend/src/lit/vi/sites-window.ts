@@ -88,7 +88,7 @@ class LthnViSitesWindow extends LitElement {
     this.loading = true;
     this.err = "";
     try {
-      const svc = await import("@desktop/vi/service");
+      const svc = await import("@desktop/vi/wailsservice");
       // Vi.Sites() returns core.Result whose Value is SitesOutput.
       // The Wails binding wraps it as core$0.Result, so we read
       // through to .Value.

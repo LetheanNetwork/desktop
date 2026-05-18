@@ -105,7 +105,7 @@ class LthnViActivityWindow extends LitElement {
     this.loading = true;
     this.err = "";
     try {
-      const svc = await import("@desktop/vi/service");
+      const svc = await import("@desktop/vi/wailsservice");
       // Vi.Activity() returns core.Result whose Value is
       // ActivityOutput. The Wails binding wraps it as
       // core$0.Result, so we read through to .Value.

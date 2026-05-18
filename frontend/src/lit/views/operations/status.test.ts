@@ -6,13 +6,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import "./status";
 
-// Mock the @desktop/vi/service module so we control Sites() output.
+// Mock the @desktop/vi/wailsservice module so we control Sites() output.
 // vi.Sites() returns core.Result-shaped { Value: { sites: [...] } }.
-vi.mock("@desktop/vi/service", () => ({
+vi.mock("@desktop/vi/wailsservice", () => ({
   Sites: vi.fn(),
 }));
 
-import { Sites } from "@desktop/vi/service";
+import { Sites } from "@desktop/vi/wailsservice";
 
 async function mount(attrs: Record<string, string | boolean> = {}) {
   const el = document.createElement("lthn-view-status") as HTMLElement & {

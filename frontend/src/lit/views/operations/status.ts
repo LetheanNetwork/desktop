@@ -81,7 +81,7 @@ class LthnViewStatus extends LitElement {
     try {
       // Lazy-import the Wails binding so a missing binding in tests
       // doesn't kill the module load. Falls back to empty sites.
-      const svc = await import("@desktop/vi/service").catch(() => null);
+      const svc = await import("@desktop/vi/wailsservice").catch(() => null);
       if (!svc || typeof (svc as { Sites?: unknown }).Sites !== "function") {
         this.sites = [];
         return;
