@@ -111,6 +111,19 @@ func (s *Service) RegisterBencher(b Bencher) core.Result {
 	return s.reg.register(b)
 }
 
+// UnregisterBencher removes a previously-registered Bencher by name.
+// Idempotent: removing an unregistered name returns Ok. Used by the
+// openaibench Settings UI Remove + reconfigure flows (delete-then-add
+// as cheap Update). Once removed, EnqueueBench against that name
+// fails clean and the picker drops the entry on the next refresh.
+//
+// Usage example:
+//
+//	if r := svc.UnregisterBencher("openai-compat:nim"); !r.OK { return r }
+func (s *Service) UnregisterBencher(name string) core.Result {
+	return s.reg.unregister(name)
+}
+
 // ListBenchers returns the metadata view of every registered Bencher
 // in registration order. Frontend renders a picker / source filter
 // against this; the runtime Bencher refs stay inside the substrate.

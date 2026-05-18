@@ -54,6 +54,25 @@ func (r *bencherRegistry) register(b Bencher) core.Result {
 	return r.reg.Set(name, b)
 }
 
+// unregister removes a previously-registered Bencher by name.
+// Idempotent — removing an unregistered name returns Ok rather than
+// Fail so the caller can blanket-clean without juggling lookups
+// first. Used by the Settings UI Remove flow + endpoint reconfigure
+// path (delete-then-add as cheap Update).
+//
+// Usage example:
+//
+//	if r := reg.unregister("openai-compat:nim"); !r.OK { return r }
+func (r *bencherRegistry) unregister(name string) core.Result {
+	if name == "" {
+		return core.Fail(core.E("benchmark.unregister", "name is empty", nil))
+	}
+	if !r.reg.Has(name) {
+		return core.Ok(nil) // idempotent
+	}
+	return r.reg.Delete(name)
+}
+
 // bencher looks up a registered Bencher by name. Returns Fail when
 // the name is not registered so callers can distinguish "no such
 // bencher" from other failure modes.

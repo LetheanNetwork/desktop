@@ -125,6 +125,35 @@ func TestInfosDescribeOptional(t *testing.T) {
 	}
 }
 
+func TestUnregisterRemovesEntry(t *testing.T) {
+	r := newBencherRegistry()
+	_ = r.register(&stubBencher{name: "x", kind: KindLocal})
+	if !r.reg.Has("x") {
+		t.Fatal("setup: expected x to be registered")
+	}
+	if res := r.unregister("x"); !res.OK {
+		t.Fatalf("unregister: want OK, got %v", res)
+	}
+	if r.reg.Has("x") {
+		t.Fatal("unregister: x still present after removal")
+	}
+}
+
+func TestUnregisterUnknownNameIsIdempotent(t *testing.T) {
+	r := newBencherRegistry()
+	// No setup — removing a never-registered name is a no-op.
+	if res := r.unregister("never-existed"); !res.OK {
+		t.Fatalf("unregister of unknown: want OK (idempotent), got %v", res)
+	}
+}
+
+func TestUnregisterEmptyNameFails(t *testing.T) {
+	r := newBencherRegistry()
+	if res := r.unregister(""); res.OK {
+		t.Fatal("unregister empty: want Fail, got OK")
+	}
+}
+
 func TestIsValidKind(t *testing.T) {
 	cases := map[Kind]bool{
 		KindLocal:      true,

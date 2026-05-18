@@ -284,6 +284,37 @@ func TestUnregisteredService_Fails(t *core.T) {
 	core.AssertFalse(t, svc.Bench(core.Background(), benchmark.Bench{}, "x").OK)
 }
 
+// Unregister surface --------------------------------------------------
+
+func TestUnregisterBencher_RemovesFromListBenchers(t *core.T) {
+	svc := newRegisteredService(t)
+	core.RequireTrue(t, svc.RegisterBencher(&benchmark.FixtureBencher{BencherName: "fx-1", BencherKind: benchmark.KindLocal}).OK)
+	core.RequireTrue(t, svc.RegisterBencher(&benchmark.FixtureBencher{BencherName: "fx-2", BencherKind: benchmark.KindLocal}).OK)
+	r := svc.ListBenchers()
+	core.AssertEqual(t, 2, len(r.Value.([]benchmark.BencherInfo)))
+
+	core.RequireTrue(t, svc.UnregisterBencher("fx-1").OK)
+	r = svc.ListBenchers()
+	infos := r.Value.([]benchmark.BencherInfo)
+	core.AssertEqual(t, 1, len(infos))
+	core.AssertEqual(t, "fx-2", infos[0].Name)
+}
+
+func TestUnregisterBencher_BenchDispatchFailsAfter(t *core.T) {
+	svc := newRegisteredService(t)
+	core.RequireTrue(t, svc.RegisterBencher(&benchmark.FixtureBencher{BencherName: "fx", BencherKind: benchmark.KindLocal}).OK)
+	core.RequireTrue(t, svc.UnregisterBencher("fx").OK)
+	r := svc.Bench(core.Background(), benchmark.Bench{Model: "m"}, "fx")
+	core.AssertFalse(t, r.OK)
+}
+
+func TestUnregisterBencher_Idempotent(t *core.T) {
+	svc := newRegisteredService(t)
+	// Removing a never-registered name returns OK so callers can
+	// blanket-clean without juggling lookups first.
+	core.RequireTrue(t, svc.UnregisterBencher("never-existed").OK)
+}
+
 // Models surface ------------------------------------------------------
 
 func TestModelsForBencher_FromCannedRuns(t *core.T) {

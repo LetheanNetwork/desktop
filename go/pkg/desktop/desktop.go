@@ -46,6 +46,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/benchmark"
 	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/ollama"
+	"dappco.re/lthn/desktop/pkg/openaibench"
 	"dappco.re/lthn/desktop/pkg/build"
 	"dappco.re/lthn/desktop/pkg/container"
 	"dappco.re/lthn/desktop/pkg/downloader"
@@ -421,6 +422,17 @@ func (s *Service) Run() core.Result {
 	benchmark.SubscribeCompleted(s.opts.Core, func(_ *core.Core, ev benchmark.BenchCompleted) {
 		emitCoreEvent(s.opts.Core, "benchmark:completed", ev)
 	})
+	// OpenAI-compat endpoints (Mantis #1775) — restore user-configured
+	// endpoints from pkg/keys-backed store + bind the Wails Settings
+	// surface. RegisterPersistedEndpoints reads tier-1 records on
+	// every boot so the bencher picker reflects the operator's last
+	// configuration without a Settings round-trip. The WailsService
+	// (added to wailsServices below) lets the Settings UI add/remove
+	// endpoints at runtime.
+	if r := openaibench.RegisterPersistedEndpoints(s.opts.Core, benchmarkSvc); !r.OK {
+		core.Warn("desktop.openaibench.boot_register", "error", r.Error())
+	}
+	openaibenchSvc := openaibench.NewWailsService(s.opts.Core, benchmarkSvc)
 
 	// Downloader → Wails event bus. The downloader spawns its fetch
 	// via c.Go and reports progress + terminal state through this
@@ -503,6 +515,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(validator.NewWailsService()),
 		application.NewService(telemetry.NewService(telemetry.Options{})),
 		application.NewService(benchmarkSvc),
+		application.NewService(openaibenchSvc),
 		application.NewService(lthnservices.NewWailsService()),
 		// Upstream dappco.re/go services — register the Core-built
 		// instances directly. Bindings land at frontend/bindings/
