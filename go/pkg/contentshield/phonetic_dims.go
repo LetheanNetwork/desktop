@@ -927,6 +927,14 @@ func PseudoJargonDensity(text string) float64 {
 		if isLegitimateCompound(token) {
 			continue
 		}
+		// Known English contractions / dialect ("ain't", "y'all",
+		// "shouldn't've", "'twas", "gov't") — internal apostrophe is
+		// structural English, not a circumvention marker. The Daz/Zoe
+		// discriminator: legitimate phonetic dialect passes through
+		// silent; only invented compounds like "Cina-Gia'a" still flag.
+		if IsKnownDialectContraction(token) {
+			continue
+		}
 		suspicious++
 	}
 	return float64(suspicious) / float64(len(tokens))
