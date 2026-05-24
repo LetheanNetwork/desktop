@@ -243,8 +243,55 @@ func preCreateWindows(c *core.Core, opts Options) {
 	if c == nil {
 		return
 	}
+	registerAllWindows(c)
 	for _, spec := range windowRegistry() {
 		openWindowSpec(c, spec, opts, true)
+	}
+}
+
+// registerAllWindows populates CoreGUI's WindowSpec registry from this
+// package's windowRegistry() — one window.register action per entry.
+// Pairs with the lazy-mount path in CoreGUI's taskSetVisibility (see
+// plans/code/core/gui/RFC.window-lifecycle.md §3): a registered spec
+// is what taskSetVisibility consults when set_visibility(name, true)
+// arrives on a window that hasn't yet been opened.
+//
+// Today preCreateWindows also eager-opens each spec (hidden=true) for
+// instant-show behaviour from tray clicks. The registry runs alongside
+// that eager pre-creation — once a window is in the manager, the
+// registry entry is dormant. The registry only fires when a consumer
+// (bridge cold-start, future fleet-mode callers) issues set_visibility
+// on a name whose platform window was never created.
+func registerAllWindows(c *core.Core) {
+	if c == nil {
+		return
+	}
+	for _, spec := range windowRegistry() {
+		kind := guiwindow.KindWebview
+		// Tray windows go through pkg/systray's lifecycle, not the
+		// webview registry. The current registry contains only
+		// webview windows; KindTray reserved for future tray entries
+		// declared here for unified lifecycle control.
+		w := &guiwindow.Window{
+			Name: spec.Name, Title: spec.Title,
+			Width: spec.Width, Height: spec.Height,
+			MinWidth: spec.MinWidth, MinHeight: spec.MinHeight,
+			MaxWidth: spec.MaxWidth, MaxHeight: spec.MaxHeight,
+			Frameless:        spec.Frameless,
+			AlwaysOnTop:      spec.AlwaysOnTop,
+			DisableResize:    spec.DisableResize,
+			EnableFileDrop:   spec.EnableFileDrop,
+			URL:              "/?surface=" + spec.Name,
+			BackgroundColour: [4]uint8{0, 0, 0, 0},
+		}
+		c.Action("window.register").Run(core.Background(), core.NewOptions(
+			core.Option{Key: "task", Value: guiwindow.TaskRegisterWindow{Window: w, Kind: kind}},
+		))
+		// Errors from window.register at boot are non-fatal — duplicate
+		// registrations (the surfaced failure mode) are recoverable;
+		// the registry already has the spec under that name. Log-by-
+		// returning-OK keeps boot quiet; if a real consumer needs to
+		// know it can call window.register directly and inspect Result.
 	}
 }
 
