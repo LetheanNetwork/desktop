@@ -30,8 +30,8 @@
 package desktop
 
 import (
-
 	core "dappco.re/go"
+	guiwindow "dappco.re/go/gui/pkg/window"
 )
 
 // TODO(snider): core/gui needs a bindable window-router service that can
@@ -86,4 +86,33 @@ func (s *WindowService) List() core.Result {
 		names[i] = spec.Name
 	}
 	return core.Ok(names)
+}
+
+// SetSize resizes the named window to (width, height). Element-driven
+// sizing — Lit components call this from firstUpdated() with their
+// declared w/h so the WebView's content owns the window dimensions
+// rather than the Go boot-time spec being the only source of truth.
+// The Go spec sets the INITIAL dimensions; the element refines after
+// first paint. Convention: call once on mount, not on every render.
+func (s *WindowService) SetSize(name string, width, height int) core.Result {
+	if s.app == nil {
+		return core.Fail(core.NewError("window service not yet attached to wails app"))
+	}
+	if name == "" {
+		return core.Fail(core.NewError("SetSize requires a window name"))
+	}
+	if width <= 0 || height <= 0 {
+		return core.Fail(core.NewError("SetSize requires positive dimensions"))
+	}
+	typed, ok := s.app.(*core.Core)
+	if !ok || typed == nil {
+		return core.Fail(core.NewError("invalid app handle"))
+	}
+	r := typed.Action("window.set_size").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guiwindow.TaskSetSize{Name: name, Width: width, Height: height}},
+	))
+	if !r.OK {
+		return r
+	}
+	return core.Ok(nil)
 }

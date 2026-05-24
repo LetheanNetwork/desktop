@@ -117,7 +117,7 @@ class LthnWelcomeWindow extends LitElement {
         globalThis.localStorage?.removeItem("lthn.welcome.start-step");
       }
     } catch { /* localStorage unavailable — fall through to step 1 */ }
-    this.step = initialStep; this.w = 760; this.h = 580; this.embedded = false;
+    this.step = initialStep; this.w = 1200; this.h = 800; this.embedded = false;
     this.chrome = { title: "Welcome to lthn", subtitleFmt: "step %s of 4" };
     this.modelsDir = "~/Lethean/conf/models/";
     this.fresh = true;
@@ -159,6 +159,20 @@ class LthnWelcomeWindow extends LitElement {
     };
   }
   createRenderRoot() { return this; }
+
+  /** firstUpdated runs once after the initial render lands. We use it
+   *  to drive the Wails window size from the element's declared w/h —
+   *  the Go boot-time spec sets the initial dimensions, this callback
+   *  lets the rendered content own the final size. Dynamic import so
+   *  vitest / design-preview environments without the Wails runtime
+   *  silently fall through. */
+  async firstUpdated(): Promise<void> {
+    try {
+      const ws = await import("@desktop/desktop/windowservice");
+      await ws.SetSize("welcome", this.w, this.h);
+    } catch { /* binding unavailable — design preview / unit test path */ }
+  }
+
   async connectedCallback() {
     super.connectedCallback();
     const [

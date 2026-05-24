@@ -115,7 +115,12 @@ func windowRegistry() []WindowSpec {
 	return []WindowSpec{
 		{
 			Name: "welcome", Title: "Welcome to lthn",
-			Width: 760, Height: 580,
+			// Initial dimensions — the welcome wizard's Lit element
+			// (frontend/src/lit/ops/welcome-window.ts) refines via
+			// WindowService.SetSize on firstUpdated to match its own
+			// declared `w`/`h`, so this value is the "before first
+			// paint" floor rather than a hard cap.
+			Width: 1200, Height: 800,
 			Frameless: true, HideOnClose: true,
 			InvisibleTitleBarHeight:  titleBarH,
 			DisableNativeContextMenu: true,
