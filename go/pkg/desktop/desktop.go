@@ -45,6 +45,8 @@ import (
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/benchmark"
 	"dappco.re/lthn/desktop/pkg/bridge"
+	"dappco.re/lthn/desktop/pkg/clbpl"
+	"dappco.re/lthn/desktop/pkg/contentshield"
 	"dappco.re/lthn/desktop/pkg/ollama"
 	"dappco.re/lthn/desktop/pkg/openaibench"
 	"dappco.re/lthn/desktop/pkg/build"
@@ -62,12 +64,16 @@ import (
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/keys"
 	"dappco.re/lthn/desktop/pkg/paths"
+	"dappco.re/lthn/desktop/pkg/r1"
+	r1analytics "dappco.re/lthn/desktop/pkg/r1/analytics"
 	"dappco.re/lthn/desktop/pkg/runner"
+	"dappco.re/lthn/desktop/pkg/seeds"
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/sandbox"
 	"dappco.re/lthn/desktop/pkg/server"
 	"dappco.re/lthn/desktop/pkg/serverkey"
 	"dappco.re/lthn/desktop/pkg/tasks"
+	"dappco.re/lthn/desktop/pkg/training"
 	lthnservices "dappco.re/lthn/desktop/pkg/services"
 	"dappco.re/lthn/desktop/pkg/sessions"
 	"dappco.re/lthn/desktop/pkg/telemetry"
@@ -453,6 +459,16 @@ func (s *Service) Run() core.Result {
 		emitCoreEvent(s.opts.Core, "marketplace:bundle:changed", ev)
 	})
 
+	// ContentShield — non-LLM text scoring tier (sycophancy, grammar
+	// imprint, differential, authority). Pure deterministic, runs
+	// in-process, scores chat input / AI response / training-data
+	// chunks / opencode session output / plugin output. Register the
+	// Core action surface (bridge / CLI / MCP callers) AND the
+	// WailsService for the WebView's typed bindings.
+	if r := contentshield.Register(s.opts.Core); !r.OK {
+		core.Warn("desktop.contentshield.register", "error", r.Error())
+	}
+
 	wailsServices := []application.Service{
 		// In-this-repo packages — each ships its own *WailsService /
 		// *Service with Wails3 lifecycle + (T, error) methods. Bindings
@@ -473,6 +489,12 @@ func (s *Service) Run() core.Result {
 		application.NewService(lthnphp.NewService(s.opts.Core)),
 		application.NewService(pluginSvc),
 		application.NewService(sandboxSvc),
+		application.NewService(contentshield.NewWailsService()),
+		application.NewService(clbpl.NewWailsService(clbpl.Options{})),
+		application.NewService(r1.NewWailsService()),
+		application.NewService(r1analytics.NewWailsService()),
+		application.NewService(seeds.NewWailsService()),
+		application.NewService(training.NewWailsService(s.opts.Core, training.NewService(s.opts.Core, training.Options{}))),
 		application.NewService(opencode.NewWailsService(opencodeSvc)),
 		application.NewService(reposSvc),
 		// tasks → Shape (a.i) IPC-entry wrapper (RFC v3.1 §4.4 /
@@ -892,23 +914,34 @@ func (s *Service) Run() core.Result {
 	))
 
 	// First-launch detection — if ~/Lethean/conf/lthn.yaml and the
-	// state DB don't exist, open the welcome wizard on top of the
-	// systray rather than dumping a fresh user straight into the
-	// popover. The wizard's final step writes config + opens the
-	// settings window; firstlaunch.Detect flips fresh→false naturally.
+	// state DB don't exist, open the welcome wizard. The wizard's
+	// completeOnboarding step writes config + opens the app shell;
+	// firstlaunch.Detect flips fresh→false naturally for subsequent
+	// launches.
+	freshInstall := false
 	if state := firstlaunch.Detect(nil); state.OK {
 		if fl, ok := state.Value.(firstlaunch.State); ok && fl.Fresh {
+			freshInstall = true
 			openWindow(s.opts.Core, "welcome")
 		}
 	}
 
-	// Dev convenience — open the main app shell on launch so the
-	// iteration loop (edit → restart → see-it) doesn't require
-	// clicking the tray every time. Must fire AFTER ApplicationStarted
-	// — pre-Run() window operations on macOS SEGV inside AppKit
-	// because the NSApp run loop isn't up yet. Production leaves this
-	// off; the tray is the canonical entry point.
-	if s.opts.ShowAppOnLaunch {
+	// Non-fresh launches drop the user straight into the app shell —
+	// "first run people get the welcome window, then drop into the
+	// desktop going forwards". Must fire AFTER ApplicationStarted —
+	// pre-Run() window operations on macOS SEGV inside AppKit because
+	// the NSApp run loop isn't up yet.
+	//
+	// Fresh installs skip this branch because the welcome wizard's
+	// completeOnboarding step opens "app" itself once the user
+	// finishes — opening it both at boot and from the wizard would
+	// flash a second shell.
+	//
+	// ShowAppOnLaunch still applies as an override: when true (dev
+	// mode via LTHN_DEV=1) the app shell opens even during a fresh-
+	// install session so iteration-mode work doesn't require the
+	// wizard each restart.
+	if !freshInstall || s.opts.ShowAppOnLaunch {
 		s.opts.Core.RegisterAction(func(c *core.Core, msg core.Message) core.Result {
 			if _, ok := msg.(guilifecycle.ActionApplicationStarted); ok {
 				openWindow(c, "app")

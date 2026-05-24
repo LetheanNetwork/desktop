@@ -40,7 +40,12 @@ async function completeOnboarding(): Promise<void> {
     // wizard at step 4 to surface it again.
     try { globalThis.localStorage?.setItem("lthn.menu.tour-completed", "true"); }
     catch { /* localStorage unavailable — replay still works via Open */ }
-    await windowSvc.Open("settings");
+    // Land in the unified app shell — the "settings" cute popover
+    // is the wrong destination for a first-run user who just finished
+    // onboarding. They should drop into the desktop they've just
+    // configured. Settings remains reachable from the app shell's
+    // own navigation.
+    await windowSvc.Open("app");
     await windowSvc.Hide("welcome");
   } catch (err) {
     console.error("welcome: completeOnboarding failed", err);
