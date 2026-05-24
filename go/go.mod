@@ -3,16 +3,17 @@ module dappco.re/lthn/desktop
 go 1.26.2
 
 require (
-	dappco.re/go v0.9.0
+	dappco.re/go v0.10.3
 	dappco.re/go/ai v0.8.0-alpha.1
 	dappco.re/go/api v0.8.0-alpha.1
 	dappco.re/go/config v0.8.0-alpha.1
 	dappco.re/go/i18n v0.8.0-alpha.1
 	dappco.re/go/inference v0.9.0
 	dappco.re/go/io v0.9.0
+	dappco.re/go/mlx v0.10.0
 	dappco.re/go/scm v0.8.0-alpha.1
 	github.com/gin-gonic/gin v1.12.0
-	github.com/wailsapp/wails/v3 v3.0.0-alpha.91
+	github.com/wailsapp/wails/v3 v3.0.0-alpha.95
 	golang.org/x/term v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -74,8 +75,8 @@ require (
 	github.com/gin-contrib/static v1.1.5 // indirect
 	github.com/gin-contrib/timeout v1.1.0 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
-	github.com/go-git/go-billy/v5 v5.7.0 // indirect
-	github.com/go-git/go-git/v5 v5.16.4 // indirect
+	github.com/go-git/go-billy/v5 v5.9.0 // indirect
+	github.com/go-git/go-git/v5 v5.19.1 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -123,7 +124,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/ollama/ollama v0.18.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
-	github.com/pjbgf/sha1cd v0.5.0 // indirect
+	github.com/pjbgf/sha1cd v0.6.0 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/qdrant/go-client v1.17.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
@@ -158,7 +159,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/arch v0.25.0 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
-	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90 // indirect
+	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/net v0.54.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
