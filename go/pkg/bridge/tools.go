@@ -7,6 +7,7 @@ package bridge
 
 import (
 	"net/http"
+	"time"
 
 	core "dappco.re/go"
 	guiwindow "dappco.re/go/gui/pkg/window"
@@ -464,78 +465,38 @@ func (s *Service) toolWindows() map[string]any {
 
 // ─── eval ───────────────────────────────────────────────────────────
 
-// eval dispatches the wrapped body through core/gui and waits for
-// the fetch-back at /internal/eval-reply. 5s timeout - anything
-// longer is almost certainly a hung script.
+// eval delegates to core/gui's window.eval_js action which wraps
+// the body, fires it via Wails ExecJS, then waits for the JS-side
+// reply on the Wails Events bus ("lthn:eval-reply"). Replaces the
+// prior fetch-back path that timed out silently because the
+// WebView's cross-origin POSTs failed the bridge HTTP server's
+// DNS-rebind origin check.
+//
+// 5s default timeout — anything longer is almost certainly a hung
+// script. Returned shape stays {ok, value/error} so existing MCP
+// callers see no behavioural change beyond eval actually working.
 func (s *Service) eval(ctx core.Context, windowName, body string) map[string]any {
 	if body == "" {
 		return map[string]any{"ok": false, "error": "script param required"}
 	}
-
-	// Cerberus #1427 — eval-id is the only thing protecting /internal/
-	// eval-reply from a race-POST forgery (the route is auth-free
-	// because the WebView is trusted and the id was claimed to be
-	// "unguessable"). The previous monotonic "eval-%d" was trivially
-	// guessable. 16 crypto-random bytes (hex = 32 chars, 2^128
-	// keyspace) makes the race-POST attack infeasible.
-	randR := core.RandomString(16)
-	if !randR.OK {
-		return map[string]any{"ok": false,
-			"error": "eval: crypto/rand unavailable: " + randR.Error()}
+	r := s.Core().Action("window.eval_js").Run(ctx, core.NewOptions(
+		core.Option{Key: "task", Value: guiwindow.TaskEvalJS{
+			Name:    windowName,
+			JS:      body,
+			Timeout: 5 * time.Second,
+		}},
+	))
+	if !r.OK {
+		return map[string]any{"ok": false, "error": r.Error()}
 	}
-	reqID := core.Concat("eval-", randR.Value.(string))
-	ch := make(chan evalReply, 1)
-	s.evalMu.Lock()
-	s.pendingEvals[reqID] = ch
-	s.evalMu.Unlock()
-
-	defer func() {
-		s.evalMu.Lock()
-		delete(s.pendingEvals, reqID)
-		s.evalMu.Unlock()
-	}()
-
-	// Indirect-eval ((0,eval)(body)) — returns the value of the last
-	// expression statement naturally. The earlier IIFE wrap
-	// ((function(){body})()) required callers to write explicit
-	// `return` because expression statements inside a function body
-	// don't auto-return; `1+1` and `document.title` both came back
-	// as undefined. Indirect eval handles bare-expression bodies AND
-	// IIFE-wrapped bodies AND multi-statement scripts (last expression
-	// wins). If the body returns a Promise, await it so async fetches
-	// resolve before we POST back.
-	wrapped := core.Sprintf(`(function(){
-  var __id=%s;
-  var __post=function(payload){
-    try{fetch('http://127.0.0.1:%d/internal/eval-reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),keepalive:true}).catch(function(){});}catch(e){}
-  };
-  try{
-    var __r=(0,eval)(%s);
-    if(__r && typeof __r.then==='function'){
-      __r.then(function(v){__post({reqId:__id, result:v});}, function(e){__post({reqId:__id, error:String(e)+(e&&e.stack?'\n'+e.stack:'')});});
-    } else {
-      __post({reqId:__id, result:__r});
-    }
-  }catch(e){
-    __post({reqId:__id, error:String(e)+(e&&e.stack?'\n'+e.stack:'')});
-  }
-})();`, jsonLit(reqID), s.port, jsonLit(body))
-
-	if errResp := s.runCoreGUIWindowTask("window.exec_js", guiwindow.TaskExecJS{Name: windowName, JS: wrapped}); errResp != nil {
-		return errResp
+	res, ok := r.Value.(guiwindow.EvalJSResult)
+	if !ok {
+		return map[string]any{"ok": false, "error": "eval_js returned unexpected shape"}
 	}
-
-	select {
-	case reply := <-ch:
-		if reply.Error != "" {
-			return map[string]any{"ok": false, "error": reply.Error}
-		}
-		return map[string]any{"ok": true, "value": reply.Result}
-	case <-core.After(5 * core.Second):
-		return map[string]any{"ok": false, "error": "eval timeout (5s)", "reqId": reqID}
-	case <-ctx.Done():
-		return map[string]any{"ok": false, "error": "context cancelled"}
+	if res.Err != "" {
+		return map[string]any{"ok": false, "error": res.Err}
 	}
+	return map[string]any{"ok": true, "value": res.Result}
 }
 
 // ─── Wails3 Service shape ───────────────────────────────────────────

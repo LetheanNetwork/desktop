@@ -188,7 +188,11 @@ func (s *Service) OnStartup(_ core.Context) core.Result {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/internal/console", s.requireOrigin(s.handleInternalConsole))
 	mux.HandleFunc("/internal/error", s.requireOrigin(s.handleInternalError))
-	mux.HandleFunc("/internal/eval-reply", s.requireOrigin(s.handleInternalEvalReply))
+	// /internal/eval-reply removed — eval now rides Wails' Events bus
+	// via core/gui's TaskEvalJS (see tools.go::eval). The handler +
+	// pendingEvals map stay around until A5 sweeps console + error
+	// onto the same channel and the whole /internal/* surface retires
+	// together.
 	mux.HandleFunc("/mcp/info", s.requireAuth(s.handleInfo))
 	mux.HandleFunc("/mcp/tools", s.requireAuth(s.handleTools))
 	mux.HandleFunc("/mcp/call", s.requireAuth(s.handleCall))
