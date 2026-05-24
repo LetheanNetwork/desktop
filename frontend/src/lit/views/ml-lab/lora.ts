@@ -136,14 +136,22 @@ const REFRESH_MS = 60_000;
 
 class LthnViewMlLabLora extends LitElement {
   static readonly properties = {
-    w:        { type: Number },
-    h:        { type: Number },
-    embedded: { type: Boolean, reflect: true },
-    runs:     { state: true },
-    loading:  { state: true },
-    error:    { state: true },
-    filter:   { state: true },
-    selected: { state: true },
+    w:           { type: Number },
+    h:           { type: Number },
+    embedded:    { type: Boolean, reflect: true },
+    runs:        { state: true },
+    loading:     { state: true },
+    error:       { state: true },
+    filter:      { state: true },
+    selected:    { state: true },
+    showWizard:  { state: true },
+    wizardBaseModel: { state: true },
+    wizardDataset:   { state: true },
+    wizardMode:      { state: true },
+    wizardIters:     { state: true },
+    wizardBusy:      { state: true },
+    controlBusy:     { state: true },
+    liveTick:        { state: true },
   };
   declare w: number;
   declare h: number;
@@ -153,7 +161,23 @@ class LthnViewMlLabLora extends LitElement {
   declare error: string;
   declare filter: string;
   declare selected: string;     // run id, "" when none selected
+  declare showWizard: boolean;
+  declare wizardBaseModel: string;
+  declare wizardDataset: string;
+  declare wizardMode: LoRAMode;
+  declare wizardIters: number;
+  declare wizardBusy: boolean;
+  declare controlBusy: boolean;
+  // liveTick is the latest RunEvent frame from the SSE stream for
+  // the selected run. Patched into the selected row's snapshot on
+  // render so the user sees iteration / loss / throughput tick
+  // without waiting for the 60s registry poll.
+  declare liveTick: {
+    runID: string; iteration: number; loss: number;
+    throughputTPS: number; etaSeconds: number;
+  } | null;
   private _timer: ReturnType<typeof setInterval> | null = null;
+  private _eventSource: EventSource | null = null;
 
   constructor() {
     super();
@@ -165,6 +189,14 @@ class LthnViewMlLabLora extends LitElement {
     this.error = "";
     this.filter = "";
     this.selected = "";
+    this.showWizard = false;
+    this.wizardBaseModel = "lemma-12b-v4-p6";
+    this.wizardDataset = "datasets/lethean-prep-v1.jsonl";
+    this.wizardMode = "sft";
+    this.wizardIters = 200;
+    this.wizardBusy = false;
+    this.controlBusy = false;
+    this.liveTick = null;
   }
 
   createRenderRoot() { return this; }
@@ -173,14 +205,65 @@ class LthnViewMlLabLora extends LitElement {
     super.connectedCallback();
     await this._loadFromBackend();
     this._timer = setInterval(() => { void this._loadFromBackend(); }, REFRESH_MS);
-    // TODO(snider): subscribe to LabService.SubscribeRunEvents for
-    // active runs so loss / throughput tick without waiting for the
-    // 60s poller. Bidirectional Wails event-bus seam, not apiFetch.
   }
 
   disconnectedCallback() {
     if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    this._closeEventSource();
     super.disconnectedCallback();
+  }
+
+  // _openEventSource opens an SSE stream for the named run so the
+  // selected row's loss / throughput / iteration tick in real time
+  // (every ~200ms from the mock driver). Auto-merges into the
+  // run's snapshot via _onLiveFrame. Idempotent — re-opening for
+  // the same id is a no-op.
+  private _openEventSource(runID: string): void {
+    if (this._eventSource && this.liveTick?.runID === runID) return;
+    this._closeEventSource();
+    if (!runID) return;
+    try {
+      const es = new EventSource(`/v1/ml-lab/runs/${encodeURIComponent(runID)}/events`);
+      es.onmessage = (ev) => this._onLiveFrame(ev.data);
+      es.addEventListener("end", () => this._closeEventSource());
+      es.onerror = () => { /* fall through to next reconnect attempt */ };
+      this._eventSource = es;
+    } catch {
+      // EventSource not available (e.g. test env) — silent degrade,
+      // the 60s poller still covers the gap.
+    }
+  }
+
+  private _closeEventSource(): void {
+    if (this._eventSource) {
+      this._eventSource.close();
+      this._eventSource = null;
+    }
+    this.liveTick = null;
+  }
+
+  private _onLiveFrame(data: string): void {
+    if (!data || data.startsWith(":")) return;
+    try {
+      const frame = JSON.parse(data) as {
+        run_id?: string; iteration?: number; loss?: number;
+        throughput_tps?: number; eta_seconds?: number; kind?: string;
+      };
+      if (!frame.run_id) return;
+      this.liveTick = {
+        runID:         frame.run_id,
+        iteration:     frame.iteration ?? 0,
+        loss:          frame.loss ?? 0,
+        throughputTPS: frame.throughput_tps ?? 0,
+        etaSeconds:    frame.eta_seconds ?? 0,
+      };
+      if (frame.kind === "complete" || frame.kind === "error") {
+        this._closeEventSource();
+        // Trigger a registry refresh so the row's terminal state
+        // (completed / failed) lands without waiting for the poller.
+        void this._loadFromBackend();
+      }
+    } catch { /* malformed frame — ignore */ }
   }
 
   async _loadFromBackend() {
@@ -230,7 +313,79 @@ class LthnViewMlLabLora extends LitElement {
 
   _onRowClick(id: string) {
     this.selected = this.selected === id ? "" : id;
+    // Open SSE stream when an active run is selected; close when
+    // deselected or selecting a terminal run.
+    const r = this.runs.find(x => x.id === id);
+    if (this.selected && r && (r.status === "active" || r.status === "queued")) {
+      this._openEventSource(this.selected);
+    } else {
+      this._closeEventSource();
+    }
   }
+
+  // _controlRun POSTs an action verb to the per-run control endpoint.
+  // Driver responds with the post-action status; trigger a refresh so
+  // the row's status badge updates immediately.
+  async _controlRun(action: "pause" | "resume" | "cancel" | "checkpoint"): Promise<void> {
+    if (!this.selected || this.controlBusy) return;
+    this.controlBusy = true;
+    try {
+      const res = await apiFetch(`/v1/ml-lab/runs/${encodeURIComponent(this.selected)}/control`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ run_id: this.selected, action }),
+      });
+      if (!res.ok) {
+        this.error = `control ${action} returned ${res.status}`;
+        return;
+      }
+      await this._loadFromBackend();
+    } catch (e) {
+      this.error = (e instanceof Error) ? e.message : `control ${action} failed`;
+    } finally {
+      this.controlBusy = false;
+    }
+  }
+
+  // _onStartRun submits the wizard form to /v1/ml-lab/runs/start.
+  // The returned RunHandle.run_id becomes the new selection so the
+  // user lands on the live row immediately.
+  async _onStartRun(): Promise<void> {
+    if (this.wizardBusy) return;
+    this.wizardBusy = true;
+    try {
+      const res = await apiFetch("/v1/ml-lab/runs/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base_model:   this.wizardBaseModel,
+          dataset:      this.wizardDataset,
+          mode:         this.wizardMode,
+          total_iters:  this.wizardIters,
+          // Tick cadence — keep mock-driver default (200ms) for the
+          // demo feel; production runs override via run-recipe.
+          hyperparams:  { tick_ms: 200 },
+        }),
+      });
+      if (!res.ok) {
+        this.error = `start run returned ${res.status}`;
+        return;
+      }
+      const handle = await res.json() as { run_id?: string };
+      this.showWizard = false;
+      await this._loadFromBackend();
+      if (handle.run_id) {
+        this.selected = handle.run_id;
+        this._openEventSource(handle.run_id);
+      }
+    } catch (e) {
+      this.error = (e instanceof Error) ? e.message : "start run failed";
+    } finally {
+      this.wizardBusy = false;
+    }
+  }
+
+  _toggleWizard() { this.showWizard = !this.showWizard; }
 
   _fmtPct(it: number, total: number): string {
     if (!total) return "—";
@@ -275,18 +430,108 @@ class LthnViewMlLabLora extends LitElement {
 
   _renderRow(r: LoRARun) {
     const isSelected = this.selected === r.id;
+    // Merge the live SSE tick onto the selected row's snapshot so
+    // iteration / loss / throughput / eta update without waiting
+    // for the 60s registry refresh. Non-selected rows render their
+    // last-known registry values.
+    const useLive = isSelected && this.liveTick && this.liveTick.runID === r.id;
+    const iter = useLive ? this.liveTick!.iteration       : r.iteration;
+    const loss = useLive ? this.liveTick!.loss            : r.last_loss;
+    const tps  = useLive ? this.liveTick!.throughputTPS   : r.throughput_tps;
+    const eta  = useLive ? this.liveTick!.etaSeconds      : r.eta_seconds;
     return html`
       <tr class="run-row ${isSelected ? "selected" : ""}" @click=${() => this._onRowClick(r.id)}>
         <td class="status">${this._statusBadge(r.status)}</td>
         <td class="base-model" title=${r.id}>${r.base_model}</td>
         <td class="mode">${this._modeBadge(r.mode)}</td>
         <td class="dataset">${r.dataset}</td>
-        <td class="progress">${r.iteration} / ${r.total_iters} (${this._fmtPct(r.iteration, r.total_iters)})</td>
-        <td class="loss">${this._fmtLoss(r.last_loss)}</td>
-        <td class="throughput">${this._fmtThroughput(r.throughput_tps)}</td>
-        <td class="eta">${this._fmtETA(r.eta_seconds)}</td>
+        <td class="progress">${iter} / ${r.total_iters} (${this._fmtPct(iter, r.total_iters)})</td>
+        <td class="loss">${this._fmtLoss(loss)}</td>
+        <td class="throughput">${this._fmtThroughput(tps)}</td>
+        <td class="eta">${this._fmtETA(eta)}</td>
         <td class="started">${this._fmtTimestamp(r.started)}</td>
       </tr>
+    `;
+  }
+
+  _renderControlBar() {
+    if (!this.selected) return null;
+    const selectedRun = this.runs.find(r => r.id === this.selected);
+    if (!selectedRun) return null;
+    const isActive    = selectedRun.status === "active";
+    const isPaused    = selectedRun.status === "paused";
+    const isTerminal  = selectedRun.status === "completed" || selectedRun.status === "cancelled" || selectedRun.status === "failed";
+    const btn = (label: string, action: "pause"|"resume"|"cancel"|"checkpoint", disabled = false) => html`
+      <button type="button" @click=${(e: Event) => { e.stopPropagation(); void this._controlRun(action); }}
+        ?disabled=${disabled || this.controlBusy}
+        style="background:var(--colour-surface-2);color:var(--colour-text-primary);border:1px solid var(--colour-border);padding:5px 12px;border-radius:5px;font-size:12px;cursor:pointer;font-family:var(--font-sans);">
+        ${label}
+      </button>
+    `;
+    return html`
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--colour-border-subtle);background:var(--colour-surface-1);">
+        <span style="font-size:11px;color:var(--colour-text-tertiary);font-family:var(--font-mono);">${this.selected}</span>
+        <div style="flex:1"></div>
+        ${btn("Pause", "pause", !isActive)}
+        ${btn("Resume", "resume", !isPaused)}
+        ${btn("Checkpoint", "checkpoint", isTerminal)}
+        ${btn("Cancel", "cancel", isTerminal)}
+        ${this.controlBusy
+          ? html`<span style="font-size:11px;color:var(--colour-text-tertiary);">…</span>`
+          : null}
+      </div>
+    `;
+  }
+
+  _renderWizard() {
+    if (!this.showWizard) return null;
+    return html`
+      <div style="position:absolute;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10;"
+           @click=${(e: Event) => { if (e.target === e.currentTarget) this._toggleWizard(); }}>
+        <div style="background:var(--colour-surface-1);border:1px solid var(--colour-border);border-radius:8px;padding:24px;width:480px;display:flex;flex-direction:column;gap:14px;">
+          <h3 style="margin:0;font-size:15px;color:var(--colour-text-primary);">New LoRA Run</h3>
+          <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--colour-text-secondary);">
+            Base model
+            <input type="text" .value=${this.wizardBaseModel}
+              @input=${(e: Event) => { this.wizardBaseModel = (e.target as HTMLInputElement).value; }}
+              style="background:var(--colour-surface-2);border:1px solid var(--colour-border);color:var(--colour-text-primary);padding:6px 10px;border-radius:5px;font-family:var(--font-mono);font-size:12px;outline:none;" />
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--colour-text-secondary);">
+            Dataset
+            <input type="text" .value=${this.wizardDataset}
+              @input=${(e: Event) => { this.wizardDataset = (e.target as HTMLInputElement).value; }}
+              style="background:var(--colour-surface-2);border:1px solid var(--colour-border);color:var(--colour-text-primary);padding:6px 10px;border-radius:5px;font-family:var(--font-mono);font-size:12px;outline:none;" />
+          </label>
+          <div style="display:flex;gap:14px;">
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--colour-text-secondary);flex:1;">
+              Mode
+              <select .value=${this.wizardMode}
+                @change=${(e: Event) => { this.wizardMode = (e.target as HTMLSelectElement).value as LoRAMode; }}
+                style="background:var(--colour-surface-2);border:1px solid var(--colour-border);color:var(--colour-text-primary);padding:6px 10px;border-radius:5px;font-family:var(--font-mono);font-size:12px;outline:none;">
+                <option value="sft">sft</option>
+                <option value="grpo">grpo</option>
+                <option value="distill">distill</option>
+              </select>
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--colour-text-secondary);flex:1;">
+              Total iterations
+              <input type="number" min="1" max="100000" .value=${String(this.wizardIters)}
+                @input=${(e: Event) => { this.wizardIters = Number((e.target as HTMLInputElement).value) || 0; }}
+                style="background:var(--colour-surface-2);border:1px solid var(--colour-border);color:var(--colour-text-primary);padding:6px 10px;border-radius:5px;font-family:var(--font-mono);font-size:12px;outline:none;" />
+            </label>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
+            <button type="button" @click=${this._toggleWizard}
+              style="background:transparent;color:var(--colour-text-secondary);border:1px solid var(--colour-border);padding:6px 14px;border-radius:5px;font-size:12px;cursor:pointer;">
+              Cancel
+            </button>
+            <button type="button" @click=${this._onStartRun} ?disabled=${this.wizardBusy}
+              style="background:var(--colour-accent);color:var(--colour-text-inverse);border:none;padding:6px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-weight:500;">
+              ${this.wizardBusy ? "Starting…" : "Start Run"}
+            </button>
+          </div>
+        </div>
+      </div>
     `;
   }
 
@@ -297,6 +542,8 @@ class LthnViewMlLabLora extends LitElement {
   render() {
     const rows = this._filtered();
     const body = html`
+      <div style="position:relative;display:flex;flex-direction:column;flex:1;min-height:0;">
+        ${this._renderWizard()}
       <div class="lora-toolbar">
         <input
           type="text"
@@ -305,6 +552,10 @@ class LthnViewMlLabLora extends LitElement {
           @input=${this._onFilterInput}
           class="filter-input"
         />
+        <button type="button" @click=${this._toggleWizard}
+          style="background:var(--colour-accent);color:var(--colour-text-inverse);border:none;padding:5px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-weight:500;margin-left:8px;">
+          New Run
+        </button>
         <span class="status">
           ${this.error ? html`<span class="error">${this.error}</span>` : null}
           ${this.loading ? html`<span class="loading">refreshing…</span>` : null}
@@ -312,6 +563,7 @@ class LthnViewMlLabLora extends LitElement {
           <span class="count">${rows.length} of ${this.runs.length}</span>
         </span>
       </div>
+      ${this._renderControlBar()}
       <table class="lora-table">
         <thead>
           <tr>
@@ -332,6 +584,7 @@ class LthnViewMlLabLora extends LitElement {
             : rows.map(r => this._renderRow(r))}
         </tbody>
       </table>
+      </div>
     `;
     if (this.embedded) return body;
     return renderChrome({
