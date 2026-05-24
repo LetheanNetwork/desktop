@@ -226,6 +226,19 @@ func windowRegistry() []WindowSpec {
 			DisableNativeContextMenu: true,
 		},
 		{
+			// ml-lab — the four-tab workbench (Influx / DuckDB /
+			// Models / LoRA) per plans/project/lthn/desktop/RFC.ml-lab.md.
+			// Generous default — sidebar (240px) + chart panel (large
+			// numeric tables) need a wide canvas; 1440×900 mirrors the
+			// `app` shell so on M-class MBPs it opens at the same
+			// comfortable size.
+			Name: "ml-lab", Title: "ML Lab",
+			Width: 1440, Height: 900, MinWidth: 1100, MinHeight: 660,
+			Frameless: true, HideOnClose: true, EnableFileDrop: true,
+			InvisibleTitleBarHeight:  titleBarH,
+			DisableNativeContextMenu: true,
+		},
+		{
 			Name: "about", Title: "About Lethean Desktop",
 			// Genuinely fixed size — Min == Max == Width/Height +
 			// DisableResize for the splash-card feel.

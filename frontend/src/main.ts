@@ -779,6 +779,13 @@ switch (surface) {
     app.innerHTML = `<lthn-providers-window></lthn-providers-window>`;
     break;
   }
+  case "ml-lab": {
+    // ML Lab Workbench — Influx / DuckDB / Models / LoRA panels
+    // per plans/project/lthn/desktop/RFC.ml-lab.md §2.
+    await import("./lit/views/ml-lab/ml-lab");
+    app.innerHTML = `<lthn-view-ml-lab></lthn-view-ml-lab>`;
+    break;
+  }
   case "canvas":
   default: {
     app.innerHTML = `
