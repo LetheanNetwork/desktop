@@ -34,6 +34,7 @@ import (
 	"runtime"
 
 	core "dappco.re/go"
+	"dappco.re/go/ai/pkg/lab"
 	"dappco.re/go/config"
 	guilifecycle "dappco.re/go/gui/pkg/lifecycle"
 	guimenu "dappco.re/go/gui/pkg/menu"
@@ -380,6 +381,12 @@ func (s *Service) Run() core.Result {
 	// gates it. Wails-bound here only to reserve the binding namespace —
 	// the REST endpoint is the canonical Stage C consumer per RFC §2.5.
 	accountSvc, _ := core.ServiceFor[*account.Service](s.opts.Core, "account")
+	// lab — ML Lab Workbench coordinator. Core-registered in app.go
+	// via core.WithName("lab", lab.Register); looked up here so the
+	// Wails Services array can bind it, and so mountSubsystems can
+	// reach it when wiring /v1/ml-lab/* HTTP routes. Per
+	// plans/project/lthn/desktop/RFC.ml-lab.md §3.
+	labSvc, _ := core.ServiceFor[*lab.Service](s.opts.Core, "lab")
 	// Bridge opencode-serve's /global/event SSE stream → Wails event
 	// bus. The opencode side runs the SSE goroutine + parses; each
 	// event JSON is forwarded here, where emitCoreEvent ferries it
@@ -495,6 +502,7 @@ func (s *Service) Run() core.Result {
 		application.NewService(r1analytics.NewWailsService()),
 		application.NewService(seeds.NewWailsService()),
 		application.NewService(training.NewWailsService(s.opts.Core, training.NewService(s.opts.Core, training.Options{}))),
+		application.NewService(labSvc),
 		application.NewService(opencode.NewWailsService(opencodeSvc)),
 		application.NewService(reposSvc),
 		// tasks → Shape (a.i) IPC-entry wrapper (RFC v3.1 §4.4 /

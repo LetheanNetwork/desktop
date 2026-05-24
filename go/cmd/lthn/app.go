@@ -4,6 +4,7 @@ package main
 
 import (
 	core "dappco.re/go"
+	"dappco.re/go/ai/pkg/lab"
 	"dappco.re/go/api"
 	"dappco.re/go/config"
 	"dappco.re/go/i18n"
@@ -219,6 +220,14 @@ func newAppCore() *core.Core {
 		// jobs / dataset manifests / model-pack registry grow without
 		// contending against the master DB.
 		core.WithName("ml", lthnml.Register),
+		// lab — ML Lab Workbench backend. Wraps four pluggable
+		// interfaces (InferenceProvider, TrainingDriver, ModelLibrary,
+		// SavedQueryStore) so the frontend panels render against
+		// deterministic mock data until real go-mlx / pkg/training /
+		// pkg/ml-DuckDB wiring lands. HTTP routes mount via
+		// lab.RegisterHTTPRoutes from pkg/desktop.mountSubsystems.
+		// Per plans/project/lthn/desktop/RFC.ml-lab.md §3.
+		core.WithName("lab", lab.Register),
 		// vi — Lethean Desktop mascot's data spine. Populates the
 		// Sites slot of the four-slot Vi data contract via the queue
 		// substrate: a "vi-probe-site" handler self-reschedules per
