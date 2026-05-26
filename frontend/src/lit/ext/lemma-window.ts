@@ -51,6 +51,7 @@ class LthnLemmaWindow extends LitElement {
     err:         { state: true },
     // admin-side state
     adminStatus: { state: true },
+    sftJob:      { state: true },
     machineHash: { state: true },
     profiles:    { state: true },
     // Pulled from Models.List() at Admin-panel open. Drives the
@@ -76,6 +77,12 @@ class LthnLemmaWindow extends LitElement {
   declare models: ModelEntry[];
   declare err: string;
   declare adminStatus: any;
+  /** Active SFT job snapshot from Lemma.SFTStatus(""). Null when no
+   *  job has ever run; non-null but state !== "running" means the
+   *  registry is holding a terminal-state record (done/failed/
+   *  stopped) the user hasn't dismissed yet. Only state ===
+   *  "running" renders the in-flight indicator. */
+  declare sftJob: { state?: string; epoch?: number; last_loss?: number; adapter_dir?: string } | null;
   declare machineHash: string;
   declare profiles: any[];
   declare availableModels: Array<{ name: string; path: string; size: number; is_dir: boolean }>;
@@ -99,6 +106,7 @@ class LthnLemmaWindow extends LitElement {
     this.models = [];
     this.err = "";
     this.adminStatus = null;
+    this.sftJob = null;
     this.machineHash = "";
     this.profiles = [];
     this.availableModels = [];
@@ -165,7 +173,7 @@ class LthnLemmaWindow extends LitElement {
     try {
       const Models = await import("../../../bindings/dappco.re/lthn/desktop/pkg/models/wailsservice.js");
       const { unwrap } = await import("../result");
-      const [statusRes, machineRes, profilesRes, modelsRes] = await Promise.allSettled([
+      const [statusRes, machineRes, profilesRes, modelsRes, sftRes] = await Promise.allSettled([
         Lemma.Status(),
         Lemma.Machine(),
         Lemma.Profiles(),
@@ -173,6 +181,10 @@ class LthnLemmaWindow extends LitElement {
         // collapses to a plain array (or the fallback on failure) so
         // the picker can iterate without per-call OK checks.
         unwrap<Array<{ name: string; path: string; size: number; is_dir: boolean }>>(Models.List(), []),
+        // SFTStatus("") returns the active job (or last completed) —
+        // 404 when no job has ever run. Both are "no SFT running" for
+        // the panel; only state === "running" surfaces in render.
+        Lemma.SFTStatus(""),
       ]);
       if (statusRes.status === "fulfilled") {
         this.adminStatus = statusRes.value;
@@ -189,6 +201,7 @@ class LthnLemmaWindow extends LitElement {
       if (modelsRes.status === "fulfilled") {
         this.availableModels = modelsRes.value ?? [];
       }
+      this.sftJob = sftRes.status === "fulfilled" ? sftRes.value : null;
     } catch (e) {
       this.reloadErr = String(e);
     }
@@ -301,8 +314,15 @@ class LthnLemmaWindow extends LitElement {
               ${this.adminStatus.profile_path
                 ? html`<lthn-rail-row k="Profile" v="${this.adminStatus.profile_path}"></lthn-rail-row>`
                 : nothing}
+              ${this.adminStatus.config?.adapter_path
+                ? html`<lthn-rail-row k="Adapter" v="${this.adminStatus.config.adapter_path}"></lthn-rail-row>`
+                : nothing}
               <lthn-rail-row k="Context" v="${this.adminStatus.config?.context_length ?? 0}"></lthn-rail-row>
               <lthn-rail-row k="Cache" v="${this.adminStatus.config?.prompt_cache ? "on" : "off"} (${this.adminStatus.config?.cache_policy || "—"})"></lthn-rail-row>
+              ${this.sftJob?.state === "running"
+                ? html`<lthn-rail-row k="Training"
+                    v="epoch ${this.sftJob.epoch ?? 0} · loss ${(this.sftJob.last_loss ?? 0).toFixed(3)}"></lthn-rail-row>`
+                : nothing}
             </div>`
           : nothing}
 
