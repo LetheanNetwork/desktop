@@ -178,6 +178,10 @@ type Options struct {
 type Service struct {
 	opts Options
 	app  *application.App
+	// selfRefreshStop signals the local-machine refresh ticker to
+	// exit. Closed by PostShutdown; the goroutine selects on it
+	// alongside the ticker channel.
+	selfRefreshStop chan struct{}
 }
 
 // NewService constructs the desktop service. Does NOT start Wails
@@ -576,6 +580,14 @@ func (s *Service) Run() core.Result {
 		if r := s.opts.Fleet.UpsertMachine(selfMachineRow()); !r.OK {
 			core.Warn("desktop.fleet.self_upsert", "error", r.Error())
 		}
+		// Keep the self row's Model + Status live — every 10s, pull
+		// Lemma.Status and re-upsert. When the user hot-swaps a model
+		// via the model-browser, the Fleet row reflects the change
+		// without waiting for the next boot. Stopped via PostShutdown
+		// closing selfRefreshStop so the goroutine doesn't outlive
+		// the process.
+		s.selfRefreshStop = make(chan struct{})
+		go runSelfMachineRefresh(s.opts.Fleet, s.selfRefreshStop)
 	}
 
 	s.app = application.New(application.Options{
@@ -654,6 +666,10 @@ func (s *Service) Run() core.Result {
 		// stopped. Last chance to close anything that held a ref
 		// into the event loop (HTTP server, store, runner).
 		PostShutdown: func() {
+			if s.selfRefreshStop != nil {
+				close(s.selfRefreshStop)
+				s.selfRefreshStop = nil
+			}
 			if s.opts.Server != nil {
 				if r := s.opts.Server.Stop(core.Background()); !r.OK {
 					core.Warn("desktop server shutdown failed", "err", r.Error())
@@ -1298,6 +1314,80 @@ func emitTrayPluginClicked(code string) {
 // Host/Port are the loopback admin endpoint convention (127.0.0.1
 // :11434) matching pkg/lemma defaults. Future remote-tunnelled
 // installs replace these when pairing.
+// runSelfMachineRefresh keeps the local-machine fleet row in sync
+// with the currently-loaded model. Tick interval is 10s — same
+// order of magnitude as the tray poll (2s) but coarser since Fleet
+// is the "across-machines view" rather than the at-a-glance status.
+// Exits when stop closes.
+//
+// Lemma down → Model field clears, Status flips to "offline" so
+// the Fleet → Machines row visibly reflects "engine not running";
+// Lemma up → Model = basename(model_path), Status = "online".
+func runSelfMachineRefresh(svc *fleet.Service, stop <-chan struct{}) {
+	tick := core.NewTicker(10 * core.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-tick.C:
+			refreshSelfMachineOnce(svc)
+		}
+	}
+}
+
+// refreshSelfMachineOnce performs one Lemma.Status read + upsert.
+// Independent of the ticker so callers (tests / first-fire post-
+// boot) can drive a single iteration. Errors are warnings — the
+// row stays as it was, no panic, no silent drift.
+func refreshSelfMachineOnce(svc *fleet.Service) {
+	if svc == nil {
+		return
+	}
+	row := selfMachineRow()
+	admin, err := lemma.NewAdmin(lemma.AdminConfig{})
+	if err != nil {
+		row.Status = "offline"
+		if r := svc.UpsertMachine(row); !r.OK {
+			core.Warn("desktop.fleet.self_refresh", "error", r.Error())
+		}
+		return
+	}
+	ctx, cancel := core.WithTimeout(core.Background(), 3*core.Second)
+	defer cancel()
+	status, statusErr := admin.Status(ctx)
+	if statusErr != nil {
+		row.Status = "offline"
+	} else {
+		row.Status = "online"
+		if base := pathBase(status.ModelPath); base != "" {
+			row.Model = base
+		}
+	}
+	if r := svc.UpsertMachine(row); !r.OK {
+		core.Warn("desktop.fleet.self_refresh", "error", r.Error())
+	}
+}
+
+// pathBase strips dir + returns the trailing path component.
+// Used to render "lemer-lite-4bit" instead of the full absolute
+// path in the Fleet row's Model field.
+func pathBase(p string) string {
+	if p == "" {
+		return ""
+	}
+	trimmed := p
+	for len(trimmed) > 1 && trimmed[len(trimmed)-1] == '/' {
+		trimmed = trimmed[:len(trimmed)-1]
+	}
+	for i := len(trimmed) - 1; i >= 0; i-- {
+		if trimmed[i] == '/' {
+			return trimmed[i+1:]
+		}
+	}
+	return trimmed
+}
+
 func selfMachineRow() fleet.Machine {
 	host := "127.0.0.1"
 	name := host
