@@ -30,6 +30,9 @@ class LthnModelBrowserWindow extends LitElement {
     machineHash:     { state: true },
     profiles:        { state: true },
     selectedProfile: { state: true },
+    adapters:        { state: true },
+    selectedAdapter: { state: true },
+    activeAdapter:   { state: true },
     reloadBusy:      { state: true },
     reloadErr:       { state: true },
     lemmaUnavailable:{ state: true },
@@ -52,6 +55,17 @@ class LthnModelBrowserWindow extends LitElement {
   declare machineHash: string;
   declare profiles: Array<{ name: string; path?: string; model?: string; backend?: string }>;
   declare selectedProfile: string;
+  /** Adapters from Lemma.SFTAdapters — completed LoRA dirs under
+   *  ~/Lethean/data/adapters. User picks one to overlay on the
+   *  selected base model when activating; empty string means no
+   *  overlay (base only). */
+  declare adapters: Array<{ name: string; path?: string }>;
+  declare selectedAdapter: string;
+  /** Currently-active adapter from Lemma.Status().config.adapter_path
+   *  — used to pre-select the dropdown so the dropdown reflects what
+   *  the engine actually has loaded, not just what the user last
+   *  picked. */
+  declare activeAdapter: string;
   declare reloadBusy: boolean;
   declare reloadErr: string;
   declare lemmaUnavailable: boolean;
@@ -79,6 +93,9 @@ class LthnModelBrowserWindow extends LitElement {
     this.machineHash = "";
     this.profiles = [];
     this.selectedProfile = "";
+    this.adapters = [];
+    this.selectedAdapter = "";
+    this.activeAdapter = "";
     this.reloadBusy = false;
     this.reloadErr = "";
     this.lemmaUnavailable = false;
@@ -464,6 +481,24 @@ class LthnModelBrowserWindow extends LitElement {
             </select>
           </div>
         ` : nothing}
+        ${this.adapters.length > 0 ? html`
+          <div>
+            <lthn-label>Adapter</lthn-label>
+            <select
+              .value=${this.selectedAdapter}
+              @change=${(e: Event) => { this.selectedAdapter = (e.target as HTMLSelectElement).value; }}
+              style="width:100%; margin-top:4px; padding:5px 7px; font-size:11.5px;
+                     background:rgba(0,0,0,0.25); color:var(--fg-1);
+                     border:1px solid rgba(255,255,255,0.08); border-radius:4px;
+                     --wails-draggable:no-drag;">
+              <option value="">(base model only)</option>
+              ${this.adapters.map(a => {
+                const isActive = a.path === this.activeAdapter;
+                return html`<option value=${a.path ?? a.name}>${a.name}${isActive ? "  (loaded)" : ""}</option>`;
+              })}
+            </select>
+          </div>
+        ` : nothing}
         <lthn-btn
           tone=${isLoaded ? "ghost" : "primary"}
           size="md"
@@ -489,13 +524,21 @@ class LthnModelBrowserWindow extends LitElement {
   private async _refreshLemmaAdmin(): Promise<void> {
     try {
       const Lemma = await import("@desktop/lemma/wailsservice");
-      const [statusRes, machineRes, profilesRes] = await Promise.allSettled([
+      const [statusRes, machineRes, profilesRes, adaptersRes] = await Promise.allSettled([
         Lemma.Status(),
         Lemma.Machine(),
         Lemma.Profiles(),
+        Lemma.SFTAdapters(),
       ]);
       if (statusRes.status === "fulfilled") {
         this.activeModelPath = statusRes.value?.model_path ?? "";
+        this.activeAdapter = statusRes.value?.config?.adapter_path ?? "";
+        // Pre-select the active adapter so the dropdown defaults to
+        // "what's loaded right now" rather than empty — the user can
+        // still pick a different one or revert to "(none)".
+        if (this.activeAdapter && !this.selectedAdapter) {
+          this.selectedAdapter = this.activeAdapter;
+        }
         this.lemmaUnavailable = false;
       } else {
         this.lemmaUnavailable = true;
@@ -506,6 +549,9 @@ class LthnModelBrowserWindow extends LitElement {
       }
       if (profilesRes.status === "fulfilled") {
         this.profiles = profilesRes.value?.profiles ?? [];
+      }
+      if (adaptersRes.status === "fulfilled") {
+        this.adapters = adaptersRes.value?.adapters ?? [];
       }
     } catch {
       this.lemmaUnavailable = true;
@@ -536,6 +582,7 @@ class LthnModelBrowserWindow extends LitElement {
         confirm_machine: this.machineHash,
         model_path:      modelPath,
         profile_path:    this.selectedProfile || undefined,
+        adapter_path:    this.selectedAdapter || undefined,
         context_length:  0,
       }));
       await this._refreshLemmaAdmin();
