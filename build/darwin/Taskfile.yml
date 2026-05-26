@@ -14,6 +14,13 @@ vars:
   # projects on one machine don't collide on the same Docker image tag.
   CROSS_IMAGE: lthn-cross
 
+  # Optional: path to the lthn-mlx.app helper bundle (from go-mlx repo).
+  # When present at bundle time, lthn-mlx.app is nested into the
+  # lthn.app under Contents/Frameworks/ following Apple's helper-app
+  # convention. Override with LTHN_MLX_APP=/path/to/lthn-mlx.app for CI.
+  # Build it from the go-mlx repo with: ./scripts/make-app-bundle.sh
+  LTHN_MLX_APP: '{{.LTHN_MLX_APP | default "../core/go-mlx/bin/lthn-mlx.app"}}'
+
 tasks:
   build:
     summary: Builds the application
@@ -203,6 +210,23 @@ tasks:
         fi
       - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
       - cp build/darwin/Info.plist "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents"
+      # Nested helper: lthn-mlx.app under Contents/Frameworks/ (Apple's
+      # convention for shipped helper executables). When the lthn binary
+      # spawns lthn-mlx as a subprocess via pkg/lemma, the helper's
+      # NSBundle.mainBundle correctly returns its own nested .app path,
+      # so the metallib resolves via Contents/Resources/mlx.metallib
+      # inside the helper bundle (not the outer lthn.app). See
+      # go-mlx/scripts/make-app-bundle.sh for how the helper is built.
+      - |-
+        if [ -d "{{.LTHN_MLX_APP}}" ]; then
+          mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Frameworks"
+          rm -rf "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Frameworks/lthn-mlx.app"
+          cp -R "{{.LTHN_MLX_APP}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Frameworks/"
+          echo "  bundled lthn-mlx helper from {{.LTHN_MLX_APP}}"
+        else
+          echo "  lthn-mlx.app not found at {{.LTHN_MLX_APP}} — desktop will need lthn-mlx on PATH at runtime"
+          echo "  to bundle: cd \$(dirname {{.LTHN_MLX_APP}})/.. && ./scripts/make-app-bundle.sh"
+        fi
       - task: '{{if eq OS "darwin"}}codesign:adhoc{{else}}codesign:skip{{end}}'
 
   codesign:adhoc:
