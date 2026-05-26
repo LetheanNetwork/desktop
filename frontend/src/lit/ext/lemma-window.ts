@@ -53,6 +53,11 @@ class LthnLemmaWindow extends LitElement {
     adminStatus: { state: true },
     machineHash: { state: true },
     profiles:    { state: true },
+    // Pulled from Models.List() at Admin-panel open. Drives the
+    // reload picker — falls back to a free-text <input> when the
+    // list is empty or the call errors (lthn-mlx may not yet have
+    // surfaced models the user just dropped into the dir).
+    availableModels: { state: true },
     reloadModel: { state: true },
     reloadProfile: { state: true },
     reloadBusy:  { state: true },
@@ -73,6 +78,7 @@ class LthnLemmaWindow extends LitElement {
   declare adminStatus: any;
   declare machineHash: string;
   declare profiles: any[];
+  declare availableModels: Array<{ name: string; path: string; size: number; is_dir: boolean }>;
   declare reloadModel: string;
   declare reloadProfile: string;
   declare reloadBusy: boolean;
@@ -95,6 +101,7 @@ class LthnLemmaWindow extends LitElement {
     this.adminStatus = null;
     this.machineHash = "";
     this.profiles = [];
+    this.availableModels = [];
     this.reloadModel = "";
     this.reloadProfile = "";
     this.reloadBusy = false;
@@ -156,10 +163,16 @@ class LthnLemmaWindow extends LitElement {
   private async loadAdmin(): Promise<void> {
     this.reloadErr = "";
     try {
-      const [statusRes, machineRes, profilesRes] = await Promise.allSettled([
+      const Models = await import("../../../bindings/dappco.re/lthn/desktop/pkg/models/wailsservice.js");
+      const { unwrap } = await import("../result");
+      const [statusRes, machineRes, profilesRes, modelsRes] = await Promise.allSettled([
         Lemma.Status(),
         Lemma.Machine(),
         Lemma.Profiles(),
+        // Models.List returns a core.Result wrapped Entry[]; unwrap()
+        // collapses to a plain array (or the fallback on failure) so
+        // the picker can iterate without per-call OK checks.
+        unwrap<Array<{ name: string; path: string; size: number; is_dir: boolean }>>(Models.List(), []),
       ]);
       if (statusRes.status === "fulfilled") {
         this.adminStatus = statusRes.value;
@@ -172,6 +185,9 @@ class LthnLemmaWindow extends LitElement {
       }
       if (profilesRes.status === "fulfilled") {
         this.profiles = profilesRes.value?.profiles ?? [];
+      }
+      if (modelsRes.status === "fulfilled") {
+        this.availableModels = modelsRes.value ?? [];
       }
     } catch (e) {
       this.reloadErr = String(e);
@@ -292,10 +308,21 @@ class LthnLemmaWindow extends LitElement {
 
         <form @submit=${this.doReload}>
           <lthn-label>Hot-swap model</lthn-label>
-          <input type="text" .value=${this.reloadModel}
-                 @input=${(e: Event) => { this.reloadModel = (e.target as HTMLInputElement).value; }}
-                 placeholder="/path/to/model-dir or model id"
-                 style="width:100%; box-sizing:border-box; padding:6px 8px; margin-top:4px; font-family:ui-monospace, monospace; font-size:12px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px;">
+          ${this.availableModels.length > 0
+            ? html`
+              <select .value=${this.reloadModel}
+                      @change=${(e: Event) => { this.reloadModel = (e.target as HTMLSelectElement).value; }}
+                      style="width:100%; box-sizing:border-box; padding:6px 8px; margin-top:4px; font-family:ui-monospace, monospace; font-size:12px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px;">
+                ${this.availableModels.map(m => {
+                  const isCurrent = m.path === (this.adminStatus?.model_path ?? "");
+                  return html`<option value=${m.path} ?selected=${isCurrent}>${m.name}${isCurrent ? "  (loaded)" : ""}</option>`;
+                })}
+              </select>`
+            : html`
+              <input type="text" .value=${this.reloadModel}
+                     @input=${(e: Event) => { this.reloadModel = (e.target as HTMLInputElement).value; }}
+                     placeholder="/path/to/model-dir or model id"
+                     style="width:100%; box-sizing:border-box; padding:6px 8px; margin-top:4px; font-family:ui-monospace, monospace; font-size:12px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px;">`}
 
           ${this.profiles.length > 0
             ? html`
