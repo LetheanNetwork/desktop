@@ -564,6 +564,20 @@ func (s *Service) Run() core.Result {
 		application.NewService(windowSvc),
 	}
 
+	// Auto-register the local machine in the Fleet substrate. The UI
+	// renders the "You" pill off is_self=true, but nobody calls
+	// UpsertMachine in production today — the row is silently absent
+	// from Fleet → Machines. One-shot insert here populates the
+	// hostname / arch / loopback endpoint / inference capability so
+	// the user sees their own machine alongside any paired remotes.
+	// Idempotent: ON CONFLICT (id) DO UPDATE re-syncs hostname /
+	// updated_at on every boot without duplicating rows.
+	if s.opts.Fleet != nil {
+		if r := s.opts.Fleet.UpsertMachine(selfMachineRow()); !r.OK {
+			core.Warn("desktop.fleet.self_upsert", "error", r.Error())
+		}
+	}
+
 	s.app = application.New(application.Options{
 		Name:        s.opts.Name,
 		Description: s.opts.Description,
@@ -1267,4 +1281,39 @@ func emitTrayPluginClicked(code string) {
 			"resolved_via": "tray_menu",
 		},
 	})
+}
+
+// selfMachineRow builds the fleet.Machine entry that represents this
+// instance. Called once per boot from Run() so the user sees their own
+// machine listed in Fleet → Machines alongside any paired remotes.
+//
+// ID is derived from hostname so reruns update the same row rather
+// than creating duplicates; if the hostname changes (rename), the
+// previous row stays as a stale entry until the user removes it.
+//
+// Capabilities defaults to inference — lthn-mlx is the engine intent
+// even when not currently running; the row's status reflects the
+// engine reachability, capabilities reflect what the machine CAN do.
+//
+// Host/Port are the loopback admin endpoint convention (127.0.0.1
+// :11434) matching pkg/lemma defaults. Future remote-tunnelled
+// installs replace these when pairing.
+func selfMachineRow() fleet.Machine {
+	host := "127.0.0.1"
+	name := host
+	if r := core.Hostname(); r.OK {
+		if h, ok := r.Value.(string); ok && core.Trim(h) != "" {
+			name = h
+		}
+	}
+	return fleet.Machine{
+		ID:           "self:" + name,
+		Name:         name,
+		Arch:         runtime.GOOS + "/" + runtime.GOARCH,
+		Host:         host,
+		Port:         11434,
+		Status:       "online",
+		IsSelf:       true,
+		Capabilities: []string{fleet.CapabilityInference},
+	}
 }
