@@ -273,6 +273,48 @@ class LthnDistillationWindow extends LitElement {
     }
   }
 
+  /** Test the named adapter overlaid on the base model — calls
+   *  Lemma.Reload with adapter_path set, then opens the Chat surface
+   *  so the operator can immediately probe the adapter's behaviour
+   *  against the base it forked from. The A/B happens by toggling
+   *  the adapter on/off via successive reloads. */
+  private async _doTestAdapter(adapterPath: string): Promise<void> {
+    if (this.busy || !this.modelPath) {
+      this.err = "pick a base model first to overlay the adapter on";
+      return;
+    }
+    this.err = "";
+    this.busy = true;
+    try {
+      const Lemma = await import("@desktop/lemma/wailsservice");
+      const { ReloadRequest } = await import("@desktop/lemma/models");
+      const machine = await Lemma.Machine();
+      const machineHash = (machine as unknown as { hash?: string }).hash || "";
+      if (!machineHash) {
+        this.err = "machine hash unavailable — engine offline?";
+        return;
+      }
+      await Lemma.Reload(new ReloadRequest({
+        confirm_machine: machineHash,
+        model_path:      this.modelPath,
+        adapter_path:    adapterPath,
+      }));
+      // Open the Chat pane so the operator can drive the test
+      // immediately — same Lethean-6 app-shell pane-set pattern the
+      // tray "Open Chat" button uses.
+      try {
+        const WindowService = await import("@desktop/desktop/windowservice");
+        await WindowService.Open("app");
+        const { Events } = await import("@wailsio/runtime");
+        Events.Emit("lthn:app:setpane", "chat");
+      } catch { /* non-Wails env — skip the navigation, the reload still happened */ }
+    } catch (e) {
+      this.err = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
   /** Small label + numeric input pair for the Recipe rail — matches
    *  the lthn-rail-row visual density. `float` flag accepts decimals
    *  (LR), otherwise integer-only. */
@@ -462,17 +504,23 @@ class LthnDistillationWindow extends LitElement {
             ${this.adapters.length === 0
               ? html`<div style="font-size:11px; color:var(--fg-3); font-style:italic; margin-top:6px;">No adapters yet — run a Fine-tune to create one.</div>`
               : html`
-                <div style="margin-top:6px; display:flex; flex-direction:column; gap:6px; max-height:180px; overflow:auto;">
+                <div style="margin-top:6px; display:flex; flex-direction:column; gap:6px; max-height:240px; overflow:auto;">
                   ${[...this.adapters].sort((a, b) => b.modified_unix - a.modified_unix).slice(0, 6).map(a => html`
-                    <div style="padding:6px 8px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05); border-radius:5px;">
+                    <div style="padding:6px 8px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05); border-radius:5px; display:flex; flex-direction:column; gap:4px;">
                       <div style="font-family:var(--font-mono); font-size:11px; color:var(--fg-0); word-break:break-all;">${a.name}</div>
-                      <div style="font-size:10px; color:var(--fg-3); margin-top:2px;">${(a.size_bytes / (1024 * 1024)).toFixed(1)} MB</div>
+                      <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                        <span style="font-size:10px; color:var(--fg-3);">${(a.size_bytes / (1024 * 1024)).toFixed(1)} MB</span>
+                        <lthn-btn tone="ghost" size="sm" ?disabled=${this.busy || !this.modelPath}
+                                  @click=${() => { void this._doTestAdapter(a.path); }}
+                                  style="--wails-draggable:no-drag;">
+                          <i class="fa-regular fa-comment" style="font-size:9px;"></i> Test
+                        </lthn-btn>
+                      </div>
                     </div>
                   `)}
                 </div>`}
           </div>
           <div style="display:flex; flex-direction:column; gap:6px;">
-            <lthn-btn tone="primary" size="md" disabled title="Coming after Mod\\Chat picker integration"><i class="fa-regular fa-comment"></i> ${this.t.btnTestChat}</lthn-btn>
             <lthn-btn tone="ghost" size="md" disabled title="Merge adapter → base — comes once go-mlx exposes the merge verb over admin"><i class="fa-solid fa-code-merge" style="font-size:11px;"></i> ${this.t.btnMerge}</lthn-btn>
             <lthn-btn tone="ghost" size="md" disabled title="Push to HuggingFace — comes once token auth lands"><i class="fa-solid fa-cloud-arrow-up" style="font-size:11px;"></i> ${this.t.btnPushHf}</lthn-btn>
           </div>

@@ -160,10 +160,16 @@ type Profile struct {
 // ReloadRequest is the body for POST /v1/admin/serve/reload. ConfirmMachine
 // is the machine hash from Status/Machine; reload rejects if it doesn't
 // match the running instance (operator-foot-gun gate per #77).
+//
+// AdapterPath overlays a LoRA adapter on the base model — Fine-tune
+// A/B flow uses this to test a freshly-trained SFT adapter against
+// the base it forked from (Lemma.SFTStart writes the adapter dir;
+// the caller passes the resulting path back here).
 type ReloadRequest struct {
 	ConfirmMachine string `json:"confirm_machine"`
 	ModelPath      string `json:"model_path,omitempty"`
 	ProfilePath    string `json:"profile_path,omitempty"`
+	AdapterPath    string `json:"adapter_path,omitempty"`
 	ContextLength  int    `json:"context_length,omitempty"`
 }
 
