@@ -27,6 +27,8 @@ class LthnTelemetryWindow extends LitElement {
     heapHistory: { state: true },
     goHistory: { state: true },
     model: { state: true },
+    modelSource: { state: true },
+    modelUptime: { state: true },
     err: { state: true },
     t: { state: true },
   };
@@ -39,6 +41,14 @@ class LthnTelemetryWindow extends LitElement {
   declare heapHistory: number[];
   declare goHistory: number[];
   declare model: string;
+  /** "lemma" when the model + uptime come from Lemma.Status (the
+   *  authoritative source — what lthn-mlx is actually serving),
+   *  "runner" when we fall back to runner.WModels[0] because Lemma
+   *  isn't reachable. Drives the secondary line under the model row
+   *  so the user knows whether the read is ground truth or runner
+   *  discovery. */
+  declare modelSource: "lemma" | "runner" | "none";
+  declare modelUptime: number; // seconds; 0 when source !== "lemma"
   declare err: string;
   declare t: {
     bigHeapL: string; bigHeapS: string;
@@ -62,6 +72,8 @@ class LthnTelemetryWindow extends LitElement {
     this.heapHistory = [];
     this.goHistory = [];
     this.model = "—";
+    this.modelSource = "none";
+    this.modelUptime = 0;
     this.err = "";
     this.t = {
       bigHeapL: "heap · MB", bigHeapS: "Go runtime · live",
@@ -124,14 +136,14 @@ class LthnTelemetryWindow extends LitElement {
    *  × 2s ≈ a 48-second rolling window — same cadence as the tray. */
   async _poll() {
     try {
-      const [tel, runner] = await Promise.all([
+      const [tel, runner, lemma] = await Promise.all([
         import("@desktop/telemetry/service"),
         import("@desktop/runner/service"),
+        import("@desktop/lemma/wailsservice"),
       ]);
       const { unwrap, demand } = await import("../result");
       type Reading = { heap_alloc_mb?: number; uptime_seconds?: number; num_goroutines?: number; num_cgo_calls?: number };
       const reading = await demand<Reading>(tel.CurrentSample());
-      const models = await unwrap<string[]>(runner.WModels(), []);
       this.sample = {
         heap_alloc_mb: reading.heap_alloc_mb || 0,
         uptime_seconds: reading.uptime_seconds || 0,
@@ -143,7 +155,31 @@ class LthnTelemetryWindow extends LitElement {
       const cap = Math.max(4, parseInt(localStorage.getItem("lthn.telemetry.samples") || "24", 10) || 24);
       this.heapHistory = heapNext.length > cap ? heapNext.slice(-cap) : heapNext;
       this.goHistory = goNext.length > cap ? goNext.slice(-cap) : goNext;
-      this.model = models?.[0] || "no model loaded";
+
+      // Lemma.Status is the authoritative source — when lthn-mlx is
+      // up the model_path basename + loaded_at are ground truth. Fall
+      // back to runner.WModels[0] (runner discovery view) when the
+      // admin endpoint isn't reachable. Lemma.Status throws when the
+      // admin token / endpoint isn't there yet, so wrap in its own
+      // try/catch — telemetry sample must not blank on Lemma down.
+      let lemmaModelPath = "";
+      let lemmaLoadedAt = 0;
+      try {
+        const status = await lemma.Status();
+        lemmaModelPath = status.model_path || "";
+        lemmaLoadedAt = status.loaded_at_unix || 0;
+      } catch { /* lthn-mlx down or unbound — fall through to runner */ }
+
+      if (lemmaModelPath) {
+        this.model = basename(lemmaModelPath);
+        this.modelUptime = lemmaLoadedAt > 0 ? Math.max(0, Date.now() / 1000 - lemmaLoadedAt) : 0;
+        this.modelSource = "lemma";
+      } else {
+        const models = await unwrap<string[]>(runner.WModels(), []);
+        this.model = models?.[0] || "no model loaded";
+        this.modelUptime = 0;
+        this.modelSource = models?.[0] ? "runner" : "none";
+      }
       this.err = "";
     } catch (e: unknown) {
       this.err = e instanceof Error ? e.message : String(e);
@@ -181,7 +217,16 @@ class LthnTelemetryWindow extends LitElement {
           ${big(this.t.bigUptimeL, this._fmtUptime(this.sample.uptime_seconds), this.t.bigUptimeS, "#a78bfa", goSpark, goMax)}
         </div>
         <div style="display:flex; gap:28px; align-items:center; font-family:var(--font-mono); font-size:12px; color:var(--fg-2); padding-top:8px; border-top:1px solid rgba(255,255,255,0.05); width:100%; justify-content:center;">
-          <div><span style="color:var(--fg-3);">${this.t.rowModel} </span><span style="color:var(--fg-0);">${this.model}</span></div>
+          <div>
+            <span style="color:var(--fg-3);">${this.t.rowModel} </span>
+            <span style="color:var(--fg-0);">${this.model}</span>
+            ${this.modelSource === "lemma" && this.modelUptime > 0 ? html`
+              <span style="color:var(--fg-3); margin-left:6px; font-size:10.5px;">· ${this._fmtUptime(this.modelUptime)}</span>
+            ` : nothing}
+            ${this.modelSource === "runner" ? html`
+              <span style="color:var(--fg-3); margin-left:6px; font-size:10.5px;">· via runner</span>
+            ` : nothing}
+          </div>
           <div style="width:1px; height:14px; background:rgba(255,255,255,0.06);"></div>
           <div><span style="color:var(--fg-3);">${this.t.rowGoroutines} </span><span style="color:var(--fg-0);">${this.sample.num_goroutines}</span></div>
           <div style="width:1px; height:14px; background:rgba(255,255,255,0.06);"></div>
@@ -208,3 +253,14 @@ class LthnTelemetryWindow extends LitElement {
   }
 }
 customElements.define("lthn-telemetry-window", LthnTelemetryWindow);
+
+/** Strip the directory + return the trailing path segment. Used to
+ *  turn "/Users/.../models/lemer-lite-4bit" into "lemer-lite-4bit"
+ *  so the model row stays glanceable. Tolerant of trailing slashes
+ *  + empty input. */
+function basename(p: string): string {
+  if (!p) return "";
+  const trimmed = p.replace(/\/+$/, "");
+  const slash = trimmed.lastIndexOf("/");
+  return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
+}
