@@ -274,6 +274,14 @@ switch (surface) {
         lemmaConnected: boolean;
         modelUptime:    number;   // seconds since Lemma loaded_at_unix
         modelRuntime:   string;   // e.g. "metal", "cuda", "rocm"
+        // SFT job awareness — when Lemma.SFTStatus("") returns a job
+        // in state "running", surface its epoch/loss in the runner
+        // panel. State stays "running" only for the active job; the
+        // last-completed slot returns terminal states (done/failed/
+        // stopped) which we collapse back to "no SFT" for the tray.
+        sftRunning:  boolean;
+        sftEpoch:    number;
+        sftLastLoss: number;
       }
       const state: TrayState = {
         model: "…",
@@ -288,6 +296,9 @@ switch (surface) {
         lemmaConnected: false,
         modelUptime: 0,
         modelRuntime: "",
+        sftRunning: false,
+        sftEpoch: 0,
+        sftLastLoss: 0,
       };
 
       const setTab = (t: TrayTab) => () => { state.tab = t; draw(); };
@@ -465,6 +476,9 @@ switch (surface) {
         ${state.lemmaConnected && state.modelRuntime
           ? kv("runtime", state.modelRuntime)
           : nothing}
+        ${state.sftRunning
+          ? kv("training", `epoch ${state.sftEpoch} · loss ${state.sftLastLoss.toFixed(3)}`)
+          : nothing}
         ${kv(t.kvThroughput, t.valDash)}
         ${kv(t.kvCache, t.valDash)}
       `;
@@ -598,13 +612,22 @@ switch (surface) {
           // not be running. Treat any failure as "no model loaded" and
           // fall back to RunnerService.WModels for the legacy display.
           type LemmaStatus = { model_path?: string; runtime?: string; loaded_at_unix?: number };
-          const [reading, models, sessionList, lemmaStatus] = await Promise.all([
+          type LemmaSFTJob = { state?: string; epoch?: number; last_loss?: number };
+          const [reading, models, sessionList, lemmaStatus, sftJob] = await Promise.all([
             demand<Reading>(TelemetryService.CurrentSample()),
             unwrap<string[]>(RunnerService.WModels(), []),
             unwrap<unknown[]>(sessions.List(), []),
             Lemma.Status().then(
               (s: unknown) => s as LemmaStatus,
               () => null as LemmaStatus | null,
+            ),
+            // SFTStatus("") returns the active job (or last completed)
+            // — 404 when no job has ever run. Both are valid "no SFT
+            // running right now" signals; only state === "running"
+            // surfaces in the tray.
+            Lemma.SFTStatus("").then(
+              (j: unknown) => j as LemmaSFTJob,
+              () => null as LemmaSFTJob | null,
             ),
           ]);
           state.connected = true;
@@ -628,6 +651,19 @@ switch (surface) {
             state.modelUptime = 0;
             state.modelRuntime = "";
             state.model = models?.[0] || t.valNoModel;
+          }
+          // SFT awareness — only "running" is interesting in the tray;
+          // terminal states (done/failed/stopped) collapse to "no SFT"
+          // so the panel doesn't carry stale training noise after the
+          // job ends.
+          if (sftJob && sftJob.state === "running") {
+            state.sftRunning = true;
+            state.sftEpoch = sftJob.epoch || 0;
+            state.sftLastLoss = sftJob.last_loss || 0;
+          } else {
+            state.sftRunning = false;
+            state.sftEpoch = 0;
+            state.sftLastLoss = 0;
           }
           // Activity-panel "Sessions today" count — sessions created
           // since midnight local time. SessionInfo.created_at is a
