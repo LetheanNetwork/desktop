@@ -1,18 +1,18 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 // E5.1 · lemma — <lthn-lemma-window>
 //
-// Minimal status panel for the local lthn-mlx engine. Mounted at
-// ?surface=lemma, shipped in both lthn-desktop and lthn-mlx (the
-// menubar). Talks only to the OpenAI-compatible HTTP endpoints
-// (/v1/health, /v1/models) that lthn-mlx serve exposes — NO Wails
-// service bindings, NO event-bus subscriptions, NO downloader.
-// Means lthn-mlx can embed the shared frontend dist and surface this
-// window even though it doesn't host lthn-desktop's full service tree.
+// Status + admin panel for the local lthn-mlx engine. Mounted at
+// ?surface=lemma. The status read uses the unauthenticated /v1/health
+// + /v1/models endpoints (works even when the desktop binary has no
+// admin token); admin verbs (reload, download, profiles, status detail)
+// route through the Wails `Lemma` binding so the Bearer token never
+// leaves Go.
 //
 // Light-DOM Lit element. Composes renderChrome() from ../chrome.js.
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
+import * as Lemma from "../../../bindings/dappco.re/lthn/desktop/pkg/lemma/wailsservice.js";
 
 interface HealthPayload {
   status?: string;
@@ -31,16 +31,36 @@ interface ModelsPayload {
   data?: ModelEntry[];
 }
 
+interface DownloadProgress {
+  jobId: string;
+  status: string;
+  progress: number;
+  bytes: number;
+  error?: string;
+}
+
 class LthnLemmaWindow extends LitElement {
   static readonly properties = {
-    w:        { type: Number },
-    h:        { type: Number },
-    embedded: { type: Boolean, reflect: true },
-    endpoint: { type: String },
-    chrome:   { state: true },
-    health:   { state: true },
-    models:   { state: true },
-    err:      { state: true },
+    w:           { type: Number },
+    h:           { type: Number },
+    embedded:    { type: Boolean, reflect: true },
+    endpoint:    { type: String },
+    chrome:      { state: true },
+    health:      { state: true },
+    models:      { state: true },
+    err:         { state: true },
+    // admin-side state
+    adminStatus: { state: true },
+    machineHash: { state: true },
+    profiles:    { state: true },
+    reloadModel: { state: true },
+    reloadProfile: { state: true },
+    reloadBusy:  { state: true },
+    reloadErr:   { state: true },
+    downloadRepo: { state: true },
+    downloadJob: { state: true },
+    downloadErr: { state: true },
+    showAdmin:   { state: true },
   };
   declare w: number;
   declare h: number;
@@ -50,16 +70,39 @@ class LthnLemmaWindow extends LitElement {
   declare health: HealthPayload | null;
   declare models: ModelEntry[];
   declare err: string;
+  declare adminStatus: any;
+  declare machineHash: string;
+  declare profiles: any[];
+  declare reloadModel: string;
+  declare reloadProfile: string;
+  declare reloadBusy: boolean;
+  declare reloadErr: string;
+  declare downloadRepo: string;
+  declare downloadJob: DownloadProgress | null;
+  declare downloadErr: string;
+  declare showAdmin: boolean;
   private pollHandle: ReturnType<typeof setInterval> | null = null;
+  private downloadPollHandle: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     super();
-    this.w = 720; this.h = 480; this.embedded = false;
+    this.w = 720; this.h = 560; this.embedded = false;
     this.endpoint = "http://localhost:11434";
     this.chrome = { title: "Lemma", subtitle: "Local AI engine · OpenAI / Anthropic / Ollama compatible" };
     this.health = null;
     this.models = [];
     this.err = "";
+    this.adminStatus = null;
+    this.machineHash = "";
+    this.profiles = [];
+    this.reloadModel = "";
+    this.reloadProfile = "";
+    this.reloadBusy = false;
+    this.reloadErr = "";
+    this.downloadRepo = "";
+    this.downloadJob = null;
+    this.downloadErr = "";
+    this.showAdmin = false;
   }
 
   createRenderRoot() { return this; }
@@ -75,6 +118,10 @@ class LthnLemmaWindow extends LitElement {
     if (this.pollHandle !== null) {
       clearInterval(this.pollHandle);
       this.pollHandle = null;
+    }
+    if (this.downloadPollHandle !== null) {
+      clearInterval(this.downloadPollHandle);
+      this.downloadPollHandle = null;
     }
   }
 
@@ -106,6 +153,110 @@ class LthnLemmaWindow extends LitElement {
     }
   }
 
+  private async loadAdmin(): Promise<void> {
+    this.reloadErr = "";
+    try {
+      const [statusRes, machineRes, profilesRes] = await Promise.allSettled([
+        Lemma.Status(),
+        Lemma.Machine(),
+        Lemma.Profiles(),
+      ]);
+      if (statusRes.status === "fulfilled") {
+        this.adminStatus = statusRes.value;
+        if (!this.reloadModel) this.reloadModel = statusRes.value?.model_path ?? "";
+      } else {
+        this.reloadErr = "status: " + String(statusRes.reason);
+      }
+      if (machineRes.status === "fulfilled") {
+        this.machineHash = machineRes.value?.hash ?? "";
+      }
+      if (profilesRes.status === "fulfilled") {
+        this.profiles = profilesRes.value?.profiles ?? [];
+      }
+    } catch (e) {
+      this.reloadErr = String(e);
+    }
+  }
+
+  private async toggleAdmin(): Promise<void> {
+    this.showAdmin = !this.showAdmin;
+    if (this.showAdmin) await this.loadAdmin();
+  }
+
+  private async doReload(e: Event): Promise<void> {
+    e.preventDefault();
+    if (this.reloadBusy) return;
+    if (!this.machineHash) {
+      this.reloadErr = "machine hash not loaded — open admin panel first";
+      return;
+    }
+    if (!this.reloadModel && !this.reloadProfile) {
+      this.reloadErr = "pick a model path or profile";
+      return;
+    }
+    this.reloadBusy = true;
+    this.reloadErr = "";
+    try {
+      await Lemma.Reload({
+        ConfirmMachine: this.machineHash,
+        ModelPath: this.reloadModel,
+        ProfilePath: this.reloadProfile,
+        ContextLength: 0,
+      } as any);
+      // Refresh status — the hot-swap mutates serve state.
+      await this.loadAdmin();
+      await this.poll();
+    } catch (err) {
+      this.reloadErr = String(err);
+    } finally {
+      this.reloadBusy = false;
+    }
+  }
+
+  private async doDownload(e: Event): Promise<void> {
+    e.preventDefault();
+    if (!this.downloadRepo.trim()) {
+      this.downloadErr = "repo id required (e.g. lthn/lemer-lite)";
+      return;
+    }
+    this.downloadErr = "";
+    try {
+      const jobId = await Lemma.Download({ RepoID: this.downloadRepo.trim(), Revision: "" } as any);
+      this.downloadJob = { jobId, status: "pending", progress: 0, bytes: 0 };
+      if (this.downloadPollHandle !== null) {
+        clearInterval(this.downloadPollHandle);
+      }
+      this.downloadPollHandle = setInterval(() => { void this.pollDownload(jobId); }, 2000);
+    } catch (err) {
+      this.downloadErr = String(err);
+    }
+  }
+
+  private async pollDownload(jobId: string): Promise<void> {
+    try {
+      const js = await Lemma.DownloadJob(jobId);
+      this.downloadJob = {
+        jobId: js.job_id ?? jobId,
+        status: js.status ?? "?",
+        progress: js.progress ?? 0,
+        bytes: js.bytes ?? 0,
+        error: js.error,
+      };
+      if (js.status === "done" || js.status === "failed") {
+        if (this.downloadPollHandle !== null) {
+          clearInterval(this.downloadPollHandle);
+          this.downloadPollHandle = null;
+        }
+      }
+    } catch (err) {
+      this.downloadErr = String(err);
+      if (this.downloadPollHandle !== null) {
+        clearInterval(this.downloadPollHandle);
+        this.downloadPollHandle = null;
+      }
+    }
+  }
+
   private renderStatus() {
     if (this.health && this.health.status === "ok") {
       return html`<lthn-state-pill variant="ok">serving</lthn-state-pill>`;
@@ -114,6 +265,85 @@ class LthnLemmaWindow extends LitElement {
       return html`<lthn-state-pill variant="warn">unreachable</lthn-state-pill>`;
     }
     return html`<lthn-state-pill variant="muted">idle</lthn-state-pill>`;
+  }
+
+  private renderAdmin() {
+    if (!this.showAdmin) return nothing;
+    return html`
+      <div style="display:flex; flex-direction:column; gap:14px; padding:12px; border-top:1px solid var(--border, #2a2a2a); margin-top:8px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <lthn-label>Admin</lthn-label>
+          ${this.machineHash
+            ? html`<span style="font-family:ui-monospace, monospace; font-size:11px; opacity:0.6;">machine ${this.machineHash.substring(0, 16)}…</span>`
+            : html`<span style="font-size:11px; opacity:0.5; color:var(--error, #f82da7);">no admin token — start lthn-mlx first</span>`}
+        </div>
+
+        ${this.adminStatus
+          ? html`
+            <div style="display:flex; flex-direction:column; gap:4px; font-size:12px;">
+              <lthn-rail-row k="Model path" v="${this.adminStatus.model_path || "—"}"></lthn-rail-row>
+              ${this.adminStatus.profile_path
+                ? html`<lthn-rail-row k="Profile" v="${this.adminStatus.profile_path}"></lthn-rail-row>`
+                : nothing}
+              <lthn-rail-row k="Context" v="${this.adminStatus.config?.context_length ?? 0}"></lthn-rail-row>
+              <lthn-rail-row k="Cache" v="${this.adminStatus.config?.prompt_cache ? "on" : "off"} (${this.adminStatus.config?.cache_policy || "—"})"></lthn-rail-row>
+            </div>`
+          : nothing}
+
+        <form @submit=${this.doReload}>
+          <lthn-label>Hot-swap model</lthn-label>
+          <input type="text" .value=${this.reloadModel}
+                 @input=${(e: Event) => { this.reloadModel = (e.target as HTMLInputElement).value; }}
+                 placeholder="/path/to/model-dir or model id"
+                 style="width:100%; box-sizing:border-box; padding:6px 8px; margin-top:4px; font-family:ui-monospace, monospace; font-size:12px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px;">
+
+          ${this.profiles.length > 0
+            ? html`
+              <label style="display:block; margin-top:8px; font-size:11px; opacity:0.7;">Profile (optional)</label>
+              <select .value=${this.reloadProfile}
+                      @change=${(e: Event) => { this.reloadProfile = (e.target as HTMLSelectElement).value; }}
+                      style="width:100%; margin-top:4px; padding:6px 8px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px;">
+                <option value="">(use serve default)</option>
+                ${this.profiles.map((p: any) => html`<option value=${p.path || p.name}>${p.name} — ${p.backend || "?"}</option>`)}
+              </select>`
+            : nothing}
+
+          <button type="submit" ?disabled=${this.reloadBusy || !this.machineHash}
+                  style="margin-top:10px; padding:6px 14px; font-size:13px; cursor:${this.reloadBusy ? "wait" : "pointer"}; background:var(--accent, #4c8bf5); color:white; border:none; border-radius:4px;">
+            ${this.reloadBusy ? "Reloading…" : "Reload"}
+          </button>
+          ${this.reloadErr
+            ? html`<div style="margin-top:6px; font-size:11px; color:var(--error, #f82da7);">${this.reloadErr}</div>`
+            : nothing}
+        </form>
+
+        <form @submit=${this.doDownload}>
+          <lthn-label>Download model from HuggingFace</lthn-label>
+          <div style="display:flex; gap:6px; margin-top:4px;">
+            <input type="text" .value=${this.downloadRepo}
+                   @input=${(e: Event) => { this.downloadRepo = (e.target as HTMLInputElement).value; }}
+                   placeholder="org/repo (e.g. lthn/lemer-lite)"
+                   style="flex:1; padding:6px 8px; font-family:ui-monospace, monospace; font-size:12px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px;">
+            <button type="submit"
+                    style="padding:6px 14px; font-size:13px; cursor:pointer; background:var(--accent, #4c8bf5); color:white; border:none; border-radius:4px;">
+              Download
+            </button>
+          </div>
+          ${this.downloadJob
+            ? html`
+              <div style="margin-top:8px; font-size:11px;">
+                <div>job ${this.downloadJob.jobId} — <strong>${this.downloadJob.status}</strong> ${this.downloadJob.progress}%</div>
+                ${this.downloadJob.error
+                  ? html`<div style="color:var(--error, #f82da7);">${this.downloadJob.error}</div>`
+                  : nothing}
+              </div>`
+            : nothing}
+          ${this.downloadErr
+            ? html`<div style="margin-top:6px; font-size:11px; color:var(--error, #f82da7);">${this.downloadErr}</div>`
+            : nothing}
+        </form>
+      </div>
+    `;
   }
 
   private renderBody() {
@@ -129,6 +359,16 @@ class LthnLemmaWindow extends LitElement {
           : html`<ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:4px;">
               ${this.models.map((m) => html`<li style="font-family:ui-monospace, monospace; font-size:12px; opacity:0.85;">${m.id ?? "(unnamed)"}</li>`)}
             </ul>`}
+
+        <div style="margin-top:4px;">
+          <button @click=${this.toggleAdmin}
+                  style="padding:6px 12px; font-size:12px; cursor:pointer; background:transparent; color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px;">
+            ${this.showAdmin ? "Hide admin" : "Admin…"}
+          </button>
+        </div>
+
+        ${this.renderAdmin()}
+
         ${this.err
           ? html`<div style="opacity:0.6; font-size:11px; color:var(--error, #f82da7); padding-top:8px;">${this.err}</div>`
           : nothing}

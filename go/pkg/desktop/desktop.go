@@ -56,6 +56,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/git"
 	"dappco.re/lthn/desktop/pkg/integrations"
+	"dappco.re/lthn/desktop/pkg/lemma"
 	"dappco.re/lthn/desktop/pkg/lint"
 	"dappco.re/lthn/desktop/pkg/marketplace"
 	"dappco.re/lthn/desktop/pkg/models"
@@ -497,6 +498,12 @@ func (s *Service) Run() core.Result {
 		application.NewService(pluginSvc),
 		application.NewService(sandboxSvc),
 		application.NewService(contentshield.NewWailsService()),
+		// lemma → admin facade on lthn-mlx /v1/admin/* (status / reload /
+		// download / profiles). Exposes the Lemma surface to the WebView
+		// without leaking the Bearer token to JS — the service runs in-Go
+		// with read access to ~/Lethean/data/admin.token; JS only sees
+		// the typed verb signatures Wails generates from this struct.
+		application.NewService(lemma.NewWailsService(lemma.AdminConfig{})),
 		application.NewService(clbpl.NewWailsService(clbpl.Options{})),
 		application.NewService(r1.NewWailsService()),
 		application.NewService(r1analytics.NewWailsService()),
