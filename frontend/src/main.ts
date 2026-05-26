@@ -282,6 +282,11 @@ switch (surface) {
         sftRunning:  boolean;
         sftEpoch:    number;
         sftLastLoss: number;
+        // Tokens emitted across all sessions since midnight local
+        // time. char/4 estimate per the same convention as the
+        // History tab — real per-turn counts will replace once the
+        // runner threads tokens_out through sessions.Append.
+        tokensToday: number;
       }
       const state: TrayState = {
         model: "…",
@@ -299,6 +304,7 @@ switch (surface) {
         sftRunning: false,
         sftEpoch: 0,
         sftLastLoss: 0,
+        tokensToday: 0,
       };
 
       const setTab = (t: TrayTab) => () => { state.tab = t; draw(); };
@@ -307,6 +313,16 @@ switch (surface) {
         if (s < 60) return `${Math.trunc(s)}s`;
         if (s < 3600) return `${Math.trunc(s / 60)}m ${Math.trunc(s % 60)}s`;
         return `${Math.trunc(s / 3600)}h ${Math.trunc((s % 3600) / 60)}m`;
+      };
+
+      /** Compact token count for the tray Activity row — under 1k as
+       *  the raw integer, 1k-1M as "1.2k" / "12.4k", past 1M as
+       *  "1.4M". Mirrors the convention the History footer uses so a
+       *  user glancing at both surfaces sees consistent shapes. */
+      const fmtTokenCount = (n: number) => {
+        if (n < 1000) return String(n);
+        if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+        return `${(n / 1_000_000).toFixed(1)}M`;
       };
 
       /** "5m ago" / "2h ago" / "3d ago" from a unix-second timestamp.
@@ -485,7 +501,7 @@ switch (surface) {
 
       const renderActivityPanel = () => html`
         ${kv(t.kvSessionsToday, state.sessionsToday > 0 ? state.sessionsToday : t.valDash)}
-        ${kv(t.kvTokens, t.valDash)}
+        ${kv(t.kvTokens, state.tokensToday > 0 ? fmtTokenCount(state.tokensToday) : t.valDash)}
         ${kv(t.kvLastInteract, state.lastInteract > 0 ? fmtRel(state.lastInteract) : t.valDash)}
         ${kv(t.kvRecentErrors, state.err ? "1" : "0")}
       `;
@@ -613,7 +629,8 @@ switch (surface) {
           // fall back to RunnerService.WModels for the legacy display.
           type LemmaStatus = { model_path?: string; runtime?: string; loaded_at_unix?: number };
           type LemmaSFTJob = { state?: string; epoch?: number; last_loss?: number };
-          const [reading, models, sessionList, lemmaStatus, sftJob] = await Promise.all([
+          type Gen = { updated_at?: number; tokens?: number };
+          const [reading, models, sessionList, lemmaStatus, sftJob, gens] = await Promise.all([
             demand<Reading>(TelemetryService.CurrentSample()),
             unwrap<string[]>(RunnerService.WModels(), []),
             unwrap<unknown[]>(sessions.List(), []),
@@ -629,6 +646,12 @@ switch (surface) {
               (j: unknown) => j as LemmaSFTJob,
               () => null as LemmaSFTJob | null,
             ),
+            // RecentGenerations flattens assistant turns across all
+            // sessions newest-first with char/4 token estimates per
+            // row. 200 caps the walk to the recent slice while still
+            // covering a full day for typical use; tokensToday filter
+            // drops anything older than midnight local time.
+            unwrap<Gen[]>(sessions.RecentGenerations(200), []),
           ]);
           state.connected = true;
           state.err = null;
@@ -675,6 +698,16 @@ switch (surface) {
             (s: unknown) => (s as { created_at?: number }).created_at !== undefined
               && ((s as { created_at: number }).created_at >= startSec),
           ).length;
+          // Tokens-today aggregate — sum char/4 estimates across
+          // generations whose session UpdatedAt is at or after
+          // midnight. RecentGenerations is newest-first so the loop
+          // can early-exit at the first row older than the cutoff.
+          let tokSum = 0;
+          for (const g of gens || []) {
+            if ((g.updated_at || 0) < startSec) break;
+            tokSum += g.tokens || 0;
+          }
+          state.tokensToday = tokSum;
           // Activity-panel "Last interact" — max updated_at across all
           // sessions, regardless of bucket. Drawing falls back to the
           // design "—" when no sessions exist.
