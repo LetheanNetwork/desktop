@@ -26,6 +26,7 @@ interface RowVM {
   ts: string;       // pretty timestamp
   bencher: string;  // which Bencher produced this row (substrate-stamped)
   model: string;
+  ctx: number;      // context length the run was sized to
   pp: number;       // pp_tok_sec
   tg: number;       // tg_tok_sec
   w: number;        // peak_watts (0 = not measurable, e.g. remote bencher)
@@ -60,11 +61,11 @@ interface RunDTO {
  *  "fixture" so an operator can tell at a glance these are not real
  *  measurements. */
 const FIXTURE_RUNS: RowVM[] = [
-  { ts: "2026-05-11 14:32", bencher: "fixture", model: "gemma-4-e2b",  pp: 4820, tg: 47.2, w: 8.4,  mem: "2.4 GB", here: true },
-  { ts: "2026-05-11 09:14", bencher: "fixture", model: "gemma-4-e2b",  pp: 4780, tg: 46.8, w: 8.5,  mem: "2.4 GB" },
-  { ts: "2026-05-10 18:02", bencher: "fixture", model: "llama-3.2-3b", pp: 3140, tg: 32.6, w: 11.8, mem: "3.6 GB" },
-  { ts: "2026-05-09 21:55", bencher: "fixture", model: "phi-3.5-mini", pp: 3960, tg: 38.4, w: 9.6,  mem: "2.9 GB" },
-  { ts: "2026-05-08 11:18", bencher: "fixture", model: "gemma-4-e2b",  pp: 4640, tg: 45.1, w: 8.6,  mem: "2.4 GB" },
+  { ts: "2026-05-11 14:32", bencher: "fixture", model: "gemma-4-e2b",  ctx: 2048, pp: 4820, tg: 47.2, w: 8.4,  mem: "2.4 GB", here: true },
+  { ts: "2026-05-11 09:14", bencher: "fixture", model: "gemma-4-e2b",  ctx: 2048, pp: 4780, tg: 46.8, w: 8.5,  mem: "2.4 GB" },
+  { ts: "2026-05-10 18:02", bencher: "fixture", model: "llama-3.2-3b", ctx: 2048, pp: 3140, tg: 32.6, w: 11.8, mem: "3.6 GB" },
+  { ts: "2026-05-09 21:55", bencher: "fixture", model: "phi-3.5-mini", ctx: 2048, pp: 3960, tg: 38.4, w: 9.6,  mem: "2.9 GB" },
+  { ts: "2026-05-08 11:18", bencher: "fixture", model: "gemma-4-e2b",  ctx: 2048, pp: 4640, tg: 45.1, w: 8.6,  mem: "2.4 GB" },
 ];
 
 /** Fixture curve (tg-vs-ctx) — kept as a separate fallback because
@@ -83,6 +84,7 @@ function dtoToRow(d: RunDTO, isLatest: boolean): RowVM {
     ts: formatTimestamp(d.timestamp),
     bencher: d.bencher || "—",
     model: d.model || "—",
+    ctx: d.ctx ?? 0,
     pp: d.pp_tok_sec ?? 0,
     tg: d.tg_tok_sec ?? 0,
     w: d.peak_watts ?? 0,
@@ -378,10 +380,35 @@ class LthnBenchmarkWindow extends LitElement {
 
   render() {
     const runs = this.runs;
-    const curve = FIXTURE_CURVE;
     const cw = 880, ch = 220, pad = { l: 48, r: 18, t: 16, b: 28 };
-    const xs = (c: number) => pad.l + (Math.log2(c / 128) / Math.log2(8192 / 128)) * (cw - pad.l - pad.r);
-    const ys = (t: number) => pad.t + (1 - (t - 20) / (60 - 20)) * (ch - pad.t - pad.b);
+    // Derive per-model curves from live runs. Group by model, then per
+    // (model, ctx) keep the freshest tg (runs are History-ordered so
+    // first-seen wins). When no real runs exist (first launch, all
+    // fixtures), fall back to FIXTURE_CURVE so the chrome stays
+    // believable. Real curves get a unique colour per model; fixture
+    // path keeps the original brand-400 single-line look.
+    const liveByModel = new Map<string, Map<number, number>>();
+    for (const r of runs) {
+      if (r.bencher === "fixture" || !r.ctx || !r.tg) continue;
+      if (!liveByModel.has(r.model)) liveByModel.set(r.model, new Map());
+      const m = liveByModel.get(r.model)!;
+      if (!m.has(r.ctx)) m.set(r.ctx, r.tg);  // first-seen = freshest
+    }
+    const liveSeries = Array.from(liveByModel.entries()).map(([model, ctxMap], i) => ({
+      model,
+      colour: ["var(--brand-400)", "#a78bfa", "#facc15", "#34d399", "#fb7185"][i % 5],
+      points: Array.from(ctxMap.entries())
+        .map(([ctx, tg]) => ({ ctx, tg }))
+        .sort((a, b) => a.ctx - b.ctx),
+    })).filter(s => s.points.length > 0);
+    const useFixture = liveSeries.length === 0;
+    const allTgs = useFixture ? FIXTURE_CURVE.map(p => p.tg) : liveSeries.flatMap(s => s.points.map(p => p.tg));
+    const tgMin = Math.min(20, ...allTgs);
+    const tgMax = Math.max(60, ...allTgs);
+    const xs = (c: number) => pad.l + (Math.log2(Math.max(c, 128) / 128) / Math.log2(8192 / 128)) * (cw - pad.l - pad.r);
+    const ys = (t: number) => pad.t + (1 - (t - tgMin) / Math.max(tgMax - tgMin, 1)) * (ch - pad.t - pad.b);
+    const fixturePath = "M " + FIXTURE_CURVE.map(p => `${xs(p.ctx)} ${ys(p.tg)}`).join(" L ");
+    const gridYs = Array.from({ length: 5 }, (_, i) => tgMin + (i / 4) * (tgMax - tgMin)).map(v => Math.round(v));
 
     const pickerStyle = "padding:4px 24px 4px 10px; border-radius:6px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); font-size:11px; color:var(--fg-1); font-family:var(--font-mono); appearance:none; cursor:pointer; outline:none;";
     const runDisabled = this.running || !this.selectedBencher || !this.selectedModel || this.models.length === 0;
@@ -472,7 +499,7 @@ class LthnBenchmarkWindow extends LitElement {
           </div>
           <div style="flex:1; background:rgba(0,0,0,0.20); border:1px solid rgba(255,255,255,0.05); border-radius:8px; padding:8px;">
             <svg viewBox="0 0 ${cw} ${ch}" width="100%" height="100%" preserveAspectRatio="none">
-              ${[60, 50, 40, 30, 20].map((y) => html`
+              ${gridYs.map((y) => html`
                 <line x1=${pad.l} x2=${cw - pad.r} y1=${ys(y)} y2=${ys(y)} stroke="rgba(255,255,255,0.05)"></line>
                 <text x=${pad.l - 8} y=${ys(y) + 3} fill="rgba(255,255,255,0.35)" font-size="10" text-anchor="end" font-family="ui-monospace, monospace">${y}</text>
               `)}
@@ -480,16 +507,28 @@ class LthnBenchmarkWindow extends LitElement {
                 <line x1=${xs(c)} x2=${xs(c)} y1=${pad.t} y2=${ch - pad.b} stroke="rgba(255,255,255,0.04)"></line>
                 <text x=${xs(c)} y=${ch - pad.b + 14} fill="rgba(255,255,255,0.40)" font-size="9.5" text-anchor="middle" font-family="ui-monospace, monospace">${c >= 1024 ? `${c/1024}k` : c}</text>
               `)}
-              <path d=${"M " + curve.map((p) => `${xs(p.ctx)} ${ys(p.tg)}`).join(" L ")} stroke="var(--brand-400)" stroke-width="2" fill="none"></path>
-              ${curve.map((p) => html`<circle cx=${xs(p.ctx)} cy=${ys(p.tg)} r="3" fill="var(--brand-400)"></circle>`)}
-              <path d="M 48 88 L 198 92 L 348 100 L 498 108 L 648 130 L 798 158 L 870 178" stroke="#a78bfa" stroke-opacity="0.55" stroke-width="1.8" fill="none" stroke-dasharray="3 3"></path>
-              <g transform="translate(${cw - pad.r - 200}, ${pad.t + 6})">
-                <rect width="200" height="42" fill="rgba(0,0,0,0.30)" stroke="rgba(255,255,255,0.06)" rx="4"></rect>
-                <circle cx="14" cy="14" r="4" fill="var(--brand-400)"></circle>
-                <text x="26" y="18" fill="rgba(255,255,255,0.85)" font-size="10" font-family="ui-monospace, monospace">gemma-4-e2b · today</text>
-                <circle cx="14" cy="30" r="4" fill="#a78bfa" fill-opacity="0.6"></circle>
-                <text x="26" y="34" fill="rgba(255,255,255,0.65)" font-size="10" font-family="ui-monospace, monospace">llama-3.2-3b · -2 d</text>
-              </g>
+              ${useFixture
+                ? html`
+                  <path d=${fixturePath} stroke="var(--brand-400)" stroke-width="2" stroke-dasharray="4 3" fill="none" opacity="0.55"></path>
+                  ${FIXTURE_CURVE.map((p) => html`<circle cx=${xs(p.ctx)} cy=${ys(p.tg)} r="3" fill="var(--brand-400)" opacity="0.55"></circle>`)}
+                  <text x=${pad.l + 6} y=${pad.t + 14} fill="rgba(255,255,255,0.45)" font-size="10" font-family="ui-monospace, monospace">fixture · run a benchmark to populate</text>`
+                : liveSeries.map(s => {
+                    const path = "M " + s.points.map(p => `${xs(p.ctx)} ${ys(p.tg)}`).join(" L ");
+                    return html`
+                      <path d=${path} stroke=${s.colour} stroke-width="2" fill="none"></path>
+                      ${s.points.map(p => html`<circle cx=${xs(p.ctx)} cy=${ys(p.tg)} r="3" fill=${s.colour}></circle>`)}
+                    `;
+                  })}
+              ${useFixture
+                ? nothing
+                : html`
+                  <g transform="translate(${cw - pad.r - 200}, ${pad.t + 6})">
+                    <rect width="200" height=${14 + liveSeries.length * 16} fill="rgba(0,0,0,0.30)" stroke="rgba(255,255,255,0.06)" rx="4"></rect>
+                    ${liveSeries.map((s, i) => html`
+                      <circle cx="14" cy=${14 + i * 16} r="4" fill=${s.colour}></circle>
+                      <text x="26" y=${18 + i * 16} fill="rgba(255,255,255,0.85)" font-size="10" font-family="ui-monospace, monospace">${s.model} · ${s.points.length} pts</text>
+                    `)}
+                  </g>`}
               <text x="8" y=${pad.t + 4} fill="rgba(255,255,255,0.45)" font-size="9.5" font-family="ui-monospace, monospace" transform="rotate(-90 10 ${pad.t + 4})">${this.t.yAxis}</text>
             </svg>
           </div>
