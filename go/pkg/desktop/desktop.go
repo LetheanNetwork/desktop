@@ -1367,6 +1367,17 @@ func refreshSelfMachineOnce(svc *fleet.Service) {
 	if r := svc.UpsertMachine(row); !r.OK {
 		core.Warn("desktop.fleet.self_refresh", "error", r.Error())
 	}
+	// Only auto-create the Local Lemma agent when reachable. The first
+	// time the user starts lthn-mlx, the agent appears in Fleet →
+	// Agents already-configured + ready to use. Subsequent ticks keep
+	// it in sync (model name / status); never delete — if Lemma drops
+	// later the row stays so the user can re-enable rather than
+	// re-configure from scratch.
+	if statusErr == nil {
+		if r := svc.UpsertAgent(localLemmaAgentRow(status.ModelPath)); !r.OK {
+			core.Warn("desktop.fleet.local_agent_refresh", "error", r.Error())
+		}
+	}
 }
 
 // pathBase strips dir + returns the trailing path component.
@@ -1386,6 +1397,28 @@ func pathBase(p string) string {
 		}
 	}
 	return trimmed
+}
+
+// localLemmaAgentRow builds the fleet.Agent entry for the local
+// lthn-mlx engine. ID is fixed ("local-lemma") so refresh ticks
+// update the same row. Provider matches the catalogue entry id in
+// configure-agent-modal.ts so the modal renders the right field set
+// when the user clicks edit. Empty APIKeyRef because the loopback
+// admin endpoint is auth-by-process-identity, not by token.
+//
+// modelPath comes from Lemma.Status — basename'd for display.
+// Empty when no model is loaded yet (engine up but pre-load).
+func localLemmaAgentRow(modelPath string) fleet.Agent {
+	model := pathBase(modelPath)
+	return fleet.Agent{
+		ID:       "local-lemma",
+		Name:     "Local Lemma",
+		Provider: "lemma-local",
+		Kind:     "local",
+		BaseURL:  "http://127.0.0.1:11434/v1",
+		Model:    model,
+		Status:   "online",
+	}
 }
 
 func selfMachineRow() fleet.Machine {
