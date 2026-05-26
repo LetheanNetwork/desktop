@@ -28,6 +28,26 @@ describe("lthn-logs-window — smoke", () => {
   });
 });
 
+describe("lthn-logs-window — tab pills", () => {
+  it("clicking a toolbar pill flips the active tab", async () => {
+    const { el } = await mountWindow<HTMLElement & {
+      tab: string;
+      updateComplete: Promise<boolean>;
+      _switchTab: (id: string) => void;
+    }>("lthn-logs-window", { props: { tab: "live" } });
+    expect(el.tab).toBe("live");
+
+    el._switchTab("history");
+    await el.updateComplete;
+    expect(el.tab).toBe("history");
+
+    // No-op when same tab clicked.
+    el._switchTab("history");
+    await el.updateComplete;
+    expect(el.tab).toBe("history");
+  });
+});
+
 describe("lthn-logs-window — two-shell", () => {
   it("embedded mode collapses the chrome", async () => {
     const { host } = await mountWindow("lthn-logs-window", { attrs: { embedded: "" } });

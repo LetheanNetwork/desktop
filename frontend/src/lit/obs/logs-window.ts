@@ -165,6 +165,18 @@ class LthnLogsWindow extends LitElement {
     }
   }
 
+  /** Flip the active tab + re-fetch History when the user lands on
+   *  it (sessions write between polls, so a re-visit should reflect
+   *  any conversation that happened since mount). Mirrors the URL
+   *  ?tab= contract from main.ts — same valid set, same semantics —
+   *  but stays in-process so the user doesn't bounce through a full
+   *  surface reload to flip a pane. */
+  _switchTab(id: string) {
+    if (this.tab === id) return;
+    this.tab = id;
+    if (id === "history") void this._loadGens();
+  }
+
   async _clear() {
     try {
       const bridge = await import("@desktop/bridge/service");
@@ -183,7 +195,8 @@ class LthnLogsWindow extends LitElement {
     ];
     const toolbar = html`
       ${tabs.map(t => html`
-        <lthn-btn tone=${this.tab === t.id ? "primary" : "ghost"} size="sm" ?active=${this.tab === t.id}>
+        <lthn-btn tone=${this.tab === t.id ? "primary" : "ghost"} size="sm" ?active=${this.tab === t.id}
+          @click=${() => this._switchTab(t.id)}>
           <i class="fa-solid ${t.icon}" style="font-size:10px;"></i> ${t.label}
         </lthn-btn>
       `)}
