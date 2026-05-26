@@ -124,16 +124,18 @@ switch (surface) {
      *   - sparkline data  ← heap_alloc_mb samples (last 24)
      *   - connection dot  ← Sample() throwing → err; success → ok
      */
-    const [telemetry, runner, windowSvc, i18n, fl] = await Promise.all([
+    const [telemetry, runner, windowSvc, i18n, fl, lemmaSvc] = await Promise.all([
       import("@desktop/telemetry/service"),
       import("@desktop/runner/service"),
       import("@desktop/desktop/windowservice"),
       import("@lthn/i18n/coreservice"),
       import("@desktop/firstlaunch/wailsservice"),
+      import("@desktop/lemma/wailsservice"),
     ]);
       const TelemetryService = telemetry;
       const RunnerService = runner;
       const WindowService = windowSvc;
+      const Lemma = lemmaSvc;
       /* Open a named window via the Go-side WindowService. Names are
        * the same keys in pkg/desktop/windows.go's registry — chat,
        * models, settings, welcome, about. */
@@ -265,6 +267,13 @@ switch (surface) {
         tab:          TrayTab;    // active info-card tab
         sessionsToday: number;    // count of sessions created since midnight
         lastInteract: number;     // max updated_at across sessions (unix sec)
+        // Lemma serve (local lthn-mlx engine) — separate from desktop
+        // process telemetry above. lemmaConnected goes true only when
+        // Lemma.Status() succeeds AND model_path is set; falls back to
+        // RunnerService.WModels() for model name when Lemma isn't up.
+        lemmaConnected: boolean;
+        modelUptime:    number;   // seconds since Lemma loaded_at_unix
+        modelRuntime:   string;   // e.g. "metal", "cuda", "rocm"
       }
       const state: TrayState = {
         model: "…",
@@ -276,6 +285,9 @@ switch (surface) {
         tab: "system",
         sessionsToday: 0,
         lastInteract: 0,
+        lemmaConnected: false,
+        modelUptime: 0,
+        modelRuntime: "",
       };
 
       const setTab = (t: TrayTab) => () => { state.tab = t; draw(); };
@@ -447,6 +459,12 @@ switch (surface) {
       const renderRunnerPanel = (hasModel: boolean) => html`
         ${kv(t.kvModel, hasModel ? state.model : t.valDash, false)}
         ${kv(t.kvStatus, hasModel ? t.valLoaded : t.valIdle)}
+        ${state.lemmaConnected
+          ? kv(t.uptime, fmtUptime(state.modelUptime))
+          : nothing}
+        ${state.lemmaConnected && state.modelRuntime
+          ? kv("runtime", state.modelRuntime)
+          : nothing}
         ${kv(t.kvThroughput, t.valDash)}
         ${kv(t.kvCache, t.valDash)}
       `;
@@ -565,23 +583,52 @@ switch (surface) {
         }), app);
       };
 
+      const basename = (p: string): string => {
+        if (!p) return "";
+        const slash = p.lastIndexOf("/");
+        return slash >= 0 ? p.slice(slash + 1) : p;
+      };
+
       const poll = async () => {
         try {
           const sessions = await import("@desktop/sessions/wailsservice");
           const { unwrap, demand } = await import("./lit/result");
           type Reading = { uptime_seconds?: number; heap_alloc_mb?: number };
-          const [reading, models, sessionList] = await Promise.all([
+          // Lemma.Status is best-effort — the local lthn-mlx serve may
+          // not be running. Treat any failure as "no model loaded" and
+          // fall back to RunnerService.WModels for the legacy display.
+          type LemmaStatus = { model_path?: string; runtime?: string; loaded_at_unix?: number };
+          const [reading, models, sessionList, lemmaStatus] = await Promise.all([
             demand<Reading>(TelemetryService.CurrentSample()),
             unwrap<string[]>(RunnerService.WModels(), []),
             unwrap<unknown[]>(sessions.List(), []),
+            Lemma.Status().then(
+              (s: unknown) => s as LemmaStatus,
+              () => null as LemmaStatus | null,
+            ),
           ]);
           state.connected = true;
           state.err = null;
           state.uptime = reading.uptime_seconds || 0;
           state.heapMb = reading.heap_alloc_mb || 0;
-          state.model = models?.[0] || t.valNoModel;
           state.samples.push(state.heapMb);
           if (state.samples.length > 24) state.samples.shift();
+          // Lemma takes precedence over WModels — it's the authoritative
+          // local engine state. Falls back to WModels when Lemma is
+          // unavailable (engine not started / admin token missing).
+          if (lemmaStatus && lemmaStatus.model_path) {
+            state.lemmaConnected = true;
+            state.model = basename(lemmaStatus.model_path);
+            state.modelRuntime = lemmaStatus.runtime || "";
+            state.modelUptime = lemmaStatus.loaded_at_unix
+              ? Math.max(0, Math.floor(Date.now() / 1000) - lemmaStatus.loaded_at_unix)
+              : 0;
+          } else {
+            state.lemmaConnected = false;
+            state.modelUptime = 0;
+            state.modelRuntime = "";
+            state.model = models?.[0] || t.valNoModel;
+          }
           // Activity-panel "Sessions today" count — sessions created
           // since midnight local time. SessionInfo.created_at is a
           // Unix second (matches go-store).
