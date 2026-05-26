@@ -13,17 +13,26 @@ interface DlDonePayload    { id: string; name: string; ok: boolean; dest?: strin
 
 class LthnModelBrowserWindow extends LitElement {
   static readonly properties = {
-    selected:  { type: String, reflect: true },
-    w:         { type: Number },
-    h:         { type: Number },
-    embedded:  { type: Boolean, reflect: true },
-    chrome:    { state: true },
-    local:     { state: true },
-    loadErr:   { state: true },
-    modelsDir: { state: true },
-    diskFree:  { state: true },
-    downloads: { state: true },
-    t:         { state: true },
+    selected:        { type: String, reflect: true },
+    w:               { type: Number },
+    h:               { type: Number },
+    embedded:        { type: Boolean, reflect: true },
+    chrome:          { state: true },
+    local:           { state: true },
+    loadErr:         { state: true },
+    modelsDir:       { state: true },
+    diskFree:        { state: true },
+    downloads:       { state: true },
+    t:               { state: true },
+    // Lemma admin state — feeds the "active loaded" indicator on rail
+    // items + the Activate / profile-picker controls in the detail aside.
+    activeModelPath: { state: true },
+    machineHash:     { state: true },
+    profiles:        { state: true },
+    selectedProfile: { state: true },
+    reloadBusy:      { state: true },
+    reloadErr:       { state: true },
+    lemmaUnavailable:{ state: true },
   };
   declare selected: string;
   declare w: number;
@@ -38,6 +47,14 @@ class LthnModelBrowserWindow extends LitElement {
   declare downloads: Map<string, { name: string; written: number; total: number }>;
   // Cleanup fns from Events.On so we unsub on disconnect.
   private _dlUnsubscribe: (() => void)[] = [];
+  // Lemma admin facets.
+  declare activeModelPath: string;
+  declare machineHash: string;
+  declare profiles: Array<{ name: string; path?: string; model?: string; backend?: string }>;
+  declare selectedProfile: string;
+  declare reloadBusy: boolean;
+  declare reloadErr: string;
+  declare lemmaUnavailable: boolean;
   declare t: {
     btnFilters: string; btnImportGguf: string;
     railLabel: string; railEmpty: string; railEmptyHint: string;
@@ -58,6 +75,13 @@ class LthnModelBrowserWindow extends LitElement {
     this.modelsDir = "~/.lthn/models/";
     this.diskFree = 0;
     this.downloads = new Map();
+    this.activeModelPath = "";
+    this.machineHash = "";
+    this.profiles = [];
+    this.selectedProfile = "";
+    this.reloadBusy = false;
+    this.reloadErr = "";
+    this.lemmaUnavailable = false;
     this.t = {
       btnFilters: "Filters", btnImportGguf: "Import GGUF…",
       railLabel: "Local",
@@ -161,6 +185,14 @@ class LthnModelBrowserWindow extends LitElement {
       subtitle: subtitleTpl.replace(/·\s*\d+\s*·/, `· ${this.local.length} ·`)
                            .replace(/·\s*—\s*·/, `· ${this.local.length} ·`),
     };
+
+    // Lemma admin facets — runs lazily so a missing lthn-mlx doesn't
+    // block the rest of the surface. Bearer auth lives in Go-side
+    // pkg/lemma.WailsService; JS never sees the admin token. When the
+    // engine is down we mark lemmaUnavailable + leave activeModelPath
+    // empty so the rail renders without "loaded" badges and the
+    // detail-aside hides Activate.
+    void this._refreshLemmaAdmin();
 
     // Subscribe to downloader bus events from the Wails event bridge.
     // Dynamic import so the component stays mountable in test + canvas
@@ -344,6 +376,7 @@ class LthnModelBrowserWindow extends LitElement {
             </lthn-btn>
             <lthn-btn tone="ghost" size="md"><i class="fa-solid fa-thumbtack" style="font-size:10px;"></i></lthn-btn>
           </div>
+          ${this._renderActivate(selected)}
           <div style="display:flex; flex-direction:column; gap:8px; font-size:11.5px;">
             <lthn-rail-row k=${this.t.rowFamily}       v=${selected ? selFamily : "Gemma 4"}></lthn-rail-row>
             <lthn-rail-row k=${this.t.rowParameters}   v=${selected ? modelParams(selected.name) : "2 B"}></lthn-rail-row>
@@ -389,9 +422,138 @@ class LthnModelBrowserWindow extends LitElement {
     });
   }
 
+  // Render the Activate panel — profile picker + "Use this model"
+  // button + inline error. Hidden when the engine is unreachable
+  // (lthn-mlx not running) OR the selected entry is a directory
+  // skeleton with no path. The match against activeModelPath flips
+  // the button copy to "Loaded" + disables so the operator doesn't
+  // pay the reload cost for a no-op swap.
+  private _renderActivate(selected: LocalModel | undefined) {
+    if (this.lemmaUnavailable) {
+      return html`
+        <div style="padding:8px 10px; border-radius:6px;
+                    background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05);
+                    font-size:10.5px; color:var(--fg-3); line-height:1.5;">
+          Lemma engine not reachable — start <code style="font-family:var(--font-mono);">lthn serve</code>
+          to enable model swapping from this pane.
+        </div>`;
+    }
+    if (!selected || !selected.path || selected.isDir) {
+      return nothing;
+    }
+    const isLoaded = selected.path === this.activeModelPath;
+    const btnLabel = this.reloadBusy ? "Reloading…"
+                   : isLoaded         ? "Loaded"
+                   : "Use this model";
+    return html`
+      <div style="display:flex; flex-direction:column; gap:8px; padding:10px;
+                  border-radius:6px; background:rgba(255,255,255,0.03);
+                  border:1px solid rgba(255,255,255,0.06);">
+        ${this.profiles.length > 0 ? html`
+          <div>
+            <lthn-label>Profile</lthn-label>
+            <select
+              .value=${this.selectedProfile}
+              @change=${(e: Event) => { this.selectedProfile = (e.target as HTMLSelectElement).value; }}
+              style="width:100%; margin-top:4px; padding:5px 7px; font-size:11.5px;
+                     background:rgba(0,0,0,0.25); color:var(--fg-1);
+                     border:1px solid rgba(255,255,255,0.08); border-radius:4px;
+                     --wails-draggable:no-drag;">
+              <option value="">(use serve default)</option>
+              ${this.profiles.map(p => html`<option value=${p.path ?? p.name}>${p.name}${p.backend ? ` — ${p.backend}` : ""}</option>`)}
+            </select>
+          </div>
+        ` : nothing}
+        <lthn-btn
+          tone=${isLoaded ? "ghost" : "primary"}
+          size="md"
+          ?disabled=${this.reloadBusy || isLoaded}
+          @click=${() => { void this._doReload(selected.path!); }}
+          style="justify-content:center; --wails-draggable:no-drag;">
+          <i class="fa-solid ${isLoaded ? "fa-check" : "fa-arrow-right-arrow-left"}" style="font-size:10px;"></i>
+          ${btnLabel}
+        </lthn-btn>
+        ${this.reloadErr ? html`
+          <div style="font-size:10.5px; color:var(--error-400); line-height:1.45;">${this.reloadErr}</div>
+        ` : nothing}
+      </div>
+    `;
+  }
+
+  // Pull Status / Machine / Profiles in parallel. Status.model_path
+  // drives the "active loaded" indicator on rail rows; Machine.hash
+  // becomes the confirm_machine gate value for Reload; Profiles
+  // populates the picker in the detail aside. Any failure marks
+  // lemmaUnavailable rather than throwing — the rest of the surface
+  // stays usable when lthn-mlx isn't running.
+  private async _refreshLemmaAdmin(): Promise<void> {
+    try {
+      const Lemma = await import("@desktop/lemma/wailsservice");
+      const [statusRes, machineRes, profilesRes] = await Promise.allSettled([
+        Lemma.Status(),
+        Lemma.Machine(),
+        Lemma.Profiles(),
+      ]);
+      if (statusRes.status === "fulfilled") {
+        this.activeModelPath = statusRes.value?.model_path ?? "";
+        this.lemmaUnavailable = false;
+      } else {
+        this.lemmaUnavailable = true;
+        this.activeModelPath = "";
+      }
+      if (machineRes.status === "fulfilled") {
+        this.machineHash = machineRes.value?.hash ?? "";
+      }
+      if (profilesRes.status === "fulfilled") {
+        this.profiles = profilesRes.value?.profiles ?? [];
+      }
+    } catch {
+      this.lemmaUnavailable = true;
+    }
+  }
+
+  // Hot-swap the loaded model. Caller passes the absolute path of the
+  // local-rail entry. ConfirmMachine is the gate the engine checks
+  // (rejects the call if the running instance hash doesn't match —
+  // operator foot-gun prevention). After success, refresh Status so
+  // the active-row indicator flips to the new selection.
+  private async _doReload(modelPath: string): Promise<void> {
+    if (this.reloadBusy) return;
+    this.reloadErr = "";
+    if (!this.machineHash) {
+      this.reloadErr = "machine hash not loaded — engine may be offline";
+      return;
+    }
+    if (!modelPath) {
+      this.reloadErr = "no model path";
+      return;
+    }
+    this.reloadBusy = true;
+    try {
+      const Lemma = await import("@desktop/lemma/wailsservice");
+      const { ReloadRequest } = await import("@desktop/lemma/models");
+      await Lemma.Reload(new ReloadRequest({
+        confirm_machine: this.machineHash,
+        model_path:      modelPath,
+        profile_path:    this.selectedProfile || undefined,
+        context_length:  0,
+      }));
+      await this._refreshLemmaAdmin();
+    } catch (err) {
+      this.reloadErr = err instanceof Error ? err.message : String(err);
+    } finally {
+      this.reloadBusy = false;
+    }
+  }
+
   _localItem(m: LocalModel) {
     const active = m.id === this.selected;
-    const tone = m.status === "loaded" ? "var(--success-400)"
+    // Real "loaded" state derives from Lemma.Status().model_path —
+    // the LocalModel.status field still defaults to "available" out
+    // of pkg/models.List() (no runner cross-check at scan time).
+    // Match on the engine's path to flip the indicator dot live.
+    const isLoaded = this.activeModelPath !== "" && m.path === this.activeModelPath;
+    const tone = isLoaded ? "var(--success-400)"
                : m.status === "downloading" ? "var(--warning-400)"
                : "var(--fg-3)";
     return html`
@@ -404,7 +566,7 @@ class LthnModelBrowserWindow extends LitElement {
                   --wails-draggable: no-drag;">
         <div style="display:flex; align-items:center; gap:8px;">
           <span style="width:6px; height:6px; border-radius:50%; background:${tone};
-                       box-shadow:${m.status === "loaded" ? `0 0 4px ${tone}` : "none"};"></span>
+                       box-shadow:${isLoaded ? `0 0 4px ${tone}` : "none"};"></span>
           <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--fg-0); letter-spacing:-0.005em;">${m.name}</span>
         </div>
         <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--fg-3);">
