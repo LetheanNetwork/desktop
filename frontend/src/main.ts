@@ -664,6 +664,11 @@ switch (surface) {
     app.innerHTML = `<lthn-model-browser-window></lthn-model-browser-window>`;
     break;
   }
+  case "lemma": {
+    await import("./lit/ext/lemma-window");
+    app.innerHTML = `<lthn-lemma-window></lthn-lemma-window>`;
+    break;
+  }
   case "editor": {
     await import("./lit/ide/editor-window");
     const path = params.get("path") || "scratch.ts";
