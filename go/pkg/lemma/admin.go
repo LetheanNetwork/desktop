@@ -188,6 +188,68 @@ type DownloadJobStatus struct {
 	Path     string `json:"path,omitempty"`
 }
 
+// SFTStartRequest is the body for POST /v1/admin/sft/start. Mirrors
+// cmd/mlx adminSFTRequest. Only ModelPath + DatasetPath are required;
+// the rest defaults to the shipped LoRA recipe upstream.
+type SFTStartRequest struct {
+	ModelPath     string  `json:"model_path"`
+	DatasetPath   string  `json:"dataset_path"`
+	AdapterName   string  `json:"adapter_name,omitempty"`
+	BatchSize     int     `json:"batch_size,omitempty"`
+	Epochs        int     `json:"epochs,omitempty"`
+	LearningRate  float64 `json:"learning_rate,omitempty"`
+	LoRARank      int     `json:"lora_rank,omitempty"`
+	LoRAAlpha     int     `json:"lora_alpha,omitempty"`
+	LoRADropout   float64 `json:"lora_dropout,omitempty"`
+	MaxSeqLen     int     `json:"max_seq_len,omitempty"`
+	ContextLength int     `json:"context_length,omitempty"`
+}
+
+// SFTLossSample is one point on the live loss curve. The upstream job
+// caps its ring at 512 samples; older roll off as new arrive.
+type SFTLossSample struct {
+	Step  int     `json:"step"`
+	Epoch int     `json:"epoch"`
+	Loss  float64 `json:"loss"`
+	TS    int64   `json:"ts_unix"`
+}
+
+// SFTJob mirrors cmd/mlx adminSFTJob. The single in-flight job's full
+// state — also returned for completed/failed/stopped runs as long as
+// the upstream's r.last slot still holds it.
+type SFTJob struct {
+	JobID       string          `json:"job_id"`
+	State       string          `json:"state"`
+	ModelPath   string          `json:"model_path"`
+	DatasetPath string          `json:"dataset_path"`
+	AdapterDir  string          `json:"adapter_dir"`
+	StartedUnix int64           `json:"started_unix"`
+	UpdatedUnix int64           `json:"updated_unix"`
+	EndedUnix   int64           `json:"ended_unix,omitempty"`
+	Step        int             `json:"step"`
+	Epoch       int             `json:"epoch"`
+	LastLoss    float64         `json:"last_loss"`
+	Samples     int             `json:"samples"`
+	Error       string          `json:"error,omitempty"`
+	Loss        []SFTLossSample `json:"loss,omitempty"`
+}
+
+// SFTAdapter is one entry from GET /v1/admin/sft/adapters. Lists the
+// completed adapter directories under ~/Lethean/data/adapters/.
+type SFTAdapter struct {
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	SizeBytes  int64  `json:"size_bytes"`
+	ModifiedAt int64  `json:"modified_unix"`
+}
+
+// SFTAdaptersList wraps the dir + entries — matches the upstream
+// adaptersList shape exactly so the JSON decode is direct.
+type SFTAdaptersList struct {
+	Dir      string       `json:"dir"`
+	Adapters []SFTAdapter `json:"adapters"`
+}
+
 // Status returns the boot-time snapshot of the running serve instance.
 //
 //	st, err := admin.Status(ctx)
@@ -324,6 +386,84 @@ func (a *Admin) doJSON(ctx context.Context, method, path string, body, out inter
 		return core.E("lemma.Admin.doJSON", "decode response", err)
 	}
 	return nil
+}
+
+// SFTStart kicks an SFT job. ModelPath + DatasetPath are required;
+// the rest defaults to the recipe upstream. Returns the initial job
+// snapshot (state=pending or running) so the caller can stash JobID
+// for follow-up Status polls. 409 conflict surfaces when another
+// job is already in flight (single-flight by design).
+//
+//	job, err := admin.SFTStart(ctx, lemma.SFTStartRequest{
+//	    ModelPath:   "/Lethean/data/models/lemer-lite",
+//	    DatasetPath: "/Lethean/data/datasets/helpcenter.jsonl",
+//	})
+func (a *Admin) SFTStart(ctx context.Context, req SFTStartRequest) (SFTJob, error) {
+	if core.Trim(req.ModelPath) == "" {
+		return SFTJob{}, core.E("lemma.Admin.SFTStart", "model_path required", nil)
+	}
+	if core.Trim(req.DatasetPath) == "" {
+		return SFTJob{}, core.E("lemma.Admin.SFTStart", "dataset_path required", nil)
+	}
+	var out SFTJob
+	if err := a.doJSON(ctx, http.MethodPost, "/v1/admin/sft/start", req, &out); err != nil {
+		return SFTJob{}, core.E("lemma.Admin.SFTStart", "request failed", err)
+	}
+	return out, nil
+}
+
+// SFTStatus polls a job. Empty jobID returns the active job (or 404
+// when nothing is running); a stale jobID resolves to the upstream's
+// r.last slot if the run just finished, so terminal-state callers
+// still get the final loss + adapter path.
+//
+//	for {
+//	    job, _ := admin.SFTStatus(ctx, jobID)
+//	    if job.State == "done" || job.State == "failed" || job.State == "stopped" { break }
+//	    time.Sleep(2 * time.Second)
+//	}
+func (a *Admin) SFTStatus(ctx context.Context, jobID string) (SFTJob, error) {
+	var out SFTJob
+	url := "/v1/admin/sft/status"
+	if core.Trim(jobID) != "" {
+		url += "?job=" + jobID
+	}
+	if err := a.doJSON(ctx, http.MethodGet, url, nil, &out); err != nil {
+		return SFTJob{}, core.E("lemma.Admin.SFTStatus", "request failed", err)
+	}
+	return out, nil
+}
+
+// SFTStop cancels the in-flight job. Checkpoints already written to
+// the adapter dir survive — only the gradient steps stop. jobID is
+// required to prevent accidental "stop whatever is running" from a
+// stale UI.
+//
+//	job, err := admin.SFTStop(ctx, jobID)
+//	// job.State is now "stopped"
+func (a *Admin) SFTStop(ctx context.Context, jobID string) (SFTJob, error) {
+	if core.Trim(jobID) == "" {
+		return SFTJob{}, core.E("lemma.Admin.SFTStop", "job id required", nil)
+	}
+	var out SFTJob
+	if err := a.doJSON(ctx, http.MethodPost, "/v1/admin/sft/stop?job="+jobID, nil, &out); err != nil {
+		return SFTJob{}, core.E("lemma.Admin.SFTStop", "request failed", err)
+	}
+	return out, nil
+}
+
+// SFTAdapters lists adapter directories on the lthn-mlx host. UI
+// renders these as the "Recent Adapters" rail entries; sort by
+// ModifiedAt descending for freshness order.
+//
+//	list, err := admin.SFTAdapters(ctx)
+//	for _, a := range list.Adapters { fmt.Println(a.Name) }
+func (a *Admin) SFTAdapters(ctx context.Context) (SFTAdaptersList, error) {
+	var out SFTAdaptersList
+	if err := a.doJSON(ctx, http.MethodGet, "/v1/admin/sft/adapters", nil, &out); err != nil {
+		return SFTAdaptersList{}, core.E("lemma.Admin.SFTAdapters", "request failed", err)
+	}
+	return out, nil
 }
 
 // loadTokenFromFile reads + trims an admin token from disk. Empty

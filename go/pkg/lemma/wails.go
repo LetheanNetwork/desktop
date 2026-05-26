@@ -134,6 +134,58 @@ func (s *WailsService) DownloadJob(ctx context.Context, jobID string) (DownloadJ
 	return a.DownloadJob(ctx, jobID)
 }
 
+// SFTStart kicks a native LoRA fine-tune. Single-flight upstream —
+// returns an error when another job is already running. The returned
+// SFTJob carries the JobID the UI uses for follow-up polls.
+//
+//	const job = await Lemma.SFTStart({ ModelPath, DatasetPath, Epochs: 3 })
+func (s *WailsService) SFTStart(ctx context.Context, req SFTStartRequest) (SFTJob, error) {
+	a, err := s.admin()
+	if err != nil {
+		return SFTJob{}, err
+	}
+	return a.SFTStart(ctx, req)
+}
+
+// SFTStatus polls a job. UI typically calls on a ~2s interval while
+// the run is active; SFTJob carries the latest step/epoch/loss/samples
+// + the rolling loss-curve ring buffer.
+//
+//	const job = await Lemma.SFTStatus(jobID)
+func (s *WailsService) SFTStatus(ctx context.Context, jobID string) (SFTJob, error) {
+	a, err := s.admin()
+	if err != nil {
+		return SFTJob{}, err
+	}
+	return a.SFTStatus(ctx, jobID)
+}
+
+// SFTStop cancels the in-flight job. Checkpoints already written to
+// the adapter dir survive — only the gradient loop stops.
+//
+//	await Lemma.SFTStop(jobID)
+func (s *WailsService) SFTStop(ctx context.Context, jobID string) (SFTJob, error) {
+	a, err := s.admin()
+	if err != nil {
+		return SFTJob{}, err
+	}
+	return a.SFTStop(ctx, jobID)
+}
+
+// SFTAdapters lists completed adapter directories. UI renders these
+// as a "Recent Adapters" rail; sort by ModifiedAt descending for
+// freshness order.
+//
+//	const list = await Lemma.SFTAdapters()
+//	for (const a of list.Adapters) { ... }
+func (s *WailsService) SFTAdapters(ctx context.Context) (SFTAdaptersList, error) {
+	a, err := s.admin()
+	if err != nil {
+		return SFTAdaptersList{}, err
+	}
+	return a.SFTAdapters(ctx)
+}
+
 // admin lazily builds the Admin client. Per-call rather than per-
 // service-instance so token rotation + late-start lthn-mlx both work
 // without re-binding the Wails service.
