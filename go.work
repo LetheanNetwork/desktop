@@ -26,6 +26,7 @@ use (
 	./external/api/go
 	./external/config/go
 	./external/container/go
+	./external/enchantrix
 	./external/go
 	./external/gui/go
 	./external/i18n/go
@@ -35,6 +36,7 @@ use (
 	// mcp's nested rag is dropped — our top-level
 	// external/ai/external/go-rag/go already provides dappco.re/go/rag
 	// and Go workspace mode refuses duplicate module paths.
+	./external/mlx/go
 	./external/orm/go
 	./external/php/go
 	./external/process/go
