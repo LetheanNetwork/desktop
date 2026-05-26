@@ -177,6 +177,20 @@ class LthnLogsWindow extends LitElement {
     if (id === "history") void this._loadGens();
   }
 
+  /** Switch the app shell to the chat pane — same channel the tray's
+   *  popover Open buttons use (Events.Emit "lthn:app:setpane"). The
+   *  shell's _select handles the actual route swap so we don't have
+   *  to know its internal pane key set here; "chat" maps to the
+   *  same NAV id main.ts's tray panel uses. */
+  async _openChat() {
+    try {
+      const { Events } = await import("@wailsio/runtime");
+      Events.Emit("lthn:app:setpane", "chat");
+    } catch (err) {
+      console.error("logs: open chat failed", err);
+    }
+  }
+
   async _clear() {
     try {
       const bridge = await import("@desktop/bridge/service");
@@ -309,11 +323,14 @@ class LthnLogsWindow extends LitElement {
     const gens = this.gens;
     if (this.gensLoaded && gens.length === 0) {
       return html`
-        <div style="flex:1; display:flex; align-items:center; justify-content:center; padding:40px 22px; flex-direction:column; gap:10px;">
+        <div style="flex:1; display:flex; align-items:center; justify-content:center; padding:40px 22px; flex-direction:column; gap:14px;">
           <div style="font-size:13px; color:var(--fg-2);">No generations yet.</div>
           <div style="font-size:11.5px; color:var(--fg-3); max-width:420px; text-align:center; line-height:1.55;">
-            Chats you have with the model land here automatically. Open the Chat surface, start a conversation, and the assistant turns will appear in this list.
+            Chats you have with the model land here automatically. Start a conversation and the assistant turns will appear in this list.
           </div>
+          <lthn-btn tone="primary" size="sm" @click=${() => this._openChat()}>
+            <i class="fa-solid fa-comments" style="font-size:10px;"></i> Open Chat
+          </lthn-btn>
         </div>
       `;
     }
