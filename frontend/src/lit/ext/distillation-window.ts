@@ -6,6 +6,27 @@ import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
 import { T } from "@lthn/i18n/coreservice";
 
+/** One model entry from Models.List() — shape mirrors pkg/models.Entry. */
+interface ModelEntry { name: string; path: string; size: number; is_dir: boolean }
+
+/** One adapter from Lemma.SFTAdapters(). Mirrors lemma.SFTAdapter. */
+interface AdapterEntry { name: string; path: string; size_bytes: number; modified_unix: number }
+
+/** Live SFT job snapshot — mirrors lemma.SFTJob (kebab-case from JSON). */
+interface SFTJobView {
+  job_id:       string;
+  state:        string;
+  model_path:   string;
+  dataset_path: string;
+  adapter_dir:  string;
+  step:         number;
+  epoch:        number;
+  last_loss:    number;
+  samples:      number;
+  error?:       string;
+  loss?:        Array<{ step: number; epoch: number; loss: number; ts_unix: number }>;
+}
+
 class LthnDistillationWindow extends LitElement {
   static readonly properties = {
     w: { type: Number },
@@ -13,11 +34,39 @@ class LthnDistillationWindow extends LitElement {
     embedded: { type: Boolean, reflect: true },
     chrome: { state: true },
     t: { state: true },
+    // Live SFT state — driven by Lemma.SFTStart/Status/Stop/Adapters.
+    job:           { state: true },
+    baseModels:    { state: true },
+    adapters:      { state: true },
+    modelPath:     { state: true },
+    datasetPath:   { state: true },
+    adapterName:   { state: true },
+    epochs:        { state: true },
+    batchSize:     { state: true },
+    learningRate:  { state: true },
+    loraRank:      { state: true },
+    loraAlpha:     { state: true },
+    busy:          { state: true },
+    err:           { state: true },
   };
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare chrome: { title: string; subtitle: string };
+  declare job: SFTJobView | null;
+  declare baseModels: ModelEntry[];
+  declare adapters: AdapterEntry[];
+  declare modelPath: string;
+  declare datasetPath: string;
+  declare adapterName: string;
+  declare epochs: number;
+  declare batchSize: number;
+  declare learningRate: number;
+  declare loraRank: number;
+  declare loraAlpha: number;
+  declare busy: boolean;
+  declare err: string;
+  private _poll: ReturnType<typeof setInterval> | null = null;
   declare t: {
     stepBase: string; stepDataset: string; stepConfig: string;
     stepRun: string; stepPublish: string; btnStop: string;
@@ -39,6 +88,19 @@ class LthnDistillationWindow extends LitElement {
     super();
     this.w = 1100; this.h = 740; this.embedded = false;
     this.chrome = { title: "Fine-tune", subtitle: "LoRA · SFT · distill · merge" };
+    this.job = null;
+    this.baseModels = [];
+    this.adapters = [];
+    this.modelPath = "";
+    this.datasetPath = "";
+    this.adapterName = "";
+    this.epochs = 3;
+    this.batchSize = 8;
+    this.learningRate = 1e-4;
+    this.loraRank = 16;
+    this.loraAlpha = 32;
+    this.busy = false;
+    this.err = "";
     this.t = {
       stepBase: "Base model", stepDataset: "Dataset", stepConfig: "Config",
       stepRun: "Run", stepPublish: "Publish", btnStop: "Stop",
@@ -100,15 +162,159 @@ class LthnDistillationWindow extends LitElement {
       rowBackend: m.row_backend, rowGpuMem: m.row_gpumem, rowDiskIo: m.row_diskio, rowEta: m.row_eta,
       calloutLocal: m.callout_local, footer: m.footer,
     };
+    // Live data — fail quietly when Lemma engine isn't reachable. The
+    // form fields stay editable so the user can fill them in and try
+    // again once `lthn serve` is up.
+    void this._refreshModels();
+    void this._refreshAdapters();
+    void this._refreshJob();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this._poll !== null) { clearInterval(this._poll); this._poll = null; }
+  }
+
+  private async _refreshModels(): Promise<void> {
+    try {
+      const Models = await import("@desktop/models/wailsservice");
+      const { unwrap } = await import("../result");
+      this.baseModels = await unwrap<ModelEntry[]>(Models.List(), []);
+      if (!this.modelPath && this.baseModels.length > 0) {
+        this.modelPath = this.baseModels[0].path;
+      }
+    } catch { /* engine offline — keep empty list, form stays editable */ }
+  }
+
+  private async _refreshAdapters(): Promise<void> {
+    try {
+      const Lemma = await import("@desktop/lemma/wailsservice");
+      const list = await Lemma.SFTAdapters();
+      const arr = (list as unknown as { adapters?: AdapterEntry[] })?.adapters;
+      this.adapters = Array.isArray(arr) ? arr : [];
+    } catch { /* engine offline */ }
+  }
+
+  /** Pulls the active job state. When a job is running, starts a 2s
+   *  poll so loss curve + metrics tick live. Stops the poll on
+   *  terminal state (done / failed / stopped) — no need to keep
+   *  asking once nothing's changing. */
+  private async _refreshJob(): Promise<void> {
+    try {
+      const Lemma = await import("@desktop/lemma/wailsservice");
+      const job = await Lemma.SFTStatus("");
+      this.job = job as unknown as SFTJobView;
+      this._managePollLifecycle();
+    } catch (e) {
+      // 404 when no job — clear local state, stop poll.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("404") || msg.includes("no SFT")) {
+        this.job = null;
+        if (this._poll !== null) { clearInterval(this._poll); this._poll = null; }
+      }
+    }
+  }
+
+  private _managePollLifecycle(): void {
+    const isLive = this.job && (this.job.state === "pending" || this.job.state === "running");
+    if (isLive && this._poll === null) {
+      this._poll = setInterval(() => { void this._refreshJob(); }, 2000);
+    } else if (!isLive && this._poll !== null) {
+      clearInterval(this._poll);
+      this._poll = null;
+    }
+  }
+
+  private async _doStart(): Promise<void> {
+    if (this.busy) return;
+    this.err = "";
+    if (!this.modelPath.trim() || !this.datasetPath.trim()) {
+      this.err = "model path + dataset path are both required";
+      return;
+    }
+    this.busy = true;
+    try {
+      const Lemma = await import("@desktop/lemma/wailsservice");
+      const { SFTStartRequest } = await import("@desktop/lemma/models");
+      const req = new SFTStartRequest({
+        model_path:    this.modelPath,
+        dataset_path:  this.datasetPath,
+        adapter_name:  this.adapterName,
+        batch_size:    this.batchSize,
+        epochs:        this.epochs,
+        learning_rate: this.learningRate,
+        lora_rank:     this.loraRank,
+        lora_alpha:    this.loraAlpha,
+      });
+      const job = await Lemma.SFTStart(req);
+      this.job = job as unknown as SFTJobView;
+      this._managePollLifecycle();
+    } catch (e) {
+      this.err = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async _doStop(): Promise<void> {
+    if (!this.job?.job_id || this.busy) return;
+    this.err = "";
+    this.busy = true;
+    try {
+      const Lemma = await import("@desktop/lemma/wailsservice");
+      const job = await Lemma.SFTStop(this.job.job_id);
+      this.job = job as unknown as SFTJobView;
+      this._managePollLifecycle();
+      void this._refreshAdapters();
+    } catch (e) {
+      this.err = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Small label + numeric input pair for the Recipe rail — matches
+   *  the lthn-rail-row visual density. `float` flag accepts decimals
+   *  (LR), otherwise integer-only. */
+  private _numInput(label: string, value: number, set: (v: number) => void, float: boolean = false) {
+    return html`
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <span style="font-size:11.5px; color:var(--fg-3);">${label}</span>
+        <input type="number" .value=${String(value)}
+               step=${float ? "0.0001" : "1"}
+               ?disabled=${this.job?.state === "running" || this.job?.state === "pending"}
+               @change=${(e: Event) => {
+                 const raw = (e.target as HTMLInputElement).value;
+                 const n = float ? parseFloat(raw) : parseInt(raw, 10);
+                 if (!Number.isNaN(n)) set(n);
+               }}
+               style="width:90px; padding:3px 6px; font-size:11px; font-family:var(--font-mono); background:rgba(0,0,0,0.25); color:var(--fg-1); border:1px solid rgba(255,255,255,0.08); border-radius:4px; --wails-draggable:no-drag;">
+      </div>
+    `;
   }
 
   render() {
-    // Deterministic-ish loss curve so the screenshot is stable
-    const loss = Array.from({ length: 40 }, (_, i) =>
-      2.4 * Math.exp(-i * 0.06) + 0.4 + ((Math.sin(i * 1.7) * 0.08))
-    );
+    // Live loss series from job.loss when present; fall back to the
+    // deterministic placeholder curve in idle state so the chrome
+    // still reads coherently in design preview / first-launch.
+    const liveLoss = this.job?.loss && this.job.loss.length > 0
+      ? this.job.loss.map(s => s.loss)
+      : [];
+    const loss = liveLoss.length > 0
+      ? liveLoss
+      : Array.from({ length: 40 }, (_, i) =>
+          2.4 * Math.exp(-i * 0.06) + 0.4 + ((Math.sin(i * 1.7) * 0.08)));
     const cw = 740, ch = 220, pad = { l: 40, r: 14, t: 12, b: 24 };
+    const lossMax = loss.length > 0 ? Math.max(...loss, 0.1) : 2.4;
+    const isRunning = this.job?.state === "running" || this.job?.state === "pending";
+    const stateLabel = this.job ? this.job.state : "idle";
 
+    // Step progress derives from job state — Run is the active step
+    // when training; Publish lights up only after a checkpoint exists.
+    const activeStepIdx = !this.job ? 2
+                        : isRunning  ? 3
+                        : this.job.state === "done" ? 4
+                        : 3;
     const steps = [
       { id: "1", label: this.t.stepBase },
       { id: "2", label: this.t.stepDataset },
@@ -120,20 +326,29 @@ class LthnDistillationWindow extends LitElement {
     const toolbar = html`
       ${steps.map((s, i) => html`
         <div style="display:flex; align-items:center; gap:6px;">
-          <div style="width:18px; height:18px; border-radius:50%; border:1.5px solid ${i < 3 ? "var(--brand-500)" : i === 3 ? "var(--brand-400)" : "rgba(255,255,255,0.12)"}; background:${i < 3 ? "var(--brand-500)" : "transparent"}; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:600; color:${i < 3 ? "#fff" : i === 3 ? "var(--brand-300)" : "var(--fg-3)"};">
-            ${i < 3 ? html`<i class="fa-solid fa-check" style="font-size:8px;"></i>` : s.id}
+          <div style="width:18px; height:18px; border-radius:50%; border:1.5px solid ${i < activeStepIdx ? "var(--brand-500)" : i === activeStepIdx ? "var(--brand-400)" : "rgba(255,255,255,0.12)"}; background:${i < activeStepIdx ? "var(--brand-500)" : "transparent"}; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:600; color:${i < activeStepIdx ? "#fff" : i === activeStepIdx ? "var(--brand-300)" : "var(--fg-3)"};">
+            ${i < activeStepIdx ? html`<i class="fa-solid fa-check" style="font-size:8px;"></i>` : s.id}
           </div>
-          <span style="font-size:12px; color:${i <= 3 ? "var(--fg-0)" : "var(--fg-3)"}; font-weight:${i === 3 ? 500 : 400};">${s.label}</span>
+          <span style="font-size:12px; color:${i <= activeStepIdx ? "var(--fg-0)" : "var(--fg-3)"}; font-weight:${i === activeStepIdx ? 500 : 400};">${s.label}</span>
           ${i < 4 ? html`<span style="width:24px; height:1px; background:rgba(255,255,255,0.08); margin:0 8px;"></span>` : nothing}
         </div>
       `)}
       <div style="flex:1"></div>
-      <lthn-btn tone="quiet" size="sm"><i class="fa-solid fa-stop" style="font-size:9px;"></i> ${this.t.btnStop}</lthn-btn>
+      <span style="font-size:11px; color:var(--fg-3); font-family:var(--font-mono);">${stateLabel}</span>
+      ${isRunning
+        ? html`<lthn-btn tone="quiet" size="sm" ?disabled=${this.busy} @click=${() => { void this._doStop(); }}>
+            <i class="fa-solid fa-stop" style="font-size:9px;"></i> ${this.busy ? "Stopping…" : this.t.btnStop}
+          </lthn-btn>`
+        : html`<lthn-btn tone="primary" size="sm" ?disabled=${this.busy || !this.modelPath || !this.datasetPath} @click=${() => { void this._doStart(); }}>
+            <i class="fa-solid fa-play" style="font-size:9px;"></i> ${this.busy ? "Starting…" : "Run"}
+          </lthn-btn>`}
     `;
 
-    const lossPath = "M " + loss.map((v, i) =>
-      `${pad.l + (i / (loss.length - 1)) * (cw - pad.l - pad.r)} ${pad.t + (1 - v / 2.4) * (ch - pad.t - pad.b)}`
-    ).join(" L ");
+    const lossPath = loss.length > 1
+      ? "M " + loss.map((v, i) =>
+          `${pad.l + (i / (loss.length - 1)) * (cw - pad.l - pad.r)} ${pad.t + (1 - v / lossMax) * (ch - pad.t - pad.b)}`
+        ).join(" L ")
+      : "";
 
     const body = html`
       <div style="flex:1; display:grid; grid-template-columns:300px 1fr 320px; min-height:0;">
@@ -141,13 +356,12 @@ class LthnDistillationWindow extends LitElement {
           <div>
             <lthn-label>${this.t.labelRecipe}</lthn-label>
             <div style="margin-top:8px; display:flex; flex-direction:column; gap:8px; font-size:11.5px;">
-              <lthn-rail-row k=${this.t.rowMethod}  v="LoRA · AdamW"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.rowRank}    v="16"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.rowAlpha}   v="32"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.rowDropout} v="0.05"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.rowLR}      v="1e-4 · cosine"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.rowBatch}   v="8 · grad-accum 4"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.rowEpochs}  v="3"></lthn-rail-row>
+              <lthn-rail-row k=${this.t.rowMethod} v="LoRA · AdamW"></lthn-rail-row>
+              ${this._numInput(this.t.rowRank,    this.loraRank,     v => { this.loraRank = v; })}
+              ${this._numInput(this.t.rowAlpha,   this.loraAlpha,    v => { this.loraAlpha = v; })}
+              ${this._numInput(this.t.rowLR,      this.learningRate, v => { this.learningRate = v; }, true)}
+              ${this._numInput(this.t.rowBatch,   this.batchSize,    v => { this.batchSize = v; })}
+              ${this._numInput(this.t.rowEpochs,  this.epochs,       v => { this.epochs = v; })}
               <lthn-rail-row k=${this.t.rowTargets} v="q_proj · v_proj · o_proj"></lthn-rail-row>
             </div>
           </div>
@@ -155,22 +369,53 @@ class LthnDistillationWindow extends LitElement {
           <div>
             <lthn-label>${this.t.labelBaseDataset}</lthn-label>
             <div style="margin-top:8px; display:flex; flex-direction:column; gap:8px; font-size:11.5px;">
-              <lthn-rail-row k=${this.t.rowBase}    v="gemma-4-e2b"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.rowDataset} v="lthn-helpcenter-v3"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.rowSamples} v="4,820"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.rowSplit}   v="train 4.5k · eval 320"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.rowFormat}  v="ChatML"></lthn-rail-row>
+              <div style="display:flex; flex-direction:column; gap:4px;">
+                <span style="font-size:10.5px; color:var(--fg-3);">${this.t.rowBase}</span>
+                <select .value=${this.modelPath}
+                        ?disabled=${isRunning}
+                        @change=${(e: Event) => { this.modelPath = (e.target as HTMLSelectElement).value; }}
+                        style="padding:5px 7px; font-size:11px; font-family:var(--font-mono); background:rgba(0,0,0,0.25); color:var(--fg-1); border:1px solid rgba(255,255,255,0.08); border-radius:4px; --wails-draggable:no-drag;">
+                  ${this.baseModels.length === 0
+                    ? html`<option value="">(no models — start lthn serve)</option>`
+                    : this.baseModels.map(m => html`<option value=${m.path}>${m.name}</option>`)}
+                </select>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:4px;">
+                <span style="font-size:10.5px; color:var(--fg-3);">${this.t.rowDataset} (JSONL path)</span>
+                <input type="text" .value=${this.datasetPath}
+                       ?disabled=${isRunning}
+                       @input=${(e: Event) => { this.datasetPath = (e.target as HTMLInputElement).value; }}
+                       placeholder="/Lethean/data/datasets/your.jsonl"
+                       style="padding:5px 7px; font-size:11px; font-family:var(--font-mono); background:rgba(0,0,0,0.25); color:var(--fg-1); border:1px solid rgba(255,255,255,0.08); border-radius:4px; --wails-draggable:no-drag;">
+              </div>
+              <div style="display:flex; flex-direction:column; gap:4px;">
+                <span style="font-size:10.5px; color:var(--fg-3);">Adapter name (optional)</span>
+                <input type="text" .value=${this.adapterName}
+                       ?disabled=${isRunning}
+                       @input=${(e: Event) => { this.adapterName = (e.target as HTMLInputElement).value; }}
+                       placeholder="my-adapter-name"
+                       style="padding:5px 7px; font-size:11px; font-family:var(--font-mono); background:rgba(0,0,0,0.25); color:var(--fg-1); border:1px solid rgba(255,255,255,0.08); border-radius:4px; --wails-draggable:no-drag;">
+              </div>
+              <lthn-rail-row k=${this.t.rowFormat} v="ChatML / JSONL"></lthn-rail-row>
             </div>
           </div>
+          ${this.err ? html`
+            <div style="padding:8px 10px; font-size:11px; color:var(--error-400, #f82da7); background:rgba(248,45,167,0.06); border:1px solid rgba(248,45,167,0.22); border-radius:4px;">
+              ${this.err}
+            </div>` : nothing}
         </aside>
 
         <main style="padding:20px 26px; overflow:auto; display:flex; flex-direction:column; gap:18px;">
           <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;">
             ${[
-              { k: this.t.mEpoch, v: "2 / 3",  sub: "step 184 / 270" },
-              { k: this.t.mLoss,  v: "0.84",   sub: "↓ from 2.31" },
-              { k: this.t.mTps,   v: "1,142",  sub: "training throughput" },
-              { k: this.t.mWatts, v: "9.8 W",  sub: "GPU + ANE" },
+              { k: this.t.mEpoch, v: this.job ? `${this.job.epoch} / ${this.epochs}` : "—",
+                sub: this.job ? `step ${this.job.step}` : "(idle)" },
+              { k: this.t.mLoss,  v: this.job && this.job.last_loss > 0 ? this.job.last_loss.toFixed(3) : "—",
+                sub: this.job ? `${this.job.samples} samples` : "(idle)" },
+              { k: this.t.mTps,   v: "—",
+                sub: "training throughput (TODO)" },
+              { k: this.t.mWatts, v: "—",
+                sub: "GPU + ANE (TODO)" },
             ].map(m => html`
               <div style="padding:12px 14px; border-radius:8px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.06);">
                 <div style="font-size:10.5px; color:var(--fg-3); letter-spacing:0.04em; text-transform:uppercase;">${m.k}</div>
@@ -214,13 +459,22 @@ class LthnDistillationWindow extends LitElement {
         <aside style="background:rgba(0,0,0,0.18); border-left:1px solid rgba(255,255,255,0.05); padding:18px; overflow:auto; display:flex; flex-direction:column; gap:14px;">
           <div>
             <lthn-label>${this.t.labelAdapter}</lthn-label>
-            <div style="font-family:var(--font-mono); font-size:12px; color:var(--fg-0); margin-top:6px;">gemma-4-e2b-helpcenter-lora</div>
-            <div style="font-size:11px; color:var(--fg-3); margin-top:3px;">~/.lthn/adapters/ · 42 MB</div>
+            ${this.adapters.length === 0
+              ? html`<div style="font-size:11px; color:var(--fg-3); font-style:italic; margin-top:6px;">No adapters yet — run a Fine-tune to create one.</div>`
+              : html`
+                <div style="margin-top:6px; display:flex; flex-direction:column; gap:6px; max-height:180px; overflow:auto;">
+                  ${[...this.adapters].sort((a, b) => b.modified_unix - a.modified_unix).slice(0, 6).map(a => html`
+                    <div style="padding:6px 8px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05); border-radius:5px;">
+                      <div style="font-family:var(--font-mono); font-size:11px; color:var(--fg-0); word-break:break-all;">${a.name}</div>
+                      <div style="font-size:10px; color:var(--fg-3); margin-top:2px;">${(a.size_bytes / (1024 * 1024)).toFixed(1)} MB</div>
+                    </div>
+                  `)}
+                </div>`}
           </div>
           <div style="display:flex; flex-direction:column; gap:6px;">
-            <lthn-btn tone="primary" size="md"><i class="fa-regular fa-comment"></i> ${this.t.btnTestChat}</lthn-btn>
-            <lthn-btn tone="ghost" size="md"><i class="fa-solid fa-code-merge" style="font-size:11px;"></i> ${this.t.btnMerge}</lthn-btn>
-            <lthn-btn tone="ghost" size="md"><i class="fa-solid fa-cloud-arrow-up" style="font-size:11px;"></i> ${this.t.btnPushHf}</lthn-btn>
+            <lthn-btn tone="primary" size="md" disabled title="Coming after Mod\\Chat picker integration"><i class="fa-regular fa-comment"></i> ${this.t.btnTestChat}</lthn-btn>
+            <lthn-btn tone="ghost" size="md" disabled title="Merge adapter → base — comes once go-mlx exposes the merge verb over admin"><i class="fa-solid fa-code-merge" style="font-size:11px;"></i> ${this.t.btnMerge}</lthn-btn>
+            <lthn-btn tone="ghost" size="md" disabled title="Push to HuggingFace — comes once token auth lands"><i class="fa-solid fa-cloud-arrow-up" style="font-size:11px;"></i> ${this.t.btnPushHf}</lthn-btn>
           </div>
           <div style="height:1px; background:rgba(255,255,255,0.05);"></div>
           <div>
