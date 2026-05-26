@@ -22,6 +22,7 @@
 package sessions
 
 import (
+	"sort"
 
 	core "dappco.re/go"
 	"dappco.re/go/inference"
@@ -956,6 +957,98 @@ func List(c *core.Core) core.Result {
 			continue
 		}
 		out = append(out, info)
+	}
+	return core.Ok(out)
+}
+
+// Generation is one assistant reply lifted out of a session, paired
+// with the user prompt that preceded it. Used by the Activity →
+// History tab to render a flat across-sessions list — "what model
+// said what, when, to which question" — without forcing the UI to
+// walk every session itself.
+//
+// Timestamp granularity is the session's UpdatedAt because the
+// legacy on-disk format doesn't carry per-message timestamps; a
+// session that received three replies in a burst surfaces three rows
+// sharing the same ts. When pkg/chathistory becomes the storage
+// layer this collapses to true per-turn time (it stores created_at
+// per row).
+//
+// Tokens is a char/4 estimate of the assistant content — the
+// existing message log has no per-turn token counter, so the field
+// gives a "ballpark for display" rather than billing-grade truth.
+// Real counts will land once the runner threads its token usage
+// through to Append.
+type Generation struct {
+	SessionID    string `json:"session_id"`
+	SessionTitle string `json:"session_title"`
+	UpdatedAt    int64  `json:"updated_at"`
+	Prompt       string `json:"prompt"`
+	Reply        string `json:"reply"`
+	Tokens       int    `json:"tokens"`
+}
+
+// RecentGenerations returns the most-recent assistant turns across
+// every session, flattened + sorted newest-first. Each row pairs the
+// assistant message with the immediately preceding user prompt so
+// the History grid can render the full ask→reply story per row.
+//
+// Limit caps the rows returned (default 20 when limit ≤ 0). Sessions
+// are walked newest-first so the cap typically only reads the top
+// few session message logs, not all of them.
+//
+// Usage example:
+//
+//	r := sessions.RecentGenerations(c, 20)
+//	if r.OK { gens := r.Value.([]sessions.Generation); _ = gens }
+func RecentGenerations(c *core.Core, limit int) core.Result {
+	if c == nil {
+		return core.Fail(core.E("sessions.RecentGenerations", coreNilMessage, nil))
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	listR := List(c)
+	if !listR.OK {
+		return listR
+	}
+	infos, _ := listR.Value.([]SessionInfo)
+	sort.SliceStable(infos, func(i, j int) bool {
+		return infos[i].UpdatedAt > infos[j].UpdatedAt
+	})
+	out := make([]Generation, 0, limit)
+	for _, info := range infos {
+		if len(out) >= limit {
+			break
+		}
+		msgsR := readMessages(c, info.ID)
+		if !msgsR.OK {
+			continue
+		}
+		msgs, _ := msgsR.Value.([]inference.Message)
+		for i := len(msgs) - 1; i >= 0; i-- {
+			if msgs[i].Role != "assistant" {
+				continue
+			}
+			prompt := ""
+			for j := i - 1; j >= 0; j-- {
+				if msgs[j].Role == "user" {
+					prompt = msgs[j].Content
+					break
+				}
+			}
+			out = append(out, Generation{
+				SessionID:    info.ID,
+				SessionTitle: info.Title,
+				UpdatedAt:    info.UpdatedAt,
+				Prompt:       prompt,
+				Reply:        msgs[i].Content,
+				Tokens:       core.RuneCount(msgs[i].Content) / 4,
+			})
+			if len(out) >= limit {
+				break
+			}
+		}
 	}
 	return core.Ok(out)
 }

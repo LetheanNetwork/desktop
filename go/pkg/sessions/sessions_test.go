@@ -102,6 +102,44 @@ func TestSessions_List_Good_MultipleSessions(t *core.T) {
 	core.AssertEqual(t, 0, byID[b].Messages, "B is still empty")
 }
 
+func TestSessions_RecentGenerations_Good(t *core.T) {
+	c := coreFixture(t)
+	idA := sessions.Create(c, "A").Value.(string)
+	idB := sessions.Create(c, "B").Value.(string)
+
+	// A: one ask + reply pair. B: two pairs so we exercise the
+	// preceding-user-prompt walk and the per-session multi-yield path.
+	core.AssertTrue(t, sessions.Append(c, idA, "user", "first prompt A").OK)
+	core.AssertTrue(t, sessions.Append(c, idA, "assistant", "reply A1").OK)
+	core.AssertTrue(t, sessions.Append(c, idB, "user", "prompt B1").OK)
+	core.AssertTrue(t, sessions.Append(c, idB, "assistant", "reply B1").OK)
+	core.AssertTrue(t, sessions.Append(c, idB, "user", "prompt B2").OK)
+	core.AssertTrue(t, sessions.Append(c, idB, "assistant", "reply B2").OK)
+
+	r := sessions.RecentGenerations(c, 10)
+	core.AssertTrue(t, r.OK)
+	gens := r.Value.([]sessions.Generation)
+	core.AssertLen(t, gens, 3)
+
+	// Each gen pairs assistant content with preceding user prompt.
+	for _, g := range gens {
+		core.AssertNotEmpty(t, g.Reply)
+		core.AssertNotEmpty(t, g.Prompt)
+		core.AssertNotEmpty(t, g.SessionID)
+	}
+
+	// Limit truncates.
+	r2 := sessions.RecentGenerations(c, 2)
+	core.AssertTrue(t, r2.OK)
+	core.AssertLen(t, r2.Value.([]sessions.Generation), 2)
+}
+
+func TestSessions_RecentGenerations_Bad_NilCore(t *core.T) {
+	r := sessions.RecentGenerations(nil, 10)
+	core.AssertFalse(t, r.OK)
+	core.AssertNotEmpty(t, r.Error())
+}
+
 func TestSessions_Create_Bad_NilCore(t *core.T) {
 	r := sessions.Create(nil, "thread")
 	core.AssertFalse(t, r.OK)

@@ -321,6 +321,22 @@ func (s *WailsService) List() core.Result {
 	return core.Ok(infos)
 }
 
+// RecentGenerations returns the most-recent assistant turns across
+// every session, flattened newest-first. Backs the Activity →
+// History tab so the user sees real "what did the model say recently
+// and to what prompt" rows instead of a fixture.
+//
+//	import { RecentGenerations } from "@desktop/sessions/wailsservice";
+//	const gens = await RecentGenerations(20);
+func (s *WailsService) RecentGenerations(limit int) core.Result {
+	r := RecentGenerations(s.core, limit)
+	if !r.OK {
+		return core.Fail(core.E("sessions.WailsService.RecentGenerations", "recent generations failed", r.Value.(error)))
+	}
+	gens, _ := r.Value.([]Generation)
+	return core.Ok(gens)
+}
+
 // validateExportPath gates the WebView-facing Export / ExportAll
 // surface against arbitrary-write attacks (Mantis #1420, Cerberus M4
 // 2026-05-17). path must be absolute, NUL-free, path-clean, and

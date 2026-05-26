@@ -13,6 +13,15 @@ interface LiveLine {
   m: string;
 }
 
+interface GenerationRow {
+  ts: string;       // "HH:MM" derived from session UpdatedAt
+  model: string;    // session title — closest stand-in until per-turn model_id lands
+  tok: number;      // char/4 estimate of assistant reply
+  tg: number | null; // tok/s — null until runner threads it through
+  w: number | null;  // watts — null until power telemetry per-turn lands
+  prompt: string;
+}
+
 class LthnLogsWindow extends LitElement {
   static readonly properties = {
     w: { type: Number },
@@ -22,6 +31,8 @@ class LthnLogsWindow extends LitElement {
     chrome: { state: true },
     liveLines: { state: true },
     paused: { state: true },
+    gens: { state: true },
+    gensLoaded: { state: true },
     t: { state: true },
   };
   declare w: number;
@@ -31,6 +42,8 @@ class LthnLogsWindow extends LitElement {
   declare chrome: { title: string; subtitle: string };
   declare liveLines: LiveLine[];
   declare paused: boolean;
+  declare gens: GenerationRow[];
+  declare gensLoaded: boolean;
   declare t: {
     tabLive: string; tabHistory: string; tabPower: string;
     btnClear: string; btnPause: string; btnResume: string;
@@ -38,25 +51,14 @@ class LthnLogsWindow extends LitElement {
 
   private _pollTimer: number | null = null;
 
-  /** History tab generations — fixture today (real history needs a
-   *  per-turn log; tracked separately). Lifted to a class field so
-   *  the footer in render() and the body in _renderHistory() share
-   *  one source — the "N generations" count stays in sync with what
-   *  the body actually shows. */
-  private readonly _gens = [
-    { ts: "14:32:14",  model: "gemma-4-e2b",  tok: 158, tg: 47.2, w: 8.4,  prompt: "Rewrite this function to use streams instead of arrays…" },
-    { ts: "12:08:42",  model: "gemma-4-e2b",  tok: 384, tg: 46.8, w: 8.3,  prompt: "Summarise the changes between v0.1 and v0.2-rc1 of the runner…" },
-    { ts: "11:55:18",  model: "llama-3.2-3b", tok: 220, tg: 32.6, w: 11.8, prompt: "What's the difference between LoRA rank 8 and rank 16?" },
-    { ts: "09:42:01",  model: "gemma-4-e2b",  tok: 642, tg: 45.9, w: 8.5,  prompt: "Draft a release note for the new model browser…" },
-    { ts: "08:18:33",  model: "phi-3.5-mini", tok: 184, tg: 38.4, w: 9.6,  prompt: "Translate the following help-centre article to British English…" },
-  ];
-
   constructor() {
     super();
     this.w = 1000; this.h = 660; this.tab = "live"; this.embedded = false;
     this.chrome = { title: "Activity", subtitle: "logs · history · power" };
     this.liveLines = [];
     this.paused = false;
+    this.gens = [];
+    this.gensLoaded = false;
     this.t = {
       tabLive: "Live log", tabHistory: "Generation history", tabPower: "Power history",
       btnClear: "Clear", btnPause: "Pause", btnResume: "Resume",
@@ -82,6 +84,43 @@ class LthnLogsWindow extends LitElement {
     };
     void this._pollLive();
     this._pollTimer = window.setInterval(() => void this._pollLive(), 1500);
+    void this._loadGens();
+  }
+
+  /** Pull recent assistant turns out of pkg/sessions and map them
+   *  into the row shape the History grid renders. One call on mount
+   *  + one on tab-click; sessions write is rare enough that polling
+   *  isn't necessary — re-fetch is cheap on demand. */
+  async _loadGens() {
+    try {
+      const sessions = await import("@desktop/sessions/wailsservice");
+      const { unwrap } = await import("../result");
+      const raw = await unwrap<unknown[]>(sessions.RecentGenerations(20), []);
+      const rows: GenerationRow[] = [];
+      for (const g of raw || []) {
+        const r = g as {
+          session_id?: string;
+          session_title?: string;
+          updated_at?: number;
+          prompt?: string;
+          reply?: string;
+          tokens?: number;
+        };
+        rows.push({
+          ts: fmtUnix(r.updated_at || 0),
+          model: r.session_title || "(untitled)",
+          tok: r.tokens || 0,
+          tg: null,
+          w: null,
+          prompt: r.prompt || "",
+        });
+      }
+      this.gens = rows;
+      this.gensLoaded = true;
+    } catch (err) {
+      console.error("logs: load gens failed", err);
+      this.gensLoaded = true;
+    }
   }
   disconnectedCallback() {
     super.disconnectedCallback();
@@ -161,13 +200,18 @@ class LthnLogsWindow extends LitElement {
         </lthn-btn>
       ` : nothing}
     `;
-    // History "N generations" derives from the rendered list so the
-    // footer count stays in sync with the body. "1.42M tokens · 142.6
-    // Wh · last 7 days" stay as design canon — no per-turn telemetry
-    // log yet to aggregate from.
+    // History footer derives from the rendered list — count + summed
+    // tokens both stay in sync with the body. Watts aggregate stays
+    // omitted until per-turn power telemetry lands; calling it
+    // "142.6 Wh" when no row carries watts would be the fixture lie
+    // we're moving away from.
+    const totalTok = this.gens.reduce((acc, g) => acc + (g.tok || 0), 0);
+    const tokStr = totalTok >= 1000 ? `${(totalTok / 1000).toFixed(1)}k` : String(totalTok);
     const footers = {
       live:    `streaming · ${this.liveLines.length} lines · webview bridge${this.paused ? " · paused" : ""}`,
-      history: `${this._gens.length} generations · last 7 days · 1.42M tokens · 142.6 Wh`,
+      history: this.gensLoaded
+        ? `${this.gens.length} generations · ~${tokStr} tokens · session-grain timestamps`
+        : "loading…",
       power:   "showing last 24h · sample 1 s · powermetrics backend",
     };
     const body =
@@ -249,20 +293,30 @@ class LthnLogsWindow extends LitElement {
   }
 
   _renderHistory() {
-    const gens = this._gens;
+    const gens = this.gens;
+    if (this.gensLoaded && gens.length === 0) {
+      return html`
+        <div style="flex:1; display:flex; align-items:center; justify-content:center; padding:40px 22px; flex-direction:column; gap:10px;">
+          <div style="font-size:13px; color:var(--fg-2);">No generations yet.</div>
+          <div style="font-size:11.5px; color:var(--fg-3); max-width:420px; text-align:center; line-height:1.55;">
+            Chats you have with the model land here automatically. Open the Chat surface, start a conversation, and the assistant turns will appear in this list.
+          </div>
+        </div>
+      `;
+    }
     return html`
       <div style="flex:1; padding:12px 22px 18px; overflow:auto;">
         <div style="background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.06); border-radius:8px; font-family:var(--font-mono); font-size:11.5px;">
           <div style="display:grid; grid-template-columns:100px 1.3fr 0.6fr 0.6fr 0.6fr 2fr; padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); color:var(--fg-3); font-size:10px; letter-spacing:0.04em; text-transform:uppercase;">
-            <span>Time</span><span>Model</span><span>Tokens</span><span>tok/s</span><span>Peak W</span><span>Prompt</span>
+            <span>Time</span><span>Session</span><span>Tokens</span><span>tok/s</span><span>Peak W</span><span>Prompt</span>
           </div>
           ${gens.map((g, i) => html`
             <div style="display:grid; grid-template-columns:100px 1.3fr 0.6fr 0.6fr 0.6fr 2fr; padding:10px 14px; border-bottom:${i < gens.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none"}; align-items:center; gap:8px;">
               <span style="color:var(--fg-2);">${g.ts}</span>
-              <span style="color:var(--fg-0);">${g.model}</span>
+              <span style="color:var(--fg-0); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.model}</span>
               <span style="color:var(--fg-1);">${g.tok}</span>
-              <span style="color:var(--brand-300);">${g.tg}</span>
-              <span style="color:var(--fg-1);">${g.w}</span>
+              <span style="color:var(--fg-3);">${g.tg ?? "—"}</span>
+              <span style="color:var(--fg-3);">${g.w ?? "—"}</span>
               <span style="color:var(--fg-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.prompt}</span>
             </div>
           `)}
@@ -331,4 +385,17 @@ function fmtTime(at: string): string {
   if (!at) return "";
   const m = at.match(/T(\d{2}:\d{2}:\d{2})/);
   return m ? m[1] : at;
+}
+
+/** Unix epoch (seconds) → "HH:MM" in the user's locale. Used by the
+ *  History tab so a row's timestamp reads against the wall clock the
+ *  user sees in the menubar rather than UTC the JSON carries. Zero
+ *  collapses to empty so a session with no UpdatedAt doesn't render
+ *  "00:00". */
+function fmtUnix(secs: number): string {
+  if (!secs) return "";
+  const d = new Date(secs * 1000);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
 }
