@@ -288,6 +288,13 @@ class LthnLemmaWindow extends LitElement {
       this.reloadErr = "pick a model path or profile";
       return;
     }
+    // SFT guard — mid-training model swap fails the job. Mirrors
+    // the model-browser-window guard; the Training row's Stop
+    // button is right above this form for the user to act on.
+    if (this.sftJob?.state === "running") {
+      this.reloadErr = "fine-tune is in flight — Stop it first (above) before swapping the model";
+      return;
+    }
     this.reloadBusy = true;
     this.reloadErr = "";
     try {
@@ -300,6 +307,12 @@ class LthnLemmaWindow extends LitElement {
       // Refresh status — the hot-swap mutates serve state.
       await this.loadAdmin();
       await this.poll();
+      // Broadcast so peer windows refresh their model_path mirror —
+      // same channel model-browser-window's Activate path uses.
+      try {
+        const { Events } = await import("@wailsio/runtime");
+        Events.Emit("lthn:lemma:model-reloaded", null);
+      } catch { /* wails runtime absent in test contexts */ }
     } catch (err) {
       this.reloadErr = String(err);
     } finally {
