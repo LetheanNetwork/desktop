@@ -581,6 +581,11 @@ func doRequest(req *core.Request) (string, int, error) {
 		return "", 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, _ := goio.ReadAll(resp.Body)
+	// 16 MiB cap — every opencode CLI verb routes through this helper
+	// against the local lthn serve, which in turn proxies to the
+	// sandbox container. Matches pkg/opencode/route.go's message-post
+	// ceiling so the CLI surface gets the same defence-in-depth
+	// against a misbehaving container pumping unbounded bytes.
+	raw, _ := goio.ReadAll(goio.LimitReader(resp.Body, 16<<20))
 	return core.Trim(string(raw)), resp.StatusCode, nil
 }
