@@ -43,7 +43,6 @@ package lemma
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -290,7 +289,8 @@ func (s *Service) callChatCompletions(ctx context.Context, messages []chatMessag
 		return "", 0, 0, err
 	}
 	if resp.StatusCode/100 != 2 {
-		return "", 0, 0, errors.New("lthn-mlx returned " + resp.Status + ": " + string(rawBody))
+		return "", 0, 0, core.E("lemma.callChatCompletions",
+			"lthn-mlx returned "+resp.Status+": "+string(rawBody), nil)
 	}
 
 	var decoded chatResponse
@@ -298,7 +298,8 @@ func (s *Service) callChatCompletions(ctx context.Context, messages []chatMessag
 		return "", 0, 0, r.Value.(error)
 	}
 	if len(decoded.Choices) == 0 {
-		return "", 0, 0, errors.New("response had no choices")
+		return "", 0, 0, core.E("lemma.callChatCompletions",
+			"response had no choices", nil)
 	}
 	tokensIn, tokensOut := 0, 0
 	if decoded.Usage != nil {
