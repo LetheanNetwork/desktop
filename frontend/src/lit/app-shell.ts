@@ -898,7 +898,7 @@ class LthnAppShell extends LitElement {
       const { unwrap } = await import("./result");
       const [models, build] = await Promise.all([
         unwrap<string[]>(runner.WModels(), []),
-        fl.Build().catch(() => null),
+        unwrap<{ version?: string } | null>(fl.Build(), null),
       ]);
       const firstModel = models?.[0];
       if (firstModel) {
@@ -953,26 +953,16 @@ class LthnAppShell extends LitElement {
    *  without raising a real OS drop. */
   async _adoptDroppedGgufs(paths: readonly string[]) {
     if (!paths || paths.length === 0) return;
-    let landed = 0;
-    try {
-      const ms = await import("@desktop/models/wailsservice");
-      const { demand } = await import("./result");
-      for (const p of paths) {
-        try {
-          await demand<string>(ms.Import(p));
-          landed += 1;
-        } catch (err: unknown) {
-          console.warn("drop-import failed:", p, err);
-        }
-      }
-    } catch (err: unknown) {
-      console.warn("drop-import binding lookup failed:", err);
-      return;
-    }
+    // TODO(athena): models/wailsservice does not yet expose an Import
+    // binding (List/Delete/DiskFree only). Drop-import is wired at the
+    // shell layer but no-ops at the backend boundary until the binding
+    // lands. File at Mantis when the model-ingest path is specced.
+    const landed = 0;
+    void paths;
     if (landed > 0) {
       try {
         const { Events } = await import("@wailsio/runtime");
-        Events.Emit({ name: MODELS_REFRESH_EVENT, data: { count: landed } });
+        Events.Emit(MODELS_REFRESH_EVENT, { count: landed });
       } catch { /* best effort */ }
     }
   }
@@ -1541,7 +1531,7 @@ class LthnAppShell extends LitElement {
                   <i class="fa-solid ${entry.icon}"
                      style="width:14px; font-size:11px; color:${isActive ? "var(--brand-300)" : "var(--fg-3)"};"></i>
                   <span style="flex:1;">${entry.label}</span>
-                  <span style="font-size:10px; color:var(--fg-3); font-family:var(--font-mono);">${entry.group}</span>
+                  <span style="font-size:10px; color:var(--fg-3); font-family:var(--font-mono);">${entry.viewLabel}</span>
                 </button>
               `;
             })}
