@@ -484,10 +484,18 @@ class LthnModelBrowserWindow extends LitElement {
                         font-family:var(--font-mono); font-size:10.5px; color:var(--fg-2);">
               ${selected?.isDir === false ? html`
                 <div style="display:flex; justify-content:space-between;"><span>${selected.name}</span><span style="color:var(--fg-3);">${selected.size}</span></div>
+              ` : selected?.isDir ? html`
+                <div style="display:flex; justify-content:space-between;">
+                  <span>${selected.name}/</span>
+                  <span style="color:var(--fg-3);">${selected.size}</span>
+                </div>
+                <div style="color:var(--fg-3); font-style:italic; margin-top:2px;">
+                  Directory contents not enumerated.
+                </div>
               ` : html`
-                <div style="display:flex; justify-content:space-between;"><span>gemma-4-e2b-q4_k_m.gguf</span><span style="color:var(--fg-3);">1.9 GB</span></div>
-                <div style="display:flex; justify-content:space-between;"><span>tokenizer.json</span><span style="color:var(--fg-3);">4.2 MB</span></div>
-                <div style="display:flex; justify-content:space-between;"><span>config.json</span><span style="color:var(--fg-3);">1.1 KB</span></div>
+                <div style="color:var(--fg-3); font-style:italic;">
+                  Select a row to see its files.
+                </div>
               `}
             </div>
           </div>
