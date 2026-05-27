@@ -1005,14 +1005,6 @@ func (s *Service) Run() core.Result {
 	return s.gui.Run()
 }
 
-func restoreFocusedWindow(c *core.Core, name string) bool {
-	if windowExists(c, name) {
-		openWindow(c, name)
-		return true
-	}
-	return false
-}
-
 // restoreSecondInstanceWindow brings a window forward in response to a
 // second-instance launch. Tries the unified app shell first, the tray
 // popover second, and falls through to a window.open create-and-show on
@@ -1039,25 +1031,20 @@ func restoreFocusedWindow(c *core.Core, name string) bool {
 // click. Forensic observability: the audit row is the value-add per
 // the Cerberus recommendation — even if window.open fails downstream
 // the substrate carries proof the handler reached the fallback branch.
-//
-// Usage example (internal):
-//
-//	restoreSecondInstanceWindow(s.opts.Core, s.opts)
 func restoreSecondInstanceWindow(c *core.Core, opts Options) {
 	if c == nil {
 		return
 	}
-	if restoreFocusedWindow(c, "app") {
+	if gui.OpenWindow(c, "app") {
 		return
 	}
-	if restoreFocusedWindow(c, "tray") {
+	if gui.OpenWindow(c, "tray") {
 		return
 	}
 	emitSecondInstanceFallback()
-	if spec, ok := windowSpecByName("app"); ok {
-		// Open the registered window via the standard window.open action.
+	if spec, ok := gui.WindowSpec(c, "app"); ok {
 		// gui.Service has already pre-created it hidden; this just shows
-		// + focuses.
+		// + focuses by re-running window.open with Hidden=false.
 		opened := *spec
 		opened.Hidden = false
 		c.Action("window.open").Run(core.Background(), core.NewOptions(
@@ -1065,30 +1052,6 @@ func restoreSecondInstanceWindow(c *core.Core, opts Options) {
 		))
 		_ = opts
 	}
-}
-
-// windowSpecByName returns the registry entry whose Name matches the
-// supplied key. The lookup walks windowRegistry() — small fixed slice
-// (single-digit entries today) so linear scan is fine; promoting to a
-// map would just hide an O(N) scan that already runs at human latency.
-//
-// Returns the spec + true on hit, the zero value + false on miss.
-//
-// Usage example (internal):
-//
-//	spec, ok := windowSpecByName("tray")
-//	if !ok { return }
-//	openWindowSpec(c, spec, opts, false)
-func windowSpecByName(name string) (*WindowSpec, bool) {
-	if name == "" {
-		return nil, false
-	}
-	for _, spec := range windowRegistry() {
-		if spec.Name == name {
-			return spec, true
-		}
-	}
-	return nil, false
 }
 
 // attachSPA mounts the embedded frontend as the coreapi.Engine's
