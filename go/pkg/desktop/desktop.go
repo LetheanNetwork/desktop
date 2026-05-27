@@ -580,6 +580,13 @@ func (s *Service) Run() core.Result {
 		if r := s.opts.Fleet.UpsertMachine(selfMachineRow()); !r.OK {
 			core.Warn("desktop.fleet.self_upsert", "error", r.Error())
 		}
+		// Kick a refresh in a goroutine immediately so the row's
+		// Status reflects Lemma reachability within ~3s (the admin
+		// timeout) rather than waiting 10s for the first ticker
+		// fire — the initial selfMachineRow() always returns
+		// status="online" which is wrong if Lemma is actually down.
+		// Backgrounded so a Lemma timeout doesn't block boot.
+		go refreshSelfMachineOnce(s.opts.Fleet)
 		// Keep the self row's Model + Status live — every 10s, pull
 		// Lemma.Status and re-upsert. When the user hot-swaps a model
 		// via the model-browser, the Fleet row reflects the change
