@@ -424,9 +424,30 @@ class LthnConfigureAgentModal extends LitElement {
     const p = this.provider;
     if (!p) return nothing;
     const isEdit = !!this.editing;
+    const isAutoManaged = isEdit && this.editing?.id === "local-lemma";
     return html`
       <div style="display:flex; flex-direction:column; gap:14px;">
         ${this.renderConfigureHeader(p, isEdit)}
+
+        ${isAutoManaged ? html`
+          <div style="padding:10px 12px; border-radius:8px;
+                      background:rgba(64,193,197,0.06);
+                      border:1px solid rgba(64,193,197,0.22);
+                      font-size:11.5px; line-height:1.55; color:var(--fg-1);">
+            <div style="font-weight:500; margin-bottom:4px;">
+              Auto-managed agent
+            </div>
+            <div style="color:var(--fg-2);">
+              Desktop re-registers Local Lemma every 10s while
+              <code style="font-family:var(--font-mono); color:var(--brand-300);">lthn-mlx</code>
+              is reachable. <strong>Model</strong> and
+              <strong>Base URL</strong> reflect the live engine — your
+              edits to those fields get overwritten on the next refresh.
+              <strong>Name</strong>, <strong>Persona</strong>, and
+              model settings persist.
+            </div>
+          </div>
+        ` : nothing}
 
         ${this.renderField("Name", html`
           <input type="text" .value=${this.name}
