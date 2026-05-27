@@ -263,7 +263,14 @@ class LthnModelBrowserWindow extends LitElement {
       const offLemmaModels = Events.On("lthn:lemma:models-changed", () => {
         void this._refreshLemmaAdmin();
       });
-      this._dlUnsubscribe = [offProgress, offDone, offLemmaModels];
+      // Sibling channel: distillation-window emits when SFT
+      // completes + the new adapter dir lands on disk. Same
+      // _refreshLemmaAdmin pulls SFTAdapters so the Adapter
+      // dropdown picks up the new entry without manual refresh.
+      const offLemmaAdapters = Events.On("lthn:lemma:adapters-changed", () => {
+        void this._refreshLemmaAdmin();
+      });
+      this._dlUnsubscribe = [offProgress, offDone, offLemmaModels, offLemmaAdapters];
     } catch { /* non-Wails env — no event bus */ }
   }
 

@@ -102,6 +102,10 @@ class LthnLemmaWindow extends LitElement {
   declare downloadErr: string;
   declare showAdmin: boolean;
   private pollHandle: ReturnType<typeof setInterval> | null = null;
+  /** Unsubscribers for cross-window Wails events captured in
+   *  connectedCallback. Cleared in disconnectedCallback so the
+   *  subscriptions don't outlive the element. */
+  private eventUnsub: Array<() => void> = [];
   private downloadPollHandle: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
@@ -131,10 +135,25 @@ class LthnLemmaWindow extends LitElement {
 
   createRenderRoot() { return this; }
 
-  connectedCallback() {
+  async connectedCallback() {
     super.connectedCallback();
     void this.poll();
     this.pollHandle = setInterval(() => { void this.poll(); }, 2000);
+    // Cross-window subscriptions: refresh the admin lane when sibling
+    // surfaces report model-list / adapter-list changes (downloads in
+    // model-browser, SFT completions in distillation). Re-pull only
+    // when the admin panel is open so we don't burn a Lemma round-trip
+    // for a collapsed surface.
+    try {
+      const { Events } = await import("@wailsio/runtime");
+      const offModels = Events.On("lthn:lemma:models-changed", () => {
+        if (this.showAdmin) void this.loadAdmin();
+      });
+      const offAdapters = Events.On("lthn:lemma:adapters-changed", () => {
+        if (this.showAdmin) void this.loadAdmin();
+      });
+      this.eventUnsub = [offModels, offAdapters];
+    } catch { /* wails runtime absent in test contexts */ }
   }
 
   disconnectedCallback() {
@@ -147,6 +166,8 @@ class LthnLemmaWindow extends LitElement {
       clearInterval(this.downloadPollHandle);
       this.downloadPollHandle = null;
     }
+    for (const u of this.eventUnsub) { try { u(); } catch { /* ignore */ } }
+    this.eventUnsub = [];
   }
 
   private async poll(): Promise<void> {

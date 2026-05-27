@@ -198,13 +198,28 @@ class LthnDistillationWindow extends LitElement {
   /** Pulls the active job state. When a job is running, starts a 2s
    *  poll so loss curve + metrics tick live. Stops the poll on
    *  terminal state (done / failed / stopped) — no need to keep
-   *  asking once nothing's changing. */
+   *  asking once nothing's changing. On the running→done transition
+   *  broadcasts "lthn:lemma:adapters-changed" so peer windows pick
+   *  up the new adapter dir without manual refresh. */
   private async _refreshJob(): Promise<void> {
+    const prevState = this.job?.state ?? "";
     try {
       const Lemma = await import("@desktop/lemma/wailsservice");
       const job = await Lemma.SFTStatus("");
       this.job = job as unknown as SFTJobView;
       this._managePollLifecycle();
+      // Edge-trigger broadcast: only on the transition INTO "done"
+      // (not on every poll while sitting in "done"). The condition
+      // wasRunning && nowDone catches the moment the adapter dir
+      // becomes complete. "failed" + "stopped" don't broadcast —
+      // there's no new adapter to surface in those cases.
+      const wasLive = prevState === "running" || prevState === "pending";
+      if (wasLive && this.job?.state === "done") {
+        try {
+          const { Events } = await import("@wailsio/runtime");
+          Events.Emit("lthn:lemma:adapters-changed", null);
+        } catch { /* wails runtime absent in test contexts */ }
+      }
     } catch (e) {
       // 404 when no job — clear local state, stop poll.
       const msg = e instanceof Error ? e.message : String(e);
