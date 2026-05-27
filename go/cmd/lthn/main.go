@@ -251,9 +251,13 @@ func cmdHelp(args []string) int {
 		return cmdMarketplace(nil)
 	case "config", "state", "events", "process", "sessions", "models",
 		"validate", "firstlaunch", "permissions", "telemetry", "service", "api":
+		// These verbs print their verb list to stderr on the no-args
+		// path. None of them dispatch a "help" sub-verb today (fleet
+		// does, which is why fleet is handled separately above), so
+		// don't lie about `lthn VERB help` — point at no-args directly.
 		core.Print(core.Stderr(),
-			"lthn help: no inline help for %q yet — try `lthn %s help` or `lthn %s` (no args) for usage\n",
-			args[0], args[0], args[0])
+			"lthn help: no inline help for %q yet — run `lthn %s` (no args) to see its verb list\n",
+			args[0], args[0])
 		return 2
 	default:
 		core.Print(core.Stderr(), "lthn help: no help for unknown subcommand %q\n", args[0])
