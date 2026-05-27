@@ -7,7 +7,8 @@
   "cli": {
     "welcome": {
       "title": "lthn — Lethean unified binary",
-      "subtitle": "Run without arguments from a GUI launcher (Finder / wails3 dev / launchd) to start the systray + GUI. From a terminal, pick a subcommand:"
+      "subtitle": "Run without arguments from a GUI launcher (Finder / wails3 dev / launchd) to start the systray + GUI. From a terminal, pick a subcommand:",
+      "more":  "run `lthn help` for the full list of subcommands."
     },
     "help": {
       "title": "lthn — Lethean unified binary",
@@ -31,6 +32,9 @@
       "telemetry": "local process metrics",
       "service": "OS daemon lifecycle",
       "api": "OpenAPI gateway",
+      "fleet": "fleet substrate (machines / agents / queue / rules)",
+      "opencode": "OpenCode sandbox lifecycle",
+      "marketplace": "plugin / bundle marketplace",
       "version": "print version information",
       "help": "show help for a subcommand"
     },

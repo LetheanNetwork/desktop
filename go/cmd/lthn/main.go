@@ -149,10 +149,15 @@ func cmdDefault(args []string) int {
 	core.Println("  lthn tray          — " + tr("cli.subcommands.tray"))
 	core.Println("  lthn serve         — " + tr("cli.subcommands.serve"))
 	core.Println("  lthn ai            — " + tr("cli.subcommands.ai"))
+	core.Println("  lthn fleet         — " + tr("cli.subcommands.fleet"))
+	core.Println("  lthn marketplace   — " + tr("cli.subcommands.marketplace"))
+	core.Println("  lthn opencode      — " + tr("cli.subcommands.opencode"))
 	core.Println("  lthn config        — " + tr("cli.subcommands.config"))
 	core.Println("  lthn state         — " + tr("cli.subcommands.state"))
 	core.Println("  lthn version       — " + tr("cli.subcommands.version"))
 	core.Println("  lthn help          — " + tr("cli.subcommands.help"))
+	core.Println("")
+	core.Println(tr("cli.welcome.more"))
 	return 0
 }
 
