@@ -353,7 +353,7 @@ class LthnDistillationWindow extends LitElement {
       // immediately — same Lethean-6 app-shell pane-set pattern the
       // tray "Open Chat" button uses.
       try {
-        const WindowService = await import("@desktop/desktop/windowservice");
+        const WindowService = await import("@lthn/gui/windowbindingservice");
         await WindowService.Open("app");
         const { Events } = await import("@wailsio/runtime");
         Events.Emit("lthn:app:setpane", "chat");

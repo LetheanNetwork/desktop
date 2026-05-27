@@ -1149,7 +1149,7 @@ class LthnAppShell extends LitElement {
   }
 
   private _popOut(id: string) {
-    import("@desktop/desktop/windowservice")
+    import("@lthn/gui/windowbindingservice")
       .then(w => w.Open(id))
       .catch(() => { /* WindowService import failure: silently degrade */ });
   }

@@ -68,7 +68,7 @@ tasks:
     generates:
       - ../frontend/bindings/**/*
     cmds:
-      - wails3 generate bindings -ts -d ../frontend/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/...
+      - wails3 generate bindings -ts -d ../frontend/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/... ../external/gui/go/...
 
   generate:icons:
     summary: Generates Windows `.ico` and Mac `.icns` from build/appicon.png.

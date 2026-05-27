@@ -32,7 +32,7 @@ async function completeOnboarding(): Promise<void> {
   try {
     const [config, windowSvc] = await Promise.all([
       import("@lthn/config/service"),
-      import("@desktop/desktop/windowservice"),
+      import("@lthn/gui/windowbindingservice"),
     ]);
     await config.Set("welcome.completed", "true");
     // Mark the menu tour as seen — the Settings → Menu Behaviours
@@ -198,7 +198,7 @@ class LthnWelcomeWindow extends LitElement {
    *  silently fall through. */
   async firstUpdated(): Promise<void> {
     try {
-      const ws = await import("@desktop/desktop/windowservice");
+      const ws = await import("@lthn/gui/windowbindingservice");
       await ws.SetSize("welcome", this.w, this.h);
     } catch { /* binding unavailable — design preview / unit test path */ }
   }

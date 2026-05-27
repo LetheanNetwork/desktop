@@ -612,7 +612,7 @@ class LthnSettingsWindow extends LitElement {
     try {
       writeStoredSetting("lthn.welcome.start-step", "4");
       writeStoredSetting("lthn.menu.tour-completed", "");
-      const ws = await import("@desktop/desktop/windowservice");
+      const ws = await import("@lthn/gui/windowbindingservice");
       await ws.Open("welcome");
     } catch (err) {
       console.error("settings: replay menu tour failed", err);
@@ -842,7 +842,7 @@ class LthnSettingsWindow extends LitElement {
             <i class="fa-regular fa-folder" style="font-size:11px; color:var(--fg-3);"></i>
             ${this.modelsDir}
             <lthn-btn tone="quiet" size="sm" style="margin-left:4px;"
-              @click=${() => import("@desktop/desktop/windowservice").then(w => w.Open("models"))}>
+              @click=${() => import("@lthn/gui/windowbindingservice").then(w => w.Open("models"))}>
               ${this.row.btnBrowse}
             </lthn-btn>
           </div>
@@ -982,7 +982,7 @@ class LthnSettingsWindow extends LitElement {
       content: html`
         ${this._row(this.row.openIntL, this.row.openIntH, html`
           <lthn-btn tone="quiet" size="sm"
-            @click=${() => import("@desktop/desktop/windowservice").then(w => w.Open("integrations"))}>
+            @click=${() => import("@lthn/gui/windowbindingservice").then(w => w.Open("integrations"))}>
             <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px;"></i> ${this.row.btnOpen}
           </lthn-btn>
         `)}

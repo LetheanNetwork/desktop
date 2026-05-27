@@ -127,7 +127,7 @@ switch (surface) {
     const [telemetry, runner, windowSvc, i18n, fl, lemmaSvc] = await Promise.all([
       import("@desktop/telemetry/service"),
       import("@desktop/runner/service"),
-      import("@desktop/desktop/windowservice"),
+      import("@lthn/gui/windowbindingservice"),
       import("@lthn/i18n/coreservice"),
       import("@desktop/firstlaunch/wailsservice"),
       import("@desktop/lemma/wailsservice"),

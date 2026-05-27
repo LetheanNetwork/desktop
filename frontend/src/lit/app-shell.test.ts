@@ -217,7 +217,7 @@ describe("lthn-app-shell — Menu Links (click dispatch matrix)", () => {
   // Spec § 4 dispatch matrix. We assert via negative-space:
   // `active` changing = navigate-in-place fired; `active` unchanged
   // = pop-out branch fired (and the pop-out import call is mocked
-  // out at the @desktop/desktop/windowservice module boundary so
+  // out at the @lthn/gui/windowbindingservice module boundary so
   // it doesn't actually spawn a window in test).
   type ShellEl = HTMLElement & {
     active: string;
@@ -320,7 +320,7 @@ describe("lthn-app-shell — rail click dispatch", () => {
   // navigation (_select) and ⌘/Ctrl-clicks to the standalone-window
   // pop-out via WindowService.Open. The pop-out branch is asserted
   // via negative-space — `active` MUST NOT change — because mocking
-  // the dynamic `import("@desktop/desktop/windowservice")` adds
+  // the dynamic `import("@lthn/gui/windowbindingservice")` adds
   // setup weight the contract doesn't need.
   // Spec: plans/project/lthn/desktop/RFC.menu-behaviours.md § 3.
   type ShellEl = HTMLElement & {
