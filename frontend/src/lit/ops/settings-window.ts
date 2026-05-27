@@ -81,6 +81,8 @@ class LthnSettingsWindow extends LitElement {
     modelsDir: { state: true },
     routeNames: { state: true },
     lemmaModel: { state: true },
+    lemmaRuntime: { state: true },
+    lemmaEndpoint: { state: true },
     build: { state: true },
     sampleInterval: { state: true },
     heapSamples: { state: true },
@@ -116,6 +118,12 @@ class LthnSettingsWindow extends LitElement {
    *  Default model display when no runner routes are configured.
    *  Empty when Lemma is unreachable or no model is loaded. */
   declare lemmaModel: string;
+  /** Runtime tag from Lemma.Status (metal / cuda / rocm / cpu) +
+   *  endpoint URL used to address the engine. Both populated only
+   *  when the engine is reachable. Used by the Runner pane to
+   *  render a Local Lemma card alongside runner routes. */
+  declare lemmaRuntime: string;
+  declare lemmaEndpoint: string;
   declare build: { version: string; go_version: string; goos: string; goarch: string; num_cpu: number };
   declare sampleInterval: string;
   declare heapSamples: string;
@@ -181,6 +189,8 @@ class LthnSettingsWindow extends LitElement {
     this.modelsDir = "~/Lethean/conf/models/";
     this.routeNames = [];
     this.lemmaModel = "";
+    this.lemmaRuntime = "";
+    this.lemmaEndpoint = "";
     this.build = { version: "0.1.0", go_version: "", goos: "", goarch: "", num_cpu: 0 };
     // Telemetry poll cadence + sparkline window. Persisted via
     // localStorage so the tray + telemetry-window read the same
@@ -498,6 +508,12 @@ class LthnSettingsWindow extends LitElement {
         const slash = p.lastIndexOf("/");
         this.lemmaModel = slash >= 0 ? p.slice(slash + 1) : p;
       }
+      // Capture runtime + endpoint for the Runner pane's Local
+      // Lemma card. Endpoint is the loopback admin convention since
+      // ServeStatus doesn't carry it (the engine doesn't know its
+      // own external URL).
+      this.lemmaRuntime = st?.runtime || "";
+      this.lemmaEndpoint = "http://127.0.0.1:11434";
     } catch { /* lemma down — keep empty */ }
     if (build?.OK) {
       this.build = build.Value as { version: string; go_version: string; goos: string; goarch: string; num_cpu: number };
@@ -845,17 +861,52 @@ class LthnSettingsWindow extends LitElement {
     });
   }
 
+  /** Local Lemma card — rendered alongside runner routes when the
+   *  engine is reachable. Tagged "lthn-mlx" to distinguish from
+   *  external provider routes; uses the brand-tinted background to
+   *  signal "this is the in-process default", not a configured route.
+   *  Hidden when Lemma is down so the panel doesn't pretend an
+   *  engine that isn't there. */
+  private _renderLemmaCard() {
+    if (!this.lemmaModel) return nothing;
+    return html`
+      <div style="padding:12px 14px; border-radius:8px;
+                  background:rgba(64,193,197,0.06);
+                  border:1px solid rgba(64,193,197,0.22);
+                  display:flex; flex-direction:column; gap:6px;">
+        <div style="display:flex; align-items:baseline; gap:8px;">
+          <span style="font-family:var(--font-mono); font-size:13px; color:var(--fg-0); font-weight:500;">
+            Local Lemma
+          </span>
+          <span style="font-size:10.5px; color:var(--brand-300); letter-spacing:0.04em; text-transform:uppercase;">
+            · lthn-mlx${this.lemmaRuntime ? ` · ${this.lemmaRuntime}` : ""}
+          </span>
+        </div>
+        <div style="display:grid; grid-template-columns:auto 1fr; gap:4px 12px;
+                    font-family:var(--font-mono); font-size:11px; color:var(--fg-2);">
+          <span style="color:var(--fg-3);">model</span>
+          <span>${this.lemmaModel}</span>
+          <span style="color:var(--fg-3);">endpoint</span>
+          <span>${this.lemmaEndpoint || "—"}/v1</span>
+        </div>
+      </div>
+    `;
+  }
+
   _sectionRunner() {
+    const hasRoutes = this.routes.length > 0;
+    const hasLemma  = !!this.lemmaModel;
     return this._section({
       title: this.panel.runnerT,
       desc:  this.panel.runnerD,
-      content: this.routes.length === 0 ? html`
+      content: !hasRoutes && !hasLemma ? html`
         <div style="padding:14px 16px; border-radius:8px; background:rgba(255,255,255,0.025);
                     border:1px solid rgba(255,255,255,0.05); font-size:12px; color:var(--fg-3); line-height:1.55;">
           ${this.row.emptyRoutes}
         </div>
       ` : html`
         <div style="display:flex; flex-direction:column; gap:8px;">
+          ${this._renderLemmaCard()}
           ${this.routes.map(r => html`
             <div style="padding:12px 14px; border-radius:8px; background:rgba(255,255,255,0.025);
                         border:1px solid rgba(255,255,255,0.06); display:flex; flex-direction:column; gap:6px;">
