@@ -1485,14 +1485,23 @@ class LthnChatWindow extends LitElement {
         <lthn-status-dot variant="ok"></lthn-status-dot>Model ready · Airplane-mode OK · ${this.runnerCount} runner · v${this.version}`;
 
     /* — toolbar — */
+    //
+    // The model badge looks like a dropdown (down-caret on the right)
+    // but the SPA doesn't host an inline model picker yet — clicking
+    // hops to the Models pane (model-browser-window) where Activate +
+    // Reload + Adapter live. Same lthn:app:setpane channel the tray
+    // popover + logs Open Chat use, so the shell deep-links cleanly.
     const toolbar = html`
-      <div style="display:flex; align-items:center; gap:6px; padding:4px 9px; border-radius:7px;
-                  background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07);
-                  font-size:11.5px; color:var(--fg-1);">
+      <button @click=${() => void this._openModelsPane()}
+        title="Open Models — pick + activate a different model"
+        style="display:flex; align-items:center; gap:6px; padding:4px 9px; border-radius:7px;
+               background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07);
+               font-size:11.5px; color:var(--fg-1); cursor:pointer; font-family:inherit;
+               --wails-draggable: no-drag;">
         <lthn-status-dot variant=${this.state === "no-model" ? "idle" : "ok"}></lthn-status-dot>
         ${toolbarModel}
         <i class="fa-solid fa-angle-down" style="font-size:9px; color:var(--fg-3); margin-left:2px;"></i>
-      </div>
+      </button>
       <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); letter-spacing:0.02em; padding:0 4px;">
         ${railData.ctx} · ${this.runnerCount} runner
       </div>
@@ -2297,6 +2306,18 @@ class LthnChatWindow extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  /** Hop the app-shell to the Models pane (model-browser-window),
+   *  where Activate + Reload + Adapter all live. Wired to the
+   *  model-name badge in the toolbar so the chevron isn't a lie. */
+  async _openModelsPane(): Promise<void> {
+    try {
+      const { Events } = await import("@wailsio/runtime");
+      Events.Emit("lthn:app:setpane", "models");
+    } catch (err) {
+      console.error("chat: open models pane failed", err);
+    }
   }
 
   /** Seed the composer with a starter suggestion + focus the textarea.
