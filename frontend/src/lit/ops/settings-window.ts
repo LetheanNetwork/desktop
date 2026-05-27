@@ -80,6 +80,7 @@ class LthnSettingsWindow extends LitElement {
     menuLayout: { state: true },
     modelsDir: { state: true },
     routeNames: { state: true },
+    lemmaModel: { state: true },
     build: { state: true },
     sampleInterval: { state: true },
     heapSamples: { state: true },
@@ -111,6 +112,10 @@ class LthnSettingsWindow extends LitElement {
   declare menuLayout: string;
   declare modelsDir: string;
   declare routeNames: string[];
+  /** Loaded model basename from Lemma.Status — fallback for the
+   *  Default model display when no runner routes are configured.
+   *  Empty when Lemma is unreachable or no model is loaded. */
+  declare lemmaModel: string;
   declare build: { version: string; go_version: string; goos: string; goarch: string; num_cpu: number };
   declare sampleInterval: string;
   declare heapSamples: string;
@@ -175,6 +180,7 @@ class LthnSettingsWindow extends LitElement {
     this.menuLayout = storedSetting("lthn.menu.layout", "toggle");
     this.modelsDir = "~/Lethean/conf/models/";
     this.routeNames = [];
+    this.lemmaModel = "";
     this.build = { version: "0.1.0", go_version: "", goos: "", goarch: "", num_cpu: 0 };
     // Telemetry poll cadence + sparkline window. Persisted via
     // localStorage so the tray + telemetry-window read the same
@@ -342,11 +348,12 @@ class LthnSettingsWindow extends LitElement {
   createRenderRoot() { return this; }
   async connectedCallback() {
     super.connectedCallback();
-    const [i18n, fl, runner, server] = await Promise.all([
+    const [i18n, fl, runner, server, lemma] = await Promise.all([
       import("@lthn/i18n/coreservice"),
       import("@desktop/firstlaunch/wailsservice"),
       import("@desktop/runner/service"),
       import("@desktop/server/service"),
+      import("@desktop/lemma/wailsservice"),
     ]);
     const [
       title, subtitleTpl, locales, currentLang, paths, routes, routeViews, build, addr, listening,
@@ -478,6 +485,20 @@ class LthnSettingsWindow extends LitElement {
     }
     this.routeNames = routes || [];
     this.routes = (routeViews || []) as RouteView[];
+    // Lemma.Status fallback for the Default model display — when
+    // no runner routes are configured but lthn-mlx has a model
+    // loaded, the user DOES have a default. Best-effort: Lemma
+    // unreachable / no model loaded leaves lemmaModel empty and
+    // the panel falls through to the "no routes configured"
+    // empty-state copy.
+    try {
+      const st = await lemma.Status();
+      if (st?.model_path) {
+        const p = st.model_path.replace(/\/+$/, "");
+        const slash = p.lastIndexOf("/");
+        this.lemmaModel = slash >= 0 ? p.slice(slash + 1) : p;
+      }
+    } catch { /* lemma down — keep empty */ }
     if (build?.OK) {
       this.build = build.Value as { version: string; go_version: string; goos: string; goarch: string; num_cpu: number };
     }
@@ -782,7 +803,18 @@ class LthnSettingsWindow extends LitElement {
   }
 
   _sectionModels() {
-    const defaultModel = this.routeNames.length > 0 ? this.routeNames[0] : "no routes configured";
+    // Three-tier fallback: runner route first (configured intent),
+    // then Lemma loaded model (engine truth), then the empty-state
+    // copy. The hint text mirrors the source so the user knows
+    // whether they're seeing a route name or the live engine model.
+    const hasRoutes = this.routeNames.length > 0;
+    const hasLemma  = !!this.lemmaModel;
+    const defaultModel = hasRoutes ? this.routeNames[0]
+                       : hasLemma  ? `${this.lemmaModel}  (lthn-mlx)`
+                       :             "no routes configured";
+    const defaultHint = hasRoutes ? this.row.defaultModelHint
+                      : hasLemma  ? "Engine truth — what lthn-mlx is currently serving."
+                      :             this.row.defaultModelEmpty;
     return this._section({
       title: this.panel.modelsT,
       desc:  this.panel.modelsD,
@@ -799,9 +831,7 @@ class LthnSettingsWindow extends LitElement {
             </lthn-btn>
           </div>
         `)}
-        ${this._row(this.row.defaultModelL,
-          this.routeNames.length > 0 ? this.row.defaultModelHint : this.row.defaultModelEmpty,
-          this._select(defaultModel))}
+        ${this._row(this.row.defaultModelL, defaultHint, this._select(defaultModel))}
         ${this._row(this.row.quantL, this.row.quantH,
           this._segment("q4_k_m", ["q4_0", "q4_k_m", "q5_k_m", "q8_0"]))}
         ${this._row(this.row.samplingL, this.row.samplingH, html`
