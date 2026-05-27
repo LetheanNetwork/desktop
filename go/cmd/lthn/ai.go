@@ -20,7 +20,10 @@ func aiChat(args []string) int {
 		core.Print(core.Stderr(), "lthn ai chat: usage: lthn ai chat MESSAGE\n")
 		return 2
 	}
-	r := newRunner()
+	r, c := newRunner()
+	if c != nil {
+		defer c.ServiceShutdown(core.Background())
+	}
 	reply := r.Chat([]inference.Message{
 		{Role: "user", Content: args[0]},
 	})
@@ -37,7 +40,10 @@ func aiGenerate(args []string) int {
 		core.Print(core.Stderr(), "lthn ai generate: usage: lthn ai generate PROMPT\n")
 		return 2
 	}
-	r := newRunner()
+	r, c := newRunner()
+	if c != nil {
+		defer c.ServiceShutdown(core.Background())
+	}
 	reply := r.Generate(args[0])
 	return printReply(reply, "ai generate")
 }
@@ -83,7 +89,10 @@ func aiModels(args []string) int {
 			return 2
 		}
 	}
-	r := newRunner()
+	r, c := newRunner()
+	if c != nil {
+		defer c.ServiceShutdown(core.Background())
+	}
 	models := r.Models()
 	if !models.OK {
 		core.Print(core.Stderr(), "lthn ai models: %s\n", models.Error())
@@ -104,21 +113,29 @@ func aiModels(args []string) int {
 	return 0
 }
 
-// newRunner returns the Core-registered runner Service. The runner is
-// constructed in app.go via core.WithName("runner", runner.Register)
-// which reads routes from ~/Lethean/conf/lthn.yaml via the config
-// service. Falls back to an empty Service if Core boot fails (echo
-// stub behaviour).
-func newRunner() *runner.Service {
+// newRunner returns the Core-registered runner Service together with
+// the booted Core handle so the caller can `defer c.ServiceShutdown(...)`.
+// The runner is constructed in app.go via core.WithName("runner",
+// runner.Register) which reads routes from ~/Lethean/conf/lthn.yaml
+// via the config service. Falls back to an empty Service if Core boot
+// fails (echo stub behaviour) — the returned Core is nil in that case.
+//
+// Returning the Core matters: the previous shape created a Core that
+// went out of scope without a shutdown call, leaking the service stack
+// (DB handles, daemon registrations, etc.) on every `lthn ai chat/
+// generate/models` invocation. OS process-exit eventually reclaimed
+// everything, but the leak made the verbs misaligned with the
+// `defer c.ServiceShutdown(...)` pattern every other cmd file uses.
+func newRunner() (*runner.Service, *core.Core) {
 	c := newAppCore()
 	if c == nil {
-		return runner.NewService(runner.Options{})
+		return runner.NewService(runner.Options{}), nil
 	}
 	r, _ := core.ServiceFor[*runner.Service](c, "runner")
 	if r == nil {
-		return runner.NewService(runner.Options{})
+		return runner.NewService(runner.Options{}), c
 	}
-	return r
+	return r, c
 }
 
 // printReply formats a Result from runner.Generate / Chat to stdout
