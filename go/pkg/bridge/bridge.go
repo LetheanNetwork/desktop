@@ -165,8 +165,21 @@ func (s *Service) OnStartup(_ core.Context) core.Result {
 	if !tokR.OK {
 		return core.Fail(core.E("bridge.OnStartup", "auth token init failed", tokR.Value.(error)))
 	}
+	tok, ok := tokR.Value.(string)
+	if !ok || tok == "" {
+		// Cast guard: if loadOrGenerateToken ever returns a non-string
+		// Value on OK (contract drift) or an empty string, fail startup
+		// loud rather than silently leaving s.token = "" and turning
+		// every /mcp/* request into a 401 (which the empty-token check
+		// in requireAuth would then enforce). Without this branch the
+		// bridge "starts" but is permanently unreachable — symptom
+		// would be \"the bridge worked yesterday, not today\" with no
+		// log to correlate.
+		return core.Fail(core.E("bridge.OnStartup",
+			"auth token init returned non-string or empty value", nil))
+	}
 	s.tokenMu.Lock()
-	s.token, _ = tokR.Value.(string)
+	s.token = tok
 	s.tokenMu.Unlock()
 
 	mux := core.NewServeMux()
