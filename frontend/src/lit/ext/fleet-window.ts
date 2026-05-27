@@ -385,9 +385,12 @@ class LthnFleetWindow extends LitElement {
           <lthn-btn tone="quiet" size="sm" @click=${() => this.editMachine(m)} title="Edit machine">
             <i class="fa-solid fa-pen" style="font-size:10px;"></i>
           </lthn-btn>
-          <lthn-btn tone="quiet" size="sm" @click=${() => { void this.deleteMachineRow(m); }} title="Delete machine">
-            <i class="fa-solid fa-trash" style="font-size:10px;"></i>
-          </lthn-btn>
+          ${m.is_self
+            ? nothing
+            : html`
+              <lthn-btn tone="quiet" size="sm" @click=${() => { void this.deleteMachineRow(m); }} title="Delete machine">
+                <i class="fa-solid fa-trash" style="font-size:10px;"></i>
+              </lthn-btn>`}
         </div>
       </div>
     `;
