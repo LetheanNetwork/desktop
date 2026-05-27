@@ -37,7 +37,6 @@ import (
 	"dappco.re/go/ai/pkg/lab"
 	"dappco.re/go/config"
 	guilifecycle "dappco.re/go/gui/pkg/lifecycle"
-	guimenu "dappco.re/go/gui/pkg/menu"
 	guisystray "dappco.re/go/gui/pkg/systray"
 	guiwindow "dappco.re/go/gui/pkg/window"
 	coreI18n "dappco.re/go/i18n"
@@ -735,6 +734,11 @@ func (s *Service) Run() core.Result {
 		},
 		// Mac defaults wired by gui.ModeTray (ActivationPolicy=Accessory,
 		// terminate-after-last-window stays false).
+		AppMenu: []gui.MenuItem{
+			{Role: &gui.RoleAppMenu},
+			{Role: &gui.RoleEditMenu},
+			{Role: &gui.RoleWindowMenu},
+		},
 		Windows: gui.WindowsOptions{
 			// DisableQuitOnLastWindowClosed wired by gui.ModeTray.
 			// EnabledFeatures stays explicit — Wails3 needs the
@@ -840,22 +844,8 @@ func (s *Service) Run() core.Result {
 	// forwarded as "lthn:notification:response" without lthn importing
 	// Wails notification services directly.
 
-	// Application menu — macOS-only. Accessory apps still get a
-	// menubar when their windows are focused, and standard roles
-	// give us Cmd+Q / Cmd+W / Cmd+M / Cmd+H / Edit menu shortcuts
-	// for free. Without AddRole(AppMenu) we'd lose those.
-	if runtime.GOOS == "darwin" {
-		appRole := guimenu.RoleAppMenu
-		editRole := guimenu.RoleEditMenu
-		windowRole := guimenu.RoleWindowMenu
-		s.opts.Core.Action("menu.set_app_menu").Run(core.Background(), core.NewOptions(
-			core.Option{Key: "task", Value: guimenu.TaskSetAppMenu{Items: []guimenu.MenuItem{
-				{Role: &appRole},
-				{Role: &editRole},
-				{Role: &windowRole},
-			}}},
-		))
-	}
+	// Application menu is now declarative via GuiConfig.AppMenu above —
+	// gui.Service auto-gates to darwin and fires menu.set_app_menu.
 
 	// Systray icon + tooltip + menu + popover attachment are now
 	// declared via gui.GuiConfig.Tray (built above) and applied by

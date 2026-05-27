@@ -14,6 +14,7 @@ package desktop
 
 import (
 	core "dappco.re/go"
+	gui "dappco.re/go/gui"
 	guiwindow "dappco.re/go/gui/pkg/window"
 )
 
@@ -222,26 +223,15 @@ func windowRegistry() []*WindowSpec {
 // silently — the caller's tray menu shouldn't have offered the
 // option in the first place).
 func openWindow(c *core.Core, name string) {
-	if c == nil || !windowExists(c, name) {
-		return
-	}
 	// The unified `app` shell is the only window that warrants a Dock
 	// presence — the tray-spawned "lite" cards stay in Accessory so
 	// the menubar stays the single source of truth for them. Elevate
-	// BEFORE Show() so the activation policy is in place by the time
-	// the window draws and the OS decides cmd+Tab eligibility.
+	// BEFORE the show actions so the activation policy is in place by
+	// the time the window draws and the OS decides cmd+Tab eligibility.
 	if name == "app" {
 		setPolicyRegular()
 	}
-	c.Action("window.restore").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guiwindow.TaskRestore{Name: name}},
-	))
-	c.Action("window.set_visibility").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guiwindow.TaskSetVisibility{Name: name, Visible: true}},
-	))
-	c.Action("window.focus").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guiwindow.TaskFocus{Name: name}},
-	))
+	gui.OpenWindow(c, name)
 }
 
 func openWindowHandle(app any, name string) {
@@ -255,21 +245,11 @@ func hideWindowHandle(app any, name string) bool {
 	if !ok || typed == nil {
 		return false
 	}
-	if !windowExists(typed, name) {
-		return false
-	}
-	r := typed.Action("window.set_visibility").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guiwindow.TaskSetVisibility{Name: name, Visible: false}},
-	))
-	return r.OK
+	return gui.HideWindow(typed, name)
 }
 
 func windowExists(c *core.Core, name string) bool {
-	if c == nil || name == "" {
-		return false
-	}
-	r := c.QUERY(guiwindow.QueryWindowByName{Name: name})
-	return r.OK && r.Value != nil
+	return gui.WindowExists(c, name)
 }
 
 // openPluginWindow creates (or re-shows) a CoreGUI window for one
