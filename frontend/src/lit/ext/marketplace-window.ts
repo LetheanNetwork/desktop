@@ -316,7 +316,13 @@ class LthnMarketplaceWindow extends LitElement {
   ) {
     if (this.prompt) this.prompt = { ...this.prompt, step: "installing" };
     try {
-      const input: InstallInput = { Manifest: manifest as never, Env: env };
+      const input: InstallInput = {
+        Manifest: manifest as never,
+        Env: env,
+        ForceStaleInstall: false,
+        ExpectedManifestDigest: "",
+        PrevGrantedPermissions: {},
+      };
       const r = await Install(input);
       if (!r.OK) {
         this.err = `${this.t.errInstall}: ${(r as { Error?: string }).Error ?? "unknown"}`;
