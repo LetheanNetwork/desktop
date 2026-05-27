@@ -284,7 +284,14 @@ func (s *Service) callChatCompletions(ctx context.Context, messages []chatMessag
 	}
 	defer resp.Body.Close()
 
-	rawBody, err := io.ReadAll(resp.Body)
+	// Cap the response body at 16 MiB so a misbehaving (or hostile)
+	// lthn-mlx returning unbounded bytes can't OOM the chat process.
+	// 16 MiB covers any plausible single chat completion (a 4096-token
+	// reply at ~6 chars/token + metadata fits in <100 KiB); the cap
+	// is intentionally generous so honest workloads never clip. The
+	// admin client uses a tighter 1 MiB cap because admin endpoints
+	// return small JSON status envelopes; chat replies need more room.
+	rawBody, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
 		return "", 0, 0, err
 	}
