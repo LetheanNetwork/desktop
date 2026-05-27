@@ -24,6 +24,7 @@ package lemma
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -476,14 +477,32 @@ func (a *Admin) SFTAdapters(ctx context.Context) (SFTAdaptersList, error) {
 	return out, nil
 }
 
+// ErrNoTokenFile signals that the admin token file simply doesn't
+// exist yet — the expected state on any machine that hasn't run
+// lthn-mlx serve. Callers (WailsService.admin) treat this as
+// "Lemma not configured" rather than logging the path-not-found
+// every time the tray polls Lemma.Status, which would otherwise
+// fill the dev log with a per-second noise floor.
+//
+// Use errors.Is to detect — the wrapping helper below preserves
+// the sentinel through core.E so the caller can pattern-match.
+var ErrNoTokenFile = errors.New("lemma: admin token file does not exist")
+
 // loadTokenFromFile reads + trims an admin token from disk. Empty
 // file is rejected (would attempt unauthenticated calls otherwise).
 // Mode-check is deferred to the upstream writer (lthn-mlx writes 0600);
 // re-checking here only adds friction without security improvement —
 // the file is already in the user's home dir under their UID.
+//
+// Returns ErrNoTokenFile (sentinel, wrap-detectable via errors.Is)
+// when the path doesn't exist — the expected state before lthn-mlx
+// has been started for the first time.
 func loadTokenFromFile(path string) (string, error) {
 	r := core.ReadFile(path)
 	if !r.OK {
+		if raw, ok := r.Value.(error); ok && core.IsNotExist(raw) {
+			return "", ErrNoTokenFile
+		}
 		return "", core.E("lemma.loadTokenFromFile", "read "+path+": "+r.Error(), nil)
 	}
 	raw, ok := r.Value.([]byte)

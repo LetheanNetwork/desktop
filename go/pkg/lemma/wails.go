@@ -15,6 +15,7 @@ package lemma
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -42,6 +43,14 @@ func NewWailsService(cfg AdminConfig) *WailsService {
 	return &WailsService{cfg: cfg}
 }
 
+// errLemmaNotConfigured is the user-facing message mutation methods
+// return when the admin token file is missing (lthn-mlx never run).
+// Reads return zero-value + nil for the same condition; mutations
+// fail loudly so the operator sees why their button-click was a
+// no-op instead of getting silent success.
+var errLemmaNotConfigured = core.E("lemma.WailsService",
+	"Lemma is not configured — start lthn-mlx serve to enable the admin surface", nil)
+
 // ServiceName labels the binding namespace exposed to JS as "Lemma".
 // Wails-generated TS lives at
 // frontend/bindings/dappco.re/lthn/desktop/pkg/lemma/.
@@ -68,6 +77,9 @@ func (s *WailsService) Status(ctx context.Context) (ServeStatus, error) {
 	if err != nil {
 		return ServeStatus{}, err
 	}
+	if a == nil {
+		return ServeStatus{}, nil
+	}
 	return a.Status(ctx)
 }
 
@@ -79,6 +91,9 @@ func (s *WailsService) Machine(ctx context.Context) (MachineInfo, error) {
 	a, err := s.admin()
 	if err != nil {
 		return MachineInfo{}, err
+	}
+	if a == nil {
+		return MachineInfo{}, nil
 	}
 	return a.Machine(ctx)
 }
@@ -92,6 +107,9 @@ func (s *WailsService) Profiles(ctx context.Context) (ProfilesList, error) {
 	a, err := s.admin()
 	if err != nil {
 		return ProfilesList{}, err
+	}
+	if a == nil {
+		return ProfilesList{}, nil
 	}
 	return a.Profiles(ctx)
 }
@@ -107,6 +125,9 @@ func (s *WailsService) Reload(ctx context.Context, req ReloadRequest) error {
 	if err != nil {
 		return err
 	}
+	if a == nil {
+		return errLemmaNotConfigured
+	}
 	return a.Reload(ctx, req)
 }
 
@@ -119,6 +140,9 @@ func (s *WailsService) Download(ctx context.Context, req DownloadRequest) (strin
 	if err != nil {
 		return "", err
 	}
+	if a == nil {
+		return "", errLemmaNotConfigured
+	}
 	return a.Download(ctx, req)
 }
 
@@ -130,6 +154,9 @@ func (s *WailsService) DownloadJob(ctx context.Context, jobID string) (DownloadJ
 	a, err := s.admin()
 	if err != nil {
 		return DownloadJobStatus{}, err
+	}
+	if a == nil {
+		return DownloadJobStatus{}, nil
 	}
 	return a.DownloadJob(ctx, jobID)
 }
@@ -144,6 +171,9 @@ func (s *WailsService) SFTStart(ctx context.Context, req SFTStartRequest) (SFTJo
 	if err != nil {
 		return SFTJob{}, err
 	}
+	if a == nil {
+		return SFTJob{}, errLemmaNotConfigured
+	}
 	return a.SFTStart(ctx, req)
 }
 
@@ -157,6 +187,9 @@ func (s *WailsService) SFTStatus(ctx context.Context, jobID string) (SFTJob, err
 	if err != nil {
 		return SFTJob{}, err
 	}
+	if a == nil {
+		return SFTJob{}, nil
+	}
 	return a.SFTStatus(ctx, jobID)
 }
 
@@ -168,6 +201,9 @@ func (s *WailsService) SFTStop(ctx context.Context, jobID string) (SFTJob, error
 	a, err := s.admin()
 	if err != nil {
 		return SFTJob{}, err
+	}
+	if a == nil {
+		return SFTJob{}, errLemmaNotConfigured
 	}
 	return a.SFTStop(ctx, jobID)
 }
@@ -183,12 +219,22 @@ func (s *WailsService) SFTAdapters(ctx context.Context) (SFTAdaptersList, error)
 	if err != nil {
 		return SFTAdaptersList{}, err
 	}
+	if a == nil {
+		return SFTAdaptersList{}, nil
+	}
 	return a.SFTAdapters(ctx)
 }
 
 // admin lazily builds the Admin client. Per-call rather than per-
 // service-instance so token rotation + late-start lthn-mlx both work
 // without re-binding the Wails service.
+//
+// "Token file does not exist" is treated as a benign "Lemma not
+// configured" state — returns (nil, nil) so the tray's per-second
+// Status / SFTStatus poll doesn't spam the dev log with a
+// not-found error on every iteration. Callers detect nil admin and
+// return zero-value snapshots; the frontend already handles those
+// (.then(s => s, () => null) collapses both into the no-engine UI).
 func (s *WailsService) admin() (*Admin, error) {
 	s.mu.RLock()
 	cfg := s.cfg
@@ -198,6 +244,9 @@ func (s *WailsService) admin() (*Admin, error) {
 	}
 	a, err := NewAdmin(cfg)
 	if err != nil {
+		if errors.Is(err, ErrNoTokenFile) {
+			return nil, nil
+		}
 		return nil, core.E("lemma.WailsService.admin", "admin client unavailable", err)
 	}
 	return a, nil
