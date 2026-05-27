@@ -93,14 +93,19 @@ function ctxItemStyle(colour: string = "var(--fg-0)"): string {
 }
 
 /* ── per-state derived props ──────────────────────────────────────── */
+//
+// Rail data — live tok/s + watts + KV-hit + token-window aren't sourced
+// yet (runner.WChat is a one-shot RPC, no streaming metering surface).
+// All values are "—" until per-turn telemetry lands; the previous
+// state-keyed fixture numbers ("47.2", "12.4 W", "94%", "1,284 / 4,096")
+// were demo-canvas leftovers that lied to users about live stats.
 function chatStateData(state: ChatState): ChatStateData {
   const railData: Record<ChatState, RailData> = {
-    empty:            { toksLive:"—",    watts:"—",      kvHit:"—",   tokens:"—",              ctx:"—" },
-    generating:       { toksLive:"47.2", watts:"12.4 W", kvHit:"94%", tokens:"1,284 / 4,096",  ctx:"1,284 / 4,096", sparkline:true,
-                        sources:[{title:"Go specification · variable scope", kind:"Reference · loaded from cache"}] },
-    "multi-turn":     { toksLive:"44.6", watts:"11.8 W", kvHit:"96%", tokens:"2,041 / 4,096",  ctx:"2,041 / 4,096" },
-    "switched-model": { toksLive:"—",    watts:"—",      kvHit:"0%",  tokens:"0 / 8,192",      ctx:"0 / 8,192" },
-    "no-model":       { toksLive:"—",    watts:"—",      kvHit:"—",   tokens:"—",              ctx:"—" },
+    empty:            { toksLive:"—", watts:"—", kvHit:"—", tokens:"—", ctx:"—" },
+    generating:       { toksLive:"—", watts:"—", kvHit:"—", tokens:"—", ctx:"—" },
+    "multi-turn":     { toksLive:"—", watts:"—", kvHit:"—", tokens:"—", ctx:"—" },
+    "switched-model": { toksLive:"—", watts:"—", kvHit:"—", tokens:"—", ctx:"—" },
+    "no-model":       { toksLive:"—", watts:"—", kvHit:"—", tokens:"—", ctx:"—" },
   };
 
   const turns: Record<ChatState, ChatTurn[] | null> = {
