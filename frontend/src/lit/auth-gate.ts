@@ -542,7 +542,7 @@ class LthnAuthGate extends LitElement {
           this._lockoutTimer = null;
         }
         if (seconds > 0) {
-          this._lockoutTimer = window.setTimeout(() => {
+          this._lockoutTimer = setTimeout(() => {
             this._lockoutTimer = null;
             this.lockedOutUntilSec = 0;
             this.unlockError = "";
