@@ -663,6 +663,14 @@ func (s *Service) Run() core.Result {
 			Menu:           trayMenuItems,
 			PopoverWindow:  "tray",
 			PopoverOffsetY: 5,
+			Routes: []gui.TrayRoute{
+				{ActionID: trayActionOpenApp, OpenWindow: "app", EmitEvent: trayOpenEvent},
+				{ActionID: trayActionOpenChat, OpenWindow: "chat", EmitEvent: trayOpenEvent},
+				{ActionID: trayActionOpenModels, OpenWindow: "models", EmitEvent: trayOpenEvent},
+				{ActionID: trayActionOpenSettings, OpenWindow: "settings", EmitEvent: trayOpenEvent},
+				{ActionID: trayActionOpenAbout, OpenWindow: "about", EmitEvent: trayOpenEvent},
+				{ActionID: trayActionQuit, Quit: true},
+			},
 		},
 		Keybindings: []gui.Keybinding{
 			{Accelerator: "Cmd+J", Description: "lthn:popover", EventName: "lthn:key:popover"},
@@ -853,51 +861,26 @@ func (s *Service) Run() core.Result {
 	// the lthn-specific routing logic (which window each ActionID
 	// opens, plus the lthn:* event emit).
 
-	// Click router — core/gui dispatches ActionTrayMenuItemClicked
-	// onto the action bus whenever a tray menu entry is clicked.
-	// Switch on ActionID; plugin entries route via the
-	// trayPluginPrefix suffix.
+	// Plugin tray-click router — bespoke handler for ActionIDs that
+	// match trayPluginPrefix. Validates the code at the click boundary
+	// (Cerberus #70 F-3 defence-in-depth) before opening the ad-hoc
+	// plugin window. Static menu items (open-app / open-chat / etc /
+	// quit) are routed declaratively via GuiConfig.Tray.Routes above.
 	s.opts.Core.RegisterAction(func(_ *core.Core, msg core.Message) core.Result {
 		click, ok := msg.(guisystray.ActionTrayMenuItemClicked)
 		if !ok {
 			return core.Result{OK: true}
 		}
-		switch click.ActionID {
-		case trayActionOpenApp:
-			openWindow(s.opts.Core, "app")
-			emitCoreEvent(s.opts.Core, trayOpenEvent, "app")
-		case trayActionOpenChat:
-			openWindow(s.opts.Core, "chat")
-			emitCoreEvent(s.opts.Core, trayOpenEvent, "chat")
-		case trayActionOpenModels:
-			openWindow(s.opts.Core, "models")
-			emitCoreEvent(s.opts.Core, trayOpenEvent, "models")
-		case trayActionOpenSettings:
-			openWindow(s.opts.Core, "settings")
-			emitCoreEvent(s.opts.Core, trayOpenEvent, "settings")
-		case trayActionOpenAbout:
-			openWindow(s.opts.Core, "about")
-			emitCoreEvent(s.opts.Core, trayOpenEvent, "about")
-		case trayActionQuit:
-			s.opts.Core.Action("lifecycle.quit").Run(core.Background(), core.NewOptions(
-				core.Option{Key: "task", Value: guilifecycle.TaskQuit{}},
-			))
-		default:
-			if core.HasPrefix(click.ActionID, trayPluginPrefix) {
-				code := core.TrimPrefix(click.ActionID, trayPluginPrefix)
-				// Re-validate at the click boundary — defence-in-depth
-				// against a race between Menus() snapshot at menu-build
-				// time and the click landing here (Cerberus #70 F-3).
-				// The build-time filter (buildPluginTrayItems) is the
-				// primary gate; this one stops a hostile ActionID that
-				// somehow bypassed it from reaching openPluginWindow.
-				if code != "" && paths.IsValidPluginCode(code) {
-					openPluginWindow(s.opts.Core, code)
-					emitCoreEvent(s.opts.Core, trayOpenEvent, "plugin:"+code)
-					emitTrayPluginClicked(code)
-				}
-			}
+		if !core.HasPrefix(click.ActionID, trayPluginPrefix) {
+			return core.Result{OK: true}
 		}
+		code := core.TrimPrefix(click.ActionID, trayPluginPrefix)
+		if code == "" || !paths.IsValidPluginCode(code) {
+			return core.Result{OK: true}
+		}
+		openPluginWindow(s.opts.Core, code)
+		emitCoreEvent(s.opts.Core, trayOpenEvent, "plugin:"+code)
+		emitTrayPluginClicked(code)
 		return core.Result{OK: true}
 	})
 
