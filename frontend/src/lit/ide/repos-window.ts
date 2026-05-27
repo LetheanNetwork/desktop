@@ -81,7 +81,11 @@ class LthnReposWindow extends LitElement {
     this.err = "";
     try {
       const svc = await import("@desktop/repos/service");
-      const r = await svc.Status({}) as { repos: RepoStatus[]; scanned: number };
+      const { unwrap } = await import("../result");
+      const r = await unwrap<{ repos: RepoStatus[]; scanned: number }>(
+        svc.Status({}),
+        { repos: [], scanned: 0 },
+      );
       this.repos = r.repos || [];
       this.scanned = r.scanned || 0;
     } catch (e: unknown) {
