@@ -255,7 +255,15 @@ class LthnModelBrowserWindow extends LitElement {
           });
         } catch { /* non-Wails env — keep existing local list */ }
       });
-      this._dlUnsubscribe = [offProgress, offDone];
+      // Cross-window broadcast: lemma-window emits this when an
+      // admin-API download finishes. Re-pull the Lemma admin lane
+      // (model list / active model / adapters) so the Reload picker
+      // + adapter dropdown reflect the new file without the user
+      // having to close + reopen the surface.
+      const offLemmaModels = Events.On("lthn:lemma:models-changed", () => {
+        void this._refreshLemmaAdmin();
+      });
+      this._dlUnsubscribe = [offProgress, offDone, offLemmaModels];
     } catch { /* non-Wails env — no event bus */ }
   }
 

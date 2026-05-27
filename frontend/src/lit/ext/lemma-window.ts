@@ -320,6 +320,19 @@ class LthnLemmaWindow extends LitElement {
         if (this.showAdmin) {
           void this.loadAdmin();
         }
+        // Broadcast so other windows (model-browser-window) re-pull
+        // their availableModels — the Reload picker / per-row Use
+        // controls reflect the new file without user-driven refresh.
+        // Emitted on both done + failed so any stale "downloading"
+        // status in a sibling window can reconcile.
+        if (js.status === "done") {
+          try {
+            const { Events } = await import("@wailsio/runtime");
+            Events.Emit("lthn:lemma:models-changed", null);
+          } catch {
+            // wails runtime not available in test contexts — silent skip
+          }
+        }
       }
     } catch (err) {
       this.downloadErr = String(err);
