@@ -312,6 +312,14 @@ class LthnLemmaWindow extends LitElement {
           clearInterval(this.downloadPollHandle);
           this.downloadPollHandle = null;
         }
+        // Refresh the admin lane on completion. "done" matters most
+        // — Models.List() now includes the freshly-downloaded file
+        // so the Reload picker reflects it without the user having
+        // to close + reopen the panel. "failed" reloads too so any
+        // stale state from the in-flight attempt is reconciled.
+        if (this.showAdmin) {
+          void this.loadAdmin();
+        }
       }
     } catch (err) {
       this.downloadErr = String(err);
