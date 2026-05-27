@@ -78,6 +78,14 @@ func windowRegistry() []*WindowSpec {
 			// spilling off small displays.
 			Width: 1440, Height: 900, MinWidth: 1000, MinHeight: 680,
 			Frameless: true, HideOnClose: true, EnableFileDrop: true,
+			// The unified `app` shell is the only window that warrants
+			// a Dock presence — the tray-spawned "lite" cards stay in
+			// Accessory so the menubar stays the single source of truth
+			// for them. gui.OpenWindow fires dock.show_icon when this
+			// flag is set, BEFORE the show sequence, so the activation
+			// policy is in place by the time the window draws and the
+			// OS decides cmd+Tab eligibility.
+			ShowDockIcon:               true,
 			DefaultContextMenuDisabled: true,
 			BackgroundColour:           [4]uint8{0, 0, 0, 0},
 			Mac:                        mac,
@@ -223,14 +231,10 @@ func windowRegistry() []*WindowSpec {
 // silently — the caller's tray menu shouldn't have offered the
 // option in the first place).
 func openWindow(c *core.Core, name string) {
-	// The unified `app` shell is the only window that warrants a Dock
-	// presence — the tray-spawned "lite" cards stay in Accessory so
-	// the menubar stays the single source of truth for them. Elevate
-	// BEFORE the show actions so the activation policy is in place by
-	// the time the window draws and the OS decides cmd+Tab eligibility.
-	if name == "app" {
-		setPolicyRegular()
-	}
+	// Dock-icon elevation for the "app" shell is now declared in
+	// windowRegistry()'s "app" entry via Window.ShowDockIcon — gui.OpenWindow
+	// fires dock.show_icon automatically when the registered descriptor
+	// has the flag.
 	gui.OpenWindow(c, name)
 }
 
@@ -268,24 +272,13 @@ func openPluginWindow(c *core.Core, code string) {
 		openWindow(c, wName)
 		return
 	}
-	r := c.Action("window.open").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guiwindow.TaskOpenWindow{Window: &guiwindow.Window{
-			Name: wName, Title: "Plugin · " + code,
-			URL:   "/?surface=plugin&code=" + code,
-			Width: 1180, Height: 760, MinWidth: 720, MinHeight: 460,
-			Frameless: true, Hidden: true,
-			DefaultContextMenuDisabled: true,
-			BackgroundColour:           [4]uint8{0, 0, 0, 0},
-			Mac:                        guiwindow.MacWindow{InvisibleTitleBarHeight: 36},
-		}}},
-	))
-	if !r.OK {
-		return
-	}
-	c.Action("window.set_visibility").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guiwindow.TaskSetVisibility{Name: wName, Visible: true}},
-	))
-	c.Action("window.focus").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guiwindow.TaskFocus{Name: wName}},
-	))
+	gui.OpenAdhocWindow(c, &guiwindow.Window{
+		Name: wName, Title: "Plugin · " + code,
+		URL:   "/?surface=plugin&code=" + code,
+		Width: 1180, Height: 760, MinWidth: 720, MinHeight: 460,
+		Frameless:                  true,
+		DefaultContextMenuDisabled: true,
+		BackgroundColour:           [4]uint8{0, 0, 0, 0},
+		Mac:                        guiwindow.MacWindow{InvisibleTitleBarHeight: 36},
+	})
 }

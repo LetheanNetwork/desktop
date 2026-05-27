@@ -16,8 +16,8 @@ package desktop
 
 import (
 	core "dappco.re/go"
+	gui "dappco.re/go/gui"
 	guienvironment "dappco.re/go/gui/pkg/environment"
-	guievents "dappco.re/go/gui/pkg/events"
 	guilifecycle "dappco.re/go/gui/pkg/lifecycle"
 	guiwindow "dappco.re/go/gui/pkg/window"
 )
@@ -85,10 +85,5 @@ func emitWindowEvent(c *core.Core, verb, window string, payload any) core.Result
 }
 
 func emitCoreEvent(c *core.Core, name string, data any) core.Result {
-	if c == nil {
-		return core.Ok(nil)
-	}
-	return c.Action("events.emit").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guievents.TaskEmit{Name: name, Data: data}},
-	))
+	return gui.EmitEvent(c, name, data)
 }

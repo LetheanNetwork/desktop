@@ -313,8 +313,9 @@ func (s *Service) Run() core.Result {
 	//
 	// CoreGUI owns native dock/taskbar and notification services. Wails
 	// remains its private substrate; lthn routes those behaviours through
-	// Core actions after registerCoreGUI wires the framework.
-	attachDock(s.opts.Core)
+	// Core actions. Dock-icon elevation for the `app` window is declared
+	// via Window.ShowDockIcon in the registry; gui.OpenWindow auto-fires
+	// dock.show_icon when it opens that window.
 	// Window service stays as a thin wrapper today — it dispatches
 	// against the in-process openWindow registry rather than wrapping
 	// any single Go package. Once windows.go grows into a real
