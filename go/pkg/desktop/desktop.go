@@ -957,7 +957,7 @@ func (s *Service) Run() core.Result {
 	if state := firstlaunch.Detect(nil); state.OK {
 		if fl, ok := state.Value.(firstlaunch.State); ok && fl.Fresh {
 			freshInstall = true
-			openWindow(s.opts.Core, "welcome")
+			gui.OpenWindow(s.opts.Core, "welcome")
 		}
 	}
 
@@ -979,7 +979,7 @@ func (s *Service) Run() core.Result {
 	if !freshInstall || s.opts.ShowAppOnLaunch {
 		s.opts.Core.RegisterAction(func(c *core.Core, msg core.Message) core.Result {
 			if _, ok := msg.(guilifecycle.ActionApplicationStarted); ok {
-				openWindow(c, "app")
+				gui.OpenWindow(c, "app")
 			}
 			return core.Ok(nil)
 		})

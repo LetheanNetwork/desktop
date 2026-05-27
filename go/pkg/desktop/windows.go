@@ -223,35 +223,10 @@ func windowRegistry() []*WindowSpec {
 	}
 }
 
-// openWindow shows + focuses the named window. Backend-driven so
-// tray menu items / keyboard shortcuts / lthn:// URL handlers can
-// open windows without round-tripping through the frontend.
-//
-// If the name isn't in the registry, this is a no-op (returns
-// silently — the caller's tray menu shouldn't have offered the
-// option in the first place).
-func openWindow(c *core.Core, name string) {
-	// Dock-icon elevation for the "app" shell is now declared in
-	// windowRegistry()'s "app" entry via Window.ShowDockIcon — gui.OpenWindow
-	// fires dock.show_icon automatically when the registered descriptor
-	// has the flag.
-	gui.OpenWindow(c, name)
-}
-
-func openWindowHandle(app any, name string) {
-	if typed, ok := app.(*core.Core); ok {
-		openWindow(typed, name)
-	}
-}
-
-func hideWindowHandle(app any, name string) bool {
-	typed, ok := app.(*core.Core)
-	if !ok || typed == nil {
-		return false
-	}
-	return gui.HideWindow(typed, name)
-}
-
+// windowExists reports whether the named window is in the gui registry.
+// Thin wrapper kept (rather than inlined at the three call sites — one
+// internal + two tests) because the local name preserves the lthn-side
+// "window directory lookup" reading clue.
 func windowExists(c *core.Core, name string) bool {
 	return gui.WindowExists(c, name)
 }
@@ -269,7 +244,7 @@ func windowExists(c *core.Core, name string) bool {
 func openPluginWindow(c *core.Core, code string) {
 	wName := "plugin-" + code
 	if windowExists(c, wName) {
-		openWindow(c, wName)
+		gui.OpenWindow(c, wName)
 		return
 	}
 	gui.OpenAdhocWindow(c, &guiwindow.Window{
