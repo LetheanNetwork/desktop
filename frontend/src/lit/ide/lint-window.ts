@@ -81,7 +81,8 @@ class LthnLintWindow extends LitElement {
     this.err = "";
     try {
       const svc = await import("@desktop/lint/service");
-      this.result = await svc.Run(this.path, this.filter, "") as RunOutput;
+      const { unwrap } = await import("../result");
+      this.result = await unwrap<RunOutput | null>(svc.Run(this.path, this.filter, ""), null);
     } catch (e: unknown) {
       this.err = e instanceof Error ? e.message : String(e);
       this.result = null;
