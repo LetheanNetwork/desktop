@@ -254,6 +254,13 @@ class LthnModelBrowserWindow extends LitElement {
             };
           });
         } catch { /* non-Wails env — keep existing local list */ }
+        // Re-emit on the unified models-changed channel so windows
+        // listening to it (lemma-window) also refresh their pickers.
+        // Without this, downloads triggered via pkg/downloader land
+        // on disk but the Lemma admin lane's availableModels picker
+        // stays stale until the user reopens it. Same channel
+        // lemma-window's Lemma.Download path fires on.
+        Events.Emit("lthn:lemma:models-changed", null);
       });
       // Cross-window broadcast: lemma-window emits this when an
       // admin-API download finishes. Re-pull the Lemma admin lane
