@@ -15,19 +15,23 @@
 // Why a separate HTTP server (not a /api/ route on the gin engine):
 // the bridge is intentionally OUT-OF-PROCESS-shaped so a stand-alone
 // MCP client can reach it without going through Wails routing.
-// /internal/console + /internal/error are POSTed by the JS shim
-// loaded in frontend/index.html on every window load.
+// Console + error capture from the bundled WebView lands via the
+// Wails Events bus (post-A5) — the JS shim in frontend/index.html
+// emits "lthn:console" / "lthn:error" events and the bridge
+// subscribes via core/gui's CustomEventBinder surface at startup.
 //
 // Endpoints:
 //   GET  /mcp/info             — bridge metadata + version
 //   GET  /mcp/tools            — tool catalogue
 //   POST /mcp/call             — { tool, params } → { ok, value, error }
 //   GET  /health               — liveness probe
-//   POST /internal/console     — JS shim → ring buffer
-//   POST /internal/error       — JS shim → ring buffer
 //
-// (The /internal/eval-reply endpoint was retired when eval moved to
-// core/gui's TaskEvalJS event-bus path. See tools.go::eval.)
+// (The whole /internal/* HTTP surface — console, error, eval-reply
+// — retired in favour of core/gui's TaskEvalJS event-bus path. The
+// JS shim emits via window.wails.Events.Emit("lthn:console"/"lthn:
+// error") and the bridge subscribes via windowSvc.SubscribeEvent in
+// OnStartup. One transport, no CORS, no DNS-rebind defence, no
+// originAllowed gate on those paths.)
 //
 // Usage example (Core registration):
 //
@@ -38,8 +42,8 @@
 package bridge
 
 import (
-
 	core "dappco.re/go"
+	guiwindow "dappco.re/go/gui/pkg/window"
 )
 
 // DefaultPort is the bridge HTTP port. Picked to differ from
@@ -55,20 +59,21 @@ const DefaultWindow = "tray"
 // consoleBufLimit caps the ring buffer for console + error events.
 const consoleBufLimit = 1000
 
-// maxInternalBodyBytes caps the request body on /internal/console
-// and /internal/error. Cerberus pass-6 MEDIUM — the previous handlers
-// were ring-buffer-capped (1000 entries) but per-entry size was
-// unbounded. A localhost POST loop of 10 MB messages would pin
-// ~10 GB resident memory before rotation; an over-eager MCP client
-// during an interactive debug session could OOM the lthn process.
-// 64 KiB per entry is generous for a real console message
-// (typical: <500 bytes) and a real error (typical: <4 KiB with
-// stack).
-const maxInternalBodyBytes = 64 * 1024
+// Event names the WebView JS shim emits on. The bridge subscribes
+// via windowSvc.SubscribeEvent in OnStartup; each event lands as
+// map[string]any carrying the same field shape the retired
+// /internal/console + /internal/error HTTP handlers used to parse.
+const (
+	eventConsoleName = "lthn:console"
+	eventErrorName   = "lthn:error"
+)
 
 // maxEntryMessageBytes is the post-decode clamp on the per-entry
-// Message field. Belt + braces to maxInternalBodyBytes — a tightly-
-// packed 64 KiB JSON could have a Message that's nearly all 64 KiB.
+// Message field. Pre-A5 the HTTP handlers had an additional
+// http.MaxBytesReader gate before this clamp; A5 dropped the
+// HTTP surface so this clamp is the only size guard now. 16 KiB
+// covers any plausible real console line / error stack while
+// still capping a hostile/looping emitter.
 const maxEntryMessageBytes = 16 * 1024
 
 // Options configures the bridge HTTP server.
@@ -101,17 +106,11 @@ type ErrorEntry struct {
 	At      core.Time `json:"at"`
 }
 
-// evalReply pairs a request id with the JS execution result (or
-// error). The JS shim's fetch-back wrapper posts one of these per
-// eval call to /internal/eval-reply.
-type evalReply struct {
-	ReqID  string `json:"reqId"`
-	Result any    `json:"result,omitempty"`
-	Error  string `json:"error,omitempty"`
-}
-
-// Service is the bridge runtime. Holds the HTTP server, ring buffers,
-// and the pending-eval map.
+// Service is the bridge runtime. Holds the HTTP server + ring
+// buffers populated from "lthn:console" + "lthn:error" Wails
+// events. The earlier pendingEvals/evalReply state retired in A5
+// when the eval-reply path migrated fully to core/gui's
+// TaskEvalJS event bus.
 type Service struct {
 	*core.ServiceRuntime[Options]
 
@@ -124,15 +123,6 @@ type Service struct {
 
 	errorMu  core.Mutex
 	errorBuf []ErrorEntry
-
-	evalMu core.Mutex
-	// Cerberus #1427 / Mantis 2026-05-16 — eval reqID was previously
-	// "eval-%d" from a monotonic counter, trivially guessable by a
-	// local-same-user (or post-DNS-rebind no-Origin) attacker who could
-	// race-POST a forged reply to /internal/eval-reply. The reqID is
-	// now hex of 16 crypto-random bytes (2^128 keyspace) — generated
-	// fresh per eval call inside (*Service).eval. No counter needed.
-	pendingEvals map[string]chan evalReply
 
 	// Cerberus #1423 / Mantis 2026-05-16 — bearer-token auth.
 	// Token is loaded or generated in OnStartup; held in memory so
@@ -152,7 +142,6 @@ func RegisterService(opts Options) func(*core.Core) core.Result {
 		s := &Service{
 			ServiceRuntime: core.NewServiceRuntime[Options](c, opts),
 			port:           opts.Port,
-			pendingEvals:   make(map[string]chan evalReply),
 		}
 		return core.Ok(s)
 	}
@@ -185,32 +174,36 @@ func (s *Service) OnStartup(_ core.Context) core.Result {
 	s.tokenMu.Unlock()
 
 	mux := core.NewServeMux()
-	// Auth tiers:
+	// Auth tiers (post-A5):
 	//   - /health  : liveness probe (no auth — must work without the
 	//     token so external uptime checks can poll).
-	//   - /internal/*: requireOrigin only (no bearer). Posted FROM
-	//     the bundled WebView itself; the JS shim has no access to
-	//     the bridge token (injecting it into the eval closure would
-	//     leak it to any script the eval body runs). Defence-in-
-	//     depth: Origin header check blocks the DNS-rebind pivot,
-	//     and each endpoint's payload carries its own capability
-	//     (eval-reply: per-call reqID — 2^128 keyspace).
-	//     Cerberus H#9-verify F1 (Mantis #1534): /internal/eval-reply
-	//     was previously bare; requireOrigin closes the no-Origin
-	//     attack surface while preserving the WebView caller.
 	//   - /mcp/*   : requireAuth (bearer + Origin). The privilege-
 	//     escalation surface (webview_eval lives here).
+	//
+	// The whole /internal/* HTTP surface retired in A5 (Mantis
+	// `roll console + errors onto same postMessage channel`). Console
+	// + error capture rides the Wails Events bus now — see the
+	// SubscribeEvent block below.
 	mux.HandleFunc("/health", s.handleHealth)
-	mux.HandleFunc("/internal/console", s.requireOrigin(s.handleInternalConsole))
-	mux.HandleFunc("/internal/error", s.requireOrigin(s.handleInternalError))
-	// /internal/eval-reply removed — eval now rides Wails' Events bus
-	// via core/gui's TaskEvalJS (see tools.go::eval). The handler +
-	// pendingEvals map stay around until A5 sweeps console + error
-	// onto the same channel and the whole /internal/* surface retires
-	// together.
 	mux.HandleFunc("/mcp/info", s.requireAuth(s.handleInfo))
 	mux.HandleFunc("/mcp/tools", s.requireAuth(s.handleTools))
 	mux.HandleFunc("/mcp/call", s.requireAuth(s.handleCall))
+
+	// A5 — subscribe to "lthn:console" + "lthn:error" Wails custom
+	// events. The WebView's JS shim (frontend/index.html) emits via
+	// window.wails.Events.Emit with the same {level,message,…} /
+	// {message,source,line,col,stack} shapes the HTTP handlers used
+	// to receive. SubscribeEvent returns false on platforms that
+	// don't support custom-event binding (test MockPlatform); the
+	// bridge is dev-mode-only so degraded operation is acceptable.
+	//
+	// The "window" service registers later than bridge (it's
+	// instantiated by pkg/desktop.registerCoreGUI as a side effect
+	// of Wails app startup, well after the WithName-list services
+	// have all called OnStartup). Poll in a background goroutine
+	// until it appears or 10s elapses — first iteration usually
+	// succeeds within tens of ms once Wails finishes booting.
+	s.Core().Go(s.subscribeToWebViewEvents)
 
 	s.mu.Lock()
 	s.httpSrv = &core.HTTPServer{
@@ -246,3 +239,26 @@ func (s *Service) OnShutdown(ctx core.Context) core.Result {
 // Port returns the bound bridge port — useful for the JS shim
 // template + health probes.
 func (s *Service) Port() int { return s.port }
+
+// subscribeToWebViewEvents polls for the "window" service registration
+// and, once it's up, subscribes to "lthn:console" + "lthn:error" via
+// the CustomEventBinder surface added in core/gui A5. The polling
+// loop runs at 50ms cadence for up to 10s — first iteration usually
+// succeeds within tens of ms once Wails finishes booting.
+//
+// Designed to run inside s.Core().Go. Returns silently on success or
+// timeout; the bridge is dev-only and a missing window service means
+// console/error capture is degraded but the rest of the bridge
+// (eval, navigate, query, mcp/*) keeps working.
+func (s *Service) subscribeToWebViewEvents() {
+	deadline := core.Now().Add(10 * core.Second)
+	for core.Now().Before(deadline) {
+		windowSvc, ok := core.ServiceFor[*guiwindow.Service](s.Core(), "window")
+		if ok && windowSvc != nil {
+			windowSvc.SubscribeEvent(eventConsoleName, s.handleConsoleEvent)
+			windowSvc.SubscribeEvent(eventErrorName, s.handleErrorEvent)
+			return
+		}
+		core.Sleep(50 * core.Millisecond)
+	}
+}

@@ -45,22 +45,24 @@
     #app { height: 100%; overscroll-behavior: none; }
   </style>
   <!-- Bridge shim — forwards console + window.error + unhandledrejection
-       events to the local MCP bridge HTTP server at 127.0.0.1:9879 so
-       Cladius / Codex / any MCP-speaking agent can observe what's
-       happening in the WebView. Silent when the bridge isn't running
-       (fetch swallows the connection refused). See pkg/bridge/. -->
+       events to the local MCP bridge via the Wails Events bus
+       ("lthn:console" / "lthn:error"). The bridge subscribes to these
+       events on startup via core/gui's CustomEventBinder; entries
+       land in the bridge's ring buffer for webview_console + webview_
+       errors MCP tool reads. Pre-A5 this used a POST to the bridge's
+       /internal/console + /internal/error HTTP shims; A5 retired
+       both shims in favour of the same event-bus path TaskEvalJS
+       uses for replies. Silent when no Wails runtime is loaded (e.g.
+       canvas-preview); events fired before window.wails.Events is
+       ready are dropped. See pkg/bridge/. -->
   <script>
     (function () {
-      var BRIDGE = 'http://127.0.0.1:9879';
-      var post = function (path, payload) {
+      var emit = function (name, payload) {
         try {
-          fetch(BRIDGE + path, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            keepalive: true,
-          }).catch(function () {});
-        } catch (e) { /* bridge unreachable — silent */ }
+          if (window.wails && window.wails.Events && typeof window.wails.Events.Emit === 'function') {
+            window.wails.Events.Emit({ name: name, data: payload });
+          }
+        } catch (_) { /* runtime not ready / events sink unavailable */ }
       };
       var fmt = function (args) {
         return Array.prototype.map.call(args, function (a) {
@@ -81,7 +83,7 @@
         var orig = console[level].bind(console);
         console[level] = function () {
           orig.apply(console, arguments);
-          post('/internal/console', {
+          emit('lthn:console', {
             level: level,
             message: fmt(arguments),
             source: 'console',
@@ -90,7 +92,7 @@
         };
       });
       window.addEventListener('error', function (e) {
-        post('/internal/error', {
+        emit('lthn:error', {
           message: e.message || 'unknown error',
           source: e.filename || '',
           line: e.lineno || 0,
@@ -101,7 +103,7 @@
       });
       window.addEventListener('unhandledrejection', function (e) {
         var reason = e.reason;
-        post('/internal/error', {
+        emit('lthn:error', {
           message: 'unhandled promise rejection: ' + (reason && reason.message ? reason.message : String(reason)),
           stack: (reason && reason.stack) || '',
           at: new Date().toISOString(),

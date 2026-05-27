@@ -6,7 +6,6 @@
 package bridge
 
 import (
-	"net/http"
 	"time"
 
 	core "dappco.re/go"
@@ -59,32 +58,33 @@ func (s *Service) handleCall(w core.ResponseWriter, r *core.Request) {
 	writeJSON(w, resp)
 }
 
-func (s *Service) handleInternalConsole(w core.ResponseWriter, r *core.Request) {
-	corsJSON(w)
-	if r.Method == core.MethodOptions {
-		w.WriteHeader(core.StatusNoContent)
+// handleConsoleEvent is the CustomEventBinder callback for
+// "lthn:console" — the JS shim wraps every console.{log,info,warn,
+// error,debug} call and emits via window.wails.Events.Emit. Each
+// payload arrives as map[string]any with the ConsoleEntry shape
+// (level / message / source / at). Unknown fields drop silently;
+// missing `at` is back-filled with core.Now() so test mocks and
+// real shim calls both produce well-formed ring-buffer entries.
+//
+// A5 replaces the retired /internal/console HTTP handler. No body
+// cap is needed here — Wails Events.Emit serialises through the
+// IPC bridge which has its own per-message ceiling — but the
+// post-decode message clamp stays (defence-in-depth against a
+// hostile shim emitting multi-MB strings).
+func (s *Service) handleConsoleEvent(data any) {
+	m, ok := data.(map[string]any)
+	if !ok {
 		return
 	}
-	if r.Method != core.MethodPost {
-		w.WriteHeader(core.StatusMethodNotAllowed)
-		return
-	}
-	// Cerberus pass-6 MEDIUM — body cap on the auth-free console
-	// endpoint. Without this, a localhost POST loop with multi-MB
-	// messages OOMs the ring buffer. http.MaxBytesReader closes the
-	// connection past the limit so the JSON decoder fails cleanly.
-	r.Body = http.MaxBytesReader(w, r.Body, maxInternalBodyBytes)
-	var entry ConsoleEntry
-	if rr := readJSON(r, &entry); !rr.OK {
-		w.WriteHeader(core.StatusBadRequest)
-		writeJSON(w, map[string]any{"error": rr.Error()})
-		return
+	entry := ConsoleEntry{
+		Level:   stringField(m, "level"),
+		Message: stringField(m, "message"),
+		Source:  stringField(m, "source"),
+		At:      timeField(m, "at"),
 	}
 	if entry.At.IsZero() {
 		entry.At = core.Now()
 	}
-	// Belt + braces — clamp the Message field even if the JSON came
-	// in under the body cap with most of the bytes packed there.
 	if len(entry.Message) > maxEntryMessageBytes {
 		entry.Message = entry.Message[:maxEntryMessageBytes] + " […truncated]"
 	}
@@ -94,26 +94,27 @@ func (s *Service) handleInternalConsole(w core.ResponseWriter, r *core.Request) 
 		s.consoleBuf = s.consoleBuf[len(s.consoleBuf)-consoleBufLimit:]
 	}
 	s.consoleMu.Unlock()
-	writeJSON(w, map[string]any{"ok": true})
 }
 
-func (s *Service) handleInternalError(w core.ResponseWriter, r *core.Request) {
-	corsJSON(w)
-	if r.Method == core.MethodOptions {
-		w.WriteHeader(core.StatusNoContent)
+// handleErrorEvent is the CustomEventBinder callback for
+// "lthn:error" — same shape as handleConsoleEvent but mirrors the
+// ErrorEntry fields (message / source / line / col / stack / at).
+// Numeric fields (line, col) arrive from JSON as float64; we
+// down-cast to int with bounds-clamp at zero.
+//
+// A5 replaces the retired /internal/error HTTP handler.
+func (s *Service) handleErrorEvent(data any) {
+	m, ok := data.(map[string]any)
+	if !ok {
 		return
 	}
-	if r.Method != core.MethodPost {
-		w.WriteHeader(core.StatusMethodNotAllowed)
-		return
-	}
-	// Same cap as /internal/console (Cerberus pass-6 MEDIUM).
-	r.Body = http.MaxBytesReader(w, r.Body, maxInternalBodyBytes)
-	var entry ErrorEntry
-	if rr := readJSON(r, &entry); !rr.OK {
-		w.WriteHeader(core.StatusBadRequest)
-		writeJSON(w, map[string]any{"error": rr.Error()})
-		return
+	entry := ErrorEntry{
+		Message: stringField(m, "message"),
+		Source:  stringField(m, "source"),
+		Line:    intField(m, "line"),
+		Col:     intField(m, "col"),
+		Stack:   stringField(m, "stack"),
+		At:      timeField(m, "at"),
 	}
 	if entry.At.IsZero() {
 		entry.At = core.Now()
@@ -130,38 +131,42 @@ func (s *Service) handleInternalError(w core.ResponseWriter, r *core.Request) {
 		s.errorBuf = s.errorBuf[len(s.errorBuf)-consoleBufLimit:]
 	}
 	s.errorMu.Unlock()
-	writeJSON(w, map[string]any{"ok": true})
 }
 
-func (s *Service) handleInternalEvalReply(w core.ResponseWriter, r *core.Request) {
-	corsJSON(w)
-	if r.Method == core.MethodOptions {
-		w.WriteHeader(core.StatusNoContent)
-		return
+// stringField pulls a string out of a map[string]any decoded from
+// JSON. Missing / wrong-type returns "" so callers don't need a
+// per-field ok-check.
+func stringField(m map[string]any, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
 	}
-	if r.Method != core.MethodPost {
-		w.WriteHeader(core.StatusMethodNotAllowed)
-		return
+	return ""
+}
+
+// intField pulls an int out of a map[string]any decoded from JSON.
+// JSON numbers decode to float64 in interface{} mode; we down-cast
+// after a non-negative guard.
+func intField(m map[string]any, key string) int {
+	if v, ok := m[key].(float64); ok && v >= 0 {
+		return int(v)
 	}
-	var reply evalReply
-	if rr := readJSON(r, &reply); !rr.OK {
-		w.WriteHeader(core.StatusBadRequest)
-		writeJSON(w, map[string]any{"error": rr.Error()})
-		return
+	return 0
+}
+
+// timeField parses an RFC3339 timestamp out of a map[string]any.
+// Missing / unparseable returns the zero core.Time so the caller's
+// back-fill logic kicks in.
+func timeField(m map[string]any, key string) core.Time {
+	raw, ok := m[key].(string)
+	if !ok || raw == "" {
+		return core.Time{}
 	}
-	s.evalMu.Lock()
-	ch, ok := s.pendingEvals[reply.ReqID]
-	s.evalMu.Unlock()
-	if !ok {
-		writeJSON(w, map[string]any{"ok": false, "error": "no pending eval for reqId"})
-		return
+	r := core.TimeParse(core.TimeRFC3339, raw)
+	if !r.OK {
+		return core.Time{}
 	}
-	select {
-	case ch <- reply:
-	default:
-		// channel already received once — drop silently.
-	}
-	writeJSON(w, map[string]any{"ok": true})
+	t, _ := r.Value.(core.Time)
+	return t
 }
 
 // ─── Tool dispatch ──────────────────────────────────────────────────
