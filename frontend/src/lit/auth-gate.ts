@@ -599,6 +599,16 @@ class LthnAuthGate extends LitElement {
     await this._deriveState();
   }
 
+  /** Copy the request id to the clipboard so the user can paste it
+   *  into a bug report. Silent on clipboard failure — the surfaced
+   *  request id text is right next to the button, so a user can
+   *  still copy by hand if the synthetic write rejects. */
+  private async _copyRequestId(): Promise<void> {
+    if (!this.requestId) return;
+    try { await navigator.clipboard?.writeText(this.requestId); }
+    catch { /* clipboard unavailable in some WebView contexts */ }
+  }
+
   render() {
     if (this.state === "ok") return nothing;
 
@@ -797,13 +807,12 @@ class LthnAuthGate extends LitElement {
               <i class="fa-solid fa-arrow-right-to-bracket" style="font-size:11px;"></i>
               ${this.loading ? "Unlocking…" : "Wreath in"}
             </lthn-btn>
-            <lthn-btn tone="quiet" size="lg">Use a different keypair…</lthn-btn>
           </div>
           <div style="margin-top:auto; padding-top:18px; border-top:1px solid rgba(255,255,255,0.04);
                       font-size:11px; color:var(--fg-3); line-height:1.6; max-width:460px;">
             Forgotten? Your passphrase decrypts the local keypair · we can't
             reset it. Run <span style="font-family:var(--font-mono); color:var(--fg-2);">lthn setup --reset</span>
-            in a terminal to start fresh.
+            in a terminal to swap to a different keypair or start fresh.
           </div>
         </main>
       </div>
@@ -858,7 +867,13 @@ class LthnAuthGate extends LitElement {
             <i class="fa-solid fa-arrow-rotate-right" style="font-size:11px;"></i>
             Retry
           </lthn-btn>
-          <lthn-btn tone="quiet" size="lg">Copy request id</lthn-btn>
+          ${this.requestId ? html`
+            <lthn-btn tone="quiet" size="lg" @click=${() => this._copyRequestId()}
+              title=${`Copy ${this.requestId} to clipboard — paste into a bug report`}>
+              <i class="fa-regular fa-copy" style="font-size:11px;"></i>
+              Copy request id
+            </lthn-btn>
+          ` : nothing}
         </div>
       </div>
     `;
