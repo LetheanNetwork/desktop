@@ -211,6 +211,10 @@ func cmdHelp(args []string) int {
 		core.Println("(see plans/project/lthn/RFC.md §7 — the unified namespace canon)")
 		return 0
 	}
+	// Subcommands with help text authored inline below take precedence;
+	// everything else known by the main switch dispatches to its own
+	// "help" verb (each cmd*.go file owns its help string — see
+	// fleetHelp / opencodeHelp / marketplaceHelp / etc).
 	switch args[0] {
 	case "ai":
 		core.Println("lthn ai — AI subsystem")
@@ -227,6 +231,21 @@ func cmdHelp(args []string) int {
 		core.Println("Starts the OpenAI-compatible HTTP API on the given port.")
 		core.Println("Endpoints: /v1/chat/completions, /v1/completions, /v1/models")
 		core.Println("Default port: 8000")
+	case "fleet":
+		return cmdFleet([]string{"help"})
+	case "opencode":
+		// opencode + marketplace don't have a "help" verb but their
+		// no-args path prints the verb list to stderr, which is the
+		// closest thing to help they expose.
+		return cmdOpenCode(nil)
+	case "marketplace":
+		return cmdMarketplace(nil)
+	case "config", "state", "events", "process", "sessions", "models",
+		"validate", "firstlaunch", "permissions", "telemetry", "service", "api":
+		core.Print(core.Stderr(),
+			"lthn help: no inline help for %q yet — try `lthn %s help` or `lthn %s` (no args) for usage\n",
+			args[0], args[0], args[0])
+		return 2
 	default:
 		core.Print(core.Stderr(), "lthn help: no help for unknown subcommand %q\n", args[0])
 		return 2
