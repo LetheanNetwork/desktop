@@ -69,17 +69,16 @@ func (s *Service) captureLayout(name string) (*Layout, map[string]any) {
 	}
 	out := make([]WindowState, 0, len(all))
 	for _, info := range all {
-		// TODO(snider): core/gui needs visibility/fullscreen/always-on-top
-		// in WindowInfo so lthn layout snapshots can preserve those fields
-		// without direct Wails access.
 		out = append(out, WindowState{
-			Name:      info.Name,
-			X:         info.X,
-			Y:         info.Y,
-			Width:     info.Width,
-			Height:    info.Height,
-			Visible:   true,
-			Maximised: info.Maximized,
+			Name:        info.Name,
+			X:           info.X,
+			Y:           info.Y,
+			Width:       info.Width,
+			Height:      info.Height,
+			Visible:     info.Visible,
+			Maximised:   info.Maximized,
+			Fullscreen:  info.Fullscreen,
+			AlwaysOnTop: info.AlwaysOnTop,
 		})
 	}
 	return &Layout{

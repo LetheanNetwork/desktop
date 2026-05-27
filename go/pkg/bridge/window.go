@@ -55,8 +55,6 @@ func windowInfo(info *guiwindow.WindowInfo) map[string]any {
 	if info == nil {
 		return nil
 	}
-	// TODO(snider): core/gui needs WindowInfo visibility, minimised,
-	// fullscreen, and always-on-top fields for exact bridge parity.
 	return map[string]any{
 		"name":          info.Name,
 		"title":         info.Title,
@@ -65,13 +63,13 @@ func windowInfo(info *guiwindow.WindowInfo) map[string]any {
 		"width":         info.Width,
 		"height":        info.Height,
 		"opacity":       info.Opacity,
-		"visible":       nil,
+		"visible":       info.Visible,
 		"maximised":     info.Maximized,
 		"maximized":     info.Maximized,
-		"minimised":     nil,
-		"fullscreen":    nil,
+		"minimised":     info.Minimised,
+		"fullscreen":    info.Fullscreen,
 		"focused":       info.Focused,
-		"always_on_top": nil,
+		"always_on_top": info.AlwaysOnTop,
 	}
 }
 
