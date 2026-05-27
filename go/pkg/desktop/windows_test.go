@@ -42,49 +42,7 @@ func TestDesktop_Run_Bad_NoServer(t *core.T) {
 	core.AssertFalse(t, r.OK, "Run() must Fail when Options.Server is nil")
 }
 
-func TestDesktop_NewWindowService_Good(t *core.T) {
-	w := desktop.NewWindowService()
-	core.AssertNotNil(t, w)
-	core.AssertEqual(t, "Window", w.ServiceName())
-}
-
-// List returns the names of every registered window. Pure — pulls
-// straight from the static windowRegistry() table.
-func TestDesktop_WindowService_List_Good(t *core.T) {
-	w := desktop.NewWindowService()
-	r := w.List()
-	core.AssertTrue(t, r.OK)
-	names := r.Value.([]string)
-	core.AssertGreater(t, len(names), 0, "registry must not be empty")
-
-	// Every window we shipped this session should be in the list.
-	expected := []string{"welcome", "app", "chat", "models", "settings", "telemetry", "about"}
-	joined := core.Join(",", names...)
-	for _, want := range expected {
-		core.AssertContains(t, joined, want, "registry should include "+want)
-	}
-}
-
-// Open / Hide are no-ops before Service.Run wires up the Wails app
-// pointer. The defensive guard returns an error rather than panicking
-// — exercised here so the error path is covered. AssertError variadic
-// args are substring requirements; we only care that err is non-nil
-// here, so no substring is given.
-func TestDesktop_WindowService_Open_Bad_NotAttached(t *core.T) {
-	w := desktop.NewWindowService()
-	r := w.Open("chat")
-	core.AssertFalse(t, r.OK)
-	core.AssertNotEmpty(t, r.Error())
-}
-
-func TestDesktop_WindowService_Hide_Bad_NotAttached(t *core.T) {
-	w := desktop.NewWindowService()
-	r := w.Hide("chat")
-	core.AssertFalse(t, r.OK)
-	core.AssertNotEmpty(t, r.Error())
-}
-
-// The package-level Wails services that used to live in bindings.go
-// have moved into their owning packages — exercising them lives next
-// to each package's own test file now. The desktop layer only owns
-// WindowService today (smoke-tested above).
+// WindowService now lives in core/gui as gui.WindowBindingService;
+// the smoke tests that used to live here moved into core/gui's test
+// suite. The desktop layer no longer owns a Wails-bindable window
+// service — every consumer pulls gui.NewWindowBindingService instead.

@@ -316,11 +316,10 @@ func (s *Service) Run() core.Result {
 	// Core actions. Dock-icon elevation for the `app` window is declared
 	// via Window.ShowDockIcon in the registry; gui.OpenWindow auto-fires
 	// dock.show_icon when it opens that window.
-	// Window service stays as a thin wrapper today — it dispatches
-	// against the in-process openWindow registry rather than wrapping
-	// any single Go package. Once windows.go grows into a real
-	// package this becomes a direct registration like the others.
-	windowSvc := NewWindowService()
+	// Window IPC binding now ships from core/gui — gui.NewWindowBindingService
+	// exposes Open / Hide / List / SetSize verbs that route through
+	// gui.OpenWindow / gui.HideWindow / GuiConfig.WindowRegistry.
+	windowSvc := gui.NewWindowBindingService(s.opts.Core)
 
 	// Fetch the Core-registered upstream services and register them
 	// directly with Wails so bindings land at dappco.re/go/<pkg>/.
@@ -837,8 +836,8 @@ func (s *Service) Run() core.Result {
 	// pre-application.New()). Today only WindowService still
 	// depends on this — env / clipboard / screen / browser / dialog
 	// previously wrapped here are now consumed by the frontend
-	// directly from @wailsio/runtime.
-	windowSvc.app = s.opts.Core
+	// directly from @wailsio/runtime. gui.WindowBindingService is bound
+	// to s.opts.Core at construction (above) — no post-app wiring needed.
 
 	// TODO(snider): core/gui needs notification response/action callbacks
 	// so native notification body clicks and action buttons can be
