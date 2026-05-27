@@ -274,6 +274,22 @@ interface ViewDef {
  *  Marketing / Sales / Office stay green-field. */
 const VIEWS: ViewDef[] = [
   {
+    // Owlet-shape — for users who want to chat with the local model and
+    // don't need the admin tooling. Three nav entries: Chat (the main
+    // surface), Models (so they can switch when Snider hands them a
+    // new one), Settings (theme + language + paths). The chat
+    // toolbar's model badge already deep-links to the Models pane via
+    // lthn:app:setpane='models', so the cross-window event resolves
+    // cleanly inside this view too.
+    id: "chat", label: "Chat", icon: "fa-comments",
+    blurb: "Just chat with the local model. Nothing else in the way.",
+    nav: [
+      { id: "chat",     label: "Chat",     icon: "fa-comments", tag: "lthn-chat-window",          group: "primary" },
+      { id: "models",   label: "Models",   icon: "fa-cube",     tag: "lthn-model-browser-window", group: "primary" },
+      { id: "settings", label: "Settings", icon: "fa-sliders",  tag: "lthn-settings-window",      group: "bottom" },
+    ],
+  },
+  {
     id: "admin", label: "Admin", icon: "fa-gauge",
     blurb: "Run the runtime. Talk to models. Watch the metrics.",
     nav: [
@@ -679,8 +695,8 @@ class LthnAppShell extends LitElement {
     this._togglePalette();
   };
 
-  /** Window-level keydown — ⌘1..⌘7 (Ctrl+1..7 on non-mac) switch
-   *  between the seven views (admin/planning/coding/marketing/
+  /** Window-level keydown — ⌘1..⌘8 (Ctrl+1..8 on non-mac) switch
+   *  between the eight views (chat/admin/planning/coding/marketing/
    *  operations/sales/office). Suppressed while a text input or
    *  contenteditable surface has focus so it doesn't steal from
    *  the chat composer / search inputs / cell editors. The WebView
@@ -690,7 +706,7 @@ class LthnAppShell extends LitElement {
     if (!accel) return;
     if (ev.shiftKey || ev.altKey) return;
     const code = ev.key.charCodeAt(0);
-    if (code < 49 || code > 55) return; // '1'..'7'
+    if (code < 49 || code > 56) return; // '1'..'8'
     const target = ev.target as HTMLElement | null;
     if (target) {
       const tag = target.tagName;

@@ -619,7 +619,10 @@ describe("lthn-app-shell — cross-view ⌘P palette", () => {
     el.paletteQuery = "settings";
     await el.updateComplete;
     const rows = host.querySelectorAll(".lthn-palette-item");
-    expect(rows.length).toBe(7); // admin/planning/coding/marketing/operations/sales/office
+    // chat/admin/planning/coding/marketing/operations/sales/office —
+    // every view exposes a Settings entry.
+    expect(rows.length).toBe(8);
+    expect(host.textContent ?? "").toContain("Chat · Settings");
     expect(host.textContent ?? "").toContain("Admin · Settings");
     expect(host.textContent ?? "").toContain("Operations · Settings");
   });
@@ -656,24 +659,24 @@ describe("lthn-app-shell — ⌘1..⌘7 view shortcuts", () => {
     updateComplete: Promise<boolean>;
   };
 
-  it("⌘1 selects the first view (admin)", async () => {
+  it("⌘1 selects the first view (chat)", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "planning" } });
     expect(el.view).toBe("planning");
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "1", metaKey: true, bubbles: true }));
     await el.updateComplete;
-    expect(el.view).toBe("admin");
+    expect(el.view).toBe("chat");
   });
 
-  it("⌘2 selects planning", async () => {
+  it("⌘2 selects admin", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell");
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "2", metaKey: true, bubbles: true }));
     await el.updateComplete;
-    expect(el.view).toBe("planning");
+    expect(el.view).toBe("admin");
   });
 
-  it("⌘3..⌘7 cycle through coding/marketing/operations/sales/office", async () => {
+  it("⌘3..⌘8 cycle through planning/coding/marketing/operations/sales/office", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell");
-    const expected = ["coding", "marketing", "operations", "sales", "office"];
+    const expected = ["planning", "coding", "marketing", "operations", "sales", "office"];
     for (let i = 0; i < expected.length; i++) {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: String(i + 3), metaKey: true, bubbles: true }));
       await el.updateComplete;
@@ -681,17 +684,17 @@ describe("lthn-app-shell — ⌘1..⌘7 view shortcuts", () => {
     }
   });
 
-  it("Ctrl+1..7 also works (Linux/Windows)", async () => {
+  it("Ctrl+1..8 also works (Linux/Windows)", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell");
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "3", ctrlKey: true, bubbles: true }));
     await el.updateComplete;
-    expect(el.view).toBe("coding");
+    expect(el.view).toBe("planning");
   });
 
-  it("⌘8 / ⌘0 are ignored (out of range)", async () => {
+  it("⌘9 / ⌘0 are ignored (out of range)", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell");
     const before = el.view;
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "8", metaKey: true, bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "9", metaKey: true, bubbles: true }));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "0", metaKey: true, bubbles: true }));
     await el.updateComplete;
     expect(el.view).toBe(before);
@@ -767,15 +770,15 @@ describe("lthn-app-shell — ⌘⇧[ / ⌘⇧] view cycling", () => {
     expect(el.view).toBe("admin");
   });
 
-  it("⌘⇧] wraps from the last view (office → admin)", async () => {
+  it("⌘⇧] wraps from the last view (office → chat)", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "office" } });
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "]", metaKey: true, shiftKey: true, bubbles: true }));
     await el.updateComplete;
-    expect(el.view).toBe("admin");
+    expect(el.view).toBe("chat");
   });
 
-  it("⌘⇧[ wraps from the first view (admin → office)", async () => {
-    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "admin" } });
+  it("⌘⇧[ wraps from the first view (chat → office)", async () => {
+    const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "chat" } });
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "[", metaKey: true, shiftKey: true, bubbles: true }));
     await el.updateComplete;
     expect(el.view).toBe("office");
