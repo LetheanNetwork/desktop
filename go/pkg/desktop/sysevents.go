@@ -19,6 +19,7 @@ import (
 	gui "dappco.re/go/gui"
 	guienvironment "dappco.re/go/gui/pkg/environment"
 	guilifecycle "dappco.re/go/gui/pkg/lifecycle"
+	guinotification "dappco.re/go/gui/pkg/notification"
 	guiwindow "dappco.re/go/gui/pkg/window"
 )
 
@@ -33,14 +34,17 @@ import (
 //
 // Event re-broadcasts:
 //
-//	guilifecycle.ActionApplicationStarted → "lthn:app:started"
-//	guilifecycle.ActionOpenedWithFile     → "lthn:app:opened-file" (file path)
-//	guienvironment.ActionThemeChanged    → "lthn:theme"
-//	guiwindow.ActionWindowFocused         → "lthn:window:focus"
-//	guiwindow.ActionWindowBlurred         → "lthn:window:blur"
-//	guiwindow.ActionWindowMoved           → "lthn:window:move"
-//	guiwindow.ActionWindowResized         → "lthn:window:resize"
-//	guiwindow.ActionFilesDropped          → "lthn:window:files-dropped"
+//	guilifecycle.ActionApplicationStarted         → "lthn:app:started"
+//	guilifecycle.ActionOpenedWithFile             → "lthn:app:opened-file" (file path)
+//	guienvironment.ActionThemeChanged             → "lthn:theme"
+//	guiwindow.ActionWindowFocused                 → "lthn:window:focus"
+//	guiwindow.ActionWindowBlurred                 → "lthn:window:blur"
+//	guiwindow.ActionWindowMoved                   → "lthn:window:move"
+//	guiwindow.ActionWindowResized                 → "lthn:window:resize"
+//	guiwindow.ActionFilesDropped                  → "lthn:window:files-dropped"
+//	guinotification.ActionNotificationClicked     → "lthn:notification:click" (notification id)
+//	guinotification.ActionNotificationActionTriggered → "lthn:notification:action" ({notification_id, action_id})
+//	guinotification.ActionNotificationDismissed   → "lthn:notification:dismiss" (notification id)
 func registerSystemEvents(c *core.Core) {
 	if c == nil {
 		return
@@ -71,6 +75,15 @@ func registerSystemEvents(c *core.Core) {
 				payload["target"] = map[string]any{"id": event.TargetID}
 			}
 			return emitWindowEvent(c, "files-dropped", event.Name, payload)
+		case guinotification.ActionNotificationClicked:
+			return emitCoreEvent(c, "lthn:notification:click", event.ID)
+		case guinotification.ActionNotificationActionTriggered:
+			return emitCoreEvent(c, "lthn:notification:action", map[string]any{
+				"notification_id": event.NotificationID,
+				"action_id":       event.ActionID,
+			})
+		case guinotification.ActionNotificationDismissed:
+			return emitCoreEvent(c, "lthn:notification:dismiss", event.ID)
 		default:
 			return core.Ok(nil)
 		}

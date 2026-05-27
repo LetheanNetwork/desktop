@@ -101,12 +101,6 @@ import (
 	gui "dappco.re/go/gui"
 )
 
-// TODO(snider): core/gui needs an app-construction surface covering
-// application.Options, service binding registration, single-instance
-// callbacks, native systray bootstrap, tray-window options, and panic/
-// shutdown hooks. Until that exists, desktop.Run is the lthn-side Wails
-// boundary and all other packages route GUI behavior through CoreGUI.
-
 const trayOpenEvent = "lthn:tray:open"
 
 // Tray menu ActionIDs — these are the labels the core/gui systray
@@ -846,11 +840,6 @@ func (s *Service) Run() core.Result {
 	// previously wrapped here are now consumed by the frontend
 	// directly from @wailsio/runtime. gui.WindowBindingService is bound
 	// to s.opts.Core at construction (above) — no post-app wiring needed.
-
-	// TODO(snider): core/gui needs notification response/action callbacks
-	// so native notification body clicks and action buttons can be
-	// forwarded as "lthn:notification:response" without lthn importing
-	// Wails notification services directly.
 
 	// Application menu is now declarative via GuiConfig.AppMenu above —
 	// gui.Service auto-gates to darwin and fires menu.set_app_menu.
