@@ -9,15 +9,17 @@ import (
 )
 
 // cmdModels dispatches `lthn models <verb>` — local model snapshot
-// management. Today supports `list`; pull/remove come with
-// pkg/downloader.
+// management. Today supports `list` (alias `ls`) and `pull URL NAME`
+// via pkg/downloader. `remove` is on the roadmap once the deletion
+// flow gets the same digest-verification gate that pull has.
 //
 // Usage example:
 //
 //	rc := cmdModels([]string{"list"})
+//	rc := cmdModels([]string{"pull", "https://example.com/m.gguf", "my-model"})
 func cmdModels(args []string) int {
 	if len(args) == 0 {
-		core.Print(core.Stderr(), "lthn models: missing verb (list)\n")
+		core.Print(core.Stderr(), "lthn models: missing verb (list / pull)\n")
 		return 2
 	}
 	switch args[0] {
