@@ -36,7 +36,9 @@ import (
 func cmdMarketplace(args []string) int {
 	if len(args) == 0 {
 		core.Print(core.Stderr(),
-			"lthn marketplace: missing verb (list / search / install / start / stop / uninstall / status / update / import-coolify)\n")
+			"lthn marketplace: missing verb (list / search / install / start / stop / uninstall / status / import-coolify)\n")
+		core.Print(core.Stderr(),
+			"  also accepts: update BUNDLE-ID  (not yet wired — use uninstall + install to re-pull)\n")
 		return 2
 	}
 	// import-coolify doesn't need a Core — pure file-to-file conversion.
