@@ -24,7 +24,6 @@ package lemma
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"time"
@@ -357,11 +356,14 @@ func (a *Admin) DownloadJob(ctx context.Context, jobID string) (DownloadJobStatu
 func (a *Admin) doJSON(ctx context.Context, method, path string, body, out interface{}) error {
 	var reqBody io.Reader
 	if body != nil {
-		buf, err := json.Marshal(body)
-		if err != nil {
-			return core.E("lemma.Admin.doJSON", "marshal request body", err)
+		// core.JSONMarshal wraps stdlib json with the Result envelope —
+		// keeps the banned-imports list in CLAUDE.md honest. Value is
+		// []byte on OK; the failure path Value is error.
+		r := core.JSONMarshal(body)
+		if !r.OK {
+			return core.E("lemma.Admin.doJSON", "marshal request body", r.Value.(error))
 		}
-		reqBody = bytes.NewReader(buf)
+		reqBody = bytes.NewReader(r.Value.([]byte))
 	}
 	req, err := http.NewRequestWithContext(ctx, method, a.baseURL+path, reqBody)
 	if err != nil {
@@ -388,8 +390,10 @@ func (a *Admin) doJSON(ctx context.Context, method, path string, body, out inter
 	if out == nil {
 		return nil
 	}
-	if err := json.Unmarshal(respBody, out); err != nil {
-		return core.E("lemma.Admin.doJSON", "decode response", err)
+	// core.JSONUnmarshal mirrors stdlib unmarshal under the Result
+	// envelope — failure path Value is the underlying error.
+	if r := core.JSONUnmarshal(respBody, out); !r.OK {
+		return core.E("lemma.Admin.doJSON", "decode response", r.Value.(error))
 	}
 	return nil
 }
