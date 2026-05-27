@@ -2842,13 +2842,13 @@ class LthnChatWindow extends LitElement {
 
             <lthn-label style="margin-top:4px;">${this.t.labelSampling}</lthn-label>
             <div style="display:flex; flex-direction:column; gap:6px; font-size:11.5px;">
-              <lthn-rail-row k=${this.t.sampTemp}    v="0.7"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.sampTopP}    v="0.95"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.sampMaxTok}  v="1024"></lthn-rail-row>
+              <lthn-rail-row k=${this.t.sampTemp}    v="—"></lthn-rail-row>
+              <lthn-rail-row k=${this.t.sampTopP}    v="—"></lthn-rail-row>
+              <lthn-rail-row k=${this.t.sampMaxTok}  v="—"></lthn-rail-row>
               <lthn-rail-row k=${this.t.sampContext} v=${data.ctx || "—"}></lthn-rail-row>
             </div>
             <div style="font-size:10.5px; color:var(--fg-3); font-style:italic; line-height:1.5;">
-              Sampling defaults shown — per-conversation overrides not yet wired (Settings → Models for global defaults).
+              Model defaults apply — Lemma serves whatever lthn-mlx is configured to. Per-conversation overrides + live readback land with the sampling-config surface.
             </div>
           ` : nothing}
 
