@@ -92,9 +92,10 @@ class LthnMarketplaceWindow extends LitElement {
     this.err = "";
     try {
       const svc = await import("@desktop/marketplace/service");
+      const { unwrap } = await import("../result");
       const [s, i] = await Promise.all([
-        svc.Search(this.query, this.category) as Promise<{ packages: Package[] }>,
-        svc.Installed() as Promise<{ packages: InstalledPackage[] }>,
+        unwrap<{ packages: Package[] }>(svc.Search(this.query, this.category), { packages: [] }),
+        unwrap<{ packages: InstalledPackage[] }>(svc.Installed(), { packages: [] }),
       ]);
       this.catalogue = s.packages || [];
       this.installed = i.packages || [];
@@ -110,7 +111,8 @@ class LthnMarketplaceWindow extends LitElement {
     this.err = "";
     try {
       const svc = await import("@desktop/marketplace/service");
-      await svc.Install(code);
+      const { demand } = await import("../result");
+      await demand<unknown>(svc.InstallPlugin(code));
       this.info = `Installed ${code}`;
       await this._refresh();
     } catch (e: unknown) {
