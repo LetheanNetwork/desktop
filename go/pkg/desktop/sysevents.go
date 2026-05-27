@@ -23,12 +23,9 @@ import (
 	guiwindow "dappco.re/go/gui/pkg/window"
 )
 
-// Remaining substrate gap (deliberately not yet wired so this file
-// stays a faithful re-broadcaster of what core/gui actually emits):
-//
-//   - WindowFilesDropped target details — DropTargetDetails carries
-//     element id + position; today we forward elementId only. Position
-//     would let a Lit drop zone snap to the cursor.
+// All substrate gaps that pre-dated GUI-16..GUI-24 are closed. This
+// re-broadcaster faithfully translates everything core/gui surfaces
+// for app + theme + window + notification lifecycle.
 
 // registerSystemEvents wires the cross-platform application events
 // onto our lthn:* bus. Called once from desktop.Run() after the
@@ -85,7 +82,20 @@ func registerSystemEvents(c *core.Core) {
 			return emitWindowEvent(c, "resize", event.Name, map[string]any{"width": event.Width, "height": event.Height})
 		case guiwindow.ActionFilesDropped:
 			payload := map[string]any{"files": event.Paths}
-			if event.TargetID != "" {
+			if event.Target != nil {
+				target := map[string]any{
+					"id": event.Target.ID,
+					"x":  event.Target.X,
+					"y":  event.Target.Y,
+				}
+				if len(event.Target.ClassList) > 0 {
+					target["classList"] = event.Target.ClassList
+				}
+				if len(event.Target.Attributes) > 0 {
+					target["attributes"] = event.Target.Attributes
+				}
+				payload["target"] = target
+			} else if event.TargetID != "" {
 				payload["target"] = map[string]any{"id": event.TargetID}
 			}
 			return emitWindowEvent(c, "files-dropped", event.Name, payload)
