@@ -91,9 +91,16 @@ class LthnContainerWindow extends LitElement {
     this.err = "";
     try {
       const svc = await import("@desktop/container/service");
+      const { unwrap } = await import("../result");
       const [det, lst] = await Promise.all([
-        svc.Detect(false) as Promise<{ runtimes: Runtime[]; available: Runtime[] }>,
-        svc.List("") as Promise<{ containers: Container[]; count: number }>,
+        unwrap<{ runtimes: Runtime[]; available: Runtime[] }>(
+          svc.Detect(false),
+          { runtimes: [], available: [] },
+        ),
+        unwrap<{ containers: Container[]; count: number }>(
+          svc.List(""),
+          { containers: [], count: 0 },
+        ),
       ]);
       this.runtimes = det.runtimes || [];
       this.list = lst.containers || [];
@@ -109,7 +116,11 @@ class LthnContainerWindow extends LitElement {
     this.logs = "Loading…";
     try {
       const svc = await import("@desktop/container/service");
-      const r = await svc.Logs(id, runtime, 200) as { logs: string };
+      const { unwrap } = await import("../result");
+      const r = await unwrap<{ logs: string }>(
+        svc.Logs(id, runtime, 200),
+        { logs: "" },
+      );
       this.logs = r.logs || "(no output)";
     } catch (e: unknown) {
       this.logs = "Error: " + (e instanceof Error ? e.message : String(e));
