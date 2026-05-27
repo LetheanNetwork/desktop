@@ -730,7 +730,7 @@ func (s *Service) Run() core.Result {
 		},
 		Assets: gui.AssetOptions{
 			Handler:    engine,
-			Middleware: ginMiddleware(engine),
+			Middleware: gui.WailsHTTPMiddleware(engine),
 		},
 		// Mac defaults wired by gui.ModeTray (ActivationPolicy=Accessory,
 		// terminate-after-last-window stays false).
@@ -1109,32 +1109,6 @@ func (s *Service) attachSPA() core.Result {
 	return core.Ok(nil)
 }
 
-// ginMiddleware delegates /wails/* requests back to Wails, hands
-// everything else to the engine. Matches the example at
-// wails/v3/examples/gin-routing/main.go.
-//
-// One carve-out: /wails/custom.js. Wails' runtime fetches this URL
-// at boot to allow user-supplied JS overrides; we don't ship any,
-// so the default Wails handler returns 404 and spams the console.
-// Intercept here and return an empty 200 instead — the runtime
-// happily continues with no overrides applied.
-func ginMiddleware(engine core.Handler) gui.MiddlewareFunc {
-	return func(next core.Handler) core.Handler {
-		return core.HandlerFunc(func(w core.ResponseWriter, r *core.Request) {
-			if r.URL.Path == "/wails/custom.js" {
-				w.Header().Set("Content-Type", "application/javascript")
-				w.WriteHeader(core.StatusOK)
-				_, _ = w.Write([]byte("/* no user overrides */\n"))
-				return
-			}
-			if core.HasPrefix(r.URL.Path, "/wails") {
-				next.ServeHTTP(w, r)
-				return
-			}
-			engine.ServeHTTP(w, r)
-		})
-	}
-}
 
 // trayPluginMaxLabelBytes caps a plugin-manifest label before it lands
 // on the native tray surface. Closes Cerberus #70 F-3 MED — STRIDE-T
