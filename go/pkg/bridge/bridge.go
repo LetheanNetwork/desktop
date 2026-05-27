@@ -250,15 +250,39 @@ func (s *Service) Port() int { return s.port }
 // timeout; the bridge is dev-only and a missing window service means
 // console/error capture is degraded but the rest of the bridge
 // (eval, navigate, query, mcp/*) keeps working.
+// subscribeToWebViewEvents wires the WebView's posted console + error
+// events directly into bridge.Service via window.Service.SubscribeEvent.
+//
+// Action-bus exception: this is the one place lthn/desktop holds a
+// direct *guiwindow.Service pointer rather than dispatching via
+// c.Action(...). The reason — SubscribeEvent is callback-shaped, and
+// the callbacks (handleConsoleEvent / handleErrorEvent) need access to
+// bridge.Service receiver state (the ring buffer for /mcp/console). An
+// action-bus indirection would require: a "window.subscribe_event"
+// task carrying a handler_action_id, the service emitting a
+// per-event-name Message{Data}, and bridge.Service registering an
+// action handler that re-routes to the right method. Three extra hops
+// for no real decoupling — the bridge already has a hard dependency on
+// the window service for /mcp/eval / /mcp/console parity.
+//
+// GUI-8 audit (2026-05-27): kept as-is.
 func (s *Service) subscribeToWebViewEvents() {
 	deadline := core.Now().Add(10 * core.Second)
+	attempts := 0
 	for core.Now().Before(deadline) {
+		attempts++
 		windowSvc, ok := core.ServiceFor[*guiwindow.Service](s.Core(), "window")
 		if ok && windowSvc != nil {
-			windowSvc.SubscribeEvent(eventConsoleName, s.handleConsoleEvent)
-			windowSvc.SubscribeEvent(eventErrorName, s.handleErrorEvent)
+			okC := windowSvc.SubscribeEvent(eventConsoleName, s.handleConsoleEvent)
+			okE := windowSvc.SubscribeEvent(eventErrorName, s.handleErrorEvent)
+			core.Print(core.Stderr(),
+				"bridge: SubscribeEvent wired after %d attempts (console=%v error=%v)\n",
+				attempts, okC, okE)
 			return
 		}
 		core.Sleep(50 * core.Millisecond)
 	}
+	core.Print(core.Stderr(),
+		"bridge: SubscribeEvent timed out after %d attempts — console/error capture degraded\n",
+		attempts)
 }
