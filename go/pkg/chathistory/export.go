@@ -46,9 +46,17 @@ func (h *History) CopyTo(dest string) error {
 		return core.E("chathistory.CopyTo", "create dest", dstResult.Value.(error))
 	}
 	dst := dstResult.Value.(*core.OSFile)
-	defer dst.Close()
+	// Close error matters on the success path — disk-full /
+	// network-drive errors often surface only at Close, not during
+	// Write. Defer here would discard them. Explicit Close after
+	// Copy means a partial-file failure becomes a returned error
+	// rather than a "succeeded but file is corrupt" surprise.
 	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
 		return core.E("chathistory.CopyTo", "copy bytes", err)
+	}
+	if err := dst.Close(); err != nil {
+		return core.E("chathistory.CopyTo", "close dest", err)
 	}
 	return nil
 }
@@ -107,6 +115,11 @@ func (h *History) ExportJSONL(dest string) error {
 		return core.E("chathistory.ExportJSONL", "create dest", fResult.Value.(error))
 	}
 	f := fResult.Value.(*core.OSFile)
+	// Belt-and-braces — defer guarantees the fd never leaks on
+	// any return path; the success path below ALSO calls Close
+	// explicitly so the writer's flush failure (disk full,
+	// network drive, etc.) becomes a returned error instead of
+	// being silently swallowed by the defer.
 	defer f.Close()
 
 	convRows, err := h.db.Query(
@@ -203,6 +216,14 @@ func (h *History) ExportJSONL(dest string) error {
 		if _, err := f.Write([]byte{'\n'}); err != nil {
 			return core.E("chathistory.ExportJSONL", "write newline", err)
 		}
+	}
+	// Explicit Close on the success path — surfaces flush failures
+	// (disk-full, network drive, etc.) that would otherwise be
+	// swallowed by the deferred Close above. The deferred Close
+	// still runs but Close-on-closed-file is a no-op error we
+	// ignore (the meaningful error already returned here).
+	if err := f.Close(); err != nil {
+		return core.E("chathistory.ExportJSONL", "close dest", err)
 	}
 	return nil
 }
