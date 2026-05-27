@@ -459,11 +459,19 @@ func (s *Service) Stop(id string) core.Result {
 	s.proxy.Delete(id)
 
 	// Mark the record Stopped. Find first to confirm it exists.
+	// A Save failure here is a real inconsistency — the container
+	// is gone (or being torn down) but the orm row stays "running"
+	// from the caller's perspective, so the next List/Status read
+	// would lie. Log it loud so audit / activity surfaces the drift
+	// rather than swallowing the error and returning core.Ok below.
 	findR := orm.Of[Sandbox](s.Core()).Find(id)
 	if findR.OK {
 		sb := findR.Value.(Sandbox)
 		sb.Status = StatusStopped
-		_ = orm.Of[Sandbox](s.Core()).Save(&sb)
+		if r := orm.Of[Sandbox](s.Core()).Save(&sb); !r.OK {
+			core.Warn("opencode.Stop.save_failed",
+				"id", id, "error", r.Error())
+		}
 	}
 
 	// Notify subscribers (runner) that the sandbox set changed.
