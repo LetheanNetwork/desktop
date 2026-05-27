@@ -101,7 +101,8 @@ class LthnPhpWindow extends LitElement {
     this.err = "";
     try {
       const svc = await import("@desktop/php/service");
-      const r = await svc.Detect([], 3) as { projects: ProjectSummary[] };
+      const { unwrap } = await import("../result");
+      const r = await unwrap<{ projects: ProjectSummary[] }>(svc.Detect([], 3), { projects: [] });
       this.projects = r.projects || [];
       if (!this.selected && this.projects.length > 0) {
         await this._select(this.projects[0].path);
@@ -123,9 +124,10 @@ class LthnPhpWindow extends LitElement {
     this.scripts = null;
     try {
       const svc = await import("@desktop/php/service");
+      const { unwrap } = await import("../result");
       const [d, s] = await Promise.all([
-        svc.Project(path) as Promise<{ detail: ProjectDetail }>,
-        svc.Scripts(path) as Promise<Scripts>,
+        unwrap<{ detail: ProjectDetail | null }>(svc.Project(path), { detail: null }),
+        unwrap<Scripts | null>(svc.Scripts(path), null),
       ]);
       this.detail = d.detail;
       this.scripts = s;
