@@ -23,10 +23,15 @@ import (
 	guiwindow "dappco.re/go/gui/pkg/window"
 )
 
-// TODO(snider): core/gui needs lifecycle/window event coverage for
-// opened-url, runtime-ready, hide/show/state events, and full file-drop
-// target details so these lthn:* frontend events can have exact parity
-// with the previous Wails event constants.
+// Remaining substrate gaps (deliberately not yet wired so this file
+// stays a faithful re-broadcaster of what core/gui actually emits):
+//
+//   - ApplicationOpenedWithURL — Wails fires this for "open with…" URL
+//     handoff (lthn:// scheme). core/gui's lifecycle pkg subscribes to
+//     ApplicationOpenedWithFile but not the URL variant yet.
+//   - WindowFilesDropped target details — DropTargetDetails carries
+//     element id + position; today we forward elementId only. Position
+//     would let a Lit drop zone snap to the cursor.
 
 // registerSystemEvents wires the cross-platform application events
 // onto our lthn:* bus. Called once from desktop.Run() after the
@@ -42,6 +47,15 @@ import (
 //	guiwindow.ActionWindowMoved                   → "lthn:window:move"
 //	guiwindow.ActionWindowResized                 → "lthn:window:resize"
 //	guiwindow.ActionFilesDropped                  → "lthn:window:files-dropped"
+//	guiwindow.ActionWindowHidden                  → "lthn:window:hide"
+//	guiwindow.ActionWindowShown                   → "lthn:window:show"
+//	guiwindow.ActionWindowMinimised               → "lthn:window:minimise"
+//	guiwindow.ActionWindowUnminimised             → "lthn:window:unminimise"
+//	guiwindow.ActionWindowMaximised               → "lthn:window:maximise"
+//	guiwindow.ActionWindowUnmaximised             → "lthn:window:unmaximise"
+//	guiwindow.ActionWindowFullscreened            → "lthn:window:fullscreen"
+//	guiwindow.ActionWindowUnfullscreened          → "lthn:window:unfullscreen"
+//	guiwindow.ActionWindowRuntimeReady            → "lthn:window:ready"
 //	guinotification.ActionNotificationClicked     → "lthn:notification:click" (notification id)
 //	guinotification.ActionNotificationActionTriggered → "lthn:notification:action" ({notification_id, action_id})
 //	guinotification.ActionNotificationDismissed   → "lthn:notification:dismiss" (notification id)
@@ -75,6 +89,24 @@ func registerSystemEvents(c *core.Core) {
 				payload["target"] = map[string]any{"id": event.TargetID}
 			}
 			return emitWindowEvent(c, "files-dropped", event.Name, payload)
+		case guiwindow.ActionWindowHidden:
+			return emitWindowEvent(c, "hide", event.Name, nil)
+		case guiwindow.ActionWindowShown:
+			return emitWindowEvent(c, "show", event.Name, nil)
+		case guiwindow.ActionWindowMinimised:
+			return emitWindowEvent(c, "minimise", event.Name, nil)
+		case guiwindow.ActionWindowUnminimised:
+			return emitWindowEvent(c, "unminimise", event.Name, nil)
+		case guiwindow.ActionWindowMaximised:
+			return emitWindowEvent(c, "maximise", event.Name, nil)
+		case guiwindow.ActionWindowUnmaximised:
+			return emitWindowEvent(c, "unmaximise", event.Name, nil)
+		case guiwindow.ActionWindowFullscreened:
+			return emitWindowEvent(c, "fullscreen", event.Name, nil)
+		case guiwindow.ActionWindowUnfullscreened:
+			return emitWindowEvent(c, "unfullscreen", event.Name, nil)
+		case guiwindow.ActionWindowRuntimeReady:
+			return emitWindowEvent(c, "ready", event.Name, nil)
 		case guinotification.ActionNotificationClicked:
 			return emitCoreEvent(c, "lthn:notification:click", event.ID)
 		case guinotification.ActionNotificationActionTriggered:
