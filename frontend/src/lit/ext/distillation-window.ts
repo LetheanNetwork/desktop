@@ -243,6 +243,18 @@ class LthnDistillationWindow extends LitElement {
     }
   }
 
+  /** Unix seconds → "5m ago" / "2h ago" / "3d ago" — compact recency
+   *  tag for the Recent Adapters rail so the user knows which entry
+   *  is the fresh one without parsing absolute timestamps. */
+  private _fmtRel(ts: number): string {
+    if (!ts) return "—";
+    const age = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+    if (age < 60)    return `${age}s ago`;
+    if (age < 3600)  return `${Math.trunc(age / 60)}m ago`;
+    if (age < 86400) return `${Math.trunc(age / 3600)}h ago`;
+    return `${Math.trunc(age / 86400)}d ago`;
+  }
+
   /** OS-native file picker for the dataset JSONL path. Filters to
    *  .jsonl so the user lands in the right shape; cancel returns
    *  undefined and we leave the field alone. Mirrors the SaveFile
@@ -573,7 +585,9 @@ class LthnDistillationWindow extends LitElement {
                     <div style="padding:6px 8px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05); border-radius:5px; display:flex; flex-direction:column; gap:4px;">
                       <div style="font-family:var(--font-mono); font-size:11px; color:var(--fg-0); word-break:break-all;">${a.name}</div>
                       <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
-                        <span style="font-size:10px; color:var(--fg-3);">${(a.size_bytes / (1024 * 1024)).toFixed(1)} MB</span>
+                        <span style="font-size:10px; color:var(--fg-3);">
+                          ${(a.size_bytes / (1024 * 1024)).toFixed(1)} MB · ${this._fmtRel(a.modified_unix)}
+                        </span>
                         <lthn-btn tone="ghost" size="sm" ?disabled=${this.busy || !this.modelPath}
                                   @click=${() => { void this._doTestAdapter(a.path); }}
                                   style="--wails-draggable:no-drag;">
