@@ -646,7 +646,26 @@ func NewService(opts Options) *Service {
 			}
 		}
 	}
-	s.http = &core.HTTPServer{Addr: opts.Addr, Handler: engine.Handler()}
+	s.http = &core.HTTPServer{
+		Addr:    opts.Addr,
+		Handler: engine.Handler(),
+		// Slowloris defence — without this a single attacker holding
+		// a TCP connection open and dribbling header bytes one at a
+		// time pins a goroutine forever. 10s is generous for any
+		// real client (Wails WebView, lthn CLI verbs, external MCP
+		// callers) and the lower bound recommended by net/http godoc.
+		ReadHeaderTimeout: 10 * core.Second,
+		// Keep-alive cap. Long enough for the WebView's UI polling
+		// loops to reuse the connection (every-few-seconds Lemma
+		// status, fleet refresh, tray Activity), short enough that
+		// abandoned connections don't accumulate goroutines.
+		// ReadTimeout + WriteTimeout deliberately left zero: long
+		// chat streams + large model-import uploads can legitimately
+		// take minutes, and per-request timeouts would truncate them
+		// mid-flight. Slowloris closure comes from ReadHeaderTimeout
+		// + IdleTimeout, not ReadTimeout.
+		IdleTimeout: 120 * core.Second,
+	}
 	return s
 }
 
