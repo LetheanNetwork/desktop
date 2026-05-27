@@ -646,6 +646,10 @@ func (s *Service) Run() core.Result {
 	// Build the GuiConfig — core/gui's Service owns wails app construction
 	// + sub-service registration. lthn/desktop holds no wails imports.
 	guiCfg := gui.GuiConfig{
+		// Tray mode auto-wires Mac.ActivationPolicy=Accessory +
+		// Windows.DisableQuitOnLastWindowClosed=true. The tray IS the
+		// process lifetime anchor.
+		Mode:            gui.ModeTray,
 		Name:            s.opts.Name,
 		Description:     s.opts.Description,
 		Icon:            s.opts.AppIcon,
@@ -729,20 +733,13 @@ func (s *Service) Run() core.Result {
 			Handler:    engine,
 			Middleware: ginMiddleware(engine),
 		},
-		Mac: gui.MacOptions{
-			// Tray IS the process — closing every window must NOT quit.
-			ApplicationShouldTerminateAfterLastWindowClosed: false,
-			// Accessory: menu-bar only, no Dock icon, no Cmd+Tab entry.
-			ActivationPolicy: gui.ActivationPolicyAccessory,
-		},
+		// Mac defaults wired by gui.ModeTray (ActivationPolicy=Accessory,
+		// terminate-after-last-window stays false).
 		Windows: gui.WindowsOptions{
-			// Windows-side equivalent of the Mac flag above — without
-			// this, closing the last window quits the process and the
-			// systray goes with it. v3/examples/systray-custom canon.
-			DisableQuitOnLastWindowClosed: true,
-			// Enable WebView2's draggable-regions feature — Wails3
-			// needs this for --wails-draggable CSS to work on
-			// Windows (macOS handles it natively without the flag).
+			// DisableQuitOnLastWindowClosed wired by gui.ModeTray.
+			// EnabledFeatures stays explicit — Wails3 needs the
+			// WebView2 draggable-regions feature for --wails-draggable
+			// CSS to work on Windows.
 			EnabledFeatures: []string{"msWebView2EnableDraggableRegions"},
 		},
 		// SingleInstance — a second launch hands off URL/file/args
