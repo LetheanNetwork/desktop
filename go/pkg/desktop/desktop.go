@@ -1351,7 +1351,7 @@ func refreshSelfMachineOnce(svc *fleet.Service) {
 	if svc == nil {
 		return
 	}
-	row := selfMachineRow()
+	row := mergeSelfMachineRow(svc)
 	admin, err := lemma.NewAdmin(lemma.AdminConfig{})
 	if err != nil {
 		row.Status = "offline"
@@ -1457,6 +1457,47 @@ func localLemmaAgentRow(modelPath string, existing *fleet.Agent) fleet.Agent {
 		out.ModelSettings = existing.ModelSettings
 		out.Tags = existing.Tags
 		out.Features = existing.Features
+	}
+	return out
+}
+
+// mergeSelfMachineRow reads the existing self-machine row (if any)
+// and merges substrate-controlled fields (the fresh selfMachineRow
+// defaults) with user-controlled fields (Tags, Capabilities, Name —
+// preserve). Without this every 10s refresh tick wipes whatever
+// custom capabilities or tags the operator added via the pair-
+// machine modal.
+//
+// Mirrors the localLemmaAgentRow merge pattern for the same reason:
+// auto-managed rows shouldn't fight user edits.
+func mergeSelfMachineRow(svc *fleet.Service) fleet.Machine {
+	out := selfMachineRow()
+	if svc == nil {
+		return out
+	}
+	listRes := svc.Machines()
+	if !listRes.OK {
+		return out
+	}
+	machines, ok := listRes.Value.([]fleet.Machine)
+	if !ok {
+		return out
+	}
+	for i := range machines {
+		if !machines[i].IsSelf {
+			continue
+		}
+		// First IsSelf row wins. The refresh upsert keys on ID so
+		// the merged shape is what lands.
+		existing := machines[i]
+		if existing.Name != "" {
+			out.Name = existing.Name
+		}
+		out.Tags = existing.Tags
+		if len(existing.Capabilities) > 0 {
+			out.Capabilities = existing.Capabilities
+		}
+		break
 	}
 	return out
 }
