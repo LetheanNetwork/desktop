@@ -419,7 +419,9 @@ func applyProfile(target, authHeader string, p Profile) core.Result {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
-		respBody, _ := goio.ReadAll(resp.Body)
+		// 1 MiB cap on error bodies — short JSON envelopes today;
+		// limits exposure if the sandbox misbehaves on the error path.
+		respBody, _ := goio.ReadAll(goio.LimitReader(resp.Body, 1<<20))
 		return core.Fail(core.E("opencode.applyProfile",
 			core.Sprintf("patch returned %d: %s", resp.StatusCode, string(respBody)), nil))
 	}

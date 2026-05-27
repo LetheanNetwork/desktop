@@ -86,6 +86,9 @@ func (s *Service) callOpenCode(method, url string, body goio.Reader) (string, in
 		return "", 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, _ := goio.ReadAll(resp.Body)
+	// 1 MiB cap — provider list is short JSON envelope; the sandbox
+	// shouldn't ever return more. Defence-in-depth against a
+	// misbehaving (or tampered) opencode container.
+	raw, _ := goio.ReadAll(goio.LimitReader(resp.Body, 1<<20))
 	return string(raw), resp.StatusCode, nil
 }

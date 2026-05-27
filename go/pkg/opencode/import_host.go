@@ -158,7 +158,11 @@ func importFetchJSON(url, authHeader string) (any, error) {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, _ := goio.ReadAll(resp.Body)
+	// 16 MiB cap — imports surface JSON catalogues of host opencode
+	// state (projects + providers). Larger than the 1 MiB error-body
+	// caps because the catalogue itself can run to many KB; 16 MiB
+	// keeps the ceiling well above honest workloads.
+	body, _ := goio.ReadAll(goio.LimitReader(resp.Body, 16<<20))
 	if resp.StatusCode >= 400 {
 		return nil, core.E("opencode.importFetchJSON",
 			core.Sprintf("HTTP %d: %s", resp.StatusCode, string(body)), nil)

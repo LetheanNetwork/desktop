@@ -202,14 +202,16 @@ func (m *Model) invoke(ctx core.Context, messages []inference.Message) (string, 
 	}
 	defer func() { _ = sessResp.Body.Close() }()
 	if sessResp.StatusCode >= 400 {
-		body, _ := goio.ReadAll(sessResp.Body)
+		// 1 MiB error-body cap — short envelope only.
+		body, _ := goio.ReadAll(goio.LimitReader(sessResp.Body, 1<<20))
 		return "", core.E("opencode.invoke",
 			core.Sprintf("session create %d: %s", sessResp.StatusCode, string(body)), nil)
 	}
 	var sess struct {
 		ID string `json:"id"`
 	}
-	body, _ := goio.ReadAll(sessResp.Body)
+	// 1 MiB cap — session create returns just {"id": "..."}.
+	body, _ := goio.ReadAll(goio.LimitReader(sessResp.Body, 1<<20))
 	if r := core.JSONUnmarshal(body, &sess); !r.OK {
 		return "", core.E("opencode.invoke", "session response parse: "+r.Error(), nil)
 	}
@@ -238,7 +240,10 @@ func (m *Model) invoke(ctx core.Context, messages []inference.Message) (string, 
 		return "", err
 	}
 	defer func() { _ = msgResp.Body.Close() }()
-	msgBody, _ := goio.ReadAll(msgResp.Body)
+	// 16 MiB cap — message post returns the assistant turn (parts
+	// array with text content). Same generous ceiling as lemma chat
+	// — honest replies fit easily, hostile responses can't OOM.
+	msgBody, _ := goio.ReadAll(goio.LimitReader(msgResp.Body, 16<<20))
 	if msgResp.StatusCode >= 400 {
 		return "", core.E("opencode.invoke",
 			core.Sprintf("message post %d: %s", msgResp.StatusCode, string(msgBody)), nil)
