@@ -86,6 +86,13 @@ func Import(srcPath string) core.Result {
 		return core.Fail(core.E("models.Import", "create destination failed", dstR.Value.(error)))
 	}
 	dst, _ := dstR.Value.(*core.OSFile)
+	// Belt-and-braces: defer guarantees the fd never leaks; success
+	// path also calls Close explicitly so a flush failure (disk full
+	// mid-write, network drive going away) surfaces as a returned
+	// error instead of being silently swallowed. Without the explicit
+	// success-path Close, a truncated .gguf would land at dstPath with
+	// the user seeing "Import succeeded" — worst possible failure mode
+	// for a multi-GB model file that may not be re-downloadable.
 	defer dst.Close()
 
 	if cpR := core.Copy(dst, src); !cpR.OK {
@@ -94,6 +101,12 @@ func Import(srcPath string) core.Result {
 		// the original copy error, not the cleanup error.
 		_ = core.Remove(dstPath)
 		return core.Fail(core.E("models.Import", "copy failed", cpR.Value.(error)))
+	}
+	if err := dst.Close(); err != nil {
+		// Flush failed — destination is partial. Roll back so the
+		// model rail doesn't show a truncated entry.
+		_ = core.Remove(dstPath)
+		return core.Fail(core.E("models.Import", "close destination failed", err))
 	}
 
 	return core.Ok(dstPath)
