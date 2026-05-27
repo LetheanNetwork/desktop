@@ -8,7 +8,7 @@
 //
 // Usage example:
 //
-//	lthn                       # default mode (launches tray + GUI when wired)
+//	lthn                       # default mode (launches tray + GUI; CLI banner when stdin is a TTY)
 //	lthn version               # version info
 //	lthn gui                   # explicit GUI launch
 //	lthn tray                  # tray-only mode (NSStatusItem)
@@ -262,12 +262,14 @@ func cmdHelp(args []string) int {
 	return 0
 }
 
-// cmdGUI handles `lthn gui`. Launches the Wails app.
-// TODO: import core/gui + Lethean-5 Lit frontend, follow core/ide pattern.
+// cmdGUI handles `lthn gui`. Launches the Wails app — mounts the
+// shared HTTP surface (gateway data firewall + opencode lifecycle +
+// plugin proxy, see buildServerOpts) into the desktop service that
+// owns the systray + popover + window lifecycle.
 //
 // Usage example:
 //
-//	rc := cmdGUI(nil) // launches the GUI when wired; today returns 1
+//	rc := cmdGUI(nil) // launches tray + GUI; returns 0 on clean exit
 func cmdGUI(args []string) int {
 	c := newAppCore()
 	if c == nil {
@@ -355,7 +357,7 @@ func cmdTray(args []string) int {
 //
 // Usage example:
 //
-//	rc := cmdServe([]string{"--port=8000"}) // starts server when wired
+//	rc := cmdServe([]string{"--port=8000"}) // starts OpenAI-compatible server on :8000
 func cmdServe(args []string) int {
 	const serveErrorFormat = "lthn serve: %s\n"
 
@@ -598,11 +600,12 @@ func buildServerOpts(c *core.Core, r *runner.Service, key string, forGUI bool) s
 	return opts
 }
 
-// cmdAI handles `lthn ai <verb> [args...]`. AI subsystem dispatch.
+// cmdAI handles `lthn ai <verb> [args...]`. AI subsystem dispatch —
+// routes to aiChat / aiGenerate / aiModels / cmdServe.
 //
 // Usage example:
 //
-//	rc := cmdAI([]string{"chat"}) // routes to the chat verb (stub today)
+//	rc := cmdAI([]string{"chat", "hello"}) // one-shot chat against the loaded model
 func cmdAI(args []string) int {
 	if len(args) == 0 {
 		core.Print(core.Stderr(), "lthn ai: missing verb (chat / generate / models / serve)\n")
