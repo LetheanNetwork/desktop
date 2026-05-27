@@ -215,6 +215,9 @@ class LthnDistillationWindow extends LitElement {
       // there's no new adapter to surface in those cases.
       const wasLive = prevState === "running" || prevState === "pending";
       if (wasLive && this.job?.state === "done") {
+        // Re-pull our own Recent Adapters rail so the new entry
+        // surfaces locally without waiting for the next poll cycle.
+        void this._refreshAdapters();
         try {
           const { Events } = await import("@wailsio/runtime");
           Events.Emit("lthn:lemma:adapters-changed", null);
