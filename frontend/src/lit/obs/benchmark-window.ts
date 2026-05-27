@@ -141,6 +141,7 @@ class LthnBenchmarkWindow extends LitElement {
     selectedBencher: { state: true },
     selectedModel: { state: true },
     running: { state: true },
+    sftRunning: { state: true },
     runErr: { state: true },
   };
   declare w: number;
@@ -153,6 +154,16 @@ class LthnBenchmarkWindow extends LitElement {
   declare selectedBencher: string;
   declare selectedModel: string;
   declare running: boolean;
+  /** True when Lemma.SFTStatus("") reports state="running" — gates
+   *  the Run button so a bench doesn't contend for GPU with an
+   *  in-flight fine-tune. Refreshed alongside the benchers/models
+   *  poll; cleared when SFT finishes or stops. */
+  declare sftRunning: boolean;
+  /** Polls SFT state every POLL_MS while mounted; null when not yet
+   *  initialised. Disconnected callback clears the handle so the
+   *  poll doesn't outlive the element. */
+  private _sftPollHandle: number | null = null;
+  private static readonly SFT_POLL_MS = 4000;
   declare runErr: string;
   declare t: {
     btnPp: string; btnTg: string; btnBoth: string; btnRun: string; btnExport: string;
@@ -178,6 +189,7 @@ class LthnBenchmarkWindow extends LitElement {
     this.selectedBencher = "";
     this.selectedModel = "";
     this.running = false;
+    this.sftRunning = false;
     this.runErr = "";
     this.t = {
       btnPp: "PP only", btnTg: "TG only", btnBoth: "Both",
@@ -228,6 +240,9 @@ class LthnBenchmarkWindow extends LitElement {
       yAxis: yAx, footer: foot,
     };
     void this._loadFromBackend();
+    void this._pollSFT();
+    this._sftPollHandle = window.setInterval(() => void this._pollSFT(),
+                                              LthnBenchmarkWindow.SFT_POLL_MS);
     // Subscribe to the queue substrate's completion event so the table
     // refreshes the moment a Run finishes — no polling needed. The
     // backend bridge emits "benchmark:completed" on every BenchCompleted
@@ -249,6 +264,25 @@ class LthnBenchmarkWindow extends LitElement {
     if (this._unsubCompleted) {
       this._unsubCompleted();
       this._unsubCompleted = null;
+    }
+    if (this._sftPollHandle !== null) {
+      clearInterval(this._sftPollHandle);
+      this._sftPollHandle = null;
+    }
+  }
+
+  /** Lemma.SFTStatus("") returns the active job (or 404 = none).
+   *  Only state==="running" gates the Run button; terminal states
+   *  collapse to "not running" so completed/stopped jobs don't keep
+   *  the bench disabled. Lemma down → assume not training (the bench
+   *  can still run against other registered benchers like Ollama). */
+  async _pollSFT() {
+    try {
+      const lemma = await import("@desktop/lemma/wailsservice");
+      const job = await lemma.SFTStatus("").catch(() => null);
+      this.sftRunning = !!(job && job.state === "running");
+    } catch {
+      this.sftRunning = false;
     }
   }
 
@@ -411,7 +445,10 @@ class LthnBenchmarkWindow extends LitElement {
     const gridYs = Array.from({ length: 5 }, (_, i) => tgMin + (i / 4) * (tgMax - tgMin)).map(v => Math.round(v));
 
     const pickerStyle = "padding:4px 24px 4px 10px; border-radius:6px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); font-size:11px; color:var(--fg-1); font-family:var(--font-mono); appearance:none; cursor:pointer; outline:none;";
-    const runDisabled = this.running || !this.selectedBencher || !this.selectedModel || this.models.length === 0;
+    const runDisabled = this.running || this.sftRunning || !this.selectedBencher || !this.selectedModel || this.models.length === 0;
+    const runLabel = this.running     ? "Running…"
+                   : this.sftRunning  ? "Training in progress"
+                   :                    this.t.btnRun;
     const toolbar = html`
       <select
         title="Bencher"
@@ -440,13 +477,14 @@ class LthnBenchmarkWindow extends LitElement {
       <lthn-btn tone="ghost" size="sm" active>${this.t.btnBoth}</lthn-btn>
       <div style="flex:1"></div>
       <lthn-btn
-        tone="primary"
+        tone=${this.sftRunning ? "ghost" : "primary"}
         size="sm"
         ?disabled=${runDisabled}
+        title=${this.sftRunning ? "Cannot bench while fine-tune is in flight — Stop it first from the Lemma engine panel" : ""}
         @click=${() => void this._runBench()}
       >
-        <i class="fa-solid ${this.running ? "fa-spinner fa-spin" : "fa-play"}" style="font-size:9px;"></i>
-        ${this.running ? "Running…" : this.t.btnRun}
+        <i class="fa-solid ${this.running ? "fa-spinner fa-spin" : this.sftRunning ? "fa-hourglass-half" : "fa-play"}" style="font-size:9px;"></i>
+        ${runLabel}
       </lthn-btn>
       <lthn-btn tone="ghost" size="sm"><i class="fa-regular fa-file-arrow-down" style="font-size:10px;"></i> ${this.t.btnExport}</lthn-btn>
     `;
