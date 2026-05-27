@@ -373,8 +373,16 @@ class LthnLemmaWindow extends LitElement {
   }
 
   private renderStatus() {
+    // Engine reachable AND a model is loaded — the typical "ready"
+    // state where the user can actually send a chat request.
+    if (this.health && this.health.status === "ok" && this.models.length > 0) {
+      return html`<lthn-state-pill variant="ok">ready</lthn-state-pill>`;
+    }
+    // Engine up but no model in the registry — common immediately
+    // after `lthn serve` boots before the first Reload. Warn so the
+    // user knows the surface is reachable but can't accept chats yet.
     if (this.health && this.health.status === "ok") {
-      return html`<lthn-state-pill variant="ok">serving</lthn-state-pill>`;
+      return html`<lthn-state-pill variant="warn">no model</lthn-state-pill>`;
     }
     if (this.err) {
       return html`<lthn-state-pill variant="warn">unreachable</lthn-state-pill>`;
