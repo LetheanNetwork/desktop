@@ -33,6 +33,8 @@ class LthnModelBrowserWindow extends LitElement {
     adapters:        { state: true },
     selectedAdapter: { state: true },
     activeAdapter:   { state: true },
+    activeContextLength: { state: true },
+    activeLoadedAt:  { state: true },
     sftRunning:      { state: true },
     deleteBusy:      { state: true },
     deleteErr:       { state: true },
@@ -69,6 +71,14 @@ class LthnModelBrowserWindow extends LitElement {
    *  the engine actually has loaded, not just what the user last
    *  picked. */
   declare activeAdapter: string;
+  /** Context length from Lemma.Status().config.context_length, only
+   *  meaningful for the currently-loaded model. 0 when no model is
+   *  loaded or the field isn't reported. */
+  declare activeContextLength: number;
+  /** Unix-seconds timestamp from Lemma.Status().loaded_at_unix —
+   *  drives the Last loaded row's relative-time tag. 0 when no
+   *  model is loaded. */
+  declare activeLoadedAt: number;
   /** True when Lemma.SFTStatus("") reports state="running" — gates
    *  the Use button because a mid-training model swap will fail the
    *  SFT job. Refreshed alongside Status / Profiles on _refresh. */
@@ -107,6 +117,8 @@ class LthnModelBrowserWindow extends LitElement {
     this.adapters = [];
     this.selectedAdapter = "";
     this.activeAdapter = "";
+    this.activeContextLength = 0;
+    this.activeLoadedAt = 0;
     this.sftRunning = false;
     this.deleteBusy = false;
     this.deleteErr = "";
@@ -442,11 +454,28 @@ class LthnModelBrowserWindow extends LitElement {
             <lthn-rail-row k=${this.t.rowFamily}       v=${selected ? selFamily : "Gemma 4"}></lthn-rail-row>
             <lthn-rail-row k=${this.t.rowParameters}   v=${selected ? modelParams(selected.name) : "2 B"}></lthn-rail-row>
             <lthn-rail-row k=${this.t.rowQuantisation} v=${selected ? modelQuant(selected.name) : "q4_k_m"}></lthn-rail-row>
-            <lthn-rail-row k=${this.t.rowContext}      v="8,192"></lthn-rail-row>
-            <lthn-rail-row k=${this.t.rowVocabulary}   v="262,144"></lthn-rail-row>
-            <lthn-rail-row k=${this.t.rowArchitecture} v="MoE · 4-expert"></lthn-rail-row>
-            <lthn-rail-row k=${this.t.rowLastLoaded}   v="2 minutes ago"></lthn-rail-row>
-            <lthn-rail-row k=${this.t.rowAvgTps}       v="47.2 · last 100 runs"></lthn-rail-row>
+            ${(() => {
+              // Context + Last loaded come from Lemma admin when the
+              // selected row matches the currently-loaded model.
+              // Other rows ("—") are honest about the missing
+              // substrate — Vocabulary / Architecture / Average
+              // tok/s would need per-model metadata or a runs
+              // aggregator that doesn't exist yet.
+              const isLoadedRow = !!selected?.path && selected.path === this.activeModelPath;
+              const ctxValue = isLoadedRow && this.activeContextLength > 0
+                ? this.activeContextLength.toLocaleString()
+                : "—";
+              const lastLoaded = isLoadedRow && this.activeLoadedAt > 0
+                ? this._fmtRel(this.activeLoadedAt)
+                : "—";
+              return html`
+                <lthn-rail-row k=${this.t.rowContext}      v=${ctxValue}></lthn-rail-row>
+                <lthn-rail-row k=${this.t.rowVocabulary}   v="—"></lthn-rail-row>
+                <lthn-rail-row k=${this.t.rowArchitecture} v="—"></lthn-rail-row>
+                <lthn-rail-row k=${this.t.rowLastLoaded}   v=${lastLoaded}></lthn-rail-row>
+                <lthn-rail-row k=${this.t.rowAvgTps}       v="—"></lthn-rail-row>
+              `;
+            })()}
           </div>
           <div style="padding:10px; border-radius:6px;
                       background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06);">
@@ -605,6 +634,8 @@ class LthnModelBrowserWindow extends LitElement {
       if (statusRes.status === "fulfilled") {
         this.activeModelPath = statusRes.value?.model_path ?? "";
         this.activeAdapter = statusRes.value?.config?.adapter_path ?? "";
+        this.activeContextLength = statusRes.value?.config?.context_length ?? 0;
+        this.activeLoadedAt = statusRes.value?.loaded_at_unix ?? 0;
         // Pre-select the active adapter so the dropdown defaults to
         // "what's loaded right now" rather than empty — the user can
         // still pick a different one or revert to "(none)".
@@ -615,6 +646,8 @@ class LthnModelBrowserWindow extends LitElement {
       } else {
         this.lemmaUnavailable = true;
         this.activeModelPath = "";
+        this.activeContextLength = 0;
+        this.activeLoadedAt = 0;
       }
       if (machineRes.status === "fulfilled") {
         this.machineHash = machineRes.value?.hash ?? "";
@@ -712,6 +745,19 @@ class LthnModelBrowserWindow extends LitElement {
     } finally {
       this.deleteBusy = false;
     }
+  }
+
+  /** Unix seconds → "5m ago" / "2h ago" / "3d ago" — used by the
+   *  Last loaded row to render a recent-time relative tag instead
+   *  of an absolute timestamp the user has to parse. Returns "—"
+   *  for falsy input (the row shows "—" when not the loaded model). */
+  private _fmtRel(ts: number): string {
+    if (!ts) return "—";
+    const age = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+    if (age < 60)    return `${age}s ago`;
+    if (age < 3600)  return `${Math.trunc(age / 60)}m ago`;
+    if (age < 86400) return `${Math.trunc(age / 3600)}h ago`;
+    return `${Math.trunc(age / 86400)}d ago`;
   }
 
   /** Switch the app shell to the Chat pane — same channel logs
