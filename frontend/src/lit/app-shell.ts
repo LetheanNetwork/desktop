@@ -289,6 +289,7 @@ const VIEWS: ViewDef[] = [
       { id: "providers",     label: "Providers",     icon: "fa-store",            tag: "lthn-providers-window",     group: "extend" },
       { id: "network",       label: "Network",       icon: "fa-circle-nodes",     tag: "lthn-network-window",       group: "preview", preview: true },
       { id: "distillation",  label: "Fine-tune",     icon: "fa-flask",            tag: "lthn-distillation-window",  group: "preview", preview: true },
+      { id: "training",      label: "Train",         icon: "fa-brain",            tag: "lthn-training-window",      group: "preview", preview: true },
       { id: "fleet",         label: "Fleet",         icon: "fa-server",           tag: "lthn-fleet-window",         group: "preview", preview: true },
       { id: "settings",      label: "Settings",      icon: "fa-sliders",          tag: "lthn-settings-window",      group: "bottom" },
     ],
@@ -1248,8 +1249,12 @@ class LthnAppShell extends LitElement {
       el.setAttribute("view", view?.label ?? this.view);
       return el;
     }
-    // Pass through some sensible defaults so the windows look populated
-    if (tag === "lthn-chat-window") el.setAttribute("state", "multi-turn");
+    // Pass through some sensible defaults so the windows look populated.
+    // Chat mounts at "empty" (welcome surface) rather than the
+    // "multi-turn" design canvas — the conversation restore inside
+    // chat-window swaps in the user's last live conversation if one
+    // exists.
+    if (tag === "lthn-chat-window") el.setAttribute("state", "empty");
     if (tag === "lthn-logs-window") el.setAttribute("tab", "live");
     if (tag === "lthn-welcome-window") el.setAttribute("step", "2");
     if (tag === "lthn-settings-window") el.setAttribute("open", "models");

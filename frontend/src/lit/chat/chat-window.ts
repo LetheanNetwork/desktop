@@ -352,7 +352,12 @@ class LthnChatWindow extends LitElement {
   };
   constructor() {
     super();
-    this.state = "multi-turn";
+    // Default to "empty" so first-time users see the welcome surface
+    // (starter chips + glyph) instead of the demo-canvas Go-loop fixture
+    // turns that ship with the "multi-turn" state for design preview.
+    // The activeConversationId restore at line ~747 swaps in liveTurns
+    // for returning users with prior conversations.
+    this.state = "empty";
     this.rail = "filled";
     // Default collapsed: chat surface is the centrepiece; the rail
     // tools (settings / stats / sources) reveal on demand via the
@@ -2190,7 +2195,12 @@ class LthnChatWindow extends LitElement {
   }
 
   _renderSurface(turns: ChatTurn[] | null, banner: ChatBanner | null) {
-    const empty = this.state === "empty";
+    // Welcome surface (starters + glyph) only when there are genuinely
+    // no live turns to show. An active conversation always wins — even
+    // when the state attribute defaults to "empty" — so picking an
+    // existing chat from the rail renders that chat's turns rather
+    // than the onboarding splash.
+    const empty = this.state === "empty" && this.activeConversationId === null;
     const streamingIdx = this.state === "generating" ? (turns?.length || 0) - 1 : -1;
     return html`
       <main style="flex:1; min-height:0; display:flex; flex-direction:column; position:relative;">
@@ -2274,17 +2284,34 @@ class LthnChatWindow extends LitElement {
         </div>
         <div style="display:grid; grid-template-columns:repeat(2, 220px); gap:8px; margin-top:6px;">
           ${starters.map(s => html`
-            <div style="padding:10px 12px; border-radius:8px;
+            <div @click=${() => this._seedComposer(s.text)}
+                 style="padding:10px 12px; border-radius:8px;
                         background:rgba(255,255,255,0.03);
                         border:1px solid rgba(255,255,255,0.06);
                         display:flex; align-items:center; gap:10px;
-                        font-size:12px; color:var(--fg-1); cursor:pointer;">
+                        font-size:12px; color:var(--fg-1); cursor:pointer;
+                        --wails-draggable: no-drag;">
               <i class="fa-solid ${s.icon}" style="font-size:11px; color:var(--fg-3);"></i>${s.text}
             </div>
           `)}
         </div>
       </div>
     `;
+  }
+
+  /** Seed the composer with a starter suggestion + focus the textarea.
+   *  Wires the empty-state chips so clicking one drops the suggestion
+   *  text into the input — the user can then edit or hit ⌘↵ to send. */
+  _seedComposer(text: string) {
+    this.composerValue = text;
+    queueMicrotask(() => {
+      const ta = this.querySelector<HTMLTextAreaElement>("textarea.lthn-chat-composer");
+      if (ta) {
+        ta.focus();
+        // Move caret to end so the user can keep typing.
+        ta.setSelectionRange(text.length, text.length);
+      }
+    });
   }
 
   _renderTurn(t: ChatTurn, streaming: boolean, isLast: boolean = false, turnIndex: number = -1) {

@@ -88,10 +88,21 @@ class LthnNetworkWindow extends LitElement {
       { id: "p4",    name: "ana-air · M2",         role: "peer-idle", layers: "—",                lat: "42 ms", x: 0.20, y: 0.68 },
     ];
 
+    // Tabs are dimmed — the LetherNet preview only renders the
+    // "This session" pane today; "Available peers" + "Ledger" land
+    // when the disaggregated-inference backend ships. The preview
+    // pill at the right is the load-bearing signal that this whole
+    // surface is design-canvas.
     const toolbar = html`
       <lthn-btn tone="primary" size="sm" active>${this.t.tabThisSession}</lthn-btn>
-      <lthn-btn tone="ghost" size="sm">${this.t.tabAvailable}</lthn-btn>
-      <lthn-btn tone="ghost" size="sm">${this.t.tabLedger}</lthn-btn>
+      <lthn-btn tone="ghost" size="sm" ?dim=${true}
+        title="Available peers ships with the LetherNet backend">
+        ${this.t.tabAvailable}
+      </lthn-btn>
+      <lthn-btn tone="ghost" size="sm" ?dim=${true}
+        title="Ledger ships with the LetherNet backend">
+        ${this.t.tabLedger}
+      </lthn-btn>
       <div style="flex:1"></div>
       <lthn-state-pill variant="preview">${this.t.pillPreview}</lthn-state-pill>
     `;
@@ -166,7 +177,10 @@ class LthnNetworkWindow extends LitElement {
           <div style="font-size:11px; color:var(--fg-3); line-height:1.55; font-style:italic;">
             ${this.t.motto}
           </div>
-          <lthn-btn tone="quiet" size="md">${this.t.btnLeave}</lthn-btn>
+          <lthn-btn tone="quiet" size="md" ?dim=${true}
+            title="Joining + leaving sessions ships with the LetherNet backend">
+            ${this.t.btnLeave}
+          </lthn-btn>
         </aside>
       </div>
     `;

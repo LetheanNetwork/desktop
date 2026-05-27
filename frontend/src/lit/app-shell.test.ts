@@ -93,7 +93,11 @@ describe("lthn-app-shell — two-shell pattern", () => {
     // when mounted via the shell. Welcome isn't in the side-nav (it's
     // a standalone wizard surface) so it's not covered here.
     const cases: Array<[string, string, string, string]> = [
-      ["chat",     "lthn-chat-window",     "state", "multi-turn"],
+      // Chat mounts at "empty" — first-time users see the welcome
+      // surface; returning users with prior conversations swap into
+      // liveTurns via the activeConversationId restore inside
+      // chat-window.
+      ["chat",     "lthn-chat-window",     "state", "empty"],
       ["logs",     "lthn-logs-window",     "tab",   "live"],
       ["settings", "lthn-settings-window", "open",  "models"],
     ];
