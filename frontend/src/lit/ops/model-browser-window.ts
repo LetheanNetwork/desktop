@@ -615,6 +615,16 @@ class LthnModelBrowserWindow extends LitElement {
         context_length:  0,
       }));
       await this._refreshLemmaAdmin();
+      // Broadcast so peer windows refresh their adminStatus mirror
+      // — lemma-window's Model path / Adapter / Profile rows reflect
+      // the new state without waiting for the next manual refresh.
+      // Tray + telemetry already poll every 2s so they pick up
+      // independently; benchmark/fleet don't track model_path so
+      // they're no-ops on this channel.
+      try {
+        const { Events } = await import("@wailsio/runtime");
+        Events.Emit("lthn:lemma:model-reloaded", null);
+      } catch { /* wails runtime absent in test contexts */ }
     } catch (err) {
       this.reloadErr = err instanceof Error ? err.message : String(err);
     } finally {

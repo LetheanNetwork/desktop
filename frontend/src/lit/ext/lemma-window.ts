@@ -152,7 +152,15 @@ class LthnLemmaWindow extends LitElement {
       const offAdapters = Events.On("lthn:lemma:adapters-changed", () => {
         if (this.showAdmin) void this.loadAdmin();
       });
-      this.eventUnsub = [offModels, offAdapters];
+      // model-browser-window emits this on a successful Reload.
+      // Refresh unconditionally — the engine's loaded model is core
+      // status, not admin detail, so the status pill / model name
+      // outside the admin panel both benefit from a refresh.
+      const offReloaded = Events.On("lthn:lemma:model-reloaded", () => {
+        void this.poll();
+        if (this.showAdmin) void this.loadAdmin();
+      });
+      this.eventUnsub = [offModels, offAdapters, offReloaded];
     } catch { /* wails runtime absent in test contexts */ }
   }
 
