@@ -171,7 +171,18 @@ class LthnLemmaWindow extends LitElement {
         void this.poll();
         if (this.showAdmin) void this.loadAdmin();
       });
-      this.eventUnsub = [offModels, offAdapters, offReloaded];
+      // Deep-link from other surfaces — model-browser's "Open Lemma"
+      // CTA + future entry points use this to land the user on the
+      // expanded admin panel (where Download + Hot-swap forms live)
+      // rather than the collapsed default. loadAdmin fires too so
+      // the panel renders populated on arrival.
+      const offOpenAdmin = Events.On("lthn:lemma:open-admin", () => {
+        if (!this.showAdmin) {
+          this.showAdmin = true;
+          void this.loadAdmin();
+        }
+      });
+      this.eventUnsub = [offModels, offAdapters, offReloaded, offOpenAdmin];
     } catch { /* wails runtime absent in test contexts */ }
   }
 

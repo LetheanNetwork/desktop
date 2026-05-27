@@ -714,14 +714,15 @@ class LthnModelBrowserWindow extends LitElement {
     }
   }
 
-  /** Switch the app shell to the Lemma pane — same channel the
-   *  tray popover + logs Open Chat (7ca2298) use. From there the
-   *  user has the Hot-swap + Download forms for getting a model
-   *  onto disk. */
+  /** Switch the app shell to the Lemma pane + expand the admin
+   *  panel so the user lands on the Download form directly. Two
+   *  events chained: setpane (same channel tray popover + logs
+   *  Open Chat use) and open-admin (lemma-window deep-link). */
   private async _openLemma(): Promise<void> {
     try {
       const { Events } = await import("@wailsio/runtime");
       Events.Emit("lthn:app:setpane", "lemma");
+      Events.Emit("lthn:lemma:open-admin", null);
     } catch (err) {
       console.error("model-browser: open lemma failed", err);
     }
