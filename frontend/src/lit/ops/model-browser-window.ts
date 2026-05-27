@@ -319,15 +319,16 @@ class LthnModelBrowserWindow extends LitElement {
   render() {
     const local: LocalModel[] = this.local;
     // The actually-selected local model for the detail rail's
-    // "Selected" header. Falls back to the design literal so the
-    // detail rail still reads coherently in canvas preview (no
-    // local entries scanned, or pre-selection settles).
+    // "Selected" header. When nothing is selected (no local entries
+    // scanned, or pre-selection still settling), every field renders
+    // as "—" instead of design-literal fallbacks ("gemma-4-e2b" /
+    // "Google" / "2.1 GB") — the rail is honest about the empty
+    // state rather than pretending a model is loaded.
     const selected = local.find(m => m.id === this.selected);
-    const selName   = selected?.name   || "gemma-4-e2b";
-    const selFamily = selected?.family || "Google";
-    const selSize   = selected?.size   || "2.1 GB";
-    const selStatus = selected?.status === "loaded" ? "loaded"
-                    : selected ? selected.status : "loaded";
+    const selName   = selected?.name   || "—";
+    const selFamily = selected?.family || "—";
+    const selSize   = selected?.size   || "—";
+    const selStatus = selected?.status || "—";
     // Curated HF catalogue — what we suggest you start with. Real
     // download counts aren't sourced (would require a live HF API
     // round-trip per row + rate-limit handling), so the row footer
@@ -457,9 +458,9 @@ class LthnModelBrowserWindow extends LitElement {
           </div>
           ${this._renderActivate(selected)}
           <div style="display:flex; flex-direction:column; gap:8px; font-size:11.5px;">
-            <lthn-rail-row k=${this.t.rowFamily}       v=${selected ? selFamily : "Gemma 4"}></lthn-rail-row>
-            <lthn-rail-row k=${this.t.rowParameters}   v=${selected ? modelParams(selected.name) : "2 B"}></lthn-rail-row>
-            <lthn-rail-row k=${this.t.rowQuantisation} v=${selected ? modelQuant(selected.name) : "q4_k_m"}></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowFamily}       v=${selected ? selFamily : "—"}></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowParameters}   v=${selected ? modelParams(selected.name) : "—"}></lthn-rail-row>
+            <lthn-rail-row k=${this.t.rowQuantisation} v=${selected ? modelQuant(selected.name) : "—"}></lthn-rail-row>
             ${(() => {
               // Context + Last loaded come from Lemma admin when the
               // selected row matches the currently-loaded model.
@@ -519,8 +520,8 @@ class LthnModelBrowserWindow extends LitElement {
       w: this.w, h: this.h,
       toolbar, body,
       footer: html`${this.t.footer
-        .replace("%d", String(local.length || 4))
-        .replace("%s", this.diskFree > 0 ? fmtBytes(this.diskFree) : "312 GB")
+        .replace("%d", String(local.length))
+        .replace("%s", this.diskFree > 0 ? fmtBytes(this.diskFree) : "—")
         .replace("%s", this.modelsDir)}`,
       embedded: this.embedded,
     });

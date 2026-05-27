@@ -32,7 +32,11 @@ type SandboxState = "stopped" | "starting" | "ready" | "stopping" | "error";
  *  check at upgrade.go:214 will surface the mismatch loudly. */
 const KNOWN_DIGESTS: ReadonlyArray<{ readonly label: string; readonly digest: string }> = [
   {
-    label:  "v2026.05.17 (current)",
+    // Label intentionally version-less so a stale "v2026.05.17" string
+    // doesn't drift past the actual ship date. When the placeholder
+    // digest gets replaced, swap this label for the matching
+    // `vYYYY.MM.DD (current)` form alongside the real sha256.
+    label:  "lthn/dev:latest (placeholder)",
     digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   },
 ];

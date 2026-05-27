@@ -239,7 +239,7 @@ class LthnLogsWindow extends LitElement {
       history: this.gensLoaded
         ? `${this.gens.length} generations · ~${tokStr} tokens · session-grain timestamps`
         : "loading…",
-      power:   "showing last 24h · sample 1 s · powermetrics backend",
+      power:   "powermetrics backend pending — preview",
     };
     const body =
       this.tab === "live"    ? this._renderLive()    :
@@ -359,47 +359,33 @@ class LthnLogsWindow extends LitElement {
   }
 
   _renderPower() {
-    const samples = Array.from({ length: 60 }, (_, i) => {
-      const base = 0.4 + Math.sin(i * 0.3) * 0.3;
-      const spike = [12, 13, 14, 22, 23, 38, 39, 40, 50, 51].includes(i) ? 6 + ((i * 17 % 30) / 30) * 3 : 0;
-      return Math.max(0.2, base + spike);
-    });
-    const w = 940, h = 280, pad = 32, max = 12;
-    const kpis = [
-      { l: "24h average",  v: "1.8 W",   s: "≈ a USB-C trickle" },
-      { l: "24h total",    v: "44.2 Wh", s: "≈ 8 phone-charges" },
-      { l: "Peak today",   v: "9.4 W",   s: "during decode @ 14:32" },
-    ];
+    // The Power tab used to render hardcoded KPIs (1.8 W / 44.2 Wh /
+    // 9.4 W "during decode @ 14:32") + a synthesized Math.sin chart.
+    // Nothing was sourced. powermetrics-backed sampling is its own
+    // work (spawn macOS `powermetrics` + parse, with per-OS gating);
+    // until that lands, the tab shows an honest placeholder rather
+    // than inventing user-facing watts.
     return html`
-      <div style="flex:1; padding:12px 22px 18px; display:flex; flex-direction:column; gap:14px; overflow:auto;">
-        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px;">
-          ${kpis.map(k => html`
-            <div style="padding:14px 16px; border-radius:8px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06);">
-              <lthn-label>${k.l}</lthn-label>
-              <div style="font-family:var(--font-mono); font-size:22px; color:var(--fg-0); margin-top:6px; letter-spacing:-0.01em;">${k.v}</div>
-              <div style="font-size:11px; color:var(--fg-3); margin-top:4px;">${k.s}</div>
-            </div>
-          `)}
+      <div style="flex:1; padding:40px 22px 18px; display:flex; flex-direction:column; gap:14px; align-items:center; justify-content:center; text-align:center;">
+        <div style="width:56px; height:56px; border-radius:14px;
+                    background:linear-gradient(155deg, rgba(64,193,197,0.18), rgba(64,193,197,0.02));
+                    border:1px solid rgba(64,193,197,0.18);
+                    display:flex; align-items:center; justify-content:center;">
+          <i class="fa-solid fa-bolt" style="font-size:22px; color:var(--brand-300);"></i>
         </div>
-        <div style="background:rgba(0,0,0,0.20); border:1px solid rgba(255,255,255,0.05); border-radius:8px; padding:12px;">
-          <lthn-label>Watts · last 24 hours</lthn-label>
-          <svg viewBox="0 0 ${w} ${h}" width="100%" height=${h} preserveAspectRatio="none" style="margin-top:6px;">
-            ${[0, 3, 6, 9, 12].map(v => {
-              const yy = h - pad - (v / max) * (h - pad - 16);
-              return html`
-                <line x1=${pad} x2=${w} y1=${yy} y2=${yy} stroke="rgba(255,255,255,0.04)"></line>
-                <text x=${pad - 6} y=${yy + 3} fill="rgba(255,255,255,0.40)" font-size="10" text-anchor="end" font-family="ui-monospace, monospace">${v} W</text>
-              `;
-            })}
-            <path d=${"M " + samples.map((s, i) => `${pad + (i / (samples.length - 1)) * (w - pad)} ${h - pad - (s / max) * (h - pad - 16)}`).join(" L ") + ` L ${w} ${h - pad} L ${pad} ${h - pad} Z`} fill="rgba(64,193,197,0.10)"></path>
-            <path d=${"M " + samples.map((s, i) => `${pad + (i / (samples.length - 1)) * (w - pad)} ${h - pad - (s / max) * (h - pad - 16)}`).join(" L ")} stroke="var(--brand-400)" stroke-width="1.4" fill="none"></path>
-            ${["00:00", "06:00", "12:00", "18:00", "now"].map((t, i) => html`
-              <text x=${pad + (i / 4) * (w - pad)} y=${h - 8} fill="rgba(255,255,255,0.40)" font-size="10" text-anchor=${i === 4 ? "end" : "middle"} font-family="ui-monospace, monospace">${t}</text>
-            `)}
-          </svg>
-          <div style="margin-top:8px; font-size:11px; color:var(--fg-3); font-style:italic; line-height:1.5;">
-            For comparison — a typical fridge averages ~150 W. A Christmas-tree bulb, ~5 W.
-          </div>
+        <div style="font-size:16px; font-weight:600; color:var(--fg-0); letter-spacing:-0.01em;">
+          Power telemetry is preview
+        </div>
+        <div style="font-size:12.5px; color:var(--fg-2); line-height:1.55; max-width:420px;">
+          KPI tiles + a 24-hour chart land with the macOS
+          <span style="font-family:var(--font-mono);">powermetrics</span>
+          backend. Until that's wired we don't have a watts signal to
+          plot, and a Math.sin canvas is the kind of fixture lie this
+          rewrite is sweeping out.
+        </div>
+        <div style="font-size:11px; color:var(--fg-3); font-style:italic; line-height:1.5; max-width:420px;">
+          Sketch reference — a typical fridge averages ~150 W; a
+          Christmas-tree bulb, ~5 W.
         </div>
       </div>
     `;

@@ -607,9 +607,14 @@ class LthnDistillationWindow extends LitElement {
             <lthn-label>${this.t.labelSystem}</lthn-label>
             <div style="margin-top:8px; display:flex; flex-direction:column; gap:6px; font-size:11px;">
               <lthn-rail-row k=${this.t.rowBackend} v="go-mlx · Metal"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.rowGpuMem}  v="13.2 / 36 GB"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.rowDiskIo}  v="22 MB/s"></lthn-rail-row>
-              <lthn-rail-row k=${this.t.rowEta}     v="14 min"></lthn-rail-row>
+              <!-- GPU mem / disk IO / ETA aren't exposed by Lemma admin
+                   today — the SFT job surface ships step / loss / running,
+                   not resource metrics. Until per-tick resource readback
+                   lands these stay "—" rather than the old fixture values
+                   ("13.2 / 36 GB · 22 MB/s · 14 min"). -->
+              <lthn-rail-row k=${this.t.rowGpuMem}  v="—"></lthn-rail-row>
+              <lthn-rail-row k=${this.t.rowDiskIo}  v="—"></lthn-rail-row>
+              <lthn-rail-row k=${this.t.rowEta}     v="—"></lthn-rail-row>
             </div>
           </div>
           <div style="font-size:11px; color:var(--fg-3); font-style:italic; line-height:1.55;">

@@ -21,11 +21,13 @@ describe("lthn-model-browser-window — smoke", () => {
     expect(host.textContent).toContain("huggingface.co");
   });
 
-  it("renders the right detail rail with selected model meta", async () => {
+  it("renders the right detail rail with the Selected header", async () => {
     const { host } = await mountWindow("lthn-model-browser-window");
     expect(host.textContent).toContain("Selected");
-    // Default selected model carries a recognizable family + arch label.
-    expect(host.textContent).toContain("gemma-4-e2b");
+    // When no local entries are scanned, every selected-model field
+    // renders as "—" — honest about the empty state rather than
+    // showing the old fixture fallback ("gemma-4-e2b · Google · 2.1 GB").
+    expect(host.textContent).toContain("—");
   });
 
   it("footer surfaces the model directory hint", async () => {
