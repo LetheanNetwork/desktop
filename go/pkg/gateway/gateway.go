@@ -41,6 +41,7 @@ import (
 
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
+	"dappco.re/go/gui/pkg/notification"
 	"dappco.re/go/orm"
 
 	"dappco.re/lthn/desktop/pkg/marketplace"
@@ -430,12 +431,81 @@ func projectMetadataRead(c *core.Core, _ string, ctx *gin.Context) core.Result {
 	})
 }
 
-// serviceNotifyInvoke is the v1 stub for desktop-notification dispatch.
-// Returns 501-shaped error per spec — pkg/notifications hasn't shipped
-// yet (see Mantis #1405 pre-claim note 1647). Filed as a separate
-// concern; the gateway slot is wired so when notifications lands the
-// handler is a one-line replacement.
-func serviceNotifyInvoke(_ *core.Core, _ string, _ *gin.Context) core.Result {
-	return core.Fail(core.E("gateway.serviceNotifyInvoke",
-		"pkg/notifications not yet implemented — file as a separate ticket if needed", nil))
+// notifyMaxTitleBytes / notifyMaxMessageBytes cap title + body sizes
+// at the gateway boundary before any text reaches the native OS
+// notification centre. Cerberus discipline: a hostile bundle could
+// otherwise ship a 1MB title that drags the rendering pipeline or
+// makes the notification unrecognisable in the OS shade. 256 bytes
+// for the title (covers ~64 wide-glyph chars) and 4096 for the
+// message (covers a reasonable paragraph) are generous floors that
+// keep worst-case allocation bounded.
+const (
+	notifyMaxTitleBytes    = 256
+	notifyMaxMessageBytes  = 4096
+	notifyMaxSubtitleBytes = 256
+)
+
+// notifyRequest is the wire shape for service.notify.invoke. Mirrors
+// notification.NotificationOptions but kept here so the gateway
+// validates against an exact, gateway-owned schema rather than coupling
+// to whatever fields the substrate adds later.
+type notifyRequest struct {
+	ID         string `json:"id,omitempty"`
+	Title      string `json:"title"`
+	Message    string `json:"message"`
+	Subtitle   string `json:"subtitle,omitempty"`
+	CategoryID string `json:"categoryId,omitempty"`
+}
+
+// serviceNotifyInvoke fires a native OS notification via core/gui's
+// notification.send action. The calling bundle is already
+// permission-gated by the gateway dispatch (service.notify:invoke).
+//
+// Body shape:  { id?, title, message, subtitle?, categoryId? }
+// Response:    { id }  — the notification id, generated when not
+//                       supplied, so the caller can correlate later
+//                       lthn:notification:* events.
+func serviceNotifyInvoke(c *core.Core, bundleID string, ctx *gin.Context) core.Result {
+	var req notifyRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		return core.Fail(core.E("gateway.serviceNotifyInvoke", "invalid notification body", err))
+	}
+	if req.Title == "" {
+		return core.Fail(core.E("gateway.serviceNotifyInvoke", "title is required", nil))
+	}
+	if len(req.Title) > notifyMaxTitleBytes {
+		return core.Fail(core.E("gateway.serviceNotifyInvoke",
+			"title exceeds byte cap", nil))
+	}
+	if len(req.Message) > notifyMaxMessageBytes {
+		return core.Fail(core.E("gateway.serviceNotifyInvoke",
+			"message exceeds byte cap", nil))
+	}
+	if len(req.Subtitle) > notifyMaxSubtitleBytes {
+		return core.Fail(core.E("gateway.serviceNotifyInvoke",
+			"subtitle exceeds byte cap", nil))
+	}
+	// Stamp a deterministic id when caller didn't supply one so the
+	// subsequent click / dismiss events the frontend receives via
+	// lthn:notification:* can correlate back to "the notification I
+	// fired". Prefix with the bundle so multi-plugin scenarios stay
+	// disambiguated in audit logs.
+	if req.ID == "" {
+		req.ID = bundleID + ":" + core.ID()
+	}
+	opts := notification.NotificationOptions{
+		ID:         req.ID,
+		Title:      req.Title,
+		Message:    req.Message,
+		Subtitle:   req.Subtitle,
+		CategoryID: req.CategoryID,
+	}
+	r := c.Action("notification.send").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: notification.TaskSend{Options: opts}},
+	))
+	if !r.OK {
+		return core.Fail(core.E("gateway.serviceNotifyInvoke",
+			"notification dispatch failed", nil))
+	}
+	return core.Ok(map[string]any{"id": req.ID})
 }

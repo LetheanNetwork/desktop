@@ -11,6 +11,7 @@ package gateway_test
 
 import (
 	"net/http/httptest"
+	"strings"
 
 	core "dappco.re/go"
 	"dappco.re/go/orm"
@@ -236,10 +237,12 @@ func TestGateway_Handle_Ugly(t *core.T) {
 	})
 	_, r := newTestRouter(t, c)
 
-	// Notifications scope is the v1 stub — declared in the bundle's
-	// permissions, registered in the gateway, but the handler returns
-	// Fail because pkg/notifications hasn't shipped. Verify the
-	// gateway propagates the handler-shaped 400 (not 403 or 501).
+	// service.notify:invoke now dispatches via the notification.send
+	// action when given a valid body. An empty POST has no body to
+	// decode → handler returns the typed validation 400 (gateway wraps
+	// as handler-failed). Verifies the gateway propagates handler-
+	// shaped validation errors with a stable message, not the legacy
+	// 501 stub.
 	req := httptest.NewRequest("POST", "/v1/api/gateway/service.notify/invoke", nil)
 	req.Header.Set("Bundle-ID", "opencode")
 	w := httptest.NewRecorder()
@@ -247,7 +250,50 @@ func TestGateway_Handle_Ugly(t *core.T) {
 
 	core.AssertEqual(t, core.StatusBadRequest, w.Code)
 	core.AssertContains(t, w.Body.String(), "handler-failed")
-	core.AssertContains(t, w.Body.String(), "pkg/notifications")
+	core.AssertContains(t, w.Body.String(), "invalid notification body")
+}
+
+func TestGateway_Handle_ServiceNotify_MissingTitle(t *core.T) {
+	c := newGatewayCore(t)
+	seedBundle(t, c, "opencode", []marketplace.Permission{
+		{Scope: "service.notify", Mode: "invoke"},
+	})
+	_, r := newTestRouter(t, c)
+
+	// Body decodes cleanly but title is empty — handler rejects with
+	// "title is required". Anchors the validation gate so a future
+	// refactor that drops the check flips this test.
+	body := strings.NewReader(`{"message":"hi"}`)
+	req := httptest.NewRequest("POST", "/v1/api/gateway/service.notify/invoke", body)
+	req.Header.Set("Bundle-ID", "opencode")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusBadRequest, w.Code)
+	core.AssertContains(t, w.Body.String(), "title is required")
+}
+
+func TestGateway_Handle_ServiceNotify_TitleByteCap(t *core.T) {
+	c := newGatewayCore(t)
+	seedBundle(t, c, "opencode", []marketplace.Permission{
+		{Scope: "service.notify", Mode: "invoke"},
+	})
+	_, r := newTestRouter(t, c)
+
+	// 257-byte title exceeds the 256-byte cap. Cerberus anchor:
+	// drops hostile-label DoS where a bundle ships a 1MB title that
+	// crashes the OS notification renderer.
+	huge := strings.Repeat("x", 257)
+	body := strings.NewReader(`{"title":"` + huge + `","message":"hi"}`)
+	req := httptest.NewRequest("POST", "/v1/api/gateway/service.notify/invoke", body)
+	req.Header.Set("Bundle-ID", "opencode")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusBadRequest, w.Code)
+	core.AssertContains(t, w.Body.String(), "title exceeds byte cap")
 }
 
 // ─── Service constructor ───────────────────────────────────────────────
