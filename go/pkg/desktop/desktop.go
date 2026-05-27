@@ -1380,8 +1380,24 @@ func refreshSelfMachineOnce(svc *fleet.Service) {
 	// it in sync (model name / status); never delete — if Lemma drops
 	// later the row stays so the user can re-enable rather than
 	// re-configure from scratch.
+	//
+	// Read existing agents first so user-edited fields (Persona,
+	// ModelSettings, Tags) survive the re-upsert. Without this, every
+	// 10s tick would wipe whatever persona/temperature the user set
+	// via Configure Agent.
 	if statusErr == nil {
-		if r := svc.UpsertAgent(localLemmaAgentRow(status.ModelPath)); !r.OK {
+		var existing *fleet.Agent
+		if listRes := svc.Agents(); listRes.OK {
+			if agents, ok := listRes.Value.([]fleet.Agent); ok {
+				for i := range agents {
+					if agents[i].ID == "local-lemma" {
+						existing = &agents[i]
+						break
+					}
+				}
+			}
+		}
+		if r := svc.UpsertAgent(localLemmaAgentRow(status.ModelPath, existing)); !r.OK {
 			core.Warn("desktop.fleet.local_agent_refresh", "error", r.Error())
 		}
 	}
@@ -1415,9 +1431,16 @@ func pathBase(p string) string {
 //
 // modelPath comes from Lemma.Status — basename'd for display.
 // Empty when no model is loaded yet (engine up but pre-load).
-func localLemmaAgentRow(modelPath string) fleet.Agent {
+//
+// existing is the current row (if any) — carries forward the
+// user-controlled fields (Persona, ModelSettings, Tags, Name) so
+// the 10s refresh ticker doesn't wipe edits made via the Configure
+// Agent modal. Substrate-controlled fields (Model, Status,
+// Provider, Kind, BaseURL) always overwrite — they reflect engine
+// truth, not user choice.
+func localLemmaAgentRow(modelPath string, existing *fleet.Agent) fleet.Agent {
 	model := pathBase(modelPath)
-	return fleet.Agent{
+	out := fleet.Agent{
 		ID:       "local-lemma",
 		Name:     "Local Lemma",
 		Provider: "lemma-local",
@@ -1426,6 +1449,16 @@ func localLemmaAgentRow(modelPath string) fleet.Agent {
 		Model:    model,
 		Status:   "online",
 	}
+	if existing != nil {
+		if existing.Name != "" {
+			out.Name = existing.Name
+		}
+		out.Persona = existing.Persona
+		out.ModelSettings = existing.ModelSettings
+		out.Tags = existing.Tags
+		out.Features = existing.Features
+	}
+	return out
 }
 
 func selfMachineRow() fleet.Machine {
