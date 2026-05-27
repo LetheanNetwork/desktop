@@ -224,6 +224,15 @@ func (s *Service) adoptFromOutput(out, expectedInstallID, authHeader string) int
 			CreatedAt: core.Now(),
 		}
 		if r := orm.Of[Sandbox](s.Core()).Save(&sb); !r.OK {
+			// Sibling-pattern to opencode.Stop.save_failed — a Save
+			// failure here means the container exists on the runtime
+			// but isn't tracked in the orm, so the GUI won't surface
+			// it and the user thinks reconcile lost their sandbox.
+			// Log loud so audit / activity can correlate the drift
+			// with the failed adoption; the loop continues to give
+			// other sandboxes a chance.
+			core.Warn("opencode.reconcile.save_failed",
+				"id", v.SandboxID, "error", r.Error())
 			continue
 		}
 		s.proxy.Set(v.SandboxID, core.Sprintf("http://127.0.0.1:%d", v.HostPort), authHeader)
