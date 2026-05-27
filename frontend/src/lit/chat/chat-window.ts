@@ -1250,8 +1250,17 @@ class LthnChatWindow extends LitElement {
       const rawHistory = await unwrap<Msg[]>(sessions.Read(id), []);
       const current = this.conversations.find(c => c.id === id);
       const history = withSystemPrompt(rawHistory || [], current?.systemPrompt || "");
-      const reply = await unwrap<string>(runner.WChat(history), "");
-      await demand<unknown>(sessions.Append(id, "assistant", reply || ""));
+      // demand + empty-guard — same pattern as _send. unwrap("") here
+      // turned every runner failure during a Redo into a blank
+      // assistant turn persisted to chathistory, with no error signal
+      // to the user. Redo is the "the reply was bad, give me another"
+      // affordance — silently substituting a worse blank reply is the
+      // worst possible UX for that path.
+      const reply = await demand<string>(runner.WChat(history));
+      if (!reply) {
+        throw new Error("Empty reply from runner");
+      }
+      await demand<unknown>(sessions.Append(id, "assistant", reply));
       await this._loadTurns();
       await this._reloadRail();
     } catch (err: unknown) {
