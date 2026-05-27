@@ -166,7 +166,7 @@ func cmdDefault(args []string) int {
 // Usage example:
 //
 //	rc := cmdVersion(nil) // prints "lthn vX.Y.Z" and returns 0
-func cmdVersion(args []string) int {
+func cmdVersion(_ []string) int {
 	core.Print(core.Stdout(), "lthn %s\n", cmdVersionLabel())
 	return 0
 }
@@ -270,7 +270,7 @@ func cmdHelp(args []string) int {
 // Usage example:
 //
 //	rc := cmdGUI(nil) // launches tray + GUI; returns 0 on clean exit
-func cmdGUI(args []string) int {
+func cmdGUI(_ []string) int {
 	c := newAppCore()
 	if c == nil {
 		return 1
@@ -348,8 +348,8 @@ func cmdGUI(args []string) int {
 // Usage example:
 //
 //	rc := cmdTray(nil) // tray-only mode
-func cmdTray(args []string) int {
-	return cmdGUI(args)
+func cmdTray(_ []string) int {
+	return cmdGUI(nil)
 }
 
 // cmdServe handles `lthn serve [--port PORT] [--token TOKEN]
