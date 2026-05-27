@@ -789,6 +789,14 @@ class LthnChatWindow extends LitElement {
     // window outside-click listeners in hostDisconnected — no
     // host-side wiring needed.
     window.removeEventListener("keydown", this._onKeyDownForCmdK);
+    // Cancel the 300ms search-debounce timer so a pending fire after
+    // unmount doesn't reach into a torn-down element via stale `this`.
+    // Each keystroke during typing schedules this; closing the window
+    // mid-typing leaves it pending and the timer holds the element.
+    if (this._contentSearchTimer) {
+      clearTimeout(this._contentSearchTimer);
+      this._contentSearchTimer = null;
+    }
     super.disconnectedCallback();
   }
 
