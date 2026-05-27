@@ -503,11 +503,45 @@ class LthnLemmaWindow extends LitElement {
     `;
   }
 
+  /** Copy text to the system clipboard with a best-effort fallback.
+   *  Used by the unreachable-state hint's command shortcut so the
+   *  user can paste it straight into a terminal. Silent on failure
+   *  — clipboard API throws in some WebView contexts and we don't
+   *  want that to confuse the hint. */
+  private async _copyToClipboard(text: string): Promise<void> {
+    try { await navigator.clipboard?.writeText(text); }
+    catch { /* clipboard unavailable — silent */ }
+  }
+
   private renderBody() {
     const runtime = this.health?.runtime ?? "—";
+    const unreachable = !this.health && !!this.err;
     return html`
       <div style="display:flex; flex-direction:column; gap:12px; padding:16px;">
         <lthn-rail-row k="Status" v="${nothing}">${this.renderStatus()}</lthn-rail-row>
+        ${unreachable ? html`
+          <div style="padding:10px 12px; border-radius:8px;
+                      background:rgba(245,158,11,0.06);
+                      border:1px solid rgba(245,158,11,0.22);
+                      font-size:11.5px; line-height:1.55; color:var(--fg-1);">
+            <div style="margin-bottom:6px;">
+              Start the engine from a terminal:
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <code style="font-family:ui-monospace, monospace; font-size:11.5px;
+                           padding:3px 7px; border-radius:4px;
+                           background:rgba(0,0,0,0.25); color:var(--brand-300);">lthn serve</code>
+              <button @click=${() => this._copyToClipboard("lthn serve")}
+                title="Copy command"
+                style="padding:2px 7px; font-size:10.5px; cursor:pointer;
+                       background:transparent; color:var(--fg-2);
+                       border:1px solid var(--border, #2a2a2a); border-radius:4px;
+                       --wails-draggable:no-drag;">
+                <i class="fa-regular fa-clipboard" style="font-size:9px;"></i> Copy
+              </button>
+            </div>
+          </div>
+        ` : nothing}
         <lthn-rail-row k="Runtime" v="${runtime}"></lthn-rail-row>
         <lthn-rail-row k="Endpoint" v="${this.endpoint}"></lthn-rail-row>
         <lthn-label>Loaded models</lthn-label>
