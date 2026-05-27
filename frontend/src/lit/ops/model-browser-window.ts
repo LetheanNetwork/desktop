@@ -337,13 +337,21 @@ class LthnModelBrowserWindow extends LitElement {
           <lthn-label style="display:block; padding:12px 14px 6px;">${this.t.railLabel} · ${local.length}</lthn-label>
           <div style="padding:0 6px; display:flex; flex-direction:column; gap:1px;">
             ${local.length === 0 ? html`
-              <div style="padding:18px 14px; font-size:11.5px; color:var(--fg-3); line-height:1.55;">
-                ${this.loadErr
-                  ? html`<span style="color:var(--error-400);">${this.t.railFailed}</span><br>${this.loadErr}`
-                  : (() => {
-                      const parts = this.t.railEmpty.split("%s");
-                      return html`${parts[0]}<code style="color:var(--fg-2);">${this.modelsDir}</code>${parts[1] || ""}<br>${this.t.railEmptyHint}`;
-                    })()}
+              <div style="padding:18px 14px; font-size:11.5px; color:var(--fg-3); line-height:1.55;
+                          display:flex; flex-direction:column; gap:12px;">
+                <div>
+                  ${this.loadErr
+                    ? html`<span style="color:var(--error-400);">${this.t.railFailed}</span><br>${this.loadErr}`
+                    : (() => {
+                        const parts = this.t.railEmpty.split("%s");
+                        return html`${parts[0]}<code style="color:var(--fg-2);">${this.modelsDir}</code>${parts[1] || ""}<br>${this.t.railEmptyHint}`;
+                      })()}
+                </div>
+                ${this.loadErr ? nothing : html`
+                  <lthn-btn tone="primary" size="sm" @click=${() => this._openLemma()}>
+                    <i class="fa-solid fa-cube" style="font-size:10px;"></i> Open Lemma
+                  </lthn-btn>
+                `}
               </div>
             ` : local.map(m => this._localItem(m))}
           </div>
@@ -559,7 +567,7 @@ class LthnModelBrowserWindow extends LitElement {
                 ? "Cannot delete the currently-loaded model — swap to a different one first"
                 : this.sftRunning
                   ? "Cannot delete a model while fine-tune is in flight"
-                  : `Delete ${selected.name} from disk — frees ${this._fmtBytes(selected.size)}`}
+                  : `Delete ${selected.name} from disk${selected.size ? ` — frees ${selected.size}` : ""}`}
               @click=${() => { void this._doDelete(selected.name); }}
               style="justify-content:center; --wails-draggable:no-drag; color:var(--error-400);">
               <i class="fa-regular fa-trash-can" style="font-size:10px;"></i>
@@ -706,13 +714,17 @@ class LthnModelBrowserWindow extends LitElement {
     }
   }
 
-  /** Compact byte count for the Delete button's tooltip — "frees
-   *  3.4 GB" reads better than "frees 3,623,878,656 bytes". */
-  private _fmtBytes(n: number): string {
-    if (n < 1024) return `${n} B`;
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-    if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-    return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  /** Switch the app shell to the Lemma pane — same channel the
+   *  tray popover + logs Open Chat (7ca2298) use. From there the
+   *  user has the Hot-swap + Download forms for getting a model
+   *  onto disk. */
+  private async _openLemma(): Promise<void> {
+    try {
+      const { Events } = await import("@wailsio/runtime");
+      Events.Emit("lthn:app:setpane", "lemma");
+    } catch (err) {
+      console.error("model-browser: open lemma failed", err);
+    }
   }
 
   _localItem(m: LocalModel) {
