@@ -140,9 +140,11 @@ func newAppCore() *core.Core {
 		// bridge — local MCP HTTP server on 127.0.0.1:9879 letting an
 		// external agent (Cladius / Codex / any MCP client) drive +
 		// observe the WebView. Console + error capture via the JS
-		// shim in frontend/index.html, webview_eval with fetch-back
-		// via /internal/eval-reply. Dev-mode focused — bound to
-		// localhost so it never leaves this Mac. See pkg/bridge/.
+		// shim in frontend/index.html, webview_eval via core/gui's
+		// TaskEvalJS event-bus path (the older /internal/eval-reply
+		// HTTP fetch-back retired with that cutover). Dev-mode
+		// focused — bound to localhost so it never leaves this Mac.
+		// See pkg/bridge/.
 		core.WithName("bridge", bridge.RegisterService(bridge.Options{})),
 		// plugin — the plugin host. Owns ~/Lethean/conf/plugins/,
 		// supervises plugin binaries via process.Service, and

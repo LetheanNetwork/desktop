@@ -25,12 +25,14 @@
 //   GET  /health               — liveness probe
 //   POST /internal/console     — JS shim → ring buffer
 //   POST /internal/error       — JS shim → ring buffer
-//   POST /internal/eval-reply  — JS fetch-back from a wrapped eval
+//
+// (The /internal/eval-reply endpoint was retired when eval moved to
+// core/gui's TaskEvalJS event-bus path. See tools.go::eval.)
 //
 // Usage example (Core registration):
 //
 //	c := core.New(
-//	    core.WithName("bridge", bridge.RegisterService(bridge.Options{Port: 9876})),
+//	    core.WithName("bridge", bridge.RegisterService(bridge.Options{Port: 9879})),
 //	)
 
 package bridge
@@ -73,9 +75,9 @@ const maxEntryMessageBytes = 16 * 1024
 //
 // Usage example:
 //
-//	core.WithName("bridge", bridge.RegisterService(bridge.Options{Port: 9876}))
+//	core.WithName("bridge", bridge.RegisterService(bridge.Options{Port: 9879}))
 type Options struct {
-	// Port is the HTTP port the bridge binds. Default: 9876.
+	// Port is the HTTP port the bridge binds. Default: DefaultPort (9879).
 	Port int
 }
 
