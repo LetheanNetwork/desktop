@@ -139,7 +139,16 @@ func (h *History) ExportJSONL(dest string) error {
 			c.EndedAt = &endedAt.Time
 		}
 		if tagsJSON.Valid && tagsJSON.String != "" {
-			_ = core.JSONUnmarshal([]byte(tagsJSON.String), &c.Tags)
+			// A decode failure here means the tags column carries
+			// garbage JSON (external write, partial migration, disk
+			// corruption). Don't fail the export — partial export
+			// with logged drift beats refusing to ship anything —
+			// but log so audit / activity can correlate later when
+			// the user notices missing tags on a re-imported file.
+			if r := core.JSONUnmarshal([]byte(tagsJSON.String), &c.Tags); !r.OK {
+				core.Warn("chathistory.export.tags_decode_failed",
+					"conversation_id", c.ID, "error", r.Error())
+			}
 		}
 
 		turnRows, err := h.db.Query(
