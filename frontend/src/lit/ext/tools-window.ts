@@ -43,7 +43,7 @@ class LthnToolsWindow extends LitElement {
   constructor() {
     super();
     this.w = 1040; this.h = 700; this.embedded = false;
-    this.chrome = { title: "Tools · MCP", subtitle: "2 servers · 12 tools · 648 calls today" };
+    this.chrome = { title: "Tools · MCP", subtitle: "tools registered via MCP" };
     this.toolList = [];
     this.selectedTool = "";
     this.activeModel = "gemma-4-e2b";

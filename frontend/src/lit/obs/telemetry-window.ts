@@ -65,7 +65,7 @@ class LthnTelemetryWindow extends LitElement {
     this.w = 880; this.h = 560; this.fullscreen = false; this.embedded = false;
     this.chrome = {
       title: "Live telemetry",
-      subtitleNormal: "demo surface",
+      subtitleNormal: "process metrics · live",
       subtitleFullscreen: "fullscreen · ⎋ to exit",
     };
     this.sample = { heap_alloc_mb: 0, uptime_seconds: 0, num_goroutines: 0, num_cgo_calls: 0 };

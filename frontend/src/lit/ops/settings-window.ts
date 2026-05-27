@@ -173,7 +173,7 @@ class LthnSettingsWindow extends LitElement {
   constructor() {
     super();
     this.open = "general"; this.w = 760; this.h = 600; this.embedded = false;
-    this.chrome = { title: "Settings", subtitle: "lthn · v0.2.0-rc1" };
+    this.chrome = { title: "Settings", subtitle: "lthn" };
     this.locales = [];
     this.currentLang = "";
     // Persisted via localStorage["lthn.boot.window"] — Go-side

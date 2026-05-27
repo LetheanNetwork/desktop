@@ -287,7 +287,7 @@
       "oc_open_web_failed":    "Couldn't open the web window — see logs for details."
     },
     "tools":        {
-      "title": "Tools · MCP", "subtitle": "2 servers · 12 tools · 648 calls today",
+      "title": "Tools · MCP", "subtitle": "tools registered via MCP",
       "btn_add_server":   "Add server",
       "btn_reload":       "Reload",
       "toolbar_model":    "tool-use availability depends on model · current model: %s · ✓ supports tools",
@@ -326,7 +326,7 @@
       "footer":          "5 runs on file · ~/.lthn/bench/results.jsonl · last run 47.2 tok/s · 8.4 W"
     },
     "telemetry":    {
-      "title": "Live telemetry", "subtitle_normal": "demo surface", "subtitle_fullscreen": "fullscreen · ⎋ to exit",
+      "title": "Live telemetry", "subtitle_normal": "process metrics · live", "subtitle_fullscreen": "fullscreen · ⎋ to exit",
       "big_heap_label":   "heap · MB",
       "big_heap_sub":     "Go runtime · live",
       "big_uptime_label": "uptime",
@@ -379,7 +379,7 @@
       "auto_refresh_caveat": "Auto-refresh pauses when the window is hidden."
     },
     "settings":     {
-      "title": "Settings", "subtitle": "lthn · v0.2.0-rc1",
+      "title": "Settings", "subtitle": "lthn",
       "panel_general_title": "General",
       "panel_general_desc":  "App-wide defaults — what to show at launch, which language to speak, theme.",
       "panel_models_title":  "Models",
