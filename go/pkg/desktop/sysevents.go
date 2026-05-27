@@ -23,12 +23,9 @@ import (
 	guiwindow "dappco.re/go/gui/pkg/window"
 )
 
-// Remaining substrate gaps (deliberately not yet wired so this file
+// Remaining substrate gap (deliberately not yet wired so this file
 // stays a faithful re-broadcaster of what core/gui actually emits):
 //
-//   - ApplicationOpenedWithURL — Wails fires this for "open with…" URL
-//     handoff (lthn:// scheme). core/gui's lifecycle pkg subscribes to
-//     ApplicationOpenedWithFile but not the URL variant yet.
 //   - WindowFilesDropped target details — DropTargetDetails carries
 //     element id + position; today we forward elementId only. Position
 //     would let a Lit drop zone snap to the cursor.
@@ -41,6 +38,7 @@ import (
 //
 //	guilifecycle.ActionApplicationStarted         → "lthn:app:started"
 //	guilifecycle.ActionOpenedWithFile             → "lthn:app:opened-file" (file path)
+//	guilifecycle.ActionLaunchedWithUrl            → "lthn:app:opened-url" (full URL — lthn://… or similar)
 //	guienvironment.ActionThemeChanged             → "lthn:theme"
 //	guiwindow.ActionWindowFocused                 → "lthn:window:focus"
 //	guiwindow.ActionWindowBlurred                 → "lthn:window:blur"
@@ -69,6 +67,8 @@ func registerSystemEvents(c *core.Core) {
 			return emitCoreEvent(c, "lthn:app:started", nil)
 		case guilifecycle.ActionOpenedWithFile:
 			return emitCoreEvent(c, "lthn:app:opened-file", event.Path)
+		case guilifecycle.ActionLaunchedWithUrl:
+			return emitCoreEvent(c, "lthn:app:opened-url", event.URL)
 		case guienvironment.ActionThemeChanged:
 			mode := "light"
 			if event.IsDark {
