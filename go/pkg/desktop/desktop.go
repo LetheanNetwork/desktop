@@ -661,6 +661,70 @@ func (s *Service) Run() core.Result {
 			PopoverWindow:  "tray",
 			PopoverOffsetY: 5,
 		},
+		Keybindings: []gui.Keybinding{
+			{Accelerator: "Cmd+J", Description: "lthn:popover", EventName: "lthn:key:popover"},
+			{Accelerator: "Ctrl+J", Description: "lthn:popover", EventName: "lthn:key:popover"},
+			{Accelerator: "Cmd+N", Description: "lthn:new-session", EventName: "lthn:key:new-session"},
+			{Accelerator: "Ctrl+N", Description: "lthn:new-session", EventName: "lthn:key:new-session"},
+			{Accelerator: "Cmd+K", Description: "lthn:command", EventName: "lthn:key:command"},
+			{Accelerator: "Ctrl+K", Description: "lthn:command", EventName: "lthn:key:command"},
+			{Accelerator: "Cmd+,", Description: "lthn:settings", EventName: "lthn:key:settings"},
+			{Accelerator: "Ctrl+,", Description: "lthn:settings", EventName: "lthn:key:settings"},
+			{Accelerator: "Cmd+Shift+M", Description: "lthn:models", EventName: "lthn:key:models"},
+			{Accelerator: "Ctrl+Shift+M", Description: "lthn:models", EventName: "lthn:key:models"},
+			{Accelerator: "Cmd+/", Description: "lthn:help", EventName: "lthn:key:help"},
+			{Accelerator: "Ctrl+/", Description: "lthn:help", EventName: "lthn:key:help"},
+			{Accelerator: "Escape", Description: "lthn:dismiss", EventName: "lthn:key:dismiss"},
+		},
+		ContextMenus: []gui.ContextMenu{
+			{
+				Name:            "lthn-message",
+				EventTemplate:   "lthn:context:{menu}:{action}",
+				MenuPrefixStrip: "lthn-",
+				Items: []gui.ContextMenuItem{
+					{Label: "Copy", ActionID: "copy"},
+					{Label: "Regenerate", ActionID: "regenerate"},
+					{Label: "Edit", ActionID: "edit"},
+					{Type: "separator"},
+					{Label: "Delete", ActionID: "delete"},
+				},
+			},
+			{
+				Name:            "lthn-input",
+				EventTemplate:   "lthn:context:{menu}:{action}",
+				MenuPrefixStrip: "lthn-",
+				Items: []gui.ContextMenuItem{
+					{Label: "Cut", ActionID: "cut"},
+					{Label: "Copy", ActionID: "copy"},
+					{Label: "Paste", ActionID: "paste"},
+					{Type: "separator"},
+					{Label: "Select All", ActionID: "selectall"},
+				},
+			},
+			{
+				Name:            "lthn-model",
+				EventTemplate:   "lthn:context:{menu}:{action}",
+				MenuPrefixStrip: "lthn-",
+				Items: []gui.ContextMenuItem{
+					{Label: "Reveal in Finder", ActionID: "reveal"},
+					{Label: "Model Info", ActionID: "info"},
+					{Type: "separator"},
+					{Label: "Remove...", ActionID: "remove"},
+				},
+			},
+			{
+				Name:            "lthn-route",
+				EventTemplate:   "lthn:context:{menu}:{action}",
+				MenuPrefixStrip: "lthn-",
+				Items: []gui.ContextMenuItem{
+					{Label: "Edit", ActionID: "edit"},
+					{Label: "Test Connection", ActionID: "test"},
+					{Type: "separator"},
+					{Label: "Disable", ActionID: "disable"},
+					{Label: "Remove...", ActionID: "remove"},
+				},
+			},
+		},
 		Assets: gui.AssetOptions{
 			Handler:    engine,
 			Middleware: ginMiddleware(engine),
@@ -850,18 +914,10 @@ func (s *Service) Run() core.Result {
 		return core.Result{OK: true}
 	})
 
-	// Context menus — right-click surfaces for the chat UI. Lit
-	// elements declare `style="--custom-contextmenu: lthn-message"`
-	// (etc.) plus `--custom-contextmenu-data: <message-id>` so the
-	// click handler knows WHICH message was right-clicked. Each
-	// action emits an "lthn:context:<menu>:<action>" event with the
-	// data; the originating Lit element dispatches accordingly.
-	registerContextMenus(s.opts.Core)
-
-	// Global keyboard shortcuts. Each emits "lthn:key:<verb>" with
-	// the active window's name. Cmd+J toggle popover / Cmd+N new
-	// session / Cmd+, settings / etc. See keybindings.go.
-	registerKeyBindings(s.opts.Core)
+	// Context menus + key bindings now declared via GuiConfig.ContextMenus
+	// and GuiConfig.Keybindings above — gui.Service registers each and
+	// installs the relay handlers that emit lthn:context:* + lthn:key:*
+	// events with the right context data.
 
 	// System event re-broadcasts. Wails' ApplicationStarted /
 	// OpenedWithFile / LaunchedWithUrl get republished as lthn:app:*
