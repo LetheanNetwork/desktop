@@ -87,15 +87,16 @@ class LthnPluginWindow extends LitElement {
     this.err = "";
     try {
       const svc = await import("@desktop/plugin/service");
+      const { unwrap } = await import("../result");
       const [menus, status] = await Promise.all([
-        svc.Menus() as Promise<MenuEntry[]>,
-        svc.Status(this.code) as Promise<Status>,
+        unwrap<MenuEntry[]>(svc.Menus(), []),
+        unwrap<Status | null>(svc.Status(this.code), null),
       ]);
       this.entry = (menus || []).find(m => m.code === this.code) || null;
       this.status = status;
       this.chrome = {
-        title:    status.name || this.code,
-        subtitle: status.namespace + " · " + status.state,
+        title:    status?.name || this.code,
+        subtitle: status ? (status.namespace + " · " + status.state) : "",
       };
     } catch (e: unknown) {
       this.err = e instanceof Error ? e.message : String(e);
