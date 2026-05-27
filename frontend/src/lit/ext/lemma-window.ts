@@ -61,8 +61,15 @@ class LthnLemmaWindow extends LitElement {
     // list is empty or the call errors (lthn-mlx may not yet have
     // surfaced models the user just dropped into the dir).
     availableModels: { state: true },
+    // Pulled from Lemma.SFTAdapters() — completed adapter dirs the
+    // user can overlay on top of the picked base model. Empty list
+    // = no overlay option (adapter <select> hidden); non-empty =
+    // dropdown alongside the model picker, mirroring model-browser's
+    // Activate panel layout.
+    availableAdapters: { state: true },
     reloadModel: { state: true },
     reloadProfile: { state: true },
+    reloadAdapter: { state: true },
     reloadBusy:  { state: true },
     reloadErr:   { state: true },
     downloadRepo: { state: true },
@@ -93,8 +100,10 @@ class LthnLemmaWindow extends LitElement {
   declare machineHash: string;
   declare profiles: any[];
   declare availableModels: Array<{ name: string; path: string; size: number; is_dir: boolean }>;
+  declare availableAdapters: Array<{ name: string; path: string; size_bytes?: number; modified_unix?: number }>;
   declare reloadModel: string;
   declare reloadProfile: string;
+  declare reloadAdapter: string;
   declare reloadBusy: boolean;
   declare reloadErr: string;
   declare downloadRepo: string;
@@ -123,8 +132,10 @@ class LthnLemmaWindow extends LitElement {
     this.machineHash = "";
     this.profiles = [];
     this.availableModels = [];
+    this.availableAdapters = [];
     this.reloadModel = "";
     this.reloadProfile = "";
+    this.reloadAdapter = "";
     this.reloadBusy = false;
     this.reloadErr = "";
     this.downloadRepo = "";
@@ -211,7 +222,7 @@ class LthnLemmaWindow extends LitElement {
     try {
       const Models = await import("../../../bindings/dappco.re/lthn/desktop/pkg/models/wailsservice.js");
       const { unwrap } = await import("../result");
-      const [statusRes, machineRes, profilesRes, modelsRes, sftRes] = await Promise.allSettled([
+      const [statusRes, machineRes, profilesRes, modelsRes, sftRes, adaptersRes] = await Promise.allSettled([
         Lemma.Status(),
         Lemma.Machine(),
         Lemma.Profiles(),
@@ -223,6 +234,10 @@ class LthnLemmaWindow extends LitElement {
         // 404 when no job has ever run. Both are "no SFT running" for
         // the panel; only state === "running" surfaces in render.
         Lemma.SFTStatus(""),
+        // SFTAdapters powers the Adapter dropdown in the Hot-swap
+        // form — completed LoRA dirs the user can overlay on the
+        // picked base model. Mirrors model-browser's Activate panel.
+        Lemma.SFTAdapters(),
       ]);
       if (statusRes.status === "fulfilled") {
         this.adminStatus = statusRes.value;
@@ -240,6 +255,16 @@ class LthnLemmaWindow extends LitElement {
         this.availableModels = modelsRes.value ?? [];
       }
       this.sftJob = sftRes.status === "fulfilled" ? sftRes.value : null;
+      if (adaptersRes.status === "fulfilled") {
+        this.availableAdapters = adaptersRes.value?.adapters ?? [];
+        // Pre-select whatever adapter the engine is currently
+        // loaded with so the dropdown reflects ground truth on
+        // first render. Active adapter path comes from
+        // adminStatus.config.adapter_path (already populated
+        // above).
+        const active = (this.adminStatus as { config?: { adapter_path?: string } })?.config?.adapter_path;
+        if (active && !this.reloadAdapter) this.reloadAdapter = active;
+      }
     } catch (e) {
       this.reloadErr = String(e);
     }
@@ -302,6 +327,7 @@ class LthnLemmaWindow extends LitElement {
         ConfirmMachine: this.machineHash,
         ModelPath: this.reloadModel,
         ProfilePath: this.reloadProfile,
+        AdapterPath: this.reloadAdapter,
         ContextLength: 0,
       } as any);
       // Refresh status — the hot-swap mutates serve state.
@@ -475,6 +501,21 @@ class LthnLemmaWindow extends LitElement {
                       style="width:100%; margin-top:4px; padding:6px 8px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px;">
                 <option value="">(use serve default)</option>
                 ${this.profiles.map((p: any) => html`<option value=${p.path || p.name}>${p.name} — ${p.backend || "?"}</option>`)}
+              </select>`
+            : nothing}
+
+          ${this.availableAdapters.length > 0
+            ? html`
+              <label style="display:block; margin-top:8px; font-size:11px; opacity:0.7;">Adapter overlay (optional)</label>
+              <select .value=${this.reloadAdapter}
+                      @change=${(e: Event) => { this.reloadAdapter = (e.target as HTMLSelectElement).value; }}
+                      style="width:100%; margin-top:4px; padding:6px 8px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px;">
+                <option value="">(base model only)</option>
+                ${this.availableAdapters.map(a => {
+                  const active = (this.adminStatus as { config?: { adapter_path?: string } })?.config?.adapter_path;
+                  const isActive = a.path === active;
+                  return html`<option value=${a.path ?? a.name}>${a.name}${isActive ? "  (loaded)" : ""}</option>`;
+                })}
               </select>`
             : nothing}
 
