@@ -459,6 +459,13 @@ class LthnFleetWindow extends LitElement {
 
   private renderAgentRow(a: AgentRow) {
     const kindBadge = a.kind === "local" ? "local · fleet-routed" : "remote · provider-routed";
+    // Auto-managed agents (currently just local-lemma) are re-upserted
+    // by the pkg/desktop refresh ticker every 10s — Delete would just
+    // make them reappear, confusing the user. Hide the Delete button
+    // + show an "auto" badge so the absence is explained. Edit stays;
+    // the localLemmaAgentRow merge (1252717) preserves user-controlled
+    // fields (Persona, ModelSettings, Tags, Name) across the refresh.
+    const isAutoManaged = a.id === "local-lemma";
     return html`
       <div style="display:grid; grid-template-columns:36px 1.4fr 1.1fr 1.1fr 0.8fr 80px; gap:14px; padding:12px 16px; border-radius:8px;
                   background:rgba(255,255,255,0.03);
@@ -471,7 +478,17 @@ class LthnFleetWindow extends LitElement {
           <i class="fa-solid fa-user-astronaut" style="font-size:13px; color:var(--brand-300);"></i>
         </div>
         <div>
-          <div style="font-size:13px; color:var(--fg-0); font-weight:500;">${a.name}</div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:13px; color:var(--fg-0); font-weight:500;">${a.name}</span>
+            ${isAutoManaged
+              ? html`<span style="font-size:9.5px; color:var(--brand-300);
+                                   padding:1px 6px; border-radius:4px;
+                                   background:rgba(64,193,197,0.08);
+                                   border:1px solid rgba(64,193,197,0.22);
+                                   letter-spacing:0.04em; text-transform:uppercase;"
+                            title="Auto-managed — desktop re-registers this agent every 10s while lthn-mlx is reachable. You can edit (rename / persona / settings) and edits persist; deletion would respawn it.">auto</span>`
+              : nothing}
+          </div>
           <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); margin-top:3px;">
             ${a.provider} · ${a.model || "no model"}
           </div>
@@ -487,9 +504,12 @@ class LthnFleetWindow extends LitElement {
           <lthn-btn tone="quiet" size="sm" @click=${() => this.editAgent(a)} title="Edit agent">
             <i class="fa-solid fa-pen" style="font-size:10px;"></i>
           </lthn-btn>
-          <lthn-btn tone="quiet" size="sm" @click=${() => { void this.deleteAgentRow(a); }} title="Delete agent">
-            <i class="fa-solid fa-trash" style="font-size:10px;"></i>
-          </lthn-btn>
+          ${isAutoManaged
+            ? nothing
+            : html`
+              <lthn-btn tone="quiet" size="sm" @click=${() => { void this.deleteAgentRow(a); }} title="Delete agent">
+                <i class="fa-solid fa-trash" style="font-size:10px;"></i>
+              </lthn-btn>`}
         </div>
       </div>
     `;
