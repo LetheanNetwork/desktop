@@ -44,10 +44,45 @@ func aiGenerate(args []string) int {
 
 // aiModels handles `lthn ai models`. Lists the configured routes.
 //
+// Sub-verbs (`ls`, `pull NAME`) were promised by older help text but
+// were never wired here — `ls` was a duplicate of the flat list and
+// `pull` belongs to the Lemma admin download surface, not the CLI.
+// When a sub-verb is passed today, the user gets a clear hint to the
+// real surface rather than a silent ignore.
+//
 // Usage example:
 //
 //	rc := aiModels(nil)
 func aiModels(args []string) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "ls":
+			// Legacy verb — flat list is what this command already does;
+			// keep going so existing scripts still work, just print the
+			// note so the next reader sees the new shape.
+			core.Print(core.Stderr(),
+				"lthn ai models: `ls` is implicit — `lthn ai models` already lists.\n")
+		case "pull":
+			repo := ""
+			if len(args) > 1 {
+				repo = args[1]
+			}
+			core.Print(core.Stderr(),
+				"lthn ai models pull: download lives in Lemma admin — run `lthn gui` and\n  open the Lemma window's Download form%s.\n",
+				func() string {
+					if repo != "" {
+						return " (HF repo: " + repo + ")"
+					}
+					return ""
+				}())
+			return 2
+		default:
+			core.Print(core.Stderr(),
+				"lthn ai models: unknown verb %q — `lthn ai models` lists configured routes\n",
+				args[0])
+			return 2
+		}
+	}
 	r := newRunner()
 	models := r.Models()
 	if !models.OK {
