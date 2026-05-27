@@ -336,10 +336,12 @@ class LthnModelBrowserWindow extends LitElement {
       { name:"Phi-4-14B-Instruct",            author:"Microsoft",  size:"9.6 GB", q:"q4_k_m", family:"Phi",     tools:true,  vision:false, dlCount:"260k",  hfRepo:"microsoft/Phi-4-mini-instruct-GGUF",          file:"Phi-4-mini-instruct-q4.gguf" },
     ];
 
-    const toolbar = html`
-      <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-filter" style="font-size:10px;"></i> ${this.t.btnFilters}</lthn-btn>
-      <lthn-btn tone="primary" size="sm"><i class="fa-solid fa-arrow-down" style="font-size:10px;"></i> ${this.t.btnImportGguf}</lthn-btn>
-    `;
+    // Toolbar intentionally empty: the original "Filters" + "Import
+    // GGUF" buttons had no handlers and no backing flows (no filter
+    // UI exists; no models.Import binding to copy a local .gguf into
+    // the models dir). Re-add when those substrates land + the
+    // actions are real.
+    const toolbar = html``;
 
     const body = html`
       <div style="flex:1; display:grid; grid-template-columns: 240px 1fr 300px; min-height:0;">
