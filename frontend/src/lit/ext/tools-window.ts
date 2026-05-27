@@ -98,15 +98,7 @@ class LthnToolsWindow extends LitElement {
       btnInvoke: bi, tryitHelp: th,
       emptyRegistry: er,
     };
-    try {
-      const svc = await import("@desktop/tools/wailsservice");
-      const list = await svc.List();
-      this.toolList = (list || []) as ToolView[];
-      if (this.toolList.length > 0) this.selectedTool = this.toolList[0].name;
-    } catch (err) {
-      console.error("tools: list failed", err);
-      this.toolList = [];
-    }
+    await this._refresh(subtitleTpl, title);
     // Toolbar's "current model: X" slot — same source-of-truth as
     // chat-window. Keeps the gemma-4-e2b fallback so the design
     // string still reads coherently if WModels() returns empty.
@@ -116,14 +108,30 @@ class LthnToolsWindow extends LitElement {
       const models = await unwrap<string[]>(runner.WModels(), []);
       if (models?.[0]) this.activeModel = models[0];
     } catch { /* keep fallback */ }
+  }
+
+  /** Re-fetch the live MCP registry — wired to the Reload button so
+   *  users can pick up an mcp.json edit without restarting lthn. */
+  private async _refresh(subtitleTpl?: string, title?: string) {
+    try {
+      const svc = await import("@desktop/tools/wailsservice");
+      const list = await svc.List();
+      this.toolList = (list || []) as ToolView[];
+      if (this.toolList.length > 0 && !this.toolList.find(t => t.name === this.selectedTool)) {
+        this.selectedTool = this.toolList[0].name;
+      }
+    } catch (err) {
+      console.error("tools: list failed", err);
+      this.toolList = [];
+    }
     // Build the subtitle from real counts — N servers (distinct
     // groups) · M tools. Falls back to the locale string when the
     // list is empty.
     const groupCount = new Set(this.toolList.map(t => t.group)).size;
     const subtitle = this.toolList.length > 0
       ? `${groupCount} ${groupCount === 1 ? "server" : "servers"} · ${this.toolList.length} ${this.toolList.length === 1 ? "tool" : "tools"}`
-      : subtitleTpl;
-    this.chrome = { title, subtitle };
+      : (subtitleTpl ?? this.chrome.subtitle);
+    this.chrome = { title: title ?? this.chrome.title, subtitle };
   }
 
   render() {
@@ -154,8 +162,13 @@ class LthnToolsWindow extends LitElement {
     const selSchema = sel ? sel.schema : "";
 
     const toolbar = html`
-      <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-plus" style="font-size:10px;"></i> ${this.t.btnAddServer}</lthn-btn>
-      <lthn-btn tone="ghost" size="sm"><i class="fa-solid fa-arrows-rotate" style="font-size:10px;"></i> ${this.t.btnReload}</lthn-btn>
+      <lthn-btn tone="ghost" size="sm" ?dim=${true}
+        title="MCP servers are declared in ~/.lthn/mcp.json — edit the file, then click Reload">
+        <i class="fa-solid fa-plus" style="font-size:10px;"></i> ${this.t.btnAddServer}
+      </lthn-btn>
+      <lthn-btn tone="ghost" size="sm" @click=${() => void this._refresh()}>
+        <i class="fa-solid fa-arrows-rotate" style="font-size:10px;"></i> ${this.t.btnReload}
+      </lthn-btn>
       <div style="flex:1"></div>
       <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3);">
         ${this.t.toolbarModel.replace("%s", this.activeModel)}
@@ -172,7 +185,6 @@ class LthnToolsWindow extends LitElement {
                 <lthn-status-dot variant=${s.on ? "ok" : "idle"}></lthn-status-dot>
                 <span>${s.name}</span>
                 <span style="margin-left:auto; font-family:var(--font-mono); font-size:9.5px; color:var(--fg-3);">${s.tools}</span>
-                <lthn-toggle ?on=${s.on}></lthn-toggle>
               </div>
               ${s.on ? html`
                 <div style="margin-top:4px; display:flex; flex-direction:column;">
@@ -228,40 +240,26 @@ class LthnToolsWindow extends LitElement {
           </div>
           <div>
             <lthn-label>${this.t.labelRecent}</lthn-label>
-            <div style="margin-top:8px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05); border-radius:8px; font-family:var(--font-mono); font-size:11px;">
-              ${[
-                { t: "14:32:21", p: '{ "path": "./notes/draft.md", "content": "..." }', ms: 14, ok: true },
-                { t: "13:18:04", p: '{ "path": "./tmp/out.json", "content": "..." }', ms: 11, ok: true },
-                { t: "12:08:42", p: '{ "path": "./.cache/lock", "create": false }',    ms: 0,  ok: false },
-              ].map((c, i) => html`
-                <div style="display:grid; grid-template-columns:70px 1fr 50px 18px; padding:8px 14px; gap:10px; border-bottom:${i < 2 ? "1px solid rgba(255,255,255,0.04)" : "none"}; align-items:center;">
-                  <span style="color:var(--fg-3);">${c.t}</span>
-                  <span style="color:var(--fg-1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${c.p}</span>
-                  <span style="color:${c.ok ? "var(--fg-1)" : "var(--err-400)"}; text-align:right;">${c.ms} ms</span>
-                  <i class="fa-solid ${c.ok ? "fa-check" : "fa-xmark"}" style="font-size:10px; color:${c.ok ? "var(--success-400)" : "var(--err-400)"};"></i>
-                </div>
-              `)}
+            <div style="margin-top:8px; padding:14px 16px; border-radius:8px;
+                        background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.05);
+                        font-size:11.5px; color:var(--fg-3); font-style:italic; line-height:1.55;">
+              Per-call telemetry isn't captured yet — tool invocations flow
+              through your active chat, so the chat history is the call log
+              today.
             </div>
           </div>
         </main>
 
-        <!-- try-it rail -->
+        <!-- try-it rail — invocation belongs in chat, since the model
+             owns the tool-use loop. The example below stays as a
+             read-only schema sample so users can see the shape, but
+             there's no separate Invoke surface to lie about. -->
         <aside style="background:rgba(0,0,0,0.18); border-left:1px solid rgba(255,255,255,0.05); padding:18px; overflow:auto; display:flex; flex-direction:column; gap:12px;">
           <lthn-label>${this.t.labelTryit}</lthn-label>
           <div style="background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:10px; font-family:var(--font-mono); font-size:11.5px; line-height:1.6; color:var(--fg-1); white-space:pre; min-height:110px;">${String.raw`{
   "path":    "./scratch/hello.txt",
   "content": "hello, world\n"
 }`}</div>
-          <lthn-btn tone="primary" size="md"><i class="fa-solid fa-play" style="font-size:10px;"></i> ${this.t.btnInvoke}</lthn-btn>
-          <div style="padding:10px 12px; border-radius:6px; background:rgba(34,197,94,0.06); border:1px solid rgba(34,197,94,0.18); font-size:11.5px; color:var(--fg-1); line-height:1.55;">
-            <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
-              <i class="fa-solid fa-check" style="color:var(--success-400); font-size:10px;"></i>
-              <span style="color:var(--success-400); font-family:var(--font-mono); font-size:10px; letter-spacing:0.06em;">OK · 14 ms</span>
-            </div>
-            <div style="font-family:var(--font-mono); color:var(--fg-2); font-size:11px;">
-              wrote 13 bytes to ./scratch/hello.txt
-            </div>
-          </div>
           <div style="font-size:10.5px; color:var(--fg-3); line-height:1.55;">
             ${this.t.tryitHelp}
           </div>
@@ -269,17 +267,17 @@ class LthnToolsWindow extends LitElement {
       </div>
     `;
 
-    // Footer counts come from the live registry — "configured" + "enabled"
+    // Footer counts come from the live registry. "configured" + "enabled"
     // are equal today since the MCP service has no per-group disable
-    // toggle. "648 calls today · 99.4 % ok" stays as design canon —
-    // no call-log service yet. Fall back to the design literals (5/3)
-    // when the list is empty so canvas preview reads coherently.
+    // toggle. Fall back to the design literals (5/3) only when the list
+    // is empty so canvas preview reads coherently — but never invent
+    // call-log numbers, since no call log exists.
     const sc = servers.length || 5;
     const se = servers.length || 3;
     return renderChrome({
       title: this.chrome.title, subtitle: this.chrome.subtitle,
       w: this.w, h: this.h, toolbar, body,
-      footer: html`~/.lthn/mcp.json · ${sc} servers configured · ${se} enabled · 648 calls today · 99.4 % ok`,
+      footer: html`~/.lthn/mcp.json · ${sc} servers configured · ${se} enabled`,
       embedded: this.embedded,
     });
   }
