@@ -276,6 +276,43 @@ class LthnBenchmarkWindow extends LitElement {
    *  collapse to "not running" so completed/stopped jobs don't keep
    *  the bench disabled. Lemma down → assume not training (the bench
    *  can still run against other registered benchers like Ollama). */
+  /** Export current History rows as CSV. Mirrors audit-window's
+   *  _exportCSV shape — Blob URL + off-screen anchor → downloads
+   *  via the browser's default folder. SaveFile dialog would be
+   *  nicer but needs a Wails-side file write binding the desktop
+   *  hasn't exposed yet (audit-window has the same limitation,
+   *  noted in deferred task #164). */
+  _exportRunsCSV() {
+    if (this.runs.length === 0) return;
+    const cols = ["ts", "bencher", "model", "ctx", "pp_tok_s", "tg_tok_s", "peak_w", "mem"];
+    const esc = (v: unknown) => {
+      const s = v === undefined || v === null ? "" : String(v);
+      if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+    const rows = [cols.join(",")];
+    for (const r of this.runs) {
+      rows.push([
+        esc(r.ts), esc(r.bencher), esc(r.model), esc(r.ctx ?? ""),
+        esc(r.pp ?? ""), esc(r.tg ?? ""), esc(r.w ?? ""), esc(r.mem ?? ""),
+      ].join(","));
+    }
+    const body = rows.join("\n");
+    try {
+      const blob = new Blob([body], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "benchmark-runs.csv";
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      queueMicrotask(() => { URL.revokeObjectURL(url); a.remove(); });
+    } catch (err) {
+      console.error("benchmark: export failed", err);
+    }
+  }
+
   async _pollSFT() {
     try {
       const lemma = await import("@desktop/lemma/wailsservice");
@@ -486,7 +523,12 @@ class LthnBenchmarkWindow extends LitElement {
         <i class="fa-solid ${this.running ? "fa-spinner fa-spin" : this.sftRunning ? "fa-hourglass-half" : "fa-play"}" style="font-size:9px;"></i>
         ${runLabel}
       </lthn-btn>
-      <lthn-btn tone="ghost" size="sm"><i class="fa-regular fa-file-arrow-down" style="font-size:10px;"></i> ${this.t.btnExport}</lthn-btn>
+      <lthn-btn tone="ghost" size="sm"
+        ?disabled=${this.runs.length === 0}
+        title=${this.runs.length === 0 ? "Run a benchmark first to populate History." : "Export the History rows as CSV — downloads to your browser's default folder."}
+        @click=${() => this._exportRunsCSV()}>
+        <i class="fa-regular fa-file-arrow-down" style="font-size:10px;"></i> ${this.t.btnExport}
+      </lthn-btn>
     `;
 
     const errBanner = this.runErr ? html`
