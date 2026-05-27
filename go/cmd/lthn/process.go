@@ -28,9 +28,22 @@ func cmdProcess(args []string) int {
 
 	switch args[0] {
 	case "run":
-		return printResultJSON(svc.Run(args[1], args[2:]), "process run", len(args) < 2)
+		// Guard BEFORE indexing — passing args[1] into svc.Run when
+		// the user typed just `lthn process run` would index out of
+		// range and panic. The printResultJSON usageMissing branch
+		// never gets a chance to run since Go evaluates the args
+		// first. kill / get already guard the same way (below).
+		if len(args) < 2 {
+			core.Print(core.Stderr(), "lthn process run: usage: lthn process run COMMAND [ARG ...]\n")
+			return 2
+		}
+		return printResultJSON(svc.Run(args[1], args[2:]), "process run")
 	case "start":
-		return printResultJSON(svc.Start(args[1], args[2:]), "process start", len(args) < 2)
+		if len(args) < 2 {
+			core.Print(core.Stderr(), "lthn process start: usage: lthn process start COMMAND [ARG ...]\n")
+			return 2
+		}
+		return printResultJSON(svc.Start(args[1], args[2:]), "process start")
 	case "kill":
 		if len(args) < 2 {
 			core.Print(core.Stderr(), "lthn process kill: usage: lthn process kill ID\n")
@@ -49,13 +62,13 @@ func cmdProcess(args []string) int {
 				runningOnly = true
 			}
 		}
-		return printResultJSON(svc.List(runningOnly), "process list", false)
+		return printResultJSON(svc.List(runningOnly), "process list")
 	case "get":
 		if len(args) < 2 {
 			core.Print(core.Stderr(), "lthn process get: usage: lthn process get ID\n")
 			return 2
 		}
-		return printResultJSON(svc.Get(args[1]), "process get", false)
+		return printResultJSON(svc.Get(args[1]), "process get")
 	default:
 		core.Print(core.Stderr(), "lthn process: unknown verb %q\n", args[0])
 		return 2
@@ -63,13 +76,11 @@ func cmdProcess(args []string) int {
 }
 
 // printResultJSON renders a core.Result as indented JSON to stdout
-// (success) or its error to stderr (failure). usageMissing short-
-// circuits with a usage message when the caller passed too few args.
-func printResultJSON(r core.Result, op string, usageMissing bool) int {
-	if usageMissing {
-		core.Print(core.Stderr(), "lthn %s: missing required argument\n", op)
-		return 2
-	}
+// (success) or its error to stderr (failure). Callers guard
+// missing-arg cases themselves before invoking — the old usageMissing
+// parameter couldn't actually short-circuit because Go evaluates the
+// args[1] indexing eagerly, which panicked before the guard ran.
+func printResultJSON(r core.Result, op string) int {
 	if !r.OK {
 		core.Print(core.Stderr(), "lthn %s: %s\n", op, r.Error())
 		return 1
