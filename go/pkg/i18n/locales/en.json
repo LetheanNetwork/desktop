@@ -452,7 +452,7 @@
       "rail_empty":      "No models found in %s.",
       "rail_empty_hint": "Import a GGUF or pull from Hugging Face to get started.",
       "rail_failed":     "Failed to list models:",
-      "rail_footer":     "Right-click for pin · open in chat · delete.",
+      "rail_footer":     "Select a row for Use / Delete affordances on the right.",
       "label_selected":  "Selected",
       "btn_open_chat":   "Open in chat",
       "row_family":      "Family",

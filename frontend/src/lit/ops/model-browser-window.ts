@@ -119,7 +119,7 @@ class LthnModelBrowserWindow extends LitElement {
       railEmpty: "No models found in %s.",
       railEmptyHint: "Import a GGUF or pull from Hugging Face to get started.",
       railFailed: "Failed to list models:",
-      railFooter: "Right-click for pin · open in chat · delete.",
+      railFooter: "Select a row for Use / Delete affordances on the right.",
       labelSelected: "Selected", btnOpenChat: "Open in chat",
       rowFamily: "Family", rowParameters: "Parameters", rowQuantisation: "Quantisation",
       rowContext: "Context", rowVocabulary: "Vocabulary", rowArchitecture: "Architecture",
