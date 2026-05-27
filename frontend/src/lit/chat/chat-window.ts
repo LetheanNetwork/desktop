@@ -1021,8 +1021,23 @@ class LthnChatWindow extends LitElement {
 
       const rawHistory = await unwrap<Msg[]>(sessions.Read(id), []);
       const history = withSystemPrompt(rawHistory || [], current?.systemPrompt || "");
-      const reply = await unwrap<string>(runner.WChat(history), "");
-      await demand<unknown>(sessions.Append(id, "assistant", reply || ""));
+      // demand (not unwrap) so a runner failure (lthn-mlx down,
+      // model not loaded, 500 from the gateway) bubbles to the
+      // catch block instead of silently turning into an empty
+      // assistant reply. Previously unwrap returned "" on error
+      // and we Appended "assistant: \"\"" to the conversation —
+      // user saw a blank reply with no error signal AND the empty
+      // turn persisted in chathistory polluting future LoRA training
+      // data.
+      const reply = await demand<string>(runner.WChat(history));
+      // Guard the empty-string case too — a successful Result with
+      // empty Value is a degenerate response we don't want to
+      // persist. Surface as an explicit error so the user retries
+      // rather than seeing a silent dead-air assistant turn.
+      if (!reply) {
+        throw new Error("Empty reply from runner");
+      }
+      await demand<unknown>(sessions.Append(id, "assistant", reply));
       await this._loadTurns();
       await this._reloadRail();
     } catch (err: unknown) {
