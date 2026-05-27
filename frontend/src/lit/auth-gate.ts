@@ -212,7 +212,21 @@ class LthnAuthGate extends LitElement {
     super.disconnectedCallback();
     window.removeEventListener(AUTH_401_EVENT, this._on401);
     window.removeEventListener(AUTH_LOCK_EVENT, this._onAuthLock);
+    // Cancel any pending lockout-expiry timer so it doesn't keep a
+    // reference to a disconnected element for up to 60s. Repeated
+    // open/close cycles during lockout windows would otherwise stack
+    // dead-element refs in the timer queue.
+    if (this._lockoutTimer !== null) {
+      clearTimeout(this._lockoutTimer);
+      this._lockoutTimer = null;
+    }
   }
+
+  /** Lockout-expiry timer — set by _bind401Error when seconds > 0,
+   *  cleared on next lockout (so consecutive lockouts don't double-
+   *  fire) and on disconnectedCallback (so a stale timer doesn't
+   *  retain the element after unmount). */
+  private _lockoutTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Probe the backend for whether a Lethean Account exists. Sets
    *  state=setup when no account is provisioned, state=auth when one
@@ -520,8 +534,16 @@ class LthnAuthGate extends LitElement {
         if (input) input.value = "";
         // Schedule a re-render the moment the lockout expires so the
         // button + inline error self-recover without the user clicking.
+        // Store the handle + clear any prior timer so consecutive
+        // lockouts don't stack; disconnectedCallback also clears so the
+        // timer doesn't retain a ref to a removed element.
+        if (this._lockoutTimer !== null) {
+          clearTimeout(this._lockoutTimer);
+          this._lockoutTimer = null;
+        }
         if (seconds > 0) {
-          window.setTimeout(() => {
+          this._lockoutTimer = window.setTimeout(() => {
+            this._lockoutTimer = null;
             this.lockedOutUntilSec = 0;
             this.unlockError = "";
             this.requestUpdate();
