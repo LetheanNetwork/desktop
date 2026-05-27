@@ -99,7 +99,7 @@ import (
 	officefile "dappco.re/lthn/desktop/pkg/office/files"
 	"dappco.re/lthn/desktop/pkg/deploys"
 	"github.com/gin-gonic/gin"
-	"github.com/wailsapp/wails/v3/pkg/application"
+	gui "dappco.re/go/gui"
 )
 
 // TODO(snider): core/gui needs an app-construction surface covering
@@ -175,10 +175,12 @@ type Options struct {
 	ShowAppOnLaunch bool
 }
 
-// Service holds the Wails application and the SystemTray anchor.
+// Service holds the core/gui handle and the SystemTray anchor. The wails
+// application lifecycle lives behind gui.Service; lthn/desktop no longer
+// touches application.* directly.
 type Service struct {
 	opts Options
-	app  *application.App
+	gui  *gui.Service
 	// selfRefreshStop signals the local-machine refresh ticker to
 	// exit. Closed by PostShutdown; the goroutine selects on it
 	// alongside the ticker channel.
@@ -482,47 +484,47 @@ func (s *Service) Run() core.Result {
 		core.Warn("desktop.contentshield.register", "error", r.Error())
 	}
 
-	wailsServices := []application.Service{
+	wailsBindings := []gui.Binding{
 		// In-this-repo packages — each ships its own *WailsService /
 		// *Service with Wails3 lifecycle + (T, error) methods. Bindings
 		// land at frontend/bindings/dappco.re/lthn/desktop/pkg/<pkg>/.
-		application.NewService(s.opts.Runner),
-		application.NewService(s.opts.Server),
-		application.NewService(sessions.NewWailsService(s.opts.Core)),
-		application.NewService(models.NewWailsService()),
-		application.NewService(downloaderSvc),
-		application.NewService(firstlaunch.NewWailsService()),
-		application.NewService(integrations.NewWailsService()),
-		application.NewService(apikey.NewWailsService(s.opts.Core)),
-		application.NewService(git.NewService(s.opts.Core)),
-		application.NewService(build.NewService(s.opts.Core)),
-		application.NewService(container.NewService(s.opts.Core)),
-		application.NewService(lint.NewService(s.opts.Core)),
-		application.NewService(marketplace.NewService(s.opts.Core)),
-		application.NewService(lthnphp.NewService(s.opts.Core)),
-		application.NewService(pluginSvc),
-		application.NewService(sandboxSvc),
-		application.NewService(contentshield.NewWailsService()),
+		gui.Bind(s.opts.Runner),
+		gui.Bind(s.opts.Server),
+		gui.Bind(sessions.NewWailsService(s.opts.Core)),
+		gui.Bind(models.NewWailsService()),
+		gui.Bind(downloaderSvc),
+		gui.Bind(firstlaunch.NewWailsService()),
+		gui.Bind(integrations.NewWailsService()),
+		gui.Bind(apikey.NewWailsService(s.opts.Core)),
+		gui.Bind(git.NewService(s.opts.Core)),
+		gui.Bind(build.NewService(s.opts.Core)),
+		gui.Bind(container.NewService(s.opts.Core)),
+		gui.Bind(lint.NewService(s.opts.Core)),
+		gui.Bind(marketplace.NewService(s.opts.Core)),
+		gui.Bind(lthnphp.NewService(s.opts.Core)),
+		gui.Bind(pluginSvc),
+		gui.Bind(sandboxSvc),
+		gui.Bind(contentshield.NewWailsService()),
 		// lemma → admin facade on lthn-mlx /v1/admin/* (status / reload /
 		// download / profiles). Exposes the Lemma surface to the WebView
 		// without leaking the Bearer token to JS — the service runs in-Go
 		// with read access to ~/Lethean/data/admin.token; JS only sees
 		// the typed verb signatures Wails generates from this struct.
-		application.NewService(lemma.NewWailsService(lemma.AdminConfig{})),
-		application.NewService(clbpl.NewWailsService(clbpl.Options{})),
-		application.NewService(r1.NewWailsService()),
-		application.NewService(r1analytics.NewWailsService()),
-		application.NewService(seeds.NewWailsService()),
-		application.NewService(training.NewWailsService(s.opts.Core, training.NewService(s.opts.Core, training.Options{}))),
-		application.NewService(labSvc),
-		application.NewService(opencode.NewWailsService(opencodeSvc)),
-		application.NewService(reposSvc),
+		gui.Bind(lemma.NewWailsService(lemma.AdminConfig{})),
+		gui.Bind(clbpl.NewWailsService(clbpl.Options{})),
+		gui.Bind(r1.NewWailsService()),
+		gui.Bind(r1analytics.NewWailsService()),
+		gui.Bind(seeds.NewWailsService()),
+		gui.Bind(training.NewWailsService(s.opts.Core, training.NewService(s.opts.Core, training.Options{}))),
+		gui.Bind(labSvc),
+		gui.Bind(opencode.NewWailsService(opencodeSvc)),
+		gui.Bind(reposSvc),
 		// tasks → Shape (a.i) IPC-entry wrapper (RFC v3.1 §4.4 /
 		// Cerberus #73 F-1 / Mantis #1755). The wrapper stamps
 		// TierRenderer at every Wails IPC entry so the substrate
 		// *Service.Require gate fires correctly; the bare *Service
 		// stays available via Substrate() for in-Go consumers.
-		application.NewService(tasks.NewWailsService(tasks.NewService(s.opts.Core))),
+		gui.Bind(tasks.NewWailsService(tasks.NewService(s.opts.Core))),
 		// vi → Shape (a.i) IPC-entry wrapper (RFC v3.1 §4.4 /
 		// Cerberus #72 F-3 / Mantis #1750). The wrapper stamps
 		// TierRenderer at every Wails IPC entry so the substrate's
@@ -533,40 +535,40 @@ func (s *Service) Run() core.Result {
 		// renderer. The Core-registered *vi.Service instance (driving
 		// the probe loop via OnStart) is still the one wrapped here;
 		// Substrate() exposes it to the composition root unchanged.
-		application.NewService(vi.NewWailsService(viSvc)),
-		application.NewService(incidentsSvc),
-		application.NewService(runbooksSvc),
-		application.NewService(contactsSvc),
-		application.NewService(dealsSvc),
-		application.NewService(pipelineSvc),
-		application.NewService(forecastSvc),
-		application.NewService(campaignsSvc),
-		application.NewService(contentSvc),
-		application.NewService(socialSvc),
-		application.NewService(audienceSvc),
-		application.NewService(analyticsSvc),
-		application.NewService(documentsSvc),
-		application.NewService(mailSvc),
-		application.NewService(filesSvc),
-		application.NewService(deploysSvc),
-		application.NewService(serverkeySvc),
-		application.NewService(accountSvc),
-		application.NewService(s.opts.Fleet),
-		application.NewService(s.opts.Keys),
-		application.NewService(tools.NewWailsService(s.opts.Core)),
-		application.NewService(validator.NewWailsService()),
-		application.NewService(telemetry.NewService(telemetry.Options{})),
-		application.NewService(benchmarkSvc),
-		application.NewService(openaibenchSvc),
-		application.NewService(lthnservices.NewWailsService()),
+		gui.Bind(vi.NewWailsService(viSvc)),
+		gui.Bind(incidentsSvc),
+		gui.Bind(runbooksSvc),
+		gui.Bind(contactsSvc),
+		gui.Bind(dealsSvc),
+		gui.Bind(pipelineSvc),
+		gui.Bind(forecastSvc),
+		gui.Bind(campaignsSvc),
+		gui.Bind(contentSvc),
+		gui.Bind(socialSvc),
+		gui.Bind(audienceSvc),
+		gui.Bind(analyticsSvc),
+		gui.Bind(documentsSvc),
+		gui.Bind(mailSvc),
+		gui.Bind(filesSvc),
+		gui.Bind(deploysSvc),
+		gui.Bind(serverkeySvc),
+		gui.Bind(accountSvc),
+		gui.Bind(s.opts.Fleet),
+		gui.Bind(s.opts.Keys),
+		gui.Bind(tools.NewWailsService(s.opts.Core)),
+		gui.Bind(validator.NewWailsService()),
+		gui.Bind(telemetry.NewService(telemetry.Options{})),
+		gui.Bind(benchmarkSvc),
+		gui.Bind(openaibenchSvc),
+		gui.Bind(lthnservices.NewWailsService()),
 		// Upstream dappco.re/go services — register the Core-built
 		// instances directly. Bindings land at frontend/bindings/
 		// dappco.re/go/<pkg>/.
-		application.NewService(i18nSvc),
-		application.NewService(configSvc),
-		application.NewService(bridgeSvc),
+		gui.Bind(i18nSvc),
+		gui.Bind(configSvc),
+		gui.Bind(bridgeSvc),
 		// Window registry — see note above.
-		application.NewService(windowSvc),
+		gui.Bind(windowSvc),
 	}
 
 	// Auto-register the local machine in the Fleet substrate. The UI
@@ -598,11 +600,33 @@ func (s *Service) Run() core.Result {
 		go runSelfMachineRefresh(s.opts.Fleet, s.selfRefreshStop)
 	}
 
-	s.app = application.New(application.Options{
+	// Build the GuiConfig — core/gui's Service owns wails app construction
+	// + sub-service registration. lthn/desktop holds no wails imports.
+	guiCfg := gui.GuiConfig{
 		Name:        s.opts.Name,
 		Description: s.opts.Description,
 		Icon:        s.opts.AppIcon,
-		Services:    wailsServices,
+		Bindings:    wailsBindings,
+		Assets: gui.AssetOptions{
+			Handler:    engine,
+			Middleware: ginMiddleware(engine),
+		},
+		Mac: gui.MacOptions{
+			// Tray IS the process — closing every window must NOT quit.
+			ApplicationShouldTerminateAfterLastWindowClosed: false,
+			// Accessory: menu-bar only, no Dock icon, no Cmd+Tab entry.
+			ActivationPolicy: gui.ActivationPolicyAccessory,
+		},
+		Windows: gui.WindowsOptions{
+			// Windows-side equivalent of the Mac flag above — without
+			// this, closing the last window quits the process and the
+			// systray goes with it. v3/examples/systray-custom canon.
+			DisableQuitOnLastWindowClosed: true,
+			// Enable WebView2's draggable-regions feature — Wails3
+			// needs this for --wails-draggable CSS to work on
+			// Windows (macOS handles it natively without the flag).
+			EnabledFeatures: []string{"msWebView2EnableDraggableRegions"},
+		},
 		// SingleInstance — a second launch hands off URL/file/args
 		// to the first instance via OnSecondInstanceLaunch and then
 		// exits. UniqueID is the macOS Bundle Identifier so the OS
@@ -618,67 +642,31 @@ func (s *Service) Run() core.Result {
 		//
 		// Cerberus #1442: the key is per-install, generated once on
 		// first launch and persisted at ~/Lethean/data/keys/
-		// single-instance.aead by pkg/keys. Every machine gets a
-		// distinct random 32-byte key; the build-time constant that
-		// was identical across every installed binary has been removed.
-		SingleInstance: &application.SingleInstanceOptions{
+		// single-instance.aead by pkg/keys.
+		SingleInstance: &gui.SingleInstanceOptions{
 			UniqueID:      "io.lethean.desktop",
 			EncryptionKey: singleInstanceKey,
 			AdditionalData: map[string]string{
-				"app": "lthn-desktop",
-				// Pulled from the canonical build-stamped Version in
-				// dappco.re/lthn/desktop — the prior hardcoded
-				// "0.2.0-rc1" literal would have lied to the
-				// second-instance receiver about which build
-				// launched, breaking telemetry + the forensic
-				// audit trail whenever versions drift.
+				"app":     "lthn-desktop",
 				"version": lthn.Version,
 			},
-			OnSecondInstanceLaunch: func(d application.SecondInstanceData) {
-				if s.app == nil {
-					return
-				}
+			OnSecondInstanceLaunch: func(d gui.SecondInstanceData) {
 				// Re-broadcast the second-launch context so any
-				// frontend subscribers (router / wizard / chat)
-				// can act on it. Same shape as ApplicationStarted
-				// / OpenedWithFile / LaunchedWithUrl emit. Safe to
-				// trust because EncryptionKey above authenticates
-				// the channel — anything reaching this callback
-				// came from a binary holding the same key.
-				emitCoreEvent(s.opts.Core,"lthn:app:second-instance", map[string]any{
+				// frontend subscribers (router / wizard / chat) can
+				// act on it. Safe to trust because EncryptionKey
+				// authenticates the channel.
+				emitCoreEvent(s.opts.Core, "lthn:app:second-instance", map[string]any{
 					"args":       d.Args,
 					"workdir":    d.WorkingDir,
 					"additional": d.AdditionalData,
 				})
-				// Bring the unified app shell (preferred) or the
-				// tray popover back to the foreground. Restore()
-				// before Focus() handles the case where the window
-				// was minimised — Wails docs canon for the second-
-				// instance UX. If neither window is registered (race
-				// during pre-create / both destroyed), fall through
-				// to a window.open create-and-show on the tray as
-				// last-resort UX + emit the fallback audit row so a
-				// forensic walker can grep for the degraded path
-				// (Cerberus #70 F-4 LOW).
 				restoreSecondInstanceWindow(s.opts.Core, s.opts)
 			},
 		},
-		// ShouldQuit fires when the OS / user requests quit. Today
-		// we always allow — pkg/sessions and pkg/store flush on
-		// OnShutdown and survive a clean exit. Return false here to
-		// veto (e.g. unsaved-state guard once chat composer state
-		// is wired into the loop).
 		ShouldQuit: func() bool { return true },
-		// OnShutdown — pre-quit cleanup. Sessions persist to the
-		// store between every interaction already; this is the
-		// belt-and-braces flush + a hook for any service that
-		// needs to drain in-flight work (runner / telemetry).
 		OnShutdown: func() {
-			emitCoreEvent(s.opts.Core,"lthn:app:shutdown", nil)
+			emitCoreEvent(s.opts.Core, "lthn:app:shutdown", nil)
 		},
-		// PostShutdown runs after the Wails event loop has fully
-		// stopped. Last chance to close anything that held a ref
-		// into the event loop (HTTP server, store, runner).
 		PostShutdown: func() {
 			if s.selfRefreshStop != nil {
 				close(s.selfRefreshStop)
@@ -690,48 +678,32 @@ func (s *Service) Run() core.Result {
 				}
 			}
 		},
-		// PanicHandler captures uncaught panics from Go-side service
-		// methods (binding adapters etc.) and re-broadcasts them
-		// onto lthn:app:panic so the frontend can show a crash
-		// pane + offer a "send report" button. Without this the
-		// panic kills the process silently.
-		PanicHandler: func(details *application.PanicDetails) {
-			if s.app == nil || details == nil {
-				return
-			}
+		OnPanic: func(d gui.PanicDetails) {
 			errStr := ""
-			if details.Error != nil {
-				errStr = details.Error.Error()
+			if d.Error != nil {
+				errStr = d.Error.Error()
 			}
-			emitCoreEvent(s.opts.Core,"lthn:app:panic", map[string]any{
+			emitCoreEvent(s.opts.Core, "lthn:app:panic", map[string]any{
 				"error":      errStr,
-				"stack":      details.StackTrace,
-				"full_stack": details.FullStackTrace,
+				"stack":      d.StackTrace,
+				"full_stack": d.FullStackTrace,
 			})
 		},
-		Mac: application.MacOptions{
-			// Tray IS the process — closing every window must NOT quit.
-			ApplicationShouldTerminateAfterLastWindowClosed: false,
-			// Accessory: menu-bar only, no Dock icon, no Cmd+Tab entry.
-			ActivationPolicy: application.ActivationPolicyAccessory,
-		},
-		Windows: application.WindowsOptions{
-			// Windows-side equivalent of the Mac flag above — without
-			// this, closing the last window quits the process and the
-			// systray goes with it. v3/examples/systray-custom canon.
-			DisableQuitOnLastWindowClosed: true,
-			// Enable WebView2's draggable-regions feature — Wails3
-			// needs this for --wails-draggable CSS to work on
-			// Windows (macOS handles it natively without the flag).
-			EnabledFeatures: []string{"msWebView2EnableDraggableRegions"},
-		},
-		Assets: application.AssetOptions{
-			Handler:    engine,
-			Middleware: ginMiddleware(engine),
-		},
-	})
+	}
 
-	if r := s.registerCoreGUI(); !r.OK {
+	// Register the gui service on Core with the config above + fire its
+	// OnStartup. OnStartup builds the wails App, wraps every Binding as
+	// a Wails IPC service, and registers every core/gui sub-service
+	// (window, systray, lifecycle, menu, dialog, etc.).
+	guiSvcResult := gui.NewService(guiCfg)(s.opts.Core)
+	if !guiSvcResult.OK {
+		return guiSvcResult
+	}
+	s.gui = guiSvcResult.Value.(*gui.Service)
+	if r := s.opts.Core.RegisterService("gui", s.gui); !r.OK {
+		return r
+	}
+	if r := s.gui.OnStartup(core.Background()); !r.OK {
 		return r
 	}
 
@@ -1009,10 +981,7 @@ func (s *Service) Run() core.Result {
 		})
 	}
 
-	if err := s.app.Run(); err != nil {
-		return core.Fail(err)
-	}
-	return core.Ok(nil)
+	return s.gui.Run()
 }
 
 func restoreFocusedWindow(c *core.Core, name string) bool {
@@ -1120,7 +1089,7 @@ func (s *Service) attachSPA() core.Result {
 // so the default Wails handler returns 404 and spams the console.
 // Intercept here and return an empty 200 instead — the runtime
 // happily continues with no overrides applied.
-func ginMiddleware(engine core.Handler) application.Middleware {
+func ginMiddleware(engine core.Handler) gui.MiddlewareFunc {
 	return func(next core.Handler) core.Handler {
 		return core.HandlerFunc(func(w core.ResponseWriter, r *core.Request) {
 			if r.URL.Path == "/wails/custom.js" {
