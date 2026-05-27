@@ -52,6 +52,8 @@ class LthnLemmaWindow extends LitElement {
     // admin-side state
     adminStatus: { state: true },
     sftJob:      { state: true },
+    sftStopBusy: { state: true },
+    sftStopErr:  { state: true },
     machineHash: { state: true },
     profiles:    { state: true },
     // Pulled from Models.List() at Admin-panel open. Drives the
@@ -82,7 +84,12 @@ class LthnLemmaWindow extends LitElement {
    *  registry is holding a terminal-state record (done/failed/
    *  stopped) the user hasn't dismissed yet. Only state ===
    *  "running" renders the in-flight indicator. */
-  declare sftJob: { state?: string; epoch?: number; last_loss?: number; adapter_dir?: string } | null;
+  declare sftJob: { state?: string; epoch?: number; last_loss?: number; adapter_dir?: string; job_id?: string } | null;
+  /** Busy flag while a Stop request is in flight — keeps the user
+   *  from double-clicking the button before the upstream
+   *  responds. Mirrors the reloadBusy / downloadJob patterns. */
+  declare sftStopBusy: boolean;
+  declare sftStopErr: string;
   declare machineHash: string;
   declare profiles: any[];
   declare availableModels: Array<{ name: string; path: string; size: number; is_dir: boolean }>;
@@ -107,6 +114,8 @@ class LthnLemmaWindow extends LitElement {
     this.err = "";
     this.adminStatus = null;
     this.sftJob = null;
+    this.sftStopBusy = false;
+    this.sftStopErr = "";
     this.machineHash = "";
     this.profiles = [];
     this.availableModels = [];
@@ -210,6 +219,33 @@ class LthnLemmaWindow extends LitElement {
   private async toggleAdmin(): Promise<void> {
     this.showAdmin = !this.showAdmin;
     if (this.showAdmin) await this.loadAdmin();
+  }
+
+  /** Cancel the active SFT job. Mirrors distillation-window's
+   *  _doStop — single-flight upstream means there's only ever one
+   *  job to cancel, but we still pass the job_id so the upstream
+   *  refuses a stale UI's "stop whatever is running" pattern.
+   *  Checkpoints already written to the adapter dir survive — only
+   *  the gradient loop stops. */
+  private async doStopSFT(): Promise<void> {
+    if (this.sftStopBusy) return;
+    const jobID = this.sftJob?.job_id ?? "";
+    if (!jobID) {
+      this.sftStopErr = "no job id — refresh the admin panel and try again";
+      return;
+    }
+    this.sftStopBusy = true;
+    this.sftStopErr = "";
+    try {
+      await Lemma.SFTStop(jobID);
+      // Re-pull so the Training row collapses (state flips to
+      // "stopped" upstream + the !== "running" guard hides it).
+      await this.loadAdmin();
+    } catch (e) {
+      this.sftStopErr = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.sftStopBusy = false;
+    }
   }
 
   private async doReload(e: Event): Promise<void> {
@@ -320,8 +356,24 @@ class LthnLemmaWindow extends LitElement {
               <lthn-rail-row k="Context" v="${this.adminStatus.config?.context_length ?? 0}"></lthn-rail-row>
               <lthn-rail-row k="Cache" v="${this.adminStatus.config?.prompt_cache ? "on" : "off"} (${this.adminStatus.config?.cache_policy || "—"})"></lthn-rail-row>
               ${this.sftJob?.state === "running"
-                ? html`<lthn-rail-row k="Training"
-                    v="epoch ${this.sftJob.epoch ?? 0} · loss ${(this.sftJob.last_loss ?? 0).toFixed(3)}"></lthn-rail-row>`
+                ? html`
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <div style="flex:1;">
+                      <lthn-rail-row k="Training"
+                        v="epoch ${this.sftJob.epoch ?? 0} · loss ${(this.sftJob.last_loss ?? 0).toFixed(3)}"></lthn-rail-row>
+                    </div>
+                    <lthn-btn tone="ghost" size="sm"
+                      ?disabled=${this.sftStopBusy}
+                      @click=${() => this.doStopSFT()}>
+                      <i class="fa-solid fa-stop" style="font-size:9px;"></i>
+                      ${this.sftStopBusy ? "Stopping…" : "Stop"}
+                    </lthn-btn>
+                  </div>
+                  ${this.sftStopErr ? html`
+                    <div style="font-size:10.5px; color:var(--error-400); padding-left:8px;">
+                      ${this.sftStopErr}
+                    </div>
+                  ` : nothing}`
                 : nothing}
             </div>`
           : nothing}
