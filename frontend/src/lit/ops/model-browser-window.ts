@@ -390,12 +390,12 @@ class LthnModelBrowserWindow extends LitElement {
               the one listed. Until then, use the Lemma engine's Download form
               (Open Lemma → Admin) to pull by repo id.
             </div>
-            <div style="display:flex; gap:6px; flex-wrap:wrap;">
-              ${["Gemma","Llama","Phi","Qwen","Mistral","≤ 5 GB","≤ 10 GB","Has vision","Has tools"].map((f, i) => html`
+            <div style="display:flex; gap:6px; flex-wrap:wrap;" title="Filter chips are part of the preview — clicks don't filter the results yet.">
+              ${["Gemma","Llama","Phi","Qwen","Mistral","≤ 5 GB","≤ 10 GB","Has vision","Has tools"].map(f => html`
                 <span style="font-size:10.5px; padding:3px 9px; border-radius:999px;
-                             background:${i < 2 ? "rgba(64,193,197,0.10)" : "rgba(255,255,255,0.04)"};
-                             border:1px solid ${i < 2 ? "rgba(64,193,197,0.20)" : "rgba(255,255,255,0.06)"};
-                             color:${i < 2 ? "var(--brand-300)" : "var(--fg-2)"};
+                             background:rgba(255,255,255,0.04);
+                             border:1px solid rgba(255,255,255,0.06);
+                             color:var(--fg-2);
                              letter-spacing:-0.005em;">${f}</span>
               `)}
             </div>
