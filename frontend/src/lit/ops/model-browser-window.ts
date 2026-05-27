@@ -33,6 +33,7 @@ class LthnModelBrowserWindow extends LitElement {
     adapters:        { state: true },
     selectedAdapter: { state: true },
     activeAdapter:   { state: true },
+    sftRunning:      { state: true },
     reloadBusy:      { state: true },
     reloadErr:       { state: true },
     lemmaUnavailable:{ state: true },
@@ -66,6 +67,10 @@ class LthnModelBrowserWindow extends LitElement {
    *  the engine actually has loaded, not just what the user last
    *  picked. */
   declare activeAdapter: string;
+  /** True when Lemma.SFTStatus("") reports state="running" — gates
+   *  the Use button because a mid-training model swap will fail the
+   *  SFT job. Refreshed alongside Status / Profiles on _refresh. */
+  declare sftRunning: boolean;
   declare reloadBusy: boolean;
   declare reloadErr: string;
   declare lemmaUnavailable: boolean;
@@ -96,6 +101,7 @@ class LthnModelBrowserWindow extends LitElement {
     this.adapters = [];
     this.selectedAdapter = "";
     this.activeAdapter = "";
+    this.sftRunning = false;
     this.reloadBusy = false;
     this.reloadErr = "";
     this.lemmaUnavailable = false;
@@ -459,9 +465,10 @@ class LthnModelBrowserWindow extends LitElement {
       return nothing;
     }
     const isLoaded = selected.path === this.activeModelPath;
-    const btnLabel = this.reloadBusy ? "Reloading…"
-                   : isLoaded         ? "Loaded"
-                   : "Use this model";
+    const btnLabel = this.reloadBusy   ? "Reloading…"
+                   : this.sftRunning   ? "Training in progress"
+                   : isLoaded          ? "Loaded"
+                   :                     "Use this model";
     return html`
       <div style="display:flex; flex-direction:column; gap:8px; padding:10px;
                   border-radius:6px; background:rgba(255,255,255,0.03);
@@ -500,12 +507,13 @@ class LthnModelBrowserWindow extends LitElement {
           </div>
         ` : nothing}
         <lthn-btn
-          tone=${isLoaded ? "ghost" : "primary"}
+          tone=${isLoaded || this.sftRunning ? "ghost" : "primary"}
           size="md"
-          ?disabled=${this.reloadBusy || isLoaded}
+          ?disabled=${this.reloadBusy || isLoaded || this.sftRunning}
+          title=${this.sftRunning ? "Cannot swap model while fine-tune is in flight — Stop it first from the Lemma engine panel" : ""}
           @click=${() => { void this._doReload(selected.path!); }}
           style="justify-content:center; --wails-draggable:no-drag;">
-          <i class="fa-solid ${isLoaded ? "fa-check" : "fa-arrow-right-arrow-left"}" style="font-size:10px;"></i>
+          <i class="fa-solid ${this.sftRunning ? "fa-hourglass-half" : isLoaded ? "fa-check" : "fa-arrow-right-arrow-left"}" style="font-size:10px;"></i>
           ${btnLabel}
         </lthn-btn>
         ${this.reloadErr ? html`
@@ -524,11 +532,16 @@ class LthnModelBrowserWindow extends LitElement {
   private async _refreshLemmaAdmin(): Promise<void> {
     try {
       const Lemma = await import("@desktop/lemma/wailsservice");
-      const [statusRes, machineRes, profilesRes, adaptersRes] = await Promise.allSettled([
+      const [statusRes, machineRes, profilesRes, adaptersRes, sftRes] = await Promise.allSettled([
         Lemma.Status(),
         Lemma.Machine(),
         Lemma.Profiles(),
         Lemma.SFTAdapters(),
+        // SFTStatus("") gates the Use button — single-flight upstream
+        // means a mid-training model swap will fail the job, so the
+        // UI disables the action when state === "running" rather than
+        // letting the user submit a doomed reload.
+        Lemma.SFTStatus(""),
       ]);
       if (statusRes.status === "fulfilled") {
         this.activeModelPath = statusRes.value?.model_path ?? "";
@@ -553,6 +566,7 @@ class LthnModelBrowserWindow extends LitElement {
       if (adaptersRes.status === "fulfilled") {
         this.adapters = adaptersRes.value?.adapters ?? [];
       }
+      this.sftRunning = sftRes.status === "fulfilled" && sftRes.value?.state === "running";
     } catch {
       this.lemmaUnavailable = true;
     }
