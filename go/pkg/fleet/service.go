@@ -263,6 +263,13 @@ func (s *Service) Machines() core.Result {
 		m.Capabilities = caps
 		out = append(out, m)
 	}
+	// sql.Rows.Next() returns false on both natural end-of-stream AND
+	// on iterator error; Err() distinguishes. Without this check a
+	// mid-stream DB blip silently returns a truncated machine list
+	// and the Fleet view shows "where did my paired machine go?"
+	if err := rows.Err(); err != nil {
+		return core.Fail(core.E("fleet.Machines", "rows", err))
+	}
 	return core.Ok(out)
 }
 
@@ -293,6 +300,7 @@ func (s *Service) Queue(limit int) core.Result {
 			Next() bool
 			Scan(...any) error
 			Close() error
+			Err() error
 		}
 		err error
 	)
@@ -315,6 +323,9 @@ func (s *Service) Queue(limit int) core.Result {
 			return core.Fail(core.E("fleet.Queue", "scan row", err))
 		}
 		out = append(out, q)
+	}
+	if err := rows.Err(); err != nil {
+		return core.Fail(core.E("fleet.Queue", "rows", err))
 	}
 	return core.Ok(out)
 }
@@ -348,6 +359,9 @@ func (s *Service) RoutingRules() core.Result {
 			return core.Fail(core.E("fleet.RoutingRules", "scan row", err))
 		}
 		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return core.Fail(core.E("fleet.RoutingRules", "rows", err))
 	}
 	return core.Ok(out)
 }
@@ -388,6 +402,9 @@ func (s *Service) Agents() core.Result {
 			return core.Fail(core.E("fleet.Agents", "scan row", err))
 		}
 		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return core.Fail(core.E("fleet.Agents", "rows", err))
 	}
 	return core.Ok(out)
 }

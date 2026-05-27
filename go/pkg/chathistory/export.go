@@ -203,6 +203,15 @@ func (h *History) ExportJSONL(dest string) error {
 			t.Signal = signal.String
 			c.Turns = append(c.Turns, t)
 		}
+		// turnRows.Next() returns false on both natural end-of-stream
+		// AND iterator error. Without Err() a mid-stream DB blip
+		// silently truncates a conversation's turn list inside an
+		// otherwise-completed export — user gets a "successful" JSONL
+		// missing turns from one record with no signal.
+		if err := turnRows.Err(); err != nil {
+			turnRows.Close()
+			return core.E("chathistory.ExportJSONL", "turn rows", err)
+		}
 		turnRows.Close()
 
 		marshalled := core.JSONMarshal(c)
@@ -216,6 +225,12 @@ func (h *History) ExportJSONL(dest string) error {
 		if _, err := f.Write([]byte{'\n'}); err != nil {
 			return core.E("chathistory.ExportJSONL", "write newline", err)
 		}
+	}
+	// Same iterator-error trap on the outer convRows loop — without
+	// this a mid-export DB blip silently produces a JSONL with the
+	// LATER conversations missing entirely.
+	if err := convRows.Err(); err != nil {
+		return core.E("chathistory.ExportJSONL", "conversation rows", err)
 	}
 	// Explicit Close on the success path — surfaces flush failures
 	// (disk-full, network drive, etc.) that would otherwise be

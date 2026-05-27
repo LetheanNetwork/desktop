@@ -297,6 +297,13 @@ func (h *History) LoadTurns(conversationID string) ([]Turn, error) {
 		}
 		out = append(out, t)
 	}
+	// rows.Next() returns false on both natural end-of-stream AND
+	// iterator error; Err() distinguishes. Without this check a
+	// mid-stream DB blip silently returns a truncated turn list
+	// and the chat view re-renders missing the latter messages.
+	if err := rows.Err(); err != nil {
+		return nil, core.E("chathistory.LoadTurns", "rows", err)
+	}
 	return out, nil
 }
 
