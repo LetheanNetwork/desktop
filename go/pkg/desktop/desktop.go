@@ -41,6 +41,7 @@ import (
 	guisystray "dappco.re/go/gui/pkg/systray"
 	guiwindow "dappco.re/go/gui/pkg/window"
 	coreI18n "dappco.re/go/i18n"
+	lthn "dappco.re/lthn/desktop"
 	"dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/audit"
@@ -624,8 +625,14 @@ func (s *Service) Run() core.Result {
 			UniqueID:      "io.lethean.desktop",
 			EncryptionKey: singleInstanceKey,
 			AdditionalData: map[string]string{
-				"app":     "lthn-desktop",
-				"version": "0.2.0-rc1",
+				"app": "lthn-desktop",
+				// Pulled from the canonical build-stamped Version in
+				// dappco.re/lthn/desktop — the prior hardcoded
+				// "0.2.0-rc1" literal would have lied to the
+				// second-instance receiver about which build
+				// launched, breaking telemetry + the forensic
+				// audit trail whenever versions drift.
+				"version": lthn.Version,
 			},
 			OnSecondInstanceLaunch: func(d application.SecondInstanceData) {
 				if s.app == nil {
