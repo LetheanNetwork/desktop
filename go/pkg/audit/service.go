@@ -441,7 +441,15 @@ func (s *Service) ensureCurrentHandleLocked(tsUnix int64) core.Result {
 		return core.Ok(nil)
 	}
 	if s.currentFile != nil {
-		_ = s.currentFile.Sync()
+		// Sync failure here loses the final batch of audit events
+		// before rotation closes the file. The audit log is the
+		// integrity-critical record per Cerberus DREAD — silent
+		// loss would let an operator believe events were durable
+		// when they're still in OS buffers. Log loud so the drift
+		// surfaces in the parent process's stderr / monitoring.
+		if err := s.currentFile.Sync(); err != nil {
+			core.Warn("audit.rotate.sync_failed", "error", err)
+		}
 		_ = s.currentFile.Close()
 		s.currentFile = nil
 		s.batched = 0
@@ -643,7 +651,13 @@ func (s *Service) Close() core.Result {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.currentFile != nil {
-		_ = s.currentFile.Sync()
+		// Same loud-fail discipline as the rotation path — a sync
+		// failure at shutdown means events written since the last
+		// rotation are still in OS buffers and may not survive
+		// a crash before the OS flushes.
+		if err := s.currentFile.Sync(); err != nil {
+			core.Warn("audit.shutdown.sync_failed", "error", err)
+		}
 		_ = s.currentFile.Close()
 		s.currentFile = nil
 	}
@@ -698,7 +712,14 @@ func (s *Service) tickFlush() {
 	if s.currentFile == nil || s.batched == 0 {
 		return
 	}
-	_ = s.currentFile.Sync()
+	// Periodic flush — sync failure here means the last batch of
+	// audit events isn't durable yet. Log loud so an operator can
+	// detect persistent IO issues (disk full, filesystem error)
+	// rather than silently accumulate buffered events at risk of
+	// loss on crash.
+	if err := s.currentFile.Sync(); err != nil {
+		core.Warn("audit.flush.sync_failed", "error", err)
+	}
 	s.batched = 0
 }
 
