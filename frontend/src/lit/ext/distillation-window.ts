@@ -495,22 +495,40 @@ class LthnDistillationWindow extends LitElement {
 
         <main style="padding:20px 26px; overflow:auto; display:flex; flex-direction:column; gap:18px;">
           <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;">
-            ${[
-              { k: this.t.mEpoch, v: this.job ? `${this.job.epoch} / ${this.epochs}` : "—",
-                sub: this.job ? `step ${this.job.step}` : "(idle)" },
-              { k: this.t.mLoss,  v: this.job && this.job.last_loss > 0 ? this.job.last_loss.toFixed(3) : "—",
-                sub: this.job ? `${this.job.samples} samples` : "(idle)" },
-              { k: this.t.mTps,   v: "—",
-                sub: "training throughput (TODO)" },
-              { k: this.t.mWatts, v: "—",
-                sub: "GPU + ANE (TODO)" },
-            ].map(m => html`
+            ${(() => {
+              // Steps-per-second derived from the loss samples ring —
+              // delta_step / delta_ts across the last 5 samples gives
+              // a recent-window average that smooths single-step
+              // jitter. Falls through to "—" when we don't have at
+              // least 2 samples with different ts_unix.
+              const samples = this.job?.loss ?? [];
+              let sps: number | null = null;
+              if (samples.length >= 2) {
+                const tail = samples.slice(-5);
+                const first = tail[0];
+                const last = tail[tail.length - 1];
+                const dt = (last.ts_unix - first.ts_unix);
+                const ds = (last.step - first.step);
+                if (dt > 0 && ds > 0) sps = ds / dt;
+              }
+              const tiles = [
+                { k: this.t.mEpoch, v: this.job ? `${this.job.epoch} / ${this.epochs}` : "—",
+                  sub: this.job ? `step ${this.job.step}` : "(idle)" },
+                { k: this.t.mLoss,  v: this.job && this.job.last_loss > 0 ? this.job.last_loss.toFixed(3) : "—",
+                  sub: this.job ? `${this.job.samples} samples` : "(idle)" },
+                { k: this.t.mTps,   v: sps !== null ? sps.toFixed(1) : "—",
+                  sub: sps !== null ? "step/s · last 5 samples" : "training throughput" },
+                { k: this.t.mWatts, v: "—",
+                  sub: "GPU + ANE (powermetrics)" },
+              ];
+              return tiles.map(m => html`
               <div style="padding:12px 14px; border-radius:8px; background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.06);">
                 <div style="font-size:10.5px; color:var(--fg-3); letter-spacing:0.04em; text-transform:uppercase;">${m.k}</div>
                 <div style="font-family:var(--font-mono); font-size:22px; color:var(--fg-0); margin-top:4px; letter-spacing:-0.01em;">${m.v}</div>
                 <div style="font-size:10.5px; color:var(--fg-3); margin-top:3px;">${m.sub}</div>
               </div>
-            `)}
+            `);
+            })()}
           </div>
           <div style="background:rgba(0,0,0,0.20); border:1px solid rgba(255,255,255,0.05); border-radius:8px; padding:12px;">
             <lthn-label>${this.t.labelLoss}</lthn-label>
