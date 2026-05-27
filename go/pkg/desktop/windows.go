@@ -17,87 +17,19 @@ import (
 	guiwindow "dappco.re/go/gui/pkg/window"
 )
 
-// TODO(snider): core/gui needs richer window creation options before this
-// registry can move fully to window.open: macOS window level/collection/
-// backdrop/webview preferences, hide-on-close hooks, content protection,
-// native context-menu disable, hide-on-focus-lost, hide-on-escape, and
-// plugin-window re-show semantics.
-
-// WindowSpec describes one named window the app can open.
-type WindowSpec struct {
-	// Name is the registry key (also the ?surface= query param).
-	Name string
-	// Title is the OS-level window title.
-	Title string
-	// Width / Height in logical pixels.
-	Width, Height int
-	// MinWidth / MinHeight prevent shrinkage; zero = no minimum.
-	MinWidth, MinHeight int
-	// MaxWidth / MaxHeight cap the upper bound; zero = no maximum.
-	// Pair with Width/Height (no min difference) for genuinely
-	// fixed-size windows like `about` or splash screens.
-	MaxWidth, MaxHeight int
-	// Frameless removes the title bar — caller's CSS draws the
-	// chrome via --wails-draggable.
-	Frameless bool
-	// HideOnClose: close button hides rather than destroys. Used
-	// when the window is part of the steady-state UX (chat,
-	// settings) — re-opening just shows it again.
-	HideOnClose bool
-	// EnableFileDrop accepts files dragged from the OS onto the
-	// window. When true, the backend fires file-drop events with the
-	// full filesystem paths + DropTargetDetails (which
-	// data-file-drop-target element received the drop). Off by
-	// default — chat and models surfaces opt in; settings/about
-	// don't need it.
-	EnableFileDrop bool
-	// InvisibleTitleBarHeight declares the top N pixels of a
-	// frameless macOS window as a native-managed drag region.
-	// Layered on top of our --wails-draggable CSS — adds an OS
-	// drag handler rather than replacing the chrome. Zero = off.
-	InvisibleTitleBarHeight int
-	// ContentProtection blocks the OS screen-capture API from
-	// recording this window. Wallets / private chat / key reveal
-	// surfaces should set true. macOS + Windows 10+; no-op on Linux.
-	ContentProtection bool
-	// DisableNativeContextMenu kills the WebView's built-in
-	// right-click menu. Windows that ship their own context menu
-	// (chat message actions, model card menu) should set true so
-	// the native one doesn't double up.
-	DisableNativeContextMenu bool
-	// AlwaysOnTop pins the window above all others. Mirrors the
-	// native option of the same name; surfaced here so the registry
-	// is the single declaration site.
-	AlwaysOnTop bool
-	// HideOnFocusLost auto-hides the window when it loses focus.
-	// Tray-popover pattern; not useful for steady-state windows.
-	HideOnFocusLost bool
-	// HideOnEscape auto-hides on Esc keypress. Tray + transient
-	// helper windows; off for editor-class surfaces where Esc has
-	// app meaning.
-	HideOnEscape bool
-	// DisableResize prevents the user from resizing the window.
-	// Pairs with fixed Width/Height for tray popover, splash.
-	DisableResize bool
-	// MacWindowLevel sets the macOS window level — Floating for
-	// the tray popover so it stays above normal windows. Leave
-	// empty for the default Normal level.
-	MacWindowLevel int
-	// MacCollectionBehavior sets the macOS Space + fullscreen
-	// behaviour. CanJoinAllSpaces | FullScreenAuxiliary is the
-	// canonical "menubar utility" combo — the popover appears on
-	// every Space and overlays fullscreen apps. Zero = default.
-	MacCollectionBehavior int
-	// MacBackdrop selects the macOS visual material behind the
-	// window. Translucent gives vibrancy depth behind our card.
-	// Zero = MacBackdropNormal (opaque).
-	MacBackdrop int
-}
+// WindowSpec is an alias for the core/gui window type. Kept as a
+// named local alias so the windowRegistry() reads as lthn-specific
+// data, while the underlying type + lifecycle is owned by core/gui.
+type WindowSpec = guiwindow.Window
 
 // windowRegistry returns the named windows the app knows how to
 // open. Today: chat (full chat surface), models (model browser),
 // settings (preferences), about (about box).
-func windowRegistry() []WindowSpec {
+//
+// The slice is passed to gui.GuiConfig.WindowRegistry at boot;
+// core/gui handles register + pre-create + HideOnClose / ContentProtection
+// auto-wiring + state persistence via the window service.
+func windowRegistry() []*WindowSpec {
 	// All windows ship frameless — renderChrome() / lthn-app-shell
 	// paint their own titlebar + traffic-lights, so the native macOS
 	// chrome would be a second, redundant set (Snider confirmed in
@@ -112,9 +44,16 @@ func windowRegistry() []WindowSpec {
 	// region. DisableNativeContextMenu defers right-click to the
 	// app's context menu registry (see contextmenus.go).
 	const titleBarH = 40
-	return []WindowSpec{
+	// Shared per-window defaults — InvisibleTitleBarHeight matches the
+	// 40px titlebar strip painted by renderChrome() so the OS drag
+	// handler aligns with the chrome's visible drag region.
+	// DefaultContextMenuDisabled defers right-click to the app's own
+	// context menu registry (see contextmenus.go).
+	mac := guiwindow.MacWindow{InvisibleTitleBarHeight: titleBarH}
+	return []*WindowSpec{
 		{
 			Name: "welcome", Title: "Welcome to lthn",
+			URL: "/?surface=welcome",
 			// Initial dimensions — the welcome wizard's Lit element
 			// (frontend/src/lit/ops/welcome-window.ts) refines via
 			// WindowService.SetSize on firstUpdated to match its own
@@ -122,8 +61,9 @@ func windowRegistry() []WindowSpec {
 			// paint" floor rather than a hard cap.
 			Width: 1200, Height: 800,
 			Frameless: true, HideOnClose: true,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		// `app` is the Lethean-6 unified application shell — single
 		// window holding titlebar + grouped side-nav + body that
@@ -131,215 +71,147 @@ func windowRegistry() []WindowSpec {
 		// ?pane=<id> set; the side-nav swaps panes internally thereafter.
 		{
 			Name: "app", Title: "Lethean Desktop",
-			// Bumped from 1200×800 — four-column chat layout (nav +
-			// conversation list + chat body + right rail) felt cramped
-			// at the previous default. 1440×900 is the standard MBP 14"+
-			// retina viewport so the unified shell breathes on most
-			// modern Macs without spilling off small displays.
+			URL: "/?surface=app",
+			// 1440×900 mirrors the MBP 14"+ retina viewport so the
+			// unified shell breathes on most modern Macs without
+			// spilling off small displays.
 			Width: 1440, Height: 900, MinWidth: 1000, MinHeight: 680,
 			Frameless: true, HideOnClose: true, EnableFileDrop: true,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		{
 			Name: "chat", Title: "Lethean Chat",
+			URL:   "/?surface=chat",
 			Width: 900, Height: 700, MinWidth: 600, MinHeight: 400,
 			Frameless: true, HideOnClose: true, EnableFileDrop: true,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		{
 			Name: "models", Title: "Models",
+			URL:   "/?surface=models",
 			Width: 800, Height: 600, MinWidth: 500, MinHeight: 400,
 			Frameless: true, HideOnClose: true, EnableFileDrop: true,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		{
 			Name: "settings", Title: "Settings",
+			URL:   "/?surface=settings",
 			Width: 700, Height: 550, MinWidth: 500, MinHeight: 400,
 			Frameless: true, HideOnClose: true,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		{
 			Name: "telemetry", Title: "Telemetry",
+			URL:   "/?surface=telemetry",
 			Width: 880, Height: 560, MinWidth: 600, MinHeight: 400,
 			Frameless: true, HideOnClose: true,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		{
 			Name: "editor", Title: "Editor",
+			URL:   "/?surface=editor",
 			Width: 1040, Height: 700, MinWidth: 600, MinHeight: 400,
 			Frameless: true, HideOnClose: true, EnableFileDrop: true,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		{
 			Name: "git", Title: "Git",
+			URL:   "/?surface=git",
 			Width: 1120, Height: 740, MinWidth: 700, MinHeight: 450,
 			Frameless: true, HideOnClose: true, EnableFileDrop: true,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		{
 			Name: "build", Title: "Build",
+			URL:   "/?surface=build",
 			Width: 1080, Height: 700, MinWidth: 700, MinHeight: 450,
 			Frameless: true, HideOnClose: true, EnableFileDrop: true,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		{
 			Name: "lint", Title: "Lint",
+			URL:   "/?surface=lint",
 			Width: 1100, Height: 740, MinWidth: 700, MinHeight: 450,
 			Frameless: true, HideOnClose: true, EnableFileDrop: true,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		{
 			Name: "containers", Title: "Containers",
+			URL:   "/?surface=containers",
 			Width: 1180, Height: 760, MinWidth: 720, MinHeight: 460,
-			Frameless: true, HideOnClose: true, EnableFileDrop: false,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			Frameless: true, HideOnClose: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		{
 			Name: "repos", Title: "Repos",
+			URL:   "/?surface=repos",
 			Width: 1180, Height: 760, MinWidth: 720, MinHeight: 460,
-			Frameless: true, HideOnClose: true, EnableFileDrop: false,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			Frameless: true, HideOnClose: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		{
 			Name: "php", Title: "PHP",
+			URL:   "/?surface=php",
 			Width: 1200, Height: 780, MinWidth: 760, MinHeight: 480,
-			Frameless: true, HideOnClose: true, EnableFileDrop: false,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			Frameless: true, HideOnClose: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		{
 			Name: "marketplace", Title: "Marketplace",
+			URL:   "/?surface=marketplace",
 			Width: 1180, Height: 760, MinWidth: 720, MinHeight: 460,
-			Frameless: true, HideOnClose: true, EnableFileDrop: false,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			Frameless: true, HideOnClose: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		{
-			// ml-lab — the four-tab workbench (Influx / DuckDB /
-			// Models / LoRA) per plans/project/lthn/desktop/RFC.ml-lab.md.
-			// Generous default — sidebar (240px) + chart panel (large
-			// numeric tables) need a wide canvas; 1440×900 mirrors the
-			// `app` shell so on M-class MBPs it opens at the same
-			// comfortable size.
 			Name: "ml-lab", Title: "ML Lab",
+			URL:   "/?surface=ml-lab",
 			Width: 1440, Height: 900, MinWidth: 1100, MinHeight: 660,
 			Frameless: true, HideOnClose: true, EnableFileDrop: true,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 		{
 			Name: "about", Title: "About Lethean Desktop",
+			URL: "/?surface=about",
 			// Genuinely fixed size — Min == Max == Width/Height +
 			// DisableResize for the splash-card feel.
 			Width: 420, Height: 320,
 			MinWidth: 420, MinHeight: 320,
 			MaxWidth: 420, MaxHeight: 320,
 			Frameless: true, DisableResize: true,
-			InvisibleTitleBarHeight:  titleBarH,
-			DisableNativeContextMenu: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
 		},
 	}
-}
-
-// preCreateWindows materialises the registry as hidden windows so
-// the first "Open Chat…" click is instant (no cold-start render).
-// Called once from desktop.Run() AFTER the tray popover window is
-// constructed. opts carries the desktop service Options (currently
-// only AppIcon for the Linux icon binding); pass s.opts.
-func preCreateWindows(c *core.Core, opts Options) {
-	if c == nil {
-		return
-	}
-	registerAllWindows(c)
-	for _, spec := range windowRegistry() {
-		openWindowSpec(c, spec, opts, true)
-	}
-}
-
-// registerAllWindows populates CoreGUI's WindowSpec registry from this
-// package's windowRegistry() — one window.register action per entry.
-// Pairs with the lazy-mount path in CoreGUI's taskSetVisibility (see
-// plans/code/core/gui/RFC.window-lifecycle.md §3): a registered spec
-// is what taskSetVisibility consults when set_visibility(name, true)
-// arrives on a window that hasn't yet been opened.
-//
-// Today preCreateWindows also eager-opens each spec (hidden=true) for
-// instant-show behaviour from tray clicks. The registry runs alongside
-// that eager pre-creation — once a window is in the manager, the
-// registry entry is dormant. The registry only fires when a consumer
-// (bridge cold-start, future fleet-mode callers) issues set_visibility
-// on a name whose platform window was never created.
-func registerAllWindows(c *core.Core) {
-	if c == nil {
-		return
-	}
-	for _, spec := range windowRegistry() {
-		kind := guiwindow.KindWebview
-		// Tray windows go through pkg/systray's lifecycle, not the
-		// webview registry. The current registry contains only
-		// webview windows; KindTray reserved for future tray entries
-		// declared here for unified lifecycle control.
-		w := &guiwindow.Window{
-			Name: spec.Name, Title: spec.Title,
-			Width: spec.Width, Height: spec.Height,
-			MinWidth: spec.MinWidth, MinHeight: spec.MinHeight,
-			MaxWidth: spec.MaxWidth, MaxHeight: spec.MaxHeight,
-			Frameless:        spec.Frameless,
-			AlwaysOnTop:      spec.AlwaysOnTop,
-			DisableResize:    spec.DisableResize,
-			EnableFileDrop:   spec.EnableFileDrop,
-			URL:              "/?surface=" + spec.Name,
-			BackgroundColour: [4]uint8{0, 0, 0, 0},
-		}
-		c.Action("window.register").Run(core.Background(), core.NewOptions(
-			core.Option{Key: "task", Value: guiwindow.TaskRegisterWindow{Window: w, Kind: kind}},
-		))
-		// Errors from window.register at boot are non-fatal — duplicate
-		// registrations (the surfaced failure mode) are recoverable;
-		// the registry already has the spec under that name. Log-by-
-		// returning-OK keeps boot quiet; if a real consumer needs to
-		// know it can call window.register directly and inspect Result.
-	}
-}
-
-func openWindowSpec(c *core.Core, spec WindowSpec, _ Options, hidden bool) bool {
-	if c == nil {
-		return false
-	}
-	r := c.Action("window.open").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guiwindow.TaskOpenWindow{Window: &guiwindow.Window{
-			Name: spec.Name, Title: spec.Title,
-			Width: spec.Width, Height: spec.Height,
-			MinWidth: spec.MinWidth, MinHeight: spec.MinHeight,
-			MaxWidth: spec.MaxWidth, MaxHeight: spec.MaxHeight,
-			Frameless: spec.Frameless, Hidden: hidden,
-			AlwaysOnTop:      spec.AlwaysOnTop,
-			DisableResize:    spec.DisableResize,
-			EnableFileDrop:   spec.EnableFileDrop,
-			URL:              "/?surface=" + spec.Name,
-			BackgroundColour: [4]uint8{0, 0, 0, 0},
-		}}},
-	))
-	if !r.OK {
-		return false
-	}
-	if spec.ContentProtection {
-		c.Action("window.set_content_protection").Run(core.Background(), core.NewOptions(
-			core.Option{Key: "task", Value: guiwindow.TaskSetContentProtection{Name: spec.Name, Protection: true}},
-		))
-	}
-	return true
 }
 
 // openWindow shows + focuses the named window. Backend-driven so
@@ -416,21 +288,20 @@ func openPluginWindow(c *core.Core, code string) {
 		openWindow(c, wName)
 		return
 	}
-	titleBarH := 36 // matches every other Lethean-5 chromed window
-	_ = titleBarH
-	ok := openWindowSpec(c, WindowSpec{
-		Name: wName, Title: "Plugin · " + code,
-		Width: 1180, Height: 760, MinWidth: 720, MinHeight: 460,
-		Frameless: true, EnableFileDrop: false,
-		InvisibleTitleBarHeight:  titleBarH,
-		DisableNativeContextMenu: true,
-	}, Options{}, true)
-	if !ok {
+	r := c.Action("window.open").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guiwindow.TaskOpenWindow{Window: &guiwindow.Window{
+			Name: wName, Title: "Plugin · " + code,
+			URL:   "/?surface=plugin&code=" + code,
+			Width: 1180, Height: 760, MinWidth: 720, MinHeight: 460,
+			Frameless: true, Hidden: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        guiwindow.MacWindow{InvisibleTitleBarHeight: 36},
+		}}},
+	))
+	if !r.OK {
 		return
 	}
-	c.Action("window.set_url").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guiwindow.TaskSetURL{Name: wName, URL: "/?surface=plugin&code=" + code}},
-	))
 	c.Action("window.set_visibility").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "task", Value: guiwindow.TaskSetVisibility{Name: wName, Visible: true}},
 	))

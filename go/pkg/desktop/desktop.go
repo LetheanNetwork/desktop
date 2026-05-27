@@ -600,13 +600,23 @@ func (s *Service) Run() core.Result {
 		go runSelfMachineRefresh(s.opts.Fleet, s.selfRefreshStop)
 	}
 
+	// Compute window state path under ~/Lethean/conf/. Without this
+	// the path defaults to $DIR_CONFIG which lthn-desktop doesn't set,
+	// dropping state under the binary's cwd.
+	windowStatePath := ""
+	if confR := paths.ConfDir(); confR.OK {
+		windowStatePath = core.PathJoin(confR.Value.(string), "window_state.json")
+	}
+
 	// Build the GuiConfig — core/gui's Service owns wails app construction
 	// + sub-service registration. lthn/desktop holds no wails imports.
 	guiCfg := gui.GuiConfig{
-		Name:        s.opts.Name,
-		Description: s.opts.Description,
-		Icon:        s.opts.AppIcon,
-		Bindings:    wailsBindings,
+		Name:            s.opts.Name,
+		Description:     s.opts.Description,
+		Icon:            s.opts.AppIcon,
+		Bindings:        wailsBindings,
+		WindowRegistry:  windowRegistry(),
+		WindowStatePath: windowStatePath,
 		Assets: gui.AssetOptions{
 			Handler:    engine,
 			Middleware: ginMiddleware(engine),
@@ -707,19 +717,10 @@ func (s *Service) Run() core.Result {
 		return r
 	}
 
-	// Point the window service's StateManager at ~/Lethean/conf/
-	// window_state.json so per-window position/size/maximised auto-
-	// persist across restarts (debounced 500ms inside the manager).
-	// Without this the path defaults to $DIR_CONFIG which lthn-desktop
-	// doesn't set, dropping state under the binary's cwd. Failure
-	// non-fatal — windows just won't remember their slot.
-	if confR := paths.ConfDir(); confR.OK {
-		if winSvc, ok := core.ServiceFor[*guiwindow.Service](s.opts.Core, "window"); ok {
-			winSvc.Manager().State().SetPath(
-				core.PathJoin(confR.Value.(string), "window_state.json"),
-			)
-		}
-	}
+	// Window state path is now wired via GuiConfig.WindowStatePath
+	// above. Pre-creation of the registered windows is owned by
+	// gui.Service.OnStartup — no post-hoc StateManager.SetPath call
+	// needed.
 
 	// Attach the constructed app to services that need app refs
 	// post-construction (the Wails App reference isn't available
@@ -934,11 +935,9 @@ func (s *Service) Run() core.Result {
 
 	// Per-window lthn:window:* event re-broadcasts (ready / focus /
 	// blur / hide / show / resize / files-dropped). See sysevents.go.
-	// Pre-create welcome / chat / models / settings / about windows
-	// hidden, so first tray-menu open is instant. See windows.go.
-	// Options threaded through for Linux icon + future per-window
-	// opts that depend on s.opts (telemetry endpoint, brand, etc.).
-	preCreateWindows(s.opts.Core, s.opts)
+	// Window registry pre-creation is now owned by gui.Service via
+	// GuiConfig.WindowRegistry; the declarative list lives in
+	// windows.go::windowRegistry().
 
 	s.opts.Core.Action("systray.attach_window").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "task", Value: guisystray.TaskAttachWindow{Name: "tray", OffsetY: 5}},
@@ -1034,7 +1033,15 @@ func restoreSecondInstanceWindow(c *core.Core, opts Options) {
 	}
 	emitSecondInstanceFallback()
 	if spec, ok := windowSpecByName("app"); ok {
-		openWindowSpec(c, spec, opts, false)
+		// Open the registered window via the standard window.open action.
+		// gui.Service has already pre-created it hidden; this just shows
+		// + focuses.
+		opened := *spec
+		opened.Hidden = false
+		c.Action("window.open").Run(core.Background(), core.NewOptions(
+			core.Option{Key: "task", Value: guiwindow.TaskOpenWindow{Window: &opened}},
+		))
+		_ = opts
 	}
 }
 
@@ -1050,16 +1057,16 @@ func restoreSecondInstanceWindow(c *core.Core, opts Options) {
 //	spec, ok := windowSpecByName("tray")
 //	if !ok { return }
 //	openWindowSpec(c, spec, opts, false)
-func windowSpecByName(name string) (WindowSpec, bool) {
+func windowSpecByName(name string) (*WindowSpec, bool) {
 	if name == "" {
-		return WindowSpec{}, false
+		return nil, false
 	}
 	for _, spec := range windowRegistry() {
 		if spec.Name == name {
 			return spec, true
 		}
 	}
-	return WindowSpec{}, false
+	return nil, false
 }
 
 // attachSPA mounts the embedded frontend as the coreapi.Engine's
