@@ -301,6 +301,27 @@ class LthnPairMachineModal extends LitElement {
               </div>
             </div>
 
+            ${isEdit && this.editing?.is_self ? html`
+              <div style="padding:10px 12px; border-radius:8px;
+                          background:rgba(64,193,197,0.06);
+                          border:1px solid rgba(64,193,197,0.22);
+                          font-size:11.5px; line-height:1.55; color:var(--fg-1);">
+                <div style="font-weight:500; margin-bottom:4px;">
+                  Auto-managed machine
+                </div>
+                <div style="color:var(--fg-2);">
+                  Desktop re-registers this row every 10s with live
+                  hardware + engine state.
+                  <strong>Status</strong>, <strong>Model</strong>,
+                  <strong>Arch</strong>, <strong>Host</strong>, and
+                  <strong>Port</strong> reflect what's actually running —
+                  edits to those fields get overwritten on the next
+                  refresh. <strong>Name</strong>, <strong>Tags</strong>,
+                  and <strong>Capabilities</strong> persist.
+                </div>
+              </div>
+            ` : nothing}
+
             <div style="display:grid; grid-template-columns:2fr 1fr; gap:12px;">
               ${this.renderField("Name", html`
                 <input type="text" .value=${this.name}
