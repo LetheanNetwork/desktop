@@ -349,14 +349,24 @@ func (s *Service) Start(profileName string) core.Result {
 		return r
 	}
 	if r := applyProfile(target, authHeader, profile); !r.OK {
-		// Log the warning shape but don't propagate — sandbox is
-		// up, just running with un-narrowed config.
-		_ = r
+		// Sandbox is up + reachable; the profile-narrowing PATCH
+		// failed. Surface so an operator inspecting drift can see
+		// "sandbox X started but is running with opencode's default
+		// (un-narrowed) config" rather than wondering why a profile-
+		// specific guard didn't fire.
+		core.Warn("opencode.Start.apply_profile_failed",
+			"id", id, "error", r.Error())
 	}
 
 	// Auto-subscribe — opens an SSE stream if an event emitter is
-	// installed (GUI mode). No-op in CLI/serve modes.
-	_, _ = s.Subscribe(id)
+	// installed (GUI mode). No-op in CLI/serve modes. A real failure
+	// here (targetFor lookup miss on a sandbox we JUST registered)
+	// surfaces as no SSE events reaching the GUI, which silently
+	// degrades the activity panel. Log so it can be correlated.
+	if _, r := s.Subscribe(id); !r.OK {
+		core.Warn("opencode.Start.subscribe_failed",
+			"id", id, "error", r.Error())
+	}
 
 	// Notify subscribers (runner) that the sandbox set changed.
 	s.fireSandboxChange()

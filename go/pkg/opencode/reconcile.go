@@ -236,8 +236,14 @@ func (s *Service) adoptFromOutput(out, expectedInstallID, authHeader string) int
 			continue
 		}
 		s.proxy.Set(v.SandboxID, core.Sprintf("http://127.0.0.1:%d", v.HostPort), authHeader)
-		// Auto-subscribe — no-op when no emitter is installed.
-		_, _ = s.Subscribe(v.SandboxID)
+		// Auto-subscribe — no-op when no emitter is installed. A real
+		// failure (targetFor lookup miss on a sandbox we JUST adopted)
+		// means the GUI activity panel won't see events from this
+		// sandbox — surface so the operator can correlate.
+		if _, r := s.Subscribe(v.SandboxID); !r.OK {
+			core.Warn("opencode.reconcile.subscribe_failed",
+				"id", v.SandboxID, "error", r.Error())
+		}
 		recovered++
 
 		_ = audit.Default().Record(audit.Event{
