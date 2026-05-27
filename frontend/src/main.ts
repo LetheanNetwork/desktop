@@ -287,6 +287,11 @@ switch (surface) {
         // History tab — real per-turn counts will replace once the
         // runner threads tokens_out through sessions.Append.
         tokensToday: number;
+        // Count of webview errors in the bridge ring buffer whose
+        // timestamp falls at or after midnight local time. Tracks
+        // both uncaught exceptions + unhandled rejections the JS
+        // shim captured this session.
+        errorsToday: number;
       }
       const state: TrayState = {
         model: "…",
@@ -305,6 +310,7 @@ switch (surface) {
         sftEpoch: 0,
         sftLastLoss: 0,
         tokensToday: 0,
+        errorsToday: 0,
       };
 
       const setTab = (t: TrayTab) => () => { state.tab = t; draw(); };
@@ -503,7 +509,7 @@ switch (surface) {
         ${kv(t.kvSessionsToday, state.sessionsToday > 0 ? state.sessionsToday : t.valDash)}
         ${kv(t.kvTokens, state.tokensToday > 0 ? fmtTokenCount(state.tokensToday) : t.valDash)}
         ${kv(t.kvLastInteract, state.lastInteract > 0 ? fmtRel(state.lastInteract) : t.valDash)}
-        ${kv(t.kvRecentErrors, state.err ? "1" : "0")}
+        ${kv(t.kvRecentErrors, state.errorsToday > 0 ? state.errorsToday : (state.err ? "1" : "0"))}
       `;
 
       const renderActivePanel = (hasModel: boolean, stateLabel: string) => {
@@ -630,7 +636,12 @@ switch (surface) {
           type LemmaStatus = { model_path?: string; runtime?: string; loaded_at_unix?: number };
           type LemmaSFTJob = { state?: string; epoch?: number; last_loss?: number };
           type Gen = { updated_at?: number; tokens?: number };
-          const [reading, models, sessionList, lemmaStatus, sftJob, gens] = await Promise.all([
+          // ErrorEntry from pkg/bridge — `at` is an ISO timestamp
+          // string ("2026-05-27T01:23:45Z") off Go's core.Time. The
+          // filter below parses it to a unix-second comparison.
+          type ErrEntry = { at?: string };
+          const bridgeMod = await import("@desktop/bridge/service");
+          const [reading, models, sessionList, lemmaStatus, sftJob, gens, errs] = await Promise.all([
             demand<Reading>(TelemetryService.CurrentSample()),
             unwrap<string[]>(RunnerService.WModels(), []),
             unwrap<unknown[]>(sessions.List(), []),
@@ -652,6 +663,14 @@ switch (surface) {
             // covering a full day for typical use; tokensToday filter
             // drops anything older than midnight local time.
             unwrap<Gen[]>(sessions.RecentGenerations(200), []),
+            // bridge.Errors ring buffer — 50 is the same cap the
+            // logs-window Live tab pulls so a user comparing the
+            // tray "errors today" to the logs view sees consistent
+            // shapes. Rejection collapses to empty so a missing
+            // bridge in tests/CI never blanks the tray.
+            (bridgeMod as { Errors: (limit: number) => Promise<ErrEntry[]> })
+              .Errors(50)
+              .catch(() => [] as ErrEntry[]),
           ]);
           state.connected = true;
           state.err = null;
@@ -708,6 +727,19 @@ switch (surface) {
             tokSum += g.tokens || 0;
           }
           state.tokensToday = tokSum;
+          // Errors-today count — parse the ISO timestamp on each
+          // entry to a unix second so the comparison stays aligned
+          // with startSec. Date.parse returns ms; /1000 to seconds.
+          // Invalid timestamps fall through as 0 (older than any
+          // midnight) — they're excluded rather than crashing the
+          // panel.
+          const startMs = startSec * 1000;
+          let errCount = 0;
+          for (const e of errs || []) {
+            const t = e.at ? Date.parse(e.at) : 0;
+            if (t >= startMs) errCount++;
+          }
+          state.errorsToday = errCount;
           // Activity-panel "Last interact" — max updated_at across all
           // sessions, regardless of bucket. Drawing falls back to the
           // design "—" when no sessions exist.
