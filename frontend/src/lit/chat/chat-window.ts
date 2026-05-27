@@ -1465,11 +1465,17 @@ class LthnChatWindow extends LitElement {
     };
 
     /* — footer per state — */
+    //
+    // Generating-state footer used to read "47.2 t/s · 12.4 W" — same
+    // fake fixture metrics the right-rail Stats section carried.
+    // Until per-turn telemetry lands, the footer just says "Generating"
+    // (the spinner-shaped status dot is the live signal) rather than
+    // inventing numbers.
     const footer =
       this.state === "no-model" ? html`
         <lthn-status-dot variant="idle"></lthn-status-dot>Idle · no model loaded`
       : this.state === "generating" ? html`
-        <lthn-status-dot variant="ok"></lthn-status-dot>Generating · 47.2 t/s · 12.4 W · Airplane-mode OK`
+        <lthn-status-dot variant="ok"></lthn-status-dot>Generating · Airplane-mode OK`
       : html`
         <lthn-status-dot variant="ok"></lthn-status-dot>Model ready · Airplane-mode OK · ${this.runnerCount} runner · v${this.version}`;
 
