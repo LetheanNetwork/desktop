@@ -608,6 +608,41 @@ func (s *Service) Run() core.Result {
 		windowStatePath = core.PathJoin(confR.Value.(string), "window_state.json")
 	}
 
+	// Build the tray menu — static items, plugin entries (if any),
+	// then the trailing About + Quit. Click routing lives in the
+	// RegisterAction handler below; this slice is purely declarative.
+	trayMenuItems := []gui.TrayItem{
+		{Label: "Open Lethean Desktop", ActionID: trayActionOpenApp},
+		{Type: "separator"},
+		{Label: "Open Chat…", ActionID: trayActionOpenChat},
+		{Label: "Models…", ActionID: trayActionOpenModels},
+		{Label: "Settings…", ActionID: trayActionOpenSettings},
+	}
+	if pluginSvc != nil {
+		entriesR := pluginSvc.Menus()
+		if entriesR.OK {
+			entries, _ := entriesR.Value.([]plugin.MenuEntry)
+			pluginItems := buildPluginTrayItems(entries)
+			if len(pluginItems) > 0 {
+				trayMenuItems = append(trayMenuItems, gui.TrayItem{Type: "separator"})
+				trayMenuItems = append(trayMenuItems, pluginItems...)
+			}
+		}
+	}
+	trayMenuItems = append(trayMenuItems,
+		gui.TrayItem{Type: "separator"},
+		gui.TrayItem{Label: "About lthn", ActionID: trayActionOpenAbout},
+		gui.TrayItem{Type: "separator"},
+		gui.TrayItem{Label: "Quit lthn", ActionID: trayActionQuit},
+	)
+	// macOS renders SetTooltip as the menu-bar title text next to the
+	// icon. Tray is icon-only, so empty on darwin; keep it as a real
+	// tooltip on other platforms.
+	trayTooltip := "Lethean Desktop"
+	if runtime.GOOS == "darwin" {
+		trayTooltip = ""
+	}
+
 	// Build the GuiConfig — core/gui's Service owns wails app construction
 	// + sub-service registration. lthn/desktop holds no wails imports.
 	guiCfg := gui.GuiConfig{
@@ -617,6 +652,15 @@ func (s *Service) Run() core.Result {
 		Bindings:        wailsBindings,
 		WindowRegistry:  windowRegistry(),
 		WindowStatePath: windowStatePath,
+		Tray: &gui.TrayConfig{
+			Icon:           s.opts.TrayIcon,
+			IconTemplate:   true, // darwin template icon; ignored elsewhere
+			Tooltip:        trayTooltip,
+			Label:          "", // clear core/gui's "Core" default
+			Menu:           trayMenuItems,
+			PopoverWindow:  "tray",
+			PopoverOffsetY: 5,
+		},
 		Assets: gui.AssetOptions{
 			Handler:    engine,
 			Middleware: ginMiddleware(engine),
@@ -752,71 +796,11 @@ func (s *Service) Run() core.Result {
 		))
 	}
 
-	// Systray icon + tooltip + menu — driven entirely through core/gui
-	// actions. registerCoreGUI has already created the underlying tray
-	// (gui.systray.OnStartup runs Setup with a default icon and "Core"
-	// tooltip); these calls replace those defaults with the lthn-branded
-	// surface. The previous direct s.app.SystemTray.New() created a
-	// SECOND tray, leaving two icons in the macOS menu bar — fixed
-	// 2026-05-14.
-	if s.opts.TrayIcon != nil {
-		iconAction := "systray.set_icon"
-		iconTask := any(guisystray.TaskSetTrayIcon{Data: s.opts.TrayIcon})
-		if runtime.GOOS == "darwin" {
-			iconAction = "systray.set_template_icon"
-			iconTask = guisystray.TaskSetTrayTemplateIcon{Data: s.opts.TrayIcon}
-		}
-		s.opts.Core.Action(iconAction).Run(core.Background(), core.NewOptions(
-			core.Option{Key: "task", Value: iconTask},
-		))
-	}
-	// macOS renders SetTooltip as the menu-bar title text next to the
-	// icon — there is no separate hover-tooltip surface. Tray is
-	// icon-only, so clear it on darwin; keep it as a real tooltip on
-	// other platforms.
-	trayTooltip := "Lethean Desktop"
-	if runtime.GOOS == "darwin" {
-		trayTooltip = ""
-	}
-	s.opts.Core.Action("systray.set_tooltip").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guisystray.TaskSetTrayTooltip{Tooltip: trayTooltip}},
-	))
-	// Clear the menu-bar label — core/gui's Setup defaults it to "Core".
-	s.opts.Core.Action("systray.set_label").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guisystray.TaskSetTrayLabel{Label: ""}},
-	))
-
-	// Tray menu — built as a []TrayMenuItem with ActionIDs. Click
-	// routing lives in the RegisterAction handler below; this keeps
-	// the menu declaration declarative + survives the action-bus
-	// boundary (closures don't).
-	trayMenuItems := []guisystray.TrayMenuItem{
-		{Label: "Open Lethean Desktop", ActionID: trayActionOpenApp},
-		{Type: "separator"},
-		{Label: "Open Chat…", ActionID: trayActionOpenChat},
-		{Label: "Models…", ActionID: trayActionOpenModels},
-		{Label: "Settings…", ActionID: trayActionOpenSettings},
-	}
-	if pluginSvc != nil {
-		entriesR := pluginSvc.Menus()
-		if entriesR.OK {
-			entries, _ := entriesR.Value.([]plugin.MenuEntry)
-			pluginItems := buildPluginTrayItems(entries)
-			if len(pluginItems) > 0 {
-				trayMenuItems = append(trayMenuItems, guisystray.TrayMenuItem{Type: "separator"})
-				trayMenuItems = append(trayMenuItems, pluginItems...)
-			}
-		}
-	}
-	trayMenuItems = append(trayMenuItems,
-		guisystray.TrayMenuItem{Type: "separator"},
-		guisystray.TrayMenuItem{Label: "About lthn", ActionID: trayActionOpenAbout},
-		guisystray.TrayMenuItem{Type: "separator"},
-		guisystray.TrayMenuItem{Label: "Quit lthn", ActionID: trayActionQuit},
-	)
-	s.opts.Core.Action("systray.set_menu").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guisystray.TaskSetTrayMenu{Items: trayMenuItems}},
-	))
+	// Systray icon + tooltip + menu + popover attachment are now
+	// declared via gui.GuiConfig.Tray (built above) and applied by
+	// gui.Service.OnStartup. Only the click router stays here — it's
+	// the lthn-specific routing logic (which window each ActionID
+	// opens, plus the lthn:* event emit).
 
 	// Click router — core/gui dispatches ActionTrayMenuItemClicked
 	// onto the action bus whenever a tray menu entry is clicked.
@@ -935,13 +919,8 @@ func (s *Service) Run() core.Result {
 
 	// Per-window lthn:window:* event re-broadcasts (ready / focus /
 	// blur / hide / show / resize / files-dropped). See sysevents.go.
-	// Window registry pre-creation is now owned by gui.Service via
-	// GuiConfig.WindowRegistry; the declarative list lives in
-	// windows.go::windowRegistry().
-
-	s.opts.Core.Action("systray.attach_window").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guisystray.TaskAttachWindow{Name: "tray", OffsetY: 5}},
-	))
+	// Window registry pre-creation + tray popover attachment are owned
+	// by gui.Service via GuiConfig.WindowRegistry + GuiConfig.Tray.
 
 	// First-launch detection — if ~/Lethean/conf/lthn.yaml and the
 	// state DB don't exist, open the welcome wizard. The wizard's
