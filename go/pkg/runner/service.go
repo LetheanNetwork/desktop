@@ -246,19 +246,31 @@ func (s *Service) GenerateCtx(ctx context.Context, prompt string) core.Result {
 	}
 	chat, ok := resp.Value.(ai.ProviderChatResponse)
 	if !ok {
+		// Router contract drift — resp.OK was true but the Value
+		// payload isn't the documented ai.ProviderChatResponse type.
+		// Previously this branch emitted a fraudulent Completed/OK
+		// audit row with tokens=0 and returned Ok("") — the chat
+		// surface then either persisted a blank reply (fixed in
+		// 9a70bdf) or saw a misleading "successful but empty" row
+		// in the audit ledger with no signal that the router was
+		// the actual fault. Fail loud so the operator can chase
+		// the real bug (router refactor, provider mock drift, etc.)
+		// instead of suspecting the model.
 		_ = audit.Default().Record(audit.Event{
-			Event:   audit.EventInferenceGenerateCompleted,
+			Event:   audit.EventInferenceGenerateFailed,
 			TS:      core.Now().Unix(),
 			Scope:   "inference",
-			Outcome: audit.OutcomeOK,
+			Outcome: audit.OutcomeFailed,
 			Meta: map[string]any{
-				"provider":   provider,
-				"model":      model,
-				"tokens":     0,
-				"latency_ms": core.Since(started).Milliseconds(),
+				"provider":              provider,
+				"model":                 model,
+				audit.MetaKeyErrorCode:  "runner.unexpected_response_type",
+				audit.MetaKeyErrorScope: "runner",
+				"latency_ms":            core.Since(started).Milliseconds(),
 			},
 		})
-		return core.Ok("")
+		return core.Fail(core.E("runner.GenerateCtx",
+			"router returned unexpected response type", nil))
 	}
 	selectedProvider := chat.Provider
 	if selectedProvider == "" {
@@ -361,19 +373,24 @@ func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) cor
 	}
 	chat, ok := resp.Value.(ai.ProviderChatResponse)
 	if !ok {
+		// See GenerateCtx for the rationale — same fail-loud
+		// substitution for the previous Completed/OK + Ok("")
+		// fraudulent-audit pattern.
 		_ = audit.Default().Record(audit.Event{
-			Event:   audit.EventInferenceChatCompleted,
+			Event:   audit.EventInferenceChatFailed,
 			TS:      core.Now().Unix(),
 			Scope:   "inference",
-			Outcome: audit.OutcomeOK,
+			Outcome: audit.OutcomeFailed,
 			Meta: map[string]any{
-				"provider":   provider,
-				"model":      model,
-				"tokens":     0,
-				"latency_ms": core.Since(started).Milliseconds(),
+				"provider":              provider,
+				"model":                 model,
+				audit.MetaKeyErrorCode:  "runner.unexpected_response_type",
+				audit.MetaKeyErrorScope: "runner",
+				"latency_ms":            core.Since(started).Milliseconds(),
 			},
 		})
-		return core.Ok("")
+		return core.Fail(core.E("runner.ChatCtx",
+			"router returned unexpected response type", nil))
 	}
 	selectedProvider := chat.Provider
 	if selectedProvider == "" {
