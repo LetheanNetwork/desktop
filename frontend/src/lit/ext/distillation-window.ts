@@ -243,6 +243,26 @@ class LthnDistillationWindow extends LitElement {
     }
   }
 
+  /** OS-native file picker for the dataset JSONL path. Filters to
+   *  .jsonl so the user lands in the right shape; cancel returns
+   *  undefined and we leave the field alone. Mirrors the SaveFile
+   *  pattern chat-window's _slashExport uses. */
+  private async _pickDataset(): Promise<void> {
+    try {
+      const dlg = await import("@wailsio/runtime").then(m => m.Dialogs);
+      const picked = await dlg.OpenFile({
+        Title: "Pick training dataset",
+        ButtonText: "Use this file",
+        Filters: [{ DisplayName: "JSONL", Pattern: "*.jsonl" }],
+      });
+      if (picked && typeof picked === "string") {
+        this.datasetPath = picked;
+      }
+    } catch (e) {
+      this.err = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   private async _doStart(): Promise<void> {
     if (this.busy) return;
     this.err = "";
@@ -442,11 +462,19 @@ class LthnDistillationWindow extends LitElement {
               </div>
               <div style="display:flex; flex-direction:column; gap:4px;">
                 <span style="font-size:10.5px; color:var(--fg-3);">${this.t.rowDataset} (JSONL path)</span>
-                <input type="text" .value=${this.datasetPath}
-                       ?disabled=${isRunning}
-                       @input=${(e: Event) => { this.datasetPath = (e.target as HTMLInputElement).value; }}
-                       placeholder="/Lethean/data/datasets/your.jsonl"
-                       style="padding:5px 7px; font-size:11px; font-family:var(--font-mono); background:rgba(0,0,0,0.25); color:var(--fg-1); border:1px solid rgba(255,255,255,0.08); border-radius:4px; --wails-draggable:no-drag;">
+                <div style="display:flex; gap:6px;">
+                  <input type="text" .value=${this.datasetPath}
+                         ?disabled=${isRunning}
+                         @input=${(e: Event) => { this.datasetPath = (e.target as HTMLInputElement).value; }}
+                         placeholder="/Lethean/data/datasets/your.jsonl"
+                         style="flex:1; padding:5px 7px; font-size:11px; font-family:var(--font-mono); background:rgba(0,0,0,0.25); color:var(--fg-1); border:1px solid rgba(255,255,255,0.08); border-radius:4px; --wails-draggable:no-drag;">
+                  <lthn-btn tone="ghost" size="sm"
+                    ?disabled=${isRunning}
+                    @click=${() => { void this._pickDataset(); }}>
+                    <i class="fa-regular fa-folder-open" style="font-size:10px;"></i>
+                    Browse
+                  </lthn-btn>
+                </div>
               </div>
               <div style="display:flex; flex-direction:column; gap:4px;">
                 <span style="font-size:10.5px; color:var(--fg-3);">Adapter name (optional)</span>
