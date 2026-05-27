@@ -24,9 +24,21 @@ import "./pair-machine-modal";
 import "./provision-remote-modal";
 
 type MachineRow = fleetModels.Machine;
-type QueueRow = fleetModels.QueueRow;
-type RuleRow = fleetModels.RoutingRule;
 type AgentRow = fleetModels.Agent;
+
+// QueueRow / RoutingRule are returned by Queue() / RoutingRules() as Go
+// fleet.QueueRow / fleet.RoutingRule (see bindings/.../fleet/service.ts
+// docstrings); not exported as TS classes from the models module so
+// declared inline against actual render-site reads.
+type QueueRow = {
+  status?: string;
+  caller?: string;
+  agent?: string;
+  model?: string;
+  machine_id?: string;
+  started_at?: number;
+};
+type RuleRow = Record<string, unknown>;
 
 type Tab = "machines" | "agents";
 
