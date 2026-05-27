@@ -53,15 +53,40 @@ async function completeOnboarding(): Promise<void> {
 }
 
 /* Advance helper — used by Back / Skip / forward buttons. Mutates the
- * step property on the host element via a property setter. */
+ * step property on the host element via a property setter. Also
+ * persists per-step side effects when advancing forward:
+ *   - leaving step 2 forward → write welcome.preferred_model (slug)
+ *     so the chat surface can offer the user the download after
+ *     onboarding completes.
+ *   - leaving step 3 forward → no-op today (client wiring lives in
+ *     Integrations; the wizard's checkboxes are preview-only). */
 function advance(host: LthnWelcomeWindow, delta: number): void {
-  const next = host.step + delta;
+  const from = host.step;
+  const next = from + delta;
   if (next < 1) return;
+  if (delta > 0 && from === 2) {
+    void persistStep2Choice(host);
+  }
   if (next > MAX_STEP) {
     void completeOnboarding();
     return;
   }
   host.step = next;
+}
+
+/* Persist the step-2 model recommendation. Best-effort — a config
+ * write failure logs but doesn't block the wizard advance. The chat
+ * surface reads welcome.preferred_model on first launch to surface
+ * the "want to download $name?" banner. */
+async function persistStep2Choice(host: LthnWelcomeWindow): Promise<void> {
+  try {
+    const slug = host.preferredModelSlug();
+    if (!slug) return;
+    const config = await import("@lthn/config/service");
+    await config.Set("welcome.preferred_model", slug);
+  } catch (err) {
+    console.warn("welcome: persist preferred model failed", err);
+  }
 }
 
 class LthnWelcomeWindow extends LitElement {
@@ -472,11 +497,34 @@ class LthnWelcomeWindow extends LitElement {
     }
   }
 
+  /** Return the HF repo slug for the model currently highlighted in
+   *  step 2, or "" when the index is out of bounds. Public so the
+   *  module-level advance helper can persist the choice on forward
+   *  without reaching into private state. */
+  preferredModelSlug(): string {
+    // Mirrors the step-2 catalogue order — kept inline rather than
+    // hoisted so the names + repos stay in one place.
+    const slugs = [
+      "google/gemma-4-e2b",
+      "meta-llama/Llama-3.2-3B-Instruct",
+      "microsoft/Phi-3.5-mini-instruct",
+    ];
+    const idx = this.selectedModelIdx;
+    if (!Number.isInteger(idx) || idx < 0 || idx >= slugs.length) return "";
+    return slugs[idx];
+  }
+
   _step2() {
+    // Catalogue is hand-curated. Selection persists to
+    // welcome.preferred_model on advance — the actual download
+    // happens via Lemma admin's Download form post-onboarding
+    // (the chat surface surfaces the choice once the model lands).
+    // hfRepo lets the post-welcome download path resolve cleanly
+    // to the Lemma admin form the same way model-browser does.
     const models = [
-      { name:"Gemma 4 E2B (-assistant)", author:"Google",    size:"2.1 GB", ram:"4 GB", desc:"Best balance for first run · Lethean-recommended", rec:true },
-      { name:"Llama 3.2 3B Instruct",    author:"Meta",      size:"3.4 GB", ram:"6 GB", desc:"Solid general-purpose · longer context window" },
-      { name:"Phi 3.5 Mini Instruct",    author:"Microsoft", size:"2.6 GB", ram:"5 GB", desc:"Punches above its weight on reasoning" },
+      { name:"Gemma 4 E2B (-assistant)", author:"Google",    size:"2.1 GB", ram:"4 GB", desc:"Best balance for first run · Lethean-recommended", rec:true,  hfRepo:"google/gemma-4-e2b" },
+      { name:"Llama 3.2 3B Instruct",    author:"Meta",      size:"3.4 GB", ram:"6 GB", desc:"Solid general-purpose · longer context window",        rec:false, hfRepo:"meta-llama/Llama-3.2-3B-Instruct" },
+      { name:"Phi 3.5 Mini Instruct",    author:"Microsoft", size:"2.6 GB", ram:"5 GB", desc:"Punches above its weight on reasoning",                rec:false, hfRepo:"microsoft/Phi-3.5-mini-instruct" },
     ];
     return html`
       <div style="display:flex; flex-direction:column; gap:16px; min-height:0;">
@@ -487,6 +535,15 @@ class LthnWelcomeWindow extends LitElement {
           <div style="font-size:13px; color:var(--fg-2); margin-top:8px; line-height:1.55; max-width:460px;">
             ${this.t.s2Body}
           </div>
+        </div>
+        <div style="padding:10px 12px; border-radius:6px;
+                    background:rgba(64,193,197,0.06);
+                    border:1px solid rgba(64,193,197,0.18);
+                    font-size:11.5px; color:var(--fg-2); line-height:1.55;">
+          <i class="fa-solid fa-circle-info" style="color:var(--brand-300); font-size:11px; margin-right:6px;"></i>
+          We save your pick for later — the download happens from the
+          Lemma window once you finish onboarding. Nothing pulls in the
+          background here.
         </div>
         <div style="display:flex; flex-direction:column; gap:8px;">
           ${models.map((m, idx) => {
@@ -552,6 +609,15 @@ class LthnWelcomeWindow extends LitElement {
               return html`${parts[0]}<span style="font-family:var(--font-mono); color:var(--fg-1);">${this.endpoint}</span>${parts[1] || ""}`;
             })()}
           </div>
+        </div>
+        <div style="padding:10px 12px; border-radius:6px;
+                    background:rgba(64,193,197,0.06);
+                    border:1px solid rgba(64,193,197,0.18);
+                    font-size:11.5px; color:var(--fg-2); line-height:1.55;">
+          <i class="fa-solid fa-circle-info" style="color:var(--brand-300); font-size:11px; margin-right:6px;"></i>
+          Showing what we detected — toggles are preview here. Wiring
+          a client (writing to its config file) happens from the
+          Integrations window after onboarding.
         </div>
         <div style="display:flex; flex-direction:column; gap:6px;">
           ${clients.length === 0 ? html`
