@@ -176,10 +176,27 @@ class LthnLemmaWindow extends LitElement {
       // expanded admin panel (where Download + Hot-swap forms live)
       // rather than the collapsed default. loadAdmin fires too so
       // the panel renders populated on arrival.
-      const offOpenAdmin = Events.On("lthn:lemma:open-admin", () => {
+      // Payload shape (when sent): { hfRepo: string } — model-browser
+      // catalogue Download buttons pass the HF repo id through so we
+      // can prefill the Download form. Bare null payloads (the empty
+      // model-browser rail CTA, telemetry deep-link, etc.) just open
+      // the admin panel without touching downloadRepo.
+      const offOpenAdmin = Events.On("lthn:lemma:open-admin", (ev: { data?: unknown } | unknown) => {
         if (!this.showAdmin) {
           this.showAdmin = true;
           void this.loadAdmin();
+        }
+        // Wails Events.On wraps the payload as { data: [payload] }
+        // (one-element array even for a single emit arg). Tolerate
+        // both shapes — the bare-payload form is also valid.
+        const raw = (ev && typeof ev === "object" && "data" in ev)
+          ? (ev as { data: unknown }).data : ev;
+        const payload = Array.isArray(raw) ? raw[0] : raw;
+        if (payload && typeof payload === "object" && "hfRepo" in payload) {
+          const hint = (payload as { hfRepo: unknown }).hfRepo;
+          if (typeof hint === "string" && hint) {
+            this.downloadRepo = hint;
+          }
         }
       });
       this.eventUnsub = [offModels, offAdapters, offReloaded, offOpenAdmin];

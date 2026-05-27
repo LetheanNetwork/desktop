@@ -328,12 +328,18 @@ class LthnModelBrowserWindow extends LitElement {
     const selSize   = selected?.size   || "2.1 GB";
     const selStatus = selected?.status === "loaded" ? "loaded"
                     : selected ? selected.status : "loaded";
+    // Curated HF catalogue — what we suggest you start with. Real
+    // download counts aren't sourced (would require a live HF API
+    // round-trip per row + rate-limit handling), so the row footer
+    // shows only fields we can stand behind: author, family, quant,
+    // tools/vision tags, size. The Download button hands off to the
+    // Lemma admin form with the repo prefilled.
     const results = [
-      { name:"Qwen2.5-Coder-7B-Instruct",     author:"Qwen",       size:"4.8 GB", q:"q4_k_m", family:"Coder",   tools:true,  vision:false, dlCount:"1.2M", hfRepo:"Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",        file:"qwen2.5-coder-7b-instruct-q4_k_m.gguf" },
-      { name:"Mistral-Nemo-12B-Instruct",     author:"MistralAI",  size:"8.4 GB", q:"q4_k_m", family:"Mistral", tools:true,  vision:false, dlCount:"420k",  hfRepo:"MistralAI/Mistral-Nemo-Instruct-2407-GGUF",   file:"mistral-nemo-instruct-2407-q4_k_m.gguf" },
-      { name:"Llama-3.2-11B-Vision-Instruct", author:"Meta",       size:"9.1 GB", q:"q4_k_m", family:"Llama",   tools:false, vision:true,  dlCount:"880k",  hfRepo:"bartowski/Llama-3.2-11B-Vision-Instruct-GGUF", file:"Llama-3.2-11B-Vision-Instruct-Q4_K_M.gguf" },
-      { name:"Gemma-3-27B-IT",                author:"Google",     size:"16 GB",  q:"q4_k_m", family:"Gemma",   tools:false, vision:false, dlCount:"340k",  hfRepo:"bartowski/gemma-3-27b-it-GGUF",               file:"gemma-3-27b-it-Q4_K_M.gguf" },
-      { name:"Phi-4-14B-Instruct",            author:"Microsoft",  size:"9.6 GB", q:"q4_k_m", family:"Phi",     tools:true,  vision:false, dlCount:"260k",  hfRepo:"microsoft/Phi-4-mini-instruct-GGUF",          file:"Phi-4-mini-instruct-q4.gguf" },
+      { name:"Qwen2.5-Coder-7B-Instruct",     author:"Qwen",       size:"4.8 GB", q:"q4_k_m", family:"Coder",   tools:true,  vision:false, hfRepo:"Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",        file:"qwen2.5-coder-7b-instruct-q4_k_m.gguf" },
+      { name:"Mistral-Nemo-12B-Instruct",     author:"MistralAI",  size:"8.4 GB", q:"q4_k_m", family:"Mistral", tools:true,  vision:false, hfRepo:"MistralAI/Mistral-Nemo-Instruct-2407-GGUF",   file:"mistral-nemo-instruct-2407-q4_k_m.gguf" },
+      { name:"Llama-3.2-11B-Vision-Instruct", author:"Meta",       size:"9.1 GB", q:"q4_k_m", family:"Llama",   tools:false, vision:true,  hfRepo:"bartowski/Llama-3.2-11B-Vision-Instruct-GGUF", file:"Llama-3.2-11B-Vision-Instruct-Q4_K_M.gguf" },
+      { name:"Gemma-3-27B-IT",                author:"Google",     size:"16 GB",  q:"q4_k_m", family:"Gemma",   tools:false, vision:false, hfRepo:"bartowski/gemma-3-27b-it-GGUF",               file:"gemma-3-27b-it-Q4_K_M.gguf" },
+      { name:"Phi-4-14B-Instruct",            author:"Microsoft",  size:"9.6 GB", q:"q4_k_m", family:"Phi",     tools:true,  vision:false, hfRepo:"microsoft/Phi-4-mini-instruct-GGUF",          file:"Phi-4-mini-instruct-q4.gguf" },
     ];
 
     // Toolbar intentionally empty: the original "Filters" + "Import
@@ -387,10 +393,9 @@ class LthnModelBrowserWindow extends LitElement {
               <span style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);">${results.length} results · huggingface.co</span>
             </div>
             <div style="font-size:11px; color:var(--fg-3); line-height:1.55; padding:2px 2px 0;">
-              Browsing is a preview — direct downloads from Hugging Face are
-              coming once we have a way to verify the file you receive matches
-              the one listed. Until then, use the Lemma engine's Download form
-              (Open Lemma → Admin) to pull by repo id.
+              Browsing is a preview — clicking Download opens the Lemma admin
+              Download form with the HF repo prefilled. The verified-fetch
+              substrate (file-hash check before write) lives there.
             </div>
             <div style="display:flex; gap:6px; flex-wrap:wrap;" title="Filter chips are part of the preview — clicks don't filter the results yet.">
               ${["Gemma","Llama","Phi","Qwen","Mistral","≤ 5 GB","≤ 10 GB","Has vision","Has tools"].map(f => html`
@@ -411,8 +416,8 @@ class LthnModelBrowserWindow extends LitElement {
                 <div style="display:flex; align-items:center; gap:14px;">
                   <div style="flex:1; min-width:0;">
                     <div style="font-family:var(--font-mono); font-size:12px; color:var(--fg-0); letter-spacing:-0.005em;">${r.name}</div>
-                    <div style="font-size:10.5px; color:var(--fg-3); margin-top:3px; display:flex; gap:12px;">
-                      <span>by ${r.author}</span><span>· ${r.dlCount} downloads</span>
+                    <div style="font-size:10.5px; color:var(--fg-3); margin-top:3px;">
+                      by ${r.author}
                     </div>
                     <div style="display:flex; gap:4px; margin-top:6px;">
                       ${[r.family, r.q, r.tools && "tools", r.vision && "vision"].filter(Boolean).map(b => html`
@@ -424,13 +429,12 @@ class LthnModelBrowserWindow extends LitElement {
                   </div>
                   <div style="text-align:right; font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">${r.size}</div>
                   <lthn-btn
-                    tone="ghost"
+                    tone="primary"
                     size="sm"
-                    disabled
-                    title="Direct download is coming once we can verify the file matches the one listed on Hugging Face."
-                    style="--wails-draggable:no-drag;">
-                    <i class="fa-solid fa-clock" style="font-size:10px;"></i>
-                    Coming soon
+                    title=${`Open Lemma admin with ${r.hfRepo} prefilled in the Download form`}
+                    @click=${() => this._downloadViaLemma(r.hfRepo)}>
+                    <i class="fa-solid fa-arrow-down" style="font-size:10px;"></i>
+                    Download
                   </lthn-btn>
                 </div>
               </div>`)}
@@ -795,6 +799,19 @@ class LthnModelBrowserWindow extends LitElement {
       Events.Emit("lthn:lemma:open-admin", null);
     } catch (err) {
       console.error("model-browser: open lemma failed", err);
+    }
+  }
+
+  /** Same hop as _openLemma but passes the HF repo id through the
+   *  open-admin event so lemma-window can prefill its Download form.
+   *  Used by the HF catalogue Download buttons. */
+  private async _downloadViaLemma(hfRepo: string): Promise<void> {
+    try {
+      const { Events } = await import("@wailsio/runtime");
+      Events.Emit("lthn:app:setpane", "lemma");
+      Events.Emit("lthn:lemma:open-admin", { hfRepo });
+    } catch (err) {
+      console.error("model-browser: download via lemma failed", err);
     }
   }
 

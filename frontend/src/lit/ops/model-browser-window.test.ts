@@ -33,23 +33,24 @@ describe("lthn-model-browser-window — smoke", () => {
     expect(host.textContent).toContain("~/.lthn/models/");
   });
 
-  // Mantis #1682 Shape B — Hugging Face fixture rows expose a disabled
-  // "Coming soon" button + a natural-language defer message instead of
-  // a live Download button. Until pkg/downloader can verify the bytes
-  // it receives match the file Hugging Face listed (the F-2 close on
-  // #1676), no path from this surface invokes dl.Download.
-  it("Hugging Face fixture rows render disabled Download buttons", async () => {
+  // HF fixture rows hand off to lemma-window — clicking Download
+  // emits lthn:lemma:open-admin with the HF repo so lemma-window can
+  // prefill its Download form. The actual fetch invocation stays
+  // inside lemma admin (which has the verified-fetch substrate +
+  // Cerberus-DREAD-approved /v1/admin/models/download endpoint), so
+  // no path from THIS surface invokes dl.Download directly.
+  it("Hugging Face fixture rows render Download buttons that hand off to lemma admin", async () => {
     const { host } = await mountWindow("lthn-model-browser-window");
-    expect(host.textContent).toContain("Coming soon");
-    // Defer message lives above the result list, in plain language —
-    // no "digest" / "Wails" / "pkg/downloader" jargon per the
-    // ui-text-offer-not-implementation discipline.
+    // Defer message stays — but now points at the verified-fetch
+    // substrate behind the lemma admin download form.
     expect(host.textContent).toContain("Browsing is a preview");
-    // Every Coming-soon button is the disabled fixture-row trigger;
-    // none of them dispatch the F-2 dl.Download vector.
-    const buttons = host.querySelectorAll('lthn-btn[disabled]');
-    const comingSoon = [...buttons].filter(b => (b.textContent || "").includes("Coming soon"));
-    expect(comingSoon.length).toBeGreaterThan(0);
+    expect(host.textContent).toContain("Lemma admin");
+    // Every HF row exposes a real Download button. None of them
+    // dispatch dl.Download from this surface — they emit a cross-window
+    // event that lands the user in lemma-window with the repo prefilled.
+    const downloadBtns = [...host.querySelectorAll('lthn-btn')]
+      .filter(b => (b.textContent || "").trim() === "Download");
+    expect(downloadBtns.length).toBeGreaterThan(0);
   });
 });
 
