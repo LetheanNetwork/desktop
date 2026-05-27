@@ -36,6 +36,24 @@ func (s *WailsService) List() core.Result {
 	return core.Ok(entries)
 }
 
+// Delete removes a model directory from the local snapshot store
+// by name. The underlying Delete enforces path-traversal protection
+// (rejects names containing /, \, or .. components) so a hostile
+// UI string can't escape the models dir. Caller passes the base
+// name as listed by List() — never an absolute path.
+//
+// Usage example (TS):
+//
+//	import { Delete } from "@desktop/models/wailsservice";
+//	await Delete("lemer-lite-4bit");
+func (s *WailsService) Delete(name string) core.Result {
+	r := Delete(name)
+	if !r.OK {
+		return core.Fail(core.E("models.WailsService.Delete", "delete model failed", r.Value.(error)))
+	}
+	return core.Ok(nil)
+}
+
 // DiskFree returns the free bytes available at the models
 // directory. Drives the model-browser footer's "free" slot so the
 // number reflects the real disk underneath ~/Lethean/conf/models/.

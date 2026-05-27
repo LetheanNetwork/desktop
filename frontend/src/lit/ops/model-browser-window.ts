@@ -34,6 +34,8 @@ class LthnModelBrowserWindow extends LitElement {
     selectedAdapter: { state: true },
     activeAdapter:   { state: true },
     sftRunning:      { state: true },
+    deleteBusy:      { state: true },
+    deleteErr:       { state: true },
     reloadBusy:      { state: true },
     reloadErr:       { state: true },
     lemmaUnavailable:{ state: true },
@@ -71,6 +73,10 @@ class LthnModelBrowserWindow extends LitElement {
    *  the Use button because a mid-training model swap will fail the
    *  SFT job. Refreshed alongside Status / Profiles on _refresh. */
   declare sftRunning: boolean;
+  /** Busy flag while Models.Delete is in flight — prevents
+   *  double-click. Cleared on success/fail. */
+  declare deleteBusy: boolean;
+  declare deleteErr: string;
   declare reloadBusy: boolean;
   declare reloadErr: string;
   declare lemmaUnavailable: boolean;
@@ -102,6 +108,8 @@ class LthnModelBrowserWindow extends LitElement {
     this.selectedAdapter = "";
     this.activeAdapter = "";
     this.sftRunning = false;
+    this.deleteBusy = false;
+    this.deleteErr = "";
     this.reloadBusy = false;
     this.reloadErr = "";
     this.lemmaUnavailable = false;
@@ -541,6 +549,27 @@ class LthnModelBrowserWindow extends LitElement {
         ${this.reloadErr ? html`
           <div style="font-size:10.5px; color:var(--error-400); line-height:1.45;">${this.reloadErr}</div>
         ` : nothing}
+        ${selected.name
+          ? html`
+            <lthn-btn
+              tone="ghost"
+              size="sm"
+              ?disabled=${this.deleteBusy || isLoaded || this.sftRunning}
+              title=${isLoaded
+                ? "Cannot delete the currently-loaded model — swap to a different one first"
+                : this.sftRunning
+                  ? "Cannot delete a model while fine-tune is in flight"
+                  : `Delete ${selected.name} from disk — frees ${this._fmtBytes(selected.size)}`}
+              @click=${() => { void this._doDelete(selected.name); }}
+              style="justify-content:center; --wails-draggable:no-drag; color:var(--error-400);">
+              <i class="fa-regular fa-trash-can" style="font-size:10px;"></i>
+              ${this.deleteBusy ? "Deleting…" : "Delete from disk"}
+            </lthn-btn>
+            ${this.deleteErr ? html`
+              <div style="font-size:10.5px; color:var(--error-400); line-height:1.45;">${this.deleteErr}</div>
+            ` : nothing}
+          `
+          : nothing}
       </div>
     `;
   }
@@ -637,6 +666,53 @@ class LthnModelBrowserWindow extends LitElement {
     } finally {
       this.reloadBusy = false;
     }
+  }
+
+  /** Confirm + Models.Delete + refresh. Native confirm() suffices —
+   *  the action is destructive but reversible (user can re-download).
+   *  Path-traversal guards live Go-side in models.Delete, so the
+   *  name string we pass is safe even if a row's name was somehow
+   *  injection-shaped. After delete, re-pull local rail + broadcast
+   *  models-changed so peer windows refresh too. */
+  private async _doDelete(name: string): Promise<void> {
+    if (this.deleteBusy) return;
+    this.deleteErr = "";
+    if (!confirm(`Delete "${name}" from disk?\n\nThe file is removed locally. You can re-download from the source repo if you change your mind.`)) {
+      return;
+    }
+    this.deleteBusy = true;
+    try {
+      const Models = await import("@desktop/models/wailsservice");
+      const { demand } = await import("../result");
+      await demand<unknown>(Models.Delete(name));
+      // Re-pull local rail so the deleted row disappears immediately.
+      const { unwrap } = await import("../result");
+      type Entry = { name: string; size: number; path: string; is_dir: boolean };
+      const entries = await unwrap<Entry[]>(Models.List(), []);
+      this.local = entries.map(deriveLocalModel);
+      // Clear the selection if it pointed at the deleted row.
+      if (this.selected && !this.local.some(m => m.id === this.selected)) {
+        this.selected = "";
+      }
+      // Broadcast so peer windows' availableModels pickers refresh.
+      try {
+        const { Events } = await import("@wailsio/runtime");
+        Events.Emit("lthn:lemma:models-changed", null);
+      } catch { /* wails runtime absent in test contexts */ }
+    } catch (err) {
+      this.deleteErr = err instanceof Error ? err.message : String(err);
+    } finally {
+      this.deleteBusy = false;
+    }
+  }
+
+  /** Compact byte count for the Delete button's tooltip — "frees
+   *  3.4 GB" reads better than "frees 3,623,878,656 bytes". */
+  private _fmtBytes(n: number): string {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+    return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
   }
 
   _localItem(m: LocalModel) {
