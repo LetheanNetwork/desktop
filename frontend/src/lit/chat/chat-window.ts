@@ -1686,7 +1686,6 @@ class LthnChatWindow extends LitElement {
             @click=${() => this._newConversation()}>
             <i class="fa-solid fa-plus" style="font-size:10px;"></i> ${this.t.railNew}
           </lthn-btn>
-          <lthn-btn tone="quiet" size="md"><i class="fa-solid fa-ellipsis" style="font-size:11px;"></i></lthn-btn>
         </div>
       </aside>
     `;
@@ -2193,7 +2192,12 @@ class LthnChatWindow extends LitElement {
                       font-size:11.5px; color:${banner.tone === "warn" ? "var(--warning-300)" : "var(--brand-200)"};">
             <i class="fa-solid ${banner.tone === "warn" ? "fa-circle-exclamation" : "fa-circle-info"}" style="font-size:11px;"></i>
             <div style="flex:1; line-height:1.5;">${banner.text}</div>
-            ${banner.action ? html`<lthn-btn tone="ghost" size="sm">${banner.action}</lthn-btn>` : nothing}
+            ${banner.action ? html`
+              <span style="font-size:11px; color:var(--fg-3); font-style:italic;"
+                title="Banner actions are design copy — click handlers not yet wired to the underlying flows.">
+                ${banner.action}
+              </span>
+            ` : nothing}
           </div>
         ` : nothing}
         <div
@@ -2584,8 +2588,9 @@ class LthnChatWindow extends LitElement {
             })()}
             ${this._renderComposerGlyph()}
             ${sending ? html`
-              <lthn-btn tone="danger" size="sm">
-                <i class="fa-solid fa-stop" style="font-size:10px;"></i> ${this.t.btnStop}
+              <lthn-btn tone="danger" size="sm" disabled
+                title="Cancel not yet wired — runner.WChat is a one-shot RPC; the request completes then the composer unlocks.">
+                <i class="fa-solid fa-spinner fa-spin" style="font-size:10px;"></i> ${this.t.btnStop}
               </lthn-btn>
             ` : html`
               <lthn-btn tone="primary" size="sm" ?dim=${disabled}
