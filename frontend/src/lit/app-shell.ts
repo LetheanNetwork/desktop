@@ -258,20 +258,24 @@ interface ViewDef {
   nav:   NavEntry[];
 }
 
-/** View registry — six designed views per HANDOVER-VIEWS.md plus the
- *  default Admin view, which preserves the original flat-nav window
- *  catalogue verbatim (zero regression on what shipped before).
+/** View registry — six designed views per HANDOVER-VIEWS.md plus
+ *  the Chat (Owlet-shape) view + the default Admin view (which
+ *  preserves the original flat-nav window catalogue verbatim — zero
+ *  regression on what shipped before).
  *
- *  Phase 1: Admin is fully wired; planning/coding/marketing/operations/
- *  sales/office are scaffolded with placeholder elements. Each window
- *  inside a non-Admin view renders via <lthn-view-placeholder> until
- *  someone registers a custom element matching the entry's `tag`.
+ *  All eight views ship with their <lthn-view-*> Lit elements
+ *  registered via frontend/src/lit/views/<surface>/index.ts side-
+ *  effect imports (loaded from lit/index.ts). The
+ *  <lthn-view-placeholder> "coming soon" card is a defensive
+ *  fallback for tags that fail customElements registration at
+ *  boot (e.g. an unloaded plugin view referenced from a stale nav
+ *  config) — not a Phase-1 stub anymore.
  *
- *  Phase 2 (separate dispatch): adopt core/ide pkg surfaces —
- *    Planning   → core/ide pkg/tasks (already in lthn via #359)
- *    Coding     → core/ide pkg/workspace + pkg/subagent + pkg/navigate
- *    Operations → core/ide pkg/marketplace + pkg/brain + pkg/vi
- *  Marketing / Sales / Office stay green-field. */
+ *  Cross-surface element reuse: <lthn-view-calendar> lives in
+ *  planning/ and is referenced by both Planning and Office nav
+ *  entries; <lthn-logs-window> / <lthn-audit-viewer> / <lthn-
+ *  telemetry-window> from Admin's window catalogue are re-used by
+ *  Operations. */
 const VIEWS: ViewDef[] = [
   {
     // Owlet-shape — for users who want to chat with the local model and
