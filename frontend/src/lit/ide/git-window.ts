@@ -102,14 +102,15 @@ class LthnGitWindow extends LitElement {
     this.err = "";
     try {
       const svc = await import("@desktop/git/service");
+      const { unwrap } = await import("../result");
       const [b, st, lg] = await Promise.all([
-        svc.Branch(this.path).catch(() => ({ branch: "—", ahead: 0, behind: 0 })),
-        svc.Status(this.path).catch((): StatusEntry[] => []),
-        svc.Log(this.path, 30).catch((): LogEntry[] => []),
+        unwrap<BranchInfo>(svc.Branch(this.path), { branch: "—", ahead: 0, behind: 0 }),
+        unwrap<StatusEntry[]>(svc.Status(this.path), []),
+        unwrap<LogEntry[]>(svc.Log(this.path, 30), []),
       ]);
-      this.branch = b as BranchInfo;
-      this.entries = (st || []) as StatusEntry[];
-      this.log = (lg || []) as LogEntry[];
+      this.branch = b;
+      this.entries = st || [];
+      this.log = lg || [];
       if (this.selected && !this.entries.some(e => e.path === this.selected)) {
         this.selected = "";
         this.diff = "";
@@ -125,7 +126,8 @@ class LthnGitWindow extends LitElement {
     this.selected = entry.path;
     try {
       const svc = await import("@desktop/git/service");
-      this.diff = await svc.Diff(this.path, entry.path, entry.staged);
+      const { unwrap } = await import("../result");
+      this.diff = await unwrap<string>(svc.Diff(this.path, entry.path, entry.staged), "");
     } catch (e: unknown) {
       this.err = e instanceof Error ? e.message : String(e);
       this.diff = "";
