@@ -58,6 +58,16 @@ export interface Conversation {
   title:   string;
   snippet: string;
   model:   string;
+  /** Per-session system-prompt override. Persisted via
+   *  Sessions.SetSystemPrompt; populated by deriveConversation from
+   *  the manifest's system_prompt field. Empty string when unset. */
+  systemPrompt?: string;
+  /** User-curated tag list. Persisted via Sessions.SetTags; populated
+   *  by deriveConversation from manifest.tags. Empty array when unset. */
+  tags?:         string[];
+  /** Manifest updated_at (epoch seconds). Drives the rail's "last
+   *  touched" ordering + the today/yesterday/week bucket boundary. */
+  updatedAt?:    number;
 }
 
 /* ── model browser (display, derived from ModelsService.Entry + runner) ── */

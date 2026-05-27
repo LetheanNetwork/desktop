@@ -776,7 +776,8 @@ class LthnChatWindow extends LitElement {
   async _reloadBuild() {
     try {
       const svc = await import("@desktop/firstlaunch/wailsservice");
-      const b = await svc.Build();
+      const { unwrap } = await import("../result");
+      const b = await unwrap<{ version?: string } | null>(svc.Build(), null);
       if (b?.version) this.version = b.version;
     } catch { /* keep fallback */ }
   }
