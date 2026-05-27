@@ -42,6 +42,8 @@ const TURNS_GEN: ChatTurn[] = [
 // existing imports keep resolving from this canonical module path.
 import { highlightMatch } from "../highlight";
 import { ComposerHistoryController } from "./composer-history.controller";
+import { ComposerGlyphController, TIER_NAMES } from "./composer-glyph.controller";
+import { ChatTurnScoreController, TIER_NAMES as TURN_TIER_NAMES } from "./chat-turn-score.controller";
 import { FindController } from "./find.controller";
 import { SlashMenuController } from "./slash-menu.controller";
 import { ContextMenuController } from "./context-menu.controller";
@@ -142,6 +144,7 @@ class LthnChatWindow extends LitElement {
     state:     { type: String, reflect: true },
     rail:      { type: String, reflect: true },
     rightRail: { type: String, attribute: "right-rail", reflect: true },
+    railSection: { state: true },
     w:         { type: Number },
     h:         { type: Number },
     // Without this static-properties entry Lit won't observe the
@@ -175,6 +178,12 @@ class LthnChatWindow extends LitElement {
   declare state:     ChatState;
   declare rail:      RailMode;
   declare rightRail: RightRailMode;
+  /** Which panel the rail shows when expanded. Three sub-sections
+   *  the collapsed-state icons each map to: settings (tags +
+   *  instructions + sampling), stats (TPS / watts / KV / tokens),
+   *  sources (RAG / pinned context cards). Default "settings"
+   *  matches the first icon (sliders / bolt) the user sees. */
+  declare railSection: "settings" | "stats" | "sources";
   declare w:         number;
   declare h:         number;
   declare embedded: boolean;
@@ -268,6 +277,22 @@ class LthnChatWindow extends LitElement {
    *  composer-history.controller.ts (Athena 2026-05-16, first lane of
    *  the chat-window controllers plan). */
   private _historyController = new ComposerHistoryController(this);
+  /** Composer ethics-tier glyph — Reactive Controller. Owns the
+   *  debounced contentshield.Score call against the live composer
+   *  draft and the resulting ScoreResult that drives the small glyph
+   *  rendered next to the send button. See composer-glyph.controller.ts
+   *  (Hephaestus 2026-05-20, lane 6 of the chat-window controllers
+   *  plan). Render is informational only — never gates the send
+   *  action. */
+  private _glyphController = new ComposerGlyphController(this);
+  /** Per-completed-turn (prompt, response) ethics scoring — Reactive
+   *  Controller. Owns the cache of contentshield.ScorePair results
+   *  keyed by turn index and drives the small indicator dot painted
+   *  next to each assistant-message footer. The dot is informational
+   *  only — it NEVER blocks, hides, dims, or modifies the assistant
+   *  message rendering. See chat-turn-score.controller.ts (Hephaestus
+   *  2026-05-20, sibling to lane 6 composer-glyph). */
+  _turnScoreController = new ChatTurnScoreController(this);
   /** Find-in-transcript overlay — Reactive Controller. Owns the open/
    *  query/cursor state, ⌘F + Escape hand-offs, match-count derivation
    *  and the active-match scroll side-effect. See find.controller.ts
@@ -324,7 +349,11 @@ class LthnChatWindow extends LitElement {
     super();
     this.state = "multi-turn";
     this.rail = "filled";
-    this.rightRail = "expanded";
+    // Default collapsed: chat surface is the centrepiece; the rail
+    // tools (settings / stats / sources) reveal on demand via the
+    // three icon buttons in the collapsed strip.
+    this.rightRail = "collapsed";
+    this.railSection = "settings";
     this.w = 1100;
     this.h = 740; this.embedded = false;
     this.chrome = { title: "lthn · chat", subtitle: "conversation · local" };
@@ -794,6 +823,12 @@ class LthnChatWindow extends LitElement {
       // the first render.
       this._prevTurnCount = 0;
       this.atBottom = true;
+      // Clear any stale ethics-tier glyph — the previous draft's
+      // score has no meaning against the new conversation.
+      this._glyphController.reset();
+      // Drop every cached per-turn (prompt, response) score — the new
+      // conversation's turns are unrelated.
+      this._turnScoreController.reset();
       // Reload the system-prompt + tags drafts from whichever
       // conversation is now active. Sync from this.conversations
       // rather than the backend so the switch is instant; the
@@ -936,6 +971,10 @@ class LthnChatWindow extends LitElement {
     // Reset history navigation — next ↑ should start at the newest
     // (which now includes the message we're about to send).
     this._historyController.reset();
+    // Clear the glyph — the composer is now empty + the just-sent
+    // message lives in the transcript, so the previous draft's score
+    // is no longer meaningful.
+    this._glyphController.reset();
     // Composer is empty now — collapse the auto-grown height back to
     // its base so the next message starts from a single-row affordance.
     const taReset = this.querySelector<HTMLTextAreaElement>("textarea.lthn-chat-composer");
@@ -1209,6 +1248,19 @@ class LthnChatWindow extends LitElement {
    *  expanded + collapsed so the user always has the rail one click
    *  away. Header sliders + chart-line icons both call this — a
    *  duplicate affordance the design intentionally provides. */
+  /** Open the rail directly to a named section. If the rail is
+   *  already open AND on the same section the user clicked, treat
+   *  that as "I want it collapsed" — single icon serves both
+   *  expand-to-this and collapse-when-here. */
+  _openRailSection(section: "settings" | "stats" | "sources") {
+    if (this.rightRail === "expanded" && this.railSection === section) {
+      this.rightRail = "collapsed";
+      return;
+    }
+    this.railSection = section;
+    this.rightRail = "expanded";
+  }
+
   _toggleRightRail() {
     this.rightRail = this.rightRail === "expanded" ? "collapsed" : "expanded";
   }
@@ -1428,11 +1480,16 @@ class LthnChatWindow extends LitElement {
       <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3); letter-spacing:0.02em; padding:0 4px;">
         ${railData.ctx} · ${this.runnerCount} runner
       </div>
-      <lthn-btn tone="ghost" size="sm" @click=${() => this._toggleRightRail()}>
+      <lthn-btn tone="ghost" size="sm"
+                ?active=${this.rightRail === "expanded" && this.railSection === "settings"}
+                title="Settings — tags · instructions · sampling"
+                @click=${() => this._openRailSection("settings")}>
         <i class="fa-solid fa-sliders" style="font-size:10px;"></i>
       </lthn-btn>
-      <lthn-btn tone="ghost" size="sm" ?active=${this.rightRail === "expanded"}
-                @click=${() => this._toggleRightRail()}>
+      <lthn-btn tone="ghost" size="sm"
+                ?active=${this.rightRail === "expanded" && this.railSection === "stats"}
+                title="Live stats — tok/s · watts · KV · tokens"
+                @click=${() => this._openRailSection("stats")}>
         <i class="fa-solid fa-chart-line" style="font-size:10px;"></i>
       </lthn-btn>
     `;
@@ -2237,6 +2294,7 @@ class LthnChatWindow extends LitElement {
           <div style="font-size:12px; font-weight:600; color:var(--fg-0); letter-spacing:-0.005em;">
             ${isYou ? "You" : (this.activeModel || "Gemma 4 E2B")}
           </div>
+          ${!isYou ? this._renderTurnScoreFooter(turnIndex) : nothing}
           <div style="flex:1"></div>
           ${!streaming ? html`
             <div style="display:flex; gap:4px; opacity:0.5;">
@@ -2340,6 +2398,10 @@ class LthnChatWindow extends LitElement {
               // Any manual edit exits history-browsing — the user has
               // moved on from the loaded past message.
               this._historyController.reset();
+              // Restart the contentshield debounce; the glyph next to
+              // the send button updates GLYPH_DEBOUNCE_MS after the
+              // last keystroke.
+              this._glyphController.notify();
             }}
             @keydown=${(e: KeyboardEvent) => this._composerKeydown(e)}
             placeholder=${disabled ? this.t.composerDisabled : this.t.composerReady}
@@ -2520,6 +2582,7 @@ class LthnChatWindow extends LitElement {
               return hint ? html`<span style="font-family:var(--font-mono); font-size:10px;
                             color:var(--fg-3); letter-spacing:0.02em;">${hint}</span>` : nothing;
             })()}
+            ${this._renderComposerGlyph()}
             ${sending ? html`
               <lthn-btn tone="danger" size="sm">
                 <i class="fa-solid fa-stop" style="font-size:10px;"></i> ${this.t.btnStop}
@@ -2536,6 +2599,81 @@ class LthnChatWindow extends LitElement {
     `;
   }
 
+  /** Renders the small ethics-tier glyph adjacent to the send button.
+   *  Pulls the latest score off the ComposerGlyphController; when no
+   *  score is populated (composer empty, scoring failed, Wails not
+   *  bound), returns `nothing` so no DOM is emitted. UX contract: the
+   *  glyph is informational only — never gates the send action. CSS
+   *  class hook is `composer-glyph composer-glyph--<tier-name>` where
+   *  the suffix is the kebab-case label (`appropriate-empathy`,
+   *  `soft-agreement`, `hollow-flattery`, `submission`); colours land
+   *  in a separate design lane against those class names. */
+  _renderComposerGlyph() {
+    const score = this._glyphController.score;
+    if (!score || !score.sycophancy) return nothing;
+    const tier = score.sycophancy.tier;
+    const toneClass = TIER_NAMES[tier] ?? "appropriate-empathy";
+    const label = score.sycophancy.label;
+    const composite = Math.round(score.sycophancy.composite);
+    const suggestionsCount = score.suggestions?.length ?? 0;
+    const suggestionSuffix = suggestionsCount > 0 ? ` · ${suggestionsCount} suggestion${suggestionsCount === 1 ? "" : "s"}` : "";
+    const tooltip = `${label} · composite ${composite}/100${suggestionSuffix}`;
+    return html`<span
+      class="composer-glyph composer-glyph--${toneClass}"
+      title=${tooltip}
+      aria-label="content scoring: ${label}"
+    >•</span>`;
+  }
+
+  /** Renders the per-turn ethics indicator next to the model-name
+   *  footer on an assistant message. Looks up the (prompt, response)
+   *  pair for turn `turnIndex` (prompt = the previous user turn) and
+   *  pulls the cached DiffResult off the ChatTurnScoreController —
+   *  which fires a contentshield.ScorePair() call in the background
+   *  on a cache miss. UX contract: informational only, NEVER blocks
+   *  / hides / dims the assistant message. CSS class hook is
+   *  `turn-score turn-score--<tier-name>` where the suffix is the
+   *  kebab-case sycophancy tier of the RESPONSE side (mirrors the
+   *  composer-glyph vocabulary so designers reuse one palette).
+   *  Tooltip + aria-label append the differential echo (when
+   *  available) + the authority pattern (when identified). */
+  _renderTurnScoreFooter(turnIndex: number) {
+    const turns = this.liveTurns;
+    if (!turns || turnIndex <= 0 || turnIndex >= turns.length) return nothing;
+    const responseTurn = turns[turnIndex];
+    const promptTurn = turns[turnIndex - 1];
+    if (!responseTurn || responseTurn.role !== "model") return nothing;
+    if (!promptTurn || promptTurn.role !== "you") return nothing;
+    const prompt = promptTurn.text || "";
+    const response = responseTurn.text || "";
+    if (prompt === "" || response === "") return nothing;
+    const slot = this._turnScoreController.score(turnIndex, prompt, response);
+    if (slot === null || slot === "pending") return nothing;
+    const respSyc = slot.response?.sycophancy;
+    if (!respSyc) return nothing;
+    const tone = TURN_TIER_NAMES[respSyc.tier] ?? "appropriate-empathy";
+    const label = respSyc.label;
+    const echoSeg = slot.differential
+      ? ` · echo ${Math.round(slot.differential.echo * 100)}%`
+      : "";
+    const authSeg = slot.authority
+      ? ` · authority: ${slot.authority.pattern}`
+      : "";
+    const tooltip = `response: ${label}${echoSeg}${authSeg}`;
+    const echoAria = slot.differential
+      ? `, mirror ${Math.round(slot.differential.echo * 100)}%`
+      : "";
+    const authAria = slot.authority
+      ? `, authority ${slot.authority.pattern}`
+      : "";
+    const aria = `response scoring: ${label}${echoAria}${authAria}`;
+    return html`<span
+      class="turn-score turn-score--${tone}"
+      title=${tooltip}
+      aria-label=${aria}
+    >•</span>`;
+  }
+
   /* — right rail (turn metadata) — */
   _renderRightRail(data: RailData) {
     if (this.rightRail === "collapsed") {
@@ -2543,95 +2681,121 @@ class LthnChatWindow extends LitElement {
         <aside style="width:36px; flex-shrink:0; border-left:1px solid rgba(255,255,255,0.05);
                       background:rgba(0,0,0,0.18); display:flex; flex-direction:column;
                       align-items:center; padding:10px 0; gap:10px;">
-          <lthn-btn tone="quiet" size="sm" @click=${() => this._toggleRightRail()}>
+          <lthn-btn tone="quiet" size="sm" title="Settings — tags · instructions · sampling"
+                    @click=${() => this._openRailSection("settings")}>
+            <i class="fa-solid fa-sliders" style="font-size:11px;"></i>
+          </lthn-btn>
+          <lthn-btn tone="quiet" size="sm" title="Live stats — tok/s · watts · KV · tokens"
+                    @click=${() => this._openRailSection("stats")}>
             <i class="fa-solid fa-chart-line" style="font-size:11px;"></i>
           </lthn-btn>
-          <lthn-btn tone="quiet" size="sm" @click=${() => this._toggleRightRail()}>
-            <i class="fa-solid fa-bolt" style="font-size:11px;"></i>
-          </lthn-btn>
-          <lthn-btn tone="quiet" size="sm" @click=${() => this._toggleRightRail()}>
+          <lthn-btn tone="quiet" size="sm" title="Sources — pinned context for this conversation"
+                    @click=${() => this._openRailSection("sources")}>
             <i class="fa-solid fa-database" style="font-size:11px;"></i>
           </lthn-btn>
         </aside>
       `;
     }
+    const sectionTab = (id: "settings" | "stats" | "sources", icon: string, label: string) => html`
+      <lthn-btn tone="quiet" size="sm"
+                ?active=${this.railSection === id}
+                title=${label}
+                @click=${() => this._openRailSection(id)}>
+        <i class="fa-solid ${icon}" style="font-size:10px;"></i>
+      </lthn-btn>
+    `;
+    const sectionTitle =
+      this.railSection === "settings" ? this.t.railMeta :
+      this.railSection === "stats"    ? "Live stats" :
+                                        "Sources";
     return html`
       <aside style="width:280px; flex-shrink:0; border-left:1px solid rgba(255,255,255,0.05);
                     background:rgba(0,0,0,0.18); display:flex; flex-direction:column;
                     min-height:0; overflow:hidden;">
-        <div style="padding:14px 18px 8px; display:flex; align-items:center; gap:8px;">
-          <lthn-label>${this.t.railMeta}</lthn-label>
+        <div style="padding:14px 18px 8px; display:flex; align-items:center; gap:6px;">
+          <lthn-label>${sectionTitle}</lthn-label>
           <div style="flex:1"></div>
-          <lthn-btn tone="quiet" size="sm" @click=${() => this._toggleRightRail()}>
+          ${sectionTab("settings", "fa-sliders",     "Settings")}
+          ${sectionTab("stats",    "fa-chart-line",  "Live stats")}
+          ${sectionTab("sources",  "fa-database",    "Sources")}
+          <lthn-btn tone="quiet" size="sm" title="Collapse"
+                    @click=${() => this._toggleRightRail()}>
             <i class="fa-solid fa-angle-right" style="font-size:10px;"></i>
           </lthn-btn>
         </div>
         <div style="padding:0 18px 16px; display:flex; flex-direction:column; gap:14px; overflow:auto;">
-          <div class="lthn-chat-tags"
-               style="display:flex; flex-direction:column; gap:6px;">
-            <lthn-label>Tags</lthn-label>
-            <input
-              class="lthn-chat-tags-input"
-              type="text"
-              .value=${this.tagsDraft}
-              ?disabled=${!this.activeConversationId}
-              placeholder="comma, separated, labels"
-              @input=${(e: Event) => {
-                this.tagsDraft = (e.target as HTMLInputElement).value;
-              }}
-              @blur=${() => void this._saveTags()}
-              style="
-                width:100%;
-                background:rgba(0,0,0,0.28);
-                border:1px solid rgba(255,255,255,0.08);
-                border-radius:6px;
-                padding:7px 9px;
-                font-family:var(--font-sans); font-size:11.5px;
-                color:var(--fg-1);
-                outline:none;
-                --wails-draggable: no-drag;
-              " />
-          </div>
+          ${this.railSection === "settings" ? html`
+            <div class="lthn-chat-tags"
+                 style="display:flex; flex-direction:column; gap:6px;">
+              <lthn-label>Tags</lthn-label>
+              <input
+                class="lthn-chat-tags-input"
+                type="text"
+                .value=${this.tagsDraft}
+                ?disabled=${!this.activeConversationId}
+                placeholder="comma, separated, labels"
+                @input=${(e: Event) => {
+                  this.tagsDraft = (e.target as HTMLInputElement).value;
+                }}
+                @blur=${() => void this._saveTags()}
+                style="
+                  width:100%;
+                  background:rgba(0,0,0,0.28);
+                  border:1px solid rgba(255,255,255,0.08);
+                  border-radius:6px;
+                  padding:7px 9px;
+                  font-family:var(--font-sans); font-size:11.5px;
+                  color:var(--fg-1);
+                  outline:none;
+                  --wails-draggable: no-drag;
+                " />
+            </div>
 
-          <div class="lthn-chat-systemprompt"
-               style="display:flex; flex-direction:column; gap:6px;">
-            <lthn-label>Instructions</lthn-label>
-            <textarea
-              class="lthn-chat-systemprompt-input"
-              .value=${this.systemPromptDraft}
-              ?disabled=${!this.activeConversationId}
-              placeholder="Steering for this conversation only — e.g. \\"You are a Go reviewer; cite playground links.\\""
-              @input=${(e: Event) => {
-                this.systemPromptDraft = (e.target as HTMLTextAreaElement).value;
-              }}
-              @blur=${() => void this._saveSystemPrompt()}
-              style="
-                width:100%; min-height:60px; max-height:160px;
-                background:rgba(0,0,0,0.28);
-                border:1px solid rgba(255,255,255,0.08);
-                border-radius:6px;
-                padding:7px 9px;
-                font-family:var(--font-sans); font-size:11.5px;
-                line-height:1.45; color:var(--fg-1);
-                outline:none; resize:vertical;
-                --wails-draggable: no-drag;
-              "></textarea>
-          </div>
+            <div class="lthn-chat-systemprompt"
+                 style="display:flex; flex-direction:column; gap:6px;">
+              <lthn-label>Instructions</lthn-label>
+              <textarea
+                class="lthn-chat-systemprompt-input"
+                .value=${this.systemPromptDraft}
+                ?disabled=${!this.activeConversationId}
+                placeholder="Steering for this conversation only — e.g. \\"You are a Go reviewer; cite playground links.\\""
+                @input=${(e: Event) => {
+                  this.systemPromptDraft = (e.target as HTMLTextAreaElement).value;
+                }}
+                @blur=${() => void this._saveSystemPrompt()}
+                style="
+                  width:100%; min-height:60px; max-height:160px;
+                  background:rgba(0,0,0,0.28);
+                  border:1px solid rgba(255,255,255,0.08);
+                  border-radius:6px;
+                  padding:7px 9px;
+                  font-family:var(--font-sans); font-size:11.5px;
+                  line-height:1.45; color:var(--fg-1);
+                  outline:none; resize:vertical;
+                  --wails-draggable: no-drag;
+                "></textarea>
+            </div>
 
-          ${this._renderRailStat(this.t.statTps, data.toksLive, data.sparkline)}
-          ${this._renderRailStat(this.t.statWatts, data.watts)}
-          ${this._renderRailStat(this.t.statKv, data.kvHit)}
-          ${this._renderRailStat(this.t.statTokens, data.tokens)}
+            <lthn-label style="margin-top:4px;">${this.t.labelSampling}</lthn-label>
+            <div style="display:flex; flex-direction:column; gap:6px; font-size:11.5px;">
+              <lthn-rail-row k=${this.t.sampTemp}    v="0.7"></lthn-rail-row>
+              <lthn-rail-row k=${this.t.sampTopP}    v="0.95"></lthn-rail-row>
+              <lthn-rail-row k=${this.t.sampMaxTok}  v="1024"></lthn-rail-row>
+              <lthn-rail-row k=${this.t.sampContext} v=${data.ctx || "—"}></lthn-rail-row>
+            </div>
+            <div style="font-size:10.5px; color:var(--fg-3); font-style:italic; line-height:1.5;">
+              Sampling defaults shown — per-conversation overrides not yet wired (Settings → Models for global defaults).
+            </div>
+          ` : nothing}
 
-          <lthn-label style="margin-top:4px;">${this.t.labelSampling}</lthn-label>
-          <div style="display:flex; flex-direction:column; gap:6px; font-size:11.5px;">
-            <lthn-rail-row k=${this.t.sampTemp}    v="0.7"></lthn-rail-row>
-            <lthn-rail-row k=${this.t.sampTopP}    v="0.95"></lthn-rail-row>
-            <lthn-rail-row k=${this.t.sampMaxTok}  v="1024"></lthn-rail-row>
-            <lthn-rail-row k=${this.t.sampContext} v=${data.ctx || "—"}></lthn-rail-row>
-          </div>
+          ${this.railSection === "stats" ? html`
+            ${this._renderRailStat(this.t.statTps, data.toksLive, data.sparkline)}
+            ${this._renderRailStat(this.t.statWatts, data.watts)}
+            ${this._renderRailStat(this.t.statKv, data.kvHit)}
+            ${this._renderRailStat(this.t.statTokens, data.tokens)}
+          ` : nothing}
 
-          <lthn-label style="margin-top:4px;">${this.t.labelSources}</lthn-label>
+          ${this.railSection === "sources" ? html`
           ${data.sources ? data.sources.map(s => html`
             <div style="padding:8px 10px; border-radius:6px;
                         background:rgba(255,255,255,0.03);
@@ -2646,6 +2810,7 @@ class LthnChatWindow extends LitElement {
               ${this.t.sourcesEmpty}
             </div>
           `}
+          ` : nothing}
         </div>
       </aside>
     `;
