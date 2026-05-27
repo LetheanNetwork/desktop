@@ -5,7 +5,6 @@
 package models
 
 import (
-	"os"
 	"syscall"
 
 	core "dappco.re/go"
@@ -41,7 +40,10 @@ import (
 //	if r := atomicRename(src, dst); !r.OK { return r }
 func atomicRename(src, dst string) core.Result {
 	if err := syscall.Link(src, dst); err != nil {
-		if os.IsExist(err) {
+		// core.IsExist mirrors stdlib os.IsExist — checks for EEXIST in
+		// the wrap chain. Keeps the banned-imports list in CLAUDE.md
+		// clean (os/* is one of the deny entries).
+		if core.IsExist(err) {
 			return core.Fail(core.NewError(
 				"models.Rename: destination already exists: " + dst))
 		}
