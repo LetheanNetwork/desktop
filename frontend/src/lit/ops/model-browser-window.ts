@@ -387,8 +387,8 @@ class LthnModelBrowserWindow extends LitElement {
             <div style="font-size:11px; color:var(--fg-3); line-height:1.55; padding:2px 2px 0;">
               Browsing is a preview — direct downloads from Hugging Face are
               coming once we have a way to verify the file you receive matches
-              the one listed. Pin a model you'd like first and we'll let you
-              know when it's ready to fetch.
+              the one listed. Until then, use the Lemma engine's Download form
+              (Open Lemma → Admin) to pull by repo id.
             </div>
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
               ${["Gemma","Llama","Phi","Qwen","Mistral","≤ 5 GB","≤ 10 GB","Has vision","Has tools"].map((f, i) => html`
