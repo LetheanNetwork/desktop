@@ -432,10 +432,10 @@ class LthnModelBrowserWindow extends LitElement {
             <div style="font-size:11px; color:var(--fg-3); margin-top:3px;">by ${selFamily} · ${selStatus} · ${selSize} on disk</div>
           </div>
           <div style="display:flex; gap:6px;">
-            <lthn-btn tone="primary" size="md" style="flex:1; justify-content:center;">
+            <lthn-btn tone="primary" size="md" style="flex:1; justify-content:center;"
+              @click=${() => this._openChat()}>
               <i class="fa-regular fa-comment"></i> ${this.t.btnOpenChat}
             </lthn-btn>
-            <lthn-btn tone="ghost" size="md"><i class="fa-solid fa-thumbtack" style="font-size:10px;"></i></lthn-btn>
           </div>
           ${this._renderActivate(selected)}
           <div style="display:flex; flex-direction:column; gap:8px; font-size:11.5px;">
@@ -711,6 +711,20 @@ class LthnModelBrowserWindow extends LitElement {
       this.deleteErr = err instanceof Error ? err.message : String(err);
     } finally {
       this.deleteBusy = false;
+    }
+  }
+
+  /** Switch the app shell to the Chat pane — same channel logs
+   *  Open Chat (7ca2298) uses. Doesn't currently pre-select the
+   *  picked model in chat-window (chat picks via runner config, not
+   *  per-conversation), but at least it gets the user to a usable
+   *  chat surface in one click. */
+  private async _openChat(): Promise<void> {
+    try {
+      const { Events } = await import("@wailsio/runtime");
+      Events.Emit("lthn:app:setpane", "chat");
+    } catch (err) {
+      console.error("model-browser: open chat failed", err);
     }
   }
 
