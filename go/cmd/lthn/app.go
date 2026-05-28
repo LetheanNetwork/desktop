@@ -20,6 +20,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/benchmark"
 	"dappco.re/lthn/desktop/pkg/bridge"
+	"dappco.re/lthn/desktop/pkg/agents"
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/gateway"
 	lthni18n "dappco.re/lthn/desktop/pkg/i18n"
@@ -207,6 +208,7 @@ func newAppCore() *core.Core {
 		// rules) backed by master DuckDB. Frontends consume via the
 		// fleet-window Wails binding.
 		core.WithName("fleet", fleet.Register),
+		core.WithName("agents", agents.Register),
 		// runner — talk-surface owning the inference-route table.
 		// Built from Core config (routes.<name>.{kind,base_url,...});
 		// SetDynamicRoutes refreshes the live router when opencode
