@@ -39,6 +39,9 @@ vars:
   # Where the go-mlx repo lives. Override with LTHN_MLX_REPO env var
   # if go-mlx is checked out elsewhere on this machine.
   LTHN_MLX_REPO: '{{.LTHN_MLX_REPO | default "/Users/snider/Code/core/go-mlx"}}'
+  # Where the core/agent repo lives (the lthn-agent crew member).
+  # Override with LTHN_AGENT_REPO if checked out elsewhere.
+  LTHN_AGENT_REPO: '{{.LTHN_AGENT_REPO | default "/Users/snider/Code/core/agent"}}'
 
 tasks:
   build:
@@ -54,9 +57,10 @@ tasks:
       - task: package
 
   pre-build:
-    summary: "Prep the ground before the wails3 OS build — stage the self-contained lthn-mlx + install frontend deps (both idempotent)"
+    summary: "Prep the ground before the wails3 OS build — stage the crew binaries (lthn-mlx, lthn-agent) + install frontend deps (idempotent)"
     deps:
       - build:lthn-mlx
+      - build:lthn-agent
       - common:install:frontend:deps
 
   build:lthn-mlx:
@@ -84,6 +88,30 @@ tasks:
         mkdir -p build/darwin/bin
         cp "$REPO/bin/lthn-mlx" build/darwin/bin/lthn-mlx
         echo "  lthn-mlx (self-contained) → build/darwin/bin/lthn-mlx"
+
+  build:lthn-agent:
+    summary: Build the lthn-agent crew member into build/darwin/bin
+    desc: |
+      Builds lthn-agent via core/agent's `task build:lthn` and stages the
+      single binary at build/darwin/bin/lthn-agent for the packager to
+      drop into Contents/MacOS. The crew's agentic-dispatch member —
+      lthn-ai manages instances of it, lthn supervises the set via
+      go-process. Skips gracefully if core/agent isn't checked out so a
+      GUI-only build still succeeds.
+    status:
+      - test -x "build/darwin/bin/lthn-agent"
+    cmds:
+      - |-
+        set -e
+        REPO="{{.LTHN_AGENT_REPO}}"
+        if [ ! -d "$REPO/go/cmd/core-agent" ]; then
+          echo "  lthn-agent: no core/agent at $REPO — skipping"
+          exit 0
+        fi
+        ( cd "$REPO" && task build:lthn )
+        mkdir -p build/darwin/bin
+        cp "$REPO/bin/lthn-agent" build/darwin/bin/lthn-agent
+        echo "  lthn-agent → build/darwin/bin/lthn-agent"
 
   package:
     summary: Packages a production build
