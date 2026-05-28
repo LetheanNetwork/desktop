@@ -41,3 +41,35 @@ func TestAgents_Service_Status_Ugly(t *core.T) {
 	r := agents.New(agents.Config{BaseURL: srv.URL}).Status()
 	core.AssertFalse(t, r.OK)
 }
+
+// --- Dispatch (method on *Service) ---
+
+func TestAgents_Service_Dispatch_Good(t *core.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		core.AssertEqual(t, "/v1/tools/agentic_dispatch", r.URL.Path)
+		core.AssertEqual(t, http.MethodPost, r.Method)
+		_, _ = w.Write([]byte(`{"success":true,"data":{"success":true,"agent":"codex","repo":"go-io","workspace_dir":".core/workspace/core/go-io/task-1","pid":1234}}`))
+	}))
+	defer srv.Close()
+	r := agents.New(agents.Config{BaseURL: srv.URL}).Dispatch(agents.DispatchRequest{Repo: "go-io", Task: "fix tests", Agent: "codex"})
+	core.AssertTrue(t, r.OK)
+	out := r.Value.(agents.DispatchResult)
+	core.AssertEqual(t, "go-io", out.Repo)
+	core.AssertEqual(t, 1234, out.PID)
+}
+
+func TestAgents_Service_Dispatch_Bad(t *core.T) {
+	// Missing repo/task → validated before any network → Fail (no panic).
+	r := agents.New(agents.Config{BaseURL: "http://127.0.0.1:1"}).Dispatch(agents.DispatchRequest{Agent: "codex"})
+	core.AssertFalse(t, r.OK, "Dispatch must Fail without repo+task")
+}
+
+func TestAgents_Service_Dispatch_Ugly(t *core.T) {
+	// Tool reports failure → Fail cleanly with the message.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"success":false,"error":"no such repo"}`))
+	}))
+	defer srv.Close()
+	r := agents.New(agents.Config{BaseURL: srv.URL}).Dispatch(agents.DispatchRequest{Repo: "nope", Task: "x"})
+	core.AssertFalse(t, r.OK)
+}

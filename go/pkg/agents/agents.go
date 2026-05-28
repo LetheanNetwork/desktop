@@ -110,6 +110,56 @@ func (s *Service) Status() core.Result {
 	return core.Ok(resp.Data)
 }
 
+// DispatchRequest mirrors CoreAgent's agentic_dispatch input. Repo + Task
+// are the essentials; Agent picks the fleet harness, the rest refine.
+type DispatchRequest struct {
+	Repo     string `json:"repo"`
+	Org      string `json:"org,omitempty"`
+	Task     string `json:"task"`
+	Agent    string `json:"agent,omitempty"`
+	Template string `json:"template,omitempty"`
+	Branch   string `json:"branch,omitempty"`
+	Issue    int    `json:"issue,omitempty"`
+	DryRun   bool   `json:"dry_run,omitempty"`
+}
+
+// DispatchResult mirrors agentic_dispatch's output — the spawned run.
+type DispatchResult struct {
+	Success      bool   `json:"success"`
+	Agent        string `json:"agent"`
+	Repo         string `json:"repo"`
+	WorkspaceDir string `json:"workspace_dir"`
+	PID          int    `json:"pid,omitempty"`
+	OutputFile   string `json:"output_file,omitempty"`
+}
+
+// Dispatch launches a CoreAgent run: preps a sandboxed workspace for Repo
+// and spawns Agent on Task (agentic_dispatch). The agent runs detached —
+// this returns once it's spawned (workspace + PID), not when it finishes;
+// watch progress via Status / the run feed. Repo + Task are required.
+//
+//	r := svc.Dispatch(agents.DispatchRequest{Repo: "go-io", Task: "fix tests", Agent: "codex"})
+//	if r.OK { out := r.Value.(agents.DispatchResult); _ = out }
+func (s *Service) Dispatch(req DispatchRequest) core.Result {
+	if core.Trim(req.Repo) == "" || core.Trim(req.Task) == "" {
+		return core.Fail(core.NewError("agents.Dispatch: repo and task are required"))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	var resp struct {
+		Success bool           `json:"success"`
+		Data    DispatchResult `json:"data"`
+		Error   string         `json:"error"`
+	}
+	if err := s.doTool(ctx, "agentic_dispatch", req, &resp); err != nil {
+		return core.Fail(core.E("agents.Dispatch", "agentic_dispatch", err))
+	}
+	if !resp.Success {
+		return core.Fail(core.NewError("agents.Dispatch: tool reported failure: " + resp.Error))
+	}
+	return core.Ok(resp.Data)
+}
+
 // doTool POSTs args (JSON) to /v1/tools/<tool> on the loopback serve and
 // decodes the {success,data} BridgeToAPI envelope into out. Mirrors
 // pkg/lemma's doJSON idiom — core.JSON* keeps the banned-imports list
