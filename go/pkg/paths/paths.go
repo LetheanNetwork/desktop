@@ -274,6 +274,61 @@ func WorkspaceDir() core.Result {
 	return core.Ok(dir)
 }
 
+// R1Dir returns ~/Lethean/data/r1/. Creates if missing.
+//
+// R₁ corpus root for the autocratic-cascade training architecture.
+// Layout below the root is <model>/<subject>.jsonl — one append-only
+// JSONL file per (canonical model ID × rotation subject) pair, each
+// line a serialised pkg/r1.R1 record.
+//
+// Both the training writer (epoch-1 sandwich responses) and the
+// inference reader (cascade target lookup when training larger
+// tiers) resolve their paths via this function so the canonical
+// location is single-sourced.
+//
+// Usage example:
+//
+//	r := paths.R1Dir()
+//	if r.OK { root := r.Value.(string); _ = root }
+func R1Dir() core.Result {
+	data := DataDir()
+	if !data.OK {
+		return data
+	}
+	dir := core.PathJoin(data.Value.(string), "r1")
+	if r := core.MkdirAll(dir, 0o755); !r.OK {
+		return r
+	}
+	return core.Ok(dir)
+}
+
+// TrainingCheckpointDir returns ~/Lethean/data/training/checkpoints/.
+// Creates the directory tree if missing.
+//
+// One JSON checkpoint file per canonical model ID, written atomically
+// at probe boundaries during Service.Run so a crash mid-rotation loses
+// at most the last in-flight probe (not the whole curriculum). Model
+// weights / KV cache / optimizer state are NOT here — those live in
+// the runner's own snapshot (go-mlx native, etc.). Our slot is the
+// orchestrator's view of the rotation: which subjects have groked,
+// which probes have written R₁s, current cascade tier and substrate.
+//
+// Usage example:
+//
+//	r := paths.TrainingCheckpointDir()
+//	if r.OK { root := r.Value.(string); _ = root }
+func TrainingCheckpointDir() core.Result {
+	data := DataDir()
+	if !data.OK {
+		return data
+	}
+	dir := core.PathJoin(data.Value.(string), "training", "checkpoints")
+	if r := core.MkdirAll(dir, 0o755); !r.OK {
+		return r
+	}
+	return core.Ok(dir)
+}
+
 func subdir(name string) core.Result {
 	root := Root()
 	if !root.OK {

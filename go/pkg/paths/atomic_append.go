@@ -195,6 +195,92 @@ func AtomicAppendLine(path string, line []byte) core.Result {
 	})
 }
 
+// AtomicAppendLineLarge appends line to path WITHOUT the PipeBufLimit
+// size gate that AtomicAppendLine enforces. Use this for append-only
+// JSONL streams where:
+//
+//   - Records routinely exceed PIPE_BUF (Darwin 512 B, Linux 4096 B)
+//     so the POSIX kernel-atomic guarantee for write(2) is not
+//     reachable — e.g. R₁ records carrying full LEK-1 sandwich +
+//     model response + Fingerprint maps (often 8–64 KiB each).
+//   - The decoder tolerates line-recovery — a torn record produces
+//     one JSONL line that fails parse, which the JSONL reader skips.
+//
+// The kernel still serialises concurrent O_APPEND writers per the
+// open file description, so two concurrent goroutines writing N-KiB
+// lines will NOT see their bytes interleaved mid-line under normal
+// circumstances; however, no POSIX atomicity guarantee applies for
+// records exceeding PIPE_BUF. Callers needing the strict per-record
+// atomicity guarantee MUST use AtomicAppendLine (which rejects
+// oversize records at the API boundary).
+//
+// Same trailing-newline + file-creation + rotation semantics as
+// AtomicAppendLine. Empty path is rejected with
+// CodeAppendInvalidPath. File mode matches the package's
+// writeFileMode (0o600) — same as every other paths.* writer.
+//
+// Usage example:
+//
+//	r := paths.AtomicAppendLineLarge(r1Path, jsonlRecord)
+//	if !r.OK { return r }
+//	out := r.Value.(paths.WriteOutput)
+func AtomicAppendLineLarge(path string, line []byte) core.Result {
+	if path == "" {
+		return core.Fail(core.NewCode(CodeAppendInvalidPath,
+			"AtomicAppendLineLarge requires a non-empty path"))
+	}
+	return WithFileLock(path, 0, func() core.Result {
+		// Rotation check — happens INSIDE the lock so concurrent
+		// appenders see a coherent transition. Same primitive as
+		// AtomicAppendLine — rotation behaviour is identical.
+		if r := maybeRotate(path); !r.OK {
+			return r
+		}
+		// Compose payload with exactly-one trailing newline.
+		payload := line
+		if len(payload) == 0 || payload[len(payload)-1] != '\n' {
+			payload = append(append([]byte(nil), payload...), '\n')
+		}
+		openR := core.OpenFile(path,
+			core.O_APPEND|core.O_CREATE|core.O_WRONLY, writeFileMode)
+		if !openR.OK {
+			return core.Fail(core.E(CodeAppendOpenFailed,
+				"open append: "+openR.Error(), nil))
+		}
+		f, _ := openR.Value.(*core.OSFile)
+		if f == nil {
+			return core.Fail(core.NewCode(CodeAppendOpenFailed,
+				"open append returned nil file"))
+		}
+		if _, err := f.Write(payload); err != nil {
+			_ = f.Close()
+			return core.Fail(core.E(CodeAppendWriteFailed,
+				"write append: ", err))
+		}
+		if err := f.Sync(); err != nil {
+			_ = f.Close()
+			return core.Fail(core.E(CodeAppendFsyncFailed,
+				"fsync append", err))
+		}
+		if err := f.Close(); err != nil {
+			return core.Fail(core.E(CodeAppendOpenFailed,
+				"close append", err))
+		}
+		out := WriteOutput{Hash: core.SHA256Hex(payload)}
+		if statR := core.Lstat(path); statR.OK {
+			if info, _ := statR.Value.(core.FsFileInfo); info != nil {
+				out.Mtime = info.ModTime()
+			}
+		}
+		// Same recorder-propagation contract as AtomicAppendLine:
+		// Sync-mode emission failures propagate; Batch-mode is silent.
+		if r := emitWriteSucceeded(path, 0); !r.OK {
+			return r
+		}
+		return core.Ok(out)
+	})
+}
+
 // maybeRotate checks the current size of path against
 // appendRotateThreshold. When over, the current file is renamed to
 // "<path>.<unix>.archived" + a fresh empty file is created with
