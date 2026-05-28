@@ -15,10 +15,15 @@
 // WCredentialMigrationStatus):
 //
 //   type MigrationStatus = {
-//     PendingMigrationCount: number;
-//     PlaintextOnDisk: boolean;
-//     LockedRoutes: string[];
+//     pending_migration_count: number;
+//     plaintext_on_disk: boolean;
+//     locked_routes: string[];
 //   };
+//
+// Field names are snake_case — the Go struct (pkg/runner/types.go)
+// carries explicit json tags, so that IS the wire shape. Reading
+// PascalCase here yields undefined, which slips the render guard
+// (`undefined <= 0` is false) and crashes on `.join`.
 //
 // Calm-voice copy per HANDOVER-VIEWS.md — observational, not alarming.
 // Dark-only treatment per feedback_dark_only_design_system. Banner is
@@ -34,9 +39,9 @@
 import { LitElement, html, nothing } from "lit";
 
 interface MigrationStatus {
-  PendingMigrationCount: number;
-  PlaintextOnDisk: boolean;
-  LockedRoutes: string[];
+  pending_migration_count: number;
+  plaintext_on_disk: boolean;
+  locked_routes: string[];
 }
 
 /** Refresh cadence — slow because the underlying signal only changes
@@ -92,11 +97,11 @@ class LthnCredMigrationBanner extends LitElement {
   }
 
   render() {
-    if (!this._status || this._status.PendingMigrationCount <= 0) {
+    if (!this._status || this._status.pending_migration_count <= 0) {
       return nothing;
     }
-    const count = this._status.PendingMigrationCount;
-    const providers = this._status.LockedRoutes.join(", ") || "(unnamed)";
+    const count = this._status.pending_migration_count;
+    const providers = (this._status.locked_routes ?? []).join(", ") || "(unnamed)";
     return html`
       <div role="alert"
            aria-label="Provider credential migration pending"
