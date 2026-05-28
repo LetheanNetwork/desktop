@@ -133,9 +133,14 @@ export class ProcessApi {
     return json as T;
   }
 
-  /** List all alive daemons from the registry. */
-  listDaemons(): Promise<DaemonEntry[]> {
-    return this.request<DaemonEntry[]>('/daemons');
+  /** List all alive daemons from the registry. Always resolves to an
+   *  array — the REST surface returns null/{} for an empty registry,
+   *  and `request` raw-casts non-enveloped bodies, so coerce here to
+   *  honour the `[]` return contract. Without this, consumers doing
+   *  `.length`/`.map` crash (or freeze on their loading frame). */
+  async listDaemons(): Promise<DaemonEntry[]> {
+    const r = await this.request<DaemonEntry[]>('/daemons');
+    return Array.isArray(r) ? r : [];
   }
 
   /** Get a single daemon entry by code and daemon name. */
@@ -155,10 +160,13 @@ export class ProcessApi {
     return this.request<HealthResult>(`/daemons/${code}/${daemon}/health`);
   }
 
-  /** List all managed processes. */
-  listProcesses(runningOnly = false): Promise<ProcessInfo[]> {
+  /** List all managed processes. Always resolves to an array — same
+   *  null/{}-for-empty coercion as listDaemons so the Processes tab
+   *  never freezes on its "Loading processes…" frame. */
+  async listProcesses(runningOnly = false): Promise<ProcessInfo[]> {
     const query = runningOnly ? '?runningOnly=true' : '';
-    return this.request<ProcessInfo[]>(`/processes${query}`);
+    const r = await this.request<ProcessInfo[]>(`/processes${query}`);
+    return Array.isArray(r) ? r : [];
   }
 
   /** Get a single managed process by ID. */
