@@ -19,9 +19,11 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	core "dappco.re/go"
+	gui "dappco.re/go/gui"
 )
 
 // DefaultBaseURL is the loopback address the crew brings lthn-agent serve
@@ -37,11 +39,20 @@ type Config struct {
 	Token string
 }
 
-// Service is the CoreAgent client. Stateless over HTTP — goroutine-safe.
+// Service is the CoreAgent client. Tool calls are stateless request/response
+// over the /v1/tools bridge (goroutine-safe); on top of that, ServiceStartup
+// brings up a live channel listener that relays CoreAgent's push events to the
+// Agents view (see channels.go).
 type Service struct {
 	baseURL string
 	token   string
 	client  *http.Client
+	// core is captured at Register (and at StartChannels) so the channel
+	// listener can emit desktop events; nil when constructed via New (unit
+	// tests) → the listener stays off.
+	core      *core.Core
+	listener  *channelListener
+	startOnce sync.Once
 }
 
 // New constructs a Service. Zero-value Config talks to the loopback
@@ -64,18 +75,58 @@ func New(cfg Config) *Service {
 // can't fail (no DB/socket — just an HTTP client), so this always Ok's.
 //
 //	core.New(core.WithName("agents", agents.Register))
-func Register(_ *core.Core) core.Result {
-	return core.Ok(New(Config{}))
+func Register(c *core.Core) core.Result {
+	svc := New(Config{})
+	svc.core = c
+	return core.Ok(svc)
 }
 
 // ServiceName is the Wails binding name → frontend @desktop/agents/service.
 func (s *Service) ServiceName() string { return "Agents" }
 
-// ServiceStartup is a no-op — the HTTP client needs no boot work.
-func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result { return core.Ok(nil) }
+// ServiceStartup brings up the live channel listener so the Agents view
+// updates on CoreAgent push events (agent.blocked, agent.complete, …) rather
+// than only on its poll. With no Core (unit tests via New) there's nothing to
+// emit to, so it stays off.
+func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result {
+	// The live channel listener is started explicitly via StartChannels from
+	// the desktop startup path (once the crew's serve is coming up) — the GUI
+	// launch doesn't run service ServiceStartup, so we don't hook it here.
+	return core.Ok(nil)
+}
 
-// ServiceShutdown is a no-op — there's no handle to release.
-func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }
+// StartChannels brings up the live channel listener: a consume-only MCP
+// session to the crew's lthn-agent serve that relays CoreAgent push events
+// (agent.blocked, agent.complete, agent.status, …) to the Agents view via
+// gui.EmitEvent("lthn:agents:channel"). Idempotent — call it once the crew is
+// supervising the serve. No-op with a nil Core.
+//
+//	agentsSvc.StartChannels(core)
+func (s *Service) StartChannels(c *core.Core) {
+	if c == nil {
+		return
+	}
+	s.startOnce.Do(func() {
+		s.core = c
+		relay := func(channel string, data any) {
+			_ = gui.EmitEvent(c, channelEventName, map[string]any{
+				"channel": channel,
+				"data":    data,
+			})
+		}
+		s.listener = newChannelListener(s.baseURL+"/mcp", relay)
+		core.Info("agents: starting channel listener", "mcp", s.baseURL+"/mcp")
+		s.listener.start()
+	})
+}
+
+// ServiceShutdown stops the channel listener.
+func (s *Service) ServiceShutdown() core.Result {
+	if s.listener != nil {
+		s.listener.stop()
+	}
+	return core.Ok(nil)
+}
 
 // BlockedRun is a workspace awaiting an operator answer — the actionable
 // rows agentic_status enumerates. Running/completed/failed runs are

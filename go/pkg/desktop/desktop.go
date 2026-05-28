@@ -623,6 +623,12 @@ func (s *Service) Run() core.Result {
 			if r := s.opts.Fleet.SuperviseLocalCrew(core.Background()); !r.OK {
 				core.Warn("desktop.fleet.crew_supervise", "error", r.Error())
 			}
+			// The crew's lthn-agent serve is coming up — start the Agents
+			// channel listener so the view gets CoreAgent push events
+			// (agent.blocked, …) live. Reconnects until the serve answers.
+			if a, _ := core.ServiceFor[*agents.Service](s.opts.Core, "agents"); a != nil {
+				a.StartChannels(s.opts.Core)
+			}
 		}()
 	}
 

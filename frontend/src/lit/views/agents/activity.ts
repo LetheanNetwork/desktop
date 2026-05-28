@@ -65,6 +65,7 @@ class LthnViewAgentActivity extends LitElement {
   declare rowErr: Record<string, string>;
 
   private _timer: ReturnType<typeof setInterval> | null = null;
+  private _unsubChannel: (() => void) | null = null;
 
   constructor() {
     super();
@@ -83,10 +84,23 @@ class LthnViewAgentActivity extends LitElement {
     super.connectedCallback();
     await this._refresh();
     this._timer = setInterval(() => { void this._refresh(); }, REFRESH_MS);
+    // Live updates: CoreAgent pushes agent.* channel events the moment a run
+    // changes (blocks, completes, …); the desktop relays them as
+    // "lthn:agents:channel". Refreshing on the agent.* ones makes the queue
+    // react instantly. The 5s poll stays as reconcile + fallback when the
+    // push stream is down (engine restart).
+    try {
+      const { Events } = await import("@wailsio/runtime");
+      this._unsubChannel = Events.On("lthn:agents:channel", (ev: { data?: { channel?: string } }) => {
+        const ch = ev?.data?.channel;
+        if (typeof ch === "string" && ch.startsWith("agent.")) void this._refresh();
+      });
+    } catch { /* no Wails runtime (tests) — poll-only */ }
   }
 
   disconnectedCallback() {
     if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    if (this._unsubChannel) { this._unsubChannel(); this._unsubChannel = null; }
     super.disconnectedCallback();
   }
 
@@ -238,7 +252,7 @@ class LthnViewAgentActivity extends LitElement {
       subtitle,
       w: this.w, h: this.h,
       toolbar, body,
-      footer: html`live CoreAgent state · answer a blocked run to resume it · polls every 5s`,
+      footer: html`live CoreAgent state · answer a blocked run to resume it · push events + 5s poll`,
       embedded: this.embedded,
     });
   }
