@@ -2,3 +2,8 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# Playwright E2E artifacts (sight specs) — never commit
+test-results/
+playwright-report/
+e2e/screens/
