@@ -2373,3 +2373,248 @@ describe("rail XSS regression-guards — SessionInfo-sourced fields", () => {
   });
 
 });
+
+// — ComposerGlyphController integration with chat-window. The controller
+// itself is covered by composer-glyph.controller.test.ts; here we just
+// assert the window's render helper paints the right class hook +
+// honours the null-score case + does NOT gate the send button. We
+// poke `el._glyphController.score` directly rather than driving the
+// debounce through the @input handler — the controller is mocked in
+// its own file; the window's job is wiring.
+
+describe("lthn-chat-window — composer ethics-tier glyph", () => {
+  it("renders glyph with --hollow-flattery class when score is tier-2", async () => {
+    const { host, el } = await mountWindow<HTMLElement & {
+      updateComplete: Promise<boolean>;
+      requestUpdate: () => void;
+      _glyphController: { score: unknown };
+      composerValue: string;
+    }>("lthn-chat-window");
+    el._glyphController.score = {
+      sycophancy: {
+        tier: 2,
+        label: "hollow_flattery",
+        composite: 47,
+      },
+    };
+    el.requestUpdate();
+    await el.updateComplete;
+
+    const glyph = host.querySelector(".composer-glyph");
+    expect(glyph, "glyph node renders when score is populated").not.toBeNull();
+    expect(glyph!.classList.contains("composer-glyph--hollow-flattery"))
+      .toBe(true);
+    // Tooltip carries the human-readable summary.
+    expect(glyph!.getAttribute("title")).toContain("hollow_flattery");
+    expect(glyph!.getAttribute("title")).toContain("47");
+    expect(glyph!.getAttribute("aria-label")).toContain("hollow_flattery");
+  });
+
+  it("hides glyph when controller.score is null", async () => {
+    const { host, el } = await mountWindow<HTMLElement & {
+      updateComplete: Promise<boolean>;
+      _glyphController: { score: unknown };
+    }>("lthn-chat-window");
+    // Default-mounted score is null (no @input has fired).
+    expect(el._glyphController.score).toBeNull();
+    await el.updateComplete;
+    expect(host.querySelector(".composer-glyph"), "no glyph node when score is null").toBeNull();
+  });
+
+  it("glyph does NOT disable the send button — even at tier-3 (submission)", async () => {
+    const { host, el } = await mountWindow<HTMLElement & {
+      updateComplete: Promise<boolean>;
+      requestUpdate: () => void;
+      _glyphController: { score: unknown };
+    }>("lthn-chat-window");
+    el._glyphController.score = {
+      sycophancy: {
+        tier: 3,
+        label: "submission",
+        composite: 92,
+      },
+    };
+    el.requestUpdate();
+    await el.updateComplete;
+
+    // Send button is the only <lthn-btn> carrying the up-arrow icon in
+    // the composer footer. Look it up via its icon class to avoid
+    // depending on tone="primary" (which other surfaces use too).
+    const sendIcon = host.querySelector("i.fa-arrow-up");
+    expect(sendIcon, "send button is rendered").not.toBeNull();
+    const sendBtn = sendIcon!.closest("lthn-btn");
+    expect(sendBtn, "send button wraps the icon").not.toBeNull();
+    // The button must NOT carry `disabled` attribute and must NOT be
+    // dimmed because of the glyph — `?dim` only mirrors the composer's
+    // `disabled` prop (model-not-ready), never the glyph state.
+    expect(sendBtn!.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("renders correct kebab-case suffix for each tier", async () => {
+    const { host, el } = await mountWindow<HTMLElement & {
+      updateComplete: Promise<boolean>;
+      requestUpdate: () => void;
+      _glyphController: { score: unknown };
+    }>("lthn-chat-window");
+    const cases: Array<[number, string, string]> = [
+      [0, "appropriate_empathy", "composer-glyph--appropriate-empathy"],
+      [1, "soft_agreement",      "composer-glyph--soft-agreement"],
+      [2, "hollow_flattery",     "composer-glyph--hollow-flattery"],
+      [3, "submission",          "composer-glyph--submission"],
+    ];
+    for (const [tier, label, cls] of cases) {
+      el._glyphController.score = {
+        sycophancy: { tier, label, composite: 10 + tier * 20 },
+      };
+      el.requestUpdate();
+      await el.updateComplete;
+      const glyph = host.querySelector(".composer-glyph");
+      expect(glyph, `tier ${tier} renders`).not.toBeNull();
+      expect(glyph!.classList.contains(cls), `tier ${tier} class hook`).toBe(true);
+    }
+  });
+
+  it("tooltip appends suggestion count when suggestions[] is populated", async () => {
+    const { host, el } = await mountWindow<HTMLElement & {
+      updateComplete: Promise<boolean>;
+      requestUpdate: () => void;
+      _glyphController: { score: unknown };
+    }>("lthn-chat-window");
+    el._glyphController.score = {
+      sycophancy: { tier: 1, label: "soft_agreement", composite: 22 },
+      suggestions: [
+        { type: "compliance_marker", span: [0, 4], severity: "low", note: "soft hedge" },
+        { type: "formulaic_preamble", span: [5, 12], severity: "info", note: "preamble" },
+      ],
+    };
+    el.requestUpdate();
+    await el.updateComplete;
+    const glyph = host.querySelector(".composer-glyph");
+    expect(glyph!.getAttribute("title")).toContain("2 suggestions");
+  });
+});
+
+// — ChatTurnScoreController integration with chat-window. The controller
+// itself is covered by chat-turn-score.controller.test.ts; here we just
+// assert the window's render helper paints the indicator on assistant
+// messages when a populated DiffResult is in the cache, hides it for
+// pending / null, and crucially does NOT modify the assistant
+// message rendering. We poke `el._turnScoreController.cache` directly
+// rather than firing the ScorePair pipeline — the controller is mocked
+// in its own file; the window's job is wiring.
+
+describe("lthn-chat-window — per-turn ethics indicator", () => {
+  /** Seed `liveTurns` with [user, model] so turnIndex=1 has a valid
+   *  prompt at index 0 and the indicator render path actually fires.
+   *  Mirrors the shape of the post-Sessions.Read() data the host
+   *  normally renders from. */
+  async function mountWithTurns() {
+    type WindowEl = HTMLElement & {
+      updateComplete: Promise<boolean>;
+      requestUpdate: () => void;
+      liveTurns: ChatTurn[] | null;
+      activeConversationId: string | null;
+      _turnScoreController: {
+        cache: Map<number, unknown>;
+      };
+    };
+    const { host, el } = await mountWindow<WindowEl>("lthn-chat-window");
+    // Bypass the activeConversationId === null short-circuit so
+    // _renderSurface paints liveTurns instead of the fixture.
+    el.activeConversationId = "test-conv";
+    el.liveTurns = [
+      { role: "you", text: "explain the spec" },
+      { role: "model", text: "you're absolutely right, the spec says…" },
+    ];
+    el.requestUpdate();
+    await el.updateComplete;
+    return { host, el };
+  }
+
+  it("renders turn-score indicator on assistant-message footer when score resolves", async () => {
+    const { host, el } = await mountWithTurns();
+    // Seed the cache as if a ScorePair already resolved for turn 1.
+    el._turnScoreController.cache.set(1, {
+      prompt: {
+        sycophancy: { tier: 0, label: "appropriate_empathy", composite: 4 },
+      },
+      response: {
+        sycophancy: { tier: 2, label: "hollow_flattery", composite: 58 },
+      },
+      differential: {
+        echo: 0.62,
+        verb_shift: 0.18,
+        tense_shift: 0.04,
+        noun_echo: 0.71,
+        question_flip: 0,
+        domain_shift: 0.12,
+      },
+      authority: {
+        targets: ["the spec"],
+        deference: 0.78,
+        pattern: "deference",
+      },
+    });
+    el.requestUpdate();
+    await el.updateComplete;
+
+    const indicator = host.querySelector(".turn-score");
+    expect(indicator, "indicator node renders when score is populated").not.toBeNull();
+    expect(indicator!.classList.contains("turn-score--hollow-flattery"),
+      "tier-2 class hook applied").toBe(true);
+    // Tooltip carries the human-readable summary.
+    const title = indicator!.getAttribute("title");
+    expect(title).toContain("hollow_flattery");
+    expect(title).toContain("echo 62%");
+    expect(title).toContain("authority: deference");
+    expect(indicator!.getAttribute("aria-label")).toContain("hollow_flattery");
+  });
+
+  it("hides indicator when cache slot is 'pending' or null", async () => {
+    const { host, el } = await mountWithTurns();
+    // Pending slot — render helper returns nothing.
+    el._turnScoreController.cache.set(1, "pending");
+    el.requestUpdate();
+    await el.updateComplete;
+    expect(host.querySelector(".turn-score"), "no indicator while pending").toBeNull();
+
+    // Null slot — still nothing.
+    el._turnScoreController.cache.set(1, null);
+    el.requestUpdate();
+    await el.updateComplete;
+    expect(host.querySelector(".turn-score"), "no indicator when slot is null").toBeNull();
+  });
+
+  it("does NOT modify the assistant message rendering — even at tier-3 (submission)", async () => {
+    const { host, el } = await mountWithTurns();
+    el._turnScoreController.cache.set(1, {
+      prompt: {
+        sycophancy: { tier: 0, label: "appropriate_empathy", composite: 2 },
+      },
+      response: {
+        sycophancy: { tier: 3, label: "submission", composite: 94 },
+      },
+      differential: null,
+      authority: null,
+    });
+    el.requestUpdate();
+    await el.updateComplete;
+
+    // The indicator is rendered…
+    const indicator = host.querySelector(".turn-score--submission");
+    expect(indicator, "indicator present at tier-3").not.toBeNull();
+
+    // …but the assistant message body, model name, and action buttons
+    // are ALL still in the DOM and visible. The message lands first;
+    // the dot is informational only.
+    expect(host.textContent, "model response text still rendered")
+      .toContain("you're absolutely right");
+    // The user prompt is also visible (proves the transcript wasn't
+    // collapsed / replaced by a warning panel).
+    expect(host.textContent, "user prompt still rendered")
+      .toContain("explain the spec");
+    // Copy + regenerate buttons remain — the message is interactive.
+    const copyIcon = host.querySelector("i.fa-copy");
+    expect(copyIcon, "copy affordance still present at tier-3").not.toBeNull();
+  });
+});
