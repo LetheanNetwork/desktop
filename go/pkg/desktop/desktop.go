@@ -605,6 +605,18 @@ func (s *Service) Run() core.Result {
 		// the process.
 		s.selfRefreshStop = make(chan struct{})
 		go runSelfMachineRefresh(s.opts.Fleet, s.selfRefreshStop)
+		// Bring up the local crew sidecars the self machine is capable of
+		// (inference -> lthn-mlx serve). One-shot at boot — deliberately
+		// NOT on the 10s refresh, which would kill+respawn the crew every
+		// tick. The supervisor adopts an already-running sidecar, else
+		// spawns + health-gates + respawns it in its own goroutines; it's
+		// torn down by Fleet.ServiceShutdown. Backgrounded so a slow
+		// sidecar can't stall boot.
+		go func() {
+			if r := s.opts.Fleet.SuperviseLocalCrew(core.Background()); !r.OK {
+				core.Warn("desktop.fleet.crew_supervise", "error", r.Error())
+			}
+		}()
 	}
 
 	// Compute window state path under ~/Lethean/conf/. Without this

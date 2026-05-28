@@ -23,6 +23,7 @@
 package fleet
 
 import (
+	"context"
 
 	core "dappco.re/go"
 	"dappco.re/go/store"
@@ -132,8 +133,9 @@ type Agent struct {
 // Service is the fleet domain service. Holds an open *store.DuckDB
 // against the master DB and lazily applies schema on first use.
 type Service struct {
-	mu core.RWMutex
-	db *store.DuckDB
+	mu   core.RWMutex
+	db   *store.DuckDB
+	crew *crewSupervisor // local-machine crew sidecars (see crew.go)
 }
 
 // New constructs a Service, opens the master DB at ~/Lethean/data/lthn.duckdb,
@@ -271,6 +273,45 @@ func (s *Service) Machines() core.Result {
 		return core.Fail(core.E("fleet.Machines", "rows", err))
 	}
 	return core.Ok(out)
+}
+
+// SuperviseLocalCrew spawns and supervises the crew sidecars the local
+// (is_self) machine is capable of: CapabilityInference -> lthn-mlx, and
+// (once its listen addr is wired) CapabilitySandbox -> lthn-agent. The
+// supervisor health-gates each instance and respawns it on crash; it
+// lives for the Service's lifetime and ServiceShutdown stops it.
+//
+// Idempotent — re-invoking stops the previous crew first. Clean no-op
+// when there's no is_self machine yet or it declares no crew capability,
+// so callers can fire it once the self machine is registered without
+// guarding the order.
+//
+// Usage example:
+//
+//	r := svc.SuperviseLocalCrew(context.Background())
+func (s *Service) SuperviseLocalCrew(ctx context.Context) core.Result {
+	r := s.Machines()
+	if !r.OK {
+		return r
+	}
+	machines, _ := r.Value.([]Machine)
+	var caps []string
+	for _, m := range machines {
+		if m.IsSelf {
+			caps = m.Capabilities
+			break
+		}
+	}
+	if len(caps) == 0 {
+		core.Info("fleet.SuperviseLocalCrew: no local crew to supervise (no is_self machine or no capabilities)")
+		return core.Ok(nil)
+	}
+	s.mu.Lock()
+	prev := s.crew
+	s.crew = superviseCrew(ctx, defaultCrew(), caps)
+	s.mu.Unlock()
+	prev.stop() // nil-safe — replace any prior crew
+	return core.Ok(nil)
 }
 
 // Queue returns up to `limit` in-flight agent_activity rows ordered by
@@ -541,5 +582,12 @@ func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
 
-// ServiceShutdown closes the DB when the app stops.
-func (s *Service) ServiceShutdown() core.Result { return s.Close() }
+// ServiceShutdown stops the supervised crew (if any) then closes the DB.
+func (s *Service) ServiceShutdown() core.Result {
+	s.mu.Lock()
+	crew := s.crew
+	s.crew = nil
+	s.mu.Unlock()
+	crew.stop() // nil-safe
+	return s.Close()
+}
