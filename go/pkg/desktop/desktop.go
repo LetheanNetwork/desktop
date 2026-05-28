@@ -46,6 +46,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/benchmark"
 	"dappco.re/lthn/desktop/pkg/bridge"
+	"dappco.re/lthn/desktop/pkg/calibrate"
 	"dappco.re/lthn/desktop/pkg/clbpl"
 	"dappco.re/lthn/desktop/pkg/contentshield"
 	"dappco.re/lthn/desktop/pkg/ollama"
@@ -504,6 +505,11 @@ func (s *Service) Run() core.Result {
 		// with read access to ~/Lethean/data/admin.token; JS only sees
 		// the typed verb signatures Wails generates from this struct.
 		gui.Bind(lemma.NewWailsService(lemma.AdminConfig{})),
+		// calibrate → lthn-mlx profiling CLI (discover / bench / auto-tune).
+		// Sibling to lemma: lemma is the HTTP admin client to a *running*
+		// serve; calibrate shells the one-shot profiling subcommands for
+		// the "Calibrate this machine" flow.
+		gui.Bind(calibrate.NewService(s.opts.Core)),
 		gui.Bind(clbpl.NewWailsService(clbpl.Options{})),
 		gui.Bind(r1.NewWailsService()),
 		gui.Bind(r1analytics.NewWailsService()),
