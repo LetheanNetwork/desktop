@@ -1465,6 +1465,6 @@ func selfMachineRow() fleet.Machine {
 		Port:         11434,
 		Status:       "online",
 		IsSelf:       true,
-		Capabilities: []string{fleet.CapabilityInference},
+		Capabilities: []string{fleet.CapabilityInference, fleet.CapabilitySandbox},
 	}
 }

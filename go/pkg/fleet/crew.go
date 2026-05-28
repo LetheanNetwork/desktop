@@ -43,7 +43,8 @@ type crewMember struct {
 	Capability string   // machine capability that enables this member
 	Binary     string   // sidecar binary name (resolved on disk)
 	Serve      []string // serve subcommand + static args; AddrFlag :PORT is appended
-	AddrFlag   string   // flag the binary takes for its listen address
+	AddrFlag   string   // CLI flag for the listen address (lthn-mlx --addr :PORT)
+	AddrEnv    string   // OR env var for the listen address (lthn-agent MCP_HTTP_ADDR=127.0.0.1:PORT) — exclusive with AddrFlag
 	ModelFlag  string   // if set, the binary requires ModelFlag <path>; the
 	//             member is skipped until a model path is resolvable
 	BasePort int // instance i listens on BasePort + i
@@ -51,9 +52,11 @@ type crewMember struct {
 }
 
 // defaultCrew is the darwin crew. lthn-mlx is the inference sidecar
-// (--addr defaults to :11434, mirroring Ollama). lthn-agent will join as
-// the sandbox member once core-agent serve's listen flag is traced
-// through coremcp; the machinery below already handles multiple members.
+// (--addr :PORT, mirroring Ollama's 11434). lthn-agent is the sandbox
+// sidecar — CoreAgent's orchestration engine, whose listen address goes
+// via MCP_HTTP_ADDR (env, not a flag) and which serves the Streamable
+// HTTP MCP at /mcp + the /v1/tools BridgeToAPI on :9101 (what the
+// desktop's pkg/agents drives). The machinery handles both members.
 func defaultCrew() []crewMember {
 	return []crewMember{
 		{
@@ -63,6 +66,14 @@ func defaultCrew() []crewMember {
 			AddrFlag:   "--addr",
 			ModelFlag:  "--model", // serve requires a model; skipped until one resolves
 			BasePort:   11434,
+			Count:      1,
+		},
+		{
+			Capability: CapabilitySandbox,
+			Binary:     "lthn-agent",
+			Serve:      []string{"serve"},
+			AddrEnv:    "MCP_HTTP_ADDR",
+			BasePort:   9101,
 			Count:      1,
 		},
 	}
@@ -134,6 +145,27 @@ func superviseCrew(ctx context.Context, crew []crewMember, capabilities []string
 	return sup
 }
 
+// spawnMember starts one crew-member process on the given port. The listen
+// address is passed via AddrFlag (a CLI flag — lthn-mlx --addr :PORT) or
+// AddrEnv (an env var — lthn-agent MCP_HTTP_ADDR=127.0.0.1:PORT); the two
+// are exclusive. Env spawns go through go-process StartWithOptions (which
+// the boot-time process.Init wired); flag spawns keep the plain Start path.
+func spawnMember(ctx context.Context, m crewMember, port int) core.Result {
+	args := append([]string(nil), m.Serve...)
+	if m.AddrFlag != "" {
+		args = append(args, m.AddrFlag, core.Sprintf(":%d", port))
+	}
+	bin := resolveCrewBinary(m.Binary)
+	if m.AddrEnv == "" {
+		return process.Start(ctx, bin, args...)
+	}
+	return process.StartWithOptions(ctx, process.RunOptions{
+		Command: bin,
+		Args:    args,
+		Env:     []string{core.Sprintf("%s=127.0.0.1:%d", m.AddrEnv, port)},
+	})
+}
+
 // launch resolves the binary, spawns one instance, health-gates it, and
 // starts its respawn watcher.
 func (sup *crewSupervisor) launch(ctx context.Context, m crewMember, idx int) {
@@ -146,10 +178,7 @@ func (sup *crewSupervisor) launch(ctx context.Context, m crewMember, idx int) {
 		core.Info("fleet.crew: port already serving — adopting, not supervising", "binary", m.Binary, "addr", addr)
 		return
 	}
-	bin := resolveCrewBinary(m.Binary)
-	args := append(append([]string(nil), m.Serve...), m.AddrFlag, core.Sprintf(":%d", port))
-
-	startR := process.Start(ctx, bin, args...)
+	startR := spawnMember(ctx, m, port)
 	if !startR.OK {
 		core.Warn("fleet.crew: spawn failed", "binary", m.Binary, "addr", addr, "err", startR.Error())
 		return
@@ -199,8 +228,7 @@ func (sup *crewSupervisor) superviseInstance(ctx context.Context, m crewMember, 
 		}
 
 		port := m.BasePort + idx
-		args := append(append([]string(nil), m.Serve...), m.AddrFlag, core.Sprintf(":%d", port))
-		startR := process.Start(ctx, resolveCrewBinary(m.Binary), args...)
+		startR := spawnMember(ctx, m, port)
 		if !startR.OK {
 			core.Warn("fleet.crew: respawn failed", "binary", m.Binary, "err", startR.Error())
 			continue
