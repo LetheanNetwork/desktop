@@ -357,6 +357,18 @@ func newAppCore() *core.Core {
 		core.Print(core.Stderr(), "lthn: audit RegisterService failed: %s\n", r.Error())
 	}
 
+	// go-process global manager init — crew supervision (pkg/fleet) and
+	// any other package-level process.Start caller use the default global
+	// service, which is distinct from the named "process" service
+	// registered above (that one backs the lthn-process CLI verbs +
+	// /api/process). Promoted ahead of c.ServiceStartup, like audit above,
+	// so a service that spawns a sidecar from its OnStart hook finds the
+	// manager live. Idempotent via sync.Once — safe though every lthn verb
+	// calls newAppCore.
+	if r := process.Init(c); !r.OK {
+		core.Print(core.Stderr(), "lthn: process.Init failed: %s\n", r.Error())
+	}
+
 	if r := c.ServiceStartup(core.Background(), nil); !r.OK {
 		core.Print(core.Stderr(), "lthn: startup failed: %s\n", r.Error())
 		return nil
