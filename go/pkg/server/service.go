@@ -489,7 +489,11 @@ func NewService(opts Options) *Service {
 		// transports on the same localhost origins.
 		//
 		// The Wails runtime injects its JS via the native WebView runtime,
-		// not via <script> tags — webview_eval bypass is unaffected by CSP.
+		// not via <script> tags. The bridge's webview_eval, though, runs a
+		// runtime code-eval INSIDE the page context, which script-src
+		// 'self' refuses — so dev builds (LTHN_DEV=1) relax script-src via
+		// cspScriptSrc to enable the drive-surface. Production stays
+		// hardened. See handlers.go cspScriptSrc.
 		coreapi.WithMiddleware(cspMiddleware()),
 	}
 	// Mantis #1458 — explicit 404 for webview-only prefixes on the

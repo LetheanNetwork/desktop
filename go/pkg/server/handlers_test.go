@@ -105,7 +105,7 @@ func TestServer_CSPFrameSrc_RejectsWildcardPort_Bad(t *testing.T) {
 	// duplicate entries. Validates the silent-drop + literal-only
 	// posture from §3.3 (NEVER `frame-src *`, NEVER
 	// `http://127.0.0.1:*`).
-	csp := BuildCSPPolicy(func() []int { return []int{0, -1, 4096, 4096} })
+	csp := BuildCSPPolicy(func() []int { return []int{0, -1, 4096, 4096} }, false)
 	if core.Contains(csp, "frame-src *") || core.Contains(csp, "127.0.0.1:*") {
 		t.Fatalf("CSP must never emit a wildcard frame-src; got: %s", csp)
 	}
@@ -121,5 +121,38 @@ func TestServer_CSPFrameSrc_RejectsWildcardPort_Bad(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("CSP must deduplicate ports; expected 1 literal, got %d in: %s", count, csp)
+	}
+}
+
+func TestBuildCSPPolicy_DevGatesUnsafeEval(t *testing.T) {
+	// The security invariant: the relaxed script-src keyword is dev-only.
+	// Production must stay hardened; dev gets the bridge drive-surface.
+	// Passing dev explicitly keeps this deterministic regardless of the
+	// LTHN_DEV env the test process happens to run under.
+	noPorts := func() []int { return nil }
+	const relaxed = "unsafe-eval"
+
+	prod := BuildCSPPolicy(noPorts, false)
+	if !core.Contains(prod, "script-src 'self'") {
+		t.Fatalf("prod CSP must restrict scripts to 'self'; got: %s", prod)
+	}
+	if core.Contains(prod, relaxed) {
+		t.Fatalf("prod CSP must NOT permit %s; got: %s", relaxed, prod)
+	}
+
+	dev := BuildCSPPolicy(noPorts, true)
+	if !core.Contains(dev, "script-src 'self' '"+relaxed+"'") {
+		t.Fatalf("dev CSP must relax script-src for the bridge; got: %s", dev)
+	}
+	// The relaxed keyword must appear exactly once — inside script-src,
+	// nowhere else (no leak into connect-src / style-src / frame-src).
+	count := 0
+	for i := 0; i+len(relaxed) <= len(dev); i++ {
+		if dev[i:i+len(relaxed)] == relaxed {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("%s must appear exactly once (script-src only); got %d in: %s", relaxed, count, dev)
 	}
 }

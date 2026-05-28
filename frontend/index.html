@@ -45,25 +45,45 @@
     #app { height: 100%; overscroll-behavior: none; }
   </style>
   <!-- Bridge shim — forwards console + window.error + unhandledrejection
-       events to the local MCP bridge via the Wails Events bus
-       ("lthn:console" / "lthn:error"). The bridge subscribes to these
-       events on startup via core/gui's CustomEventBinder; entries
-       land in the bridge's ring buffer for webview_console + webview_
-       errors MCP tool reads. Pre-A5 this used a POST to the bridge's
-       /internal/console + /internal/error HTTP shims; A5 retired
-       both shims in favour of the same event-bus path TaskEvalJS
-       uses for replies. Silent when no Wails runtime is loaded (e.g.
-       canvas-preview); events fired before window.wails.Events is
-       ready are dropped. See pkg/bridge/. -->
-  <script>
+       to the local MCP bridge via the Wails Events bus ("lthn:console" /
+       "lthn:error"), and publishes window.__lthnEmit so the bridge's
+       ExecJS-injected eval wrap (core/gui taskEvalJS) can emit its
+       "lthn:eval-reply" through the SAME resolved emitter. The bridge
+       subscribes to all three on the Go side via core/gui's
+       CustomEventBinder / BindEvalReply.
+
+       MUST be type="module": "@wailsio/runtime" is a bare specifier
+       that only resolves through vite's module transform (exactly how
+       main.ts reaches it). A classic <script>'s runtime import keeps
+       the literal specifier, the browser can't resolve it, and the
+       emitter stays null — which silently killed console, error AND
+       eval capture before this fix. Events emitted before the runtime
+       import settles are queued and flushed on resolve. Silent (no
+       throw, no flush) when no runtime is present — canvas-preview /
+       unit tests. See pkg/bridge/ + core/gui pkg/window. -->
+  <script type="module">
     (function () {
+      // emitter is null until the @wailsio/runtime import settles; emit
+      // queues until then so the earliest console lines / the shim-ready
+      // diagnostic aren't lost to the boot race.
+      var emitter = null;
+      var queue = [];
       var emit = function (name, payload) {
-        try {
-          if (window.wails && window.wails.Events && typeof window.wails.Events.Emit === 'function') {
-            window.wails.Events.Emit({ name: name, data: payload });
-          }
-        } catch (_) { /* runtime not ready / events sink unavailable */ }
+        if (emitter) { try { emitter(name, payload); } catch (_) {} return; }
+        if (queue.length < 256) queue.push([name, payload]);
       };
+      // Published for the bridge eval wrap — an ExecJS classic script
+      // can't import bare specifiers, so it reuses this emitter.
+      window.__lthnEmit = emit;
+      import('@wailsio/runtime').then(function (rt) {
+        if (rt && rt.Events && typeof rt.Events.Emit === 'function') {
+          emitter = function (n, p) { rt.Events.Emit(n, p); };
+          var q = queue; queue = [];
+          for (var i = 0; i < q.length; i++) {
+            try { emitter(q[i][0], q[i][1]); } catch (_) {}
+          }
+        }
+      }).catch(function () { /* no Wails runtime (canvas-preview / tests) — stay silent */ });
       var fmt = function (args) {
         return Array.prototype.map.call(args, function (a) {
           if (a === null || a === undefined) return String(a);
@@ -108,6 +128,15 @@
           stack: (reason && reason.stack) || '',
           at: new Date().toISOString(),
         });
+      });
+      // Diagnostic — emitted immediately; queues until the runtime
+      // import settles, then flushes. Its arrival in the bridge console
+      // buffer is the end-to-end proof that JS→Go emit works.
+      emit('lthn:console', {
+        level: 'info',
+        message: 'lthn shim ready (module emit path)',
+        source: 'shim',
+        at: new Date().toISOString(),
       });
     })();
   </script>

@@ -320,7 +320,14 @@ func writeGinError(c *gin.Context, status int, msg, kind string) {
 //
 // Directive rationale:
 //   - default-src 'self'       — deny everything not explicitly listed.
-//   - script-src 'self'        — no inline scripts, no eval, no remote JS.
+//   - script-src — 'self' in production (no inline, no eval, no remote
+//     JS); dev builds (LTHN_DEV=1) add 'unsafe-eval' so the bridge's
+//     webview_eval drive-surface (click / query / navigate all ride
+//     eval) works. The lthn WebView is a native OS render pane
+//     (WKWebView / WebView2), not an internet-facing origin, and the
+//     bridge binds loopback-only — so dev eval is a local-trust
+//     affordance, not a web-XSS surface. Injected by BuildCSPPolicy via
+//     cspScriptSrc, NOT baked into cspPolicyBase below.
 //   - style-src 'self' 'unsafe-inline' — inline <style> allowed for Lit
 //     shadow-root styles; nonce-based alternative deferred (see service.go
 //     cspMiddleware comment for the tradeoff).
@@ -334,7 +341,9 @@ func writeGinError(c *gin.Context, status int, msg, kind string) {
 //     wildcards (Cerberus CRIT-1 — frame-src 'none' http://127.0.0.1:<p1>
 //     http://127.0.0.1:<p2>). Empty registry → frame-src 'none'.
 const cspPolicyBase = "default-src 'self'; " +
-	"script-src 'self'; " +
+	// script-src is injected separately (dev-aware) by BuildCSPPolicy —
+	// see cspScriptSrc. Keeping it out of this const is what lets the
+	// directive flip on LTHN_DEV without duplicating the whole policy.
 	"style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data: blob:; " +
 	"connect-src 'self' " +
@@ -382,16 +391,34 @@ func cspMiddleware() gin.HandlerFunc {
 // explicit port source. Used by tests to assert frame-src
 // enumeration without touching the package-global ViewRegistry.
 func cspMiddlewareWithSource(source PluginPortSource) gin.HandlerFunc {
+	// Read the dev flag once at construction — LTHN_DEV doesn't change
+	// during a run, so there's no need to re-probe per request.
+	dev := core.Getenv("LTHN_DEV") == "1"
 	return func(c *gin.Context) {
-		c.Header(cspHeader, BuildCSPPolicy(source))
+		c.Header(cspHeader, BuildCSPPolicy(source, dev))
 		c.Next()
 	}
 }
 
+// cspScriptSrc returns the script-src directive. Production (dev=false)
+// is the hardened 'self' — no inline scripts, no remote JS, no runtime
+// code evaluation. Dev (dev=true, from LTHN_DEV=1) adds the relaxed
+// keyword so the bridge's webview drive-surface can run injected probes
+// that 'self' alone refuses. The relaxed form MUST stay dev-only — the
+// BuildCSPPolicy tests lock that invariant.
+func cspScriptSrc(dev bool) string {
+	if dev {
+		return "script-src 'self' 'unsafe-eval'"
+	}
+	return "script-src 'self'"
+}
+
 // BuildCSPPolicy composes the full CSP value: the static
-// cspPolicyBase plus a frame-src directive enumerating the live
-// iframe loopback ports. Exported so tests can assert the exact
-// rendered policy string without spinning a gin engine.
+// cspPolicyBase, the dev-aware script-src directive (cspScriptSrc(dev)
+// — dev adds 'unsafe-eval'), plus a frame-src directive enumerating the
+// live iframe loopback ports. Exported (with dev passed explicitly, not
+// read from the env) so tests can assert both the hardened production
+// policy and the relaxed dev policy without env manipulation.
 //
 // Behaviour per RFC §3.3:
 //   - empty port list → `frame-src 'none'`
@@ -399,13 +426,15 @@ func cspMiddlewareWithSource(source PluginPortSource) gin.HandlerFunc {
 //   - NEVER wildcards (no `frame-src *`, no `http://127.0.0.1:*`)
 //   - port 0 entries are silently dropped (defensive — zero is the
 //     lit-kind sentinel; should never reach this path)
-func BuildCSPPolicy(source PluginPortSource) string {
+func BuildCSPPolicy(source PluginPortSource, dev bool) string {
 	var ports []int
 	if source != nil {
 		ports = source()
 	}
 	b := core.NewBuilder()
 	b.WriteString(cspPolicyBase)
+	b.WriteString("; ")
+	b.WriteString(cspScriptSrc(dev))
 	b.WriteString("; frame-src 'none'")
 	seen := map[int]bool{}
 	for _, p := range ports {
