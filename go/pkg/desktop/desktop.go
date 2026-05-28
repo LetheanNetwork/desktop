@@ -42,6 +42,7 @@ import (
 	coreI18n "dappco.re/go/i18n"
 	lthn "dappco.re/lthn/desktop"
 	"dappco.re/lthn/desktop/pkg/account"
+	"dappco.re/lthn/desktop/pkg/agents"
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/benchmark"
@@ -389,6 +390,11 @@ func (s *Service) Run() core.Result {
 	// reach it when wiring /v1/ml-lab/* HTTP routes. Per
 	// plans/project/lthn/desktop/RFC.ml-lab.md §3.
 	labSvc, _ := core.ServiceFor[*lab.Service](s.opts.Core, "lab")
+	// agents — CoreAgent (lthn-agent) client. Core-registered in
+	// cmd/lthn/app.go via core.WithName("agents", agents.Register); looked
+	// up + Wails-bound here so the binding generator emits @desktop/agents
+	// and the Agents view's Dispatch panel can call Agents.Dispatch().
+	agentsSvc, _ := core.ServiceFor[*agents.Service](s.opts.Core, "agents")
 	// Bridge opencode-serve's /global/event SSE stream → Wails event
 	// bus. The opencode side runs the SSE goroutine + parses; each
 	// event JSON is forwarded here, where emitCoreEvent ferries it
@@ -560,6 +566,7 @@ func (s *Service) Run() core.Result {
 		gui.Bind(deploysSvc),
 		gui.Bind(serverkeySvc),
 		gui.Bind(accountSvc),
+		gui.Bind(agentsSvc),
 		gui.Bind(s.opts.Fleet),
 		gui.Bind(s.opts.Keys),
 		gui.Bind(tools.NewWailsService(s.opts.Core)),

@@ -10,9 +10,11 @@
 //
 // Elements registered:
 //   <lthn-view-agent-activity>           — live dispatch feed, wired to Fleet.Activity()
+//   <lthn-view-agent-dispatch>           — launch a run, wired to Agents.Dispatch()
 //   <lthn-view-repos|issues|prs|deploys> — repo context, reused from the former Coding view
 
 import "./activity";
+import "./dispatch";
 
 // Pulled-in Coding panels — repos/issues/prs/deploys are repo context
 // (what the fleet works on), reused here rather than discarded.
