@@ -35,6 +35,15 @@ const surface = params.get("surface") || "canvas";
 // Per Cerberus #1465 — the gate's bootstrap-token lives in closure
 // scope inside the element; this mount doesn't change that property.
 (() => {
+  // Guest by default — the user account is a per-user choice; the server
+  // secures its own connections regardless. Only run the boot-probe gate
+  // and raise the 401 overlay when the user has opted into requiring
+  // auth via Settings. Mirror of <lthn-app-shell>'s AUTH_REQUIRE_KEY
+  // ("lthn.auth.require"); the Settings panel writes both.
+  const authRequired = (() => {
+    try { return localStorage.getItem("lthn.auth.require") === "1"; }
+    catch { return false; }
+  })();
   let overlay: HTMLElement | null = null;
   // mount() accepts an optional options bag so the boot-probe error
   // path can pass through a headline + framed body — the gate's
@@ -77,6 +86,10 @@ const surface = params.get("surface") || "canvas";
     if (overlay) { overlay.remove(); overlay = null; }
   };
   window.addEventListener("lthn:auth:401", (ev: Event) => {
+    // Guest mode (default) — an auth-tier route 401'd, but the user
+    // hasn't opted into an account. Let the surface degrade to its empty
+    // state instead of covering it with the gate.
+    if (!authRequired) return;
     const detail = (ev as CustomEvent<{ requestId?: string }>).detail;
     // Accidental 401 (a fetch tripped the gate) — dismissable so the
     // gate shows a Back button. Boot-probe mounts (setup / unreachable)
@@ -99,7 +112,10 @@ const surface = params.get("surface") || "canvas";
   // structured console.error breadcrumb. The previous silent-degrade
   // (`catch { /* binding missing → degrade silently */ }`) left the
   // underlying surface unprotected with NO visible signal.
-  void runBootProbe(mount);
+  //
+  // Guest by default — the boot-probe only runs (and can mount the setup
+  // gate) once the user has opted into requiring auth.
+  if (authRequired) void runBootProbe(mount);
 })();
 
 // Security note — innerHTML writes below (Cerberus Mantis #1422, 2026-05-16).

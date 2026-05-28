@@ -619,9 +619,9 @@ describe("lthn-app-shell — cross-view ⌘P palette", () => {
     el.paletteQuery = "settings";
     await el.updateComplete;
     const rows = host.querySelectorAll(".lthn-palette-item");
-    // chat/admin/planning/coding/marketing/operations/sales/office —
-    // every view exposes a Settings entry.
-    expect(rows.length).toBe(8);
+    // chat/admin/ml-lab/planning/coding/marketing/operations/sales/
+    // office — every view exposes a Settings entry.
+    expect(rows.length).toBe(9);
     expect(host.textContent ?? "").toContain("Chat · Settings");
     expect(host.textContent ?? "").toContain("Admin · Settings");
     expect(host.textContent ?? "").toContain("Operations · Settings");
@@ -674,9 +674,9 @@ describe("lthn-app-shell — ⌘1..⌘7 view shortcuts", () => {
     expect(el.view).toBe("admin");
   });
 
-  it("⌘3..⌘8 cycle through planning/coding/marketing/operations/sales/office", async () => {
+  it("⌘3..⌘8 cycle through ml-lab/planning/coding/marketing/operations/sales", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell");
-    const expected = ["planning", "coding", "marketing", "operations", "sales", "office"];
+    const expected = ["ml-lab", "planning", "coding", "marketing", "operations", "sales"];
     for (let i = 0; i < expected.length; i++) {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: String(i + 3), metaKey: true, bubbles: true }));
       await el.updateComplete;
@@ -688,7 +688,7 @@ describe("lthn-app-shell — ⌘1..⌘7 view shortcuts", () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell");
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "3", ctrlKey: true, bubbles: true }));
     await el.updateComplete;
-    expect(el.view).toBe("planning");
+    expect(el.view).toBe("ml-lab");
   });
 
   it("⌘9 / ⌘0 are ignored (out of range)", async () => {
@@ -756,18 +756,18 @@ describe("lthn-app-shell — ⌘⇧[ / ⌘⇧] view cycling", () => {
     updateComplete: Promise<boolean>;
   };
 
-  it("⌘⇧] advances to the next view (admin → planning)", async () => {
+  it("⌘⇧] advances to the next view (admin → ml-lab)", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "admin" } });
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "]", metaKey: true, shiftKey: true, bubbles: true }));
     await el.updateComplete;
-    expect(el.view).toBe("planning");
+    expect(el.view).toBe("ml-lab");
   });
 
-  it("⌘⇧[ moves to the previous view (planning → admin)", async () => {
+  it("⌘⇧[ moves to the previous view (planning → ml-lab)", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "planning" } });
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "[", metaKey: true, shiftKey: true, bubbles: true }));
     await el.updateComplete;
-    expect(el.view).toBe("admin");
+    expect(el.view).toBe("ml-lab");
   });
 
   it("⌘⇧] wraps from the last view (office → chat)", async () => {
@@ -788,7 +788,7 @@ describe("lthn-app-shell — ⌘⇧[ / ⌘⇧] view cycling", () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "admin" } });
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "]", ctrlKey: true, shiftKey: true, bubbles: true }));
     await el.updateComplete;
-    expect(el.view).toBe("planning");
+    expect(el.view).toBe("ml-lab");
   });
 
   it("⌘] without shift is ignored", async () => {
@@ -811,7 +811,7 @@ describe("lthn-app-shell — ⌘⇧[ / ⌘⇧] view cycling", () => {
 
   it("five forward cycles visit every view in order", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "admin" } });
-    const expected = ["planning", "coding", "marketing", "operations", "sales"];
+    const expected = ["ml-lab", "planning", "coding", "marketing", "operations"];
     for (const want of expected) {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "]", metaKey: true, shiftKey: true, bubbles: true }));
       await el.updateComplete;
@@ -830,6 +830,7 @@ describe("lthn-app-shell — auth-gate mount (Stage C)", () => {
     active: string;
     _authState: "setup" | "auth" | "error" | "ok";
     _authRequestId: string;
+    _authRequired: boolean;
     updateComplete: Promise<boolean>;
   };
 
@@ -853,8 +854,10 @@ describe("lthn-app-shell — auth-gate mount (Stage C)", () => {
     expect(gate?.hasAttribute("embedded")).toBe(true);
   });
 
-  it("lthn:auth:401 event flips _authState to error + captures requestId", async () => {
+  it("lthn:auth:401 event flips _authState to error + captures requestId (require-auth mode)", async () => {
     const { el, host } = await mountWindow<ShellWithAuth>("lthn-app-shell");
+    // The user opted into requiring their account — a 401 raises the gate.
+    el._authRequired = true;
     expect(el._authState).toBe("ok");
     window.dispatchEvent(new CustomEvent("lthn:auth:401", {
       detail: { requestId: "req-from-event-abc" },
@@ -863,6 +866,20 @@ describe("lthn-app-shell — auth-gate mount (Stage C)", () => {
     expect(el._authState).toBe("error");
     expect(el._authRequestId).toBe("req-from-event-abc");
     expect(host.querySelector("lthn-auth-gate")).not.toBeNull();
+  });
+
+  it("guest mode (default): lthn:auth:401 does NOT raise the gate", async () => {
+    const { el, host } = await mountWindow<ShellWithAuth>("lthn-app-shell");
+    // Default is guest — an account is the user's choice, so an auth-tier
+    // 401 lets the pane degrade rather than covering the app with the gate.
+    expect(el._authRequired).toBe(false);
+    expect(el._authState).toBe("ok");
+    window.dispatchEvent(new CustomEvent("lthn:auth:401", {
+      detail: { requestId: "req-guest-ignored" },
+    }));
+    await el.updateComplete;
+    expect(el._authState).toBe("ok");
+    expect(host.querySelector("lthn-auth-gate")).toBeNull();
   });
 
   it("lthn:auth:ok event flips _authState back to ok (gate unmounts)", async () => {
@@ -891,13 +908,18 @@ describe("lthn-app-shell — Sign-Out UI wire", () => {
   // (which is the 401-fallback surface).
   type ShellWithSignOut = HTMLElement & {
     _authState: "setup" | "auth" | "error" | "ok";
+    _authRequired: boolean;
     _onSignOut: () => Promise<void>;
     updateComplete: Promise<boolean>;
   };
 
   it("TestAppShell_SignOutButtonVisibleWhenAuthOk_Good — button renders only while signed in", async () => {
     const { el, host } = await mountWindow<ShellWithSignOut>("lthn-app-shell");
-    // Default state is "ok" — button visible.
+    // Sign-out is meaningful only when the user opted into requiring auth;
+    // in guest mode there's no session to end so the button stays hidden.
+    el._authRequired = true;
+    await el.updateComplete;
+    // State is "ok" + auth required — button visible.
     expect(el._authState).toBe("ok");
     const button = host.querySelector('[data-testid="lthn-app-shell-sign-out"]');
     expect(button).not.toBeNull();
@@ -935,6 +957,7 @@ describe("lthn-app-shell — Sign-Out UI wire", () => {
 
     try {
       const { el, host } = await mountWindow<ShellWithSignOut>("lthn-app-shell");
+      el._authRequired = true;
       el._authState = "ok";
       await el.updateComplete;
 
@@ -1052,6 +1075,7 @@ describe("lthn-app-shell — Sign-Out UI wire", () => {
 describe("lthn-app-shell — Stage D: boot-time _probeAuthState", () => {
   type ShellWithAuth = HTMLElement & {
     _authState: "ok" | "setup" | "auth" | "error";
+    _authRequired: boolean;
     _probeAuthState: () => Promise<void>;
     updateComplete: Promise<boolean>;
   };
@@ -1059,6 +1083,7 @@ describe("lthn-app-shell — Stage D: boot-time _probeAuthState", () => {
   it("_probeAuthState sets state=setup when backend reports no account", async () => {
     const { el } = await mountWindow<ShellWithAuth>("lthn-app-shell");
     el._authState = "ok"; // reset to baseline
+    el._authRequired = true; // the probe only gates in require-auth mode
     // Mount-time has already run _probeAuthState once; re-run with a
     // direct mock to drive the no-account branch deterministically.
     (ServerKeyAccountStatus as unknown as { mockResolvedValueOnce: (v: unknown) => void })
@@ -1070,6 +1095,7 @@ describe("lthn-app-shell — Stage D: boot-time _probeAuthState", () => {
   it("_probeAuthState keeps state=ok when backend reports account exists", async () => {
     const { el } = await mountWindow<ShellWithAuth>("lthn-app-shell");
     el._authState = "ok";
+    el._authRequired = true;
     (ServerKeyAccountStatus as unknown as { mockResolvedValueOnce: (v: unknown) => void })
       .mockResolvedValueOnce({ OK: true, Value: { has_user_account: true } });
     await el._probeAuthState();
@@ -1079,6 +1105,7 @@ describe("lthn-app-shell — Stage D: boot-time _probeAuthState", () => {
   it("_probeAuthState degrades to ok when backend rejects", async () => {
     const { el } = await mountWindow<ShellWithAuth>("lthn-app-shell");
     el._authState = "ok";
+    el._authRequired = true;
     (ServerKeyAccountStatus as unknown as { mockRejectedValueOnce: (v: unknown) => void })
       .mockRejectedValueOnce(new Error("no binding"));
     await el._probeAuthState();
@@ -1088,6 +1115,7 @@ describe("lthn-app-shell — Stage D: boot-time _probeAuthState", () => {
   it("_probeAuthState keeps state=ok when r.OK is false", async () => {
     const { el } = await mountWindow<ShellWithAuth>("lthn-app-shell");
     el._authState = "ok";
+    el._authRequired = true;
     (ServerKeyAccountStatus as unknown as { mockResolvedValueOnce: (v: unknown) => void })
       .mockResolvedValueOnce({ OK: false, Value: undefined });
     await el._probeAuthState();

@@ -315,6 +315,19 @@ const VIEWS: ViewDef[] = [
     ],
   },
   {
+    // ML Lab — the <lthn-view-ml-lab> workbench mounts whole. Its own
+    // toolbar tabs (Influx/DuckDB/Models/LoRA), sidebar (Models/Runs/
+    // Saved) and ASK box are internal orchestration, so the view needs
+    // a single surface entry rather than one rail item per tab — the
+    // shell's shared selection would be lost if the tabs were split out.
+    id: "ml-lab", label: "ML Lab", icon: "fa-flask-vial",
+    blurb: "Models, runs, LoRA adapters. The workbench for your training data.",
+    nav: [
+      { id: "workbench", label: "Workbench", icon: "fa-flask-vial", tag: "lthn-view-ml-lab",     group: "primary" },
+      { id: "settings",  label: "Settings",  icon: "fa-sliders",    tag: "lthn-settings-window", group: "bottom" },
+    ],
+  },
+  {
     id: "planning", label: "Planning", icon: "fa-list-check",
     blurb: "Where work waits. Roadmap, backlog, sprints, retros.",
     nav: [
@@ -425,6 +438,7 @@ class LthnAppShell extends LitElement {
     _authState:   { state: true },
     _authRequestId: { state: true },
     _authDismissable: { state: true },
+    _authRequired: { state: true },
     t:         { state: true },
   };
   /** Active view id — drives the side-nav contents + status-bar
@@ -481,6 +495,13 @@ class LthnAppShell extends LitElement {
    *  successful unlock). Keeps Back from becoming an auth bypass: a
    *  deliberate sign-out / first-run never offers it. */
   declare _authDismissable: boolean;
+  /** Whether the user has opted into requiring their LetheanAccount to
+   *  use the app. Default false — the app loads as guest. A user
+   *  account is a per-user choice; the server secures its own
+   *  connections regardless. When false the boot probe and 401 handler
+   *  never raise the gate; the Settings panel flips this (persisted to
+   *  AUTH_REQUIRE_KEY, live via "lthn:auth:require-changed"). */
+  declare _authRequired: boolean;
   /** The pane that was active immediately before the current one —
    *  captured in _select. Lets the Back button on an accidental-401
    *  gate return the user to where they were instead of the pane that
@@ -518,6 +539,14 @@ class LthnAppShell extends LitElement {
    *  so an open shell reacts without reload. */
   private static readonly MENU_LINKS_KEY  = "lthn.menu.links";
   private static readonly MENU_LAYOUT_KEY = "lthn.menu.layout";
+
+  /** localStorage key for the "require my account" preference. Absent
+   *  or "0" → guest mode (default): the app loads without a Lethean
+   *  account and auth-tier panes degrade gracefully. "1" → the user
+   *  opted in, so the boot probe enforces setup and a 401 raises the
+   *  re-auth gate. The Settings panel writes this and emits
+   *  "lthn:auth:require-changed" so an open shell reacts without reload. */
+  private static readonly AUTH_REQUIRE_KEY = "lthn.auth.require";
 
   /** Pending mouseleave-debounce timer for Hover Open mode — gives
    *  the cursor 300ms grace to re-enter before the rail collapses. */
@@ -572,6 +601,12 @@ class LthnAppShell extends LitElement {
     this._authState     = "ok";
     this._authRequestId = "";
     this._authDismissable = false;
+    // Guest by default — only raise the gate when the user has opted
+    // into requiring their account (persisted AUTH_REQUIRE_KEY).
+    this._authRequired = (() => {
+      try { return localStorage.getItem(LthnAppShell.AUTH_REQUIRE_KEY) === "1"; }
+      catch { return false; }
+    })();
     this.running = true;
     this.model = "gemma-4-e2b";
     this.tps = "47.2";
@@ -601,6 +636,12 @@ class LthnAppShell extends LitElement {
    *  "error" so the next render mounts <lthn-auth-gate state="error">
    *  in place of the normal body pane. */
   private _onAuth401 = (ev: Event) => {
+    // Guest mode (default) — a LetheanAccount is the user's choice, not
+    // a wall. Auth-tier routes 401 and their panes fall back to empty
+    // states; we don't cover the app with the gate. The user opts into
+    // auth via Settings (AUTH_REQUIRE_KEY), which is when a 401 means
+    // "your session lapsed, re-authenticate".
+    if (!this._authRequired) return;
     const detail = (ev as CustomEvent<{ requestId?: string }>).detail;
     if (detail && typeof detail.requestId === "string") {
       this._authRequestId = detail.requestId;
@@ -649,6 +690,10 @@ class LthnAppShell extends LitElement {
    *    transitions ("auth" gate) ship in a later sweep alongside
    *    LetheanAccount unlock wiring. */
   async _probeAuthState(): Promise<void> {
+    // Guest by default — the account is the user's choice, so a missing
+    // LetheanAccount is not a wall. Only probe-and-gate when the user
+    // has opted into requiring auth via Settings (AUTH_REQUIRE_KEY).
+    if (!this._authRequired) return;
     try {
       const svc = await import("@desktop/serverkey/service").catch(() => null);
       if (!svc || typeof (svc as { AccountStatus?: unknown }).AccountStatus !== "function") {
@@ -922,6 +967,26 @@ class LthnAppShell extends LitElement {
       }
     });
 
+    // Subscribe to "lthn:auth:require-changed" — emitted by the Settings
+    // panel when the user toggles "require my account". Apply live:
+    // turning it ON re-probes (may raise the setup gate if no account);
+    // turning it OFF drops any standing gate back to guest. ev.data is
+    // { required: boolean }.
+    this._unsubAuthRequire = Events.On("lthn:auth:require-changed", (ev) => {
+      const data = ev?.data as { required?: boolean } | undefined;
+      const required = !!data?.required;
+      this._authRequired = required;
+      try { localStorage.setItem(LthnAppShell.AUTH_REQUIRE_KEY, required ? "1" : "0"); }
+      catch { /* storage unavailable */ }
+      if (required) {
+        void this._probeAuthState();
+      } else if (this._authState !== "ok") {
+        this._authState = "ok";
+        this._authRequestId = "";
+        this._authDismissable = false;
+      }
+    });
+
     // Status-bar live data — same sources chat-window, tray, and
     // Settings → About all bind against. Falls back to the design
     // literals so the bar reads coherently before bindings resolve
@@ -965,6 +1030,10 @@ class LthnAppShell extends LitElement {
       this._unsubMenuChanged();
       this._unsubMenuChanged = null;
     }
+    if (this._unsubAuthRequire) {
+      this._unsubAuthRequire();
+      this._unsubAuthRequire = null;
+    }
     if (this._unsubFilesDropped) {
       this._unsubFilesDropped();
       this._unsubFilesDropped = null;
@@ -978,6 +1047,9 @@ class LthnAppShell extends LitElement {
   /** Returned by Events.On to detach the listener on element teardown. */
   private _unsubSetPane: (() => void) | null = null;
   private _unsubMenuChanged: (() => void) | null = null;
+  /** Unsubscribe for the lthn:auth:require-changed listener that flips
+   *  guest ↔ require-auth live when the Settings panel toggles it. */
+  private _unsubAuthRequire: (() => void) | null = null;
   /** Unsubscribe for the lthn:window:files-dropped listener that
    *  routes dragged .gguf files into Models.Import. */
   private _unsubFilesDropped: (() => void) | null = null;
@@ -1664,7 +1736,7 @@ class LthnAppShell extends LitElement {
                  is hidden while the gate covers the body (no point
                  offering Sign-Out from inside the sign-in surface).
                  data-testid is the stable hook the suite asserts on. -->
-            ${this._authState === "ok" ? html`
+            ${this._authState === "ok" && this._authRequired ? html`
               <button @click=${() => this._onSignOut()}
                 title="Sign out"
                 data-testid="lthn-app-shell-sign-out"
