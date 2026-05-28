@@ -73,3 +73,34 @@ func TestAgents_Service_Dispatch_Ugly(t *core.T) {
 	r := agents.New(agents.Config{BaseURL: srv.URL}).Dispatch(agents.DispatchRequest{Repo: "nope", Task: "x"})
 	core.AssertFalse(t, r.OK)
 }
+
+// --- Scan (method on *Service) ---
+
+func TestAgents_Service_Scan_Good(t *core.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		core.AssertEqual(t, "/v1/tools/agentic_scan", r.URL.Path)
+		_, _ = w.Write([]byte(`{"success":true,"data":{"success":true,"count":1,"issues":[{"repo":"go-io","number":15,"title":"fix tests","labels":["agentic"],"url":"https://forge.lthn.ai/core/go-io/issues/15"}]}}`))
+	}))
+	defer srv.Close()
+	r := agents.New(agents.Config{BaseURL: srv.URL}).Scan(agents.ScanRequest{Org: "core", Labels: []string{"agentic"}})
+	core.AssertTrue(t, r.OK)
+	issues := r.Value.([]agents.ScanIssue)
+	core.AssertEqual(t, 1, len(issues))
+	core.AssertEqual(t, 15, issues[0].Number)
+}
+
+func TestAgents_Service_Scan_Bad(t *core.T) {
+	// Serve unreachable → transport error → Fail.
+	r := agents.New(agents.Config{BaseURL: "http://127.0.0.1:1"}).Scan(agents.ScanRequest{Org: "core"})
+	core.AssertFalse(t, r.OK, "Scan must Fail when serve is unreachable")
+}
+
+func TestAgents_Service_Scan_Ugly(t *core.T) {
+	// Tool reports failure → Fail cleanly.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"success":false,"error":"forge unreachable"}`))
+	}))
+	defer srv.Close()
+	r := agents.New(agents.Config{BaseURL: srv.URL}).Scan(agents.ScanRequest{Org: "core"})
+	core.AssertFalse(t, r.OK)
+}

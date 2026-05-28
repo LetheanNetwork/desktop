@@ -173,6 +173,50 @@ func (s *Service) Dispatch(req DispatchRequest) core.Result {
 	return core.Ok(resp.Data)
 }
 
+// ScanIssue mirrors an agentic_scan row — an open Forge issue matching the
+// label filter, a candidate for dispatch.
+type ScanIssue struct {
+	Repo     string   `json:"repo"`
+	Number   int      `json:"number"`
+	Title    string   `json:"title"`
+	Labels   []string `json:"labels"`
+	Assignee string   `json:"assignee,omitempty"`
+	URL      string   `json:"url"`
+}
+
+// ScanRequest mirrors agentic_scan's input — a Forge org + label filter.
+type ScanRequest struct {
+	Org    string   `json:"org,omitempty"`
+	Labels []string `json:"labels,omitempty"`
+	Limit  int      `json:"limit,omitempty"`
+}
+
+// Scan lists open Forge issues across an org matching the label filter
+// (agentic_scan) — the dispatch candidates. Read-only.
+//
+//	r := svc.Scan(agents.ScanRequest{Org: "core", Labels: []string{"agentic"}})
+//	if r.OK { issues := r.Value.([]agents.ScanIssue); _ = issues }
+func (s *Service) Scan(req ScanRequest) core.Result {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Success bool        `json:"success"`
+			Count   int         `json:"count"`
+			Issues  []ScanIssue `json:"issues"`
+		} `json:"data"`
+		Error string `json:"error"`
+	}
+	if err := s.doTool(ctx, "agentic_scan", req, &resp); err != nil {
+		return core.Fail(core.E("agents.Scan", "agentic_scan", err))
+	}
+	if !resp.Success {
+		return core.Fail(core.NewError("agents.Scan: tool reported failure: " + resp.Error))
+	}
+	return core.Ok(resp.Data.Issues)
+}
+
 // doTool POSTs args (JSON) to /v1/tools/<tool> on the loopback serve and
 // decodes the {success,data} BridgeToAPI envelope into out. Mirrors
 // pkg/lemma's doJSON idiom — core.JSON* keeps the banned-imports list

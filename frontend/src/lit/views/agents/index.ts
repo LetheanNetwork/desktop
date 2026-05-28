@@ -9,12 +9,14 @@
 // Import via:  import "@/lit/views/agents"
 //
 // Elements registered:
-//   <lthn-view-agent-activity>           — live dispatch feed, wired to Fleet.Activity()
+//   <lthn-view-agent-activity>           — live fleet pulse, wired to Agents.Status()
 //   <lthn-view-agent-dispatch>           — launch a run, wired to Agents.Dispatch()
+//   <lthn-view-agent-scan>               — find dispatch candidates, wired to Agents.Scan()
 //   <lthn-view-repos|issues|prs|deploys> — repo context, reused from the former Coding view
 
 import "./activity";
 import "./dispatch";
+import "./scan";
 
 // Pulled-in Coding panels — repos/issues/prs/deploys are repo context
 // (what the fleet works on), reused here rather than discarded.
