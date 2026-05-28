@@ -47,6 +47,12 @@ const (
 //	r := svc.Discover()
 type Service struct {
 	core *core.Core
+
+	// mu guards job — the single in-flight calibration. A machine
+	// calibrates one model at a time; concurrent Calibrate() calls are
+	// rejected while a job runs.
+	mu  core.Mutex
+	job *calibrateJob
 }
 
 // NewService constructs the calibration surface against a Core container.
