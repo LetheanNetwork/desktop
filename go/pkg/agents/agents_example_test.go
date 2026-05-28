@@ -10,7 +10,7 @@ func ExampleService_Status() {
 	svc := agents.New(agents.Config{})
 	r := svc.Status()
 	if r.OK {
-		_ = r.Value.(agents.StatusCounts)
+		_ = r.Value.(agents.StatusResult)
 	}
 }
 

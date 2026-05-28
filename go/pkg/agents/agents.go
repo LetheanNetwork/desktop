@@ -77,14 +77,27 @@ func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result { return cor
 // ServiceShutdown is a no-op — there's no handle to release.
 func (s *Service) ServiceShutdown() core.Result { return core.Ok(nil) }
 
-// StatusCounts mirrors the agentic_status tool's data payload — the
-// dispatch-queue summary across all CoreAgent workspaces.
-type StatusCounts struct {
-	Total     int `json:"total"`
-	Running   int `json:"running"`
-	Queued    int `json:"queued"`
-	Completed int `json:"completed"`
-	Failed    int `json:"failed"`
+// BlockedRun is a workspace awaiting an operator answer — the actionable
+// rows agentic_status enumerates. Running/completed/failed runs are
+// counted, not listed (the full run history lives in CoreAgent's events
+// log — a separate bridge).
+type BlockedRun struct {
+	Name     string `json:"name"`
+	Repo     string `json:"repo"`
+	Agent    string `json:"agent"`
+	Question string `json:"question"`
+}
+
+// StatusResult mirrors the agentic_status payload — the live dispatch
+// counts across all CoreAgent workspaces, plus the blocked runs (each with
+// the question it's waiting on).
+type StatusResult struct {
+	Total     int          `json:"total"`
+	Running   int          `json:"running"`
+	Queued    int          `json:"queued"`
+	Completed int          `json:"completed"`
+	Failed    int          `json:"failed"`
+	Blocked   []BlockedRun `json:"blocked"`
 }
 
 // Status returns the CoreAgent dispatch-queue summary (agentic_status).
@@ -92,13 +105,13 @@ type StatusCounts struct {
 // down" rather than crash.
 //
 //	r := svc.Status()
-//	if r.OK { counts := r.Value.(agents.StatusCounts); _ = counts }
+//	if r.OK { counts := r.Value.(agents.StatusResult); _ = counts }
 func (s *Service) Status() core.Result {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var resp struct {
 		Success bool         `json:"success"`
-		Data    StatusCounts `json:"data"`
+		Data    StatusResult `json:"data"`
 		Error   string       `json:"error"`
 	}
 	if err := s.doTool(ctx, "agentic_status", map[string]any{}, &resp); err != nil {

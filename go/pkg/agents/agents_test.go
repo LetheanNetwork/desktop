@@ -21,7 +21,7 @@ func TestAgents_Service_Status_Good(t *core.T) {
 	defer srv.Close()
 	r := agents.New(agents.Config{BaseURL: srv.URL}).Status()
 	core.AssertTrue(t, r.OK)
-	c := r.Value.(agents.StatusCounts)
+	c := r.Value.(agents.StatusResult)
 	core.AssertEqual(t, 3, c.Total)
 	core.AssertEqual(t, 1, c.Running)
 }
