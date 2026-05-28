@@ -255,6 +255,12 @@ interface ViewDef {
   label: string;
   icon:  string;
   blurb: string;
+  /** Held out of the view switcher when true. The view stays in
+   *  VIEW_BY_ID (deep-links + persisted state still resolve and the
+   *  element stays registered) — it's just not advertised in the
+   *  switcher. Used to pare the beta surface back to Chat + Admin;
+   *  restoring a view is a one-line flag flip. */
+  hidden?: boolean;
   nav:   NavEntry[];
 }
 
@@ -315,20 +321,7 @@ const VIEWS: ViewDef[] = [
     ],
   },
   {
-    // ML Lab — the <lthn-view-ml-lab> workbench mounts whole. Its own
-    // toolbar tabs (Influx/DuckDB/Models/LoRA), sidebar (Models/Runs/
-    // Saved) and ASK box are internal orchestration, so the view needs
-    // a single surface entry rather than one rail item per tab — the
-    // shell's shared selection would be lost if the tabs were split out.
-    id: "ml-lab", label: "ML Lab", icon: "fa-flask-vial",
-    blurb: "Models, runs, LoRA adapters. The workbench for your training data.",
-    nav: [
-      { id: "workbench", label: "Workbench", icon: "fa-flask-vial", tag: "lthn-view-ml-lab",     group: "primary" },
-      { id: "settings",  label: "Settings",  icon: "fa-sliders",    tag: "lthn-settings-window", group: "bottom" },
-    ],
-  },
-  {
-    id: "planning", label: "Planning", icon: "fa-list-check",
+    id: "planning", label: "Planning", icon: "fa-list-check", hidden: true,
     blurb: "Where work waits. Roadmap, backlog, sprints, retros.",
     nav: [
       { id: "today",    label: "Today",    icon: "fa-circle-dot",     tag: "lthn-view-today",    group: "primary" },
@@ -341,7 +334,7 @@ const VIEWS: ViewDef[] = [
     ],
   },
   {
-    id: "coding", label: "Coding", icon: "fa-code",
+    id: "coding", label: "Coding", icon: "fa-code", hidden: true,
     blurb: "Write, ship, observe. Repos and chat in the same surface.",
     nav: [
       { id: "chat",     label: "Chat",     icon: "fa-comments",            tag: "lthn-chat-window",      group: "primary" },
@@ -354,7 +347,7 @@ const VIEWS: ViewDef[] = [
     ],
   },
   {
-    id: "marketing", label: "Marketing", icon: "fa-bullhorn",
+    id: "marketing", label: "Marketing", icon: "fa-bullhorn", hidden: true,
     blurb: "Campaigns, content, social, audience. Numbers your CEO asks about.",
     nav: [
       { id: "campaigns", label: "Campaigns", icon: "fa-bullhorn",    tag: "lthn-view-campaigns",  group: "primary" },
@@ -366,7 +359,7 @@ const VIEWS: ViewDef[] = [
     ],
   },
   {
-    id: "operations", label: "Operations", icon: "fa-shield-halved",
+    id: "operations", label: "Operations", icon: "fa-shield-halved", hidden: true,
     blurb: "Uptime, incidents, runbooks. The boring stuff that matters.",
     nav: [
       { id: "status",    label: "Status",    icon: "fa-heart-pulse",            tag: "lthn-view-status",      group: "primary" },
@@ -379,7 +372,7 @@ const VIEWS: ViewDef[] = [
     ],
   },
   {
-    id: "sales", label: "Sales", icon: "fa-handshake",
+    id: "sales", label: "Sales", icon: "fa-handshake", hidden: true,
     blurb: "Pipeline, contacts, deals, forecast. Honest numbers only.",
     nav: [
       { id: "pipeline", label: "Pipeline", icon: "fa-filter",       tag: "lthn-view-pipeline",   group: "primary" },
@@ -390,7 +383,7 @@ const VIEWS: ViewDef[] = [
     ],
   },
   {
-    id: "office", label: "Office", icon: "fa-building",
+    id: "office", label: "Office", icon: "fa-building", hidden: true,
     blurb: "Documents, mail, calendar, files. The Monday-morning surface.",
     nav: [
       { id: "documents", label: "Documents", icon: "fa-file-lines",  tag: "lthn-view-documents",  group: "primary" },
@@ -402,10 +395,17 @@ const VIEWS: ViewDef[] = [
   },
 ];
 
-/** ID → ViewDef lookup. Built once at module load. */
+/** ID → ViewDef lookup. Built once at module load. Includes hidden
+ *  views so deep-links + persisted state still resolve. */
 const VIEW_BY_ID: Record<string, ViewDef> = Object.fromEntries(
   VIEWS.map(v => [v.id, v]),
 );
+
+/** Views advertised in the switcher — the active beta surface (Chat +
+ *  Admin). Hidden views stay in VIEW_BY_ID above so deep-links + ⌘P +
+ *  ⌘-number shortcuts still reach them; the switcher just doesn't list
+ *  them. Restore a view to the switcher by clearing its hidden flag. */
+const SWITCHER_VIEWS: ViewDef[] = VIEWS.filter(v => !v.hidden);
 
 /** Resolve a view id to its NavEntry[]; falls back to admin on
  *  unknown id so a stale localStorage value can't render a blank rail. */
@@ -1522,9 +1522,9 @@ class LthnAppShell extends LitElement {
       ">
         <div style="padding:8px 12px 4px; font-family:var(--font-mono); font-size:9.5px; color:var(--fg-3); letter-spacing:0.10em; text-transform:uppercase; display:flex; justify-content:space-between; align-items:center;">
           <span>Switch view</span>
-          <span style="color:var(--fg-4);">${VIEWS.length} available</span>
+          <span style="color:var(--fg-4);">${SWITCHER_VIEWS.length} available</span>
         </div>
-        ${VIEWS.map(v => {
+        ${SWITCHER_VIEWS.map(v => {
           const active = v.id === this.view;
           return html`
             <button @click=${() => this._selectView(v.id)}
@@ -1717,7 +1717,7 @@ class LthnAppShell extends LitElement {
                  VIEWS registry the sidebar reads; emits
                  lthn:view-switcher:select with the picked id. -->
             <lthn-view-switcher
-              .views=${VIEWS.map(v => ({ id: v.id, label: v.label, icon: v.icon }))}
+              .views=${SWITCHER_VIEWS.map(v => ({ id: v.id, label: v.label, icon: v.icon }))}
               active-view=${this.view}
               @lthn:view-switcher:select=${this._onViewSwitcherSelect}
             ></lthn-view-switcher>

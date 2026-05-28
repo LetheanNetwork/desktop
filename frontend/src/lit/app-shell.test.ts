@@ -619,9 +619,10 @@ describe("lthn-app-shell — cross-view ⌘P palette", () => {
     el.paletteQuery = "settings";
     await el.updateComplete;
     const rows = host.querySelectorAll(".lthn-palette-item");
-    // chat/admin/ml-lab/planning/coding/marketing/operations/sales/
-    // office — every view exposes a Settings entry.
-    expect(rows.length).toBe(9);
+    // chat/admin/planning/coding/marketing/operations/sales/office —
+    // every view exposes a Settings entry. (Palette spans all views,
+    // including those parked out of the switcher.)
+    expect(rows.length).toBe(8);
     expect(host.textContent ?? "").toContain("Chat · Settings");
     expect(host.textContent ?? "").toContain("Admin · Settings");
     expect(host.textContent ?? "").toContain("Operations · Settings");
@@ -674,9 +675,9 @@ describe("lthn-app-shell — ⌘1..⌘7 view shortcuts", () => {
     expect(el.view).toBe("admin");
   });
 
-  it("⌘3..⌘8 cycle through ml-lab/planning/coding/marketing/operations/sales", async () => {
+  it("⌘3..⌘8 cycle through planning/coding/marketing/operations/sales/office", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell");
-    const expected = ["ml-lab", "planning", "coding", "marketing", "operations", "sales"];
+    const expected = ["planning", "coding", "marketing", "operations", "sales", "office"];
     for (let i = 0; i < expected.length; i++) {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: String(i + 3), metaKey: true, bubbles: true }));
       await el.updateComplete;
@@ -688,7 +689,7 @@ describe("lthn-app-shell — ⌘1..⌘7 view shortcuts", () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell");
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "3", ctrlKey: true, bubbles: true }));
     await el.updateComplete;
-    expect(el.view).toBe("ml-lab");
+    expect(el.view).toBe("planning");
   });
 
   it("⌘9 / ⌘0 are ignored (out of range)", async () => {
@@ -756,18 +757,18 @@ describe("lthn-app-shell — ⌘⇧[ / ⌘⇧] view cycling", () => {
     updateComplete: Promise<boolean>;
   };
 
-  it("⌘⇧] advances to the next view (admin → ml-lab)", async () => {
+  it("⌘⇧] advances to the next view (admin → planning)", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "admin" } });
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "]", metaKey: true, shiftKey: true, bubbles: true }));
     await el.updateComplete;
-    expect(el.view).toBe("ml-lab");
+    expect(el.view).toBe("planning");
   });
 
-  it("⌘⇧[ moves to the previous view (planning → ml-lab)", async () => {
+  it("⌘⇧[ moves to the previous view (planning → admin)", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "planning" } });
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "[", metaKey: true, shiftKey: true, bubbles: true }));
     await el.updateComplete;
-    expect(el.view).toBe("ml-lab");
+    expect(el.view).toBe("admin");
   });
 
   it("⌘⇧] wraps from the last view (office → chat)", async () => {
@@ -788,7 +789,7 @@ describe("lthn-app-shell — ⌘⇧[ / ⌘⇧] view cycling", () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "admin" } });
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "]", ctrlKey: true, shiftKey: true, bubbles: true }));
     await el.updateComplete;
-    expect(el.view).toBe("ml-lab");
+    expect(el.view).toBe("planning");
   });
 
   it("⌘] without shift is ignored", async () => {
@@ -811,12 +812,27 @@ describe("lthn-app-shell — ⌘⇧[ / ⌘⇧] view cycling", () => {
 
   it("five forward cycles visit every view in order", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "admin" } });
-    const expected = ["ml-lab", "planning", "coding", "marketing", "operations"];
+    const expected = ["planning", "coding", "marketing", "operations", "sales"];
     for (const want of expected) {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "]", metaKey: true, shiftKey: true, bubbles: true }));
       await el.updateComplete;
       expect(el.view).toBe(want);
     }
+  });
+});
+
+describe("lthn-app-shell — switcher hides parked views", () => {
+  // The switcher lists only non-hidden views (the beta surface = Chat +
+  // Admin). Parked views (planning/coding/…) stay in VIEW_BY_ID so
+  // deep-links + ⌘P + ⌘-number shortcuts still reach them — they're just
+  // not advertised in the switcher dropdown / titlebar picker.
+  it("titlebar view-switcher lists only Chat + Admin", async () => {
+    const { host } = await mountWindow<HTMLElement>("lthn-app-shell");
+    const sw = host.querySelector("lthn-view-switcher") as
+      (HTMLElement & { views?: Array<{ id: string }> }) | null;
+    expect(sw).not.toBeNull();
+    const ids = (sw?.views ?? []).map(v => v.id);
+    expect(ids).toEqual(["chat", "admin"]);
   });
 });
 

@@ -63,13 +63,6 @@ import "./views/operations";
 // Calendar is shared with the Office view per HANDOVER-VIEWS.md.
 import "./views/planning";
 
-// ML Lab view (plans/project/lthn/desktop/RFC.ml-lab.md) — registers
-// the <lthn-view-ml-lab> workbench shell. The shell side-effect-
-// imports its four tab bodies (<lthn-view-ml-lab-{influx,duckdb,
-// models,lora}>), so this one import wires the whole surface. Mounted
-// by <lthn-app-shell> as the "ML Lab" view.
-import "./views/ml-lab/ml-lab";
-
 // First-run + 401 auth-gate — registers <lthn-auth-gate>. Mounted by
 // <lthn-app-shell> ahead of the normal body slot whenever authState
 // is anything other than "ok" (Stage C of plans/code/lthn/desktop/
