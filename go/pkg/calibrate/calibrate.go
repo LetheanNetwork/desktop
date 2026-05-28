@@ -73,26 +73,18 @@ func Register(c *core.Core) core.Result {
 	return core.Ok(NewService(c))
 }
 
-// resolveBinary resolves the lthn-mlx CLI, PREFERRING the .app-wrapped
-// binary. The bare binary panics in Metal init on LoadModel because it
-// can't find its mlx.metallib; the .app-wrapped binary
-// (lthn-mlx.app/Contents/MacOS/lthn-mlx) resolves the metallib from the
-// sibling Contents/Resources, so compute init works (verified: bench
-// --json runs clean via the .app). Order: explicit override
-// (LTHN_MLX_BIN) → .app-wrapped (install, then dev) → bare (fallback) →
-// PATH. The production .app nests lthn-mlx.app under Contents/Frameworks
-// (build/darwin/Taskfile.yml); reaching that needs LTHN_MLX_BIN set at
-// launch or an exe-relative resolve — the remaining Mantis #98 bit.
+// resolveBinary resolves the lthn-mlx CLI. lthn-mlx embeds its own
+// metallib (built -tags embed_metallib), so the bare binary runs from
+// any path — no .app wrapper, no sibling metallib file. Order: explicit
+// override (LTHN_MLX_BIN — e.g. the packaged app points this at its
+// bundled Contents/MacOS/lthn-mlx) → installed (~/Lethean/bin) → go-mlx
+// dev build → PATH.
 func resolveBinary() string {
 	if p := core.Trim(core.Env(envBinaryOverride)); p != "" {
 		return p
 	}
 	home := core.Env("HOME")
-	// .app/Contents/MacOS/lthn-mlx — the metallib-resolving form.
-	appBin := core.PathJoin("lthn-mlx.app", "Contents", "MacOS", binaryName)
 	candidates := []string{
-		core.PathJoin(home, "Lethean", "bin", appBin),
-		core.PathJoin(home, "Code", "core", "go-mlx", "bin", appBin),
 		core.PathJoin(home, "Lethean", "bin", binaryName),
 		core.PathJoin(home, "Code", "core", "go-mlx", "bin", binaryName),
 	}

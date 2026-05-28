@@ -42,17 +42,48 @@ vars:
 
 tasks:
   build:
-    summary: Builds the application (OS-detect) + lthn-mlx sibling binary
-    deps: [build:lthn-mlx]
+    summary: Builds the application (OS-detect) after pre-build prep
+    deps: [pre-build]
     cmds:
       - task: "{{OS}}:build"
 
-  build:lthn-mlx:
-    summary: Build the lthn-mlx CLI from go-mlx source into bin/
-    status:
-      - test -x "{{.BIN_DIR}}/lthn-mlx"
+  lthn:
+    summary: All-in-one — prep the ground (pre-build) then build + package the distributable bundle
+    deps: [pre-build]
     cmds:
-      - cd "{{.LTHN_MLX_REPO}}/go" && go build -o "{{.ROOT_DIR}}/{{.BIN_DIR}}/lthn-mlx" ./cmd/mlx
+      - task: package
+
+  pre-build:
+    summary: "Prep the ground before the wails3 OS build — stage the self-contained lthn-mlx + install frontend deps (both idempotent)"
+    deps:
+      - build:lthn-mlx
+      - common:install:frontend:deps
+
+  build:lthn-mlx:
+    summary: Build the self-contained lthn-mlx (embedded metallib) into build/darwin/bin
+    desc: |
+      Builds lthn-mlx via go-mlx's `task build:lthn`, which embeds the
+      gzipped metallib (-tags embed_metallib) so the binary is fully
+      self-contained — no sibling metallib, no .app wrapper, runs from
+      any path. Stages the single binary at build/darwin/bin/lthn-mlx for
+      the packager to drop into Contents/MacOS. Skips gracefully if go-mlx
+      can't produce it (e.g. metallib not built) so a GUI-only build still
+      succeeds (the packager then expects lthn-mlx on PATH at runtime).
+    status:
+      - test -x "build/darwin/bin/lthn-mlx"
+    cmds:
+      - |-
+        set -e
+        REPO="{{.LTHN_MLX_REPO}}"
+        if [ ! -f "$REPO/dist/lib/mlx.metallib" ]; then
+          echo "  lthn-mlx: no metallib at $REPO/dist/lib/mlx.metallib — skipping"
+          echo "  build it first: (cd $REPO && cmake --build build --target install)"
+          exit 0
+        fi
+        ( cd "$REPO" && task build:lthn )
+        mkdir -p build/darwin/bin
+        cp "$REPO/bin/lthn-mlx" build/darwin/bin/lthn-mlx
+        echo "  lthn-mlx (self-contained) → build/darwin/bin/lthn-mlx"
 
   package:
     summary: Packages a production build

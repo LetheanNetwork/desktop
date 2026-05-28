@@ -1,0 +1,4 @@
+# Build-produced binaries — the staged self-contained lthn-mlx from
+# `task pre-build` (build:lthn-mlx). Artefact, not the tracked Wails
+# scaffold. Nested here so it overrides the root's `!build/**` un-ignore.
+bin/
