@@ -13,7 +13,7 @@ require (
 	dappco.re/go/mlx v0.10.0
 	dappco.re/go/scm v0.8.0-alpha.1
 	github.com/gin-gonic/gin v1.12.0
-	github.com/wailsapp/wails/v3 v3.0.0-alpha.95
+	github.com/wailsapp/wails/v3 v3.0.0-alpha.96
 	golang.org/x/term v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 )
