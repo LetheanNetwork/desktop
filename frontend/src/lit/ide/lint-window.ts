@@ -10,7 +10,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
-import { T } from "@lthn/i18n/coreservice";
+import { T } from "@ui/i18n";
 
 interface Issue {
   rule_id: string;

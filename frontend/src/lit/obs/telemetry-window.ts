@@ -4,7 +4,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
-import { T } from "@lthn/i18n/coreservice";
+import { T } from "@ui/i18n";
 
 /** Parse the "1s" / "2s" / "5s" / "off" picker value into a setInterval
  *  delay in ms. "off" → 0 so the caller can skip scheduling. Unknown

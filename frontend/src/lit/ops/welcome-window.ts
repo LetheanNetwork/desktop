@@ -4,7 +4,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
-import { T } from "@lthn/i18n/coreservice";
+import { T } from "@ui/i18n";
 
 /** Shape returned by integrations.List() — mirrored here so the
  *  wizard doesn't pull a hard dependency on the bindings module

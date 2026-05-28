@@ -24,7 +24,7 @@
 
 import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { renderChrome } from "../chrome";
-import { T } from "@lthn/i18n/coreservice";
+import { T } from "@ui/i18n";
 import {
   FetchIndex, FetchManifest, Install, Launch,
   Stop, Uninstall, ListInstalled, Status,

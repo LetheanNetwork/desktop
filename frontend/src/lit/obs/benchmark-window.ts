@@ -16,7 +16,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
-import { T } from "@lthn/i18n/coreservice";
+import { T } from "@ui/i18n";
 
 /** Row view-model the template renders. Mirrors the on-disk Run
  *  shape but trims to what the table needs and pre-formats fields

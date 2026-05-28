@@ -15,7 +15,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
-import { T } from "@lthn/i18n/coreservice";
+import { T } from "@ui/i18n";
 import { Machines, Queue, RoutingRules, Agents, DeleteAgent, DeleteMachine } from "@desktop/fleet/service";
 import type * as fleetModels from "@desktop/fleet/models";
 import { unwrap } from "../result";

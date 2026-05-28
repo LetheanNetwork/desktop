@@ -5,7 +5,7 @@
 import { LitElement, html, nothing } from "lit";
 import { ref as litRef } from "lit/directives/ref.js";
 import { renderChrome } from "../chrome";
-import { T } from "@lthn/i18n/coreservice";
+import { T } from "@ui/i18n";
 import type {
   ChatState, ChatStateData, ChatTurn, ChatBanner, ChatComposer,
   Conversation, RailData, RailMode, RightRailMode,

@@ -15,7 +15,7 @@
 
 import { LitElement, html } from "lit";
 import { renderChrome } from "../chrome";
-import { T } from "@lthn/i18n/coreservice";
+import { T } from "@ui/i18n";
 import "./lethean-monaco";
 
 class LthnEditorWindow extends LitElement {

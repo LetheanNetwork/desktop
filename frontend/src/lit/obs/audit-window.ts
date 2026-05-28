@@ -45,7 +45,7 @@
 
 import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { renderChrome } from "../chrome";
-import { T } from "@lthn/i18n/coreservice";
+import { T } from "@ui/i18n";
 import { apiFetch } from "../api-fetch";
 import {
   AUDIT_EVENT_NAMES,

@@ -4,7 +4,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
-import { T } from "@lthn/i18n/coreservice";
+import { T } from "@ui/i18n";
 import type { LitContent } from "../types";
 import { unwrap, demand } from "../result";
 
@@ -487,7 +487,10 @@ class LthnSettingsWindow extends LitElement {
       emptyRoutes: emRt,
       footer: foot,
     };
-    this.locales = locales;
+    // Guard: locales is binding-derived (not T(), so the i18n wrapper
+    // doesn't cover it). A down/empty binding yields undefined or a
+    // non-array Result — either crashes this.locales.map() in render.
+    this.locales = Array.isArray(locales) ? locales : [];
     this.currentLang = currentLang;
     if (paths?.OK) {
       const p = paths.Value as { models_dir?: string };

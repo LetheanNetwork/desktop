@@ -44,7 +44,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { ref as litRef } from "lit/directives/ref.js";
-import { T } from "@lthn/i18n/coreservice";
+import { T } from "@ui/i18n";
 import { AUTH_401_EVENT, AUTH_OK_EVENT, type AuthGateState } from "./auth-gate";
 import { apiFetch, clearSessionToken, AUTH_LOCK_EVENT } from "./api-fetch";
 // Plugin-views Unit B.4 — titlebar view-switcher + iframe wrapper

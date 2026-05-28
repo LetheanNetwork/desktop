@@ -4,7 +4,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../chrome";
-import { T } from "@lthn/i18n/coreservice";
+import { T } from "@ui/i18n";
 
 /** One model entry from Models.List() — shape mirrors pkg/models.Entry. */
 interface ModelEntry { name: string; path: string; size: number; is_dir: boolean }
