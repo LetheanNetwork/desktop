@@ -619,7 +619,7 @@ describe("lthn-app-shell — cross-view ⌘P palette", () => {
     el.paletteQuery = "settings";
     await el.updateComplete;
     const rows = host.querySelectorAll(".lthn-palette-item");
-    // chat/admin/planning/coding/marketing/operations/sales/office —
+    // chat/admin/planning/agents/marketing/operations/sales/office —
     // every view exposes a Settings entry. (Palette spans all views,
     // including those parked out of the switcher.)
     expect(rows.length).toBe(8);
@@ -675,9 +675,9 @@ describe("lthn-app-shell — ⌘1..⌘7 view shortcuts", () => {
     expect(el.view).toBe("admin");
   });
 
-  it("⌘3..⌘8 cycle through planning/coding/marketing/operations/sales/office", async () => {
+  it("⌘3..⌘8 cycle through planning/agents/marketing/operations/sales/office", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell");
-    const expected = ["planning", "coding", "marketing", "operations", "sales", "office"];
+    const expected = ["planning", "agents", "marketing", "operations", "sales", "office"];
     for (let i = 0; i < expected.length; i++) {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: String(i + 3), metaKey: true, bubbles: true }));
       await el.updateComplete;
@@ -812,7 +812,7 @@ describe("lthn-app-shell — ⌘⇧[ / ⌘⇧] view cycling", () => {
 
   it("five forward cycles visit every view in order", async () => {
     const { el } = await mountWindow<ShellWithView>("lthn-app-shell", { attrs: { view: "admin" } });
-    const expected = ["planning", "coding", "marketing", "operations", "sales"];
+    const expected = ["planning", "agents", "marketing", "operations", "sales"];
     for (const want of expected) {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "]", metaKey: true, shiftKey: true, bubbles: true }));
       await el.updateComplete;
@@ -823,16 +823,16 @@ describe("lthn-app-shell — ⌘⇧[ / ⌘⇧] view cycling", () => {
 
 describe("lthn-app-shell — switcher hides parked views", () => {
   // The switcher lists only non-hidden views (the beta surface = Chat +
-  // Admin). Parked views (planning/coding/…) stay in VIEW_BY_ID so
-  // deep-links + ⌘P + ⌘-number shortcuts still reach them — they're just
-  // not advertised in the switcher dropdown / titlebar picker.
-  it("titlebar view-switcher lists only Chat + Admin", async () => {
+  // Admin + Agents). Parked views (planning/marketing/…) stay in
+  // VIEW_BY_ID so deep-links + ⌘P + ⌘-number shortcuts still reach them —
+  // they're just not advertised in the switcher dropdown / titlebar picker.
+  it("titlebar view-switcher lists Chat + Admin + Agents", async () => {
     const { host } = await mountWindow<HTMLElement>("lthn-app-shell");
     const sw = host.querySelector("lthn-view-switcher") as
       (HTMLElement & { views?: Array<{ id: string }> }) | null;
     expect(sw).not.toBeNull();
     const ids = (sw?.views ?? []).map(v => v.id);
-    expect(ids).toEqual(["chat", "admin"]);
+    expect(ids).toEqual(["chat", "admin", "agents"]);
   });
 });
 
@@ -1221,7 +1221,7 @@ describe("consent-ratchet (RFC.plugin-views §6.4)", () => {
 
   it("canPersistDefaultView always allows built-in view ids (pluginCode empty)", () => {
     expect(canPersistDefaultView("admin", "")).toBe(true);
-    expect(canPersistDefaultView("coding", "")).toBe(true);
+    expect(canPersistDefaultView("agents", "")).toBe(true);
   });
 
   it("each (pluginCode, viewId) pair is independent", () => {

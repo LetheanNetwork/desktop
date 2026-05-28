@@ -40,9 +40,9 @@ import "./views/marketing";
 // re-registered here; it's owned by the Planning view and shared.
 import "./views/office";
 
-// Coding role views (Phase 2 wave 1) — registers
-// <lthn-view-repos|issues|prs|deploys>.
-import "./views/coding";
+// Agents role view (CoreAgent surface) — registers
+// <lthn-view-agent-activity>. Spec: code/lthn/desktop/views/RFC.agents-view.md
+import "./views/agents";
 
 // Sales role views (Phase 2 wave 1) — registers
 // <lthn-view-pipeline|contacts|deals|forecast>. Fixtures-only in v1;

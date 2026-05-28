@@ -62,6 +62,19 @@ func ExampleService_Queue() {
 	}
 }
 
+func ExampleService_Activity() {
+	r := fleet.New()
+	if !r.OK {
+		return
+	}
+	svc := r.Value.(*fleet.Service)
+	defer svc.Close()
+	a := svc.Activity(20)
+	if a.OK {
+		_ = a.Value.([]fleet.QueueRow)
+	}
+}
+
 func ExampleService_RoutingRules() {
 	r := fleet.New()
 	if !r.OK {

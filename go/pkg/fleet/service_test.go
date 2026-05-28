@@ -210,6 +210,34 @@ func TestService_Service_Queue_Ugly(t *core.T) {
 	core.AssertTrue(t, r2.OK, "negative limits treated same as zero — no cap")
 }
 
+// --- Activity (method on *Service) ---
+
+func TestService_Service_Activity_Good(t *core.T) {
+	svc := homeFixture(t)
+	r := svc.Activity(10)
+	core.AssertTrue(t, r.OK)
+	rows := r.Value.([]fleet.QueueRow)
+	core.AssertEqual(t, 0, len(rows))
+}
+
+func TestService_Service_Activity_Bad(t *core.T) {
+	t.Setenv("HOME", t.TempDir())
+	r := fleet.New()
+	core.AssertTrue(t, r.OK)
+	svc := r.Value.(*fleet.Service)
+	core.AssertTrue(t, svc.Close().OK)
+	core.AssertFalse(t, svc.Activity(5).OK, "Activity after Close must Fail (db nil)")
+}
+
+func TestService_Service_Activity_Ugly(t *core.T) {
+	svc := homeFixture(t)
+	// limit<=0 must not error; query just omits the LIMIT clause.
+	r := svc.Activity(0)
+	core.AssertTrue(t, r.OK)
+	r2 := svc.Activity(-5)
+	core.AssertTrue(t, r2.OK, "negative limits treated same as zero — no cap")
+}
+
 // --- RoutingRules (method on *Service) ---
 
 func TestService_Service_RoutingRules_Good(t *core.T) {

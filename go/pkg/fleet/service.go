@@ -371,6 +371,64 @@ func (s *Service) Queue(limit int) core.Result {
 	return core.Ok(out)
 }
 
+// Activity returns up to `limit` recent agent_activity rows across ALL
+// statuses (running · done · failed), ordered started_at desc — the
+// Agents view's run feed. Queue is the status='running' subset; Activity
+// is the full recent history. limit<=0 means no cap. Empty feed returns
+// []QueueRow{} in Value.
+//
+// Usage example:
+//
+//	r := svc.Activity(200)
+//	if r.OK { rows := r.Value.([]fleet.QueueRow); _ = rows }
+func (s *Service) Activity(limit int) core.Result {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return core.Fail(core.NewError("fleet.Activity: service closed"))
+	}
+	query := `
+		SELECT id, agent, COALESCE(caller,''), COALESCE(task_id,''),
+		       COALESCE(machine_id,''), COALESCE(model,''), action, status,
+		       started_at, COALESCE(summary,'')
+		FROM agent_activity
+		ORDER BY started_at DESC
+	`
+	var (
+		rows interface {
+			Next() bool
+			Scan(...any) error
+			Close() error
+			Err() error
+		}
+		err error
+	)
+	if limit > 0 {
+		query += " LIMIT ?"
+		rows, err = s.db.Conn().Query(query, limit)
+	} else {
+		rows, err = s.db.Conn().Query(query)
+	}
+	if err != nil {
+		return core.Fail(core.E("fleet.Activity", "query", err))
+	}
+	defer rows.Close()
+	out := []QueueRow{}
+	for rows.Next() {
+		var q QueueRow
+		if err := rows.Scan(&q.ID, &q.Agent, &q.Caller, &q.TaskID,
+			&q.MachineID, &q.Model, &q.Action, &q.Status,
+			&q.StartedAt, &q.Summary); err != nil {
+			return core.Fail(core.E("fleet.Activity", "scan row", err))
+		}
+		out = append(out, q)
+	}
+	if err := rows.Err(); err != nil {
+		return core.Fail(core.E("fleet.Activity", "rows", err))
+	}
+	return core.Ok(out)
+}
+
 // RoutingRules returns every fleet_routing row ordered by priority asc.
 // Empty rules returns []RoutingRule{} in Value.
 //
