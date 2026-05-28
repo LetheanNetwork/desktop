@@ -45,7 +45,7 @@
 import { LitElement, html, nothing } from "lit";
 import { ref as litRef } from "lit/directives/ref.js";
 import { T } from "@ui/i18n";
-import { AUTH_401_EVENT, AUTH_OK_EVENT, type AuthGateState } from "./auth-gate";
+import { AUTH_401_EVENT, AUTH_OK_EVENT, AUTH_BACK_EVENT, type AuthGateState } from "./auth-gate";
 import { apiFetch, clearSessionToken, AUTH_LOCK_EVENT } from "./api-fetch";
 // Plugin-views Unit B.4 — titlebar view-switcher + iframe wrapper
 // per plans/code/lthn/desktop/views/RFC.plugin-views.md §4.1.
@@ -424,6 +424,7 @@ class LthnAppShell extends LitElement {
     switcherOpen: { state: true },
     _authState:   { state: true },
     _authRequestId: { state: true },
+    _authDismissable: { state: true },
     t:         { state: true },
   };
   /** Active view id — drives the side-nav contents + status-bar
@@ -474,6 +475,17 @@ class LthnAppShell extends LitElement {
    *  through to the mounted gate so the error frame surfaces the
    *  same trace id the server-side logs index by. */
   declare _authRequestId: string;
+  /** Whether the mounted gate may show a "Back" button. True ONLY when
+   *  the gate was triggered by an accidental 401 (a pane fetch 401'd) —
+   *  set in _onAuth401, cleared everywhere else (sign-out, boot setup,
+   *  successful unlock). Keeps Back from becoming an auth bypass: a
+   *  deliberate sign-out / first-run never offers it. */
+  declare _authDismissable: boolean;
+  /** The pane that was active immediately before the current one —
+   *  captured in _select. Lets the Back button on an accidental-401
+   *  gate return the user to where they were instead of the pane that
+   *  triggered the gate (which would just 401 again). */
+  private _previousPane = "";
 
   /** Plugin-view descriptor cache — populated lazily by
    *  _ensurePluginDescriptor when a non-built-in view id is selected.
@@ -559,6 +571,7 @@ class LthnAppShell extends LitElement {
     // first-paint 401 flash; Stage C keeps the additive shape.
     this._authState     = "ok";
     this._authRequestId = "";
+    this._authDismissable = false;
     this.running = true;
     this.model = "gemma-4-e2b";
     this.tps = "47.2";
@@ -592,6 +605,9 @@ class LthnAppShell extends LitElement {
     if (detail && typeof detail.requestId === "string") {
       this._authRequestId = detail.requestId;
     }
+    // Accidental 401 — the user was using the app and a pane fetch
+    // tripped the gate. Offer a Back button so they aren't trapped.
+    this._authDismissable = true;
     this._authState = "error";
   };
 
@@ -600,6 +616,22 @@ class LthnAppShell extends LitElement {
   private _onAuthOk = () => {
     this._authState     = "ok";
     this._authRequestId = "";
+    this._authDismissable = false;
+  };
+
+  /** Window-level listener — the gate's Back button dispatches this
+   *  (only shown when _authDismissable). Dismiss the gate and return to
+   *  the pane the user was on before the one that 401'd; fall back to
+   *  the current view's first nav entry if that's unknown/invalid. */
+  private _onAuthBack = () => {
+    this._authState = "ok";
+    this._authRequestId = "";
+    this._authDismissable = false;
+    const nav = navForView(this.view);
+    const target = (this._previousPane && nav.some(n => n.id === this._previousPane))
+      ? this._previousPane
+      : (nav[0]?.id ?? "chat");
+    this._select(target);
   };
 
   /** Boot-time auth-state derivation (Stage D — closes the
@@ -687,6 +719,9 @@ class LthnAppShell extends LitElement {
     // _deriveState refines this if it disagrees).
     this._authState = "auth";
     this._authRequestId = "";
+    // Deliberate sign-out — no Back button. The user chose to leave;
+    // offering Back here would defeat the sign-out.
+    this._authDismissable = false;
   }
 
   /** Window-level keydown — ⌘P / Ctrl+P toggles the command palette.
@@ -814,6 +849,7 @@ class LthnAppShell extends LitElement {
     // same connected/disconnected lifecycle.
     window.addEventListener(AUTH_401_EVENT, this._onAuth401);
     window.addEventListener(AUTH_OK_EVENT, this._onAuthOk);
+    window.addEventListener(AUTH_BACK_EVENT, this._onAuthBack);
     // Boot-time auth-state derivation — closes the first-launch
     // 401-flash gap. Awaited so the first paint after this point
     // already reflects "setup" if the user has no LetheanAccount.
@@ -918,6 +954,7 @@ class LthnAppShell extends LitElement {
     window.removeEventListener("keydown", this._onKeyDownForViewCycle);
     window.removeEventListener(AUTH_401_EVENT, this._onAuth401);
     window.removeEventListener(AUTH_OK_EVENT, this._onAuthOk);
+    window.removeEventListener(AUTH_BACK_EVENT, this._onAuthBack);
     window.removeEventListener(PLUGIN_VIEW_MOUNT_TIMEOUT_EVENT, this._onPluginViewMountTimeout);
     document.removeEventListener("click", this._onDocClickForSwitcher);
     if (this._unsubSetPane) {
@@ -968,6 +1005,9 @@ class LthnAppShell extends LitElement {
   }
 
   _select(id: string) {
+    // Remember where we came from so the auth-gate's Back button (on an
+    // accidental 401) can return here instead of the pane that 401'd.
+    if (id !== this.active) this._previousPane = this.active;
     this.active = id;
     try {
       // Per-view key so each view remembers its own last pane.
@@ -1202,6 +1242,7 @@ class LthnAppShell extends LitElement {
           embedded
           state=${this._authState}
           request-id=${this._authRequestId}
+          ?dismissable=${this._authDismissable}
         ></lthn-auth-gate>
       </div>`;
     }

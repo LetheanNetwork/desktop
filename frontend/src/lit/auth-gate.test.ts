@@ -105,7 +105,7 @@ describe("<lthn-auth-gate> — state-machine renders", () => {
     expect(el.state).toBe("auth");
     expect(el.textContent).toContain("Welcome back.");
     expect(el.textContent).toContain("Passphrase");
-    expect(el.textContent).toContain("Wreath in");
+    expect(el.textContent).toContain("Login");
     // UI-text-as-offer discipline — uses "Lethean Account", not
     // implementation terms.
     expect(el.textContent).toContain("Lethean Account");

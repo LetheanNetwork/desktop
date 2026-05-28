@@ -61,6 +61,15 @@ export const AUTH_401_EVENT = "lthn:auth:401";
  *  setup-or-unlock so the shell can flip back to "ok". */
 export const AUTH_OK_EVENT = "lthn:auth:ok";
 
+/** CustomEvent name dispatched by the gate's "Back" button. Only the
+ *  shell can decide where back goes (the pane the user was on before
+ *  the one that 401'd), so the gate just signals intent and the shell
+ *  restores _authState + the previous pane. The Back button is only
+ *  shown when the shell marked this gate `dismissable` — i.e. an
+ *  accidental 401 cascade, never a deliberate sign-out or first-run
+ *  setup (where there is nothing safe to go back to). */
+export const AUTH_BACK_EVENT = "lthn:auth:back";
+
 /** Minimal binding shape — we only access the JSON-tagged fields. The
  *  Wails-generated bindings return `core.Result` whose `Value` is the
  *  Go struct serialised to JSON, so the TS keys mirror the `json:"…"`
@@ -100,6 +109,7 @@ class LthnAuthGate extends LitElement {
     h:               { type: Number },
     requestId:       { type: String, attribute: "request-id" },
     embedded:        { type: Boolean, reflect: true },
+    dismissable:     { type: Boolean, reflect: true },
     loading:         { state: true },
     errorStatus:     { state: true },
     errorMessage:    { state: true },
@@ -117,6 +127,12 @@ class LthnAuthGate extends LitElement {
   declare h:            number;
   declare requestId:    string;
   declare embedded:     boolean;
+  /** When true, the gate renders a "Back" button in the auth + error
+   *  views that returns the user to the app instead of forcing a
+   *  sign-in. Set by the shell ONLY when the gate was triggered by an
+   *  accidental 401 (a pane that 401'd) — never on deliberate sign-out
+   *  or first-run setup, so it can't become an auth bypass. */
+  declare dismissable:  boolean;
   declare loading:      boolean;
   /** HTTP status of the failed request that triggered state=error.
    *  0 when the gate is in state=error from a CustomEvent rather than
@@ -157,6 +173,7 @@ class LthnAuthGate extends LitElement {
     this.h                 = 620;
     this.requestId         = "";
     this.embedded          = false;
+    this.dismissable       = false;
     this.loading           = false;
     this.errorStatus       = 0;
     this.errorMessage      = "";
@@ -621,6 +638,15 @@ class LthnAuthGate extends LitElement {
     await this._deriveState();
   }
 
+  /** Back click handler — fires AUTH_BACK_EVENT so the shell dismisses
+   *  the gate and returns to the pane the user was on before the one
+   *  that 401'd. Only wired to a visible button when `dismissable` is
+   *  set (accidental-401 cascade), so it can never bypass a deliberate
+   *  sign-out or first-run setup. */
+  private _onBack(): void {
+    window.dispatchEvent(new CustomEvent(AUTH_BACK_EVENT));
+  }
+
   /** Copy the request id to the clipboard so the user can paste it
    *  into a bug report. Silent on clipboard failure — the surfaced
    *  request id text is right next to the button, so a user can
@@ -827,8 +853,14 @@ class LthnAuthGate extends LitElement {
               ?disabled=${this.loading || this._isLockedOut()}
               @click=${() => this._onWreathIn()}>
               <i class="fa-solid fa-arrow-right-to-bracket" style="font-size:11px;"></i>
-              ${this.loading ? "Unlocking…" : "Wreath in"}
+              ${this.loading ? "Unlocking…" : "Login"}
             </lthn-btn>
+            ${this.dismissable ? html`
+              <lthn-btn tone="ghost" size="lg" @click=${() => this._onBack()}>
+                <i class="fa-solid fa-arrow-left" style="font-size:11px;"></i>
+                Back
+              </lthn-btn>
+            ` : nothing}
           </div>
           <div style="margin-top:auto; padding-top:18px; border-top:1px solid rgba(255,255,255,0.04);
                       font-size:11px; color:var(--fg-3); line-height:1.6; max-width:460px;">
@@ -883,8 +915,14 @@ class LthnAuthGate extends LitElement {
         <div style="display:flex; gap:10px;">
           <lthn-btn tone="primary" size="lg" @click=${() => this._onWreathIn()}>
             <i class="fa-solid fa-arrow-right-to-bracket" style="font-size:11px;"></i>
-            Wreath in
+            Login
           </lthn-btn>
+          ${this.dismissable ? html`
+            <lthn-btn tone="ghost" size="lg" @click=${() => this._onBack()}>
+              <i class="fa-solid fa-arrow-left" style="font-size:11px;"></i>
+              Back
+            </lthn-btn>
+          ` : nothing}
           <lthn-btn tone="ghost" size="lg" @click=${() => this._onRetry()}>
             <i class="fa-solid fa-arrow-rotate-right" style="font-size:11px;"></i>
             Retry

@@ -42,12 +42,14 @@ const surface = params.get("surface") || "canvas";
   // reach the element via JS assignment, not via attribute.
   const mount = (
     state: "setup" | "auth" | "error",
-    options?: { requestId?: string; errorMessage?: string; errorBody?: string },
+    options?: { requestId?: string; errorMessage?: string; errorBody?: string; dismissable?: boolean },
   ) => {
     const reqId = options?.requestId;
     if (overlay) {
       overlay.setAttribute("state", state);
       if (reqId) overlay.setAttribute("request-id", reqId);
+      if (options?.dismissable) overlay.setAttribute("dismissable", "");
+      else overlay.removeAttribute("dismissable");
       if (options?.errorMessage !== undefined) {
         (overlay as HTMLElement & { errorMessage?: string }).errorMessage = options.errorMessage;
       }
@@ -58,6 +60,7 @@ const surface = params.get("surface") || "canvas";
     }
     overlay = document.createElement("lthn-auth-gate");
     overlay.setAttribute("state", state);
+    if (options?.dismissable) overlay.setAttribute("dismissable", "");
     if (reqId) overlay.setAttribute("request-id", reqId);
     if (options?.errorMessage !== undefined) {
       (overlay as HTMLElement & { errorMessage?: string }).errorMessage = options.errorMessage;
@@ -75,9 +78,17 @@ const surface = params.get("surface") || "canvas";
   };
   window.addEventListener("lthn:auth:401", (ev: Event) => {
     const detail = (ev as CustomEvent<{ requestId?: string }>).detail;
-    mount("error", { requestId: detail?.requestId });
+    // Accidental 401 (a fetch tripped the gate) — dismissable so the
+    // gate shows a Back button. Boot-probe mounts (setup / unreachable)
+    // stay non-dismissable: there's nothing safe behind them.
+    mount("error", { requestId: detail?.requestId, dismissable: true });
   });
   window.addEventListener("lthn:auth:ok", () => { unmount(); });
+  // Back button on a dismissable overlay — tear it down so the
+  // underlying surface reappears. Pairs with the app-shell's own
+  // _onAuthBack (which also restores the previous pane). One click
+  // clears both because both listen for the same event.
+  window.addEventListener("lthn:auth:back", () => { unmount(); });
   // Boot-time probe — if account is absent, mount the setup gate
   // BEFORE the surface renders so the first paint is the gate, not
   // a flash of the underlying window.
