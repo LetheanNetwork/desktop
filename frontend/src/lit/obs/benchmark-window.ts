@@ -40,6 +40,37 @@ interface BencherInfoVM {
   description?: string;
 }
 
+/** Parsed `lthn-mlx discover --json` (calibrate.MachineReport) — the
+ *  machine's inference backend + memory envelope + capabilities. Drives
+ *  the calibrate card. Only the displayed fields are typed. */
+interface MachineReportVM {
+  runtime?: { backend?: string; device?: string; native_runtime?: boolean };
+  device?: { name?: string; architecture?: string; memory_size?: number };
+  available?: boolean;
+  capabilities?: { id: string; status: string }[];
+}
+
+/** calibrate.CalibrateResult — the winning profile from a sweep. */
+interface CalResultVM {
+  selected_id?: string;
+  score?: string;
+  profile_path?: string;
+}
+
+/** calibrate.CalibrateProgress — the pollable sweep state. */
+interface CalProgressVM {
+  idle?: boolean;
+  running?: boolean;
+  done?: boolean;
+  failed?: boolean;
+  error?: string;
+  output?: string;
+  result?: CalResultVM | null;
+}
+
+/** Workloads lthn-mlx auto-tune accepts; drives the calibrate picker. */
+const CAL_WORKLOADS = ["chat", "coding", "long_context", "agent_state", "throughput", "low_latency"];
+
 /** Backend Run shape (subset). Mirrors go/pkg/benchmark.Run JSON tags. */
 interface RunDTO {
   id?: string;
@@ -107,6 +138,12 @@ function formatMem(mb: number | undefined): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
 }
 
+/** Raw bytes → "78 GB" for the machine card's memory envelope. */
+function formatBytes(b: number | undefined): string {
+  if (!b || b <= 0) return "—";
+  return `${(b / (1024 ** 3)).toFixed(0)} GB`;
+}
+
 /** Default ctx for the Run button. Matches the standard benchmark
  *  bucket; the picker UI will let users pick something else later. */
 const DEFAULT_RUN_CTX = 2048;
@@ -143,6 +180,12 @@ class LthnBenchmarkWindow extends LitElement {
     running: { state: true },
     sftRunning: { state: true },
     runErr: { state: true },
+    machine: { state: true },
+    calWorkload: { state: true },
+    calibrating: { state: true },
+    calProgress: { state: true },
+    calResult: { state: true },
+    calErr: { state: true },
   };
   declare w: number;
   declare h: number;
@@ -165,6 +208,16 @@ class LthnBenchmarkWindow extends LitElement {
   private _sftPollHandle: number | null = null;
   private static readonly SFT_POLL_MS = 4000;
   declare runErr: string;
+  /** Calibrate card state. machine = parsed Discover report (null until
+   *  loaded / when lthn-mlx absent). calibrating gates the CTA + drives
+   *  the poll loop; calProgress is the live auto-tune stdout feed;
+   *  calResult is the won profile; calErr surfaces a failed sweep. */
+  declare machine: MachineReportVM | null;
+  declare calWorkload: string;
+  declare calibrating: boolean;
+  declare calProgress: string;
+  declare calResult: CalResultVM | null;
+  declare calErr: string;
   declare t: {
     btnPp: string; btnTg: string; btnBoth: string; btnRun: string; btnExport: string;
     labelRecent: string; labelCompare: string;
@@ -191,6 +244,12 @@ class LthnBenchmarkWindow extends LitElement {
     this.running = false;
     this.sftRunning = false;
     this.runErr = "";
+    this.machine = null;
+    this.calWorkload = "chat";
+    this.calibrating = false;
+    this.calProgress = "";
+    this.calResult = null;
+    this.calErr = "";
     this.t = {
       btnPp: "PP only", btnTg: "TG only", btnBoth: "Both",
       btnRun: "Run", btnExport: "Export",
@@ -240,6 +299,7 @@ class LthnBenchmarkWindow extends LitElement {
       yAxis: yAx, footer: foot,
     };
     void this._loadFromBackend();
+    void this._loadMachine();
     void this._pollSFT();
     this._sftPollHandle = window.setInterval(() => void this._pollSFT(),
                                               LthnBenchmarkWindow.SFT_POLL_MS);
@@ -392,6 +452,85 @@ class LthnBenchmarkWindow extends LitElement {
     }
   }
 
+  /** Discover the machine — `lthn-mlx discover --json` via the calibrate
+   *  service. Fast (no model load), so the machine card renders even when
+   *  serve/bench can't. Missing binding / lthn-mlx absent leaves machine
+   *  null (card hidden) — graceful, never blocks the bench table. */
+  async _loadMachine(): Promise<void> {
+    try {
+      const [calMod, resultMod] = await Promise.all([
+        import("@desktop/calibrate/service"),
+        import("../result"),
+      ]);
+      const { unwrap } = resultMod;
+      const rep = await unwrap<MachineReportVM | null>(calMod.Discover(), null);
+      if (rep && (rep.runtime || rep.device)) this.machine = rep;
+    } catch {
+      // calibrate binding missing / lthn-mlx not found — card stays hidden
+    }
+  }
+
+  /** Start the unattended "Calibrate this machine" sweep against the
+   *  selected model, then poll for progress. The CLI does the expert
+   *  tuning (discover → auto-tune → optimal profile); the user trades a
+   *  few minutes for a setup they never have to understand. */
+  async _calibrate(): Promise<void> {
+    if (this.calibrating) return;
+    if (!this.selectedModel) {
+      this.calErr = "Pick a model to calibrate.";
+      return;
+    }
+    this.calibrating = true;
+    this.calErr = "";
+    this.calProgress = "";
+    this.calResult = null;
+    try {
+      const [calMod, resultMod] = await Promise.all([
+        import("@desktop/calibrate/service"),
+        import("../result"),
+      ]);
+      const { demand } = resultMod;
+      await demand<unknown>(calMod.Calibrate(this.calWorkload, this.selectedModel));
+      void this._pollCalibrate();
+    } catch (e: unknown) {
+      this.calErr = e instanceof Error ? e.message : String(e);
+      this.calibrating = false;
+    }
+  }
+
+  /** Poll CalibrateStatus every 2s while a sweep runs: stream the stdout
+   *  progress feed, and on Done capture the won profile / surface a
+   *  failure, then stop. */
+  async _pollCalibrate(): Promise<void> {
+    if (!this.calibrating) return;
+    try {
+      const [calMod, resultMod] = await Promise.all([
+        import("@desktop/calibrate/service"),
+        import("../result"),
+      ]);
+      const { unwrap } = resultMod;
+      const p = await unwrap<CalProgressVM | null>(calMod.CalibrateStatus(), null);
+      if (p) {
+        if (p.output) this.calProgress = p.output;
+        if (p.done) {
+          this.calibrating = false;
+          if (p.result) this.calResult = p.result;
+          if (p.failed) this.calErr = p.error || "Calibration failed.";
+          return;
+        }
+      }
+    } catch {
+      this.calibrating = false;
+      return;
+    }
+    if (this.calibrating) window.setTimeout(() => void this._pollCalibrate(), 2000);
+  }
+
+  /** Workload picker change for the calibrate sweep. */
+  _onCalWorkloadChange(e: Event) {
+    this.calWorkload = (e.target as HTMLSelectElement).value;
+  }
+
   /** Enqueue one benchmark run via the queue substrate (Mantis #1770).
    *  EnqueueBench returns the Job record immediately; the queue worker
    *  picks it up + dispatches via Bencher.Bench. When the run finishes
@@ -537,10 +676,50 @@ class LthnBenchmarkWindow extends LitElement {
       </div>
     ` : nothing;
 
+    // Calibrate-first card — machine report (Discover) + the "Calibrate
+    // this machine" CTA. Renders only when the machine probe succeeded
+    // (lthn-mlx present); the bench table below is the expert view.
+    const m = this.machine;
+    const autotuneReady = !!m?.capabilities?.some(c => c.id === "runtime.autotune" && c.status === "supported");
+    const calCard = m ? html`
+      <div style="padding:14px 22px 0;">
+        <div style="background:linear-gradient(155deg, rgba(64,193,197,0.08), rgba(64,193,197,0.01)); border:1px solid rgba(64,193,197,0.20); border-radius:10px; padding:14px 16px; display:flex; flex-direction:column; gap:10px;">
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <i class="fa-solid fa-microchip" style="color:var(--brand-300); font-size:13px;"></i>
+            <span style="font-weight:600; color:var(--fg-0); font-size:13px;">${m.device?.name || m.runtime?.device || "this machine"}</span>
+            <lthn-state-pill variant="info">${m.runtime?.backend || "—"}</lthn-state-pill>
+            <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3);">${formatBytes(m.device?.memory_size)} memory · ${m.capabilities?.length || 0} capabilities</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <span style="font-size:11.5px; color:var(--fg-2); flex:1; min-width:200px; line-height:1.5;">
+              Calibrate tunes the runtime to this machine — an unattended sweep that trades a few minutes for an optimal local-model setup.
+            </span>
+            <select title="Workload" style=${pickerStyle} .value=${this.calWorkload} ?disabled=${this.calibrating} @change=${(e: Event) => this._onCalWorkloadChange(e)}>
+              ${CAL_WORKLOADS.map(w => html`<option value=${w} ?selected=${w === this.calWorkload}>${w}</option>`)}
+            </select>
+            <lthn-btn tone="primary" size="sm"
+              ?disabled=${this.calibrating || !autotuneReady || !this.selectedModel}
+              title=${!this.selectedModel ? "Pick a model below first" : !autotuneReady ? "This backend doesn't report auto-tune support" : "Run an unattended calibration sweep for this machine"}
+              @click=${() => void this._calibrate()}>
+              <i class="fa-solid ${this.calibrating ? "fa-spinner fa-spin" : "fa-wand-magic-sparkles"}" style="font-size:9px;"></i>
+              ${this.calibrating ? "Calibrating…" : "Calibrate this machine"}
+            </lthn-btn>
+          </div>
+          ${this.calErr ? html`<div style="font-family:var(--font-mono); font-size:10.5px; color:var(--error-400);">${this.calErr}</div>` : nothing}
+          ${this.calProgress ? html`<pre style="margin:0; max-height:120px; overflow:auto; background:rgba(0,0,0,0.25); border-radius:6px; padding:8px 10px; font-size:10px; color:var(--fg-2); white-space:pre-wrap; font-family:var(--font-mono);">${this.calProgress}</pre>` : nothing}
+          ${this.calResult ? html`
+            <div style="font-family:var(--font-mono); font-size:11px; color:var(--brand-300);">
+              ✓ tuned · ${this.calResult.selected_id || "profile"}${this.calResult.score ? ` (score ${this.calResult.score})` : ""} — serve auto-applies it
+            </div>` : nothing}
+        </div>
+      </div>
+    ` : nothing;
+
     const cols = "20px 1.3fr 0.9fr 1.2fr 0.7fr 0.8fr 0.7fr 0.7fr 60px";
 
     const body = html`
       <div style="flex:1; display:flex; flex-direction:column; min-height:0;">
+        ${calCard}
         ${errBanner}
         <!-- history table -->
         <div style="padding:14px 22px 8px; display:flex; flex-direction:column; gap:6px;">
