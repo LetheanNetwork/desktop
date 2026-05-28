@@ -73,12 +73,12 @@ func Register(c *core.Core) core.Result {
 	return core.Ok(NewService(c))
 }
 
-// binaryPath resolves the lthn-mlx CLI. Order: explicit override
+// resolveBinary resolves the lthn-mlx CLI. Order: explicit override
 // (LTHN_MLX_BIN) → known install location (~/Lethean/bin) → dev build
 // (~/Code/core/go-mlx/bin) → bare name for PATH resolution by
 // process.Run. Bundling the binary into the .app and pointing the
 // override at it is the packaged path (Mantis #98).
-func (s *Service) binaryPath() string {
+func resolveBinary() string {
 	if p := core.Trim(core.Env(envBinaryOverride)); p != "" {
 		return p
 	}
@@ -121,7 +121,7 @@ func (s *Service) Discover() core.Result {
 	if !ok || proc == nil {
 		return core.Fail(core.E(discoverOp, "process service unavailable", nil))
 	}
-	r := proc.Run(core.Background(), s.binaryPath(), "discover", "--json")
+	r := proc.Run(core.Background(), resolveBinary(), "discover", "--json")
 	out, _ := r.Value.(string)
 	if !r.OK {
 		return core.Fail(core.E(discoverOp, r.Error(), nil))

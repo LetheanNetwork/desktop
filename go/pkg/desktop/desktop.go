@@ -424,6 +424,14 @@ func (s *Service) Run() core.Result {
 	if r := benchmarkSvc.RegisterBencher(ollama.NewBencher(ollama.Options{})); !r.OK {
 		core.Warn("desktop.benchmark.ollama_register", "error", r.Error())
 	}
+	// lthn-mlx local bencher (the #1768 runner bencher) — shells
+	// `lthn-mlx bench --json` via pkg/calibrate so the admin Benchmark
+	// table shows real local prefill/decode/memory rows instead of
+	// fixtures. Power omitted (bench carries no watts; joules is a
+	// deferred driver-profile concern).
+	if r := benchmarkSvc.RegisterBencher(calibrate.NewBencher(s.opts.Core)); !r.OK {
+		core.Warn("desktop.benchmark.calibrate_register", "error", r.Error())
+	}
 	// Queue substrate wiring (Mantis #1770) — "benchmark.gpu" kind
 	// handler registered against pkg/queue so EnqueueBench from the
 	// Wails surface dispatches via the substrate's single-worker

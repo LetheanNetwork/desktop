@@ -115,7 +115,7 @@ func (s *Service) Calibrate(workload, model string) core.Result {
 
 	wl := normaliseWorkload(workload)
 	r := proc.StartWithOptions(core.Background(), process.RunOptions{
-		Command: s.binaryPath(),
+		Command: resolveBinary(),
 		Args:    []string{"auto-tune", "--workload", wl, model},
 	})
 	if !r.OK {
