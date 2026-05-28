@@ -217,6 +217,57 @@ func (s *Service) Scan(req ScanRequest) core.Result {
 	return core.Ok(resp.Data.Issues)
 }
 
+// ResumeRequest mirrors agentic_resume's input — re-launch a workspace
+// that's blocked (or failed/completed), optionally answering the question
+// it raised. Workspace is the blocked run's Name as agentic_status reports
+// it (org/repo/task-N); Answer is written to the workspace's ANSWER.md
+// before the agent relaunches and reads it.
+type ResumeRequest struct {
+	Workspace string `json:"workspace"`
+	Answer    string `json:"answer,omitempty"`
+	Agent     string `json:"agent,omitempty"`
+	DryRun    bool   `json:"dry_run,omitempty"`
+}
+
+// ResumeResult mirrors agentic_resume's output — the relaunched run.
+type ResumeResult struct {
+	Success    bool   `json:"success"`
+	Workspace  string `json:"workspace"`
+	Agent      string `json:"agent"`
+	PID        int    `json:"pid,omitempty"`
+	OutputFile string `json:"output_file,omitempty"`
+	Prompt     string `json:"prompt,omitempty"`
+}
+
+// Resume re-launches a blocked workspace (agentic_resume): writes the
+// operator's Answer to ANSWER.md, then relaunches the agent told to read
+// it and continue — the other half of Status's blocked queue. Workspace is
+// required; an empty Answer just relaunches the agent against BLOCKED.md.
+// Runs detached like Dispatch — returns once spawned (workspace + PID), not
+// when it finishes; the run reappears in Status as "running".
+//
+//	r := svc.Resume(agents.ResumeRequest{Workspace: "core/go-io/task-4", Answer: "Use the shared notifier"})
+//	if r.OK { out := r.Value.(agents.ResumeResult); _ = out }
+func (s *Service) Resume(req ResumeRequest) core.Result {
+	if core.Trim(req.Workspace) == "" {
+		return core.Fail(core.NewError("agents.Resume: workspace is required"))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	var resp struct {
+		Success bool         `json:"success"`
+		Data    ResumeResult `json:"data"`
+		Error   string       `json:"error"`
+	}
+	if err := s.doTool(ctx, "agentic_resume", req, &resp); err != nil {
+		return core.Fail(core.E("agents.Resume", "agentic_resume", err))
+	}
+	if !resp.Success {
+		return core.Fail(core.NewError("agents.Resume: tool reported failure: " + resp.Error))
+	}
+	return core.Ok(resp.Data)
+}
+
 // doTool POSTs args (JSON) to /v1/tools/<tool> on the loopback serve and
 // decodes the {success,data} BridgeToAPI envelope into out. Mirrors
 // pkg/lemma's doJSON idiom — core.JSON* keeps the banned-imports list

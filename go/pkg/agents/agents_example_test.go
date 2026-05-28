@@ -14,6 +14,16 @@ func ExampleService_Status() {
 	}
 }
 
+func ExampleService_Resume() {
+	// Answer a blocked run and relaunch it — the workspace is the blocked
+	// run's Name from Status (org/repo/task-N).
+	svc := agents.New(agents.Config{})
+	r := svc.Resume(agents.ResumeRequest{Workspace: "core/go-io/task-4", Answer: "Use the shared notifier"})
+	if r.OK {
+		_ = r.Value.(agents.ResumeResult)
+	}
+}
+
 func ExampleNew() {
 	// Talk to the crew's loopback lthn-agent serve (DefaultBaseURL), or
 	// point at an explicit address.

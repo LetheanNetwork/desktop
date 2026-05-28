@@ -104,3 +104,35 @@ func TestAgents_Service_Scan_Ugly(t *core.T) {
 	r := agents.New(agents.Config{BaseURL: srv.URL}).Scan(agents.ScanRequest{Org: "core"})
 	core.AssertFalse(t, r.OK)
 }
+
+// --- Resume (method on *Service) ---
+
+func TestAgents_Service_Resume_Good(t *core.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		core.AssertEqual(t, "/v1/tools/agentic_resume", r.URL.Path)
+		core.AssertEqual(t, http.MethodPost, r.Method)
+		_, _ = w.Write([]byte(`{"success":true,"data":{"success":true,"workspace":"core/go-io/task-4","agent":"codex","pid":4321}}`))
+	}))
+	defer srv.Close()
+	r := agents.New(agents.Config{BaseURL: srv.URL}).Resume(agents.ResumeRequest{Workspace: "core/go-io/task-4", Answer: "use the shared notifier"})
+	core.AssertTrue(t, r.OK)
+	out := r.Value.(agents.ResumeResult)
+	core.AssertEqual(t, "core/go-io/task-4", out.Workspace)
+	core.AssertEqual(t, 4321, out.PID)
+}
+
+func TestAgents_Service_Resume_Bad(t *core.T) {
+	// Missing workspace → validated before any network → Fail (no panic).
+	r := agents.New(agents.Config{BaseURL: "http://127.0.0.1:1"}).Resume(agents.ResumeRequest{Answer: "x"})
+	core.AssertFalse(t, r.OK, "Resume must Fail without a workspace")
+}
+
+func TestAgents_Service_Resume_Ugly(t *core.T) {
+	// Tool reports failure (e.g. workspace not resumable) → Fail cleanly.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"success":false,"error":"workspace is running, not resumable"}`))
+	}))
+	defer srv.Close()
+	r := agents.New(agents.Config{BaseURL: srv.URL}).Resume(agents.ResumeRequest{Workspace: "core/go-io/task-4"})
+	core.AssertFalse(t, r.OK)
+}

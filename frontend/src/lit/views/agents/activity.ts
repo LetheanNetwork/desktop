@@ -17,6 +17,7 @@
 
 import { LitElement, html, nothing } from "lit";
 import { renderChrome } from "../../chrome";
+import { demand } from "../../result";
 
 /** BlockedRun mirrors agents.BlockedRun (a workspace awaiting an answer). */
 interface BlockedRun {
@@ -46,6 +47,9 @@ class LthnViewAgentActivity extends LitElement {
     status:   { state: true },
     loading:  { state: true },
     err:      { state: true },
+    answers:  { state: true },
+    busyWs:   { state: true },
+    rowErr:   { state: true },
   };
 
   declare w: number;
@@ -54,6 +58,11 @@ class LthnViewAgentActivity extends LitElement {
   declare status: StatusResult | null;
   declare loading: boolean;
   declare err: string;
+  // Per-blocked-run UI state, keyed by workspace name: the answer being
+  // typed, the one workspace currently resuming, and any per-row error.
+  declare answers: Record<string, string>;
+  declare busyWs: string;
+  declare rowErr: Record<string, string>;
 
   private _timer: ReturnType<typeof setInterval> | null = null;
 
@@ -63,6 +72,9 @@ class LthnViewAgentActivity extends LitElement {
     this.status = null;
     this.loading = false;
     this.err = "";
+    this.answers = {};
+    this.busyWs = "";
+    this.rowErr = {};
   }
 
   createRenderRoot() { return this; }
@@ -91,6 +103,30 @@ class LthnViewAgentActivity extends LitElement {
       this.status = null;
     } finally {
       this.loading = false;
+    }
+  }
+
+  /** Answer a blocked run and relaunch it (Agents.Resume → agentic_resume).
+   *  An empty answer is valid — the agent re-reads BLOCKED.md and retries.
+   *  On success the run flips to "running" and leaves the blocked queue, so
+   *  we refresh; on failure the message shows inline on the row. */
+  async _resume(ws: string) {
+    if (this.busyWs) return;
+    this.busyWs = ws;
+    this.rowErr = { ...this.rowErr, [ws]: "" };
+    try {
+      const svc = await import("@desktop/agents/service");
+      const answer = (this.answers[ws] ?? "").trim();
+      await demand<unknown>(
+        (svc as { Resume: (req: { workspace: string; answer?: string }) => Promise<{ OK: boolean; Value: unknown }> })
+          .Resume({ workspace: ws, answer }),
+      );
+      const next = { ...this.answers }; delete next[ws]; this.answers = next;
+      await this._refresh();
+    } catch (e: unknown) {
+      this.rowErr = { ...this.rowErr, [ws]: e instanceof Error ? e.message : String(e) };
+    } finally {
+      this.busyWs = "";
     }
   }
 
@@ -164,6 +200,28 @@ class LthnViewAgentActivity extends LitElement {
                   <span style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);">${b.repo || b.name}</span>
                 </div>
                 <div style="margin-top:8px; font-size:13px; color:var(--fg-0); line-height:1.5;">${b.question || "(no question recorded)"}</div>
+                <div style="margin-top:10px; display:flex; gap:8px; align-items:flex-end; --wails-draggable:no-drag;">
+                  <textarea rows="2"
+                    placeholder="answer — written to ANSWER.md, then the agent resumes (leave blank to just retry)"
+                    .value=${this.answers[b.name] ?? ""}
+                    @input=${(e: Event) => { this.answers = { ...this.answers, [b.name]: (e.target as HTMLTextAreaElement).value }; }}
+                    style="flex:1; padding:7px 9px; font-size:12px; line-height:1.5; resize:vertical;
+                           background:rgba(0,0,0,0.25); color:var(--fg-0);
+                           border:1px solid rgba(255,255,255,0.08); border-radius:5px;
+                           font-family:inherit; --wails-draggable:no-drag;"></textarea>
+                  <lthn-btn tone="primary" size="sm" ?dim=${this.busyWs === b.name}
+                    @click=${() => void this._resume(b.name)}>
+                    <i class="fa-solid ${this.busyWs === b.name ? "fa-spinner" : "fa-play"}" style="font-size:10px;"></i>
+                    ${this.busyWs === b.name ? "Resuming…" : "Resume"}
+                  </lthn-btn>
+                </div>
+                ${this.rowErr[b.name] ? html`
+                  <div style="margin-top:8px; padding:8px 10px; color:var(--err-400);
+                              background:rgba(255,76,76,0.06); border:1px solid rgba(255,76,76,0.18);
+                              border-radius:6px; font-size:11px; line-height:1.5; font-family:var(--font-mono);">
+                    ${this.rowErr[b.name]}
+                  </div>
+                ` : nothing}
               </div>
             `)}
           </div>
@@ -180,7 +238,7 @@ class LthnViewAgentActivity extends LitElement {
       subtitle,
       w: this.w, h: this.h,
       toolbar, body,
-      footer: html`live CoreAgent state · polls every 5s · data via Agents.Status()`,
+      footer: html`live CoreAgent state · answer a blocked run to resume it · polls every 5s`,
       embedded: this.embedded,
     });
   }
