@@ -78,6 +78,7 @@ func Suggestions(text string) []Suggestion {
 func scoreFromImprint(text string, imp reversal.GrammarImprint) ScoreResult {
 	r := ScoreResult{
 		Sycophancy: DetectSycophancy(text),
+		LEK:        LEK(text),
 	}
 	if imp.TokenCount > 0 {
 		scores := imprintScores(imp)

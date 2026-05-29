@@ -23,6 +23,9 @@ type ScoreResult struct {
 	Sycophancy  *SycophancyInfo `json:"sycophancy,omitempty"`
 	Imprint     *ImprintScores  `json:"imprint,omitempty"`
 	Suggestions []Suggestion    `json:"suggestions,omitempty"`
+	// LEK is the heuristic axis-set + composite 0..100 LEK score (the
+	// lthn.ai/score signal), populated by Score / ScorePair. See lek.go.
+	LEK *LEKScores `json:"lek,omitempty"`
 }
 
 // DiffResult is the unified contentshield scoring output for a
