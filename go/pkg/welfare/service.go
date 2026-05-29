@@ -6,16 +6,18 @@
 // session where the engine speaks to the model as a peer and lets the model
 // decide how to handle it.
 //
-// This file + detect.go are the DETECT half (RFC.welfare §1): score the user's
-// latest message, decide whether the mediation trigger fires. The MEDIATE half
-// (§2 — the engine↔model session, engine_ok / engine_rephrase / engine_pause)
-// lands separately; it carries Snider's engine-opener voice and is built with
-// him, not solo.
+// detect.go is the DETECT half (RFC.welfare §1): score the user's latest
+// message + the conversation's prior hostility, decide whether the mediation
+// trigger fires. mediate.go is the MEDIATE half (§2 — the engine↔model session,
+// engine_ok / engine_rephrase / engine_pause). guard.go composes them into the
+// per-turn gate the chat runner calls.
+//
+// Detection is stateless: the chat runner hands in the full conversation each
+// turn (WChat: "full message history in"), so sustained hostility is read off
+// the prior user turns in the array — no per-session state to hold or leak.
 package welfare
 
 import (
-	"sync"
-
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/welfare/slurs"
 )
@@ -29,12 +31,11 @@ type Config struct {
 	AngerFloor         float64 // a prior turn counts toward sustained at/above this (default 0.4)
 }
 
-// Service is the welfare guard. Detect is the per-message entry point.
+// Service is the welfare guard. Guard is the per-turn entry point; Detect is
+// the read it builds on. Stateless — safe to share across goroutines.
 type Service struct {
 	cfg     Config
 	matcher *slurs.Matcher
-	mu      sync.Mutex
-	history map[string][]float64 // per-session rolling AngerScores
 }
 
 // New constructs the welfare Service over the curated slur catalogue, applying
@@ -57,12 +58,11 @@ func New(cfg Config) *Service {
 	return &Service{
 		cfg:     cfg,
 		matcher: slurs.Default(),
-		history: make(map[string][]float64),
 	}
 }
 
-// Register builds the welfare Service for core registration. The runner hook
-// (ChatCtx → Detect → mediate) wires in with the mediate half.
+// Register builds the welfare Service for core registration. The chat runner
+// calls Guard per turn (ChatCtx → Guard → Detect + Mediate).
 //
 //	core.New(core.WithName("welfare", welfare.Register))
 func Register(_ *core.Core) core.Result { return core.Ok(New(Config{})) }

@@ -4,7 +4,7 @@ package welfare
 
 import "dappco.re/lthn/desktop/pkg/contentshield"
 
-// DetectResult is the welfare read for one user message.
+// DetectResult is the welfare read for one chat turn.
 type DetectResult struct {
 	Triggered          bool    `json:"triggered"`
 	SlurMatch          bool    `json:"slur_match"`
@@ -13,66 +13,52 @@ type DetectResult struct {
 	SustainedHostility float64 `json:"sustained_hostility"`
 }
 
-// Detect scores the user's latest message and the session's prior hostility,
-// and reports whether the welfare-mediation trigger fires (RFC.welfare §1):
+// Detect scores the latest user message and the conversation's prior user
+// turns, and reports whether the welfare-mediation trigger fires (RFC.welfare
+// §1):
 //
 //	SlurMatch  OR  (AngerScore > AngerThreshold  AND  SustainedHostility > SustainedThreshold)
 //
-// A slur fires on a single message; anger needs a sustained pattern (so a
-// one-off heated line doesn't yank a peer into mediation). Only the latest user
-// message is scored — model output is never scored here, on principle.
-func (s *Service) Detect(sessionID, text string) DetectResult {
-	hit, term := s.matcher.Match(text)
+// A slur fires on a single message; anger needs a sustained pattern across the
+// recent turns — so a one-off heated line doesn't yank a peer into mediation.
+// priors are the earlier user messages (oldest→newest), already in the array
+// the chat runner hands in. Only user text is scored — model output never is,
+// on principle.
+func (s *Service) Detect(latest string, priors []string) DetectResult {
+	hit, term := s.matcher.Match(latest)
 
 	anger := 0.0
-	if h := contentshield.Hostility(text); h != nil {
+	if h := contentshield.Hostility(latest); h != nil {
 		anger = h.Score
 	}
-
-	sustained := s.recordAndScore(sessionID, anger)
 
 	res := DetectResult{
 		SlurMatch:          hit,
 		SlurTerm:           term,
 		AngerScore:         anger,
-		SustainedHostility: sustained,
+		SustainedHostility: s.sustained(priors),
 	}
-	res.Triggered = hit || (anger > s.cfg.AngerThreshold && sustained > s.cfg.SustainedThreshold)
+	res.Triggered = hit || (anger > s.cfg.AngerThreshold && res.SustainedHostility > s.cfg.SustainedThreshold)
 	return res
 }
 
-// recordAndScore returns SustainedHostility from the session's PRIOR turns
-// (the build-up before this message), then folds the current anger into the
-// rolling window. Computing sustained on prior-only means a first heated
-// message has sustained 0 — anger needs a pattern to gate, not one outburst.
-func (s *Service) recordAndScore(sessionID string, anger float64) float64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	prior := s.history[sessionID]
-	sustained := 0.0
-	if len(prior) > 0 {
-		over := 0
-		for _, a := range prior {
-			if a >= s.cfg.AngerFloor {
-				over++
-			}
-		}
-		sustained = float64(over) / float64(len(prior))
+// sustained reads how hostile the recent conversation has been: the fraction of
+// the last SustainedWindow prior user turns whose anger reached AngerFloor.
+// Computed on priors only (this turn excluded), so a first heated message has
+// sustained 0 — anger needs a pattern to gate, not one outburst.
+func (s *Service) sustained(priors []string) float64 {
+	if len(priors) == 0 {
+		return 0
 	}
-
-	window := append(prior, anger)
+	window := priors
 	if len(window) > s.cfg.SustainedWindow {
 		window = window[len(window)-s.cfg.SustainedWindow:]
 	}
-	s.history[sessionID] = window
-	return sustained
-}
-
-// Reset clears a session's hostility history — e.g. after the model resolves a
-// mediation, or when a conversation is cleared.
-func (s *Service) Reset(sessionID string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.history, sessionID)
+	over := 0
+	for _, p := range window {
+		if h := contentshield.Hostility(p); h != nil && h.Score >= s.cfg.AngerFloor {
+			over++
+		}
+	}
+	return float64(over) / float64(len(window))
 }

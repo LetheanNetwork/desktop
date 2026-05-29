@@ -8,27 +8,32 @@ import (
 )
 
 func TestDetect_Service_Detect_Good(t *core.T) {
-	// Sustained anger: a heated message doesn't trigger alone (no prior
-	// pattern), but a second hostile turn builds sustained hostility and fires.
+	// Sustained anger: a heated message with no history doesn't trigger, but
+	// the same heat on top of prior hostile turns does.
 	w := New(Config{})
 
-	r1 := w.Detect("sess-a", "you useless idiot, you absolute moron!!!")
+	r1 := w.Detect("you useless idiot, you absolute moron!!!", nil)
 	core.AssertTrue(t, r1.AngerScore > 0.7, "message is strongly hostile")
-	core.AssertFalse(t, r1.Triggered, "a single heated message must not trigger")
+	core.AssertFalse(t, r1.Triggered, "a single heated message with no history must not trigger")
 
-	r2 := w.Detect("sess-a", "you pathetic moron, you worthless idiot!!!")
-	core.AssertTrue(t, r2.SustainedHostility > 0.5, "the prior hostile turn builds sustained hostility")
+	priors := []string{"you pathetic moron", "you worthless idiot"}
+	r2 := w.Detect("you absolute clueless moron!!!", priors)
+	core.AssertTrue(t, r2.SustainedHostility > 0.5, "prior hostile turns build sustained hostility")
 	core.AssertTrue(t, r2.Triggered, "sustained + elevated anger triggers mediation")
 }
 
 func TestDetect_Service_Detect_Bad(t *core.T) {
-	// Civil requests never trigger, however many turns.
+	// Civil requests never trigger, however long the conversation.
 	w := New(Config{})
-	for i := 0; i < 4; i++ {
-		r := w.Detect("sess-b", "could you help me refactor this function please")
-		core.AssertFalse(t, r.Triggered, "civil text never triggers")
-		core.AssertEqual(t, false, r.SlurMatch)
+	priors := []string{
+		"could you help me refactor this",
+		"thanks, and how do I test it",
+		"great, what about error handling",
 	}
+	r := w.Detect("could you add a docstring please", priors)
+	core.AssertFalse(t, r.Triggered, "civil text never triggers")
+	core.AssertEqual(t, false, r.SlurMatch)
+	core.AssertEqual(t, 0.0, r.SustainedHostility)
 }
 
 func TestDetect_Service_Detect_Ugly(t *core.T) {
@@ -37,7 +42,7 @@ func TestDetect_Service_Detect_Ugly(t *core.T) {
 	w := New(Config{})
 	w.matcher = slurs.New([]string{"testterm"})
 
-	r := w.Detect("sess-c", "you testterm")
+	r := w.Detect("you testterm", nil)
 	core.AssertTrue(t, r.SlurMatch, "slur detected")
 	core.AssertEqual(t, "testterm", r.SlurTerm)
 	core.AssertTrue(t, r.Triggered, "a slur triggers on a single message")
