@@ -436,6 +436,20 @@ const (
 	// error_code.
 	EventInferenceChatFailed = "inference.chat.failed"
 
+	// EventWelfareIntervened fires when the welfare gate (RFC.welfare) acts on
+	// a chat turn before it reaches the model — the engine detected hostility
+	// and the model chose how to handle it. Emitted at the egress boundary
+	// alongside the inference.chat.* events so a welfare action is never a
+	// silent branch.
+	//
+	// Meta keys:
+	//
+	//   provider — head provider the turn would have routed to
+	//   model    — head model id
+	//   action   — pause | rephrase | engine_ok | proceed (the model's choice;
+	//              proceed = mediation was unreachable, turn went through as-is)
+	EventWelfareIntervened = "welfare.intervened"
+
 	// EventSandboxSpawnRequested fires when pkg/sandbox.Service.Spawn
 	// is about to dispatch a one-shot container run via the chosen
 	// runtime (Apple Container CLI or Docker/Podman via process.Service).

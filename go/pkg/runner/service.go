@@ -31,6 +31,7 @@ import (
 	"dappco.re/go/inference"
 
 	"dappco.re/lthn/desktop/pkg/audit"
+	"dappco.re/lthn/desktop/pkg/welfare"
 )
 
 // Status is the runner's lifecycle state.
@@ -72,6 +73,10 @@ type Service struct {
 	router   *ai.ProviderRouter
 	core     *core.Core
 	dynamic  []ai.ProviderRoute
+	// welfare is the per-turn chat guard (RFC.welfare). nil = disabled: the
+	// CLI builds the runner without one, so the gate is GUI-only. Attached in
+	// NewServiceFromCore. ChatCtx is the only reader.
+	welfare *welfare.Service
 }
 
 // NewService constructs the runner with the canonical Mantis #1336
@@ -342,6 +347,30 @@ func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) cor
 	// RLock release.
 	provider, model := routerHead(router)
 	started := core.Now()
+
+	// Welfare gate (RFC.welfare) — runs before the turn reaches the model.
+	// Dormant unless a welfare Service is attached (GUI only). On a flagged
+	// turn the model itself chose the action; we just apply it.
+	if g := s.welfareGuard(ctx, messages, router); g.Triggered {
+		s.auditWelfare(provider, model, g)
+		switch {
+		case g.Synthetic != "":
+			// engine_pause — the model takes a breather; the user gets the
+			// warm notice in place of a reply. Returns before chat.requested
+			// (no chat was requested of the model).
+			return core.Ok(g.Synthetic)
+		case g.Rephrased != "":
+			// engine_rephrase — send the reworded prompt on. The user still
+			// sees their original; the "reworded on your behalf" chip is a
+			// frontend follow-up (WarnUser signal already set).
+			messages = withLastUser(messages, g.Rephrased)
+		case g.FalsePositive != nil:
+			// engine_ok — the model cleared it; proceed with the original and
+			// remember the false flag for a future contentshield re-train.
+			s.appendWelfareFeedback(*g.FalsePositive)
+		}
+	}
+
 	_ = audit.Default().Record(audit.Event{
 		Event:   audit.EventInferenceChatRequested,
 		TS:      started.Unix(),

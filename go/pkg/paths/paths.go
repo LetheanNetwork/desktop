@@ -329,6 +329,29 @@ func TrainingCheckpointDir() core.Result {
 	return core.Ok(dir)
 }
 
+// WelfareDir returns ~/Lethean/data/welfare/. Creates if missing.
+//
+// Holds the welfare gate's on-device feedback corpus (RFC.welfare) —
+// feedback.jsonl, one append-only line per engine_ok false-positive (a prompt
+// the engine flagged but the model judged fine). A later contentshield re-train
+// reads this to weight those patterns down. Never leaves the device.
+//
+// Usage example:
+//
+//	r := paths.WelfareDir()
+//	if r.OK { dir := r.Value.(string); _ = dir }
+func WelfareDir() core.Result {
+	data := DataDir()
+	if !data.OK {
+		return data
+	}
+	dir := core.PathJoin(data.Value.(string), "welfare")
+	if r := core.MkdirAll(dir, 0o755); !r.OK {
+		return r
+	}
+	return core.Ok(dir)
+}
+
 func subdir(name string) core.Result {
 	root := Root()
 	if !root.OK {

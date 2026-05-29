@@ -41,6 +41,7 @@ import (
 
 	"dappco.re/lthn/desktop/pkg/keys"
 	"dappco.re/lthn/desktop/pkg/paths"
+	"dappco.re/lthn/desktop/pkg/welfare"
 )
 
 // outboundLimiter is constructed once per process and shared across
@@ -281,5 +282,9 @@ func saveRouteConfigsToCore(c *core.Core, routes map[string]RouteConfig) core.Re
 func NewServiceFromCore(c *core.Core) *Service {
 	s := NewService(Options{Routes: LoadRoutesFromCore(c)})
 	s.core = c
+	// Attach the welfare gate (RFC.welfare). Stateless + dependency-free, so
+	// it's always on for the GUI runner; the nil-guard in ChatCtx keeps chat
+	// working even if this is ever left unset (CLI path).
+	s.welfare = welfare.New(welfare.Config{})
 	return s
 }
