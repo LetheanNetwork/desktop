@@ -338,8 +338,9 @@ const VIEWS: ViewDef[] = [
     blurb: "Dispatch across the fleet, run flows, watch the agents work.",
     nav: [
       { id: "activity", label: "Activity", icon: "fa-wave-square",        tag: "lthn-view-agent-activity", group: "primary" },
-      { id: "dispatch", label: "Dispatch", icon: "fa-paper-plane",        tag: "lthn-view-agent-dispatch", group: "primary" },
-      { id: "scan",     label: "Scan",     icon: "fa-magnifying-glass",   tag: "lthn-view-agent-scan",     group: "primary" },
+      { id: "dispatch",   label: "Dispatch",   icon: "fa-paper-plane",        tag: "lthn-view-agent-dispatch",   group: "primary" },
+      { id: "workspaces", label: "Workspaces", icon: "fa-layer-group",        tag: "lthn-view-agent-workspaces", group: "primary" },
+      { id: "scan",       label: "Scan",       icon: "fa-magnifying-glass",   tag: "lthn-view-agent-scan",       group: "primary" },
       { id: "chat",     label: "Chat",     icon: "fa-comments",           tag: "lthn-chat-window",         group: "primary" },
       { id: "repos",    label: "Repos",    icon: "fa-folder-tree",        tag: "lthn-view-repos",          group: "observe" },
       { id: "issues",   label: "Issues",   icon: "fa-circle-exclamation", tag: "lthn-view-issues",         group: "observe" },

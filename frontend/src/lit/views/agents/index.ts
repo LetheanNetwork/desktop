@@ -16,6 +16,7 @@
 
 import "./activity";
 import "./dispatch";
+import "./workspaces";
 import "./scan";
 
 // Pulled-in Coding panels — repos/issues/prs/deploys are repo context
