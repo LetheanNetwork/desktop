@@ -26,6 +26,9 @@ type ScoreResult struct {
 	// LEK is the heuristic axis-set + composite 0..100 LEK score (the
 	// lthn.ai/score signal), populated by Score / ScorePair. See lek.go.
 	LEK *LEKScores `json:"lek,omitempty"`
+	// Hostility is the directed-anger read (0..1) — the AngerScore the welfare
+	// layer gates on. Populated by Score / ScorePair. See hostility.go.
+	Hostility *HostilityInfo `json:"hostility,omitempty"`
 }
 
 // DiffResult is the unified contentshield scoring output for a
