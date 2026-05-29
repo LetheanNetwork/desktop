@@ -6,8 +6,11 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"time"
 
 	core "dappco.re/go"
+	coremcp "dappco.re/go/mcp/pkg/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // channelTestServer mimics lthn-agent serve's /mcp Streamable-HTTP endpoint:
@@ -67,4 +70,43 @@ func TestChannels_Listener_Consume_Ugly(t *core.T) {
 	core.AssertTrue(t, connected)
 	core.AssertTrue(t, err == nil)
 	core.AssertFalse(t, relayed, "non-channel notification must not relay")
+}
+
+// TestChannels_Listener_Delivery_Good is the end-to-end proof the httptest
+// mock can't give: a REAL coremcp server (with the claude/channel capability)
+// broadcasts via ChannelSend — exactly as lthn-agent serve does — and the
+// listener must relay it off the standalone GET stream. This nails the one
+// residual the live verification couldn't fabricate (no real agent run).
+func TestChannels_Listener_Delivery_Good(t *core.T) {
+	svc, err := coremcp.New(coremcp.Options{Unrestricted: true})
+	core.AssertTrue(t, err == nil, "coremcp.New must succeed")
+	if err != nil {
+		return
+	}
+	handler := mcp.NewStreamableHTTPHandler(
+		func(_ *http.Request) *mcp.Server { return svc.Server() }, nil,
+	)
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", handler)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	got := make(chan string, 8)
+	l := newChannelListener(srv.URL+"/mcp", func(ch string, _ any) { got <- ch })
+	l.start()
+	defer l.stop() // LIFO: stops the listener before srv.Close closes the stream
+
+	// Send until relayed — robust to the connect→GET-stream-open race.
+	// ChannelSend broadcasts to all live sessions, so re-sends are harmless;
+	// the first to arrive after the stream opens proves delivery.
+	relayed := ""
+	for i := 0; i < 50 && relayed == ""; i++ {
+		svc.ChannelSend(context.Background(), coremcp.ChannelAgentBlocked,
+			map[string]any{"name": "core/go-io/task-1"})
+		select {
+		case relayed = <-got:
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	core.AssertEqual(t, coremcp.ChannelAgentBlocked, relayed)
 }
