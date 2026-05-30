@@ -35,24 +35,15 @@ describe("lthn-model-browser-window — smoke", () => {
     expect(host.textContent).toContain("~/.lthn/models/");
   });
 
-  // HF fixture rows hand off to lemma-window — clicking Download
-  // emits lthn:lemma:open-admin with the HF repo so lemma-window can
-  // prefill its Download form. The actual fetch invocation stays
-  // inside lemma admin (which has the verified-fetch substrate +
-  // Cerberus-DREAD-approved /v1/admin/models/download endpoint), so
-  // no path from THIS surface invokes dl.Download directly.
-  it("Hugging Face fixture rows render Download buttons that hand off to lemma admin", async () => {
+  // The HF search surface renders its facet controls without a live
+  // network result: a Base-only toggle + a Sort select. (Live result rows
+  // — and their per-row Download buttons, which call the Lemma.Download
+  // verified-fetch binding — need a network fetch the test env lacks.)
+  it("renders the HF search facets — base-only toggle + sort select", async () => {
     const { host } = await mountWindow("lthn-model-browser-window");
-    // Defer message stays — but now points at the verified-fetch
-    // substrate behind the lemma admin download form.
-    expect(host.textContent).toContain("Browsing is a preview");
-    expect(host.textContent).toContain("Lemma admin");
-    // Every HF row exposes a real Download button. None of them
-    // dispatch dl.Download from this surface — they emit a cross-window
-    // event that lands the user in lemma-window with the repo prefilled.
-    const downloadBtns = [...host.querySelectorAll('lthn-btn')]
-      .filter(b => (b.textContent || "").trim() === "Download");
-    expect(downloadBtns.length).toBeGreaterThan(0);
+    expect(host.textContent).toContain("Base models only");
+    expect(host.querySelector("lthn-toggle")).not.toBeNull();
+    expect(host.querySelector("select")).not.toBeNull();
   });
 });
 
