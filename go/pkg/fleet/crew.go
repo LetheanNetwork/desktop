@@ -17,7 +17,8 @@ import (
 // driven by the machine's capabilities — a member runs only when the
 // machine declares the matching capability:
 //
-//	CapabilityInference -> lthn-mlx   serve --addr :PORT  (OpenAI /v1)
+//	CapabilityInference -> lthn-ai    (the LEM host; auto-serves + supervises the
+//	                                   mlx driver, OpenAI /v1 chat on :PORT)
 //	CapabilitySandbox   -> lthn-agent serve               (joins once its
 //	                                                        listen addr is wired)
 //
@@ -45,28 +46,33 @@ type crewMember struct {
 	Serve      []string // serve subcommand + static args; AddrFlag :PORT is appended
 	AddrFlag   string   // CLI flag for the listen address (lthn-mlx --addr :PORT)
 	AddrEnv    string   // OR env var for the listen address (lthn-agent MCP_HTTP_ADDR=127.0.0.1:PORT) — exclusive with AddrFlag
+	Env        []string // extra static KEY=VALUE env for the spawn (merged with the AddrEnv var)
 	ModelFlag  string   // if set, the binary requires ModelFlag <path>; the
 	//             member is skipped until a model path is resolvable
 	BasePort int // instance i listens on BasePort + i
 	Count    int // instances to run (clamped to >= 1)
 }
 
-// defaultCrew is the darwin crew. lthn-mlx is the inference sidecar
-// (--addr :PORT, mirroring Ollama's 11434). lthn-agent is the sandbox
-// sidecar — CoreAgent's orchestration engine, whose listen address goes
-// via MCP_HTTP_ADDR (env, not a flag) and which serves the Streamable
-// HTTP MCP at /mcp + the /v1/tools BridgeToAPI on :9101 (what the
-// desktop's pkg/agents drives). The machinery handles both members.
+// defaultCrew is the darwin crew. lthn-ai is the inference host — it serves the
+// OpenAI /v1 surface on :9100 (CORE_AI_HTTP_ADDR) and on boot auto-serves +
+// supervises the mlx driver itself (CORE_AI_SERVE_RUNTIME=mlx), so the desktop
+// supervises lthn-ai and lthn-ai supervises the driver. Its MCP socket is moved
+// off the shared default so it can't collide. lthn-agent is the sandbox sidecar
+// — CoreAgent's orchestration engine, listen address via MCP_HTTP_ADDR, serving
+// the Streamable HTTP MCP at /mcp + the /v1/tools BridgeToAPI on :9101 (what the
+// desktop's pkg/agents drives). The machinery handles every member.
 func defaultCrew() []crewMember {
 	return []crewMember{
 		{
 			Capability: CapabilityInference,
-			Binary:     "lthn-mlx",
-			Serve:      []string{"serve"},
-			AddrFlag:   "--addr",
-			ModelFlag:  "--model", // serve requires a model; skipped until one resolves
-			BasePort:   11434,
-			Count:      1,
+			Binary:     "lthn-ai",
+			AddrEnv:    "CORE_AI_HTTP_ADDR",
+			Env: []string{
+				"CORE_AI_SERVE_RUNTIME=mlx",           // auto-serve the mlx driver on boot
+				"CORE_MCP_ADDR=/tmp/lthn-ai-mcp.sock", // MCP unix socket off the shared default
+			},
+			BasePort: 9100,
+			Count:    1,
 		},
 		{
 			Capability: CapabilitySandbox,
@@ -147,22 +153,27 @@ func superviseCrew(ctx context.Context, crew []crewMember, capabilities []string
 
 // spawnMember starts one crew-member process on the given port. The listen
 // address is passed via AddrFlag (a CLI flag — lthn-mlx --addr :PORT) or
-// AddrEnv (an env var — lthn-agent MCP_HTTP_ADDR=127.0.0.1:PORT); the two
-// are exclusive. Env spawns go through go-process StartWithOptions (which
-// the boot-time process.Init wired); flag spawns keep the plain Start path.
+// AddrEnv (an env var — lthn-ai CORE_AI_HTTP_ADDR=127.0.0.1:PORT); the two are
+// exclusive. Any static m.Env (KEY=VALUE) is merged in. A spawn that carries
+// env goes through go-process StartWithOptions; a bare flag spawn keeps the
+// plain Start path.
 func spawnMember(ctx context.Context, m crewMember, port int) core.Result {
 	args := append([]string(nil), m.Serve...)
 	if m.AddrFlag != "" {
 		args = append(args, m.AddrFlag, core.Sprintf(":%d", port))
 	}
 	bin := resolveCrewBinary(m.Binary)
-	if m.AddrEnv == "" {
+	env := append([]string(nil), m.Env...)
+	if m.AddrEnv != "" {
+		env = append(env, core.Sprintf("%s=127.0.0.1:%d", m.AddrEnv, port))
+	}
+	if len(env) == 0 {
 		return process.Start(ctx, bin, args...)
 	}
 	return process.StartWithOptions(ctx, process.RunOptions{
 		Command: bin,
 		Args:    args,
-		Env:     []string{core.Sprintf("%s=127.0.0.1:%d", m.AddrEnv, port)},
+		Env:     env,
 	})
 }
 

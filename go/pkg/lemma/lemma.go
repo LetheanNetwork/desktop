@@ -52,8 +52,10 @@ import (
 )
 
 const (
-	// DefaultBaseURL matches the lthn-mlx serve default port.
-	DefaultBaseURL = "http://127.0.0.1:11434/v1"
+	// DefaultBaseURL points at the lthn-ai host (the LEM Runtime host), which
+	// gates capacity then proxies chat to the model driver it supervises.
+	// lthn-ai owns :9100; the driver's own :11434 sits behind it.
+	DefaultBaseURL = "http://127.0.0.1:9100/v1"
 
 	// DefaultModelID is the wire model name. lthn-mlx serve lazily
 	// loads whatever --model directory it was started with.

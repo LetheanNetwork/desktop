@@ -1271,9 +1271,9 @@ func emitTrayPluginClicked(code string) {
 // even when not currently running; the row's status reflects the
 // engine reachability, capabilities reflect what the machine CAN do.
 //
-// Host/Port are the loopback admin endpoint convention (127.0.0.1
-// :11434) matching pkg/lemma defaults. Future remote-tunnelled
-// installs replace these when pairing.
+// Host/Port are the loopback inference endpoint convention (127.0.0.1
+// :9100 — the lthn-ai host) matching pkg/lemma defaults. Future
+// remote-tunnelled installs replace these when pairing.
 // runSelfMachineRefresh keeps the local-machine fleet row in sync
 // with the currently-loaded model. Tick interval is 10s — same
 // order of magnitude as the tray poll (2s) but coarser since Fleet
@@ -1398,7 +1398,7 @@ func localLemmaAgentRow(modelPath string, existing *fleet.Agent) fleet.Agent {
 		Name:     "Local Lemma",
 		Provider: "lemma-local",
 		Kind:     "local",
-		BaseURL:  "http://127.0.0.1:11434/v1",
+		BaseURL:  "http://127.0.0.1:9100/v1",
 		Model:    model,
 		Status:   "online",
 	}
@@ -1468,7 +1468,7 @@ func selfMachineRow() fleet.Machine {
 		Name:         name,
 		Arch:         runtime.GOOS + "/" + runtime.GOARCH,
 		Host:         host,
-		Port:         11434,
+		Port:         9100,
 		Status:       "online",
 		IsSelf:       true,
 		Capabilities: []string{fleet.CapabilityInference, fleet.CapabilitySandbox},
