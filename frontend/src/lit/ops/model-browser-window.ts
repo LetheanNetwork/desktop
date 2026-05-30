@@ -23,6 +23,10 @@ class LthnModelBrowserWindow extends LitElement {
     modelsDir:       { state: true },
     diskFree:        { state: true },
     downloads:       { state: true },
+    query:           { state: true },
+    hfResults:       { state: true },
+    hfBusy:          { state: true },
+    hfErr:           { state: true },
     t:               { state: true },
     // Lemma admin state — feeds the "active loaded" indicator on rail
     // items + the Activate / profile-picker controls in the detail aside.
@@ -53,6 +57,14 @@ class LthnModelBrowserWindow extends LitElement {
   declare diskFree: number;
   // jobId → { name, written, total } for in-flight downloads.
   declare downloads: Map<string, { name: string; written: number; total: number }>;
+  // Live Hugging Face search — replaces the old static preview. query is the
+  // input text; hfResults the fetched rows (base models, text-generation,
+  // most-downloaded). hfBusy/hfErr drive the search-bar status.
+  declare query: string;
+  declare hfResults: Array<{ name: string; author: string; size: string; q: string; family: string; tools: boolean; vision: boolean; hfRepo: string; file: string }>;
+  declare hfBusy: boolean;
+  declare hfErr: string;
+  private _searchDebounce: ReturnType<typeof setTimeout> | null = null;
   // Cleanup fns from Events.On so we unsub on disconnect.
   private _dlUnsubscribe: (() => void)[] = [];
   // Lemma admin facets.
@@ -110,6 +122,10 @@ class LthnModelBrowserWindow extends LitElement {
     this.modelsDir = "~/.lthn/models/";
     this.diskFree = 0;
     this.downloads = new Map();
+    this.query = "";
+    this.hfResults = [];
+    this.hfBusy = false;
+    this.hfErr = "";
     this.activeModelPath = "";
     this.machineHash = "";
     this.profiles = [];
@@ -237,6 +253,10 @@ class LthnModelBrowserWindow extends LitElement {
     // detail-aside hides Activate.
     void this._refreshLemmaAdmin();
 
+    // Kick an initial Hugging Face search (popular base models) so the results
+    // pane isn't empty on first open.
+    void this._searchHF();
+
     // Subscribe to downloader bus events from the Wails event bridge.
     // Dynamic import so the component stays mountable in test + canvas
     // environments where the binding isn't present.
@@ -305,6 +325,7 @@ class LthnModelBrowserWindow extends LitElement {
     super.disconnectedCallback();
     for (const unsub of this._dlUnsubscribe) { try { unsub(); } catch { /* ignore */ } }
     this._dlUnsubscribe = [];
+    if (this._searchDebounce) { clearTimeout(this._searchDebounce); this._searchDebounce = null; }
   }
 
   // Download trigger on Hugging Face fixture rows is intentionally
@@ -329,19 +350,11 @@ class LthnModelBrowserWindow extends LitElement {
     const selFamily = selected?.family || "—";
     const selSize   = selected?.size   || "—";
     const selStatus = selected?.status || "—";
-    // Curated HF catalogue — what we suggest you start with. Real
-    // download counts aren't sourced (would require a live HF API
-    // round-trip per row + rate-limit handling), so the row footer
-    // shows only fields we can stand behind: author, family, quant,
-    // tools/vision tags, size. The Download button hands off to the
-    // Lemma admin form with the repo prefilled.
-    const results = [
-      { name:"Qwen2.5-Coder-7B-Instruct",     author:"Qwen",       size:"4.8 GB", q:"q4_k_m", family:"Coder",   tools:true,  vision:false, hfRepo:"Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",        file:"qwen2.5-coder-7b-instruct-q4_k_m.gguf" },
-      { name:"Mistral-Nemo-12B-Instruct",     author:"MistralAI",  size:"8.4 GB", q:"q4_k_m", family:"Mistral", tools:true,  vision:false, hfRepo:"MistralAI/Mistral-Nemo-Instruct-2407-GGUF",   file:"mistral-nemo-instruct-2407-q4_k_m.gguf" },
-      { name:"Llama-3.2-11B-Vision-Instruct", author:"Meta",       size:"9.1 GB", q:"q4_k_m", family:"Llama",   tools:false, vision:true,  hfRepo:"bartowski/Llama-3.2-11B-Vision-Instruct-GGUF", file:"Llama-3.2-11B-Vision-Instruct-Q4_K_M.gguf" },
-      { name:"Gemma-3-27B-IT",                author:"Google",     size:"16 GB",  q:"q4_k_m", family:"Gemma",   tools:false, vision:false, hfRepo:"bartowski/gemma-3-27b-it-GGUF",               file:"gemma-3-27b-it-Q4_K_M.gguf" },
-      { name:"Phi-4-14B-Instruct",            author:"Microsoft",  size:"9.6 GB", q:"q4_k_m", family:"Phi",     tools:true,  vision:false, hfRepo:"microsoft/Phi-4-mini-instruct-GGUF",          file:"Phi-4-mini-instruct-q4.gguf" },
-    ];
+    // Live Hugging Face search results — base models (no fine-tunes),
+    // text-generation, most-downloaded — populated by _searchHF from the search
+    // box. The right-hand number is the HF download count; Download hands the
+    // repo id to the Lemma admin form.
+    const results = this.hfResults;
 
     // Toolbar intentionally empty: the original "Filters" + "Import
     // GGUF" buttons had no handlers and no backing flows (no filter
@@ -389,14 +402,19 @@ class LthnModelBrowserWindow extends LitElement {
             <div style="display:flex; align-items:center; gap:9px; height:32px; padding:0 12px;
                         background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); border-radius:8px;">
               <i class="fa-solid fa-magnifying-glass" style="font-size:11px; color:var(--fg-3);"></i>
-              <span style="font-size:12.5px; color:var(--fg-1);">coder · gguf · q4_k_m</span>
-              <div style="flex:1"></div>
-              <span style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);">${results.length} results · huggingface.co</span>
+              <input
+                .value=${this.query}
+                @input=${(e: Event) => this._onSearchInput(e)}
+                placeholder="Search Hugging Face base models…"
+                style="flex:1; min-width:0; background:transparent; border:0; outline:none;
+                       color:var(--fg-0); font-size:12.5px; font-family:var(--font-sans);
+                       --wails-draggable: no-drag;">
+              <span style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3); white-space:nowrap;">${this.hfBusy ? "searching…" : `${results.length} results`} · huggingface.co</span>
             </div>
             <div style="font-size:11px; color:var(--fg-3); line-height:1.55; padding:2px 2px 0;">
-              Browsing is a preview — clicking Download opens the Lemma admin
-              Download form with the HF repo prefilled. The verified-fetch
-              substrate (file-hash check before write) lives there.
+              ${this.hfErr
+                ? html`<span style="color:var(--error-400);">Hugging Face search failed:</span> ${this.hfErr}`
+                : html`Live search of Hugging Face base models. Download opens the Lemma admin form with the repo prefilled — the verified-fetch substrate (file-hash check before write) lives there.`}
             </div>
             <div style="display:flex; gap:6px; flex-wrap:wrap;" title="Filter chips are part of the preview — clicks don't filter the results yet.">
               ${["Gemma","Llama","Phi","Qwen","Mistral","≤ 5 GB","≤ 10 GB","Has vision","Has tools"].map(f => html`
@@ -816,6 +834,58 @@ class LthnModelBrowserWindow extends LitElement {
     }
   }
 
+  /** Debounced search-input handler — updates the query + schedules a fetch. */
+  private _onSearchInput(e: Event): void {
+    this.query = (e.target as HTMLInputElement).value;
+    if (this._searchDebounce) clearTimeout(this._searchDebounce);
+    this._searchDebounce = setTimeout(() => { void this._searchHF(); }, 350);
+  }
+
+  /** Query the live Hugging Face models API — base models only
+   *  (base_model_relation=base, the registry's "no fine-tunes" filter),
+   *  text-generation, most-downloaded first. Maps each hit to the result-row
+   *  shape; Download hands the repo id to the Lemma admin form. CORS is open on
+   *  the HF API and HTTPS satisfies WKWebView, so this runs frontend-side. */
+  private async _searchHF(): Promise<void> {
+    this.hfBusy = true;
+    this.hfErr = "";
+    const params = new URLSearchParams({
+      base_model_relation: "base",
+      pipeline_tag: "text-generation",
+      sort: "downloads",
+      direction: "-1",
+      limit: "25",
+    });
+    const q = this.query.trim();
+    if (q) params.set("search", q);
+    try {
+      const resp = await fetch("https://huggingface.co/api/models?" + params.toString());
+      if (!resp.ok) throw new Error(`HF search failed (${resp.status})`);
+      const data = await resp.json() as Array<{ id?: string; modelId?: string; downloads?: number; tags?: string[] }>;
+      this.hfResults = data.map(m => {
+        const id = m.id || m.modelId || "";
+        const tags = m.tags || [];
+        const leaf = id.includes("/") ? id.slice(id.indexOf("/") + 1) : id;
+        return {
+          name:   leaf,
+          author: id.includes("/") ? id.slice(0, id.indexOf("/")) : "",
+          size:   fmtCount(m.downloads || 0) + " ↓",
+          q:      "",
+          family: modelFamily(leaf),
+          tools:  tags.some(t => /(^|[-_])tool|function.?call/i.test(t)),
+          vision: tags.some(t => /vision|image-text|multimodal/i.test(t)),
+          hfRepo: id,
+          file:   "",
+        };
+      });
+    } catch (err) {
+      this.hfErr = err instanceof Error ? err.message : String(err);
+      this.hfResults = [];
+    } finally {
+      this.hfBusy = false;
+    }
+  }
+
   _localItem(m: LocalModel) {
     const active = m.id === this.selected;
     // Real "loaded" state derives from Lemma.Status().model_path —
@@ -920,6 +990,14 @@ function fmtBytes(bytes: number): string {
   let v = bytes;
   while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
   return v >= 100 || i === 0 ? `${v.toFixed(0)} ${units[i]}` : `${v.toFixed(1)} ${units[i]}`;
+}
+
+/** Compact count — 45 → "45", 1234 → "1.2k", 4500000 → "4.5M". Used for the
+ *  Hugging Face download count on a search-result row. */
+function fmtCount(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return (n / 1000).toFixed(n < 10_000 ? 1 : 0) + "k";
+  return (n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0) + "M";
 }
 
 /** Maps a pkg/models Entry → LocalModel. Status default is
