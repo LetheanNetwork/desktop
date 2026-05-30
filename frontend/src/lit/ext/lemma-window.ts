@@ -509,7 +509,7 @@ class LthnLemmaWindow extends LitElement {
             ? html`
               <select .value=${this.reloadModel}
                       @change=${(e: Event) => { this.reloadModel = (e.target as HTMLSelectElement).value; }}
-                      style="width:100%; box-sizing:border-box; padding:6px 8px; margin-top:4px; font-family:ui-monospace, monospace; font-size:12px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px;">
+                      style="width:100%; box-sizing:border-box; padding:6px 8px; margin-top:4px; font-family:ui-monospace, monospace; font-size:12px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px; --wails-draggable: no-drag;">
                 ${this.availableModels.map(m => {
                   const isCurrent = m.path === (this.adminStatus?.model_path ?? "");
                   return html`<option value=${m.path} ?selected=${isCurrent}>${m.name}${isCurrent ? "  (loaded)" : ""}</option>`;
@@ -519,14 +519,14 @@ class LthnLemmaWindow extends LitElement {
               <input type="text" .value=${this.reloadModel}
                      @input=${(e: Event) => { this.reloadModel = (e.target as HTMLInputElement).value; }}
                      placeholder="/path/to/model-dir or model id"
-                     style="width:100%; box-sizing:border-box; padding:6px 8px; margin-top:4px; font-family:ui-monospace, monospace; font-size:12px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px;">`}
+                     style="width:100%; box-sizing:border-box; padding:6px 8px; margin-top:4px; font-family:ui-monospace, monospace; font-size:12px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px; --wails-draggable: no-drag;">`}
 
           ${this.profiles.length > 0
             ? html`
               <label style="display:block; margin-top:8px; font-size:11px; opacity:0.7;">Profile (optional)</label>
               <select .value=${this.reloadProfile}
                       @change=${(e: Event) => { this.reloadProfile = (e.target as HTMLSelectElement).value; }}
-                      style="width:100%; margin-top:4px; padding:6px 8px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px;">
+                      style="width:100%; margin-top:4px; padding:6px 8px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px; --wails-draggable: no-drag;">
                 <option value="">(use serve default)</option>
                 ${this.profiles.map((p: any) => html`<option value=${p.path || p.name}>${p.name} — ${p.backend || "?"}</option>`)}
               </select>`
@@ -537,7 +537,7 @@ class LthnLemmaWindow extends LitElement {
               <label style="display:block; margin-top:8px; font-size:11px; opacity:0.7;">Adapter overlay (optional)</label>
               <select .value=${this.reloadAdapter}
                       @change=${(e: Event) => { this.reloadAdapter = (e.target as HTMLSelectElement).value; }}
-                      style="width:100%; margin-top:4px; padding:6px 8px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px;">
+                      style="width:100%; margin-top:4px; padding:6px 8px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px; --wails-draggable: no-drag;">
                 <option value="">(base model only)</option>
                 ${this.availableAdapters.map(a => {
                   const active = (this.adminStatus as { config?: { adapter_path?: string } })?.config?.adapter_path;
@@ -562,7 +562,7 @@ class LthnLemmaWindow extends LitElement {
             <input type="text" .value=${this.downloadRepo}
                    @input=${(e: Event) => { this.downloadRepo = (e.target as HTMLInputElement).value; }}
                    placeholder="org/repo (e.g. lthn/lemer-lite)"
-                   style="flex:1; padding:6px 8px; font-family:ui-monospace, monospace; font-size:12px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px;">
+                   style="flex:1; padding:6px 8px; font-family:ui-monospace, monospace; font-size:12px; background:var(--bg-elevated, #1a1a1a); color:inherit; border:1px solid var(--border, #2a2a2a); border-radius:4px; --wails-draggable: no-drag;">
             <button type="submit"
                     style="padding:6px 14px; font-size:13px; cursor:pointer; background:var(--accent, #4c8bf5); color:white; border:none; border-radius:4px;">
               Download
