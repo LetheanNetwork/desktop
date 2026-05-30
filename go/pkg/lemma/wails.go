@@ -23,20 +23,23 @@ import (
 )
 
 // WailsService is the Wails-bound facade. Carries an AdminConfig
-// describing how to talk to the local lthn-mlx; reconstructs the
-// Admin handle lazily on each method call so a token rotation or a
-// freshly-started lthn-mlx that wasn't running at desktop boot still
-// "just works" without re-binding.
+// describing how to talk to the local lthn-mlx driver, plus a
+// HostConfig for the lthn-ai orchestration host (:9100). Reconstructs
+// the Admin / Host handles lazily on each method call so a token
+// rotation or a freshly-started lthn-mlx that wasn't running at desktop
+// boot still "just works" without re-binding.
 //
 //	application.NewService(lemma.NewWailsService(lemma.AdminConfig{}))
 type WailsService struct {
-	cfg AdminConfig
-	mu  sync.RWMutex
+	cfg     AdminConfig
+	hostCfg HostConfig
+	mu      sync.RWMutex
 }
 
 // NewWailsService constructs the WailsService. Zero AdminConfig uses
-// the default endpoint (127.0.0.1:11434) and token path
-// (~/Lethean/data/admin.token).
+// the default driver endpoint (127.0.0.1:11434) and token path
+// (~/Lethean/data/admin.token); the host endpoint defaults to lthn-ai
+// on 127.0.0.1:9100.
 //
 //	application.NewService(lemma.NewWailsService(lemma.AdminConfig{}))
 func NewWailsService(cfg AdminConfig) *WailsService {
@@ -114,21 +117,48 @@ func (s *WailsService) Profiles(ctx context.Context) (ProfilesList, error) {
 	return a.Profiles(ctx)
 }
 
-// Reload hot-swaps the loaded model. Caller must supply the machine
-// hash via the same struct field — frontend reads it from Machine()
-// first, then echoes it back as ConfirmMachine to prove the operator
-// intended this instance specifically.
+// Reload makes the picked (model, profile) live. The binding signature
+// is unchanged — the frontend still calls Lemma.Reload(ReloadRequest) —
+// but the routing now depends on whether an adapter overlay is asked
+// for:
 //
-//	await Lemma.Reload({ ConfirmMachine: mi.hash, ModelPath: picked })
+//   - No adapter (the common "Use this model" case): routes through the
+//     lthn-ai host's POST /v1/driver/serve. The host hot-swaps the model
+//     in place AND persists the (model, profile) to
+//     ~/Lethean/data/lthn-ai-serve.json, so the next boot restores the
+//     operator's last pick. ConfirmMachine is ignored here — the host
+//     supervises a single local driver, so the machine-foot-gun gate the
+//     driver's admin/reload enforces is moot.
+//
+//   - Adapter set (the Fine-tune A/B overlay case): routes through the
+//     driver's Bearer-gated /v1/admin/serve/reload, because the host's
+//     serve surface carries no adapter field. This preserves the adapter
+//     overlay rather than silently dropping it — but the choice does NOT
+//     persist across a host restart (the admin/reload path doesn't write
+//     the serve file). That is acceptable: an adapter overlay is a
+//     transient A/B test, not a default-model selection.
+//
+//	await Lemma.Reload({ ModelPath: picked, ProfilePath: prof })          // → host serve (persists)
+//	await Lemma.Reload({ ModelPath: picked, AdapterPath: adapterDir })    // → driver admin/reload (overlay)
 func (s *WailsService) Reload(ctx context.Context, req ReloadRequest) error {
-	a, err := s.admin()
-	if err != nil {
-		return err
+	// Adapter overlay → driver admin/reload (host serve has no adapter field).
+	if core.Trim(req.AdapterPath) != "" {
+		a, err := s.admin()
+		if err != nil {
+			return err
+		}
+		if a == nil {
+			return errLemmaNotConfigured
+		}
+		return a.Reload(ctx, req)
 	}
-	if a == nil {
-		return errLemmaNotConfigured
-	}
-	return a.Reload(ctx, req)
+	// No adapter → lthn-ai host serve: hot-swap in place + persist the pick.
+	return s.host().Serve(ctx, HostServeRequest{
+		Runtime: "mlx",
+		Model:   req.ModelPath,
+		Profile: req.ProfilePath,
+		Context: req.ContextLength,
+	})
 }
 
 // Download queues an HF-allowlisted model fetch. Returns the job_id
@@ -250,4 +280,15 @@ func (s *WailsService) admin() (*Admin, error) {
 		return nil, core.E("lemma.WailsService.admin", "admin client unavailable", err)
 	}
 	return a, nil
+}
+
+// host lazily builds the lthn-ai Host client. Per-call (matching admin())
+// so a late-started lthn-ai works without re-binding; there is no token to
+// load, so this never fails — an unreachable host surfaces as a transport
+// error when Serve is actually called.
+func (s *WailsService) host() *Host {
+	s.mu.RLock()
+	cfg := s.hostCfg
+	s.mu.RUnlock()
+	return NewHost(cfg)
 }

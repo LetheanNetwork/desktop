@@ -697,20 +697,31 @@ class LthnModelBrowserWindow extends LitElement {
     }
   }
 
-  // Hot-swap the loaded model. Caller passes the absolute path of the
-  // local-rail entry. ConfirmMachine is the gate the engine checks
-  // (rejects the call if the running instance hash doesn't match —
-  // operator foot-gun prevention). After success, refresh Status so
-  // the active-row indicator flips to the new selection.
+  // Make the picked model live. Caller passes the absolute path of the
+  // local-rail entry. Routing happens Go-side in Lemma.Reload:
+  //
+  //   - No adapter selected → lthn-ai host serve (:9100), which
+  //     hot-swaps + persists the pick across reboots. The host
+  //     supervises a single local driver, so confirm_machine is ignored
+  //     on that path — no machineHash gate needed here.
+  //   - Adapter selected → driver admin/reload (Bearer-gated, machine-
+  //     hash confirmed), because the host serve surface carries no
+  //     adapter field. Only that path needs the machineHash, so the
+  //     guard below is scoped to it.
+  //
+  // After success, refresh Status so the active-row indicator flips to
+  // the new selection.
   private async _doReload(modelPath: string): Promise<void> {
     if (this.reloadBusy) return;
     this.reloadErr = "";
-    if (!this.machineHash) {
-      this.reloadErr = "machine hash not loaded — engine may be offline";
-      return;
-    }
     if (!modelPath) {
       this.reloadErr = "no model path";
+      return;
+    }
+    // The adapter-overlay path still rides the machine-hash-gated driver
+    // admin/reload; the plain model swap (host serve) does not.
+    if (this.selectedAdapter && !this.machineHash) {
+      this.reloadErr = "machine hash not loaded — engine may be offline (required for adapter overlay)";
       return;
     }
     this.reloadBusy = true;
