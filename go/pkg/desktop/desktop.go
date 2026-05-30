@@ -180,6 +180,10 @@ type Service struct {
 	// exit. Closed by PostShutdown; the goroutine selects on it
 	// alongside the ticker channel.
 	selfRefreshStop chan struct{}
+	// trayStatusStop signals the tray-tooltip refresh ticker to exit.
+	// Closed by PostShutdown; the goroutine selects on it alongside
+	// the ticker channel.
+	trayStatusStop chan struct{}
 }
 
 // NewService constructs the desktop service. Does NOT start Wails
@@ -832,6 +836,10 @@ func (s *Service) Run() core.Result {
 				close(s.selfRefreshStop)
 				s.selfRefreshStop = nil
 			}
+			if s.trayStatusStop != nil {
+				close(s.trayStatusStop)
+				s.trayStatusStop = nil
+			}
 			if s.opts.Server != nil {
 				if r := s.opts.Server.Stop(core.Background()); !r.OK {
 					core.Warn("desktop server shutdown failed", "err", r.Error())
@@ -1013,7 +1021,73 @@ func (s *Service) Run() core.Result {
 		})
 	}
 
+	// Live tray-tooltip status. The tray icon is the at-a-glance
+	// surface; the tooltip reflects the currently-loaded Lemma model
+	// + ready state without the user opening any window. An immediate
+	// backgrounded poll fires the first read within the admin timeout
+	// (~3s) so the tooltip reflects truth shortly after launch rather
+	// than waiting a full 30s tick. The ticker keeps it live as the
+	// user hot-swaps models. Stopped via PostShutdown closing
+	// trayStatusStop so the goroutine doesn't outlive the process.
+	go refreshTrayTooltipOnce(s.opts.Core)
+	s.trayStatusStop = make(chan struct{})
+	go runTrayStatusRefresh(s.opts.Core, s.trayStatusStop)
+
 	return s.gui.Run()
+}
+
+// runTrayStatusRefresh keeps the native tray tooltip in sync with the
+// currently-loaded Lemma model on a 30s ticker. Coarser than a chat
+// surface needs — the tooltip is at-a-glance, not real-time — but
+// frequent enough to catch a model hot-swap or an engine stop/start.
+// Exits when stop closes (PostShutdown).
+//
+//	s.trayStatusStop = make(chan struct{})
+//	go runTrayStatusRefresh(s.opts.Core, s.trayStatusStop)
+func runTrayStatusRefresh(c *core.Core, stop <-chan struct{}) {
+	tick := core.NewTicker(30 * core.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-tick.C:
+			refreshTrayTooltipOnce(c)
+		}
+	}
+}
+
+// refreshTrayTooltipOnce performs one Lemma.Status read + pushes the
+// result to the native tray tooltip via the systray.set_tooltip action.
+// Independent of the ticker so the boot-time first-fire (and tests) can
+// drive a single iteration.
+//
+// Lemma up with a model loaded → tooltip = basename(model_path) +
+// " — ready". Lemma unreachable, errored, or no model loaded →
+// tooltip = "no model loaded". Errors are debug-level only — no panic,
+// no user-visible noise (a menu-bar utility shouldn't surface engine
+// transients).
+func refreshTrayTooltipOnce(c *core.Core) {
+	if c == nil {
+		return
+	}
+	tooltip := "no model loaded"
+	admin, err := lemma.NewAdmin(lemma.AdminConfig{})
+	if err != nil {
+		core.Debug("desktop.tray.status", "err", err.Error())
+	} else {
+		ctx, cancel := core.WithTimeout(core.Background(), 3*core.Second)
+		defer cancel()
+		status, statusErr := admin.Status(ctx)
+		if statusErr != nil {
+			core.Debug("desktop.tray.status", "err", statusErr.Error())
+		} else if base := pathBase(status.ModelPath); base != "" {
+			tooltip = base + " — ready"
+		}
+	}
+	c.Action("systray.set_tooltip").Run(core.Background(), core.NewOptions(
+		core.Option{Key: "task", Value: guisystray.TaskSetTrayTooltip{Tooltip: tooltip}},
+	))
 }
 
 // restoreSecondInstanceWindow brings a window forward in response to a
