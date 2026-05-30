@@ -208,12 +208,17 @@ func TestAdminReloadPostsBody(t *testing.T) {
 	}
 }
 
-// TestAdminDownloadFlow — Download returns job_id, then DownloadJob
-// returns a status snapshot. Mirrors the real two-step flow.
+// TestAdminDownloadFlow — Download returns the job id, then DownloadJob
+// returns a status snapshot. The server here speaks the driver's real wire
+// shape (go-mlx cmd/mlx adminDownloadJob): the kick body carries "repo", the
+// response identifies the job by "id" (not "job_id"), and progress is byte
+// counters (bytes_done / bytes_total). This guards the field-tag contract that
+// previously drifted from the driver and silently broke the kick.
 func TestAdminDownloadFlow(t *testing.T) {
 	const tok = "tok"
 	const jobID = "dl-job-42"
 
+	var capturedRepo string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+tok {
 			http.Error(w, "auth", http.StatusUnauthorized)
@@ -221,19 +226,24 @@ func TestAdminDownloadFlow(t *testing.T) {
 		}
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/models/download":
+			var body DownloadRequest
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			capturedRepo = body.Repo
+			w.WriteHeader(http.StatusAccepted)
 			_ = json.NewEncoder(w).Encode(DownloadJobStatus{
-				JobID:  jobID,
+				ID:     jobID,
 				Status: "pending",
-				RepoID: "lthn/lemer-lite",
+				Repo:   "mlx-community/gemma-4-e2b-it-mxfp8",
 			})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/admin/models/download" && r.URL.Query().Get("job") == jobID:
 			_ = json.NewEncoder(w).Encode(DownloadJobStatus{
-				JobID:    jobID,
-				Status:   "done",
-				RepoID:   "lthn/lemer-lite",
-				Progress: 100,
-				Bytes:    123_456_789,
-				Path:     "/Lethean/data/models/lthn/lemer-lite",
+				ID:         jobID,
+				Status:     "done",
+				Repo:       "mlx-community/gemma-4-e2b-it-mxfp8",
+				DestPath:   "/Lethean/data/models/mlx-community/gemma-4-e2b-it-mxfp8/main",
+				BytesTotal: 123_456_789,
+				BytesDone:  123_456_789,
+				FileCount:  3,
 			})
 		default:
 			http.Error(w, "unrouted", http.StatusNotFound)
@@ -242,19 +252,67 @@ func TestAdminDownloadFlow(t *testing.T) {
 	defer srv.Close()
 
 	admin, _ := NewAdmin(AdminConfig{BaseURL: srv.URL, Token: tok})
-	gotJob, err := admin.Download(context.Background(), DownloadRequest{RepoID: "lthn/lemer-lite"})
+	gotJob, err := admin.Download(context.Background(), DownloadRequest{Repo: "mlx-community/gemma-4-e2b-it-mxfp8"})
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
 	if gotJob != jobID {
-		t.Fatalf("Download job_id = %q, want %q", gotJob, jobID)
+		t.Fatalf("Download id = %q, want %q", gotJob, jobID)
+	}
+	if capturedRepo != "mlx-community/gemma-4-e2b-it-mxfp8" {
+		t.Fatalf("server captured repo = %q, want the request's repo (wire tag must be \"repo\")", capturedRepo)
 	}
 	js, err := admin.DownloadJob(context.Background(), jobID)
 	if err != nil {
 		t.Fatalf("DownloadJob: %v", err)
 	}
-	if js.Status != "done" || js.Progress != 100 {
-		t.Fatalf("DownloadJob = %+v, want status=done progress=100", js)
+	if js.Status != "done" || js.BytesDone != 123_456_789 {
+		t.Fatalf("DownloadJob = %+v, want status=done bytes_done=123456789", js)
+	}
+}
+
+// TestEnsureRepoAllowed — the catalogue-download permit step. A fresh HOME
+// (no allowlist) gets the file created with the repo; a second call for a
+// different repo appends rather than replacing; a repeat of an existing repo
+// is a no-op. The on-disk schema must match the driver's {"repos": [...]} so
+// the driver's gate reads exactly what we wrote.
+func TestEnsureRepoAllowed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, "Lethean", "data", "allowed-models.json")
+
+	if err := ensureRepoAllowed("mlx-community/gemma-4-e2b-it-mxfp8"); err != nil {
+		t.Fatalf("first ensure: %v", err)
+	}
+	read := func() allowedModelsFile {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read allowlist: %v", err)
+		}
+		var f allowedModelsFile
+		if err := json.Unmarshal(raw, &f); err != nil {
+			t.Fatalf("allowlist not valid JSON in driver schema: %v\n%s", err, raw)
+		}
+		return f
+	}
+	if got := read().Repos; len(got) != 1 || got[0] != "mlx-community/gemma-4-e2b-it-mxfp8" {
+		t.Fatalf("after first ensure repos = %v, want [the repo]", got)
+	}
+
+	// Append a different repo — must keep the first.
+	if err := ensureRepoAllowed("google/gemma-4-e2b-it"); err != nil {
+		t.Fatalf("second ensure: %v", err)
+	}
+	if got := read().Repos; len(got) != 2 {
+		t.Fatalf("after second ensure repos = %v, want 2 entries (append, not replace)", got)
+	}
+
+	// Repeat an existing repo — no-op, count unchanged.
+	if err := ensureRepoAllowed("google/gemma-4-e2b-it"); err != nil {
+		t.Fatalf("idempotent ensure: %v", err)
+	}
+	if got := read().Repos; len(got) != 2 {
+		t.Fatalf("after idempotent ensure repos = %v, want still 2 (no duplicate)", got)
 	}
 }
 
@@ -269,7 +327,7 @@ func TestAdminBadStatusSurfacesUpstreamBody(t *testing.T) {
 	defer srv.Close()
 
 	admin, _ := NewAdmin(AdminConfig{BaseURL: srv.URL, Token: tok})
-	_, err := admin.Download(context.Background(), DownloadRequest{RepoID: "evil/repo"})
+	_, err := admin.Download(context.Background(), DownloadRequest{Repo: "evil/repo"})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}

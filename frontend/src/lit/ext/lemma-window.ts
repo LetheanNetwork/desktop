@@ -382,7 +382,7 @@ class LthnLemmaWindow extends LitElement {
     }
     this.downloadErr = "";
     try {
-      const jobId = await Lemma.Download({ RepoID: this.downloadRepo.trim(), Revision: "" } as any);
+      const jobId = await Lemma.Download({ repo: this.downloadRepo.trim(), revision: "" } as any);
       this.downloadJob = { jobId, status: "pending", progress: 0, bytes: 0 };
       if (this.downloadPollHandle !== null) {
         clearInterval(this.downloadPollHandle);
@@ -396,11 +396,17 @@ class LthnLemmaWindow extends LitElement {
   private async pollDownload(jobId: string): Promise<void> {
     try {
       const js = await Lemma.DownloadJob(jobId);
+      // Driver job shape (go-mlx adminDownloadJob): id / bytes_done /
+      // bytes_total — derive a 0-100 progress from the byte counters so
+      // this window's bar still renders without a server-side percentage.
+      const pct = js.bytes_total && js.bytes_total > 0
+        ? Math.round(100 * (js.bytes_done ?? 0) / js.bytes_total)
+        : 0;
       this.downloadJob = {
-        jobId: js.job_id ?? jobId,
+        jobId: js.id ?? jobId,
         status: js.status ?? "?",
-        progress: js.progress ?? 0,
-        bytes: js.bytes ?? 0,
+        progress: pct,
+        bytes: js.bytes_done ?? 0,
         error: js.error,
       };
       if (js.status === "done" || js.status === "failed") {

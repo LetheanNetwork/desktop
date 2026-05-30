@@ -173,25 +173,37 @@ type ReloadRequest struct {
 	ContextLength  int    `json:"context_length,omitempty"`
 }
 
-// DownloadRequest is the body for POST /v1/admin/models/download.
-// RepoID is the HF repo (allowlist-gated upstream); Revision optional.
+// DownloadRequest is the body for POST /v1/admin/models/download. Mirrors
+// the driver's adminDownloadRequest (go-mlx cmd/mlx/admin_download.go): the
+// field on the wire is "repo" (not "repo_id"), Revision is optional (driver
+// defaults to "main"), Files optionally restricts a multi-file repo to a
+// subset (empty = fetch every file the HF tree lists).
+//
+// The repo must be in the driver's operator allowlist
+// (~/Lethean/data/allowed-models.json) or the driver refuses with 403; the
+// Wails Download surface ensures the repo is allow-listed before kicking the
+// job (clicking Download in the catalogue IS the operator's permit intent).
 type DownloadRequest struct {
-	RepoID   string `json:"repo_id"`
-	Revision string `json:"revision,omitempty"`
+	Repo     string   `json:"repo"`
+	Revision string   `json:"revision,omitempty"`
+	Files    []string `json:"files,omitempty"`
 }
 
 // DownloadJobStatus is the response for GET /v1/admin/models/download?job=ID
-// + the kick response from POST. Status transitions: pending → running →
-// done | failed.
+// + the kick response from POST. Mirrors the driver's adminDownloadJob exactly
+// so the JSON decode is direct — the kick field is "id" (not "job_id"), and
+// progress is reported as byte counters (bytes_done / bytes_total) rather than
+// a percentage. Status transitions: pending → running → done | failed.
 type DownloadJobStatus struct {
-	JobID    string `json:"job_id"`
-	Status   string `json:"status"`
-	RepoID   string `json:"repo_id,omitempty"`
-	Revision string `json:"revision,omitempty"`
-	Progress int    `json:"progress,omitempty"`
-	Bytes    int64  `json:"bytes,omitempty"`
-	Error    string `json:"error,omitempty"`
-	Path     string `json:"path,omitempty"`
+	ID         string `json:"id"`
+	Status     string `json:"status"`
+	Repo       string `json:"repo,omitempty"`
+	Revision   string `json:"revision,omitempty"`
+	DestPath   string `json:"dest_path,omitempty"`
+	BytesTotal int64  `json:"bytes_total,omitempty"`
+	BytesDone  int64  `json:"bytes_done,omitempty"`
+	FileCount  int    `json:"file_count,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 // SFTStartRequest is the body for POST /v1/admin/sft/start. Mirrors
@@ -311,24 +323,27 @@ func (a *Admin) Reload(ctx context.Context, req ReloadRequest) error {
 	return nil
 }
 
-// Download kicks off an async HF repo fetch. Returns the job_id;
-// caller polls DownloadJob(jobID) to monitor.
+// Download kicks off an async HF repo fetch. Returns the job id (the
+// driver's "id" field); caller polls DownloadJob(id) to monitor. The repo
+// must already be in the driver's allowlist — the Wails Download surface
+// handles that; a raw Admin.Download against a non-allowed repo surfaces the
+// driver's 403.
 //
-//	jobID, err := admin.Download(ctx, lemma.DownloadRequest{
-//	    RepoID: "lthn/lemer-lite", Revision: "main",
+//	id, err := admin.Download(ctx, lemma.DownloadRequest{
+//	    Repo: "mlx-community/gemma-4-e2b-it-mxfp8", Revision: "main",
 //	})
 func (a *Admin) Download(ctx context.Context, req DownloadRequest) (string, error) {
-	if core.Trim(req.RepoID) == "" {
-		return "", core.E("lemma.Admin.Download", "repo_id required", nil)
+	if core.Trim(req.Repo) == "" {
+		return "", core.E("lemma.Admin.Download", "repo required", nil)
 	}
 	var out DownloadJobStatus
 	if err := a.doJSON(ctx, http.MethodPost, "/v1/admin/models/download", req, &out); err != nil {
 		return "", core.E("lemma.Admin.Download", "request failed", err)
 	}
-	if core.Trim(out.JobID) == "" {
-		return "", core.E("lemma.Admin.Download", "server omitted job_id", nil)
+	if core.Trim(out.ID) == "" {
+		return "", core.E("lemma.Admin.Download", "server omitted job id", nil)
 	}
-	return out.JobID, nil
+	return out.ID, nil
 }
 
 // DownloadJob polls the status of an in-flight download job.
@@ -514,4 +529,68 @@ func loadTokenFromFile(path string) (string, error) {
 		return "", core.E("lemma.loadTokenFromFile", "token file empty: "+path, nil)
 	}
 	return tok, nil
+}
+
+// allowedModelsRelPath — path under $HOME of the driver's operator allowlist.
+// Sibling of admin.token. Schema mirrors go-mlx cmd/mlx allowedModelsFile:
+// {"repos": ["org/model", …]}. Absent → empty allowlist → the driver refuses
+// every download (fail-closed). Keep this exact path + schema in lockstep with
+// the driver — a mismatch silently re-closes the gate.
+const allowedModelsRelPath = "Lethean/data/allowed-models.json"
+
+// allowedModelsFile is the on-disk allowlist shape — identical to the driver's
+// so a read here sees exactly what the driver's gate reads.
+type allowedModelsFile struct {
+	Repos []string `json:"repos"`
+}
+
+// ensureRepoAllowed adds repo to the driver's allowlist if absent, so the
+// driver's fail-closed download gate accepts the subsequent fetch. Idempotent:
+// a repo already present is a no-op (no rewrite). Creates the file + parent dir
+// on first use. The write is atomic via a temp file + rename so a crash
+// mid-write can't truncate an existing allowlist.
+func ensureRepoAllowed(repo string) error {
+	repo = core.Trim(repo)
+	if repo == "" {
+		return core.E("lemma.ensureRepoAllowed", "repo required", nil)
+	}
+	homeR := core.UserHomeDir()
+	if !homeR.OK {
+		return core.E("lemma.ensureRepoAllowed", "home dir unavailable: "+homeR.Error(), nil)
+	}
+	home, _ := homeR.Value.(string)
+	path := core.JoinPath(home, allowedModelsRelPath)
+
+	var current allowedModelsFile
+	if r := core.ReadFile(path); r.OK {
+		if raw, ok := r.Value.([]byte); ok && len(raw) > 0 {
+			if jr := core.JSONUnmarshal(raw, &current); !jr.OK {
+				// A malformed allowlist is the operator's file — surface it
+				// rather than clobbering hand-curated content.
+				return core.E("lemma.ensureRepoAllowed", "parse existing allowlist "+path, jr.Value.(error))
+			}
+		}
+	}
+	for _, r := range current.Repos {
+		if core.Trim(r) == repo {
+			return nil // already permitted — nothing to write
+		}
+	}
+	current.Repos = append(current.Repos, repo)
+
+	enc := core.JSONMarshalIndent(current, "", "  ")
+	if !enc.OK {
+		return core.E("lemma.ensureRepoAllowed", "marshal allowlist", enc.Value.(error))
+	}
+	if r := core.MkdirAll(core.PathDir(path), 0o755); !r.OK {
+		return core.E("lemma.ensureRepoAllowed", "create data dir", nil)
+	}
+	tmp := path + ".tmp"
+	if r := core.WriteFile(tmp, enc.Value.([]byte), 0o644); !r.OK {
+		return core.E("lemma.ensureRepoAllowed", "write allowlist temp: "+r.Error(), nil)
+	}
+	if r := core.Rename(tmp, path); !r.OK {
+		return core.E("lemma.ensureRepoAllowed", "promote allowlist: "+r.Error(), nil)
+	}
+	return nil
 }

@@ -279,6 +279,19 @@ class LthnModelBrowserWindow extends LitElement {
         const next = new Map(this.downloads);
         next.delete(d.id);
         this.downloads = next;
+        if (d.ok === false) {
+          // Surface the failure (most often the driver's HF resolve /
+          // verify error) on the search status line, and drop the
+          // provisional rail entry so the bar doesn't stick. Note the
+          // driver currently downloads into ~/Lethean/data/models while
+          // this rail lists ~/Lethean/conf/models — a successful fetch
+          // won't appear here until those reconcile (see #download-dir).
+          this.hfErr = `Download failed${d.name ? ` (${d.name})` : ""}: ${d.error || "unknown error"}`;
+          if (d.name) this.local = this.local.filter(m => !(m.name === d.name && m.status === "downloading"));
+          return;
+        }
+        // Success — clear any stale error from a previous attempt.
+        this.hfErr = "";
         // Re-list local models so the newly fetched file appears in the rail.
         try {
           import("@desktop/models/wailsservice").then(async ms => {
@@ -413,8 +426,8 @@ class LthnModelBrowserWindow extends LitElement {
             </div>
             <div style="font-size:11px; color:var(--fg-3); line-height:1.55; padding:2px 2px 0;">
               ${this.hfErr
-                ? html`<span style="color:var(--error-400);">Hugging Face search failed:</span> ${this.hfErr}`
-                : html`Live search of Hugging Face base models. Download opens the Lemma admin form with the repo prefilled — the verified-fetch substrate (file-hash check before write) lives there.`}
+                ? html`<span style="color:var(--error-400);">${this.hfErr}</span>`
+                : html`Live search of Hugging Face base models. Download verifies each file's hash before writing into your local models dir; progress shows in the Local rail on the left.`}
             </div>
             <div style="display:flex; gap:6px; flex-wrap:wrap;" title="Filter chips are part of the preview — clicks don't filter the results yet.">
               ${["Gemma","Llama","Phi","Qwen","Mistral","≤ 5 GB","≤ 10 GB","Has vision","Has tools"].map(f => html`
@@ -450,7 +463,7 @@ class LthnModelBrowserWindow extends LitElement {
                   <lthn-btn
                     tone="primary"
                     size="sm"
-                    title=${`Open Lemma admin with ${r.hfRepo} prefilled in the Download form`}
+                    title=${`Download ${r.hfRepo} — verified fetch into the local models dir; progress shows in the Local rail`}
                     @click=${() => this._downloadViaLemma(r.hfRepo)}>
                     <i class="fa-solid fa-arrow-down" style="font-size:10px;"></i>
                     Download
@@ -832,16 +845,102 @@ class LthnModelBrowserWindow extends LitElement {
     }
   }
 
-  /** Same hop as _openLemma but passes the HF repo id through the
-   *  open-admin event so lemma-window can prefill its Download form.
-   *  Used by the HF catalogue Download buttons. */
+  /** Kick a verified HF repo download through the Go-side Lemma.Download
+   *  binding (lthn-mlx admin verified-fetch — sha-gated, allowlist-
+   *  permitted Go-side), then drive the existing downloader bus so the
+   *  local rail reflects progress and re-lists on completion. Self-
+   *  contained: no hop to the lemma-window (which isn't in shell nav, so
+   *  the old setpane("lemma") dead-ended at "No window for lemma").
+   *
+   *  WebView can't fetch the backend over loopback, so this is all
+   *  Wails bindings: Lemma.Download (kick) + Lemma.DownloadJob (poll).
+   *  The job reports byte counters; we translate them onto the
+   *  "downloader:progress" / "downloader:done" payloads the rail's
+   *  connectedCallback already subscribes to, so the progress bar +
+   *  re-list path is reused rather than rebuilt. */
   private async _downloadViaLemma(hfRepo: string): Promise<void> {
+    const name = hfRepo.includes("/") ? hfRepo.slice(hfRepo.indexOf("/") + 1) : hfRepo;
+    // Guard against a second click while this repo is already in flight.
+    if ([...this.downloads.values()].some(d => d.name === name)) return;
+
+    let Events: typeof import("@wailsio/runtime").Events;
     try {
-      const { Events } = await import("@wailsio/runtime");
-      Events.Emit("lthn:app:setpane", "lemma");
-      Events.Emit("lthn:lemma:open-admin", { hfRepo });
+      ({ Events } = await import("@wailsio/runtime"));
     } catch (err) {
-      console.error("model-browser: download via lemma failed", err);
+      console.error("model-browser: wails runtime absent — cannot download", err);
+      return;
+    }
+
+    let id: string;
+    try {
+      const Lemma = await import("@desktop/lemma/wailsservice");
+      const { DownloadRequest } = await import("@desktop/lemma/models");
+      // Lemma.Download returns a bare job id string (Go (string, error) →
+      // resolved promise / rejection), not a core.Result — await directly.
+      id = await Lemma.Download(new DownloadRequest({ repo: hfRepo }));
+    } catch (err) {
+      // Surface the kick failure on the search-result status line — the
+      // most common cause is lthn-mlx not running (no admin token) or a
+      // private/unresolvable repo.
+      this.hfErr = `Download could not start: ${err instanceof Error ? err.message : String(err)}`;
+      return;
+    }
+
+    // Provisional rail entry so the user sees the download immediately,
+    // before the file lands + the post-done re-list replaces it. Matches
+    // the name the progress/done handlers key on.
+    if (!this.local.some(m => m.name === name)) {
+      this.local = [
+        { id: modelSlug(name), name, family: modelFamily(name), size: "—", status: "downloading" as const },
+        ...this.local,
+      ];
+    }
+
+    // Poll the job, translating byte counters onto the downloader bus the
+    // rail already listens to. The connectedCallback "downloader:done"
+    // handler re-lists local models + clears the downloads map entry.
+    void this._pollDownloadJob(id, name, Events);
+  }
+
+  /** Poll Lemma.DownloadJob on a 2s cadence, re-emitting onto the
+   *  downloader bus so the rail UI (progress bar + re-list) is reused.
+   *  Terminal states (done | failed) fire "downloader:done" then stop. A
+   *  poll-call failure is treated as terminal so a dropped engine can't
+   *  leave the bar spinning forever. */
+  private async _pollDownloadJob(
+    id: string,
+    name: string,
+    Events: typeof import("@wailsio/runtime").Events,
+  ): Promise<void> {
+    const Lemma = await import("@desktop/lemma/wailsservice");
+    for (;;) {
+      await new Promise(r => setTimeout(r, 2000));
+      // Lemma.DownloadJob returns a bare DownloadJobStatus (not a
+      // core.Result) — await directly; a rejected promise is terminal.
+      let js: { id?: string; status?: string; bytes_done?: number; bytes_total?: number; dest_path?: string; error?: string };
+      try {
+        js = await Lemma.DownloadJob(id);
+      } catch (err) {
+        Events.Emit("downloader:done", { id, name, ok: false, error: err instanceof Error ? err.message : String(err) });
+        return;
+      }
+      const status = js.status ?? "";
+      if (status === "done") {
+        Events.Emit("downloader:done", { id, name, ok: true, dest: js.dest_path });
+        return;
+      }
+      if (status === "failed") {
+        Events.Emit("downloader:done", { id, name, ok: false, error: js.error || "download failed" });
+        return;
+      }
+      // pending / running → report progress. The driver reports byte
+      // counters; the rail's bar computes written/total, so pass them
+      // straight through (0/0 renders a 0% bar until the first byte).
+      Events.Emit("downloader:progress", {
+        id, name,
+        written: js.bytes_done ?? 0,
+        total:   js.bytes_total ?? 0,
+      });
     }
   }
 

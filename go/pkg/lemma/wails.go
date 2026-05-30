@@ -161,17 +161,36 @@ func (s *WailsService) Reload(ctx context.Context, req ReloadRequest) error {
 	})
 }
 
-// Download queues an HF-allowlisted model fetch. Returns the job_id
-// for follow-up polling via DownloadJob.
+// Download kicks a verified HF repo fetch through the driver and returns the
+// job id for follow-up polling via DownloadJob. The model-browser catalogue's
+// Download button calls this with a repo id.
 //
-//	const jobID = await Lemma.Download({ RepoID: "lthn/lemer-lite" })
+// The driver's download surface is allowlist-gated
+// (~/Lethean/data/allowed-models.json, fail-closed) — a non-allowed repo is
+// refused with 403. Clicking Download in the catalogue is the operator's
+// explicit intent to permit that repo, so this ensures the repo is on the
+// allowlist before kicking the job. Without that step every catalogue download
+// would dead-end on a 403 the user can't resolve from the UI. The repo stays
+// permitted for future fetches (an append, not a replace), matching the
+// operator-curated nature of the file.
+//
+//	const id = await Lemma.Download({ repo: "mlx-community/gemma-4-e2b-it-mxfp8" })
 func (s *WailsService) Download(ctx context.Context, req DownloadRequest) (string, error) {
+	if core.Trim(req.Repo) == "" {
+		return "", core.E("lemma.WailsService.Download", "repo required", nil)
+	}
 	a, err := s.admin()
 	if err != nil {
 		return "", err
 	}
 	if a == nil {
 		return "", errLemmaNotConfigured
+	}
+	// Permit the repo before the driver's allowlist gate sees it. Best-effort
+	// on the read side (a parse error there is surfaced), but the write must
+	// succeed or the kick below will 403 — so a write failure is returned.
+	if err := ensureRepoAllowed(req.Repo); err != nil {
+		return "", core.E("lemma.WailsService.Download", "permit repo for download", err)
 	}
 	return a.Download(ctx, req)
 }
