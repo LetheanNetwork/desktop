@@ -16,6 +16,8 @@
  *   <lthn-status-dot variant pulse>
  *   <lthn-state-pill variant>               (slot — pill text)
  *   <lthn-sparkline data="..." color width height fill>
+ *   <lthn-filter-chip selected>             (slot — chip text; parent owns click)
+ *   <lthn-range min max step value>         (emits lthn-change {value})
  */
 
 import { LitElement, html, nothing, type TemplateResult } from "lit";
@@ -257,6 +259,77 @@ class LthnStatePill extends LitElement {
   }
 }
 customElements.define("lthn-state-pill", LthnStatePill);
+
+/* ────────────────────────────────── <lthn-filter-chip> ──────────── */
+/* Selectable filter chip. The parent owns the click + the selected state —
+ * same "display reflects a parent-held boolean" shape as <lthn-toggle>, so
+ * lifting to @dappcore/ui later is a rename (→ <core-pill selectable>).
+ *
+ *   <lthn-filter-chip selected @click=${...}>Base</lthn-filter-chip>
+ */
+class LthnFilterChip extends LitElement {
+  static readonly properties = { selected: { type: Boolean, reflect: true } };
+  declare selected: boolean;
+  constructor() { super(); this.selected = false; }
+  createRenderRoot() { return this; }
+  render() {
+    const on = this.selected;
+    return html`
+      <span style="font-size:10.5px; padding:3px 10px; border-radius:999px; cursor:pointer; user-select:none;
+                   display:inline-block; letter-spacing:-0.005em; transition:background .12s, border-color .12s, color .12s;
+                   background:${on ? "rgba(64,193,197,0.14)" : "rgba(255,255,255,0.04)"};
+                   border:1px solid ${on ? "rgba(64,193,197,0.40)" : "rgba(255,255,255,0.06)"};
+                   color:${on ? "var(--brand-300)" : "var(--fg-2)"};
+                   --wails-draggable:no-drag;">
+        <slot></slot>
+      </span>
+    `;
+  }
+}
+customElements.define("lthn-filter-chip", LthnFilterChip);
+
+/* ────────────────────────────────── <lthn-range> ───────────────── */
+/* Single-thumb slider; emits `lthn-change` {value} on input. The thumb/track
+ * need pseudo-element rules (::-webkit-slider-thumb can't be inline-styled),
+ * so a one-time scoped <style> is injected on first load. Lifts to
+ * @dappcore/ui later as <core-slider> — a dual-thumb band is the lift-time
+ * upgrade; a max-size ceiling is what the local-runner case actually needs.
+ *
+ *   <lthn-range min="0" max="5" step="1" .value=${i} @lthn-change=${...}></lthn-range>
+ */
+if (typeof document !== "undefined" && !document.getElementById("lthn-range-style")) {
+  const s = document.createElement("style");
+  s.id = "lthn-range-style";
+  s.textContent = `
+    lthn-range > input[type=range] { -webkit-appearance:none; appearance:none; width:100%; height:4px;
+      border-radius:999px; background:rgba(255,255,255,0.12); outline:none; cursor:pointer; }
+    lthn-range > input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none;
+      width:14px; height:14px; border-radius:50%; background:var(--brand-400);
+      box-shadow:0 1px 3px rgba(0,0,0,0.4); cursor:pointer; }
+    lthn-range > input[type=range]::-moz-range-thumb { width:14px; height:14px; border:0; border-radius:50%;
+      background:var(--brand-400); cursor:pointer; }`;
+  document.head.appendChild(s);
+}
+class LthnRange extends LitElement {
+  static readonly properties = {
+    min: { type: Number }, max: { type: Number }, step: { type: Number }, value: { type: Number },
+  };
+  declare min: number; declare max: number; declare step: number; declare value: number;
+  constructor() { super(); this.min = 0; this.max = 100; this.step = 1; this.value = 0; }
+  createRenderRoot() { return this; }
+  private _onInput(e: Event) {
+    this.value = Number((e.target as HTMLInputElement).value);
+    this.dispatchEvent(new CustomEvent("lthn-change", { bubbles: true, composed: true, detail: { value: this.value } }));
+  }
+  render() {
+    return html`
+      <input type="range" min=${this.min} max=${this.max} step=${this.step}
+             .value=${String(this.value)} @input=${(e: Event) => this._onInput(e)}
+             style="--wails-draggable:no-drag;">
+    `;
+  }
+}
+customElements.define("lthn-range", LthnRange);
 
 /* ────────────────────────────────── <lthn-sparkline> ────────────── */
 class LthnSparkline extends LitElement {

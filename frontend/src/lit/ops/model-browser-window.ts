@@ -27,6 +27,14 @@ class LthnModelBrowserWindow extends LitElement {
     hfResults:       { state: true },
     hfBusy:          { state: true },
     hfErr:           { state: true },
+    baseOnly:        { state: true },
+    relation:        { state: true },
+    sortBy:          { state: true },
+    maxParamsIdx:    { state: true },
+    wantVision:      { state: true },
+    wantTools:       { state: true },
+    formats:         { state: true },
+    rightMode:       { state: true },
     t:               { state: true },
     // Lemma admin state — feeds the "active loaded" indicator on rail
     // items + the Activate / profile-picker controls in the detail aside.
@@ -61,9 +69,18 @@ class LthnModelBrowserWindow extends LitElement {
   // input text; hfResults the fetched rows (base models, text-generation,
   // most-downloaded). hfBusy/hfErr drive the search-bar status.
   declare query: string;
-  declare hfResults: Array<{ name: string; author: string; size: string; q: string; family: string; tools: boolean; vision: boolean; hfRepo: string; file: string }>;
+  declare hfResults: HFRow[];
   declare hfBusy: boolean;
   declare hfErr: string;
+  // Search facets — query params (server-side) + client-side refines.
+  declare baseOnly: boolean;                 // base_model_relation=base shortcut
+  declare relation: string;                  // '' | adapter | finetune | quantized | merge (when baseOnly off)
+  declare sortBy: string;                    // downloads | likes | lastModified | createdAt
+  declare maxParamsIdx: number;              // index into PARAM_STOPS — client-side size ceiling
+  declare wantVision: boolean;               // client refine
+  declare wantTools: boolean;                // client refine
+  declare formats: string[];                 // library filter: gguf | mlx | safetensors
+  declare rightMode: "filters" | "detail";   // right pane: HF filters vs Selected detail
   private _searchDebounce: ReturnType<typeof setTimeout> | null = null;
   // Cleanup fns from Events.On so we unsub on disconnect.
   private _dlUnsubscribe: (() => void)[] = [];
@@ -126,6 +143,14 @@ class LthnModelBrowserWindow extends LitElement {
     this.hfResults = [];
     this.hfBusy = false;
     this.hfErr = "";
+    this.baseOnly = true;
+    this.relation = "";
+    this.sortBy = "downloads";
+    this.maxParamsIdx = PARAM_STOPS.length - 1;
+    this.wantVision = false;
+    this.wantTools = false;
+    this.formats = [];
+    this.rightMode = "detail";
     this.activeModelPath = "";
     this.machineHash = "";
     this.profiles = [];
@@ -367,7 +392,7 @@ class LthnModelBrowserWindow extends LitElement {
     // text-generation, most-downloaded — populated by _searchHF from the search
     // box. The right-hand number is the HF download count; Download hands the
     // repo id to the Lemma admin form.
-    const results = this.hfResults;
+    const results = this._applyClientFilters(this.hfResults);
 
     // Toolbar intentionally empty: the original "Filters" + "Import
     // GGUF" buttons had no handlers and no backing flows (no filter
@@ -418,7 +443,8 @@ class LthnModelBrowserWindow extends LitElement {
               <input
                 .value=${this.query}
                 @input=${(e: Event) => this._onSearchInput(e)}
-                placeholder="Search Hugging Face base models…"
+                @focus=${() => { this.rightMode = "filters"; }}
+                placeholder="Search Hugging Face models…"
                 style="flex:1; min-width:0; background:transparent; border:0; outline:none;
                        color:var(--fg-0); font-size:12.5px; font-family:var(--font-sans);
                        --wails-draggable: no-drag;">
@@ -429,15 +455,35 @@ class LthnModelBrowserWindow extends LitElement {
                 ? html`<span style="color:var(--error-400);">${this.hfErr}</span>`
                 : html`Live search of Hugging Face base models. Download verifies each file's hash before writing into your local models dir; progress shows in the Local rail on the left.`}
             </div>
-            <div style="display:flex; gap:6px; flex-wrap:wrap;" title="Filter chips are part of the preview — clicks don't filter the results yet.">
-              ${["Gemma","Llama","Phi","Qwen","Mistral","≤ 5 GB","≤ 10 GB","Has vision","Has tools"].map(f => html`
-                <span style="font-size:10.5px; padding:3px 9px; border-radius:999px;
-                             background:rgba(255,255,255,0.04);
-                             border:1px solid rgba(255,255,255,0.06);
-                             color:var(--fg-2);
-                             letter-spacing:-0.005em;">${f}</span>
-              `)}
+            <!-- search facets: base-only toggle · sort · relation chips -->
+            <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+              <span style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:11px; color:var(--fg-2); --wails-draggable:no-drag;"
+                    @click=${() => this._setBaseOnly(!this.baseOnly)}>
+                <lthn-toggle ?on=${this.baseOnly}></lthn-toggle> Base models only
+              </span>
+              <span style="display:flex; align-items:center; gap:7px; font-size:11px; color:var(--fg-3);">
+                Sort
+                <select
+                  .value=${this.sortBy}
+                  @change=${(e: Event) => this._setSort((e.target as HTMLSelectElement).value)}
+                  style="padding:4px 7px; font-size:11px; background:rgba(0,0,0,0.25); color:var(--fg-1);
+                         border:1px solid rgba(255,255,255,0.08); border-radius:4px; --wails-draggable:no-drag;">
+                  <option value="downloads">Most downloaded</option>
+                  <option value="likes">Most likes</option>
+                  <option value="lastModified">Recently updated</option>
+                  <option value="createdAt">Recently created</option>
+                </select>
+              </span>
             </div>
+            ${this.baseOnly ? nothing : html`
+              <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                ${RELATIONS.map(r => html`
+                  <lthn-filter-chip
+                    ?selected=${this.relation === r.value}
+                    @click=${() => this._setRelation(this.relation === r.value ? "" : r.value)}>${r.label}</lthn-filter-chip>
+                `)}
+              </div>
+            `}
           </div>
           <div style="flex:1; overflow:auto; padding:4px 18px 18px; display:flex; flex-direction:column; gap:8px;">
             ${results.map((r, i) => html`
@@ -476,6 +522,14 @@ class LthnModelBrowserWindow extends LitElement {
         <!-- detail -->
         <aside style="background:rgba(0,0,0,0.18); border-left:1px solid rgba(255,255,255,0.05);
                       padding:18px; overflow:auto; display:flex; flex-direction:column; gap:14px;">
+          <!-- right pane flips between the selected-model detail and the
+               HF search filters; focusing the search box opens Filters,
+               selecting a local model opens Details. -->
+          <div style="display:flex; gap:6px;">
+            <lthn-filter-chip ?selected=${this.rightMode === "detail"} @click=${() => { this.rightMode = "detail"; }}>Details</lthn-filter-chip>
+            <lthn-filter-chip ?selected=${this.rightMode === "filters"} @click=${() => { this.rightMode = "filters"; }}>Filters</lthn-filter-chip>
+          </div>
+          ${this.rightMode === "filters" ? this._renderFilters() : html`
           <div>
             <lthn-label>${this.t.labelSelected}</lthn-label>
             <div style="font-family:var(--font-mono); font-size:13px; color:var(--fg-0); margin-top:6px; letter-spacing:-0.005em; word-break:break-all;">${selName}</div>
@@ -541,6 +595,7 @@ class LthnModelBrowserWindow extends LitElement {
             Small dense model tuned for assistant-style turns. Lethean-recommended
             starter — fastest tok/s per watt on Apple Silicon at this size.
           </div>
+          `}
         </aside>
       </div>
     `;
@@ -951,21 +1006,112 @@ class LthnModelBrowserWindow extends LitElement {
     this._searchDebounce = setTimeout(() => { void this._searchHF(); }, 350);
   }
 
-  /** Query the live Hugging Face models API — base models only
-   *  (base_model_relation=base, the registry's "no fine-tunes" filter),
-   *  text-generation, most-downloaded first. Maps each hit to the result-row
-   *  shape; Download hands the repo id to the Lemma admin form. CORS is open on
-   *  the HF API and HTTPS satisfies WKWebView, so this runs frontend-side. */
+  // ── search-facet setters ──
+  // Server-side facets (base-only, relation, sort, format) re-query HF;
+  // client-side refines (params, vision, tools) just re-render over the last
+  // fetch — keeps the typing path light and the size slider instant.
+  private _setBaseOnly(on: boolean): void {
+    this.baseOnly = on;
+    if (on) this.relation = "";   // base-only owns the relation; chips hide
+    void this._searchHF();
+  }
+  private _setRelation(value: string): void {
+    this.relation = value;
+    void this._searchHF();
+  }
+  private _setSort(value: string): void {
+    this.sortBy = value;
+    void this._searchHF();
+  }
+  private _setType(kind: "vision" | "tools", on: boolean): void {
+    if (kind === "vision") this.wantVision = on; else this.wantTools = on;
+  }
+  private _toggleFormat(value: string): void {
+    this.formats = this.formats.includes(value)
+      ? this.formats.filter(f => f !== value)
+      : [...this.formats, value];
+    void this._searchHF();
+  }
+
+  /** Client-side refines over the fetched HF rows — vision/tools type
+   *  narrowing + a parameter-size ceiling. Params has no reliable list-API
+   *  field, so size is derived from the model name; rows whose size can't be
+   *  parsed pass through (honest — don't hide what we can't size). */
+  private _applyClientFilters(rows: HFRow[]): HFRow[] {
+    const ceiling = PARAM_STOPS[this.maxParamsIdx];
+    return rows.filter(r => {
+      if (this.wantVision && !r.vision) return false;
+      if (this.wantTools && !r.tools) return false;
+      if (ceiling !== Infinity) {
+        const p = parseParams(r.name);
+        if (p !== null && p > ceiling) return false;
+      }
+      return true;
+    });
+  }
+
+  /** Right-pane search filters — shown when rightMode==='filters'. Params is a
+   *  client-side ceiling; type + format extend/refine the search. Uses the
+   *  lift-ready <lthn-range> + <lthn-filter-chip> primitives. */
+  private _renderFilters() {
+    const idx = this.maxParamsIdx;
+    const atMax = idx >= PARAM_STOPS.length - 1;
+    return html`
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <lthn-label>Parameters</lthn-label>
+        <div style="font-family:var(--font-mono); font-size:11.5px; color:var(--fg-1);">
+          ${atMax ? "Any size" : `≤ ${PARAM_LABELS[idx]}`}
+        </div>
+        <lthn-range min="0" max=${PARAM_STOPS.length - 1} step="1" .value=${idx}
+          @lthn-change=${(e: CustomEvent) => { this.maxParamsIdx = e.detail.value; }}></lthn-range>
+        <div style="display:flex; justify-content:space-between; font-size:9.5px; color:var(--fg-3); font-family:var(--font-mono);">
+          <span>${PARAM_LABELS[0]}</span><span>${PARAM_LABELS[PARAM_LABELS.length - 1]}</span>
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <lthn-label>Type</lthn-label>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <lthn-filter-chip ?selected=${this.wantVision} @click=${() => this._setType("vision", !this.wantVision)}>Vision</lthn-filter-chip>
+          <lthn-filter-chip ?selected=${this.wantTools} @click=${() => this._setType("tools", !this.wantTools)}>Tools</lthn-filter-chip>
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <lthn-label>Format</lthn-label>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          ${FORMATS.map(f => html`
+            <lthn-filter-chip ?selected=${this.formats.includes(f.value)}
+              @click=${() => this._toggleFormat(f.value)}>${f.label}</lthn-filter-chip>
+          `)}
+        </div>
+      </div>
+      <div style="font-size:11px; color:var(--fg-3); line-height:1.55;">
+        Parameters filter the fetched results by name-derived size; format
+        narrows the Hugging Face query. Results update as you adjust.
+      </div>
+    `;
+  }
+
+  /** Query the live Hugging Face models API from the current facets —
+   *  relation (base-only, or a specific base_model_relation), sort, library
+   *  format filter, and the search text — over the text-generation pipeline.
+   *  Maps each hit to the result-row shape; size/vision/tools are refined
+   *  client-side (see _applyClientFilters). CORS is open on the HF API and
+   *  HTTPS satisfies WKWebView, so this runs frontend-side. */
   private async _searchHF(): Promise<void> {
     this.hfBusy = true;
     this.hfErr = "";
     const params = new URLSearchParams({
-      base_model_relation: "base",
       pipeline_tag: "text-generation",
-      sort: "downloads",
+      sort: this.sortBy,
       direction: "-1",
-      limit: "25",
+      limit: "50",
     });
+    // Relation: base-only is the common shortcut; otherwise an optional
+    // specific relation (adapter/finetune/quantized/merge), else all.
+    if (this.baseOnly) params.set("base_model_relation", "base");
+    else if (this.relation) params.set("base_model_relation", this.relation);
+    // Library/format facet (server-side tag filter).
+    for (const f of this.formats) params.append("filter", f);
     const q = this.query.trim();
     if (q) params.set("search", q);
     try {
@@ -1008,7 +1154,7 @@ class LthnModelBrowserWindow extends LitElement {
                : "var(--fg-3)";
     return html`
       <div
-        @click=${() => { this.selected = m.id; }}
+        @click=${() => { this.selected = m.id; this.rightMode = "detail"; }}
         style="padding:9px 10px; border-radius:6px;
                   background:${active ? "rgba(255,255,255,0.07)" : "transparent"};
                   border-left:${active ? "2px solid var(--brand-400)" : "2px solid transparent"};
@@ -1038,6 +1184,42 @@ class LthnModelBrowserWindow extends LitElement {
 customElements.define("lthn-model-browser-window", LthnModelBrowserWindow);
 
 // ─── helpers ────────────────────────────────────────────────────────
+
+/** A Hugging Face search result row (mapped from the models API). */
+type HFRow = {
+  name: string; author: string; size: string; q: string; family: string;
+  tools: boolean; vision: boolean; hfRepo: string; file: string;
+};
+
+/** Parameter-size ceiling stops for the search slider. The last entry
+ *  (Infinity) means "no ceiling"; PARAM_LABELS renders the tick labels. */
+const PARAM_STOPS  = [1, 4, 8, 16, 32, Infinity];
+const PARAM_LABELS = ["1B", "4B", "8B", "16B", "32B", "Any"];
+
+/** base_model_relation values for the relation chips, shown when base-only
+ *  is off. Base is the toggle's job, so it isn't repeated here. */
+const RELATIONS = [
+  { value: "adapter",   label: "Adapters" },
+  { value: "finetune",  label: "Finetunes" },
+  { value: "quantized", label: "Quants" },
+  { value: "merge",     label: "Merges" },
+];
+
+/** Library/format facets — map to the HF `filter` query param. */
+const FORMATS = [
+  { value: "gguf",        label: "GGUF" },
+  { value: "mlx",         label: "MLX" },
+  { value: "safetensors", label: "Safetensors" },
+];
+
+/** Parse a parameter count (billions) from a model name, e.g.
+ *  "qwen2.5-7b-instruct" → 7, "gemma-4-e2b" → 2. Returns null when no size
+ *  token is present. HF's list endpoint has no reliable param field, so the
+ *  search slider refines on this best-effort parse. */
+function parseParams(name: string): number | null {
+  const m = name.match(/(\d+(?:\.\d+)?)\s*[Bb](?:[-._]|$)/);
+  return m ? parseFloat(m[1]) : null;
+}
 
 /** Common LLM family parsed from the file/dir name. Best-effort —
  *  matches the prefix conventions Hugging Face / lthn use. Falls
