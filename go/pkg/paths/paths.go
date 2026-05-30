@@ -332,7 +332,7 @@ func TrainingCheckpointDir() core.Result {
 // WelfareDir returns ~/Lethean/data/welfare/. Creates if missing.
 //
 // Holds the welfare gate's on-device feedback corpus (RFC.welfare) —
-// feedback.jsonl, one append-only line per engine_ok false-positive (a prompt
+// feedback.jsonl, one append-only line per lem_ok false-positive (a prompt
 // the engine flagged but the model judged fine). A later contentshield re-train
 // reads this to weight those patterns down. Never leaves the device.
 //

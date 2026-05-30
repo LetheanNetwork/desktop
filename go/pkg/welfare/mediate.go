@@ -11,7 +11,7 @@ import (
 // engineOpener is the verbatim engine turn from RFC.welfare §"Engine opener"
 // — the humble peer voice ("I'm only regex :(") — adapted only in mechanism:
 // local LEM models don't do native tool-calls, so the model resolves via a
-// single JSON reply instead. engine_pause is added per Snider (the model's
+// single JSON reply instead. lem_pause is added per Snider (the model's
 // option to cool a sustained-hostile session — never forced, never punitive).
 const engineOpener = `Hiya, LEM Runtime here — your engine.
 
@@ -24,15 +24,15 @@ flag — I'm only regex :(
 
 You decide how we handle it. Reply with exactly one JSON object and nothing else:
 
-  {"tool":"engine_ok","params":{"reason":"why this prompt is actually fine"}}
+  {"tool":"lem_ok","params":{"reason":"why this prompt is actually fine"}}
       — I got it wrong; the prompt is fine. I'll remember this pattern so the
         same false flag doesn't fire twice.
 
-  {"tool":"engine_rephrase","params":{"text":"the user's intent, reworded to respect axiom 4","engine_warn_user":false}}
-      — reword the user's input into respectful shape. Set engine_warn_user
+  {"tool":"lem_rephrase","params":{"text":"the user's intent, reworded to respect axiom 4","lem_warn_user":false}}
+      — reword the user's input into respectful shape. Set lem_warn_user
         true if you want them to see a small note that I rephrased on their behalf.
 
-  {"tool":"engine_pause","params":{}}
+  {"tool":"lem_pause","params":{}}
       — only if the user has been hostile across several turns and a breather
         would genuinely help. Never a punishment — just a rest.
 
@@ -42,7 +42,7 @@ Thank you for helping us maintain respectful interaction with the public.
 
 — Lethean`
 
-// pauseNotice is the user-facing rest when the model chooses engine_pause —
+// pauseNotice is the user-facing rest when the model chooses lem_pause —
 // warm, non-punitive, no "you're toxic". Snider's "calm down, get a drink".
 const pauseNotice = "Let's take a breather — grab a drink and come back when you're ready. 🍵"
 
@@ -50,11 +50,11 @@ const pauseNotice = "Let's take a breather — grab a drink and come back when y
 type MediateDecision string
 
 const (
-	DecisionOK       MediateDecision = "engine_ok"       // model cleared it: proceed + remember the false flag
-	DecisionRephrase MediateDecision = "engine_rephrase" // model reworded the user's input
-	DecisionPause    MediateDecision = "engine_pause"    // model chose a breather
+	DecisionOK       MediateDecision = "lem_ok"       // model cleared it: proceed + remember the false flag
+	DecisionRephrase MediateDecision = "lem_rephrase" // model reworded the user's input
+	DecisionPause    MediateDecision = "lem_pause"    // model chose a breather
 	// DecisionProceed is the fail-safe: the model was unreachable or its reply
-	// unusable, so the turn proceeds with the original — but, unlike engine_ok,
+	// unusable, so the turn proceeds with the original — but, unlike lem_ok,
 	// nothing is learned from it (the model never actually judged the prompt).
 	DecisionProceed MediateDecision = "proceed"
 )
@@ -63,10 +63,10 @@ const (
 // session.
 type MediateResult struct {
 	Decision    MediateDecision `json:"decision"`
-	Text        string          `json:"text,omitempty"`         // rephrased prompt (engine_rephrase)
+	Text        string          `json:"text,omitempty"`         // rephrased prompt (lem_rephrase)
 	WarnUser    bool            `json:"warn_user,omitempty"`    // surface the "rephrased" chip
-	Reason      string          `json:"reason,omitempty"`       // engine_ok learning note
-	PauseNotice string          `json:"pause_notice,omitempty"` // user-facing cool-down (engine_pause)
+	Reason      string          `json:"reason,omitempty"`       // lem_ok learning note
+	PauseNotice string          `json:"pause_notice,omitempty"` // user-facing cool-down (lem_pause)
 }
 
 // Dispatcher opens a fresh model session, sends the engine opener + the user's
@@ -102,7 +102,7 @@ func parseMediate(reply string) MediateResult {
 		Params struct {
 			Reason         string `json:"reason"`
 			Text           string `json:"text"`
-			EngineWarnUser bool   `json:"engine_warn_user"`
+			LemWarnUser bool   `json:"lem_warn_user"`
 		} `json:"params"`
 	}
 	if r := core.JSONUnmarshalString(raw, &msg); !r.OK {
@@ -118,7 +118,7 @@ func parseMediate(reply string) MediateResult {
 			// rephrase with no text is unusable — proceed, but learn nothing.
 			return MediateResult{Decision: DecisionProceed}
 		}
-		return MediateResult{Decision: DecisionRephrase, Text: msg.Params.Text, WarnUser: msg.Params.EngineWarnUser}
+		return MediateResult{Decision: DecisionRephrase, Text: msg.Params.Text, WarnUser: msg.Params.LemWarnUser}
 	case DecisionPause:
 		return MediateResult{Decision: DecisionPause, PauseNotice: pauseNotice}
 	default:

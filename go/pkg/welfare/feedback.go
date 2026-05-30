@@ -4,7 +4,7 @@ package welfare
 
 import core "dappco.re/go"
 
-// FalsePositive is a mediation the model resolved as engine_ok: the engine
+// FalsePositive is a mediation the model resolved as lem_ok: the engine
 // flagged the prompt, the model judged it fine. Recorded to the on-device
 // contentshield-feedback corpus so a later re-train can weight this pattern
 // down — RFC.welfare §2, the engine's "I'll remember this pattern so the same
@@ -20,7 +20,7 @@ type FalsePositive struct {
 }
 
 // NewFalsePositive builds the learning record from a triggered detection and
-// the model's engine_ok reason.
+// the model's lem_ok reason.
 //
 //	fp := welfare.NewFalsePositive(prompt, det, res.Reason)
 //	c.Fs().AppendLine(feedbackCorpus, fp.Line())

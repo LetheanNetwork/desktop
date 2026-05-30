@@ -9,7 +9,7 @@
 // detect.go is the DETECT half (RFC.welfare §1): score the user's latest
 // message + the conversation's prior hostility, decide whether the mediation
 // trigger fires. mediate.go is the MEDIATE half (§2 — the engine↔model session,
-// engine_ok / engine_rephrase / engine_pause). guard.go composes them into the
+// lem_ok / lem_rephrase / lem_pause). guard.go composes them into the
 // per-turn gate the chat runner calls.
 //
 // Detection is stateless: the chat runner hands in the full conversation each

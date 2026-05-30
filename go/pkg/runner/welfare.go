@@ -47,7 +47,7 @@ func userTurns(messages []inference.Message) (latest string, priors []string) {
 }
 
 // withLastUser returns a copy of messages with the last user turn's content
-// replaced (the engine_rephrase substitution). Copies rather than mutating so
+// replaced (the lem_rephrase substitution). Copies rather than mutating so
 // the caller's slice — and the history the frontend still shows the user — is
 // untouched.
 func withLastUser(messages []inference.Message, replacement string) []inference.Message {
@@ -82,7 +82,7 @@ func welfareDispatch(router *ai.ProviderRouter) welfare.Dispatcher {
 	}
 }
 
-// appendWelfareFeedback records an engine_ok false-positive to the on-device
+// appendWelfareFeedback records a lem_ok false-positive to the on-device
 // corpus (~/Lethean/data/welfare/feedback.jsonl). Best-effort: a write failure
 // must never break the user's chat, so the error is swallowed (the gate already
 // decided to proceed with the original prompt).

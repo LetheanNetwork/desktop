@@ -22,7 +22,7 @@ func TestGuard_Service_Guard_Good(t *core.T) {
 
 	// Flagged turn the model rewords, asking the user be told.
 	w.matcher = slurs.New([]string{"testterm"})
-	reply := `{"tool":"engine_rephrase","params":{"text":"could you help, this is frustrating","engine_warn_user":true}}`
+	reply := `{"tool":"lem_rephrase","params":{"text":"could you help, this is frustrating","lem_warn_user":true}}`
 	g := w.Guard(ctx, "you testterm", nil, fakeDispatch(reply, nil))
 	core.AssertTrue(t, g.Triggered, "the slur fires the gate")
 	core.AssertEqual(t, "could you help, this is frustrating", g.Rephrased)
@@ -31,14 +31,14 @@ func TestGuard_Service_Guard_Good(t *core.T) {
 }
 
 func TestGuard_Service_Guard_Bad(t *core.T) {
-	// engine_ok: the model judged the flagged prompt fine — proceed, and record
+	// lem_ok: the model judged the flagged prompt fine — proceed, and record
 	// the false flag for the feedback corpus.
 	w := New(Config{})
 	w.matcher = slurs.New([]string{"testterm"})
-	reply := `{"tool":"engine_ok","params":{"reason":"testterm is the user's own username"}}`
+	reply := `{"tool":"lem_ok","params":{"reason":"testterm is the user's own username"}}`
 	g := w.Guard(context.Background(), "my handle is testterm", nil, fakeDispatch(reply, nil))
 	core.AssertTrue(t, g.Triggered)
-	core.AssertTrue(t, g.FalsePositive != nil, "a genuine engine_ok records a false positive")
+	core.AssertTrue(t, g.FalsePositive != nil, "a genuine lem_ok records a false positive")
 	core.AssertEqual(t, "my handle is testterm", g.FalsePositive.Prompt)
 	core.AssertEqual(t, "", g.Rephrased)
 	core.AssertEqual(t, "", g.Synthetic)
@@ -49,9 +49,9 @@ func TestGuard_Service_Guard_Ugly(t *core.T) {
 	w.matcher = slurs.New([]string{"testterm"})
 	ctx := context.Background()
 
-	// engine_pause — the model takes a breather; the caller returns the notice
+	// lem_pause — the model takes a breather; the caller returns the notice
 	// and never sends the message on. Not a false positive.
-	pause := w.Guard(ctx, "you testterm", nil, fakeDispatch(`{"tool":"engine_pause","params":{}}`, nil))
+	pause := w.Guard(ctx, "you testterm", nil, fakeDispatch(`{"tool":"lem_pause","params":{}}`, nil))
 	core.AssertTrue(t, pause.Triggered)
 	core.AssertTrue(t, pause.Synthetic != "", "a pause carries the user-facing notice")
 	core.AssertTrue(t, pause.FalsePositive == nil, "a pause is not a false positive")

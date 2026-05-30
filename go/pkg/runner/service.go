@@ -355,17 +355,17 @@ func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) cor
 		s.auditWelfare(provider, model, g)
 		switch {
 		case g.Synthetic != "":
-			// engine_pause — the model takes a breather; the user gets the
+			// lem_pause — the model takes a breather; the user gets the
 			// warm notice in place of a reply. Returns before chat.requested
 			// (no chat was requested of the model).
 			return core.Ok(g.Synthetic)
 		case g.Rephrased != "":
-			// engine_rephrase — send the reworded prompt on. The user still
+			// lem_rephrase — send the reworded prompt on. The user still
 			// sees their original; the "reworded on your behalf" chip is a
 			// frontend follow-up (WarnUser signal already set).
 			messages = withLastUser(messages, g.Rephrased)
 		case g.FalsePositive != nil:
-			// engine_ok — the model cleared it; proceed with the original and
+			// lem_ok — the model cleared it; proceed with the original and
 			// remember the false flag for a future contentshield re-train.
 			s.appendWelfareFeedback(*g.FalsePositive)
 		}

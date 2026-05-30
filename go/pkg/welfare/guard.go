@@ -10,8 +10,8 @@ type GuardResult struct {
 	Triggered     bool           // the gate fired (for audit/telemetry)
 	Rephrased     string         // non-empty → send this in place of the user's message
 	WarnUser      bool           // surface a "reworded on your behalf" note (the model's choice)
-	Synthetic     string         // non-empty → DON'T call the model; return this reply (engine_pause)
-	FalsePositive *FalsePositive // non-nil → append to the on-device feedback corpus (engine_ok)
+	Synthetic     string         // non-empty → DON'T call the model; return this reply (lem_pause)
+	FalsePositive *FalsePositive // non-nil → append to the on-device feedback corpus (lem_ok)
 }
 
 // Guard is the per-turn welfare gate: it detects hostility in the latest user
@@ -22,8 +22,8 @@ type GuardResult struct {
 // (call the router directly), or a flagged turn recurses.
 //
 //	g := w.Guard(ctx, latest, priors, dispatch)
-//	if g.Synthetic != "" { return reply(g.Synthetic) }  // engine_pause: model rests
-//	if g.Rephrased != "" { latest = g.Rephrased }        // engine_rephrase
+//	if g.Synthetic != "" { return reply(g.Synthetic) }  // lem_pause: model rests
+//	if g.Rephrased != "" { latest = g.Rephrased }        // lem_rephrase
 //	if g.FalsePositive != nil { appendCorpus(g.FalsePositive.Line()) }
 func (s *Service) Guard(ctx context.Context, latest string, priors []string, dispatch Dispatcher) GuardResult {
 	det := s.Detect(latest, priors)
