@@ -337,7 +337,7 @@ export function renderChrome({ title, subtitle, w = 900, h = 600, toolbar, body,
             flex-shrink:0;
           ">${toolbar}</div>
         ` : nothing}
-        <div style="flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden;">
+        <div style="flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden; --wails-draggable: no-drag;">
           ${body}
         </div>
       </div>
@@ -407,7 +407,7 @@ export function renderChrome({ title, subtitle, w = 900, h = 600, toolbar, body,
       ` : nothing}
 
       <!-- body -->
-      <div style="flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden;">
+      <div style="flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden; --wails-draggable: no-drag;">
         ${body}
       </div>
 
