@@ -27,29 +27,34 @@ const channelNotificationMethod = "notifications/claude/channel"
 // sseDataPrefix marks a Server-Sent-Events payload line.
 var sseDataPrefix = []byte("data:")
 
-// channelListener holds a long-lived MCP session to lthn-agent serve's /mcp
-// Streamable-HTTP endpoint and relays every notifications/claude/channel event
-// to a sink. Consume-only by design: it never makes tool calls (those go over
-// the /v1/tools REST bridge that doStool drives) — it exists purely to turn
-// CoreAgent's push channels (agent.blocked, agent.complete, agent.status, …)
-// into desktop events so the UI updates live rather than polling. The crew
-// respawns lthn-agent serve, so the session drops are expected churn; run()
-// reconnects with capped backoff.
+// channelListener holds a long-lived MCP session to the hub's MCP plane
+// (lthn-agent hub, :9202) and relays every notifications/claude/channel
+// event to a sink. Consume-only by design: it never makes tool calls —
+// it exists purely to turn CoreAgent's push channels (agent.blocked,
+// agent.complete, agent.status, …) into desktop events so the UI updates
+// live rather than polling. The crew respawns lthn-agent hub, so session
+// drops are expected churn; run() reconnects with capped backoff.
+//
+// bearer is the MCP_AUTH_TOKEN value the hub's transport expects on every
+// request. Empty string disables injection (unit tests with no-auth serve).
 type channelListener struct {
 	mcpURL string
+	bearer string
 	relay  func(channel string, data any)
 	client *http.Client
 	cancel context.CancelFunc
 }
 
-// newChannelListener builds a listener for the given /mcp endpoint that hands
+// newChannelListener builds a listener for the given MCP endpoint that hands
 // each channel event to relay. relay must be goroutine-safe; it's called from
-// the listener's own goroutine.
+// the listener's own goroutine. bearer is forwarded as Authorization: Bearer
+// on every HTTP request to the hub's fail-closed transport.
 //
-//	l := newChannelListener("http://127.0.0.1:9101/mcp", func(ch string, d any) { _ = ch })
-func newChannelListener(mcpURL string, relay func(channel string, data any)) *channelListener {
+//	l := newChannelListener("http://127.0.0.1:9202", token, func(ch string, d any) { _ = ch })
+func newChannelListener(mcpURL, bearer string, relay func(channel string, data any)) *channelListener {
 	return &channelListener{
 		mcpURL: mcpURL,
+		bearer: bearer,
 		relay:  relay,
 		// No client timeout — the GET stream is intentionally long-lived;
 		// reconnection is driven by ctx + stream EOF, not a deadline.
@@ -121,6 +126,7 @@ func (l *channelListener) consume(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	req.Header.Set("Accept", "text/event-stream")
+	l.setBearer(req)
 	if sessionID != "" {
 		req.Header.Set("Mcp-Session-Id", sessionID)
 	}
@@ -149,6 +155,7 @@ func (l *channelListener) initialize(ctx context.Context) (string, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
+	l.setBearer(req)
 	resp, err := l.client.Do(req)
 	if err != nil {
 		return "", err
@@ -170,11 +177,21 @@ func (l *channelListener) sendInitialized(ctx context.Context, sessionID string)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
+	l.setBearer(req)
 	if sessionID != "" {
 		req.Header.Set("Mcp-Session-Id", sessionID)
 	}
 	if resp, err := l.client.Do(req); err == nil {
 		resp.Body.Close()
+	}
+}
+
+// setBearer attaches Authorization: Bearer <token> when the listener was
+// constructed with a non-empty bearer credential. No-op for unit tests
+// that pass an empty token.
+func (l *channelListener) setBearer(req *http.Request) {
+	if l.bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+l.bearer)
 	}
 }
 
