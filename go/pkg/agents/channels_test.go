@@ -13,7 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// channelTestServer mimics lthn-agent serve's /mcp Streamable-HTTP endpoint:
+// channelTestServer mimics the hub's /mcp MCP HTTP+SSE endpoint:
 // POSTs (initialize / initialized) get a session header + 200; the GET opens
 // the server→client SSE stream and writes getBody, then ends.
 func channelTestServer(getBody string) *httptest.Server {
@@ -40,7 +40,7 @@ func TestChannels_Listener_Consume_Good(t *core.T) {
 
 	var gotChannel string
 	var gotData any
-	l := newChannelListener(srv.URL, func(ch string, data any) { gotChannel = ch; gotData = data })
+	l := newChannelListener(srv.URL, "", func(ch string, data any) { gotChannel = ch; gotData = data })
 	connected, err := l.consume(context.Background())
 	core.AssertTrue(t, connected, "stream should open")
 	core.AssertTrue(t, err == nil, "clean stream returns no error")
@@ -50,7 +50,7 @@ func TestChannels_Listener_Consume_Good(t *core.T) {
 
 func TestChannels_Listener_Consume_Bad(t *core.T) {
 	// Nothing listening → initialize fails → (false, err), no panic.
-	l := newChannelListener("http://127.0.0.1:1/mcp", func(string, any) {})
+	l := newChannelListener("http://127.0.0.1:1/mcp", "", func(string, any) {})
 	connected, err := l.consume(context.Background())
 	core.AssertFalse(t, connected, "no stream when serve is unreachable")
 	core.AssertTrue(t, err != nil, "unreachable serve surfaces an error")
@@ -65,7 +65,7 @@ func TestChannels_Listener_Consume_Ugly(t *core.T) {
 	defer srv.Close()
 
 	relayed := false
-	l := newChannelListener(srv.URL, func(string, any) { relayed = true })
+	l := newChannelListener(srv.URL, "", func(string, any) { relayed = true })
 	connected, err := l.consume(context.Background())
 	core.AssertTrue(t, connected)
 	core.AssertTrue(t, err == nil)
@@ -92,7 +92,7 @@ func TestChannels_Listener_Delivery_Good(t *core.T) {
 	defer srv.Close()
 
 	got := make(chan string, 8)
-	l := newChannelListener(srv.URL+"/mcp", func(ch string, _ any) { got <- ch })
+	l := newChannelListener(srv.URL+"/mcp", "", func(ch string, _ any) { got <- ch })
 	l.start()
 	defer l.stop() // LIFO: stops the listener before srv.Close closes the stream
 

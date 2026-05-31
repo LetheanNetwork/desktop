@@ -276,10 +276,15 @@ func (s *Service) Machines() core.Result {
 }
 
 // SuperviseLocalCrew spawns and supervises the crew sidecars the local
-// (is_self) machine is capable of: CapabilityInference -> lthn-mlx, and
-// (once its listen addr is wired) CapabilitySandbox -> lthn-agent. The
+// (is_self) machine is capable of: CapabilityInference -> lthn-ai, and
+// CapabilitySandbox -> lthn-agent hub (Mantis #1807 Unit D). The
 // supervisor health-gates each instance and respawns it on crash; it
 // lives for the Service's lifetime and ServiceShutdown stops it.
+//
+// sandboxEnv carries KEY=VALUE pairs forwarded to the sandbox sidecar
+// (MCP_JWT_SECRET and MCP_AUTH_TOKEN for the hub's two planes). The
+// desktop startup resolves these from pkg/keys tier-0 before calling
+// this method so the secrets are available at spawn time.
 //
 // Idempotent — re-invoking stops the previous crew first. Clean no-op
 // when there's no is_self machine yet or it declares no crew capability,
@@ -288,8 +293,9 @@ func (s *Service) Machines() core.Result {
 //
 // Usage example:
 //
-//	r := svc.SuperviseLocalCrew(context.Background())
-func (s *Service) SuperviseLocalCrew(ctx context.Context) core.Result {
+//	r := svc.SuperviseLocalCrew(context.Background(),
+//	    []string{"MCP_JWT_SECRET=abc", "MCP_AUTH_TOKEN=xyz"})
+func (s *Service) SuperviseLocalCrew(ctx context.Context, sandboxEnv []string) core.Result {
 	r := s.Machines()
 	if !r.OK {
 		return r
@@ -308,7 +314,7 @@ func (s *Service) SuperviseLocalCrew(ctx context.Context) core.Result {
 	}
 	s.mu.Lock()
 	prev := s.crew
-	s.crew = superviseCrew(ctx, defaultCrew(), caps)
+	s.crew = superviseCrew(ctx, defaultCrew(sandboxEnv), caps)
 	s.mu.Unlock()
 	prev.stop() // nil-safe — replace any prior crew
 	return core.Ok(nil)

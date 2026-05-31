@@ -617,21 +617,33 @@ func (s *Service) Run() core.Result {
 		s.selfRefreshStop = make(chan struct{})
 		go runSelfMachineRefresh(s.opts.Fleet, s.selfRefreshStop)
 		// Bring up the local crew sidecars the self machine is capable of
-		// (inference -> lthn-mlx serve). One-shot at boot — deliberately
-		// NOT on the 10s refresh, which would kill+respawn the crew every
-		// tick. The supervisor adopts an already-running sidecar, else
-		// spawns + health-gates + respawns it in its own goroutines; it's
-		// torn down by Fleet.ServiceShutdown. Backgrounded so a slow
-		// sidecar can't stall boot.
+		// (inference -> lthn-ai, sandbox -> lthn-agent hub). One-shot at
+		// boot — deliberately NOT on the 10s refresh, which would
+		// kill+respawn the crew every tick. The supervisor adopts an
+		// already-running sidecar, else spawns + health-gates + respawns
+		// it in its own goroutines; torn down by Fleet.ServiceShutdown.
+		// Backgrounded so a slow sidecar can't stall boot.
+		//
+		// The hub requires MCP_JWT_SECRET (JWT signing key) and
+		// MCP_AUTH_TOKEN (per-request bearer for the MCP plane).  Both
+		// are machine-level secrets resolved from pkg/keys tier-0 so
+		// they persist across restarts without requiring the user to
+		// unlock an account. We read them here, before backgrounding,
+		// so the goroutine captures stable values rather than racing
+		// against a concurrent SetKEKProvider call.
+		sandboxEnv := hubSandboxEnv(s.opts.Core)
+		mcpToken := hubMCPToken(sandboxEnv)
 		go func() {
-			if r := s.opts.Fleet.SuperviseLocalCrew(core.Background()); !r.OK {
+			if r := s.opts.Fleet.SuperviseLocalCrew(core.Background(), sandboxEnv); !r.OK {
 				core.Warn("desktop.fleet.crew_supervise", "error", r.Error())
 			}
-			// The crew's lthn-agent serve is coming up — start the Agents
-			// channel listener so the view gets CoreAgent push events
-			// (agent.blocked, …) live. Reconnects until the serve answers.
+			// The hub's MCP plane is coming up on :9202 — start the
+			// Agents channel listener so the view gets CoreAgent push
+			// events (agent.blocked, …) live. Reconnects until the hub
+			// answers; the bearer token is required for the fail-closed
+			// MCP transport (MCP_AUTH_TOKEN).
 			if a, _ := core.ServiceFor[*agents.Service](s.opts.Core, "agents"); a != nil {
-				a.StartChannels(s.opts.Core)
+				a.StartChannels(s.opts.Core, mcpToken)
 			}
 		}()
 	}
@@ -1547,4 +1559,80 @@ func selfMachineRow() fleet.Machine {
 		IsSelf:       true,
 		Capabilities: []string{fleet.CapabilityInference, fleet.CapabilitySandbox},
 	}
+}
+
+// hubSandboxEnv resolves the two secrets the lthn-agent hub requires at
+// spawn time and returns them as KEY=VALUE env pairs for the crew member.
+// Both secrets are stored in pkg/keys tier-0 (machine-level, pre-unlock)
+// so they survive process restarts without user interaction.
+//
+//   - MCP_JWT_SECRET: HMAC signing key for the hub's JWT mint+verify path.
+//   - MCP_AUTH_TOKEN: per-request bearer credential checked by the hub's
+//     fail-closed MCP HTTP+SSE transport.
+//
+// When the keys service is unavailable or tier-0 is not yet wired, the
+// function falls back to fresh random hex values (logged as warnings) so
+// the hub still starts — the secrets will differ from run to run until
+// the keys substrate is live, but that is preferable to a hard boot
+// failure on first install.
+//
+//	env := hubSandboxEnv(c)
+//	// ["MCP_JWT_SECRET=...", "MCP_AUTH_TOKEN=..."]
+func hubSandboxEnv(c *core.Core) []string {
+	const (
+		jwtSecretRef  = "hub-mcp-jwt-secret"
+		authTokenRef  = "hub-mcp-auth-token"
+		envJWTSecret  = "MCP_JWT_SECRET"
+		envAuthToken  = "MCP_AUTH_TOKEN"
+	)
+	generate := func() ([]byte, error) {
+		rr := core.RandomBytes(32)
+		if !rr.OK {
+			return nil, rr.Value.(error)
+		}
+		return []byte(core.HexEncode(rr.Value.([]byte))), nil
+	}
+
+	resolve := func(ref string) string {
+		if c != nil {
+			if ks, _ := core.ServiceFor[*keys.Service](c, "keys"); ks != nil {
+				if r := ks.GetOrCreateTier0(ref, generate); r.OK {
+					return core.Trim(string(r.Value.([]byte)))
+				}
+				core.Warn("desktop.hub: tier-0 key resolve failed for "+ref+", using ephemeral value")
+			}
+		}
+		// Fallback: ephemeral random value (no persistence).
+		rr := core.RandomBytes(32)
+		if !rr.OK {
+			return ""
+		}
+		return core.HexEncode(rr.Value.([]byte))
+	}
+
+	jwtSecret := resolve(jwtSecretRef)
+	authToken := resolve(authTokenRef)
+	env := []string{}
+	if jwtSecret != "" {
+		env = append(env, envJWTSecret+"="+jwtSecret)
+	}
+	if authToken != "" {
+		env = append(env, envAuthToken+"="+authToken)
+	}
+	return env
+}
+
+// hubMCPToken extracts the MCP_AUTH_TOKEN value from a sandboxEnv slice
+// returned by hubSandboxEnv so the channel listener can send it as bearer.
+//
+//	env := hubSandboxEnv(c)
+//	token := hubMCPToken(env)
+func hubMCPToken(env []string) string {
+	const prefix = "MCP_AUTH_TOKEN="
+	for _, kv := range env {
+		if core.HasPrefix(kv, prefix) {
+			return kv[len(prefix):]
+		}
+	}
+	return ""
 }

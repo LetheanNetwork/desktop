@@ -35,8 +35,8 @@ func ExampleService_Resume() {
 }
 
 func ExampleNew() {
-	// Zero-value talks to the loopback serve for the channel listener; CLI ops
-	// resolve the lthn-agent binary at call time.
+	// Zero-value talks to the hub MCP plane (:9202) for the channel listener;
+	// CLI ops resolve the lthn-agent binary at call time.
 	_ = agents.New(agents.Config{})
-	_ = agents.New(agents.Config{ServeURL: "http://127.0.0.1:9101"})
+	_ = agents.New(agents.Config{MCPURL: "http://127.0.0.1:9202", MCPToken: "my-token"})
 }

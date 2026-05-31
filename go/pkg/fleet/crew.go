@@ -17,10 +17,10 @@ import (
 // driven by the machine's capabilities — a member runs only when the
 // machine declares the matching capability:
 //
-//	CapabilityInference -> lthn-ai    (the LEM host; auto-serves + supervises the
-//	                                   mlx driver, OpenAI /v1 chat on :PORT)
-//	CapabilitySandbox   -> lthn-agent serve               (joins once its
-//	                                                        listen addr is wired)
+//	CapabilityInference -> lthn-ai      (the LEM host; auto-serves + supervises the
+//	                                     mlx driver, OpenAI /v1 chat on :9100)
+//	CapabilitySandbox   -> lthn-agent hub (HTTP control plane on :9201,
+//	                                       MCP HTTP+SSE plane on :9202)
 //
 // Each instance is health-gated (not "up" until its port accepts a
 // connection) and respawned with bounded backoff if it exits. A member
@@ -53,15 +53,24 @@ type crewMember struct {
 	Count    int // instances to run (clamped to >= 1)
 }
 
-// defaultCrew is the darwin crew. lthn-ai is the inference host — it serves the
-// OpenAI /v1 surface on :9100 (CORE_AI_HTTP_ADDR) and on boot auto-serves +
-// supervises the mlx driver itself (CORE_AI_SERVE_RUNTIME=mlx), so the desktop
-// supervises lthn-ai and lthn-ai supervises the driver. Its MCP socket is moved
-// off the shared default so it can't collide. lthn-agent is the sandbox sidecar
-// — CoreAgent's orchestration engine, listen address via MCP_HTTP_ADDR, serving
-// the Streamable HTTP MCP at /mcp + the /v1/tools BridgeToAPI on :9101 (what the
-// desktop's pkg/agents drives). The machinery handles every member.
-func defaultCrew() []crewMember {
+// defaultCrew returns the darwin crew definition. lthn-ai is the inference
+// host — it serves the OpenAI /v1 surface on :9100 (CORE_AI_HTTP_ADDR) and
+// on boot auto-serves + supervises the mlx driver itself
+// (CORE_AI_SERVE_RUNTIME=mlx), so the desktop supervises lthn-ai and
+// lthn-ai supervises the driver. Its MCP socket is moved off the shared
+// default so it can't collide.
+//
+// lthn-agent is the sandbox sidecar running `hub` (Mantis #1807 Unit D).
+// The hub exposes two planes:
+//   - HTTP control plane on :9201 (bearer-required, health-gate target)
+//   - MCP HTTP+SSE plane on :9202 (fail-closed: requires MCP_JWT_SECRET)
+//
+// sandboxEnv carries MCP_JWT_SECRET and MCP_AUTH_TOKEN so both planes start;
+// the caller (desktop startup) resolves these from pkg/keys tier-0 before
+// invoking SuperviseLocalCrew. The health gate dials :9201 (BasePort).
+//
+//	crew := defaultCrew([]string{"MCP_JWT_SECRET=abc", "MCP_AUTH_TOKEN=xyz"})
+func defaultCrew(sandboxEnv []string) []crewMember {
 	return []crewMember{
 		{
 			Capability: CapabilityInference,
@@ -75,11 +84,16 @@ func defaultCrew() []crewMember {
 			Count:    1,
 		},
 		{
+			// lthn-agent hub — replaces the deleted `serve` subcommand
+			// (RFC.serve.md Unit B / Mantis #1807). Static args pin both
+			// listen addresses so the desktop knows where to find them
+			// regardless of the hub's defaults; the health gate dials
+			// the HTTP control plane (BasePort = 9201).
 			Capability: CapabilitySandbox,
 			Binary:     "lthn-agent",
-			Serve:      []string{"serve"},
-			AddrEnv:    "MCP_HTTP_ADDR",
-			BasePort:   9101,
+			Serve:      []string{"hub", "--http", "127.0.0.1:9201", "--mcp-http", "127.0.0.1:9202"},
+			Env:        append([]string(nil), sandboxEnv...),
+			BasePort:   9201,
 			Count:      1,
 		},
 	}
