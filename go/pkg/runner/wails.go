@@ -102,8 +102,25 @@ func (s *Service) WGenerate(prompt string) core.Result {
 	return core.Ok(text)
 }
 
+// ChatReply is the structured WChat return — the assistant reply plus
+// the welfare gate's "reworded on your behalf" signal (Mantis #1799). The
+// renderer reads warn_user to paint a small chip when the welfare model
+// chose lem_rephrase with lem_warn_user=true; the reply text is the model's
+// answer to the (possibly reworded) prompt. The unprefixed Chat(messages)
+// core.Result still returns a bare string for Action-bus / CLI callers.
+//
+// Usage example (TS):
+//
+//	import { WChat } from "@desktop/runner/service";
+//	const { text, warn_user } = await demand(WChat(history));
+//	if (warn_user) { /* show the rephrased chip */ }
+type ChatReply struct {
+	Text     string `json:"text"`
+	WarnUser bool   `json:"warn_user"`
+}
+
 // WChat is the WebView-binding-friendly Chat — full message
-// history in, assistant reply out.
+// history in, assistant reply + welfare signal out.
 func (s *Service) WChat(messages []inference.Message) core.Result {
 	// Cerberus #1426 — defence-in-depth caps before the array hits
 	// any allocator path. Order matters: count first (cheap), then
@@ -128,12 +145,14 @@ func (s *Service) WChat(messages []inference.Message) core.Result {
 					i, maxChatTotalBytes), nil))
 		}
 	}
-	r := s.Chat(messages)
+	// chatCtxWelfare keeps the welfare WarnUser flag the bare Chat path
+	// drops — the renderer needs it to paint the rephrased chip.
+	r, warnUser := s.chatCtxWelfare(core.Background(), messages)
 	if !r.OK {
 		return wrapInnerFail("runner.Service.WChat", "chat failed", r)
 	}
 	text, _ := r.Value.(string)
-	return core.Ok(text)
+	return core.Ok(ChatReply{Text: text, WarnUser: warnUser})
 }
 
 // WModels is the WebView-binding-friendly Models — returns the

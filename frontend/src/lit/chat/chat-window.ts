@@ -11,6 +11,16 @@ import type {
   Conversation, RailData, RailMode, RightRailMode,
 } from "../types";
 
+/** Structured runner.WChat return — the assistant reply plus the welfare
+ *  gate's "reworded on your behalf" signal (Mantis #1799). Mirrors the Go
+ *  runner.ChatReply shape; defined locally because the Wails binding is
+ *  generated at build time. warn_user is true when the welfare model chose
+ *  lem_rephrase with lem_warn_user. */
+interface WelfareChatReply {
+  text: string;
+  warn_user: boolean;
+}
+
 /* ── data fixtures (shared with the React version) ────────────────── */
 const CONVERSATIONS: Conversation[] = [
   { id:"c1", bucket:"today",     title:"Refactor the embed loop",  snippet:"Looks like the issue is the closure capturing…", model:"Gemma 4 E2B" },
@@ -175,6 +185,7 @@ class LthnChatWindow extends LitElement {
     composerValue: { state: true },
     sending: { state: true },
     sendErr: { state: true },
+    welfareReworded: { state: true },
     activeModel: { state: true },
     version: { state: true },
     runnerCount: { state: true },
@@ -332,6 +343,12 @@ class LthnChatWindow extends LitElement {
   declare composerValue: string;
   declare sending: boolean;
   declare sendErr: string;
+  /** Mantis #1799 — set true when the last WChat round-trip carried the
+   *  welfare gate's warn_user flag (the model chose lem_rephrase with
+   *  lem_warn_user). Drives the transient "reworded on your behalf" chip
+   *  above the composer; cleared on the next send so it tracks the most
+   *  recent turn only. */
+  declare welfareReworded: boolean;
   declare activeModel: string;
   declare version: string;
   declare runnerCount: number;
@@ -349,6 +366,7 @@ class LthnChatWindow extends LitElement {
     labelSampling: string;
     sampTemp: string; sampTopP: string; sampMaxTok: string; sampContext: string;
     labelSources: string; sourcesEmpty: string;
+    rewordedNote: string;
   };
   constructor() {
     super();
@@ -384,6 +402,7 @@ class LthnChatWindow extends LitElement {
     this.composerValue = "";
     this.sending = false;
     this.sendErr = "";
+    this.welfareReworded = false;
     this.activeModel = "";
     this.version = "0.2.0-rc1";
     this.runnerCount = 1;
@@ -413,6 +432,7 @@ class LthnChatWindow extends LitElement {
       sampContext:      "Context",
       labelSources:     "Sources",
       sourcesEmpty:     "None this turn. Citations appear here when the model grounds an answer.",
+      rewordedNote:     "Reworded on your behalf to keep things respectful.",
     };
   }
   createRenderRoot() { return this; }
@@ -697,7 +717,7 @@ class LthnChatWindow extends LitElement {
       et, eb, cd, cr, ca, cs, bSend, bStop,
       rMeta, sTps, sWatts, sKv, sTokens,
       lSamp, sT, sP, sMax, sCtx,
-      lSrc, sEmpty,
+      lSrc, sEmpty, rewordedNote,
     ] = await Promise.all([
       T("window.chat.title"),
       T("window.chat.subtitle"),
@@ -728,6 +748,7 @@ class LthnChatWindow extends LitElement {
       T("window.chat.samp_context"),
       T("window.chat.label_sources"),
       T("window.chat.sources_empty"),
+      T("window.chat.reworded_note", "Reworded on your behalf to keep things respectful."),
     ]);
     this.chrome = { title, subtitle };
     this.t = {
@@ -742,6 +763,7 @@ class LthnChatWindow extends LitElement {
       labelSampling: lSamp,
       sampTemp: sT, sampTopP: sP, sampMaxTok: sMax, sampContext: sCtx,
       labelSources: lSrc, sourcesEmpty: sEmpty,
+      rewordedNote,
     };
     // Restore last-active conversation BEFORE _reloadRail. The rail
     // loader's fallback assigns conversations[0] when active is null,
@@ -986,6 +1008,9 @@ class LthnChatWindow extends LitElement {
     const id = this.activeConversationId;
     this.sending = true;
     this.sendErr = "";
+    // Clear any prior turn's welfare chip — it tracks the most recent
+    // round-trip only (Mantis #1799).
+    this.welfareReworded = false;
     this.composerValue = "";
     // Reset history navigation — next ↑ should start at the newest
     // (which now includes the message we're about to send).
@@ -1030,7 +1055,13 @@ class LthnChatWindow extends LitElement {
       // user saw a blank reply with no error signal AND the empty
       // turn persisted in chathistory polluting future LoRA training
       // data.
-      const reply = await demand<string>(runner.WChat(history));
+      // WChat now returns a structured { text, warn_user } shape — the
+      // welfare gate's "reworded on your behalf" signal rides alongside
+      // the reply (Mantis #1799). Older bare-string returns are tolerated
+      // for resilience against a stale binding.
+      const res = await demand<WelfareChatReply | string>(runner.WChat(history));
+      const reply = typeof res === "string" ? res : res.text;
+      this.welfareReworded = typeof res === "string" ? false : !!res.warn_user;
       // Guard the empty-string case too — a successful Result with
       // empty Value is a degenerate response we don't want to
       // persist. Surface as an explicit error so the user retries
@@ -1234,6 +1265,9 @@ class LthnChatWindow extends LitElement {
     const id = this.activeConversationId;
     this.sending = true;
     this.sendErr = "";
+    // Redo replaces the most-recent turn — clear the welfare chip so it
+    // re-derives from this fresh round-trip (Mantis #1799).
+    this.welfareReworded = false;
     try {
       const [sessions, runner] = await Promise.all([
         import("@desktop/sessions/wailsservice"),
@@ -1257,7 +1291,9 @@ class LthnChatWindow extends LitElement {
       // to the user. Redo is the "the reply was bad, give me another"
       // affordance — silently substituting a worse blank reply is the
       // worst possible UX for that path.
-      const reply = await demand<string>(runner.WChat(history));
+      const res = await demand<WelfareChatReply | string>(runner.WChat(history));
+      const reply = typeof res === "string" ? res : res.text;
+      this.welfareReworded = typeof res === "string" ? false : !!res.warn_user;
       if (!reply) {
         throw new Error("Empty reply from runner");
       }
@@ -2476,6 +2512,16 @@ class LthnChatWindow extends LitElement {
                       background:rgba(255,76,76,0.08); border:1px solid rgba(255,76,76,0.18);
                       border-radius:6px; font-size:11.5px; color:var(--err-300, #ffb4b4);">
             <i class="fa-solid fa-triangle-exclamation" style="font-size:11px;"></i>${liveErr}
+          </div>
+        ` : nothing}
+        ${this.welfareReworded ? html`
+          <div class="lthn-chat-welfare-chip" role="status" aria-live="polite"
+               style="display:inline-flex; align-self:flex-start; align-items:center; gap:7px;
+                      padding:6px 11px; background:rgba(120,170,255,0.08);
+                      border:1px solid rgba(120,170,255,0.20); border-radius:999px;
+                      font-size:11px; color:var(--fg-1, #aac4ff);">
+            <i class="fa-regular fa-wand-magic-sparkles" style="font-size:10.5px;"></i>
+            ${this.t.rewordedNote}
           </div>
         ` : nothing}
         <div style="position:relative;

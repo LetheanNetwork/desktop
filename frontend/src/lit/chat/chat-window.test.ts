@@ -497,6 +497,53 @@ describe("rail search — truncated banner (Mantis #1571)", () => {
   });
 });
 
+// Mantis #1799 — welfare "reworded on your behalf" chip. WChat now
+// returns a structured { text, warn_user } shape; when warn_user is true
+// the chat surfaces a calm chip above the composer telling the user the
+// welfare model reworded their prompt. The state field welfareReworded is
+// the seam (set from the WChat return in _send / _regenerate); we drive it
+// directly and assert the chip's DOM presence — same boundary the
+// searchTruncated banner test above uses.
+describe("welfare reworded chip (Mantis #1799)", () => {
+  type ChatWindowEl = HTMLElement & {
+    welfareReworded: boolean;
+    updateComplete: Promise<boolean>;
+  };
+
+  // TestChatWindow_WelfareChip_ShownWhenReworded_Good
+  it("renders the reworded chip when welfareReworded is true", async () => {
+    const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
+    el.welfareReworded = true;
+    await el.updateComplete;
+
+    const chip = host.querySelector(".lthn-chat-welfare-chip");
+    expect(chip, "welfare chip present when warn_user fired").not.toBeNull();
+    expect(chip?.textContent || "", "carries the reworded copy").toContain("Reworded on your behalf");
+    // Politeness: status role + polite live region so a screen reader
+    // announces the rewording without interrupting the user.
+    expect(chip?.getAttribute("role")).toBe("status");
+    expect(chip?.getAttribute("aria-live")).toBe("polite");
+  });
+
+  // TestChatWindow_WelfareChip_HiddenWhenClean_Bad
+  it("does not render the chip when welfareReworded is false", async () => {
+    const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
+    el.welfareReworded = false;
+    await el.updateComplete;
+
+    const chip = host.querySelector(".lthn-chat-welfare-chip");
+    expect(chip, "no chip on an un-reworded turn").toBeNull();
+  });
+
+  // TestChatWindow_WelfareChip_DefaultsClean_Ugly
+  it("defaults to no chip on a fresh mount", async () => {
+    const { el, host } = await mountWindow<ChatWindowEl>("lthn-chat-window");
+    await el.updateComplete;
+    expect(el.welfareReworded, "fresh window starts welfare-clean").toBe(false);
+    expect(host.querySelector(".lthn-chat-welfare-chip")).toBeNull();
+  });
+});
+
 describe("/export-all slash command", () => {
   type ChatWindowEl = HTMLElement & {
     _slashMenuController: { open: boolean; close: () => boolean; toggle: () => void };

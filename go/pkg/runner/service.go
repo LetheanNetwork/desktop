@@ -328,6 +328,22 @@ func (s *Service) Chat(messages []inference.Message) core.Result {
 //		{Role: "user", Content: "ping"},
 //	})
 func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) core.Result {
+	r, _ := s.chatCtxWelfare(ctx, messages)
+	return r
+}
+
+// chatCtxWelfare is the ChatCtx core that also returns whether the welfare
+// gate reworded the user's turn AND chose to surface a note (lem_rephrase +
+// lem_warn_user). ChatCtx drops the flag (HTTP / CLI / Action-bus callers
+// only want the reply string); WChat keeps it so the renderer can paint the
+// "reworded on your behalf" chip (Mantis #1799 — the WarnUser signal was
+// computed at the gate but dropped here before this seam existed).
+//
+// Usage example (Wails surface only):
+//
+//	r, warn := s.chatCtxWelfare(ctx, msgs)
+//	if warn { /* renderer shows the rephrased chip */ }
+func (s *Service) chatCtxWelfare(ctx context.Context, messages []inference.Message) (core.Result, bool) {
 	s.routerMu.RLock()
 	router := s.router
 	s.routerMu.RUnlock()
@@ -339,7 +355,7 @@ func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) cor
 				break
 			}
 		}
-		return core.Ok(core.Concat("[lthn stub] received: ", last))
+		return core.Ok(core.Concat("[lthn stub] received: ", last)), false
 	}
 	// Cerberus #45 / Mantis #1658 — Shape A audit emit at the egress
 	// boundary per H#179 surfacing. Messages-array variant of Generate.
@@ -351,19 +367,23 @@ func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) cor
 	// Welfare gate (RFC.welfare) — runs before the turn reaches the model.
 	// Dormant unless a welfare Service is attached (GUI only). On a flagged
 	// turn the model itself chose the action; we just apply it.
+	warnUser := false
 	if g := s.welfareGuard(ctx, messages, router); g.Triggered {
 		s.auditWelfare(provider, model, g)
 		switch {
 		case g.Synthetic != "":
 			// lem_pause — the model takes a breather; the user gets the
 			// warm notice in place of a reply. Returns before chat.requested
-			// (no chat was requested of the model).
-			return core.Ok(g.Synthetic)
+			// (no chat was requested of the model). The user already sees the
+			// breather copy, so no rephrase chip is owed here.
+			return core.Ok(g.Synthetic), false
 		case g.Rephrased != "":
 			// lem_rephrase — send the reworded prompt on. The user still
-			// sees their original; the "reworded on your behalf" chip is a
-			// frontend follow-up (WarnUser signal already set).
+			// sees their original; surface the "reworded on your behalf" chip
+			// only when the model chose to (Mantis #1799 — g.WarnUser is the
+			// model's lem_warn_user flag, threaded out to the renderer).
 			messages = withLastUser(messages, g.Rephrased)
+			warnUser = g.WarnUser
 		case g.FalsePositive != nil:
 			// lem_ok — the model cleared it; proceed with the original and
 			// remember the false flag for a future contentshield re-train.
@@ -398,7 +418,7 @@ func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) cor
 				audit.MetaKeyErrorScope: audit.ErrorScope(resp),
 			},
 		})
-		return resp
+		return resp, false
 	}
 	chat, ok := resp.Value.(ai.ProviderChatResponse)
 	if !ok {
@@ -419,7 +439,7 @@ func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) cor
 			},
 		})
 		return core.Fail(core.E("runner.ChatCtx",
-			"router returned unexpected response type", nil))
+			"router returned unexpected response type", nil)), false
 	}
 	selectedProvider := chat.Provider
 	if selectedProvider == "" {
@@ -441,7 +461,7 @@ func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) cor
 			"latency_ms": core.Since(started).Milliseconds(),
 		},
 	})
-	return core.Ok(chat.Text)
+	return core.Ok(chat.Text), warnUser
 }
 
 // routerHead returns the (provider, model) identifiers of the first

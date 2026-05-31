@@ -66,3 +66,39 @@ func TestWelfare_withLastUser_Ugly(t *core.T) {
 	out := withLastUser(nil, "reworded")
 	core.AssertEqual(t, 0, len(out))
 }
+
+// TestWelfare_WChat_Good_StructuredReplyWelfareClean — Mantis #1799: WChat
+// now returns the structured ChatReply shape (text + warn_user) instead of a
+// bare string. On the no-router stub path the welfare gate never runs, so the
+// reply MUST carry WarnUser=false (no "reworded" chip on an un-gated turn).
+func TestWelfare_WChat_Good_StructuredReplyWelfareClean(t *core.T) {
+	s := NewService(Options{}) // no routes → router==nil → echo stub
+	r := s.WChat([]inference.Message{{Role: "user", Content: "hello"}})
+	core.AssertTrue(t, r.OK, "WChat stub path must succeed")
+	reply, ok := r.Value.(ChatReply)
+	core.AssertTrue(t, ok, "WChat must return a structured ChatReply")
+	core.AssertFalse(t, reply.WarnUser, "un-gated stub turn must not flag WarnUser")
+	core.AssertContains(t, reply.Text, "hello")
+}
+
+// TestWelfare_chatCtxWelfare_Bad_NoWarnOnStub — the chatCtxWelfare seam (the
+// drop-site this ticket reopened) returns warnUser=false when no welfare gate
+// is attached, so HTTP / CLI callers that go through bare ChatCtx are
+// unaffected by the new second return value.
+func TestWelfare_chatCtxWelfare_Bad_NoWarnOnStub(t *core.T) {
+	s := NewService(Options{})
+	r, warn := s.chatCtxWelfare(core.Background(), []inference.Message{
+		{Role: "user", Content: "ping"},
+	})
+	core.AssertTrue(t, r.OK, "stub chatCtxWelfare must succeed")
+	core.AssertFalse(t, warn, "stub path must never flag WarnUser")
+}
+
+// TestWelfare_chatCtxWelfare_Ugly_EmptyMessages — no user turn at all: the
+// stub returns its echo with no warn flag and no panic.
+func TestWelfare_chatCtxWelfare_Ugly_EmptyMessages(t *core.T) {
+	s := NewService(Options{})
+	r, warn := s.chatCtxWelfare(core.Background(), nil)
+	core.AssertTrue(t, r.OK, "empty-message stub must succeed")
+	core.AssertFalse(t, warn, "empty-message path must never flag WarnUser")
+}
