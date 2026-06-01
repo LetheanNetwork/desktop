@@ -27,6 +27,8 @@ interface Tab {
   repo?: string;
   cwd?: string;
   attachId?: string;
+  command?: string[];
+  shared?: boolean;
   title: string;
   exited?: boolean;
 }
@@ -36,8 +38,14 @@ class LthnViewTerminal extends LitElement {
     w:        { type: Number },
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },
-    repo:     { type: String }, // cold seed for the initial tab (set by the shell)
+    // Cold seed for the initial tab (set by the shell's _instantiate). repo/cwd
+    // open a shell there; attachId/command/shared cover an agent/command tab
+    // when the terminal's first activation IS the open-here.
+    repo:     { type: String },
     cwd:      { type: String },
+    attachId: { type: String },
+    command:  { type: Array },
+    shared:   { type: Boolean },
     tabs:      { state: true },
     activeKey: { state: true },
   };
@@ -47,6 +55,9 @@ class LthnViewTerminal extends LitElement {
   declare embedded: boolean;
   declare repo: string;
   declare cwd: string;
+  declare attachId: string;
+  declare command: string[];
+  declare shared: boolean;
   declare tabs: Tab[];
   declare activeKey: string;
 
@@ -55,7 +66,7 @@ class LthnViewTerminal extends LitElement {
   constructor() {
     super();
     this.w = 1180; this.h = 720; this.embedded = false;
-    this.repo = ""; this.cwd = "";
+    this.repo = ""; this.cwd = ""; this.attachId = ""; this.command = []; this.shared = false;
     this.tabs = []; this.activeKey = "";
   }
 
@@ -70,7 +81,10 @@ class LthnViewTerminal extends LitElement {
     this.style.minWidth = "0";
     window.addEventListener("lthn:open-terminal", this._onOpenTerminal as EventListener);
     if (this.tabs.length === 0) {
-      this._addTab(this.repo || this.cwd ? { repo: this.repo, cwd: this.cwd } : {});
+      const seeded = this.repo || this.cwd || this.attachId || this.command.length;
+      this._addTab(seeded
+        ? { repo: this.repo, cwd: this.cwd, attachId: this.attachId, command: this.command, shared: this.shared }
+        : {});
     }
   }
 
@@ -82,20 +96,24 @@ class LthnViewTerminal extends LitElement {
   /** "open terminal here" — a repo row (or any caller) asks for a terminal in a
    *  cwd, or to attach to an existing session. Same hand-off as lthn:open-code. */
   _onOpenTerminal = (ev: Event) => {
-    const d = (ev as CustomEvent<{ repo?: string; cwd?: string; path?: string; attachId?: string }>).detail || {};
-    this._addTab({ repo: d.repo, cwd: d.cwd || d.path, attachId: d.attachId });
+    const d = (ev as CustomEvent<{ repo?: string; cwd?: string; path?: string; attachId?: string; command?: string[]; shared?: boolean; title?: string }>).detail || {};
+    this._addTab({ repo: d.repo, cwd: d.cwd || d.path, attachId: d.attachId, command: d.command, shared: d.shared, title: d.title });
   };
 
-  private _addTab(opts: { repo?: string; cwd?: string; attachId?: string }) {
+  private _addTab(opts: { repo?: string; cwd?: string; attachId?: string; command?: string[]; shared?: boolean; title?: string }) {
     const key = "t" + (++this.seq);
-    const title = opts.repo
-      ? opts.repo
-      : opts.attachId
-        ? "↪ " + opts.attachId.slice(0, 8)
-        : opts.cwd
-          ? (opts.cwd.split("/").filter(Boolean).pop() || "shell")
-          : "shell " + this.seq;
-    this.tabs = [...this.tabs, { key, repo: opts.repo, cwd: opts.cwd, attachId: opts.attachId, title }];
+    const title = opts.title
+      ? opts.title
+      : opts.repo
+        ? opts.repo
+        : opts.attachId
+          ? "↪ " + opts.attachId.slice(0, 8)
+          : opts.command && opts.command.length
+            ? (opts.command[0].split("/").filter(Boolean).pop() || "cmd")
+            : opts.cwd
+              ? (opts.cwd.split("/").filter(Boolean).pop() || "shell")
+              : "shell " + this.seq;
+    this.tabs = [...this.tabs, { key, repo: opts.repo, cwd: opts.cwd, attachId: opts.attachId, command: opts.command, shared: opts.shared, title }];
     this.activeKey = key;
   }
 
@@ -172,6 +190,7 @@ class LthnViewTerminal extends LitElement {
             <div style="position:absolute; inset:0; display:${t.key === this.activeKey ? "flex" : "none"};">
               <lthn-terminal-session
                 .tabKey=${t.key} .repo=${t.repo || ""} .cwd=${t.cwd || ""} .attachId=${t.attachId || ""}
+                .command=${t.command || []} .shared=${!!t.shared}
                 .active=${t.key === this.activeKey}
                 @lthn-term-ready=${this._onReady} @lthn-term-exit=${this._onExit}></lthn-terminal-session>
             </div>`)}

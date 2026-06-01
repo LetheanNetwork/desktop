@@ -375,6 +375,33 @@ class LthnIntegrationsWindow extends LitElement {
     }
   }
 
+  /** Open the opencode agent's TUI as an IN-APP terminal tab (the integrated
+   *  experience, vs openTUI's external Terminal.app window). The Go side spawns
+   *  `opencode attach <url>` into lthn's PTY pool (pkg/terminal) and returns the
+   *  session ID; we fire lthn:open-terminal so the shell attaches a tab to it.
+   *  shared=false: this tab owns the attach client, so closing it stops the TUI
+   *  (the sandbox backend keeps running). */
+  private async openTUIInApp() {
+    if (!this.sandboxId) return;
+    try {
+      const oc = await import("@desktop/opencode/wailsservice");
+      const r = await oc.WOpenTUIInApp(this.sandboxId);
+      const ok = (r as { OK?: boolean })?.OK === true;
+      const sid = (r as { Value?: { sessionId?: string } })?.Value?.sessionId;
+      if (!ok || !sid) {
+        console.error("opencode WOpenTUIInApp failed", r);
+        this.mergeStatus = { kind: "err", text: this.t.ocOpenTUIFailed };
+        return;
+      }
+      window.dispatchEvent(new CustomEvent("lthn:open-terminal", {
+        detail: { attachId: sid, shared: false, title: "opencode" },
+      }));
+    } catch (err) {
+      console.error("opencode WOpenTUIInApp threw", err);
+      this.mergeStatus = { kind: "err", text: this.t.ocOpenTUIFailed };
+    }
+  }
+
   /** JSONC snippet matching DefaultLthnProfile.Provider["lthn"]. Users
    *  see this in the card AND it's what Merge writes. Static for now;
    *  if the default profile gains baseURL knobs the snippet should
@@ -717,7 +744,7 @@ class LthnIntegrationsWindow extends LitElement {
               </button>
               <button
                 ?disabled=${sandboxBusy}
-                @click=${() => void this.openTUI()}
+                @click=${() => void this.openTUIInApp()}
                 style="padding:6px 12px; font-size:11.5px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.10); border-radius:6px; color:var(--fg-0); cursor:${sandboxBusy ? "default" : "pointer"}; opacity:${sandboxBusy ? 0.6 : 1}; --wails-draggable: no-drag;">
                 <i class="fa-solid fa-terminal" style="font-size:10px; margin-right:6px;"></i>${this.t.ocOpenTUI}
               </button>

@@ -54,6 +54,33 @@ func TestService_Control_Ugly(t *testing.T) {
 	}
 }
 
+func TestService_Spawn_Good(t *testing.T) {
+	id, err := Spawn(SpawnInput{Command: []string{"/bin/cat"}, Label: "test-agent"})
+	if err != nil {
+		t.Skipf("spawn: %v", err) // /bin/cat absent in some sandboxes
+	}
+	if id == "" {
+		t.Fatal("Spawn returned an empty id")
+	}
+	sess := terminalPoolSingleton().Get(id)
+	if sess == nil {
+		t.Fatal("spawned session is not in the pool")
+	}
+	if sess.Kind != "agent" {
+		t.Errorf("Kind = %q, want agent", sess.Kind)
+	}
+	if sess.Label != "test-agent" {
+		t.Errorf("Label = %q, want test-agent", sess.Label)
+	}
+	terminalPoolSingleton().Close(id)
+}
+
+func TestService_Spawn_Bad(t *testing.T) {
+	if _, err := Spawn(SpawnInput{}); err == nil {
+		t.Error("Spawn with no command should error")
+	}
+}
+
 func TestService_List_Good(t *testing.T) {
 	// With no sessions opened, List returns an empty (non-nil) slice.
 	r := newTestService().List()

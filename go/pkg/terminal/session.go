@@ -56,6 +56,8 @@ type TerminalSession struct {
 	Shell string
 	Cwd   string
 	Env   []string
+	Label string // human label for non-shell sessions (e.g. "opencode oc-123")
+	Kind  string // "shell" (default) | "command" | "agent"
 
 	pty    *os.File
 	cmd    *exec.Cmd
@@ -73,20 +75,26 @@ type TerminalSession struct {
 }
 
 // SessionOptions configures a new session. Empty fields fall back to sensible
-// defaults ($SHELL or /bin/zsh, $HOME, xterm-256color).
+// defaults ($SHELL or /bin/zsh, $HOME, xterm-256color). When Command is set the
+// session runs that argv instead of an interactive shell — this is how an agent
+// (e.g. opencode attach) registers its own PTY in the pool.
 type SessionOptions struct {
-	ID    string
-	Host  string
-	Shell string
-	Cwd   string
-	Term  string
-	Env   []string
-	Cols  int
-	Rows  int
+	ID      string
+	Host    string
+	Shell   string
+	Cwd     string
+	Term    string
+	Env     []string
+	Cols    int
+	Rows    int
+	Command []string // when non-empty, run this argv instead of $SHELL
+	Label   string
+	Kind    string // "shell" | "command" | "agent"; defaults to "shell"
 }
 
-// NewTerminalSession allocates a PTY and spawns the configured shell. Returns
-// the session ready to Run; call Close if you abandon it before Run.
+// NewTerminalSession allocates a PTY and spawns the configured shell (or the
+// SessionOptions.Command argv). Returns the session ready to Run; call Close if
+// you abandon it before Run.
 func NewTerminalSession(opts SessionOptions) (*TerminalSession, error) {
 	shell := opts.Shell
 	if shell == "" {
@@ -104,14 +112,23 @@ func NewTerminalSession(opts SessionOptions) (*TerminalSession, error) {
 		term = "xterm-256color"
 	}
 
-	cmd := exec.Command(shell)
+	// A custom argv (agent / command session) runs in place of the shell; the
+	// display label is the program name so the tab/SessionInfo reads sensibly.
+	displayShell := shell
+	var cmd *exec.Cmd
+	if len(opts.Command) > 0 {
+		cmd = exec.Command(opts.Command[0], opts.Command[1:]...)
+		displayShell = opts.Command[0]
+	} else {
+		cmd = exec.Command(shell)
+	}
 	cmd.Dir = cwd
 	cmd.Env = append(os.Environ(), "TERM="+term)
 	cmd.Env = append(cmd.Env, opts.Env...)
 
 	f, err := pty.Start(cmd)
 	if err != nil {
-		return nil, core.E("terminal.NewSession", "pty start "+shell+": "+err.Error(), nil)
+		return nil, core.E("terminal.NewSession", "pty start "+displayShell+": "+err.Error(), nil)
 	}
 
 	if opts.Cols > 0 && opts.Rows > 0 {
@@ -122,13 +139,19 @@ func NewTerminalSession(opts SessionOptions) (*TerminalSession, error) {
 	if host == "" {
 		host = "local"
 	}
+	kind := opts.Kind
+	if kind == "" {
+		kind = "shell"
+	}
 
 	return &TerminalSession{
 		ID:          opts.ID,
 		Host:        host,
-		Shell:       shell,
+		Shell:       displayShell,
 		Cwd:         cwd,
 		Env:         opts.Env,
+		Label:       opts.Label,
+		Kind:        kind,
 		pty:         f,
 		cmd:         cmd,
 		ring:        make([]byte, terminalRingCap),
@@ -363,18 +386,21 @@ func (p *TerminalPool) Snapshot() []SessionInfo {
 	out := make([]SessionInfo, 0, len(p.sessions))
 	for _, s := range p.sessions {
 		s.mu.RLock()
-		out = append(out, SessionInfo{ID: s.ID, Host: s.Host, Shell: s.Shell, Cwd: s.Cwd})
+		out = append(out, SessionInfo{ID: s.ID, Host: s.Host, Shell: s.Shell, Cwd: s.Cwd, Label: s.Label, Kind: s.Kind})
 		s.mu.RUnlock()
 	}
 	return out
 }
 
-// SessionInfo is the Wails-serialisable view of a session.
+// SessionInfo is the Wails-serialisable view of a session. Kind + Label let the
+// FE tell user shells from agent sessions and offer "watch" tabs for the latter.
 type SessionInfo struct {
 	ID    string `json:"id"`
 	Host  string `json:"host"`
 	Shell string `json:"shell"`
 	Cwd   string `json:"cwd"`
+	Label string `json:"label,omitempty"`
+	Kind  string `json:"kind,omitempty"`
 }
 
 // newSessionID returns 16 random hex chars — enough for a per-process table.

@@ -306,6 +306,17 @@ func (w *WailsService) WOpenTUI(id string) core.Result {
 	return w.svc.OpenTUI(id)
 }
 
+// WOpenTUIInApp spawns the opencode TUI (`opencode attach <url>`) as a PTY in
+// lthn's own terminal pool and returns the session ID, so the FE can attach an
+// in-app terminal tab to the running agent instead of opening an external
+// terminal window. Integrations card "Open in-app" button.
+func (w *WailsService) WOpenTUIInApp(id string) core.Result {
+	if w == nil || w.svc == nil {
+		return core.Fail(core.E("opencode.WOpenTUIInApp", "service not bound", nil))
+	}
+	return w.svc.OpenTUIInApp(id)
+}
+
 // WEnable persists `opencode.serve.enabled = true` and spawns a
 // sandbox if none is running. Idempotent. Empty profile = default.
 // Frontend uses this on the integrations card as a "remember my

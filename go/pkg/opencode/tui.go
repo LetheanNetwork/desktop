@@ -35,6 +35,7 @@ import (
 	goruntime "runtime"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/terminal"
 )
 
 // OpenTUI launches `<runtime> exec -it <container> opencode` inside
@@ -175,6 +176,63 @@ func (s *Service) OpenTUI(id string) core.Result {
 		return core.Fail(core.E("opencode.OpenTUI",
 			"unsupported platform: "+goruntime.GOOS, nil))
 	}
+}
+
+// OpenTUIInAppResult carries the pooled session ID back so the FE can attach a
+// terminal tab to the agent's TUI.
+type OpenTUIInAppResult struct {
+	SessionID string `json:"sessionId"`
+	Label     string `json:"label"`
+}
+
+// OpenTUIInApp is the in-app counterpart to OpenTUI: instead of launching the
+// host opencode TUI in an external terminal window, it spawns `opencode attach
+// <url>` as a PTY-backed session in lthn's own terminal pool (pkg/terminal) and
+// returns the session ID. The FE then attaches a terminal tab to that ID, so
+// the running agent's TUI is watchable + drivable inside lthn — the concrete
+// form of "an agent registers its PTY in the pool".
+//
+// Same guarantees as OpenTUI: the sandbox must be running, and the server
+// password rides terminal.SpawnInput.Env so it never lands on the command line,
+// in `ps` output, or in shell history.
+//
+//	r := svc.OpenTUIInApp("oc-1735843891234")
+//	if r.OK { out := r.Value.(OpenTUIInAppResult); _ = out.SessionID }
+func (s *Service) OpenTUIInApp(id string) core.Result {
+	if s == nil {
+		return core.Fail(core.E("opencode.OpenTUIInApp", "service is nil", nil))
+	}
+	if core.Trim(id) == "" {
+		return core.Fail(core.E("opencode.OpenTUIInApp", "id is required", nil))
+	}
+	infoR := s.Inspect(id)
+	if !infoR.OK {
+		return infoR
+	}
+	sb, _ := infoR.Value.(Sandbox)
+	if sb.Status != StatusRunning {
+		return core.Fail(core.E("opencode.OpenTUIInApp",
+			"sandbox is not running (status="+sb.Status+")", nil))
+	}
+	pwR := s.ServerPassword()
+	if !pwR.OK {
+		return pwR
+	}
+	password, _ := pwR.Value.(string)
+
+	// Host-side `opencode attach <url>` (the user's own opencode, theme, auth),
+	// pointed at the container's bound backend port — same target as OpenTUI.
+	targetURL := core.Sprintf("http://127.0.0.1:%d/", sb.HostPort)
+	label := "opencode " + id
+	sid, err := terminal.Spawn(terminal.SpawnInput{
+		Command: []string{"opencode", "attach", targetURL},
+		Env:     []string{"OPENCODE_SERVER_PASSWORD=" + password},
+		Label:   label,
+	})
+	if err != nil {
+		return core.Fail(core.E("opencode.OpenTUIInApp", "spawn agent terminal: "+err.Error(), nil))
+	}
+	return core.Ok(OpenTUIInAppResult{SessionID: sid, Label: label})
 }
 
 // shellQuote single-quotes a string for safe inclusion in `sh -c`.

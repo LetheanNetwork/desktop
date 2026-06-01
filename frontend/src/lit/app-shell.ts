@@ -1214,7 +1214,7 @@ class LthnAppShell extends LitElement {
   };
 
   /** Open-terminal seed for the next Terminal-pane cold mount. */
-  _terminalSeed: { repo: string; cwd: string } | null = null;
+  _terminalSeed: { repo: string; cwd: string; attachId: string; command: string[]; shared: boolean } | null = null;
 
   /** Panes kept mounted across view-switches (hidden, not destroyed) so their
    *  state survives — e.g. the terminal's live shells + tabs. Keyed by tag,
@@ -1229,9 +1229,12 @@ class LthnAppShell extends LitElement {
    *  warm mounts are handled by the pane's own lthn:open-terminal listener
    *  (which adds a tab to the already-mounted manager). */
   _onOpenTerminal = (ev: Event) => {
-    const d = (ev as CustomEvent<{ repo?: string; cwd?: string; path?: string }>).detail;
+    const d = (ev as CustomEvent<{ repo?: string; cwd?: string; path?: string; attachId?: string; command?: string[]; shared?: boolean }>).detail;
     if (!d) return;
-    this._terminalSeed = { repo: d.repo ?? "", cwd: d.cwd ?? d.path ?? "" };
+    this._terminalSeed = {
+      repo: d.repo ?? "", cwd: d.cwd ?? d.path ?? "",
+      attachId: d.attachId ?? "", command: d.command ?? [], shared: !!d.shared,
+    };
     this._selectView("agents");
     this._select("terminal");
   };
@@ -1500,8 +1503,9 @@ class LthnAppShell extends LitElement {
     // Open-terminal hand-off: seed the initial tab's repo/cwd.
     if (tag === "lthn-view-terminal" && this._terminalSeed) {
       const seed = this._terminalSeed;
-      const tv = el as { repo?: string; cwd?: string };
+      const tv = el as { repo?: string; cwd?: string; attachId?: string; command?: string[]; shared?: boolean };
       tv.repo = seed.repo; tv.cwd = seed.cwd;
+      tv.attachId = seed.attachId; tv.command = seed.command; tv.shared = seed.shared;
       this._terminalSeed = null;
     }
     return el;

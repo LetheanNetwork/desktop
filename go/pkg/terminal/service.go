@@ -42,14 +42,57 @@ func NewService(c *core.Core) *Service {
 // ServiceName identifies the Wails binding namespace.
 func (s *Service) ServiceName() string { return "Terminal" }
 
+// SpawnInput configures an agent-registered session (see Spawn).
+type SpawnInput struct {
+	Command []string // argv to run (required)
+	Env     []string // extra environment, e.g. a secret kept off the command line
+	Cwd     string
+	Cols    int
+	Rows    int
+	Label   string // human label surfaced in the tab / SessionInfo
+}
+
+// Spawn registers a process-backed PTY in the shared pool and returns its
+// session ID. This is the Go-side entry an agent uses to put its own terminal
+// in the pool — e.g. opencode spawning `opencode attach <url>` with the server
+// password on Env so it never hits the command line. The FE then attaches a tab
+// by ID (Service.Attach), exactly as for a shell, so the agent's terminal is
+// watchable and drivable in-app. Kind is fixed to "agent".
+//
+//	id, err := terminal.Spawn(terminal.SpawnInput{
+//	    Command: []string{"opencode", "attach", url},
+//	    Env:     []string{"OPENCODE_SERVER_PASSWORD=" + pw},
+//	    Label:   "opencode " + sandboxID,
+//	})
+func Spawn(in SpawnInput) (string, error) {
+	if len(in.Command) == 0 {
+		return "", core.E("terminal.Spawn", "command is required", nil)
+	}
+	sess, err := terminalPoolSingleton().Open(SessionOptions{
+		Command: in.Command,
+		Env:     in.Env,
+		Cwd:     in.Cwd,
+		Cols:    in.Cols,
+		Rows:    in.Rows,
+		Label:   in.Label,
+		Kind:    "agent",
+	})
+	if err != nil {
+		return "", err
+	}
+	return sess.ID, nil
+}
+
 // OpenInput configures a new session. Cwd wins; else Repo resolves to its
-// workspace path; else the session defaults to $HOME.
+// workspace path; else the session defaults to $HOME. Command, when set, runs
+// that argv instead of an interactive shell ("open a tab running X").
 type OpenInput struct {
-	Repo string `json:"repo,omitempty"`
-	Cwd  string `json:"cwd,omitempty"`
-	Term string `json:"term,omitempty"`
-	Cols int    `json:"cols,omitempty"`
-	Rows int    `json:"rows,omitempty"`
+	Repo    string   `json:"repo,omitempty"`
+	Cwd     string   `json:"cwd,omitempty"`
+	Term    string   `json:"term,omitempty"`
+	Cols    int      `json:"cols,omitempty"`
+	Rows    int      `json:"rows,omitempty"`
+	Command []string `json:"command,omitempty"`
 }
 
 // OpenOutput carries the new session's identity back to the FE. The FE should
@@ -91,11 +134,17 @@ type ListOutput struct {
 //	r := svc.Open(terminal.OpenInput{Repo: "desktop", Cols: 120, Rows: 32})
 //	if r.OK { out := r.Value.(terminal.OpenOutput); _ = out.ID }
 func (s *Service) Open(input OpenInput) core.Result {
+	kind := "shell"
+	if len(input.Command) > 0 {
+		kind = "command"
+	}
 	sess, err := terminalPoolSingleton().Open(SessionOptions{
-		Cwd:  s.resolveCwd(input),
-		Term: input.Term,
-		Cols: input.Cols,
-		Rows: input.Rows,
+		Cwd:     s.resolveCwd(input),
+		Term:    input.Term,
+		Cols:    input.Cols,
+		Rows:    input.Rows,
+		Command: input.Command,
+		Kind:    kind,
 	})
 	if err != nil {
 		return core.Fail(core.E("terminal.Open", err.Error(), nil))

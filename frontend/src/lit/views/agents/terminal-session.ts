@@ -64,6 +64,8 @@ class LthnTerminalSession extends LitElement {
     repo:     { type: String },
     cwd:      { type: String },
     attachId: { type: String },
+    command:  { type: Array },
+    shared:   { type: Boolean }, // attach to a session we DON'T own (don't close it)
     active:   { type: Boolean },
     err:        { state: true },
     searchOpen: { state: true },
@@ -75,6 +77,8 @@ class LthnTerminalSession extends LitElement {
   declare repo: string;
   declare cwd: string;
   declare attachId: string;
+  declare command: string[];
+  declare shared: boolean;
   declare active: boolean;
   declare err: string;
   declare searchOpen: boolean;
@@ -95,6 +99,7 @@ class LthnTerminalSession extends LitElement {
   constructor() {
     super();
     this.tabKey = ""; this.repo = ""; this.cwd = ""; this.attachId = ""; this.active = false;
+    this.command = []; this.shared = false;
     this.err = ""; this.searchOpen = false; this.searchTerm = ""; this.searchCount = "";
   }
 
@@ -125,8 +130,10 @@ class LthnTerminalSession extends LitElement {
     this.resizeObserver?.disconnect();
     for (const off of this.offHandlers) { try { off(); } catch { /* already gone */ } }
     this.offHandlers = [];
-    // Close only sessions we spawned; an attached (agent) session outlives the tab.
-    if (this.sessionId && !this.attachId && this.svc?.Close) {
+    // Close sessions this tab owns (a spawned shell/command, or an attached
+    // session we own like the opencode TUI). A SHARED attach — watching a
+    // session someone else owns — is left running on unmount.
+    if (this.sessionId && !(this.attachId && this.shared) && this.svc?.Close) {
       void this.svc.Close({ id: this.sessionId }).catch(() => { /* tearing down */ });
     }
     if (this.term) { try { this.term.dispose(); } catch { /* already torn down */ } }
@@ -239,7 +246,7 @@ class LthnTerminalSession extends LitElement {
       if (!svc.Open) { this.err = "terminal service unavailable"; return; }
       let opened;
       try {
-        opened = (await svc.Open({ repo: this.repo, cwd: this.cwd, term: "xterm-256color", cols: term.cols, rows: term.rows }))?.Value;
+        opened = (await svc.Open({ repo: this.repo, cwd: this.cwd, command: this.command, term: "xterm-256color", cols: term.cols, rows: term.rows }))?.Value;
       } catch (e: unknown) {
         this.err = "open: " + (e instanceof Error ? e.message : String(e));
         return;
@@ -247,7 +254,7 @@ class LthnTerminalSession extends LitElement {
       if (this.disposed) return;
       if (!opened?.id) { this.err = "failed to open a shell session"; return; }
       id = opened.id;
-      title = title || basename(opened.cwd || "") || "shell";
+      title = title || basename(opened.cwd || "") || (this.command.length ? basename(this.command[0]) : "") || "shell";
       this._emit("lthn-term-ready", { key: this.tabKey, title, cwd: opened.cwd || "", shell: opened.shell || "" });
     }
     this.sessionId = id;
