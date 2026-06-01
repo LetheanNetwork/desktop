@@ -83,6 +83,22 @@ func Spawn(in SpawnInput) (string, error) {
 	return sess.ID, nil
 }
 
+// Wait blocks until a pooled session ends (its process exits), or returns
+// immediately if the session is unknown (already gone). The supervision
+// counterpart to Spawn — a caller that owns a Spawn'd session (e.g. the crew
+// respawn loop) blocks here in place of process.Wait.
+func Wait(id string) {
+	if sess := terminalPoolSingleton().Get(id); sess != nil {
+		<-sess.Done()
+	}
+}
+
+// Kill terminates a pooled session by ID. No-op if unknown. The shutdown
+// counterpart to Spawn (in place of process.Kill).
+func Kill(id string) {
+	terminalPoolSingleton().Close(id)
+}
+
 // OpenInput configures a new session. Cwd wins; else Repo resolves to its
 // workspace path; else the session defaults to $HOME. Command, when set, runs
 // that argv instead of an interactive shell ("open a tab running X").

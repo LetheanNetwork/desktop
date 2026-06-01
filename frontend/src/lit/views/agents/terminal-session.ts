@@ -239,9 +239,10 @@ class LthnTerminalSession extends LitElement {
     let id = "";
     let title = this.repo;
     if (this.attachId) {
-      // Attach to an existing pool session (e.g. a running agent's PTY).
+      // Attach to an existing pool session (e.g. a running agent's PTY). The
+      // manager owns this tab's title (from the agent's pool Label), so we emit
+      // no ready event here — doing so would clobber it with a bare session id.
       id = this.attachId;
-      title = title || "↪ " + id.slice(0, 8);
     } else {
       if (!svc.Open) { this.err = "terminal service unavailable"; return; }
       let opened;
@@ -270,7 +271,6 @@ class LthnTerminalSession extends LitElement {
 
     term.onData((data) => { void svc.Write?.({ id, data }).catch(() => {}); });
     await svc.Attach?.({ id }).catch(() => {});
-    if (this.attachId) this._emit("lthn-term-ready", { key: this.tabKey, title, cwd: "", shell: "" });
 
     this._refit();
     this.resizeObserver = new ResizeObserver(() => this._refit());

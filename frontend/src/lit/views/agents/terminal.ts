@@ -86,6 +86,9 @@ class LthnViewTerminal extends LitElement {
         ? { repo: this.repo, cwd: this.cwd, attachId: this.attachId, command: this.command, shared: this.shared }
         : {});
     }
+    // Surface any already-running agent sessions (e.g. the lthn-agent hub) as
+    // watch tabs alongside the shell.
+    void this._discoverAgents();
   }
 
   disconnectedCallback() {
@@ -100,7 +103,7 @@ class LthnViewTerminal extends LitElement {
     this._addTab({ repo: d.repo, cwd: d.cwd || d.path, attachId: d.attachId, command: d.command, shared: d.shared, title: d.title });
   };
 
-  private _addTab(opts: { repo?: string; cwd?: string; attachId?: string; command?: string[]; shared?: boolean; title?: string }) {
+  private _addTab(opts: { repo?: string; cwd?: string; attachId?: string; command?: string[]; shared?: boolean; title?: string }, activate = true) {
     const key = "t" + (++this.seq);
     const title = opts.title
       ? opts.title
@@ -114,7 +117,28 @@ class LthnViewTerminal extends LitElement {
               ? (opts.cwd.split("/").filter(Boolean).pop() || "shell")
               : "shell " + this.seq;
     this.tabs = [...this.tabs, { key, repo: opts.repo, cwd: opts.cwd, attachId: opts.attachId, command: opts.command, shared: opts.shared, title }];
-    this.activeKey = key;
+    if (activate) this.activeKey = key;
+  }
+
+  /** Surface running agent sessions (crew members PTY-backed via terminal.Spawn,
+   *  opencode, etc.) as watch tabs when the terminal opens. shared:true — the
+   *  agent owns its lifecycle, so closing the watch tab never kills it. Tabs are
+   *  added without stealing focus from the user's shell. */
+  private async _discoverAgents() {
+    try {
+      const svc = await import("@desktop/terminal/service").catch(() => null);
+      const list = svc && (svc as {
+        List?: () => Promise<{ Value?: { sessions?: Array<{ id: string; label?: string; shell?: string; kind?: string }> } }>;
+      }).List;
+      if (!list) return;
+      const sessions = (await list())?.Value?.sessions;
+      if (!Array.isArray(sessions)) return;
+      for (const s of sessions) {
+        if (s.kind === "agent" && s.id && !this.tabs.some(t => t.attachId === s.id)) {
+          this._addTab({ attachId: s.id, shared: true, title: s.label || s.shell || "agent" }, false);
+        }
+      }
+    } catch { /* no agents to surface */ }
   }
 
   private _newTab() { this._addTab({}); }

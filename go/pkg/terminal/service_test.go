@@ -2,7 +2,10 @@
 
 package terminal
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func newTestService() *Service { return &Service{attached: make(map[string]func())} }
 
@@ -79,6 +82,23 @@ func TestService_Spawn_Bad(t *testing.T) {
 	if _, err := Spawn(SpawnInput{}); err == nil {
 		t.Error("Spawn with no command should error")
 	}
+}
+
+func TestService_WaitKill_Good(t *testing.T) {
+	id, err := Spawn(SpawnInput{Command: []string{"/bin/cat"}}) // cat blocks on stdin
+	if err != nil {
+		t.Skipf("spawn: %v", err)
+	}
+	done := make(chan struct{})
+	go func() { Wait(id); close(done) }()
+	Kill(id)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Wait did not return after Kill")
+	}
+	// Wait on an unknown session returns immediately (already gone).
+	Wait("definitely-not-a-session")
 }
 
 func TestService_List_Good(t *testing.T) {

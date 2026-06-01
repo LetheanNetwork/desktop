@@ -9,6 +9,7 @@ import (
 
 	core "dappco.re/go"
 	process "dappco.re/go/process"
+	terminal "dappco.re/lthn/desktop/pkg/terminal"
 )
 
 // Crew supervision — the local (is_self) machine spawns and supervises
@@ -49,8 +50,11 @@ type crewMember struct {
 	Env        []string // extra static KEY=VALUE env for the spawn (merged with the AddrEnv var)
 	ModelFlag  string   // if set, the binary requires ModelFlag <path>; the
 	//             member is skipped until a model path is resolvable
-	BasePort int // instance i listens on BasePort + i
-	Count    int // instances to run (clamped to >= 1)
+	BasePort int  // instance i listens on BasePort + i
+	Count    int  // instances to run (clamped to >= 1)
+	Watch    bool // PTY-back this member via terminal.Spawn so its output is a
+	//             watchable in-app terminal session (registered in the pool).
+	//             Default false: infra members keep the plain process.Start path.
 }
 
 // defaultCrew returns the darwin crew definition. lthn-ai is the inference
@@ -100,6 +104,9 @@ func defaultCrew(sandboxEnv []string) []crewMember {
 			Env:        append([]string(nil), sandboxEnv...),
 			BasePort:   9201,
 			Count:      1,
+			// PTY-back the hub so its live output (where dispatched agent work
+			// runs) is a watchable in-app terminal tab.
+			Watch: true,
 		},
 	}
 }
@@ -129,9 +136,10 @@ func resolveCrewBinary(name string) string {
 
 // crewInstance is one running sidecar process under supervision.
 type crewInstance struct {
-	binary string
-	addr   string // host:port the instance listens on
-	procID string // go-process id, for Kill on shutdown
+	binary    string
+	addr      string // host:port the instance listens on
+	procID    string // go-process id, for Kill on shutdown (process-backed members)
+	sessionID string // terminal-pool session id (Watch members); supervised via terminal.Wait/Kill
 }
 
 // crewSupervisor owns the running crew for the local machine. Spawn,
@@ -187,7 +195,7 @@ func superviseCrew(ctx context.Context, crew []crewMember, capabilities []string
 // exclusive. Any static m.Env (KEY=VALUE) is merged in. A spawn that carries
 // env goes through go-process StartWithOptions; a bare flag spawn keeps the
 // plain Start path.
-func spawnMember(ctx context.Context, m crewMember, port int) core.Result {
+func spawnMember(ctx context.Context, m crewMember, port int) (procID, sessionID, errMsg string) {
 	args := append([]string(nil), m.Serve...)
 	if m.AddrFlag != "" {
 		args = append(args, m.AddrFlag, core.Sprintf(":%d", port))
@@ -197,14 +205,56 @@ func spawnMember(ctx context.Context, m crewMember, port int) core.Result {
 	if m.AddrEnv != "" {
 		env = append(env, core.Sprintf("%s=127.0.0.1:%d", m.AddrEnv, port))
 	}
-	if len(env) == 0 {
-		return process.Start(ctx, bin, args...)
+	// Watch members run under a PTY in the terminal pool so their output is a
+	// watchable in-app session; supervised below via crewWait/crewKill.
+	if m.Watch {
+		sid, err := terminal.Spawn(terminal.SpawnInput{
+			Command: append([]string{bin}, args...),
+			Env:     env,
+			Label:   m.Binary,
+			Cols:    200,
+			Rows:    50,
+		})
+		if err != nil {
+			return "", "", err.Error()
+		}
+		return "", sid, ""
 	}
-	return process.StartWithOptions(ctx, process.RunOptions{
-		Command: bin,
-		Args:    args,
-		Env:     env,
-	})
+	var r core.Result
+	if len(env) == 0 {
+		r = process.Start(ctx, bin, args...)
+	} else {
+		r = process.StartWithOptions(ctx, process.RunOptions{
+			Command: bin,
+			Args:    args,
+			Env:     env,
+		})
+	}
+	if !r.OK {
+		return "", "", r.Error()
+	}
+	return crewProcID(r), "", ""
+}
+
+// crewWait blocks until the instance's process exits — process.Wait for a
+// process-backed member, terminal.Wait for a PTY-backed (Watch) member.
+func crewWait(inst *crewInstance) {
+	if inst.sessionID != "" {
+		terminal.Wait(inst.sessionID)
+		return
+	}
+	process.Wait(inst.procID)
+}
+
+// crewKill terminates the instance — process.Kill or terminal.Kill.
+func crewKill(inst *crewInstance) {
+	if inst.sessionID != "" {
+		terminal.Kill(inst.sessionID)
+		return
+	}
+	if inst.procID != "" {
+		_ = process.Kill(inst.procID)
+	}
 }
 
 // launch resolves the binary, spawns one instance, health-gates it, and
@@ -219,12 +269,12 @@ func (sup *crewSupervisor) launch(ctx context.Context, m crewMember, idx int) {
 		core.Info("fleet.crew: port already serving — adopting, not supervising", "binary", m.Binary, "addr", addr)
 		return
 	}
-	startR := spawnMember(ctx, m, port)
-	if !startR.OK {
-		core.Warn("fleet.crew: spawn failed", "binary", m.Binary, "addr", addr, "err", startR.Error())
+	procID, sessionID, errMsg := spawnMember(ctx, m, port)
+	if procID == "" && sessionID == "" {
+		core.Warn("fleet.crew: spawn failed", "binary", m.Binary, "addr", addr, "err", errMsg)
 		return
 	}
-	inst := &crewInstance{binary: m.Binary, addr: addr, procID: crewProcID(startR)}
+	inst := &crewInstance{binary: m.Binary, addr: addr, procID: procID, sessionID: sessionID}
 
 	sup.mu.Lock()
 	sup.instances = append(sup.instances, inst)
@@ -247,7 +297,7 @@ func (sup *crewSupervisor) superviseInstance(ctx context.Context, m crewMember, 
 	backoff := crewBackoffMin
 	for {
 		startedAt := time.Now()
-		process.Wait(inst.procID) // blocks until the process exits
+		crewWait(inst) // blocks until the process exits (process- or PTY-backed)
 
 		sup.mu.Lock()
 		stopped := sup.stopped
@@ -269,12 +319,13 @@ func (sup *crewSupervisor) superviseInstance(ctx context.Context, m crewMember, 
 		}
 
 		port := m.BasePort + idx
-		startR := spawnMember(ctx, m, port)
-		if !startR.OK {
-			core.Warn("fleet.crew: respawn failed", "binary", m.Binary, "err", startR.Error())
+		procID, sessionID, errMsg := spawnMember(ctx, m, port)
+		if procID == "" && sessionID == "" {
+			core.Warn("fleet.crew: respawn failed", "binary", m.Binary, "err", errMsg)
 			continue
 		}
-		inst.procID = crewProcID(startR)
+		inst.procID = procID
+		inst.sessionID = sessionID
 		crewHealthy(inst.addr)
 	}
 }
@@ -295,9 +346,7 @@ func (sup *crewSupervisor) stop() {
 	instances := append([]*crewInstance(nil), sup.instances...)
 	sup.mu.Unlock()
 	for _, inst := range instances {
-		if inst.procID != "" {
-			_ = process.Kill(inst.procID)
-		}
+		crewKill(inst)
 	}
 }
 
