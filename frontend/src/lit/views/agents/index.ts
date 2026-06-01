@@ -22,6 +22,7 @@ import "./scan";
 import "./flows";
 import "./tasks";
 import "./code";
+import "./terminal-session";
 import "./terminal";
 
 // Pulled-in Coding panels — repos/issues/prs/deploys are repo context

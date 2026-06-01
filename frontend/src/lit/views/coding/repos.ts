@@ -211,6 +211,12 @@ class LthnViewRepos extends LitElement {
     window.dispatchEvent(new CustomEvent("lthn:dispatch-repo", { detail: { repo } }));
   }
 
+  /** Open a terminal in this repo's path — the app-shell switches to the
+   *  Terminal view and opens a tab seeded with the repo (lthn:open-terminal). */
+  _terminal(r: RepoRow) {
+    window.dispatchEvent(new CustomEvent("lthn:open-terminal", { detail: { repo: r.name, path: r.path } }));
+  }
+
   /** Run core-lint over a repo and file new findings as tasks (Tasks.Detect).
    *  The count shows in the header; the tasks land in Coding/Issues, ready to
    *  dispatch. Needs a live local path (live rows only) + the agent endpoint. */
@@ -295,6 +301,11 @@ class LthnViewRepos extends LitElement {
                           title="Scan ${r.name} with core-lint → file issues as tasks"
                           style="cursor:pointer; --wails-draggable:no-drag; margin-left:6px; color:var(--fg-3);">
                       <i class="fa-solid ${this.scanning === r.name ? "fa-spinner" : "fa-magnifying-glass"}" style="font-size:9px;"></i>
+                    </span>
+                    <span @click=${(e: Event) => { e.preventDefault(); e.stopPropagation(); this._terminal(r); }}
+                          title="Open a terminal in ${r.name}"
+                          style="cursor:pointer; --wails-draggable:no-drag; margin-left:4px; color:var(--fg-3);">
+                      <i class="fa-solid fa-terminal" style="font-size:9px;"></i>
                     </span>
                   ` : nothing}
                 </div>

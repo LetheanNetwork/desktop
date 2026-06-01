@@ -929,6 +929,7 @@ class LthnAppShell extends LitElement {
     window.addEventListener("lthn:dispatch-repo", this._onDispatchRepo as EventListener);
     // Code navigation: a Backlog task asks the shell to open a finding's source.
     window.addEventListener("lthn:open-code", this._onOpenCode as EventListener);
+    window.addEventListener("lthn:open-terminal", this._onOpenTerminal as EventListener);
     const [
       brand, search, settingsTip, preview, expand, collapse,
       gPrimary, gObserve, gExtend, gPreview,
@@ -1046,6 +1047,7 @@ class LthnAppShell extends LitElement {
     window.removeEventListener(PLUGIN_VIEW_MOUNT_TIMEOUT_EVENT, this._onPluginViewMountTimeout);
     window.removeEventListener("lthn:dispatch-repo", this._onDispatchRepo as EventListener);
     window.removeEventListener("lthn:open-code", this._onOpenCode as EventListener);
+    window.removeEventListener("lthn:open-terminal", this._onOpenTerminal as EventListener);
     document.removeEventListener("click", this._onDocClickForSwitcher);
     if (this._unsubSetPane) {
       this._unsubSetPane();
@@ -1209,6 +1211,21 @@ class LthnAppShell extends LitElement {
     this._codeSeed = { repo: d.repo ?? "", file: d.file ?? "", line: d.line ?? 0, path: d.path ?? "" };
     this._selectView("agents");
     this._select("code");
+  };
+
+  /** Open-terminal seed for the next Terminal-pane cold mount. */
+  _terminalSeed: { repo: string; cwd: string } | null = null;
+
+  /** "open terminal here" — a repo row asks for a shell in its path. Same
+   *  hand-off shape as _onOpenCode: cold mounts read this seed in _instantiate,
+   *  warm mounts are handled by the pane's own lthn:open-terminal listener
+   *  (which adds a tab to the already-mounted manager). */
+  _onOpenTerminal = (ev: Event) => {
+    const d = (ev as CustomEvent<{ repo?: string; cwd?: string; path?: string }>).detail;
+    if (!d) return;
+    this._terminalSeed = { repo: d.repo ?? "", cwd: d.cwd ?? d.path ?? "" };
+    this._selectView("agents");
+    this._select("terminal");
   };
 
   /** Plugin-view mount-timeout fallback per RFC.plugin-views §6.3
@@ -1454,6 +1471,13 @@ class LthnAppShell extends LitElement {
       const c = el as { repo?: string; file?: string; line?: number; path?: string };
       c.repo = seed.repo; c.file = seed.file; c.line = seed.line; c.path = seed.path;
       this._codeSeed = null;
+    }
+    // Open-terminal hand-off: seed the initial tab's repo/cwd.
+    if (tag === "lthn-view-terminal" && this._terminalSeed) {
+      const seed = this._terminalSeed;
+      const tv = el as { repo?: string; cwd?: string };
+      tv.repo = seed.repo; tv.cwd = seed.cwd;
+      this._terminalSeed = null;
     }
     return el;
   }
