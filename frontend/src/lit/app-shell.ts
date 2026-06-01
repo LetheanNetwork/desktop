@@ -351,6 +351,17 @@ const VIEWS: ViewDef[] = [
     ],
   },
   {
+    id: "coding", label: "Coding", icon: "fa-code",
+    blurb: "Repos, issues, PRs, deploys — find the work, then dispatch it.",
+    nav: [
+      { id: "repos",    label: "Repos",    icon: "fa-folder-tree",        tag: "lthn-view-repos",      group: "primary" },
+      { id: "issues",   label: "Issues",   icon: "fa-circle-exclamation", tag: "lthn-view-issues",     group: "primary" },
+      { id: "prs",      label: "PRs",      icon: "fa-code-pull-request",  tag: "lthn-view-prs",        group: "primary" },
+      { id: "deploys",  label: "Deploys",  icon: "fa-rocket",             tag: "lthn-view-deploys",    group: "primary" },
+      { id: "settings", label: "Settings", icon: "fa-sliders",            tag: "lthn-settings-window", group: "bottom" },
+    ],
+  },
+  {
     id: "marketing", label: "Marketing", icon: "fa-bullhorn", hidden: true,
     blurb: "Campaigns, content, social, audience. Numbers your CEO asks about.",
     nav: [
@@ -910,6 +921,9 @@ class LthnAppShell extends LitElement {
     // §6.2 fallback chain. The chain is hard-capped at 2 entries
     // (configured → admin); falling through both lands on admin.
     window.addEventListener(PLUGIN_VIEW_MOUNT_TIMEOUT_EVENT, this._onPluginViewMountTimeout);
+    // Coding → Dispatch: a repo row (in Coding or the Agents view) asks the
+    // shell to open the Dispatch pane pre-filled with its repo.
+    window.addEventListener("lthn:dispatch-repo", this._onDispatchRepo as EventListener);
     const [
       brand, search, settingsTip, preview, expand, collapse,
       gPrimary, gObserve, gExtend, gPreview,
@@ -1025,6 +1039,7 @@ class LthnAppShell extends LitElement {
     window.removeEventListener(AUTH_OK_EVENT, this._onAuthOk);
     window.removeEventListener(AUTH_BACK_EVENT, this._onAuthBack);
     window.removeEventListener(PLUGIN_VIEW_MOUNT_TIMEOUT_EVENT, this._onPluginViewMountTimeout);
+    window.removeEventListener("lthn:dispatch-repo", this._onDispatchRepo as EventListener);
     document.removeEventListener("click", this._onDocClickForSwitcher);
     if (this._unsubSetPane) {
       this._unsubSetPane();
@@ -1157,6 +1172,21 @@ class LthnAppShell extends LitElement {
   _onViewSwitcherSelect = (ev: Event) => {
     const detail = (ev as CustomEvent<{ viewId?: string }>).detail;
     if (detail?.viewId) this._selectView(detail.viewId);
+  };
+
+  /** Repo pre-fill for the next Dispatch-pane mount, seeded by a repo row via
+   *  the lthn:dispatch-repo event and consumed (then cleared) in _instantiate. */
+  _dispatchRepo = "";
+
+  /** Coding → Dispatch: open the Dispatch pane in the Agents view with the
+   *  clicked repo pre-filled. _selectView lands the pane on its default, then
+   *  _select switches to dispatch; _instantiate seeds the repo on mount. */
+  _onDispatchRepo = (ev: Event) => {
+    const detail = (ev as CustomEvent<{ repo?: string }>).detail;
+    if (!detail?.repo) return;
+    this._dispatchRepo = detail.repo;
+    this._selectView("agents");
+    this._select("dispatch");
   };
 
   /** Plugin-view mount-timeout fallback per RFC.plugin-views §6.3
@@ -1385,6 +1415,11 @@ class LthnAppShell extends LitElement {
     if (tag === "lthn-logs-window") el.setAttribute("tab", "live");
     if (tag === "lthn-welcome-window") el.setAttribute("step", "2");
     if (tag === "lthn-settings-window") el.setAttribute("open", "models");
+    // Coding → Dispatch hand-off: seed the repo a row asked us to dispatch.
+    if (tag === "lthn-view-agent-dispatch" && this._dispatchRepo) {
+      (el as { repo?: string }).repo = this._dispatchRepo;
+      this._dispatchRepo = "";
+    }
     return el;
   }
 

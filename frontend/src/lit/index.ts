@@ -44,6 +44,12 @@ import "./views/office";
 // <lthn-view-agent-activity>. Spec: code/lthn/desktop/views/RFC.agents-view.md
 import "./views/agents";
 
+// Coding view — registers <lthn-view-repos|issues|prs|deploys>. The
+// "find the work" surface; its repo rows dispatch into the Agents view.
+// (Also pulled in transitively by the Agents view; explicit here so the
+// standalone Coding view's elements register regardless.)
+import "./views/coding";
+
 // Sales role views (Phase 2 wave 1) — registers
 // <lthn-view-pipeline|contacts|deals|forecast>. Fixtures-only in v1;
 // future pkg/sales/* Go bindings replace the per-element fixture arrays.

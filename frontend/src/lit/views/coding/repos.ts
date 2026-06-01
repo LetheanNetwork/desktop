@@ -198,6 +198,12 @@ class LthnViewRepos extends LitElement {
     );
   }
 
+  /** Ask the shell to open Dispatch pre-filled with this repo (Coding →
+   *  Dispatch). The app-shell listens for lthn:dispatch-repo on window. */
+  _dispatch(repo: string) {
+    window.dispatchEvent(new CustomEvent("lthn:dispatch-repo", { detail: { repo } }));
+  }
+
   render() {
     const sum = this._summary();
     const prsTotal = this.repos.reduce((t, r) => t + r.prs, 0);
@@ -236,13 +242,16 @@ class LthnViewRepos extends LitElement {
             ${this.repos.map((r, i) => html`
               <div class="lthn-view-repos-row"
                    data-repo=${r.name}
+                   title="Dispatch an agent on ${r.name}"
+                   @click=${() => this._dispatch(r.name)}
                    style="display:grid; grid-template-columns: 1.6fr 70px 110px 110px 110px 60px; gap:14px;
-                          padding:14px 16px;
+                          padding:14px 16px; cursor:pointer;
                           border-bottom:${i < this.repos.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none"};
                           align-items:center;">
                 <div style="display:flex; align-items:center; gap:10px;">
                   <span style="width:6px; height:6px; border-radius:50%; background:${langColour(r.lang)};"></span>
                   <span style="font-family:var(--font-mono); font-size:13px; color:var(--fg-0);">${r.name}</span>
+                  <i class="fa-solid fa-paper-plane" style="font-size:9px; color:var(--fg-3); margin-left:2px;"></i>
                 </div>
                 <span style="font-family:var(--font-mono); font-size:11px; color:var(--fg-2);">${r.lang}</span>
                 <span style="font-family:var(--font-mono); font-size:11px; color:var(--fg-1);">${r.branch}</span>
