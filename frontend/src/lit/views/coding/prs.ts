@@ -194,6 +194,14 @@ class LthnViewPRs extends LitElement {
     }
   }
 
+  /** Ask the shell to open Dispatch on this PR (Coding → Dispatch). The
+   *  app-shell listens for lthn:dispatch-repo on window. */
+  _dispatch(p: PRRow) {
+    window.dispatchEvent(new CustomEvent("lthn:dispatch-repo", {
+      detail: { repo: p.repo, pr: p.number, task: p.title },
+    }));
+  }
+
   render() {
     const counts = this._counts();
     const visible = this._visible();
@@ -263,6 +271,11 @@ class LthnViewPRs extends LitElement {
                       <span style="font-family:var(--font-mono); font-size:10px; color:var(--fg-2);">${p.author || "—"}</span>
                       <span style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);">·</span>
                       <span style="font-family:var(--font-mono); font-size:10px; color:var(--success-400);">${p.diffStats}</span>
+                      <span @click=${(e: Event) => { e.preventDefault(); e.stopPropagation(); this._dispatch(p); }}
+                            title="Dispatch an agent on PR #${p.number}"
+                            style="cursor:pointer; --wails-draggable:no-drag; margin-left:4px; color:var(--fg-3);">
+                        <i class="fa-solid fa-paper-plane" style="font-size:9px;"></i>
+                      </span>
                     </div>
                   </div>
                   <span style="font-family:var(--font-mono); font-size:10.5px; padding:3px 9px; border-radius:999px;

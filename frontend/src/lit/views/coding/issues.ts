@@ -183,6 +183,14 @@ class LthnViewIssues extends LitElement {
     `;
   }
 
+  /** Ask the shell to open Dispatch on this issue (Coding → Dispatch). The
+   *  app-shell listens for lthn:dispatch-repo on window. */
+  _dispatch(it: IssueRow) {
+    window.dispatchEvent(new CustomEvent("lthn:dispatch-repo", {
+      detail: { repo: it.repo, issue: it.n, task: it.title },
+    }));
+  }
+
   render() {
     const visible = this._visible();
     const labels = ["bug", "enhancement", "ui", "docs", "metal", "telemetry"];
@@ -223,11 +231,15 @@ class LthnViewIssues extends LitElement {
               ${visible.map((it, i) => html`
                 <div class="lthn-view-issues-row"
                      data-issue=${it.n}
+                     title="Dispatch an agent on ${it.repo}#${it.n}"
+                     @click=${() => this._dispatch(it)}
                      style="display:grid; grid-template-columns: 60px 1fr 100px 80px; gap:14px;
-                            padding:14px 16px;
+                            padding:14px 16px; cursor:pointer;
                             border-bottom:${i < visible.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none"};
                             align-items:center;">
-                  <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--fg-3);">#${it.n}</span>
+                  <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--fg-3);">#${it.n}
+                    <i class="fa-solid fa-paper-plane" style="font-size:8px; opacity:0.5; margin-left:2px;"></i>
+                  </span>
                   <div style="min-width:0;">
                     <div style="font-size:13px; color:var(--fg-0); line-height:1.4;">${it.title}</div>
                     <div style="display:flex; align-items:center; gap:6px; margin-top:6px;">

@@ -1174,17 +1174,19 @@ class LthnAppShell extends LitElement {
     if (detail?.viewId) this._selectView(detail.viewId);
   };
 
-  /** Repo pre-fill for the next Dispatch-pane mount, seeded by a repo row via
-   *  the lthn:dispatch-repo event and consumed (then cleared) in _instantiate. */
-  _dispatchRepo = "";
+  /** Seed for the next Dispatch-pane mount — a repo/issue/PR + task a Coding
+   *  row asked to dispatch on, via the lthn:dispatch-repo event; consumed (and
+   *  cleared) in _instantiate. */
+  _dispatchSeed: { repo: string; issue: number; pr: number; task: string } | null = null;
 
-  /** Coding → Dispatch: open the Dispatch pane in the Agents view with the
-   *  clicked repo pre-filled. _selectView lands the pane on its default, then
-   *  _select switches to dispatch; _instantiate seeds the repo on mount. */
+  /** Coding → Dispatch: open the Dispatch pane in the Agents view seeded with
+   *  the clicked repo (and optional issue/PR + task). _selectView lands the
+   *  pane on its default, then _select switches to dispatch; _instantiate
+   *  seeds the fields on mount. */
   _onDispatchRepo = (ev: Event) => {
-    const detail = (ev as CustomEvent<{ repo?: string }>).detail;
-    if (!detail?.repo) return;
-    this._dispatchRepo = detail.repo;
+    const d = (ev as CustomEvent<{ repo?: string; issue?: number; pr?: number; task?: string }>).detail;
+    if (!d || (!d.repo && !d.issue && !d.pr)) return;
+    this._dispatchSeed = { repo: d.repo ?? "", issue: d.issue ?? 0, pr: d.pr ?? 0, task: d.task ?? "" };
     this._selectView("agents");
     this._select("dispatch");
   };
@@ -1415,10 +1417,16 @@ class LthnAppShell extends LitElement {
     if (tag === "lthn-logs-window") el.setAttribute("tab", "live");
     if (tag === "lthn-welcome-window") el.setAttribute("step", "2");
     if (tag === "lthn-settings-window") el.setAttribute("open", "models");
-    // Coding → Dispatch hand-off: seed the repo a row asked us to dispatch.
-    if (tag === "lthn-view-agent-dispatch" && this._dispatchRepo) {
-      (el as { repo?: string }).repo = this._dispatchRepo;
-      this._dispatchRepo = "";
+    // Coding → Dispatch hand-off: seed the repo/issue/PR + task a row asked
+    // us to dispatch on.
+    if (tag === "lthn-view-agent-dispatch" && this._dispatchSeed) {
+      const seed = this._dispatchSeed;
+      const d = el as { repo?: string; issue?: number; pr?: number; task?: string };
+      if (seed.repo) d.repo = seed.repo;
+      if (seed.issue) d.issue = seed.issue;
+      if (seed.pr) d.pr = seed.pr;
+      if (seed.task) d.task = seed.task;
+      this._dispatchSeed = null;
     }
     return el;
   }

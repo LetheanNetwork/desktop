@@ -57,6 +57,8 @@ class LthnViewAgentDispatch extends LitElement {
     personas: { state: true },
     tasks:    { state: true },
     repo:     { state: true },
+    issue:    { state: true },
+    pr:       { state: true },
     agent:    { state: true },
     persona:  { state: true },
     planTemplate: { state: true },
@@ -75,6 +77,8 @@ class LthnViewAgentDispatch extends LitElement {
   declare personas: PersonaCard[];
   declare tasks: TaskCard[];
   declare repo: string;
+  declare issue: number;
+  declare pr: number;
   declare agent: string;
   declare persona: string;
   declare planTemplate: string;
@@ -92,6 +96,8 @@ class LthnViewAgentDispatch extends LitElement {
     this.personas = [];
     this.tasks = [];
     this.repo = "";
+    this.issue = 0;
+    this.pr = 0;
     this.agent = "";
     this.persona = "";
     this.planTemplate = "";
@@ -107,10 +113,30 @@ class LthnViewAgentDispatch extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
+    // A row clicked while this view is already mounted seeds via this event;
+    // a cold mount (navigating in) is seeded by the shell's _instantiate.
+    window.addEventListener("lthn:dispatch-repo", this._onSeed);
     await this._loadAgents();
     await this._loadPersonas();
     await this._loadTasks();
   }
+
+  disconnectedCallback() {
+    window.removeEventListener("lthn:dispatch-repo", this._onSeed);
+    super.disconnectedCallback();
+  }
+
+  /** Apply a dispatch seed to an already-mounted Dispatch view (repo/issue/PR
+   *  + task from a Coding row). issue/pr reset to the event's values so a
+   *  plain repo dispatch clears any stale issue/PR chip. */
+  _onSeed = (ev: Event) => {
+    const d = (ev as CustomEvent<{ repo?: string; issue?: number; pr?: number; task?: string }>).detail;
+    if (!d || (!d.repo && !d.issue && !d.pr)) return;
+    if (d.repo) this.repo = d.repo;
+    this.issue = d.issue ?? 0;
+    this.pr = d.pr ?? 0;
+    if (d.task) this.task = d.task;
+  };
 
   /** Populate the agent picker from the Fleet registry. */
   async _loadAgents() {
@@ -204,6 +230,8 @@ class LthnViewAgentDispatch extends LitElement {
         agent:        this.agent.trim(),
         persona:      this.persona.trim(),
         plan_template: this.planTemplate.trim(),
+        issue:        this.issue || 0,
+        pr:           this.pr || 0,
         branch:       this.branch.trim(),
         dry_run:      this.dryRun,
       };
@@ -232,6 +260,17 @@ class LthnViewAgentDispatch extends LitElement {
             <input style=${fieldStyle} placeholder="e.g. go-io  (or  org/repo)"
               .value=${this.repo}
               @input=${(e: Event) => { this.repo = (e.target as HTMLInputElement).value; }}>
+            ${(this.issue > 0 || this.pr > 0) ? html`
+              <div style="display:flex; align-items:center; gap:8px; margin-top:7px;">
+                <span style="font-family:var(--font-mono); font-size:11px; padding:2px 9px; border-radius:999px;
+                             background:rgba(64,193,197,0.1); border:1px solid rgba(64,193,197,0.25); color:var(--brand-300);">
+                  <i class="fa-solid ${this.issue > 0 ? "fa-circle-exclamation" : "fa-code-pull-request"}" style="font-size:9px;"></i>
+                  ${this.issue > 0 ? `issue #${this.issue}` : `PR #${this.pr}`}
+                </span>
+                <span @click=${() => { this.issue = 0; this.pr = 0; }} title="Clear"
+                      style="cursor:pointer; font-size:10.5px; color:var(--fg-3); --wails-draggable:no-drag;">✕ clear</span>
+              </div>
+            ` : nothing}
           </div>
 
           <div>
