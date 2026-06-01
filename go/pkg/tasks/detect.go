@@ -4,6 +4,7 @@ package tasks
 
 import (
 	core "dappco.re/go"
+	"dappco.re/go/orm"
 	"dappco.re/go/process"
 
 	"dappco.re/lthn/desktop/pkg/auth"
@@ -111,6 +112,60 @@ func (s *Service) Detect(input DetectInput) core.Result {
 func (w *WailsService) Detect(input DetectInput) core.Result {
 	defer stampRenderer(w.svc.core)()
 	return w.svc.Detect(input)
+}
+
+// ClearInput names an optional project to scope the clear to (empty = all).
+type ClearInput struct {
+	Project string `json:"project,omitempty"`
+}
+
+// ClearOutput reports how many detector-filed tasks were removed.
+type ClearOutput struct {
+	Cleared int `json:"cleared"`
+}
+
+// ClearDetected hard-deletes every task filed by a detector (reporter
+// core-lint or package-update), optionally scoped to a project. Detector tasks
+// are machine-generated and cheap to regenerate (re-scan), so a clean reset is
+// the right move; human-authored tasks (any other reporter) are never touched.
+//
+//	r := tasks.ClearDetected(c, "")            // all detector tasks
+//	r := tasks.ClearDetected(c, "core/go-io")  // just this repo's
+func ClearDetected(c *core.Core, project string) core.Result {
+	cleared := 0
+	for _, reporter := range []string{lintReporter, updateReporter} {
+		if lr := List(c, ListFilter{Project: project, Reporter: reporter}); lr.OK {
+			if issues, ok := lr.Value.([]Issue); ok {
+				cleared += len(issues)
+			}
+		}
+		// Always scoped by reporter (never a bare DeleteAll) so only
+		// detector-owned rows are removed.
+		b := orm.Of[Issue](c).Where("reporter", "=", reporter)
+		if core.Trim(project) != "" {
+			b = b.Where("project", "=", project)
+		}
+		if dr := b.DeleteAll(); !dr.OK {
+			return core.Fail(core.E("tasks.ClearDetected", "clear "+reporter+": "+dr.Error(), nil))
+		}
+	}
+	return core.Ok(ClearOutput{Cleared: cleared})
+}
+
+// ClearDetected (Wails) — gated GUI trigger to reset the detector backlog.
+func (s *Service) ClearDetected(input ClearInput) core.Result {
+	id, ok := auth.Require(s.core, "tasks.Service.ClearDetected", auth.TierOperator, auth.TierRenderer)
+	if !ok {
+		return core.Fail(core.E("tasks.Service.ClearDetected",
+			"tasks.tier_not_permitted: "+id.Tier.String(), nil))
+	}
+	return ClearDetected(s.core, input.Project)
+}
+
+// ClearDetected (Wails IPC) — stamp TierRenderer → delegate to the substrate.
+func (w *WailsService) ClearDetected(input ClearInput) core.Result {
+	defer stampRenderer(w.svc.core)()
+	return w.svc.ClearDetected(input)
 }
 
 // runCoreLint shells `core-lint run --output=json` and parses the report.

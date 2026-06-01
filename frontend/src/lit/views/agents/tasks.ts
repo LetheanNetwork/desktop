@@ -72,6 +72,21 @@ class LthnViewAgentTasks extends LitElement {
     }
   }
 
+  /** Clear all detector-filed tasks (lint + package-update). They regenerate
+   *  on the next Scan, so this is a cheap reset of the machine-filed backlog;
+   *  human-authored tasks are untouched. */
+  async _clear() {
+    if (this.loading) return;
+    this.loading = true;
+    try {
+      const svc = await import("@desktop/tasks/wailsservice").catch(() => null);
+      const clear = svc && (svc as { ClearDetected?: (i: unknown) => Promise<unknown> }).ClearDetected;
+      if (clear) await clear({});
+    } catch { /* surfaced by the reload below */ }
+    finally { this.loading = false; }
+    await this._load();
+  }
+
   /** Counts by reporter source for the header summary. */
   _bySource(): { lint: number; updates: number; other: number } {
     const c = { lint: 0, updates: 0, other: 0 };
@@ -102,6 +117,10 @@ class LthnViewAgentTasks extends LitElement {
           <div style="flex:1"></div>
           <lthn-btn tone="ghost" size="sm" @click=${() => void this._load()}>
             <i class="fa-solid ${this.loading ? "fa-spinner" : "fa-rotate"}" style="font-size:10px;"></i> Refresh
+          </lthn-btn>
+          <lthn-btn tone="ghost" size="sm" @click=${() => void this._clear()}
+                    title="Delete all lint + dependency tasks — they regenerate on the next Scan">
+            <i class="fa-solid fa-broom" style="font-size:10px;"></i> Clear
           </lthn-btn>
         </div>
         ${this.err ? html`<div style="padding:6px 22px 10px; color:var(--err-400); font-size:11.5px;">${this.err}</div>` : nothing}
