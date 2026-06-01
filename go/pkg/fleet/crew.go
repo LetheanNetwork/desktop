@@ -159,6 +159,17 @@ func superviseCrew(ctx context.Context, crew []crewMember, capabilities []string
 		if !caps[m.Capability] {
 			continue
 		}
+		// In dev (task dev sets LTHN_DEV=1) the heavy inference sidecar
+		// (lthn-ai, which auto-serves lthn-mlx on the Metal device / :9100) is
+		// skipped by default so it doesn't clash with tests that need the GPU
+		// or that port. Production (no LTHN_DEV) runs it. Force it on in dev
+		// with LTHN_CREW_INFERENCE=1.
+		if m.Capability == CapabilityInference &&
+			core.Trim(core.Env("LTHN_DEV")) != "" &&
+			core.Trim(core.Env("LTHN_CREW_INFERENCE")) != "1" {
+			core.Info("fleet.crew: dev mode — skipping inference sidecar (lthn-ai/lthn-mlx); set LTHN_CREW_INFERENCE=1 to enable")
+			continue
+		}
 		count := m.Count
 		if count < 1 {
 			count = 1
