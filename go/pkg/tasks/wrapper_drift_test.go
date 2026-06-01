@@ -54,6 +54,7 @@ var gatedWailsMethods = map[string]bool{
 	"Update":  true, // permits TierOperator + TierRenderer
 	"AddNote": true, // permits TierOperator + TierRenderer (ENFORCE-not-claim Author)
 	"Detect":  true, // permits TierOperator + TierRenderer (files core-lint findings as tasks)
+	"DetectUpdates": true, // permits TierOperator + TierRenderer (files outdated-dependency tasks)
 }
 
 // exemptWailsMethods is intentionally empty for pkg/tasks: the
@@ -83,6 +84,7 @@ var gatedWailsServiceMethods = map[string]bool{
 	"Update":  true, // delegates to *Service.Update
 	"AddNote": true, // delegates to *Service.AddNote (ENFORCE-not-claim Author via inner)
 	"Detect":  true, // delegates to *Service.Detect (files core-lint findings as tasks)
+	"DetectUpdates": true, // delegates to *Service.DetectUpdates (outdated-dependency tasks)
 }
 
 // exemptWailsServiceMethods carves out non-Wails-binding helpers on

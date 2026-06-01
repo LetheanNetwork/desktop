@@ -73,7 +73,7 @@ func Detect(c *core.Core, input DetectInput) core.Result {
 	if !r.OK {
 		return r
 	}
-	seen := existingLintFingerprints(c, input.Repo)
+	seen := existingFingerprints(c, input.Repo, lintReporter)
 	out := DetectOutput{Repo: input.Repo, Findings: len(report.Findings)}
 	for _, f := range report.Findings {
 		fp := lintFingerprint(f)
@@ -122,22 +122,30 @@ func runCoreLint(path, lang string) (lintReport, core.Result) {
 	if core.Trim(lang) != "" {
 		args = append(args, "--lang="+lang)
 	}
-	startR := process.Start(core.Background(), resolveLintBinary(), args...)
-	if !startR.OK {
-		return lintReport{}, core.Fail(core.E("tasks.Detect", "start core-lint: "+startR.Error(), nil))
-	}
-	id := lintProcID(startR)
-	process.Wait(id) // blocks; a non-zero exit (findings present) is expected
-	outR := process.Output(id)
-	if !outR.OK {
-		return lintReport{}, core.Fail(core.E("tasks.Detect", "read core-lint output: "+outR.Error(), nil))
-	}
-	out, _ := outR.Value.(string)
-	report, ok := parseLintReport(out)
+	report, ok := parseLintReport(captureCommand(resolveLintBinary(), args...))
 	if !ok {
 		return lintReport{}, core.Fail(core.E("tasks.Detect", "no JSON report in core-lint output", nil))
 	}
 	return report, core.Ok(nil)
+}
+
+// captureCommand runs a command and returns its combined output regardless of
+// exit code — linters and dependency tools exit non-zero when they have
+// something to report, but their output is still what we want. "" on a spawn
+// failure (caller treats empty as "nothing detected").
+func captureCommand(bin string, args ...string) string {
+	startR := process.Start(core.Background(), bin, args...)
+	if !startR.OK {
+		return ""
+	}
+	id := lintProcID(startR)
+	process.Wait(id) // blocks; a non-zero exit is expected and fine
+	outR := process.Output(id)
+	if !outR.OK {
+		return ""
+	}
+	out, _ := outR.Value.(string)
+	return out
 }
 
 // parseLintReport extracts the JSON report document from core-lint's output.
@@ -229,13 +237,14 @@ func lintSeverity(s string) string {
 	}
 }
 
-// existingLintFingerprints returns the fingerprints already on the board for a
-// project — read from the bracketed prefix of OPEN lint-filed task summaries,
-// so re-running detection does not duplicate. Closed (done/cancelled) tasks are
-// excluded, letting a recurrence re-file once the prior task is resolved.
-func existingLintFingerprints(c *core.Core, repo string) map[string]bool {
+// existingFingerprints returns the fingerprints already on the board for a
+// project, filed by the given reporter — read from the bracketed prefix of
+// OPEN task summaries, so re-running detection does not duplicate. Closed
+// (done/cancelled) tasks are excluded, letting a recurrence re-file once the
+// prior task is resolved.
+func existingFingerprints(c *core.Core, repo, reporter string) map[string]bool {
 	seen := map[string]bool{}
-	r := List(c, ListFilter{Project: repo, Reporter: lintReporter})
+	r := List(c, ListFilter{Project: repo, Reporter: reporter})
 	if !r.OK {
 		return seen
 	}

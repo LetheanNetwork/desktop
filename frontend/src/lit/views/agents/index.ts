@@ -20,6 +20,7 @@ import "./dispatch";
 import "./workspaces";
 import "./scan";
 import "./flows";
+import "./tasks";
 
 // Pulled-in Coding panels — repos/issues/prs/deploys are repo context
 // (what the fleet works on), reused here rather than discarded.

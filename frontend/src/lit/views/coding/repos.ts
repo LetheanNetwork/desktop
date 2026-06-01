@@ -220,12 +220,18 @@ class LthnViewRepos extends LitElement {
     this.scanMsg = "";
     try {
       const svc = await import("@desktop/tasks/wailsservice").catch(() => null);
-      const detect = svc && (svc as {
-        Detect?: (i: unknown) => Promise<{ Value?: { created?: number; skipped?: number; findings?: number } }>;
-      }).Detect;
+      type DetectFn = (i: unknown) => Promise<{ Value?: { created?: number; skipped?: number; findings?: number } }>;
+      const detect = svc && (svc as { Detect?: DetectFn }).Detect;
+      const detectUpdates = svc && (svc as { DetectUpdates?: DetectFn }).DetectUpdates;
       if (!detect) { this.scanMsg = "scan unavailable — is the agent endpoint running?"; return; }
-      const v = (await detect({ repo: r.name, path: r.path }))?.Value ?? {};
-      this.scanMsg = `${r.name}: ${v.created ?? 0} filed · ${v.skipped ?? 0} known · ${v.findings ?? 0} found`;
+      // One Scan = lint findings + outdated dependencies, both filed as tasks.
+      let created = 0, known = 0, found = 0;
+      for (const fn of [detect, detectUpdates]) {
+        if (!fn) continue;
+        const v = (await fn({ repo: r.name, path: r.path }))?.Value ?? {};
+        created += v.created ?? 0; known += v.skipped ?? 0; found += v.findings ?? 0;
+      }
+      this.scanMsg = `${r.name}: ${created} filed · ${known} known · ${found} found`;
     } catch (e: unknown) {
       this.scanMsg = `scan failed: ${e instanceof Error ? e.message : String(e)}`;
     } finally {
