@@ -274,6 +274,37 @@ func parseDispatchResult(stdout string) core.Result {
 	return core.Ok(out)
 }
 
+// --- personas ---
+
+// PersonaCard mirrors core/agent lib.PersonaCard — one roster entry for the
+// dispatch picker: the --persona path plus the frontmatter shown on the card.
+type PersonaCard struct {
+	Path        string `json:"path"` // dispatch value, e.g. "code/senior-developer"
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Emoji       string `json:"emoji"`
+	Vibe        string `json:"vibe"`
+	Color       string `json:"color"`
+}
+
+// Personas lists the persona roster (`lthn-agent personas --json`) for the
+// dispatch view's persona picker. Path is the value the picker passes back as
+// DispatchRequest.Persona.
+//
+//	r := svc.Personas()
+//	if r.OK { cards := r.Value.([]agents.PersonaCard); _ = cards }
+func (s *Service) Personas() core.Result {
+	r := s.run("personas")
+	if !r.OK {
+		return r
+	}
+	var cards []PersonaCard
+	if pr := core.JSONUnmarshalString(r.Value.(string), &cards); !pr.OK {
+		return core.Fail(core.E("agents.Personas", "parse persona list: "+pr.Error(), nil))
+	}
+	return core.Ok(cards)
+}
+
 // --- resume ---
 
 // ResumeRequest mirrors resume's flags. Workspace is the blocked run's Name

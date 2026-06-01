@@ -24,6 +24,14 @@ interface FleetAgent {
   provider: string;
 }
 
+/** A persona roster card (mirrors agents.PersonaCard / lib.PersonaCard). */
+interface PersonaCard {
+  path:  string;   // the --persona value, e.g. "code/senior-developer"
+  name:  string;
+  emoji: string;
+  vibe:  string;
+}
+
 /** Result of a dispatch (mirrors agents.DispatchResult). */
 interface DispatchResult {
   agent:         string;
@@ -38,8 +46,10 @@ class LthnViewAgentDispatch extends LitElement {
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },
     agents:   { state: true },
+    personas: { state: true },
     repo:     { state: true },
     agent:    { state: true },
+    persona:  { state: true },
     task:     { state: true },
     branch:   { state: true },
     dryRun:   { state: true },
@@ -52,8 +62,10 @@ class LthnViewAgentDispatch extends LitElement {
   declare h: number;
   declare embedded: boolean;
   declare agents: FleetAgent[];
+  declare personas: PersonaCard[];
   declare repo: string;
   declare agent: string;
+  declare persona: string;
   declare task: string;
   declare branch: string;
   declare dryRun: boolean;
@@ -65,8 +77,10 @@ class LthnViewAgentDispatch extends LitElement {
     super();
     this.w = 1180; this.h = 720; this.embedded = false;
     this.agents = [];
+    this.personas = [];
     this.repo = "";
     this.agent = "";
+    this.persona = "";
     this.task = "";
     this.branch = "";
     this.dryRun = false;
@@ -80,6 +94,7 @@ class LthnViewAgentDispatch extends LitElement {
   async connectedCallback() {
     super.connectedCallback();
     await this._loadAgents();
+    await this._loadPersonas();
   }
 
   /** Populate the agent picker from the Fleet registry. */
@@ -93,6 +108,35 @@ class LthnViewAgentDispatch extends LitElement {
       // Fleet unavailable — the picker degrades to a free-text agent.
       this.agents = [];
     }
+  }
+
+  /** Populate the persona picker from the CoreAgent roster (lib personas). */
+  async _loadPersonas() {
+    try {
+      const svc = await import("@desktop/agents/service");
+      const r = await (svc as { Personas: () => Promise<{ Value: PersonaCard[] }> }).Personas();
+      this.personas = r?.Value ?? [];
+    } catch {
+      // Roster unavailable (lthn-agent down) — the picker hides; dispatch
+      // still works without a persona.
+      this.personas = [];
+    }
+  }
+
+  /** Group personas by path category (the segment before "/"), sorted. */
+  _personaGroups(): [string, PersonaCard[]][] {
+    const groups = new Map<string, PersonaCard[]>();
+    for (const p of this.personas) {
+      const cat = p.path.includes("/") ? p.path.split("/")[0] : "other";
+      const list = groups.get(cat);
+      if (list) list.push(p); else groups.set(cat, [p]);
+    }
+    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }
+
+  /** The vibe line of the selected persona, shown as a hint under the picker. */
+  _selectedVibe(): string {
+    return this.personas.find(p => p.path === this.persona)?.vibe ?? "";
   }
 
   /** Fire the dispatch. Repo + task are required (the backend re-checks). */
@@ -111,6 +155,7 @@ class LthnViewAgentDispatch extends LitElement {
         repo:    this.repo.trim(),
         task:    this.task.trim(),
         agent:   this.agent.trim(),
+        persona: this.persona.trim(),
         branch:  this.branch.trim(),
         dry_run: this.dryRun,
       };
@@ -157,6 +202,27 @@ class LthnViewAgentDispatch extends LitElement {
                 No fleet agents configured — add one in Fleet, or type a harness name.
               </div>
             `}
+          </div>
+
+          <div>
+            <lthn-label>Persona (optional)</lthn-label>
+            ${this.personas.length > 0 ? html`
+              <select style=${fieldStyle}
+                .value=${this.persona}
+                @change=${(e: Event) => { this.persona = (e.target as HTMLSelectElement).value; }}>
+                <option value="">— no persona —</option>
+                ${this._personaGroups().map(([cat, cards]) => html`
+                  <optgroup label=${cat}>
+                    ${cards.map(p => html`<option value=${p.path}>${p.emoji} ${p.name}</option>`)}
+                  </optgroup>
+                `)}
+              </select>
+              ${this._selectedVibe() ? html`
+                <div style="margin-top:5px; font-size:10.5px; color:var(--fg-3); font-style:italic;">
+                  ${this._selectedVibe()}
+                </div>
+              ` : nothing}
+            ` : nothing}
           </div>
 
           <div>
