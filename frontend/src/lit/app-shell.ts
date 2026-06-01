@@ -343,6 +343,7 @@ const VIEWS: ViewDef[] = [
       { id: "scan",       label: "Scan",       icon: "fa-magnifying-glass",   tag: "lthn-view-agent-scan",       group: "primary" },
       { id: "flows",      label: "Flows",      icon: "fa-diagram-project",    tag: "lthn-view-agent-flows",      group: "primary" },
       { id: "tasks",      label: "Backlog",    icon: "fa-list-check",         tag: "lthn-view-agent-tasks",      group: "primary" },
+      { id: "code",       label: "Code",       icon: "fa-code",               tag: "lthn-view-code",             group: "observe" },
       { id: "chat",     label: "Chat",     icon: "fa-comments",           tag: "lthn-chat-window",         group: "primary" },
       { id: "repos",    label: "Repos",    icon: "fa-folder-tree",        tag: "lthn-view-repos",          group: "observe" },
       { id: "issues",   label: "Issues",   icon: "fa-circle-exclamation", tag: "lthn-view-issues",         group: "observe" },
@@ -925,6 +926,8 @@ class LthnAppShell extends LitElement {
     // Coding → Dispatch: a repo row (in Coding or the Agents view) asks the
     // shell to open the Dispatch pane pre-filled with its repo.
     window.addEventListener("lthn:dispatch-repo", this._onDispatchRepo as EventListener);
+    // Code navigation: a Backlog task asks the shell to open a finding's source.
+    window.addEventListener("lthn:open-code", this._onOpenCode as EventListener);
     const [
       brand, search, settingsTip, preview, expand, collapse,
       gPrimary, gObserve, gExtend, gPreview,
@@ -1041,6 +1044,7 @@ class LthnAppShell extends LitElement {
     window.removeEventListener(AUTH_BACK_EVENT, this._onAuthBack);
     window.removeEventListener(PLUGIN_VIEW_MOUNT_TIMEOUT_EVENT, this._onPluginViewMountTimeout);
     window.removeEventListener("lthn:dispatch-repo", this._onDispatchRepo as EventListener);
+    window.removeEventListener("lthn:open-code", this._onOpenCode as EventListener);
     document.removeEventListener("click", this._onDocClickForSwitcher);
     if (this._unsubSetPane) {
       this._unsubSetPane();
@@ -1190,6 +1194,20 @@ class LthnAppShell extends LitElement {
     this._dispatchSeed = { repo: d.repo ?? "", issue: d.issue ?? 0, pr: d.pr ?? 0, task: d.task ?? "" };
     this._selectView("agents");
     this._select("dispatch");
+  };
+
+  /** Code-open seed for the next Code-pane mount, set by a lthn:open-code event. */
+  _codeSeed: { repo: string; file: string; line: number; path: string } | null = null;
+
+  /** Code navigation: open the Code pane in the Agents view at a file:line —
+   *  fired by a Backlog task ("see the offending source"). Same hand-off shape
+   *  as _onDispatchRepo; _instantiate seeds the pane on mount. */
+  _onOpenCode = (ev: Event) => {
+    const d = (ev as CustomEvent<{ repo?: string; file?: string; line?: number; path?: string }>).detail;
+    if (!d || (!d.file && !d.path)) return;
+    this._codeSeed = { repo: d.repo ?? "", file: d.file ?? "", line: d.line ?? 0, path: d.path ?? "" };
+    this._selectView("agents");
+    this._select("code");
   };
 
   /** Plugin-view mount-timeout fallback per RFC.plugin-views §6.3
@@ -1428,6 +1446,13 @@ class LthnAppShell extends LitElement {
       if (seed.pr) d.pr = seed.pr;
       if (seed.task) d.task = seed.task;
       this._dispatchSeed = null;
+    }
+    // Code navigation hand-off: seed the file:line a Backlog task asked to open.
+    if (tag === "lthn-view-code" && this._codeSeed) {
+      const seed = this._codeSeed;
+      const c = el as { repo?: string; file?: string; line?: number; path?: string };
+      c.repo = seed.repo; c.file = seed.file; c.line = seed.line; c.path = seed.path;
+      this._codeSeed = null;
     }
     return el;
   }

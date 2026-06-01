@@ -105,6 +105,34 @@ class LthnViewAgentTasks extends LitElement {
     }));
   }
 
+  /** Parse a lint task's "[tool:rule@file:line] msg" summary → {file, line}, or
+   *  null for tasks without a file:line (e.g. package-update). */
+  _findingLocation(t: Task): { file: string; line: number } | null {
+    const s = t.Summary || "";
+    if (s[0] !== "[") return null;
+    const end = s.indexOf("]");
+    if (end < 1) return null;
+    const fp = s.slice(1, end);     // tool:rule@file:line
+    const at = fp.lastIndexOf("@");
+    if (at < 0) return null;
+    const loc = fp.slice(at + 1);   // file:line
+    const colon = loc.lastIndexOf(":");
+    if (colon < 1) return null;
+    const file = loc.slice(0, colon);
+    const line = parseInt(loc.slice(colon + 1), 10);
+    if (!file || Number.isNaN(line)) return null;
+    return { file, line };
+  }
+
+  /** Open the finding's source in the Code pane (Backlog → see the code). */
+  _viewCode(t: Task) {
+    const loc = this._findingLocation(t);
+    if (!loc) return;
+    window.dispatchEvent(new CustomEvent("lthn:open-code", {
+      detail: { repo: t.Project, file: loc.file, line: loc.line },
+    }));
+  }
+
   render() {
     const src = this._bySource();
     const body = html`
@@ -131,7 +159,9 @@ class LthnViewAgentTasks extends LitElement {
             </div>
           ` : html`
             <div style="background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.06); border-radius:10px; overflow:hidden;">
-              ${this.tasks.map((t, i) => html`
+              ${this.tasks.map((t, i) => {
+                const loc = this._findingLocation(t);
+                return html`
                 <div title="Dispatch an agent on this task"
                      @click=${() => this._dispatch(t)}
                      style="display:grid; grid-template-columns: 1fr 170px 110px 90px; gap:14px;
@@ -139,13 +169,16 @@ class LthnViewAgentTasks extends LitElement {
                             border-bottom:${i < this.tasks.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none"};">
                   <span style="font-size:12.5px; color:var(--fg-0); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                     ${t.Summary} <i class="fa-solid fa-paper-plane" style="font-size:8px; opacity:0.5;"></i>
+                    ${loc ? html`<i class="fa-solid fa-code" title="View ${loc.file}:${loc.line}"
+                      @click=${(e: Event) => { e.stopPropagation(); this._viewCode(t); }}
+                      style="font-size:9px; color:var(--fg-3); margin-left:6px; cursor:pointer;"></i>` : nothing}
                   </span>
                   <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--fg-3);
                                overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${t.Project}</span>
                   <span style="font-family:var(--font-mono); font-size:10px; color:var(--fg-3);">${t.Reporter || "—"}</span>
                   <span style="font-family:var(--font-mono); font-size:10px; color:var(--fg-2); text-align:right;">${t.State}</span>
                 </div>
-              `)}
+              `; })}
             </div>
           `}
         </div>

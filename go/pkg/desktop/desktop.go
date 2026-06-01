@@ -55,6 +55,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/build"
 	"dappco.re/lthn/desktop/pkg/container"
 	"dappco.re/lthn/desktop/pkg/downloader"
+	"dappco.re/lthn/desktop/pkg/files"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/git"
 	"dappco.re/lthn/desktop/pkg/integrations"
@@ -509,6 +510,7 @@ func (s *Service) Run() core.Result {
 		gui.Bind(integrations.NewWailsService()),
 		gui.Bind(apikey.NewWailsService(s.opts.Core)),
 		gui.Bind(git.NewService(s.opts.Core)),
+		gui.Bind(files.NewService(s.opts.Core)),
 		gui.Bind(build.NewService(s.opts.Core)),
 		gui.Bind(container.NewService(s.opts.Core)),
 		gui.Bind(lint.NewService(s.opts.Core)),
