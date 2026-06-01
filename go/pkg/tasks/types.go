@@ -115,7 +115,7 @@ const (
 	StateCancelled  = "cancelled"
 )
 
-// Canonical severity values (matches Mantis).
+// Canonical severity values for the local task queue.
 const (
 	SeverityFeature = "feature"
 	SeverityTrivial = "trivial"
@@ -127,7 +127,7 @@ const (
 	SeverityBlock   = "block"
 )
 
-// Canonical priority values (matches Mantis).
+// Canonical priority values for the local task queue.
 const (
 	PriorityNone      = "none"
 	PriorityLow       = "low"

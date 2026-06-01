@@ -217,7 +217,7 @@ func lintDescription(f lintFinding) string {
 	return b
 }
 
-// lintSeverity maps a core-lint severity onto the queue's Mantis-style set.
+// lintSeverity maps a core-lint severity onto the local task queue's values.
 func lintSeverity(s string) string {
 	switch core.Lower(core.Trim(s)) {
 	case "error":
