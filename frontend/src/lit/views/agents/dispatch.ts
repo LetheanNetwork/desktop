@@ -32,6 +32,14 @@ interface PersonaCard {
   vibe:  string;
 }
 
+/** A plan/task template card (mirrors agents.TaskCard / lib.TaskCard). */
+interface TaskCard {
+  slug:        string;   // the --plan-template value, e.g. "package-update"
+  name:        string;
+  description: string;
+  category:    string;
+}
+
 /** Result of a dispatch (mirrors agents.DispatchResult). */
 interface DispatchResult {
   agent:         string;
@@ -47,9 +55,11 @@ class LthnViewAgentDispatch extends LitElement {
     embedded: { type: Boolean, reflect: true },
     agents:   { state: true },
     personas: { state: true },
+    tasks:    { state: true },
     repo:     { state: true },
     agent:    { state: true },
     persona:  { state: true },
+    planTemplate: { state: true },
     task:     { state: true },
     branch:   { state: true },
     dryRun:   { state: true },
@@ -63,9 +73,11 @@ class LthnViewAgentDispatch extends LitElement {
   declare embedded: boolean;
   declare agents: FleetAgent[];
   declare personas: PersonaCard[];
+  declare tasks: TaskCard[];
   declare repo: string;
   declare agent: string;
   declare persona: string;
+  declare planTemplate: string;
   declare task: string;
   declare branch: string;
   declare dryRun: boolean;
@@ -78,9 +90,11 @@ class LthnViewAgentDispatch extends LitElement {
     this.w = 1180; this.h = 720; this.embedded = false;
     this.agents = [];
     this.personas = [];
+    this.tasks = [];
     this.repo = "";
     this.agent = "";
     this.persona = "";
+    this.planTemplate = "";
     this.task = "";
     this.branch = "";
     this.dryRun = false;
@@ -95,6 +109,7 @@ class LthnViewAgentDispatch extends LitElement {
     super.connectedCallback();
     await this._loadAgents();
     await this._loadPersonas();
+    await this._loadTasks();
   }
 
   /** Populate the agent picker from the Fleet registry. */
@@ -112,15 +127,24 @@ class LthnViewAgentDispatch extends LitElement {
 
   /** Populate the persona picker from the CoreAgent roster (lib personas). */
   async _loadPersonas() {
-    try {
-      const svc = await import("@desktop/agents/service");
-      const r = await (svc as { Personas: () => Promise<{ Value: PersonaCard[] }> }).Personas();
-      this.personas = r?.Value ?? [];
-    } catch {
-      // Roster unavailable (lthn-agent down) — the picker hides; dispatch
-      // still works without a persona.
-      this.personas = [];
+    this.personas = await this._loadAgentList<PersonaCard>("Personas");
+  }
+
+  /** Call an Agents list binding, returning [] on any error or non-array
+   *  result. Retries once after a beat: the lthn-agent CLI shell it spawns
+   *  can be killed by boot-time crew churn if the view is opened early, and
+   *  on error r.Value is the error object — never store that as the list. */
+  async _loadAgentList<T>(method: "Personas" | "Tasks"): Promise<T[]> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const svc = await import("@desktop/agents/service");
+        const fn = (svc as Record<string, () => Promise<{ Value: unknown }>>)[method];
+        const r = await fn();
+        if (Array.isArray(r?.Value)) return r.Value as T[];
+      } catch { /* fall through to retry / empty */ }
+      if (attempt === 0) await new Promise(res => setTimeout(res, 1500));
     }
+    return [];
   }
 
   /** Group personas by path category (the segment before "/"), sorted. */
@@ -139,6 +163,29 @@ class LthnViewAgentDispatch extends LitElement {
     return this.personas.find(p => p.path === this.persona)?.vibe ?? "";
   }
 
+  /** Populate the premade-task picker from the CoreAgent plan templates. */
+  async _loadTasks() {
+    this.tasks = await this._loadAgentList<TaskCard>("Tasks");
+  }
+
+  /** Group task templates by category, sorted. */
+  _taskGroups(): [string, TaskCard[]][] {
+    const groups = new Map<string, TaskCard[]>();
+    for (const t of this.tasks) {
+      const cat = t.category || "other";
+      const list = groups.get(cat);
+      if (list) list.push(t); else groups.set(cat, [t]);
+    }
+    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }
+
+  /** Apply a premade task: set the plan template and prefill the editable task. */
+  _pickTask(slug: string) {
+    this.planTemplate = slug;
+    const card = this.tasks.find(t => t.slug === slug);
+    if (card && card.description) this.task = card.description;
+  }
+
   /** Fire the dispatch. Repo + task are required (the backend re-checks). */
   async _dispatch() {
     if (this.busy) return;
@@ -154,10 +201,11 @@ class LthnViewAgentDispatch extends LitElement {
       const req = {
         repo:    this.repo.trim(),
         task:    this.task.trim(),
-        agent:   this.agent.trim(),
-        persona: this.persona.trim(),
-        branch:  this.branch.trim(),
-        dry_run: this.dryRun,
+        agent:        this.agent.trim(),
+        persona:      this.persona.trim(),
+        plan_template: this.planTemplate.trim(),
+        branch:       this.branch.trim(),
+        dry_run:      this.dryRun,
       };
       const r = await (svc as { Dispatch: (req: unknown) => Promise<{ Value: DispatchResult }> }).Dispatch(req);
       this.result = r?.Value ?? null;
@@ -222,6 +270,25 @@ class LthnViewAgentDispatch extends LitElement {
                   ${this._selectedVibe()}
                 </div>
               ` : nothing}
+            ` : nothing}
+          </div>
+
+          <div>
+            <lthn-label>Premade task (optional)</lthn-label>
+            ${this.tasks.length > 0 ? html`
+              <select style=${fieldStyle}
+                .value=${this.planTemplate}
+                @change=${(e: Event) => { this._pickTask((e.target as HTMLSelectElement).value); }}>
+                <option value="">— custom (write your own below) —</option>
+                ${this._taskGroups().map(([cat, cards]) => html`
+                  <optgroup label=${cat}>
+                    ${cards.map(t => html`<option value=${t.slug}>${t.name}</option>`)}
+                  </optgroup>
+                `)}
+              </select>
+              <div style="margin-top:5px; font-size:10.5px; color:var(--fg-3);">
+                Attaches a structured plan and fills the task below — edit it freely.
+              </div>
             ` : nothing}
           </div>
 

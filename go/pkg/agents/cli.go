@@ -219,11 +219,12 @@ type DispatchRequest struct {
 	Agent    string `json:"agent,omitempty"`
 	Issue    int    `json:"issue,omitempty"`
 	PR       int    `json:"pr,omitempty"`
-	Branch   string `json:"branch,omitempty"`
-	Template string `json:"template,omitempty"`
-	Persona  string `json:"persona,omitempty"`
-	Tag      string `json:"tag,omitempty"`
-	DryRun   bool   `json:"dry_run,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	Template     string `json:"template,omitempty"`
+	PlanTemplate string `json:"plan_template,omitempty"` // premade task → --plan-template
+	Persona      string `json:"persona,omitempty"`
+	Tag          string `json:"tag,omitempty"`
+	DryRun       bool   `json:"dry_run,omitempty"`
 }
 
 // DispatchResult mirrors workspace/dispatch --json (core/agent DispatchOutput).
@@ -252,6 +253,7 @@ func (s *Service) Dispatch(req DispatchRequest) core.Result {
 	args = flag(args, "agent", req.Agent)
 	args = flag(args, "branch", req.Branch)
 	args = flag(args, "template", req.Template)
+	args = flag(args, "plan-template", req.PlanTemplate)
 	args = flag(args, "persona", req.Persona)
 	args = flag(args, "tag", req.Tag)
 	args = intFlag(args, "issue", req.Issue)
@@ -301,6 +303,35 @@ func (s *Service) Personas() core.Result {
 	var cards []PersonaCard
 	if pr := core.JSONUnmarshalString(r.Value.(string), &cards); !pr.OK {
 		return core.Fail(core.E("agents.Personas", "parse persona list: "+pr.Error(), nil))
+	}
+	return core.Ok(cards)
+}
+
+// --- tasks ---
+
+// TaskCard mirrors core/agent lib.TaskCard — one plan/task template for the
+// dispatch picker: the --plan-template slug plus its human fields.
+type TaskCard struct {
+	Slug        string `json:"slug"` // dispatch value, e.g. "package-update"
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
+}
+
+// Tasks lists the plan/task templates (`lthn-agent tasks --json`) for the
+// dispatch view's premade-task picker. Slug is the value the picker passes
+// back as DispatchRequest.PlanTemplate.
+//
+//	r := svc.Tasks()
+//	if r.OK { cards := r.Value.([]agents.TaskCard); _ = cards }
+func (s *Service) Tasks() core.Result {
+	r := s.run("tasks")
+	if !r.OK {
+		return r
+	}
+	var cards []TaskCard
+	if pr := core.JSONUnmarshalString(r.Value.(string), &cards); !pr.OK {
+		return core.Fail(core.E("agents.Tasks", "parse task list: "+pr.Error(), nil))
 	}
 	return core.Ok(cards)
 }
