@@ -22,6 +22,7 @@ import { clampRows } from "../_bounds";
 /** Shape of one watched-repo fixture row. */
 interface RepoRow {
   name:   string;
+  path?:  string;   // local filesystem path (live rows only) — for core-lint
   lang:   string;
   branch: string;
   commit: string;
@@ -66,6 +67,7 @@ function mapBackendRow(r: BackendRepoStatus): RepoRow {
   const build: RepoRow["build"] = err ? "failing" : (r.dirty || churn > 0) ? "running" : "passing";
   return {
     name:   r.name   ?? "",
+    path:   r.path   ?? "",
     lang:   "Go",
     branch: r.branch ?? "",
     commit: "—",
@@ -105,12 +107,16 @@ class LthnViewRepos extends LitElement {
     /** Live data from pkg/repos.Service.Status(); falls back to the
      *  constructor-seeded fixture when the binding is unavailable. */
     repos:    { state: true },
+    scanning: { state: true }, // repo name currently being scanned ("" = none)
+    scanMsg:  { state: true }, // last scan result, shown in the header
   };
 
   declare w: number;
   declare h: number;
   declare embedded: boolean;
   declare repos: RepoRow[];
+  declare scanning: string;
+  declare scanMsg: string;
 
   /** Repo state changes slowly — 60s refresh is plenty. */
   private _timer: ReturnType<typeof setInterval> | null = null;
@@ -118,6 +124,7 @@ class LthnViewRepos extends LitElement {
   constructor() {
     super();
     this.w = 1180; this.h = 720; this.embedded = false;
+    this.scanning = ""; this.scanMsg = "";
     // Design-reference fixtures — identical names + data to the Claude
     // Design reference impl (lit-views-coding.js) so the rendered output
     // matches the approved mockup. Used as fallback when the Wails
@@ -204,6 +211,28 @@ class LthnViewRepos extends LitElement {
     window.dispatchEvent(new CustomEvent("lthn:dispatch-repo", { detail: { repo } }));
   }
 
+  /** Run core-lint over a repo and file new findings as tasks (Tasks.Detect).
+   *  The count shows in the header; the tasks land in Coding/Issues, ready to
+   *  dispatch. Needs a live local path (live rows only) + the agent endpoint. */
+  async _scan(r: RepoRow) {
+    if (!r.path || this.scanning) return;
+    this.scanning = r.name;
+    this.scanMsg = "";
+    try {
+      const svc = await import("@desktop/tasks/wailsservice").catch(() => null);
+      const detect = svc && (svc as {
+        Detect?: (i: unknown) => Promise<{ Value?: { created?: number; skipped?: number; findings?: number } }>;
+      }).Detect;
+      if (!detect) { this.scanMsg = "scan unavailable — is the agent endpoint running?"; return; }
+      const v = (await detect({ repo: r.name, path: r.path }))?.Value ?? {};
+      this.scanMsg = `${r.name}: ${v.created ?? 0} filed · ${v.skipped ?? 0} known · ${v.findings ?? 0} found`;
+    } catch (e: unknown) {
+      this.scanMsg = `scan failed: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      this.scanning = "";
+    }
+  }
+
   render() {
     const sum = this._summary();
     const prsTotal = this.repos.reduce((t, r) => t + r.prs, 0);
@@ -215,6 +244,9 @@ class LthnViewRepos extends LitElement {
           <span style="font-family:var(--font-mono); font-size:11px; color:var(--fg-3);">
             ${this.repos.length} watched · ${prsTotal} PRs in flight
           </span>
+          ${this.scanMsg ? html`
+            <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--brand-300);">${this.scanMsg}</span>
+          ` : nothing}
           <div style="flex:1"></div>
           <lthn-btn tone="ghost" size="sm">
             <i class="fa-solid fa-magnifying-glass" style="font-size:10px;"></i> Filter
@@ -252,6 +284,13 @@ class LthnViewRepos extends LitElement {
                   <span style="width:6px; height:6px; border-radius:50%; background:${langColour(r.lang)};"></span>
                   <span style="font-family:var(--font-mono); font-size:13px; color:var(--fg-0);">${r.name}</span>
                   <i class="fa-solid fa-paper-plane" style="font-size:9px; color:var(--fg-3); margin-left:2px;"></i>
+                  ${r.path ? html`
+                    <span @click=${(e: Event) => { e.preventDefault(); e.stopPropagation(); void this._scan(r); }}
+                          title="Scan ${r.name} with core-lint → file issues as tasks"
+                          style="cursor:pointer; --wails-draggable:no-drag; margin-left:6px; color:var(--fg-3);">
+                      <i class="fa-solid ${this.scanning === r.name ? "fa-spinner" : "fa-magnifying-glass"}" style="font-size:9px;"></i>
+                    </span>
+                  ` : nothing}
                 </div>
                 <span style="font-family:var(--font-mono); font-size:11px; color:var(--fg-2);">${r.lang}</span>
                 <span style="font-family:var(--font-mono); font-size:11px; color:var(--fg-1);">${r.branch}</span>
