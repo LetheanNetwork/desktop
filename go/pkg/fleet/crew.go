@@ -89,9 +89,14 @@ func defaultCrew(sandboxEnv []string) []crewMember {
 			// listen addresses so the desktop knows where to find them
 			// regardless of the hub's defaults; the health gate dials
 			// the HTTP control plane (BasePort = 9201).
+			//
+			// The flags MUST use the --key=value form: core.Options parses
+			// `--mcp-http=ADDR` but treats `--mcp-http ADDR` as a valueless
+			// bool + a stray positional, so a space-separated pin silently
+			// falls back to the hub's default port. (Verified 2026-06-01.)
 			Capability: CapabilitySandbox,
 			Binary:     "lthn-agent",
-			Serve:      []string{"hub", "--http", "127.0.0.1:9201", "--mcp-http", "127.0.0.1:9202"},
+			Serve:      []string{"hub", "--http=127.0.0.1:9201", "--mcp-http=127.0.0.1:9202"},
 			Env:        append([]string(nil), sandboxEnv...),
 			BasePort:   9201,
 			Count:      1,
