@@ -63,6 +63,11 @@ class LthnViewTerminal extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    // Grow as a flex item in the shell's pane row — without this the manager
+    // shrink-wraps to its tab strip (~370px). (The session children carry the
+    // same on their own host.)
+    this.style.flex = "1";
+    this.style.minWidth = "0";
     window.addEventListener("lthn:open-terminal", this._onOpenTerminal as EventListener);
     if (this.tabs.length === 0) {
       this._addTab(this.repo || this.cwd ? { repo: this.repo, cwd: this.cwd } : {});

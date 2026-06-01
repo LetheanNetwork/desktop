@@ -1216,6 +1216,14 @@ class LthnAppShell extends LitElement {
   /** Open-terminal seed for the next Terminal-pane cold mount. */
   _terminalSeed: { repo: string; cwd: string } | null = null;
 
+  /** Panes kept mounted across view-switches (hidden, not destroyed) so their
+   *  state survives — e.g. the terminal's live shells + tabs. Keyed by tag,
+   *  instantiated lazily on first activation, then never torn down. Targeted
+   *  rather than universal: most panes are stateless views that re-fetch fine,
+   *  and keeping every visited pane alive would leave them all polling. */
+  private _keepAlive = new Map<string, HTMLElement>();
+  private readonly _keepAliveTags = new Set(["lthn-view-terminal"]);
+
   /** "open terminal here" — a repo row asks for a shell in its path. Same
    *  hand-off shape as _onOpenCode: cold mounts read this seed in _instantiate,
    *  warm mounts are handled by the pane's own lthn:open-terminal listener
@@ -1412,6 +1420,23 @@ class LthnAppShell extends LitElement {
     if (node) return html`<slot name="body"></slot>`;
     const entry = navForView(this.view).find(n => n.id === this.active);
     if (!entry) return html`<div style="padding:40px; color:var(--fg-3);">No window for "${this.active}"</div>`;
+    const activeTag = entry.tag;
+    const keepActive = this._keepAliveTags.has(activeTag);
+    // Keepalive panes: instantiate + cache the first time shown, then keep them
+    // mounted as hidden absolute overlays so their state (live shells) survives
+    // a view-switch. Non-keepalive panes render as the flex child below, exactly
+    // as before. position:relative on the container anchors the overlays without
+    // touching the flex child's layout.
+    if (keepActive && !this._keepAlive.has(activeTag)) {
+      this._keepAlive.set(activeTag, this._instantiate(activeTag));
+    }
+    if (this._keepAlive.size > 0) {
+      return html`<div style="flex:1; min-height:0; display:flex; position:relative; overflow:hidden; background:radial-gradient(1200px 600px at 50% 30%, rgba(64,193,197,0.03), transparent 60%);">
+        ${[...this._keepAlive].map(([tag, el]) => html`
+          <div style="position:absolute; inset:0; display:${tag === activeTag ? "flex" : "none"};">${el}</div>`)}
+        ${keepActive ? nothing : this._instantiate(activeTag)}
+      </div>`;
+    }
     // Dynamically render the matching custom element. With embedded
     // mode (set in _instantiate), the child fills the body slot
     // 100% — no padding, no centring. Background gradient kept so the
