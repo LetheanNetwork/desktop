@@ -78,6 +78,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/server"
 	"dappco.re/lthn/desktop/pkg/serverkey"
 	"dappco.re/lthn/desktop/pkg/tasks"
+	"dappco.re/lthn/desktop/pkg/terminal"
 	"dappco.re/lthn/desktop/pkg/training"
 	lthnservices "dappco.re/lthn/desktop/pkg/services"
 	"dappco.re/lthn/desktop/pkg/sessions"
@@ -511,6 +512,7 @@ func (s *Service) Run() core.Result {
 		gui.Bind(apikey.NewWailsService(s.opts.Core)),
 		gui.Bind(git.NewService(s.opts.Core)),
 		gui.Bind(files.NewService(s.opts.Core)),
+		gui.Bind(terminal.NewService(s.opts.Core)),
 		gui.Bind(build.NewService(s.opts.Core)),
 		gui.Bind(container.NewService(s.opts.Core)),
 		gui.Bind(lint.NewService(s.opts.Core)),

@@ -21,6 +21,7 @@ require (
 require (
 	forge.lthn.ai/Snider/Enchantrix v0.0.6-0.20260516140840-9b2b878aa3d0 // indirect
 	github.com/apache/arrow-go/v18 v18.1.0 // indirect
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8 // indirect
 	github.com/emersion/go-message v0.18.2 // indirect
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect

@@ -344,6 +344,7 @@ const VIEWS: ViewDef[] = [
       { id: "flows",      label: "Flows",      icon: "fa-diagram-project",    tag: "lthn-view-agent-flows",      group: "primary" },
       { id: "tasks",      label: "Backlog",    icon: "fa-list-check",         tag: "lthn-view-agent-tasks",      group: "primary" },
       { id: "code",       label: "Code",       icon: "fa-code",               tag: "lthn-view-code",             group: "observe" },
+      { id: "terminal",   label: "Terminal",   icon: "fa-terminal",           tag: "lthn-view-terminal",         group: "observe" },
       { id: "chat",     label: "Chat",     icon: "fa-comments",           tag: "lthn-chat-window",         group: "primary" },
       { id: "repos",    label: "Repos",    icon: "fa-folder-tree",        tag: "lthn-view-repos",          group: "observe" },
       { id: "issues",   label: "Issues",   icon: "fa-circle-exclamation", tag: "lthn-view-issues",         group: "observe" },
