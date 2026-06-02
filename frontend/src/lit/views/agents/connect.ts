@@ -27,9 +27,13 @@ class LthnViewAgentConnect extends LitElement {
     w:        { type: Number },
     h:        { type: Number },
     embedded: { type: Boolean, reflect: true },
-    recipe:   { state: true },
-    err:      { state: true },
-    copied:   { state: true },
+    recipe:       { state: true },
+    err:          { state: true },
+    copied:       { state: true },
+    launchTarget: { state: true },
+    launchMenu:   { state: true },
+    launching:    { state: true },
+    launchMsg:    { state: true },
   };
 
   declare w: number;
@@ -37,7 +41,11 @@ class LthnViewAgentConnect extends LitElement {
   declare embedded: boolean;
   declare recipe: ConnectRecipe | null;
   declare err: string;
-  declare copied: string; // key of the block last copied (for the ✓ flash)
+  declare copied: string;       // key of the block last copied (for the ✓ flash)
+  declare launchTarget: string; // "window" | "tab" — the split button's default action
+  declare launchMenu: boolean;  // split-button dropdown open
+  declare launching: boolean;
+  declare launchMsg: string;
 
   constructor() {
     super();
@@ -45,6 +53,10 @@ class LthnViewAgentConnect extends LitElement {
     this.recipe = null;
     this.err = "";
     this.copied = "";
+    this.launchTarget = "window";
+    this.launchMenu = false;
+    this.launching = false;
+    this.launchMsg = "";
   }
 
   createRenderRoot() { return this; }
@@ -81,6 +93,29 @@ class LthnViewAgentConnect extends LitElement {
     } catch { /* clipboard blocked — the text is selectable manually */ }
   }
 
+  /** Launch Claude Code with the hub bearer on its env — a new Terminal window
+   *  ("window") or an in-app PTY tab ("tab"). The desktop spawns claude with
+   *  MCP_AUTH_TOKEN set; it never writes the user's ~/.claude config. */
+  async _launch(target: string) {
+    this.launchMenu = false;
+    this.launchTarget = target;
+    this.launching = true;
+    this.launchMsg = "";
+    try {
+      const svc = await import("@desktop/agents/service");
+      // cast via unknown: the Wails binding for LaunchClaudeConnected regenerates on the next desktop build
+      const r = await (svc as unknown as { LaunchClaudeConnected: (t: string) => Promise<{ Value: unknown }> }).LaunchClaudeConnected(target);
+      const v = r?.Value as { target?: string } | undefined;
+      if (v?.target === "tab") this.launchMsg = "✓ Launched in an in-app terminal — open the Terminal tab to use it.";
+      else if (v?.target === "window") this.launchMsg = "✓ Launched in a new Terminal window.";
+      else this.launchMsg = "Launch returned no target — is the hub up?";
+    } catch (e: unknown) {
+      this.launchMsg = "Launch failed: " + (e instanceof Error ? e.message : String(e));
+    } finally {
+      this.launching = false;
+    }
+  }
+
   _exportLine(): string {
     return `export MCP_AUTH_TOKEN=${this.recipe?.token ?? ""}`;
   }
@@ -110,7 +145,7 @@ class LthnViewAgentConnect extends LitElement {
       <div style="font-size:12px; color:var(--fg-2); line-height:1.65;">
         This machine runs your CoreAgent hub. Attach Claude Code so Cladius can drive the fleet from
         the editor — dispatch, review, memory, fleet control — over the loopback MCP plane.
-        <span style="color:var(--fg-1);">Lethean never edits your Claude Code config</span> — copy these in yourself.
+        <span style="color:var(--fg-1);">Lethean never edits your Claude Code config</span> — it launches Claude Code with the bearer on its env, or you wire it manually.
       </div>
     `;
 
@@ -132,6 +167,38 @@ class LthnViewAgentConnect extends LitElement {
       inner = html`<div style="font-size:12px; color:var(--fg-3);">Resolving hub connection…</div>`;
     } else {
       inner = html`
+        <div style="position:relative; display:inline-flex; align-items:center;">
+          <lthn-btn tone="primary" ?dim=${this.launching} @click=${() => void this._launch(this.launchTarget)}>
+            <i class="fa-solid ${this.launching ? "fa-spinner" : "fa-rocket"}" style="font-size:11px;"></i>
+            ${this.launching ? "Launching…" : "Launch Claude Code"}
+            <span style="opacity:0.7; font-size:10px;">· ${this.launchTarget === "tab" ? "in-app tab" : "new window"}</span>
+          </lthn-btn>
+          <lthn-btn tone="primary" @click=${() => { this.launchMenu = !this.launchMenu; }} title="Choose where it opens">
+            <i class="fa-solid fa-caret-down" style="font-size:10px;"></i>
+          </lthn-btn>
+          ${this.launchMenu ? html`
+            <div style="position:absolute; top:calc(100% + 4px); left:0; z-index:20; min-width:200px; background:#181a1d;
+                        border:1px solid rgba(255,255,255,0.12); border-radius:6px; box-shadow:0 6px 20px rgba(0,0,0,0.4);
+                        overflow:hidden; --wails-draggable:no-drag;">
+              <div @click=${() => void this._launch("window")} style="padding:8px 12px; font-size:12px; color:var(--fg-1); cursor:pointer;">
+                <i class="fa-solid fa-window-maximize" style="font-size:10px; width:16px;"></i> New Terminal window
+              </div>
+              <div @click=${() => void this._launch("tab")} style="padding:8px 12px; font-size:12px; color:var(--fg-1); cursor:pointer; border-top:1px solid rgba(255,255,255,0.06);">
+                <i class="fa-solid fa-terminal" style="font-size:10px; width:16px;"></i> In-app terminal tab
+              </div>
+            </div>
+          ` : nothing}
+        </div>
+        ${this.launchMsg ? html`
+          <div style="font-size:11px; margin-top:8px; color:${this.launchMsg.startsWith("✓") ? "var(--success-400)" : "var(--err-400)"};">
+            ${this.launchMsg}
+          </div>
+        ` : nothing}
+
+        <div style="font-size:10.5px; color:var(--fg-3); border-top:1px solid rgba(255,255,255,0.06); padding-top:14px;">
+          Or set it up manually:
+        </div>
+
         <div>
           <lthn-label>1 · Install the plugin</lthn-label>
           <div style="font-size:10.5px; color:var(--fg-3); margin-top:5px;">
