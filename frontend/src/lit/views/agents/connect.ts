@@ -81,10 +81,6 @@ class LthnViewAgentConnect extends LitElement {
     } catch { /* clipboard blocked — the text is selectable manually */ }
   }
 
-  _settingsSnippet(): string {
-    return `{\n  "env": {\n    "MCP_AUTH_TOKEN": "${this.recipe?.token ?? ""}"\n  }\n}`;
-  }
-
   _exportLine(): string {
     return `export MCP_AUTH_TOKEN=${this.recipe?.token ?? ""}`;
   }
@@ -137,27 +133,25 @@ class LthnViewAgentConnect extends LitElement {
     } else {
       inner = html`
         <div>
-          <lthn-label>1 · Add the bearer to Claude Code's env</lthn-label>
+          <lthn-label>1 · Install the plugin</lthn-label>
           <div style="font-size:10.5px; color:var(--fg-3); margin-top:5px;">
-            Add to <code style="font-family:var(--font-mono);">~/.claude/settings.json</code>:
+            Run these in Claude Code — the plugin ships the <code style="font-family:var(--font-mono);">core</code> MCP server + the agent commands:
           </div>
-          ${this._block(this._settingsSnippet(), "settings")}
-          <div style="font-size:10.5px; color:var(--fg-3); margin-top:9px;">
-            …or export it before launching <code style="font-family:var(--font-mono);">claude</code>:
+          ${this._block((this.recipe.install_commands ?? []).join("\n"), "install")}
+          <div style="font-size:10.5px; color:var(--fg-3); margin-top:7px;">
+            <code style="font-family:var(--font-mono);">/reload-plugins</code> applies it — no restart.
+          </div>
+        </div>
+
+        <div>
+          <lthn-label>2 · Put the bearer in your launch env</lthn-label>
+          <div style="font-size:10.5px; color:var(--fg-3); margin-top:5px;">
+            The plugin's <code style="font-family:var(--font-mono);">core</code> reads <code style="font-family:var(--font-mono);">\${MCP_AUTH_TOKEN}</code>. Lethean Desktop sets it when it launches Claude Code; for a manual launch, export it first:
           </div>
           ${this._block(this._exportLine(), "export")}
           <div style="font-size:10px; color:var(--fg-3); margin-top:7px;">
             <i class="fa-solid fa-shield-halved" style="font-size:9px;"></i>
             Treat this token like a password — it authenticates into your hub.
-          </div>
-        </div>
-
-        <div>
-          <lthn-label>2 · Install the plugin</lthn-label>
-          <div style="font-size:10.5px; color:var(--fg-3); margin-top:5px;">Run these in Claude Code:</div>
-          ${this._block((this.recipe.install_commands ?? []).join("\n"), "install")}
-          <div style="font-size:10.5px; color:var(--fg-3); margin-top:7px;">
-            <code style="font-family:var(--font-mono);">/reload-plugins</code> picks up the connection — no restart.
           </div>
         </div>
 
