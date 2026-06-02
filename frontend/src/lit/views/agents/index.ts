@@ -24,6 +24,7 @@ import "./tasks";
 import "./code";
 import "./terminal-session";
 import "./terminal";
+import "./connect";
 
 // Pulled-in Coding panels — repos/issues/prs/deploys are repo context
 // (what the fleet works on), reused here rather than discarded.

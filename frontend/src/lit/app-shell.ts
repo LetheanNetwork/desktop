@@ -350,6 +350,7 @@ const VIEWS: ViewDef[] = [
       { id: "issues",   label: "Issues",   icon: "fa-circle-exclamation", tag: "lthn-view-issues",         group: "observe" },
       { id: "prs",      label: "PRs",      icon: "fa-code-pull-request",  tag: "lthn-view-prs",            group: "observe" },
       { id: "deploys",  label: "Deploys",  icon: "fa-rocket",             tag: "lthn-view-deploys",        group: "observe" },
+      { id: "connect",  label: "Connect",  icon: "fa-plug",               tag: "lthn-view-agent-connect",  group: "bottom" },
       { id: "settings", label: "Settings", icon: "fa-sliders",            tag: "lthn-settings-window",     group: "bottom" },
     ],
   },
