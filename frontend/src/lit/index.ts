@@ -25,6 +25,7 @@ import "./obs/telemetry-window";
 import "./obs/audit-window";
 import "./ext/integrations-window";
 import "./ext/tools-window";
+import "./ext/tools-landing";
 import "./ext/network-window";
 import "./ext/distillation-window";
 import "./ext/training-window";
