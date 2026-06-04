@@ -839,6 +839,12 @@ switch (surface) {
     app.innerHTML = `<lthn-model-browser-window></lthn-model-browser-window>`;
     break;
   }
+  case "apps": {
+    // The contained-assistant tools hub (Odysseus + roadmap tools). Opened
+    // from the tray's "Tools…" item; cards route to each tool's proxied panel.
+    app.innerHTML = `<lthn-tools-landing></lthn-tools-landing>`;
+    break;
+  }
   case "lemma": {
     await import("./lit/ext/lemma-window");
     app.innerHTML = `<lthn-lemma-window></lthn-lemma-window>`;

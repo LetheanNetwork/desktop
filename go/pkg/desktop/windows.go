@@ -109,6 +109,18 @@ func windowRegistry() []*WindowSpec {
 			Mac:                        mac,
 		},
 		{
+			// The contained-assistant tools hub (<lthn-tools-landing>). Opened
+			// from the tray's "Tools…" item; a bit larger than models since it
+			// is a card grid that also hosts each tool's full panel.
+			Name: "apps", Title: "Tools",
+			URL:   "/?surface=apps",
+			Width: 920, Height: 680, MinWidth: 600, MinHeight: 420,
+			Frameless: true, HideOnClose: true,
+			DefaultContextMenuDisabled: true,
+			BackgroundColour:           [4]uint8{0, 0, 0, 0},
+			Mac:                        mac,
+		},
+		{
 			Name: "settings", Title: "Settings",
 			URL:   "/?surface=settings",
 			Width: 700, Height: 550, MinWidth: 500, MinHeight: 400,

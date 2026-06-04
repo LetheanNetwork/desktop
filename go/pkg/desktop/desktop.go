@@ -34,12 +34,13 @@ import (
 	"runtime"
 
 	core "dappco.re/go"
-	"dappco.re/go/ai/pkg/lab"
 	"dappco.re/go/config"
+	gui "dappco.re/go/gui"
 	guilifecycle "dappco.re/go/gui/pkg/lifecycle"
 	guisystray "dappco.re/go/gui/pkg/systray"
 	guiwindow "dappco.re/go/gui/pkg/window"
 	coreI18n "dappco.re/go/i18n"
+	"dappco.re/go/ml/lab"
 	lthn "dappco.re/lthn/desktop"
 	"dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/agents"
@@ -47,62 +48,61 @@ import (
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/benchmark"
 	"dappco.re/lthn/desktop/pkg/bridge"
+	"dappco.re/lthn/desktop/pkg/build"
 	"dappco.re/lthn/desktop/pkg/calibrate"
 	"dappco.re/lthn/desktop/pkg/clbpl"
-	"dappco.re/lthn/desktop/pkg/contentshield"
-	"dappco.re/lthn/desktop/pkg/ollama"
-	"dappco.re/lthn/desktop/pkg/openaibench"
-	"dappco.re/lthn/desktop/pkg/build"
 	"dappco.re/lthn/desktop/pkg/container"
+	"dappco.re/lthn/desktop/pkg/contentshield"
+	"dappco.re/lthn/desktop/pkg/deploys"
 	"dappco.re/lthn/desktop/pkg/downloader"
 	"dappco.re/lthn/desktop/pkg/files"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
+	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/git"
+	"dappco.re/lthn/desktop/pkg/incidents"
 	"dappco.re/lthn/desktop/pkg/integrations"
+	"dappco.re/lthn/desktop/pkg/keys"
 	"dappco.re/lthn/desktop/pkg/lemma"
 	"dappco.re/lthn/desktop/pkg/lint"
+	"dappco.re/lthn/desktop/pkg/marketing/analytics"
+	"dappco.re/lthn/desktop/pkg/marketing/audience"
+	"dappco.re/lthn/desktop/pkg/marketing/campaigns"
+	"dappco.re/lthn/desktop/pkg/marketing/content"
+	"dappco.re/lthn/desktop/pkg/marketing/social"
 	"dappco.re/lthn/desktop/pkg/marketplace"
 	"dappco.re/lthn/desktop/pkg/models"
+	"dappco.re/lthn/desktop/pkg/office/documents"
+	officefile "dappco.re/lthn/desktop/pkg/office/files"
+	"dappco.re/lthn/desktop/pkg/office/mail"
+	"dappco.re/lthn/desktop/pkg/ollama"
+	"dappco.re/lthn/desktop/pkg/openaibench"
+	"dappco.re/lthn/desktop/pkg/opencode"
+	"dappco.re/lthn/desktop/pkg/paths"
 	lthnphp "dappco.re/lthn/desktop/pkg/php"
 	"dappco.re/lthn/desktop/pkg/plugin"
-	"dappco.re/lthn/desktop/pkg/repos"
-	"dappco.re/lthn/desktop/pkg/fleet"
-	"dappco.re/lthn/desktop/pkg/keys"
-	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/r1"
 	r1analytics "dappco.re/lthn/desktop/pkg/r1/analytics"
-	"dappco.re/lthn/desktop/pkg/runner"
-	"dappco.re/lthn/desktop/pkg/seeds"
-	"dappco.re/lthn/desktop/pkg/opencode"
-	"dappco.re/lthn/desktop/pkg/sandbox"
-	"dappco.re/lthn/desktop/pkg/server"
-	"dappco.re/lthn/desktop/pkg/serverkey"
-	"dappco.re/lthn/desktop/pkg/tasks"
-	"dappco.re/lthn/desktop/pkg/terminal"
-	"dappco.re/lthn/desktop/pkg/training"
-	lthnservices "dappco.re/lthn/desktop/pkg/services"
-	"dappco.re/lthn/desktop/pkg/sessions"
-	"dappco.re/lthn/desktop/pkg/telemetry"
-	"dappco.re/lthn/desktop/pkg/tools"
-	"dappco.re/lthn/desktop/pkg/validator"
-	"dappco.re/lthn/desktop/pkg/vi"
-	"dappco.re/lthn/desktop/pkg/incidents"
+	"dappco.re/lthn/desktop/pkg/repos"
 	"dappco.re/lthn/desktop/pkg/runbooks"
+	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/sales/contacts"
 	"dappco.re/lthn/desktop/pkg/sales/deals"
 	"dappco.re/lthn/desktop/pkg/sales/forecast"
 	"dappco.re/lthn/desktop/pkg/sales/pipeline"
-	"dappco.re/lthn/desktop/pkg/marketing/campaigns"
-	"dappco.re/lthn/desktop/pkg/marketing/content"
-	"dappco.re/lthn/desktop/pkg/marketing/social"
-	"dappco.re/lthn/desktop/pkg/marketing/audience"
-	"dappco.re/lthn/desktop/pkg/marketing/analytics"
-	"dappco.re/lthn/desktop/pkg/office/documents"
-	"dappco.re/lthn/desktop/pkg/office/mail"
-	officefile "dappco.re/lthn/desktop/pkg/office/files"
-	"dappco.re/lthn/desktop/pkg/deploys"
+	"dappco.re/lthn/desktop/pkg/sandbox"
+	"dappco.re/lthn/desktop/pkg/seeds"
+	"dappco.re/lthn/desktop/pkg/server"
+	"dappco.re/lthn/desktop/pkg/serverkey"
+	lthnservices "dappco.re/lthn/desktop/pkg/services"
+	"dappco.re/lthn/desktop/pkg/sessions"
+	"dappco.re/lthn/desktop/pkg/tasks"
+	"dappco.re/lthn/desktop/pkg/telemetry"
+	"dappco.re/lthn/desktop/pkg/terminal"
+	"dappco.re/lthn/desktop/pkg/tools"
+	"dappco.re/lthn/desktop/pkg/training"
+	"dappco.re/lthn/desktop/pkg/validator"
+	"dappco.re/lthn/desktop/pkg/vi"
 	"github.com/gin-gonic/gin"
-	gui "dappco.re/go/gui"
 )
 
 const trayOpenEvent = "lthn:tray:open"
@@ -117,6 +117,7 @@ const (
 	trayActionOpenChat     = "lthn:tray:open-chat"
 	trayActionOpenModels   = "lthn:tray:open-models"
 	trayActionOpenSettings = "lthn:tray:open-settings"
+	trayActionOpenApps     = "lthn:tray:open-apps"
 	trayActionOpenAbout    = "lthn:tray:open-about"
 	trayActionQuit         = "lthn:tray:quit"
 	trayPluginPrefix       = "lthn:tray:plugin:"
@@ -668,6 +669,7 @@ func (s *Service) Run() core.Result {
 		{Type: "separator"},
 		{Label: "Open Chat…", ActionID: trayActionOpenChat},
 		{Label: "Models…", ActionID: trayActionOpenModels},
+		{Label: "Tools…", ActionID: trayActionOpenApps},
 		{Label: "Settings…", ActionID: trayActionOpenSettings},
 	}
 	if pluginSvc != nil {
@@ -721,6 +723,7 @@ func (s *Service) Run() core.Result {
 				{ActionID: trayActionOpenChat, OpenWindow: "chat", EmitEvent: trayOpenEvent},
 				{ActionID: trayActionOpenModels, OpenWindow: "models", EmitEvent: trayOpenEvent},
 				{ActionID: trayActionOpenSettings, OpenWindow: "settings", EmitEvent: trayOpenEvent},
+				{ActionID: trayActionOpenApps, OpenWindow: "apps", EmitEvent: trayOpenEvent},
 				{ActionID: trayActionOpenAbout, OpenWindow: "about", EmitEvent: trayOpenEvent},
 				{ActionID: trayActionQuit, Quit: true},
 			},
@@ -1173,7 +1176,6 @@ func (s *Service) attachSPA() core.Result {
 	return core.Ok(nil)
 }
 
-
 // trayPluginMaxLabelBytes caps a plugin-manifest label before it lands
 // on the native tray surface. Closes Cerberus #70 F-3 MED — STRIDE-T
 // Tampering. A hostile manifest could otherwise ship a 1MB label that
@@ -1584,10 +1586,10 @@ func selfMachineRow() fleet.Machine {
 //	// ["MCP_JWT_SECRET=...", "MCP_AUTH_TOKEN=..."]
 func hubSandboxEnv(c *core.Core) []string {
 	const (
-		jwtSecretRef  = "hub-mcp-jwt-secret"
-		authTokenRef  = "hub-mcp-auth-token"
-		envJWTSecret  = "MCP_JWT_SECRET"
-		envAuthToken  = "MCP_AUTH_TOKEN"
+		jwtSecretRef = "hub-mcp-jwt-secret"
+		authTokenRef = "hub-mcp-auth-token"
+		envJWTSecret = "MCP_JWT_SECRET"
+		envAuthToken = "MCP_AUTH_TOKEN"
 	)
 	generate := func() ([]byte, error) {
 		rr := core.RandomBytes(32)
@@ -1603,7 +1605,7 @@ func hubSandboxEnv(c *core.Core) []string {
 				if r := ks.GetOrCreateTier0(ref, generate); r.OK {
 					return core.Trim(string(r.Value.([]byte)))
 				}
-				core.Warn("desktop.hub: tier-0 key resolve failed for "+ref+", using ephemeral value")
+				core.Warn("desktop.hub: tier-0 key resolve failed for " + ref + ", using ephemeral value")
 			}
 		}
 		// Fallback: ephemeral random value (no persistence).
