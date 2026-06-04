@@ -101,6 +101,20 @@ func stripAndInjectCSP(resp *http.Response) error {
 		}
 	}
 	resp.Header.Set("Content-Security-Policy", pluginProxyCSPHeader)
+	// The injected CSP's `frame-ancestors wails://wails` is the
+	// authoritative framing policy. Drop any upstream X-Frame-Options so a
+	// plugin/bundle webapp that sends "DENY" (e.g. Odysseus's
+	// SecurityHeadersMiddleware) can't override it and block the host shell
+	// from framing the proxied view. The CSP spec says frame-ancestors
+	// supersedes X-Frame-Options, but removing it explicitly avoids any
+	// WebView ambiguity. Both canonical + variant spellings, every response
+	// code — same belt-and-suspenders shape as the CSP strip above.
+	resp.Header.Del("X-Frame-Options")
+	for k := range resp.Header {
+		if core.Lower(k) == "x-frame-options" {
+			resp.Header.Del(k)
+		}
+	}
 	return nil
 }
 
