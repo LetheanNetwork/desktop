@@ -58,8 +58,12 @@ plugin:
       icon: fa-compass
       kind: iframe
       source: ${expose.app.route}
-      capabilities:
-        - session-token
+      # Route through the host reverse proxy so Odysseus's hard-coded
+      # X-Frame-Options: DENY + CSP frame-ancestors are stripped and the
+      # host policy is injected — the panel renders in the shell. Without
+      # this the WebView refuses to frame Odysseus (the opencode-proven
+      # format; opencode + every framing-hostile contained app uses it).
+      proxied: true
 
 env:
   - key: ADMIN_PASSWORD

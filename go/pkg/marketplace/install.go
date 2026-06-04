@@ -349,6 +349,10 @@ func (s *Service) Install(input InstallInput) core.Result {
 	installID := s.resolveSandboxInstallID(sbPort)
 
 	sandboxIDs := map[string]string{}
+	// hostPorts maps image id → the dynamically-allocated host port the
+	// container's expose was published to. Used to wire proxied iframe
+	// views into the host reverse proxy after the spawn loop.
+	hostPorts := map[string]int{}
 	var lastErr string
 
 	for _, img := range m.Images {
@@ -373,6 +377,7 @@ func (s *Service) Install(input InstallInput) core.Result {
 		}
 		h := r.Value.(sandbox.ContainerHandle)
 		sandboxIDs[img.ID] = h.SandboxID
+		hostPorts[img.ID] = h.HostPort
 	}
 
 	status := BundleStatusRunning
@@ -422,6 +427,13 @@ func (s *Service) Install(input InstallInput) core.Result {
 	// fail the install (the sandboxes already landed); the affected
 	// view simply doesn't register so the frontend falls back per §6.
 	registerPluginViews(m)
+
+	// Mount proxied iframe views into the host reverse proxy (the
+	// opencode-proven format) so the contained app's framing headers are
+	// stripped + the host policy injected. Best-effort: a missing plugin
+	// service or unresolved host port leaves the view unmounted rather than
+	// failing the install (the container already landed).
+	s.mountProxiedBundleViews(m, hostPorts)
 
 	// Broadcast — frontend renders status pills + future MCP/agent
 	// consumers react. Before is zero (first install, no prior state).
@@ -1079,10 +1091,27 @@ func registerPluginViews(m BundleManifest) {
 		if v.Kind == PluginViewKindIframe {
 			exposeID := exposeIDFromSource(v.Source)
 			if b, ok := bindings[exposeID]; ok {
-				desc.LoopbackPort = b.port
-				desc.LoopbackOrigin = core.Sprintf("http://127.0.0.1:%d", b.port)
-				if b.route != "" {
-					desc.Source = b.route
+				if v.Proxied {
+					// Proxied: the iframe loads the host reverse-proxy route
+					// (/v1/api/plugin/<code>/<route>); the proxy forwards to the
+					// container loopback + strips the contained app's framing
+					// headers. No direct LoopbackOrigin — the frontend mounts the
+					// same-origin proxy route, so the §3.3 frame-src allowlist +
+					// §5.1 postMessage origin both resolve to the host api origin
+					// (the opencode-proven shape). proxy.Set is wired in Install
+					// once the dynamic host port is known.
+					desc.Proxied = true
+					route := b.route
+					if route == "" {
+						route = "/"
+					}
+					desc.Source = "/v1/api/plugin/" + code + route
+				} else {
+					desc.LoopbackPort = b.port
+					desc.LoopbackOrigin = core.Sprintf("http://127.0.0.1:%d", b.port)
+					if b.route != "" {
+						desc.Source = b.route
+					}
 				}
 			}
 		}
@@ -1110,6 +1139,40 @@ func exposeIDFromSource(src string) string {
 		return ""
 	}
 	return src[len(prefix) : len(src)-len(suffix)]
+}
+
+// mountProxiedBundleViews wires every proxied iframe view into the host
+// reverse proxy (pkg/plugin.ProxyGroup), keyed by plugin code, targeting the
+// container's dynamically-allocated loopback host port. The proxy's
+// stripAndInjectCSP drops the contained app's framing headers
+// (X-Frame-Options + CSP) and injects the host policy, so a framing-hostile
+// webapp (e.g. Odysseus) renders in the shell — the opencode-proven format.
+//
+// Best-effort: returns silently when the plugin service is unavailable or a
+// proxied view does not resolve a live host port (the container already
+// landed; the install does not fail on a proxy-mount miss).
+func (s *Service) mountProxiedBundleViews(m BundleManifest, hostPorts map[string]int) {
+	if m.Plugin == nil || len(m.Plugin.Views) == 0 || s.core == nil {
+		return
+	}
+	code := pluginCodeOf(m)
+	if code == "" {
+		return
+	}
+	host, ok := core.ServiceFor[*plugin.Service](s.core, "plugin")
+	if !ok || host == nil {
+		return
+	}
+	for _, v := range m.Plugin.Views {
+		if v.Kind != PluginViewKindIframe || !v.Proxied {
+			continue
+		}
+		port := hostPorts[exposeIDFromSource(v.Source)]
+		if port == 0 {
+			continue
+		}
+		host.ProxyGroup().Set(code, core.Sprintf("http://127.0.0.1:%d", port))
+	}
 }
 
 // rollbackSpawnedSandboxes Kills every sandbox handle in ids when an

@@ -98,6 +98,13 @@ type PluginViewDescriptor struct {
 	// the §5.1 postMessage inbound verification. Empty for lit-kind
 	// views.
 	LoopbackOrigin string `json:"loopbackOrigin,omitempty"`
+
+	// Proxied marks an iframe view that loads via the host reverse proxy
+	// (/v1/api/plugin/<code>/*) rather than the container's loopback origin
+	// directly — so the proxy strips the contained app's framing headers.
+	// When true, Source is the proxy route and the frontend mounts it as a
+	// same-origin iframe (no direct loopback). Mirrors the opencode format.
+	Proxied bool `json:"proxied,omitempty"`
 }
 
 // pluginViewRegistry is the in-process registry. ViewRegistry below

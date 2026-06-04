@@ -130,11 +130,20 @@ type PluginBlock struct {
 //	      source: ${expose.web.route}
 //	      capabilities: [session-token]
 type PluginView struct {
-	ID           string   `yaml:"id"`
-	Label        string   `yaml:"label"`
-	Icon         string   `yaml:"icon,omitempty"`
-	Kind         string   `yaml:"kind"`
-	Source       string   `yaml:"source"`
+	ID     string `yaml:"id"`
+	Label  string `yaml:"label"`
+	Icon   string `yaml:"icon,omitempty"`
+	Kind   string `yaml:"kind"`
+	Source string `yaml:"source"`
+	// Proxied routes an iframe-kind view through the host reverse proxy
+	// (pkg/plugin.ProxyGroup at /v1/api/plugin/<code>/*) instead of mounting
+	// the container's loopback origin directly. The proxy strips the contained
+	// app's framing headers (X-Frame-Options + CSP frame-ancestors) and
+	// injects the host policy, so a framing-hostile contained app — e.g.
+	// Odysseus, which hard-codes X-Frame-Options: DENY — still renders in the
+	// shell. The opencode-proven format; opt-in per view so existing
+	// frame-friendly bundles keep their direct-loopback mount.
+	Proxied      bool     `yaml:"proxied,omitempty"`
 	Capabilities []string `yaml:"capabilities,omitempty"`
 }
 
@@ -194,11 +203,11 @@ const rejectionReasonThirdPartyLitPending = "third-party-lit-pending-dappcore-ui
 
 // RouteEntry declares a navigation entry in the lthn sidebar.
 type RouteEntry struct {
-	Title   string `yaml:"title"`
-	Icon    string `yaml:"icon,omitempty"`
-	Group   string `yaml:"group,omitempty"`  // nav group e.g. "extend"
-	Target  string `yaml:"target,omitempty"` // supports ${expose.<id>.route}
-	OpenAfterInstall bool `yaml:"open_after_install,omitempty"`
+	Title            string `yaml:"title"`
+	Icon             string `yaml:"icon,omitempty"`
+	Group            string `yaml:"group,omitempty"`  // nav group e.g. "extend"
+	Target           string `yaml:"target,omitempty"` // supports ${expose.<id>.route}
+	OpenAfterInstall bool   `yaml:"open_after_install,omitempty"`
 }
 
 // CommandEntry declares a Core command the bundle registers.
@@ -211,7 +220,7 @@ type CommandEntry struct {
 // SettingEntry declares a user-visible setting persisted to go-store.
 type SettingEntry struct {
 	Key     string `yaml:"key"`
-	Type    string `yaml:"type"`    // "string" | "secret" | "bool" | "int"
+	Type    string `yaml:"type"` // "string" | "secret" | "bool" | "int"
 	Prompt  string `yaml:"prompt"`
 	Default string `yaml:"default,omitempty"` // supports ${random.password(N)}
 }
