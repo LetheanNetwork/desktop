@@ -1,0 +1,77 @@
+schema: lthn-vm/v1
+name: odysseus
+display: Odysseus
+description: Self-hosted AI workspace — chat, deep research, agents, documents — running contained in lthn-vm. Your data stays local; the model stays on the host.
+category: ai-agents
+icon: fa-compass
+homepage: https://github.com/pewdiepie-archdaemon/odysseus
+license: MIT
+
+# One sealed image: the Odysseus app + ChromaDB + SearXNG co-located under
+# supervisord (see Dockerfile), so chroma/searxng are reached at localhost
+# inside the VM and the bundle exposes only the app's :7000. Inference is NOT
+# baked in — LLM_HOST points at the host engine over the sandbox bridge.
+images:
+  - id: app
+    image: lthn/odysseus:latest          # built from ./Dockerfile (no published image)
+    env:
+      APP_BIND: 0.0.0.0
+      APP_PORT: "7000"
+      AUTH_ENABLED: "true"               # login required — it's an admin-grade console
+      SECURE_COOKIES: "true"             # served over the host HTTPS proxy
+      LOCALHOST_BYPASS: "false"
+      ODYSSEUS_ADMIN_USER: admin
+      ODYSSEUS_ADMIN_PASSWORD: ${env.ADMIN_PASSWORD}   # Odysseus reads this; empty = auto-gen, so we pre-seed
+      LLM_HOST: ${env.LLM_HOST}            # host LEM Engine / local model — inference stays host-side
+      CHROMADB_HOST: localhost             # baked in-image (server on :8000)
+      SEARXNG_INSTANCE: http://localhost:8080   # baked in-image
+      DATABASE_URL: sqlite:///./data/app.db
+    volumes:
+      - container: /app/data             # app.db, chroma/, uploads, settings, the SSH key
+        persist: odysseus-data
+    expose:
+      port: 7000
+      route: /odysseus
+
+plugin:
+  code: odysseus
+  routes:
+    - title: Odysseus
+      icon: fa-compass
+      group: extend
+      target: ${expose.app.route}
+      open_after_install: true
+  commands:
+    - id: odysseus.open
+      title: Open Odysseus
+      runs: route:${expose.app.route}
+  settings:
+    - key: theme
+      type: string
+      prompt: UI theme
+      default: dark
+  # The webui rendered as a full panel via <lthn-plugin-view kind=iframe>,
+  # selectable from the view-switcher — the surface opencode uses.
+  views:
+    - id: odysseus
+      label: Odysseus
+      icon: fa-compass
+      kind: iframe
+      source: ${expose.app.route}
+      capabilities:
+        - session-token
+
+env:
+  - key: ADMIN_PASSWORD
+    prompt: Odysseus admin password (first-boot admin login)
+    type: secret
+    default: ${random.password(32)}
+  - key: LLM_HOST
+    prompt: Local model endpoint Odysseus should use (the host LEM Engine, or Ollama)
+    type: string
+    default: http://host.lthn.vm:11434     # host-bridge address — confirm the sandbox's gateway
+
+permissions:
+  - scope: project.metadata
+    mode: read
+    reason: List workspace projects in Odysseus's file tools.

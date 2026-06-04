@@ -1,0 +1,17 @@
+# Minimal SearXNG settings for Odysseus's programmatic queries. Layered on
+# SearXNG's defaults; only the deltas Odysseus needs are set here.
+# FLAG: confirm the key names against the current searxng settings schema.
+use_default_settings: true
+
+server:
+  # secret_key is injected from $SEARXNG_SECRET (generated + persisted by
+  # entrypoint.sh) so it's stable across restarts and never a literal.
+  secret_key: "${SEARXNG_SECRET}"
+  bind_address: "127.0.0.1"
+  port: 8080
+  limiter: false            # internal-only; no public bot-rate-limiting needed
+
+search:
+  formats:
+    - html
+    - json                  # Odysseus's Deep Research queries the JSON API
