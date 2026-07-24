@@ -41,8 +41,8 @@ import (
 
 	core "dappco.re/go"
 	coreapi "dappco.re/go/api"
-	"dappco.re/go/gui/pkg/notification"
 	"dappco.re/go/orm"
+	"dappco.re/go/render/display/webkit/pkg/notification"
 
 	"dappco.re/lthn/desktop/pkg/marketplace"
 	"dappco.re/lthn/desktop/pkg/opencode"
@@ -271,9 +271,9 @@ func (g *gatewayRoutes) RegisterRoutes(rg *gin.RouterGroup) {
 //  1. Body-cap (Cerberus #1435) — MaxBytesReader before any read.
 //  2. Resolve authoritative bundle identity (Cerberus #1443):
 //     a. If X-Bundle-Token present and a BundleCodeResolver is wired,
-//        resolve token → code. Spoofed Bundle-ID header is ignored.
+//     resolve token → code. Spoofed Bundle-ID header is ignored.
 //     b. If no token (backward compat / non-plugin callers), fall back
-//        to the Bundle-ID header claim.
+//     to the Bundle-ID header claim.
 //     c. 401 when neither produces a non-empty code.
 //  3. Look up scope handler — 501 if no handler registered.
 //  4. CheckPermission against the bundle's declared manifest scope —
@@ -463,8 +463,9 @@ type notifyRequest struct {
 //
 // Body shape:  { id?, title, message, subtitle?, categoryId? }
 // Response:    { id }  — the notification id, generated when not
-//                       supplied, so the caller can correlate later
-//                       lthn:notification:* events.
+//
+//	supplied, so the caller can correlate later
+//	lthn:notification:* events.
 func serviceNotifyInvoke(c *core.Core, bundleID string, ctx *gin.Context) core.Result {
 	var req notifyRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {

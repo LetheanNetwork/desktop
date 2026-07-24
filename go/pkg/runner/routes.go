@@ -34,9 +34,10 @@ package runner
 
 import (
 	core "dappco.re/go"
-	"dappco.re/go/ai/ai"
-	"dappco.re/go/ai/providers/openai"
 	"dappco.re/go/config"
+	"dappco.re/go/inference"
+	"dappco.re/go/inference/agent/ai"
+	"dappco.re/go/inference/serving/provider/openai"
 	"dappco.re/go/ratelimit"
 
 	"dappco.re/lthn/desktop/pkg/keys"
@@ -214,8 +215,12 @@ func buildRoute(name string, rc RouteConfig, keysSvc *keys.Service) *ai.Provider
 			DefaultModel: rc.Model,
 			Limiter:      resolveOutboundLimiter(),
 		})
-		model, err := backend.LoadModel(rc.Model)
-		if err != nil {
+		loadR := backend.LoadModel(rc.Model)
+		if !loadR.OK {
+			return nil
+		}
+		model, ok := loadR.Value.(inference.TextModel)
+		if !ok {
 			return nil
 		}
 		return &ai.ProviderRoute{

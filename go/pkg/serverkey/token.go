@@ -5,7 +5,7 @@ package serverkey
 import (
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/audit"
-	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
+	"github.com/Snider/Enchantrix/pkg/crypt/std/pgp"
 )
 
 // IssueBootstrapToken mints a fresh detached-PGP-signature token with

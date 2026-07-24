@@ -6,9 +6,8 @@
 package bridge
 
 import (
-
 	core "dappco.re/go"
-	guiwindow "dappco.re/go/gui/pkg/window"
+	guiwindow "dappco.re/go/render/display/webkit/pkg/window"
 )
 
 func (s *Service) coreGUIWindowList() ([]guiwindow.WindowInfo, map[string]any) {

@@ -1,6 +1,11 @@
 bin/
 node_modules/
 dist/
+# Keep the Go embed staging directory present in source-only checkouts while
+# continuing to ignore every generated frontend asset copied into it.
+!go/cmd/lthn/dist/
+go/cmd/lthn/dist/*
+!go/cmd/lthn/dist/.keep
 *.log
 .DS_Store
 .env

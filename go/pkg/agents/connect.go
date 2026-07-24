@@ -99,7 +99,7 @@ func (s *Service) resolveClaudePath() string {
 		"/opt/homebrew/bin/claude",
 		"/usr/local/bin/claude",
 	} {
-		if s.core != nil && s.core.Fs().IsFile(p) {
+		if s.core != nil && s.core.Fs().IsFile(p).OK {
 			return p
 		}
 	}

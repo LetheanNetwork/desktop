@@ -47,7 +47,7 @@ import (
 	"sync"
 
 	core "dappco.re/go"
-	"forge.lthn.ai/Snider/Enchantrix/pkg/trix"
+	"github.com/Snider/Enchantrix/pkg/trix"
 )
 
 // --- Lib-defined interfaces (RFC §5.1) -------------------------------

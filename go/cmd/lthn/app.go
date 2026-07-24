@@ -4,7 +4,6 @@ package main
 
 import (
 	core "dappco.re/go"
-	"dappco.re/go/ai/pkg/lab"
 	"dappco.re/go/api"
 	"dappco.re/go/config"
 	"dappco.re/go/i18n"
@@ -13,53 +12,53 @@ import (
 	"dappco.re/go/orm"
 	"dappco.re/go/process"
 	"dappco.re/go/store"
-	"dappco.re/go/stream"
+	"dappco.re/go/ws"
 	lthn "dappco.re/lthn/desktop"
 	"dappco.re/lthn/desktop/pkg/account"
+	"dappco.re/lthn/desktop/pkg/agents"
 	lthnai "dappco.re/lthn/desktop/pkg/ai"
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/benchmark"
 	"dappco.re/lthn/desktop/pkg/bridge"
-	"dappco.re/lthn/desktop/pkg/agents"
+	"dappco.re/lthn/desktop/pkg/deploys"
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/gateway"
 	lthni18n "dappco.re/lthn/desktop/pkg/i18n"
+	"dappco.re/lthn/desktop/pkg/incidents"
 	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/lthn/desktop/pkg/marketing/analytics"
+	"dappco.re/lthn/desktop/pkg/marketing/audience"
+	"dappco.re/lthn/desktop/pkg/marketing/campaigns"
+	"dappco.re/lthn/desktop/pkg/marketing/content"
+	"dappco.re/lthn/desktop/pkg/marketing/social"
 	"dappco.re/lthn/desktop/pkg/marketplace"
 	"dappco.re/lthn/desktop/pkg/mdns"
 	lthnml "dappco.re/lthn/desktop/pkg/ml"
+	"dappco.re/lthn/desktop/pkg/office/documents"
+	"dappco.re/lthn/desktop/pkg/office/files"
+	"dappco.re/lthn/desktop/pkg/office/mail"
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/plugin"
 	lthnprocess "dappco.re/lthn/desktop/pkg/process"
 	"dappco.re/lthn/desktop/pkg/queue"
 	"dappco.re/lthn/desktop/pkg/repos"
-	"dappco.re/lthn/desktop/pkg/runner"
-	"dappco.re/lthn/desktop/pkg/sandbox"
-	"dappco.re/lthn/desktop/pkg/tasks"
-	lthnupdate "dappco.re/lthn/desktop/pkg/update"
-	"dappco.re/lthn/desktop/pkg/vi"
-	"dappco.re/lthn/desktop/pkg/incidents"
 	"dappco.re/lthn/desktop/pkg/runbooks"
+	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/sales/contacts"
 	"dappco.re/lthn/desktop/pkg/sales/deals"
 	"dappco.re/lthn/desktop/pkg/sales/forecast"
 	"dappco.re/lthn/desktop/pkg/sales/pipeline"
-	"dappco.re/lthn/desktop/pkg/marketing/campaigns"
-	"dappco.re/lthn/desktop/pkg/marketing/content"
-	"dappco.re/lthn/desktop/pkg/marketing/social"
-	"dappco.re/lthn/desktop/pkg/marketing/audience"
-	"dappco.re/lthn/desktop/pkg/marketing/analytics"
-	"dappco.re/lthn/desktop/pkg/office/documents"
-	"dappco.re/lthn/desktop/pkg/office/mail"
-	"dappco.re/lthn/desktop/pkg/office/files"
-	"dappco.re/lthn/desktop/pkg/deploys"
+	"dappco.re/lthn/desktop/pkg/sandbox"
 	"dappco.re/lthn/desktop/pkg/serverkey"
+	"dappco.re/lthn/desktop/pkg/tasks"
+	lthnupdate "dappco.re/lthn/desktop/pkg/update"
+	"dappco.re/lthn/desktop/pkg/vi"
 )
 
 // newAppCore constructs the shared *core.Core for any lthn CLI verb
 // that needs the service bus. Registers the phase-1 service stack —
-// store / stream / process / i18n / io — with paths resolved through
+// store / ws / process / i18n / io — with paths resolved through
 // pkg/paths so the canonical ~/Lethean/ layout is uniform.
 //
 // Returns the started Core. The caller MUST defer
@@ -104,7 +103,7 @@ func newAppCore() *core.Core {
 			DatabasePath:            dbPath.Value.(string),
 			WorkspaceStateDirectory: workspace.Value.(string),
 		})),
-		core.WithName("stream", stream.NewService(stream.DefaultHubConfig())),
+		core.WithName("ws", ws.NewService(ws.DefaultHubConfig())),
 		core.WithName("process", process.NewService(process.Options{})),
 		core.WithName("i18n", i18n.NewCoreService(i18n.ServiceOptions{
 			Language: "en-GB",
@@ -224,14 +223,6 @@ func newAppCore() *core.Core {
 		// jobs / dataset manifests / model-pack registry grow without
 		// contending against the master DB.
 		core.WithName("ml", lthnml.Register),
-		// lab — ML Lab Workbench backend. Wraps four pluggable
-		// interfaces (InferenceProvider, TrainingDriver, ModelLibrary,
-		// SavedQueryStore) so the frontend panels render against
-		// deterministic mock data until real go-mlx / pkg/training /
-		// pkg/ml-DuckDB wiring lands. HTTP routes mount via
-		// lab.RegisterHTTPRoutes from pkg/desktop.mountSubsystems.
-		// Per plans/project/lthn/desktop/RFC.ml-lab.md §3.
-		core.WithName("lab", lab.Register),
 		// vi — Lethean Desktop mascot's data spine. Populates the
 		// Sites slot of the four-slot Vi data contract via the queue
 		// substrate: a "vi-probe-site" handler self-reschedules per

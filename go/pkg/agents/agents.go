@@ -19,7 +19,7 @@ import (
 	"sync"
 
 	core "dappco.re/go"
-	gui "dappco.re/go/gui"
+	gui "dappco.re/go/render/display/webkit"
 )
 
 // DefaultMCPURL is the hub's MCP HTTP+SSE plane that the crew brings

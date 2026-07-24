@@ -163,7 +163,7 @@ func (f Finding) String() string {
 //	for _, f := range findings { core.Print(f.String()) }
 func Scan(root string) ([]Finding, error) {
 	var out []Finding
-	walkErr := core.PathWalkDir(root, func(path string, d core.FsDirEntry, err error) error {
+	walkR := core.PathWalkDir(root, func(path string, d core.FsDirEntry, err error) error {
 		if err != nil {
 			if path == root {
 				return err
@@ -193,9 +193,9 @@ func Scan(root string) ([]Finding, error) {
 		out = append(out, findings...)
 		return nil
 	})
-	if walkErr != nil {
+	if !walkR.OK {
 		return nil, core.E("serviceingress.Scan",
-			"PathWalkDir under "+root, walkErr)
+			"PathWalkDir under "+root, walkR.Err())
 	}
 	return out, nil
 }

@@ -9,7 +9,7 @@ import (
 	"os"
 
 	core "dappco.re/go"
-	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
+	"github.com/Snider/Enchantrix/pkg/crypt/std/pgp"
 )
 
 // OsChmod is the test-only stand-in for os.Chmod — CoreGO doesn't

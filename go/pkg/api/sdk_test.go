@@ -65,7 +65,9 @@ func TestSDK_ExportSpec_RunnerRoutesAppearInYAML(t *core.T) {
 		t.Fatalf("register groups: %s", r.Error())
 	}
 
-	tmp := c.Fs().TempDir("lthn-api-test-")
+	tmpR := c.Fs().TempDir("lthn-api-test-")
+	core.RequireTrue(t, tmpR.OK)
+	tmp := tmpR.Value.(string)
 	out := core.Path(tmp, "openapi.yaml")
 	r := lthnapi.ExportSpec(c, "yaml", out, lthnapi.DefaultSpecInfo())
 	if !r.OK {

@@ -6,9 +6,8 @@
 package bridge
 
 import (
-
 	core "dappco.re/go"
-	guiclipboard "dappco.re/go/gui/pkg/clipboard"
+	guiclipboard "dappco.re/go/render/display/webkit/pkg/clipboard"
 )
 
 // toolClipboardRead returns the current clipboard text.

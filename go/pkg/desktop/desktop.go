@@ -35,12 +35,11 @@ import (
 
 	core "dappco.re/go"
 	"dappco.re/go/config"
-	gui "dappco.re/go/gui"
-	guilifecycle "dappco.re/go/gui/pkg/lifecycle"
-	guisystray "dappco.re/go/gui/pkg/systray"
-	guiwindow "dappco.re/go/gui/pkg/window"
 	coreI18n "dappco.re/go/i18n"
-	"dappco.re/go/ml/lab"
+	gui "dappco.re/go/render/display/webkit"
+	guilifecycle "dappco.re/go/render/display/webkit/pkg/lifecycle"
+	guisystray "dappco.re/go/render/display/webkit/pkg/systray"
+	guiwindow "dappco.re/go/render/display/webkit/pkg/window"
 	lthn "dappco.re/lthn/desktop"
 	"dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/agents"
@@ -391,12 +390,6 @@ func (s *Service) Run() core.Result {
 	// gates it. Wails-bound here only to reserve the binding namespace —
 	// the REST endpoint is the canonical Stage C consumer per RFC §2.5.
 	accountSvc, _ := core.ServiceFor[*account.Service](s.opts.Core, "account")
-	// lab — ML Lab Workbench coordinator. Core-registered in app.go
-	// via core.WithName("lab", lab.Register); looked up here so the
-	// Wails Services array can bind it, and so mountSubsystems can
-	// reach it when wiring /v1/ml-lab/* HTTP routes. Per
-	// plans/project/lthn/desktop/RFC.ml-lab.md §3.
-	labSvc, _ := core.ServiceFor[*lab.Service](s.opts.Core, "lab")
 	// agents — CoreAgent (lthn-agent) client. Core-registered in
 	// cmd/lthn/app.go via core.WithName("agents", agents.Register); looked
 	// up + Wails-bound here so the binding generator emits @desktop/agents
@@ -538,7 +531,6 @@ func (s *Service) Run() core.Result {
 		gui.Bind(r1analytics.NewWailsService()),
 		gui.Bind(seeds.NewWailsService()),
 		gui.Bind(training.NewWailsService(s.opts.Core, training.NewService(s.opts.Core, training.Options{}))),
-		gui.Bind(labSvc),
 		gui.Bind(opencode.NewWailsService(opencodeSvc)),
 		gui.Bind(reposSvc),
 		// tasks → Shape (a.i) IPC-entry wrapper (RFC v3.1 §4.4 /

@@ -6,8 +6,8 @@ import (
 	"context"
 
 	core "dappco.re/go"
-	"dappco.re/go/ai/ai"
 	"dappco.re/go/inference"
+	"dappco.re/go/inference/agent/ai"
 
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/paths"

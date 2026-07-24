@@ -21,10 +21,9 @@
 package bridge
 
 import (
-
 	core "dappco.re/go"
-	guiscreen "dappco.re/go/gui/pkg/screen"
-	guiwindow "dappco.re/go/gui/pkg/window"
+	guiscreen "dappco.re/go/render/display/webkit/pkg/screen"
+	guiwindow "dappco.re/go/render/display/webkit/pkg/window"
 )
 
 // WindowState is the serialised shape of one window in a layout.

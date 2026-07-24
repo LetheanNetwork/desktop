@@ -478,9 +478,10 @@ func cmdServe(args []string) int {
 //	c := newAppCore()
 //	r, _ := core.ServiceFor[*runner.Service](c, "runner")
 //	key, _ := apikey.GenerateOrLoad(c).Value.(string)
-//	opts := buildServerOpts(c, r, key)
+//	opts := buildServerOpts(c, r, key, false)
 //	opts.Addr = ":8000" // serve only — GUI leaves empty + skips Start()
 //	s := server.NewService(opts)
+//
 // buildServerOpts assembles the server.Options shared between cmdGUI
 // and cmdServe. The forGUI flag toggles registration of route groups
 // that pkg/desktop/subsystems.go.mountSubsystems ALSO registers when

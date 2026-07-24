@@ -16,11 +16,11 @@ package desktop
 
 import (
 	core "dappco.re/go"
-	gui "dappco.re/go/gui"
-	guienvironment "dappco.re/go/gui/pkg/environment"
-	guilifecycle "dappco.re/go/gui/pkg/lifecycle"
-	guinotification "dappco.re/go/gui/pkg/notification"
-	guiwindow "dappco.re/go/gui/pkg/window"
+	gui "dappco.re/go/render/display/webkit"
+	guienvironment "dappco.re/go/render/display/webkit/pkg/environment"
+	guilifecycle "dappco.re/go/render/display/webkit/pkg/lifecycle"
+	guinotification "dappco.re/go/render/display/webkit/pkg/notification"
+	guiwindow "dappco.re/go/render/display/webkit/pkg/window"
 )
 
 // All substrate gaps that pre-dated GUI-16..GUI-24 are closed. This

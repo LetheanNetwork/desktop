@@ -6,8 +6,8 @@
 package bridge
 
 import (
-	guiscreen "dappco.re/go/gui/pkg/screen"
-	guiwindow "dappco.re/go/gui/pkg/window"
+	guiscreen "dappco.re/go/render/display/webkit/pkg/screen"
+	guiwindow "dappco.re/go/render/display/webkit/pkg/window"
 )
 
 // screenInfo serialises a core/gui screen.
