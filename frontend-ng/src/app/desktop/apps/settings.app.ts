@@ -2,15 +2,23 @@ import {
   Component,
   CUSTOM_ELEMENTS_SCHEMA,
   Input,
+  OnInit,
   inject,
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Store } from '@ngrx/store';
 import { AppView } from './app-view';
 import { AppNavItem } from '../desktop-route-tree';
 import { Win } from '../desktop.data';
 import { PreferencesService } from '../preferences.service';
 import { WindowManagerService } from '../window-manager.service';
+import { desktopControlsActions } from '../../store/desktop-controls.actions';
+import { DesktopControl } from '../../store/desktop-controls.models';
+import {
+  desktopControlsFeature,
+  selectDesktopControlGroups,
+} from '../../store/desktop-controls.reducer';
 
 @Component({
   selector: 'lthn-settings-app',
@@ -64,27 +72,6 @@ import { WindowManagerService } from '../window-manager.service';
         </div>
         <div class="setgroup">
           <span class="glab" i18n="Settings group@@settings.group.appearance">Appearance</span>
-          <div class="setrow">
-            <div class="k" i18n="Theme preference@@settings.theme">
-              Theme<small>Light mode applies to the desktop only</small>
-            </div>
-            <div class="prefseg" role="group">
-              <button
-                [class.on]="prefs.mode() === 'dark'"
-                (click)="prefs.mode.set('dark')"
-                i18n="Dark theme option@@settings.theme.dark"
-              >
-                Dark
-              </button>
-              <button
-                [class.on]="prefs.mode() === 'light'"
-                (click)="prefs.mode.set('light')"
-                i18n="Light theme option@@settings.theme.light"
-              >
-                Light
-              </button>
-            </div>
-          </div>
           <div class="setrow">
             <div class="k" i18n="Design preference@@settings.design">
               Design<small>Brand token ramp</small>
@@ -252,38 +239,205 @@ import { WindowManagerService } from '../window-manager.service';
               </button>
             </div>
           </div>
-          <div class="setrow">
-            <div class="k" i18n="Reduced motion preference@@settings.reduceMotion">
-              Reduce motion<small>Disable dock magnify &amp; transitions</small>
-            </div>
-            <div class="prefseg" role="group">
-              <button
-                [class.on]="prefs.reduceMotion()"
-                (click)="prefs.reduceMotion.set(true)"
-                i18n="Enabled option@@common.on"
-              >
-                On
-              </button>
-              <button
-                [class.on]="!prefs.reduceMotion()"
-                (click)="prefs.reduceMotion.set(false)"
-                i18n="Disabled option@@common.off"
-              >
-                Off
-              </button>
-            </div>
-          </div>
         </div>
+        <section class="desktop-controls-panel" aria-labelledby="desktop-controls-heading">
+          <div class="controls-heading">
+            <div>
+              <h1 id="desktop-controls-heading">Desktop controls</h1>
+              <p>Wails, operating-system and security behaviour in one persisted panel.</p>
+            </div>
+            @if (configPath()) {
+              <code class="config-path">{{ configPath() }}</code>
+            }
+          </div>
+
+          @if (controlsError()) {
+            <p class="controls-error" role="alert">{{ controlsError() }}</p>
+          }
+          @if (controlsLoading() && controlGroups().length === 0) {
+            <p class="controls-status">Loading desktop controls…</p>
+          }
+
+          @for (group of controlGroups(); track group.name) {
+            <div class="setgroup control-group">
+              <span class="glab">{{ group.name }}</span>
+              @for (control of group.controls; track control.key) {
+                <div
+                  class="setrow desktop-control"
+                  [attr.data-control-key]="control.key"
+                  [class.is-saving]="isSaving(control.key)"
+                >
+                  <div class="k">
+                    {{ control.label }}
+                    <small>{{ control.description }}</small>
+                    <span class="control-badges">
+                      @if (control.live) {
+                        <span class="control-badge live">Live</span>
+                      }
+                      @if (control.restartRequired) {
+                        <span class="control-badge restart">Restart required</span>
+                      }
+                      @if (control.configured) {
+                        <span class="control-badge configured">Custom</span>
+                      }
+                      @if (isSaving(control.key)) {
+                        <span class="control-badge saving">Saving…</span>
+                      }
+                    </span>
+                  </div>
+
+                  @switch (control.kind) {
+                    @case ('toggle') {
+                      <div class="prefseg" role="group" [attr.aria-label]="control.label">
+                        <button
+                          [class.on]="control.value === true"
+                          [disabled]="isSaving(control.key)"
+                          (click)="setToggle(control, true)"
+                        >
+                          On
+                        </button>
+                        <button
+                          [class.on]="control.value === false"
+                          [disabled]="isSaving(control.key)"
+                          (click)="setToggle(control, false)"
+                        >
+                          Off
+                        </button>
+                      </div>
+                    }
+                    @case ('select') {
+                      <select
+                        class="cfgin control-input"
+                        [value]="control.value"
+                        [disabled]="isSaving(control.key)"
+                        [attr.aria-label]="control.label"
+                        (change)="setChoice(control, $event)"
+                      >
+                        @for (choice of control.choices ?? []; track choice) {
+                          <option [value]="choice">{{ choice }}</option>
+                        }
+                      </select>
+                    }
+                    @case ('number') {
+                      <input
+                        class="cfgin control-input"
+                        type="number"
+                        [value]="control.value"
+                        [attr.min]="control.minimum ?? null"
+                        [attr.max]="control.maximum ?? null"
+                        [attr.step]="control.step ?? null"
+                        [disabled]="isSaving(control.key)"
+                        [attr.aria-label]="control.label"
+                        (change)="setNumber(control, $event)"
+                      />
+                    }
+                    @default {
+                      <input
+                        class="cfgin control-input"
+                        type="text"
+                        [value]="control.value"
+                        [disabled]="isSaving(control.key)"
+                        [attr.aria-label]="control.label"
+                        (change)="setText(control, $event)"
+                      />
+                    }
+                  }
+                </div>
+              }
+            </div>
+          }
+        </section>
       </ng-container>
     </div>
   `,
+  styles: `
+    .desktop-controls-panel {
+      margin-top: 22px;
+      padding-bottom: 24px;
+    }
+    .controls-heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 0 16px 12px;
+    }
+    .controls-heading h1 {
+      margin: 0;
+      font-size: 16px;
+    }
+    .controls-heading p,
+    .controls-status {
+      margin: 4px 0 0;
+      color: var(--text-muted, #8d929b);
+      font-size: 11px;
+    }
+    .config-path {
+      max-width: 52%;
+      overflow: hidden;
+      color: var(--text-muted, #8d929b);
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .controls-error {
+      margin: 0 16px 12px;
+      padding: 8px 10px;
+      border: 1px solid color-mix(in srgb, #ef6b73 45%, transparent);
+      border-radius: 7px;
+      background: color-mix(in srgb, #ef6b73 10%, transparent);
+      color: #ef9aa0;
+      font-size: 11px;
+    }
+    .control-group {
+      margin-bottom: 12px;
+    }
+    .desktop-control .k {
+      min-width: 0;
+    }
+    .control-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 5px;
+    }
+    .control-badge {
+      padding: 1px 5px;
+      border: 1px solid var(--border, #30343b);
+      border-radius: 999px;
+      color: var(--text-muted, #8d929b);
+      font-size: 9px;
+      line-height: 14px;
+    }
+    .control-badge.live {
+      color: #65cdb0;
+    }
+    .control-badge.restart {
+      color: #e3b35b;
+    }
+    .control-badge.saving {
+      color: #8eb8ff;
+    }
+    .control-input {
+      width: min(210px, 42%);
+    }
+    .desktop-control.is-saving {
+      opacity: 0.75;
+    }
+  `,
 })
-export class SettingsApp implements AppView {
+export class SettingsApp implements AppView, OnInit {
   @Input({ required: true }) win!: Win;
   @Input() nav: AppNavItem[] = [];
 
   readonly prefs = inject(PreferencesService);
   readonly wm = inject(WindowManagerService);
+  private readonly store = inject(Store);
+  readonly controlGroups = this.store.selectSignal(selectDesktopControlGroups);
+  readonly controlsLoading = this.store.selectSignal(desktopControlsFeature.selectLoading);
+  readonly controlsError = this.store.selectSignal(desktopControlsFeature.selectError);
+  readonly configPath = this.store.selectSignal(desktopControlsFeature.selectConfigPath);
+  readonly savingKeys = this.store.selectSignal(desktopControlsFeature.selectSavingKeys);
   readonly wallpapers = ['aurora', 'dusk', 'mist', 'graphite'] as const;
   readonly devices = ['small', 'large', 'full'] as const;
   readonly edges = ['top', 'right', 'bottom', 'left'] as const;
@@ -335,6 +489,37 @@ export class SettingsApp implements AppView {
     },
     ja: { 'menu.file': 'ファイル', 'menu.edit': '編集', 'menu.view': '表示' },
   };
+
+  ngOnInit(): void {
+    this.store.dispatch(desktopControlsActions.load());
+  }
+
+  isSaving(key: string): boolean {
+    return this.savingKeys().includes(key);
+  }
+
+  setToggle(control: DesktopControl, value: boolean): void {
+    this.setControl(control, value);
+  }
+
+  setChoice(control: DesktopControl, event: Event): void {
+    this.setControl(control, (event.target as HTMLSelectElement).value);
+  }
+
+  setNumber(control: DesktopControl, event: Event): void {
+    const value = (event.target as HTMLInputElement).valueAsNumber;
+    if (!Number.isFinite(value)) return;
+    this.setControl(control, value);
+  }
+
+  setText(control: DesktopControl, event: Event): void {
+    this.setControl(control, (event.target as HTMLInputElement).value);
+  }
+
+  private setControl(control: DesktopControl, value: boolean | number | string): void {
+    if (this.isSaving(control.key) || control.value === value) return;
+    this.store.dispatch(desktopControlsActions.setControl({ key: control.key, value }));
+  }
 
   setCustomName(event: Event): void {
     this.prefs.customName.set((event.target as HTMLInputElement).value);

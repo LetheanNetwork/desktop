@@ -813,6 +813,7 @@ var wailsBindingCatalogue = []string{
 	"telemetry",
 	"lthnservices",
 	"i18n",
+	"appconfig",
 	"config",
 	"window",
 }

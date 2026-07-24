@@ -6,6 +6,7 @@ import (
 	"runtime"
 
 	core "dappco.re/go"
+	"dappco.re/go/config"
 	gui "dappco.re/go/render/display/webkit"
 	"dappco.re/go/render/display/webkit/pkg/contextmenu"
 	"dappco.re/go/render/display/webkit/pkg/events"
@@ -34,7 +35,8 @@ func newGUIRuntime(c *core.Core, cfg gui.GuiConfig, transport application.Transp
 	}
 
 	applyGUIModeDefaults(&cfg)
-	app := application.New(guiApplicationOptions(cfg, transport))
+	configSvc, _ := core.ServiceFor[*config.Service](c, "config")
+	app := application.New(guiApplicationOptions(cfg, transport, configSvc))
 	if app == nil {
 		return core.Fail(core.E("desktop.newGUIRuntime", "Wails application is nil", nil))
 	}
@@ -64,48 +66,82 @@ func (r *guiRuntime) Run() core.Result {
 	return core.Ok(nil)
 }
 
-func guiApplicationOptions(cfg gui.GuiConfig, transport application.Transport) application.Options {
+func guiApplicationOptions(
+	cfg gui.GuiConfig,
+	transport application.Transport,
+	configs ...*config.Service,
+) application.Options {
 	name := cfg.Name
 	if name == "" {
 		name = "core-gui"
 	}
+	configSvc := firstDesktopConfig(configs)
 
 	var middleware application.Middleware
 	if cfg.Assets.Middleware != nil {
 		middleware = application.Middleware(cfg.Assets.Middleware)
 	}
 
-	options := appconfig.ApplicationOptions()
-	options.Name = name
-	options.Description = cfg.Description
+	options := appconfig.ApplicationOptions(configSvc)
+	if !desktopConfigHas(configSvc, "desktop.wails.application.name") {
+		options.Name = name
+	}
+	if !desktopConfigHas(configSvc, "desktop.wails.application.description") {
+		options.Description = cfg.Description
+	}
 	options.Icon = cfg.Icon
 	options.Services = cfg.Bindings
 	options.Transport = transport
-	options.Assets = application.AssetOptions{
-		Handler:        cfg.Assets.Handler,
-		Middleware:     middleware,
-		DisableLogging: cfg.Assets.DisableLogging,
+	options.Assets.Handler = cfg.Assets.Handler
+	options.Assets.Middleware = middleware
+	if !desktopConfigHas(configSvc, "desktop.wails.application.assets.disable_logging") {
+		options.Assets.DisableLogging = cfg.Assets.DisableLogging
 	}
-	options.Mac.ActivationPolicy = guiActivationPolicy(cfg.Mac.ActivationPolicy)
-	options.Mac.ApplicationShouldTerminateAfterLastWindowClosed =
-		cfg.Mac.ApplicationShouldTerminateAfterLastWindowClosed
-	options.Windows.DisableQuitOnLastWindowClosed =
-		cfg.Windows.DisableQuitOnLastWindowClosed
-	options.Windows.EnabledFeatures = cfg.Windows.EnabledFeatures
-	options.Windows.DisabledFeatures = cfg.Windows.DisabledFeatures
-	options.Windows.AdditionalBrowserArgs = cfg.Windows.AdditionalBrowserArgs
-	options.Windows.UseVisualHosting = cfg.Windows.UseVisualHosting
-	if cfg.Windows.WndClass != "" {
+	if !desktopConfigHas(configSvc, "desktop.wails.application.mac.activation_policy") {
+		options.Mac.ActivationPolicy = guiActivationPolicy(cfg.Mac.ActivationPolicy)
+	}
+	if !desktopConfigHas(
+		configSvc,
+		"desktop.wails.application.mac.application_should_terminate_after_last_window_closed",
+	) {
+		options.Mac.ApplicationShouldTerminateAfterLastWindowClosed =
+			cfg.Mac.ApplicationShouldTerminateAfterLastWindowClosed
+	}
+	if !desktopConfigHas(
+		configSvc,
+		"desktop.wails.application.windows.disable_quit_on_last_window_closed",
+	) {
+		options.Windows.DisableQuitOnLastWindowClosed =
+			cfg.Windows.DisableQuitOnLastWindowClosed
+	}
+	if !desktopConfigHas(configSvc, "desktop.wails.application.windows.enabled_features") {
+		options.Windows.EnabledFeatures = cfg.Windows.EnabledFeatures
+	}
+	if !desktopConfigHas(configSvc, "desktop.wails.application.windows.disabled_features") {
+		options.Windows.DisabledFeatures = cfg.Windows.DisabledFeatures
+	}
+	if !desktopConfigHas(configSvc, "desktop.wails.application.windows.additional_browser_args") {
+		options.Windows.AdditionalBrowserArgs = cfg.Windows.AdditionalBrowserArgs
+	}
+	if !desktopConfigHas(configSvc, "desktop.wails.application.windows.use_visual_hosting") {
+		options.Windows.UseVisualHosting = cfg.Windows.UseVisualHosting
+	}
+	if cfg.Windows.WndClass != "" &&
+		!desktopConfigHas(configSvc, "desktop.wails.application.windows.wnd_class") {
 		options.Windows.WndClass = cfg.Windows.WndClass
 	}
-	options.Windows.WebviewUserDataPath = cfg.Windows.WebviewUserDataPath
-	options.Windows.WebviewBrowserPath = cfg.Windows.WebviewBrowserPath
+	if !desktopConfigHas(configSvc, "desktop.wails.application.windows.webview_user_data_path") {
+		options.Windows.WebviewUserDataPath = cfg.Windows.WebviewUserDataPath
+	}
+	if !desktopConfigHas(configSvc, "desktop.wails.application.windows.webview_browser_path") {
+		options.Windows.WebviewBrowserPath = cfg.Windows.WebviewBrowserPath
+	}
 	options.ShouldQuit = cfg.ShouldQuit
 	options.OnShutdown = cfg.OnShutdown
 	options.PostShutdown = cfg.PostShutdown
 	options.SingleInstance = nil
 	if cfg.SingleInstance != nil {
-		options.SingleInstance = guiSingleInstanceOptions(*cfg.SingleInstance)
+		options.SingleInstance = guiSingleInstanceOptions(*cfg.SingleInstance, configSvc)
 	}
 	if cfg.OnPanic != nil {
 		options.PanicHandler = func(details *application.PanicDetails) {
@@ -134,8 +170,12 @@ func guiActivationPolicy(policy gui.ActivationPolicy) application.ActivationPoli
 	}
 }
 
-func guiSingleInstanceOptions(options gui.SingleInstanceOptions) *application.SingleInstanceOptions {
-	defaults := appconfig.ApplicationOptions().SingleInstance
+func guiSingleInstanceOptions(
+	options gui.SingleInstanceOptions,
+	configs ...*config.Service,
+) *application.SingleInstanceOptions {
+	configSvc := firstDesktopConfig(configs)
+	defaults := appconfig.ApplicationOptions(configSvc).SingleInstance
 	result := &application.SingleInstanceOptions{
 		UniqueID: defaults.UniqueID,
 		// OnSecondInstanceLaunch is connected below when the desktop supplies a callback.
@@ -145,7 +185,11 @@ func guiSingleInstanceOptions(options gui.SingleInstanceOptions) *application.Si
 		ExitCode:      defaults.ExitCode,
 		EncryptionKey: options.EncryptionKey,
 	}
-	if options.UniqueID != "" {
+	if options.UniqueID != "" &&
+		!desktopConfigHas(
+			configSvc,
+			"desktop.wails.application.single_instance.unique_id",
+		) {
 		result.UniqueID = options.UniqueID
 	}
 	if options.OnSecondInstanceLaunch != nil {
@@ -158,6 +202,45 @@ func guiSingleInstanceOptions(options gui.SingleInstanceOptions) *application.Si
 		}
 	}
 	return result
+}
+
+func firstDesktopConfig(configs []*config.Service) *config.Service {
+	for _, candidate := range configs {
+		if candidate != nil && candidate.Config() != nil {
+			return candidate
+		}
+	}
+	return nil
+}
+
+func desktopConfigHas(cfg *config.Service, key string) bool {
+	if cfg == nil || cfg.Config() == nil {
+		return false
+	}
+	var value any
+	return cfg.Get(key, &value).OK
+}
+
+func desktopConfigString(cfg *config.Service, key string, fallback string) string {
+	if cfg == nil || cfg.Config() == nil {
+		return fallback
+	}
+	var value string
+	if !cfg.Get(key, &value).OK {
+		return fallback
+	}
+	return value
+}
+
+func desktopSingleInstanceEnabled(cfg *config.Service) bool {
+	if cfg == nil || cfg.Config() == nil {
+		return true
+	}
+	var enabled bool
+	if !cfg.Get("desktop.single_instance.enabled", &enabled).OK {
+		return true
+	}
+	return enabled
 }
 
 func applyGUIModeDefaults(cfg *gui.GuiConfig) {

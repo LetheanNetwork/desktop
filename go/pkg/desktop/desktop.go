@@ -44,6 +44,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/agents"
 	"dappco.re/lthn/desktop/pkg/apikey"
+	"dappco.re/lthn/desktop/pkg/appconfig"
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/benchmark"
 	"dappco.re/lthn/desktop/pkg/build"
@@ -287,6 +288,8 @@ func (s *Service) Run() core.Result {
 	if s.opts.Connection == nil {
 		return core.Fail(core.E("desktop.Run", "Connection is required", nil))
 	}
+	configSvc, _ := core.ServiceFor[*config.Service](s.opts.Core, "config")
+	singleInstanceEnabled := desktopSingleInstanceEnabled(configSvc)
 
 	// Resolve the per-install SingleInstance encryption key. Generated
 	// once on first launch, persisted at ~/Lethean/data/keys/
@@ -294,7 +297,7 @@ func (s *Service) Run() core.Result {
 	// Cerberus #1442: replaces the build-time constant that was shared
 	// across every installed binary on every machine.
 	var singleInstanceKey [32]byte
-	if s.opts.Keys != nil {
+	if singleInstanceEnabled && s.opts.Keys != nil {
 		kr := s.opts.Keys.SingleInstanceKey()
 		if !kr.OK {
 			return core.Fail(core.E("desktop.Run", "load single-instance key", kr.Value.(error)))
@@ -337,7 +340,7 @@ func (s *Service) Run() core.Result {
 	// directly with Wails so bindings land at dappco.re/go/<pkg>/.
 	// No adapter layer — Wails generates straight from the package.
 	i18nSvc, _ := core.ServiceFor[*coreI18n.CoreService](s.opts.Core, "i18n")
-	configSvc, _ := core.ServiceFor[*config.Service](s.opts.Core, "config")
+	appconfigSvc := appconfig.NewService(appconfig.Options{Core: s.opts.Core})
 	pluginSvc, _ := core.ServiceFor[*plugin.Service](s.opts.Core, "plugin")
 	sandboxSvc, _ := core.ServiceFor[*sandbox.Service](s.opts.Core, "sandbox")
 	opencodeSvc, _ := core.ServiceFor[*opencode.Service](s.opts.Core, "opencode")
@@ -589,6 +592,10 @@ func (s *Service) Run() core.Result {
 		// instances directly. Bindings land at frontend/bindings/
 		// dappco.re/go/<pkg>/.
 		gui.Bind(i18nSvc),
+		// appconfig is the curated, typed settings bridge. It validates
+		// user-facing desktop controls before delegating persistence to
+		// the same configSvc bound immediately below.
+		gui.Bind(appconfigSvc),
 		gui.Bind(configSvc),
 		// Window registry — see note above.
 		gui.Bind(windowSvc),
@@ -689,6 +696,26 @@ func (s *Service) Run() core.Result {
 		gui.TrayItem{Type: "separator"},
 		gui.TrayItem{Label: "Quit lthn", ActionID: trayActionQuit},
 	)
+	trayTooltip := desktopConfigString(
+		configSvc,
+		"desktop.tray.tooltip",
+		"Lethean Desktop",
+	)
+	trayLabel := desktopConfigString(configSvc, "desktop.tray.label", "")
+	var singleInstanceOptions *gui.SingleInstanceOptions
+	if singleInstanceEnabled {
+		singleInstanceOptions = &gui.SingleInstanceOptions{
+			UniqueID:      "ai.lthn.desktop",
+			EncryptionKey: singleInstanceKey,
+			AdditionalData: map[string]string{
+				"app":     "lthn-desktop",
+				"version": lthn.Version,
+			},
+			OnSecondInstanceLaunch: func(d gui.SecondInstanceData) {
+				handleSecondInstanceLaunch(s.opts.Core, d)
+			},
+		}
+	}
 	// Build the GuiConfig — core/gui's Service owns wails app construction
 	// + sub-service registration. lthn/desktop holds no wails imports.
 	guiCfg := gui.GuiConfig{
@@ -700,13 +727,13 @@ func (s *Service) Run() core.Result {
 		Description:     s.opts.Description,
 		Icon:            s.opts.AppIcon,
 		Bindings:        wailsBindings,
-		WindowRegistry:  windowRegistry(),
+		WindowRegistry:  windowRegistry(configSvc),
 		WindowStatePath: windowStatePath,
 		Tray: &gui.TrayConfig{
 			Icon:         s.opts.TrayIcon,
 			IconTemplate: true, // darwin template icon; ignored elsewhere
-			Tooltip:      "Lethean Desktop",
-			Label:        "", // clear core/gui's "Core" default
+			Tooltip:      trayTooltip,
+			Label:        trayLabel,
 			Menu:         trayMenuItems,
 			// The panel is pre-created hidden in windowRegistry. Wails
 			// positions and toggles it under the status item while the
@@ -815,18 +842,8 @@ func (s *Service) Run() core.Result {
 		// Cerberus #1442: the key is per-install, generated once on
 		// first launch and persisted at ~/Lethean/data/keys/
 		// single-instance.aead by pkg/keys.
-		SingleInstance: &gui.SingleInstanceOptions{
-			UniqueID:      "ai.lthn.desktop",
-			EncryptionKey: singleInstanceKey,
-			AdditionalData: map[string]string{
-				"app":     "lthn-desktop",
-				"version": lthn.Version,
-			},
-			OnSecondInstanceLaunch: func(d gui.SecondInstanceData) {
-				handleSecondInstanceLaunch(s.opts.Core, d)
-			},
-		},
-		ShouldQuit: func() bool { return true },
+		SingleInstance: singleInstanceOptions,
+		ShouldQuit:     func() bool { return true },
 		OnShutdown: func() {
 			emitCoreEvent(s.opts.Core, "lthn:app:shutdown", nil)
 		},
@@ -988,16 +1005,22 @@ func runTrayStatusRefresh(c *core.Core, stop <-chan struct{}) {
 // Independent of the ticker so the boot-time first-fire (and tests) can
 // drive a single iteration.
 //
-// Lemma up with a model loaded → tooltip = basename(model_path) +
-// " — ready". Lemma unreachable, errored, or no model loaded →
-// tooltip = "no model loaded". Errors are debug-level only — no panic,
-// no user-visible noise (a menu-bar utility shouldn't surface engine
-// transients).
+// Lemma up with a model loaded → tooltip = configured tray prefix +
+// basename(model_path) + " — ready". Lemma unreachable, errored, or no
+// model loaded → configured prefix + " — no model loaded". Errors are
+// debug-level only — no panic, no user-visible noise (a menu-bar utility
+// shouldn't surface engine transients).
 func refreshTrayTooltipOnce(c *core.Core) {
 	if c == nil {
 		return
 	}
-	tooltip := "Lethean Desktop — no model loaded"
+	configSvc, _ := core.ServiceFor[*config.Service](c, "config")
+	prefix := desktopConfigString(
+		configSvc,
+		"desktop.tray.tooltip",
+		"Lethean Desktop",
+	)
+	tooltip := trayStatusTooltip(prefix, "")
 	admin, err := lemma.NewAdmin(lemma.AdminConfig{})
 	if err != nil {
 		core.Debug("desktop.tray.status", "err", err.Error())
@@ -1008,12 +1031,27 @@ func refreshTrayTooltipOnce(c *core.Core) {
 		if statusErr != nil {
 			core.Debug("desktop.tray.status", "err", statusErr.Error())
 		} else if base := pathBase(status.ModelPath); base != "" {
-			tooltip = "Lethean Desktop — " + base + " — ready"
+			tooltip = trayStatusTooltip(prefix, base)
 		}
 	}
 	c.Action("systray.set_tooltip").Run(core.Background(), core.NewOptions(
 		core.Option{Key: "task", Value: guisystray.TaskSetTrayTooltip{Tooltip: tooltip}},
 	))
+}
+
+func trayStatusTooltip(prefix string, model string) string {
+	prefix = core.Trim(prefix)
+	model = core.Trim(model)
+	if model == "" {
+		if prefix == "" {
+			return "no model loaded"
+		}
+		return prefix + " — no model loaded"
+	}
+	if prefix == "" {
+		return model + " — ready"
+	}
+	return prefix + " — " + model + " — ready"
 }
 
 // restoreSecondInstanceWindow brings a window forward in response to a
