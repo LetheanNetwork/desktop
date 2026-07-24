@@ -3,13 +3,10 @@
 // second_instance_test.go — Cerberus #70 F-4 LOW coverage for the
 // OnSecondInstanceLaunch fallback path in pkg/desktop. Two specs:
 //
-//   - WindowsUnregistered_FallbackOpensTray_Good (sic — the brief's
-//     canonical test name; the implementation falls through to the
-//     unified "app" shell rather than "tray", documented in
-//     restoreSecondInstanceWindow's rationale comment): confirms that
-//     when neither "app" nor "tray" is registered in CoreGUI, the
-//     restoreSecondInstanceWindow helper invokes window.open via the
-//     "app" WindowSpec lookup. The action substrate isn't wired in
+//   - WindowsUnregistered_FallbackOpensApp_Good: confirms that when
+//     "app" is not registered in CoreGUI, restoreSecondInstanceWindow
+//     reaches the audited window.open fallback. The action substrate
+//     isn't wired in
 //     this test (Wails isn't booted), so the assertion is on the
 //     audit emit that always fires alongside the create-and-show
 //     attempt — the substrate row is the load-bearing forensic
@@ -47,36 +44,31 @@ func secondInstanceAuditFixture(t *core.T) *audit.Service {
 
 // --- restoreSecondInstanceWindow ---
 
-// TestDesktop_SecondInstance_WindowsUnregistered_FallbackOpensTray_Good
+// TestDesktop_SecondInstance_WindowsUnregistered_FallbackOpensApp_Good
 // drives the fallback branch by passing a fresh *core.Core that has no
-// CoreGUI window service attached — windowExists returns false for both
-// "app" and "tray", restoreFocusedWindow returns false twice, and the
-// handler must reach the audit-emit + window.open create-and-show
-// branch. The window.open action returns its own r.OK (no Wails app
+// CoreGUI window service attached — windowExists returns false for app,
+// and the handler must reach the audit-emit + window.open
+// create-and-show branch. The window.open action returns its own r.OK
+// (no Wails app
 // loop in tests) — we cannot assert on its side-effect here. The
 // observable that DOES land is the audit row, exactly per the Cerberus
 // #70 F-4 recommendation that the audit emit is the load-bearing
 // forensic value-add even when the downstream create-and-show itself
 // fails. Spec-name preserved verbatim from the brief.
-func TestDesktop_SecondInstance_WindowsUnregistered_FallbackOpensTray_Good(t *core.T) {
+func TestDesktop_SecondInstance_WindowsUnregistered_FallbackOpensApp_Good(t *core.T) {
 	svc := secondInstanceAuditFixture(t)
 
 	c := core.New()
 	core.AssertNotNil(t, c, "core.New must return non-nil")
 
-	// Sanity preconditions — windowExists must report false for both
-	// the candidate windows so we know the fallback branch is the one
-	// under test. If either flipped to true here the test is observing
-	// the wrong branch.
+	// Sanity precondition — the one boot-registered window must be
+	// absent so the fallback branch is the one under test.
 	core.AssertFalse(t, windowExists(c, "app"),
 		"app must be unregistered in the test core")
-	core.AssertFalse(t, windowExists(c, "tray"),
-		"tray must be unregistered in the test core")
 
-	// Drive the handler. The opts argument carries AppIcon for the
-	// Linux openWindowSpec path; an empty Options is fine — the test
-	// asserts on the audit emit, not on the window-creation side effect.
-	restoreSecondInstanceWindow(c, Options{})
+	// Drive the handler. The test asserts on the audit emit, not on the
+	// window-creation side effect.
+	restoreSecondInstanceWindow(c)
 
 	// The audit substrate must carry exactly one fallback row.
 	qr := svc.Query(audit.QueryInput{
@@ -113,7 +105,7 @@ func TestDesktop_SecondInstance_AuditEmitOnFallback_Good(t *core.T) {
 	core.AssertEqual(t, audit.EventDesktopSecondInstanceFallback, ev.Event)
 	core.AssertEqual(t, audit.OutcomeOK, ev.Outcome)
 	core.AssertEqual(t, desktopScope, ev.Scope)
-	core.AssertEqual(t, "app,tray", ev.Meta["primary_targets"])
+	core.AssertEqual(t, "app", ev.Meta["primary_targets"])
 	core.AssertEqual(t, "app", ev.Meta["fallback_target"])
 	core.AssertEqual(t, "window.open", ev.Meta["fallback_via"])
 	// Negative — no caller-controlled payload bytes must reach the row.
