@@ -10,6 +10,11 @@
 // below are the offline/mock default so the app runs with no backend.
 // ─────────────────────────────────────────────────────────────────────────
 import { InjectionToken } from '@angular/core';
+import {
+  SURFACE_APPS,
+  SURFACE_CATEGORIES,
+  SURFACE_CATEGORY_APPS,
+} from './surfaces/surface-registry';
 
 // ── core types ──────────────────────────────────────────────────────────
 export type ViewMode = 'desktop' | 'shell' | 'device';
@@ -273,6 +278,7 @@ export const APPS: Record<string, AppDef> = {
     dev: true,
     route: 'tenant',
   },
+  ...SURFACE_APPS,
 };
 
 export const ORDER: string[] = [
@@ -330,7 +336,7 @@ export const CATEGORIES: Category[] = [
     id: 'office',
     label: $localize`:Application category@@category.office:Office`,
     icon: 'briefcase',
-    apps: ['tasks', 'tenant'],
+    apps: ['tasks', 'tenant', ...SURFACE_CATEGORY_APPS['office']],
   },
   {
     id: 'ai',
@@ -356,6 +362,7 @@ export const CATEGORIES: Category[] = [
     icon: 'network-wired',
     apps: ['lethernet'],
   },
+  ...SURFACE_CATEGORIES.filter(({ id }) => id !== 'office'),
 ];
 
 // child-view rails (a window's internal nav). key, icon, label.

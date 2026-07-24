@@ -60,3 +60,5 @@ build/sdk/*/
 
 # Sonar scanner local cache
 .scannerwork/
+frontend-lit-ref/
+.agents/

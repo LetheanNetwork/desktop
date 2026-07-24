@@ -48,6 +48,11 @@
             ],
             "styles": ["src/styles.scss"],
             "inlineStyleLanguage": "scss",
+            "allowedCommonJsDependencies": [
+              "@xterm/addon-fit",
+              "@xterm/addon-web-links",
+              "@xterm/xterm"
+            ],
             "polyfills": ["@angular/localize/init"]
           },
           "configurations": {

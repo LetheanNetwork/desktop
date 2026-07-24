@@ -12,11 +12,14 @@
 // ─────────────────────────────────────────────────────────────────────────
 import { Type } from '@angular/core';
 import { Win } from '../desktop.data';
+import { SURFACE_APP_REGISTRY } from '../surfaces/surface-registry';
 
 /** Implemented by every app-view. `win` is the only required input; apps read
  *  their sub/systab from it and call WindowManagerService to change them, so the
  *  service stays the single source of truth. */
-export interface AppView { win: Win; }
+export interface AppView {
+  win: Win;
+}
 
 export type AppComponentLoader = () => Promise<Type<AppView>>;
 
@@ -27,17 +30,13 @@ const loadDevPanel: AppComponentLoader = () =>
 export const APP_REGISTRY: Record<string, AppComponentLoader> = {
   control: () => import('./control.app').then(({ ControlApp }) => ControlApp),
   chat: () => import('./chat.app').then(({ ChatApp }) => ChatApp),
-  telemetry: () =>
-    import('./telemetry.app').then(({ TelemetryApp }) => TelemetryApp),
-  activity: () =>
-    import('./activity.app').then(({ ActivityApp }) => ActivityApp),
-  lethernet: () =>
-    import('./lethernet.app').then(({ LetherNetApp }) => LetherNetApp),
+  telemetry: () => import('./telemetry.app').then(({ TelemetryApp }) => TelemetryApp),
+  activity: () => import('./activity.app').then(({ ActivityApp }) => ActivityApp),
+  lethernet: () => import('./lethernet.app').then(({ LetherNetApp }) => LetherNetApp),
   games: () => import('./games.app').then(({ GamesApp }) => GamesApp),
   notepad: () => import('./notepad.app').then(({ NotepadApp }) => NotepadApp),
   files: () => import('./files.app').then(({ FilesApp }) => FilesApp),
-  settings: () =>
-    import('./settings.app').then(({ SettingsApp }) => SettingsApp),
+  settings: () => import('./settings.app').then(({ SettingsApp }) => SettingsApp),
   // Core/IDE panels share one view; route data and shell inputs select content.
   cpanel: loadDevPanel,
   explorer: loadDevPanel,
@@ -53,4 +52,5 @@ export const APP_REGISTRY: Record<string, AppComponentLoader> = {
   marketplace: loadDevPanel,
   tasks: loadDevPanel,
   tenant: loadDevPanel,
+  ...SURFACE_APP_REGISTRY,
 };

@@ -1,17 +1,7 @@
 import { Type } from '@angular/core';
 import { ActivatedRouteSnapshot, Route, Routes } from '@angular/router';
-import {
-  APPS,
-  CATEGORIES,
-  CTRL_NAV,
-  GAMES_NAV,
-  SETTINGS_NAV,
-} from './desktop.data';
-import {
-  APP_REGISTRY,
-  AppComponentLoader,
-  AppView,
-} from './apps/app-view';
+import { APPS, CATEGORIES, CTRL_NAV, GAMES_NAV, SETTINGS_NAV } from './desktop.data';
+import { APP_REGISTRY, AppComponentLoader, AppView } from './apps/app-view';
 
 export type AppNavItem = readonly [path: string, icon: string, title: string];
 
@@ -63,15 +53,10 @@ const appNav: Partial<Record<string, readonly AppNavItem[]>> = {
 
 const dataOf = (route: Route): DesktopRouteData | null => {
   const data = route.data as Partial<DesktopRouteData> | undefined;
-  return data?.category && data.title && data.icon && data.kind
-    ? (data as DesktopRouteData)
-    : null;
+  return data?.category && data.title && data.icon && data.kind ? (data as DesktopRouteData) : null;
 };
 
-const appRoute = (
-  categoryId: string,
-  appId: string,
-): Route => {
+const appRoute = (categoryId: string, appId: string): Route => {
   const app = APPS[appId];
   const loadComponent = APP_REGISTRY[appId];
   if (!app || !loadComponent) {
@@ -86,22 +71,20 @@ const appRoute = (
           pathMatch: 'full',
           redirectTo: app.defaultSub ?? nav[0][0],
         },
-        ...nav.map(
-          ([path, icon, title]): Route => ({
-            path,
-            data: {
-              category: categoryId,
-              title,
-              icon,
-              kind: 'subview',
-              app: appId,
-              sub: path,
-            } satisfies DesktopRouteData,
-            // A componentless leaf still needs an activation target to satisfy
-            // Angular's route validator. The parent app component owns the view.
-            children: [],
-          }),
-        ),
+        ...nav.map(([path, icon, title]): Route => ({
+          path,
+          data: {
+            category: categoryId,
+            title,
+            icon,
+            kind: 'subview',
+            app: appId,
+            sub: path,
+          } satisfies DesktopRouteData,
+          // A componentless leaf still needs an activation target to satisfy
+          // Angular's route validator. The parent app component owns the view.
+          children: [],
+        })),
       ]
     : [];
 
@@ -134,9 +117,9 @@ export const DESKTOP_APP_ROUTES: Routes = CATEGORIES.map((category) => ({
 
 /** Read menu and app-host metadata from Router.config, never desktop.data. */
 export function readDesktopRouteCatalog(config: Routes): DesktopRouteCatalog {
-  const shell = config.find(
-    (route) => route.path === '' && route.children === DESKTOP_APP_ROUTES,
-  ) ?? config.find((route) => route.path === '' && route.children?.length);
+  const shell =
+    config.find((route) => route.path === '' && route.children === DESKTOP_APP_ROUTES) ??
+    config.find((route) => route.path === '' && route.children?.length);
   const categories: DesktopMenuCategory[] = [];
   const apps: Record<string, DesktopMenuApp> = {};
 
@@ -154,12 +137,7 @@ export function readDesktopRouteCatalog(config: Routes): DesktopRouteCatalog {
 
     for (const route of categoryRoute.children ?? []) {
       const appData = dataOf(route);
-      if (
-        appData?.kind !== 'app' ||
-        !appData.app ||
-        !route.path ||
-        !route.loadComponent
-      ) {
+      if (appData?.kind !== 'app' || !appData.app || !route.path || !route.loadComponent) {
         continue;
       }
 

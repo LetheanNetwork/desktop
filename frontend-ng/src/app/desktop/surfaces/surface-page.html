@@ -1,0 +1,234 @@
+<section class="surface" [attr.data-surface]="config.id" [attr.data-kind]="config.kind ?? 'list'">
+  <header class="surface__header">
+    <div class="surface__identity">
+      <span class="surface__icon" aria-hidden="true">
+        <lthn-icon [attr.name]="config.icon" size="15"></lthn-icon>
+      </span>
+      <div>
+        @if (config.eyebrow) {
+          <div class="surface__eyebrow">{{ config.eyebrow }}</div>
+        }
+        <h2>{{ config.title }}</h2>
+        <p>{{ config.subtitle }}</p>
+      </div>
+    </div>
+    @if (config.actions?.length) {
+      <div class="surface__actions" aria-label="View actions" i18n-aria-label>
+        @for (action of config.actions; track action.id) {
+          <button
+            type="button"
+            class="surface__button"
+            [class.surface__button--primary]="action.kind === 'run' || action.kind === 'add'"
+            [disabled]="busy()"
+            (click)="runAction(action)"
+          >
+            <lthn-icon [attr.name]="action.icon" size="11"></lthn-icon>
+            {{ action.label }}
+          </button>
+        }
+      </div>
+    }
+  </header>
+
+  @if (config.metrics?.length) {
+    <div class="surface__metrics">
+      @for (metric of config.metrics; track metric.label) {
+        <article class="surface__metric" [attr.data-tone]="metric.tone ?? 'muted'">
+          <span>{{ metric.label }}</span>
+          <strong>{{ metric.value }}</strong>
+          @if (metric.hint) {
+            <small>{{ metric.hint }}</small>
+          }
+        </article>
+      }
+    </div>
+  }
+
+  @if (config.chart?.length) {
+    <div class="surface__chart" aria-label="Trend" i18n-aria-label>
+      <div>
+        <span i18n="Chart heading@@surface.common.trend">Trend</span>
+        <strong>{{ config.chart.at(-1) }}</strong>
+      </div>
+      <lthn-sparkline
+        [attr.data]="config.chart.join(',')"
+        color="var(--brand-300)"
+        width="260"
+        height="46"
+        fill
+      ></lthn-sparkline>
+    </div>
+  }
+
+  @if (config.filters?.length || config.searchPlaceholder) {
+    <div class="surface__toolbar">
+      @if (config.searchPlaceholder) {
+        <label class="surface__search">
+          <lthn-icon name="magnifying-glass" size="11"></lthn-icon>
+          <span class="sr-only" i18n="Search label@@surface.common.search">Search</span>
+          <input
+            type="search"
+            [placeholder]="config.searchPlaceholder"
+            [value]="query()"
+            (input)="setQuery($event)"
+          />
+        </label>
+      }
+      @if (config.filters?.length) {
+        <div class="surface__filters" aria-label="Filters" i18n-aria-label>
+          @for (filter of config.filters; track filter.id) {
+            <button
+              type="button"
+              [class.is-active]="activeFilter() === filter.id"
+              [attr.aria-pressed]="activeFilter() === filter.id"
+              (click)="selectFilter(filter.id)"
+            >
+              {{ filter.label }}
+            </button>
+          }
+        </div>
+      }
+    </div>
+  }
+
+  @if (config.kind === 'editor') {
+    <div class="surface__editor">
+      <div class="surface__editor-label">
+        <span>{{ config.editorLabel }}</span>
+        <span i18n="Read only safety label@@surface.common.readOnly">read-only query surface</span>
+      </div>
+      <textarea
+        spellcheck="false"
+        [value]="editor()"
+        [attr.aria-label]="config.editorLabel"
+        (input)="setEditor($event)"
+      ></textarea>
+      @if (result()) {
+        <pre class="surface__result">{{ result() }}</pre>
+      }
+    </div>
+  }
+
+  @if ((config.kind ?? 'list') === 'board') {
+    <div class="surface__board">
+      @for (column of visibleColumns(); track column.id) {
+        <section
+          class="surface__column"
+          [attr.data-column]="column.id"
+          (dragover)="allowDrop($event)"
+          (drop)="drop($event, column.id)"
+        >
+          <header>
+            <span>{{ column.title }}</span>
+            @if (column.value) {
+              <strong>{{ column.value }}</strong>
+            } @else {
+              <strong>{{ column.cards.length }}</strong>
+            }
+          </header>
+          <div class="surface__cards">
+            @for (card of column.cards; track card.id) {
+              <button
+                type="button"
+                class="surface__card"
+                [class.is-selected]="selectedId() === card.id"
+                [attr.data-status]="card.status"
+                draggable="true"
+                (dragstart)="dragStart($event, card, column.id)"
+                (click)="selectRow(card.id)"
+              >
+                <span class="surface__card-id">{{ card.id }}</span>
+                <strong>{{ card.title }}</strong>
+                @if (card.detail) {
+                  <small>{{ card.detail }}</small>
+                }
+                <span class="surface__card-meta">
+                  <span>{{ card.meta }}</span>
+                  <span>{{ card.value }}</span>
+                </span>
+              </button>
+            } @empty {
+              <div class="surface__empty" i18n="Empty board column@@surface.common.emptyColumn">
+                No matching items
+              </div>
+            }
+          </div>
+        </section>
+      }
+    </div>
+  } @else if (visibleRows().length) {
+    <div class="surface__list" role="list">
+      @for (row of visibleRows(); track row.id) {
+        <button
+          type="button"
+          role="listitem"
+          class="surface__row"
+          [class.is-selected]="selectedId() === row.id"
+          [attr.data-status]="row.status"
+          [attr.data-tone]="row.tone"
+          (click)="selectRow(row.id)"
+        >
+          <span class="surface__row-marker" aria-hidden="true"></span>
+          <span class="surface__row-main">
+            <span class="surface__row-title">
+              <strong>{{ row.title }}</strong>
+              @if (row.status) {
+                <span class="surface__pill">{{ row.status }}</span>
+              }
+            </span>
+            @if (row.detail) {
+              <small>{{ row.detail }}</small>
+            }
+            @if (row.tags?.length) {
+              <span class="surface__tags">
+                @for (tag of row.tags; track tag) {
+                  <span>{{ tag }}</span>
+                }
+              </span>
+            }
+            @if (row.progress !== undefined) {
+              <span class="surface__progress">
+                <span [style.width]="progress(row.progress)"></span>
+              </span>
+            }
+          </span>
+          <span class="surface__row-aside">
+            <strong>{{ row.value }}</strong>
+            <span>{{ row.meta }}</span>
+            <small>{{ row.secondary }}</small>
+          </span>
+        </button>
+      }
+    </div>
+  } @else if (!config.columns?.length) {
+    <div class="surface__empty">
+      <lthn-icon name="inbox" size="20"></lthn-icon>
+      <span>{{ config.emptyLabel ?? 'No items match this view.' }}</span>
+    </div>
+  }
+
+  @if (config.sections?.length) {
+    <div class="surface__sections">
+      @for (section of config.sections; track section.title) {
+        <article [attr.data-tone]="section.tone ?? 'muted'">
+          <h3>{{ section.title }}</h3>
+          @if (section.body) {
+            <p>{{ section.body }}</p>
+          }
+          @if (section.items?.length) {
+            <ul>
+              @for (item of section.items; track item) {
+                <li>{{ item }}</li>
+              }
+            </ul>
+          }
+        </article>
+      }
+    </div>
+  }
+
+  @if (notice()) {
+    <div class="surface__notice" role="status">{{ notice() }}</div>
+  }
+  <footer>{{ config.footer }}</footer>
+</section>

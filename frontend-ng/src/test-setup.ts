@@ -37,6 +37,14 @@ if (window !== globalThis) {
   defineStorage(window, 'sessionStorage', testSessionStorage);
 }
 
+// jsdom's canvas stub logs a "not implemented" error before returning null.
+// Components already treat a null context as the non-WebGL fallback, so keep
+// that browser contract without polluting otherwise-green test output.
+Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+  configurable: true,
+  value: () => null,
+});
+
 (globalThis as typeof globalThis & { litIssuedWarnings?: Set<string> }).litIssuedWarnings = new Set(
   ['dev-mode'],
 );
