@@ -1,9 +1,10 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
+//go:build !ios && !android
+
 package main
 
 import (
-
 	core "dappco.re/go"
 )
 

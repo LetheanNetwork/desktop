@@ -1,14 +1,16 @@
-# Lethean Desktop — multi-OS build + artifact upload.
+# Lethean Desktop — desktop and mobile build + artifact upload.
 #
 # Triggers:
 #   - push to main / dev   → CI build, upload as workflow artifacts (7d retention)
 #   - tag `v*`             → CI build + create GitHub Release with the binaries
 #   - manual dispatch      → on-demand build (useful for PR sanity checks)
 #
-# Each OS produces a single canonical artifact:
+# Each target produces a single canonical artifact:
 #   - macOS (arm64): bin/lthn.app (ad-hoc signed, .zip-bundled for upload)
 #   - Linux (amd64): bin/lthn (raw ELF)
 #   - Windows (amd64): bin/lthn.exe
+#   - iOS Simulator (arm64): bin/lthn.app (ad-hoc signed, zipped)
+#   - Android: bin/lthn.apk (arm64-v8a + x86_64, debug-key signed)
 #
 # Local builds: `task build` (auto-detects OS). CI mirrors that path
 # via OS-specific wails3 Taskfile targets — no separate CI build logic
@@ -25,7 +27,7 @@ on:
   workflow_dispatch: {}
 
 env:
-  GO_VERSION:   "1.26.0"
+  GO_VERSION:   "1.26.2"
   NODE_VERSION: "22"   # Angular frontend toolchain
 
 jobs:
@@ -51,6 +53,16 @@ jobs:
             artifact:  lthn-windows-amd64
             ext:       .exe
             task:      windows:build
+          - os:        ios
+            runner:    macos-15
+            artifact:  lthn-ios-simulator-arm64
+            ext:       .app
+            task:      ios:package
+          - os:        android
+            runner:    ubuntu-latest
+            artifact:  lthn-android-universal
+            ext:       .apk
+            task:      android:package:fat
 
     steps:
       - name: Checkout
@@ -84,10 +96,32 @@ jobs:
             libgtk-3-dev libwebkit2gtk-4.1-dev \
             pkg-config build-essential
 
+      - name: Set up Java
+        if: matrix.os == 'android'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK and NDK
+        if: matrix.os == 'android'
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build packages
+        if: matrix.os == 'android'
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;26.3.11579264"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
+
       - name: Install Wails CLI + Task
         shell: bash
         run: |
-          go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.117
           go install github.com/go-task/task/v3/cmd/task@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
@@ -96,14 +130,17 @@ jobs:
         run: npm ci
 
       - name: Generate bindings (TypeScript)
-        run: task common:generate:bindings
+        if: matrix.os != 'ios' && matrix.os != 'android'
+        run: wails3 task common:generate:bindings
 
       - name: Typecheck frontend
         working-directory: frontend-ng
         run: npx tsc --noEmit
 
       - name: Build
-        run: task ${{ matrix.task }}
+        env:
+          WAILS3_TOOL: wails3
+        run: wails3 task ${{ matrix.task }}
 
       - name: Bundle macOS .app
         if: matrix.os == 'macos'
@@ -125,6 +162,18 @@ jobs:
         run: |
           mkdir -p artifact
           cp bin/lthn.exe artifact/lthn-windows-amd64.exe
+
+      - name: Bundle iOS Simulator .app
+        if: matrix.os == 'ios'
+        run: |
+          mkdir -p artifact
+          ditto -c -k --keepParent bin/lthn.app artifact/lthn-ios-simulator-arm64.zip
+
+      - name: Stage Android artifact
+        if: matrix.os == 'android'
+        run: |
+          mkdir -p artifact
+          cp bin/lthn.apk artifact/lthn-android-universal.apk
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -159,6 +208,8 @@ jobs:
             dist/lthn-darwin-arm64.zip
             dist/lthn-linux-amd64
             dist/lthn-windows-amd64.exe
+            dist/lthn-ios-simulator-arm64.zip
+            dist/lthn-android-universal.apk
           generate_release_notes: true
           draft:      false
           prerelease: ${{ contains(github.ref, '-') }}

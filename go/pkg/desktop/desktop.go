@@ -882,6 +882,7 @@ func (s *Service) Run() core.Result {
 	if r := s.gui.OnStartup(core.Background()); !r.OK {
 		return r
 	}
+	registerRuntimeSystemEvents(s.opts.Core, s.gui.App())
 
 	// Window state path is now wired via GuiConfig.WindowStatePath
 	// above. Pre-creation of the registered windows is owned by

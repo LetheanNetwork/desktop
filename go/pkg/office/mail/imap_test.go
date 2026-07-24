@@ -72,6 +72,7 @@ func TestResetBackoff_Good(t *testing.T) {
 // TestUIDValidityChange_PreserveAndResync_Ugly — when UIDValidity changes:
 // threads.md renamed to .preresync-{old}, EventResyncStarted+Completed fire.
 func TestUIDValidityChange_PreserveAndResync_Ugly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	c := core.New()
 	svc := NewService(c)
 
@@ -114,6 +115,7 @@ func TestUIDValidityChange_PreserveAndResync_Ugly(t *testing.T) {
 // TestStateFile_AccountFolderIsolation_Ugly — two accounts polling the same
 // folder slug don't cross-contaminate state files.
 func TestStateFile_AccountFolderIsolation_Ugly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	c := core.New()
 	svc := NewService(c)
 

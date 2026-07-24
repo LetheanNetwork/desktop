@@ -1,5 +1,7 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
+//go:build !ios && !android
+
 // `lthn fleet` — read-only inspector for the master DuckDB
 // (~/Lethean/data/lthn.duckdb). Backs the `gui.sh fleet ...`
 // debug skill verb so operators can sanity-check what's landed

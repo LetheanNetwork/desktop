@@ -15,6 +15,7 @@ import { DesktopEffects } from './store/desktop.effects';
 import { desktopFeature } from './store/desktop.reducer';
 import { DesktopMcpService } from './desktop/desktop-mcp.service';
 import { DeepLinkNavigationService } from './deep-link-navigation.service';
+import { MobileRuntimeService } from './mobile-runtime.service';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -32,5 +33,6 @@ export const appConfig: ApplicationConfig = {
     provideAppInitializer(() => {
       inject(DeepLinkNavigationService);
     }),
+    provideAppInitializer(() => inject(MobileRuntimeService).ready),
   ],
 };

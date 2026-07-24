@@ -20,9 +20,9 @@ import (
 // one synthetic id; tests that exercise the multi/zero paths set
 // this explicitly.
 type testAccountProvider struct {
-	pub          []byte
-	priv         []byte
-	unlockedIDs  []string
+	pub         []byte
+	priv        []byte
+	unlockedIDs []string
 }
 
 func newTestAccountProvider(t *testing.T) *testAccountProvider {
@@ -75,13 +75,7 @@ func (p *lockedAccountProvider) PrivateKeyFor(_ string) (*account.PrivateKeyHand
 // newTestService constructs a mail Service with a temp mail dir.
 func newTestMailService(t *testing.T) (*Service, *testAccountProvider) {
 	t.Helper()
-	tmp := t.TempDir()
-	// Override paths.Root() via env is not available — set the mail dir
-	// via the private mailDir helper. Instead, we test via methods
-	// that accept an account provider; the mailDir calls inside will
-	// use whatever paths.Root() returns. For unit tests we use the
-	// default home-based path; account provider is tested in isolation.
-	_ = tmp
+	t.Setenv("HOME", t.TempDir())
 	c := core.New()
 	svc := NewService(c)
 	ap := newTestAccountProvider(t)
@@ -131,6 +125,7 @@ func TestSaveAccount_RoundTripDecrypt_Good(t *testing.T) {
 // TestSaveAccount_NoUnlockNeeded_Good — Save works while session is locked
 // (public key only, per §1.2 write invariant).
 func TestSaveAccount_NoUnlockNeeded_Good(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	c := core.New()
 	svc := NewService(c)
 	ap := newTestAccountProvider(t)

@@ -27,6 +27,13 @@
   --r-xs: 4px; --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-xl: 18px; --r-2xl: 22px;
 }
 
+[data-platform="android"] {
+  --font-sans: "Roboto", "Noto Sans", system-ui, sans-serif;
+  --font-mono: "Roboto Mono", ui-monospace, monospace;
+  --font-display: "Roboto", "Noto Sans", system-ui, sans-serif;
+  --r-xs: 4px; --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-xl: 18px; --r-2xl: 24px;
+}
+
 /* Native list-row chrome — used by Darwin/iOS/iPad shells.
    Body data stays identical; only the row height + separators change. */
 .native-list { background: var(--ink-2); border: 1px solid var(--line-1); border-radius: var(--r-lg); overflow: hidden; }
