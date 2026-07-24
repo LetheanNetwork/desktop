@@ -5,7 +5,7 @@ package serverkey
 import (
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
-	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
+	"github.com/Snider/Enchantrix/pkg/crypt/std/pgp"
 )
 
 // NewService constructs the serverkey Service. Generates the per-

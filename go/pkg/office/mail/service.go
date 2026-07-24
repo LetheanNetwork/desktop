@@ -34,7 +34,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/office/internal/safedir"
 	"dappco.re/lthn/desktop/pkg/paths"
-	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
+	"github.com/Snider/Enchantrix/pkg/crypt/std/pgp"
 	"gopkg.in/yaml.v3"
 )
 

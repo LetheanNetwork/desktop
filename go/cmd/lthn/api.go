@@ -3,7 +3,6 @@
 package main
 
 import (
-
 	core "dappco.re/go"
 
 	lthnapi "dappco.re/lthn/desktop/pkg/api"
@@ -123,7 +122,12 @@ func apiSDK(args []string) int {
 	// the same directory the SDK output ends up under so subsequent
 	// runs can be reproduced without re-invoking spec.
 	if specPath == "" {
-		tmp := c.Fs().TempDir("lthn-api-")
+		tmpR := c.Fs().TempDir("lthn-api-")
+		if !tmpR.OK {
+			core.Print(core.Stderr(), "lthn api sdk: temp directory: %s\n", tmpR.Error())
+			return 1
+		}
+		tmp := tmpR.Value.(string)
 		specPath = core.Path(tmp, "openapi.yaml")
 		if r := lthnapi.ExportSpec(c, "yaml", specPath, lthnapi.DefaultSpecInfo()); !r.OK {
 			core.Print(core.Stderr(), "lthn api sdk: build spec: %s\n", r.Error())

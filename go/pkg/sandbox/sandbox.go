@@ -16,7 +16,6 @@
 package sandbox
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/container"
 	"dappco.re/go/process"
@@ -37,10 +36,10 @@ type Options struct {
 const (
 	// defaultImage is the canonical fallback when neither Options.DefaultImage
 	// nor SpawnInput.Image is set.
-	defaultImage    = "lthn/dev:latest"
-	spawnOp         = "sandbox.Spawn"
-	spawnAppleOp    = "sandbox.spawnApple"
-	inspectImageOp  = "sandbox.InspectImage"
+	defaultImage   = "lthn/dev:latest"
+	spawnOp        = "sandbox.Spawn"
+	spawnAppleOp   = "sandbox.spawnApple"
+	inspectImageOp = "sandbox.InspectImage"
 
 	// inspectImageTimeout caps the `docker manifest inspect` wall-clock so
 	// a hung registry can't stall the marketplace Install pipeline. 30s
@@ -330,12 +329,13 @@ func (s *Service) spawnApple(input SpawnInput, timeout core.Duration) core.Resul
 	if input.CPUs > 0 {
 		runOpts = append(runOpts, container.WithCPUs(input.CPUs))
 	}
-	ctr, err := provider.Run(img, runOpts...)
-	if err != nil {
-		return core.Fail(core.E(spawnAppleOp, "run failed", err))
+	runR := provider.Run(img, runOpts...)
+	if !runR.OK {
+		return core.Fail(core.E(spawnAppleOp, "run failed", runR.Err()))
 	}
-	if waitErr := provider.Wait(ctx, ctr.ID); waitErr != nil {
-		return core.Fail(core.E(spawnAppleOp, "wait failed", waitErr))
+	ctr := runR.Value.(*container.Container)
+	if waitR := provider.Wait(ctx, ctr.ID); !waitR.OK {
+		return core.Fail(core.E(spawnAppleOp, "wait failed", waitR.Err()))
 	}
 	dur := core.Since(started).Milliseconds()
 	// AppleProvider's Container struct has Status but no ExitCode

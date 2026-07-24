@@ -8,10 +8,9 @@
 package php
 
 import (
-
 	core "dappco.re/go"
-	"dappco.re/go/php/pkg/php"
 	"dappco.re/go/process"
+	"dappco.re/go/render/engine/php"
 )
 
 const composerSource = "composer"

@@ -124,11 +124,12 @@ func fleetOpenReadOnly() (*store.DuckDB, int) {
 			}
 		}
 	}
-	db, r := store.OpenDuckDB(tmpPath)
+	r := store.OpenDuckDB(tmpPath)
 	if !r.OK {
 		core.Print(core.Stderr(), "fleet: open failed: %s\n", r.Error())
 		return nil, 1
 	}
+	db := r.Value.(*store.DuckDB)
 	return db, 0
 }
 

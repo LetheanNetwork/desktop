@@ -11,7 +11,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"dappco.re/lthn/desktop/pkg/sales/deals"
-	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
+	"github.com/Snider/Enchantrix/pkg/crypt/std/pgp"
 )
 
 // stubSessionGate is the test double for the consumer-defined

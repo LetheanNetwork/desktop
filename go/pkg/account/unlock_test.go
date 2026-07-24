@@ -14,7 +14,7 @@ import (
 	core "dappco.re/go"
 	subject "dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/serverkey"
-	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
+	"github.com/Snider/Enchantrix/pkg/crypt/std/pgp"
 	"github.com/ProtonMail/go-crypto/openpgp"
 	"github.com/ProtonMail/go-crypto/openpgp/packet"
 )

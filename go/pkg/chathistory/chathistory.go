@@ -53,7 +53,7 @@ import (
 	// Using v2 to align with dappco.re/go/orm's transitive pin —
 	// prevents CGo duplicate-symbol link errors from v1 + v2 both
 	// embedding DuckDB statics into the same binary.
-	_ "github.com/marcboeker/go-duckdb/v2"
+	_ "github.com/duckdb/duckdb-go/v2"
 )
 
 //go:embed migrations/001_init.sql

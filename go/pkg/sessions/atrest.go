@@ -57,7 +57,7 @@ import (
 
 	"dappco.re/lthn/desktop/pkg/account"
 
-	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
+	"github.com/Snider/Enchantrix/pkg/crypt/std/pgp"
 )
 
 // atrestAccountSurface is the narrow live-read surface sessions

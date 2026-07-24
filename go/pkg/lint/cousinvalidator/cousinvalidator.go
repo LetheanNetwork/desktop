@@ -152,7 +152,7 @@ func (f Finding) String() string {
 //	for _, f := range findings { core.Print(f.String()) }
 func Scan(root string) ([]Finding, error) {
 	var out []Finding
-	walkErr := core.PathWalkDir(root, func(path string, d core.FsDirEntry, err error) error {
+	walkR := core.PathWalkDir(root, func(path string, d core.FsDirEntry, err error) error {
 		if err != nil {
 			// Root-level error (missing scan root, permission
 			// denied on the top dir) propagates so a CI mis-
@@ -184,9 +184,9 @@ func Scan(root string) ([]Finding, error) {
 		out = append(out, findings...)
 		return nil
 	})
-	if walkErr != nil {
+	if !walkR.OK {
 		return nil, core.E("cousinvalidator.Scan",
-			"PathWalkDir under "+root, walkErr)
+			"PathWalkDir under "+root, walkR.Err())
 	}
 	return out, nil
 }

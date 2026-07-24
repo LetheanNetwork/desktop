@@ -109,10 +109,10 @@ type RoutingRule struct {
 //
 // Kind distinguishes runtime topology:
 //   - "remote"  : provider handles routing; api_key_ref + base_url
-//                 are load-bearing
+//     are load-bearing
 //   - "local"   : runs against the user's machine fleet via routing
-//                 rules; model_settings JSON carries context length,
-//                 temperature, sampling params
+//     rules; model_settings JSON carries context length,
+//     temperature, sampling params
 type Agent struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
@@ -159,10 +159,11 @@ func New() core.Result {
 	if r := paths.DataDir(); !r.OK {
 		return r
 	}
-	db, openR := store.OpenDuckDBReadWrite(dbPathR.Value.(string))
+	openR := store.OpenDuckDBReadWrite(dbPathR.Value.(string))
 	if !openR.OK {
-		return core.Fail(core.E("fleet.New", "open master DuckDB", openR.Value.(error)))
+		return core.Fail(core.E("fleet.New", "open master DuckDB", openR.Err()))
 	}
+	db := openR.Value.(*store.DuckDB)
 	if r := applySchema(db); !r.OK {
 		closeR := db.Close()
 		if !closeR.OK {
@@ -180,6 +181,7 @@ func New() core.Result {
 // Usage example:
 //
 //	if r := fleet.Register(c); !r.OK { return r }
+//
 // Register is lock-tolerant. DuckDB serialises every connection to the
 // master DB by an OS file lock — when the GUI or `lthn serve` already
 // holds it, a sibling CLI process (e.g. `lthn fleet ...`) can't open

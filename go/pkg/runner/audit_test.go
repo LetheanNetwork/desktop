@@ -19,8 +19,8 @@ import (
 	"sync"
 
 	core "dappco.re/go"
-	"dappco.re/go/ai/ai"
 	"dappco.re/go/inference"
+	"dappco.re/go/inference/agent/ai"
 
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/runner"
@@ -92,12 +92,12 @@ func (m *runnerStubModel) Chat(ctx context.Context, messages []inference.Message
 	return m.seq()
 }
 
-func (m *runnerStubModel) Classify(context.Context, []string, ...inference.GenerateOption) ([]inference.ClassifyResult, error) {
-	return nil, nil
+func (m *runnerStubModel) Classify(context.Context, []string, ...inference.GenerateOption) core.Result {
+	return core.Ok([]inference.ClassifyResult(nil))
 }
 
-func (m *runnerStubModel) BatchGenerate(context.Context, []string, ...inference.GenerateOption) ([]inference.BatchResult, error) {
-	return nil, nil
+func (m *runnerStubModel) BatchGenerate(context.Context, []string, ...inference.GenerateOption) core.Result {
+	return core.Ok([]inference.BatchResult(nil))
 }
 
 func (m *runnerStubModel) ModelType() string         { return "stub" }
@@ -105,8 +105,13 @@ func (m *runnerStubModel) Info() inference.ModelInfo { return inference.ModelInf
 func (m *runnerStubModel) Metrics() inference.GenerateMetrics {
 	return m.metrics
 }
-func (m *runnerStubModel) Err() error   { return m.err }
-func (m *runnerStubModel) Close() error { return nil }
+func (m *runnerStubModel) Err() core.Result {
+	if m.err != nil {
+		return core.Fail(m.err)
+	}
+	return core.Ok(nil)
+}
+func (m *runnerStubModel) Close() core.Result { return core.Ok(nil) }
 
 // newStubRunner constructs a Service backed by a single ai.ProviderRoute
 // with the given stub model. Exercises the router.Chat egress path the

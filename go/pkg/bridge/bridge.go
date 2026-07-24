@@ -43,7 +43,7 @@ package bridge
 
 import (
 	core "dappco.re/go"
-	guiwindow "dappco.re/go/gui/pkg/window"
+	guiwindow "dappco.re/go/render/display/webkit/pkg/window"
 )
 
 // DefaultPort is the bridge HTTP port. Picked to differ from

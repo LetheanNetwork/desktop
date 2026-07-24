@@ -8,7 +8,7 @@
 // invocations to process.Service so the user can stream output.
 //
 // Ported from core/ide's php_bridge.go + phpbridge.go. Uses
-// dappco.re/go/php's detect helpers (IsLaravelProject,
+// dappco.re/go/render's PHP detect helpers (IsLaravelProject,
 // GetLaravelAppName, GetLaravelAppURL, DetectPackageManager,
 // IsFrankenPHPProject, DetectServices, ExtractDomainFromURL) as
 // canonical — no re-implementation here.
@@ -20,10 +20,9 @@
 package php
 
 import (
-
 	core "dappco.re/go"
-	"dappco.re/go/php/pkg/php"
 	"dappco.re/go/process"
+	"dappco.re/go/render/engine/php"
 )
 
 // Service owns the php surface. Holds *core.Core for late
@@ -158,8 +157,8 @@ func (s *Service) detect(roots []string, maxDepth int) []ProjectSummary {
 }
 
 func (s *Service) detectRoot(root string, maxDepth int, out *[]ProjectSummary) {
-	if err := core.PathWalkDir(root, func(path string, d core.FsDirEntry, err error) error {
-		if err != nil || !d.IsDir() {
+	if walkR := core.PathWalkDir(root, func(path string, d core.FsDirEntry, err error) error {
+		if err != nil || d == nil || !d.IsDir() {
 			return nil
 		}
 		if skipDetectDir(d.Name()) {
@@ -173,8 +172,8 @@ func (s *Service) detectRoot(root string, maxDepth int, out *[]ProjectSummary) {
 		}
 		*out = append(*out, summaryForProject(path))
 		return core.PathSkipDir
-	}); err != nil {
-		core.Warn("php project detection walk failed", "root", root, "err", err)
+	}); !walkR.OK {
+		core.Warn("php project detection walk failed", "root", root, "err", walkR.Error())
 	}
 }
 

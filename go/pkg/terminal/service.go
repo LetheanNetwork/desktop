@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	core "dappco.re/go"
-	gui "dappco.re/go/gui"
+	gui "dappco.re/go/render/display/webkit"
 )
 
 // Event name prefixes for the byte stream. The session ID is appended so a

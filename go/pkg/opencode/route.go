@@ -28,8 +28,8 @@ import (
 	"iter"
 
 	core "dappco.re/go"
-	"dappco.re/go/ai/ai"
 	"dappco.re/go/inference"
+	"dappco.re/go/inference/agent/ai"
 )
 
 // ModelOptions configures one OpenCode-backed Model instance.
@@ -101,23 +101,27 @@ func (m *Model) Chat(ctx core.Context, messages []inference.Message, _ ...infere
 }
 
 // Classify is not supported via the opencode session API.
-func (m *Model) Classify(core.Context, []string, ...inference.GenerateOption) ([]inference.ClassifyResult, error) {
-	return nil, core.E("opencode.Classify",
-		"classification is not supported via opencode session routing", nil)
+func (m *Model) Classify(core.Context, []string, ...inference.GenerateOption) core.Result {
+	return core.Fail(core.E("opencode.Classify",
+		"classification is not supported via opencode session routing", nil))
 }
 
 // BatchGenerate runs Generate sequentially for each prompt — mirrors
 // the openai backend's approach.
-func (m *Model) BatchGenerate(ctx core.Context, prompts []string, opts ...inference.GenerateOption) ([]inference.BatchResult, error) {
+func (m *Model) BatchGenerate(ctx core.Context, prompts []string, opts ...inference.GenerateOption) core.Result {
 	out := make([]inference.BatchResult, 0, len(prompts))
 	for _, p := range prompts {
 		var tokens []inference.Token
 		for tok := range m.Generate(ctx, p, opts...) {
 			tokens = append(tokens, tok)
 		}
-		out = append(out, inference.BatchResult{Tokens: tokens, Err: m.Err()})
+		batch := inference.BatchResult{Tokens: tokens}
+		if errR := m.Err(); !errR.OK {
+			batch.Err = errR.Err()
+		}
+		out = append(out, batch)
 	}
-	return out, nil
+	return core.Ok(out)
 }
 
 // ModelType implements inference.TextModel.
@@ -139,16 +143,19 @@ func (m *Model) Metrics() inference.GenerateMetrics {
 }
 
 // Err implements inference.TextModel.
-func (m *Model) Err() error {
+func (m *Model) Err() core.Result {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.lastErr
+	if m.lastErr != nil {
+		return core.Fail(m.lastErr)
+	}
+	return core.Ok(nil)
 }
 
 // Close implements inference.TextModel — opencode sessions are
 // short-lived and cleaned up by opencode-serve when the container
 // exits, so Close is a no-op.
-func (m *Model) Close() error { return nil }
+func (m *Model) Close() core.Result { return core.Ok(nil) }
 
 // setResult records the per-call outcome under the model mutex.
 func (m *Model) setResult(metrics inference.GenerateMetrics, err error) {

@@ -114,7 +114,7 @@ func SweepTmpOrphans(root string) core.Result {
 	}
 
 	count := 0
-	walkErr := core.PathWalkDir(root, func(path string, d core.FsDirEntry, err error) error {
+	walkR := core.PathWalkDir(root, func(path string, d core.FsDirEntry, err error) error {
 		if err != nil {
 			// Absorb per-entry walk errors (permission denied on a
 			// nested dir, transient I/O). Returning nil keeps the
@@ -153,9 +153,9 @@ func SweepTmpOrphans(root string) core.Result {
 		count++
 		return nil
 	})
-	if walkErr != nil {
+	if !walkR.OK {
 		return core.Fail(core.E(CodeSweepWalkFailed,
-			"PathWalkDir under "+root, walkErr))
+			"PathWalkDir under "+root, walkR.Err()))
 	}
 	return core.Ok(count)
 }

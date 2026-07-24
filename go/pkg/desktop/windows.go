@@ -14,8 +14,8 @@ package desktop
 
 import (
 	core "dappco.re/go"
-	gui "dappco.re/go/gui"
-	guiwindow "dappco.re/go/gui/pkg/window"
+	gui "dappco.re/go/render/display/webkit"
+	guiwindow "dappco.re/go/render/display/webkit/pkg/window"
 )
 
 // WindowSpec is an alias for the core/gui window type. Kept as a

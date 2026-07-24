@@ -71,7 +71,7 @@ func newBuildOptsCore(t *core.T) *core.Core {
 func TestMain_BuildServerOpts_Good_MountsGatewayAndCheckers(t *core.T) {
 	c := newBuildOptsCore(t)
 	r := runner.NewService(runner.Options{})
-	opts := buildServerOpts(c, r, "test-local-key")
+	opts := buildServerOpts(c, r, "test-local-key", false)
 
 	core.AssertNotNil(t, opts.ExtraGroups,
 		"ExtraGroups must be populated when gateway service is registered")
@@ -109,7 +109,7 @@ func TestMain_BuildServerOpts_Bad_HandlesEmptyCoreGracefully(t *core.T) {
 	t.Cleanup(func() { _ = c.ServiceShutdown(core.Background()) })
 
 	r := runner.NewService(runner.Options{})
-	opts := buildServerOpts(c, r, "empty-core-key")
+	opts := buildServerOpts(c, r, "empty-core-key", false)
 
 	core.AssertEqual(t, "empty-core-key", opts.LocalKey)
 	core.AssertNotNil(t, opts.Runner)
@@ -121,23 +121,18 @@ func TestMain_BuildServerOpts_Bad_HandlesEmptyCoreGracefully(t *core.T) {
 		"PluginOriginChecker wires unconditionally on marketplace.ViewRegistry")
 }
 
-// TestMain_BuildServerOpts_Ugly_SymmetricBetweenGUIAndServe pins the
-// Cerberus #70 F-1 symmetry contract — cmdGUI and cmdServe MUST get
-// identical wiring surfaces (ExtraGroups count + checker presence)
-// from the helper; the only legitimate divergence is opts.Addr (and
-// the caller's serve-only side effects: s.Start + mdns broadcast).
-// Pre-#1741, cmdGUI's opts had zero ExtraGroups and zero checkers
-// while cmdServe's had the full set; this test fails loud if a future
-// refactor reintroduces that asymmetry.
-func TestMain_BuildServerOpts_Ugly_SymmetricBetweenGUIAndServe(t *core.T) {
+// TestMain_BuildServerOpts_Ugly_GUIOmitsDuplicateProxyGroups pins the
+// intentional GUI/serve split: both modes retain their shared checkers,
+// while GUI mode omits proxy groups mounted later by desktop subsystems.
+func TestMain_BuildServerOpts_Ugly_GUIOmitsDuplicateProxyGroups(t *core.T) {
 	c := newBuildOptsCore(t)
 	r := runner.NewService(runner.Options{})
 
-	guiOpts := buildServerOpts(c, r, "shared-key")
-	serveOpts := buildServerOpts(c, r, "shared-key")
+	guiOpts := buildServerOpts(c, r, "shared-key", true)
+	serveOpts := buildServerOpts(c, r, "shared-key", false)
 	serveOpts.Addr = ":8000" // serve verb's only delta from GUI
 
-	core.AssertEqual(t, len(guiOpts.ExtraGroups), len(serveOpts.ExtraGroups))
+	core.AssertGreater(t, len(serveOpts.ExtraGroups), len(guiOpts.ExtraGroups))
 	core.AssertEqual(t, guiOpts.LocalKey, serveOpts.LocalKey)
 	core.AssertEqual(t, guiOpts.PluginInstalledChecker == nil,
 		serveOpts.PluginInstalledChecker == nil)

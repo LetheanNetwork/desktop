@@ -47,10 +47,11 @@ func New() core.Result {
 	if r := paths.DesktopDir(); !r.OK {
 		return r
 	}
-	db, openR := store.OpenDuckDBReadWrite(dbPathR.Value.(string))
+	openR := store.OpenDuckDBReadWrite(dbPathR.Value.(string))
 	if !openR.OK {
-		return core.Fail(core.E("ml.New", "open ml DuckDB", openR.Value.(error)))
+		return core.Fail(core.E("ml.New", "open ml DuckDB", openR.Err()))
 	}
+	db := openR.Value.(*store.DuckDB)
 	return core.Ok(&Service{db: db})
 }
 

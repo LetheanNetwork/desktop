@@ -29,7 +29,7 @@ import (
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/account"
 	subject "dappco.re/lthn/desktop/pkg/marketing/audience"
-	"forge.lthn.ai/Snider/Enchantrix/pkg/crypt/std/pgp"
+	"github.com/Snider/Enchantrix/pkg/crypt/std/pgp"
 )
 
 // stubKeySessionGate is the at-rest-capable test double — satisfies

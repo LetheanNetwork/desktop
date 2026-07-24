@@ -24,9 +24,7 @@
 package desktop
 
 import (
-
 	core "dappco.re/go"
-	"dappco.re/go/ai/pkg/lab"
 	coreapi "dappco.re/go/api"
 	mcpsvc "dappco.re/go/mcp/pkg/mcp"
 	"github.com/gin-gonic/gin"
@@ -69,14 +67,6 @@ func mountSubsystems(c *core.Core, engine *coreapi.Engine, r *runner.Service) co
 		if rr := lthnapi.Register(c, r); !rr.OK {
 			return rr
 		}
-	}
-
-	// ml-lab — mount /v1/ml-lab/* on the api engine. Self-skips when
-	// either the api Service or the lab Service isn't registered on
-	// this Core (headless build / partial composition). Per
-	// plans/project/lthn/desktop/RFC.ml-lab.md §3.
-	if rr := lab.RegisterHTTPRoutes(c); !rr.OK {
-		return rr
 	}
 
 	// api (sub-engine sub-mount) — the standalone *coreapi.Service
