@@ -816,23 +816,14 @@ func (s *Service) Run() core.Result {
 		// first launch and persisted at ~/Lethean/data/keys/
 		// single-instance.aead by pkg/keys.
 		SingleInstance: &gui.SingleInstanceOptions{
-			UniqueID:      "io.lethean.desktop",
+			UniqueID:      "ai.lthn.desktop",
 			EncryptionKey: singleInstanceKey,
 			AdditionalData: map[string]string{
 				"app":     "lthn-desktop",
 				"version": lthn.Version,
 			},
 			OnSecondInstanceLaunch: func(d gui.SecondInstanceData) {
-				// Re-broadcast the second-launch context so any
-				// frontend subscribers (router / wizard / chat) can
-				// act on it. Safe to trust because EncryptionKey
-				// authenticates the channel.
-				emitCoreEvent(s.opts.Core, "lthn:app:second-instance", map[string]any{
-					"args":       d.Args,
-					"workdir":    d.WorkingDir,
-					"additional": d.AdditionalData,
-				})
-				restoreSecondInstanceWindow(s.opts.Core)
+				handleSecondInstanceLaunch(s.opts.Core, d)
 			},
 		},
 		ShouldQuit: func() bool { return true },
@@ -1052,6 +1043,35 @@ func restoreSecondInstanceWindow(c *core.Core) {
 			core.Option{Key: "task", Value: guiwindow.TaskOpenWindow{Window: &opened}},
 		))
 	}
+}
+
+// handleSecondInstanceLaunch re-broadcasts the authenticated hand-off and
+// routes the first lthn:// argument through the same deep-link path as an
+// operating-system URL event. Launches without a deep link retain the existing
+// restore-and-focus behaviour.
+func handleSecondInstanceLaunch(c *core.Core, data gui.SecondInstanceData) {
+	if c == nil {
+		return
+	}
+	emitCoreEvent(c, "lthn:app:second-instance", map[string]any{
+		"args":       data.Args,
+		"workdir":    data.WorkingDir,
+		"additional": data.AdditionalData,
+	})
+
+	for _, argument := range data.Args {
+		candidate := core.Trim(argument)
+		if !core.HasPrefix(core.Lower(candidate), "lthn://") {
+			continue
+		}
+		if handled := handleDeepLink(c, candidate); handled.OK {
+			return
+		} else {
+			core.Warn("desktop second-instance deep link ignored", "err", handled.Error())
+			break
+		}
+	}
+	restoreSecondInstanceWindow(c)
 }
 
 // attachSPA mounts the embedded frontend as the coreapi.Engine's

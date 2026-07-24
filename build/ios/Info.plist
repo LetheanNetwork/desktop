@@ -29,22 +29,23 @@
 			<key>NSAllowsLocalNetworking</key>
 			<true/>
 		</dict>
+		<key>NSCameraUsageDescription</key>
+		<string>Lethean uses the camera only when you choose to capture a photo or video.</string>
+		<key>NSFaceIDUsageDescription</key>
+		<string>Lethean uses Face ID when you choose to protect access with biometric authentication.</string>
 		<key>NSHumanReadableCopyright</key>
 		<string>© 2026, Lethean (EUPL-1.2)</string>
 		<key>NSLocationWhenInUseUsageDescription</key>
 		<string>Lethean uses your location only when you request local device context.</string>
-		<key>NSMotionUsageDescription</key>
-		<string>Lethean uses motion data only while you enable motion-aware features.</string>
-		<key>NSCameraUsageDescription</key>
-		<string>Lethean uses the camera only when you choose to capture a photo or video.</string>
 		<key>NSMicrophoneUsageDescription</key>
 		<string>Lethean uses the microphone only when you choose to capture a video with audio.</string>
-		<key>NSFaceIDUsageDescription</key>
-		<string>Lethean uses Face ID when you choose to protect access with biometric authentication.</string>
+		<key>NSMotionUsageDescription</key>
+		<string>Lethean uses motion data only while you enable motion-aware features.</string>
 		<key>UILaunchStoryboardName</key>
 		<string>LaunchScreen</string>
 		<key>UIRequiredDeviceCapabilities</key>
 		<array>
+			<string>armv7</string>
 			<string>arm64</string>
 		</array>
 		<key>UISupportedInterfaceOrientations</key>

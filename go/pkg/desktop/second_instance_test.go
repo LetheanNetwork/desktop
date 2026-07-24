@@ -24,6 +24,7 @@ package desktop
 
 import (
 	core "dappco.re/go"
+	gui "dappco.re/go/render/display/webkit"
 	"dappco.re/lthn/desktop/pkg/audit"
 )
 
@@ -115,4 +116,53 @@ func TestDesktop_SecondInstance_AuditEmitOnFallback_Good(t *core.T) {
 	core.AssertFalse(t, hasWD, "workdir must never reach the audit row")
 	_, hasAdd := ev.Meta["additional"]
 	core.AssertFalse(t, hasAdd, "additional must never reach the audit row")
+}
+
+func TestDesktop_SecondInstance_Good_DeepLinkRoutesInRunningApp(t *core.T) {
+	c, emitted, windowActions := deepLinkEventFixture(t)
+
+	handleSecondInstanceLaunch(c, gui.SecondInstanceData{
+		Args: []string{"lthn", "lthn://open/document?id=record-42"},
+	})
+
+	core.AssertEqual(t, []string{
+		"dock.show_icon",
+		"window.restore",
+		"window.set_visibility",
+		"window.focus",
+	}, *windowActions)
+	core.AssertEqual(t, 2, len(*emitted))
+	if len(*emitted) < 2 {
+		return
+	}
+	core.AssertEqual(t, "lthn:app:second-instance", (*emitted)[0].Name)
+	core.AssertEqual(t, "navigate", (*emitted)[1].Name)
+	core.AssertEqual(t, map[string]string{
+		"action":   "open",
+		"resource": "document",
+		"id":       "record-42",
+	}, (*emitted)[1].Data)
+}
+
+func TestDesktop_SecondInstance_Bad_NoDeepLinkRestoresMainWindow(t *core.T) {
+	c, emitted, windowActions := deepLinkEventFixture(t)
+
+	handleSecondInstanceLaunch(c, gui.SecondInstanceData{
+		Args: []string{"lthn", "--background"},
+	})
+
+	core.AssertEqual(t, 1, len(*emitted))
+	core.AssertEqual(t, "lthn:app:second-instance", (*emitted)[0].Name)
+	core.AssertEqual(t, 4, len(*windowActions))
+}
+
+func TestDesktop_SecondInstance_Ugly_InvalidDeepLinkStillRestoresWindow(t *core.T) {
+	c, emitted, windowActions := deepLinkEventFixture(t)
+
+	handleSecondInstanceLaunch(c, gui.SecondInstanceData{
+		Args: []string{"lthn", "lthn://chat/%zz"},
+	})
+
+	core.AssertEqual(t, 1, len(*emitted))
+	core.AssertEqual(t, 4, len(*windowActions))
 }

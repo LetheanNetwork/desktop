@@ -14,7 +14,9 @@ import (
 	core "dappco.re/go"
 	gui "dappco.re/go/render/display/webkit"
 	guiwindow "dappco.re/go/render/display/webkit/pkg/window"
+	"dappco.re/lthn/desktop/pkg/appconfig"
 	"dappco.re/lthn/desktop/pkg/paths"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 const (
@@ -22,11 +24,8 @@ const (
 	angularShellRoute         = "/#/"
 	trayPanelWindowName       = "tray-panel"
 	trayPanelRoute            = "/#/tray"
-	trayPanelWidth            = 400
-	trayPanelHeight           = 560
 	nativeAppWindowNamePrefix = "app-view-"
 	nativeAppRoutePrefix      = "/#/w/"
-	desktopTitleBarHeight     = 40
 )
 
 // WindowSpec is an alias for the core/gui window type. Kept as a
@@ -38,17 +37,16 @@ type WindowSpec = guiwindow.Window
 // OS shell and a future native app tear-off. Angular paints the visible
 // titlebar, so the native windows stay frameless and transparent.
 func angularWindowSpec(name, title, route string) *WindowSpec {
-	return &WindowSpec{
-		Name: name, Title: title, URL: route,
-		Width: 1440, Height: 900, MinWidth: 1000, MinHeight: 680,
-		Frameless: true, HideOnClose: true, EnableFileDrop: true,
-		ShowDockIcon:               true,
-		DefaultContextMenuDisabled: true,
-		BackgroundColour:           [4]uint8{0, 0, 0, 0},
-		Mac: guiwindow.MacWindow{
-			InvisibleTitleBarHeight: desktopTitleBarHeight,
-		},
+	profile := "tear-off"
+	if name == mainWindowName {
+		profile = "main"
 	}
+	spec := windowSpecFromWebviewOptions(
+		appconfig.WebviewWindowOptions(profile, name, title, route),
+	)
+	spec.HideOnClose = true
+	spec.ShowDockIcon = true
+	return spec
 }
 
 // trayPanelWindowSpec returns the compact, single-screen surface attached to
@@ -56,36 +54,100 @@ func angularWindowSpec(name, title, route string) *WindowSpec {
 // startup, then the platform reveals and positions the same warm WebView on
 // each tray click.
 func trayPanelWindowSpec() *WindowSpec {
+	spec := windowSpecFromWebviewOptions(appconfig.WebviewWindowOptions(
+		"tray-popover",
+		trayPanelWindowName,
+		"Lethean Desktop",
+		trayPanelRoute,
+	))
+	spec.HideOnClose = true
+	return spec
+}
+
+func windowSpecFromWebviewOptions(options application.WebviewWindowOptions) *WindowSpec {
+	permissions := make(map[uint8]uint8, len(options.Permissions))
+	for permissionType, permission := range options.Permissions {
+		permissions[uint8(permissionType)] = uint8(permission)
+	}
+	if len(permissions) == 0 {
+		permissions = nil
+	}
+
+	var liquidGlassTint *[4]uint8
+	if options.Mac.LiquidGlass.TintColor != nil {
+		colour := options.Mac.LiquidGlass.TintColor
+		liquidGlassTint = &[4]uint8{colour.Red, colour.Green, colour.Blue, colour.Alpha}
+	}
+
+	backForwardNavigation := options.Mac.WebviewPreferences.AllowsBackForwardNavigationGestures
+	autoplay := options.Mac.WebviewPreferences.EnableAutoplayWithoutUserAction
+
 	return &WindowSpec{
-		Name:          trayPanelWindowName,
-		Title:         "Lethean Desktop",
-		URL:           trayPanelRoute,
-		Width:         trayPanelWidth,
-		Height:        trayPanelHeight,
-		MinWidth:      trayPanelWidth,
-		MinHeight:     trayPanelHeight,
-		MaxWidth:      trayPanelWidth,
-		MaxHeight:     trayPanelHeight,
-		Frameless:     true,
-		Hidden:        true,
-		AlwaysOnTop:   true,
-		DisableResize: true,
-		HideOnClose:   true,
-		HideOnEscape:  true,
-		// Native tray popovers dismiss when the operator clicks elsewhere.
-		HideOnFocusLost:            true,
-		DefaultContextMenuDisabled: true,
-		BackgroundColour:           [4]uint8{0, 0, 0, 0},
-		BackgroundType:             1,
+		Name:                       options.Name,
+		Title:                      options.Title,
+		URL:                        options.URL,
+		HTML:                       options.HTML,
+		JS:                         options.JS,
+		CSS:                        options.CSS,
+		Width:                      options.Width,
+		Height:                     options.Height,
+		X:                          options.X,
+		Y:                          options.Y,
+		MinWidth:                   options.MinWidth,
+		MinHeight:                  options.MinHeight,
+		MaxWidth:                   options.MaxWidth,
+		MaxHeight:                  options.MaxHeight,
+		Frameless:                  options.Frameless,
+		Hidden:                     options.Hidden,
+		AlwaysOnTop:                options.AlwaysOnTop,
+		BackgroundColour:           [4]uint8{options.BackgroundColour.Red, options.BackgroundColour.Green, options.BackgroundColour.Blue, options.BackgroundColour.Alpha},
+		DisableResize:              options.DisableResize,
+		EnableFileDrop:             options.EnableFileDrop,
+		HideOnEscape:               options.HideOnEscape,
+		HideOnFocusLost:            options.HideOnFocusLost,
+		DefaultContextMenuDisabled: options.DefaultContextMenuDisabled,
+		StartState:                 int(options.StartState),
+		BackgroundType:             int(options.BackgroundType),
+		ScreenID:                   "",
+		Zoom:                       options.Zoom,
+		ZoomControlEnabled:         options.ZoomControlEnabled,
+		Permissions:                permissions,
+		OpenInspectorOnStartup:     options.OpenInspectorOnStartup,
+		DevToolsEnabled:            options.DevToolsEnabled,
+		MinimiseButtonState:        int(options.MinimiseButtonState),
+		MaximiseButtonState:        int(options.MaximiseButtonState),
+		CloseButtonState:           int(options.CloseButtonState),
+		FullscreenButtonState:      int(options.FullscreenButtonState),
+		IgnoreMouseEvents:          options.IgnoreMouseEvents,
+		UseApplicationMenu:         options.UseApplicationMenu,
+		ContentProtection:          options.ContentProtectionEnabled,
 		Mac: guiwindow.MacWindow{
-			WindowLevel: guiwindow.MacWindowLevelPopUpMenu,
-			CollectionBehavior: guiwindow.MacCollectionBehaviorCanJoinAllSpaces |
-				guiwindow.MacCollectionBehaviorFullScreenAuxiliary |
-				guiwindow.MacCollectionBehaviorIgnoresCycle,
-			DisableBackForwardNav: true,
+			WindowLevel:                     guiwindow.MacWindowLevel(options.Mac.WindowLevel),
+			CollectionBehavior:              guiwindow.MacCollectionBehavior(options.Mac.CollectionBehavior),
+			InvisibleTitleBarHeight:         options.Mac.InvisibleTitleBarHeight,
+			DisableBackForwardNav:           backForwardNavigation.IsSet() && !backForwardNavigation.Get(),
+			Backdrop:                        int(options.Mac.Backdrop),
+			DisableShadow:                   options.Mac.DisableShadow,
+			TabbingMode:                     int(options.Mac.TabbingMode),
+			DisableEscapeExitsFullscreen:    options.Mac.DisableEscapeExitsFullscreen,
+			EnableAutoplayWithoutUserAction: autoplay.IsSet() && autoplay.Get(),
+			LiquidGlassStyle:                int(options.Mac.LiquidGlass.Style),
+			LiquidGlassMaterial:             int(options.Mac.LiquidGlass.Material),
+			LiquidGlassCornerRadius:         options.Mac.LiquidGlass.CornerRadius,
+			LiquidGlassTintColour:           liquidGlassTint,
+			LiquidGlassGroupID:              options.Mac.LiquidGlass.GroupID,
+			LiquidGlassGroupSpacing:         options.Mac.LiquidGlass.GroupSpacing,
+		},
+		Linux: guiwindow.LinuxWindow{
+			Icon: options.Linux.Icon,
 		},
 		Windows: guiwindow.WindowsWindow{
-			HiddenOnTaskbar: true,
+			HiddenOnTaskbar:            options.Windows.HiddenOnTaskbar,
+			DisableMenu:                options.Windows.DisableMenu,
+			Theme:                      int(options.Windows.Theme),
+			NonClientRegionSupport:     options.Windows.NonClientRegionSupport,
+			WebView2CompositionHosting: options.Windows.WebView2CompositionHosting,
+			WindowDidMoveDebounceMS:    options.Windows.WindowDidMoveDebounceMS,
 		},
 	}
 }

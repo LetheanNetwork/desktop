@@ -14,6 +14,7 @@ import (
 	"dappco.re/go/render/display/webkit/pkg/menu"
 	"dappco.re/go/render/display/webkit/pkg/systray"
 	"dappco.re/go/render/display/webkit/pkg/window"
+	"dappco.re/lthn/desktop/pkg/appconfig"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -73,35 +74,36 @@ func guiApplicationOptions(cfg gui.GuiConfig, transport application.Transport) a
 	if cfg.Assets.Middleware != nil {
 		middleware = application.Middleware(cfg.Assets.Middleware)
 	}
-	options := application.Options{
-		Name:        name,
-		Description: cfg.Description,
-		Icon:        cfg.Icon,
-		Services:    cfg.Bindings,
-		Transport:   transport,
-		Assets: application.AssetOptions{
-			Handler:        cfg.Assets.Handler,
-			Middleware:     middleware,
-			DisableLogging: cfg.Assets.DisableLogging,
-		},
-		Mac: application.MacOptions{
-			ApplicationShouldTerminateAfterLastWindowClosed: cfg.Mac.ApplicationShouldTerminateAfterLastWindowClosed,
-			ActivationPolicy: guiActivationPolicy(cfg.Mac.ActivationPolicy),
-		},
-		Windows: application.WindowsOptions{
-			DisableQuitOnLastWindowClosed: cfg.Windows.DisableQuitOnLastWindowClosed,
-			EnabledFeatures:               cfg.Windows.EnabledFeatures,
-			DisabledFeatures:              cfg.Windows.DisabledFeatures,
-			AdditionalBrowserArgs:         cfg.Windows.AdditionalBrowserArgs,
-			UseVisualHosting:              cfg.Windows.UseVisualHosting,
-			WndClass:                      cfg.Windows.WndClass,
-			WebviewUserDataPath:           cfg.Windows.WebviewUserDataPath,
-			WebviewBrowserPath:            cfg.Windows.WebviewBrowserPath,
-		},
-		ShouldQuit:   cfg.ShouldQuit,
-		OnShutdown:   cfg.OnShutdown,
-		PostShutdown: cfg.PostShutdown,
+
+	options := appconfig.ApplicationOptions()
+	options.Name = name
+	options.Description = cfg.Description
+	options.Icon = cfg.Icon
+	options.Services = cfg.Bindings
+	options.Transport = transport
+	options.Assets = application.AssetOptions{
+		Handler:        cfg.Assets.Handler,
+		Middleware:     middleware,
+		DisableLogging: cfg.Assets.DisableLogging,
 	}
+	options.Mac.ActivationPolicy = guiActivationPolicy(cfg.Mac.ActivationPolicy)
+	options.Mac.ApplicationShouldTerminateAfterLastWindowClosed =
+		cfg.Mac.ApplicationShouldTerminateAfterLastWindowClosed
+	options.Windows.DisableQuitOnLastWindowClosed =
+		cfg.Windows.DisableQuitOnLastWindowClosed
+	options.Windows.EnabledFeatures = cfg.Windows.EnabledFeatures
+	options.Windows.DisabledFeatures = cfg.Windows.DisabledFeatures
+	options.Windows.AdditionalBrowserArgs = cfg.Windows.AdditionalBrowserArgs
+	options.Windows.UseVisualHosting = cfg.Windows.UseVisualHosting
+	if cfg.Windows.WndClass != "" {
+		options.Windows.WndClass = cfg.Windows.WndClass
+	}
+	options.Windows.WebviewUserDataPath = cfg.Windows.WebviewUserDataPath
+	options.Windows.WebviewBrowserPath = cfg.Windows.WebviewBrowserPath
+	options.ShouldQuit = cfg.ShouldQuit
+	options.OnShutdown = cfg.OnShutdown
+	options.PostShutdown = cfg.PostShutdown
+	options.SingleInstance = nil
 	if cfg.SingleInstance != nil {
 		options.SingleInstance = guiSingleInstanceOptions(*cfg.SingleInstance)
 	}
@@ -133,10 +135,18 @@ func guiActivationPolicy(policy gui.ActivationPolicy) application.ActivationPoli
 }
 
 func guiSingleInstanceOptions(options gui.SingleInstanceOptions) *application.SingleInstanceOptions {
+	defaults := appconfig.ApplicationOptions().SingleInstance
 	result := &application.SingleInstanceOptions{
-		UniqueID:       options.UniqueID,
-		EncryptionKey:  options.EncryptionKey,
-		AdditionalData: options.AdditionalData,
+		UniqueID: defaults.UniqueID,
+		// OnSecondInstanceLaunch is connected below when the desktop supplies a callback.
+		OnSecondInstanceLaunch: nil,
+		AdditionalData:         options.AdditionalData,
+		// ExitCode retains the central successful hand-off default.
+		ExitCode:      defaults.ExitCode,
+		EncryptionKey: options.EncryptionKey,
+	}
+	if options.UniqueID != "" {
+		result.UniqueID = options.UniqueID
 	}
 	if options.OnSecondInstanceLaunch != nil {
 		result.OnSecondInstanceLaunch = func(data application.SecondInstanceData) {
@@ -176,6 +186,7 @@ func registerCoreGUIServices(c *core.Core, app *application.App, cfg gui.GuiConf
 	if len(options) != 20 {
 		return core.Fail(core.E("desktop.registerCoreGUIServices", "unexpected CoreGUI bootstrap shape", nil))
 	}
+	options[1] = window.Register(newConfiguredWailsPlatform(app))
 
 	// CoreGUI's declarative bootstrap registers everything before the
 	// lifecycle starts. The desktop Core is already live, so start each
