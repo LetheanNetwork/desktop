@@ -11,7 +11,7 @@ Canonical Lethean Go repo shape:
 - `go/` — the Go module (`dappco.re/lthn/desktop`). All Go code lives here.
 - `external/` — git submodules of canonical Lethean dependencies, pinned to `dev` branches via `.gitmodules`.
 - `go.work` at repo root — workspace mode points at `./go` + `./external/*`. Live dev sources resolve through here.
-- `frontend/`, `docs/`, `bin/`, `build/`, `LICENCE`, `README.md`, `CLAUDE.md`, `AGENTS.md`, `Taskfile.yml` at repo root.
+- `frontend-ng/`, `docs/`, `bin/`, `build/`, `LICENCE`, `README.md`, `CLAUDE.md`, `AGENTS.md`, `Taskfile.yml` at repo root.
 
 ## Code Map
 
@@ -21,7 +21,7 @@ Canonical Lethean Go repo shape:
 - `go/pkg/telemetry/service.go` — `powermetrics` / `IOReport` sampler.
 - `go/pkg/api/` — HTTP gateway RouteGroups + spec/SDK helpers. `RunnerGroup` implements `coreapi.DescribableGroup` exposing `/v1/runner/*`. `lthn api spec` emits `build/sdk/openapi.yaml`; `build/sdk/publish.sh` regenerates 13 `@lthn/sdk-*` flavours and force-pushes each to `LetheanNetwork/sdk-<flavour>`. Per-flavour SDK content is gitignored — lthn/desktop tracks only the spec + driver.
 - `external/go/` — submodule of `dappco.re/go` (the Core primitives module) on its `dev` branch.
-- `frontend/` — Vite + Lit. Lethean-5 components in `src/lit/`. `index.html` is the app entry; `canvas.html` is the design canvas.
+- `frontend-ng/` — standalone Angular desktop app. It is client-side rendered, uses hash routing, NgRx, WebMCP, and Angular localisation. `ng build` writes directly to `go/cmd/lthn/dist/`.
 - `docs/design/lethean-4-react-reference/` — animated React/JSX visual source for design review only; not built.
 
 Each package in `pkg/` follows the Mantis #1336 canonical Service.go shape: a `Service` struct, a `NewService(opts Options) *Service` constructor, a `(s *Service) Register(c *core.Core) core.Result` method, AND a free `Register(c *core.Core) core.Result` function for one-shot wiring. Files declaring `NewService` carry a `// Usage example:` doc marker per Mantis #1383.
@@ -49,7 +49,7 @@ wails3 task test:frontend        # Vitest only
 
 wails3 task test:cover           # both with coverage reports
 wails3 task test:cover:go        # → go/coverage.{out,html} + func table
-wails3 task test:cover:frontend  # → frontend/coverage/index.html
+wails3 task test:cover:frontend  # → frontend-ng/coverage/lcov.info
 
 wails3 task api:spec             # → build/sdk/openapi.yaml
 wails3 task api:sdk:typescript   # regenerates spec then TS SDK → build/sdk/typescript-fetch/
@@ -86,30 +86,16 @@ Rules:
 - HOME-isolated fixtures (`t.TempDir()` + `os.Setenv("HOME", tmp)` + `t.Cleanup`) for anything that touches `~/Lethean/`.
 - `core.AssertError`'s variadic strings are **substring requirements**, not failure messages — pass none when you only care that err is non-nil.
 
-### Frontend test canon — Vitest + happy-dom
+### Frontend test canon — Angular + Vitest
 
-Stack: vitest@^3, happy-dom, @vitest/coverage-v8@^3. Vite config carries the `test` block so path aliases (`@service`, `@ui`, …) work in tests too.
+The Angular unit-test builder runs Vitest in jsdom. Tests are colocated as
+`*.spec.ts` under `frontend-ng/src/`; `npm run test:ci` is the non-watch gate
+and writes LCOV coverage.
 
-Shared fixture at `frontend/src/test/window-fixture.ts`:
-
-```ts
-import { describe, it, expect } from "vitest";
-import { mountWindow, expectChromeTitle, isEmbedded } from "../../test/window-fixture";
-import "./my-window";
-
-describe("lthn-my-window", () => {
-  it("mounts with the right title", async () => {
-    const { host } = await mountWindow("lthn-my-window");
-    expectChromeTitle(host, "My Window");
-  });
-});
-```
-
-Canonical 4-section pattern per window:
-1. **Smoke** — mounts without throwing + titlebar carries the right title.
-2. **Embedded sweep** — `embedded` attribute collapses chrome to `.lthn-window--embedded`.
-3. **Content presence** — distinctive strings from the body so render regressions fail loudly.
-4. **Reactive prop** (where relevant) — mutate, `await el.updateComplete`, assert the rendered DOM reflected.
+- Use standalone components and `TestBed`.
+- For reactive rendering, act, `await fixture.whenStable()`, then assert.
+- Router tests must preserve `HashLocationStrategy` and the `#/` / `#/w/:app` contracts.
+- Keep bridge and WebMCP behaviour covered without requiring a live Wails runtime.
 
 ### Coverage outliers — accepted, not bugs
 
@@ -144,13 +130,13 @@ bash /Users/snider/Code/core/go/tests/cli/v090-upgrade/audit.sh .
 
 The audit reports compliance dimensions. Eight code-wrongness dimensions (`banned-imports`, `err-shape-funcs`, `tuple-result-shape`, `result-discards`, `service-canonical-shape`, `service-usage-example`, `service-name-empty`, `legacy-imports`) should stay at zero on every commit. Test/example/docs completeness dimensions may carry a backlog while scaffold work continues; do not regress what is already at zero.
 
-Frontend builds with Vite. From `frontend/`:
+The frontend is an Angular CSR build. From `frontend-ng/`:
 
 ```bash
 npm install
-npm run build       # → frontend/dist/
-npm run dev         # → http://127.0.0.1:9245/
-npm test            # vitest run
+npx ng build        # → ../go/cmd/lthn/dist/index.html
+npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
+npm run test:ci
 ```
 
 The Wails GUI consumer of the binary is decoupled — `lthn serve` and `lthn ai` must function with the GUI broken. Test against this property when changing dispatch.

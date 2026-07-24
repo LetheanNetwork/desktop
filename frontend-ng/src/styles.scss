@@ -1,0 +1,34 @@
+// ─────────────────────────────────────────────────────────────────────────
+// Lethean Desktop — the single global stylesheet.
+// Composed via @use so it bundles into one <link>. Modular primitives:
+// add partials as needed, e.g. a print sheet:  @use 'print';  where
+// _print.scss wraps its rules in `@media print { … }`.
+// ─────────────────────────────────────────────────────────────────────────
+
+// Design system — :root tokens (colour / type / spacing) + base reset.
+@use 'foundations/styles';
+
+// Font Awesome — light-DOM <lthn-icon> renders `<i class="fas fa-*">`, so the
+// classes + @font-face must be global. Explicit .css so it's a plain CSS import
+// (esbuild bundles it into the sheet) rather than a deprecated SASS @import.
+@import '@fortawesome/fontawesome-free/css/all.min.css';
+
+// The Angular root is the Wails webview surface. Give every ancestor an
+// explicit viewport box so the desktop's flex layout cannot collapse under a
+// custom wails:// origin, and remove the browser's default body gutter.
+html,
+body,
+app-root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--ink-0);
+}
+
+app-root {
+  display: block;
+}

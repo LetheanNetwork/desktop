@@ -39,12 +39,11 @@ dev_mode:
     dir:
       - .git
       - node_modules
-      - frontend
+      - frontend-ng
       - bin
-      # Vite output gets copied into go/cmd/lthn/dist on every
-      # build:frontend step (so go:embed picks it up). Without
-      # excluding it the watcher trips on its own staging copy
-      # and we get an infinite rebuild loop.
+      # Angular writes into go/cmd/lthn/dist on every build:frontend
+      # step so go:embed picks it up. Excluding it prevents the watcher
+      # from tripping on its own output and causing an infinite rebuild.
       - go/cmd/lthn/dist
       - dist
     file:
@@ -55,7 +54,7 @@ dev_mode:
     watched_extension:
       - "*.go"
       - "*.js" # Watch for changes to JS/TS files included using the //wails:include directive.
-      - "*.ts" # The frontend directory will be excluded entirely by the setting above.
+      - "*.ts" # The Angular source directory is excluded above; ng serve watches it.
     git_ignore: true
   executes:
     # npm install — once at session start. Cheap when node_modules is
@@ -64,15 +63,15 @@ dev_mode:
     # runs, not on every rebuild trigger.
     - cmd: wails3 task common:install:frontend:deps
       type: once
-    # Vite dev server in the background — provides HMR for the Lit /
-    # @lthn/* / @desktop/* sources under frontend/src. Wails3
+    # Angular dev server in the background — provides HMR for the
+    # standalone app under frontend-ng/src. Wails3
     # overrides the binary's Assets.Handler to proxy at this port,
     # so go:embed dist/ isn't used while dev mode is live.
     - cmd: wails3 task common:dev:frontend
       type: background
     # Regenerate the TS Wails bindings on every Go file change.
     # Without this step, changing a Wails Service method signature
-    # (or adding a new one) leaves frontend/bindings/ stale and the
+    # (or adding a new one) leaves frontend-ng/bindings/ stale and the
     # WebView keeps calling the old shape. ~1.6s sweep across the
     # package tree — cheap, and the difference between "i changed
     # Go and it broke silently" and "i changed Go and the binding

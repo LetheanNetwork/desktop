@@ -1,0 +1,189 @@
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: var(--fg-1);
+}
+
+.shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background:
+    radial-gradient(
+      circle at 50% 12%,
+      color-mix(in oklch, var(--brand-500) 22%, transparent),
+      transparent 38%
+    ),
+    linear-gradient(145deg, var(--ink-1), var(--ink-0) 70%);
+}
+
+.menubar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 32px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line-1);
+  background: color-mix(in oklch, var(--ink-2) 88%, transparent);
+  font-size: 12px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--fg-0);
+  font-weight: 650;
+}
+
+.brand-mark {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border-radius: 5px;
+  background: var(--brand-500);
+  color: var(--fg-0);
+  font-size: 10px;
+}
+
+.menu {
+  color: var(--fg-3);
+}
+
+.status {
+  display: flex;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.status i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--fg-4);
+}
+
+.workspace {
+  display: grid;
+  height: calc(100% - 32px);
+  place-items: center;
+  padding: 7vh 8vw 15vh;
+  box-sizing: border-box;
+}
+
+.window {
+  width: min(760px, 78vw);
+  height: min(470px, 62vh);
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-xl);
+  background: var(--ink-2);
+  box-shadow: 0 28px 90px rgb(0 0 0 / 42%);
+}
+
+.titlebar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 38px;
+  border-bottom: 1px solid var(--line-1);
+  background: var(--ink-3);
+}
+
+.lights {
+  display: flex;
+  gap: 7px;
+  padding-left: 13px;
+}
+
+.lights i,
+.dock i {
+  border-radius: 50%;
+}
+
+.lights i {
+  width: 9px;
+  height: 9px;
+  background: var(--fg-4);
+}
+
+.title {
+  position: absolute;
+  inset-inline: 0;
+  color: var(--fg-3);
+  font-size: 11px;
+  text-align: center;
+}
+
+.window-body {
+  display: grid;
+  height: calc(100% - 38px);
+  place-content: center;
+  justify-items: center;
+  gap: 15px;
+}
+
+.pulse {
+  animation: shell-pulse 1.6s ease-in-out infinite;
+}
+
+.logo {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 13px;
+  background: var(--brand-500);
+  color: var(--fg-0);
+  font-weight: 700;
+}
+
+.line {
+  width: 112px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ink-4);
+}
+
+.line.wide {
+  width: 178px;
+}
+
+.dock {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  display: flex;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 18px;
+  background: color-mix(in oklch, var(--ink-3) 84%, transparent);
+  transform: translateX(-50%);
+}
+
+.dock i {
+  width: 29px;
+  height: 29px;
+  border-radius: 9px;
+  background: var(--ink-4);
+}
+
+.dock i:first-child {
+  background: color-mix(in oklch, var(--brand-500) 60%, var(--ink-4));
+}
+
+@keyframes shell-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    animation: none;
+  }
+}

@@ -4,7 +4,7 @@
 > One symbol, six routing surfaces. See [`forge.lthn.sh/lthn/desktop`](https://forge.lthn.sh/lthn/desktop).
 
 **Binary:** `lthn`
-**Status:** scaffold — Lit primitives wired from Lethean-5; Go services stubbed.
+**Status:** Angular desktop shell wired to the Wails runtime and Go services.
 **Licence:** EUPL-1.2
 
 ## What it is
@@ -16,29 +16,21 @@ The product story: **sovereign compute, single-watt** — AI on the user's own h
 See the canonical spec:
 
 - [`plans/project/lthn/desktop/RFC.first-release.md`](../../host-uk/core/plans/project/lthn/desktop/RFC.first-release.md) — first-release scope (P0 tray + the v0 to v1.0 trajectory)
-- [`plans/project/lthn/desktop/DESIGN-BRIEF.md`](../../host-uk/core/plans/project/lthn/desktop/DESIGN-BRIEF.md) — design canon (Lethean-4 visual + Lethean-5 Lit port)
+- [`plans/project/lthn/desktop/DESIGN-BRIEF.md`](../../host-uk/core/plans/project/lthn/desktop/DESIGN-BRIEF.md) — visual design canon
 
 ## Repo layout
 
 ```
 lthn/desktop/
-├── cmd/lthn/             — main binary entrypoint (tray-rooted, no quit-on-last-close)
-├── pkg/tray/             — NSStatusItem + popover anchor + window-spawn router
-├── pkg/runner/           — go-mlx inference adapter (start / stop / generate, signals)
-├── pkg/telemetry/        — powermetrics / IOReport sampler (watts + memory readings)
-├── frontend/             — Vite + Lit
-│   ├── src/
-│   │   ├── tokens.css    — Lethean-4 design tokens (OKLCH, Vi-anchored)
-│   │   ├── main.js       — entry; mounts windows by ?surface=... URL param
-│   │   └── lit/          — Lit primitives + windows from Lethean-5
-│   │       ├── chrome.js       — renderChrome() + 9 primitives
-│   │       ├── chat-window.js  — E0 chat
-│   │       ├── ops-windows.js  — E1 welcome / settings / model browser
-│   │       ├── obs-windows.js  — E2 benchmark / logs / telemetry
-│   │       └── ext-windows.js  — E3 + E4 integrations / tools / network / fine-tune / fleet
-│   ├── index.html
-│   ├── package.json
-│   └── vite.config.js
+├── go/
+│   ├── cmd/lthn/         — main binary and embedded frontend target
+│   └── pkg/              — tray, desktop, runner, telemetry, API, and other services
+├── frontend-ng/          — Angular CSR app
+│   ├── src/app/          — standalone shell, hash routes, NgRx state, and app views
+│   ├── src/wails-bridge.ts — Wails event and WebMCP bridge shim
+│   ├── src/locale/       — Angular localisation catalogues
+│   ├── angular.json      — builds directly to go/cmd/lthn/dist/
+│   └── package.json
 ├── build/{darwin,linux,windows}/  — platform build configs (codesigning, packaging)
 ├── docs/
 └── Taskfile.yml
@@ -47,14 +39,15 @@ lthn/desktop/
 ## Quickstart (dev)
 
 ```bash
-# Frontend-only — Lit windows on the design canvas, no Go runtime:
-cd frontend && npm install && npm run dev
-# → http://localhost:9245/  (mount any window via ?surface=chat etc.)
+# Frontend-only — Angular shell, no Go runtime:
+cd frontend-ng && npm install
+npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
+# → http://127.0.0.1:9245/#/
 
-# Full hot-reload dev loop — Wails app + Vite + Go rebuild watcher:
-wails3 dev
+# Full hot-reload dev loop — Wails app + Angular HMR + Go rebuild watcher:
+wails3 task dev
 # .app launches on first build cycle; menubar icon = lthn-glyph
-# Edits to go/**/*.go and frontend/**/*.ts trigger automatic rebuild.
+# Angular edits use HMR; Go edits rebuild and relaunch the app.
 
 # One-shot release build (auto-detect OS):
 task build               # produces bin/lthn{.app,.exe,}
@@ -71,7 +64,7 @@ task windows:build       # Windows .exe
 | Tool | Min version | Purpose |
 |---|---|---|
 | Go | 1.26.0 | backend |
-| Node | 22 | frontend + Vite |
+| Node | 22 | Angular frontend |
 | `wails3` | v3.0.0-alpha.91 | CLI scaffold + dev orchestrator |
 | `task` (go-task) | 3.x | build runner |
 

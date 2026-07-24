@@ -1,0 +1,13 @@
+// ═══════════════════════════════════════════════════════════
+// Lethean Design System — global entry, composed from modular
+// SASS primitives via @use. Order: fonts first (their @font-face
+// must lead), then the token layers, then the base reset.
+// ═══════════════════════════════════════════════════════════
+@use 'tokens/fonts';
+@use 'tokens/colors';
+@use 'tokens/typography';
+@use 'tokens/spacing';
+@use 'tokens/brands';
+@use 'tokens/platforms';
+@use 'tokens/modes';
+@use 'base';

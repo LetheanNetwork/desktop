@@ -1,6 +1,6 @@
 ---
 title: Architecture
-description: Internals of the lthn binary — CLI router, subsystem composition (tray / runner / telemetry / future blockchain + LNS + wallet), Wails GUI as one consumer of dispatch, OpenAI-compatible HTTP server via core/api, Lit frontend from Lethean-5.
+description: Internals of the lthn binary — CLI router, subsystem composition (tray / runner / telemetry / future blockchain + LNS + wallet), Wails GUI as one consumer of dispatch, OpenAI-compatible HTTP server via core/api, and the Angular desktop frontend.
 ---
 
 <!-- SPDX-License-Identifier: EUPL-1.2 -->
@@ -104,7 +104,7 @@ Each ships under the same pattern: a `Service` + `NewService` + dual `Register` 
 2. `tray.Register(c)` wires the NSStatusItem + popover anchor.
 3. `runner.Register(c)` + `telemetry.Register(c)` wire the AI lifecycle and platform telemetry.
 4. The Wails `application.App` is constructed with `ApplicationShouldTerminateAfterLastWindowClosed: false` — the NSStatusItem is the lifetime anchor.
-5. The frontend (Lit + Lethean-5) is embedded via `application.AssetOptions{Handler: ...}` and served by the Wails internal handler.
+5. The Angular frontend is embedded via `application.AssetOptions{Handler: ...}` and served by the Wails internal handler.
 6. The popover panel is the default window; expansion windows (chat, settings, benchmark, telemetry) spawn from the tray dropdown or programmatic dispatch.
 
 When the user closes a window, the app keeps running. When the user selects "Quit" from the tray menu, the app exits cleanly via `core.Exit`.
@@ -137,21 +137,19 @@ Inference handlers call into `pkg/runner.Service.Generate(...)` — the same pat
 
 ## 5. The frontend
 
-The frontend lives at `frontend/` and is built with Vite. It is pure Lit + Lethean-5 design tokens — no Angular, React, Vue, Svelte. The supply-chain surface is intentionally small.
+The production frontend lives at `frontend-ng/` and is a standalone Angular
+application. It is client-side rendered and uses hash routing because Wails
+serves a static asset bundle rather than a History API server.
 
-- `frontend/src/tokens.css` — Lethean-4 OKLCH tokens, Vi-anchored at `#663399`.
-- `frontend/src/lit/lit-chrome.js` — the shared `renderChrome({title, subtitle, w, h, toolbar, body, footer})` window frame plus nine primitives (`<lthn-glyph>`, `<lthn-traffic-lights>`, `<lthn-label>`, `<lthn-btn>`, `<lthn-rail-row>`, `<lthn-toggle>`, `<lthn-status-dot>`, `<lthn-state-pill>`, `<lthn-sparkline>`).
-- `frontend/src/lit/lit-chat-window.js` — E0 chat (5 states).
-- `frontend/src/lit/lit-ops-windows.js` — E1 welcome / settings / model browser.
-- `frontend/src/lit/lit-obs-windows.js` — E2 benchmark / activity / live telemetry.
-- `frontend/src/lit/lit-ext-windows.js` — E3 integrations / tools + E4 network / fine-tune / fleet.
+- `frontend-ng/src/main.ts` installs the bridge shim before bootstrapping Angular.
+- `frontend-ng/src/app/app.config.ts` wires hash routing, NgRx, WebMCP, and app initialisation.
+- `frontend-ng/src/app/app.routes.ts` owns `#/` and `#/w/:app`.
+- `frontend-ng/src/locale/` carries the Angular localisation catalogues.
+- `frontend-ng/angular.json` writes the browser output directly to `go/cmd/lthn/dist/`, with `index.html` at the root.
 
-Two viewing surfaces are built:
-
-- `frontend/index.html` — app entry. Mounts a single window by `?surface=` URL param. Wails serves this at runtime.
-- `frontend/canvas.html` — design canvas. Every window rendered side-by-side. For design review and demos.
-
-Light DOM is used for leaf components — tokens cascade in. The Lit handover at `docs/design/lethean-4-react-reference/` contains the original React/JSX visual source for design iteration; the Lit port at `frontend/src/lit/` is production code.
+Production Wails builds embed that directory. During `wails3 task dev`, Wails
+proxies Angular's development server on port 9245, so frontend changes use HMR
+while Go changes continue through the normal rebuild-and-relaunch loop.
 
 ---
 
@@ -184,7 +182,7 @@ Function signatures return `core.Result` rather than `error` or `(T, error)`. Th
 ## 8. Future architecture
 
 - **`lthn://` URI handler** — Wails app registers a custom URI scheme; URIs route through the same CLI dispatch via the Go-side router. Clicking `lthn://ai/chat?model=gemma-4-e2b` opens the chat window at that state.
-- **Side-loaded modules** — additional `pkg/*` subsystems (blockchain, LNS, mining, wallet) ship as additional `Register` calls + additional Lit windows. The binary stays one entry; the dispatch grows.
+- **Side-loaded modules** — additional `pkg/*` subsystems (blockchain, LNS, mining, wallet) ship as additional `Register` calls and Angular app surfaces. The binary stays one entry; the dispatch grows.
 - **Heterogeneous compute** — when `go-rocm` (AMD HIP) and CUDA backends land, the runner abstracts over them; the user picks via settings, the model runs on the best card for each layer. Eventually federated across LetherNet peers.
 - **External API fallback** — `go-ratelimit` (already shipped, Sonnet-CLEAN) routes overflow requests to OpenAI / Anthropic when local capacity saturates. The user owns their compute first; cloud is the explicit fallback.
 
