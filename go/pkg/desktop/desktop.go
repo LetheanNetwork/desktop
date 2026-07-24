@@ -49,6 +49,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/build"
 	"dappco.re/lthn/desktop/pkg/calibrate"
 	"dappco.re/lthn/desktop/pkg/clbpl"
+	"dappco.re/lthn/desktop/pkg/connection"
 	"dappco.re/lthn/desktop/pkg/container"
 	"dappco.re/lthn/desktop/pkg/contentshield"
 	"dappco.re/lthn/desktop/pkg/deploys"
@@ -154,6 +155,10 @@ type Options struct {
 	// the Wails binding; plaintext never crosses the WebView (Get
 	// is Go-side only). Required.
 	Keys *keys.Service
+	// Connection owns the Wails WebSocket transport and its remotely
+	// reachable client set. Required so the GUI, a browser, or a mobile
+	// client can all use the same binding surface.
+	Connection *connection.Service
 	// TrayIcon is the light-mode systray icon bytes. Empty leaves the
 	// platform default tray glyph unchanged.
 	TrayIcon []byte
@@ -169,12 +174,12 @@ type Options struct {
 	ShowAppOnLaunch bool
 }
 
-// Service holds the core/gui handle and the SystemTray anchor. The wails
-// application lifecycle lives behind gui.Service; lthn/desktop no longer
-// touches application.* directly.
+// Service holds the core/gui configuration facade, the transport-aware
+// Wails runtime, and the SystemTray anchor.
 type Service struct {
-	opts Options
-	gui  *gui.Service
+	opts    Options
+	gui     *gui.Service
+	runtime *guiRuntime
 	// selfRefreshStop signals the local-machine refresh ticker to
 	// exit. Closed by PostShutdown; the goroutine selects on it
 	// alongside the ticker channel.
@@ -257,6 +262,11 @@ func RegisterService(opts Options) func(*core.Core) core.Result {
 				opts.Keys = k
 			}
 		}
+		if opts.Connection == nil {
+			if manager, _ := core.ServiceFor[*connection.Service](c, "connection"); manager != nil {
+				opts.Connection = manager
+			}
+		}
 		return core.Ok(NewService(opts))
 	}
 }
@@ -273,6 +283,9 @@ func RegisterService(opts Options) func(*core.Core) core.Result {
 func (s *Service) Run() core.Result {
 	if s.opts.Server == nil {
 		return core.Fail(core.E("desktop.Run", "Server is required", nil))
+	}
+	if s.opts.Connection == nil {
+		return core.Fail(core.E("desktop.Run", "Connection is required", nil))
 	}
 
 	// Resolve the per-install SingleInstance encryption key. Generated
@@ -867,10 +880,10 @@ func (s *Service) Run() core.Result {
 		},
 	}
 
-	// Register the gui service on Core with the config above + fire its
-	// OnStartup. OnStartup builds the wails App, wraps every Binding as
-	// a Wails IPC service, and registers every core/gui sub-service
-	// (window, systray, lifecycle, menu, dialog, etc.).
+	// Keep core/gui's typed configuration service in the registry so its
+	// OpenWindow and WindowBindingService helpers can resolve the window
+	// catalogue. The local runtime constructs the same Wails/CoreGUI stack
+	// with the connection manager's custom transport attached.
 	guiSvcResult := gui.NewService(guiCfg)(s.opts.Core)
 	if !guiSvcResult.OK {
 		return guiSvcResult
@@ -879,10 +892,12 @@ func (s *Service) Run() core.Result {
 	if r := s.opts.Core.RegisterService("gui", s.gui); !r.OK {
 		return r
 	}
-	if r := s.gui.OnStartup(core.Background()); !r.OK {
-		return r
+	runtimeResult := newGUIRuntime(s.opts.Core, guiCfg, s.opts.Connection.Transport())
+	if !runtimeResult.OK {
+		return runtimeResult
 	}
-	registerRuntimeSystemEvents(s.opts.Core, s.gui.App())
+	s.runtime = runtimeResult.Value.(*guiRuntime)
+	registerRuntimeSystemEvents(s.opts.Core, s.runtime.App())
 
 	// Window state path is now wired via GuiConfig.WindowStatePath
 	// above. Pre-creation of the registered windows is owned by
@@ -967,7 +982,7 @@ func (s *Service) Run() core.Result {
 	s.trayStatusStop = make(chan struct{})
 	go runTrayStatusRefresh(s.opts.Core, s.trayStatusStop)
 
-	return s.gui.Run()
+	return s.runtime.Run()
 }
 
 // runTrayStatusRefresh keeps the native tray tooltip in sync with the

@@ -25,7 +25,8 @@ This guide covers everything needed to build, test, extend, and contribute to lt
 6. [Adding a subcommand](#6-adding-a-subcommand)
 7. [Adding a subsystem](#7-adding-a-subsystem)
 8. [Frontend development](#8-frontend-development)
-9. [Coding standards](#9-coding-standards)
+9. [WebSocket connection manager](#9-websocket-connection-manager)
+10. [Coding standards](#10-coding-standards)
 
 ---
 
@@ -182,7 +183,7 @@ func NewService(opts Options) *Service { return &Service{opts: opts} }
 
 func (s *Service) Register(c *core.Core) core.Result {
     // Wire actions, signals, lifecycle hooks here.
-    return core.Ok(nil)
+    return core.Ok(s)
 }
 
 func Register(c *core.Core) core.Result {
@@ -224,7 +225,81 @@ add Angular SSR, a server entry point, or hydration.
 
 ---
 
-## 9. Coding standards
+## 9. WebSocket connection manager
+
+The GUI backend exposes Wails bindings and events through
+`pkg/connection`. Its local development endpoint is:
+
+```text
+ws://localhost:9099/wails/ws
+```
+
+Backend configuration is resolved when the connection service is
+constructed:
+
+| Environment variable | Purpose | Default |
+|---|---|---|
+| `LTHN_WAILS_WS_LISTEN` | Backend TCP listen address | `127.0.0.1:9099` |
+| `LTHN_WAILS_WS_PATH` | HTTP WebSocket upgrade path | `/wails/ws` |
+| `LTHN_WAILS_WS_URL` | URL or root-relative path published to clients | `ws://localhost:9099/wails/ws` |
+| `LTHN_WAILS_WS_ORIGINS` | Comma-separated exact browser Origins | Native Wails and loopback origins |
+| `LTHN_WAILS_WS_TOKEN` | Optional upgrade token | Empty on loopback |
+| `LTHN_WAILS_WS_TRUST_PROXY` | Acknowledge that an authenticating proxy is the sole route to a non-loopback listener | `false` |
+
+The Angular client accepts an injected URL, an intentional bootstrap
+override, backend-served configuration, or a URL previously selected through
+`ConnectionManagerService.configure()`. It converts an HTTPS same-origin
+path to WSS. It rejects remote plaintext WS, URL credentials, and fragments.
+Only the non-secret URL is persisted; tokens are never written to browser
+storage.
+
+### Secure reverse proxy
+
+For a host proxy, leave the Go listener on loopback and publish a WSS route.
+For example, the essential nginx upgrade shape is:
+
+```nginx
+location /wails/ws {
+    proxy_pass http://127.0.0.1:9099/wails/ws;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Origin $http_origin;
+}
+```
+
+Terminate TLS and authenticate the user before this location, then configure:
+
+```bash
+LTHN_WAILS_WS_URL=/wails/ws
+LTHN_WAILS_WS_ORIGINS=https://desktop.example
+```
+
+The browser will resolve the relative path as
+`wss://desktop.example/wails/ws`. A proxy in another container or network
+namespace may require a non-loopback listen address. In that case, firewall
+the backend from direct access and set either
+`LTHN_WAILS_WS_TOKEN` or the explicit
+`LTHN_WAILS_WS_TRUST_PROXY=true` acknowledgement.
+
+Browser WebSocket clients supply a short-lived token as `access_token` when
+the backend token is enabled. Non-browser clients may instead send
+`Authorization: Bearer <token>`. Never place a long-lived token in
+`LTHN_WAILS_WS_URL`, page history, served JavaScript, proxy access logs, or
+mobile persistent storage. Any token used outside loopback must travel over
+WSS.
+
+Run the focused transport checks with:
+
+```bash
+cd go && go test -race ./pkg/connection
+cd ../frontend-ng
+npx ng test --configuration=ci --include=src/app/connection-manager.service.spec.ts
+```
+
+---
+
+## 10. Coding standards
 
 - **UK English** throughout: `colour`, `behaviour`, `centre`, `organisation`, `licence`. Never American spellings.
 - **CoreGO wrappers** for all stdlib equivalents (see audit gate above).

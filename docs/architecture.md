@@ -111,6 +111,47 @@ When the user closes a window, the app keeps running. When the user selects "Qui
 
 The decoupling is structural: `cmdServe` and `cmdAI` never construct an `application.App`. They use `core.New()` plus the same subsystem `Register` calls, then run their own event loops (HTTP server or REPL).
 
+### WebSocket connection manager
+
+`pkg/connection` is the transport boundary between a Wails backend and any
+frontend that consumes its generated bindings:
+
+```
+Angular/generated binding
+        │
+        ▼
+ConnectionManagerService ── ws:// or wss:// ──► pkg/connection
+                                                    │
+                                                    ▼
+                                         Wails MessageProcessor
+                                                    │
+                                                    ▼
+                                         registered Go services
+```
+
+The service implements Wails' custom transport, asset-server transport, and
+event-listener contracts. The default listener is
+`127.0.0.1:9099`, with binding IPC at
+`ws://localhost:9099/wails/ws`. `pkg/desktop` consumes the registered
+connection manager and passes its transport into `application.Options`; it
+does not own the listener or client lifecycle.
+
+Generated bindings do not change. `@wailsio/runtime` delegates every call to
+the Angular `ConnectionManagerService`, which correlates responses and
+forwards server-pushed events into Wails' normal event dispatcher. A browser
+or mobile client may therefore run separately from the native WebView and
+connect to the authoritative desktop backend.
+
+The Core service exists in CLI, serve, and GUI compositions, but remains
+unbound until a Wails application supplies its `MessageProcessor`. This
+preserves the rule that `lthn serve` and `lthn ai` do not start a display or
+an extra listener.
+
+Remote access is proxy-first: keep the backend on loopback, terminate TLS and
+user authentication at the proxy, publish `wss://.../wails/ws`, and configure
+an exact HTTPS Origin allow-list. The manager never places its access token
+in served JavaScript or status output.
+
 ---
 
 ## 4. The HTTP server
