@@ -98,6 +98,11 @@ describe('DeepLinkNavigationService', () => {
     await harness.fixture.whenStable();
   };
 
+  const trayOpen = async (payload: unknown): Promise<void> => {
+    listeners.get('lthn:tray:open')?.(payload);
+    await harness.fixture.whenStable();
+  };
+
   it('routes a registered app id through the desktop route catalogue', async () => {
     expect(events.on).toHaveBeenCalledWith('navigate', expect.any(Function));
 
@@ -110,6 +115,14 @@ describe('DeepLinkNavigationService', () => {
     await navigate({ action: 'mcp', resource: 'directory', id: '' });
 
     expect(router.url).toBe('/agents/flows');
+  });
+
+  it('routes tray launch events through the same desktop catalogue', async () => {
+    expect(events.on).toHaveBeenCalledWith('lthn:tray:open', expect.any(Function));
+
+    await trayOpen('chat');
+
+    expect(router.url).toBe('/ai/chat');
   });
 
   it('leaves the current route unchanged for unknown or malformed targets', async () => {

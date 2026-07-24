@@ -5,6 +5,7 @@ import { APPS } from './desktop/desktop.data';
 import { readDesktopRouteCatalog, routeSegmentsForWindow } from './desktop/desktop-route-tree';
 
 const NAVIGATE_EVENT = 'navigate';
+const TRAY_OPEN_EVENT = 'lthn:tray:open';
 const MCP_DIRECTORY_APP_ID = 'surface-agents-flows';
 
 export interface DeepLinkEventSource {
@@ -34,10 +35,16 @@ export class DeepLinkNavigationService {
   private readonly routeCatalog = readDesktopRouteCatalog(this.router.config);
 
   constructor() {
-    const off = this.events.on(NAVIGATE_EVENT, (payload) => {
+    const offNavigate = this.events.on(NAVIGATE_EVENT, (payload) => {
       void this.navigate(payload);
     });
-    this.destroyRef.onDestroy(off);
+    const offTray = this.events.on(TRAY_OPEN_EVENT, (payload) => {
+      void this.navigateTrayTarget(payload);
+    });
+    this.destroyRef.onDestroy(() => {
+      offNavigate();
+      offTray();
+    });
   }
 
   private async navigate(payload: unknown): Promise<void> {
@@ -47,7 +54,31 @@ export class DeepLinkNavigationService {
     const appId = appForDeepLink(target);
     if (!appId) return;
 
-    const segments = routeSegmentsForWindow(this.routeCatalog, appId);
+    await this.navigateToApp(appId);
+  }
+
+  private async navigateTrayTarget(payload: unknown): Promise<void> {
+    if (typeof payload !== 'string' || this.router.url === '/tray') return;
+    const target = payload.trim().toLocaleLowerCase('en-GB');
+    if (target === 'desktop') {
+      await this.router.navigateByUrl('/');
+      return;
+    }
+
+    const mapped: Record<string, readonly [app: string, sub?: string]> = {
+      chat: ['chat'],
+      models: ['control', 'models'],
+      settings: ['settings'],
+      telemetry: ['telemetry'],
+      tools: ['marketplace'],
+    };
+    const destination = target.startsWith('plugin:') ? ['marketplace'] : mapped[target];
+    if (!destination) return;
+    await this.navigateToApp(destination[0], destination[1]);
+  }
+
+  private async navigateToApp(appId: string, sub?: string): Promise<void> {
+    const segments = routeSegmentsForWindow(this.routeCatalog, appId, sub);
     if (!segments.length) return;
 
     await this.router.navigateByUrl(`/${segments.join('/')}`);

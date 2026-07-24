@@ -13,4 +13,9 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./standalone-app-host').then(({ StandaloneAppHost }) => StandaloneAppHost),
   },
+  {
+    path: 'tray',
+    title: 'Lethean Desktop',
+    loadComponent: () => import('./tray-panel/tray-panel').then(({ TrayPanel }) => TrayPanel),
+  },
 ];

@@ -16,8 +16,8 @@
 //   - Mac.ActivationPolicy = Accessory (menu-bar app, no Dock icon).
 //   - ApplicationShouldTerminateAfterLastWindowClosed = false
 //     (the NSStatusItem remains the process lifetime anchor).
-//   - SystemTray attached to the main Angular OS window; left-click
-//     shows/focuses it and the status-item menu remains available.
+//   - SystemTray attached to a compact Angular panel; left-click opens
+//     the always-on-top panel while the status-item menu remains available.
 //
 // The main window loads Angular's hash-located OS shell at "/#/".
 //
@@ -163,9 +163,9 @@ type Options struct {
 	// bundle separately; both should derive from the same source PNG
 	// to stay visually consistent.
 	AppIcon []byte
-	// ShowAppOnLaunch is retained for caller compatibility. The Angular
-	// OS shell now owns first-run onboarding, so Run opens "app" after
-	// ApplicationStarted on every launch.
+	// ShowAppOnLaunch opens the full Angular OS shell after
+	// ApplicationStarted. False starts as a tray-only process; clicking
+	// the status item still opens the compact tray panel.
 	ShowAppOnLaunch bool
 }
 
@@ -676,14 +676,6 @@ func (s *Service) Run() core.Result {
 		gui.TrayItem{Type: "separator"},
 		gui.TrayItem{Label: "Quit lthn", ActionID: trayActionQuit},
 	)
-	// macOS renders SetTooltip as the menu-bar title text next to the
-	// icon. Tray is icon-only, so empty on darwin; keep it as a real
-	// tooltip on other platforms.
-	trayTooltip := "Lethean Desktop"
-	if runtime.GOOS == "darwin" {
-		trayTooltip = ""
-	}
-
 	// Build the GuiConfig — core/gui's Service owns wails app construction
 	// + sub-service registration. lthn/desktop holds no wails imports.
 	guiCfg := gui.GuiConfig{
@@ -700,20 +692,15 @@ func (s *Service) Run() core.Result {
 		Tray: &gui.TrayConfig{
 			Icon:         s.opts.TrayIcon,
 			IconTemplate: true, // darwin template icon; ignored elsewhere
-			Tooltip:      trayTooltip,
+			Tooltip:      "Lethean Desktop",
 			Label:        "", // clear core/gui's "Core" default
 			Menu:         trayMenuItems,
-			// Attach the primary OS shell directly: a status-item click
-			// shows/focuses app instead of loading a second copy of the
-			// OS in a dedicated tray popover. The menu remains intact.
-			PopoverWindow: mainWindowName,
+			// The panel is pre-created hidden in windowRegistry. Wails
+			// positions and toggles it under the status item while the
+			// right-click menu remains independently available.
+			PopoverWindow:  trayPanelWindowName,
+			PopoverOffsetY: 4,
 			Routes: []gui.TrayRoute{
-				{ActionID: trayActionOpenApp, OpenWindow: mainWindowName, EmitEvent: trayOpenEvent},
-				{ActionID: trayActionOpenChat, OpenWindow: mainWindowName, EmitEvent: trayOpenEvent},
-				{ActionID: trayActionOpenModels, OpenWindow: mainWindowName, EmitEvent: trayOpenEvent},
-				{ActionID: trayActionOpenSettings, OpenWindow: mainWindowName, EmitEvent: trayOpenEvent},
-				{ActionID: trayActionOpenApps, OpenWindow: mainWindowName, EmitEvent: trayOpenEvent},
-				{ActionID: trayActionOpenAbout, OpenWindow: mainWindowName, EmitEvent: trayOpenEvent},
 				{ActionID: trayActionQuit, Quit: true},
 			},
 		},
@@ -899,31 +886,30 @@ func (s *Service) Run() core.Result {
 	// Application menu is now declarative via GuiConfig.AppMenu above —
 	// gui.Service auto-gates to darwin and fires menu.set_app_menu.
 
-	// Systray icon + tooltip + menu + main-window attachment are now
+	// Systray icon + tooltip + menu + panel-window attachment are now
 	// declared via gui.GuiConfig.Tray (built above) and applied by
-	// gui.Service.OnStartup. Only the click router stays here — it's
-	// the lthn-specific plugin validation + event/audit logic.
-
-	// Plugin tray-click router — bespoke handler for ActionIDs that
-	// match trayPluginPrefix. Validates the code at the click boundary
-	// (Cerberus #70 F-3 defence-in-depth), then focuses the Angular OS
-	// shell. Angular owns the plugin's in-webview window.
+	// gui.Service.OnStartup. The lthn-specific click router supplies
+	// meaningful navigation targets and validates plugin codes.
 	s.opts.Core.RegisterAction(func(c *core.Core, msg core.Message) core.Result {
 		click, ok := msg.(guisystray.ActionTrayMenuItemClicked)
 		if !ok {
-			return core.Result{OK: true}
+			return core.Ok(nil)
 		}
-		if !core.HasPrefix(click.ActionID, trayPluginPrefix) {
-			return core.Result{OK: true}
+		if click.ActionID == trayActionOpenAbout {
+			if s.gui != nil && s.gui.App() != nil && s.gui.App().Menu != nil {
+				s.gui.App().Menu.ShowAbout()
+			}
+			return core.Ok(nil)
 		}
-		code := core.TrimPrefix(click.ActionID, trayPluginPrefix)
-		if code == "" || !paths.IsValidPluginCode(code) {
-			return core.Result{OK: true}
+		target, routed := trayTargetForAction(click.ActionID)
+		if !routed {
+			return core.Ok(nil)
 		}
-		gui.OpenWindow(c, mainWindowName)
-		emitCoreEvent(c, trayOpenEvent, "plugin:"+code)
-		emitTrayPluginClicked(code)
-		return core.Result{OK: true}
+		result := openTrayTarget(c, target)
+		if result.OK && core.HasPrefix(target, "plugin:") {
+			emitTrayPluginClicked(core.TrimPrefix(target, "plugin:"))
+		}
+		return result
 	})
 
 	// Context menus + key bindings now declared via GuiConfig.ContextMenus
@@ -939,16 +925,16 @@ func (s *Service) Run() core.Result {
 
 	// Per-window lthn:window:* event re-broadcasts (ready / focus /
 	// blur / hide / show / resize / files-dropped). See sysevents.go.
-	// Window registry pre-creation + main-window tray attachment are
+	// Window registry pre-creation + compact-panel tray attachment are
 	// owned by gui.Service via GuiConfig.WindowRegistry + GuiConfig.Tray.
 
-	// Angular owns both the desktop and onboarding, so every launch
-	// opens the same /#/ OS shell. This must fire AFTER
-	// ApplicationStarted —
+	// The tray panel is the normal launch surface. Development and other
+	// explicit callers may request the full OS shell immediately with
+	// ShowAppOnLaunch. This must fire AFTER ApplicationStarted —
 	// pre-Run() window operations on macOS SEGV inside AppKit because
 	// the NSApp run loop isn't up yet.
 	s.opts.Core.RegisterAction(func(c *core.Core, msg core.Message) core.Result {
-		if _, ok := msg.(guilifecycle.ActionApplicationStarted); ok {
+		if _, ok := msg.(guilifecycle.ActionApplicationStarted); ok && s.opts.ShowAppOnLaunch {
 			gui.OpenWindow(c, mainWindowName)
 		}
 		return core.Ok(nil)
@@ -1004,7 +990,7 @@ func refreshTrayTooltipOnce(c *core.Core) {
 	if c == nil {
 		return
 	}
-	tooltip := "no model loaded"
+	tooltip := "Lethean Desktop — no model loaded"
 	admin, err := lemma.NewAdmin(lemma.AdminConfig{})
 	if err != nil {
 		core.Debug("desktop.tray.status", "err", err.Error())
@@ -1015,7 +1001,7 @@ func refreshTrayTooltipOnce(c *core.Core) {
 		if statusErr != nil {
 			core.Debug("desktop.tray.status", "err", statusErr.Error())
 		} else if base := pathBase(status.ModelPath); base != "" {
-			tooltip = base + " — ready"
+			tooltip = "Lethean Desktop — " + base + " — ready"
 		}
 	}
 	c.Action("systray.set_tooltip").Run(core.Background(), core.NewOptions(
@@ -1068,6 +1054,62 @@ func (s *Service) attachSPA() core.Result {
 		fileServer.ServeHTTP(c.Writer, c.Request)
 	})
 	return core.Ok(nil)
+}
+
+// trayTargetForAction translates native menu ActionIDs into the semantic
+// target consumed by Angular's lthn:tray:open listener. Plugin codes are
+// validated at this native boundary before they become event data.
+func trayTargetForAction(actionID string) (string, bool) {
+	switch actionID {
+	case trayActionOpenApp:
+		return "desktop", true
+	case trayActionOpenChat:
+		return "chat", true
+	case trayActionOpenModels:
+		return "models", true
+	case trayActionOpenSettings:
+		return "settings", true
+	case trayActionOpenApps:
+		return "tools", true
+	}
+	if !core.HasPrefix(actionID, trayPluginPrefix) {
+		return "", false
+	}
+	code := core.TrimPrefix(actionID, trayPluginPrefix)
+	if code == "" || !paths.IsValidPluginCode(code) {
+		return "", false
+	}
+	return "plugin:" + code, true
+}
+
+// openTrayTarget brings the full desktop forward, emits the semantic Angular
+// navigation target, and dismisses the compact popover. Errors use the Core
+// error shape because this helper runs on the Core action bus.
+func openTrayTarget(c *core.Core, target string) core.Result {
+	if c == nil {
+		return core.Fail(core.E("desktop.openTrayTarget", "core is nil", nil))
+	}
+	if !validTrayTarget(target) {
+		return core.Fail(core.E("desktop.openTrayTarget", "invalid tray target", nil))
+	}
+	if !gui.OpenWindow(c, mainWindowName) {
+		return core.Fail(core.E("desktop.openTrayTarget", "desktop window is unavailable", nil))
+	}
+	emitCoreEvent(c, trayOpenEvent, target)
+	gui.HideWindow(c, trayPanelWindowName)
+	return core.Ok(nil)
+}
+
+func validTrayTarget(target string) bool {
+	switch target {
+	case "desktop", "chat", "models", "settings", "telemetry", "tools":
+		return true
+	}
+	if !core.HasPrefix(target, "plugin:") {
+		return false
+	}
+	code := core.TrimPrefix(target, "plugin:")
+	return code != "" && paths.IsValidPluginCode(code)
 }
 
 // trayPluginMaxLabelBytes caps a plugin-manifest label before it lands
