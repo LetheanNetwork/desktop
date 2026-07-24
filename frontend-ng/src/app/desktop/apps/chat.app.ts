@@ -43,6 +43,7 @@ interface PendingCompletion {
 interface ChatRequest {
   readonly id: string;
   readonly history: readonly AiChatMessage[];
+  readonly route: string;
   readonly completion: PendingCompletion;
 }
 
@@ -168,6 +169,20 @@ let messageSequence = 0;
       color: var(--fg-3);
       overflow-wrap: anywhere;
     }
+    .provider-select {
+      width: 100%;
+      min-width: 0;
+      padding: 7px 26px 7px 8px;
+      border: 1px solid var(--line-2);
+      border-radius: 7px;
+      background: var(--ink-1);
+      color: var(--fg-1);
+      font: 11px var(--font-mono);
+    }
+    .provider-select:focus {
+      outline: 1px solid var(--brand-400);
+      border-color: var(--brand-400);
+    }
     .rail-action {
       padding: 6px 8px;
       border: 1px solid var(--line-2);
@@ -269,8 +284,26 @@ let messageSequence = 0;
           >Provider routing</span
         >
         <div class="provider-summary">{{ providerSummary() }}</div>
+        <select
+          class="provider-select"
+          [value]="selectedRoute()"
+          (change)="selectProvider($event)"
+          aria-label="Provider route"
+          i18n-aria-label="Provider route selector@@chat.provider.selector"
+          [disabled]="providerRoutes.isLoading()"
+        >
+          <option value="" i18n="Automatic provider route option@@chat.provider.autoOption">
+            Automatic
+          </option>
+          <option
+            *ngFor="let route of providerRoutes.value(); trackBy: trackRoute"
+            [value]="route.name"
+          >
+            {{ route.name }} · {{ route.model || 'default model' }}
+          </option>
+        </select>
         <lthn-badge [attr.variant]="providerRoutes.error() ? 'warn' : 'ok'">
-          {{ providerRoutes.error() ? 'bridge unavailable' : 'automatic' }}
+          {{ providerRoutes.error() ? 'bridge unavailable' : selectedRoute() || 'automatic' }}
         </lthn-badge>
 
         <ng-container *ngFor="let route of providerRoutes.value(); trackBy: trackRoute">
@@ -348,6 +381,7 @@ export class ChatApp implements AppView {
 
   readonly draft = signal('');
   readonly messages = signal<ThreadMessage[]>([]);
+  readonly selectedRoute = signal('');
   readonly lastError = signal<string | null>(null);
   readonly notice = signal<string | null>(null);
   readonly sending = computed(() => this.activeRequest() !== undefined);
@@ -398,12 +432,24 @@ export class ChatApp implements AppView {
     if (this.providerRoutes.error()) return 'Desktop runner is not reachable.';
     const routes = this.providerRoutes.value();
     if (!routes.length) return 'No provider routes are configured.';
+    const selected = this.selectedRoute();
+    if (selected) {
+      const route = routes.find((candidate) => candidate.name === selected);
+      return route
+        ? `Routing this request through ${route.name} (${route.model || 'default model'}).`
+        : `Routing this request through ${selected}.`;
+    }
     return `${routes.length} configured route${routes.length === 1 ? '' : 's'}; Go selects the route.`;
   });
 
   readonly userLabel = $localize`:Current user label@@chat.participant.you:You`;
   readonly assistantLabel = computed(() => {
     const routes = this.providerRoutes.value();
+    const selected = this.selectedRoute();
+    if (selected) {
+      const route = routes.find((candidate) => candidate.name === selected);
+      return route?.model || route?.name || selected;
+    }
     return routes.length === 1
       ? routes[0].model || routes[0].name
       : $localize`:Automatic provider label@@chat.provider.automatic:Assistant`;
@@ -411,6 +457,10 @@ export class ChatApp implements AppView {
 
   updateDraft(event: Event): void {
     this.draft.set((event.target as HTMLTextAreaElement).value);
+  }
+
+  selectProvider(event: Event): void {
+    this.selectedRoute.set((event.target as HTMLSelectElement).value);
   }
 
   composerKeydown(event: KeyboardEvent): void {
@@ -423,7 +473,7 @@ export class ChatApp implements AppView {
     void this.sendPrompt(this.draft()).catch(() => undefined);
   }
 
-  sendPrompt(prompt: string): Promise<ThreadMessage> {
+  sendPrompt(prompt: string, routeOverride = this.selectedRoute()): Promise<ThreadMessage> {
     const content = prompt.trim();
     if (!content) return Promise.reject(new Error('Prompt is required.'));
     if (this.activeRequest()) {
@@ -445,6 +495,7 @@ export class ChatApp implements AppView {
     return new Promise<ThreadMessage>((resolve, reject) => {
       this.activeRequest.set({
         id: nextMessageId('request'),
+        route: routeOverride.trim(),
         history: nextMessages.map(({ role, content: text }) => ({
           role,
           content: text,
@@ -506,7 +557,7 @@ export class ChatApp implements AppView {
     };
 
     try {
-      for await (const event of this.ai.streamChat(request.history, abortSignal)) {
+      for await (const event of this.ai.streamChat(request.history, request.route, abortSignal)) {
         if (event.type === 'text') {
           current = { ...current, text: current.text + event.text };
         } else if (event.type === 'tool-calls') {
@@ -562,7 +613,7 @@ export class ChatApp implements AppView {
             {
               type: 'text',
               text: JSON.stringify({
-                provider_mode: 'automatic',
+                provider_mode: this.selectedRoute() || 'automatic',
                 routes: this.providerRoutes.value(),
                 sending: this.sending(),
                 messages: this.messages(),
@@ -584,15 +635,24 @@ export class ChatApp implements AppView {
               maxLength: 32768,
               description: 'Prompt to append to the current Chat thread.',
             },
+            route: {
+              type: 'string',
+              maxLength: 128,
+              description:
+                'Optional live provider route name. Empty keeps automatic Go fallback routing.',
+            },
           },
           required: ['prompt'],
           additionalProperties: false,
         },
-        execute: async ({ prompt }) => {
+        execute: async ({ prompt, route = '' }) => {
           if (!prompt.trim() || prompt.length > 32768) {
             throw new Error('Prompt must contain 1 to 32768 characters.');
           }
-          const assistant = await this.sendPrompt(prompt);
+          if (route.length > 128) {
+            throw new Error('Provider route must not exceed 128 characters.');
+          }
+          const assistant = await this.sendPrompt(prompt, route || this.selectedRoute());
           return {
             content: [
               {

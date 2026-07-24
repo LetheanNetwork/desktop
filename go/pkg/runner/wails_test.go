@@ -41,7 +41,7 @@ func TestRunner_WChat_Bad_TooManyMessages(t *core.T) {
 	for i := range msgs {
 		msgs[i] = inference.Message{Role: "user", Content: "x"}
 	}
-	r := s.WChat(msgs)
+	r := s.WChat(msgs, "")
 	core.AssertFalse(t, r.OK,
 		"WChat must refuse message arrays beyond the count cap")
 }
@@ -51,7 +51,7 @@ func TestRunner_WChat_Bad_OversizedSingleMessage(t *core.T) {
 	// Single message whose Role+Content exceeds 1 MiB.
 	r := s.WChat([]inference.Message{
 		{Role: "user", Content: oversizePrompt(1<<20 + 1)},
-	})
+	}, "")
 	core.AssertFalse(t, r.OK,
 		"WChat must refuse a single message larger than the per-msg cap")
 }
@@ -68,7 +68,7 @@ func TestRunner_WChat_Bad_OversizedCumulative(t *core.T) {
 		// cumulative is what fails.
 		msgs[i] = inference.Message{Role: "u", Content: near}
 	}
-	r := s.WChat(msgs)
+	r := s.WChat(msgs, "")
 	core.AssertFalse(t, r.OK,
 		"WChat must refuse a message array whose total bytes exceed the cumulative cap")
 }
@@ -90,7 +90,7 @@ func TestRunner_WChat_Good_AtCapNoReject(t *core.T) {
 	for i := range msgs {
 		msgs[i] = inference.Message{Role: "", Content: atMsg}
 	}
-	r := s.WChat(msgs)
+	r := s.WChat(msgs, "")
 	// Either OK (no router → echo stub on Chat path) or a Chat-layer
 	// failure — but the error string must NOT contain "cap" /
 	// "exceeds" / "count exceeds", which are the cap-rejection sentinels.
@@ -101,6 +101,22 @@ func TestRunner_WChat_Good_AtCapNoReject(t *core.T) {
 		core.AssertFalse(t, core.Contains(msg, "exceeds"),
 			"at-cap WChat must not trip the cap layer; got: "+msg)
 	}
+}
+
+// TestRunner_Chat_Bad_TooManyMessages verifies the caps sit below the
+// renderer binding as well: CLI, Action-bus, and HTTP callers cannot bypass
+// the message-count defence by calling the bare Chat surface.
+func TestRunner_Chat_Bad_TooManyMessages(t *core.T) {
+	s := runner.NewService(runner.Options{})
+	msgs := make([]inference.Message, runner.MaxChatMessages+1)
+	for i := range msgs {
+		msgs[i] = inference.Message{Role: "user", Content: "x"}
+	}
+
+	r := s.Chat(msgs)
+
+	core.AssertFalse(t, r.OK, "bare Chat must enforce the mandatory message caps")
+	core.AssertContains(t, r.Error(), "message count exceeds")
 }
 
 // TestRunner_WGenerate_Good_AtCapNoReject — same boundary check on

@@ -14,6 +14,43 @@ import (
 	"dappco.re/lthn/desktop/pkg/welfare"
 )
 
+type welfareChatState struct {
+	messages  []inference.Message
+	synthetic string
+	warnUser  bool
+}
+
+// applyWelfare runs the optional gate and returns the exact chat input or
+// synthetic response chosen by it. A nil welfare service is the default and
+// returns the caller's messages untouched.
+func (s *Service) applyWelfare(
+	ctx context.Context,
+	messages []inference.Message,
+	router *ai.ProviderRouter,
+	provider string,
+	model string,
+) welfareChatState {
+	state := welfareChatState{messages: messages}
+	g := s.welfareGuard(ctx, messages, router)
+	if !g.Triggered {
+		return state
+	}
+
+	s.auditWelfare(provider, model, g)
+	switch {
+	case g.Synthetic != "":
+		// lem_pause returns before inference.chat.requested because the
+		// original turn never reaches the model.
+		state.synthetic = g.Synthetic
+	case g.Rephrased != "":
+		state.messages = withLastUser(messages, g.Rephrased)
+		state.warnUser = g.WarnUser
+	case g.FalsePositive != nil:
+		s.appendWelfareFeedback(*g.FalsePositive)
+	}
+	return state
+}
+
 // welfareGuard runs the welfare gate (RFC.welfare) for one chat turn. Returns a
 // zero GuardResult (Triggered=false → caller proceeds unchanged) when no welfare
 // Service is attached — the CLI path constructs the runner without one, so the
