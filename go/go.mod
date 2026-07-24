@@ -14,7 +14,7 @@ require (
 	dappco.re/go/orm v0.1.2
 	dappco.re/go/process v0.16.1
 	dappco.re/go/ratelimit v0.12.1
-	dappco.re/go/render v0.19.0
+	dappco.re/go/render v0.20.0
 	dappco.re/go/scm v0.22.0
 	dappco.re/go/store v0.14.1
 	dappco.re/go/ws v0.7.1

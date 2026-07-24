@@ -50,7 +50,7 @@ func trayAuditFixture(t *core.T) *audit.Service {
 // silently filtered out of the tray menu surface. The Cerberus #70
 // F-3 attack walk seeds a hostile manifest with traversal + special-
 // char codes; the gate must drop them before the click router can
-// route them through openPluginWindow.
+// route them through the Angular OS shell.
 func TestTray_BuildPluginTrayItems_InvalidPluginCodeRejected_Bad(t *core.T) {
 	entries := []plugin.MenuEntry{
 		{Code: "opencode", Label: "OpenCode", Running: true},

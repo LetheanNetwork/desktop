@@ -10,7 +10,7 @@ See:
 
 - Long-term spec: [`plans/project/lthn/desktop/RFC.md`](../../host-uk/core/plans/project/lthn/desktop/RFC.md)
 - First release scope: [`plans/project/lthn/desktop/RFC.first-release.md`](../../host-uk/core/plans/project/lthn/desktop/RFC.first-release.md)
-- Design canon (Lit port): [`plans/ops/hostuk/website/_design/lethean-5/`](../../host-uk/core/plans/ops/hostuk/website/_design/lethean-5/)
+- Visual design ancestry: [`plans/ops/hostuk/website/_design/lethean-5/`](../../host-uk/core/plans/ops/hostuk/website/_design/lethean-5/)
 - `lthn` namespace canon: [`plans/project/lthn/RFC.md`](../../host-uk/core/plans/project/lthn/RFC.md) §7
 
 ## Architectural rules (load-bearing — read first)
@@ -19,7 +19,7 @@ See:
 2. **The tray IS the process (in GUI mode).** When Wails launches, `ApplicationShouldTerminateAfterLastWindowClosed = false`. Windows are transient surfaces; closing all of them does NOT quit the app. The NSStatusItem is the lifetime anchor.
 3. **Single screen tray panel — no internal navigation.** The 400×560 popover has no side menus, tabs, drawers. Anything that doesn't fit ships as a separate transient window.
 4. **Glue only.** No new library code lives in this repo. Library capability lives in `core/`, `go-mlx`, `core/gui`, etc. This repo composes them.
-5. **Lit + light DOM for windows.** Leaf components are light DOM (matches the Lethean Lit-rule canon). Tokens.css cascades in.
+5. **Angular CSR frontend.** The standalone app uses hash routing inside Wails and builds directly to `go/cmd/lthn/dist/`. Do not add Angular SSR or hydration.
 6. **British English everywhere.** colour, organisation, centre, behaviour.
 7. **EUPL-1.2 / CIC asset-locked.** No "Pro" gates, no upgrade prompts, no feature paywalls.
 
@@ -38,13 +38,13 @@ lthn/desktop/
 │   └── pkg/telemetry/       — powermetrics/IOReport sampler
 ├── external/                — git submodules pinned to dev branches
 │   └── go/                  — dappco.re/go (Core primitives)
-├── frontend/
-│   ├── index.html           — app entry (single-window mount via ?surface=)
-│   ├── canvas.html          — design canvas (every window side-by-side)
+├── frontend-ng/
+│   ├── angular.json         — direct output to go/cmd/lthn/dist/
 │   └── src/
-│       ├── tokens.css       — Lethean-4 OKLCH tokens, Vi-anchored
-│       ├── main.js          — surface router for index.html
-│       └── lit/             — Lit primitives + windows from Lethean-5
+│       ├── main.ts          — bridge-first Angular bootstrap
+│       ├── wails-bridge.ts  — Wails event + WebMCP shim
+│       ├── locale/          — localisation catalogues
+│       └── app/             — standalone shell, hash routes, NgRx, app views
 └── docs/
     ├── index.md / architecture.md / development.md
     └── design/
@@ -82,28 +82,14 @@ lthn wallet ...            # blockchain wallet (when side-loaded)
 ## Frontend dev
 
 ```bash
-cd frontend && npm install && npm run dev
-# → http://127.0.0.1:5173/canvas.html   ← every window side-by-side (the design canvas)
-# → http://127.0.0.1:5173/?surface=chat ← single-window mount (app entry)
+cd frontend-ng && npm install
+npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
+# → http://127.0.0.1:9245/#/
+# → http://127.0.0.1:9245/#/w/:app
 ```
 
-### Two viewing surfaces
-
-- **`canvas.html`** — the design canvas from the Lethean-5 handover. Every window rendered side-by-side with section captions. Drop-in from `frontend/src/lit/lit-desktop.html`-origin (now at `frontend/canvas.html`). Open in a browser; pan around; review what's shipped.
-- **`index.html`** — the app entry. Mounts one window at a time via `?surface=` URL param. This is the surface Wails serves at production runtime.
-
-Mount any single window for review:
-- `?surface=tray` — popover (TODO: port from Lethean-4)
-- `?surface=chat&state=multi-turn|generating|switched-model|empty|no-model`
-- `?surface=welcome&step=1|2|3`
-- `?surface=settings&open=models`
-- `?surface=models`
-- `?surface=benchmark`
-- `?surface=logs&tab=live|history|power`
-- `?surface=telemetry`
-- `?surface=integrations`
-- `?surface=tools`
-- `?surface=canvas` (default — index of all)
+`wails3 task dev` starts this server in the background and proxies it into the
+WebView. Angular source changes use HMR; Go changes rebuild and relaunch Wails.
 
 ## Go services (canonical Service.go pattern — Mantis #1336)
 
@@ -132,12 +118,14 @@ Foundation in place on both sides. Coverage target ≥70% per package; lifting f
 wails3 task test                 # Go + frontend
 wails3 task test:cover           # both with coverage reports
 wails3 task test:cover:go        # → go/coverage.{out,html}
-wails3 task test:cover:frontend  # → frontend/coverage/
+wails3 task test:cover:frontend  # → frontend-ng/coverage/lcov.info
 ```
 
 **Go side** — 12 packages tested, 10 over 70%. Tests use the `core/go` framework: external `_test` package, alias-import `dappco.re/go` for `core.T`/`AssertEqual`/`AssertTrue`/etc, no separate `"testing"` import, AX `Good/Bad/Ugly` naming, HOME-isolated fixtures via `t.TempDir()` + `t.Cleanup`.
 
-**Frontend side** — vitest@^3 + happy-dom + @vitest/coverage-v8. 14 spec files, 70 tests, ~600ms wall time. Per-window tests use the shared `frontend/src/test/window-fixture.ts` (`mountWindow`, `expectChromeTitle`, `isEmbedded`, `findCard`). Canonical 4-section pattern: smoke / embedded-sweep / content-presence / reactive-prop.
+**Frontend side** — Angular's unit-test builder runs Vitest in jsdom. Specs are
+colocated under `frontend-ng/src/`; `npm run test:ci` is the non-watch test and
+coverage gate.
 
 **Coverage outliers (ceilinged, not bugs):**
 - `pkg/services` 49.4% — kardianos writes to `~/Library/LaunchAgents/` etc; integration-suite work, not unit.
@@ -155,11 +143,11 @@ Both ceilings are documented in their test files.
 - **Window events** — `WindowDidMove`, `WindowMaximise/UnMaximise`, `WindowMinimise/UnMinimise` re-broadcast onto the `lthn:window:*` bus for the frontend.
 - **Build** — Taskfile ARCH propagation fixed across `package` → `create:*` → `build` chains for all three platforms. Custom `darwin:create:dmg` mirror-implementing Wails' `dmg.Creator` (the alpha.91 dispatch is disabled but the Go package ships). `Linux.Icon` wired through `preCreateWindows`.
 
-## UI polish — retina + window 100%/100%
+## UI shell
 
-- `frontend/index.html` — `-webkit-font-smoothing: antialiased` + `-moz-osx-font-smoothing: grayscale` + `text-rendering: optimizeLegibility` + `font-feature-settings: kern/liga/calt`. Without these the macOS WebView falls back to subpixel-antialiased which makes thin light-on-dark text feel cramped. `color-scheme: dark` meta tells WebView's native form controls + scrollbars + dialogs to render with dark defaults. Viewport meta gains `viewport-fit=cover` for mobile-ready future.
-- `frontend/src/lit/chrome.ts` — non-embedded card uses `width:100%; height:100%` instead of fixed `${w}px/${h}px`. The OS window from `pkg/desktop/windows.go` is the authoritative size; the card fills it. `ChromeOptions` gains optional `actions` slot for titlebar right-side icons (cog + screen on the tray today).
-- `frontend/src/tokens.css` — global rules give every `<lthn-*-window>` custom element `display:flex; width:100%; height:100%` so the 100% chrome has somewhere to grow.
+The Angular root and desktop component fill the native WebView. The OS window
+model in `pkg/desktop` remains authoritative; frontend navigation stays behind
+the hash so native `wails://` URLs do not require server-side fallbacks.
 
 ## OpenAPI + @lthn/api TypeScript SDK pipeline (2026-05-13)
 
@@ -169,7 +157,7 @@ spec generator can build a complete OpenAPI 3.1 document straight off
 the live `api.Engine`. RouteGroups today: `RunnerGroup` (GET /v1/runner/models, POST /v1/runner/generate, POST /v1/runner/chat).
 
 **Two consumer paths, one surface:**
-- **Wails3 bindings** — same-process Service access from the Lit windows; auto-generated under `frontend/bindings/`. Zero network hop.
+- **Wails3 runtime** — same-process service access from Angular uses `@wailsio/runtime`; the bridge shim is `frontend-ng/src/wails-bridge.ts`. Generated bindings are staged under `frontend-ng/bindings/`.
 - **`@lthn/sdk-*` family on npm** — external clients (Claude Code, Codex, OpenCode, Raycast extensions, future plugins) and Lethean fleet peers. Each flavour lives in its own GitHub repo (`LetheanNetwork/sdk-<flavour>`) and publishes to npm separately. The flavour list is in `build/sdk/publish.sh`'s MANIFEST.
 
 **Published flavours** (`LetheanNetwork/sdk-<id>` → `@lthn/sdk-<id>` on the matching package registry):
@@ -222,23 +210,24 @@ Tracked at [`plans/project/lthn/desktop/RFC.first-release.md`](../../host-uk/cor
 1. Telemetry source — `powermetrics` (sudo) vs `IOReport` (no sudo) vs XPC helper
 2. First-launch flow when no model present
 
-## Parallel sub-tasks for multi-agent direction
+## Historical first-release task split
 
-From `RFC.first-release.md §9.4`, 14 units A-N. Each has a single owner, single output artefact:
+From `RFC.first-release.md §9.4`, 14 units A-N. Frontend paths below point at
+their current Angular homes:
 
 - A — tray + NSStatusItem registration → `pkg/tray/`
 - B — popover anchor + window manager → `pkg/tray/`
-- C — header section (brand + Start/Stop) → `frontend/src/lit/` (panel)
-- D — stats strip (4 rows) → `frontend/src/lit/` (panel)
-- E — prompt + generation + sparkline → `frontend/src/lit/` (panel)
-- F — footer status states → `frontend/src/lit/` (panel)
+- C — header section (brand + Start/Stop) → `frontend-ng/src/app/desktop/`
+- D — stats strip (4 rows) → `frontend-ng/src/app/desktop/`
+- E — prompt + generation + sparkline → `frontend-ng/src/app/desktop/apps/`
+- F — footer status states → `frontend-ng/src/app/desktop/`
 - G — runner service (Go ↔ go-mlx) → `pkg/runner/`
 - H — telemetry service → `pkg/telemetry/`
-- I — Wails bindings + signal wiring → glue across pkg/ + frontend/
-- J — `cmd/lthn/` main + service composition → `cmd/lthn/`
+- I — Wails bindings + signal wiring → glue across `go/pkg/` + `frontend-ng/`
+- J — `lthn` main + service composition → `go/cmd/lthn/`
 - K — Taskfile + build/darwin packaging → `Taskfile.yml` + `build/`
 - L — codesigning config + first-launch UX → `build/`
-- M — Lethean-4 token import + theme wiring → `frontend/src/` (done — `tokens.css` in place)
-- N — Lethean violet tray-icon SVG → `frontend/src/assets/` (pending design pass output)
+- M — theme tokens → `frontend-ng/src/foundations/`
+- N — Lethean visual assets → `frontend-ng/public/`
 
 C/D/E/F can ship against fixture data from G/H. K/L runs alongside.

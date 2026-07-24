@@ -15,11 +15,11 @@
 //     Vite frontend dist so the SPA loads at "/".
 //   - Mac.ActivationPolicy = Accessory (menu-bar app, no Dock icon).
 //   - ApplicationShouldTerminateAfterLastWindowClosed = false
-//     (the tray IS the process — closing the popover hides it).
-//   - SystemTray + popover Window attached via WindowOffset(5).
+//     (the NSStatusItem remains the process lifetime anchor).
+//   - SystemTray attached to the main Angular OS window; left-click
+//     shows/focuses it and the status-item menu remains available.
 //
-// The window URL is "/?surface=tray" — the index.html in the
-// embedded dist reads ?surface= and mounts the matching Lit element.
+// The main window loads Angular's hash-located OS shell at "/#/".
 //
 // Usage example:
 //
@@ -164,11 +164,9 @@ type Options struct {
 	// bundle separately; both should derive from the same source PNG
 	// to stay visually consistent.
 	AppIcon []byte
-	// ShowAppOnLaunch opens the main "app" window automatically after
-	// pre-create finishes. Useful in dev mode so iteration doesn't
-	// require clicking the tray every restart. Production builds
-	// leave it false — the tray IS the process; the user clicks in.
-	// Toggled in main.go from the LTHN_DEV env var.
+	// ShowAppOnLaunch is retained for caller compatibility. The Angular
+	// OS shell now owns first-run onboarding, so Run opens "app" after
+	// ApplicationStarted on every launch.
 	ShowAppOnLaunch bool
 }
 
@@ -693,8 +691,8 @@ func (s *Service) Run() core.Result {
 	// + sub-service registration. lthn/desktop holds no wails imports.
 	guiCfg := gui.GuiConfig{
 		// Tray mode auto-wires Mac.ActivationPolicy=Accessory +
-		// Windows.DisableQuitOnLastWindowClosed=true. The tray IS the
-		// process lifetime anchor.
+		// Windows.DisableQuitOnLastWindowClosed=true. The NSStatusItem
+		// remains the process lifetime anchor.
 		Mode:            gui.ModeTray,
 		Name:            s.opts.Name,
 		Description:     s.opts.Description,
@@ -703,20 +701,22 @@ func (s *Service) Run() core.Result {
 		WindowRegistry:  windowRegistry(),
 		WindowStatePath: windowStatePath,
 		Tray: &gui.TrayConfig{
-			Icon:           s.opts.TrayIcon,
-			IconTemplate:   true, // darwin template icon; ignored elsewhere
-			Tooltip:        trayTooltip,
-			Label:          "", // clear core/gui's "Core" default
-			Menu:           trayMenuItems,
-			PopoverWindow:  "tray",
-			PopoverOffsetY: 5,
+			Icon:         s.opts.TrayIcon,
+			IconTemplate: true, // darwin template icon; ignored elsewhere
+			Tooltip:      trayTooltip,
+			Label:        "", // clear core/gui's "Core" default
+			Menu:         trayMenuItems,
+			// Attach the primary OS shell directly: a status-item click
+			// shows/focuses app instead of loading a second copy of the
+			// OS in a dedicated tray popover. The menu remains intact.
+			PopoverWindow: mainWindowName,
 			Routes: []gui.TrayRoute{
-				{ActionID: trayActionOpenApp, OpenWindow: "app", EmitEvent: trayOpenEvent},
-				{ActionID: trayActionOpenChat, OpenWindow: "chat", EmitEvent: trayOpenEvent},
-				{ActionID: trayActionOpenModels, OpenWindow: "models", EmitEvent: trayOpenEvent},
-				{ActionID: trayActionOpenSettings, OpenWindow: "settings", EmitEvent: trayOpenEvent},
-				{ActionID: trayActionOpenApps, OpenWindow: "apps", EmitEvent: trayOpenEvent},
-				{ActionID: trayActionOpenAbout, OpenWindow: "about", EmitEvent: trayOpenEvent},
+				{ActionID: trayActionOpenApp, OpenWindow: mainWindowName, EmitEvent: trayOpenEvent},
+				{ActionID: trayActionOpenChat, OpenWindow: mainWindowName, EmitEvent: trayOpenEvent},
+				{ActionID: trayActionOpenModels, OpenWindow: mainWindowName, EmitEvent: trayOpenEvent},
+				{ActionID: trayActionOpenSettings, OpenWindow: mainWindowName, EmitEvent: trayOpenEvent},
+				{ActionID: trayActionOpenApps, OpenWindow: mainWindowName, EmitEvent: trayOpenEvent},
+				{ActionID: trayActionOpenAbout, OpenWindow: mainWindowName, EmitEvent: trayOpenEvent},
 				{ActionID: trayActionQuit, Quit: true},
 			},
 		},
@@ -835,7 +835,7 @@ func (s *Service) Run() core.Result {
 					"workdir":    d.WorkingDir,
 					"additional": d.AdditionalData,
 				})
-				restoreSecondInstanceWindow(s.opts.Core, s.opts)
+				restoreSecondInstanceWindow(s.opts.Core)
 			},
 		},
 		ShouldQuit: func() bool { return true },
@@ -902,18 +902,16 @@ func (s *Service) Run() core.Result {
 	// Application menu is now declarative via GuiConfig.AppMenu above —
 	// gui.Service auto-gates to darwin and fires menu.set_app_menu.
 
-	// Systray icon + tooltip + menu + popover attachment are now
+	// Systray icon + tooltip + menu + main-window attachment are now
 	// declared via gui.GuiConfig.Tray (built above) and applied by
 	// gui.Service.OnStartup. Only the click router stays here — it's
-	// the lthn-specific routing logic (which window each ActionID
-	// opens, plus the lthn:* event emit).
+	// the lthn-specific plugin validation + event/audit logic.
 
 	// Plugin tray-click router — bespoke handler for ActionIDs that
 	// match trayPluginPrefix. Validates the code at the click boundary
-	// (Cerberus #70 F-3 defence-in-depth) before opening the ad-hoc
-	// plugin window. Static menu items (open-app / open-chat / etc /
-	// quit) are routed declaratively via GuiConfig.Tray.Routes above.
-	s.opts.Core.RegisterAction(func(_ *core.Core, msg core.Message) core.Result {
+	// (Cerberus #70 F-3 defence-in-depth), then focuses the Angular OS
+	// shell. Angular owns the plugin's in-webview window.
+	s.opts.Core.RegisterAction(func(c *core.Core, msg core.Message) core.Result {
 		click, ok := msg.(guisystray.ActionTrayMenuItemClicked)
 		if !ok {
 			return core.Result{OK: true}
@@ -925,8 +923,8 @@ func (s *Service) Run() core.Result {
 		if code == "" || !paths.IsValidPluginCode(code) {
 			return core.Result{OK: true}
 		}
-		openPluginWindow(s.opts.Core, code)
-		emitCoreEvent(s.opts.Core, trayOpenEvent, "plugin:"+code)
+		gui.OpenWindow(c, mainWindowName)
+		emitCoreEvent(c, trayOpenEvent, "plugin:"+code)
 		emitTrayPluginClicked(code)
 		return core.Result{OK: true}
 	})
@@ -942,95 +940,22 @@ func (s *Service) Run() core.Result {
 	// See sysevents.go for the table.
 	registerSystemEvents(s.opts.Core)
 
-	// Tray popover construction via core/gui. core/gui's window service
-	// creates the underlying wails window from this spec; we then look
-	// the wails handle up by name to register the close-hide hook
-	// (cancel-able window hooks are not yet exposed on the core/gui
-	// surface — that's the remaining direct wails seam).
-	s.opts.Core.Action("window.open").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guiwindow.TaskOpenWindow{Window: &guiwindow.Window{
-			Name:                       "tray",
-			Title:                      "Lethean Desktop",
-			Width:                      400,
-			Height:                     560,
-			Frameless:                  true,
-			AlwaysOnTop:                true,
-			Hidden:                     true,
-			DisableResize:              true,
-			HideOnEscape:               true,
-			HideOnFocusLost:            true,
-			URL:                        "/?surface=tray",
-			BackgroundColour:           [4]uint8{0, 0, 0, 0},
-			DefaultContextMenuDisabled: true,
-			Mac: guiwindow.MacWindow{
-				WindowLevel: guiwindow.MacWindowLevelFloating,
-				CollectionBehavior: guiwindow.MacCollectionBehaviorCanJoinAllSpaces |
-					guiwindow.MacCollectionBehaviorFullScreenAuxiliary |
-					guiwindow.MacCollectionBehaviorIgnoresCycle,
-				InvisibleTitleBarHeight: 40,
-				DisableBackForwardNav:   true,
-			},
-			Linux: guiwindow.LinuxWindow{
-				Icon: s.opts.AppIcon,
-			},
-			Windows: guiwindow.WindowsWindow{
-				HiddenOnTaskbar: true,
-			},
-		}}},
-	))
-
-	// Close-hides rather than destroys — tray-rooted lifecycle. The
-	// popover survives the user clicking its close button so the tray
-	// icon stays the canonical entry point. Driven through core/gui's
-	// window.set_close_behavior action; no direct wails seam needed.
-	s.opts.Core.Action("window.set_close_behavior").Run(core.Background(), core.NewOptions(
-		core.Option{Key: "task", Value: guiwindow.TaskSetCloseBehavior{
-			Name:     "tray",
-			Behavior: guiwindow.CloseBehaviorHide,
-		}},
-	))
-
 	// Per-window lthn:window:* event re-broadcasts (ready / focus /
 	// blur / hide / show / resize / files-dropped). See sysevents.go.
-	// Window registry pre-creation + tray popover attachment are owned
-	// by gui.Service via GuiConfig.WindowRegistry + GuiConfig.Tray.
+	// Window registry pre-creation + main-window tray attachment are
+	// owned by gui.Service via GuiConfig.WindowRegistry + GuiConfig.Tray.
 
-	// First-launch detection — if ~/Lethean/conf/lthn.yaml and the
-	// state DB don't exist, open the welcome wizard. The wizard's
-	// completeOnboarding step writes config + opens the app shell;
-	// firstlaunch.Detect flips fresh→false naturally for subsequent
-	// launches.
-	freshInstall := false
-	if state := firstlaunch.Detect(nil); state.OK {
-		if fl, ok := state.Value.(firstlaunch.State); ok && fl.Fresh {
-			freshInstall = true
-			gui.OpenWindow(s.opts.Core, "welcome")
-		}
-	}
-
-	// Non-fresh launches drop the user straight into the app shell —
-	// "first run people get the welcome window, then drop into the
-	// desktop going forwards". Must fire AFTER ApplicationStarted —
+	// Angular owns both the desktop and onboarding, so every launch
+	// opens the same /#/ OS shell. This must fire AFTER
+	// ApplicationStarted —
 	// pre-Run() window operations on macOS SEGV inside AppKit because
 	// the NSApp run loop isn't up yet.
-	//
-	// Fresh installs skip this branch because the welcome wizard's
-	// completeOnboarding step opens "app" itself once the user
-	// finishes — opening it both at boot and from the wizard would
-	// flash a second shell.
-	//
-	// ShowAppOnLaunch still applies as an override: when true (dev
-	// mode via LTHN_DEV=1) the app shell opens even during a fresh-
-	// install session so iteration-mode work doesn't require the
-	// wizard each restart.
-	if !freshInstall || s.opts.ShowAppOnLaunch {
-		s.opts.Core.RegisterAction(func(c *core.Core, msg core.Message) core.Result {
-			if _, ok := msg.(guilifecycle.ActionApplicationStarted); ok {
-				gui.OpenWindow(c, "app")
-			}
-			return core.Ok(nil)
-		})
-	}
+	s.opts.Core.RegisterAction(func(c *core.Core, msg core.Message) core.Result {
+		if _, ok := msg.(guilifecycle.ActionApplicationStarted); ok {
+			gui.OpenWindow(c, mainWindowName)
+		}
+		return core.Ok(nil)
+	})
 
 	// Live tray-tooltip status. The tray icon is the at-a-glance
 	// surface; the tooltip reflects the currently-loaded Lemma model
@@ -1102,43 +1027,24 @@ func refreshTrayTooltipOnce(c *core.Core) {
 }
 
 // restoreSecondInstanceWindow brings a window forward in response to a
-// second-instance launch. Tries the unified app shell first, the tray
-// popover second, and falls through to a window.open create-and-show on
-// the unified app shell if neither is registered (race during pre-create
-// or both destroyed). Always emits an EventDesktopSecondInstanceFallback
-// audit row when the fallback engages so a forensic walker can grep for
-// the degraded UX path even when the create-and-show itself fails.
-//
-// Fallback target is "app" (Lethean Desktop unified shell) rather than
-// "tray": tray is a transient menubar-utility popover and is built
-// inline at boot via a hand-spec TaskOpenWindow that pkg/desktop owns
-// (not in windowRegistry()), whereas "app" lives in the registry with
-// a complete WindowSpec and is the operator-facing primary surface. If
-// the operator double-launched the binary the user-visible intent is
-// "show me the app", not "rebuild the menubar popover that should
-// already exist".
+// second-instance launch. It restores the one registered Angular OS
+// shell, then falls through to a window.open create-and-show attempt if
+// the shell is not yet reachable (for example, during a pre-create
+// race). Always emits an EventDesktopSecondInstanceFallback audit row
+// when the fallback engages.
 //
 // Cerberus #70 F-4 LOW (STRIDE-R Repudiation / defence-in-depth):
-// the pre-fix shape silently no-op'd when both restore calls returned
-// false — the bus event still fired (renderer consumers acted on the
-// SecondInstanceData payload) but no window came forward visibly, and
-// the substrate had no row recording that the path engaged. Operator
-// observability: a visible window is preferable to a silent dead
-// click. Forensic observability: the audit row is the value-add per
-// the Cerberus recommendation — even if window.open fails downstream
-// the substrate carries proof the handler reached the fallback branch.
-func restoreSecondInstanceWindow(c *core.Core, opts Options) {
+// the audit row proves the fallback branch ran even if window.open
+// itself fails downstream.
+func restoreSecondInstanceWindow(c *core.Core) {
 	if c == nil {
 		return
 	}
-	if gui.OpenWindow(c, "app") {
-		return
-	}
-	if gui.OpenWindow(c, "tray") {
+	if gui.OpenWindow(c, mainWindowName) {
 		return
 	}
 	emitSecondInstanceFallback()
-	if spec, ok := gui.WindowSpec(c, "app"); ok {
+	if spec, ok := gui.WindowSpec(c, mainWindowName); ok {
 		// gui.Service has already pre-created it hidden; this just shows
 		// + focuses by re-running window.open with Hidden=false.
 		opened := *spec
@@ -1146,7 +1052,6 @@ func restoreSecondInstanceWindow(c *core.Core, opts Options) {
 		c.Action("window.open").Run(core.Background(), core.NewOptions(
 			core.Option{Key: "task", Value: guiwindow.TaskOpenWindow{Window: &opened}},
 		))
-		_ = opts
 	}
 }
 
@@ -1288,10 +1193,10 @@ const desktopScope = "desktop"
 
 // emitSecondInstanceFallback fires the Cerberus #70 F-4 audit row
 // when the OnSecondInstanceLaunch handler falls through to the
-// window.open create-and-show path because neither the unified app
-// shell nor the tray popover was registered (both restoreFocusedWindow
-// calls returned false). Single event — the row records "the handler
-// reached the degraded UX branch". The SecondInstanceData payload
+// window.open create-and-show path because the unified Angular app
+// shell was not registered or reachable. Single event — the row
+// records "the handler reached the degraded UX branch". The
+// SecondInstanceData payload
 // (Args / WorkingDir / AdditionalData) is NEVER recorded — those bytes
 // are caller-controlled and would defeat the bounded-keyspace promise
 // of the audit substrate (sibling discipline to the plugin-label drop
@@ -1312,8 +1217,8 @@ func emitSecondInstanceFallback() {
 		Scope:   desktopScope,
 		Outcome: audit.OutcomeOK,
 		Meta: map[string]any{
-			"primary_targets": "app,tray",
-			"fallback_target": "app",
+			"primary_targets": mainWindowName,
+			"fallback_target": mainWindowName,
 			"fallback_via":    "window.open",
 		},
 	})

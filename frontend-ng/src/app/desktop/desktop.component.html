@@ -1,0 +1,1083 @@
+<!-- Desktop OS shell — merged chrome. Mirrors angular/desktop/preview.html.
+     macOS windows + menu bar · Windows-style edge-dockable taskbar (session chip)
+     · macOS dock floating adjacent · right-click a dock icon for window actions. -->
+<div
+  id="os"
+  #osEl
+  [class.mode-desktop]="wm.view() === 'desktop'"
+  [class.mode-shell]="wm.view() === 'shell'"
+  [class.mode-device]="wm.view() === 'device'"
+  [attr.data-device]="wm.device()"
+  [class.no-icons]="!showIcons"
+  [class.reduce-motion]="reduceMotion"
+  [class.no-widgets]="!showWidgets"
+  [attr.data-wall]="wall"
+  [attr.data-bar]="bar"
+  [attr.data-mode]="mode === 'light' ? 'light' : null"
+>
+  <div class="wall" (contextmenu)="deskCtx($event)" (pointerdown)="startMarquee($event)"></div>
+
+  <div class="menubar">
+    <button
+      class="hoplite-btn mbtn"
+      [class.on]="mbKey === 'system'"
+      [attr.aria-expanded]="mbKey === 'system'"
+      aria-haspopup="true"
+      (click)="openMb('system', $event)"
+      (mouseenter)="hoverMb('system', $event)"
+      aria-label="Lethean"
+      i18n-aria-label="System menu label@@desktop.systemMenuLabel"
+    >
+      <img class="hoplite" src="hoplite_white.png" alt="" width="17" height="17" />
+    </button>
+    <button
+      class="mbtn app"
+      [class.on]="mbKey === 'app'"
+      [attr.aria-expanded]="mbKey === 'app'"
+      aria-haspopup="true"
+      (click)="openMb('app', $event)"
+      (mouseenter)="hoverMb('app', $event)"
+    >
+      {{ activeApp() }}
+    </button>
+    <button
+      class="mbtn route-category"
+      *ngFor="let category of categories"
+      aria-haspopup="true"
+      (click)="shellCat(category, $event)"
+    >
+      {{ category.title }}
+    </button>
+    <div class="right">
+      <button
+        class="trayi"
+        (click)="openTray('lang', $event)"
+        aria-label="Language"
+        i18n-aria-label="Language tray label@@desktop.tray.languageLabel"
+      >
+        <span style="font-family: var(--font-mono); font-size: 11px">{{
+          lang.toUpperCase()
+        }}</span></button
+      ><button
+        class="trayi"
+        (click)="openTray('wifi', $event)"
+        aria-label="Network"
+        i18n-aria-label="Network tray label@@desktop.tray.networkLabel"
+      >
+        <lthn-icon name="wifi" size="12"></lthn-icon></button
+      ><button
+        class="trayi"
+        (click)="openTray('battery', $event)"
+        aria-label="Battery"
+        i18n-aria-label="Battery tray label@@desktop.tray.batteryLabel"
+      >
+        <lthn-icon name="battery-three-quarters" size="13"></lthn-icon></button
+      ><button
+        class="trayi"
+        (click)="openTray('clock', $event)"
+        aria-label="Date &amp; time"
+        i18n-aria-label="Date and time tray label@@desktop.tray.dateTimeLabel"
+      >
+        <span class="clock">{{ clock }}</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="dicons">
+    <div
+      class="dicon"
+      *ngFor="let id of deskIcons"
+      [title]="APPS[id].hint"
+      (click)="wm.launch(id)"
+      (contextmenu)="iconCtx($event, id)"
+    >
+      <span class="gl"><lthn-icon [attr.name]="APPS[id].icon" size="18"></lthn-icon></span
+      ><span>{{ APPS[id].title }}</span>
+    </div>
+  </div>
+
+  <div class="widgets">
+    <div class="widget wchart">
+      <div class="wh">
+        <lthn-icon name="chart-line" size="11"></lthn-icon>
+        <ng-container i18n="Throughput widget heading@@desktop.widget.throughput"
+          >Throughput</ng-container
+        >
+        <span class="tr"
+          ><lthn-badge variant="ok" i18n="Live status@@common.liveLower">live</lthn-badge></span
+        >
+      </div>
+      <span class="big"
+        >41.8<small i18n="Tokens per second unit@@unit.tokensPerSecondInline"> tok/s</small></span
+      ><lthn-sparkline
+        [attr.data]="throughputJson"
+        color="var(--brand-300)"
+        width="188"
+        height="40"
+        fill
+      ></lthn-sparkline>
+    </div>
+    <div class="widget wclock">
+      <div class="wh">
+        <lthn-icon name="globe" size="11"></lthn-icon>
+        <ng-container i18n="World clock widget heading@@desktop.widget.worldClock"
+          >World clock</ng-container
+        >
+      </div>
+      <div class="row" *ngFor="let c of clocks">
+        <span class="city">{{ c.city }}</span
+        ><span class="tz">{{ c.zone }}</span
+        ><span class="time">{{ fmtTz(c.tz) }}</span>
+      </div>
+    </div>
+    <div class="widget wstat">
+      <div class="wh">
+        <lthn-icon name="cube" size="11"></lthn-icon>
+        <ng-container i18n="Package widget heading@@desktop.widget.packages">Packages</ng-container>
+      </div>
+      <div class="row" *ngFor="let p of pkgs">
+        <lthn-status-dot [attr.variant]="p.variant || null"></lthn-status-dot
+        ><span class="nm">{{ p.name }}</span
+        ><span class="stt">{{ p.state }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="winlayer" #winlayerEl>
+    <div
+      class="win"
+      *ngFor="let w of wm.renderWins(); trackBy: trackWin"
+      [class.focused]="w.id === wm.focusId()"
+      [class.min]="w.min"
+      [class.max]="w.max"
+      [class.anim]="w.minimizing"
+      [style.width.px]="wm.windowed() ? w.w : null"
+      [style.height.px]="wm.windowed() ? w.h : null"
+      [style.transform]="wm.windowed() ? transform(w) : null"
+      [style.zIndex]="w.z"
+      [style.opacity]="w.minimizing ? 0 : null"
+      [style.transformOrigin]="w.minimizing ? minOrigin() : null"
+      [class.sel]="selected.includes(w.id)"
+      (pointerdown)="wm.focus(w.id)"
+      (contextmenu)="winCtx($event, w)"
+    >
+      <!-- desktop titlebar -->
+      <div
+        class="titlebar"
+        *ngIf="wm.windowed()"
+        (pointerdown)="startDrag($event, w)"
+        (dblclick)="wm.maximise(w.id, windowBounds())"
+      >
+        <span class="lights"
+          ><i
+            class="c"
+            (click)="$event.stopPropagation(); wm.close(w.id)"
+            title="Close"
+            i18n-title="Close window action@@desktop.window.close"
+          ></i
+          ><i
+            class="m"
+            (click)="$event.stopPropagation(); wm.minimise(w.id, reduceMotion ? 0 : 190)"
+            title="Minimise"
+            i18n-title="Minimise window action@@desktop.window.minimise"
+          ></i
+          ><i
+            class="x"
+            (click)="$event.stopPropagation(); wm.maximise(w.id, windowBounds())"
+            title="Zoom"
+            i18n-title="Zoom window action@@desktop.window.zoom"
+          ></i
+        ></span>
+        <span class="tb-title">{{ APPS[w.app].title }}</span>
+      </div>
+      <!-- shell titlebar (category nav + tray) + unified tab strip (from st.wins) -->
+      <ng-container *ngIf="wm.view() === 'shell'">
+        <div class="titlebar shelltitle" (pointerdown)="startDrag($event, w)">
+          <span class="lights"
+            ><i
+              class="c"
+              (click)="$event.stopPropagation(); wm.close(w.id)"
+              title="Close"
+              i18n-title="Close window action@@desktop.window.close"
+            ></i
+            ><i
+              class="m"
+              (click)="$event.stopPropagation(); wm.minimise(w.id, reduceMotion ? 0 : 190)"
+              title="Minimise"
+              i18n-title="Minimise window action@@desktop.window.minimise"
+            ></i
+            ><i
+              class="x"
+              (click)="$event.stopPropagation(); wm.maximise(w.id, windowBounds())"
+              title="Zoom"
+              i18n-title="Zoom window action@@desktop.window.zoom"
+            ></i
+          ></span>
+          <nav class="shellnav">
+            <button
+              class="shellcat"
+              *ngFor="let c of categories"
+              [class.on]="c.apps.some((app) => app.id === w.app)"
+              (click)="shellCat(c, $event)"
+            >
+              <lthn-icon [attr.name]="c.icon" size="13"></lthn-icon> {{ c.title }}
+            </button>
+          </nav>
+          <div class="shelltray">
+            <button
+              class="trayi"
+              (click)="openTray('lang', $event)"
+              aria-label="Language"
+              i18n-aria-label="Language tray label@@desktop.tray.languageLabel"
+            >
+              <span style="font-family: var(--font-mono); font-size: 11px">{{
+                lang.toUpperCase()
+              }}</span></button
+            ><button
+              class="trayi"
+              (click)="openTray('wifi', $event)"
+              aria-label="Network"
+              i18n-aria-label="Network tray label@@desktop.tray.networkLabel"
+            >
+              <lthn-icon name="wifi" size="12"></lthn-icon></button
+            ><button
+              class="trayi"
+              (click)="openTray('battery', $event)"
+              aria-label="Battery"
+              i18n-aria-label="Battery tray label@@desktop.tray.batteryLabel"
+            >
+              <lthn-icon name="battery-three-quarters" size="13"></lthn-icon></button
+            ><button
+              class="trayi"
+              (click)="openTray('clock', $event)"
+              aria-label="Date &amp; time"
+              i18n-aria-label="Date and time tray label@@desktop.tray.dateTimeLabel"
+            >
+              <span class="clock">{{ clock }}</span>
+            </button>
+          </div>
+        </div>
+        <div class="shellhead">
+          <div class="shelldock">
+            <button
+              class="shtab"
+              *ngFor="let x of wm.openWins()"
+              [class.on]="x.id === wm.focusId()"
+              (click)="wm.focus(x.id)"
+            >
+              <lthn-icon [attr.name]="APPS[x.app].icon" size="13"></lthn-icon> {{ APPS[x.app].title
+              }}<i
+                class="shx"
+                (click)="$event.stopPropagation(); wm.close(x.id)"
+                title="Close"
+                i18n-title="Close window action@@desktop.window.close"
+                >✕</i
+              ></button
+            ><button
+              class="shtab shadd"
+              (click)="wm.goHome()"
+              title="Home"
+              i18n-title="Home action@@common.home"
+            >
+              <lthn-icon name="house" size="12"></lthn-icon>
+            </button>
+          </div>
+        </div>
+      </ng-container>
+      <!-- device status bar -->
+      <div class="devbar" *ngIf="wm.view() === 'device' && wm.device() !== 'full'">
+        <span class="dv-time">{{ clock }}</span
+        ><span class="dv-app">{{ APPS[w.app].title }}</span
+        ><span class="dv-sys"
+          ><lthn-icon name="wifi" size="11"></lthn-icon
+          ><lthn-icon name="battery-three-quarters" size="12"></lthn-icon
+        ></span>
+      </div>
+
+      <div class="appwrap">
+        <lthn-window-route-content [win]="w" [panel]="panelFor(w)" [empty]="emptyFor(w)" />
+      </div>
+
+      <!-- device dock — open apps + Home (Home closes the active window) -->
+      <div class="devdock" *ngIf="wm.view() === 'device' && wm.device() !== 'full'">
+        <button
+          class="devhome"
+          (click)="wm.goHome()"
+          aria-label="Home"
+          i18n-aria-label="Home action@@common.home"
+        ></button
+        ><span class="dvsep" *ngIf="wm.openWins().length"></span
+        ><button
+          class="devapp"
+          *ngFor="let x of wm.openWins()"
+          [class.on]="x.id === wm.focusId()"
+          (click)="wm.focus(x.id)"
+          [attr.aria-label]="APPS[x.app].title"
+        >
+          <lthn-icon [attr.name]="APPS[x.app].icon" size="20"></lthn-icon>
+        </button>
+      </div>
+      <div class="resize" *ngIf="wm.windowed()" (pointerdown)="startResize($event, w)"></div>
+    </div>
+
+    <!-- HOME SURFACE — shell/device with no focused window (unified: st.focus===null) -->
+    <div class="win focused homesurface" *ngIf="wm.homeVisible()">
+      <ng-container *ngIf="wm.view() === 'shell'">
+        <div class="titlebar shelltitle">
+          <span class="lights"><i class="c"></i><i class="m"></i><i class="x"></i></span>
+          <nav class="shellnav">
+            <button class="shellcat" *ngFor="let c of categories" (click)="shellCat(c, $event)">
+              <lthn-icon [attr.name]="c.icon" size="13"></lthn-icon> {{ c.title }}
+            </button>
+          </nav>
+          <div class="shelltray">
+            <button
+              class="trayi"
+              (click)="openTray('lang', $event)"
+              aria-label="Language"
+              i18n-aria-label="Language tray label@@desktop.tray.languageLabel"
+            >
+              <span style="font-family: var(--font-mono); font-size: 11px">{{
+                lang.toUpperCase()
+              }}</span></button
+            ><button
+              class="trayi"
+              (click)="openTray('wifi', $event)"
+              aria-label="Network"
+              i18n-aria-label="Network tray label@@desktop.tray.networkLabel"
+            >
+              <lthn-icon name="wifi" size="12"></lthn-icon></button
+            ><button
+              class="trayi"
+              (click)="openTray('battery', $event)"
+              aria-label="Battery"
+              i18n-aria-label="Battery tray label@@desktop.tray.batteryLabel"
+            >
+              <lthn-icon name="battery-three-quarters" size="13"></lthn-icon></button
+            ><button
+              class="trayi"
+              (click)="openTray('clock', $event)"
+              aria-label="Date &amp; time"
+              i18n-aria-label="Date and time tray label@@desktop.tray.dateTimeLabel"
+            >
+              <span class="clock">{{ clock }}</span>
+            </button>
+          </div>
+        </div>
+        <div class="shellhead">
+          <span class="shellhint" i18n="Empty app shell hint@@desktop.shell.noApps"
+            >No apps open — open one from the menu above</span
+          >
+          <div class="shelldock"></div>
+        </div>
+        <div class="deskwrap">
+          <div class="dw-hint">
+            <lthn-icon name="table-cells-large" size="30"></lthn-icon
+            ><b i18n="App shell title@@desktop.shell.title">App shell</b
+            ><span i18n="App shell command hint@@desktop.shell.commandHint"
+              >Open an app from the menu · press ⌘ for the command palette</span
+            >
+          </div>
+          <div class="dw-widgets">
+            <div class="widget wchart">
+              <div class="wh">
+                <lthn-icon name="chart-line" size="11"></lthn-icon>
+                <ng-container i18n="Throughput widget heading@@desktop.widget.throughput"
+                  >Throughput</ng-container
+                >
+                <span class="tr"
+                  ><lthn-badge variant="ok" i18n="Live status@@common.liveLower"
+                    >live</lthn-badge
+                  ></span
+                >
+              </div>
+              <span class="big"
+                >41.8<small i18n="Tokens per second unit@@unit.tokensPerSecondInline">
+                  tok/s</small
+                ></span
+              ><lthn-sparkline
+                [attr.data]="throughputJson"
+                color="var(--brand-300)"
+                width="188"
+                height="40"
+                fill
+              ></lthn-sparkline>
+            </div>
+            <div class="widget wclock">
+              <div class="wh">
+                <lthn-icon name="globe" size="11"></lthn-icon>
+                <ng-container i18n="World clock widget heading@@desktop.widget.worldClock"
+                  >World clock</ng-container
+                >
+              </div>
+              <div class="row" *ngFor="let c of clocks">
+                <span class="city">{{ c.city }}</span
+                ><span class="tz">{{ c.zone }}</span
+                ><span class="time">{{ fmtTz(c.tz) }}</span>
+              </div>
+            </div>
+            <div class="widget wstat">
+              <div class="wh">
+                <lthn-icon name="cube" size="11"></lthn-icon>
+                <ng-container i18n="Package widget heading@@desktop.widget.packages"
+                  >Packages</ng-container
+                >
+              </div>
+              <div class="row" *ngFor="let p of pkgs">
+                <lthn-status-dot [attr.variant]="p.variant || null"></lthn-status-dot
+                ><span class="nm">{{ p.name }}</span
+                ><span class="stt">{{ p.state }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </ng-container>
+      <ng-container *ngIf="wm.view() === 'device'">
+        <div class="devbar">
+          <span class="dv-time">{{ clock }}</span
+          ><span class="dv-app" i18n="Device home title@@desktop.device.home">Home</span
+          ><span class="dv-sys"
+            ><lthn-icon name="wifi" size="11"></lthn-icon
+            ><lthn-icon name="battery-three-quarters" size="12"></lthn-icon
+          ></span>
+        </div>
+        <div class="devbody">
+          <div class="devgrid">
+            <button class="devtile" *ngFor="let c of categories" (click)="wm.toggleDevCat(c.id)">
+              <span class="dt-ic"><lthn-icon [attr.name]="c.icon" size="24"></lthn-icon></span
+              ><span class="dt-lb">{{ c.title }}</span>
+            </button>
+          </div>
+          <div class="devoverlay" *ngIf="wm.devCat()" (click)="wm.devCat.set(null)">
+            <div class="devsheet" (click)="$event.stopPropagation()">
+              <div class="ds-h">
+                <lthn-icon [attr.name]="catIcon(wm.devCat())" size="15"></lthn-icon>
+                {{ catLabel(wm.devCat())
+                }}<button
+                  class="ds-x"
+                  (click)="wm.devCat.set(null)"
+                  aria-label="Close"
+                  i18n-aria-label="Close action@@common.close"
+                >
+                  ✕
+                </button>
+              </div>
+              <div class="ds-apps">
+                <button
+                  class="ds-app"
+                  *ngFor="let app of catApps(wm.devCat())"
+                  (click)="wm.launch(app.id)"
+                >
+                  <span class="gl"><lthn-icon [attr.name]="app.icon" size="22"></lthn-icon></span
+                  ><span>{{ app.title }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="devdock">
+          <button
+            class="devhome"
+            (click)="wm.goHome()"
+            aria-label="Home"
+            i18n-aria-label="Home action@@common.home"
+          ></button
+          ><span class="dvsep" *ngIf="wm.openWins().length"></span
+          ><button
+            class="devapp"
+            *ngFor="let x of wm.openWins()"
+            [class.on]="x.id === wm.focusId()"
+            (click)="wm.focus(x.id)"
+            [attr.aria-label]="APPS[x.app].title"
+          >
+            <lthn-icon [attr.name]="APPS[x.app].icon" size="20"></lthn-icon>
+          </button>
+        </div>
+      </ng-container>
+    </div>
+  </div>
+
+  <!-- taskbar — fresh session chip + running task buttons -->
+  <div class="bar">
+    <button class="session" aria-haspopup="true" (click)="toggleSession($event)">
+      <span class="ava">{{ user.initials }}</span
+      ><span class="who"
+        ><b>{{ user.name }}</b
+        ><small>{{ user.host }}</small></span
+      ><lthn-status-dot variant="ok"></lthn-status-dot>
+    </button>
+    <span class="bdiv"></span>
+    <div class="tasks">
+      <button
+        class="task"
+        *ngFor="let w of taskWins"
+        [class.active]="!w.min && wm.focusId() === w.id"
+        (click)="taskClick(w.id)"
+      >
+        <lthn-icon [attr.name]="APPS[w.app].icon" size="13"></lthn-icon
+        ><span class="tt">{{ APPS[w.app].title }}</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- dock — running processes (not a launcher; decoupled from the task list) -->
+  <div class="dock" [class.dropzone]="proxy.open && proxy.over">
+    <button
+      class="di"
+      *ngFor="let id of runningApps"
+      [attr.aria-label]="APPS[id].title"
+      [attr.data-label]="APPS[id].title"
+      (click)="dockClick(id)"
+      (contextmenu)="dockCtx($event, id)"
+    >
+      <lthn-icon [attr.name]="APPS[id].icon" size="20"></lthn-icon><span class="dot"></span>
+    </button>
+    <button
+      class="di group"
+      *ngFor="let g of groups"
+      [class.open]="g.open"
+      [attr.aria-label]="g.name"
+      [attr.data-label]="g.name"
+      (click)="toggleGroup(g.id)"
+      (contextmenu)="groupCtx($event, g)"
+    >
+      <lthn-icon
+        *ngFor="let a of g.apps.slice(0, 4)"
+        [attr.name]="APPS[a].icon"
+        size="11"
+      ></lthn-icon
+      ><span class="gcount">{{ g.ids.length }}</span>
+    </button>
+    <span class="sep" *ngIf="runningApps.length || groups.length"></span>
+    <button
+      class="di"
+      aria-label="Trash"
+      i18n-aria-label="Trash label@@desktop.trash"
+      data-label="Trash"
+      i18n-data-label="Trash label@@desktop.trash"
+    >
+      <lthn-icon name="trash-can" size="18"></lthn-icon>
+    </button>
+  </div>
+
+  <!-- session chip → 2-column Start menu: programs (launcher) + session -->
+  <div
+    class="menu sessionmenu"
+    #sessionMenuEl
+    [hidden]="!sessionOpen"
+    [style.left.px]="sessionPos.left"
+    [style.top.px]="sessionPos.top"
+    [style.bottom.px]="sessionPos.bottom"
+  >
+    <div class="startpanel">
+      <div class="sp-apps">
+        <div class="sp-h" i18n="Start menu program heading@@desktop.start.programs">Programs</div>
+        <ng-container *ngFor="let c of categories">
+          <div
+            class="mi sm-cat"
+            role="button"
+            [attr.aria-expanded]="!!openCats[c.id]"
+            (click)="openCats[c.id] = !openCats[c.id]"
+          >
+            <lthn-icon [attr.name]="c.icon" size="15"></lthn-icon>
+            <div class="mt">
+              <b>{{ c.title }}</b
+              ><small i18n="Category app count@@desktop.start.appCount"
+                >{{ c.apps.length }} apps</small
+              >
+            </div>
+            <span class="chev"
+              ><lthn-icon
+                [attr.name]="openCats[c.id] ? 'chevron-down' : 'chevron-right'"
+                size="10"
+              ></lthn-icon
+            ></span>
+          </div>
+          <div
+            class="mi sm-child"
+            [class.haschild]="app.children.length"
+            *ngFor="let app of openCats[c.id] ? c.apps : []"
+            (click)="startLaunch(app)"
+            (mouseenter)="onProg(app, $event)"
+          >
+            <lthn-icon [attr.name]="app.icon" size="14"></lthn-icon>
+            <div class="mt">
+              <b>{{ app.title }}</b
+              ><small>{{ app.hint }}</small>
+            </div>
+            <span class="chev" *ngIf="app.children.length">›</span>
+          </div>
+        </ng-container>
+      </div>
+      <div class="sp-user">
+        <div class="mhead">
+          <span class="ava lg">{{ user.initials }}</span>
+          <div>
+            <b>{{ user.name }}</b
+            ><small>{{ user.email }}</small>
+          </div>
+        </div>
+        <div class="msep"></div>
+        <div
+          class="mi"
+          (click)="sessionAction('lock', $event)"
+          i18n="Lock screen action@@desktop.session.lock"
+        >
+          <lthn-icon name="lock" size="13"></lthn-icon> Lock screen
+        </div>
+        <div
+          class="mi"
+          (click)="sessionAction('switch', $event)"
+          i18n="Switch user action@@desktop.session.switch"
+        >
+          <lthn-icon name="user-group" size="13"></lthn-icon> Switch user…
+        </div>
+        <div class="msep"></div>
+        <div
+          class="mi"
+          (click)="sessionAction('logout', $event)"
+          i18n="Log out action@@desktop.session.logout"
+        >
+          <lthn-icon name="right-from-bracket" size="13"></lthn-icon> Log out
+        </div>
+        <div
+          class="mi"
+          (click)="sessionAction('shutdown', $event)"
+          i18n="Shut down action@@desktop.session.shutdown"
+        >
+          <lthn-icon name="power-off" size="13"></lthn-icon> Shut down…
+        </div>
+      </div>
+    </div>
+    <div class="submenu" *ngIf="sub.open" [style.left.px]="sub.left" [style.top.px]="sub.top">
+      <div class="mi" *ngFor="let c of submenuFor(sub.parent)" (click)="startSub(sub.parent, c[0])">
+        <lthn-icon [attr.name]="c[1]" size="14"></lthn-icon>
+        <div class="mt">
+          <b>{{ c[2] }}</b>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- right-click menus (desktop / window / dock / icon) with submenus -->
+  <div
+    class="menu ctxmenu"
+    #ctxMenuEl
+    [hidden]="!ctx.open"
+    [style.left.px]="ctx.left"
+    [style.top.px]="ctx.top"
+  >
+    <div class="mhead" *ngIf="ctx.title">
+      <b>{{ ctx.title }}</b>
+    </div>
+    <div class="msep" *ngIf="ctx.title"></div>
+    <ng-container *ngFor="let it of ctx.items; let i = index">
+      <div class="msep" *ngIf="it.sep"></div>
+      <div class="mi haschild" *ngIf="!it.sep && it.children" (mouseenter)="openCtxSub(i, $event)">
+        <lthn-icon [attr.name]="it.icon || 'circle'" size="13"></lthn-icon> {{ it.label
+        }}<span class="chev">›</span>
+      </div>
+      <div
+        class="mi"
+        *ngIf="!it.sep && !it.children"
+        (click)="runCtx(it, $event)"
+        (mouseenter)="csub.open = false"
+      >
+        <lthn-icon [attr.name]="it.icon || 'circle'" size="13"></lthn-icon> {{ it.label }}
+      </div>
+    </ng-container>
+    <div
+      class="submenu ctxsub"
+      *ngIf="csub.open"
+      [style.left.px]="csub.left"
+      [style.top.px]="csub.top"
+    >
+      <div class="mi" *ngFor="let c of ctx.items[csub.i]?.children" (click)="runCtx(c, $event)">
+        <lthn-icon [attr.name]="c.icon || 'angle-right'" size="13"></lthn-icon> {{ c.label }}
+      </div>
+    </div>
+  </div>
+
+  <!-- click-drag snap preview -->
+  <div
+    class="snapzone"
+    [hidden]="!snap.zone"
+    [style.left.px]="snap.left"
+    [style.top.px]="snap.top"
+    [style.width.px]="snap.w"
+    [style.height.px]="snap.h"
+  ></div>
+
+  <!-- menu-bar tray panel (contents from the related app) -->
+  <div
+    class="menu traypanel"
+    #trayEl
+    [hidden]="!tray.open"
+    [style.left.px]="tray.left"
+    [style.top.px]="tray.top"
+    [ngSwitch]="tray.key"
+  >
+    <ng-container *ngSwitchCase="'lang'">
+      <div class="trh">
+        <lthn-icon name="language" size="13"></lthn-icon>
+        <ng-container i18n="Language tray heading@@desktop.tray.languageHeading"
+          >Language</ng-container
+        ><span class="tr-r">{{ lang.toUpperCase() }}</span>
+      </div>
+      <div class="mi" *ngFor="let l of langs" (click)="setLang(l[0])">
+        <lthn-icon [attr.name]="l[0] === lang ? 'check' : 'globe'" size="12"></lthn-icon> {{ l[1]
+        }}<span class="tr-r" style="font-family: var(--font-mono); font-size: 10px">{{
+          l[0].toUpperCase()
+        }}</span>
+      </div>
+      <div class="msep"></div>
+      <button
+        class="tr-btn"
+        (click)="trayOpen('settings', 'translations')"
+        i18n="Edit translations action@@desktop.tray.editTranslations"
+      >
+        Edit translations…
+      </button>
+    </ng-container>
+    <ng-container *ngSwitchCase="'wifi'">
+      <div class="trh">
+        <lthn-icon name="wifi" size="13"></lthn-icon>
+        <ng-container i18n="Network tray heading@@desktop.tray.networkHeading">Network</ng-container
+        ><span class="tr-r" i18n="Application title@@app.lethernet.title">LetherNet</span>
+      </div>
+      <div class="tr-row">
+        <span i18n="Wi-Fi label@@desktop.tray.wifi">Wi-Fi</span><lthn-toggle on></lthn-toggle>
+      </div>
+      <div class="tr-row">
+        <span>lethean-mesh</span><lthn-status-dot variant="ok"></lthn-status-dot>
+      </div>
+      <div class="msep"></div>
+      <div class="tr-kv">
+        <span i18n="Network region label@@desktop.tray.region">Region</span><b>eu-west-2</b>
+      </div>
+      <div class="tr-kv">
+        <span i18n="Network peers label@@desktop.tray.peers">Peers</span
+        ><b i18n="Online peer count@@desktop.tray.onlinePeers">4 online</b>
+      </div>
+      <div class="tr-kv">
+        <span i18n="Pooled throughput label@@desktop.tray.pooled">Pooled</span><b>286 tok/s</b>
+      </div>
+      <button
+        class="tr-btn"
+        (click)="trayOpen('lethernet')"
+        i18n="Open LetherNet action@@desktop.tray.openLetherNet"
+      >
+        Open LetherNet
+      </button>
+    </ng-container>
+    <ng-container *ngSwitchCase="'battery'">
+      <div class="trh">
+        <lthn-icon name="battery-three-quarters" size="13"></lthn-icon>
+        <ng-container i18n="Power tray heading@@desktop.tray.powerHeading">Power</ng-container
+        ><span class="tr-r">84%</span>
+      </div>
+      <div class="tr-big">
+        3h 20m<small i18n="Battery time remaining@@desktop.tray.remaining"> remaining</small>
+      </div>
+      <lthn-sparkline
+        [attr.data]="wattsJson"
+        color="#febc2e"
+        width="228"
+        height="34"
+        fill
+      ></lthn-sparkline>
+      <div class="tr-kv">
+        <span i18n="Current power draw label@@desktop.tray.drawingNow">Drawing now</span
+        ><b>207 W</b>
+      </div>
+      <div class="tr-kv">
+        <span i18n="Daily power total label@@desktop.tray.dailyTotal">24h total</span><b>4.7 kWh</b>
+      </div>
+      <button
+        class="tr-btn"
+        (click)="trayOpen('control', 'power')"
+        i18n="Open power view action@@desktop.tray.openPower"
+      >
+        Open Power
+      </button>
+    </ng-container>
+    <ng-container *ngSwitchCase="'clock'">
+      <div class="trh">
+        <lthn-icon name="clock" size="13"></lthn-icon>
+        <ng-container i18n="Date and time tray heading@@desktop.tray.dateTimeHeading"
+          >Date &amp; time</ng-container
+        >
+      </div>
+      <div class="tr-big">{{ clock }}</div>
+      <div class="tr-sub">{{ today() }}</div>
+      <div class="msep"></div>
+      <div class="tr-kv" *ngFor="let c of clocks">
+        <span>{{ c.city }}</span
+        ><b>{{ fmtTz(c.tz) }}</b>
+      </div>
+    </ng-container>
+  </div>
+
+  <!-- marquee selection + group drag proxy -->
+  <div
+    class="marquee"
+    [hidden]="!marquee.open"
+    [style.left.px]="marquee.left"
+    [style.top.px]="marquee.top"
+    [style.width.px]="marquee.w"
+    [style.height.px]="marquee.h"
+  ></div>
+  <div
+    class="dragproxy"
+    [hidden]="!proxy.open"
+    [style.left.px]="proxy.left"
+    [style.top.px]="proxy.top"
+  >
+    <lthn-icon name="layer-group" size="12"></lthn-icon>
+    <span i18n="Dragged window count@@desktop.group.windowCount">{{ proxy.n }} windows</span
+    ><span *ngIf="proxy.over" i18n="Drop windows to create group@@desktop.group.dropHint">
+      — drop to group</span
+    >
+  </div>
+
+  <!-- about / system modal -->
+  <div
+    class="aboutmodal"
+    [hidden]="!about"
+    role="dialog"
+    aria-modal="true"
+    aria-label="About this system"
+    i18n-aria-label="About dialog label@@desktop.about.dialogLabel"
+    (click)="about = false"
+  >
+    <div class="aboutcard" (click)="$event.stopPropagation()">
+      <button
+        class="aclose"
+        aria-label="Close"
+        i18n-aria-label="Close action@@common.close"
+        (click)="about = false"
+      >
+        ✕
+      </button>
+      <span class="amark"
+        ><img class="hoplite" src="hoplite_white.png" alt="" width="30" height="30"
+      /></span>
+      <h2 i18n="Operating system name@@desktop.about.osName">LetheanOS</h2>
+      <p class="ver" i18n="Operating system version@@desktop.about.version">
+        Version 2.4.1 “Hoplite” · CoreGo 1.20
+      </p>
+      <div class="arows">
+        <div class="ar">
+          <span i18n="About design label@@desktop.about.design">Design</span
+          ><b>{{ designLabel() }}</b>
+        </div>
+        <div class="ar">
+          <span i18n="About chip label@@desktop.about.chip">Chip</span
+          ><b>Apple M-series · 10-core</b>
+        </div>
+        <div class="ar">
+          <span i18n="About memory label@@desktop.about.memory">Memory</span><b>32 GB</b>
+        </div>
+        <div class="ar">
+          <span i18n="About region label@@desktop.about.region">Region</span><b>eu-west-2</b>
+        </div>
+        <div class="ar">
+          <span i18n="About uptime label@@desktop.about.uptime">Uptime</span><b>6d 4h</b>
+        </div>
+      </div>
+      <div class="abtns">
+        <button
+          (click)="about = false; wm.launch('settings')"
+          i18n="Open system settings action@@desktop.about.systemSettings"
+        >
+          System Settings…</button
+        ><button
+          (click)="about = false"
+          i18n="Software update action@@desktop.about.softwareUpdate"
+        >
+          Software Update…
+        </button>
+      </div>
+      <p class="acopy" i18n="About copyright and privacy line@@desktop.about.copyright">
+        © Lethean · dAppCore — all local, always.
+      </p>
+    </div>
+  </div>
+
+  <!-- notifications -->
+  <div class="notifs">
+    <div class="notif" *ngFor="let n of notifs">
+      <span class="ni"><lthn-icon [attr.name]="n.icon" size="14"></lthn-icon></span>
+      <div class="nt">
+        <b>{{ n.title }}</b
+        ><small *ngIf="n.body">{{ n.body }}</small>
+      </div>
+      <button
+        class="nx"
+        aria-label="Dismiss"
+        i18n-aria-label="Dismiss notification action@@desktop.notification.dismiss"
+        (click)="dismiss(n.id)"
+      >
+        ✕
+      </button>
+    </div>
+  </div>
+
+  <!-- session screens (lock / switch / login / shutdown) -->
+  <div class="lockscreen" [class.off]="session === 'off'" *ngIf="session !== 'active'">
+    <ng-container [ngSwitch]="session">
+      <ng-container *ngSwitchCase="'locked'">
+        <div class="lk-time">{{ clock }}</div>
+        <div class="lk-date">{{ today() }}</div>
+        <div class="lk-user">
+          <span class="ava xl">{{ user.initials }}</span>
+          <div class="lk-name">{{ user.name }}</div>
+          <div class="lk-pin"><i></i><i></i><i></i><i></i></div>
+          <button
+            class="lk-btn"
+            (click)="resume()"
+            i18n="Unlock session action@@desktop.session.unlock"
+          >
+            <lthn-icon name="unlock" size="12"></lthn-icon> Unlock
+          </button>
+        </div>
+      </ng-container>
+      <ng-container *ngSwitchCase="'switch'">
+        <div class="lk-title" i18n="Switch user screen title@@desktop.session.switchTitle">
+          Switch user
+        </div>
+        <div class="lk-users">
+          <button class="lk-acct" *ngFor="let a of users" (click)="resume(a)">
+            <span class="ava xl">{{ a.initials }}</span>
+            <div class="lk-name">{{ a.name }}</div>
+          </button>
+        </div>
+      </ng-container>
+      <ng-container *ngSwitchCase="'login'">
+        <div class="lk-title" i18n="Product name@@brand.lethean">Lethean</div>
+        <div class="lk-user">
+          <span class="ava xl">{{ user.initials }}</span>
+          <div class="lk-name">{{ user.name }}</div>
+          <div class="lk-sub">{{ user.email }}</div>
+          <div class="lk-pin"><i></i><i></i><i></i><i></i></div>
+          <button class="lk-btn" (click)="resume()" i18n="Sign in action@@desktop.session.signIn">
+            <lthn-icon name="arrow-right" size="12"></lthn-icon> Sign in
+          </button>
+        </div>
+      </ng-container>
+      <ng-container *ngSwitchCase="'shutting'">
+        <lthn-icon name="power-off" size="22"></lthn-icon>
+        <div class="lk-sub" i18n="Shutdown progress@@desktop.session.shuttingDown">
+          Shutting down…
+        </div>
+      </ng-container>
+      <ng-container *ngSwitchCase="'off'">
+        <button
+          class="lk-power"
+          (click)="resume()"
+          title="Power on"
+          i18n-title="Power on action@@desktop.session.powerOn"
+        >
+          <lthn-icon name="power-off" size="22"></lthn-icon>
+        </button>
+        <div class="lk-sub" i18n="Power on action@@desktop.session.powerOn">Power on</div>
+      </ng-container>
+    </ng-container>
+  </div>
+
+  <!-- command palette (tap Cmd / Windows key) -->
+  <div class="paletteov" [hidden]="!palette.open" (pointerdown)="palClick($event)">
+    <div
+      class="palette"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Command palette"
+      i18n-aria-label="Command palette dialog label@@desktop.palette.dialogLabel"
+    >
+      <div class="pl-in">
+        <lthn-icon name="magnifying-glass" size="14"></lthn-icon
+        ><input
+          #plInput
+          [value]="palette.q"
+          (input)="onPlInput($event)"
+          (keydown)="plKey($event)"
+          placeholder="Type a command…"
+          i18n-placeholder="Command palette placeholder@@desktop.palette.placeholder"
+          autocomplete="off"
+          aria-label="Command"
+          i18n-aria-label="Command input label@@desktop.palette.commandLabel"
+        />
+      </div>
+      <div class="pl-list">
+        <div
+          class="pl-cmd"
+          *ngFor="let c of filtered; let i = index"
+          [class.on]="i === palette.i"
+          (click)="runCmd(i)"
+          (mouseenter)="palette.i = i"
+        >
+          <span class="ci"><lthn-icon [attr.name]="c.icon" size="12"></lthn-icon></span
+          ><span>{{ c.label }}</span
+          ><span class="sec">{{ c.sec }}</span>
+        </div>
+        <div
+          class="pl-empty"
+          *ngIf="!filtered.length"
+          i18n="No matching commands message@@desktop.palette.noMatches"
+        >
+          No commands match “{{ palette.q }}”
+        </div>
+      </div>
+      <div class="pl-foot">
+        <span i18n="Command palette keyboard help@@desktop.palette.navigate"
+          ><kbd>↑</kbd><kbd>↓</kbd> navigate</span
+        ><span i18n="Command palette keyboard help@@desktop.palette.run"><kbd>↵</kbd> run</span
+        ><span i18n="Command palette keyboard help@@desktop.palette.close"
+          ><kbd>esc</kbd> close</span
+        >
+      </div>
+    </div>
+    <div class="pl-widgets" *ngIf="!palette.q">
+      <div class="plw">
+        <div class="plw-h">
+          <lthn-icon name="clock" size="11"></lthn-icon>
+          <ng-container i18n="Time widget heading@@desktop.palette.time">Time</ng-container>
+        </div>
+        <div class="plw-big">{{ clock }}</div>
+        <div class="plw-sub">{{ today() }}</div>
+      </div>
+      <div class="plw">
+        <div class="plw-h">
+          <lthn-icon name="chart-line" size="11"></lthn-icon>
+          <ng-container i18n="Throughput widget heading@@desktop.widget.throughput"
+            >Throughput</ng-container
+          >
+        </div>
+        <div class="plw-big">
+          41.8<small i18n="Tokens per second unit@@unit.tokensPerSecondInline"> tok/s</small>
+        </div>
+        <lthn-sparkline
+          [attr.data]="throughputJson"
+          color="var(--brand-300)"
+          width="150"
+          height="30"
+          fill
+        ></lthn-sparkline>
+      </div>
+      <div class="plw">
+        <div class="plw-h">
+          <lthn-icon name="bolt" size="11"></lthn-icon>
+          <ng-container i18n="Power widget heading@@desktop.palette.power">Power</ng-container>
+        </div>
+        <div class="plw-big">207<small i18n="Watts unit@@unit.wattsInline"> W</small></div>
+        <lthn-sparkline
+          [attr.data]="wattsJson"
+          color="#febc2e"
+          width="150"
+          height="30"
+          fill
+        ></lthn-sparkline>
+      </div>
+    </div>
+  </div>
+</div>

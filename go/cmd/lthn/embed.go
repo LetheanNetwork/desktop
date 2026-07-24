@@ -4,9 +4,8 @@ package main
 
 import "embed"
 
-// frontendDist is the embedded Vite-built frontend. The Taskfile
-// `frontend` task copies frontend/dist → go/cmd/lthn/dist before
-// the Go build so go:embed has something to bundle.
+// frontendDist is the embedded Angular frontend. Angular writes its
+// browser bundle directly to go/cmd/lthn/dist before the Go build.
 //
 // Path is relative to this source file (cmd/lthn/). The dist
 // directory is .gitignored — it's rebuilt on every Taskfile

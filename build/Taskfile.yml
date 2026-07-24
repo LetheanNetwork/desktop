@@ -8,8 +8,8 @@ tasks:
       - echo "skipping go mod tidy — workspace mode handles dependency resolution"
 
   install:frontend:deps:
-    summary: Install frontend dependencies
-    dir: frontend
+    summary: Install Angular frontend dependencies
+    dir: frontend-ng
     sources:
       - package.json
       - package-lock.json
@@ -23,36 +23,30 @@ tasks:
 
   build:frontend:
     label: build:frontend (DEV={{.DEV}})
-    summary: Build the Vite frontend + stage into go/cmd/lthn/dist for embed. Skips entirely when no frontend sources changed (sources/generates), so a Go-only edit in the wails3 dev cycle pays only the Go-build cost, not the vite-build tax.
+    summary: Build the Angular frontend directly into go/cmd/lthn/dist for embedding. Skips when no frontend source changed, so Go-only Wails dev cycles avoid the Angular build cost.
     deps:
       - task: install:frontend:deps
       - task: generate:bindings
         vars:
           BUILD_FLAGS:
             ref: .BUILD_FLAGS
-    # Vite watches these inputs and embeds outputs into the Go binary
-    # via cmd/lthn/dist. go-task checksums the source files and skips
-    # the cmds block when nothing changed — the dev cycle's blocking
-    # `build` step becomes free on .go-only edits.
+    # Angular writes directly to cmd/lthn/dist. go-task checksums these
+    # inputs and skips the command when nothing changed, leaving the dev
+    # cycle's blocking build free on Go-only edits.
     sources:
-      - frontend/src/**/*
-      - frontend/index.html
-      - frontend/vite.config.js
-      - frontend/tsconfig.json
-      - frontend/package.json
-      - frontend/public/**/*
-      - frontend/bindings/**/*
+      - frontend-ng/src/**/*
+      - frontend-ng/public/**/*
+      - frontend-ng/angular.json
+      - frontend-ng/package.json
+      - frontend-ng/package-lock.json
+      - frontend-ng/tsconfig*.json
+      - frontend-ng/bindings/**/*
     generates:
       - "{{.GO_DIR}}/cmd/lthn/dist/index.html"
     cmds:
-      - cd frontend && npm run {{.BUILD_COMMAND}} -q
-      - rm -rf {{.GO_DIR}}/cmd/lthn/dist
-      - mkdir -p {{.GO_DIR}}/cmd/lthn/dist
-      - cp -R frontend/dist/. {{.GO_DIR}}/cmd/lthn/dist/
-    env:
-      PRODUCTION: '{{if eq .DEV "true"}}false{{else}}true{{end}}'
+      - cd frontend-ng && npm run build -- --configuration {{.BUILD_CONFIGURATION}}
     vars:
-      BUILD_COMMAND: '{{if eq .DEV "true"}}build:dev{{else}}build{{end}}'
+      BUILD_CONFIGURATION: '{{if eq .DEV "true"}}development{{else}}production{{end}}'
 
 
   generate:bindings:
@@ -66,9 +60,9 @@ tasks:
       - go.mod
       - go.sum
     generates:
-      - ../frontend/bindings/**/*
+      - ../frontend-ng/bindings/**/*
     cmds:
-      - wails3 generate bindings -ts -d ../frontend/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/... ../external/gui/go/...
+      - wails3 generate bindings -ts -d ../frontend-ng/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/... ../external/gui/go/...
 
   generate:icons:
     summary: Generates Windows `.ico` and Mac `.icns` from build/appicon.png.
@@ -93,12 +87,12 @@ tasks:
       - wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico
 
   dev:frontend:
-    summary: Runs the frontend in development mode
-    dir: frontend
+    summary: Runs Angular's development server with HMR for the Wails proxy
+    dir: frontend-ng
     deps:
       - task: install:frontend:deps
     cmds:
-      - npm run dev
+      - npm start -- --host 127.0.0.1 --port "{{.VITE_PORT}}" --hmr --poll 1000
 
   update:build-assets:
     summary: Updates the build assets

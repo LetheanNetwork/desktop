@@ -145,7 +145,7 @@ tasks:
       - go.mod
       - go.sum
     generates:
-      - frontend/bindings/**/*
+      - frontend-ng/bindings/**/*
     cmds:
       - wails3 generate bindings -f '{{.BUILD_FLAGS}}' -clean=true
     env:

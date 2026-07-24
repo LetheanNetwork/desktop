@@ -27,8 +27,8 @@ FROM gcr.io/distroless/static-debian12
 # Copy the binary
 COPY --from=builder /app/server /server
 
-# Copy frontend assets
-COPY --from=builder /app/frontend/dist /frontend/dist
+# Copy the Angular assets staged for Go embedding.
+COPY --from=builder /app/go/cmd/lthn/dist /frontend/dist
 
 # Expose the default port
 EXPOSE 8080

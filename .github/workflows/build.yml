@@ -26,7 +26,7 @@ on:
 
 env:
   GO_VERSION:   "1.26.0"
-  NODE_VERSION: "22"   # vite 7 wants ≥20; pin to LTS-ish
+  NODE_VERSION: "22"   # Angular frontend toolchain
 
 jobs:
   build:
@@ -74,7 +74,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache:        npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: frontend-ng/package-lock.json
 
       - name: Install Linux build deps
         if: matrix.os == 'linux'
@@ -92,14 +92,14 @@ jobs:
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Install frontend dependencies
-        working-directory: frontend
+        working-directory: frontend-ng
         run: npm ci
 
       - name: Generate bindings (TypeScript)
         run: task common:generate:bindings
 
       - name: Typecheck frontend
-        working-directory: frontend
+        working-directory: frontend-ng
         run: npx tsc --noEmit
 
       - name: Build

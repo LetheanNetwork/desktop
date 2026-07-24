@@ -144,7 +144,7 @@ tasks:
       - go.mod
       - go.sum
     generates:
-      - frontend/bindings/**/*
+      - frontend-ng/bindings/**/*
     vars:
       SDK_PATH:
         sh: xcrun --sdk iphonesimulator --show-sdk-path

@@ -12,20 +12,7 @@ go/cmd/lthn/dist/*
 .env.local
 
 # Wails generated
-frontend/bindings/
-frontend/dist/
-
-# Vite + Monaco — workers are copied into frontend/public/monaco/ at
-# build time from node_modules. ~120 generated worker files; never
-# tracked. FontAwesome Pro Plus (Mantis #1606) is a SOURCE asset
-# bundled for self-hosted distribution, so we ignore everything under
-# frontend/public/ EXCEPT the fontawesome/ subtree. Per gitignore
-# semantics, a directory ignore can't be negated for children, so we
-# enumerate the generated subtrees explicitly.
-frontend/public/monaco/
-frontend/public/*.js
-frontend/public/*.map
-frontend/public/*.wasm
+frontend-ng/bindings/
 
 # Go build cache + test artefacts
 *.test
@@ -36,7 +23,7 @@ go/coverage.out
 go/coverage.html
 
 # Frontend coverage report
-frontend/coverage/
+frontend-ng/coverage/
 
 # IDE
 .idea/
@@ -73,3 +60,5 @@ build/sdk/*/
 
 # Sonar scanner local cache
 .scannerwork/
+frontend-lit-ref/
+.agents/

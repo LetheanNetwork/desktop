@@ -11,7 +11,7 @@ This guide covers everything needed to build, test, extend, and contribute to lt
 
 **Module path:** `dappco.re/lthn/desktop`
 **Licence:** EUPL-1.2
-**Language:** Go 1.26 + Lit (frontend)
+**Language:** Go 1.26 + Angular (frontend)
 
 ---
 
@@ -202,27 +202,25 @@ The free `Register(c *core.Core) core.Result` function is canonical per Mantis #
 ## 8. Frontend development
 
 ```bash
-cd frontend
+cd frontend-ng
 npm install
-npm run dev        # → http://127.0.0.1:5173/
+npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
 ```
 
-Two viewing surfaces:
+The browser-only shell is available at:
 
-- `http://127.0.0.1:5173/` — app entry. Mount a single window via `?surface=chat&state=multi-turn` (etc).
-- `http://127.0.0.1:5173/canvas.html` — design canvas. Every window side-by-side for design review.
-
-Surface route names: `chat`, `welcome`, `settings`, `models`, `benchmark`, `logs`, `telemetry`, `integrations`, `tools`, `network`, `distillation`, `fleet`, `canvas` (default).
+- `http://127.0.0.1:9245/#/` — the desktop shell.
+- `http://127.0.0.1:9245/#/w/:app` — a standalone native-window host.
 
 Production build:
 
 ```bash
-npm run build    # → frontend/dist/{index.html,canvas.html,assets/}
+npx ng build    # → ../go/cmd/lthn/dist/index.html
 ```
 
-The build emits both pages plus the asset bundle. Wails embeds the production output when the GUI ships.
-
-Components and primitives live at `frontend/src/lit/lit-*.js`. The Lethean-5 handover is the source of truth — changes should flow through the design pass at `docs/design/lethean-4-react-reference/` first, then land in the Lit port. Do not add UI framework dependencies (Angular, React, Vue, Svelte are banned by the supply-chain-surface principle).
+Angular writes the browser bundle directly to the directory embedded by
+`go/cmd/lthn/embed.go`. The application remains client-side rendered: do not
+add Angular SSR, a server entry point, or hydration.
 
 ---
 
@@ -236,6 +234,6 @@ Components and primitives live at `frontend/src/lit/lit-*.js`. The Lethean-5 han
 - **TDD** — every public symbol ships with its `Test*_{Good,Bad,Ugly}` triplet + `Example*` in the same commit. Do not accumulate test backlog.
 - **No version pins in docs** — `go.mod` and `package.json` are the source of truth for dependency versions. Describe what a dep is, not what version it's at.
 - **No hidden user bloat** — user-visible data goes under `~/Lethean/`, never `~/.lthn/` or other dot-dirs.
-- **No supply-chain bloat** — see the supply-chain-surface memory; the curated allow-list is Lit + Vite + Lethean tokens (frontend), Go stdlib + `golang.org/x/*` + `dappco.re/*` (backend).
+- **No supply-chain bloat** — frontend dependencies stay deliberate and recorded in `frontend-ng/package.json`; backend code stays within Go stdlib + `golang.org/x/*` + `dappco.re/*`.
 
 When in doubt, read the v0.9.0 audit at `core/go/tests/cli/v090-upgrade/audit.sh` — the dimensions encode the standards.
