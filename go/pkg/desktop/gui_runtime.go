@@ -269,7 +269,7 @@ func registerCoreGUIServices(c *core.Core, app *application.App, cfg gui.GuiConf
 	if len(options) != 20 {
 		return core.Fail(core.E("desktop.registerCoreGUIServices", "unexpected CoreGUI bootstrap shape", nil))
 	}
-	options[1] = window.Register(newConfiguredWailsPlatform(app))
+	options[1] = core.WithService(window.Register(newConfiguredWailsPlatform(app)))
 
 	// CoreGUI's declarative bootstrap registers everything before the
 	// lifecycle starts. The desktop Core is already live, so start each
