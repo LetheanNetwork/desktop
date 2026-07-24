@@ -126,11 +126,12 @@ func TestServer_CSPFrameSrc_RejectsWildcardPort_Bad(t *testing.T) {
 
 func TestBuildCSPPolicy_DevGatesUnsafeEval(t *testing.T) {
 	// The security invariant: the relaxed script-src keyword is dev-only.
-	// Production must stay hardened; dev gets the bridge drive-surface.
+	// Production must stay hardened; dev gets Wails' MCP drive-surface.
 	// Passing dev explicitly keeps this deterministic regardless of the
 	// LTHN_DEV env the test process happens to run under.
 	noPorts := func() []int { return nil }
 	const relaxed = "unsafe-eval"
+	const wailsMCPOrigin = "http://127.0.0.1:9099"
 
 	prod := BuildCSPPolicy(noPorts, false)
 	if !core.Contains(prod, "script-src 'self'") {
@@ -139,10 +140,16 @@ func TestBuildCSPPolicy_DevGatesUnsafeEval(t *testing.T) {
 	if core.Contains(prod, relaxed) {
 		t.Fatalf("prod CSP must NOT permit %s; got: %s", relaxed, prod)
 	}
+	if core.Contains(prod, wailsMCPOrigin) {
+		t.Fatalf("prod CSP must NOT permit the Wails MCP callback; got: %s", prod)
+	}
 
 	dev := BuildCSPPolicy(noPorts, true)
 	if !core.Contains(dev, "script-src 'self' '"+relaxed+"'") {
-		t.Fatalf("dev CSP must relax script-src for the bridge; got: %s", dev)
+		t.Fatalf("dev CSP must relax script-src for Wails MCP; got: %s", dev)
+	}
+	if !core.Contains(dev, wailsMCPOrigin) {
+		t.Fatalf("dev CSP must permit the Wails MCP callback; got: %s", dev)
 	}
 	// The relaxed keyword must appear exactly once — inside script-src,
 	// nowhere else (no leak into connect-src / style-src / frame-src).

@@ -57,9 +57,9 @@ const toolText = (value: unknown) => ({
 /**
  * Provider-neutral browser tools for operating the desktop shell.
  *
- * Angular registers these against document.modelContext. The pre-bootstrap
- * Wails adapter mirrors that context to window.__lthnWebMcp so any MCP client
- * with access to the existing webview bridge can list and call the tools.
+ * Angular registers these when the browser provides document.modelContext.
+ * Wails development control uses the built-in MCP service instead; the retained
+ * compatibility bridge can still mirror these tools when explicitly imported.
  */
 @Service()
 export class DesktopMcpService {

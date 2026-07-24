@@ -46,7 +46,6 @@ import (
 	"dappco.re/lthn/desktop/pkg/apikey"
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/benchmark"
-	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/build"
 	"dappco.re/lthn/desktop/pkg/calibrate"
 	"dappco.re/lthn/desktop/pkg/clbpl"
@@ -326,7 +325,6 @@ func (s *Service) Run() core.Result {
 	// No adapter layer — Wails generates straight from the package.
 	i18nSvc, _ := core.ServiceFor[*coreI18n.CoreService](s.opts.Core, "i18n")
 	configSvc, _ := core.ServiceFor[*config.Service](s.opts.Core, "config")
-	bridgeSvc, _ := core.ServiceFor[*bridge.Service](s.opts.Core, "bridge")
 	pluginSvc, _ := core.ServiceFor[*plugin.Service](s.opts.Core, "plugin")
 	sandboxSvc, _ := core.ServiceFor[*sandbox.Service](s.opts.Core, "sandbox")
 	opencodeSvc, _ := core.ServiceFor[*opencode.Service](s.opts.Core, "opencode")
@@ -579,7 +577,6 @@ func (s *Service) Run() core.Result {
 		// dappco.re/go/<pkg>/.
 		gui.Bind(i18nSvc),
 		gui.Bind(configSvc),
-		gui.Bind(bridgeSvc),
 		// Window registry — see note above.
 		gui.Bind(windowSvc),
 	}

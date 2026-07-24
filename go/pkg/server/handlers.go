@@ -321,19 +321,19 @@ func writeGinError(c *gin.Context, status int, msg, kind string) {
 // Directive rationale:
 //   - default-src 'self'       — deny everything not explicitly listed.
 //   - script-src — 'self' in production (no inline, no eval, no remote
-//     JS); dev builds (LTHN_DEV=1) add 'unsafe-eval' so the bridge's
-//     webview_eval drive-surface (click / query / navigate all ride
-//     eval) works. The lthn WebView is a native OS render pane
-//     (WKWebView / WebView2), not an internet-facing origin, and the
-//     bridge binds loopback-only — so dev eval is a local-trust
-//     affordance, not a web-XSS surface. Injected by BuildCSPPolicy via
-//     cspScriptSrc, NOT baked into cspPolicyBase below.
+//     JS); dev builds (LTHN_DEV=1) add 'unsafe-eval' so Wails' built-in
+//     MCP evaluator can drive the WebView. The lthn WebView is a native
+//     OS render pane (WKWebView / WebView2), not an internet-facing
+//     origin, and the MCP server binds loopback-only — so dev eval is a
+//     local-trust affordance, not a web-XSS surface. Injected by
+//     BuildCSPPolicy via cspScriptSrc, NOT baked into cspPolicyBase below.
 //   - style-src 'self' 'unsafe-inline' — inline <style> allowed for Lit
 //     shadow-root styles; nonce-based alternative deferred (see service.go
 //     cspMiddleware comment for the tradeoff).
 //   - img-src 'self' data: blob: — Lit image bindings + base64 data URIs.
-//   - connect-src ... — XHR/fetch targets: same-origin + bridge ports +
-//     HF API (model browser) + wss for future WebSocket lanes.
+//   - connect-src ... — XHR/fetch targets: same-origin + retained legacy
+//     bridge/service-discovery ports + HF API (model browser) + wss for
+//     future WebSocket lanes. Dev adds Wails MCP's result callback on 9099.
 //   - frame-ancestors 'none'   — prevents the WebView being embedded in
 //     an attacker-controlled frame (belt-and-suspenders with X-Frame-Options).
 //   - frame-src appended at request time — per-port loopback allowlist
@@ -345,12 +345,14 @@ const cspPolicyBase = "default-src 'self'; " +
 	// see cspScriptSrc. Keeping it out of this const is what lets the
 	// directive flip on LTHN_DEV without duplicating the whole policy.
 	"style-src 'self' 'unsafe-inline'; " +
-	"img-src 'self' data: blob:; " +
-	"connect-src 'self' " +
+	"img-src 'self' data: blob:"
+
+const cspConnectSrcBase = "connect-src 'self' " +
 	"http://127.0.0.1:9879 http://127.0.0.1:9876 " +
 	"wss://127.0.0.1:9879 wss://127.0.0.1:9876 " +
-	"https://huggingface.co https://hf.co; " +
-	"frame-ancestors 'none'"
+	"https://huggingface.co https://hf.co"
+
+const cspWailsMCPConnectSrc = " http://127.0.0.1:9099"
 
 // cspHeader is the HTTP header name for the Content-Security-Policy.
 const cspHeader = "Content-Security-Policy"
@@ -403,7 +405,7 @@ func cspMiddlewareWithSource(source PluginPortSource) gin.HandlerFunc {
 // cspScriptSrc returns the script-src directive. Production (dev=false)
 // is the hardened 'self' — no inline scripts, no remote JS, no runtime
 // code evaluation. Dev (dev=true, from LTHN_DEV=1) adds the relaxed
-// keyword so the bridge's webview drive-surface can run injected probes
+// keyword so Wails' MCP drive-surface can run injected probes
 // that 'self' alone refuses. The relaxed form MUST stay dev-only — the
 // BuildCSPPolicy tests lock that invariant.
 func cspScriptSrc(dev bool) string {
@@ -413,12 +415,23 @@ func cspScriptSrc(dev bool) string {
 	return "script-src 'self'"
 }
 
+// cspConnectSrc returns the network destinations available to page scripts.
+// Wails' MCP evaluator posts each result back to its loopback server, so the
+// default 9099 origin is present only when the application is in dev mode.
+func cspConnectSrc(dev bool) string {
+	if dev {
+		return cspConnectSrcBase + cspWailsMCPConnectSrc
+	}
+	return cspConnectSrcBase
+}
+
 // BuildCSPPolicy composes the full CSP value: the static
 // cspPolicyBase, the dev-aware script-src directive (cspScriptSrc(dev)
-// — dev adds 'unsafe-eval'), plus a frame-src directive enumerating the
-// live iframe loopback ports. Exported (with dev passed explicitly, not
-// read from the env) so tests can assert both the hardened production
-// policy and the relaxed dev policy without env manipulation.
+// — dev adds 'unsafe-eval'), the dev-aware connect-src directive, plus a
+// frame-src directive enumerating the live iframe loopback ports. Exported
+// (with dev passed explicitly, not read from the env) so tests can assert
+// both the hardened production policy and the relaxed dev policy without
+// environment manipulation.
 //
 // Behaviour per RFC §3.3:
 //   - empty port list → `frame-src 'none'`
@@ -435,7 +448,9 @@ func BuildCSPPolicy(source PluginPortSource, dev bool) string {
 	b.WriteString(cspPolicyBase)
 	b.WriteString("; ")
 	b.WriteString(cspScriptSrc(dev))
-	b.WriteString("; frame-src 'none'")
+	b.WriteString("; ")
+	b.WriteString(cspConnectSrc(dev))
+	b.WriteString("; frame-ancestors 'none'; frame-src 'none'")
 	seen := map[int]bool{}
 	for _, p := range ports {
 		if p <= 0 || seen[p] {

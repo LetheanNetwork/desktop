@@ -483,17 +483,18 @@ func NewService(opts Options) *Service {
 		// justified today — 'unsafe-inline' on styles only allows injected
 		// styles, not injected scripts. Revisit if a nonce pipeline lands.
 		//
-		// connect-src: 127.0.0.1:9879 is the bridge (tools), 9876 is the
-		// mdns / service-discovery port. huggingface.co + hf.co are for the
-		// model browser's HF API calls. wss: is included for future WebSocket
-		// transports on the same localhost origins.
+		// connect-src: dev mode adds Wails MCP's result callback on
+		// 127.0.0.1:9099. The retained bridge and service-discovery
+		// allowances remain on 9879 / 9876. huggingface.co + hf.co are
+		// for the model browser's HF API calls. wss: is included for
+		// future WebSocket transports on the same localhost origins.
 		//
 		// The Wails runtime injects its JS via the native WebView runtime,
-		// not via <script> tags. The bridge's webview_eval, though, runs a
-		// runtime code-eval INSIDE the page context, which script-src
-		// 'self' refuses — so dev builds (LTHN_DEV=1) relax script-src via
-		// cspScriptSrc to enable the drive-surface. Production stays
-		// hardened. See handlers.go cspScriptSrc.
+		// not via <script> tags. Wails MCP's evaluator runs code INSIDE
+		// the page context, which script-src 'self' refuses — so dev
+		// builds (LTHN_DEV=1) relax script-src via cspScriptSrc to enable
+		// the drive-surface. Production stays hardened. See handlers.go
+		// cspScriptSrc.
 		coreapi.WithMiddleware(cspMiddleware()),
 	}
 	// Mantis #1458 — explicit 404 for webview-only prefixes on the

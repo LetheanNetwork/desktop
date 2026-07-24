@@ -82,7 +82,7 @@ func (p *rebasedProvider) RegisterRoutes(rg *gin.RouterGroup) { p.inner.Register
 
 // Service wraps the dappco.re/go/process action surface for consumers
 // inside this binary. All calls round-trip through c.Action so they
-// share the same registry the bridge mount + Wails clients see.
+// share the same registry the API mount and Wails clients see.
 type Service struct {
 	core *core.Core
 }

@@ -1,16 +1,17 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-// Package bridge — local MCP HTTP server that lets an external agent
-// (Cladius / Codex / any MCP-speaking client) drive and observe the
-// running lthn/desktop WebView. Ported down from core/ide's
+// Package bridge provides the retained local MCP HTTP compatibility server.
+// The default desktop composition now uses Wails' build-tagged MCP service and
+// does not register this package. Explicit fallback consumers can still wire it
+// with RegisterService without reviving a second server by default. It was
+// ported down from core/ide's
 // mcp_bridge.go to the minimum-viable surface lthn/desktop needs in
-// dev mode: console + error capture, webview_eval with fetch-back,
+// compatibility mode: console + error capture, webview_eval with fetch-back,
 // and a handful of pre-shaped JS one-liners that build on eval.
 //
-// The bridge is dev-mode-focused — it binds 127.0.0.1:9876 so it's
+// The bridge is dev-mode-focused — it binds 127.0.0.1:9879 so it's
 // never exposed beyond the local machine. Production builds can skip
-// registration entirely by branching in pkg/desktop/desktop.go's
-// wailsServices list.
+// registration entirely; lthn's default composition does so.
 //
 // Why a separate HTTP server (not a /api/ route on the gin engine):
 // the bridge is intentionally OUT-OF-PROCESS-shaped so a stand-alone

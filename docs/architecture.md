@@ -141,7 +141,9 @@ The production frontend lives at `frontend-ng/` and is a standalone Angular
 application. It is client-side rendered and uses hash routing because Wails
 serves a static asset bundle rather than a History API server.
 
-- `frontend-ng/src/main.ts` installs the bridge shim before bootstrapping Angular.
+- `frontend-ng/src/main.ts` bootstraps Angular directly. Development builds expose
+  Wails' built-in MCP service on loopback through the `mcp` build tag; the former
+  bridge shim remains in the tree as an unbootstrapped compatibility fallback.
 - `frontend-ng/src/app/app.config.ts` wires hash routing, NgRx, WebMCP, and app initialisation.
 - `frontend-ng/src/app/app.routes.ts` owns `#/` and `#/w/:app`.
 - `frontend-ng/src/locale/` carries the Angular localisation catalogues.

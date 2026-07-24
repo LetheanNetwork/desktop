@@ -19,7 +19,6 @@ import (
 	lthnai "dappco.re/lthn/desktop/pkg/ai"
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/benchmark"
-	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/deploys"
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/gateway"
@@ -137,15 +136,6 @@ func newAppCore() *core.Core {
 		core.WithName("mcp", mcp.NewService(mcp.Options{
 			WorkspaceRoot: dataDir.Value.(string),
 		})),
-		// bridge — local MCP HTTP server on 127.0.0.1:9879 letting an
-		// external agent (Cladius / Codex / any MCP client) drive +
-		// observe the WebView. Console + error capture via the JS
-		// shim in frontend/index.html, webview_eval via core/gui's
-		// TaskEvalJS event-bus path (the older /internal/eval-reply
-		// HTTP fetch-back retired with that cutover). Dev-mode
-		// focused — bound to localhost so it never leaves this Mac.
-		// See pkg/bridge/.
-		core.WithName("bridge", bridge.RegisterService(bridge.Options{})),
 		// plugin — the plugin host. Owns ~/Lethean/conf/plugins/,
 		// supervises plugin binaries via process.Service, and
 		// mounts a reverse-proxy on the coreapi.Engine at
@@ -816,7 +806,6 @@ var wailsBindingCatalogue = []string{
 	"lthnservices",
 	"i18n",
 	"config",
-	"bridge",
 	"window",
 }
 

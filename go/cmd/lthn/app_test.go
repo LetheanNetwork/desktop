@@ -257,10 +257,10 @@ func TestApp_NewAppCore_EmitsServiceRegistrationAudit_Good(t *testing.T) {
 		"day-file must carry "+audit.EventCompositionServicesRegistered+"; got: "+contents)
 
 	// Meta carries the four forensic-fingerprint keys and the version.
-	// service_count is 3 — core.New auto-registers a "cli" service in
-	// addition to the two test names ("alpha", "beta").
-	core.AssertTrue(t, core.Contains(contents, `"service_count":3`),
-		"Meta must carry service_count=3 (alpha + beta + auto-cli); got: "+contents)
+	// service_count is 2 — the fixture registers "alpha" and "beta";
+	// Core does not inject an implicit CLI service.
+	core.AssertTrue(t, core.Contains(contents, `"service_count":2`),
+		"Meta must carry service_count=2 (alpha + beta); got: "+contents)
 	core.AssertTrue(t, core.Contains(contents, `"service_names_hash":`),
 		"Meta must carry service_names_hash; got: "+contents)
 	core.AssertTrue(t, core.Contains(contents, `"wails_binding_count":`),
@@ -270,26 +270,26 @@ func TestApp_NewAppCore_EmitsServiceRegistrationAudit_Good(t *testing.T) {
 	core.AssertTrue(t, core.Contains(contents, `"version":"test-version-1.2.3"`),
 		"Meta must carry the pinned build version; got: "+contents)
 
-	// The service_names_hash for the deterministic ["alpha","beta","cli"]
-	// set (sorted-comma-joined → "alpha,beta,cli") is a stable forensic
+	// The service_names_hash for the deterministic ["alpha","beta"] set
+	// (sorted-comma-joined → "alpha,beta") is a stable forensic
 	// value. Hash truncated to 16 hex chars to stay under the secret-
 	// shape redactor's 32-char floor (matches the emit-site idiom).
-	expectedNamesHash := core.SHA256HexString("alpha,beta,cli")[:16]
+	expectedNamesHash := core.SHA256HexString("alpha,beta")[:16]
 	core.AssertTrue(t, core.Contains(contents, `"service_names_hash":"`+expectedNamesHash+`"`),
-		"service_names_hash must equal SHA-256[:16] of 'alpha,beta,cli'; got: "+contents)
+		"service_names_hash must equal SHA-256[:16] of 'alpha,beta'; got: "+contents)
 
 	// The wails_binding_count is the catalogue length — pinned so a
 	// drift in wailsBindingCatalogue without an intentional schema bump
 	// trips the test. Update both this assertion + the catalogue
 	// together when intentionally adding a binding.
 	//
-	// Count == 47 is the hand-maintained mirror of pkg/desktop/desktop.go's
+	// Count == 46 is the hand-maintained mirror of pkg/desktop/desktop.go's
 	// Wails bindings (see Cerberus #50 ADD-1 / Mantis #1759). A `len > 0`
 	// gate previously let a forgotten catalogue-update slip through silently
 	// (audit hash flipped, no test failure). The exact-count gate forces
 	// the catalogue + the binding surface to be edited in lockstep.
-	core.AssertEqual(t, 47, len(wailsBindingCatalogue),
-		"wailsBindingCatalogue length must equal 47 — update catalogue + this pin together when intentionally adding/removing a Wails binding")
+	core.AssertEqual(t, 46, len(wailsBindingCatalogue),
+		"wailsBindingCatalogue length must equal 46 — update catalogue + this pin together when intentionally adding/removing a Wails binding")
 }
 
 // TestApp_AuditMeta_NoServiceInternals_Bad pins the Meta-PII discipline:
@@ -368,7 +368,7 @@ func noopServiceFactory(_ *core.Core) core.Result {
 // TestApp_WailsBindingCatalogue_CountPinned_Good is the dedicated
 // drift-detection gate for wailsBindingCatalogue (Cerberus #50 ADD-1 /
 // Mantis #1759 LOW). The catalogue in app.go is the hand-maintained
-// mirror of pkg/desktop/desktop.go's Wails-binding surface (47 bindings
+// mirror of pkg/desktop/desktop.go's Wails-binding surface (46 bindings
 // at the time of writing). A contributor adding a binding to
 // pkg/desktop without updating the catalogue would silently flip the
 // `wails_bindings_hash` Meta field in the boot composition audit row
@@ -384,10 +384,10 @@ func noopServiceFactory(_ *core.Core) core.Result {
 //
 // Usage example:
 //
-//	core.AssertEqual(t, 47, len(wailsBindingCatalogue), "...")
+//	core.AssertEqual(t, 46, len(wailsBindingCatalogue), "...")
 func TestApp_WailsBindingCatalogue_CountPinned_Good(t *testing.T) {
-	core.AssertEqual(t, 47, len(wailsBindingCatalogue),
-		"wailsBindingCatalogue length must equal 47 — drift gate: update catalogue + this pin together when intentionally adding/removing a Wails binding in pkg/desktop/desktop.go")
+	core.AssertEqual(t, 46, len(wailsBindingCatalogue),
+		"wailsBindingCatalogue length must equal 46 — drift gate: update catalogue + this pin together when intentionally adding/removing a Wails binding in pkg/desktop/desktop.go")
 }
 
 // TestApp_PostUnlock_TriggersMigrateLegacyKeys_Good pins the H#250 /
