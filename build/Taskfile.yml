@@ -48,6 +48,25 @@ tasks:
     vars:
       BUILD_CONFIGURATION: '{{if eq .DEV "true"}}development{{else}}production{{end}}'
 
+  build:frontend:mobile:
+    label: build:frontend:mobile (DEV={{.DEV}})
+    summary: Build the Angular frontend for iOS and Android without desktop-only Go binding generation
+    deps:
+      - task: install:frontend:deps
+    sources:
+      - frontend-ng/src/**/*
+      - frontend-ng/public/**/*
+      - frontend-ng/angular.json
+      - frontend-ng/package.json
+      - frontend-ng/package-lock.json
+      - frontend-ng/tsconfig*.json
+    generates:
+      - "{{.GO_DIR}}/cmd/lthn/dist/index.html"
+    cmds:
+      - cd frontend-ng && npm run build -- --configuration {{.BUILD_CONFIGURATION}}
+    vars:
+      BUILD_CONFIGURATION: '{{if eq .DEV "true"}}development{{else}}production{{end}}'
+
 
   generate:bindings:
     label: generate:bindings (BUILD_FLAGS={{.BUILD_FLAGS}})

@@ -43,7 +43,9 @@ func (s *stubSessionGate) UnlockedAccountIDs() []string { return s.ids }
 // methods pass the unlock gate by default. Tests that need to assert
 // the locked-state path call SetSessionGate explicitly with an empty
 // stub (or use newTestServiceNoGate for the nil-gate fail-safe path).
-func newTestService() *Service {
+func newTestService(t *testing.T) *Service {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
 	c := core.New()
 	svc := NewService(c)
 	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-test"}})
@@ -53,7 +55,9 @@ func newTestService() *Service {
 // newTestServiceNoGate returns a Service with NO SessionGate wired —
 // exercises the §2.2 / Cerberus #27 Q2 fail-safe path where the
 // service is constructed before app.go's SetSessionGate runs.
-func newTestServiceNoGate() *Service {
+func newTestServiceNoGate(t *testing.T) *Service {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
 	c := core.New()
 	return NewService(c)
 }
@@ -263,7 +267,7 @@ func TestSplitFrontmatter_NoFrontmatter(t *testing.T) {
 
 // TestCreate_Good — happy path: file lands on disk, DocRow returned.
 func TestCreate_Good(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	slug := testSlug(t)
 	cleanupDoc(t, slug)
 
@@ -282,7 +286,7 @@ func TestCreate_Good(t *testing.T) {
 
 // TestCreate_Bad — duplicate slug returns documents.create.exists.
 func TestCreate_Bad(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	slug := testSlug(t)
 	cleanupDoc(t, slug)
 
@@ -302,7 +306,7 @@ func TestCreate_Bad(t *testing.T) {
 
 // TestCreate_Ugly — traversal slug rejected before any FS touch.
 func TestCreate_Ugly(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	r := svc.Create(CreateInput{Slug: "../etc/passwd", Body: "evil"})
 	if r.OK {
 		t.Fatal("expected Create to reject traversal slug")
@@ -314,7 +318,7 @@ func TestCreate_Ugly(t *testing.T) {
 
 // TestCreate_BodyTooLarge_Bad — 1.1MB body rejected before FS touch.
 func TestCreate_BodyTooLarge_Bad(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	slug := testSlug(t)
 	body := make([]byte, MaxBodyBytes+1024)
 	for i := range body {
@@ -361,7 +365,7 @@ func TestValidateSlug_Ugly(t *testing.T) {
 
 // TestSave_Good — round-trip: Create then Save, body updated.
 func TestSave_Good(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	slug := testSlug(t)
 	cleanupDoc(t, slug)
 
@@ -399,7 +403,7 @@ func TestSave_Good(t *testing.T) {
 
 // TestSave_Bad — missing IfMatchHash rejected with documents.save.missing_if_match.
 func TestSave_Bad(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	slug := testSlug(t)
 	cleanupDoc(t, slug)
 
@@ -423,7 +427,7 @@ func TestSave_Bad(t *testing.T) {
 
 // TestSave_ConflictDetected_Ugly — stale hash rejected with documents.save.conflict.
 func TestSave_ConflictDetected_Ugly(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	slug := testSlug(t)
 	cleanupDoc(t, slug)
 
@@ -469,7 +473,7 @@ func TestSave_ConflictDetected_Ugly(t *testing.T) {
 
 // TestDelete_Good — file removed after Delete with valid token.
 func TestDelete_Good(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	slug := testSlug(t)
 	// No cleanupDoc — Delete removes it.
 
@@ -503,7 +507,7 @@ func TestDelete_Good(t *testing.T) {
 
 // TestDelete_Bad — stale hash rejected with documents.delete.conflict.
 func TestDelete_Bad(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	slug := testSlug(t)
 	cleanupDoc(t, slug)
 
@@ -526,7 +530,7 @@ func TestDelete_Bad(t *testing.T) {
 
 // TestDelete_Ugly — missing IfMatchHash rejected before FS touch.
 func TestDelete_Ugly(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	slug := testSlug(t)
 	cleanupDoc(t, slug)
 
@@ -551,7 +555,7 @@ func TestDelete_Ugly(t *testing.T) {
 // gate reports zero unlocked accounts (RFC.stage-e-unlockgate v2 §4.2
 // LockedSession_Bad shape — Mantis #1613 B.1).
 func TestDocuments_LockedGate_FailsWrite(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
 
 	if r := svc.Save(SaveInput{Slug: "any", Body: "body", IfMatch: core.Now(), IfMatchHash: "abc"}); r.OK {
@@ -576,7 +580,7 @@ func TestDocuments_LockedGate_FailsWrite(t *testing.T) {
 // TestDocuments_UnlockedGate_AllowsWrite — Create succeeds when the
 // live-read gate reports a non-empty unlocked-account slice.
 func TestDocuments_UnlockedGate_AllowsWrite(t *testing.T) {
-	svc := newTestServiceNoGate()
+	svc := newTestServiceNoGate(t)
 	svc.SetSessionGate(&stubSessionGate{ids: []string{"acct-1"}})
 
 	slug := testSlug(t)
@@ -591,7 +595,7 @@ func TestDocuments_UnlockedGate_AllowsWrite(t *testing.T) {
 // on the first write; nilWarned one-shot suppresses re-warning on
 // subsequent writes (RFC §2.2 / Cerberus #27 Q2 fail-safe).
 func TestDocuments_NilGate_WarnsOnce_FailsClosed(t *testing.T) {
-	svc := newTestServiceNoGate()
+	svc := newTestServiceNoGate(t)
 
 	// First write — nilWarned trips false→true; behaviour: fails closed.
 	r1 := svc.Create(CreateInput{Slug: "any", Body: "body"})
@@ -625,7 +629,7 @@ func TestDocuments_NilGate_WarnsOnce_FailsClosed(t *testing.T) {
 // TestDocuments_StopNilsGate — Stop() severs the SessionGate; subsequent
 // writes fail-closed even though the gate WAS wired (Cerberus #27 ADD-5).
 func TestDocuments_StopNilsGate(t *testing.T) {
-	svc := newTestService() // gate wired with unlocked stub
+	svc := newTestService(t) // gate wired with unlocked stub
 
 	// Pre-Stop: write succeeds.
 	slug := testSlug(t)
@@ -652,7 +656,7 @@ func TestDocuments_StopNilsGate(t *testing.T) {
 // TestSessionLocked_ReadStillWorks_Good — List is not blocked by the
 // session gate (RFC §3.1 — reads stay open while locked).
 func TestSessionLocked_ReadStillWorks_Good(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	svc.SetSessionGate(&stubSessionGate{ids: []string{}})
 	r := svc.List(ListInput{})
 	if !r.OK {
@@ -662,7 +666,7 @@ func TestSessionLocked_ReadStillWorks_Good(t *testing.T) {
 
 // TestRelated_BrokenRefSurvivesSave_Good — Q5: broken related refs survive Save.
 func TestRelated_BrokenRefSurvivesSave_Good(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	slug := testSlug(t)
 	cleanupDoc(t, slug)
 
@@ -713,7 +717,7 @@ func TestNormaliseTags_Ugly(t *testing.T) {
 
 // TestReadBodyHash_Good — returns consistent hash for known content.
 func TestReadBodyHash_Good(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	slug := testSlug(t)
 	cleanupDoc(t, slug)
 
@@ -753,7 +757,7 @@ func TestReadBodyHash_Bad(t *testing.T) {
 
 // TestReadBodyHash_Ugly — after content changes, hash changes.
 func TestReadBodyHash_Ugly(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	slug := testSlug(t)
 	cleanupDoc(t, slug)
 
@@ -787,6 +791,7 @@ func TestReadBodyHash_Ugly(t *testing.T) {
 
 // TestAtomicWriteFile_Good — file lands with correct content.
 func TestAtomicWriteFile_Good(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	dirR := docsDir()
 	if !dirR.OK {
 		t.Skipf("docsDir unavailable: %v", dirR.Error())
@@ -845,7 +850,7 @@ func TestFrontmatter_UpdatedAt_Drift_Ugly(t *testing.T) {
 // conflict. The frontend conflict-UI consumes current_hash to compose
 // the reload prompt; the test pins the field's presence + lifecycle.
 func TestSave_PrimitiveStaleEnvelope_Ugly(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	slug := testSlug(t)
 	cleanupDoc(t, slug)
 
@@ -883,7 +888,7 @@ func TestSave_PrimitiveStaleEnvelope_Ugly(t *testing.T) {
 // downstream). The recorder is overridden for the test; production
 // boot wires the real audit.Service adapter.
 func TestCreate_RoutesThroughPrimitive_Good(t *testing.T) {
-	svc := newTestService()
+	svc := newTestService(t)
 	slug := testSlug(t)
 	cleanupDoc(t, slug)
 

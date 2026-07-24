@@ -1,5 +1,7 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
+//go:build !ios && !android
+
 // Command lthn — Lethean's unified CLI binary.
 //
 // Single binary, multiple modes. The CLI router dispatches based on

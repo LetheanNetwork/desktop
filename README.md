@@ -1,15 +1,15 @@
 # lthn — Lethean Desktop
 
-> Native macOS tray app — sovereign-compute local LLM runner.
+> Native desktop and mobile app — sovereign-compute local LLM client.
 > One symbol, six routing surfaces. See [`forge.lthn.sh/lthn/desktop`](https://forge.lthn.sh/lthn/desktop).
 
 **Binary:** `lthn`
-**Status:** Angular desktop shell wired to the Wails runtime and Go services.
+**Status:** Angular shell wired to Wails on desktop, iOS and Android.
 **Licence:** EUPL-1.2
 
 ## What it is
 
-A native macOS tray icon + 400×560 popover panel that runs local LLM inference on Apple Silicon. The tray is the process; expansion windows (chat, settings, benchmark, telemetry) are transient surfaces anchored to the tray-process. Closing all windows does NOT quit the app.
+A native macOS tray icon + 400×560 popover panel that runs local LLM inference on Apple Silicon. The tray is the desktop process; expansion windows (chat, settings, benchmark, telemetry) are transient surfaces anchored to it. The same Angular application now runs in Wails' iOS and Android hosts, using the device presentation and a shared lifecycle, battery, network, safe-area and native-feature event contract.
 
 The product story: **sovereign compute, single-watt** — AI on the user's own hardware, no cloud round-trip, airplane-mode capable.
 
@@ -31,7 +31,8 @@ lthn/desktop/
 │   ├── src/locale/       — Angular localisation catalogues
 │   ├── angular.json      — builds directly to go/cmd/lthn/dist/
 │   └── package.json
-├── build/{darwin,linux,windows}/  — platform build configs (codesigning, packaging)
+├── build/{darwin,linux,windows,ios,android}/
+│                         — platform build configs, native hosts and packaging
 ├── docs/
 └── Taskfile.yml
 ```
@@ -57,6 +58,18 @@ task package             # produces a distributable bundle
 task darwin:build        # macOS .app
 task linux:build         # Linux ELF
 task windows:build       # Windows .exe
+
+# Mobile packages:
+wails3 task ios:package          # bin/lthn.app, arm64 iOS Simulator
+wails3 task android:package:fat  # bin/lthn.apk, arm64-v8a + x86_64
+
+# Provisioned iPhone/iPad package:
+wails3 task ios:package IOS_PLATFORM=device \
+  CODESIGN_IDENTITY="Apple Development: …" \
+  PROVISIONING_PROFILE=/path/to/profile.mobileprovision
+wails3 task ios:package:ipa IOS_PLATFORM=device \
+  CODESIGN_IDENTITY="Apple Development: …" \
+  PROVISIONING_PROFILE=/path/to/profile.mobileprovision
 ```
 
 ### Prerequisites
@@ -65,28 +78,40 @@ task windows:build       # Windows .exe
 |---|---|---|
 | Go | 1.26.0 | backend |
 | Node | 22 | Angular frontend |
-| `wails3` | v3.0.0-alpha.91 | CLI scaffold + dev orchestrator |
+| `wails3` | v3.0.0-alpha2.117 | pinned mobile overlay generator + task runner |
 | `task` (go-task) | 3.x | build runner |
+| Xcode | current stable | iOS SDK, linker, assets and signing |
+| JDK | 21 | Android Gradle build |
+| Android SDK | API 35 | Android compile and packaging tools |
+| Android NDK | 26.3.11579264+ | Go c-shared mobile library |
 
 ```bash
 # One-time tool install:
-go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.117
 go install github.com/go-task/task/v3/cmd/task@latest
 
 # Linux only — webkit + GTK:
 sudo apt-get install libgtk-3-dev libwebkit2gtk-4.1-dev
 ```
 
+The mobile tasks use the module-pinned CLI for generated overlays. Set
+`WAILS3_TOOL` only when pointing at an already-built CLI of that exact version.
+Android release packages use the debug signing key unless the
+`ANDROID_KEYSTORE_*` variables documented in
+[`build/android/Taskfile.yml`](build/android/Taskfile.yml) are supplied.
+
 ## CI / artifact builds
 
-GitHub Actions builds darwin-arm64, linux-amd64, windows-amd64 on every push to `main` / `dev` and uploads the binaries as workflow artifacts (7-day retention).
+GitHub Actions builds darwin-arm64, linux-amd64, windows-amd64, an arm64
+iOS Simulator app and a universal Android APK on every push to `main` / `dev`,
+then uploads them as workflow artifacts (7-day retention).
 
 Pushing a `v*` tag creates a GitHub Release with the artifacts attached:
 
 ```bash
 git tag v0.1.0 && git push github v0.1.0
 # → .github/workflows/build.yml runs the matrix, then `release` job
-#   attaches lthn-darwin-arm64.zip + lthn-linux-amd64 + lthn-windows-amd64.exe
+#   also attaches lthn-ios-simulator-arm64.zip + lthn-android-universal.apk
 ```
 
 Workflow definition: [`.github/workflows/build.yml`](.github/workflows/build.yml).
