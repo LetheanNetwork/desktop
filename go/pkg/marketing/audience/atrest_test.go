@@ -158,6 +158,32 @@ func escapeAngle(s string) string {
 	return string(out)
 }
 
+// headerContainsExactCount reports whether a decoded header contains n as a
+// complete scalar value. Substring checks are invalid here because random
+// checksums, fingerprints, and MACs can legitimately contain the same decimal
+// digits without exposing the audience count.
+func headerContainsExactCount(value any, n int) bool {
+	switch typed := value.(type) {
+	case float64:
+		return typed == float64(n)
+	case string:
+		return typed == core.Sprintf("%d", n)
+	case map[string]any:
+		for _, nested := range typed {
+			if headerContainsExactCount(nested, n) {
+				return true
+			}
+		}
+	case []any:
+		for _, nested := range typed {
+			if headerContainsExactCount(nested, n) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // audienceLthnPath returns the absolute path to the encrypted segment
 // file for the named id under the test HOME.
 //
@@ -255,17 +281,12 @@ func TestAudience_AtRestSchema_RawNNeverInHeader_Bad(t *testing.T) {
 		n      int
 		bucket string
 	}
-	// N values chosen with two constraints: (1) cover every bucket
-	// boundary, (2) the decimal representation MUST NOT be a substring
-	// of any reasonable Unix timestamp the substrate writes into
-	// created_at/updated_at (10-digit values starting "17" or "18").
-	// Values >=999_999_999 or composed so a 4-5 digit run never lands
-	// inside the timestamp digit run.
+	// N values cover every bucket boundary.
 	cases := []probe{
-		{n: 873, bucket: "<1k"},        // 3-digit, won't collide
-		{n: 4892, bucket: "1-10k"},     // pre-existing fixture value
-		{n: 42813, bucket: "10-100k"},  // 5-digit, won't substring 1779…
-		{n: 250000, bucket: "100k+"},   // 6-digit, won't substring 1779…
+		{n: 873, bucket: "<1k"},
+		{n: 4892, bucket: "1-10k"},
+		{n: 42813, bucket: "10-100k"},
+		{n: 250000, bucket: "100k+"},
 	}
 	for _, c := range cases {
 		r := svc.Create(subject.CreateInput{
@@ -292,12 +313,16 @@ func TestAudience_AtRestSchema_RawNNeverInHeader_Bad(t *testing.T) {
 		if core.Contains(header, `"n":`) {
 			t.Fatalf("raw `n` key leaked into encrypted-file header: %s", header)
 		}
-		// The raw integer MUST NOT appear as a free-standing substring
-		// in the header. Choice of probe N values above guarantees no
-		// timestamp collision.
-		needle := core.Sprintf("%d", c.n)
-		if core.Contains(header, needle) {
-			t.Fatalf("raw N=%d leaked into encrypted-file header (RFC §2.4 + Cerberus C#7 Q2): %s",
+		// The raw integer MUST NOT appear as an exact JSON scalar. Do not
+		// use a byte-substring assertion: random digests and MACs may
+		// legitimately contain the same decimal digit sequence.
+		var decoded map[string]any
+		jsonHeader := body[9:trixHeaderEnd(body)]
+		if unmarshal := core.JSONUnmarshal(jsonHeader, &decoded); !unmarshal.OK {
+			t.Fatalf("decode encrypted-file header: %s", unmarshal.Error())
+		}
+		if headerContainsExactCount(decoded, c.n) {
+			t.Fatalf("raw N=%d leaked into encrypted-file header as a scalar (RFC §2.4 + Cerberus C#7 Q2): %s",
 				c.n, header)
 		}
 		// The bucket label MUST appear in the header (positive

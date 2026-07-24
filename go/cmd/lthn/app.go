@@ -21,6 +21,7 @@ import (
 	lthnai "dappco.re/lthn/desktop/pkg/ai"
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/benchmark"
+	"dappco.re/lthn/desktop/pkg/connection"
 	"dappco.re/lthn/desktop/pkg/deploys"
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/gateway"
@@ -105,6 +106,11 @@ func newAppCore() *core.Core {
 			WorkspaceStateDirectory: workspace.Value.(string),
 		})),
 		core.WithName("ws", ws.NewService(ws.DefaultHubConfig())),
+		// connection — remotely reachable Wails binding transport. The
+		// service stays unbound until the desktop's Wails application
+		// supplies its MessageProcessor, so CLI and serve modes retain
+		// their GUI-independent startup contract.
+		core.WithName("connection", connection.Register),
 		core.WithName("process", process.NewService(process.Options{})),
 		core.WithName("i18n", i18n.NewCoreService(i18n.ServiceOptions{
 			Language: "en-GB",

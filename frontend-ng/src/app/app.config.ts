@@ -16,6 +16,7 @@ import { desktopFeature } from './store/desktop.reducer';
 import { DesktopMcpService } from './desktop/desktop-mcp.service';
 import { DeepLinkNavigationService } from './deep-link-navigation.service';
 import { MobileRuntimeService } from './mobile-runtime.service';
+import { ConnectionManagerService } from './connection-manager.service';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -29,6 +30,9 @@ export const appConfig: ApplicationConfig = {
     provideEffects([DesktopEffects]),
     provideRouterStore(),
     provideStoreDevtools({ maxAge: 25, logOnly: !isDevMode() }),
+    // Install the socket transport before any other initializer can call a
+    // generated Wails binding. Offline startup remains non-blocking.
+    provideAppInitializer(() => inject(ConnectionManagerService).ready),
     provideAppInitializer(() => inject(DesktopMcpService).ready),
     provideAppInitializer(() => {
       inject(DeepLinkNavigationService);

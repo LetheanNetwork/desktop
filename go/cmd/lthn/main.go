@@ -32,6 +32,7 @@ import (
 	coreapi "dappco.re/go/api"
 	lthn "dappco.re/lthn/desktop"
 	"dappco.re/lthn/desktop/pkg/apikey"
+	"dappco.re/lthn/desktop/pkg/connection"
 	"dappco.re/lthn/desktop/pkg/desktop"
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/gateway"
@@ -322,6 +323,11 @@ func cmdGUI(_ []string) int {
 		core.Print(core.Stderr(), "lthn gui: keys service unavailable\n")
 		return 1
 	}
+	connectionSvc, _ := core.ServiceFor[*connection.Service](c, "connection")
+	if connectionSvc == nil {
+		core.Print(core.Stderr(), "lthn gui: connection manager unavailable\n")
+		return 1
+	}
 	d := desktop.NewService(desktop.Options{
 		Name:            "lthn",
 		Description:     "Lethean Desktop",
@@ -331,6 +337,7 @@ func cmdGUI(_ []string) int {
 		Runner:          r,
 		Fleet:           fleetSvc,
 		Keys:            keysSvc,
+		Connection:      connectionSvc,
 		TrayIcon:        trayIcon,
 		AppIcon:         appIcon,
 		ShowAppOnLaunch: core.Getenv("LTHN_DEV") == "1",
