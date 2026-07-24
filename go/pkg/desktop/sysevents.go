@@ -65,7 +65,11 @@ func registerSystemEvents(c *core.Core) {
 		case guilifecycle.ActionOpenedWithFile:
 			return emitCoreEvent(c, "lthn:app:opened-file", event.Path)
 		case guilifecycle.ActionLaunchedWithUrl:
-			return emitCoreEvent(c, "lthn:app:opened-url", event.URL)
+			opened := emitCoreEvent(c, "lthn:app:opened-url", event.URL)
+			if handled := handleDeepLink(c, event.URL); !handled.OK {
+				core.Warn("desktop deep link ignored", "err", handled.Error())
+			}
+			return opened
 		case guienvironment.ActionThemeChanged:
 			mode := "light"
 			if event.IsDark {

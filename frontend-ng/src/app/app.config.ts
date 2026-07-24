@@ -14,6 +14,7 @@ import { routes } from './app.routes';
 import { DesktopEffects } from './store/desktop.effects';
 import { desktopFeature } from './store/desktop.reducer';
 import { DesktopMcpService } from './desktop/desktop-mcp.service';
+import { DeepLinkNavigationService } from './deep-link-navigation.service';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -28,5 +29,8 @@ export const appConfig: ApplicationConfig = {
     provideRouterStore(),
     provideStoreDevtools({ maxAge: 25, logOnly: !isDevMode() }),
     provideAppInitializer(() => inject(DesktopMcpService).ready),
+    provideAppInitializer(() => {
+      inject(DeepLinkNavigationService);
+    }),
   ],
 };
