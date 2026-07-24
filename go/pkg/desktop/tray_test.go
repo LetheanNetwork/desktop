@@ -122,6 +122,45 @@ func TestTray_SanitizePluginLabel_EmptyInput_Good(t *core.T) {
 	core.AssertEqual(t, "", sanitizePluginLabel(""))
 }
 
+// --- trayTargetForAction ---
+
+func TestTray_TrayTargetForAction_Good(t *core.T) {
+	cases := map[string]string{
+		trayActionOpenApp:      "desktop",
+		trayActionOpenChat:     "chat",
+		trayActionOpenModels:   "models",
+		trayActionOpenSettings: "settings",
+		trayActionOpenApps:     "tools",
+	}
+	for actionID, expected := range cases {
+		target, ok := trayTargetForAction(actionID)
+		core.AssertTrue(t, ok)
+		core.AssertEqual(t, expected, target)
+	}
+}
+
+func TestTray_TrayTargetForAction_Bad_UnknownAction(t *core.T) {
+	target, ok := trayTargetForAction("lthn:tray:not-real")
+	core.AssertFalse(t, ok)
+	core.AssertEqual(t, "", target)
+}
+
+func TestTray_TrayTargetForAction_Ugly_PluginValidation(t *core.T) {
+	target, ok := trayTargetForAction(trayPluginPrefix + "opencode")
+	core.AssertTrue(t, ok)
+	core.AssertEqual(t, "plugin:opencode", target)
+
+	target, ok = trayTargetForAction(trayPluginPrefix + "../escape")
+	core.AssertFalse(t, ok)
+	core.AssertEqual(t, "", target)
+}
+
+func TestTray_OpenTrayTarget_Bad_NilCore(t *core.T) {
+	r := openTrayTarget(nil, "chat")
+	core.AssertFalse(t, r.OK)
+	core.AssertContains(t, r.Error(), "core is nil")
+}
+
 // --- emitTrayPluginClicked ---
 
 // TestTray_EmitTrayPluginClicked_EmitsAudit_Good confirms the audit

@@ -2,10 +2,11 @@
 
 // Native-window declarations for the Angular desktop OS.
 //
-// The boot registry contains only the main OS shell at /#/. Application
-// windows are owned by Angular + NgRx and render inside that shell. A
-// single parameterised ad-hoc opener remains for future native tear-off
-// windows; those load Angular's standalone app route at /#/w/<appId>.
+// The boot registry contains the main OS shell at /#/ and its compact tray
+// panel at /#/tray. Application windows are owned by Angular + NgRx and render
+// inside the shell. A single parameterised ad-hoc opener remains for future
+// native tear-off windows; those load Angular's standalone app route at
+// /#/w/<appId>.
 
 package desktop
 
@@ -19,6 +20,10 @@ import (
 const (
 	mainWindowName            = "app"
 	angularShellRoute         = "/#/"
+	trayPanelWindowName       = "tray-panel"
+	trayPanelRoute            = "/#/tray"
+	trayPanelWidth            = 400
+	trayPanelHeight           = 560
 	nativeAppWindowNamePrefix = "app-view-"
 	nativeAppRoutePrefix      = "/#/w/"
 	desktopTitleBarHeight     = 40
@@ -46,12 +51,52 @@ func angularWindowSpec(name, title, route string) *WindowSpec {
 	}
 }
 
+// trayPanelWindowSpec returns the compact, single-screen surface attached to
+// the system tray. It is pre-created hidden so Wails can anchor it during app
+// startup, then the platform reveals and positions the same warm WebView on
+// each tray click.
+func trayPanelWindowSpec() *WindowSpec {
+	return &WindowSpec{
+		Name:          trayPanelWindowName,
+		Title:         "Lethean Desktop",
+		URL:           trayPanelRoute,
+		Width:         trayPanelWidth,
+		Height:        trayPanelHeight,
+		MinWidth:      trayPanelWidth,
+		MinHeight:     trayPanelHeight,
+		MaxWidth:      trayPanelWidth,
+		MaxHeight:     trayPanelHeight,
+		Frameless:     true,
+		Hidden:        true,
+		AlwaysOnTop:   true,
+		DisableResize: true,
+		HideOnClose:   true,
+		HideOnEscape:  true,
+		// Native tray popovers dismiss when the operator clicks elsewhere.
+		HideOnFocusLost:            true,
+		DefaultContextMenuDisabled: true,
+		BackgroundColour:           [4]uint8{0, 0, 0, 0},
+		BackgroundType:             1,
+		Mac: guiwindow.MacWindow{
+			WindowLevel: guiwindow.MacWindowLevelPopUpMenu,
+			CollectionBehavior: guiwindow.MacCollectionBehaviorCanJoinAllSpaces |
+				guiwindow.MacCollectionBehaviorFullScreenAuxiliary |
+				guiwindow.MacCollectionBehaviorIgnoresCycle,
+			DisableBackForwardNav: true,
+		},
+		Windows: guiwindow.WindowsWindow{
+			HiddenOnTaskbar: true,
+		},
+	}
+}
+
 // windowRegistry returns the windows pre-created at application boot.
-// The Angular desktop is one OS shell, so no app surface, welcome
-// wizard, or tray popover is registered as a separate native window.
+// The Angular desktop remains one OS shell; the only companion is the compact
+// tray panel that Wails needs pre-created before it can attach the popover.
 func windowRegistry() []*WindowSpec {
 	return []*WindowSpec{
 		angularWindowSpec(mainWindowName, "Lethean Desktop", angularShellRoute),
+		trayPanelWindowSpec(),
 	}
 }
 

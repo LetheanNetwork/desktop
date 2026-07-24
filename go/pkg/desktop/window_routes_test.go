@@ -6,7 +6,7 @@ import core "dappco.re/go"
 
 func TestWindows_WindowRegistry_Good_AngularShell(t *core.T) {
 	registry := windowRegistry()
-	core.AssertEqual(t, 1, len(registry), "only the Angular OS shell is boot-registered")
+	core.AssertEqual(t, 2, len(registry), "the desktop shell and tray panel are boot-registered")
 
 	app := registry[0]
 	core.AssertEqual(t, "app", app.Name)
@@ -15,6 +15,23 @@ func TestWindows_WindowRegistry_Good_AngularShell(t *core.T) {
 	core.AssertEqual(t, 900, app.Height)
 	core.AssertTrue(t, app.Frameless)
 	core.AssertTrue(t, app.ShowDockIcon)
+}
+
+func TestWindows_TrayPanelWindowSpec_Good_Popover(t *core.T) {
+	panel := windowRegistry()[1]
+
+	core.AssertEqual(t, "tray-panel", panel.Name)
+	core.AssertEqual(t, "/#/tray", panel.URL)
+	core.AssertEqual(t, 400, panel.Width)
+	core.AssertEqual(t, 560, panel.Height)
+	core.AssertTrue(t, panel.Hidden)
+	core.AssertTrue(t, panel.AlwaysOnTop)
+	core.AssertTrue(t, panel.DisableResize)
+	core.AssertTrue(t, panel.HideOnClose)
+	core.AssertTrue(t, panel.HideOnEscape)
+	core.AssertTrue(t, panel.HideOnFocusLost)
+	core.AssertTrue(t, panel.Windows.HiddenOnTaskbar)
+	core.AssertFalse(t, panel.ShowDockIcon)
 }
 
 func TestWindows_NativeAppWindowSpec_Good_HashRoute(t *core.T) {

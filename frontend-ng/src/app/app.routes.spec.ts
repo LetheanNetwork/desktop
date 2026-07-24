@@ -1,6 +1,7 @@
 import { DesktopComponent } from './desktop/desktop.component';
 import { routes } from './app.routes';
 import { StandaloneAppHost } from './standalone-app-host';
+import { TrayPanel } from './tray-panel/tray-panel';
 import { DESKTOP_APP_ROUTES, readDesktopRouteCatalog } from './desktop/desktop-route-tree';
 import { CATEGORIES, CTRL_NAV } from './desktop/desktop.data';
 
@@ -28,7 +29,7 @@ describe('app routes', () => {
     extensions: ['marketplace', 'plugin-view', 'opencode-shim'],
   };
 
-  it('keeps the desktop shell and native-window host routes lazy', async () => {
+  it('keeps the desktop shell, native-window host, and tray panel routes lazy', async () => {
     expect(routes[0]).toMatchObject({
       path: '',
       loadComponent: expect.any(Function),
@@ -38,8 +39,13 @@ describe('app routes', () => {
       path: 'w/:app',
       loadComponent: expect.any(Function),
     });
+    expect(routes[2]).toMatchObject({
+      path: 'tray',
+      loadComponent: expect.any(Function),
+    });
     await expect(routes[0].loadComponent!()).resolves.toBe(DesktopComponent);
     await expect(routes[1].loadComponent!()).resolves.toBe(StandaloneAppHost);
+    await expect(routes[2].loadComponent!()).resolves.toBe(TrayPanel);
   });
 
   it('builds category, app, and sub-view metadata from desktop data', () => {
