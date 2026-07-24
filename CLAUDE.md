@@ -41,8 +41,8 @@ lthn/desktop/
 ├── frontend-ng/
 │   ├── angular.json         — direct output to go/cmd/lthn/dist/
 │   └── src/
-│       ├── main.ts          — bridge-first Angular bootstrap
-│       ├── wails-bridge.ts  — Wails event + WebMCP shim
+│       ├── main.ts          — direct Angular bootstrap
+│       ├── wails-bridge.ts  — retained Wails event + WebMCP compatibility shim
 │       ├── locale/          — localisation catalogues
 │       └── app/             — standalone shell, hash routes, NgRx, app views
 └── docs/
@@ -157,7 +157,7 @@ spec generator can build a complete OpenAPI 3.1 document straight off
 the live `api.Engine`. RouteGroups today: `RunnerGroup` (GET /v1/runner/models, POST /v1/runner/generate, POST /v1/runner/chat).
 
 **Two consumer paths, one surface:**
-- **Wails3 runtime** — same-process service access from Angular uses `@wailsio/runtime`; the bridge shim is `frontend-ng/src/wails-bridge.ts`. Generated bindings are staged under `frontend-ng/bindings/`.
+- **Wails3 runtime** — same-process service access from Angular uses `@wailsio/runtime`; development builds add Wails' built-in MCP service with the `mcp` build tag. The former shim remains at `frontend-ng/src/wails-bridge.ts` as an unbootstrapped compatibility fallback. Generated bindings are staged under `frontend-ng/bindings/`.
 - **`@lthn/sdk-*` family on npm** — external clients (Claude Code, Codex, OpenCode, Raycast extensions, future plugins) and Lethean fleet peers. Each flavour lives in its own GitHub repo (`LetheanNetwork/sdk-<flavour>`) and publishes to npm separately. The flavour list is in `build/sdk/publish.sh`'s MANIFEST.
 
 **Published flavours** (`LetheanNetwork/sdk-<id>` → `@lthn/sdk-<id>` on the matching package registry):

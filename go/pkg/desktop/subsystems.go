@@ -30,7 +30,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	lthnapi "dappco.re/lthn/desktop/pkg/api"
-	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/marketplace"
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/plugin"
@@ -100,12 +99,6 @@ func mountSubsystems(c *core.Core, engine *coreapi.Engine, r *runner.Service) co
 		if ms, msOK := core.ServiceFor[*marketplace.Service](c, "marketplace"); msOK && ms != nil {
 			marketplace.RegisterMCPTools(mcpSvc, ms)
 		}
-		if bridgeSvc, bridgeOK := core.ServiceFor[*bridge.Service](c, "bridge"); bridgeOK && bridgeSvc != nil {
-			if rr := bridge.RegisterWebMCPTools(mcpSvc, bridgeSvc); !rr.OK {
-				return rr
-			}
-		}
-
 		toolBridge := coreapi.NewToolBridge("/mcp")
 		for _, t := range mcpSvc.Tools() {
 			toolBridge.Add(coreapi.ToolDescriptor{

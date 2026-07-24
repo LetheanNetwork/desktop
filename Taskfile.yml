@@ -156,9 +156,13 @@ tasks:
       - task: "{{OS}}:run"
 
   dev:
-    summary: Wails3 dev mode with Angular HMR — LTHN_DEV=1 auto-opens the app window on launch
+    summary: Wails3 dev mode with Angular HMR and the built-in MCP service on 127.0.0.1:9099
     env:
       LTHN_DEV: "1"
+      # The built-in Wails MCP server is compiled out unless this tag is
+      # present. Keep it on the development route only; release builds must
+      # retain Wails' zero-port, zero-attack-surface default.
+      EXTRA_TAGS: "mcp"
     cmds:
       - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
 

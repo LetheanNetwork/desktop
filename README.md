@@ -27,7 +27,7 @@ lthn/desktop/
 │   └── pkg/              — tray, desktop, runner, telemetry, API, and other services
 ├── frontend-ng/          — Angular CSR app
 │   ├── src/app/          — standalone shell, hash routes, NgRx state, and app views
-│   ├── src/wails-bridge.ts — Wails event and WebMCP bridge shim
+│   ├── src/wails-bridge.ts — retained Wails event/WebMCP compatibility shim
 │   ├── src/locale/       — Angular localisation catalogues
 │   ├── angular.json      — builds directly to go/cmd/lthn/dist/
 │   └── package.json
@@ -48,6 +48,8 @@ npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
 wails3 task dev
 # .app launches on first build cycle; menubar icon = lthn-glyph
 # Angular edits use HMR; Go edits rebuild and relaunch the app.
+# Wails' built-in MCP service listens at http://127.0.0.1:9099/mcp.
+# The MCP build tag is development-only and is absent from release builds.
 
 # One-shot release build (auto-detect OS):
 task build               # produces bin/lthn{.app,.exe,}

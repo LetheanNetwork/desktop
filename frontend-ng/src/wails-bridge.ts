@@ -1,3 +1,7 @@
+// Retained compatibility bridge. The default application bootstrap no longer
+// imports this module: development control is provided by Wails' build-tagged
+// MCP service. Tests and explicit fallback consumers may still import it.
+
 type BridgeEmit = (name: string, payload: unknown) => void;
 type ConsoleLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';
 
