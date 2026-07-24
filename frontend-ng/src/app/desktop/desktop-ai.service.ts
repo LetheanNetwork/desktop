@@ -2,8 +2,11 @@ import { InjectionToken, PLATFORM_ID, Service, inject } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 
 const RUNNER_SERVICE = 'dappco.re/lthn/desktop/pkg/runner.Service';
-const WAILS_CHAT_METHOD = `${RUNNER_SERVICE}.WChat`;
+const WAILS_CHAT_STREAM_METHOD = `${RUNNER_SERVICE}.WChatStream`;
 const WAILS_ROUTES_METHOD = `${RUNNER_SERVICE}.WRoutes`;
+const RUNNER_CHAT_DELTA = 'runner:chat:delta';
+const RUNNER_CHAT_DONE = 'runner:chat:done';
+const RUNNER_CHAT_FAILED = 'runner:chat:failed';
 
 export type ChatRole = 'system' | 'user' | 'assistant';
 
@@ -34,6 +37,7 @@ export type AiStreamEvent =
 
 export interface DesktopAiTransport {
   call(method: string, args: readonly unknown[], signal: AbortSignal): Promise<unknown>;
+  on(name: string, handler: (payload: unknown) => void): Promise<() => void>;
 }
 
 export const DESKTOP_AI_TRANSPORT = new InjectionToken<DesktopAiTransport>('DESKTOP_AI_TRANSPORT', {
@@ -42,6 +46,10 @@ export const DESKTOP_AI_TRANSPORT = new InjectionToken<DesktopAiTransport>('DESK
     async call(method, args, signal): Promise<unknown> {
       const { Call } = await import('@wailsio/runtime');
       return await Call.ByName(method, ...args).cancelOn(signal);
+    },
+    async on(name, handler): Promise<() => void> {
+      const { Events } = await import('@wailsio/runtime');
+      return Events.On(name, (event) => handler(event.data));
     },
   }),
 });
@@ -57,6 +65,11 @@ interface ChatReply {
   readonly text: string;
   readonly warnUser: boolean;
   readonly toolCalls: AiToolCall[];
+}
+
+interface QueuedRunnerEvent {
+  readonly name: string;
+  readonly payload: unknown;
 }
 
 /**
@@ -94,35 +107,130 @@ export class DesktopAiService {
   }
 
   /**
-   * Emits a stream-shaped sequence for Angular's streaming resource API.
-   *
-   * The current Go WChat binding is a one-shot RPC. Once it resolves, this
-   * adapter progressively presents bounded text chunks. A future streaming
-   * Wails binding can replace this method without changing the chat surface.
+   * Relays the Go runner's correlated token events into Angular's streaming
+   * resource API. WChatStream still returns its final ChatReply so a missing
+   * terminal event can be reconciled without inventing synthetic chunks.
    */
   async *streamChat(
     messages: readonly AiChatMessage[],
+    route: string,
     signal: AbortSignal,
   ): AsyncGenerator<AiStreamEvent> {
     if (!isPlatformBrowser(this.platformId)) {
       throw new Error('The desktop AI bridge is unavailable during rendering.');
     }
 
-    const raw = await this.transport.call(WAILS_CHAT_METHOD, [messages], signal);
-    const reply = normaliseReply(unwrapResult(raw));
+    const callId = nextStreamCallId();
+    const queued: QueuedRunnerEvent[] = [];
+    let resume: (() => void) | undefined;
+    const enqueue = (name: string, payload: unknown): void => {
+      queued.push({ name, payload });
+      const wake = resume;
+      resume = undefined;
+      wake?.();
+    };
 
-    if (reply.warnUser) {
-      yield { type: 'welfare', reworded: true };
-    }
-    if (reply.toolCalls.length) {
-      yield { type: 'tool-calls', toolCalls: reply.toolCalls };
-    }
+    const off = await Promise.all([
+      this.transport.on(RUNNER_CHAT_DELTA, (payload) => enqueue(RUNNER_CHAT_DELTA, payload)),
+      this.transport.on(RUNNER_CHAT_DONE, (payload) => enqueue(RUNNER_CHAT_DONE, payload)),
+      this.transport.on(RUNNER_CHAT_FAILED, (payload) => enqueue(RUNNER_CHAT_FAILED, payload)),
+    ]);
 
-    const chunks = textChunks(reply.text);
-    for (let index = 0; index < chunks.length; index++) {
+    let rawReply: unknown;
+    let callFailure: unknown;
+    let callSettled = false;
+    let terminalEvent = false;
+    let terminalFailure: Error | undefined;
+    let streamedText = '';
+    let welfareEmitted = false;
+    const wakeOnAbort = (): void => {
+      const wake = resume;
+      resume = undefined;
+      wake?.();
+    };
+    signal.addEventListener('abort', wakeOnAbort, { once: true });
+
+    const call = this.transport
+      .call(WAILS_CHAT_STREAM_METHOD, [callId, messages, route], signal)
+      .then(
+        (raw) => {
+          rawReply = raw;
+        },
+        (error: unknown) => {
+          callFailure = error;
+        },
+      )
+      .finally(() => {
+        callSettled = true;
+        const wake = resume;
+        resume = undefined;
+        wake?.();
+      });
+
+    try {
+      while (!terminalEvent && !terminalFailure) {
+        if (signal.aborted) throw abortError(signal);
+
+        const event = queued.shift();
+        if (!event) {
+          if (callSettled) break;
+          await new Promise<void>((resolve) => {
+            resume = resolve;
+          });
+          continue;
+        }
+
+        const payload = runnerEventPayload(event.payload, callId);
+        if (!payload) continue;
+        if (event.name === RUNNER_CHAT_DELTA) {
+          const delta = typeof payload['delta'] === 'string' ? payload['delta'] : '';
+          if (!delta) continue;
+          streamedText += delta;
+          yield { type: 'text', text: delta };
+          continue;
+        }
+        if (event.name === RUNNER_CHAT_FAILED) {
+          terminalFailure = new Error(
+            typeof payload['error'] === 'string' && payload['error'].trim()
+              ? payload['error']
+              : 'Desktop AI provider stream failed.',
+          );
+          continue;
+        }
+
+        const doneText = typeof payload['text'] === 'string' ? payload['text'] : '';
+        const suffix = streamSuffix(streamedText, doneText);
+        if (suffix) {
+          streamedText += suffix;
+          yield { type: 'text', text: suffix };
+        }
+        if (payload['warn_user'] === true) {
+          welfareEmitted = true;
+          yield { type: 'welfare', reworded: true };
+        }
+        terminalEvent = true;
+      }
+
+      await call;
       if (signal.aborted) throw abortError(signal);
-      if (index > 0) await nextPaint(signal);
-      yield { type: 'text', text: chunks[index] };
+      if (callFailure) throw toError(callFailure);
+      if (terminalFailure) throw terminalFailure;
+
+      const reply = normaliseReply(unwrapResult(rawReply));
+      const suffix = streamSuffix(streamedText, reply.text);
+      if (suffix) {
+        streamedText += suffix;
+        yield { type: 'text', text: suffix };
+      }
+      if (reply.warnUser && !welfareEmitted) {
+        yield { type: 'welfare', reworded: true };
+      }
+      if (reply.toolCalls.length) {
+        yield { type: 'tool-calls', toolCalls: reply.toolCalls };
+      }
+    } finally {
+      signal.removeEventListener('abort', wakeOnAbort);
+      for (const unsubscribe of off) unsubscribe();
     }
   }
 }
@@ -200,35 +308,34 @@ function normaliseToolCalls(value: unknown): AiToolCall[] {
   });
 }
 
-function textChunks(text: string): string[] {
-  if (!text) return [];
-  const words = text.match(/\S+\s*/g) ?? [text];
-  const wordsPerChunk = Math.max(1, Math.ceil(words.length / 32));
-  const chunks: string[] = [];
-  for (let index = 0; index < words.length; index += wordsPerChunk) {
-    chunks.push(words.slice(index, index + wordsPerChunk).join(''));
-  }
-  return chunks;
+function runnerEventPayload(value: unknown, callId: string): Record<string, unknown> | undefined {
+  if (!isRecord(value) || value['call_id'] !== callId) return undefined;
+  return value;
 }
 
-function nextPaint(signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(abortError(signal));
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, 16);
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
+function streamSuffix(current: string, complete: string): string {
+  if (!complete || complete === current) return '';
+  if (!complete.startsWith(current)) {
+    throw new Error('Desktop AI stream did not match its final reply.');
+  }
+  return complete.slice(current.length);
 }
 
 function abortError(signal: AbortSignal): Error {
   return signal.reason instanceof Error
     ? signal.reason
     : new DOMException('The AI request was cancelled.', 'AbortError');
+}
+
+let streamSequence = 0;
+
+function nextStreamCallId(): string {
+  streamSequence += 1;
+  return `chat-${Date.now()}-${streamSequence}`;
+}
+
+function toError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
 }
 
 function isToolStatus(value: unknown): value is AiToolCall['status'] {

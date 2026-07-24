@@ -35,6 +35,7 @@ describe('ChatApp', () => {
     ]),
     streamChat: vi.fn(async function* (
       messages: readonly AiChatMessage[],
+      _route: string,
     ): AsyncGenerator<AiStreamEvent> {
       const prompt = messages.at(-1)?.content ?? '';
       if (prompt === 'fail') throw new Error('provider unavailable');
@@ -88,6 +89,7 @@ describe('ChatApp', () => {
   it('streams a provider response into history and renders tool calls', async () => {
     const fixture = await createChat();
     const chat = fixture.componentInstance;
+    chat.selectedRoute.set('automatic-local');
 
     const assistant = await chat.sendPrompt('List the windows');
     await fixture.whenStable();
@@ -102,13 +104,17 @@ describe('ChatApp', () => {
           content: 'List the windows',
         },
       ],
+      'automatic-local',
       expect.any(AbortSignal),
     );
     expect(
       fixture.nativeElement.querySelector('[data-message-id] .tool-call')?.textContent,
     ).toContain('desktop_list_windows');
     expect(fixture.nativeElement.textContent).toContain('Done through the configured route.');
-    expect(chat.providerSummary()).toContain('1 configured route');
+    expect(chat.providerSummary()).toContain('automatic-local');
+    expect(
+      (fixture.nativeElement.querySelector('.provider-select') as HTMLSelectElement).value,
+    ).toBe('automatic-local');
   });
 
   it('exposes read, send, and clear actions as component-scoped tools', async () => {

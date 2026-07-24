@@ -64,8 +64,9 @@ const consoleBufLimit = 1000
 // map[string]any carrying the same field shape the retired
 // /internal/console + /internal/error HTTP handlers used to parse.
 const (
-	eventConsoleName = "lthn:console"
-	eventErrorName   = "lthn:error"
+	eventConsoleName        = "lthn:console"
+	eventErrorName          = "lthn:error"
+	eventWebMCPToolsChanged = "lthn:webmcp:tools-changed"
 )
 
 // maxEntryMessageBytes is the post-decode clamp on the per-entry
@@ -129,6 +130,12 @@ type Service struct {
 	// requireAuth doesn't hit disk per-request.
 	tokenMu core.Mutex
 	token   string
+
+	// webMCP mirrors Angular's document.modelContext tool registry onto the
+	// native MCP server. Tool definitions arrive over the existing Wails event
+	// bus; calls return through the existing window.eval_js transport.
+	webMCP     *webMCPState
+	webMCPCall webMCPCallFunc
 }
 
 // RegisterService returns a Core service factory for the bridge. The
@@ -275,9 +282,19 @@ func (s *Service) subscribeToWebViewEvents() {
 		if ok && windowSvc != nil {
 			okC := windowSvc.SubscribeEvent(eventConsoleName, s.handleConsoleEvent)
 			okE := windowSvc.SubscribeEvent(eventErrorName, s.handleErrorEvent)
+			okW := windowSvc.SubscribeEvent(
+				eventWebMCPToolsChanged,
+				s.handleWebMCPToolsChanged,
+			)
 			core.Print(core.Stderr(),
-				"bridge: SubscribeEvent wired after %d attempts (console=%v error=%v)\n",
-				attempts, okC, okE)
+				"bridge: SubscribeEvent wired after %d attempts (console=%v error=%v webmcp=%v)\n",
+				attempts, okC, okE, okW)
+			if okW {
+				// Registrations can race bridge startup. Ask the already-loaded
+				// shim for its full current snapshot after subscribing so no
+				// early tools-changed event is lost.
+				s.refreshWebMCPTools()
+			}
 			return
 		}
 		core.Sleep(50 * core.Millisecond)

@@ -3,12 +3,18 @@ import { TestBed } from '@angular/core/testing';
 import { DESKTOP_AI_TRANSPORT, DesktopAiService, DesktopAiTransport } from './desktop-ai.service';
 
 describe('DesktopAiService', () => {
+  const listeners = new Map<string, (payload: unknown) => void>();
   const transport: DesktopAiTransport = {
     call: vi.fn(),
+    on: vi.fn(async (name, handler) => {
+      listeners.set(name, handler);
+      return () => listeners.delete(name);
+    }),
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    listeners.clear();
     TestBed.configureTestingModule({
       providers: [
         { provide: PLATFORM_ID, useValue: 'browser' },
@@ -60,33 +66,63 @@ describe('DesktopAiService', () => {
     );
   });
 
-  it('normalises welfare, tool calls, and progressive reply text', async () => {
-    vi.mocked(transport.call).mockResolvedValue({
-      OK: true,
-      Value: {
+  it('consumes correlated Go delta events and passes the selected route', async () => {
+    vi.mocked(transport.call).mockImplementation(async (method, args) => {
+      expect(method).toBe('dappco.re/lthn/desktop/pkg/runner.Service.WChatStream');
+      const callId = args[0] as string;
+      listeners.get('runner:chat:delta')?.({
+        call_id: 'another-call',
+        delta: 'ignore me',
+      });
+      listeners.get('runner:chat:delta')?.({
+        call_id: callId,
+        delta: 'The desktop ',
+      });
+      listeners.get('runner:chat:delta')?.({
+        call_id: callId,
+        delta: 'action completed.',
+      });
+      listeners.get('runner:chat:done')?.({
+        call_id: callId,
         text: 'The desktop action completed.',
         warn_user: true,
-        tool_calls: [
-          {
-            id: 'call-1',
-            name: 'desktop_list_windows',
-            status: 'completed',
-            arguments: {},
-            result: { windows: 2 },
-          },
-        ],
-      },
+        provider: 'opencode:anthropic/sonnet',
+      });
+      return {
+        OK: true,
+        Value: {
+          text: 'The desktop action completed.',
+          warn_user: true,
+          tool_calls: [
+            {
+              id: 'call-1',
+              name: 'desktop_list_windows',
+              status: 'completed',
+              arguments: {},
+              result: { windows: 2 },
+            },
+          ],
+        },
+      };
     });
     const service = TestBed.inject(DesktopAiService);
     const events = [];
     const messages = [{ role: 'user' as const, content: 'List windows' }];
 
-    for await (const event of service.streamChat(messages, new AbortController().signal)) {
+    for await (const event of service.streamChat(
+      messages,
+      'opencode:anthropic/sonnet',
+      new AbortController().signal,
+    )) {
       events.push(event);
     }
 
-    expect(events[0]).toEqual({ type: 'welfare', reworded: true });
-    expect(events[1]).toEqual({
+    expect(events.slice(0, 2)).toEqual([
+      { type: 'text', text: 'The desktop ' },
+      { type: 'text', text: 'action completed.' },
+    ]);
+    expect(events).toContainEqual({ type: 'welfare', reworded: true });
+    expect(events).toContainEqual({
       type: 'tool-calls',
       toolCalls: [
         {
@@ -105,10 +141,11 @@ describe('DesktopAiService', () => {
         .join(''),
     ).toBe('The desktop action completed.');
     expect(transport.call).toHaveBeenCalledWith(
-      'dappco.re/lthn/desktop/pkg/runner.Service.WChat',
-      [messages],
+      'dappco.re/lthn/desktop/pkg/runner.Service.WChatStream',
+      [expect.any(String), messages, 'opencode:anthropic/sonnet'],
       expect.any(AbortSignal),
     );
+    expect(transport.on).toHaveBeenCalledTimes(3);
   });
 
   it('surfaces failed Result envelopes and empty replies', async () => {
@@ -121,6 +158,7 @@ describe('DesktopAiService', () => {
     await expect(async () => {
       for await (const _event of service.streamChat(
         [{ role: 'user', content: 'Hello' }],
+        '',
         new AbortController().signal,
       )) {
         // Consume the generator so transport errors are observed.
@@ -134,6 +172,7 @@ describe('DesktopAiService', () => {
     await expect(async () => {
       for await (const _event of service.streamChat(
         [{ role: 'user', content: 'Hello' }],
+        '',
         new AbortController().signal,
       )) {
         // Consume the generator so reply validation runs.

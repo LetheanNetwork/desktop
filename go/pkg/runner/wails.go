@@ -8,7 +8,6 @@
 package runner
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/inference"
 
@@ -112,42 +111,23 @@ func (s *Service) WGenerate(prompt string) core.Result {
 // Usage example (TS):
 //
 //	import { WChat } from "@desktop/runner/service";
-//	const { text, warn_user } = await demand(WChat(history));
+//	const { text, warn_user } = await demand(WChat(history, route));
 //	if (warn_user) { /* show the rephrased chip */ }
 type ChatReply struct {
 	Text     string `json:"text"`
 	WarnUser bool   `json:"warn_user"`
 }
 
-// WChat is the WebView-binding-friendly Chat — full message
-// history in, assistant reply + welfare signal out.
-func (s *Service) WChat(messages []inference.Message) core.Result {
-	// Cerberus #1426 — defence-in-depth caps before the array hits
-	// any allocator path. Order matters: count first (cheap), then
-	// per-message size (still O(n) but bounded), then total.
-	if len(messages) > maxChatMessages {
-		return core.Fail(core.E("runner.Service.WChat",
-			core.Sprintf("message count exceeds %d (got %d)",
-				maxChatMessages, len(messages)), nil))
-	}
-	var total int
-	for i, m := range messages {
-		size := len(m.Role) + len(m.Content)
-		if size > maxPromptBytes {
-			return core.Fail(core.E("runner.Service.WChat",
-				core.Sprintf("message[%d] size %d exceeds %d byte cap",
-					i, size, maxPromptBytes), nil))
-		}
-		total += size
-		if total > maxChatTotalBytes {
-			return core.Fail(core.E("runner.Service.WChat",
-				core.Sprintf("cumulative message size at index %d exceeds %d byte cap",
-					i, maxChatTotalBytes), nil))
-		}
+// WChat is the WebView-binding-friendly one-shot Chat — full message history
+// and an optional provider/route selector in, assistant reply plus welfare
+// signal out. Empty route preserves the configured provider fallback order.
+func (s *Service) WChat(messages []inference.Message, route string) core.Result {
+	if r := validateChatMessages("runner.Service.WChat", messages); !r.OK {
+		return r
 	}
 	// chatCtxWelfare keeps the welfare WarnUser flag the bare Chat path
 	// drops — the renderer needs it to paint the rephrased chip.
-	r, warnUser := s.chatCtxWelfare(core.Background(), messages)
+	r, warnUser := s.chatCtxRouteWelfare(core.Background(), messages, route)
 	if !r.OK {
 		return wrapInnerFail("runner.Service.WChat", "chat failed", r)
 	}
@@ -155,15 +135,33 @@ func (s *Service) WChat(messages []inference.Message) core.Result {
 	return core.Ok(ChatReply{Text: text, WarnUser: warnUser})
 }
 
-// WModels is the WebView-binding-friendly Models — returns the
-// list of configured route names.
-func (s *Service) WModels() core.Result {
-	r := s.Models()
-	if !r.OK {
-		return wrapInnerFail("runner.Service.WModels", "list models failed", r)
+// WModels is the WebView-binding-friendly model listing. Empty provider keeps
+// the historical route-name list; a provider or exact route selector returns
+// the matching model identifiers.
+func (s *Service) WModels(provider string) core.Result {
+	if core.Trim(provider) == "" {
+		r := s.Models()
+		if !r.OK {
+			return wrapInnerFail("runner.Service.WModels", "list models failed", r)
+		}
+		names, _ := r.Value.([]string)
+		return core.Ok(names)
 	}
-	names, _ := r.Value.([]string)
-	return core.Ok(names)
+
+	matches := matchingProviderRoutes(s.liveProviderRoutes(), provider)
+	if len(matches) == 0 {
+		return core.Fail(core.E("runner.Service.WModels",
+			"provider route not found: "+provider, nil))
+	}
+	models := make([]string, 0, len(matches))
+	for _, route := range matches {
+		if route.ModelID != "" {
+			models = append(models, route.ModelID)
+			continue
+		}
+		models = append(models, route.Name)
+	}
+	return core.Ok(models)
 }
 
 // wrapInnerFail is the safe inner-Result error wrapper used by the
@@ -198,11 +196,37 @@ func wrapInnerFail(op, msg string, inner core.Result) core.Result {
 //	routes.forEach(r => console.log(r.name, r.kind, r.base_url));
 func (s *Service) WRoutes() core.Result {
 	out := []RouteView{}
-	if s == nil || s.core == nil {
+	if s == nil {
 		return core.Ok(out)
 	}
+
 	raw := loadRouteConfigsFromCore(s.core)
+	seen := map[string]bool{}
+	for _, route := range s.liveProviderRoutes() {
+		rc := raw[route.Name]
+		kind := route.Labels["kind"]
+		if kind == "" {
+			kind = rc.Kind
+		}
+		if kind == "" {
+			kind = "local"
+		}
+		out = append(out, RouteView{
+			Name:    route.Name,
+			Kind:    kind,
+			BaseURL: rc.BaseURL,
+			Model:   route.ModelID,
+		})
+		seen[route.Name] = true
+	}
+
+	// Keep configured-but-not-currently-live routes visible in Settings (for
+	// example, a credential-locked external route), without duplicating live
+	// routes or exposing API keys.
 	for name, rc := range raw {
+		if seen[name] {
+			continue
+		}
 		kind := rc.Kind
 		if kind == "" {
 			kind = "openai"

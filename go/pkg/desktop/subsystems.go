@@ -30,6 +30,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	lthnapi "dappco.re/lthn/desktop/pkg/api"
+	"dappco.re/lthn/desktop/pkg/bridge"
 	"dappco.re/lthn/desktop/pkg/marketplace"
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/plugin"
@@ -99,10 +100,15 @@ func mountSubsystems(c *core.Core, engine *coreapi.Engine, r *runner.Service) co
 		if ms, msOK := core.ServiceFor[*marketplace.Service](c, "marketplace"); msOK && ms != nil {
 			marketplace.RegisterMCPTools(mcpSvc, ms)
 		}
+		if bridgeSvc, bridgeOK := core.ServiceFor[*bridge.Service](c, "bridge"); bridgeOK && bridgeSvc != nil {
+			if rr := bridge.RegisterWebMCPTools(mcpSvc, bridgeSvc); !rr.OK {
+				return rr
+			}
+		}
 
-		bridge := coreapi.NewToolBridge("/mcp")
+		toolBridge := coreapi.NewToolBridge("/mcp")
 		for _, t := range mcpSvc.Tools() {
-			bridge.Add(coreapi.ToolDescriptor{
+			toolBridge.Add(coreapi.ToolDescriptor{
 				Name:         t.Name,
 				Description:  t.Description,
 				Group:        t.Group,
@@ -110,7 +116,7 @@ func mountSubsystems(c *core.Core, engine *coreapi.Engine, r *runner.Service) co
 				OutputSchema: t.OutputSchema,
 			}, adaptMCPRest(t.RESTHandler))
 		}
-		engine.Register(bridge)
+		engine.Register(toolBridge)
 	}
 
 	// plugin — reverse-proxy mount under /v1/api/plugin/<code>/*.

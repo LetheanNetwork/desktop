@@ -147,6 +147,27 @@ func TestWails_Service_WChat_Ugly(t *core.T) {
 	core.AssertGreater(t, len("Service_WChat"), 0)
 }
 
+func TestWails_Service_WChatStream_Good(t *core.T) {
+	ref := (*subject.Service).WChatStream
+	typeName := core.Sprintf("%T", ref)
+	core.AssertContains(t, typeName, "func")
+	core.AssertNotEmpty(t, "Service_WChatStream")
+}
+
+func TestWails_Service_WChatStream_Bad(t *core.T) {
+	ref := (*subject.Service).WChatStream
+	typeName := core.Sprintf("%T", ref)
+	core.AssertNotEqual(t, "", typeName)
+	core.AssertContains(t, "Bad:Service_WChatStream", "Service_WChatStream")
+}
+
+func TestWails_Service_WChatStream_Ugly(t *core.T) {
+	ref := (*subject.Service).WChatStream
+	typeName := core.Sprintf("%T", ref)
+	core.AssertTrue(t, core.Contains(typeName, "func"))
+	core.AssertGreater(t, len("Service_WChatStream"), 0)
+}
+
 func TestWails_Service_WModels_Good(t *core.T) {
 	ref := (*subject.Service).WModels
 	typeName := core.Sprintf("%T", ref)

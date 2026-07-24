@@ -56,6 +56,12 @@ type Options struct {
 	// snapshots. Defaults to ~/Lethean/conf/models/ per the
 	// no-hidden-user-bloat rule.
 	ModelDir string
+
+	// WelfareEnabled opts chat into the RFC.welfare mediation gate.
+	// It is deliberately false by default: ordinary chat reaches the
+	// selected model unchanged. NewServiceFromCore reads the
+	// runner.welfare.enabled config key into this field.
+	WelfareEnabled bool
 }
 
 // Service is the runner subsystem. Holds the ai.ProviderRouter (when
@@ -74,9 +80,13 @@ type Service struct {
 	core     *core.Core
 	dynamic  []ai.ProviderRoute
 	// welfare is the per-turn chat guard (RFC.welfare). nil = disabled: the
-	// CLI builds the runner without one, so the gate is GUI-only. Attached in
-	// NewServiceFromCore. ChatCtx is the only reader.
+	// default for every caller. It is attached only when Options.WelfareEnabled
+	// (or runner.welfare.enabled in Core config) explicitly opts in.
 	welfare *welfare.Service
+
+	// eventEmitter is the renderer event seam used by WChatStream. Production
+	// falls back to core/gui's events.emit action; tests inject a recorder.
+	eventEmitter func(name string, data any) core.Result
 }
 
 // NewService constructs the runner with the canonical Mantis #1336
@@ -90,6 +100,9 @@ type Service struct {
 //	r.Register(c)
 func NewService(opts Options) *Service {
 	s := &Service{opts: opts}
+	if opts.WelfareEnabled {
+		s.welfare = welfare.New(welfare.Config{})
+	}
 	if len(opts.Routes) > 0 {
 		built := ai.NewProviderRouter(opts.Routes...)
 		if built.OK {
@@ -328,6 +341,9 @@ func (s *Service) Chat(messages []inference.Message) core.Result {
 //		{Role: "user", Content: "ping"},
 //	})
 func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) core.Result {
+	if r := validateChatMessages("runner.ChatCtx", messages); !r.OK {
+		return r
+	}
 	r, _ := s.chatCtxWelfare(ctx, messages)
 	return r
 }
@@ -344,9 +360,22 @@ func (s *Service) ChatCtx(ctx context.Context, messages []inference.Message) cor
 //	r, warn := s.chatCtxWelfare(ctx, msgs)
 //	if warn { /* renderer shows the rephrased chip */ }
 func (s *Service) chatCtxWelfare(ctx context.Context, messages []inference.Message) (core.Result, bool) {
-	s.routerMu.RLock()
-	router := s.router
-	s.routerMu.RUnlock()
+	return s.chatCtxRouteWelfare(ctx, messages, "")
+}
+
+// chatCtxRouteWelfare is the provider-aware chat core shared by WChat and
+// WChatStream. Empty route preserves the existing ordered fallback router;
+// a non-empty selector is resolved against live configured + OpenCode routes.
+func (s *Service) chatCtxRouteWelfare(
+	ctx context.Context,
+	messages []inference.Message,
+	route string,
+) (core.Result, bool) {
+	routerR := s.routerForSelector(route)
+	if !routerR.OK {
+		return routerR, false
+	}
+	router, _ := routerR.Value.(*ai.ProviderRouter)
 	if router == nil {
 		last := ""
 		for i := len(messages) - 1; i >= 0; i-- {
@@ -364,32 +393,12 @@ func (s *Service) chatCtxWelfare(ctx context.Context, messages []inference.Messa
 	provider, model := routerHead(router)
 	started := core.Now()
 
-	// Welfare gate (RFC.welfare) — runs before the turn reaches the model.
-	// Dormant unless a welfare Service is attached (GUI only). On a flagged
-	// turn the model itself chose the action; we just apply it.
-	warnUser := false
-	if g := s.welfareGuard(ctx, messages, router); g.Triggered {
-		s.auditWelfare(provider, model, g)
-		switch {
-		case g.Synthetic != "":
-			// lem_pause — the model takes a breather; the user gets the
-			// warm notice in place of a reply. Returns before chat.requested
-			// (no chat was requested of the model). The user already sees the
-			// breather copy, so no rephrase chip is owed here.
-			return core.Ok(g.Synthetic), false
-		case g.Rephrased != "":
-			// lem_rephrase — send the reworded prompt on. The user still
-			// sees their original; surface the "reworded on your behalf" chip
-			// only when the model chose to (Mantis #1799 — g.WarnUser is the
-			// model's lem_warn_user flag, threaded out to the renderer).
-			messages = withLastUser(messages, g.Rephrased)
-			warnUser = g.WarnUser
-		case g.FalsePositive != nil:
-			// lem_ok — the model cleared it; proceed with the original and
-			// remember the false flag for a future contentshield re-train.
-			s.appendWelfareFeedback(*g.FalsePositive)
-		}
+	welfareState := s.applyWelfare(ctx, messages, router, provider, model)
+	if welfareState.synthetic != "" {
+		return core.Ok(welfareState.synthetic), false
 	}
+	messages = welfareState.messages
+	warnUser := welfareState.warnUser
 
 	_ = audit.Default().Record(audit.Event{
 		Event:   audit.EventInferenceChatRequested,

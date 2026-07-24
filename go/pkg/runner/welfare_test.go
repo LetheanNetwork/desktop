@@ -73,7 +73,7 @@ func TestWelfare_withLastUser_Ugly(t *core.T) {
 // reply MUST carry WarnUser=false (no "reworded" chip on an un-gated turn).
 func TestWelfare_WChat_Good_StructuredReplyWelfareClean(t *core.T) {
 	s := NewService(Options{}) // no routes → router==nil → echo stub
-	r := s.WChat([]inference.Message{{Role: "user", Content: "hello"}})
+	r := s.WChat([]inference.Message{{Role: "user", Content: "hello"}}, "")
 	core.AssertTrue(t, r.OK, "WChat stub path must succeed")
 	reply, ok := r.Value.(ChatReply)
 	core.AssertTrue(t, ok, "WChat must return a structured ChatReply")
