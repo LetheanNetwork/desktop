@@ -6,7 +6,9 @@ import (
 	core "dappco.re/go"
 	"dappco.re/go/config"
 	gui "dappco.re/go/render/display/webkit"
+	guiwindow "dappco.re/go/render/display/webkit/pkg/window"
 	"dappco.re/lthn/desktop/pkg/connection"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 type guiRuntimeBindingFixture struct{}
@@ -91,4 +93,23 @@ func TestGUIRuntime_New_Ugly_NilCore(t *core.T) {
 	result := newGUIRuntime(nil, gui.GuiConfig{}, transport)
 	core.AssertFalse(t, result.OK)
 	core.AssertContains(t, result.Error(), "core is nil")
+}
+
+func TestGUIRuntime_RegisterCoreGUIServices_Good_WiresWindowService(t *core.T) {
+	t.Setenv("HOME", t.TempDir())
+	c := core.New()
+	t.Cleanup(func() {
+		_ = c.ServiceShutdown(core.Background())
+	})
+	app := application.New(application.Options{
+		Name:      "lthn-test",
+		Transport: connection.NewService(connection.Options{}).Transport(),
+	})
+
+	result := registerCoreGUIServices(c, app, gui.GuiConfig{})
+
+	core.RequireTrue(t, result.OK, result.Error())
+	service, ok := core.ServiceFor[*guiwindow.Service](c, "window")
+	core.AssertTrue(t, ok)
+	core.AssertNotNil(t, service)
 }
