@@ -7,14 +7,15 @@ package appconfig
 import (
 	"time"
 
+	"dappco.re/go/config"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // ApplicationOptions returns Lethean Desktop's complete Wails application
 // defaults. Runtime services, assets, callbacks and transport are overlaid by
 // the desktop or mobile entrypoint after this value is returned.
-func ApplicationOptions() application.Options {
-	return application.Options{
+func ApplicationOptions(configs ...*config.Service) application.Options {
+	options := application.Options{
 		// Name labels the application in Wails-owned operating-system UI.
 		Name: "lthn",
 		// Description supplies the default about-box description.
@@ -176,6 +177,8 @@ func ApplicationOptions() application.Options {
 			TLS: defaultTLSOptions(false),
 		},
 	}
+	resolveApplicationOptions(firstConfig(configs), &options)
+	return options
 }
 
 func defaultTLSOptions(enabled bool) *application.TLSOptions {
@@ -194,7 +197,10 @@ func defaultTLSOptions(enabled bool) *application.TLSOptions {
 // WebviewWindowOptions returns a complete Wails window configuration for the
 // "main", "tray-popover", "tear-off" or "mobile" profile. Unknown profiles
 // retain Wails' own window defaults and are suitable for ad-hoc windows.
-func WebviewWindowOptions(profile, name, title, url string) application.WebviewWindowOptions {
+func WebviewWindowOptions(
+	profile, name, title, url string,
+	configs ...*config.Service,
+) application.WebviewWindowOptions {
 	macWebviewPreferences := defaultMacWebviewPreferences()
 
 	options := application.WebviewWindowOptions{
@@ -418,6 +424,7 @@ func WebviewWindowOptions(profile, name, title, url string) application.WebviewW
 	case "mobile":
 		// Mobile keeps the complete Wails defaults and applies only entrypoint-owned colour overrides.
 	}
+	resolveWindowOptions(firstConfig(configs), profile, &options)
 	return options
 }
 

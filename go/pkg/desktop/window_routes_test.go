@@ -17,6 +17,17 @@ func TestWindows_WindowRegistry_Good_AngularShell(t *core.T) {
 	core.AssertTrue(t, app.ShowDockIcon)
 }
 
+func TestWindows_WindowRegistry_Good_UserConfigWinsProfileDefault(t *core.T) {
+	_, cfg := guiRuntimeConfigFixture(t)
+	core.RequireTrue(t, cfg.Set("desktop.wails.window.main.width", 1280).OK)
+	core.RequireTrue(t, cfg.Set("desktop.wails.window.tray_popover.height", 640).OK)
+
+	registry := windowRegistry(cfg)
+
+	core.AssertEqual(t, 1280, registry[0].Width)
+	core.AssertEqual(t, 640, registry[1].Height)
+}
+
 func TestWindows_TrayPanelWindowSpec_Good_Popover(t *core.T) {
 	panel := windowRegistry()[1]
 

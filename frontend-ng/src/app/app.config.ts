@@ -13,6 +13,8 @@ import { provideRouter, withHashLocation } from '@angular/router';
 import { routes } from './app.routes';
 import { DesktopEffects } from './store/desktop.effects';
 import { desktopFeature } from './store/desktop.reducer';
+import { DesktopControlsEffects } from './store/desktop-controls.effects';
+import { desktopControlsFeature } from './store/desktop-controls.reducer';
 import { DesktopMcpService } from './desktop/desktop-mcp.service';
 import { DeepLinkNavigationService } from './deep-link-navigation.service';
 import { MobileRuntimeService } from './mobile-runtime.service';
@@ -27,7 +29,8 @@ export const appConfig: ApplicationConfig = {
     provideRouter(routes, withHashLocation()),
     provideStore(),
     provideState(desktopFeature),
-    provideEffects([DesktopEffects]),
+    provideState(desktopControlsFeature),
+    provideEffects([DesktopEffects, DesktopControlsEffects]),
     provideRouterStore(),
     provideStoreDevtools({ maxAge: 25, logOnly: !isDevMode() }),
     // Install the socket transport before any other initializer can call a

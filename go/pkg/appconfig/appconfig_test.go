@@ -4,9 +4,28 @@ package appconfig_test
 
 import (
 	core "dappco.re/go"
+	"dappco.re/go/config"
 	"dappco.re/lthn/desktop/pkg/appconfig"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+func newConfigFixture(t *core.T) (*core.Core, *config.Service) {
+	t.Helper()
+	path := core.PathJoin(t.TempDir(), "lthn.yaml")
+	c := core.New(
+		core.WithName("config", config.NewConfigServiceWith(config.ServiceOptions{
+			Path: path,
+		})),
+	)
+	core.RequireTrue(t, c.ServiceStartup(core.Background(), nil).OK)
+	t.Cleanup(func() {
+		_ = c.ServiceShutdown(core.Background())
+	})
+	cfg, ok := core.ServiceFor[*config.Service](c, "config")
+	core.RequireTrue(t, ok)
+	core.AssertNotNil(t, cfg)
+	return c, cfg
+}
 
 func TestApplicationOptions_Good_DesktopDefaults(t *core.T) {
 	options := appconfig.ApplicationOptions()
@@ -119,4 +138,87 @@ func TestWebviewWindowOptions_Ugly_TrayAndTearOffPreserveProfiles(t *core.T) {
 	core.AssertTrue(t, tearOff.EnableFileDrop)
 	core.AssertFalse(t, tearOff.AlwaysOnTop)
 	core.AssertFalse(t, tearOff.Hidden)
+}
+
+func TestApplicationOptions_Good_ConfigOverride(t *core.T) {
+	_, cfg := newConfigFixture(t)
+	core.RequireTrue(t, cfg.Set("desktop.wails.application.server.port", 9245).OK)
+	core.RequireTrue(t, cfg.Set("desktop.wails.application.windows.use_visual_hosting", true).OK)
+	core.RequireTrue(t, cfg.Set(
+		"desktop.wails.application.server.tls.cert_file",
+		"/tmp/lthn-cert.pem",
+	).OK)
+
+	options := appconfig.ApplicationOptions(cfg)
+
+	core.AssertEqual(t, 9245, options.Server.Port)
+	core.AssertTrue(t, options.Windows.UseVisualHosting)
+	core.AssertEqual(t, "localhost", options.Server.Host)
+	core.AssertNotNil(t, options.Server.TLS)
+	core.AssertEqual(t, "/tmp/lthn-cert.pem", options.Server.TLS.CertFile)
+}
+
+func TestApplicationOptions_Bad_InvalidConfigUsesFallback(t *core.T) {
+	_, cfg := newConfigFixture(t)
+	core.RequireTrue(t, cfg.Set("desktop.wails.application.server.port", "not-a-port").OK)
+
+	options := appconfig.ApplicationOptions(cfg)
+
+	core.AssertEqual(t, 8080, options.Server.Port)
+}
+
+func TestApplicationOptions_Ugly_RuntimeOwnedValuesStayInternal(t *core.T) {
+	_, cfg := newConfigFixture(t)
+	core.RequireTrue(t, cfg.Set("desktop.wails.application.single_instance.encryption_key", "unsafe").OK)
+	core.RequireTrue(t, cfg.Set("desktop.wails.application.services", []string{"unsafe"}).OK)
+
+	options := appconfig.ApplicationOptions(cfg)
+
+	core.AssertEqual(t, [32]byte{}, options.SingleInstance.EncryptionKey)
+	core.AssertNil(t, options.Services)
+}
+
+func TestWebviewWindowOptions_Good_ConfigOverride(t *core.T) {
+	_, cfg := newConfigFixture(t)
+	core.RequireTrue(t, cfg.Set("desktop.wails.window.main.width", 1280).OK)
+	core.RequireTrue(t, cfg.Set("desktop.wails.window.main.always_on_top", true).OK)
+
+	options := appconfig.WebviewWindowOptions(
+		"main",
+		"app",
+		"Lethean Desktop",
+		"/#/",
+		cfg,
+	)
+
+	core.AssertEqual(t, 1280, options.Width)
+	core.AssertTrue(t, options.AlwaysOnTop)
+	core.AssertEqual(t, 900, options.Height)
+}
+
+func TestWebviewWindowOptions_Bad_InvalidConfigUsesProfileFallback(t *core.T) {
+	_, cfg := newConfigFixture(t)
+	core.RequireTrue(t, cfg.Set("desktop.wails.window.tray_popover.width", "wide").OK)
+
+	options := appconfig.WebviewWindowOptions(
+		"tray-popover",
+		"tray-panel",
+		"Lethean Desktop",
+		"/#/tray",
+		cfg,
+	)
+
+	core.AssertEqual(t, 400, options.Width)
+}
+
+func TestWebviewWindowOptions_Ugly_ProfileOverrideWinsCommonOverride(t *core.T) {
+	_, cfg := newConfigFixture(t)
+	core.RequireTrue(t, cfg.Set("desktop.wails.window.default.width", 1111).OK)
+	core.RequireTrue(t, cfg.Set("desktop.wails.window.main.width", 1222).OK)
+
+	main := appconfig.WebviewWindowOptions("main", "app", "Lethean", "/#/", cfg)
+	unknown := appconfig.WebviewWindowOptions("unknown", "utility", "Utility", "/", cfg)
+
+	core.AssertEqual(t, 1222, main.Width)
+	core.AssertEqual(t, 1111, unknown.Width)
 }

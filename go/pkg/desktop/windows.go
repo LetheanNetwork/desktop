@@ -12,6 +12,7 @@ package desktop
 
 import (
 	core "dappco.re/go"
+	"dappco.re/go/config"
 	gui "dappco.re/go/render/display/webkit"
 	guiwindow "dappco.re/go/render/display/webkit/pkg/window"
 	"dappco.re/lthn/desktop/pkg/appconfig"
@@ -36,13 +37,16 @@ type WindowSpec = guiwindow.Window
 // angularWindowSpec returns the shared native chrome for both the main
 // OS shell and a future native app tear-off. Angular paints the visible
 // titlebar, so the native windows stay frameless and transparent.
-func angularWindowSpec(name, title, route string) *WindowSpec {
+func angularWindowSpec(
+	name, title, route string,
+	configs ...*config.Service,
+) *WindowSpec {
 	profile := "tear-off"
 	if name == mainWindowName {
 		profile = "main"
 	}
 	spec := windowSpecFromWebviewOptions(
-		appconfig.WebviewWindowOptions(profile, name, title, route),
+		appconfig.WebviewWindowOptions(profile, name, title, route, configs...),
 	)
 	spec.HideOnClose = true
 	spec.ShowDockIcon = true
@@ -53,12 +57,13 @@ func angularWindowSpec(name, title, route string) *WindowSpec {
 // the system tray. It is pre-created hidden so Wails can anchor it during app
 // startup, then the platform reveals and positions the same warm WebView on
 // each tray click.
-func trayPanelWindowSpec() *WindowSpec {
+func trayPanelWindowSpec(configs ...*config.Service) *WindowSpec {
 	spec := windowSpecFromWebviewOptions(appconfig.WebviewWindowOptions(
 		"tray-popover",
 		trayPanelWindowName,
 		"Lethean Desktop",
 		trayPanelRoute,
+		configs...,
 	))
 	spec.HideOnClose = true
 	return spec
@@ -155,17 +160,17 @@ func windowSpecFromWebviewOptions(options application.WebviewWindowOptions) *Win
 // windowRegistry returns the windows pre-created at application boot.
 // The Angular desktop remains one OS shell; the only companion is the compact
 // tray panel that Wails needs pre-created before it can attach the popover.
-func windowRegistry() []*WindowSpec {
+func windowRegistry(configs ...*config.Service) []*WindowSpec {
 	return []*WindowSpec{
-		angularWindowSpec(mainWindowName, "Lethean Desktop", angularShellRoute),
-		trayPanelWindowSpec(),
+		angularWindowSpec(mainWindowName, "Lethean Desktop", angularShellRoute, configs...),
+		trayPanelWindowSpec(configs...),
 	}
 }
 
 // nativeAppWindowSpec builds the one supported native tear-off shape.
 // App IDs are constrained to one safe route segment before they are
 // used in either the native window name or Angular hash route.
-func nativeAppWindowSpec(appID string) *WindowSpec {
+func nativeAppWindowSpec(appID string, configs ...*config.Service) *WindowSpec {
 	if !paths.IsValidPluginCode(appID) {
 		return nil
 	}
@@ -173,6 +178,7 @@ func nativeAppWindowSpec(appID string) *WindowSpec {
 		nativeAppWindowNamePrefix+appID,
 		"Lethean Desktop · "+appID,
 		nativeAppRoutePrefix+appID,
+		configs...,
 	)
 }
 
@@ -180,8 +186,12 @@ func nativeAppWindowSpec(appID string) *WindowSpec {
 // in a native frameless window. It is deliberately not wired to any
 // menu, bridge, or drag event yet; it is the future tear-off seam.
 func openNativeAppWindow(c *core.Core, appID string) bool {
-	spec := nativeAppWindowSpec(appID)
-	if c == nil || spec == nil {
+	if c == nil {
+		return false
+	}
+	configSvc, _ := core.ServiceFor[*config.Service](c, "config")
+	spec := nativeAppWindowSpec(appID, configSvc)
+	if spec == nil {
 		return false
 	}
 	if !windowExists(c, spec.Name) {

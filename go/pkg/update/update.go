@@ -23,6 +23,7 @@ package update
 
 import (
 	core "dappco.re/go"
+	"dappco.re/go/config"
 	upstream "dappco.re/go/update"
 	lthn "dappco.re/lthn/desktop"
 )
@@ -34,6 +35,7 @@ import (
 type Service struct {
 	inner *upstream.UpdateService
 	cfg   upstream.UpdateServiceConfig
+	core  *core.Core
 }
 
 // DefaultRepoURL is the GitHub mirror that ships release artefacts.
@@ -80,11 +82,80 @@ func New(cfg upstream.UpdateServiceConfig) core.Result {
 //	core.New(core.WithName("update", update.Register))
 func Register(c *core.Core) core.Result {
 	syncUpstreamVersion()
-	return New(upstream.UpdateServiceConfig{
+	result := New(upstream.UpdateServiceConfig{
 		RepoURL:        DefaultRepoURL,
 		Channel:        DefaultChannel,
 		CheckOnStartup: upstream.NoCheck,
 	})
+	if !result.OK {
+		return result
+	}
+	service := result.Value.(*Service)
+	service.core = c
+	return core.Ok(service)
+}
+
+// OnStartup reconfigures the updater from the registered desktop config
+// service. The default remains no check; configured checks run in Core's
+// tracked background pool so network availability cannot block desktop boot.
+//
+// Usage example:
+//
+//	_ = svc.OnStartup(core.Background())
+func (s *Service) OnStartup(_ core.Context) core.Result {
+	if s == nil {
+		return core.Fail(core.E("update.Service.OnStartup", "service is nil", nil))
+	}
+	if s.core == nil {
+		return core.Fail(core.E("update.Service.OnStartup", "core is nil", nil))
+	}
+	cfgSvc, ok := core.ServiceFor[*config.Service](s.core, "config")
+	if !ok || cfgSvc == nil || cfgSvc.Config() == nil {
+		return core.Ok(nil)
+	}
+
+	channel := DefaultChannel
+	var configuredChannel string
+	if cfgSvc.Get("desktop.updater.channel", &configuredChannel).OK {
+		switch core.Lower(configuredChannel) {
+		case "stable", "beta":
+			channel = core.Lower(configuredChannel)
+		}
+	}
+
+	mode := upstream.NoCheck
+	var configuredMode string
+	if cfgSvc.Get("desktop.updater.check_on_startup", &configuredMode).OK {
+		switch core.Lower(configuredMode) {
+		case "check":
+			mode = upstream.CheckOnStartup
+		case "check-and-install":
+			mode = upstream.CheckAndUpdateOnStartup
+		}
+	}
+
+	cfg := s.cfg
+	cfg.Channel = channel
+	cfg.CheckOnStartup = mode
+	syncUpstreamVersion()
+	result := upstream.NewUpdateService(cfg)
+	if !result.OK {
+		return core.Fail(core.E(
+			"update.Service.OnStartup",
+			"configure updater",
+			result.Err(),
+		))
+	}
+	s.inner = result.Value.(*upstream.UpdateService)
+	s.cfg = cfg
+	if mode != upstream.NoCheck {
+		s.core.Go(func() {
+			if start := s.Start(); !start.OK {
+				core.Warn("update startup check failed", "err", start.Error())
+			}
+		})
+	}
+	return core.Ok(nil)
 }
 
 // Start fires the upstream check using the configured CheckOnStartup
