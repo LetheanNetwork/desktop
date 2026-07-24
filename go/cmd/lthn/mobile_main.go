@@ -6,6 +6,7 @@ package main
 
 import (
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/appconfig"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -26,35 +27,30 @@ func runMobile() core.Result {
 	assets := assetsResult.Value.(core.FS)
 	background := application.NewRGB(8, 12, 18)
 
-	app := application.New(application.Options{
-		Name:        "Lethean",
-		Description: "Local AI, sovereign by design.",
-		Icon:        appIcon,
-		Assets: application.AssetOptions{
-			Handler: application.AssetFileServerFS(assets),
-		},
-		Flags: map[string]any{
-			"lthn":   true,
-			"mobile": true,
-		},
-		IOS: application.IOSOptions{
-			BackgroundColour: background,
-			DisableBounce:    true,
-		},
-		Android: application.AndroidOptions{
-			BackgroundColour: background,
-		},
-	})
+	options := appconfig.ApplicationOptions()
+	options.Name = "Lethean"
+	options.Description = "Local AI, sovereign by design."
+	options.Icon = appIcon
+	options.Assets.Handler = application.AssetFileServerFS(assets)
+	options.Flags = map[string]any{
+		"lthn":   true,
+		"mobile": true,
+	}
+	options.IOS.BackgroundColour = background
+	options.IOS.DisableBounce = true
+	options.Android.BackgroundColour = background
+	// Mobile lifecycle ownership is native, so desktop instance hand-off is disabled.
+	options.SingleInstance = nil
+
+	app := application.New(options)
 
 	registerMobileRuntimeEvents(app)
 	registerMobileNativeFeatures(app)
 	registerIOSRuntimeEventHandlers(app)
 
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:            "Lethean",
-		BackgroundColour: background,
-		URL:              "/",
-	})
+	windowOptions := appconfig.WebviewWindowOptions("mobile", "", "Lethean", "/")
+	windowOptions.BackgroundColour = background
+	app.Window.NewWithOptions(windowOptions)
 
 	if err := app.Run(); err != nil {
 		return core.Fail(core.E("lthn.mobile", "run Wails application", err))

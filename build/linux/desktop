@@ -10,4 +10,4 @@ Icon=lthn
 Categories=Utility;
 StartupWMClass=lthn
 
- 
+MimeType=x-scheme-handler/lthn; 

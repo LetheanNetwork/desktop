@@ -2,20 +2,31 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 	<dict>
+		<key>CFBundleDocumentTypes</key>
+		<array>
+			<dict>
+				<key>CFBundleTypeExtensions</key>
+				<array>
+					<string>lthn</string>
+				</array>
+				<key>CFBundleTypeIconFile</key>
+				<string>icons</string>
+				<key>CFBundleTypeMimeType</key>
+				<string>application/x-lethean</string>
+				<key>CFBundleTypeName</key>
+				<string>Lethean Desktop Configuration</string>
+				<key>CFBundleTypeRole</key>
+				<string>Editor</string>
+			</dict>
+		</array>
 		<key>CFBundleExecutable</key>
 		<string>lthn</string>
 		<key>CFBundleGetInfoString</key>
 		<string>lthn — Lethean Desktop</string>
 		<key>CFBundleIconFile</key>
 		<string>icons</string>
-		<!--
-		  CFBundleIconName intentionally omitted. The Icon Composer pipeline
-		  (appicon.icon + Assets.car) is dropped — see build/Taskfile.yml
-		  `generate:icons` for the rationale. Without Assets.car, macOS
-		  falls back to CFBundleIconFile = icons.icns, which is derived from
-		  build/appicon.png. Re-add this key when we have a proper Lethean
-		  .icon Composer descriptor and Assets.car comes back into play.
-		-->
+		<key>CFBundleIconName</key>
+		<string>appicon</string>
 		<key>CFBundleIdentifier</key>
 		<string>ai.lthn.desktop</string>
 		<key>CFBundleName</key>
@@ -24,6 +35,17 @@
 		<string>APPL</string>
 		<key>CFBundleShortVersionString</key>
 		<string>0.1.0</string>
+		<key>CFBundleURLTypes</key>
+		<array>
+			<dict>
+				<key>CFBundleURLName</key>
+				<string>wails.com.lthn</string>
+				<key>CFBundleURLSchemes</key>
+				<array>
+					<string>lthn</string>
+				</array>
+			</dict>
+		</array>
 		<key>CFBundleVersion</key>
 		<string>0.1.0</string>
 		<key>LSMinimumSystemVersion</key>

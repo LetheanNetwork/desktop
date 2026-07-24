@@ -5,24 +5,24 @@ version: '3'
 
 # This information is used to generate the build assets.
 info:
-  companyName: "Lethean"
-  productName: "Lethean Desktop"
-  productIdentifier: "ai.lthn.desktop"
-  description: "Local AI, sovereign by design."
-  copyright: "© 2026, Lethean (EUPL-1.2)"
-  comments: "lthn — Lethean Desktop"
-  version: "0.1.0"
-  # cfBundleIconName: "appicon" # The macOS icon name in Assets.car icon bundles (optional)
-  #                               # Should match the name of your .icon file without the extension
-  #                               # If not set and Assets.car exists, defaults to "appicon"
+  companyName: "Lethean" # Identify the publisher in generated package metadata.
+  productName: "Lethean Desktop" # Display the full desktop product name to users.
+  productIdentifier: "ai.lthn.desktop" # Use one stable reverse-DNS application identifier.
+  description: "Local AI, sovereign by design." # Describe the packaged application consistently.
+  copyright: "© 2026, Lethean (EUPL-1.2)" # Publish the product copyright and licence notice.
+  comments: "lthn — Lethean Desktop" # Label generated version resources with the binary identity.
+  version: "0.1.0" # Seed every package format with the current application version.
+  cfBundleIconName: "appicon" # Use the packaged App Icon asset catalogue name on macOS.
 
 # Mobile metadata used by the generated Xcode project.
 ios:
-  bundleID: "ai.lthn.desktop"
-  displayName: "Lethean"
-  version: "0.1.0"
-  company: "Lethean"
-  comments: "Local AI, sovereign by design."
+  bundleID: "ai.lthn.desktop" # Match the desktop bundle identifier on iOS.
+  displayName: "Lethean" # Keep the home-screen label compact.
+  version: "0.1.0" # Match the desktop package version.
+  company: "Lethean" # Identify the iOS package owner.
+  comments: "Local AI, sovereign by design." # Carry the product description into Xcode metadata.
+  minIOSVersion: "15.0" # Retain Wails' minimum supported iOS deployment target.
+  backgroundModes: [] # Request no background execution modes by default.
 
 # Dev mode configuration
 dev_mode:
@@ -87,25 +87,16 @@ dev_mode:
 
 # File Associations
 # More information at: https://v3.wails.io/noit/done/yet
-fileAssociations: []
-#  - ext: wails
-#    name: Wails
-#    description: Wails Application File
-#    iconName: wailsFileIcon
-#    role: Editor
-#  - ext: jpg
-#    name: JPEG
-#    description: Image File
-#    iconName: jpegFileIcon
-#    role: Editor
-#    mimeType: image/jpeg  # (optional)
+fileAssociations:
+  - ext: lthn # Register the desktop's own configuration-document extension.
+    name: Lethean Desktop Configuration # Show a recognisable document type in the OS.
+    description: Lethean Desktop configuration file # Describe the associated document to users.
+    iconName: icons # Reuse the packaged Lethean application icon.
+    role: Editor # Let Lethean Desktop open and edit the document.
+    mimeType: application/x-lethean # Publish a stable cross-platform MIME type.
 
 # Custom URL protocols. Wails consumes this at package time for macOS
 # CFBundleURLTypes, Windows NSIS/MSIX registration, and Linux desktop handlers.
 protocols:
-  - scheme: lthn
-    description: "Lethean Desktop deep link"
-
-# Other data
-other:
-  - name: My Other Data
+  - scheme: lthn # Register the stable external URL scheme.
+    description: "Lethean Desktop deep link" # Describe the protocol in package metadata.
