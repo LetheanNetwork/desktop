@@ -79,10 +79,12 @@ dev_mode:
     - cmd: env EXTRA_TAGS=mcp wails3 task build
       type: blocking
     # Boot the rebuilt .app — long-lived process the dev loop kills
-    # and restarts on every blocking-step completion. Set LTHN_DEV
-    # here as well as in the top-level task so direct `wails3 dev`
-    # keeps the MCP evaluator's CSP permissions development-only.
-    - cmd: env LTHN_DEV=1 wails3 task run
+    # and restarts on every blocking-step completion. Wails MCP owns
+    # 9099 in an MCP-tagged development build, so the Lethean transport
+    # owns 9199. Set LTHN_DEV here as well as in the top-level task so
+    # direct `wails3 dev` keeps the MCP evaluator's CSP permissions
+    # development-only.
+    - cmd: env LTHN_DEV=1 LTHN_WAILS_WS_LISTEN=127.0.0.1:9199 LTHN_WAILS_WS_URL=ws://localhost:9199/wails/ws wails3 task run
       type: primary
 
 # File Associations

@@ -33,7 +33,10 @@ test('Wails development commands apply environment through an executable', async
   const fakeWails = join(binDir, 'wails3');
   await writeFile(
     fakeWails,
-    '#!/bin/sh\nprintf "%s|%s|%s\\n" "${EXTRA_TAGS-}" "${LTHN_DEV-}" "$*"\n',
+    '#!/bin/sh\n' +
+      'printf "%s|%s|%s|%s|%s\\n" ' +
+      '"${EXTRA_TAGS-}" "${LTHN_DEV-}" ' +
+      '"${LTHN_WAILS_WS_LISTEN-}" "${LTHN_WAILS_WS_URL-}" "$*"\n',
   );
   await chmod(fakeWails, 0o755);
 
@@ -46,7 +49,10 @@ test('Wails development commands apply environment through an executable', async
     outputs.push(stdout.trim());
   }
 
-  assert.deepEqual(outputs, ['mcp||task build', '|1|task run']);
+  assert.deepEqual(outputs, [
+    'mcp||||task build',
+    '|1|127.0.0.1:9199|ws://localhost:9199/wails/ws|task run',
+  ]);
 });
 
 test('font verification rejects a referenced asset that is absent', async () => {
