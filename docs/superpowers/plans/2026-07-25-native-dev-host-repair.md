@@ -68,8 +68,9 @@ Existing files changed in place:
   development process through a cross-platform launcher.
 - `scripts/wails-dev-command.mjs` — launches the build or primary Wails task
   with a deduplicated, exact development environment.
-- `scripts/wails-dev-command.test.mjs` — proves effective child environments
-  with hostile ambient values on Unix and Windows.
+- `scripts/wails-dev-command.test.mjs` — proves executable, arguments, status,
+  errors, and effective child environments with hostile ambient values through
+  a platform-neutral injected spawn boundary.
 - `go/cmd/lthn/mcp_wiring_test.go` — parses the ordered Wails config to pin
   command multiplicity, execution type, and build-before-run order.
 - `scripts/verify-frontend-build.test.mjs` — pins CSP-compatible stylesheet
@@ -141,11 +142,12 @@ exports and write tests that:
 - pass hostile values for all four managed keys, including lower-case key
   variants, and assert the returned build/run environments contain only the
   exact command-specific managed values;
-- execute the launcher with a temporary fake `wails3` under a hostile ambient
-  environment and assert the fake receives `task build`/`task run` plus the
-  exact effective managed environment;
-- create an executable Node shim on Unix and a `.cmd` shim on Windows, using
-  Node's `path.delimiter`, so the test itself is cross-platform;
+- call `runDevelopmentCommand` with an injected spawn function and hostile
+  ambient object, then assert the captured executable is `wails3`, arguments
+  are `task build`/`task run`, `stdio` is `inherit`, and the effective managed
+  environment is exact;
+- avoid a fake `.cmd` executable: the real Windows Wails CLI is a native
+  `wails3.exe`, and Node cannot launch `.cmd` files without a shell;
 - reject an unknown launcher command.
 
 Remove the former POSIX fake-executable command test from
@@ -197,18 +199,21 @@ Copy the ambient object while omitting keys whose lower-case form matches a
 managed key, then add only the selected command's environment. This
 case-insensitive removal prevents duplicate Windows environment keys.
 
-Export `runDevelopmentCommand(command, spawn = spawnSync)`. Invoke:
+Export
+`runDevelopmentCommand(command, spawn = spawnSync, ambient = process.env)`.
+Invoke:
 
 ```js
 spawn('wails3', ['task', definition.task], {
-  env: developmentCommandEnvironment(command),
+  env: developmentCommandEnvironment(command, ambient),
   stdio: 'inherit',
 });
 ```
 
 Propagate launch errors and the child exit status. In the direct CLI path,
 accept exactly `build` or `run`; print a concise error and exit non-zero for
-anything else.
+anything else. Keep `shell` unset/false: production launches the native
+`wails3` executable directly on every platform.
 
 In `build/config.yml`, use:
 
@@ -234,8 +239,9 @@ node --test scripts/wails-dev-command.test.mjs scripts/verify-frontend-build.tes
 ```
 
 Expected: the ordered Go config contract and all Node contract tests PASS.
-The launcher test proves hostile ambient values cannot change the effective
-build or run child environment.
+The injected child-boundary test proves hostile ambient values cannot change
+the effective build or run environment, arguments, executable, or inherited
+stdio on either Unix or Windows.
 
 - [ ] **Step 5: Inspect the exact diff**
 

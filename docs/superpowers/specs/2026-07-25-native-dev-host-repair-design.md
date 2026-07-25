@@ -170,12 +170,14 @@ LTHN_WAILS_WS_LISTEN=127.0.0.1:9199
 LTHN_WAILS_WS_URL=ws://localhost:9199/wails/ws
 ```
 
-The test must also prove the MCP-tagged build command receives
+The test must also prove at the injected child-process boundary that the
+native `wails3` executable receives
 `EXTRA_TAGS=mcp`, the launcher invokes `wails3 task build` and
 `wails3 task run`, the config keeps exactly one of each entry attached to
 `blocking` and `primary` in that order, and irrelevant managed variables are
-absent from each child. This contract must not rely on POSIX shell syntax or
-host-first environment precedence.
+absent from each child. This contract must not substitute a Windows `.cmd`
+script for the real native `wails3.exe`, rely on POSIX shell syntax, invoke a
+shell in production, or depend on host-first environment precedence.
 
 ### Go asset-routing contract
 
