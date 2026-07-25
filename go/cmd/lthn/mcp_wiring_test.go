@@ -4,7 +4,24 @@ package main
 
 import (
 	core "dappco.re/go"
+	"gopkg.in/yaml.v3"
 )
+
+type wailsDevelopmentConfig struct {
+	DevMode struct {
+		Executes []struct {
+			Command string `yaml:"cmd"`
+			Type    string `yaml:"type"`
+		} `yaml:"executes"`
+	} `yaml:"dev_mode"`
+}
+
+type wailsTaskfile struct {
+	Tasks map[string]struct {
+		Commands []string          `yaml:"cmds"`
+		Env      map[string]string `yaml:"env"`
+	} `yaml:"tasks"`
+}
 
 func readMCPWiringFixture(t *core.T, path string) string {
 	t.Helper()
@@ -16,13 +33,39 @@ func readMCPWiringFixture(t *core.T, path string) string {
 	return string(contents)
 }
 
-func TestWailsMCPDevWiring_Good_BuildTag(t *core.T) {
-	taskfile := readMCPWiringFixture(t, "../../../Taskfile.yml")
-	config := readMCPWiringFixture(t, "../../../build/config.yml")
+func TestWailsMCPDevWiring_Good_CommandContracts(t *core.T) {
+	var config wailsDevelopmentConfig
+	core.RequireNoError(t, yaml.Unmarshal(
+		[]byte(readMCPWiringFixture(t, "../../../build/config.yml")),
+		&config,
+	))
 
-	core.AssertContains(t, taskfile, `EXTRA_TAGS: "mcp"`)
-	core.AssertContains(t, config, "- cmd: env EXTRA_TAGS=mcp wails3 task build\n")
-	core.AssertContains(t, config, "- cmd: env LTHN_DEV=1 LTHN_WAILS_WS_LISTEN=127.0.0.1:9199 LTHN_WAILS_WS_URL=ws://localhost:9199/wails/ws wails3 task run\n")
+	executionTypes := make(map[string]string, len(config.DevMode.Executes))
+	for _, execution := range config.DevMode.Executes {
+		executionTypes[execution.Command] = execution.Type
+	}
+	core.AssertEqual(t, "blocking", executionTypes["wails3 task common:dev:build:native"])
+	core.AssertEqual(t, "primary", executionTypes["wails3 task common:dev:run:native"])
+
+	var taskfile wailsTaskfile
+	core.RequireNoError(t, yaml.Unmarshal(
+		[]byte(readMCPWiringFixture(t, "../../../build/Taskfile.yml")),
+		&taskfile,
+	))
+
+	buildTask, ok := taskfile.Tasks["dev:build:native"]
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, []string{"wails3 task build"}, buildTask.Commands)
+	core.AssertEqual(t, map[string]string{"EXTRA_TAGS": "mcp"}, buildTask.Env)
+
+	runTask, ok := taskfile.Tasks["dev:run:native"]
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, []string{"wails3 task run"}, runTask.Commands)
+	core.AssertEqual(t, map[string]string{
+		"LTHN_DEV":             "1",
+		"LTHN_WAILS_WS_LISTEN": "127.0.0.1:9199",
+		"LTHN_WAILS_WS_URL":    "ws://localhost:9199/wails/ws",
+	}, runTask.Env)
 }
 
 func TestWailsMCPDevWiring_Bad_LegacyBridgeInactive(t *core.T) {

@@ -72,19 +72,17 @@ dev_mode:
     # updated".
     - cmd: wails3 task common:generate:bindings
       type: blocking
-    # Build the Go binary with Wails' built-in MCP service. EXTRA_TAGS
-    # reaches the repository's OS-specific go build command even when
-    # this config is entered directly through `wails3 dev`; production
-    # build and package tasks do not set the tag.
-    - cmd: env EXTRA_TAGS=mcp wails3 task build
+    # Build the Go binary with Wails' built-in MCP service. The internal
+    # Task helper uses a cross-platform environment map to supply only
+    # EXTRA_TAGS=mcp; production build and package tasks do not set it.
+    - cmd: wails3 task common:dev:build:native
       type: blocking
     # Boot the rebuilt .app — long-lived process the dev loop kills
     # and restarts on every blocking-step completion. Wails MCP owns
     # 9099 in an MCP-tagged development build, so the Lethean transport
-    # owns 9199. Set LTHN_DEV here as well as in the top-level task so
-    # direct `wails3 dev` keeps the MCP evaluator's CSP permissions
-    # development-only.
-    - cmd: env LTHN_DEV=1 LTHN_WAILS_WS_LISTEN=127.0.0.1:9199 LTHN_WAILS_WS_URL=ws://localhost:9199/wails/ws wails3 task run
+    # owns 9199. The internal Task helper supplies LTHN_DEV and the
+    # transport settings through a cross-platform environment map.
+    - cmd: wails3 task common:dev:run:native
       type: primary
 
 # File Associations
