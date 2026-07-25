@@ -11,8 +11,9 @@
 //   - Assets.Middleware = the Gin middleware pattern from
 //     the native webview runtime: delegate /wails/* back to
 //     Wails internals, hand everything else to Gin.
-//   - A NoRoute fallback on the Gin engine that serves the embedded
-//     Vite frontend dist so the SPA loads at "/".
+//   - A NoRoute fallback on the Gin engine that proxies frontend requests
+//     to Angular during Wails development and otherwise serves the embedded
+//     Angular dist so the SPA loads at "/".
 //   - Mac.ActivationPolicy = Accessory (menu-bar app, no Dock icon).
 //   - ApplicationShouldTerminateAfterLastWindowClosed = false
 //     (the NSStatusItem remains the process lifetime anchor).
@@ -129,8 +130,9 @@ type Options struct {
 	Name string
 	// Description is the app description shown by the OS.
 	Description string
-	// Frontend is the embedded Vite build (cmd/lthn/embed.go). The
-	// service serves it via a NoRoute fallback on the gin engine.
+	// Frontend is the embedded Angular build (cmd/lthn/embed.go). The
+	// service proxies frontend requests to Angular during Wails development
+	// and otherwise serves it via a NoRoute fallback on the gin engine.
 	// The core.FS root should contain index.html at its top level.
 	Frontend core.FS
 	// FrontendRoot is the subdirectory within Frontend that holds
@@ -314,8 +316,8 @@ func (s *Service) Run() core.Result {
 	}
 
 	// Mount the SPA fallback on the gin engine — every request that
-	// doesn't match a registered API route falls through to the
-	// embedded dist.
+	// doesn't match a registered API route falls through to Angular
+	// during Wails development or the embedded dist otherwise.
 	if r := s.attachSPA(); !r.OK {
 		return r
 	}
@@ -1112,18 +1114,18 @@ func handleSecondInstanceLaunch(c *core.Core, data gui.SecondInstanceData) {
 	restoreSecondInstanceWindow(c)
 }
 
-// attachSPA mounts the embedded frontend as the coreapi.Engine's
-// no-route fallback. Anything that doesn't match an explicit lthn /
-// subsystem route gets served from the embedded dist — index.html,
-// assets/*, etc. The handler inherits the canonical middleware chain
-// (auth, sunset, cache, tracing) just like any other route.
+// attachSPA mounts the frontend as the coreapi.Engine's no-route fallback.
+// Anything that doesn't match an explicit lthn / subsystem route is proxied
+// to Angular during Wails development or served from the embedded dist
+// otherwise. The handler inherits the canonical middleware chain (auth,
+// sunset, cache, tracing) just like any other route.
 func (s *Service) attachSPA() core.Result {
 	sr := core.Sub(s.opts.Frontend, s.opts.FrontendRoot)
 	if !sr.OK {
 		return core.Fail(core.E("desktop.attachSPA", "frontend root not found", sr.Value.(error)))
 	}
 	sub := sr.Value.(core.FS)
-	fileServer := core.HTTPFileServer(core.HTTPFS(sub))
+	fileServer := frontendAssetHandler(sub)
 	s.opts.Server.Engine().SetNoRoute(func(c *gin.Context) {
 		fileServer.ServeHTTP(c.Writer, c.Request)
 	})
