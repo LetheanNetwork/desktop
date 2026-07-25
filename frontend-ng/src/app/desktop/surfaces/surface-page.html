@@ -12,19 +12,34 @@
         <p>{{ config.subtitle }}</p>
       </div>
     </div>
-    @if (config.actions?.length) {
-      <div class="surface__actions" aria-label="View actions" i18n-aria-label>
-        @for (action of config.actions; track action.id) {
-          <button
-            type="button"
-            class="surface__button"
-            [class.surface__button--primary]="action.kind === 'run' || action.kind === 'add'"
-            [disabled]="busy()"
-            (click)="runAction(action)"
+    @if (config.bridgeMethod || config.loadEndpoint || config.actions?.length) {
+      <div class="surface__header-tools">
+        @if (config.bridgeMethod || config.loadEndpoint) {
+          <span
+            class="surface__data-state"
+            role="status"
+            aria-live="polite"
+            [attr.data-data-state]="dataState()"
           >
-            <lthn-icon [attr.name]="action.icon" size="11"></lthn-icon>
-            {{ action.label }}
-          </button>
+            <span aria-hidden="true"></span>
+            {{ dataStateLabel() }}
+          </span>
+        }
+        @if (config.actions?.length) {
+          <div class="surface__actions" aria-label="View actions" i18n-aria-label>
+            @for (action of config.actions; track action.id) {
+              <button
+                type="button"
+                class="surface__button"
+                [class.surface__button--primary]="action.kind === 'run' || action.kind === 'add'"
+                [disabled]="busy()"
+                (click)="runAction(action)"
+              >
+                <lthn-icon [attr.name]="action.icon" size="11"></lthn-icon>
+                {{ action.label }}
+              </button>
+            }
+          </div>
         }
       </div>
     }

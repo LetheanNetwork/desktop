@@ -1,6 +1,7 @@
 import { DOCUMENT } from '@angular/common';
 import { InjectionToken, Service, inject, signal } from '@angular/core';
 import { Events, System } from '@wailsio/runtime';
+import type { DeviceSize, ViewMode } from './desktop/desktop.data';
 import { WindowManagerService } from './desktop/window-manager.service';
 
 export type LetheanPlatform = 'web' | 'darwin' | 'windows' | 'linux' | 'ios' | 'ipad' | 'android';
@@ -35,6 +36,20 @@ export interface MobileRuntimeTransport {
   on(name: string, handler: (payload: unknown) => void): () => void;
   emit(name: string, payload: Record<string, unknown>): Promise<void>;
 }
+
+export interface MobileRuntimeLocation {
+  readonly search: string;
+}
+
+export const MOBILE_RUNTIME_LOCATION = new InjectionToken<MobileRuntimeLocation>(
+  'MOBILE_RUNTIME_LOCATION',
+  {
+    providedIn: 'root',
+    factory: () => ({
+      search: inject(DOCUMENT).defaultView?.location.search ?? '',
+    }),
+  },
+);
 
 function runtimePlatform(): LetheanPlatform {
   if (System.IsIOS()) {
@@ -74,6 +89,7 @@ const MAX_EVENT_LOG = 64;
 @Service()
 export class MobileRuntimeService {
   private readonly document = inject(DOCUMENT);
+  private readonly location = inject(MOBILE_RUNTIME_LOCATION);
   private readonly transport = inject(MOBILE_RUNTIME_TRANSPORT);
   private readonly windows = inject(WindowManagerService);
   private readonly off: Array<() => void> = [];
@@ -125,7 +141,9 @@ export class MobileRuntimeService {
     this._platform.set(platform);
     this.document.documentElement.dataset['platform'] = platform;
 
-    if (platform === 'ios' || platform === 'ipad' || platform === 'android') {
+    if (platform === 'web') {
+      this.applyBrowserPreview();
+    } else if (platform === 'ios' || platform === 'ipad' || platform === 'android') {
       this.windows.setView('device');
       this.windows.setDevice(
         platform === 'ipad' || this.document.documentElement.clientWidth >= 768
@@ -176,6 +194,20 @@ export class MobileRuntimeService {
   destroy(): void {
     for (const unsubscribe of this.off.splice(0)) unsubscribe();
     this.started = false;
+  }
+
+  private applyBrowserPreview(): void {
+    const search = new URLSearchParams(this.location.search);
+    const view = search.get('lthn-view');
+    if (!isViewMode(view)) return;
+
+    this.windows.setView(view);
+    if (view !== 'device') return;
+
+    const device = search.get('lthn-device');
+    if (isDeviceSize(device)) {
+      this.windows.setDevice(device);
+    }
   }
 
   share(text: string, url = ''): Promise<void> {
@@ -336,6 +368,14 @@ export class MobileRuntimeService {
       type: typeof value['type'] === 'string' ? value['type'] : 'unknown',
     });
   }
+}
+
+function isViewMode(value: string | null): value is ViewMode {
+  return value === 'desktop' || value === 'shell' || value === 'device';
+}
+
+function isDeviceSize(value: string | null): value is DeviceSize {
+  return value === 'small' || value === 'large' || value === 'full';
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

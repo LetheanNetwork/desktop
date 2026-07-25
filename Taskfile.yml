@@ -166,6 +166,11 @@ tasks:
     cmds:
       - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
 
+  doctor:
+    summary: Check the local toolchain, generated frontend inputs, optional crew repositories, and development ports
+    cmds:
+      - node scripts/dev-doctor.mjs
+
   test:
     summary: Run every test suite — Go pkg/* + frontend Vitest
     deps: [test:go, test:frontend]
@@ -190,6 +195,12 @@ tasks:
     cmds:
       - cd frontend-ng && npm run test:ci
       - cd frontend-ng && npm run test:contracts
+
+  verify:frontend:
+    summary: Run the complete deterministic Angular confidence gate
+    dir: frontend-ng
+    cmds:
+      - npm run verify
 
   test:cover:
     summary: Run both suites with coverage + emit reports an agent can read

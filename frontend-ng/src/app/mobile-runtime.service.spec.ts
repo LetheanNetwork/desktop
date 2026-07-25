@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import type { Mock } from 'vitest';
 import { WindowManagerService } from './desktop/window-manager.service';
 import {
+  MOBILE_RUNTIME_LOCATION,
   MOBILE_RUNTIME_TRANSPORT,
   MobileRuntimeService,
   type LetheanPlatform,
@@ -16,7 +17,10 @@ describe('MobileRuntimeService', () => {
   let service: MobileRuntimeService;
   let windows: Pick<WindowManagerService, 'setView' | 'setDevice'>;
 
-  const createService = (platform: LetheanPlatform): MobileRuntimeService => {
+  const createService = (
+    platform: LetheanPlatform,
+    search = '',
+  ): MobileRuntimeService => {
     listeners = new Map();
     emit = vi.fn((_name: string, _payload: Record<string, unknown>) => Promise.resolve());
     const transport: MobileRuntimeTransport = {
@@ -37,6 +41,7 @@ describe('MobileRuntimeService', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: MOBILE_RUNTIME_TRANSPORT, useValue: transport },
+        { provide: MOBILE_RUNTIME_LOCATION, useValue: { search } },
         { provide: WindowManagerService, useValue: windows },
       ],
     });
@@ -98,6 +103,38 @@ describe('MobileRuntimeService', () => {
     expect(document.documentElement.dataset['platform']).toBe(platform);
     expect(windows.setView).toHaveBeenCalledWith('device');
     expect(windows.setDevice).toHaveBeenCalledWith(device);
+  });
+
+  it.each([
+    ['?lthn-view=shell', 'shell', undefined],
+    ['?lthn-view=device&lthn-device=small', 'device', 'small'],
+    ['?lthn-view=device&lthn-device=large', 'device', 'large'],
+  ] as const)(
+    'applies the %s browser preview without pretending to be a native device',
+    async (search, view, device) => {
+      service.destroy();
+      TestBed.resetTestingModule();
+      service = createService('web', search);
+      await service.ready;
+
+      expect(windows.setView).toHaveBeenCalledWith(view);
+      if (device) {
+        expect(windows.setDevice).toHaveBeenCalledWith(device);
+      } else {
+        expect(windows.setDevice).not.toHaveBeenCalled();
+      }
+      expect(emit).not.toHaveBeenCalled();
+    },
+  );
+
+  it('ignores invalid browser presentation query values', async () => {
+    service.destroy();
+    TestBed.resetTestingModule();
+    service = createService('web', '?lthn-view=phone&lthn-device=tiny');
+    await service.ready;
+
+    expect(windows.setView).not.toHaveBeenCalled();
+    expect(windows.setDevice).not.toHaveBeenCalled();
   });
 
   it('tracks lifecycle, power, network, lock and memory events', () => {

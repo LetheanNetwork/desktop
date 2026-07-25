@@ -10,7 +10,8 @@
     "test:ci": "ng test --configuration=ci",
     "test:contracts": "node --test ../scripts/*.test.mjs",
     "verify:build": "node ../scripts/verify-frontend-build.mjs ../go/cmd/lthn/dist",
-    "audit:capabilities": "node ../scripts/frontend-capability-inventory.mjs --write docs/frontend/capability-matrix.md"
+    "audit:capabilities": "node ../scripts/frontend-capability-inventory.mjs --write docs/frontend/capability-matrix.md",
+    "verify": "node ../scripts/frontend-verify.mjs"
   },
   "private": true,
   "packageManager": "npm@11.17.0",

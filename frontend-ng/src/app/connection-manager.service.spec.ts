@@ -135,6 +135,31 @@ describe('ConnectionManagerService', () => {
     expect(socketURLs).toEqual(['wss://api.lethean.example/wails/ws']);
   });
 
+  it('keeps fixture previews offline without opening or retrying a socket', async () => {
+    configure(
+      {
+        protocol: 'http:',
+        host: '127.0.0.1:9245',
+        search: '?lthn-offline=1',
+      },
+      {
+        reconnectDelayMs: 5,
+        connectionTimeoutMs: 5,
+        requestTimeoutMs: 10,
+      },
+    );
+    await service.ready;
+
+    expect(getTransport()).toBe(service);
+    expect(service.state()).toBe('offline');
+    expect(socketURLs).toEqual([]);
+    await expect(service.call(0, 1, '', {})).rejects.toThrow(
+      'Offline preview mode is enabled.',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(socketURLs).toEqual([]);
+  });
+
   it('correlates successful and failed Wails runtime calls', async () => {
     configure();
     const connected = service.connect();

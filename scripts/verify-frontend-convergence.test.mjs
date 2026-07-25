@@ -293,3 +293,33 @@ test('the root frontend test task runs convergence contracts', async () => {
   assert.match(frontendTask, /npm run test:ci/);
   assert.match(frontendTask, /npm run test:contracts/);
 });
+
+test('frontend verification has one package, Task, and CI entrypoint', async () => {
+  const packageJSON = JSON.parse(await read('frontend-ng/package.json'));
+  const rootTaskfile = await read('Taskfile.yml');
+  const commonTaskfile = await read('build/Taskfile.yml');
+  const workflow = await read('.github/workflows/build.yml');
+
+  assert.equal(packageJSON.scripts.verify, 'node ../scripts/frontend-verify.mjs');
+
+  const verifyTask = rootTaskfile.match(
+    /\n  verify:frontend:\n[\s\S]*?(?=\n  [^ \n][^\n]*:\n|\s*$)/,
+  )?.[0];
+  assert.ok(verifyTask);
+  assert.match(verifyTask, /npm run verify/);
+
+  const installTask = commonTaskfile.match(
+    /\n  install:frontend:deps:\n[\s\S]*?(?=\n  [^ \n][^\n]*:\n|\s*$)/,
+  )?.[0];
+  assert.ok(installTask);
+  assert.match(installTask, /npm ci/);
+  assert.doesNotMatch(installTask, /npm install/);
+
+  const frontendJob = workflow.match(
+    /\n  frontend:\n[\s\S]*?(?=\n  [a-z][a-z0-9_-]*:\n|\s*$)/,
+  )?.[0];
+  assert.ok(frontendJob);
+  assert.match(frontendJob, /run:\s*npm run verify/);
+  assert.equal(workflow.match(/npm run verify/g)?.length, 1);
+  assert.match(workflow, /\n  build:\n(?:.*\n)*?    needs: frontend\n/);
+});

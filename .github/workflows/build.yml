@@ -31,8 +31,48 @@ env:
   NODE_VERSION: "22"   # Angular frontend toolchain
 
 jobs:
+  frontend:
+    name: frontend verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go/go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend-ng/package-lock.json
+
+      - name: Install Wails CLI and Task
+        shell: bash
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.117
+          go install github.com/go-task/task/v3/cmd/task@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install frontend dependencies
+        working-directory: frontend-ng
+        run: npm ci
+
+      - name: Generate bindings
+        run: wails3 task common:generate:bindings
+
+      - name: Verify frontend
+        working-directory: frontend-ng
+        run: npm run verify
+
   build:
     name: build (${{ matrix.os }})
+    needs: frontend
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -126,10 +166,6 @@ jobs:
       - name: Generate bindings (TypeScript)
         if: matrix.os != 'ios' && matrix.os != 'android'
         run: wails3 task common:generate:bindings
-
-      - name: Typecheck frontend
-        working-directory: frontend-ng
-        run: npx tsc --noEmit
 
       - name: Build
         env:

@@ -26,11 +26,13 @@ export type ConnectionState =
   | 'connecting'
   | 'connected'
   | 'reconnecting'
-  | 'disconnected';
+  | 'disconnected'
+  | 'offline';
 
 export interface ConnectionManagerOptions {
   readonly url?: string;
   readonly token?: string;
+  readonly offline?: boolean;
   readonly reconnectDelayMs?: number;
   readonly maxReconnectDelayMs?: number;
   readonly requestTimeoutMs?: number;
@@ -146,10 +148,12 @@ export class ConnectionManagerService implements RuntimeTransport, OnDestroy {
   private maxPendingRequests = DEFAULT_MAX_PENDING_REQUESTS;
   private requestSequence = 0;
   private configurationError: Error | null = null;
+  private previewOffline = false;
 
   private readonly _state = signal<ConnectionState>('disconnected');
   readonly state = this._state.asReadonly();
   readonly connected = computed(() => this._state() === 'connected');
+  readonly offline = computed(() => this._state() === 'offline');
 
   private readonly _url = signal(DEFAULT_WEBSOCKET_URL);
   readonly url = this._url.asReadonly();
@@ -163,6 +167,10 @@ export class ConnectionManagerService implements RuntimeTransport, OnDestroy {
   readonly ready = this.initialise();
 
   connect(): Promise<void> {
+    if (this.previewOffline) {
+      this._state.set('offline');
+      return Promise.reject(new Error('Offline preview mode is enabled.'));
+    }
     if (this.destroyed) {
       return Promise.reject(new Error('The Wails connection manager has been destroyed.'));
     }
@@ -313,6 +321,7 @@ export class ConnectionManagerService implements RuntimeTransport, OnDestroy {
     this.applyConfiguration(current);
     this.persistURL(current.url);
     this.disconnect();
+    if (this.previewOffline) return;
     await this.connect();
   }
 
@@ -332,7 +341,7 @@ export class ConnectionManagerService implements RuntimeTransport, OnDestroy {
       socket.close(1000, 'client disconnect');
     }
     if (!this.destroyed) {
-      this._state.set('disconnected');
+      this._state.set(this.previewOffline ? 'offline' : 'disconnected');
     }
   }
 
@@ -357,7 +366,11 @@ export class ConnectionManagerService implements RuntimeTransport, OnDestroy {
     try {
       this.applyConfiguration(this.connectionConfiguration(this.initialOptions));
       this.configurationError = null;
-      void this.connect().catch(() => undefined);
+      if (this.previewOffline) {
+        this._state.set('offline');
+      } else {
+        void this.connect().catch(() => undefined);
+      }
     } catch (error) {
       const reason = asError(error, 'The Wails WebSocket configuration is invalid.');
       this.configurationError = reason;
@@ -370,6 +383,7 @@ export class ConnectionManagerService implements RuntimeTransport, OnDestroy {
 
   private connectionConfiguration(options: ConnectionManagerOptions): {
     readonly url: string;
+    readonly offline: boolean;
     readonly reconnectDelayMs: number;
     readonly maxReconnectDelayMs: number;
     readonly requestTimeoutMs: number;
@@ -393,6 +407,7 @@ export class ConnectionManagerService implements RuntimeTransport, OnDestroy {
 
     return {
       url: authenticatedURL(withoutAccessToken(this.normaliseURL(selectedURL)), token),
+      offline: options.offline ?? queryFlag(search.get('lthn-offline')),
       reconnectDelayMs: positiveInteger(options.reconnectDelayMs, DEFAULT_RECONNECT_DELAY_MS),
       maxReconnectDelayMs: positiveInteger(
         options.maxReconnectDelayMs,
@@ -415,6 +430,7 @@ export class ConnectionManagerService implements RuntimeTransport, OnDestroy {
 
   private applyConfiguration(configuration: {
     readonly url: string;
+    readonly offline: boolean;
     readonly reconnectDelayMs: number;
     readonly maxReconnectDelayMs: number;
     readonly requestTimeoutMs: number;
@@ -422,6 +438,7 @@ export class ConnectionManagerService implements RuntimeTransport, OnDestroy {
     readonly maxPendingRequests: number;
   }): void {
     this._url.set(configuration.url);
+    this.previewOffline = configuration.offline;
     this.reconnectDelayMs = configuration.reconnectDelayMs;
     this.maxReconnectDelayMs = Math.max(
       configuration.reconnectDelayMs,
@@ -526,7 +543,14 @@ export class ConnectionManagerService implements RuntimeTransport, OnDestroy {
   }
 
   private scheduleReconnect(): void {
-    if (this.destroyed || this.suppressReconnect || this.reconnectTimer) return;
+    if (
+      this.destroyed ||
+      this.previewOffline ||
+      this.suppressReconnect ||
+      this.reconnectTimer
+    ) {
+      return;
+    }
     const attempt = this._reconnectAttempt() + 1;
     this._reconnectAttempt.set(attempt);
     this._state.set('reconnecting');
@@ -563,6 +587,10 @@ function positiveInteger(value: number | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
     ? Math.floor(value)
     : fallback;
+}
+
+function queryFlag(value: string | null): boolean {
+  return ['1', 'true', 'yes'].includes(clean(value).toLocaleLowerCase('en-GB'));
 }
 
 function authenticatedURL(value: string, token: string): string {

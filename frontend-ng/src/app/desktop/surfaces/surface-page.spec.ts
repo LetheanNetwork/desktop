@@ -28,7 +28,8 @@ describe('SurfacePage', () => {
   };
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    bridge.call.mockReset();
+    bridge.request.mockReset();
     TestBed.configureTestingModule({
       providers: [{ provide: SurfaceBridgeService, useValue: bridge }],
     });
@@ -60,6 +61,43 @@ describe('SurfacePage', () => {
     expect(page.selectedId()).toBe('M-1');
     page.selectRow('M-1');
     expect(page.selectedId()).toBe('');
+  });
+
+  it('labels fixture-backed data and changes the label after a live refresh', async () => {
+    bridge.call.mockResolvedValueOnce({
+      items: [{ id: 'live-1', title: 'Live issue', status: 'open' }],
+    });
+    const fixture = create({ ...listConfig, bridgeInput: 'text' });
+    await fixture.whenStable();
+
+    const status = (): HTMLElement | null =>
+      fixture.nativeElement.querySelector('[data-data-state]');
+    expect(status()?.textContent).toContain('Fixture data');
+    expect(status()?.dataset['dataState']).toBe('fixture');
+
+    await fixture.componentInstance.runAction(listConfig.actions![0]);
+    await fixture.whenStable();
+
+    expect(status()?.textContent).toContain('Live data');
+    expect(status()?.dataset['dataState']).toBe('live');
+    expect(fixture.componentInstance.rows()[0].title).toBe('Live issue');
+  });
+
+  it('labels an initial backend failure while retaining the fixture rows', async () => {
+    bridge.call.mockRejectedValueOnce(new Error('connection refused'));
+    const fixture = create();
+
+    await vi.waitFor(() => expect(bridge.call).toHaveBeenCalledOnce());
+    await fixture.whenStable();
+
+    const status: HTMLElement | null =
+      fixture.nativeElement.querySelector('[data-data-state]');
+    expect(status?.textContent).toContain('Offline · fixture kept');
+    expect(status?.dataset['dataState']).toBe('offline');
+    expect(fixture.componentInstance.rows().map(({ id }) => id)).toEqual([
+      'M-1',
+      'M-2',
+    ]);
   });
 
   it('replaces fixtures with bounded live rows and keeps them on backend failure', async () => {

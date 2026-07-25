@@ -20,6 +20,7 @@ import '../../../kit/lthn-core';
 
 export type SurfaceTone = 'brand' | 'ok' | 'warn' | 'danger' | 'muted';
 export type SurfaceKind = 'list' | 'board' | 'dashboard' | 'editor' | 'terminal' | 'calendar';
+export type SurfaceDataState = 'fixture' | 'loading' | 'live' | 'offline';
 
 export interface SurfaceMetric {
   readonly label: string;
@@ -137,6 +138,20 @@ export class SurfacePage implements OnChanges, OnInit, OnDestroy {
   readonly result = signal('');
   readonly notice = signal('');
   readonly busy = signal(false);
+  private readonly _dataState = signal<SurfaceDataState>('fixture');
+  readonly dataState = this._dataState.asReadonly();
+  readonly dataStateLabel = computed(() => {
+    switch (this._dataState()) {
+      case 'loading':
+        return $localize`:Surface loading state@@surface.common.loadingLiveData:Loading live data`;
+      case 'live':
+        return $localize`:Surface live state@@surface.common.liveData:Live data`;
+      case 'offline':
+        return $localize`:Surface offline state@@surface.common.offlineFixture:Offline · fixture kept`;
+      case 'fixture':
+        return $localize`:Surface fixture state@@surface.common.fixtureData:Fixture data`;
+    }
+  });
 
   private readonly conflictReload = (event: Event): void => {
     const service = (event as CustomEvent<{ service?: unknown }>).detail?.service;
@@ -203,6 +218,7 @@ export class SurfacePage implements OnChanges, OnInit, OnDestroy {
     this.selectedId.set('');
     this.result.set('');
     this.notice.set('');
+    this._dataState.set('fixture');
     const version = ++this.loadVersion;
     if ((this.config.bridgeMethod || this.config.loadEndpoint) && !this.config.bridgeInput) {
       queueMicrotask(() => {
@@ -519,6 +535,7 @@ export class SurfacePage implements OnChanges, OnInit, OnDestroy {
   private async loadLive(announce: boolean): Promise<void> {
     if (this.liveLoading) return;
     this.liveLoading = true;
+    this._dataState.set('loading');
     try {
       const value = this.config.bridgeMethod
         ? await this.bridge.call(
@@ -527,12 +544,14 @@ export class SurfacePage implements OnChanges, OnInit, OnDestroy {
           )
         : await this.bridge.request(this.config.loadEndpoint!, { method: 'GET' });
       this.applyLiveValue(value);
+      this._dataState.set('live');
       if (announce) {
         this.notice.set(
           $localize`:Surface refresh success@@surface.common.liveDataLoaded:Live data loaded.`,
         );
       }
     } catch (error) {
+      this._dataState.set('offline');
       if (!announce) return;
       const message = error instanceof Error ? error.message : String(error);
       this.notice.set(

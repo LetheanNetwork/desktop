@@ -207,11 +207,25 @@ npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
 # http://127.0.0.1:9245/#/
 ```
 
+For deterministic browser-only design work, place preview options before the
+hash. `lthn-offline=1` disables the Wails socket/retry loop while keeping
+fixture data visibly labelled; `lthn-view` accepts `desktop`, `shell`, or
+`device`, and `lthn-device` accepts `small`, `large`, or `full`.
+
+```text
+http://127.0.0.1:9245/?lthn-offline=1&lthn-view=shell#/
+http://127.0.0.1:9245/?lthn-offline=1&lthn-view=device&lthn-device=small#/
+```
+
 Full Wails development from the repository root:
 
 ```bash
 wails3 task dev
 ```
+
+Run `task doctor` before development when the toolchain, generated bindings,
+optional crew repositories, or ports are in doubt. Run `task verify:frontend`
+for the same ordered Angular confidence gate used by CI.
 
 Production Angular build:
 
