@@ -49,6 +49,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/Ladicle/tabwriter v1.0.0 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
+	github.com/Masterminds/semver/v3 v3.5.0 // indirect
 	github.com/Masterminds/sprig/v3 v3.3.0 // indirect
 	github.com/MauriceGit/skiplist v0.0.0-20211105230623-77f5c8d3e145 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect

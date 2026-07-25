@@ -42,7 +42,7 @@ tasks:
     summary: Builds the application natively on Linux (Lethean go/ layout)
     internal: true
     deps:
-      - task: common:go:mod:tidy
+      - task: common:go:work:sync
       - task: common:build:frontend
         vars:
           BUILD_FLAGS:

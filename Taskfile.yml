@@ -186,9 +186,10 @@ tasks:
       - cd "{{.GO_DIR}}" && go test ./pkg/lint/serviceingress/...
 
   test:frontend:
-    summary: Run the Angular frontend Vitest suite with its CI configuration
+    summary: Run Angular Vitest plus frontend convergence contracts
     cmds:
       - cd frontend-ng && npm run test:ci
+      - cd frontend-ng && npm run test:contracts
 
   test:cover:
     summary: Run both suites with coverage + emit reports an agent can read

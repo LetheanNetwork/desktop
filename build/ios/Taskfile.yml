@@ -47,7 +47,7 @@ tasks:
     deps:
       - task: generate:ios:overlay
       - task: generate:ios:xcode
-      - task: common:go:mod:tidy
+      - task: common:go:work:sync
       - task: common:build:frontend:mobile
         vars:
           BUILD_FLAGS:
@@ -222,6 +222,11 @@ tasks:
     cmds:
       - task: compile:ios:link
 
+  bindings:
+    summary: Generate iOS TypeScript bindings into frontend-ng/bindings
+    cmds:
+      - task: generate:ios:bindings
+
   generate:ios:bindings:
     internal: true
     summary: Generates bindings for iOS with proper CGO flags
@@ -230,12 +235,12 @@ tasks:
       - go.mod
       - go.sum
     generates:
-      - frontend/bindings/**/*
+      - frontend-ng/bindings/**/*
     vars:
       SDK_PATH:
         sh: xcrun --sdk {{.IOS_SDK}} --show-sdk-path
     cmds:
-      - cd "{{.GO_DIR}}" && {{.WAILS3_TOOL}} generate bindings -ts -d ../frontend-ng/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/...
+      - cd "{{.GO_DIR}}" && wails3 generate bindings -ts -d ../frontend-ng/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/...
     env:
       GOOS: ios
       CGO_ENABLED: 1

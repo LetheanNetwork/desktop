@@ -1,11 +1,11 @@
 version: '3'
 
 tasks:
-  go:mod:tidy:
-    summary: No-op — Lethean uses go.work + submodule pins, not proxy resolution
+  go:work:sync:
+    summary: Synchronise the ./go module selected by the root go.work
     internal: true
     cmds:
-      - echo "skipping go mod tidy — workspace mode handles dependency resolution"
+      - go work sync
 
   install:frontend:deps:
     summary: Install Angular frontend dependencies
@@ -72,7 +72,7 @@ tasks:
     label: generate:bindings (BUILD_FLAGS={{.BUILD_FLAGS}})
     summary: Generates TS bindings for pkg/desktop adapter services
     deps:
-      - task: go:mod:tidy
+      - task: go:work:sync
     dir: "{{.GO_DIR}}"
     sources:
       - "**/*.go"
@@ -81,7 +81,7 @@ tasks:
     generates:
       - ../frontend-ng/bindings/**/*
     cmds:
-      - wails3 generate bindings -ts -d ../frontend-ng/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/... ../external/gui/go/...
+      - wails3 generate bindings -ts -d ../frontend-ng/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/...
 
   generate:icons:
     summary: Generates Windows `.ico` and Mac `.icns` from build/appicon.png.

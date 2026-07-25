@@ -75,6 +75,7 @@ github.com/MarvinJWendt/testza v0.4.2/go.mod h1:mSdhXiKH8sg/gQehJ63bINcCKp7RtYew
 github.com/MarvinJWendt/testza v0.5.2 h1:53KDo64C1z/h/d/stCYCPY69bt/OSwjq5KpFNwi+zB4=
 github.com/MarvinJWendt/testza v0.5.2/go.mod h1:xu53QFE5sCdjtMCKk8YMQ2MnymimEctc4n3EjyIYvEY=
 github.com/Masterminds/goutils v1.1.1 h1:5nUrii3FMTL5diU80unEVvNevw1nH4+ZV4DSLVJLSYI=
+github.com/Masterminds/semver/v3 v3.5.0 h1:kQceYJfbupGfZOKZQg0kou0DgAKhzDg2NZPAwZ/2OOE=
 github.com/Masterminds/sprig/v3 v3.3.0 h1:mQh0Yrg1XPo6vjYXgtf5OtijNAKJRNcTdOOGZe3tPhs=
 github.com/MauriceGit/skiplist v0.0.0-20211105230623-77f5c8d3e145 h1:1yw6O62BReQ+uA1oyk9XaQTvLhcoHWmoQAgXmDFXpIY=
 github.com/MauriceGit/skiplist v0.0.0-20211105230623-77f5c8d3e145/go.mod h1:877WBceefKn14QwVVn4xRFUsHsZb9clICgdeTj4XsUg=
