@@ -65,9 +65,13 @@ New focused files:
 Existing files changed in place:
 
 - `build/config.yml` — supplies port 9199 only to the primary native
-  development process.
-- `scripts/verify-frontend-build.test.mjs` — pins command environments and
-  CSP-compatible stylesheet activation.
+  development process through cross-platform Task helpers.
+- `build/Taskfile.yml` — internal native-development build and run helpers
+  with Task-level environment maps.
+- `go/cmd/lthn/mcp_wiring_test.go` — parses the Wails config and Taskfile to
+  pin command, execution type, nested command, and environment together.
+- `scripts/verify-frontend-build.test.mjs` — pins CSP-compatible stylesheet
+  activation; its transport fallback test remains unchanged.
 - `scripts/verify-frontend-build.mjs` — verifies the generated index activates
   its stylesheet without inline JavaScript, in addition to font assets.
 - `frontend-ng/angular.json` — disables production critical-CSS inlining while
@@ -78,13 +82,18 @@ Existing files changed in place:
 ### Task 1: Separate the Native Development Listeners
 
 **Files:**
-- Modify: `scripts/verify-frontend-build.test.mjs`
 - Modify: `build/config.yml`
+- Modify: `build/Taskfile.yml`
+- Modify: `go/cmd/lthn/mcp_wiring_test.go`
+- Modify: `scripts/verify-frontend-build.test.mjs`
 
 **Interfaces:**
-- The MCP-tagged build command receives `EXTRA_TAGS=mcp` and no transport
-  override.
-- The primary native command receives:
+- `build/config.yml` invokes internal `common:dev:build:native` and
+  `common:dev:run:native` Task helpers as `blocking` and `primary`
+  respectively.
+- The build helper invokes `wails3 task build`, receives `EXTRA_TAGS=mcp`, and
+  has no transport override.
+- The run helper invokes `wails3 task run` and receives:
   `LTHN_DEV=1`,
   `LTHN_WAILS_WS_LISTEN=127.0.0.1:9199`, and
   `LTHN_WAILS_WS_URL=ws://localhost:9199/wails/ws`.
@@ -92,91 +101,128 @@ Existing files changed in place:
   `frontend-ng/public/wails/transport.js` remains
   `ws://localhost:9099/wails/ws`.
 
-- [ ] **Step 1: Extend the behavioural command test**
+- [ ] **Step 1: Write a structural cross-platform wiring test**
 
-In
-`scripts/verify-frontend-build.test.mjs`, change the fake `wails3` executable
-to print five fields:
+In `go/cmd/lthn/mcp_wiring_test.go`, replace the lexical command assertions
+with YAML parsing through the repository's existing `gopkg.in/yaml.v3`
+dependency. Use focused local structs for:
 
-```js
-await writeFile(
-  fakeWails,
-  '#!/bin/sh\n' +
-    'printf "%s|%s|%s|%s|%s\\n" ' +
-    '"${EXTRA_TAGS-}" "${LTHN_DEV-}" ' +
-    '"${LTHN_WAILS_WS_LISTEN-}" "${LTHN_WAILS_WS_URL-}" "$*"\n',
-);
+```go
+type wailsDevelopmentConfig struct {
+	DevMode struct {
+		Executes []struct {
+			Command string `yaml:"cmd"`
+			Type    string `yaml:"type"`
+		} `yaml:"executes"`
+	} `yaml:"dev_mode"`
+}
+
+type wailsTaskfile struct {
+	Tasks map[string]struct {
+		Commands []string          `yaml:"cmds"`
+		Env      map[string]string `yaml:"env"`
+	} `yaml:"tasks"`
+}
 ```
 
-Change the expected outputs to:
+Parse `build/config.yml` and `build/Taskfile.yml`, then assert:
 
-```js
-assert.deepEqual(outputs, [
-  'mcp||||task build',
-  '|1|127.0.0.1:9199|ws://localhost:9199/wails/ws|task run',
-]);
-```
+- the config entry `wails3 task common:dev:build:native` has type `blocking`;
+- the config entry `wails3 task common:dev:run:native` has type `primary`;
+- `dev:build:native` has the single command `wails3 task build`, environment
+  `EXTRA_TAGS=mcp`, and no Lethean transport variables;
+- `dev:run:native` has the single command `wails3 task run`, environment
+  `LTHN_DEV=1`, `LTHN_WAILS_WS_LISTEN=127.0.0.1:9199`, and
+  `LTHN_WAILS_WS_URL=ws://localhost:9199/wails/ws`, with no `EXTRA_TAGS`.
 
-This proves the listener split behaviour by executing the YAML command through
-the host environment; do not replace it with a string-presence assertion.
+Remove the POSIX fake-executable command test from
+`scripts/verify-frontend-build.test.mjs`, along with imports used only by that
+test. Task's environment propagation is an upstream runtime contract; this
+repository pins its own parsed configuration and proves the actual execution
+path during the native acceptance task.
 
 - [ ] **Step 2: Run the test and confirm the port-contract failure**
 
 Run:
 
 ```bash
-node --test scripts/verify-frontend-build.test.mjs
+go test ./go/cmd/lthn -run 'TestWailsMCPDevWiring_Good_CommandContracts' -count=1
 ```
 
-Expected: FAIL in
-`Wails development commands apply environment through an executable`; the
-primary command prints empty listen/URL fields.
+Expected: FAIL because the helper tasks and delegated config commands do not
+exist yet.
 
 - [ ] **Step 3: Supply the development-only transport override**
 
-In `build/config.yml`, replace only the primary command:
+In `build/Taskfile.yml`, add two internal helpers:
 
 ```yaml
-- cmd: env LTHN_DEV=1 LTHN_WAILS_WS_LISTEN=127.0.0.1:9199 LTHN_WAILS_WS_URL=ws://localhost:9199/wails/ws wails3 task run
+dev:build:native:
+  summary: Build the native development binary with Wails MCP
+  internal: true
+  env:
+    EXTRA_TAGS: "mcp"
+  cmds:
+    - wails3 task build
+
+dev:run:native:
+  summary: Run the native development binary with its split transport
+  internal: true
+  env:
+    LTHN_DEV: "1"
+    LTHN_WAILS_WS_LISTEN: "127.0.0.1:9199"
+    LTHN_WAILS_WS_URL: "ws://localhost:9199/wails/ws"
+  cmds:
+    - wails3 task run
+```
+
+In `build/config.yml`, delegate:
+
+```yaml
+- cmd: wails3 task common:dev:build:native
+  type: blocking
+- cmd: wails3 task common:dev:run:native
   type: primary
 ```
 
-Update the preceding comment to explain that Wails MCP owns 9099 in an
-MCP-tagged development build and the Lethean transport therefore owns 9199.
-Do not put these variables on the build command, the root `task dev`
-environment, or production run tasks.
+Update the comments to explain the 9099/9199 ownership and why Task-level
+environment maps are used. Do not use POSIX assignment prefixes or the `env`
+executable, and do not put the transport variables on the root `task dev`
+environment or production run tasks.
 
 - [ ] **Step 4: Run the focused contract tests**
 
 Run:
 
 ```bash
+go test ./go/cmd/lthn -run 'TestWailsMCPDevWiring_Good_CommandContracts' -count=1
 node --test scripts/verify-frontend-build.test.mjs
 ```
 
-Expected: all current Node contract tests PASS, including:
-
-```text
-development transport bootstrap publishes the loopback default only
-Wails development commands apply environment through an executable
-```
+Expected: the parsed Go wiring contract and all current Node contract tests
+PASS. Re-run the Node suite once with ambient `EXTRA_TAGS`, `LTHN_DEV`,
+`LTHN_WAILS_WS_LISTEN`, and `LTHN_WAILS_WS_URL` set to arbitrary values; it
+must still pass because no test depends on those ambient variables.
 
 - [ ] **Step 5: Inspect the exact diff**
 
 Run:
 
 ```bash
-git diff -- build/config.yml scripts/verify-frontend-build.test.mjs
+git diff -- build/config.yml build/Taskfile.yml \
+  go/cmd/lthn/mcp_wiring_test.go scripts/verify-frontend-build.test.mjs
 git diff --check
 ```
 
-Expected: only the primary native command owns the 9199 override; the build
-command still owns only `EXTRA_TAGS=mcp`; no whitespace errors.
+Expected: only the internal run helper owns the 9199 override; only the
+internal build helper owns `EXTRA_TAGS=mcp`; execution types are pinned; no
+POSIX-only launcher or whitespace error remains.
 
 - [ ] **Step 6: Commit the listener split**
 
 ```bash
-git add build/config.yml scripts/verify-frontend-build.test.mjs
+git add build/config.yml build/Taskfile.yml \
+  go/cmd/lthn/mcp_wiring_test.go scripts/verify-frontend-build.test.mjs
 git commit -m "fix(dev): separate MCP and Wails transport ports"
 ```
 
@@ -775,8 +821,8 @@ The parent `2026-07-25-frontend-convergence.md` workflow must now:
 
 | Contract | Evidence |
 |---|---|
-| Wails MCP owns 9099 | behavioural YAML test plus live `lsof` |
-| Lethean native transport owns 9199 | behavioural YAML test, live `lsof`, generated transport object |
+| Wails MCP owns 9099 | parsed config/Task contract plus live `lsof` |
+| Lethean native transport owns 9199 | parsed config/Task contract, live `lsof`, generated transport object |
 | Browser/default transport remains 9099 | existing fallback transport contract test |
 | Native assets reach Angular HMR | Go proxy test, native font fetch, HMR rebuild |
 | Backend routes remain local | `/health` real-handler test |

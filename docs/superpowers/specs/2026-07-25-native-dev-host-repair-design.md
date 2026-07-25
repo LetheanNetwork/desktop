@@ -61,9 +61,12 @@ Development reserves:
 - `127.0.0.1:9199` for Lethean's configurable Wails WebSocket transport.
 - `127.0.0.1:9245` for Angular's HMR development server.
 
-`build/config.yml` supplies the 9199 listen address and public WebSocket URL to
-the native primary process. Wails' generated `/wails/transport.js` therefore
-publishes `ws://localhost:9199/wails/ws` inside the native development host.
+`build/config.yml` delegates its build and primary commands to internal Wails
+Task helpers. Those helpers use Task's cross-platform `env:` maps to supply the
+9199 listen address and public WebSocket URL to the native primary process,
+rather than depending on the POSIX-only `env` executable. Wails' generated
+`/wails/transport.js` therefore publishes
+`ws://localhost:9199/wails/ws` inside the native development host.
 
 This does not change the normal `pkg/connection` default. A separately served
 browser GUI and non-MCP application composition may continue to use port 9099
@@ -154,8 +157,8 @@ development proxy environment.
 
 ### Development command contract
 
-Extend the existing behavioural config test to prove the primary native
-process receives:
+Parse the Wails development configuration and its internal Task helpers to
+prove the primary native process receives:
 
 ```text
 LTHN_DEV=1
@@ -164,7 +167,9 @@ LTHN_WAILS_WS_URL=ws://localhost:9199/wails/ws
 ```
 
 The test must also prove the MCP-tagged build command still receives
-`EXTRA_TAGS=mcp`.
+`EXTRA_TAGS=mcp`, the helpers invoke `wails3 task build` and
+`wails3 task run`, and the config keeps those entries attached to `blocking`
+and `primary` respectively. This contract must not rely on POSIX shell syntax.
 
 ### Go asset-routing contract
 
