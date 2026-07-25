@@ -4,6 +4,7 @@ import { WindowManagerService } from './desktop/window-manager.service';
 import {
   MOBILE_RUNTIME_TRANSPORT,
   MobileRuntimeService,
+  type LetheanPlatform,
   type MobileRuntimeTransport,
 } from './mobile-runtime.service';
 
@@ -15,11 +16,11 @@ describe('MobileRuntimeService', () => {
   let service: MobileRuntimeService;
   let windows: Pick<WindowManagerService, 'setView' | 'setDevice'>;
 
-  beforeEach(async () => {
+  const createService = (platform: LetheanPlatform): MobileRuntimeService => {
     listeners = new Map();
     emit = vi.fn((_name: string, _payload: Record<string, unknown>) => Promise.resolve());
     const transport: MobileRuntimeTransport = {
-      platform: () => 'ios',
+      platform: () => platform,
       on(name, handler): () => void {
         listeners.set(name, handler);
         return () => listeners.delete(name);
@@ -39,7 +40,11 @@ describe('MobileRuntimeService', () => {
         { provide: WindowManagerService, useValue: windows },
       ],
     });
-    service = TestBed.inject(MobileRuntimeService);
+    return TestBed.inject(MobileRuntimeService);
+  };
+
+  beforeEach(async () => {
+    service = createService('ios');
     await service.ready;
   });
 
@@ -65,6 +70,34 @@ describe('MobileRuntimeService', () => {
         ['common:getOrientation', {}],
       ]),
     );
+  });
+
+  it.each(['darwin', 'windows', 'linux'] as const)(
+    'marks %s as native desktop without forcing device presentation',
+    async (platform) => {
+      service.destroy();
+      TestBed.resetTestingModule();
+      service = createService(platform);
+      await service.ready;
+
+      expect(document.documentElement.dataset['platform']).toBe(platform);
+      expect(windows.setView).not.toHaveBeenCalled();
+      expect(windows.setDevice).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['ipad', 'large'],
+    ['android', 'small'],
+  ] as const)('uses the %s device presentation with a %s frame', async (platform, device) => {
+    service.destroy();
+    TestBed.resetTestingModule();
+    service = createService(platform);
+    await service.ready;
+
+    expect(document.documentElement.dataset['platform']).toBe(platform);
+    expect(windows.setView).toHaveBeenCalledWith('device');
+    expect(windows.setDevice).toHaveBeenCalledWith(device);
   });
 
   it('tracks lifecycle, power, network, lock and memory events', () => {

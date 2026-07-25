@@ -1,7 +1,7 @@
 import { SURFACE_APPS, SURFACE_APP_REGISTRY, SURFACE_CATEGORIES } from './surface-registry';
 
 describe('surface registry', () => {
-  it('registers all 43 Lit surface routes exactly once', () => {
+  it('registers all 43 Angular surface routes exactly once', () => {
     expect(Object.keys(SURFACE_APPS)).toHaveLength(43);
     expect(Object.keys(SURFACE_APP_REGISTRY)).toEqual(Object.keys(SURFACE_APPS));
     expect(SURFACE_CATEGORIES.map(({ id }) => id)).toEqual([

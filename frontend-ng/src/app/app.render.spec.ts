@@ -51,6 +51,8 @@ describe('App first paint', () => {
       expect(element.querySelectorAll('#winlayer > .win')).toHaveLength(2);
       expect(element.querySelector('lthn-control-app')).not.toBeNull();
       expect(element.querySelector('lthn-telemetry-app')).not.toBeNull();
+      expect(element.querySelector('app-app-shell')).toBeNull();
+      expect(element.querySelector('router-outlet')).not.toBeNull();
     });
 
     const desktop = element.querySelector('lthn-desktop');
