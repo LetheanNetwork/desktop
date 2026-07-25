@@ -21,8 +21,8 @@ func TestWailsMCPDevWiring_Good_BuildTag(t *core.T) {
 	config := readMCPWiringFixture(t, "../../../build/config.yml")
 
 	core.AssertContains(t, taskfile, `EXTRA_TAGS: "mcp"`)
-	core.AssertContains(t, config, "EXTRA_TAGS=mcp wails3 task build")
-	core.AssertContains(t, config, "LTHN_DEV=1 wails3 task run")
+	core.AssertContains(t, config, "- cmd: env EXTRA_TAGS=mcp wails3 task build\n")
+	core.AssertContains(t, config, "- cmd: env LTHN_DEV=1 LTHN_WAILS_WS_LISTEN=127.0.0.1:9199 LTHN_WAILS_WS_URL=ws://localhost:9199/wails/ws wails3 task run\n")
 }
 
 func TestWailsMCPDevWiring_Bad_LegacyBridgeInactive(t *core.T) {
