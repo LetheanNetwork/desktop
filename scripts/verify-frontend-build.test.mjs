@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { verifyFrontendBuild } from './verify-frontend-build.mjs';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
+const execFileAsync = promisify(execFile);
 
 test('development transport bootstrap publishes the loopback default only', async () => {
   const source = await readFile(`${repoRoot}/frontend-ng/public/wails/transport.js`, 'utf8');
@@ -17,6 +20,33 @@ test('development transport bootstrap publishes the loopback default only', asyn
     webSocketUrl: 'ws://localhost:9099/wails/ws',
   });
   assert.equal(Object.isFrozen(sandbox.globalThis.__LTHN_CONNECTION__), true);
+});
+
+test('Wails development commands apply environment through an executable', async () => {
+  const config = await readFile(`${repoRoot}/build/config.yml`, 'utf8');
+  const commands = [...config.matchAll(/^\s*-\s+cmd:\s+(.+)$/gm)]
+    .map((match) => match[1])
+    .filter((command) => /wails3 task (?:build|run)$/.test(command));
+  assert.equal(commands.length, 2);
+
+  const binDir = await mkdtemp(join(tmpdir(), 'lthn-wails-dev-'));
+  const fakeWails = join(binDir, 'wails3');
+  await writeFile(
+    fakeWails,
+    '#!/bin/sh\nprintf "%s|%s|%s\\n" "${EXTRA_TAGS-}" "${LTHN_DEV-}" "$*"\n',
+  );
+  await chmod(fakeWails, 0o755);
+
+  const outputs = [];
+  for (const command of commands) {
+    const [file, ...args] = command.split(/\s+/);
+    const { stdout } = await execFileAsync(file, args, {
+      env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
+    });
+    outputs.push(stdout.trim());
+  }
+
+  assert.deepEqual(outputs, ['mcp||task build', '|1|task run']);
 });
 
 test('font verification rejects a referenced asset that is absent', async () => {

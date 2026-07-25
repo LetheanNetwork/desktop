@@ -76,13 +76,13 @@ dev_mode:
     # reaches the repository's OS-specific go build command even when
     # this config is entered directly through `wails3 dev`; production
     # build and package tasks do not set the tag.
-    - cmd: EXTRA_TAGS=mcp wails3 task build
+    - cmd: env EXTRA_TAGS=mcp wails3 task build
       type: blocking
     # Boot the rebuilt .app — long-lived process the dev loop kills
     # and restarts on every blocking-step completion. Set LTHN_DEV
     # here as well as in the top-level task so direct `wails3 dev`
     # keeps the MCP evaluator's CSP permissions development-only.
-    - cmd: LTHN_DEV=1 wails3 task run
+    - cmd: env LTHN_DEV=1 wails3 task run
       type: primary
 
 # File Associations
