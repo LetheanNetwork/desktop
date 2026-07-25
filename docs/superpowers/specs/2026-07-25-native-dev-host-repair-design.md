@@ -61,12 +61,15 @@ Development reserves:
 - `127.0.0.1:9199` for Lethean's configurable Wails WebSocket transport.
 - `127.0.0.1:9245` for Angular's HMR development server.
 
-`build/config.yml` delegates its build and primary commands to internal Wails
-Task helpers. Those helpers use Task's cross-platform `env:` maps to supply the
-9199 listen address and public WebSocket URL to the native primary process,
-rather than depending on the POSIX-only `env` executable. Wails' generated
-`/wails/transport.js` therefore publishes
-`ws://localhost:9199/wails/ws` inside the native development host.
+`build/config.yml` delegates its build and primary commands to a small Node
+launcher. Node is already required for the Angular development server. The
+launcher constructs a deduplicated child environment, removes every
+case-variant of the four managed development variables, then adds the exact
+values for either `wails3 task build` or `wails3 task run`. This avoids both
+the POSIX-only `env` executable and Wails Task's host-first environment
+precedence. Wails' generated `/wails/transport.js` therefore publishes
+`ws://localhost:9199/wails/ws` inside the native development host even when
+the parent shell has stale Lethean development variables.
 
 This does not change the normal `pkg/connection` default. A separately served
 browser GUI and non-MCP application composition may continue to use port 9099
@@ -157,8 +160,9 @@ development proxy environment.
 
 ### Development command contract
 
-Parse the Wails development configuration and its internal Task helpers to
-prove the primary native process receives:
+Parse the ordered Wails development configuration and exercise the
+cross-platform launcher with hostile ambient values to prove the primary
+native process receives:
 
 ```text
 LTHN_DEV=1
@@ -166,10 +170,12 @@ LTHN_WAILS_WS_LISTEN=127.0.0.1:9199
 LTHN_WAILS_WS_URL=ws://localhost:9199/wails/ws
 ```
 
-The test must also prove the MCP-tagged build command still receives
-`EXTRA_TAGS=mcp`, the helpers invoke `wails3 task build` and
-`wails3 task run`, and the config keeps those entries attached to `blocking`
-and `primary` respectively. This contract must not rely on POSIX shell syntax.
+The test must also prove the MCP-tagged build command receives
+`EXTRA_TAGS=mcp`, the launcher invokes `wails3 task build` and
+`wails3 task run`, the config keeps exactly one of each entry attached to
+`blocking` and `primary` in that order, and irrelevant managed variables are
+absent from each child. This contract must not rely on POSIX shell syntax or
+host-first environment precedence.
 
 ### Go asset-routing contract
 

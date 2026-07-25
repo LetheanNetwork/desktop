@@ -65,11 +65,13 @@ New focused files:
 Existing files changed in place:
 
 - `build/config.yml` — supplies port 9199 only to the primary native
-  development process through cross-platform Task helpers.
-- `build/Taskfile.yml` — internal native-development build and run helpers
-  with Task-level environment maps.
-- `go/cmd/lthn/mcp_wiring_test.go` — parses the Wails config and Taskfile to
-  pin command, execution type, nested command, and environment together.
+  development process through a cross-platform launcher.
+- `scripts/wails-dev-command.mjs` — launches the build or primary Wails task
+  with a deduplicated, exact development environment.
+- `scripts/wails-dev-command.test.mjs` — proves effective child environments
+  with hostile ambient values on Unix and Windows.
+- `go/cmd/lthn/mcp_wiring_test.go` — parses the ordered Wails config to pin
+  command multiplicity, execution type, and build-before-run order.
 - `scripts/verify-frontend-build.test.mjs` — pins CSP-compatible stylesheet
   activation; its transport fallback test remains unchanged.
 - `scripts/verify-frontend-build.mjs` — verifies the generated index activates
@@ -83,17 +85,22 @@ Existing files changed in place:
 
 **Files:**
 - Modify: `build/config.yml`
-- Modify: `build/Taskfile.yml`
 - Modify: `go/cmd/lthn/mcp_wiring_test.go`
 - Modify: `scripts/verify-frontend-build.test.mjs`
+- Create: `scripts/wails-dev-command.mjs`
+- Create: `scripts/wails-dev-command.test.mjs`
 
 **Interfaces:**
-- `build/config.yml` invokes internal `common:dev:build:native` and
-  `common:dev:run:native` Task helpers as `blocking` and `primary`
-  respectively.
-- The build helper invokes `wails3 task build`, receives `EXTRA_TAGS=mcp`, and
-  has no transport override.
-- The run helper invokes `wails3 task run` and receives:
+- `build/config.yml` invokes `node scripts/wails-dev-command.mjs build` as one
+  `blocking` entry, followed by
+  `node scripts/wails-dev-command.mjs run` as one `primary` entry.
+- `developmentCommandEnvironment(command, ambient)` removes every
+  case-variant of `EXTRA_TAGS`, `LTHN_DEV`, `LTHN_WAILS_WS_LISTEN`, and
+  `LTHN_WAILS_WS_URL` before installing the command's exact values.
+- The build launcher invokes `wails3 task build`, receives
+  `EXTRA_TAGS=mcp`, and receives none of the three Lethean run variables.
+- The run launcher invokes `wails3 task run`, receives no `EXTRA_TAGS`, and
+  receives:
   `LTHN_DEV=1`,
   `LTHN_WAILS_WS_LISTEN=127.0.0.1:9199`, and
   `LTHN_WAILS_WS_URL=ws://localhost:9199/wails/ws`.
@@ -101,11 +108,10 @@ Existing files changed in place:
   `frontend-ng/public/wails/transport.js` remains
   `ws://localhost:9099/wails/ws`.
 
-- [ ] **Step 1: Write a structural cross-platform wiring test**
+- [ ] **Step 1: Write failing ordered-config and launcher tests**
 
-In `go/cmd/lthn/mcp_wiring_test.go`, replace the lexical command assertions
-with YAML parsing through the repository's existing `gopkg.in/yaml.v3`
-dependency. Use focused local structs for:
+In `go/cmd/lthn/mcp_wiring_test.go`, parse `build/config.yml` through the
+repository's existing `gopkg.in/yaml.v3` dependency. Use:
 
 ```go
 type wailsDevelopmentConfig struct {
@@ -116,30 +122,34 @@ type wailsDevelopmentConfig struct {
 		} `yaml:"executes"`
 	} `yaml:"dev_mode"`
 }
-
-type wailsTaskfile struct {
-	Tasks map[string]struct {
-		Commands []string          `yaml:"cmds"`
-		Env      map[string]string `yaml:"env"`
-	} `yaml:"tasks"`
-}
 ```
 
-Parse `build/config.yml` and `build/Taskfile.yml`, then assert:
+Iterate the `executes` slice without folding it into a map. Count and record
+the indices of:
 
-- the config entry `wails3 task common:dev:build:native` has type `blocking`;
-- the config entry `wails3 task common:dev:run:native` has type `primary`;
-- `dev:build:native` has the single command `wails3 task build`, environment
-  `EXTRA_TAGS=mcp`, and no Lethean transport variables;
-- `dev:run:native` has the single command `wails3 task run`, environment
-  `LTHN_DEV=1`, `LTHN_WAILS_WS_LISTEN=127.0.0.1:9199`, and
-  `LTHN_WAILS_WS_URL=ws://localhost:9199/wails/ws`, with no `EXTRA_TAGS`.
+```text
+node scripts/wails-dev-command.mjs build
+node scripts/wails-dev-command.mjs run
+```
 
-Remove the POSIX fake-executable command test from
-`scripts/verify-frontend-build.test.mjs`, along with imports used only by that
-test. Task's environment propagation is an upstream runtime contract; this
-repository pins its own parsed configuration and proves the actual execution
-path during the native acceptance task.
+Assert each occurs exactly once, the build entry is `blocking`, the run entry
+is `primary`, and the build index is lower than the run index.
+
+Create `scripts/wails-dev-command.test.mjs`. Import the missing launcher
+exports and write tests that:
+
+- pass hostile values for all four managed keys, including lower-case key
+  variants, and assert the returned build/run environments contain only the
+  exact command-specific managed values;
+- execute the launcher with a temporary fake `wails3` under a hostile ambient
+  environment and assert the fake receives `task build`/`task run` plus the
+  exact effective managed environment;
+- create an executable Node shim on Unix and a `.cmd` shim on Windows, using
+  Node's `path.delimiter`, so the test itself is cross-platform;
+- reject an unknown launcher command.
+
+Remove the former POSIX fake-executable command test from
+`scripts/verify-frontend-build.test.mjs` and keep its transport/font tests.
 
 - [ ] **Step 2: Run the test and confirm the port-contract failure**
 
@@ -147,48 +157,72 @@ Run:
 
 ```bash
 go test ./go/cmd/lthn -run 'TestWailsMCPDevWiring_Good_CommandContracts' -count=1
+node --test scripts/wails-dev-command.test.mjs
 ```
 
-Expected: FAIL because the helper tasks and delegated config commands do not
-exist yet.
+Expected: the Go test FAILS because the ordered launcher commands do not exist,
+and the Node test FAILS because the launcher module does not exist.
 
 - [ ] **Step 3: Supply the development-only transport override**
 
-In `build/Taskfile.yml`, add two internal helpers:
+Create `scripts/wails-dev-command.mjs`. Define the managed keys and immutable
+command definitions:
 
-```yaml
-dev:build:native:
-  summary: Build the native development binary with Wails MCP
-  internal: true
-  env:
-    EXTRA_TAGS: "mcp"
-  cmds:
-    - wails3 task build
+```js
+const managedKeys = [
+  'EXTRA_TAGS',
+  'LTHN_DEV',
+  'LTHN_WAILS_WS_LISTEN',
+  'LTHN_WAILS_WS_URL',
+];
 
-dev:run:native:
-  summary: Run the native development binary with its split transport
-  internal: true
-  env:
-    LTHN_DEV: "1"
-    LTHN_WAILS_WS_LISTEN: "127.0.0.1:9199"
-    LTHN_WAILS_WS_URL: "ws://localhost:9199/wails/ws"
-  cmds:
-    - wails3 task run
+const commands = Object.freeze({
+  build: {
+    task: 'build',
+    env: { EXTRA_TAGS: 'mcp' },
+  },
+  run: {
+    task: 'run',
+    env: {
+      LTHN_DEV: '1',
+      LTHN_WAILS_WS_LISTEN: '127.0.0.1:9199',
+      LTHN_WAILS_WS_URL: 'ws://localhost:9199/wails/ws',
+    },
+  },
+});
 ```
 
-In `build/config.yml`, delegate:
+Export `developmentCommandEnvironment(command, ambient = process.env)`.
+Copy the ambient object while omitting keys whose lower-case form matches a
+managed key, then add only the selected command's environment. This
+case-insensitive removal prevents duplicate Windows environment keys.
+
+Export `runDevelopmentCommand(command, spawn = spawnSync)`. Invoke:
+
+```js
+spawn('wails3', ['task', definition.task], {
+  env: developmentCommandEnvironment(command),
+  stdio: 'inherit',
+});
+```
+
+Propagate launch errors and the child exit status. In the direct CLI path,
+accept exactly `build` or `run`; print a concise error and exit non-zero for
+anything else.
+
+In `build/config.yml`, use:
 
 ```yaml
-- cmd: wails3 task common:dev:build:native
+- cmd: node scripts/wails-dev-command.mjs build
   type: blocking
-- cmd: wails3 task common:dev:run:native
+- cmd: node scripts/wails-dev-command.mjs run
   type: primary
 ```
 
-Update the comments to explain the 9099/9199 ownership and why Task-level
-environment maps are used. Do not use POSIX assignment prefixes or the `env`
-executable, and do not put the transport variables on the root `task dev`
-environment or production run tasks.
+Remove the now-unused `dev:build:native` and `dev:run:native` additions from
+`build/Taskfile.yml`. Update the config comments to explain the 9099/9199
+ownership and exact launcher environment. Do not use POSIX assignment
+prefixes, the `env` executable, or Task's host-first environment defaults.
 
 - [ ] **Step 4: Run the focused contract tests**
 
@@ -196,33 +230,35 @@ Run:
 
 ```bash
 go test ./go/cmd/lthn -run 'TestWailsMCPDevWiring_Good_CommandContracts' -count=1
-node --test scripts/verify-frontend-build.test.mjs
+node --test scripts/wails-dev-command.test.mjs scripts/verify-frontend-build.test.mjs
 ```
 
-Expected: the parsed Go wiring contract and all current Node contract tests
-PASS. Re-run the Node suite once with ambient `EXTRA_TAGS`, `LTHN_DEV`,
-`LTHN_WAILS_WS_LISTEN`, and `LTHN_WAILS_WS_URL` set to arbitrary values; it
-must still pass because no test depends on those ambient variables.
+Expected: the ordered Go config contract and all Node contract tests PASS.
+The launcher test proves hostile ambient values cannot change the effective
+build or run child environment.
 
 - [ ] **Step 5: Inspect the exact diff**
 
 Run:
 
 ```bash
-git diff -- build/config.yml build/Taskfile.yml \
-  go/cmd/lthn/mcp_wiring_test.go scripts/verify-frontend-build.test.mjs
+git diff -- build/config.yml go/cmd/lthn/mcp_wiring_test.go \
+  scripts/verify-frontend-build.test.mjs \
+  scripts/wails-dev-command.mjs scripts/wails-dev-command.test.mjs
 git diff --check
 ```
 
-Expected: only the internal run helper owns the 9199 override; only the
-internal build helper owns `EXTRA_TAGS=mcp`; execution types are pinned; no
-POSIX-only launcher or whitespace error remains.
+Expected: the build launcher owns only `EXTRA_TAGS=mcp`; the run launcher owns
+only the three run values; config order/types are pinned; no Task helper,
+POSIX-only launcher, host-first environment dependence, or whitespace error
+remains.
 
 - [ ] **Step 6: Commit the listener split**
 
 ```bash
-git add build/config.yml build/Taskfile.yml \
-  go/cmd/lthn/mcp_wiring_test.go scripts/verify-frontend-build.test.mjs
+git add build/config.yml go/cmd/lthn/mcp_wiring_test.go \
+  scripts/verify-frontend-build.test.mjs \
+  scripts/wails-dev-command.mjs scripts/wails-dev-command.test.mjs
 git commit -m "fix(dev): separate MCP and Wails transport ports"
 ```
 
@@ -821,8 +857,8 @@ The parent `2026-07-25-frontend-convergence.md` workflow must now:
 
 | Contract | Evidence |
 |---|---|
-| Wails MCP owns 9099 | parsed config/Task contract plus live `lsof` |
-| Lethean native transport owns 9199 | parsed config/Task contract, live `lsof`, generated transport object |
+| Wails MCP owns 9099 | ordered config plus hostile-ambient launcher test and live `lsof` |
+| Lethean native transport owns 9199 | ordered config, hostile-ambient launcher test, live `lsof`, generated transport object |
 | Browser/default transport remains 9099 | existing fallback transport contract test |
 | Native assets reach Angular HMR | Go proxy test, native font fetch, HMR rebuild |
 | Backend routes remain local | `/health` real-handler test |
