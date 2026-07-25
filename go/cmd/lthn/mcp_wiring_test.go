@@ -16,13 +16,6 @@ type wailsDevelopmentConfig struct {
 	} `yaml:"dev_mode"`
 }
 
-type wailsTaskfile struct {
-	Tasks map[string]struct {
-		Commands []string          `yaml:"cmds"`
-		Env      map[string]string `yaml:"env"`
-	} `yaml:"tasks"`
-}
-
 func readMCPWiringFixture(t *core.T, path string) string {
 	t.Helper()
 
@@ -40,32 +33,36 @@ func TestWailsMCPDevWiring_Good_CommandContracts(t *core.T) {
 		&config,
 	))
 
-	executionTypes := make(map[string]string, len(config.DevMode.Executes))
-	for _, execution := range config.DevMode.Executes {
-		executionTypes[execution.Command] = execution.Type
+	const (
+		buildCommand = "node scripts/wails-dev-command.mjs build"
+		runCommand   = "node scripts/wails-dev-command.mjs run"
+	)
+
+	buildCount, runCount := 0, 0
+	buildIndex, runIndex := -1, -1
+	buildType, runType := "", ""
+	for index, execution := range config.DevMode.Executes {
+		switch execution.Command {
+		case buildCommand:
+			buildCount++
+			if buildIndex == -1 {
+				buildIndex = index
+				buildType = execution.Type
+			}
+		case runCommand:
+			runCount++
+			if runIndex == -1 {
+				runIndex = index
+				runType = execution.Type
+			}
+		}
 	}
-	core.AssertEqual(t, "blocking", executionTypes["wails3 task common:dev:build:native"])
-	core.AssertEqual(t, "primary", executionTypes["wails3 task common:dev:run:native"])
 
-	var taskfile wailsTaskfile
-	core.RequireNoError(t, yaml.Unmarshal(
-		[]byte(readMCPWiringFixture(t, "../../../build/Taskfile.yml")),
-		&taskfile,
-	))
-
-	buildTask, ok := taskfile.Tasks["dev:build:native"]
-	core.RequireTrue(t, ok)
-	core.AssertEqual(t, []string{"wails3 task build"}, buildTask.Commands)
-	core.AssertEqual(t, map[string]string{"EXTRA_TAGS": "mcp"}, buildTask.Env)
-
-	runTask, ok := taskfile.Tasks["dev:run:native"]
-	core.RequireTrue(t, ok)
-	core.AssertEqual(t, []string{"wails3 task run"}, runTask.Commands)
-	core.AssertEqual(t, map[string]string{
-		"LTHN_DEV":             "1",
-		"LTHN_WAILS_WS_LISTEN": "127.0.0.1:9199",
-		"LTHN_WAILS_WS_URL":    "ws://localhost:9199/wails/ws",
-	}, runTask.Env)
+	core.AssertEqual(t, 1, buildCount)
+	core.AssertEqual(t, 1, runCount)
+	core.AssertEqual(t, "blocking", buildType)
+	core.AssertEqual(t, "primary", runType)
+	core.AssertTrue(t, buildIndex < runIndex)
 }
 
 func TestWailsMCPDevWiring_Bad_LegacyBridgeInactive(t *core.T) {

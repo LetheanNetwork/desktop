@@ -105,24 +105,6 @@ tasks:
     cmds:
       - wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico
 
-  dev:build:native:
-    summary: Build the native development binary with Wails MCP
-    internal: true
-    env:
-      EXTRA_TAGS: "mcp"
-    cmds:
-      - wails3 task build
-
-  dev:run:native:
-    summary: Run the native development binary with its split transport
-    internal: true
-    env:
-      LTHN_DEV: "1"
-      LTHN_WAILS_WS_LISTEN: "127.0.0.1:9199"
-      LTHN_WAILS_WS_URL: "ws://localhost:9199/wails/ws"
-    cmds:
-      - wails3 task run
-
   dev:frontend:
     summary: Runs Angular's development server with HMR for the Wails proxy
     dir: frontend-ng
