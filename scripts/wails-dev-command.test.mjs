@@ -2,9 +2,6 @@
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
@@ -35,20 +32,20 @@ const runManagedEntries = [
   ['LTHN_WAILS_WS_URL', 'ws://localhost:9199/wails/ws'],
 ];
 
-test('development command environments replace every managed ambient key exactly', () => {
-  const hostileAmbient = {
-    PATH: '/example/bin',
-    UNMANAGED_VALUE: 'preserved',
-    EXTRA_TAGS: 'ambient-build',
-    extra_tags: 'lower-build',
-    LTHN_DEV: 'ambient-dev',
-    lthn_dev: 'lower-dev',
-    LTHN_WAILS_WS_LISTEN: '127.0.0.1:7777',
-    lthn_wails_ws_listen: '127.0.0.1:6666',
-    LTHN_WAILS_WS_URL: 'ws://localhost:7777/wails/ws',
-    lthn_wails_ws_url: 'ws://localhost:6666/wails/ws',
-  };
+const hostileAmbient = Object.freeze({
+  PATH: '/example/bin',
+  UNMANAGED_VALUE: 'preserved',
+  EXTRA_TAGS: 'ambient-build',
+  extra_tags: 'lower-build',
+  LTHN_DEV: 'ambient-dev',
+  lthn_dev: 'lower-dev',
+  LTHN_WAILS_WS_LISTEN: '127.0.0.1:7777',
+  lthn_wails_ws_listen: '127.0.0.1:6666',
+  LTHN_WAILS_WS_URL: 'ws://localhost:7777/wails/ws',
+  lthn_wails_ws_url: 'ws://localhost:6666/wails/ws',
+});
 
+test('development command environments replace every managed ambient key exactly', () => {
   const build = developmentCommandEnvironment('build', hostileAmbient);
   assert.deepEqual(managedEntries(build), buildManagedEntries);
   assert.equal(build.UNMANAGED_VALUE, 'preserved');
@@ -58,66 +55,29 @@ test('development command environments replace every managed ambient key exactly
   assert.equal(run.UNMANAGED_VALUE, 'preserved');
 });
 
-async function writeFakeWails(binDir) {
-  const shimSource = `
-const { writeFileSync } = require('node:fs');
-const managedKeys = new Set(${JSON.stringify([...managedKeySet])});
-const managed = Object.entries(process.env)
-  .filter(([key]) => managedKeys.has(key.toLowerCase()))
-  .map(([key, value]) => [key.toUpperCase(), value])
-  .sort(([left], [right]) => left.localeCompare(right));
-writeFileSync(
-  process.env.WAILS_CAPTURE_FILE,
-  JSON.stringify({ args: process.argv.slice(2), managed }),
-);
-`;
-
-  if (process.platform === 'win32') {
-    const nodeShim = join(binDir, 'wails3-shim.cjs');
-    await writeFile(nodeShim, shimSource);
-    await writeFile(
-      join(binDir, 'wails3.cmd'),
-      '@echo off\r\n"%WAILS_TEST_NODE%" "%WAILS_TEST_SHIM%" %*\r\n',
-    );
-    return {
-      WAILS_TEST_NODE: process.execPath,
-      WAILS_TEST_SHIM: nodeShim,
-    };
-  }
-
-  const executable = join(binDir, 'wails3');
-  await writeFile(executable, `#!/usr/bin/env node\n${shimSource}`);
-  await chmod(executable, 0o755);
-  return {};
-}
-
-test('launcher passes exact arguments and managed environment under hostile ambient values', async () => {
-  const binDir = await mkdtemp(join(tmpdir(), 'lthn-wails-command-'));
-  const shimEnvironment = await writeFakeWails(binDir);
-
+test('launcher passes the exact native child boundary under hostile ambient values', () => {
   for (const [command, expectedManaged] of [
     ['build', buildManagedEntries],
     ['run', runManagedEntries],
   ]) {
-    const captureFile = join(binDir, `${command}.json`);
-    const result = spawnSync(process.execPath, [launcherPath, command], {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        ...shimEnvironment,
-        PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
-        WAILS_CAPTURE_FILE: captureFile,
-        EXTRA_TAGS: 'ambient-build',
-        LTHN_DEV: 'ambient-dev',
-        LTHN_WAILS_WS_LISTEN: '127.0.0.1:7777',
-        LTHN_WAILS_WS_URL: 'ws://localhost:7777/wails/ws',
+    let captured;
+    const status = runDevelopmentCommand(
+      command,
+      (executable, args, options) => {
+        captured = { executable, args, options };
+        return { status: 0 };
       },
-    });
+      hostileAmbient,
+    );
 
-    assert.equal(result.status, 0, result.stderr);
-    const captured = JSON.parse(await readFile(captureFile, 'utf8'));
+    assert.equal(status, 0);
+    assert.equal(captured.executable, 'wails3');
     assert.deepEqual(captured.args, ['task', command]);
-    assert.deepEqual(captured.managed, expectedManaged);
+    assert.equal(captured.options.stdio, 'inherit');
+    assert.equal(Object.hasOwn(captured.options, 'shell'), false);
+    assert.deepEqual(managedEntries(captured.options.env), expectedManaged);
+    assert.equal(captured.options.env.PATH, '/example/bin');
+    assert.equal(captured.options.env.UNMANAGED_VALUE, 'preserved');
   }
 });
 
