@@ -79,9 +79,15 @@ tasks:
       - go.mod
       - go.sum
     generates:
-      - ../frontend-ng/bindings/**/*
+      # Every target cleans the shared binding directory. A flavour/flags
+      # marker prevents another target's output satisfying this task's cache.
+      - ../frontend-ng/bindings/.desktop-bindings-{{.BINDINGS_CACHE_KEY}}
     cmds:
       - wails3 generate bindings -ts -d ../frontend-ng/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/...
+      - touch ../frontend-ng/bindings/.desktop-bindings
+      - touch ../frontend-ng/bindings/.desktop-bindings-{{.BINDINGS_CACHE_KEY}}
+    vars:
+      BINDINGS_CACHE_KEY: '{{sha256sum (.BUILD_FLAGS | default "")}}'
 
   generate:icons:
     summary: Generates Windows `.ico` and Mac `.icns` from build/appicon.png.

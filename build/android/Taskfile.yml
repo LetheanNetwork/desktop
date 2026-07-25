@@ -268,11 +268,12 @@ tasks:
       - go.mod
       - go.sum
     generates:
-      - frontend-ng/bindings/**/*
+      - frontend-ng/bindings/.android-bindings
     cmds:
       # Bindings are generated from the Go AST; CGO is disabled so the NDK
       # is not required for this step
       - cd "{{.GO_DIR}}" && wails3 generate bindings -ts -d ../frontend-ng/bindings -f '-tags android' -clean=true ./pkg/desktop/...
+      - touch frontend-ng/bindings/.android-bindings
     env:
       GOOS: android
       CGO_ENABLED: 0

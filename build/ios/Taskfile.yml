@@ -235,12 +235,13 @@ tasks:
       - go.mod
       - go.sum
     generates:
-      - frontend-ng/bindings/**/*
+      - frontend-ng/bindings/.ios-bindings
     vars:
       SDK_PATH:
         sh: xcrun --sdk {{.IOS_SDK}} --show-sdk-path
     cmds:
-      - cd "{{.GO_DIR}}" && wails3 generate bindings -ts -d ../frontend-ng/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/...
+      - cd "{{.GO_DIR}}" && wails3 generate bindings -ts -d ../frontend-ng/bindings -f '-tags ios' -clean=true ./pkg/desktop/...
+      - touch frontend-ng/bindings/.ios-bindings
     env:
       GOOS: ios
       CGO_ENABLED: 1
