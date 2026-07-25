@@ -58,9 +58,15 @@ New focused files:
 
 - `go/pkg/desktop/frontend_assets.go` — the local frontend handler boundary
   that selects Wails' development proxy or embedded filesystem behaviour.
-- `go/pkg/desktop/frontend_assets_internal_test.go` — real handler tests for
-  Angular development proxying, embedded fallback, invalid development URLs,
-  Angular routes, and Gin API precedence.
+- `go/pkg/desktop/frontend_assets_internal_test.go` — shared real-handler
+  tests for embedded fallback and Gin API precedence.
+- `go/pkg/desktop/frontend_assets_development_internal_test.go` —
+  development-tag handler tests for Angular proxying, invalid development
+  URLs, and Angular routes.
+- `go/pkg/desktop/frontend_assets_production_internal_test.go` —
+  production-tag proof that an inherited development URL is ignored.
+- `go/cmd/lthn/native_build_contract_test.go` — packaged Darwin build-tag
+  contract.
 
 Existing files changed in place:
 
@@ -81,6 +87,8 @@ Existing files changed in place:
   retaining production optimisation and minification.
 - `go/pkg/desktop/desktop.go` — installs the Wails frontend handler as the
   existing Gin no-route fallback and corrects stale Vite wording.
+- `build/darwin/Taskfile.yml` — compiles packaged macOS applications with
+  Wails' `production` asset mode while preserving optional extra tags.
 
 ### Task 1: Separate the Native Development Listeners
 
@@ -273,7 +281,11 @@ git commit -m "fix(dev): separate MCP and Wails transport ports"
 **Files:**
 - Create: `go/pkg/desktop/frontend_assets.go`
 - Create: `go/pkg/desktop/frontend_assets_internal_test.go`
+- Create: `go/pkg/desktop/frontend_assets_development_internal_test.go`
+- Create: `go/pkg/desktop/frontend_assets_production_internal_test.go`
+- Create: `go/cmd/lthn/native_build_contract_test.go`
 - Modify: `go/pkg/desktop/desktop.go`
+- Modify: `build/darwin/Taskfile.yml`
 - Read: `go/pkg/server/service.go`
 - Test: `go/pkg/server/server_test.go`
 
@@ -284,9 +296,12 @@ git commit -m "fix(dev): separate MCP and Wails transport ports"
 - Explicit server routes such as `/health` remain Gin/CoreGO responses.
 - Unmatched frontend requests use `application.AssetFileServerFS`.
 - With `FRONTEND_DEVSERVER_URL` set, the handler uses the development server
-  and never silently falls back to embedded output.
-- With that variable empty, the handler serves the supplied embedded
-  filesystem.
+  in a build without the `production` tag and never silently falls back to
+  embedded output.
+- With the `production` tag, the handler ignores
+  `FRONTEND_DEVSERVER_URL` and serves the supplied embedded filesystem.
+- Packaged Darwin builds always include the `production` tag, composed with
+  any optional extra tags.
 
 - [ ] **Step 1: Write the failing real-handler tests**
 
@@ -464,6 +479,100 @@ git add go/pkg/desktop/desktop.go \
   go/pkg/desktop/frontend_assets.go \
   go/pkg/desktop/frontend_assets_internal_test.go
 git commit -m "fix(dev): proxy native SPA assets to Angular HMR"
+```
+
+- [ ] **Step 8: Add failing production-mode and Darwin build contracts**
+
+Move
+`TestFrontendAssets_Good_DevelopmentServerHandlesAssetsAndRoutes` and
+`TestFrontendAssetHandler_Bad_InvalidDevelopmentURLFailsExplicitly` into
+`go/pkg/desktop/frontend_assets_development_internal_test.go`, guarded by:
+
+```go
+//go:build !production
+```
+
+Keep shared constructors, the registered-backend precedence test, and the
+embedded-filesystem test in the untagged file. Strengthen the embedded font
+assertion to require exactly `font/woff2`.
+
+Create
+`go/pkg/desktop/frontend_assets_production_internal_test.go`, guarded by:
+
+```go
+//go:build production
+```
+
+Its test must set `FRONTEND_DEVSERVER_URL` to a live `httptest.Server`, install
+an embedded `dist/media/probe.woff2`, and prove:
+
+- the response is status 200 with body `embedded-font`;
+- the content type is exactly `font/woff2`;
+- the development server receives zero requests.
+
+Create `go/cmd/lthn/native_build_contract_test.go`. Read
+`../../../build/darwin/Taskfile.yml` and assert its non-development
+`BUILD_FLAGS` branch contains:
+
+```text
+-tags production{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}}
+```
+
+Run:
+
+```bash
+go test -tags production ./go/pkg/desktop -run 'TestFrontendAsset' -count=1
+go test ./go/cmd/lthn -run 'TestNativeProductionAssets_Good_DarwinBuildUsesProductionTag' -count=1
+```
+
+Expected before changing the Darwin task: the production handler test passes
+after the test split, while the Darwin build contract FAILS because its
+release branch omits `production`.
+
+- [ ] **Step 9: Compile packaged Darwin applications in production asset mode**
+
+In `build/darwin/Taskfile.yml`, change only the non-development
+`BUILD_FLAGS` branch to match the established Linux/Windows composition:
+
+```yaml
+-tags production{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false
+```
+
+Keep development flags unchanged so `wails3 task dev` can proxy to Angular.
+Do not set or clear `FRONTEND_DEVSERVER_URL` in the packaged process; the
+compile-time Wails production handler must make it irrelevant.
+
+- [ ] **Step 10: Verify both compiled asset modes**
+
+Run:
+
+```bash
+gofmt -w \
+  go/cmd/lthn/native_build_contract_test.go \
+  go/pkg/desktop/frontend_assets_internal_test.go \
+  go/pkg/desktop/frontend_assets_development_internal_test.go \
+  go/pkg/desktop/frontend_assets_production_internal_test.go
+go test ./go/pkg/desktop -run 'TestFrontendAsset' -count=1
+go test -tags production ./go/pkg/desktop -run 'TestFrontendAsset' -count=1
+go test ./go/cmd/lthn -run 'TestNativeProductionAssets_Good_DarwinBuildUsesProductionTag' -count=1
+go test ./go/pkg/desktop ./go/pkg/server ./go/cmd/lthn
+go vet ./go/pkg/desktop ./go/pkg/server ./go/cmd/lthn
+git diff --check
+```
+
+Expected: all commands PASS. Normal compilation proves the HMR proxy and
+invalid-URL behaviour; production compilation proves the inherited
+development URL is ignored and embedded assets remain authoritative.
+
+- [ ] **Step 11: Commit the production-mode correction**
+
+```bash
+git add build/darwin/Taskfile.yml \
+  go/cmd/lthn/native_build_contract_test.go \
+  go/pkg/desktop/frontend_assets_internal_test.go \
+  go/pkg/desktop/frontend_assets_development_internal_test.go \
+  go/pkg/desktop/frontend_assets_production_internal_test.go
+git commit -m "fix(build): force production assets on macOS"
 ```
 
 ### Task 3: Make Production Styles Compatible With the Strict CSP

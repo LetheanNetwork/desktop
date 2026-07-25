@@ -85,8 +85,16 @@ source. Lethean's desktop package will wrap it with Wails'
 That Wails handler already has the required two modes:
 
 - when `FRONTEND_DEVSERVER_URL` is set, proxy frontend requests to the Angular
-  development server;
-- otherwise, serve the supplied embedded filesystem.
+  development server in a build without the `production` tag;
+- when compiled with the `production` tag, ignore
+  `FRONTEND_DEVSERVER_URL` and serve the supplied embedded filesystem.
+
+Every packaged desktop build must therefore compile Wails with the
+`production` tag. Linux and Windows already do so; the Darwin release task
+must preserve that invariant while continuing to compose any optional extra
+tags. Development builds deliberately omit `production` so Wails can honour
+the HMR server URL. This compile-time boundary prevents a packaged
+application from depending on an inherited development environment variable.
 
 The existing Gin router remains in front of the fallback. Registered `/v1`
 and other backend routes continue to execute locally and retain their current
@@ -192,6 +200,15 @@ Use an `httptest` Angular server and the real frontend handler with
 
 The test should derive its request from the real handler boundary rather than
 asserting a configuration string.
+
+Compile the development-proxy and invalid-URL cases only without the
+`production` tag. Compile a separate production-mode case with
+`-tags production`; it must prove that a populated
+`FRONTEND_DEVSERVER_URL` is ignored, the development server receives no
+request, and the embedded font is returned as exactly `font/woff2`. Pin the
+Darwin release task's `production` build tag in a focused repository contract
+test so packaged macOS builds cannot silently regress to development asset
+selection.
 
 ### Build/CSP contract
 
