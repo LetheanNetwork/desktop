@@ -4,6 +4,27 @@ import { pathToFileURL } from 'node:url';
 
 const REQUIRED_FAMILIES = ['Geist', 'Geist Mono', 'Instrument Serif', 'Font Awesome 7 Free'];
 
+function parseLinkAttributes(tag) {
+  const attributes = new Map();
+  const source = tag.replace(/^<link(?=[\s/>])/i, '').replace(/>$/, '');
+  const attributePattern =
+    /(?:^|\s+)([^\s"'<>\/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+
+  for (const match of source.matchAll(attributePattern)) {
+    const name = match[1].toLowerCase();
+    const value = match[2] ?? match[3] ?? match[4] ?? '';
+    attributes.set(name, value);
+  }
+  return attributes;
+}
+
+function hasAttributeToken(value, expected) {
+  return value
+    .trim()
+    .split(/\s+/)
+    .some((token) => token.toLowerCase() === expected);
+}
+
 export async function verifyFrontendBuild(distDir) {
   const cssFiles = (await readdir(distDir)).filter((name) => name.endsWith('.css'));
   const css = (
@@ -33,15 +54,23 @@ export async function verifyFrontendBuild(distDir) {
       throw new Error(`missing required font family: ${family}`);
     }
   }
-  const stylesheetLinks = [...indexHTML.matchAll(/<link\b[^>]*>/gi)]
-    .map((match) => match[0])
-    .filter((tag) => /\brel\s*=\s*["']stylesheet["']/i.test(tag));
+  const uncommentedIndex = indexHTML.replace(/<!--[\s\S]*?-->/g, '');
+  const stylesheetEntries = [...uncommentedIndex.matchAll(/<link(?=[\s/>])[^>]*>/gi)]
+    .map((match) => {
+      const tag = match[0];
+      return { tag, attributes: parseLinkAttributes(tag) };
+    })
+    .filter(({ attributes }) => {
+      const rel = attributes.get('rel');
+      return rel !== undefined && hasAttributeToken(rel, 'stylesheet');
+    });
+  const stylesheetLinks = stylesheetEntries.map(({ tag }) => tag);
   if (stylesheetLinks.length === 0) {
     throw new Error('missing active stylesheet link');
   }
-  for (const link of stylesheetLinks) {
-    const usesInlineActivation = /\bonload\s*=/i.test(link);
-    const isPrintOnly = /\bmedia\s*=\s*["']print["']/i.test(link);
+  for (const { tag: link, attributes } of stylesheetEntries) {
+    const usesInlineActivation = attributes.has('onload');
+    const isPrintOnly = attributes.get('media')?.trim().toLowerCase() === 'print';
     if (usesInlineActivation || isPrintOnly) {
       throw new Error(`stylesheet activation depends on inline script: ${link}`);
     }
@@ -56,8 +85,8 @@ if (isMain) {
   if (!requestedPath) throw new Error('usage: verify-frontend-build.mjs DIST_DIR');
   const report = await verifyFrontendBuild(resolve(requestedPath));
   console.log(
-    `frontend font build: ${report.requiredFamilies.length} families, ` +
+    `frontend build: ${report.requiredFamilies.length} families, ` +
       `${report.references.length} references, ` +
-      `${report.stylesheetLinks.length} stylesheet links, PASS`,
+      `stylesheet links: ${report.stylesheetLinks.length}, PASS`,
   );
 }

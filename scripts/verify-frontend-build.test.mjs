@@ -33,6 +33,13 @@ async function writeCompleteFontFixture(root) {
   );
 }
 
+async function verifyCompleteFontIndex(indexHTML) {
+  const root = await mkdtemp(join(tmpdir(), 'lthn-fonts-'));
+  await writeFile(join(root, 'index.html'), indexHTML);
+  await writeCompleteFontFixture(root);
+  return verifyFrontendBuild(root);
+}
+
 test('development transport bootstrap publishes the loopback default only', async () => {
   const source = await readFile(`${repoRoot}/frontend-ng/public/wails/transport.js`, 'utf8');
   const sandbox = { globalThis: {} };
@@ -115,4 +122,76 @@ test('stylesheet verification rejects a missing stylesheet link', async () => {
   await writeCompleteFontFixture(root);
 
   await assert.rejects(verifyFrontendBuild(root), /missing active stylesheet link/);
+});
+
+test('stylesheet verification ignores data-rel attributes', async () => {
+  await assert.rejects(
+    verifyCompleteFontIndex(
+      '<!doctype html><html><head>' +
+        '<link data-rel="stylesheet" href="styles.css">' +
+        '</head><body></body></html>',
+    ),
+    /missing active stylesheet link/,
+  );
+});
+
+test('stylesheet verification ignores links inside HTML comments', async () => {
+  await assert.rejects(
+    verifyCompleteFontIndex(
+      '<!doctype html><html><head>' +
+        '<!-- <link rel="stylesheet" href="retired.css"> -->' +
+        '</head><body></body></html>',
+    ),
+    /missing active stylesheet link/,
+  );
+});
+
+test('stylesheet verification ignores data-onload attributes', async () => {
+  const link = '<link data-onload="marker" href="styles.css" rel="stylesheet">';
+  const report = await verifyCompleteFontIndex(
+    `<!doctype html><html><head>${link}</head><body></body></html>`,
+  );
+
+  assert.deepEqual(report.stylesheetLinks, [link]);
+});
+
+test('stylesheet verification accepts an unquoted rel attribute', async () => {
+  const link = '<link href="styles.css" rel=stylesheet>';
+  const report = await verifyCompleteFontIndex(
+    `<!doctype html><html><head>${link}</head><body></body></html>`,
+  );
+
+  assert.deepEqual(report.stylesheetLinks, [link]);
+});
+
+test('stylesheet verification trims print-only media values', async () => {
+  await assert.rejects(
+    verifyCompleteFontIndex(
+      '<!doctype html><html><head>' +
+        '<link rel="stylesheet" href="styles.css" media=" print ">' +
+        '</head><body></body></html>',
+    ),
+    /stylesheet activation depends on inline script/,
+  );
+});
+
+test('stylesheet verification accepts reordered mixed-case tokenised rel values', async () => {
+  const link = '<LINK HREF="styles.css" REL="preload StyleSheet">';
+  const report = await verifyCompleteFontIndex(
+    `<!doctype html><html><head>${link}</head><body></body></html>`,
+  );
+
+  assert.deepEqual(report.stylesheetLinks, [link]);
+});
+
+test('stylesheet verification rejects an invalid second stylesheet', async () => {
+  await assert.rejects(
+    verifyCompleteFontIndex(
+      '<!doctype html><html><head>' +
+        '<link rel="stylesheet" href="styles.css">' +
+        '<link rel="stylesheet" href="print.css" media=" print ">' +
+        '</head><body></body></html>',
+    ),
+    /stylesheet activation depends on inline script/,
+  );
 });
