@@ -2,141 +2,301 @@
 
 # Agent Notes
 
-This repository is the Lethean Desktop product binary — `lthn`. It is a CLI router that dispatches to subsystems (GUI, HTTP server, AI runtime, future blockchain / LNS / wallet modules). The Wails GUI is one consumer of that dispatch, not the binary's identity.
+This repository builds the Lethean Desktop product binary, `lthn`. The binary
+is a CLI router first. Wails desktop/mobile hosts and the Angular application
+are consumers of the same Go service composition; they are not the binary's
+identity. A frontend failure must not silently break `lthn serve`, `lthn ai`,
+or the other non-GUI commands.
 
-## Repository layout
+## Product and UI decisions
 
-Canonical Lethean Go repo shape:
+- `frontend-ng/` is the canonical and only product frontend.
+- The frontend is Angular 22, standalone, client-side rendered, and
+  hash-routed. Do not add Angular SSR, prerendering as an application mode,
+  hydration, or a second frontend framework.
+- Production Angular output goes directly to `go/cmd/lthn/dist/` and is
+  embedded by `go/cmd/lthn/embed.go`.
+- Wails owns native windows, tray lifetime, application policy, mobile hosts,
+  and the Go/TypeScript transport. Angular owns the rendered UI and navigation.
+- Use British English in code, copy, docs, and tests: `colour`, `behaviour`,
+  `centre`, `organisation`, `licence`.
+- The project is EUPL-1.2 and must not acquire feature paywalls or “Pro” gates.
 
-- `go/` — the Go module (`dappco.re/lthn/desktop`). All Go code lives here.
-- `external/` — git submodules of canonical Lethean dependencies, pinned to `dev` branches via `.gitmodules`.
-- `go.work` at repo root — workspace mode points at `./go` + `./external/*`. Live dev sources resolve through here.
-- `frontend-ng/`, `docs/`, `bin/`, `build/`, `LICENCE`, `README.md`, `CLAUDE.md`, `AGENTS.md`, `Taskfile.yml` at repo root.
+### What the similarly named directories mean
 
-## Code Map
+- `frontend-ng/` — live Angular product source. Build, test, and develop here.
+- `frontend/` — two tracked Wails mobile-generated support binding files. It is
+  not a second application. iOS/Android tasks still mention this path, so do not
+  delete it as cosmetic cleanup without repairing and testing those tasks.
+- `frontend-ng/bindings/` — ignored generated Wails TypeScript bindings.
+- `frontend-lit-ref/` — ignored local snapshot of the retired Lit application.
+  It is byte-for-byte recoverable as `67b012f^:frontend` (361 files), not a
+  build input or source of truth. The owner has chosen Git history, rather than
+  a working-tree archive, as the retention policy for retired implementations.
+- `docs/design/lit/` — tracked pre-Angular visual prototypes only.
+  `docs/design/Lethean-5.zip` contains byte-identical copies of those files,
+  and `docs/design/HANDOVER.md` duplicates
+  `docs/design/lit/HANDOVER.md`. None are built, and new duplicate code
+  archives must not be added; Git is the archive.
 
-- `go/cmd/lthn/main.go` — CLI router. Parses `core.Args()`, dispatches on subcommand (`version`, `help`, `gui`, `tray`, `serve`, `ai`). Add new subcommands here as flat handlers that delegate to `go/pkg/*`.
-- `go/pkg/tray/tray.go` — NSStatusItem + popover anchor + window-spawn router (consumed by `lthn gui`).
-- `go/pkg/runner/service.go` — go-mlx adapter signals contract (consumed by `lthn ai` and `lthn serve`).
-- `go/pkg/telemetry/service.go` — `powermetrics` / `IOReport` sampler.
-- `go/pkg/api/` — HTTP gateway RouteGroups + spec/SDK helpers. `RunnerGroup` implements `coreapi.DescribableGroup` exposing `/v1/runner/*`. `lthn api spec` emits `build/sdk/openapi.yaml`; `build/sdk/publish.sh` regenerates 13 `@lthn/sdk-*` flavours and force-pushes each to `LetheanNetwork/sdk-<flavour>`. Per-flavour SDK content is gitignored — lthn/desktop tracks only the spec + driver.
-- `external/go/` — submodule of `dappco.re/go` (the Core primitives module) on its `dev` branch.
-- `frontend-ng/` — standalone Angular desktop app. It is client-side rendered, uses hash routing, NgRx, WebMCP, and Angular localisation. `ng build` writes directly to `go/cmd/lthn/dist/`.
-- `docs/design/lethean-4-react-reference/` — animated React/JSX visual source for design review only; not built.
+Lit is still an intentional runtime dependency inside the Angular project:
+`frontend-ng/src/kit/` implements reusable custom elements with Lit, and the
+plugin-view runtime supports descriptors whose `kind` is `lit`. Retiring the
+old Lit application does **not** mean removing the `lit` package or those
+framework-neutral elements.
 
-Each package in `pkg/` follows the Mantis #1336 canonical Service.go shape: a `Service` struct, a `NewService(opts Options) *Service` constructor, a `(s *Service) Register(c *core.Core) core.Result` method, AND a free `Register(c *core.Core) core.Result` function for one-shot wiring. Files declaring `NewService` carry a `// Usage example:` doc marker per Mantis #1383.
+### Design-system contract
 
-## Compliance Rules
+The Lethean Design Pack is the visual and brand reference, not another product
+frontend or a path-level dependency. It defines one dark-calm token engine,
+Lethean's teal skin, the hoplite mark, Geist/Geist Mono/Instrument Serif roles,
+Font Awesome iconography, quiet motion, and Vi's calm British-English voice.
+Its `angular/desktop/` mock is the intended desktop/window UX and app catalogue;
+its runnable Angular 18 workspace is a reference fixture, not code to restore.
 
-Follow the v0.9.0 Core compliance shape. Use `dappco.re/go` wrappers for output (`core.Print`, `core.Println`, `core.Sprintf`), argv (`core.Args()`), exit (`core.Exit`), flag parsing (`core.ParseFlag`), errors (`core.E`, `core.NewError`), and results (`core.Result`, `core.Ok`, `core.Fail`). Direct stdlib imports of `fmt`, `errors`, `strings`, `os`, `log`, `encoding/json`, `bytes`, `path`, `path/filepath`, `os/exec`, `io/ioutil` are banned in production AND test files.
+The production ports already live in:
 
-Function signatures return `core.Result`, never `error` and never `(T, error)` tuples. The Result type recovers panics inside the function body, so callers branch on `r.OK` and pull the value from `r.Value`.
+- `frontend-ng/src/foundations/` — the pack's CSS tokens converted to Sass,
+  with self-hosted fonts for offline/CSP-safe builds and an Android profile.
+- `frontend-ng/src/kit/` — the active typed Lit custom-element layer.
+- `frontend-ng/src/app/desktop/` — the Angular 22 evolution of the pack's
+  desktop mock, with NgRx, lazy routes, localisation, WebMCP, and Wails/CoreGO
+  integration.
 
-Do not roll your own primitives that CoreGO already provides. Check `dappco.re/go/*.go` for the canonical wrapper before importing stdlib.
+When applying a newer design pack, diff and port the relevant tokens, assets,
+or interaction intent into those production locations. Do not copy the pack's
+sample workspace into the repository, import its mock state as live product
+data, or make the preview and product co-equal implementations. Preserve
+shipped production adaptations unless the replacement is explicitly tested.
 
-Use TDD when adding code. Each new public symbol ships with `Test<File>_<Symbol>_{Good,Bad,Ugly}` triplets in the matching `<file>_test.go` and at least one `Example<Symbol>` in `<file>_example_test.go`. The pre-existing scaffold has a test-scaffolding backlog flagged by the v0.9.0 audit (`ax7-triplet-gaps`, `example-gaps`, `missing-test-files`, `missing-example-files`) — file the gap as it gets filled, do not extend the backlog with new untested public symbols.
+## Current repository shape
 
-## Testing
-
-The repo has a paired Go + frontend test foundation. Coverage target is ≥70% per package — proves the code works and catches regressions. Pushing individual packages to 80%+ is an open agent workstream.
-
-### One-shot entrypoints (Taskfile)
-
-```bash
-wails3 task test                 # run both suites
-wails3 task test:go              # Go pkg/... only
-wails3 task test:frontend        # Vitest only
-
-wails3 task test:cover           # both with coverage reports
-wails3 task test:cover:go        # → go/coverage.{out,html} + func table
-wails3 task test:cover:frontend  # → frontend-ng/coverage/lcov.info
-
-wails3 task api:spec             # → build/sdk/openapi.yaml
-wails3 task api:sdk:typescript   # regenerates spec then TS SDK → build/sdk/typescript-fetch/
+```text
+desktop/
+├── go.work                       # workspace contains ./go only
+├── go/
+│   ├── go.mod                    # dappco.re/lthn/desktop
+│   ├── cmd/lthn/                 # CLI, composition root, embedded assets
+│   └── pkg/                      # product services
+├── frontend-ng/                  # canonical Angular application
+├── frontend/                     # Wails mobile support bindings, not an app
+├── build/                        # Wails/platform/task configuration
+├── bundles/                      # marketplace bundle manifests
+├── docs/
+├── Taskfile.yml
+├── CLAUDE.md
+└── AGENTS.md
 ```
 
-`test:cover` prints the report paths + parse recipes (`go tool cover -func=coverage.out` for the table; `open` for the HTML viewer).
+There is no `.gitmodules` file and no tracked `external/` checkout on `main`.
+`go.work` uses only `./go`; CoreGO and its sibling capabilities resolve from
+the versioned `dappco.re/go*` modules in `go/go.mod`. Do not restore the old
+submodule topology or write new instructions that assume `external/*` exists.
+Use `go.mod`, `go.sum`, and `go.work` as the dependency truth.
 
-### Go test canon — `core/go` framework
+Version manifests are authoritative:
 
-Every test file uses the AX-shaped pattern from `dappco.re/go`:
+- `go/go.mod` — Go toolchain, Wails, CoreGO, and backend modules.
+- `frontend-ng/package.json` and `package-lock.json` — Angular, TypeScript,
+  NgRx, Lit, Wails runtime, xterm, and npm.
+- `.github/workflows/build.yml` — CI toolchain and platform matrix.
 
-```go
-package mypkg_test
+At the time of the Angular migration the main stack is Go 1.26, Angular 22,
+TypeScript 6, NgRx 21, npm, Wails 3 alpha, and the versioned
+`dappco.re/go*` framework. Read the manifests before relying on a patch-level
+version.
 
-import core "dappco.re/go"
-import "dappco.re/lthn/desktop/pkg/mypkg"
+## Code map
 
-func TestMyFunc_Good(t *core.T) {
-    r := mypkg.MyFunc("ok")
-    core.AssertTrue(t, r.OK)
-    core.AssertEqual(t, "expected", r.Value.(string))
-}
+### Go composition
 
-func TestMyFunc_Bad_EmptyInput(t *core.T) {
-    r := mypkg.MyFunc("")
-    core.AssertFalse(t, r.OK)
-}
-```
+- `go/cmd/lthn/main.go` — desktop CLI router. It dispatches `version`, `help`,
+  `gui`, `tray`, `serve`, `ai`, `config`, `state`, `events`, `process`,
+  `sessions`, `models`, `validate`, `firstlaunch`, `permissions`, `telemetry`,
+  `service`, `api`, `fleet`, `opencode`, and `marketplace`.
+- `go/cmd/lthn/app.go` — `newAppCore` and the application-wide service
+  composition root.
+- `go/cmd/lthn/embed.go` — embeds Angular `dist/` and native icons.
+- `go/pkg/desktop/` — Wails application, windows, tray, deep links, SPA
+  mounting, native policy, and runtime events.
+- `go/pkg/connection/` — WebSocket transport used by the Wails runtime. The
+  default development endpoint is `ws://localhost:9099/wails/ws`.
+- `go/pkg/server/` and `go/pkg/api/` — HTTP gateway, route groups, OpenAPI, and
+  SDK generation.
+- `go/pkg/runner/` — inference-facing service used by CLI, server, and GUI.
+- `go/pkg/appconfig/` — settings catalogue consumed by the Angular controls.
+- `go/pkg/telemetry/`, `go/pkg/fleet/`, `go/pkg/marketplace/`, and the other
+  `go/pkg/*` directories — independently registered product services.
 
-Rules:
-- External `_test` package (no internal-symbol leak — except for table-driving unexported helpers, which goes in a `package mypkg` internal_test)
-- Aliased `dappco.re/go` import gives `core.T`, `core.AssertEqual`, `core.AssertTrue`, …. **No separate `import "testing"` line.**
-- AX naming convention: `TestFunc_Good`, `TestFunc_Bad_<reason>`, `TestFunc_Ugly_<reason>`.
-- HOME-isolated fixtures (`t.TempDir()` + `os.Setenv("HOME", tmp)` + `t.Cleanup`) for anything that touches `~/Lethean/`.
-- `core.AssertError`'s variadic strings are **substring requirements**, not failure messages — pass none when you only care that err is non-nil.
+Add CLI verbs as flat `cmdX(args []string) int` handlers which delegate to
+`go/pkg/*`; do not put reusable capability into `cmd/lthn`.
 
-### Frontend test canon — Angular + Vitest
+### Angular application
 
-The Angular unit-test builder runs Vitest in jsdom. Tests are colocated as
-`*.spec.ts` under `frontend-ng/src/`; `npm run test:ci` is the non-watch gate
-and writes LCOV coverage.
+- `frontend-ng/src/main.ts` — direct Angular bootstrap.
+- `frontend-ng/src/app/app.config.ts` — hash router, NgRx, transport, WebMCP,
+  deep-link, and mobile initialisers.
+- `frontend-ng/src/app/app.routes.ts` — top-level routes:
+  `#/`, `#/w/:app`, and `#/tray`.
+- `frontend-ng/src/app/desktop/desktop.data.ts` — app and category metadata.
+- `frontend-ng/src/app/desktop/apps/app-view.ts` — lazy component registry.
+- `frontend-ng/src/app/desktop/desktop-route-tree.ts` — derives the router and
+  menus from the app/category registries.
+- `frontend-ng/src/app/desktop/window-manager.service.ts` — single source of
+  truth for Angular window state.
+- `frontend-ng/src/app/desktop/surfaces/` — lazy product surfaces and shared
+  bridge/page primitives.
+- `frontend-ng/src/app/store/` — NgRx state which crosses components or
+  transport boundaries.
+- `frontend-ng/src/app/connection-manager.service.ts` — installs the Wails
+  WebSocket transport before generated binding calls.
+- `frontend-ng/src/app/desktop/desktop-mcp.service.ts` — Angular WebMCP tools.
+- `frontend-ng/src/wails-bridge.ts` — unbootstrapped compatibility fallback;
+  it is not the primary transport.
+- `frontend-ng/src/foundations/` — design tokens and global foundations.
+- `frontend-ng/src/kit/` — active Lit-based reusable custom elements.
 
-- Use standalone components and `TestBed`.
-- For reactive rendering, act, `await fixture.whenStable()`, then assert.
-- Router tests must preserve `HashLocationStrategy` and the `#/` / `#/w/:app` contracts.
-- Keep bridge and WebMCP behaviour covered without requiring a live Wails runtime.
+When adding an Angular app surface, update `APPS`/`CATEGORIES` and
+`APP_REGISTRY`, let `DESKTOP_APP_ROUTES` derive the route tree, and extend the
+route/registry tests. Prefer standalone lazy components, `OnPush`, signals for
+local reactive state, and NgRx for shared/event-driven state. Do not recreate
+the retired custom-element view switcher.
 
-### Coverage outliers — accepted, not bugs
+## CoreGO development contract
 
-- **`pkg/services` (49.4%)** — kardianos/service writes to `~/Library/LaunchAgents/` and `~/.config/systemd/user/`. Unit tests must not mutate those. Integration-suite responsibility (container or disposable VM).
-- **`pkg/desktop` (9.3%)** — most of the 1882 LOC is inside `Service.Run()` which boots Wails. Headless-Wails integration is its own workstream.
+The user's Go framework is the `dappco.re/go*` family. In product code, prefer
+the local package's established CoreGO idiom over replacing it with generic
+stdlib patterns:
 
-Both are documented in their test files. Don't fight the ceilings; lift the other packages.
+- `core.Args`, `core.Exit`, `core.Print`, `core.Println`, and `core.ParseFlag`
+  for process/CLI boundaries.
+- `core.Result`, `core.Ok`, `core.Fail`, `core.E`, and `core.NewError` for the
+  result and error contract where the package already uses it.
+- `core.Core` service registration and lifecycle rather than package-level
+  hidden wiring.
+- Canonical services expose `Service`, `NewService(Options)`, a method
+  `Register(*core.Core) core.Result`, and a free one-shot
+  `Register(*core.Core) core.Result`, with a `// Usage example:` marker.
 
-### Open agent workstream — `>70% → 80%+`
+Use TDD for new behaviour. New public symbols should carry focused
+Good/Bad/Ugly tests and runnable examples in the matching package. Use
+`*core.T`/the package's existing test convention, `t.TempDir()`, and
+`t.Setenv("HOME", ...)` for user-data isolation. Never let a unit test write to
+the real `~/Lethean/` tree.
 
-Run `wails3 task test:cover:go`, open `go/coverage.html`, pick a package, add targeted tests for uncovered branches, re-run, commit.
+The external v0.9.0 audit currently reports a large pre-existing compliance
+backlog; it is **not** a green all-zero gate on this branch. Run it as a
+before/after no-regression diagnostic for changed Go scope. Do not claim the
+repository is globally compliant, and do not expand a task into thousands of
+unrelated mechanical rewrites.
 
-| Package | Current | Headroom |
-|---|---|---|
-| `pkg/runner` | 72.7% | router-backed Generate / Chat path (needs an httptest openai-mock backend) |
-| `pkg/sessions` | 75.6% | store-error propagation arms |
-| `pkg/permissions` | 78.3% | EntitlementChecker closure with a config service registered |
-| `pkg/telemetry` | 85.7% | NewService nil-Core sweep |
-| `pkg/firstlaunch` | 87.0% | yamlHasRoutes edge cases |
+## Build and development
 
-## Before Stopping
-
-Workspace mode is the bar. From the repo root with `go.work` active:
+Install the frontend exactly from its npm lockfile:
 
 ```bash
-go work sync
-go vet ./go/...
-wails3 task test                              # both suites
-gofmt -l go/
-bash /Users/snider/Code/core/go/tests/cli/v090-upgrade/audit.sh .
+cd frontend-ng
+npm ci
 ```
 
-The audit reports compliance dimensions. Eight code-wrongness dimensions (`banned-imports`, `err-shape-funcs`, `tuple-result-shape`, `result-discards`, `service-canonical-shape`, `service-usage-example`, `service-name-empty`, `legacy-imports`) should stay at zero on every commit. Test/example/docs completeness dimensions may carry a backlog while scaffold work continues; do not regress what is already at zero.
-
-The frontend is an Angular CSR build. From `frontend-ng/`:
+Frontend-only development:
 
 ```bash
-npm install
-npx ng build        # → ../go/cmd/lthn/dist/index.html
+cd frontend-ng
 npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
-npm run test:ci
+# http://127.0.0.1:9245/#/
 ```
 
-The Wails GUI consumer of the binary is decoupled — `lthn serve` and `lthn ai` must function with the GUI broken. Test against this property when changing dispatch.
+Full Wails development from the repository root:
+
+```bash
+wails3 task dev
+```
+
+Production Angular build:
+
+```bash
+cd frontend-ng
+npm run build
+# output: ../go/cmd/lthn/dist/index.html
+```
+
+Platform builds and packages are routed through `Taskfile.yml` and
+`build/{darwin,linux,windows,ios,android}/`. The root pre-build can also stage
+`lthn-mlx`, `lthn-agent`, and `lthn-ai`; their checkout locations are
+overridable with `LTHN_MLX_REPO`, `LTHN_AGENT_REPO`, and `LTHN_AI_REPO`.
+Do not assume those optional sibling repositories are present in CI or on
+another developer's machine.
+
+## Tests and verification
+
+Use focused tests while iterating:
+
+```bash
+go test ./go/pkg/<changed-package>
+cd frontend-ng
+npx ng test --watch=false --include=src/path/to/file.spec.ts
+```
+
+Repository entrypoints:
+
+```bash
+wails3 task test:go
+wails3 task test:frontend
+wails3 task test
+
+wails3 task test:cover:go
+wails3 task test:cover:frontend
+wails3 task test:cover
+```
+
+Frontend CI tests are Angular's Vitest runner in jsdom. Specs are colocated as
+`*.spec.ts`; reactive rendering generally needs an action followed by
+`await fixture.whenStable()`. Preserve hash-router tests and keep Wails/WebMCP
+tests independent of a live native runtime.
+
+The frontend has an improvement target of at least 70% coverage, but the
+current aggregate is below that target and no threshold is enforced by
+`vitest-base.config.ts`. Always measure a fresh report; do not copy old
+coverage percentages into plans or completion claims.
+
+Before stopping after code changes, run the checks proportional to the scope:
+
+```bash
+gofmt -l go/
+git diff --check
+go vet ./go/...
+wails3 task test
+cd frontend-ng && npm run build
+```
+
+The complete Go suite is large, noisy, and contains long security sweeps.
+`pkg/account` alone can take roughly 80 seconds. A running development
+`lthn.app` owns port `127.0.0.1:9099` and can make `pkg/desktop` fail with
+“address already in use”; close the development app before that focused test or
+record the environmental collision separately.
+
+## Known main-branch migration drift
+
+Treat these as known debt, not as canonical instructions:
+
+- `build/Taskfile.yml` still passes the removed
+  `../external/gui/go/...` path to `generate:bindings`; a clean binding
+  regeneration/CI checkout needs that command repaired before `-clean=true`
+  is trusted.
+- `.github/workflows/build.yml` still describes and checks out recursive
+  submodules even though this tree has no `.gitmodules`.
+- `build/audit.sh` still runs `bun` commands under the removed `frontend/`
+  application. Do not use it as the current all-in-one gate until it targets
+  `frontend-ng`/npm.
+- Several Go comments still point to `frontend/src/lit` or
+  `frontend/bindings`; map them to the Angular surface or
+  `frontend-ng/bindings` before treating the comment as a contract.
+- `CLAUDE.md`, `docs/development.md`, and parts of other prose still describe
+  the removed `external/` workspace or pre-Wails scaffold state.
+- The tracked Lit design ZIP and duplicate handover are redundant archives;
+  the ignored `frontend-lit-ref/` snapshot is local user material.
+
+Fix these coherently as a migration-retirement change with tests. Do not
+silently delete reference material, mobile support files, or generated
+bindings just because their directory names look old.
