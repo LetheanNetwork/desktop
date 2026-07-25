@@ -612,12 +612,12 @@ calling `verifyFrontendBuild`.
 Add a complete-font fixture test named
 `stylesheet verification rejects inline critical activation`. Give it the
 same valid CSS and four real temporary font files as the successful font test,
-but write:
+but write a stylesheet link with `onload` that is not also print-only:
 
 ```html
 <!doctype html><html><head>
   <link rel="stylesheet" href="styles.css"
-        media="print" onload="this.media='all'">
+        onload="this.media='all'">
 </head><body></body></html>
 ```
 
@@ -629,6 +629,32 @@ await assert.rejects(
   /stylesheet activation depends on inline script/,
 );
 ```
+
+Add a separate complete-font fixture named
+`stylesheet verification rejects print-only links` whose index contains:
+
+```html
+<!doctype html><html><head>
+  <link rel="stylesheet" href="styles.css" media="print">
+</head><body></body></html>
+```
+
+Assert the same
+`/stylesheet activation depends on inline script/` rejection. Keeping
+`onload` out of this fixture proves the print-only predicate independently.
+
+Add a third complete-font fixture named
+`stylesheet verification rejects a missing stylesheet link`. Its index may
+contain a non-stylesheet `<link rel="icon">`, but no stylesheet link. Assert
+rejection with:
+
+```js
+/missing active stylesheet link/
+```
+
+Use a small test helper for the repeated valid CSS/font fixture if useful, but
+keep every test's `index.html` explicit enough that the failed activation
+contract is visible at the call site.
 
 Extend the successful fixture to assert:
 
@@ -646,8 +672,8 @@ Run:
 node --test scripts/verify-frontend-build.test.mjs
 ```
 
-Expected: FAIL because the current verifier accepts the print/onload
-stylesheet and does not return `stylesheetLinks`.
+Expected: FAIL because the current verifier accepts invalid or missing
+stylesheet activation and does not return `stylesheetLinks`.
 
 - [ ] **Step 3: Implement generated-index verification**
 
