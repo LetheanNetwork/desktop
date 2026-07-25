@@ -129,6 +129,18 @@ func TestConnection_Transport_Bad_DoesNotPublishToken(t *core.T) {
 	core.AssertFalse(t, core.Contains(client, "\"token\""))
 }
 
+func TestConnection_Transport_Good_PublishesConfiguredClientURL(t *core.T) {
+	svc := NewService(Options{
+		PublicURL: "wss://api.lethean.example/wails/ws",
+		Token:     "never-publish-this-secret",
+	})
+	client := string(svc.jsClient())
+
+	core.AssertContains(t, client, `globalThis.__LTHN_CONNECTION__=Object.freeze(`)
+	core.AssertContains(t, client, `"webSocketUrl":"wss://api.lethean.example/wails/ws"`)
+	core.AssertFalse(t, core.Contains(client, "never-publish-this-secret"))
+}
+
 func TestConnection_Transport_Good_AcceptsBearerToken(t *core.T) {
 	svc, _ := startTransportFixture(t, Options{
 		Address: "127.0.0.1:0",

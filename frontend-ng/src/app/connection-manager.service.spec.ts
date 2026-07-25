@@ -120,6 +120,21 @@ describe('ConnectionManagerService', () => {
     );
   });
 
+  it('prefers a secure remote query endpoint over the browser origin', async () => {
+    configure(
+      {
+        protocol: 'https:',
+        host: 'ui.lethean.example',
+        search: '?lthn-ws=wss%3A%2F%2Fapi.lethean.example%2Fwails%2Fws',
+      },
+      {},
+    );
+    await service.ready;
+
+    expect(service.url()).toBe('wss://api.lethean.example/wails/ws');
+    expect(socketURLs).toEqual(['wss://api.lethean.example/wails/ws']);
+  });
+
   it('correlates successful and failed Wails runtime calls', async () => {
     configure();
     const connected = service.connect();
