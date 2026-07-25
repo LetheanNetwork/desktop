@@ -1,16 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback } from 'node:child_process';
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  realpath,
-  rm,
-  writeFile,
-} from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -72,9 +64,7 @@ test('mobile platforms expose public binding verification tasks', async () => {
     const taskfile = await read(`build/${platform}/Taskfile.yml`);
     assert.match(
       taskfile,
-      new RegExp(
-        `\\n  bindings:\\n(?:.*\\n)*?      - task: generate:${platform}:bindings`,
-      ),
+      new RegExp(`\\n  bindings:\\n(?:.*\\n)*?      - task: generate:${platform}:bindings`),
     );
   }
 });
@@ -92,6 +82,7 @@ test('binding tasks use the host Wails CLI and restore desktop bindings after mo
     'build/windows/Taskfile.yml',
     'build/ios/Taskfile.yml',
     'build/android/Taskfile.yml',
+    'scripts/write-binding-marker.mjs',
   ];
   for (const path of taskfiles) {
     const destination = join(harnessRoot, path);
@@ -101,24 +92,15 @@ test('binding tasks use the host Wails CLI and restore desktop bindings after mo
 
   await mkdir(join(harnessRoot, 'go/pkg/desktop'), { recursive: true });
   await mkdir(join(harnessRoot, 'frontend-ng'), { recursive: true });
-  await writeFile(
-    join(harnessRoot, 'go/go.mod'),
-    'module example.test/desktop\n\ngo 1.26\n',
-  );
+  await writeFile(join(harnessRoot, 'go/go.mod'), 'module example.test/desktop\n\ngo 1.26\n');
   await writeFile(join(harnessRoot, 'go/go.sum'), '');
-  await writeFile(
-    join(harnessRoot, 'go/pkg/desktop/desktop.go'),
-    'package desktop\n',
-  );
+  await writeFile(join(harnessRoot, 'go/pkg/desktop/desktop.go'), 'package desktop\n');
 
   const binDir = join(harnessRoot, 'test-bin');
   const cacheDir = join(harnessRoot, 'task-cache');
   const recordPath = join(harnessRoot, 'wails-invocations.jsonl');
-  const fakeWails = join(binDir, 'wails3');
   await mkdir(binDir, { recursive: true });
-  await writeFile(
-    fakeWails,
-    `#!/usr/bin/env node
+  const fakeWailsSource = `
 const { appendFileSync, mkdirSync, rmSync, writeFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 
@@ -147,20 +129,39 @@ rmSync(destination, { recursive: true, force: true });
 mkdirSync(destination, { recursive: true });
 writeFileSync(resolve(destination, 'binding-owner.json'), JSON.stringify(record));
 appendFileSync(process.env.LTHN_BINDING_RECORD, JSON.stringify(record) + '\\n');
-`,
-  );
-  await writeFile(join(binDir, 'go'), '#!/bin/sh\nexit 0\n');
-  await writeFile(
-    join(binDir, 'xcrun'),
-    '#!/bin/sh\nprintf "%s\\n" /fake/sdk\n',
-  );
-  await Promise.all(
-    ['wails3', 'go', 'xcrun'].map((name) => chmod(join(binDir, name), 0o755)),
-  );
+`;
+  let fakeWails;
+  if (process.platform === 'win32') {
+    const fakeWailsScript = join(binDir, 'wails3.cjs');
+    fakeWails = fakeWailsScript;
+    await writeFile(fakeWailsScript, fakeWailsSource);
+    await writeFile(
+      join(binDir, 'wails3.cmd'),
+      `@echo off\r\n"${process.execPath}" "${fakeWailsScript}" %*\r\n`,
+    );
+    await writeFile(join(binDir, 'go.cmd'), '@exit /b 0\r\n');
+    await writeFile(join(binDir, 'xcrun.cmd'), '@echo /fake/sdk\r\n');
+    await writeFile(
+      join(binDir, 'touch.cmd'),
+      '@echo binding tasks must not require POSIX touch 1>&2\r\n@exit /b 91\r\n',
+    );
+  } else {
+    fakeWails = join(binDir, 'wails3');
+    await writeFile(fakeWails, `#!/usr/bin/env node\n${fakeWailsSource}`);
+    await writeFile(join(binDir, 'go'), '#!/bin/sh\nexit 0\n');
+    await writeFile(join(binDir, 'xcrun'), '#!/bin/sh\nprintf "%s\\n" /fake/sdk\n');
+    await writeFile(
+      join(binDir, 'touch'),
+      '#!/bin/sh\necho "binding tasks must not require POSIX touch" >&2\nexit 91\n',
+    );
+    await Promise.all(
+      ['wails3', 'go', 'xcrun', 'touch'].map((name) => chmod(join(binDir, name), 0o755)),
+    );
+  }
 
   const env = {
     ...process.env,
-    PATH: `${binDir}:${process.env.PATH}`,
+    PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
     LTHN_BINDING_RECORD: recordPath,
     NO_COLOR: '1',
   };
@@ -173,14 +174,7 @@ appendFileSync(process.env.LTHN_BINDING_RECORD, JSON.stringify(record) + '\\n');
   const runTask = (...args) =>
     execFile(
       'task',
-      [
-        '--taskfile',
-        'Taskfile.yml',
-        '--temp-dir',
-        cacheDir,
-        '--color=false',
-        ...args,
-      ],
+      ['--taskfile', 'Taskfile.yml', '--temp-dir', cacheDir, '--color=false', ...args],
       {
         cwd: harnessRoot,
         env,
@@ -193,6 +187,10 @@ appendFileSync(process.env.LTHN_BINDING_RECORD, JSON.stringify(record) + '\\n');
   await runTask('common:generate:bindings', 'BUILD_FLAGS=-tags mcp');
   await runTask('common:generate:bindings');
   await runTask('ios:bindings');
+  await runTask('ios:bindings');
+  await runTask('ios:bindings', 'IOS_PLATFORM=device');
+  await runTask('ios:bindings', 'IOS_PLATFORM=device');
+  await runTask('ios:bindings', 'IOS_PLATFORM=simulator', 'ARCH=amd64', 'MIN_IOS_VERSION=16.0');
   await runTask('android:bindings');
   await runTask('common:generate:bindings');
 
@@ -219,17 +217,15 @@ appendFileSync(process.env.LTHN_BINDING_RECORD, JSON.stringify(record) + '\\n');
   const androidArgs = [...desktopArgs];
   androidArgs[6] = '-tags android';
 
-  assert.equal(
-    records.length,
-    6,
-    'only the repeated unmodified desktop task should skip',
-  );
+  assert.equal(records.length, 8, 'only repeated desktop and identical iOS targets should skip');
   assert.deepEqual(
     records.map(({ args }) => args),
     [
       desktopArgs,
       taggedDesktopArgs,
       desktopArgs,
+      iosArgs,
+      iosArgs,
       iosArgs,
       androidArgs,
       desktopArgs,
@@ -257,18 +253,34 @@ appendFileSync(process.env.LTHN_BINDING_RECORD, JSON.stringify(record) + '\\n');
       '-isysroot /fake/sdk -target arm64-apple-ios15.0-simulator -mios-simulator-version-min=15.0',
     CGO_LDFLAGS: '-isysroot /fake/sdk -target arm64-apple-ios15.0-simulator',
   });
-  assert.equal(records[4].env.GOOS, 'android');
-  assert.equal(records[4].env.CGO_ENABLED, '0');
+  assert.deepEqual(records[4].env, {
+    GOOS: 'ios',
+    CGO_ENABLED: '1',
+    GOARCH: 'arm64',
+    CGO_CFLAGS: '-isysroot /fake/sdk -target arm64-apple-ios15.0 -miphoneos-version-min=15.0',
+    CGO_LDFLAGS: '-isysroot /fake/sdk -target arm64-apple-ios15.0',
+  });
+  assert.deepEqual(records[5].env, {
+    GOOS: 'ios',
+    CGO_ENABLED: '1',
+    GOARCH: 'amd64',
+    CGO_CFLAGS:
+      '-isysroot /fake/sdk -target x86_64-apple-ios16.0-simulator -mios-simulator-version-min=16.0',
+    CGO_LDFLAGS: '-isysroot /fake/sdk -target x86_64-apple-ios16.0-simulator',
+  });
+  assert.deepEqual(records[6].env, {
+    GOOS: 'android',
+    CGO_ENABLED: '0',
+    GOARCH: '',
+    CGO_CFLAGS: '',
+    CGO_LDFLAGS: '',
+  });
 
-  const finalOwner = JSON.parse(
-    await readFile(join(bindingsDir, 'binding-owner.json'), 'utf8'),
-  );
+  const finalOwner = JSON.parse(await readFile(join(bindingsDir, 'binding-owner.json'), 'utf8'));
   assert.deepEqual(finalOwner, records.at(-1));
   await readFile(join(bindingsDir, '.desktop-bindings'), 'utf8');
   await assert.rejects(readFile(join(bindingsDir, '.ios-bindings'), 'utf8'));
-  await assert.rejects(
-    readFile(join(bindingsDir, '.android-bindings'), 'utf8'),
-  );
+  await assert.rejects(readFile(join(bindingsDir, '.android-bindings'), 'utf8'));
 });
 
 test('the root frontend test task runs convergence contracts', async () => {

@@ -84,8 +84,8 @@ tasks:
       - ../frontend-ng/bindings/.desktop-bindings-{{.BINDINGS_CACHE_KEY}}
     cmds:
       - wails3 generate bindings -ts -d ../frontend-ng/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/...
-      - touch ../frontend-ng/bindings/.desktop-bindings
-      - touch ../frontend-ng/bindings/.desktop-bindings-{{.BINDINGS_CACHE_KEY}}
+      - node ../scripts/write-binding-marker.mjs ../frontend-ng/bindings/.desktop-bindings
+      - node ../scripts/write-binding-marker.mjs ../frontend-ng/bindings/.desktop-bindings-{{.BINDINGS_CACHE_KEY}}
     vars:
       BINDINGS_CACHE_KEY: '{{sha256sum (.BUILD_FLAGS | default "")}}'
 

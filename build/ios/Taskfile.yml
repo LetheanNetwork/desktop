@@ -235,19 +235,22 @@ tasks:
       - go.mod
       - go.sum
     generates:
-      - frontend-ng/bindings/.ios-bindings
+      - frontend-ng/bindings/.ios-bindings-{{.BINDINGS_CACHE_KEY}}
     vars:
       SDK_PATH:
         sh: xcrun --sdk {{.IOS_SDK}} --show-sdk-path
+      BINDINGS_TARGET: '{{if eq (.ARCH | default "arm64") "amd64"}}x86_64{{else}}{{.ARCH | default "arm64"}}{{end}}-apple-ios{{.MIN_IOS_VERSION}}{{if ne .IOS_PLATFORM "device"}}-simulator{{end}}'
+      BINDINGS_CACHE_KEY: '{{sha256sum (printf "ios|%s|%s|%s|%s|%s|%s|%s|%s" (.ARCH | default "arm64") .IOS_PLATFORM .IOS_SDK .BINDINGS_TARGET .MIN_IOS_VERSION .IOS_VERSION_MIN_FLAG .SDK_PATH "-tags ios")}}'
     cmds:
       - cd "{{.GO_DIR}}" && wails3 generate bindings -ts -d ../frontend-ng/bindings -f '-tags ios' -clean=true ./pkg/desktop/...
-      - touch frontend-ng/bindings/.ios-bindings
+      - node scripts/write-binding-marker.mjs frontend-ng/bindings/.ios-bindings
+      - node scripts/write-binding-marker.mjs frontend-ng/bindings/.ios-bindings-{{.BINDINGS_CACHE_KEY}}
     env:
       GOOS: ios
       CGO_ENABLED: 1
       GOARCH: '{{.ARCH | default "arm64"}}'
-      CGO_CFLAGS: '-isysroot {{.SDK_PATH}} -target {{.IOS_TARGET}} {{.IOS_VERSION_MIN_FLAG}}'
-      CGO_LDFLAGS: '-isysroot {{.SDK_PATH}} -target {{.IOS_TARGET}}'
+      CGO_CFLAGS: '-isysroot {{.SDK_PATH}} -target {{.BINDINGS_TARGET}} {{.IOS_VERSION_MIN_FLAG}}'
+      CGO_LDFLAGS: '-isysroot {{.SDK_PATH}} -target {{.BINDINGS_TARGET}}'
 
   ensure-simulator:
     internal: true
