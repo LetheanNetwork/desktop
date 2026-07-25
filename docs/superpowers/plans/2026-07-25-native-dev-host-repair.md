@@ -592,6 +592,9 @@ git commit -m "fix(build): force production assets on macOS"
   - a build with no stylesheet link;
   - a stylesheet link containing an inline `onload`;
   - a stylesheet link restricted to `media="print"`.
+- Generated-index parsing ignores HTML comments, matches exact attribute
+  names, supports quoted and unquoted values, tokenises `rel`
+  case-insensitively, trims `media`, and validates every stylesheet link.
 - Angular's production build keeps script/style minification but sets
   `optimization.styles.inlineCritical` to `false`.
 
@@ -805,6 +808,92 @@ git commit -m "fix(frontend): keep production styles CSP compatible"
 ```
 
 Do not stage `go/cmd/lthn/dist/`; it is generated build output.
+
+- [ ] **Step 10: Add failing generated-index parser regressions**
+
+Extend `scripts/verify-frontend-build.test.mjs` with complete-font fixtures
+that independently prove:
+
+- `data-rel="stylesheet"` without a true `rel` is rejected as a missing
+  stylesheet;
+- a stylesheet present only inside an HTML comment is ignored and rejected as
+  missing;
+- `data-onload="marker"` on an otherwise valid stylesheet is not treated as
+  an inline event handler;
+- unquoted `rel=stylesheet` is accepted;
+- `media=" print "` is trimmed and rejected as print-only;
+- reordered, mixed-case attributes with a tokenised value such as
+  `REL="preload StyleSheet"` are accepted;
+- when multiple stylesheet links exist, an invalid second link is still
+  rejected.
+
+Keep the index markup visible in each case or use a table whose case names and
+markup make the boundary explicit.
+
+Run:
+
+```bash
+node --test scripts/verify-frontend-build.test.mjs
+```
+
+Expected before changing the parser: the new cases expose the current
+substring-regex false positives and false negatives.
+
+- [ ] **Step 11: Parse actual link attributes**
+
+In `scripts/verify-frontend-build.mjs`, strip HTML comments before extracting
+`link` tags. Parse each tag's whitespace-delimited attributes into exact
+case-insensitive names with values accepted in double-quoted, single-quoted,
+or unquoted form.
+
+Select stylesheets when the exact `rel` attribute contains a
+case-insensitive whitespace-delimited `stylesheet` token. Detect inline
+activation only when the exact `onload` attribute exists. Treat the exact
+`media` value as print-only after trimming whitespace and folding case.
+Validate every selected stylesheet link and continue to return each original
+tag verbatim in `stylesheetLinks`.
+
+Do not add an HTML parser dependency for this generated Angular index. Keep
+the helpers local and focused, and do not weaken any font check.
+
+- [ ] **Step 12: Correct the command-line report and rerun contracts**
+
+Change the CLI prefix from `frontend font build` to `frontend build`. Avoid
+singular/plural ambiguity by formatting the count as:
+
+```text
+stylesheet links: 1
+```
+
+Run:
+
+```bash
+node --test scripts/verify-frontend-build.test.mjs
+cd frontend-ng
+npm run test:contracts
+npm run build
+npm run verify:build
+cd ..
+rg -n '<link[^>]+stylesheet|onload=|media="print"' go/cmd/lthn/dist/index.html
+git diff --check
+```
+
+Expected: all tests and the production build/verifier PASS; the real
+generated index still contains one normal active stylesheet and no inline or
+print-only activation.
+
+- [ ] **Step 13: Commit the Task 3 parser correction**
+
+Stage only:
+
+```bash
+git add scripts/verify-frontend-build.mjs \
+  scripts/verify-frontend-build.test.mjs
+git commit -m "fix(frontend): parse generated stylesheet links"
+```
+
+Do not stage generated `go/cmd/lthn/dist/`. Return the updated review range
+based at `5bdab24` for the same specification and code-quality reviewers.
 
 ### Task 4: Prove Native HMR and Embedded Production End to End
 

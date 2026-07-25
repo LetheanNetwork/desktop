@@ -219,6 +219,12 @@ Build production Angular output and verify:
 - no required font reference is missing;
 - Geist, Geist Mono, Instrument Serif, and Font Awesome remain declared.
 
+The generated-index verifier must inspect real `link` attributes rather than
+substring matches. It ignores HTML comments, recognises quoted and unquoted
+attribute values, tokenises `rel` case-insensitively, distinguishes exact
+attribute names from `data-*` names, trims `media`, and validates every
+stylesheet link.
+
 ### Native acceptance smoke
 
 Run `wails3 task dev` without a smoke-only environment override and verify:
