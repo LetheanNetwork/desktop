@@ -1,5 +1,6 @@
 import { Service, declareExperimentalWebMcpTool, inject } from '@angular/core';
-import { APPS, ViewMode, Win } from './desktop.data';
+import { APPS } from './desktop-catalogue.data';
+import { ViewMode, Win } from './desktop.data';
 import { WindowManagerService } from './window-manager.service';
 
 const APP_IDS = Object.keys(APPS);

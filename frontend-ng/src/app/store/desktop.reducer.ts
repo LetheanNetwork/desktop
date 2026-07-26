@@ -1,5 +1,6 @@
 import { createFeature, createReducer, createSelector, on } from '@ngrx/store';
-import { APPS, DeviceSize, ViewMode, Win } from '../desktop/desktop.data';
+import { APPS } from '../desktop/desktop-catalogue.data';
+import { DeviceSize, ViewMode, Win } from '../desktop/desktop.data';
 import {
   DesktopHydration,
   SeedWindowIds,

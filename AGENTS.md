@@ -138,7 +138,14 @@ Add CLI verbs as flat `cmdX(args []string) int` handlers which delegate to
   deep-link, and mobile initialisers.
 - `frontend-ng/src/app/app.routes.ts` — top-level routes:
   `#/`, `#/w/:app`, and `#/tray`.
-- `frontend-ng/src/app/desktop/desktop.data.ts` — app and category metadata.
+- `frontend-ng/src/app/desktop/desktop-catalogue.data.ts` — typed app,
+  category, ordering, and child-navigation catalogue.
+- `frontend-ng/src/app/desktop/dev-panel.data.ts` — typed CoreGO/IDE panel
+  fixtures and route lookup.
+- `frontend-ng/src/app/desktop/desktop-shell-fixtures.data.ts` — typed world
+  clock and package-status fixtures.
+- `frontend-ng/src/app/desktop/desktop.data.ts` — shared desktop state defaults
+  and compatibility exports for the split data modules.
 - `frontend-ng/src/app/desktop/apps/app-view.ts` — lazy component registry.
 - `frontend-ng/src/app/desktop/desktop-route-tree.ts` — derives the router and
   menus from the app/category registries.

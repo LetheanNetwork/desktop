@@ -142,7 +142,7 @@ export function renderCapabilityMatrix(report) {
 
 async function readBaseApps(repoRoot) {
   const source = await readFile(
-    join(repoRoot, 'frontend-ng/src/app/desktop/desktop.data.ts'),
+    join(repoRoot, 'frontend-ng/src/app/desktop/desktop-catalogue.data.ts'),
     'utf8',
   );
   const block = source.slice(

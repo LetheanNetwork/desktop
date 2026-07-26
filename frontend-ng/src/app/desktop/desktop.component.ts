@@ -19,7 +19,10 @@ import { CommonModule } from '@angular/common';
 import { NavigationEnd, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { filter } from 'rxjs';
-import { APPS, LANGS, ORDER, TELEMETRY, Win, WindowSnapState } from './desktop.data';
+import { APPS, ORDER } from './desktop-catalogue.data';
+import { CLOCKS, PKGS } from './desktop-shell-fixtures.data';
+import { devPanelFor, type DevPanelView } from './dev-panel.data';
+import { LANGS, TELEMETRY, Win, WindowSnapState } from './desktop.data';
 import { WindowManagerService } from './window-manager.service';
 import { WindowRouteContent } from './window-route-content';
 import {
@@ -229,283 +232,13 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
 
   openCats: Record<string, boolean> = {};
   sub: ShellStartSubmenuState = { open: false, left: 0, top: 0, parent: '' };
-  // Column headings and metric labels are UI chrome. Rows, tree nodes, cards,
-  // kanban content, console lines, and terminal output model CoreGO payload data.
-  DEVPANEL: any = {
-    'control-panel': {
-      kind: 'table',
-      tiles: [
-        ['9/9', $localize`:Developer metric@@devPanel.metric.services:Services`],
-        ['34%', $localize`:Developer metric@@devPanel.metric.cpu:CPU`],
-        ['18.4 GB', $localize`:Developer metric@@devPanel.metric.memory:Mem`],
-        ['6d 4h', $localize`:Developer metric@@devPanel.metric.uptime:Uptime`],
-      ],
-      cols: JSON.stringify([
-        { key: 'svc', label: $localize`:Developer table column@@devPanel.column.service:Service` },
-        {
-          key: 'st',
-          label: $localize`:Developer table column@@devPanel.column.state:State`,
-          type: 'status',
-        },
-        {
-          key: 'port',
-          label: $localize`:Developer table column@@devPanel.column.port:Port`,
-          type: 'mono',
-        },
-      ]),
-      rows: '[{"svc":"inference","st":"running","port":"1988"},{"svc":"api","st":"running","port":"8080"},{"svc":"lethernet","st":"active","port":"4666"},{"svc":"store","st":"idle","port":"5432"}]',
-    },
-    explorer: {
-      kind: 'tree',
-      nodes: [
-        [0, 'src', 1],
-        [1, 'app', 1],
-        [2, 'app.ts', 0],
-        [2, 'app.routes.ts', 0],
-        [1, 'elements', 1],
-        [1, 'frame', 1],
-        [0, 'go', 1],
-        [1, 'cmd', 1],
-        [1, 'pkg', 1],
-        [0, 'README.md', 0],
-        [0, 'go.work', 0],
-      ],
-    },
-    search: {
-      kind: 'table',
-      cols: JSON.stringify([
-        {
-          key: 'file',
-          label: $localize`:Developer table column@@devPanel.column.file:File`,
-          type: 'mono',
-        },
-        {
-          key: 'ln',
-          label: $localize`:Developer table column@@devPanel.column.line:Ln`,
-          type: 'num',
-        },
-        { key: 'match', label: $localize`:Developer table column@@devPanel.column.match:Match` },
-      ]),
-      rows: '[{"file":"app.routes.ts","ln":58,"match":"loadComponent build"},{"file":"build.component.ts","ln":12,"match":"class BuildComponent"},{"file":"process.go","ln":204,"match":"func (s *Service) Start"}]',
-    },
-    git: {
-      kind: 'table',
-      cols: JSON.stringify([
-        {
-          key: 'change',
-          label: $localize`:Developer table column@@devPanel.column.change:Change`,
-        },
-        {
-          key: 'file',
-          label: $localize`:Developer table column@@devPanel.column.file:File`,
-          type: 'mono',
-        },
-      ]),
-      rows: '[{"change":"Modified","file":"app.routes.ts"},{"change":"Added","file":"desktop.component.ts"},{"change":"Deleted","file":"legacy/old.ts"}]',
-    },
-    build: {
-      kind: 'console',
-      lines: [
-        ['09:20:01', 'go', 'build ./cmd/lthn …'],
-        ['09:20:07', 'go', 'ok — 3 targets · 4.1s'],
-        ['09:20:07', 'ng', 'build frontend …'],
-        ['09:20:24', 'ng', '✓ 25 lazy chunks · 1.2 MB'],
-      ],
-    },
-    process: {
-      kind: 'table',
-      cols: JSON.stringify([
-        {
-          key: 'pid',
-          label: $localize`:Developer table column@@devPanel.column.pid:PID`,
-          type: 'mono',
-        },
-        {
-          key: 'cmd',
-          label: $localize`:Developer table column@@devPanel.column.command:Command`,
-        },
-        {
-          key: 'status',
-          label: $localize`:Developer table column@@devPanel.column.state:State`,
-          type: 'status',
-        },
-        {
-          key: 'cpu',
-          label: $localize`:Developer table column@@devPanel.column.cpuPercent:CPU %`,
-          type: 'num',
-        },
-      ]),
-      rows: '[{"pid":"4821","cmd":"lthn-inference serve","status":"running","cpu":142},{"pid":"5201","cmd":"go-pool worker","status":"active","cpu":3.2},{"pid":"5410","cmd":"go-proxy stratum","status":"running","cpu":1.1}]',
-    },
-    containers: {
-      kind: 'table',
-      cols: JSON.stringify([
-        {
-          key: 'name',
-          label: $localize`:Developer table column@@devPanel.column.container:Container`,
-        },
-        {
-          key: 'image',
-          label: $localize`:Developer table column@@devPanel.column.image:Image`,
-          type: 'mono',
-        },
-        {
-          key: 'st',
-          label: $localize`:Developer table column@@devPanel.column.state:State`,
-          type: 'status',
-        },
-        {
-          key: 'ports',
-          label: $localize`:Developer table column@@devPanel.column.ports:Ports`,
-          type: 'mono',
-        },
-      ]),
-      rows: '[{"name":"forgejo","image":"codeberg/forgejo","st":"running","ports":"3000"},{"name":"n8n","image":"n8nio/n8n","st":"running","ports":"5678"},{"name":"vaultwarden","image":"vaultwarden/server","st":"active","ports":"8000"},{"name":"sonarqube","image":"sonarqube:lts","st":"idle","ports":"9000"}]',
-    },
-    repos: {
-      kind: 'table',
-      cols: JSON.stringify([
-        {
-          key: 'repo',
-          label: $localize`:Developer table column@@devPanel.column.repository:Repository`,
-        },
-        {
-          key: 'branch',
-          label: $localize`:Developer table column@@devPanel.column.branch:Branch`,
-          type: 'mono',
-        },
-        {
-          key: 'st',
-          label: $localize`:Developer table column@@devPanel.column.state:State`,
-          type: 'status',
-        },
-        {
-          key: 'sync',
-          label: $localize`:Developer table column@@devPanel.column.sync:Sync`,
-          type: 'mono',
-        },
-      ]),
-      rows: '[{"repo":"core/go","branch":"dev","st":"running","sync":"↑ 0 ↓ 0"},{"repo":"core/ide","branch":"dev","st":"active","sync":"↑ 2 ↓ 0"},{"repo":"core/play","branch":"dev","st":"idle","sync":"↑ 0 ↓ 1"},{"repo":"desktop","branch":"main","st":"running","sync":"↑ 0 ↓ 0"}]',
-    },
-    devops: {
-      kind: 'table',
-      cols: JSON.stringify([
-        { key: 'play', label: $localize`:Developer table column@@devPanel.column.play:Play` },
-        {
-          key: 'host',
-          label: $localize`:Developer table column@@devPanel.column.host:Host`,
-          type: 'mono',
-        },
-        {
-          key: 'st',
-          label: $localize`:Developer table column@@devPanel.column.state:State`,
-          type: 'status',
-        },
-        {
-          key: 'dur',
-          label: $localize`:Developer table column@@devPanel.column.duration:Dur`,
-          type: 'mono',
-        },
-      ]),
-      rows: '[{"play":"provision","host":"vi-01.lan","st":"running","dur":"12s"},{"play":"deploy inference","host":"vi-02.lan","st":"active","dur":"41s"},{"play":"harden","host":"hoplite-7","st":"idle","dur":"—"}]',
-    },
-    tenant: {
-      kind: 'table',
-      cols: JSON.stringify([
-        {
-          key: 'tenant',
-          label: $localize`:Developer table column@@devPanel.column.tenant:Tenant`,
-        },
-        { key: 'plan', label: $localize`:Developer table column@@devPanel.column.plan:Plan` },
-        {
-          key: 'users',
-          label: $localize`:Developer table column@@devPanel.column.users:Users`,
-          type: 'num',
-        },
-        {
-          key: 'st',
-          label: $localize`:Developer table column@@devPanel.column.state:State`,
-          type: 'status',
-        },
-      ]),
-      rows: '[{"tenant":"lethean","plan":"Sovereign","users":42,"st":"running"},{"tenant":"host-uk","plan":"Business","users":18,"st":"active"},{"tenant":"studio","plan":"Starter","users":3,"st":"idle"}]',
-    },
-    forge: {
-      kind: 'cards',
-      cards: [
-        { title: 'go-service', sub: 'Go microservice', icon: 'server' },
-        { title: 'angular-app', sub: 'Angular 18 SPA', icon: 'window-maximize' },
-        { title: 'stim-bundle', sub: 'CorePlay bundle', icon: 'gamepad' },
-        { title: 'mcp-server', sub: 'MCP tool server', icon: 'plug' },
-      ],
-    },
-    marketplace: {
-      kind: 'cards',
-      cards: [
-        { title: 'Vi', sub: 'AI copilot', icon: 'robot' },
-        { title: 'Prettier', sub: 'Formatter', icon: 'wand-magic-sparkles' },
-        { title: 'GitLens', sub: 'Git insight', icon: 'code-branch' },
-        { title: 'Docker', sub: 'Containers', icon: 'cubes-stacked' },
-      ],
-    },
-    tasks: {
-      kind: 'kanban',
-      columns: [
-        { name: 'To do', cards: ['Rip out legacy UI', 'Wire process panel', 'LSP in editor'] },
-        { name: 'In progress', cards: ['Desktop shell', 'i18n viewer'] },
-        { name: 'Done', cards: ['Command palette', 'Theme editor', 'App categories'] },
-      ],
-    },
-    terminal: {
-      kind: 'term',
-      lines: [
-        'lthn@desktop ~/core % core build',
-        '\u2192 3 targets built in 4.1s',
-        'lthn@desktop ~/core % core play mega-lo-mania',
-        '\u2192 launching STIM bundle (retroarch)\u2026',
-        'lthn@desktop ~/core % ',
-      ],
-    },
-  };
   readonly throughput = TELEMETRY.throughput;
   readonly watts = TELEMETRY.watts;
-  clocks = [
-    {
-      city: $localize`:World clock city@@desktop.clock.london:London`,
-      zone: $localize`:World clock zone@@desktop.clock.londonZone:London`,
-      tz: 'Europe/London',
-    },
-    {
-      city: $localize`:World clock city@@desktop.clock.newYork:New York`,
-      zone: $localize`:World clock zone@@desktop.clock.newYorkZone:New York`,
-      tz: 'America/New_York',
-    },
-    {
-      city: $localize`:World clock city@@desktop.clock.singapore:Singapore`,
-      zone: $localize`:World clock zone@@desktop.clock.singaporeZone:Singapore`,
-      tz: 'Asia/Singapore',
-    },
-  ];
+  readonly clocks = CLOCKS;
   get worldClocks(): ShellWorldClock[] {
     return this.clocks.map(({ city, tz }) => ({ city, time: this.fmtTz(tz) }));
   }
-  pkgs = [
-    {
-      name: 'llama.cpp',
-      state: $localize`:Package state@@desktop.package.running:running`,
-      variant: 'ok',
-    },
-    {
-      name: 'lthn-runner',
-      state: $localize`:Package state@@desktop.package.active:active`,
-      variant: 'ok',
-    },
-    {
-      name: 'LetherNet',
-      state: $localize`:Package state@@desktop.package.idle:idle`,
-      variant: '',
-    },
-  ];
+  readonly pkgs = PKGS;
 
   get throughputJson() {
     return JSON.stringify(this.throughput);
@@ -625,9 +358,9 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       ? this.APPS[f.app].title
       : $localize`:Product name@@brand.lethean:Lethean`;
   }
-  panelFor(w: Win) {
+  panelFor(w: Win): DevPanelView {
     const route = APPS[w.app]?.route ?? '';
-    return this.DEVPANEL[route] ?? {};
+    return devPanelFor(route);
   }
   emptyFor(w: Win): [string, string, string] | null {
     return APPS[w.app]?.route === 'git'

@@ -1,9 +1,16 @@
 import { Type } from '@angular/core';
 import { ActivatedRouteSnapshot, Route, Routes } from '@angular/router';
-import { APPS, CATEGORIES, CTRL_NAV, GAMES_NAV, SETTINGS_NAV } from './desktop.data';
+import {
+  APPS,
+  CATEGORIES,
+  CTRL_NAV,
+  GAMES_NAV,
+  SETTINGS_NAV,
+  type AppNavItem,
+} from './desktop-catalogue.data';
 import { APP_REGISTRY, AppComponentLoader, AppView } from './apps/app-view';
 
-export type AppNavItem = readonly [path: string, icon: string, title: string];
+export type { AppNavItem } from './desktop-catalogue.data';
 
 export interface DesktopRouteData {
   category: string;

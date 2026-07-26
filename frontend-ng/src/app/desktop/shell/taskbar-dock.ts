@@ -7,7 +7,8 @@ import {
   input,
   output,
 } from '@angular/core';
-import type { AppDef, Win } from '../desktop.data';
+import type { AppDef } from '../desktop-catalogue.data';
+import type { Win } from '../desktop.data';
 import type { ShellUserIdentity, ShellValueEvent, ShellWindowGroup } from './shell.types';
 
 @Component({

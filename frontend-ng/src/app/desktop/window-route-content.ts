@@ -10,7 +10,9 @@ import {
 } from '@angular/core';
 import { NgComponentOutlet } from '@angular/common';
 import { Router } from '@angular/router';
-import { AppDef, APPS, Win } from './desktop.data';
+import { APPS, type AppDef } from './desktop-catalogue.data';
+import { EMPTY_DEV_PANEL, type DevPanelView } from './dev-panel.data';
+import { Win } from './desktop.data';
 import { AppView } from './apps/app-view';
 import {
   AppNavItem,
@@ -39,7 +41,7 @@ export class WindowRouteContent implements OnChanges {
   private loadedApp = '';
 
   @Input({ required: true }) win!: Win;
-  @Input() panel: unknown = {};
+  @Input() panel: DevPanelView = EMPTY_DEV_PANEL;
   @Input() empty: [string, string, string] | null = null;
 
   component: Type<AppView> | null = null;

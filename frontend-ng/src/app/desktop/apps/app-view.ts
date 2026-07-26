@@ -8,7 +8,7 @@
 //
 // The route tree resolves `win.app` → lazy component through APP_REGISTRY. To add
 // an app: build a component implementing AppView, register its dynamic import
-// here, and add its AppDef/category entry to desktop.data.ts.
+// here, and add its AppDef/category entry to desktop-catalogue.data.ts.
 // ─────────────────────────────────────────────────────────────────────────
 import { Type } from '@angular/core';
 import { Win } from '../desktop.data';

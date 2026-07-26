@@ -1,12 +1,14 @@
 // apps/dev-panel.app.ts — ONE dumb component for all 14 core/ide developer
 // panels. The shell passes the panel spec (`panel`) + app meta; this renders the
 // right shape (table/console/term/cards/tree/kanban) with a load-once skeleton
-// and an honest empty state. Panel specs live in the shell/data today; in prod
-// they arrive per-route from the CoreGo IDE API.
+// and an honest empty state. Fixture panel specs live in dev-panel.data.ts;
+// production panels will arrive per-route from the CoreGo IDE API.
 import { Component, CUSTOM_ELEMENTS_SCHEMA, Input, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AppView } from './app-view';
-import { Win, AppDef } from '../desktop.data';
+import type { AppDef } from '../desktop-catalogue.data';
+import { EMPTY_DEV_PANEL, type DevPanelConsoleLine, type DevPanelView } from '../dev-panel.data';
+import { Win } from '../desktop.data';
 
 @Component({
   selector: 'lthn-dev-panel-app',
@@ -49,7 +51,7 @@ import { Win, AppDef } from '../desktop.data';
         </ng-container>
         <ng-container *ngSwitchCase="'console'"
           ><div class="logs">
-            <div class="ln" *ngFor="let l of panel.lines">
+            <div class="ln" *ngFor="let l of consoleLines">
               <span class="t">{{ l[0] }}</span
               ><span class="c">{{ l[1] }}</span
               ><span class="m">{{ l[2] }}</span>
@@ -58,7 +60,7 @@ import { Win, AppDef } from '../desktop.data';
         >
         <ng-container *ngSwitchCase="'term'"
           ><div class="logs">
-            <div class="ln" *ngFor="let l of panel.lines">
+            <div class="ln" *ngFor="let l of terminalLines">
               <span class="m">{{ l }}</span>
             </div>
           </div></ng-container
@@ -110,9 +112,19 @@ import { Win, AppDef } from '../desktop.data';
 export class DevPanelApp implements AppView {
   @Input() win!: Win;
   @Input() app!: AppDef;
-  @Input() panel: any = {};
+  @Input() panel: DevPanelView = EMPTY_DEV_PANEL;
   /** [title, icon, message] when the panel should show an empty state (e.g. clean git tree). */
   @Input() empty: [string, string, string] | null = null;
+  get consoleLines(): readonly DevPanelConsoleLine[] {
+    return this.panel.kind === 'console'
+      ? ((this.panel.lines as readonly DevPanelConsoleLine[] | undefined) ?? [])
+      : [];
+  }
+  get terminalLines(): readonly string[] {
+    return this.panel.kind === 'term'
+      ? ((this.panel.lines as readonly string[] | undefined) ?? [])
+      : [];
+  }
   ready = false;
   ngOnInit() {
     setTimeout(() => (this.ready = true), 650);

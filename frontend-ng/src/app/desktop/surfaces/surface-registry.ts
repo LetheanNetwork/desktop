@@ -1,4 +1,4 @@
-import type { AppDef, Category } from '../desktop.data';
+import type { AppDef, Category } from '../desktop-catalogue.data';
 import type { AppComponentLoader } from '../apps/app-view';
 
 interface SurfaceDefinition {

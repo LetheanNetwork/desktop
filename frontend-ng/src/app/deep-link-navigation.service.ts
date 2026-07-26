@@ -1,7 +1,7 @@
 import { DestroyRef, InjectionToken, Service, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { Events } from '@wailsio/runtime';
-import { APPS } from './desktop/desktop.data';
+import { APPS } from './desktop/desktop-catalogue.data';
 import { readDesktopRouteCatalog, routeSegmentsForWindow } from './desktop/desktop-route-tree';
 
 const NAVIGATE_EVENT = 'navigate';

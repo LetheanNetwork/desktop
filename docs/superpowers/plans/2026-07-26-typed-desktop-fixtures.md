@@ -39,7 +39,7 @@
 - Produces behavioural contracts for reference integrity, developer-route
   coverage, valid table serialisation, IANA time zones, and package variants.
 
-- [ ] **Step 1: Write the three focused specs**
+- [x] **Step 1: Write the three focused specs**
 
   The catalogue spec iterates literal ids and fails on any dangling order or
   category reference. It also collects `APPS` entries with `dev: true` and
@@ -53,7 +53,7 @@
   requires unique clock cities and package names, and accepts only `''` or
   `'ok'` package variants.
 
-- [ ] **Step 2: Run the specs and verify RED**
+- [x] **Step 2: Run the specs and verify RED**
 
   Run:
 
@@ -76,6 +76,7 @@
 - Modify: `frontend-ng/src/app/desktop/desktop.data.ts`
 - Modify: `frontend-ng/src/app/desktop/desktop-route-tree.ts`
 - Modify: `frontend-ng/src/app/desktop/surfaces/surface-registry.ts`
+- Modify: `scripts/frontend-capability-inventory.mjs`
 - Modify direct production catalogue imports as identified by TypeScript.
 
 **Interfaces:**
@@ -91,21 +92,22 @@
   - `GAMES_NAV`
   - `SETTINGS_NAV`
 
-- [ ] **Step 1: Move the catalogue declarations unchanged**
+- [x] **Step 1: Move the catalogue declarations unchanged**
 
   Preserve each literal and compose `SURFACE_APPS`, `SURFACE_CATEGORIES`, and
   `SURFACE_CATEGORY_APPS` in the same positions.
 
-- [ ] **Step 2: Retain the compatibility facade**
+- [x] **Step 2: Retain the compatibility facade**
 
   Import and re-export catalogue values/types from `desktop.data.ts`, then use
   them unchanged in `DesktopData` and `DEFAULT_DESKTOP_DATA`.
 
-- [ ] **Step 3: Point canonical consumers at the new owner**
+- [x] **Step 3: Point canonical consumers at the new owner**
 
   Update the route tree, desktop coordinator, surface registry, reducer, route
   content, deep-link service, and desktop MCP service to import catalogue
-  values or types from `desktop-catalogue.data.ts`.
+  values or types from `desktop-catalogue.data.ts`. Point the source-based
+  capability inventory at the same authoritative file.
 
 ### Task 3: Extract and type developer-panel fixtures
 
@@ -129,16 +131,16 @@
   - `EMPTY_DEV_PANEL`
   - `devPanelFor(route: string): DevPanelView`
 
-- [ ] **Step 1: Move every panel literal into the typed catalogue**
+- [x] **Step 1: Move every panel literal into the typed catalogue**
 
   Replace raw table JSON strings with `JSON.stringify` over typed column and
   row literals while retaining the exact resulting payload.
 
-- [ ] **Step 2: Remove `DEVPANEL: any` from the component**
+- [x] **Step 2: Remove `DEVPANEL: any` from the component**
 
   Make `panelFor` return `devPanelFor(APPS[window.app]?.route ?? '')`.
 
-- [ ] **Step 3: Type the developer-panel input path**
+- [x] **Step 3: Type the developer-panel input path**
 
   Change `DevPanelApp.panel` from `any` to `DevPanelView` and
   `WindowRouteContent.panel` from `unknown` to `DevPanelView`, using
@@ -161,17 +163,17 @@
   - `CLOCKS`
   - `PKGS`
 
-- [ ] **Step 1: Move localised clock and package rows unchanged**
+- [x] **Step 1: Move localised clock and package rows unchanged**
 
   Export readonly arrays using `satisfies` and retain the existing city, zone,
   time-zone, package, state, and variant values.
 
-- [ ] **Step 2: Replace component-owned arrays**
+- [x] **Step 2: Replace component-owned arrays**
 
   Expose `readonly clocks = CLOCKS` and `readonly pkgs = PKGS`; retain
   `worldClocks` and `fmtTz` in the component.
 
-- [ ] **Step 3: Remove duplicate unlocalised declarations**
+- [x] **Step 3: Remove duplicate unlocalised declarations**
 
   Re-export the new constants through `desktop.data.ts` rather than retaining
   a second clock/package source.
@@ -188,7 +190,7 @@
 
 - Produces an updated code map naming each data owner.
 
-- [ ] **Step 1: Run the focused confidence gate**
+- [x] **Step 1: Run the focused confidence gate**
 
   Run:
 
@@ -204,13 +206,13 @@
 
   Require every focused spec to pass.
 
-- [ ] **Step 2: Update the project code map**
+- [x] **Step 2: Update the project code map**
 
   Add the catalogue, developer-panel fixture, and shell-fixture files to
   `AGENTS.md`; describe `desktop.data.ts` as the state/token compatibility
   facade.
 
-- [ ] **Step 3: Format and inspect**
+- [x] **Step 3: Format and inspect**
 
   Run Prettier on changed TypeScript/spec files, then:
 
@@ -222,7 +224,7 @@
 
   Confirm no HTML/Sass change and `.playwright-mcp/` remains unrelated.
 
-- [ ] **Step 4: Run the complete frontend gate**
+- [x] **Step 4: Run the complete frontend gate**
 
   Run:
 
@@ -234,7 +236,7 @@
 
   Require zero test failures and a successful production build.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
   Stage only the planned files and commit with:
 
