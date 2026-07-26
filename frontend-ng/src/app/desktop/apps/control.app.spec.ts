@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { DesktopLiveDataService } from '../desktop-live-data.service';
 import type { Win } from '../desktop.data';
 import { WindowManagerService } from '../window-manager.service';
+import { APP_REGISTRY } from './app-view';
 import { ControlApp } from './control.app';
 
 const controlWin: Win = {
@@ -61,6 +62,26 @@ describe('ControlApp', () => {
       (fixture.nativeElement as HTMLElement).querySelector('lthn-stat[value="34.2"]'),
     ).not.toBeNull();
     expect(liveData.control).not.toHaveBeenCalled();
+  });
+
+  it('delegates each rail section to its standalone view', async () => {
+    const expectations = [
+      ['models', 'lthn-control-models-view'],
+      ['runs', 'lthn-control-runs-view'],
+      ['power', 'lthn-control-power-view'],
+      ['system', 'lthn-control-system-view'],
+      ['settings', 'lthn-control-settings-view'],
+    ] as const;
+
+    for (const [sub, selector] of expectations) {
+      const fixture = await create({ ...controlWin, sub });
+      expect((fixture.nativeElement as HTMLElement).querySelector(selector)).not.toBeNull();
+      fixture.destroy();
+    }
+  });
+
+  it('remains the lazy component registered for Control', async () => {
+    await expect(APP_REGISTRY['control']()).resolves.toBe(ControlApp);
   });
 
   it('replaces model fixtures with the local catalogue and truthful live summary values', async () => {
