@@ -29,9 +29,10 @@ export class AgentsCodeSurface extends SurfaceRoute {
       },
       {
         title: 'Safety',
-        body: 'The viewer reads through Files.Read and never writes the selected source file.',
+        body: 'The viewer reads through Files.Preview({mountId, path}) and never writes the selected source file.',
       },
     ],
-    footer: 'read-only source view · Files.Read · open a finding from the Backlog',
+    footer:
+      'read-only source view · Files.Preview({mountId, path}) · open a finding from the Backlog',
   };
 }

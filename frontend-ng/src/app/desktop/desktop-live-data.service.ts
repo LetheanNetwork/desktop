@@ -8,7 +8,6 @@ const TELEMETRY_METHOD = 'dappco.re/lthn/desktop/pkg/telemetry.Service.CurrentSa
 const MODELS_METHOD = 'dappco.re/lthn/desktop/pkg/models.WailsService.List';
 const BENCHMARK_HISTORY_METHOD = 'dappco.re/lthn/desktop/pkg/benchmark.Service.History';
 const PROCESS_LIST_METHOD = 'dappco.re/lthn/desktop/pkg/build.Service.ProcessList';
-const FILES_SERVICE = 'dappco.re/lthn/desktop/pkg/office/files.Service';
 
 export type DesktopDataMode = 'demo' | 'live';
 
@@ -52,33 +51,6 @@ export interface DesktopProcess {
   readonly command: string;
   readonly status: string;
   readonly exitCode: number;
-}
-
-export interface FileLocation {
-  readonly name: string;
-  readonly count: number;
-  readonly size: string;
-  readonly brand: boolean;
-}
-
-export interface RecentFile {
-  readonly name: string;
-  readonly path: string;
-  readonly when: string;
-  readonly size: string;
-}
-
-export interface DiskUsage {
-  readonly free: string;
-  readonly total: string;
-  readonly usedPercent: number;
-}
-
-export interface FilesSnapshot {
-  readonly locations: readonly FileLocation[];
-  readonly recent: readonly RecentFile[];
-  readonly totalRecent: number;
-  readonly disk: DiskUsage;
 }
 
 export type ControlDataSection =
@@ -140,16 +112,6 @@ export class DesktopLiveDataService {
       throw new Error('The process registry response is unavailable.');
     }
     return raw.map(parseProcess);
-  }
-
-  async files(locationName = ''): Promise<FilesSnapshot> {
-    this.requireLiveMode();
-    const [locationsRaw, recentRaw, diskRaw] = await Promise.all([
-      this.bridge.call(`${FILES_SERVICE}.ListLocations`),
-      this.bridge.call(`${FILES_SERVICE}.ListRecent`, [{ locationName, limit: 50 }]),
-      this.bridge.call(`${FILES_SERVICE}.GetDiskUsage`),
-    ]);
-    return parseFilesSnapshot(locationsRaw, recentRaw, diskRaw);
   }
 
   async control(): Promise<ControlLiveSnapshot> {
@@ -250,58 +212,6 @@ function parseProcess(raw: unknown): DesktopProcess {
     command: requiredString(record, 'command', 'process registry'),
     status: requiredString(record, 'status', 'process registry'),
     exitCode: requiredNumber(record, 'exit_code', 'process registry'),
-  };
-}
-
-function parseFilesSnapshot(
-  locationsRaw: unknown,
-  recentRaw: unknown,
-  diskRaw: unknown,
-): FilesSnapshot {
-  const locationsRecord = requiredRecord(locationsRaw, 'file locations');
-  const locations = locationsRecord['locations'];
-  if (!Array.isArray(locations)) {
-    throw new Error('The file locations response has no valid locations.');
-  }
-
-  const recentRecord = requiredRecord(recentRaw, 'recent files');
-  const recent = recentRecord['recent'];
-  if (!Array.isArray(recent)) {
-    throw new Error('The recent files response has no valid recent rows.');
-  }
-
-  const diskRecord = requiredRecord(diskRaw, 'disk usage');
-  const disk = requiredRecord(diskRecord['disk'], 'disk usage');
-
-  return {
-    locations: locations.map(parseFileLocation),
-    recent: recent.map(parseRecentFile),
-    totalRecent: requiredNumber(recentRecord, 'total', 'recent files'),
-    disk: {
-      free: requiredString(disk, 'free', 'disk usage'),
-      total: requiredString(disk, 'total', 'disk usage'),
-      usedPercent: requiredNumber(disk, 'used', 'disk usage'),
-    },
-  };
-}
-
-function parseFileLocation(raw: unknown): FileLocation {
-  const record = requiredRecord(raw, 'file locations');
-  return {
-    name: requiredString(record, 'name', 'file locations'),
-    count: requiredNumber(record, 'count', 'file locations'),
-    size: requiredString(record, 'size', 'file locations'),
-    brand: record['brand'] === true,
-  };
-}
-
-function parseRecentFile(raw: unknown): RecentFile {
-  const record = requiredRecord(raw, 'recent files');
-  return {
-    name: requiredString(record, 'name', 'recent files'),
-    path: requiredString(record, 'path', 'recent files'),
-    when: requiredString(record, 'when', 'recent files'),
-    size: requiredString(record, 'size', 'recent files'),
   };
 }
 

@@ -148,45 +148,8 @@ describe('DesktopLiveDataService', () => {
     ]);
   });
 
-  it('combines saved locations, recent files, and disk usage into one Files snapshot', async () => {
-    surface.call.mockImplementation(async (method: string) => {
-      if (method.endsWith('.ListLocations')) {
-        return {
-          locations: [{ name: 'Code', count: 12, size: '4.2 GB', brand: false }],
-        };
-      }
-      if (method.endsWith('.ListRecent')) {
-        return {
-          recent: [
-            {
-              name: 'desktop.data.ts',
-              path: '~/Code/lthn/desktop/',
-              when: '08:31',
-              size: '7 KB',
-            },
-          ],
-          total: 1,
-        };
-      }
-      if (method.endsWith('.GetDiskUsage')) {
-        return { disk: { free: '312 GB', total: '1 TB', used: 68 } };
-      }
-      throw new Error(`Unexpected method: ${method}`);
-    });
-
-    await expect(service.files('Code')).resolves.toEqual({
-      locations: [{ name: 'Code', count: 12, size: '4.2 GB', brand: false }],
-      recent: [
-        {
-          name: 'desktop.data.ts',
-          path: '~/Code/lthn/desktop/',
-          when: '08:31',
-          size: '7 KB',
-        },
-      ],
-      totalRecent: 1,
-      disk: { free: '312 GB', total: '1 TB', usedPercent: 68 },
-    });
+  it('does not retain the retired aggregate Files bridge', () => {
+    expect('files' in service).toBe(false);
   });
 
   it('keeps successful Control sections when one backend service is unavailable', async () => {
