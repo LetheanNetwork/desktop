@@ -1,32 +1,66 @@
-// apps/files.app.ts — dumb file browser. Reads the FS tree from desktop.data;
-// folder nav = win.sub, grid/list = win.systab, driven through WindowManagerService.
 import {
+  ChangeDetectionStrategy,
   Component,
   CUSTOM_ELEMENTS_SCHEMA,
+  Injector,
   Input,
   OnInit,
-  computed,
-  inject,
-  ChangeDetectionStrategy,
-  declareExperimentalWebMcpTool,
-  signal,
+  PendingTasks,
   ViewEncapsulation,
+  computed,
+  declareExperimentalWebMcpTool,
+  inject,
+  signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { AppView } from './app-view';
-import { Win, FS, type FsNode } from '../desktop.data';
+import { ConnectionManagerService } from '../../connection-manager.service';
+import { DesktopFilesBridgeService } from '../desktop-files-bridge.service';
+import type { Win } from '../desktop.data';
 import { WindowManagerService } from '../window-manager.service';
-import { DesktopLiveDataService, FilesSnapshot } from '../desktop-live-data.service';
-import { DesktopDataStateBadge } from '../desktop-data-state-badge';
-import { DesktopDataState } from '../desktop-data-state';
+import { AppView } from './app-view';
+import { FilesBrowserView } from './files/files-browser.view';
+import { FilesDemoStore } from './files/files-demo.store';
+import { FilesOperationDialogViewComponent } from './files/files-operation-dialog.view';
+import { FilesPreviewView } from './files/files-preview.view';
+import { FilesSidebarView } from './files/files-sidebar.view';
+import { FilesStatusView } from './files/files-status.view';
+import { FilesToolbarView } from './files/files-toolbar.view';
+import type {
+  DirectorySnapshotView,
+  FilePreviewView,
+  FilesActionIntent,
+  FilesBrowserEntryView,
+  FilesCatalogueView,
+  FilesDataSource,
+  FilesDataState,
+  FilesLocation,
+  FilesOperationDialogView,
+  FilesViewMode,
+  TrashSnapshotView,
+} from './files/files-view.models';
+import {
+  buildFilesViewState,
+  filesToken,
+  parseFilesToken,
+  reconcileLocation,
+} from './files/files-view-state';
 
-type FilePlace = [string, string, string];
-type FilePlaceGroup = [string, FilePlace[]];
+const EMPTY_CATALOGUE: FilesCatalogueView = {
+  mounts: [],
+  favourites: [],
+  recent: [],
+};
 
 @Component({
   selector: 'lthn-files-app',
   standalone: true,
-  imports: [CommonModule, DesktopDataStateBadge],
+  imports: [
+    FilesSidebarView,
+    FilesToolbarView,
+    FilesBrowserView,
+    FilesStatusView,
+    FilesPreviewView,
+    FilesOperationDialogViewComponent,
+  ],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   host: { style: 'display: contents' },
   styleUrl: './files/files.app.scss',
@@ -34,452 +68,393 @@ type FilePlaceGroup = [string, FilePlace[]];
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="fb">
-      <div class="fbside">
-        <ng-container *ngFor="let grp of places()">
-          <div class="slab">{{ grp[0] }}</div>
-          <div
-            class="fbplace"
-            *ngFor="let p of grp[1]"
-            [class.on]="on(p[0])"
-            (click)="navigate(p[0])"
-          >
-            <lthn-icon [attr.name]="p[2]" size="15"></lthn-icon> {{ p[1] }}
-          </div>
-        </ng-container>
-      </div>
-      <div class="fbmain">
-        <div class="fbtop">
-          <div class="fbnav">
-            <button
-              [attr.disabled]="up() ? null : ''"
-              (click)="navigate(up())"
-              aria-label="Up"
-              i18n-aria-label="Navigate to parent folder@@files.action.up"
-            >
-              <lthn-icon name="arrow-up" size="13"></lthn-icon>
-            </button>
-            <button
-              [attr.disabled]="id() === 'home' ? '' : null"
-              (click)="navigate('home')"
-              aria-label="Home"
-              i18n-aria-label="Navigate to home folder@@files.action.home"
-            >
-              <lthn-icon name="house" size="13"></lthn-icon>
-            </button>
-          </div>
-          <div class="fbcrumb">
-            <ng-container *ngFor="let c of crumb(); let i = index; let last = last">
-              <span class="sep" *ngIf="i">/</span>
-              <span class="cr" [class.here]="last" (click)="navigate(c[0])">{{ c[1] }}</span>
-            </ng-container>
-          </div>
-          <div class="fbvtog">
-            <button
-              [class.on]="!list()"
-              (click)="wm.setSysTab(win.id, 'grid')"
-              aria-label="Grid view"
-              i18n-aria-label="File grid view action@@files.action.gridView"
-            >
-              <lthn-icon name="table-cells-large" size="12"></lthn-icon>
-            </button>
-            <button
-              [class.on]="list()"
-              (click)="wm.setSysTab(win.id, 'list')"
-              aria-label="List view"
-              i18n-aria-label="File list view action@@files.action.listView"
-            >
-              <lthn-icon name="list" size="12"></lthn-icon>
-            </button>
-          </div>
-        </div>
-        <div class="fbbody">
-          <div class="fbempty" *ngIf="!items().length">
-            <lthn-icon
-              [attr.name]="id() === 'trash' ? 'trash-can' : 'folder-open'"
-              size="36"
-            ></lthn-icon>
-            <div>{{ emptyLabel() }}</div>
-          </div>
-          <div class="fblist" *ngIf="items().length && list()">
-            <div class="fbrow head">
-              <span i18n="File list column@@files.column.name">Name</span
-              ><span i18n="File list column@@files.column.size">Size</span
-              ><span i18n="File list column@@files.column.modified">Modified</span>
-            </div>
-            <div
-              class="fbrow"
-              *ngFor="let it of items()"
-              [attr.data-sub]="it.k === 'folder' ? it.to : null"
-              (click)="it.k === 'folder' && navigate(it.to ?? '')"
-            >
-              <span class="nm"
-                ><lthn-icon [attr.name]="icon(it.k)" size="15"></lthn-icon
-                ><span>{{ it.n }}</span></span
-              ><span class="mut">{{ it.c || '—' }}</span
-              ><span class="mut">{{ it.m || '—' }}</span>
-            </div>
-          </div>
-          <div class="fbgrid" *ngIf="items().length && !list()">
-            <div
-              class="fbcell"
-              *ngFor="let it of items()"
-              (click)="it.k === 'folder' && navigate(it.to ?? '')"
-            >
-              <lthn-icon
-                class="fi"
-                [class.folder]="it.k === 'folder'"
-                [attr.name]="icon(it.k)"
-                size="30"
-              ></lthn-icon
-              ><span class="fn">{{ it.n }}</span
-              ><span class="fc">{{ it.c }}</span>
-            </div>
-          </div>
-        </div>
-        <div class="fbstatus">
-          <lthn-desktop-data-state [state]="dataState()" />
-          <span>{{ status() }}</span
-          ><span class="v">{{ diskLabel() }}</span>
-        </div>
-      </div>
+      <lthn-files-sidebar-view [state]="viewState()" (intent)="handleIntent($event)" />
+      <main class="fbmain">
+        <lthn-files-toolbar-view
+          [state]="viewState()"
+          [selection]="selection()"
+          (intent)="handleIntent($event)"
+        />
+        <lthn-files-browser-view
+          [state]="viewState()"
+          [selectedKey]="selectedKey()"
+          (intent)="handleIntent($event)"
+        />
+        <lthn-files-status-view [state]="viewState()" />
+      </main>
+      @if (preview(); as filePreview) {
+        <lthn-files-preview-view [preview]="filePreview" (intent)="handleIntent($event)" />
+      }
+      @if (dialog(); as operationDialog) {
+        <lthn-files-operation-dialog-view
+          [dialog]="operationDialog"
+          [catalogue]="catalogue()"
+          (intent)="handleIntent($event)"
+        />
+      }
     </div>
   `,
 })
 export class FilesApp implements AppView, OnInit {
   @Input() win!: Win;
-  wm = inject(WindowManagerService);
-  private readonly liveData = inject(DesktopLiveDataService);
-  private readonly demoPlaces: FilePlaceGroup[] = [
-    [
-      $localize`:File browser sidebar group@@files.sidebar.favourites:Favourites`,
-      [
-        ['home', $localize`:File browser place@@files.place.home:Home`, 'house'],
-        ['documents', $localize`:File browser place@@files.place.documents:Documents`, 'folder'],
-        ['downloads', $localize`:File browser place@@files.place.downloads:Downloads`, 'download'],
-        ['models', $localize`:File browser place@@files.place.models:Models`, 'cube'],
-        ['projects', $localize`:File browser place@@files.place.projects:Projects`, 'folder-tree'],
-      ],
-    ],
-    [
-      $localize`:File browser sidebar group@@files.sidebar.locations:Locations`,
-      [
-        [
-          'lethernet',
-          $localize`:Application title@@app.lethernet.title:LetherNet`,
-          'network-wired',
-        ],
-        ['trash', $localize`:File browser place@@files.place.trash:Trash`, 'trash-can'],
-      ],
-    ],
-  ];
-  private readonly liveSnapshot = signal<FilesSnapshot | null>(null);
-  private readonly liveFileSystem = signal<Record<string, FsNode>>({});
-  readonly dataState = signal<DesktopDataState>(
-    this.liveData.mode() === 'demo' ? 'demo' : 'loading',
+
+  private readonly connection = inject(ConnectionManagerService);
+  private readonly bridge = inject(DesktopFilesBridgeService);
+  private readonly wm = inject(WindowManagerService);
+  private readonly pendingTasks = inject(PendingTasks);
+  private readonly injector = inject(Injector);
+  private readonly demoStore = new FilesDemoStore();
+
+  readonly catalogue = signal<FilesCatalogueView>(EMPTY_CATALOGUE);
+  readonly location = signal<FilesLocation>({ kind: 'home' });
+  readonly directory = signal<DirectorySnapshotView | null>(null);
+  readonly trashSnapshot = signal<TrashSnapshotView | null>(null);
+  readonly preview = signal<FilePreviewView | null>(null);
+  readonly dialog = signal<FilesOperationDialogView | null>(null);
+  readonly dataState = signal<FilesDataState>(this.connection.offline() ? 'demo' : 'loading');
+  readonly viewMode = signal<FilesViewMode>('grid');
+  readonly selectedKey = signal('');
+  readonly failure = signal('');
+
+  readonly viewState = computed(() =>
+    buildFilesViewState({
+      catalogue: this.catalogue(),
+      location: this.location(),
+      directory: this.directory(),
+      trash: this.trashSnapshot(),
+      dataState: this.dataState(),
+      viewMode: this.viewMode(),
+    }),
   );
-  readonly diskLabel = computed(() => {
-    const disk = this.liveSnapshot()?.disk;
-    return disk
-      ? `${disk.free} free of ${disk.total}`
-      : $localize`:Demo disk free-space status@@files.freeSpace:218 GB free of 512 GB`;
-  });
-  readonly places = computed<FilePlaceGroup[]>(() => {
-    const snapshot = this.liveSnapshot();
-    if (this.dataState() !== 'live' || !snapshot) return this.demoPlaces;
-    return [
-      [
-        $localize`:File browser sidebar group@@files.sidebar.favourites:Favourites`,
-        [['home', $localize`:File browser place@@files.place.home:Home`, 'house']],
-      ],
-      [
-        $localize`:File browser sidebar group@@files.sidebar.locations:Locations`,
-        snapshot.locations.map((location): FilePlace => [
-          locationId(location.name),
-          location.name,
-          locationIcon(location.name),
-        ]),
-      ],
-    ];
-  });
-  private readonly mcpTools = this.registerMcpTools();
+  readonly selection = computed<FilesBrowserEntryView | null>(
+    () => this.viewState().entries.find((entry) => entryKey(entry) === this.selectedKey()) ?? null,
+  );
+
+  private loadVersion = 0;
+  private previewVersion = 0;
+  private hasSuccessfulView = false;
+  private readonly observedMcpTokens = new Set<string>();
 
   ngOnInit(): void {
-    if (this.liveData.mode() === 'demo') {
-      this.dataState.set('demo');
+    this.viewMode.set(this.win.systab === 'grid' ? 'grid' : 'list');
+    this.pendingTasks.run(async () => {
+      await Promise.all([
+        this.initialise(),
+        this.win.app === 'files' ? this.registerMcpTools() : Promise.resolve(),
+      ]);
+    });
+  }
+
+  handleIntent(intent: FilesActionIntent): void {
+    switch (intent.type) {
+      case 'navigate':
+        this.pendingTasks.run(() => this.navigateToken(intent.token));
+        return;
+      case 'home':
+        this.pendingTasks.run(() => this.navigateToken('home'));
+        return;
+      case 'up':
+        if (this.viewState().upToken) {
+          this.pendingTasks.run(() => this.navigateToken(this.viewState().upToken));
+        }
+        return;
+      case 'refresh':
+        this.pendingTasks.run(() => this.refresh());
+        return;
+      case 'set-view':
+        this.viewMode.set(intent.view);
+        this.wm.setSysTab(this.win.id, intent.view);
+        return;
+      case 'select-entry':
+        this.selectedKey.set(`${intent.mountId}::${intent.path}::${intent.receiptId}`);
+        return;
+      case 'open-directory':
+        this.pendingTasks.run(() =>
+          this.navigateLocation({
+            kind: 'directory',
+            mountId: intent.mountId,
+            path: intent.path,
+          }),
+        );
+        return;
+      case 'preview':
+        this.pendingTasks.run(() => this.loadPreview(intent.mountId, intent.path));
+        return;
+      case 'close-preview':
+        this.preview.set(null);
+        return;
+      case 'dismiss-dialog':
+        this.dialog.set(null);
+        return;
+      case 'open-operation':
+      case 'submit-operation':
+        // Task 14 owns mutation orchestration. The typed views are already wired.
+        return;
+    }
+  }
+
+  async navigateToken(token: string): Promise<void> {
+    const location = reconcileLocation(parseFilesToken(token), this.catalogue());
+    await this.navigateLocation(location);
+  }
+
+  async refresh(): Promise<void> {
+    const version = ++this.loadVersion;
+    const source = this.source();
+    const previousState = this.dataState();
+    if (!this.connection.offline()) this.dataState.set('loading');
+    try {
+      let catalogue = this.catalogue();
+      if (this.location().kind === 'home') {
+        catalogue = await source.listMounts();
+        if (version !== this.loadVersion) return;
+        this.catalogue.set(catalogue);
+        this.location.set(reconcileLocation(this.location(), catalogue));
+      }
+      await this.loadLocation(source, this.location(), version);
+      if (version !== this.loadVersion) return;
+      this.markSuccessful();
+    } catch (error) {
+      if (version !== this.loadVersion) return;
+      this.applyLoadFailure(error, previousState);
+    }
+  }
+
+  private async initialise(): Promise<void> {
+    const version = ++this.loadVersion;
+    const source = this.source();
+    this.dataState.set(this.connection.offline() ? 'demo' : 'loading');
+    try {
+      const catalogue = await source.listMounts();
+      if (version !== this.loadVersion) return;
+      this.catalogue.set(catalogue);
+      const location = reconcileLocation(parseFilesToken(this.win.sub || 'home'), catalogue);
+      this.location.set(location);
+      await this.loadLocation(source, location, version);
+      if (version !== this.loadVersion) return;
+      this.markSuccessful();
+    } catch (error) {
+      if (version !== this.loadVersion) return;
+      this.applyLoadFailure(error, this.dataState());
+    }
+  }
+
+  private async navigateLocation(location: FilesLocation): Promise<void> {
+    const reconciled = reconcileLocation(location, this.catalogue());
+    const token = filesToken(reconciled);
+    this.wm.setSub(this.win.id, token);
+    this.location.set(reconciled);
+    this.selectedKey.set('');
+    this.preview.set(null);
+    this.failure.set('');
+
+    const version = ++this.loadVersion;
+    const previousState = this.dataState();
+    if (!this.connection.offline()) this.dataState.set('loading');
+    try {
+      await this.loadLocation(this.source(), reconciled, version);
+      if (version !== this.loadVersion) return;
+      this.markSuccessful();
+    } catch (error) {
+      if (version !== this.loadVersion) return;
+      this.applyLoadFailure(error, previousState);
+    }
+  }
+
+  private async loadLocation(
+    source: FilesDataSource,
+    location: FilesLocation,
+    version: number,
+  ): Promise<void> {
+    if (location.kind === 'home') {
+      if (version !== this.loadVersion) return;
+      this.directory.set(null);
+      this.trashSnapshot.set(null);
       return;
     }
-    this.dataState.set('loading');
-    void this.refresh(this.win.sub || 'home');
+    if (location.kind === 'trash') {
+      const trash = await source.listTrash();
+      if (version !== this.loadVersion) return;
+      this.directory.set(null);
+      this.trashSnapshot.set(trash);
+      return;
+    }
+    const directory = await source.listDirectory({
+      mountId: location.mountId,
+      path: location.path,
+      cursor: '',
+      limit: 200,
+    });
+    if (version !== this.loadVersion) return;
+    this.directory.set(directory);
+    this.trashSnapshot.set(null);
   }
 
-  async refresh(requestedId = this.id()): Promise<void> {
-    if (this.liveData.mode() === 'demo') return;
+  private async loadPreview(mountId: string, path: string): Promise<void> {
+    const version = ++this.previewVersion;
     try {
-      const requestedLocation = locationNameForId(this.liveSnapshot(), requestedId);
-      const snapshot = await this.liveData.files(requestedLocation);
-      this.liveSnapshot.set(snapshot);
-      this.liveFileSystem.set(buildLiveFileSystem(snapshot, requestedId));
-      this.dataState.set('live');
-    } catch {
-      this.liveSnapshot.set(null);
-      this.liveFileSystem.set({});
-      this.dataState.set('unavailable');
+      const preview = await this.source().preview({ mountId, path });
+      if (version !== this.previewVersion) return;
+      this.preview.set(preview);
+      this.failure.set('');
+    } catch (error) {
+      if (version !== this.previewVersion) return;
+      this.failure.set(errorMessage(error));
     }
   }
 
-  navigate(id: string): void {
-    if (!id) return;
-    this.wm.setSub(this.win.id, id);
-    if (this.liveData.mode() === 'live') void this.refresh(id);
+  private markSuccessful(): void {
+    this.hasSuccessfulView = true;
+    this.failure.set('');
+    this.dataState.set(this.connection.offline() ? 'demo' : 'live');
   }
 
-  private fileSystem(): Record<string, FsNode> {
-    return this.dataState() === 'live' ? this.liveFileSystem() : FS;
-  }
-
-  id() {
-    const fileSystem = this.fileSystem();
-    return fileSystem[this.win.sub] ? this.win.sub : 'home';
-  }
-  folder() {
-    return this.fileSystem()[this.id()];
-  }
-  items() {
-    return this.folder().items;
-  }
-  up() {
-    return this.folder().up || '';
-  }
-  list() {
-    return this.win.systab === 'list';
-  }
-  emptyLabel() {
-    return this.id() === 'trash'
-      ? $localize`:Empty trash message@@files.empty.trash:Trash is empty`
-      : $localize`:Empty folder message@@files.empty.folder:This folder is empty`;
-  }
-  crumb(): [string, string][] {
-    const out: [string, string][] = [];
-    const fileSystem = this.fileSystem();
-    let c: string | null = this.id();
-    while (c && fileSystem[c]) {
-      out.unshift([c, fileSystem[c].name]);
-      c = fileSystem[c].up;
+  private applyLoadFailure(error: unknown, previousState: FilesDataState): void {
+    this.failure.set(errorMessage(error));
+    if (this.hasSuccessfulView) {
+      this.dataState.set(this.connection.offline() ? previousState : 'stale');
+      return;
     }
-    return out;
+    this.catalogue.set(EMPTY_CATALOGUE);
+    this.location.set({ kind: 'home' });
+    this.directory.set(null);
+    this.trashSnapshot.set(null);
+    this.dataState.set('unavailable');
   }
-  on(id: string) {
-    return this.id() === id || this.crumb().some((c) => c[0] === id);
-  }
-  icon(k: string) {
-    return (
-      (
-        {
-          folder: 'folder',
-          doc: 'file-lines',
-          pdf: 'file-pdf',
-          img: 'file-image',
-          code: 'file-code',
-          zip: 'file-zipper',
-          model: 'cube',
-          audio: 'file-audio',
-        } as any
-      )[k] || 'file'
-    );
-  }
-  status() {
-    const items = this.items();
-    if (!items.length) return $localize`:File browser item count@@files.status.noItems:0 items`;
-    const nf = items.filter((i) => i.k === 'folder').length,
-      nfile = items.length - nf;
-    const itemLabel =
-      items.length === 1
-        ? $localize`:Singular item label@@files.count.item:item`
-        : $localize`:Plural item label@@files.count.items:items`;
-    const folderLabel =
-      nf === 1
-        ? $localize`:Singular folder label@@files.count.folder:folder`
-        : $localize`:Plural folder label@@files.count.folders:folders`;
-    const fileLabel =
-      nfile === 1
-        ? $localize`:Singular file label@@files.count.file:file`
-        : $localize`:Plural file label@@files.count.files:files`;
-    return $localize`:File browser item summary@@files.status.summary:${items.length}:itemCount: ${itemLabel}:itemLabel: · ${nf}:folderCount: ${folderLabel}:folderLabel:, ${nfile}:fileCount: ${fileLabel}:fileLabel:`;
+
+  private source(): FilesDataSource {
+    return this.connection.offline() ? this.demoStore : this.bridge;
   }
 
   private async registerMcpTools(): Promise<void> {
-    const locations = [
-      ...Object.keys(FS),
-      'code',
-      'lthn-models',
-      'recordings',
-      'screenshots',
-    ].filter((id, index, values) => values.indexOf(id) === index);
-
     await Promise.all([
-      declareExperimentalWebMcpTool({
-        name: 'files_read_location',
-        description: 'Reads the Files app location, breadcrumbs, view mode, and visible items.',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-          additionalProperties: false,
-        },
-        execute: () => ({
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                location_id: this.id(),
-                location_name: this.folder().name,
-                breadcrumbs: this.crumb().map(([id, name]) => ({ id, name })),
-                view: this.list() ? 'list' : 'grid',
-                items: this.items(),
-              }),
-            },
-          ],
-        }),
-      }),
-      declareExperimentalWebMcpTool({
-        name: 'files_navigate',
-        description: 'Navigates the Files app to a known location.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            location_id: {
-              type: 'string',
-              enum: locations,
-              description: 'Location id from files_read_location.',
-            },
+      declareExperimentalWebMcpTool(
+        {
+          name: 'files_read_location',
+          description:
+            'Reads the Files location, breadcrumbs, view mode, data state, and visible provider-neutral entries.',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+            additionalProperties: false,
           },
-          required: ['location_id'],
-          additionalProperties: false,
-        },
-        execute: ({ location_id }) => {
-          const available = Object.keys(this.fileSystem());
-          if (!available.includes(location_id)) {
-            throw new Error(
-              `Unknown Files location "${location_id}". Expected one of: ${available.join(', ')}.`,
-            );
-          }
-          this.navigate(location_id);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ ok: true, location_id }),
-              },
-            ],
-          };
-        },
-      }),
-      declareExperimentalWebMcpTool({
-        name: 'files_set_view',
-        description: 'Switches the Files app between grid and list views.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            view: {
-              type: 'string',
-              enum: ['grid', 'list'],
-              description: 'Files item presentation.',
-            },
+          execute: () => {
+            const state = this.viewState();
+            const observed = [state.token, ...state.breadcrumbs.map(({ token }) => token)];
+            observed.forEach((token) => this.observedMcpTokens.add(token));
+            const mountId = state.location.kind === 'directory' ? state.location.mountId : '';
+            const path = state.location.kind === 'directory' ? state.location.path : '';
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    location_id: state.token,
+                    location_name: state.providerLabel,
+                    mount_id: mountId,
+                    path,
+                    breadcrumbs: state.breadcrumbs.map(({ token, label }) => ({
+                      id: token,
+                      name: label,
+                    })),
+                    view: state.viewMode,
+                    data_state: state.dataState,
+                    items: state.entries.map((entry) => ({
+                      mountId: entry.mountId,
+                      path: entry.relativePath,
+                      name: entry.name,
+                      kind: entry.kind,
+                      sizeBytes: entry.sizeBytes,
+                      modifiedAt: entry.modifiedAt,
+                    })),
+                  }),
+                },
+              ],
+            };
           },
-          required: ['view'],
-          additionalProperties: false,
         },
-        execute: ({ view }) => {
-          if (view !== 'grid' && view !== 'list') {
-            throw new Error(`Unknown Files view "${view}". Expected grid or list.`);
-          }
-          this.wm.setSysTab(this.win.id, view);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ ok: true, view }),
+        this.injector,
+      ),
+      declareExperimentalWebMcpTool(
+        {
+          name: 'files_navigate',
+          description:
+            'Navigates Files to a current root or a nested token previously returned by files_read_location.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              location_id: {
+                type: 'string',
+                description: 'Location token from files_read_location.',
               },
-            ],
-          };
+            },
+            required: ['location_id'],
+            additionalProperties: false,
+          },
+          execute: async ({ location_id }) => {
+            const rootTokens = ['home', 'trash', ...this.catalogue().mounts.map(({ id }) => id)];
+            if (!rootTokens.includes(location_id) && !this.observedMcpTokens.has(location_id)) {
+              throw new Error(
+                `Unknown Files location "${location_id}". Expected one of: ${rootTokens.join(', ')}.`,
+              );
+            }
+            await this.navigateToken(location_id);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({ ok: true, location_id }),
+                },
+              ],
+            };
+          },
         },
-      }),
+        this.injector,
+      ),
+      declareExperimentalWebMcpTool(
+        {
+          name: 'files_set_view',
+          description: 'Switches Files between grid and list views.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              view: {
+                type: 'string',
+                enum: ['grid', 'list'],
+                description: 'Files item presentation.',
+              },
+            },
+            required: ['view'],
+            additionalProperties: false,
+          },
+          execute: ({ view }) => {
+            if (view !== 'grid' && view !== 'list') {
+              throw new Error(`Unknown Files view "${view}". Expected grid or list.`);
+            }
+            this.viewMode.set(view);
+            this.wm.setSysTab(this.win.id, view);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({ ok: true, view }),
+                },
+              ],
+            };
+          },
+        },
+        this.injector,
+      ),
     ]);
   }
 }
 
-function buildLiveFileSystem(snapshot: FilesSnapshot, requestedId: string): Record<string, FsNode> {
-  const recentItems: FsNode['items'] = snapshot.recent.map((file) => ({
-    n: file.name,
-    k: fileKind(file.name),
-    c: file.size,
-    m: `${file.when} · ${file.path}`,
-  }));
-  const locationItems: FsNode['items'] = snapshot.locations.map((location) => ({
-    n: location.name,
-    k: 'folder',
-    to: locationId(location.name),
-    c: `${location.count} ${location.count === 1 ? 'item' : 'items'} · ${location.size}`,
-  }));
-  const fileSystem: Record<string, FsNode> = {
-    home: {
-      name: $localize`:File browser place@@files.place.home:Home`,
-      up: null,
-      items: [...locationItems, ...recentItems],
-    },
-  };
-  for (const location of snapshot.locations) {
-    const id = locationId(location.name);
-    fileSystem[id] = {
-      name: location.name,
-      up: 'home',
-      items: requestedId === id ? recentItems : [],
-    };
-  }
-  return fileSystem;
+function entryKey(entry: FilesBrowserEntryView): string {
+  return `${entry.mountId}::${entry.relativePath}::${entry.receiptId}`;
 }
 
-function locationId(name: string): string {
-  return (
-    name
-      .toLocaleLowerCase('en-GB')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '') || 'location'
-  );
-}
-
-function locationNameForId(snapshot: FilesSnapshot | null, id: string): string {
-  if (!id || id === 'home') return '';
-  const liveName = snapshot?.locations.find((location) => locationId(location.name) === id)?.name;
-  if (liveName) return liveName;
-  const known: Record<string, string> = {
-    code: 'Code',
-    documents: 'Documents',
-    models: 'lthn / models',
-    'lthn-models': 'lthn / models',
-    recordings: 'Recordings',
-    screenshots: 'Screenshots',
-  };
-  return known[id] ?? '';
-}
-
-function locationIcon(name: string): string {
-  const id = locationId(name);
-  if (id.includes('model')) return 'cube';
-  if (id.includes('record')) return 'microphone';
-  if (id.includes('screen')) return 'image';
-  if (id === 'code') return 'code';
-  return 'folder';
-}
-
-function fileKind(name: string): string {
-  const extension = name.split('.').at(-1)?.toLocaleLowerCase('en-GB') ?? '';
-  if (extension === 'pdf') return 'pdf';
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(extension)) return 'img';
-  if (['zip', 'gz', 'tgz', 'tar', 'dmg'].includes(extension)) return 'zip';
-  if (['gguf', 'safetensors'].includes(extension)) return 'model';
-  if (['mp3', 'wav', 'm4a', 'flac'].includes(extension)) return 'audio';
-  if (['ts', 'js', 'go', 'json', 'yaml', 'yml', 'md', 'html', 'css', 'scss'].includes(extension)) {
-    return 'code';
-  }
-  return 'doc';
+function errorMessage(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : $localize`:Unknown Files provider error@@files.error.unknown:The Files provider is unavailable.`;
 }
