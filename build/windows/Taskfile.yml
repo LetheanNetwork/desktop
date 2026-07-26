@@ -17,7 +17,7 @@ vars:
   # CERT_PATH keeps MSIX signing optional for local packages.
   CERT_PATH: ""
   #
-  # Password is stored securely in system keychain. Run: wails3 setup signing
+  # Password is stored securely in system keychain. Run: go tool wails3 setup signing
 
   # Docker image for cross-compilation with CGO (used when CGO_ENABLED=1 on non-Windows).
   # Renamed from the wails3-scaffold `wails-cross` so multiple wails3
@@ -81,7 +81,7 @@ tasks:
       - sh: docker image inspect {{.CROSS_IMAGE}} > /dev/null 2>&1
         msg: |
           Docker image '{{.CROSS_IMAGE}}' not found.
-          Build it first: wails3 task setup:docker
+          Build it first: go tool wails3 task setup:docker
     cmds:
       - task: generate:syso
         vars:
@@ -127,7 +127,7 @@ tasks:
       # Go links syso files automatically when they live in the main
       # package directory. With go/cmd/lthn/ as our main, the syso
       # must land there — NOT at repo root like the scaffold default.
-      - wails3 generate syso -arch {{.ARCH}} -icon windows/icon.ico -manifest windows/wails.exe.manifest -info windows/info.json -out ../{{.GO_DIR}}/cmd/lthn/wails_windows_{{.ARCH}}.syso
+      - '{{.WAILS3_TOOL}} generate syso -arch {{.ARCH}} -icon windows/icon.ico -manifest windows/wails.exe.manifest -info windows/info.json -out ../{{.GO_DIR}}/cmd/lthn/wails_windows_{{.ARCH}}.syso'
     vars:
       ARCH: '{{.ARCH | default ARCH}}'
 
@@ -140,7 +140,7 @@ tasks:
           ARCH: '{{.ARCH | default ARCH}}'
     cmds:
       # Create the Microsoft WebView2 bootstrapper if it doesn't exist
-      - wails3 generate webview2bootstrapper -dir "{{.ROOT_DIR}}/build/windows/nsis"
+      - '{{.WAILS3_TOOL}} generate webview2bootstrapper -dir "{{.ROOT_DIR}}/build/windows/nsis"'
       - | 
         {{if eq OS "windows"}}
         makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}\{{.BIN_DIR}}\{{.APP_NAME}}.exe" project.nsi
@@ -159,7 +159,7 @@ tasks:
           ARCH: '{{.ARCH | default ARCH}}'
     cmds:
       - |-
-        wails3 tool msix \
+        {{.WAILS3_TOOL}} tool msix \
           --config "{{.ROOT_DIR}}/wails.json" \
           --name "{{.APP_NAME}}" \
           --executable "{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" \
@@ -177,7 +177,7 @@ tasks:
   install:msix:tools:
     summary: Installs tools required for MSIX packaging
     cmds:
-      - wails3 tool msix-install-tools
+      - '{{.WAILS3_TOOL}} tool msix-install-tools'
 
   run:
     cmds:
@@ -188,11 +188,11 @@ tasks:
     desc: |
       Signs the .exe with an Authenticode certificate.
       Configure SIGN_CERTIFICATE or SIGN_THUMBPRINT in the vars section at the top of this file.
-      Password is retrieved from system keychain (run: wails3 setup signing)
+      Password is retrieved from system keychain (run: go tool wails3 setup signing)
     deps:
       - task: build
     cmds:
-      - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.exe" {{if .SIGN_CERTIFICATE}}--certificate {{.SIGN_CERTIFICATE}}{{end}} {{if .SIGN_THUMBPRINT}}--thumbprint {{.SIGN_THUMBPRINT}}{{end}} {{if .TIMESTAMP_SERVER}}--timestamp {{.TIMESTAMP_SERVER}}{{end}}
+      - '{{.WAILS3_TOOL}} tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.exe" {{if .SIGN_CERTIFICATE}}--certificate {{.SIGN_CERTIFICATE}}{{end}} {{if .SIGN_THUMBPRINT}}--thumbprint {{.SIGN_THUMBPRINT}}{{end}} {{if .TIMESTAMP_SERVER}}--timestamp {{.TIMESTAMP_SERVER}}{{end}}'
     preconditions:
       - sh: '[ -n "{{.SIGN_CERTIFICATE}}" ] || [ -n "{{.SIGN_THUMBPRINT}}" ]'
         msg: "Either SIGN_CERTIFICATE or SIGN_THUMBPRINT is required. Set it in the vars section at the top of build/windows/Taskfile.yml"
@@ -202,11 +202,11 @@ tasks:
     desc: |
       Creates and signs the NSIS installer.
       Configure SIGN_CERTIFICATE or SIGN_THUMBPRINT in the vars section at the top of this file.
-      Password is retrieved from system keychain (run: wails3 setup signing)
+      Password is retrieved from system keychain (run: go tool wails3 setup signing)
     deps:
       - task: create:nsis:installer
     cmds:
-      - wails3 tool sign --input "build/windows/nsis/{{.APP_NAME}}-installer.exe" {{if .SIGN_CERTIFICATE}}--certificate {{.SIGN_CERTIFICATE}}{{end}} {{if .SIGN_THUMBPRINT}}--thumbprint {{.SIGN_THUMBPRINT}}{{end}} {{if .TIMESTAMP_SERVER}}--timestamp {{.TIMESTAMP_SERVER}}{{end}}
+      - '{{.WAILS3_TOOL}} tool sign --input "build/windows/nsis/{{.APP_NAME}}-installer.exe" {{if .SIGN_CERTIFICATE}}--certificate {{.SIGN_CERTIFICATE}}{{end}} {{if .SIGN_THUMBPRINT}}--thumbprint {{.SIGN_THUMBPRINT}}{{end}} {{if .TIMESTAMP_SERVER}}--timestamp {{.TIMESTAMP_SERVER}}{{end}}'
     preconditions:
       - sh: '[ -n "{{.SIGN_CERTIFICATE}}" ] || [ -n "{{.SIGN_THUMBPRINT}}" ]'
         msg: "Either SIGN_CERTIFICATE or SIGN_THUMBPRINT is required. Set it in the vars section at the top of build/windows/Taskfile.yml"

@@ -1,5 +1,5 @@
 # This file contains the configuration for this project.
-# When you update `info`, `fileAssociations`, or `protocols`, run `wails3 task common:update:build-assets` to update the assets.
+# When you update `info`, `fileAssociations`, or `protocols`, run `go tool wails3 task common:update:build-assets` to update the assets.
 # Note that this will overwrite any changes you have made to the assets.
 version: '3'
 
@@ -55,13 +55,13 @@ dev_mode:
     # already populated; necessary on a fresh clone or after lockfile
     # bumps. The `once` type fires only the first time the dev loop
     # runs, not on every rebuild trigger.
-    - cmd: wails3 task common:install:frontend:deps
+    - cmd: go tool wails3 task common:install:frontend:deps
       type: once
     # Angular dev server in the background — provides HMR for the
     # standalone app under frontend-ng/src. Development windows load this
     # loopback URL directly so WebKit permits the 9199 socket transport;
     # go:embed dist/ remains the compiled production path.
-    - cmd: wails3 task common:dev:frontend
+    - cmd: go tool wails3 task common:dev:frontend
       type: background
     # Regenerate the TS Wails bindings on every Go file change.
     # Without this step, changing a Wails Service method signature
@@ -70,7 +70,7 @@ dev_mode:
     # package tree — cheap, and the difference between "i changed
     # Go and it broke silently" and "i changed Go and the binding
     # updated".
-    - cmd: wails3 task common:generate:bindings
+    - cmd: go tool wails3 task common:generate:bindings
       type: blocking
     # Compile only the host-native Go development binary with Wails' built-in
     # MCP service. Angular HMR already owns the frontend and this path must not

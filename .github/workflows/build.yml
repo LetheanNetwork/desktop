@@ -52,10 +52,9 @@ jobs:
           cache: npm
           cache-dependency-path: frontend-ng/package-lock.json
 
-      - name: Install Wails CLI and Task
+      - name: Install Task
         shell: bash
         run: |
-          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.117
           go install github.com/go-task/task/v3/cmd/task@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
@@ -64,7 +63,7 @@ jobs:
         run: npm ci
 
       - name: Generate bindings
-        run: wails3 task common:generate:bindings
+        run: go tool wails3 task common:generate:bindings
 
       - name: Verify frontend
         working-directory: frontend-ng
@@ -152,10 +151,9 @@ jobs:
             "ndk;26.3.11579264"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
 
-      - name: Install Wails CLI + Task
+      - name: Install Task
         shell: bash
         run: |
-          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.117
           go install github.com/go-task/task/v3/cmd/task@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
@@ -165,12 +163,10 @@ jobs:
 
       - name: Generate bindings (TypeScript)
         if: matrix.os != 'ios' && matrix.os != 'android'
-        run: wails3 task common:generate:bindings
+        run: go tool wails3 task common:generate:bindings
 
       - name: Build
-        env:
-          WAILS3_TOOL: wails3
-        run: wails3 task ${{ matrix.task }}
+        run: go tool wails3 task ${{ matrix.task }}
 
       - name: Bundle macOS .app
         if: matrix.os == 'macos'

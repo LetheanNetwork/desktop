@@ -41,12 +41,12 @@ lthn/desktop/
 
 ```bash
 # Frontend-only — Angular shell, no Go runtime:
-cd frontend-ng && npm install
+cd frontend-ng && npm ci
 npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
 # → http://127.0.0.1:9245/#/
 
 # Full hot-reload dev loop — Wails app + Angular HMR + Go rebuild watcher:
-wails3 task dev
+go tool wails3 task dev
 # .app launches on first build cycle; menubar icon = lthn-glyph
 # Angular edits use HMR; Go edits rebuild and relaunch the app.
 # Wails' built-in MCP service listens at http://127.0.0.1:9099/mcp.
@@ -62,14 +62,14 @@ task linux:build         # Linux ELF
 task windows:build       # Windows .exe
 
 # Mobile packages:
-wails3 task ios:package          # bin/lthn.app, arm64 iOS Simulator
-wails3 task android:package:fat  # bin/lthn.apk, arm64-v8a + x86_64
+go tool wails3 task ios:package          # bin/lthn.app, arm64 iOS Simulator
+go tool wails3 task android:package:fat  # bin/lthn.apk, arm64-v8a + x86_64
 
 # Provisioned iPhone/iPad package:
-wails3 task ios:package IOS_PLATFORM=device \
+go tool wails3 task ios:package IOS_PLATFORM=device \
   CODESIGN_IDENTITY="Apple Development: …" \
   PROVISIONING_PROFILE=/path/to/profile.mobileprovision
-wails3 task ios:package:ipa IOS_PLATFORM=device \
+go tool wails3 task ios:package:ipa IOS_PLATFORM=device \
   CODESIGN_IDENTITY="Apple Development: …" \
   PROVISIONING_PROFILE=/path/to/profile.mobileprovision
 ```
@@ -80,7 +80,7 @@ wails3 task ios:package:ipa IOS_PLATFORM=device \
 |---|---|---|
 | Go | 1.26.0 | backend |
 | Node | 22 | Angular frontend |
-| `wails3` | v3.0.0-alpha2.117 | pinned mobile overlay generator + task runner |
+| Wails tool | `go/go.mod` | module-pinned generator and development orchestrator |
 | `task` (go-task) | 3.x | build runner |
 | macOS | 26.0 | native Wails/CoreGO runtime and link target |
 | Xcode | current stable | iOS SDK, linker, assets and signing |
@@ -89,16 +89,16 @@ wails3 task ios:package:ipa IOS_PLATFORM=device \
 | Android NDK | 26.3.11579264+ | Go c-shared mobile library |
 
 ```bash
-# One-time tool install:
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.117
+# One-time task-runner install:
 go install github.com/go-task/task/v3/cmd/task@latest
 
 # Linux only — webkit + GTK:
 sudo apt-get install libgtk-3-dev libwebkit2gtk-4.1-dev
 ```
 
-The mobile tasks use the module-pinned CLI for generated overlays. Set
-`WAILS3_TOOL` only when pointing at an already-built CLI of that exact version.
+All active Wails commands use `go tool wails3`, which selects the CLI declared
+by `go/go.mod`. Set `WAILS3_TOOL` only when pointing at an already-built CLI of
+that exact version.
 Android release packages use the debug signing key unless the
 `ANDROID_KEYSTORE_*` variables documented in
 [`build/android/Taskfile.yml`](build/android/Taskfile.yml) are supplied.

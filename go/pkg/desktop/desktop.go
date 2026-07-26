@@ -36,7 +36,6 @@ import (
 
 	core "dappco.re/go"
 	"dappco.re/go/config"
-	coreI18n "dappco.re/go/i18n"
 	gui "dappco.re/go/render/display/webkit"
 	guilifecycle "dappco.re/go/render/display/webkit/pkg/lifecycle"
 	guisystray "dappco.re/go/render/display/webkit/pkg/systray"
@@ -337,10 +336,9 @@ func (s *Service) Run() core.Result {
 	// gui.OpenWindow / gui.HideWindow / GuiConfig.WindowRegistry.
 	windowSvc := gui.NewWindowBindingService(s.opts.Core)
 
-	// Fetch the Core-registered upstream services and register them
-	// directly with Wails so bindings land at dappco.re/go/<pkg>/.
-	// No adapter layer — Wails generates straight from the package.
-	i18nSvc, _ := core.ServiceFor[*coreI18n.CoreService](s.opts.Core, "i18n")
+	// Fetch the renderer-facing services. Raw CoreGO config and i18n services
+	// remain backend composition concerns: Angular uses its compile-time
+	// localisation catalogue and the curated appconfig bridge.
 	appconfigSvc := appconfig.NewService(appconfig.Options{Core: s.opts.Core})
 	pluginSvc, _ := core.ServiceFor[*plugin.Service](s.opts.Core, "plugin")
 	sandboxSvc, _ := core.ServiceFor[*sandbox.Service](s.opts.Core, "sandbox")
@@ -589,15 +587,10 @@ func (s *Service) Run() core.Result {
 		gui.Bind(benchmarkSvc),
 		gui.Bind(openaibenchSvc),
 		gui.Bind(lthnservices.NewWailsService()),
-		// Upstream dappco.re/go services — register the Core-built
-		// instances directly. Bindings land at frontend-ng/bindings/
-		// dappco.re/go/<pkg>/.
-		gui.Bind(i18nSvc),
 		// appconfig is the curated, typed settings bridge. It validates
 		// user-facing desktop controls before delegating persistence to
-		// the same configSvc bound immediately below.
+		// the registered config service without exposing raw provider APIs.
 		gui.Bind(appconfigSvc),
-		gui.Bind(configSvc),
 		// Window registry — see note above.
 		gui.Bind(windowSvc),
 	}

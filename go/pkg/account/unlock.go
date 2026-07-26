@@ -298,6 +298,8 @@ func (s *Service) Lock(input LockInput) core.Result {
 //
 //	svc := account.NewService(c)
 //	svc.SetServerKey(serverkeySvc)
+//
+//wails:ignore
 func (s *Service) SetServerKey(sk SessionTokenIssuer) {
 	s.serverkey = sk
 }

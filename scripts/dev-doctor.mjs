@@ -31,9 +31,9 @@ const COMMANDS = [
   },
   {
     name: 'Wails',
-    command: 'wails3',
-    args: ['version'],
-    hint: 'Install Wails 3 and ensure wails3 is on PATH.',
+    command: 'go',
+    args: ['tool', 'wails3', 'version'],
+    hint: 'Restore the Wails tool declared by go/go.mod with the project Go toolchain.',
   },
   {
     name: 'Task',

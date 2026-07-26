@@ -252,6 +252,8 @@ func (s *Service) ServiceName() string { return "Mail" }
 // Usage example:
 //
 //	mailSvc.SetAccountService(accountSvc)
+//
+//wails:ignore
 func (s *Service) SetAccountService(a AccountProvider) {
 	s.account = a
 }

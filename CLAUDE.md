@@ -32,7 +32,7 @@ required submodules or `external/` source checkouts.
 ## Start here
 
 ```bash
-wails3 task doctor
+go tool wails3 task doctor
 
 # Browser-only deterministic design/demo mode
 cd frontend-ng
@@ -41,18 +41,18 @@ npm run demo
 
 # Full native development with Angular HMR
 cd ..
-wails3 task dev
+go tool wails3 task dev
 ```
 
-`wails3 task dev` uses Angular HMR on 9245, Wails MCP on 9099, and the Lethean
+`go tool wails3 task dev` uses Angular HMR on 9245, Wails MCP on 9099, and the Lethean
 binding transport on 9199. Production builds remain embedded under the
 `wails://` asset route.
 
 ## Confidence gates
 
 ```bash
-wails3 task verify:frontend
-wails3 task test
+go tool wails3 task verify:frontend
+go tool wails3 task test
 go vet ./go/...
 cd frontend-ng && npm run build
 ```

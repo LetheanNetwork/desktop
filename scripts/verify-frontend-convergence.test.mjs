@@ -43,9 +43,9 @@ test('Wails development installs frontend dependencies once before starting HMR'
   assert.ok(installFrontend);
   assert.ok(devFrontend);
   assert.ok(devBuild);
-  assert.equal(config.match(/cmd: wails3 task common:install:frontend:deps/g)?.length, 1);
-  assert.match(config, /cmd: wails3 task common:install:frontend:deps\n\s+type: once/);
-  assert.match(config, /cmd: wails3 task common:dev:frontend\n\s+type: background/);
+  assert.equal(config.match(/cmd: go tool wails3 task common:install:frontend:deps/g)?.length, 1);
+  assert.match(config, /cmd: go tool wails3 task common:install:frontend:deps\n\s+type: once/);
+  assert.match(config, /cmd: go tool wails3 task common:dev:frontend\n\s+type: background/);
   assert.match(installFrontend, /generates:\n\s+- node_modules\/\.package-lock\.json/);
   assert.doesNotMatch(devFrontend, /\n\s+deps:/);
   assert.doesNotMatch(devFrontend, /- task: install:frontend:deps/);
@@ -90,6 +90,7 @@ test('macOS Go links and bundle metadata share the 26.0 deployment floor', async
     assert.match(block, /CGO_CFLAGS: .*mmacosx-version-min=.*MACOS_DEPLOYMENT_TARGET/);
     assert.match(block, /CGO_CXXFLAGS: .*mmacosx-version-min=.*MACOS_DEPLOYMENT_TARGET/);
     assert.match(block, /CGO_LDFLAGS: .*mmacosx-version-min=.*MACOS_DEPLOYMENT_TARGET/);
+    assert.match(block, /CGO_LDFLAGS: .*no_warn_duplicate_libraries/);
   }
 
   for (const path of ['build/darwin/Info.plist', 'build/darwin/Info.dev.plist']) {
@@ -112,6 +113,59 @@ test('all binding generators target frontend-ng and no removed external tree', a
   assert.doesNotMatch(combined, /frontend\/bindings/);
   assert.doesNotMatch(combined, /external\/gui/);
   assert.match(combined, /frontend-ng\/bindings/);
+});
+
+test('active build entrypoints use the module-pinned Wails tool', async () => {
+  const sources = await Promise.all(
+    [
+      'Taskfile.yml',
+      'build/Taskfile.yml',
+      'build/darwin/Taskfile.yml',
+      'build/linux/Taskfile.yml',
+      'build/windows/Taskfile.yml',
+      'build/ios/Taskfile.yml',
+      'build/android/Taskfile.yml',
+      'build/config.yml',
+      '.github/workflows/build.yml',
+    ].map(read),
+  );
+  const combined = sources.join('\n');
+
+  assert.doesNotMatch(combined, /^\s*(?:-\s+|cmd:\s+|run:\s+)wails3\b/m);
+  assert.doesNotMatch(combined, /(?:&&|\|\||;)\s*wails3\b/);
+  assert.match(combined, /go tool wails3/);
+});
+
+test('module-pinned Wails binding generation emits no renderer-contract warnings', async () => {
+  const goMod = await read('go/go.mod');
+  const pinnedVersion = goMod.match(
+    /github\.com\/wailsapp\/wails\/v3 v([^\s]+)/,
+  )?.[1];
+  assert.ok(pinnedVersion, 'go/go.mod must pin the Wails runtime and tool version');
+
+  const { stdout, stderr } = await execFile(
+    'go',
+    [
+      'tool',
+      'wails3',
+      'generate',
+      'bindings',
+      '-ts',
+      '-dry',
+      '-f',
+      '-tags mcp',
+      './pkg/desktop/...',
+    ],
+    {
+      cwd: join(repoRoot, 'go'),
+      env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' },
+      maxBuffer: 10 * 1024 * 1024,
+    },
+  );
+  const output = `${stdout}\n${stderr}`;
+
+  assert.match(output, new RegExp(`Wails v${pinnedVersion.replaceAll('.', '\\.')}`));
+  assert.doesNotMatch(output, /\bWARNING\b|\[warn\]/);
 });
 
 test('CI and audit use the current module and Angular topology', async () => {
@@ -152,7 +206,7 @@ test('mobile platforms expose public binding verification tasks', async () => {
   }
 });
 
-test('binding tasks use the host Wails CLI and restore desktop bindings after mobile generation', async (t) => {
+test('binding tasks use the module-pinned Wails CLI and restore desktop bindings after mobile generation', async (t) => {
   const harnessRoot = await mkdtemp(join(tmpdir(), 'lthn-bindings-contract-'));
   const canonicalHarnessRoot = await realpath(harnessRoot);
   t.after(() => rm(harnessRoot, { recursive: true, force: true }));
@@ -222,7 +276,10 @@ appendFileSync(process.env.LTHN_BINDING_RECORD, JSON.stringify(record) + '\\n');
       join(binDir, 'wails3.cmd'),
       `@echo off\r\n"${process.execPath}" "${fakeWailsScript}" %*\r\n`,
     );
-    await writeFile(join(binDir, 'go.cmd'), '@exit /b 0\r\n');
+    await writeFile(
+      join(binDir, 'go.cmd'),
+      '@if "%1"=="tool" if "%2"=="wails3" (\r\n@shift\r\n@shift\r\n@"%~dp0wails3.cmd" %*\r\n@exit /b %ERRORLEVEL%\r\n)\r\n@exit /b 0\r\n',
+    );
     await writeFile(join(binDir, 'xcrun.cmd'), '@echo /fake/sdk\r\n');
     await writeFile(
       join(binDir, 'touch.cmd'),
@@ -231,7 +288,10 @@ appendFileSync(process.env.LTHN_BINDING_RECORD, JSON.stringify(record) + '\\n');
   } else {
     fakeWails = join(binDir, 'wails3');
     await writeFile(fakeWails, `#!/usr/bin/env node\n${fakeWailsSource}`);
-    await writeFile(join(binDir, 'go'), '#!/bin/sh\nexit 0\n');
+    await writeFile(
+      join(binDir, 'go'),
+      '#!/bin/sh\nif [ "$1" = tool ] && [ "$2" = wails3 ]; then\n  shift 2\n  exec "$(dirname "$0")/wails3" "$@"\nfi\nexit 0\n',
+    );
     await writeFile(join(binDir, 'xcrun'), '#!/bin/sh\nprintf "%s\\n" /fake/sdk\n');
     await writeFile(
       join(binDir, 'touch'),

@@ -38,6 +38,9 @@ vars:
   # Where the Go module + cmd live (Lethean canon: go/ subfolder).
   GO_DIR: "go"
   GO_CMD: "./cmd/lthn"
+  # Run the Wails CLI through the Go module's tool directive so the runtime,
+  # generator, and orchestrator cannot drift from go/go.mod.
+  WAILS3_TOOL: '{{.WAILS3_TOOL | default "go tool wails3"}}'
   # The native Wails/CoreGO objects are built for macOS 26. Keep the Go
   # link target and bundle metadata aligned with that real product floor.
   MACOS_DEPLOYMENT_TARGET: "26.0"
@@ -178,7 +181,7 @@ tasks:
       MACOSX_DEPLOYMENT_TARGET: '{{if eq OS "darwin"}}{{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
       CGO_CFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
       CGO_CXXFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
-      CGO_LDFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_LDFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}} -Wl,-no_warn_duplicate_libraries{{end}}'
 
   dev:
     summary: Wails3 dev mode with Angular HMR and the built-in MCP service on 127.0.0.1:9099
@@ -189,7 +192,7 @@ tasks:
       # retain Wails' zero-port, zero-attack-surface default.
       EXTRA_TAGS: "mcp"
     cmds:
-      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
+      - '{{.WAILS3_TOOL}} dev -config ./build/config.yml -port {{.VITE_PORT}}'
 
   doctor:
     summary: Check the local toolchain, generated frontend inputs, optional crew repositories, and development ports
@@ -208,7 +211,7 @@ tasks:
       MACOSX_DEPLOYMENT_TARGET: '{{if eq OS "darwin"}}{{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
       CGO_CFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
       CGO_CXXFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
-      CGO_LDFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_LDFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}} -Wl,-no_warn_duplicate_libraries{{end}}'
 
   lint:cousinvalidator:
     summary: "Run cousin-validator lint (forbid local isValid* outside pkg/paths/, Mantis #1505) — operator shortcut for focused run; task test:go already catches drift via the embedded test"
@@ -264,7 +267,7 @@ tasks:
       MACOSX_DEPLOYMENT_TARGET: '{{if eq OS "darwin"}}{{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
       CGO_CFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
       CGO_CXXFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
-      CGO_LDFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_LDFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}} -Wl,-no_warn_duplicate_libraries{{end}}'
 
   test:cover:frontend:
     summary: Angular frontend coverage (Vitest v8 → frontend-ng/coverage/)

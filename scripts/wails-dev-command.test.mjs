@@ -75,8 +75,8 @@ test('launcher passes the exact native child boundary under hostile ambient valu
     );
 
     assert.equal(status, 0);
-    assert.equal(captured.executable, 'wails3');
-    assert.deepEqual(captured.args, ['task', taskForCommand[command]]);
+    assert.equal(captured.executable, 'go');
+    assert.deepEqual(captured.args, ['tool', 'wails3', 'task', taskForCommand[command]]);
     assert.equal(captured.options.stdio, 'inherit');
     assert.equal(Object.hasOwn(captured.options, 'shell'), false);
     assert.deepEqual(managedEntries(captured.options.env), expectedManaged);
@@ -86,7 +86,7 @@ test('launcher passes the exact native child boundary under hostile ambient valu
 });
 
 test('runDevelopmentCommand propagates launch errors and child status', () => {
-  const launchError = new Error('cannot launch wails3');
+  const launchError = new Error('cannot launch module-pinned wails3');
   assert.throws(
     () => runDevelopmentCommand('build', () => ({ error: launchError, status: null })),
     (error) => error === launchError,

@@ -84,6 +84,8 @@ func NewWailsService(c *core.Core) *WailsService {
 //	dlSvc.SetEmitter(func(name string, data any) {
 //	    s.app.Event.Emit(name, data)
 //	})
+//
+//wails:ignore
 func (s *WailsService) SetEmitter(emit Emitter) {
 	if s == nil {
 		return

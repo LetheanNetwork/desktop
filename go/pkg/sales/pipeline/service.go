@@ -543,6 +543,8 @@ func (s *Service) fireMove(dealID, fromStage, toStage string, force bool) {
 // Usage example:
 //
 //	pipelineSvc.SetSessionGate(accountSvc)
+//
+//wails:ignore
 func (s *Service) SetSessionGate(g SessionGate) {
 	s.gateMu.Lock()
 	s.gate = g

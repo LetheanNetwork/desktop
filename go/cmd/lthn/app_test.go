@@ -288,8 +288,8 @@ func TestApp_NewAppCore_EmitsServiceRegistrationAudit_Good(t *testing.T) {
 	// gate previously let a forgotten catalogue-update slip through silently
 	// (audit hash flipped, no test failure). The exact-count gate forces
 	// the catalogue + the binding surface to be edited in lockstep.
-	core.AssertEqual(t, 47, len(wailsBindingCatalogue),
-		"wailsBindingCatalogue length must equal 47 — update catalogue + this pin together when intentionally adding/removing a Wails binding")
+	core.AssertEqual(t, 45, len(wailsBindingCatalogue),
+		"wailsBindingCatalogue length must equal 45 — update catalogue + this pin together when intentionally adding/removing a Wails binding")
 }
 
 // TestApp_AuditMeta_NoServiceInternals_Bad pins the Meta-PII discipline:
@@ -384,10 +384,10 @@ func noopServiceFactory(_ *core.Core) core.Result {
 //
 // Usage example:
 //
-//	core.AssertEqual(t, 47, len(wailsBindingCatalogue), "...")
+//	core.AssertEqual(t, 45, len(wailsBindingCatalogue), "...")
 func TestApp_WailsBindingCatalogue_CountPinned_Good(t *testing.T) {
-	core.AssertEqual(t, 47, len(wailsBindingCatalogue),
-		"wailsBindingCatalogue length must equal 47 — drift gate: update catalogue + this pin together when intentionally adding/removing a Wails binding in pkg/desktop/desktop.go")
+	core.AssertEqual(t, 45, len(wailsBindingCatalogue),
+		"wailsBindingCatalogue length must equal 45 — drift gate: update catalogue + this pin together when intentionally adding/removing a Wails binding in pkg/desktop/desktop.go")
 }
 
 // TestApp_PostUnlock_TriggersMigrateLegacyKeys_Good pins the H#250 /

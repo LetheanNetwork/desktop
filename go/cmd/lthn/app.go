@@ -814,9 +814,7 @@ var wailsBindingCatalogue = []string{
 	"validator",
 	"telemetry",
 	"lthnservices",
-	"i18n",
 	"appconfig",
-	"config",
 	"window",
 }
 

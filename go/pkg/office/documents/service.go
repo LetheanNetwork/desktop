@@ -325,7 +325,6 @@ func toRow(r DocRecord, now core.Time) DocRow {
 	}
 }
 
-
 // scanDocs reads all *.md files from docsDir() and returns a slice of
 // DocRecord values sorted by ModTime descending (newest first).
 // Malformed files are warned and skipped.
@@ -415,6 +414,8 @@ func loadDoc(slug string) ([]byte, error) {
 // Usage example:
 //
 //	docsSvc.SetSessionGate(accountSvc)
+//
+//wails:ignore
 func (s *Service) SetSessionGate(g SessionGate) {
 	s.gateMu.Lock()
 	s.gate = g

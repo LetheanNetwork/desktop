@@ -24,8 +24,9 @@ Use the versions declared by:
 - `frontend-ng/package-lock.json`
 - `.github/workflows/build.yml`
 
-Required local commands are Go, Node.js, npm, Wails 3, and Task. A normal clone
-contains the complete source topology:
+Required local commands are Go, Node.js, npm, and Task. Wails is invoked
+through the tool directive in `go/go.mod`, so a normal clone contains the
+complete source topology:
 
 ```bash
 git clone <repo-url> lthn-desktop
@@ -34,7 +35,7 @@ go work sync
 cd frontend-ng
 npm ci
 cd ..
-wails3 task doctor
+go tool wails3 task doctor
 ```
 
 There are no required Git submodules or `external/` source checkouts.
@@ -78,7 +79,7 @@ window, so UI work is deterministic without a native backend.
 From the repository root:
 
 ```bash
-wails3 task dev
+go tool wails3 task dev
 ```
 
 The development topology is:
@@ -136,8 +137,8 @@ go/cmd/lthn/dist/index.html
 Build or package the current platform:
 
 ```bash
-wails3 task build
-wails3 task package
+go tool wails3 task build
+go tool wails3 task package
 ```
 
 Platform-specific tasks live under:
@@ -174,7 +175,7 @@ The CLI remains usable independently of the GUI:
 Generate the desktop bindings with:
 
 ```bash
-wails3 task common:generate:bindings
+go tool wails3 task common:generate:bindings
 ```
 
 Every platform generator writes to the shared ignored directory:
@@ -205,19 +206,19 @@ npx ng test --watch=false --include=src/path/to/file.spec.ts
 Repository entrypoints:
 
 ```bash
-wails3 task test:go
-wails3 task test:frontend
-wails3 task test
+go tool wails3 task test:go
+go tool wails3 task test:frontend
+go tool wails3 task test
 
-wails3 task test:cover:go
-wails3 task test:cover:frontend
-wails3 task test:cover
+go tool wails3 task test:cover:go
+go tool wails3 task test:cover:frontend
+go tool wails3 task test:cover
 ```
 
 The ordered frontend confidence gate used by CI is:
 
 ```bash
-wails3 task verify:frontend
+go tool wails3 task verify:frontend
 ```
 
 It runs formatting, type/build checks, Angular tests, executable development
@@ -230,7 +231,7 @@ Before stopping after code changes, run checks proportional to the scope:
 gofmt -l go/
 git diff --check
 go vet ./go/...
-wails3 task test
+go tool wails3 task test
 cd frontend-ng && npm run build
 ```
 

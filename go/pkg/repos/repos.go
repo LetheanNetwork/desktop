@@ -62,6 +62,8 @@ type Service struct {
 //	if reposSvc, _ := core.ServiceFor[*repos.Service](c, "repos"); reposSvc != nil {
 //	    reposSvc.RegisterSource("opencode-imports", openCodeImportsPaths(c))
 //	}
+//
+//wails:ignore
 func (s *Service) RegisterSource(name string, fn SourceProvider) {
 	if s == nil || fn == nil {
 		return

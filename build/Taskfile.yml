@@ -83,7 +83,7 @@ tasks:
       # marker prevents another target's output satisfying this task's cache.
       - ../frontend-ng/bindings/.desktop-bindings-{{.BINDINGS_CACHE_KEY}}
     cmds:
-      - wails3 generate bindings -ts -d ../frontend-ng/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/...
+      - '{{.WAILS3_TOOL}} generate bindings -ts -d ../frontend-ng/bindings -f ''{{.BUILD_FLAGS}}'' -clean=true ./pkg/desktop/...'
       - node ../scripts/write-binding-marker.mjs ../frontend-ng/bindings/.desktop-bindings
       - node ../scripts/write-binding-marker.mjs ../frontend-ng/bindings/.desktop-bindings-{{.BINDINGS_CACHE_KEY}}
     vars:
@@ -109,14 +109,14 @@ tasks:
       - "darwin/icons.icns"
       - "windows/icon.ico"
     cmds:
-      - wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico
+      - '{{.WAILS3_TOOL}} generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico'
 
   dev:frontend:
     summary: Runs Angular's HMR server for the Wails development window
     dir: frontend-ng
     preconditions:
       - sh: test -d node_modules
-        msg: "Frontend dependencies are missing. Run: wails3 task common:install:frontend:deps"
+        msg: "Frontend dependencies are missing. Run: go tool wails3 task common:install:frontend:deps"
     cmds:
       - npm start -- --host 127.0.0.1 --port "{{.VITE_PORT}}" --hmr --poll 1000
 
@@ -124,7 +124,7 @@ tasks:
     summary: Updates the build assets
     dir: build
     cmds:
-      - wails3 update build-assets -name "{{.APP_NAME}}" -binaryname "{{.APP_NAME}}" -config config.yml -dir .
+      - '{{.WAILS3_TOOL}} update build-assets -name "{{.APP_NAME}}" -binaryname "{{.APP_NAME}}" -config config.yml -dir .'
 
   build:server:
     summary: Builds the application in server mode (no GUI, HTTP server only)
@@ -145,7 +145,7 @@ tasks:
       MACOSX_DEPLOYMENT_TARGET: '{{if eq OS "darwin"}}{{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
       CGO_CFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
       CGO_CXXFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
-      CGO_LDFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_LDFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}} -Wl,-no_warn_duplicate_libraries{{end}}'
 
   run:server:
     summary: Builds and runs the application in server mode
@@ -168,7 +168,7 @@ tasks:
       - sh: docker info > /dev/null 2>&1
         msg: "Docker is required. Please install Docker first."
       - sh: test -f build/docker/Dockerfile.server
-        msg: "Dockerfile.server not found. Run 'wails3 update build-assets' to generate it."
+        msg: "Dockerfile.server not found. Run 'go tool wails3 update build-assets' to generate it."
 
   run:docker:
     summary: Builds and runs the Docker image

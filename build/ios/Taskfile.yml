@@ -242,7 +242,7 @@ tasks:
       BINDINGS_TARGET: '{{if eq (.ARCH | default "arm64") "amd64"}}x86_64{{else}}{{.ARCH | default "arm64"}}{{end}}-apple-ios{{.MIN_IOS_VERSION}}{{if ne .IOS_PLATFORM "device"}}-simulator{{end}}'
       BINDINGS_CACHE_KEY: '{{sha256sum (printf "ios|%s|%s|%s|%s|%s|%s|%s|%s" (.ARCH | default "arm64") .IOS_PLATFORM .IOS_SDK .BINDINGS_TARGET .MIN_IOS_VERSION .IOS_VERSION_MIN_FLAG .SDK_PATH "-tags ios")}}'
     cmds:
-      - cd "{{.GO_DIR}}" && wails3 generate bindings -ts -d ../frontend-ng/bindings -f '-tags ios' -clean=true ./pkg/desktop/...
+      - cd "{{.GO_DIR}}" && {{.WAILS3_TOOL}} generate bindings -ts -d ../frontend-ng/bindings -f '-tags ios' -clean=true ./pkg/desktop/...
       - node scripts/write-binding-marker.mjs frontend-ng/bindings/.ios-bindings
       - node scripts/write-binding-marker.mjs frontend-ng/bindings/.ios-bindings-{{.BINDINGS_CACHE_KEY}}
     env:
@@ -290,7 +290,7 @@ tasks:
         fi
     preconditions:
       - sh: command -v xcrun
-        msg: "xcrun not found. Please run 'wails3 task ios:install:deps' to install iOS development dependencies"
+        msg: "xcrun not found. Please run 'go tool wails3 task ios:install:deps' to install iOS development dependencies"
 
   generate:ios:overlay:
     internal: true

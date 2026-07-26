@@ -121,7 +121,7 @@ version.
   mounting, native policy, and runtime events.
 - `go/pkg/connection/` — WebSocket transport used by the Wails runtime. Its
   generic loopback default is `ws://localhost:9099/wails/ws`; full
-  `wails3 task dev` moves the Lethean transport to 9199 because the
+  `go tool wails3 task dev` moves the Lethean transport to 9199 because the
   development-only Wails MCP service owns 9099.
 - `go/pkg/server/` and `go/pkg/api/` — HTTP gateway, route groups, OpenAPI, and
   SDK generation.
@@ -274,7 +274,7 @@ http://127.0.0.1:9245/?lthn-offline=1&lthn-view=device&lthn-device=small#/
 Full Wails development from the repository root:
 
 ```bash
-wails3 task dev
+go tool wails3 task dev
 ```
 
 Development windows load the Angular loopback server directly and receive the
@@ -329,13 +329,13 @@ npx ng test --watch=false --include=src/path/to/file.spec.ts
 Repository entrypoints:
 
 ```bash
-wails3 task test:go
-wails3 task test:frontend
-wails3 task test
+go tool wails3 task test:go
+go tool wails3 task test:frontend
+go tool wails3 task test
 
-wails3 task test:cover:go
-wails3 task test:cover:frontend
-wails3 task test:cover
+go tool wails3 task test:cover:go
+go tool wails3 task test:cover:frontend
+go tool wails3 task test:cover
 ```
 
 Frontend CI tests are Angular's Vitest runner in jsdom. Specs are colocated as
@@ -354,7 +354,7 @@ Before stopping after code changes, run the checks proportional to the scope:
 gofmt -l go/
 git diff --check
 go vet ./go/...
-wails3 task test
+go tool wails3 task test
 cd frontend-ng && npm run build
 ```
 

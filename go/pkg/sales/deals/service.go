@@ -911,6 +911,8 @@ func (s *Service) fireEvent(name string, rec DealRecord) {
 // Usage example:
 //
 //	dealsSvc.SetSessionGate(accountSvc)
+//
+//wails:ignore
 func (s *Service) SetSessionGate(g SessionGate) {
 	s.gateMu.Lock()
 	s.gate = g

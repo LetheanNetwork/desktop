@@ -462,6 +462,8 @@ func Register(c *core.Core) core.Result {
 //	    if !kekR.OK { return nil, false }
 //	    return kekR.Value.([]byte), true
 //	})
+//
+//wails:ignore
 func (s *Service) SetKEKProviderTier0(provider KEKProvider) {
 	s.kekProviderMu.Lock()
 	s.tier0KEKProvider = provider
@@ -507,6 +509,8 @@ func (s *Service) SetKEKProviderTier0(provider KEKProvider) {
 //	    if len(kek) != 32 { return nil, false }
 //	    return kek, true
 //	})
+//
+//wails:ignore
 func (s *Service) SetKEKProvider(provider KEKProvider) {
 	s.kekProviderMu.Lock()
 	s.tier1KEKProvider = provider
@@ -1394,6 +1398,8 @@ func (s *Service) ListTier0() core.Result {
 //	    return core.RandomBytes(32).Value.([]byte), nil
 //	})
 //	if r.OK { key := r.Value.([]byte); _ = key }
+//
+//wails:ignore
 func (s *Service) GetOrCreateTier0(ref string, generate func() ([]byte, error)) core.Result {
 	return s.getOrCreate(tier0, ref, generate)
 }
@@ -1566,6 +1572,8 @@ func (s *Service) ListTier1() core.Result {
 //	    return core.RandomBytes(32).Value.([]byte), nil
 //	})
 //	if r.OK { key := r.Value.([]byte); _ = key }
+//
+//wails:ignore
 func (s *Service) GetOrCreateTier1(ref string, generate func() ([]byte, error)) core.Result {
 	return s.getOrCreate(tier1, ref, generate)
 }

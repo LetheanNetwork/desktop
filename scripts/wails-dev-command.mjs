@@ -49,7 +49,7 @@ export function developmentCommandEnvironment(command, ambient = process.env) {
 
 export function runDevelopmentCommand(command, spawn = spawnSync, ambient = process.env) {
   const definition = commandDefinition(command);
-  const result = spawn('wails3', ['task', definition.task], {
+  const result = spawn('go', ['tool', 'wails3', 'task', definition.task], {
     env: developmentCommandEnvironment(command, ambient),
     stdio: 'inherit',
   });

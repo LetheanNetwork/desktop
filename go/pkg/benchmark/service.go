@@ -107,6 +107,8 @@ func Register(c *core.Core) core.Result {
 // Usage example:
 //
 //	if r := svc.RegisterBencher(myBencher); !r.OK { return r }
+//
+//wails:ignore
 func (s *Service) RegisterBencher(b Bencher) core.Result {
 	return s.reg.register(b)
 }

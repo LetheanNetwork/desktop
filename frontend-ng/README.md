@@ -10,11 +10,11 @@ the browser bundle.
 From this directory:
 
 ```bash
-npm install
+npm ci
 npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
 ```
 
-For the native hot-reload loop, run `wails3 task dev` at the repository root.
+For the native hot-reload loop, run `go tool wails3 task dev` at the repository root.
 Wails proxies the same Angular development server on port 9245.
 
 ## Code scaffolding

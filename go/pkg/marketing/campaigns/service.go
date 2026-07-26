@@ -116,6 +116,8 @@ func NewService(c *core.Core) *Service {
 // Usage example:
 //
 //	campaignsSvc.SetSessionGate(accountSvc)
+//
+//wails:ignore
 func (s *Service) SetSessionGate(g SessionGate) {
 	s.gateMu.Lock()
 	s.gate = g

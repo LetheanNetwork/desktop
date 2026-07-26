@@ -900,6 +900,8 @@ func (s *Service) fireEvent(name string, entry IncidentEntry) {
 // Usage example:
 //
 //	incidentsSvc.SetSessionGate(accountSvc)
+//
+//wails:ignore
 func (s *Service) SetSessionGate(g SessionGate) {
 	s.gateMu.Lock()
 	s.gate = g

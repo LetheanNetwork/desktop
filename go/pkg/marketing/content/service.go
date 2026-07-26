@@ -204,6 +204,8 @@ func slugifyContent(title string) string {
 // Usage example:
 //
 //	contentSvc.SetSessionGate(accountSvc)
+//
+//wails:ignore
 func (s *Service) SetSessionGate(g SessionGate) {
 	s.gateMu.Lock()
 	s.gate = g

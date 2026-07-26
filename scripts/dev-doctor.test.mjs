@@ -54,7 +54,28 @@ test('fails when a required development command is unavailable', async () => {
       .map(({ name }) => name),
     ['Wails'],
   );
-  assert.match(renderDoctorReport(report), /Install Wails 3/);
+  assert.match(
+    renderDoctorReport(report),
+    /Restore the Wails tool declared by go\/go\.mod/,
+  );
+});
+
+test('probes the module-pinned Wails tool instead of a PATH executable', async () => {
+  let wailsProbe;
+  await inspectDevelopmentEnvironment({
+    cwd: '/workspace/desktop',
+    homeDir: '/home/developer',
+    environment: {},
+    commandProbe: async (command) => {
+      if (command.name === 'Wails') wailsProbe = command;
+      return { available: true, detail: `${command.name} test-version` };
+    },
+    portProbe,
+    pathProbe,
+  });
+
+  assert.equal(wailsProbe.command, 'go');
+  assert.deepEqual(wailsProbe.args, ['tool', 'wails3', 'version']);
 });
 
 test('warns about occupied development ports without hiding other checks', async () => {

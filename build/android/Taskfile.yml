@@ -272,7 +272,7 @@ tasks:
     cmds:
       # Bindings are generated from the Go AST; CGO is disabled so the NDK
       # is not required for this step
-      - cd "{{.GO_DIR}}" && wails3 generate bindings -ts -d ../frontend-ng/bindings -f '-tags android' -clean=true ./pkg/desktop/...
+      - cd "{{.GO_DIR}}" && {{.WAILS3_TOOL}} generate bindings -ts -d ../frontend-ng/bindings -f '-tags android' -clean=true ./pkg/desktop/...
       - node scripts/write-binding-marker.mjs frontend-ng/bindings/.android-bindings
     env:
       GOOS: android

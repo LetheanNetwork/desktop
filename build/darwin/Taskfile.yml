@@ -72,7 +72,7 @@ tasks:
       MACOSX_DEPLOYMENT_TARGET: '{{.MACOS_DEPLOYMENT_TARGET}}'
       CGO_CFLAGS: '-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}'
       CGO_CXXFLAGS: '-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}'
-      CGO_LDFLAGS: '-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}'
+      CGO_LDFLAGS: '-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}} -Wl,-no_warn_duplicate_libraries'
 
   build:docker:
     summary: Cross-compiles for macOS using Docker (for Linux/Windows hosts)
@@ -86,7 +86,7 @@ tasks:
       - sh: docker image inspect {{.CROSS_IMAGE}} > /dev/null 2>&1
         msg: |
           Docker image '{{.CROSS_IMAGE}}' not found.
-          Build it first: wails3 task setup:docker
+          Build it first: go tool wails3 task setup:docker
     cmds:
       - docker run --rm -v "{{.ROOT_DIR}}:/app" {{.GO_CACHE_MOUNT}} {{.REPLACE_MOUNTS}} -e APP_NAME="{{.APP_NAME}}" {{if .EXTRA_TAGS}}-e EXTRA_TAGS="{{.EXTRA_TAGS}}"{{end}} {{.CROSS_IMAGE}} darwin {{.DOCKER_ARCH}}
       - docker run --rm -v "{{.ROOT_DIR}}:/app" alpine chown -R $(id -u):$(id -g) /app/bin
@@ -140,7 +140,7 @@ tasks:
     summary: Creates universal binary using wails3 tool lipo (Linux/Windows)
     internal: true
     cmds:
-      - wails3 tool lipo -output "{{.BIN_DIR}}/{{.APP_NAME}}" -input "{{.BIN_DIR}}/{{.APP_NAME}}-amd64" -input "{{.BIN_DIR}}/{{.APP_NAME}}-arm64"
+      - '{{.WAILS3_TOOL}} tool lipo -output "{{.BIN_DIR}}/{{.APP_NAME}}" -input "{{.BIN_DIR}}/{{.APP_NAME}}-amd64" -input "{{.BIN_DIR}}/{{.APP_NAME}}-arm64"'
       - rm -f "{{.BIN_DIR}}/{{.APP_NAME}}-amd64" "{{.BIN_DIR}}/{{.APP_NAME}}-arm64"
 
   package:
@@ -174,11 +174,11 @@ tasks:
     #
     # Consumes whatever .app already exists at bin/<APP_NAME>.app —
     # so the caller chooses whether that's the host-arch .app from
-    # `wails3 task darwin:package` or the universal .app from
-    # `wails3 task darwin:package:universal`. Run one of those first.
+    # `go tool wails3 task darwin:package` or the universal .app from
+    # `go tool wails3 task darwin:package:universal`. Run one of those first.
     preconditions:
       - sh: test -d "{{.BIN_DIR}}/{{.APP_NAME}}.app"
-        msg: "{{.BIN_DIR}}/{{.APP_NAME}}.app not found. Run `wails3 task darwin:package` (host arch) or `wails3 task darwin:package:universal` (both arches) first."
+        msg: "{{.BIN_DIR}}/{{.APP_NAME}}.app not found. Run `go tool wails3 task darwin:package` (host arch) or `go tool wails3 task darwin:package:universal` (both arches) first."
     cmds:
       - |-
         set -e
@@ -268,7 +268,7 @@ tasks:
     deps:
       - task: package
     cmds:
-      - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.app" --identity "{{.SIGN_IDENTITY}}" {{if .ENTITLEMENTS}}--entitlements {{.ENTITLEMENTS}}{{end}}
+      - '{{.WAILS3_TOOL}} tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.app" --identity "{{.SIGN_IDENTITY}}" {{if .ENTITLEMENTS}}--entitlements {{.ENTITLEMENTS}}{{end}}'
     preconditions:
       - sh: '[ -n "{{.SIGN_IDENTITY}}" ]'
         msg: "SIGN_IDENTITY is required. Set it in the vars section at the top of build/darwin/Taskfile.yml"
@@ -280,11 +280,11 @@ tasks:
       Configure SIGN_IDENTITY and KEYCHAIN_PROFILE in the vars section at the top of this file.
 
       Setup (one-time):
-        wails3 signing credentials --apple-id "you@email.com" --team-id "TEAMID" --password "app-specific-password" --profile "my-profile"
+        go tool wails3 signing credentials --apple-id "you@email.com" --team-id "TEAMID" --password "app-specific-password" --profile "my-profile"
     deps:
       - task: package
     cmds:
-      - wails3 tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.app" --identity "{{.SIGN_IDENTITY}}" {{if .ENTITLEMENTS}}--entitlements {{.ENTITLEMENTS}}{{end}} --notarize --keychain-profile {{.KEYCHAIN_PROFILE}}
+      - '{{.WAILS3_TOOL}} tool sign --input "{{.BIN_DIR}}/{{.APP_NAME}}.app" --identity "{{.SIGN_IDENTITY}}" {{if .ENTITLEMENTS}}--entitlements {{.ENTITLEMENTS}}{{end}} --notarize --keychain-profile {{.KEYCHAIN_PROFILE}}'
     preconditions:
       - sh: '[ -n "{{.SIGN_IDENTITY}}" ]'
         msg: "SIGN_IDENTITY is required. Set it in the vars section at the top of build/darwin/Taskfile.yml"
