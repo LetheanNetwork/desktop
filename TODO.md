@@ -51,17 +51,23 @@ values with truthful live data.
 
 ### Files
 
-- [ ] Add a capability-scoped directory listing contract for browsing beneath
-      approved locations. The current Office Files service provides saved
-      locations and recent direct files, not general traversal.
-- [ ] Add safe file open, reveal-in-host-file-manager, and preview contracts.
-- [ ] Add create folder, rename, move, copy, trash, restore, and delete
-      operations with explicit confirmation and conflict results.
-- [ ] Add filesystem watch events so visible folders and recents update without
-      polling.
-- [ ] Add user-managed saved locations and removable/network volume discovery.
-- [ ] Add pagination, search, metadata, MIME/type detection, and thumbnail
-      generation for large locations.
+- [x] Browse registered locations through capability-scoped `io.Medium`
+      mounts, using only mount IDs and provider-relative paths.
+- [x] Provide bounded text/binary preview through `Files.Preview`.
+- [ ] Add explicit host open and reveal-in-host-file-manager operations behind
+      mount capabilities; neither accepts an absolute renderer path.
+- [x] Create folders, rename, copy, move, trash, restore, and permanently
+      delete with confirmation, conflict, and partial-result contracts.
+- [ ] Add provider-native watch sources. Current `lthn:files:changed` events
+      invalidate mutations without polling, but do not observe external
+      provider changes.
+- [ ] Add Medium-backed user-managed locations plus removable and network
+      volume discovery.
+- [x] Provide bounded pagination and base entry metadata.
+- [ ] Add search, thumbnail generation, richer MIME detection, and indexing
+      suitable for very large catalogues.
+- [ ] Move configured model-root selection behind its own Medium-backed
+      settings source before registering it as a user-managed mount.
 
 ### Terminal
 

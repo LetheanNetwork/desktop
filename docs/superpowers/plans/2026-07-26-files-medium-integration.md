@@ -24,6 +24,17 @@ host root or selects a provider implementation.
 `io.Medium`, `os.Root`, Wails 3 alpha, Angular 22 standalone components,
 TypeScript 6, signals, Vitest/TestBed, Lit custom elements, npm.
 
+**Execution outcome:** `go/v0.15.2` published the planned `os.Root`
+containment repair. Verification then found that its constructor still created
+missing optional roots, so `go/v0.15.3` corrected that behaviour and is the
+version pinned by Desktop. Later `v0.15.2` commands in this historical plan
+describe the original release checkpoint; `v0.15.3` is the consumed release.
+The complete Files tranche was implemented on `main`. Release proof also found
+and repaired a Wails development-only integration fault: macOS WebKit rejects a
+JavaScript WebSocket opened from the secure `wails://` custom scheme, so
+non-production windows now load the Angular loopback origin directly and
+receive an exact validated socket URL. Production remains embedded.
+
 ## Global Constraints
 
 - Execute inline on `main`; do not dispatch sub-agents or create a worktree.
@@ -35,7 +46,8 @@ TypeScript 6, signals, Vitest/TestBed, Lit custom elements, npm.
 - Provider implementations may use platform APIs internally to implement the
   Medium contract; product callers may only see `io.Medium`.
 - Do not enable a production local mount until Desktop pins
-  `dappco.re/go/io v0.15.2` containing the `os.Root` repair.
+  `dappco.re/go/io v0.15.3`, containing the `os.Root` repair and the
+  fail-closed missing-root correction.
 - Do not use `Medium.Exists`, `IsFile`, or `IsDir` for security, conflict, or
   authorisation decisions because their boolean contract cannot distinguish an
   unavailable provider from a missing path. Use `Stat` and preserve errors.
@@ -209,7 +221,7 @@ TypeScript 6, signals, Vitest/TestBed, Lit custom elements, npm.
   `validateEntryName(string) error`, and
   `(*Service).mount(string) (Mount, error)`.
 
-- [ ] **Step 1: Write failing registry and path tests**
+- [x] **Step 1: Write failing registry and path tests**
 
 Replace the old location-format tests with focused contracts:
 
@@ -316,7 +328,7 @@ func registeredMemoryService(
 }
 ```
 
-- [ ] **Step 2: Run the package test and observe the missing-contract failure**
+- [x] **Step 2: Run the package test and observe the missing-contract failure**
 
 Run:
 
@@ -328,7 +340,7 @@ go test ./go/pkg/office/files -run \
 Expected: FAIL because the new mount, runtime, limits, and path contracts do
 not exist.
 
-- [ ] **Step 3: Define the exact wire and service types**
+- [x] **Step 3: Define the exact wire and service types**
 
 Use these public shapes in `types.go`:
 
@@ -540,7 +552,7 @@ normal function returning
 that temporary fail-closed body before any native binding uses it. Do not use a
 mutable package-level function variable for this security seam.
 
-- [ ] **Step 4: Implement pure path validation**
+- [x] **Step 4: Implement pure path validation**
 
 In `path.go`, use provider-style `/` semantics, never host `filepath`
 semantics:
@@ -582,7 +594,7 @@ and U+2066–U+2069. `validateEntryName` additionally rejects `/`, `\`, `.`,
 and `..`. Mount IDs accept only lower-case ASCII letters, digits, and `-`, with
 a maximum of 64 bytes.
 
-- [ ] **Step 5: Run the focused package test**
+- [x] **Step 5: Run the focused package test**
 
 Run:
 
@@ -593,7 +605,7 @@ go test ./go/pkg/office/files -run \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit the foundational contract**
+- [x] **Step 6: Commit the foundational contract**
 
 ```bash
 git add go/pkg/office/files/types.go \
@@ -626,7 +638,7 @@ git commit -m "feat(files): define Medium mount boundary"
   `ListDirectory(ListDirectoryInput) core.Result`, and
   `Preview(PreviewInput) core.Result`.
 
-- [ ] **Step 1: Write failing list and preview tests**
+- [x] **Step 1: Write failing list and preview tests**
 
 ```go
 func TestService_ListDirectory_Good(t *core.T) {
@@ -699,7 +711,7 @@ Create `failingMedium` in `wails_test.go` as a complete test-only
 explicit injected error fields, so later tasks reuse it without inventing
 another fake.
 
-- [ ] **Step 2: Run the new tests and observe missing methods**
+- [x] **Step 2: Run the new tests and observe missing methods**
 
 Run:
 
@@ -710,7 +722,7 @@ go test ./go/pkg/office/files -run \
 
 Expected: FAIL because the DTOs and methods do not exist.
 
-- [ ] **Step 3: Define the provider-neutral read DTOs**
+- [x] **Step 3: Define the provider-neutral read DTOs**
 
 Add these types to `types.go`:
 
@@ -791,7 +803,7 @@ type FilePreview struct {
 `ListMounts` loads the injected runtime and returns empty non-nil slices when
 there are no saved rows.
 
-- [ ] **Step 4: Implement deterministic bounded listing**
+- [x] **Step 4: Implement deterministic bounded listing**
 
 `ListDirectory` performs this exact order:
 
@@ -813,7 +825,7 @@ Never call `Exists`, `IsFile`, or `IsDir`. Do not hide dotfiles; mark them with
 `Hidden: true` so Angular can decide how to display them. Exclude only the
 server-owned first component `.lthn-files`.
 
-- [ ] **Step 5: Implement bounded streaming preview**
+- [x] **Step 5: Implement bounded streaming preview**
 
 `Preview` requires `Capabilities.Preview`, uses `Stat` to reject directories
 and link/other modes, then reads exactly `MaxPreviewBytes + 1` through
@@ -844,7 +856,7 @@ the extension and otherwise use `text/plain` or
 `application/octet-stream`. Count lines only for text. Return mount ID and
 relative path, never a host path.
 
-- [ ] **Step 6: Make Wails methods thin and test the wire boundary**
+- [x] **Step 6: Make Wails methods thin and test the wire boundary**
 
 `wails.go` exposes only:
 
@@ -867,7 +879,7 @@ go test ./go/pkg/office/files -run \
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit the read façade**
+- [x] **Step 7: Commit the read façade**
 
 ```bash
 git add go/pkg/office/files/types.go \
@@ -901,7 +913,7 @@ git commit -m "feat(files): browse and preview Medium mounts"
   `NewMemoryRuntimeMetadata() RuntimeMetadata`, and the Medium-backed
   implementation of Task 1's runtime contract.
 
-- [ ] **Step 1: Write failing persistence and recent-file tests**
+- [x] **Step 1: Write failing persistence and recent-file tests**
 
 ```go
 func TestMediumRuntimeMetadata_RoundTripGood(t *core.T) {
@@ -954,7 +966,7 @@ func TestService_PreviewRecordsRecentGood(t *core.T) {
 }
 ```
 
-- [ ] **Step 2: Run the runtime tests and observe missing types**
+- [x] **Step 2: Run the runtime tests and observe missing types**
 
 Run:
 
@@ -965,7 +977,7 @@ go test ./go/pkg/office/files -run \
 
 Expected: FAIL because the Medium-backed runtime constructors do not exist.
 
-- [ ] **Step 3: Implement the existing persistence interface**
+- [x] **Step 3: Implement the existing persistence interface**
 
 ```go
 type mediumRuntimeMetadata struct {
@@ -979,7 +991,7 @@ type mediumRuntimeMetadata struct {
 `NewMediumRuntimeMetadata(coreio.NewMemoryMedium(), "runtime.json")`; even
 ephemeral tests cross the same Medium boundary.
 
-- [ ] **Step 4: Implement Medium-only load and staged save**
+- [x] **Step 4: Implement Medium-only load and staged save**
 
 `Load` calls `Medium.Read`. Only `fs.ErrNotExist` returns
 `RuntimeSnapshot{Version: 1, Favourites: []Favourite{},
@@ -1019,7 +1031,7 @@ Do not instantiate `go-store` here. The pinned go-store can use a Medium for
 database transport, but it also stages SQLite/workspace files internally; it
 is not the first implementation of this security boundary.
 
-- [ ] **Step 5: Integrate metadata with catalogue and preview**
+- [x] **Step 5: Integrate metadata with catalogue and preview**
 
 `ListMounts` loads runtime metadata and returns public mount DTOs plus only
 favourites/recents whose mount still exists and whose path remains valid.
@@ -1037,7 +1049,7 @@ go test ./go/pkg/office/files -run \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit runtime metadata**
+- [x] **Step 6: Commit runtime metadata**
 
 ```bash
 git add go/pkg/office/files/types.go \
@@ -1070,7 +1082,7 @@ git commit -m "feat(files): persist runtime metadata through Medium"
   `FileOperationResult`, `FileConflict`, `FileEvent`, and
   `Subscribe(*core.Core, func(*core.Core, FileEvent))`.
 
-- [ ] **Step 1: Write failing mutation and event tests**
+- [x] **Step 1: Write failing mutation and event tests**
 
 ```go
 func TestService_CreateDirectory_Good(t *core.T) {
@@ -1140,7 +1152,7 @@ func TestService_Rename_EmitsRelativeEventGood(t *core.T) {
 }
 ```
 
-- [ ] **Step 2: Run the new tests and observe the missing mutation API**
+- [x] **Step 2: Run the new tests and observe the missing mutation API**
 
 Run:
 
@@ -1151,7 +1163,7 @@ go test ./go/pkg/office/files -run \
 
 Expected: FAIL because the input, result, event, and methods do not exist.
 
-- [ ] **Step 3: Add stable operation and event wire shapes**
+- [x] **Step 3: Add stable operation and event wire shapes**
 
 ```go
 type OperationStatus string
@@ -1224,7 +1236,7 @@ func Subscribe(c *core.Core, fn func(*core.Core, FileEvent)) {
 }
 ```
 
-- [ ] **Step 4: Implement create and rename through one Medium**
+- [x] **Step 4: Implement create and rename through one Medium**
 
 Both methods:
 
@@ -1259,7 +1271,7 @@ the cause.
 same parent, rejects the mount root, and never overwrites. It must not accept a
 destination path from the renderer.
 
-- [ ] **Step 5: Expose thin Wails methods and run the mutation suite**
+- [x] **Step 5: Expose thin Wails methods and run the mutation suite**
 
 Add the two receiver methods to `wails.go` and verify their JSON-visible inputs
 contain no absolute-root field.
@@ -1273,7 +1285,7 @@ go test ./go/pkg/office/files -run \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit the first mutations**
+- [x] **Step 6: Commit the first mutations**
 
 ```bash
 git add go/pkg/office/files/types.go \
@@ -1307,7 +1319,7 @@ git commit -m "feat(files): add Medium mutations and events"
   `Move(TransferInput) core.Result`, deterministic preflight, staging, and
   partial-move reporting.
 
-- [ ] **Step 1: Write failing cross-Medium and adversarial tests**
+- [x] **Step 1: Write failing cross-Medium and adversarial tests**
 
 ```go
 func TestService_CopyAcrossMedia_Good(t *core.T) {
@@ -1386,7 +1398,7 @@ preflight, a mid-stream write failure, same-source/destination rejection, and a
 destination conflict. Extend `failingMedium` with stream/delete errors rather
 than using raw files.
 
-- [ ] **Step 2: Run transfer tests and observe the missing implementation**
+- [x] **Step 2: Run transfer tests and observe the missing implementation**
 
 Run:
 
@@ -1397,7 +1409,7 @@ go test ./go/pkg/office/files -run \
 
 Expected: FAIL because `TransferInput`, `Copy`, and `Move` do not exist.
 
-- [ ] **Step 3: Define the transfer input and internal preflight manifest**
+- [x] **Step 3: Define the transfer input and internal preflight manifest**
 
 ```go
 type TransferInput struct {
@@ -1419,7 +1431,7 @@ There is intentionally no `Overwrite` boolean. A present destination returns
 an `OperationConflict` result with code `files.conflict`, and the UI can ask
 for another name; destructive replacement is not smuggled into copy/move.
 
-- [ ] **Step 4: Implement fail-closed preflight**
+- [x] **Step 4: Implement fail-closed preflight**
 
 `preflightTransfer` recursively inspects only through the source Medium:
 
@@ -1436,7 +1448,7 @@ for another name; destructive replacement is not smuggled into copy/move.
 Use `Stat` on the destination. Only `fs.ErrNotExist` means it is available.
 The preflight manifest stores provider-relative paths and modes only.
 
-- [ ] **Step 5: Stream into an owned staging directory**
+- [x] **Step 5: Stream into an owned staging directory**
 
 During service registration, initialise and verify this exact marker through
 each writable destination Medium:
@@ -1473,7 +1485,7 @@ On failure, delete only the owned operation staging path through
 rename the staging payload to the destination and remove the empty operation
 directory. Never stage under `/tmp` or another host path.
 
-- [ ] **Step 6: Implement move semantics**
+- [x] **Step 6: Implement move semantics**
 
 - Same mount: after all validation and conflict checks, call
   `Medium.Rename(source, destination)` while holding its one lock.
@@ -1489,7 +1501,7 @@ directory. Never stage under `/tmp` or another host path.
 Emit exactly one event after a complete copy/move, and one `partial` event for
 a partial move.
 
-- [ ] **Step 7: Run focused tests and commit**
+- [x] **Step 7: Run focused tests and commit**
 
 Run:
 
@@ -1531,7 +1543,7 @@ git commit -m "feat(files): stream bounded Medium transfers"
   `Restore(RestoreInput) core.Result`, and
   `Delete(DeleteInput) core.Result`.
 
-- [ ] **Step 1: Write failing trash lifecycle tests**
+- [x] **Step 1: Write failing trash lifecycle tests**
 
 ```go
 func TestService_TrashRestore_Good(t *core.T) {
@@ -1598,7 +1610,7 @@ Also cover restore conflict, stale receipt, runtime-save failure with successful
 rollback, rollback failure as partial, permanent deletion of a trash receipt,
 root deletion rejection, missing-provider errors, and internal-path rejection.
 
-- [ ] **Step 2: Run the lifecycle tests and observe missing methods**
+- [x] **Step 2: Run the lifecycle tests and observe missing methods**
 
 Run:
 
@@ -1609,7 +1621,7 @@ go test ./go/pkg/office/files -run \
 
 Expected: FAIL because the trash DTOs and lifecycle methods do not exist.
 
-- [ ] **Step 3: Define the public trash contract**
+- [x] **Step 3: Define the public trash contract**
 
 ```go
 type TrashInput struct {
@@ -1650,7 +1662,7 @@ type TrashSnapshot struct {
 Add `ReceiptID string` to `FileOperationResult`. `DeleteInput` requires exactly
 one of `{MountID, Path}` or `ReceiptID`.
 
-- [ ] **Step 4: Implement trash and restore transaction order**
+- [x] **Step 4: Implement trash and restore transaction order**
 
 Trash:
 
@@ -1677,7 +1689,7 @@ Medium. `fs.ErrNotExist` marks the row stale and returns a typed unavailable
 row; other provider errors fail the snapshot. It never scans arbitrary
 `.lthn-files` children.
 
-- [ ] **Step 5: Implement explicit permanent deletion**
+- [x] **Step 5: Implement explicit permanent deletion**
 
 - `Confirmed` is mandatory for every permanent delete.
 - A non-empty directory additionally requires `Recursive`.
@@ -1692,7 +1704,7 @@ row; other provider errors fail the snapshot. It never scans arbitrary
 Emit relative-path events for trash, restore, and delete. The trash event may
 include the receipt ID but never the trusted internal path.
 
-- [ ] **Step 6: Run the lifecycle suite and commit**
+- [x] **Step 6: Run the lifecycle suite and commit**
 
 Run:
 
@@ -1732,7 +1744,7 @@ git commit -m "feat(files): add Medium-owned trash lifecycle"
   `coreio.NewSandboxed(string) (coreio.Medium, error)` contracts.
 - Establishes the release gate for Go 1.26 `os.Root` containment and closure.
 
-- [ ] **Step 1: Preserve the upstream worktree before editing**
+- [x] **Step 1: Preserve the upstream worktree before editing**
 
 Run:
 
@@ -1747,7 +1759,7 @@ Expected baseline: branch `dev`, current commit recorded in the execution
 notes, and the existing untracked `go.work.sum` left untouched. Do not clean,
 stage, or rewrite unrelated upstream work.
 
-- [ ] **Step 2: Write a deterministic component-swap test**
+- [x] **Step 2: Write a deterministic component-swap test**
 
 Add an unexported nil-by-default `beforeRootOperation func()` field to the
 current `Medium`, and invoke it after `validatePath` but immediately before
@@ -1785,7 +1797,7 @@ func TestLocal_Read_ComponentSwapCannotEscape_Ugly(t *core.T) {
 The upstream provider test is allowed to use OS/Core primitives to construct
 an attack outside the provider boundary. Product Files tests are not.
 
-- [ ] **Step 3: Run the red security tests against v0.15.1 behaviour**
+- [x] **Step 3: Run the red security tests against v0.15.1 behaviour**
 
 Run:
 
@@ -1798,7 +1810,7 @@ go test ./local -run \
 Expected: FAIL because the scheduled read returns `"outside"` through the
 validate-then-use gap.
 
-- [ ] **Step 4: Add the rest of the root/lifecycle contract**
+- [x] **Step 4: Add the rest of the root/lifecycle contract**
 
 After recording the behavioural red result, add sibling tests for:
 
@@ -1838,7 +1850,7 @@ preserved in the plan execution notes.
 - Adds `(*local.Medium).Close() error` as an optional `io.Closer`.
 - Uses Go 1.26 `*os.Root` for every local provider operation.
 
-- [ ] **Step 1: Replace the Medium internals**
+- [x] **Step 1: Replace the Medium internals**
 
 Use this structural shape:
 
@@ -1884,7 +1896,7 @@ Replace `validatePath` with a pure `rootPath` normaliser which:
 Delete `unrestrictedFileSystem`, symlink-resolution helpers, and every
 validate-then-use call.
 
-- [ ] **Step 2: Map every Medium operation to the rooted handle**
+- [x] **Step 2: Map every Medium operation to the rooted handle**
 
 Implement the complete interface with these primitives:
 
@@ -1912,7 +1924,7 @@ than falling back. `Service.OnShutdown` checks whether its configured Medium
 implements `io.Closer`; it closes only service-owned sandboxed media, not the
 package-global `io.Local`.
 
-- [ ] **Step 3: Run focused and complete upstream verification**
+- [x] **Step 3: Run focused and complete upstream verification**
 
 Run:
 
@@ -1933,7 +1945,7 @@ rg -n 'validatePath|resolveSymlinks|unrestrictedFileSystem' local
 
 Expected: no matches.
 
-- [ ] **Step 4: Commit the upstream security repair**
+- [x] **Step 4: Commit the upstream security repair**
 
 ```bash
 cd /Users/snider/Code/core/go-io
@@ -1950,7 +1962,7 @@ git commit -m "fix(local): anchor sandbox operations to os.Root"
 
 Do not stage the pre-existing `go.work.sum`.
 
-- [ ] **Step 5: Release checkpoint**
+- [x] **Step 5: Release checkpoint**
 
 Use the repository's existing release process to publish `go/v0.15.2` from the
 verified commit. Creating or pushing the release/tag is an external mutation,
@@ -1991,7 +2003,7 @@ product dependency.
 - Composes narrow local content mounts with `coreio.NewSandboxed`.
 - Binds exactly one Wails service named `Files`.
 
-- [ ] **Step 1: Verify and pin the immutable upstream release**
+- [x] **Step 1: Verify and pin the immutable upstream release**
 
 Run:
 
@@ -2013,7 +2025,7 @@ Inspect `go.work.sum` before staging because it was already modified at plan
 time. Preserve unrelated content; stage it only if the release resolution
 adds a directly relevant checksum hunk.
 
-- [ ] **Step 2: Write failing default-composition and shutdown tests**
+- [x] **Step 2: Write failing default-composition and shutdown tests**
 
 Use only media to seed the temporary home:
 
@@ -2070,7 +2082,7 @@ only for `fs.ErrNotExist`; permission or rooted-provider creation errors fail
 composition. Add a test proving runtime metadata is written at
 `desktop/files/runtime.json` through the registered I/O Medium.
 
-- [ ] **Step 3: Compose runtime and narrow local mounts**
+- [x] **Step 3: Compose runtime and narrow local mounts**
 
 `DefaultOptions(c)` must:
 
@@ -2113,7 +2125,7 @@ It is lifecycle metadata, never a renderer capability.
 `io.Closer`. It does not close the application `"io"` Medium which owns
 runtime metadata.
 
-- [ ] **Step 4: Add the non-negotiable Files source boundary test**
+- [x] **Step 4: Add the non-negotiable Files source boundary test**
 
 `medium_boundary_test.go` opens its own package directory through
 `coreio.NewSandboxed(".")`, lists and reads source through that Medium, then
@@ -2145,7 +2157,7 @@ go test ./go/pkg/office/files -run \
 
 Expected: PASS.
 
-- [ ] **Step 5: Remove both bypass and duplicate native bindings**
+- [x] **Step 5: Remove both bypass and duplicate native bindings**
 
 - Delete `go/pkg/files`; its unrestricted absolute-path `Read` surface has no
   compatibility grace period.
@@ -2164,7 +2176,7 @@ Expected: PASS.
 Add a source-contract test in `go/pkg/desktop` which parses the binding slice
 and asserts one `Files` binding source.
 
-- [ ] **Step 6: Relay typed Core events to Wails**
+- [x] **Step 6: Relay typed Core events to Wails**
 
 `files_events.go` subscribes once:
 
@@ -2180,7 +2192,7 @@ Call it during desktop setup before the GUI starts. Test the exact event name
 and payload with mount IDs/relative paths, and assert serialised output has no
 temporary root. The relay must not perform a refresh or file read itself.
 
-- [ ] **Step 7: Replace examples with Memory-Medium examples**
+- [x] **Step 7: Replace examples with Memory-Medium examples**
 
 Provide runnable examples for `ListMounts`, `ListDirectory`, `Preview`, and
 one mutation. They must seed with `coreio.NewMemoryMedium`, register the
@@ -2208,7 +2220,7 @@ func ExampleService_ListDirectory() {
 }
 ```
 
-- [ ] **Step 8: Run the wired Go slice and commit**
+- [x] **Step 8: Run the wired Go slice and commit**
 
 Run:
 
@@ -2257,7 +2269,7 @@ git commit -m "feat(files): bind the sole Medium-backed service"
 - Produces: readonly renderer models, pure route-token functions, state
   reconciliation, and a per-window in-memory demo implementation.
 
-- [ ] **Step 1: Write failing token, state, and demo-store tests**
+- [x] **Step 1: Write failing token, state, and demo-store tests**
 
 ```ts
 describe('Files navigation tokens', () => {
@@ -2323,7 +2335,7 @@ describe('FilesDemoStore', () => {
 });
 ```
 
-- [ ] **Step 2: Run the new frontend tests and observe missing modules**
+- [x] **Step 2: Run the new frontend tests and observe missing modules**
 
 Run:
 
@@ -2336,7 +2348,7 @@ npx ng test --watch=false \
 
 Expected: FAIL because the typed Files modules do not exist.
 
-- [ ] **Step 3: Define readonly provider-neutral models**
+- [x] **Step 3: Define readonly provider-neutral models**
 
 Use discriminated unions and the Go wire names:
 
@@ -2407,7 +2419,7 @@ directory, preview, trash, operation result, conflict, event, and every input.
 Use one `FilesActionIntent` discriminated union for view outputs. Do not add
 provider-specific fields or any absolute-path field.
 
-- [ ] **Step 4: Implement pure navigation and reconciliation**
+- [x] **Step 4: Implement pure navigation and reconciliation**
 
 Use these stable token rules:
 
@@ -2424,7 +2436,7 @@ the current snapshot, and Trash to the trash snapshot. It computes count
 labels, icons, selected-provider label, optional capacity label, Up, and
 breadcrumbs without provider branching.
 
-- [ ] **Step 5: Port—not rewrite—the complete existing fixture**
+- [x] **Step 5: Port—not rewrite—the complete existing fixture**
 
 Move every `FS` row from `desktop.data.ts` into typed mount/path entries:
 
@@ -2444,7 +2456,7 @@ and delete. It clones the constant seed in its constructor, uses a monotonic
 demo operation ID, applies the same path/capability/conflict rules, and never
 imports Wails, fetches, accesses browser storage, or calls a host API.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run:
 
@@ -2480,7 +2492,7 @@ git commit -m "feat(frontend): type Files state and demo data"
 - Produces one typed method per Go Files method plus an explicit event
   subscription.
 
-- [ ] **Step 1: Write failing bridge method, parser, event, and offline tests**
+- [x] **Step 1: Write failing bridge method, parser, event, and offline tests**
 
 ```ts
 describe('DesktopFilesBridgeService', () => {
@@ -2530,7 +2542,7 @@ Add parser tests for every DTO and mutation method, malformed `core.Result`
 payloads, missing required fields, invalid enum values, negative sizes, an
 invalid event, and unsubscribe.
 
-- [ ] **Step 2: Run the bridge test and observe the missing service**
+- [x] **Step 2: Run the bridge test and observe the missing service**
 
 Run:
 
@@ -2542,7 +2554,7 @@ npx ng test --watch=false \
 
 Expected: FAIL because the service does not exist.
 
-- [ ] **Step 3: Implement one method-name table and explicit online guard**
+- [x] **Step 3: Implement one method-name table and explicit online guard**
 
 ```ts
 const FILES_SERVICE = 'dappco.re/lthn/desktop/pkg/office/files.Service';
@@ -2569,7 +2581,7 @@ Every method calls `requireOnline()` before `SurfaceBridgeService.call`.
 Put event access behind a `FILES_EVENT_SOURCE` injection token mirroring
 `DEEP_LINK_EVENTS`, so jsdom tests never need a native runtime.
 
-- [ ] **Step 4: Parse unknown values without trusting TypeScript casts**
+- [x] **Step 4: Parse unknown values without trusting TypeScript casts**
 
 Implement small `requiredRecord`, `requiredString`, `requiredBoolean`,
 `requiredNumber`, `requiredArray`, and enum readers. Recursively reject
@@ -2595,7 +2607,7 @@ function providerRelativePath(value: unknown, context: string): string {
 Do not silently default a missing capability to `true`, missing arrays to a
 fixture, or invalid capacity to zero.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run:
 
@@ -2645,7 +2657,7 @@ git commit -m "feat(frontend): add strict Files live bridge"
 - Emits typed `FilesActionIntent` values.
 - Does not inject bridge, live-data, window-manager, or provider services.
 
-- [ ] **Step 1: Write failing isolated view contracts**
+- [x] **Step 1: Write failing isolated view contracts**
 
 For each view, render fixed typed inputs and assert both presentation and
 emitted intent. The suite must cover:
@@ -2678,7 +2690,7 @@ it('emits a directory-open intent without knowing a provider', async () => {
 });
 ```
 
-- [ ] **Step 2: Run the isolated suite and observe missing components**
+- [x] **Step 2: Run the isolated suite and observe missing components**
 
 Run:
 
@@ -2690,7 +2702,7 @@ npx ng test --watch=false \
 
 Expected: FAIL because the six views do not exist.
 
-- [ ] **Step 3: Build standalone `OnPush` views**
+- [x] **Step 3: Build standalone `OnPush` views**
 
 Use Angular 22 `input.required`, `input`, and `output`; no `@Input`/`EventEmitter`
 mix inside the new views. Give interactive rows real buttons or roving
@@ -2703,7 +2715,7 @@ and preview labels.
 `innerHTML`. Binary previews show metadata only. Link/other entries show an
 unsupported message and no open action.
 
-- [ ] **Step 4: Move the `.fb*` styling intact, then add only required states**
+- [x] **Step 4: Move the `.fb*` styling intact, then add only required states**
 
 Copy the current `.fb`, `.fbside`, `.fbplace`, `.fbmain`, `.fbtop`, `.fbnav`,
 `.fbcrumb`, `.fbvtog`, `.fbbody`, `.fblist`, `.fbrow`, `.fbgrid`, `.fbcell`,
@@ -2718,7 +2730,7 @@ for selection, keyboard focus, stale state, preview, and operation dialog using
 existing foundation tokens. Do not change fonts, colours, spacing, window
 chrome, shell breakpoints, or unrelated desktop selectors.
 
-- [ ] **Step 5: Run the view suite and commit**
+- [x] **Step 5: Run the view suite and commit**
 
 Run:
 
@@ -2753,7 +2765,7 @@ git commit -m "refactor(frontend): extract Files presentation views"
 - Initially wires Home, mount browsing, breadcrumbs, Up, Refresh, grid/list,
   selection, and Preview. Mutations/events arrive in Task 14.
 
-- [ ] **Step 1: Replace the old aggregate tests with failing container contracts**
+- [x] **Step 1: Replace the old aggregate tests with failing container contracts**
 
 Cover:
 
@@ -2771,7 +2783,7 @@ Cover:
     unavailable when none exists; and
 11. live failure never substitutes demo fixture values.
 
-- [ ] **Step 2: Run the container spec and observe old-contract failures**
+- [x] **Step 2: Run the container spec and observe old-contract failures**
 
 Run:
 
@@ -2784,7 +2796,7 @@ npx ng test --watch=false \
 Expected: FAIL because `FilesApp` still uses `DesktopLiveDataService` and the
 flat `FS` fixture.
 
-- [ ] **Step 3: Implement a presentation-only template composition**
+- [x] **Step 3: Implement a presentation-only template composition**
 
 `FilesApp` imports the six views and renders:
 
@@ -2822,7 +2834,7 @@ Keep `ChangeDetectionStrategy.OnPush`, `CUSTOM_ELEMENTS_SCHEMA`,
 `host: { style: 'display: contents' }`,
 `ViewEncapsulation.None`, and `styleUrl: './files/files.app.scss'`.
 
-- [ ] **Step 4: Implement deterministic load orchestration**
+- [x] **Step 4: Implement deterministic load orchestration**
 
 Store local signals for catalogue, location, directory/trash snapshot, preview,
 selection, data state, last refresh, and failure. On initialisation:
@@ -2841,7 +2853,7 @@ selection, data state, last refresh, and failure. On initialisation:
 Home is assembled from live mount catalogue and recent rows through
 `buildFilesViewState`; it does not issue a host-home listing.
 
-- [ ] **Step 5: Wire navigation, preview, and view mode**
+- [x] **Step 5: Wire navigation, preview, and view mode**
 
 - `navigate(location)` writes only `filesToken(location)` through
   `wm.setSub(win.id, token)`, clears selection/preview, and loads the new state.
@@ -2852,7 +2864,7 @@ Home is assembled from live mount catalogue and recent rows through
 - Grid/list continues to use `win.systab` and
   `wm.setSysTab(win.id, "grid" | "list")`.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run:
 
@@ -2886,7 +2898,7 @@ git commit -m "feat(frontend): browse Medium mounts in Files"
 - Produces capability-aware visible actions, truthful operation feedback, and
   the three existing read-only WebMCP tools.
 
-- [ ] **Step 1: Write failing operation, event, and WebMCP tests**
+- [x] **Step 1: Write failing operation, event, and WebMCP tests**
 
 Add container tests for:
 
@@ -2925,7 +2937,7 @@ against the current catalogue. `files_set_view` retains `grid | list`.
 Register these global tool names only when `win.app === "files"`; the Office
 wrapper in Task 15 reuses the UI but must not create a second registration.
 
-- [ ] **Step 2: Run the container and MCP suites and observe failures**
+- [x] **Step 2: Run the container and MCP suites and observe failures**
 
 Run:
 
@@ -2939,7 +2951,7 @@ npx ng test --watch=false \
 Expected: FAIL because mutations, event refresh, and new token semantics are
 not wired.
 
-- [ ] **Step 3: Centralise action orchestration**
+- [x] **Step 3: Centralise action orchestration**
 
 Implement one `handleIntent(intent: FilesActionIntent)` switch in the
 container. It may open a typed dialog, navigate, preview, refresh, or call
@@ -2960,7 +2972,7 @@ Frontend name checks improve feedback, but Go remains the security boundary.
 Never offer an action when capability is false; never assume that makes an
 unauthorised backend call safe.
 
-- [ ] **Step 4: Subscribe only in connected mode and coalesce refreshes**
+- [x] **Step 4: Subscribe only in connected mode and coalesce refreshes**
 
 After a successful connected initial load:
 
@@ -2981,7 +2993,7 @@ its direct child, or its ancestor.
 Provider-native watchers can emit the same event later; do not add polling in
 this task.
 
-- [ ] **Step 5: Retain read-only WebMCP without granting mutation authority**
+- [x] **Step 5: Retain read-only WebMCP without granting mutation authority**
 
 Register the same three tools once. Keep `location_id` as the public argument
 name for backwards compatibility, but its value is now the reversible token.
@@ -2992,7 +3004,7 @@ Reject unknown tokens with a calm error listing currently available root
 tokens. Nested tokens can be used only after the tool has observed them in
 `files_read_location` output.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run:
 
@@ -3032,7 +3044,7 @@ git commit -m "feat(frontend): wire safe Files operations"
 - Keeps both the app-shell Files route and Office catalogue route, but both
   render the same canonical component.
 
-- [ ] **Step 1: Write the failing route-reuse and absence tests**
+- [x] **Step 1: Write the failing route-reuse and absence tests**
 
 In `surface-registry.spec.ts`, resolve `surface-office-files`, render it with a
 demo `Win`, and assert it contains `lthn-files-app`, the Demo data badge,
@@ -3045,7 +3057,7 @@ desktop-data assertion that `('fs' in DEFAULT_DESKTOP_DATA) === false`.
 The explicit `rg` inspection in Step 3 proves the retired symbol names are
 absent without making a browser test read repository source files.
 
-- [ ] **Step 2: Run the affected tests and observe duplicate-fixture failures**
+- [x] **Step 2: Run the affected tests and observe duplicate-fixture failures**
 
 Run:
 
@@ -3058,7 +3070,7 @@ npx ng test --watch=false \
 
 Expected: FAIL while the retired aggregate and Office fixture still exist.
 
-- [ ] **Step 3: Delete only Files-owned fixture/aggregate code**
+- [x] **Step 3: Delete only Files-owned fixture/aggregate code**
 
 - Remove `FileLocation`, `RecentFile`, `DiskUsage`, `FilesSnapshot`,
   `DesktopLiveDataService.files`, `parseFilesSnapshot`, and its helpers only
@@ -3072,7 +3084,7 @@ Run `rg -n '\b(FS|FsNode|FilesSnapshot|ListLocations|ListRecent|GetDiskUsage)\b'
 frontend-ng/src/app/desktop` and inspect every remaining match. Expected
 matches are only design/history prose if any; no TypeScript consumer remains.
 
-- [ ] **Step 4: Make Office Files a thin canonical wrapper**
+- [x] **Step 4: Make Office Files a thin canonical wrapper**
 
 ```ts
 @Component({
@@ -3095,7 +3107,7 @@ Update the Agents Code explanatory copy from the retired absolute
 bridge call there unless that surface has a registered repository mount and a
 relative address.
 
-- [ ] **Step 5: Run the route/data tests and commit**
+- [x] **Step 5: Run the route/data tests and commit**
 
 Run:
 
@@ -3140,7 +3152,7 @@ If `frontend-ng/src/app/desktop/index.ts` is unchanged, omit it from `git add`.
 - Records, but does not mechanically rewrite, pre-existing non-Files debt.
 - Produces fresh Go, Angular, build, and visual verification evidence.
 
-- [ ] **Step 1: Update the design/runtime-persistence statement**
+- [x] **Step 1: Update the design/runtime-persistence statement**
 
 Replace the design's permissive go-store paragraph with the verified current
 constraint:
@@ -3157,7 +3169,7 @@ This correction changes no product architecture: runtime metadata remains
 separate from content mounts and may later change implementation behind the
 same `RuntimeMetadata` interface.
 
-- [ ] **Step 2: Add the invariant to `AGENTS.md`**
+- [x] **Step 2: Add the invariant to `AGENTS.md`**
 
 Under CoreGO development contract, add:
 
@@ -3174,7 +3186,7 @@ Also document the canonical Files package, runtime metadata path, default
 mount IDs, internal namespace, Wails event name, offline-demo rule, and focused
 test commands introduced by this plan.
 
-- [ ] **Step 3: Make the Files backlog truthful**
+- [x] **Step 3: Make the Files backlog truthful**
 
 In `TODO.md`:
 
@@ -3190,7 +3202,7 @@ In `TODO.md`:
 
 Do not remove unrelated Control, Telemetry, Terminal, or shared-bridge work.
 
-- [ ] **Step 4: Produce a reproducible repository-wide audit**
+- [x] **Step 4: Produce a reproducible repository-wide audit**
 
 Run read-only inventories such as:
 
@@ -3216,7 +3228,7 @@ Write `docs/security/io-medium-audit.md` with:
 
 Do not turn this audit step into thousands of unrelated rewrites.
 
-- [ ] **Step 5: Run focused Go proof**
+- [x] **Step 5: Run focused Go proof**
 
 ```bash
 cd /Users/snider/Code/core/go-io/go
@@ -3233,7 +3245,7 @@ gofmt -l go/pkg/office/files go/pkg/desktop/files_events.go \
 
 Expected: tests/vet PASS and `gofmt -l` prints nothing.
 
-- [ ] **Step 6: Run the Angular confidence gate and production build**
+- [x] **Step 6: Run the Angular confidence gate and production build**
 
 ```bash
 cd /Users/snider/Lethean/agent/cladius/Code/lthn/desktop
@@ -3245,7 +3257,7 @@ npm run build
 Expected: ordered lint/type/test confidence gate PASS and production output at
 `../go/cmd/lthn/dist/index.html`.
 
-- [ ] **Step 7: Run browser demo visual and interaction proof**
+- [x] **Step 7: Run browser demo visual and interaction proof**
 
 Start:
 
@@ -3275,7 +3287,7 @@ Verify:
 Capture screenshots only as verification artefacts; do not add them to the
 repository unless the owner asks.
 
-- [ ] **Step 8: Run native connected smoke**
+- [x] **Step 8: Run native connected smoke**
 
 With the browser server stopped and port `9099` free:
 
@@ -3286,12 +3298,14 @@ wails3 task dev
 
 Verify one real temporary/approved mount path through the native app:
 ListMounts, root/nested listing, bounded preview, create/rename, copy, trash,
-restore, and delete. Confirm the Angular network/event log contains only mount
-IDs and relative paths and receives `lthn:files:changed`. Do not use a personal
-document as a destructive test target; create a dedicated disposable folder
-through the Files UI.
+restore, and grid/list switching. Confirm the Angular network/event log
+contains only mount IDs and relative paths and receives
+`lthn:files:changed`. Prove permanent deletion separately against an isolated
+test Medium unless an operator explicitly confirms the irreversible native UI
+step. Do not use a personal document as a destructive test target; create a
+dedicated disposable folder through the Files UI.
 
-- [ ] **Step 9: Run repository diff and broad proportional checks**
+- [x] **Step 9: Run repository diff and broad proportional checks**
 
 ```bash
 cd /Users/snider/Lethean/agent/cladius/Code/lthn/desktop
@@ -3304,7 +3318,7 @@ Expected: `git diff --check` PASS. Record any pre-existing broad-suite/security
 sweep failure separately with its exact command and output; do not weaken a
 test or claim global CoreGO compliance to make the turn green.
 
-- [ ] **Step 10: Commit documentation and audit evidence**
+- [x] **Step 10: Commit documentation and audit evidence**
 
 ```bash
 git add AGENTS.md TODO.md \
@@ -3312,6 +3326,39 @@ git add AGENTS.md TODO.md \
   docs/security/io-medium-audit.md
 git commit -m "docs(files): codify the Medium security boundary"
 ```
+
+---
+
+## Final release proof
+
+Completed on 2026-07-26:
+
+- upstream `core/go-io` local-provider tests, full tests, and vet passed for
+  the published `v0.15.3` boundary;
+- Desktop focused Go tests/vet, the complete `wails3 task test`, and
+  `go vet ./go/...` passed;
+- all Go files changed from `origin/main` are `gofmt`-clean. The unscoped
+  `gofmt -l go/` inventory still reports unrelated pre-existing formatting
+  debt and was not used to rewrite other packages;
+- `wails3 task verify:frontend` passed 35 development-contract checks and
+  268 Angular tests across 59 files. Fresh aggregate coverage was 67.28%
+  statements and 70.97% lines; the Files app measured 82.89% statements and
+  88.27% lines;
+- the standalone production Angular build passed and emitted
+  `go/cmd/lthn/dist/index.html`;
+- deterministic offline browser QA passed at desktop, tablet/shell, and
+  390-by-844 device sizes with no Wails socket or retry loop;
+- the native macOS app browsed six real temporary `io.Medium` mounts and
+  exercised nested listing, bounded preview, create, rename, cross-mount copy
+  and move, recoverable trash, restore, and grid/list switching. The disposable
+  QA home was removed afterwards through `io.Medium`; and
+- permanent delete and recursive-confirmation behaviour passed freshly in the
+  isolated `TestService_Delete*` service tests. No personal file was used.
+
+The expected browser-only `/wails/custom.js` miss is limited to explicit
+offline preview. A real macOS Documents mount may still require the user to
+grant the app Documents access; denial fails closed through the Medium rather
+than bypassing it.
 
 ---
 

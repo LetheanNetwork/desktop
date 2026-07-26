@@ -194,11 +194,40 @@ stdlib patterns:
   `Register(*core.Core) core.Result`, and a free one-shot
   `Register(*core.Core) core.Result`, with a `// Usage example:` marker.
 
+All file-backed product operations must ultimately flow through a registered
+`dappco.re/go/io.Medium`. `io.Medium` is the security boundary: do not add a
+raw `os`/`path/filepath`/`syscall`/Core-Fs fallback for local convenience,
+including for metadata, tests, previews, recursion, or error recovery. An
+unavailable Medium fails closed. Resolve provider roots and credentials in
+trusted Go composition; renderer contracts carry only mount IDs and
+provider-relative paths.
+
+The canonical Files service is `go/pkg/office/files`. Its runtime metadata is
+the versioned `desktop/files/runtime.json` document on the registered
+application I/O Medium. Existing local directories may be composed as
+`documents`, `downloads`, `projects`, `models`, `recordings`, and
+`screenshots`; missing roots are skipped and must not be created by browsing.
+Each mutable content Medium owns only its audited `.lthn-files` namespace.
+Mutations emit `lthn:files:changed` with mount IDs and relative paths. Explicit
+offline transport uses one isolated in-memory demo store per Files window and
+must make no Wails call or event subscription.
+
 Use TDD for new behaviour. New public symbols should carry focused
 Good/Bad/Ugly tests and runnable examples in the matching package. Use
 `*core.T`/the package's existing test convention, `t.TempDir()`, and
 `t.Setenv("HOME", ...)` for user-data isolation. Never let a unit test write to
 the real `~/Lethean/` tree.
+
+Focused Files checks:
+
+```bash
+go test ./go/pkg/office/files ./go/pkg/desktop ./go/cmd/lthn -count=1
+go vet ./go/pkg/office/files ./go/pkg/desktop ./go/cmd/lthn
+cd frontend-ng
+npx ng test --watch=false \
+  --include=src/app/desktop/apps/files.app.spec.ts \
+  --include=src/app/desktop/desktop-files-bridge.service.spec.ts
+```
 
 The external v0.9.0 audit currently reports a large pre-existing compliance
 backlog; it is **not** a green all-zero gate on this branch. Run it as a
@@ -245,6 +274,13 @@ Full Wails development from the repository root:
 ```bash
 wails3 task dev
 ```
+
+Development windows load the Angular loopback server directly and receive the
+validated Wails WebSocket URL as `lthn-ws`; macOS WebKit rejects JavaScript
+WebSockets started from the secure custom `wails://` scheme. The transport
+allows only the exact loopback development origins derived from
+`WAILS_VITE_PORT`. Production builds retain the embedded `wails://` asset
+route, and must not inherit this development URL behaviour.
 
 Run `task doctor` before development when the toolchain, generated bindings,
 optional crew repositories, or ports are in doubt. Run `task verify:frontend`

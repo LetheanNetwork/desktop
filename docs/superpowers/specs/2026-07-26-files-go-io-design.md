@@ -96,34 +96,26 @@ second service as `Files.Read`. These are the seams to replace together.
 
 ## Upstream boundary gate
 
-The pinned and current upstream local Medium contains an explicit security
-warning: its path containment currently validates path components and later
-passes the resulting string to an unrestricted filesystem operation. A
-filesystem object can theoretically be swapped between those steps, creating a
-time-of-check/time-of-use race around a symlink.
+The audit found that the previous local Medium validated path components and
+later passed the resulting string to an unrestricted filesystem operation.
+That left a time-of-check/time-of-use race around a swapped symlink. The fix
+belonged in `go-io`, because every CoreGO consumer relies on the same boundary;
+Desktop did not add a second sandboxing implementation.
 
-Desktop must not paper over this inside `go/pkg/office/files`. The correct
-owner is `go-io`, because every CoreGO consumer relies on the same boundary.
+The gate is now satisfied:
 
-Before enabling the local mount in a release:
+- adversarial tests in `core/go-io/go/local` reproduce component and symlink
+  swaps;
+- every local Medium operation is rooted through Go 1.26 `os.Root`
+  handle-relative operations and unsupported paths fail closed;
+- `go/v0.15.2` published the containment repair;
+- `go/v0.15.3` corrected constructor behaviour so browsing a missing optional
+  root returns `fs.ErrNotExist` instead of creating it; and
+- Lethean Desktop pins `dappco.re/go/io v0.15.3`.
 
-- add an adversarial regression test to `core/go-io/go/local` that attempts a
-  component or symlink swap between validation and use;
-- replace validate-then-use with Go 1.26 `os.Root` handle-relative operations
-  for every local Medium method; internal relative symlinks may be followed,
-  but an absolute or escaping target must fail at the rooted operation;
-- make unsupported platform paths fail closed rather than falling back to the
-  old unrestricted operation;
-- retain the `io.Medium` interface so other providers and consumers do not
-  change;
-- release the repaired go-io module; and
-- update Lethean Desktop to that version before calling the local Files mount
-  production-ready.
-
-The desktop implementation may be developed against Memory and other safe
-Mediums while this upstream gate is repaired. It must not add a second
-sandboxing implementation or claim that repeated string validation closes the
-race.
+The `io.Medium` interface remains unchanged, so Memory and future provider
+media use the same product contract. Repeated string validation is still not a
+substitute for the handle-relative provider boundary.
 
 ## Approaches considered
 
