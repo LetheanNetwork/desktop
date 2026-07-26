@@ -10,6 +10,7 @@ import {
   ChangeDetectionStrategy,
   declareExperimentalWebMcpTool,
   signal,
+  ViewEncapsulation,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AppView } from './app-view';
@@ -28,6 +29,8 @@ type FilePlaceGroup = [string, FilePlace[]];
   imports: [CommonModule, DesktopDataStateBadge],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   host: { style: 'display: contents' },
+  styleUrl: './files/files.app.scss',
+  encapsulation: ViewEncapsulation.None,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="fb">

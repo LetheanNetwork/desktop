@@ -1,0 +1,593 @@
+/* Canonical Files app — global light-DOM styles (ViewEncapsulation.None). */
+.fb {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  position: relative;
+}
+.fbside {
+  flex: none;
+  width: 186px;
+  background: var(--ink-2);
+  border-right: 1px solid var(--line-1);
+  padding: 10px 8px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.fbside .slab {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  margin: 12px 8px 4px;
+}
+.fbside .slab:first-child {
+  margin-top: 2px;
+}
+.fbplace {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  color: var(--fg-2);
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.fbplace lthn-icon {
+  color: var(--fg-3);
+}
+.fbplace:hover {
+  background: color-mix(in oklch, var(--fg-0) 6%, transparent);
+  color: var(--fg-0);
+}
+.fbplace.on {
+  background: color-mix(in oklch, var(--brand-500) 20%, transparent);
+  color: var(--brand-100);
+}
+.fbplace.on lthn-icon {
+  color: var(--brand-200);
+}
+.fbmain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fbtop {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--line-1);
+  background: color-mix(in oklch, var(--ink-2) 55%, transparent);
+}
+.fbnav {
+  display: flex;
+  gap: 4px;
+}
+.fbnav button {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 1px solid var(--line-2);
+  background: var(--ink-1);
+  color: var(--fg-2);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.fbnav button:hover:not(:disabled) {
+  color: var(--fg-0);
+  border-color: var(--brand-400);
+}
+.fbnav button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+.fbcrumb {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--fg-2);
+  overflow: hidden;
+}
+.fbcrumb .cr {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px 7px;
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fbcrumb .cr:hover {
+  background: color-mix(in oklch, var(--fg-0) 8%, transparent);
+  color: var(--fg-0);
+}
+.fbcrumb .cr.here {
+  color: var(--fg-0);
+  font-weight: 600;
+}
+.fbcrumb .sep {
+  color: var(--fg-4);
+  flex: none;
+}
+.fbactions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.fbactions button {
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  background: var(--ink-1);
+  color: var(--fg-2);
+  font: inherit;
+  font-size: 11px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.fbactions button:hover {
+  color: var(--fg-0);
+  border-color: var(--brand-400);
+}
+.fbactions button.danger:hover {
+  border-color: var(--danger-400);
+  color: var(--danger-200);
+}
+.fbvtog {
+  display: inline-flex;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  overflow: hidden;
+  flex: none;
+}
+.fbvtog button {
+  border: 0;
+  background: transparent;
+  color: var(--fg-3);
+  padding: 5px 9px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.fbvtog button.on {
+  background: var(--ink-3);
+  color: var(--fg-0);
+}
+.fbbody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+.fbgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(102px, 1fr));
+  gap: 4px;
+}
+.fbcell {
+  font: inherit;
+  background: transparent;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 14px 8px 11px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-align: center;
+}
+.fbcell:hover {
+  background: color-mix(in oklch, var(--fg-0) 6%, transparent);
+}
+.fbcell.selected {
+  background: color-mix(in oklch, var(--brand-500) 15%, transparent);
+  border-color: color-mix(in oklch, var(--brand-400) 65%, transparent);
+}
+.fbcell .fi {
+  color: var(--brand-200);
+}
+.fbcell .fi.folder {
+  color: var(--brand-300);
+}
+.fbcell .fn {
+  font-size: 12px;
+  color: var(--fg-1);
+  word-break: break-word;
+  line-height: 1.3;
+}
+.fbcell .fc {
+  font-size: 10px;
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+}
+.fblist {
+  display: flex;
+  flex-direction: column;
+}
+.fbrow {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  display: grid;
+  grid-template-columns: 1fr 96px 96px;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+.fbrow.head {
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line-1);
+  border-radius: 0;
+  margin-bottom: 2px;
+}
+button.fbrow {
+  cursor: pointer;
+}
+button.fbrow:hover {
+  background: color-mix(in oklch, var(--fg-0) 6%, transparent);
+  color: var(--fg-0);
+}
+button.fbrow.selected {
+  background: color-mix(in oklch, var(--brand-500) 15%, transparent);
+  color: var(--brand-100);
+}
+.fbrow .nm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.fbrow .nm lthn-icon {
+  color: var(--brand-200);
+}
+.fbrow .nm span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fbrow .mut {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-4);
+}
+.fbempty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--fg-4);
+  text-align: center;
+  font-size: 13px;
+}
+.fbempty lthn-icon {
+  color: var(--fg-4);
+  opacity: 0.6;
+}
+.fbstatus {
+  flex: none;
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 14px;
+  border-top: 1px solid var(--line-1);
+  background: var(--ink-2);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.fbstatus.stale {
+  border-top-color: color-mix(in oklch, var(--warning-400) 55%, var(--line-1));
+}
+.fbstatus .provider {
+  color: var(--fg-4);
+}
+.fbstatus .v {
+  margin-left: auto;
+  font-family: var(--font-mono);
+}
+.fbpreview {
+  flex: none;
+  width: min(300px, 38%);
+  min-width: 230px;
+  border-left: 1px solid var(--line-1);
+  background: var(--ink-2);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.fbpreview > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line-1);
+}
+.fbpreview > header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.fbpreview > header strong {
+  color: var(--fg-0);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fbpreview > header span {
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.fbpreview > header button,
+.fbdialog > header button {
+  margin-left: auto;
+  width: 27px;
+  height: 27px;
+  border-radius: 7px;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.fbpreview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line-1);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--fg-4);
+}
+.fbpreview pre {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.fbpreview-unsupported {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  padding: 22px;
+  color: var(--fg-4);
+  font-size: 12px;
+}
+.fbpreview-unsupported strong {
+  color: var(--fg-2);
+}
+.fbpreview-warning {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--warning-200);
+  background: color-mix(in oklch, var(--warning-500) 12%, transparent);
+  font-size: 11px;
+}
+.fbdialog-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(2px);
+}
+.fbdialog {
+  width: min(420px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--ink-2);
+  box-shadow: var(--shadow-4);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fbdialog > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.fbdialog h2 {
+  margin: 0;
+  color: var(--fg-0);
+  font-size: 14px;
+  font-weight: 600;
+}
+.fbdialog p {
+  margin: 0;
+  color: var(--fg-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.fbdialog p.warning {
+  color: var(--warning-200);
+}
+.fbdialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--fg-3);
+  font-size: 11px;
+}
+.fbdialog :is(input, select) {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  background: var(--ink-1);
+  color: var(--fg-1);
+  font: inherit;
+  padding: 7px 9px;
+}
+.fbdialog > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+.fbdialog > footer button {
+  border: 1px solid var(--brand-400);
+  border-radius: 7px;
+  background: var(--brand-500);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.fbdialog > footer button.danger {
+  border-color: var(--danger-400);
+  background: var(--danger-500);
+}
+.fbdialog-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-3);
+  font-size: 12px;
+}
+.fbdialog-progress lthn-icon {
+  animation: files-spin 1s linear infinite;
+}
+.fbdialog-addresses {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.fbdialog-addresses dt {
+  color: var(--fg-4);
+}
+.fbdialog-addresses dd {
+  margin: 0;
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+.fb :is(button, input, select):focus-visible {
+  outline: 2px solid var(--brand-300);
+  outline-offset: 2px;
+}
+@keyframes files-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 760px) {
+  .fbside {
+    width: 154px;
+  }
+  .fbactions {
+    max-width: 34%;
+    overflow: auto;
+  }
+  .fbactions button {
+    white-space: nowrap;
+  }
+  .fbpreview {
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: min(330px, 90%);
+    z-index: 10;
+    box-shadow: var(--shadow-4);
+  }
+}
+@media (max-width: 520px) {
+  .fb {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .fbside {
+    width: auto;
+    min-width: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-1);
+    padding: 6px;
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .fbside .slab {
+    display: none;
+  }
+  .fbplace {
+    width: auto;
+    flex: none;
+  }
+  .fbtop {
+    gap: 5px;
+    padding: 7px;
+  }
+  .fbcrumb {
+    order: 2;
+    flex-basis: 100%;
+  }
+  .fbtop {
+    flex-wrap: wrap;
+  }
+  .fbactions {
+    margin-left: auto;
+    max-width: 55%;
+  }
+  .fbrow {
+    grid-template-columns: minmax(0, 1fr) 64px;
+  }
+  .fbrow > :last-child {
+    display: none;
+  }
+  .fbstatus {
+    flex-wrap: wrap;
+    height: auto;
+  }
+}
