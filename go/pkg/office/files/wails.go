@@ -26,6 +26,16 @@ func (s *Service) Preview(input PreviewInput) core.Result {
 	return s.preview(input)
 }
 
+// CreateDirectory creates one child directory through its registered Medium.
+func (s *Service) CreateDirectory(input CreateDirectoryInput) core.Result {
+	return s.createDirectory(input)
+}
+
+// Rename replaces one entry's final name without accepting a destination root.
+func (s *Service) Rename(input RenameInput) core.Result {
+	return s.rename(input)
+}
+
 // ListLocations returns the ordered catalogue of canonical workspace
 // locations with item counts and rolled-up sizes.
 // Non-existent paths produce a row with count=0 and size="0 KB".

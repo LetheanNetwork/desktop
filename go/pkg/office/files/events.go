@@ -1,15 +1,45 @@
-// SPDX-Licence-Identifier: EUPL-1.2
-
-// Event name constants for the files surface.
-// v1 is read-only — no events are emitted. Constants are reserved
-// for v2 when FSEvents / inotify watchers push change notifications.
+// SPDX-License-Identifier: EUPL-1.2
 
 package files
 
-// EventLocationChanged fires when a watched location's contents change (v2).
-// Payload is the location Name that changed.
-const EventLocationChanged = "files.location.changed"
+import core "dappco.re/go"
 
-// EventRecentUpdated fires when the recent-files list changes (v2).
-// Payload is the updated []RecentRow.
-const EventRecentUpdated = "files.recent.updated"
+// Subscribe registers a typed Files event listener on Core's ACTION bus.
+func Subscribe(c *core.Core, fn func(*core.Core, FileEvent)) {
+	if c == nil || fn == nil {
+		return
+	}
+	c.RegisterAction(func(c *core.Core, message core.Message) core.Result {
+		if event, ok := message.(FileEvent); ok {
+			fn(c, event)
+		}
+		return core.Ok(nil)
+	})
+}
+
+func (s *Service) fireEvent(
+	operation string,
+	operationID string,
+	addresses ...FileAddress,
+) {
+	if s == nil || s.core == nil {
+		return
+	}
+	mountIDs := make([]string, 0, len(addresses))
+	paths := make([]string, 0, len(addresses))
+	seenMount := make(map[string]bool)
+	for _, address := range addresses {
+		if !seenMount[address.MountID] {
+			seenMount[address.MountID] = true
+			mountIDs = append(mountIDs, address.MountID)
+		}
+		paths = append(paths, address.Path)
+	}
+	s.core.ACTION(FileEvent{
+		Operation:   operation,
+		OperationID: operationID,
+		MountIDs:    mountIDs,
+		Paths:       paths,
+		At:          core.Now().UTC(),
+	})
+}

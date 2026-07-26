@@ -241,6 +241,64 @@ type FilePreview struct {
 	Binary       bool   `json:"binary"`
 }
 
+// OperationStatus is the stable mutation outcome namespace.
+type OperationStatus string
+
+const (
+	OperationCompleted OperationStatus = "completed"
+	OperationConflict  OperationStatus = "conflict"
+	OperationPartial   OperationStatus = "partial"
+)
+
+// FileAddress contains only a registered mount and provider-relative path.
+type FileAddress struct {
+	MountID string `json:"mountId"`
+	Path    string `json:"path"`
+}
+
+// FileConflict preserves both sides of a non-destructive conflict.
+type FileConflict struct {
+	Source      FileAddress `json:"source"`
+	Destination FileAddress `json:"destination"`
+	Kind        EntryKind   `json:"kind"`
+}
+
+// FileOperationResult is the common renderer-facing mutation result.
+type FileOperationResult struct {
+	OperationID string          `json:"operationId"`
+	Operation   string          `json:"operation"`
+	Status      OperationStatus `json:"status"`
+	Code        ErrorCode       `json:"code,omitempty"`
+	Source      FileAddress     `json:"source"`
+	Destination *FileAddress    `json:"destination,omitempty"`
+	Affected    []FileAddress   `json:"affected"`
+	Conflict    *FileConflict   `json:"conflict,omitempty"`
+	Message     string          `json:"message"`
+}
+
+// CreateDirectoryInput creates one validated child of a relative parent.
+type CreateDirectoryInput struct {
+	MountID    string `json:"mountId"`
+	ParentPath string `json:"parentPath,omitempty"`
+	Name       string `json:"name"`
+}
+
+// RenameInput replaces only the final name of an existing relative path.
+type RenameInput struct {
+	MountID string `json:"mountId"`
+	Path    string `json:"path"`
+	Name    string `json:"name"`
+}
+
+// FileEvent is a small invalidation signal broadcast after mutation.
+type FileEvent struct {
+	Operation   string    `json:"operation"`
+	OperationID string    `json:"operationId"`
+	MountIDs    []string  `json:"mountIds"`
+	Paths       []string  `json:"paths"`
+	At          core.Time `json:"at"`
+}
+
 // Failure is a stable Files error which deliberately omits provider roots,
 // endpoints, credentials, and low-level causes from its rendered text.
 type Failure struct {
