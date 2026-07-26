@@ -13,9 +13,22 @@ test('inventories every base app and routed surface without calling it live', as
 
   assert.equal(report.baseApps.length, 23);
   assert.equal(report.surfaceApps.length, 43);
-  assert.equal(report.surfaceApps.filter(({ contracts }) => contracts.length > 0).length, 35);
+  assert.equal(report.surfaceApps.filter(({ contracts }) => contracts.length > 0).length, 34);
   assert.equal(new Set(report.surfaceApps.map(({ route }) => route)).size, 43);
-  assert.equal(report.entries.some(({ sourceState }) => sourceState === 'live'), false);
+  assert.equal(
+    report.entries.some(({ sourceState }) => sourceState === 'live'),
+    false,
+  );
+
+  for (const id of ['files', 'surface-office-files']) {
+    const entry = report.entries.find((candidate) => candidate.id === id);
+    assert.equal(entry?.sourceState, 'integrated', id);
+    assert.equal(
+      entry?.evidence.includes('frontend-ng/src/app/desktop/desktop-files-bridge.service.ts'),
+      true,
+      id,
+    );
+  }
 });
 
 test('renders evidence and limitations instead of mock-or-live guesses', async () => {

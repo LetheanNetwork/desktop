@@ -58,10 +58,9 @@ const BASE_ROUTES = Object.freeze({
 
 const SPECIALISED_EVIDENCE = Object.freeze({
   chat: ['frontend-ng/src/app/desktop/desktop-ai.service.ts'],
+  files: ['frontend-ng/src/app/desktop/desktop-files-bridge.service.ts'],
   settings: ['frontend-ng/src/app/desktop/preferences.service.ts'],
-  'surface-agents-terminal': [
-    'frontend-ng/src/app/desktop/surfaces/agents/terminal-session.ts',
-  ],
+  'surface-agents-terminal': ['frontend-ng/src/app/desktop/surfaces/agents/terminal-session.ts'],
   'surface-extensions-marketplace': [
     'frontend-ng/src/app/desktop/surfaces/extensions/marketplace.ts',
   ],
@@ -71,10 +70,13 @@ const SPECIALISED_EVIDENCE = Object.freeze({
   'surface-extensions-opencode-shim': [
     'frontend-ng/src/app/desktop/surfaces/extensions/opencode-shim.ts',
   ],
+  'surface-office-files': [
+    'frontend-ng/src/app/desktop/apps/files.app.ts',
+    'frontend-ng/src/app/desktop/desktop-files-bridge.service.ts',
+  ],
 });
 
-const CONTRACT_PATTERN =
-  /(?:bridgeMethod|loadEndpoint|endpoint):\s*['"`]([^'"`]+)['"`]/g;
+const CONTRACT_PATTERN = /(?:bridgeMethod|loadEndpoint|endpoint):\s*['"`]([^'"`]+)['"`]/g;
 
 /**
  * @typedef {'integrated'|'unresolved'|'design-fixture'} SourceState
@@ -102,10 +104,8 @@ export async function collectCapabilityEvidence(repoRoot) {
   const entries = [...baseApps, ...surfaceApps];
 
   for (const entry of entries) {
-    const hasIntegration =
-      entry.contracts.length > 0 || entry.specialisedEvidence.length > 0;
-    const allContractsResolve =
-      entry.resolvedContracts === entry.contracts.length;
+    const hasIntegration = entry.contracts.length > 0 || entry.specialisedEvidence.length > 0;
+    const allContractsResolve = entry.resolvedContracts === entry.contracts.length;
     entry.sourceState = !hasIntegration
       ? 'design-fixture'
       : allContractsResolve && entry.evidence.length > 0
@@ -149,11 +149,10 @@ async function readBaseApps(repoRoot) {
     source.indexOf('export const APPS:'),
     source.indexOf('export const CATEGORIES:'),
   );
-  const ids = [...block.matchAll(/^\s{2}([a-z][a-z0-9_-]+):\s*\{/gm)]
-    .map((match) => match[1]);
-  return Promise.all(ids.map((id) =>
-    entryFromComponent(repoRoot, id, BASE_ROUTES[id], BASE_COMPONENTS[id]),
-  ));
+  const ids = [...block.matchAll(/^\s{2}([a-z][a-z0-9_-]+):\s*\{/gm)].map((match) => match[1]);
+  return Promise.all(
+    ids.map((id) => entryFromComponent(repoRoot, id, BASE_ROUTES[id], BASE_COMPONENTS[id])),
+  );
 }
 
 async function readSurfaceApps(repoRoot) {
@@ -165,18 +164,20 @@ async function readSurfaceApps(repoRoot) {
     source.indexOf('const DEFINITIONS:'),
     source.indexOf('export function surfaceAppId'),
   );
-  const definitions = [...block.matchAll(
-    /group:\s*'([^']+)'[\s\S]*?route:\s*'([^']+)'[\s\S]*?title:/g,
-  )];
-  return Promise.all(definitions.map(([, group, route]) => {
-    const id = `surface-${group}-${route}`;
-    return entryFromComponent(
-      repoRoot,
-      id,
-      `/${group}/${route}`,
-      `frontend-ng/src/app/desktop/surfaces/${group}/${route}.ts`,
-    );
-  }));
+  const definitions = [
+    ...block.matchAll(/group:\s*'([^']+)'[\s\S]*?route:\s*'([^']+)'[\s\S]*?title:/g),
+  ];
+  return Promise.all(
+    definitions.map(([, group, route]) => {
+      const id = `surface-${group}-${route}`;
+      return entryFromComponent(
+        repoRoot,
+        id,
+        `/${group}/${route}`,
+        `frontend-ng/src/app/desktop/surfaces/${group}/${route}.ts`,
+      );
+    }),
+  );
 }
 
 async function entryFromComponent(repoRoot, id, route, component) {
@@ -195,10 +196,7 @@ async function entryFromComponent(repoRoot, id, route, component) {
     route,
     component,
     contracts,
-    evidence: [
-      ...resolutions.flatMap(({ evidence }) => evidence),
-      ...presentSpecialisedEvidence,
-    ],
+    evidence: [...resolutions.flatMap(({ evidence }) => evidence), ...presentSpecialisedEvidence],
     limitations: [],
     resolvedContracts: resolutions.filter(({ resolved }) => resolved).length,
     specialisedEvidence,
@@ -207,19 +205,16 @@ async function entryFromComponent(repoRoot, id, route, component) {
 }
 
 async function resolveContract(repoRoot, contract) {
-  const goFiles = (await gitLines(repoRoot, ['ls-files', 'go']))
-    .filter((path) => path.endsWith('.go') && !path.endsWith('_test.go'));
+  const goFiles = (await gitLines(repoRoot, ['ls-files', 'go'])).filter(
+    (path) => path.endsWith('.go') && !path.endsWith('_test.go'),
+  );
   const method = contract.match(
     /^dappco\.re\/lthn\/desktop\/(pkg\/.+)\.Service\.([A-Za-z][A-Za-z0-9_]*)$/,
   );
   if (method) {
     const [, packagePath, methodName] = method;
-    const candidates = goFiles.filter((path) =>
-      path.startsWith(`go/${packagePath}/`),
-    );
-    const declaration = new RegExp(
-      `func\\s*\\([^)]*\\*Service\\)\\s*${methodName}\\s*\\(`,
-    );
+    const candidates = goFiles.filter((path) => path.startsWith(`go/${packagePath}/`));
+    const declaration = new RegExp(`func\\s*\\([^)]*\\*Service\\)\\s*${methodName}\\s*\\(`);
     const evidence = [];
     for (const path of candidates) {
       const source = await readFile(join(repoRoot, path), 'utf8');
@@ -242,9 +237,7 @@ async function resolveContract(repoRoot, contract) {
 
 const modulePath = fileURLToPath(import.meta.url);
 const repoRoot = resolve(dirname(modulePath), '..');
-const isMain =
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 
 if (isMain) {
   const markdown = renderCapabilityMatrix(await collectCapabilityEvidence(repoRoot));

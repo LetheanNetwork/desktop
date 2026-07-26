@@ -46,7 +46,7 @@
 | /networking/lethernet | frontend-ng/src/app/desktop/apps/lethernet.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
 | /observe/activity | frontend-ng/src/app/desktop/surfaces/observe/activity.ts | /v1/audit/events?limit=250 | unresolved | component/route only | Runtime path not certified by this source audit. |
 | /office/documents | frontend-ng/src/app/desktop/surfaces/office/documents.ts | dappco.re/lthn/desktop/pkg/office/documents.Service.List | integrated | go/pkg/office/documents/wails.go#Service.List | Runtime path not certified by this source audit. |
-| /office/files | frontend-ng/src/app/desktop/surfaces/office/files.ts | dappco.re/lthn/desktop/pkg/office/files.Service.ListRecent | integrated | go/pkg/office/files/wails.go#Service.ListRecent | Runtime path not certified by this source audit. |
+| /office/files | frontend-ng/src/app/desktop/surfaces/office/files.ts | none declared | integrated | frontend-ng/src/app/desktop/apps/files.app.ts<br>frontend-ng/src/app/desktop/desktop-files-bridge.service.ts | Runtime path not certified by this source audit. |
 | /office/mail | frontend-ng/src/app/desktop/surfaces/office/mail.ts | dappco.re/lthn/desktop/pkg/office/mail.Service.ListThreads | integrated | go/pkg/office/mail/wails.go#Service.ListThreads | Runtime path not certified by this source audit. |
 | /office/tasks | frontend-ng/src/app/desktop/apps/dev-panel.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
 | /office/tenant | frontend-ng/src/app/desktop/apps/dev-panel.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
@@ -67,6 +67,6 @@
 | /system/control | frontend-ng/src/app/desktop/apps/control.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
 | /system/settings | frontend-ng/src/app/desktop/apps/settings.app.ts | none declared | integrated | frontend-ng/src/app/desktop/preferences.service.ts | Runtime path not certified by this source audit. |
 | /system/telemetry | frontend-ng/src/app/desktop/apps/telemetry.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
-| /tools/files | frontend-ng/src/app/desktop/apps/files.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
+| /tools/files | frontend-ng/src/app/desktop/apps/files.app.ts | none declared | integrated | frontend-ng/src/app/desktop/desktop-files-bridge.service.ts | Runtime path not certified by this source audit. |
 | /tools/notepad | frontend-ng/src/app/desktop/apps/notepad.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
 | /tools/terminal | frontend-ng/src/app/desktop/apps/dev-panel.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
