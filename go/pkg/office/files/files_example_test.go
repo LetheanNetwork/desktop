@@ -10,7 +10,7 @@ import (
 // ExampleService_ListLocations shows how to list canonical workspace locations.
 func ExampleService_ListLocations() {
 	c := core.New()
-	svc := files.NewService(c)
+	svc := files.NewService(files.Options{Core: c})
 
 	r := svc.ListLocations()
 	if !r.OK {
@@ -27,7 +27,7 @@ func ExampleService_ListLocations() {
 // ExampleService_ListRecent shows how to get recent files for a specific location.
 func ExampleService_ListRecent() {
 	c := core.New()
-	svc := files.NewService(c)
+	svc := files.NewService(files.Options{Core: c})
 
 	r := svc.ListRecent(files.ListRecentInput{LocationName: "Code", Limit: 10})
 	if !r.OK {
@@ -43,7 +43,7 @@ func ExampleService_ListRecent() {
 // ExampleService_GetDiskUsage shows how to retrieve disk free/used figures.
 func ExampleService_GetDiskUsage() {
 	c := core.New()
-	svc := files.NewService(c)
+	svc := files.NewService(files.Options{Core: c})
 
 	r := svc.GetDiskUsage()
 	if !r.OK {
