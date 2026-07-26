@@ -57,6 +57,20 @@ describe('Lethean core kit', () => {
     expect(button?.textContent).toContain('Save');
   });
 
+  it('renders and updates a badge label supplied by a framework binding', async () => {
+    const element = await mount<LitTestElement & { label: string }>('lthn-badge', (badge) => {
+      badge.label = 'Demo data';
+    });
+
+    expect(element.textContent).toContain('Demo data');
+
+    element.label = 'Live data';
+    await element.updateComplete;
+
+    expect(element.textContent).toContain('Live data');
+    expect(element.textContent).not.toContain('Demo data');
+  });
+
   it('emits the next boolean value when a toggle changes', async () => {
     const element = await mount<LitTestElement & { on: boolean }>('lthn-toggle');
     const change = vi.fn();

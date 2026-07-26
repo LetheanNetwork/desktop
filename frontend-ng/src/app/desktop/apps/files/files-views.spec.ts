@@ -1,5 +1,6 @@
 import type { Type } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import '../../../../kit/lthn-core';
 import type {
   FilePreviewView,
   FilesActionIntent,
@@ -236,7 +237,8 @@ describe('Files presentation views', () => {
 
   it('shows data state, counts, provider, and optional capacity', async () => {
     const fixture = await render(FilesStatusView, { state: viewState() });
-    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    const element = fixture.nativeElement as HTMLElement;
+    const text = element.textContent ?? '';
 
     expect(text).toContain('Demo data');
     expect(text).toContain('2 items');
@@ -244,6 +246,11 @@ describe('Files presentation views', () => {
     expect(text).toContain('1 file');
     expect(text).toContain('Documents');
     expect(text).toContain('218 GB free of 512 GB');
+
+    fixture.componentRef.setInput('state', viewState({ dataState: 'live' }));
+    await fixture.whenStable();
+    expect(element.textContent).toContain('Live data');
+    expect(element.textContent).not.toContain('Demo data');
   });
 
   it('renders escaped bounded text and binary preview metadata', async () => {

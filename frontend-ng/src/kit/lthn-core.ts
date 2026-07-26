@@ -50,6 +50,7 @@ export type BadgeVariant = "neutral" | "brand" | "success" | "warn";
 export interface BadgeProperties {
   variant?: BadgeVariant;
   icon?: string;
+  label?: string;
 }
 
 export interface CardProperties {
@@ -225,12 +226,13 @@ define("lthn-button", LthnButton);
 
 /* ───────────── <lthn-badge variant icon> ───────────── */
 class LthnBadge extends LthnLight implements BadgeProperties {
-  static override properties: PropertyDeclarations = { variant: {}, icon: {} };
+  static override properties: PropertyDeclarations = { variant: {}, icon: {}, label: {} };
 
   declare variant: BadgeVariant;
   declare icon: string;
+  declare label: string;
 
-  constructor() { super(); this.variant = "neutral"; }
+  constructor() { super(); this.variant = "neutral"; this.label = ""; }
   protected override render(): TemplateResult {
     const variants: Record<BadgeVariant, string> = {
       neutral: "background:var(--ink-3);color:var(--fg-2);border-color:var(--line-1);",
@@ -240,7 +242,7 @@ class LthnBadge extends LthnLight implements BadgeProperties {
     };
     const v = variants[this.variant] || "";
     return html`<span style="display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 10px;border-radius:var(--r-pill);font-size:11.5px;font-weight:500;border:1px solid;${v}">
-      ${this.icon ? html`<i class="fas fa-${this.icon}" style="font-size:9px" aria-hidden="true"></i>` : nothing}${this.slotted()}
+      ${this.icon ? html`<i class="fas fa-${this.icon}" style="font-size:9px" aria-hidden="true"></i>` : nothing}${this.label || this.slotted()}
     </span>`;
   }
 }

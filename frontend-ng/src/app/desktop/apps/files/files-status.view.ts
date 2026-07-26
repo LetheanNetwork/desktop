@@ -12,9 +12,8 @@ import type { FilesDataState, FilesViewState } from './files-view.models';
       <lthn-badge
         [attr.variant]="badgeVariant(state().dataState)"
         [attr.data-data-state]="state().dataState"
-      >
-        {{ stateLabel(state().dataState) }}
-      </lthn-badge>
+        [attr.label]="stateLabel(state().dataState)"
+      ></lthn-badge>
       <span>{{ countLabel() }}</span>
       <span class="provider">{{ state().providerLabel }}</span>
       @if (state().capacityLabel) {
@@ -41,9 +40,9 @@ export class FilesStatusView {
     }
   }
 
-  badgeVariant(state: FilesDataState): 'ok' | 'muted' | 'warn' {
-    if (state === 'live') return 'ok';
-    if (state === 'loading') return 'muted';
+  badgeVariant(state: FilesDataState): 'success' | 'neutral' | 'warn' {
+    if (state === 'live') return 'success';
+    if (state === 'loading') return 'neutral';
     return 'warn';
   }
 

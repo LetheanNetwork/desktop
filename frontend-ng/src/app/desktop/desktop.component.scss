@@ -293,7 +293,7 @@ lthn-desktop{background:var(--ink-0);color:var(--fg-1);font-family:var(--font-sa
   /* ══════════ DEVICE VIEW — mobile / tablet / edge frame: one focused app + dock + Home; category home screen ══════════ */
   .mode-device .dicons,.mode-device .bar,.mode-device .dock,.mode-device .widgets,.mode-device .menubar{display:none}
   .mode-device #winlayer{inset:0!important;display:grid;place-items:center;padding:20px;background:transparent}
-  .mode-device:not([data-device="full"]) .win,.mode-device:not([data-device="full"]) .homesurface{position:relative!important;inset:auto!important;transform:none!important;display:flex;flex-direction:column;overflow:hidden;background:var(--ink-1);border:9px solid #05070a;border-radius:40px;box-shadow:0 40px 90px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.05);width:390px;height:min(94%,780px)}
+  .mode-device:not([data-device="full"]) .win,.mode-device:not([data-device="full"]) .homesurface{position:relative!important;inset:auto!important;transform:none!important;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box;background:var(--ink-1);border:9px solid #05070a;border-radius:40px;box-shadow:0 40px 90px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.05);width:min(100%,390px);height:min(94%,780px)}
   .mode-device[data-device="large"] .win,.mode-device[data-device="large"] .homesurface{width:min(94%,760px);height:min(94%,900px);border-radius:30px;border-width:12px}
   .mode-device .homesurface{background:transparent}
   .mode-device .resize,.mode-device .titlebar{display:none}
