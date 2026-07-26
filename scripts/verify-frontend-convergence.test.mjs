@@ -26,6 +26,36 @@ test('frontend exposes the documented deterministic demo server', async () => {
   );
 });
 
+test('Wails development installs frontend dependencies once before starting HMR', async () => {
+  const config = await read('build/config.yml');
+  const common = await read('build/Taskfile.yml');
+  const root = await read('Taskfile.yml');
+  const installFrontend = common.match(
+    /\n  install:frontend:deps:\n[\s\S]*?(?=\n  [^ \n][^\n]*:\n|\s*$)/,
+  )?.[0];
+  const devFrontend = common.match(
+    /\n  dev:frontend:\n[\s\S]*?(?=\n  [^ \n][^\n]*:\n|\s*$)/,
+  )?.[0];
+  const devBuild = root.match(
+    /\n  dev:build:\n[\s\S]*?(?=\n  [^ \n][^\n]*:\n|\s*$)/,
+  )?.[0];
+
+  assert.ok(installFrontend);
+  assert.ok(devFrontend);
+  assert.ok(devBuild);
+  assert.equal(config.match(/cmd: wails3 task common:install:frontend:deps/g)?.length, 1);
+  assert.match(config, /cmd: wails3 task common:install:frontend:deps\n\s+type: once/);
+  assert.match(config, /cmd: wails3 task common:dev:frontend\n\s+type: background/);
+  assert.match(installFrontend, /generates:\n\s+- node_modules\/\.package-lock\.json/);
+  assert.doesNotMatch(devFrontend, /\n\s+deps:/);
+  assert.doesNotMatch(devFrontend, /- task: install:frontend:deps/);
+  assert.match(devFrontend, /test -d node_modules/);
+  assert.match(devBuild, /go build/);
+  assert.match(devBuild, /-gcflags=all=/);
+  assert.doesNotMatch(devBuild, /-tags production/);
+  assert.doesNotMatch(devBuild, /pre-build|build:frontend|install:frontend:deps/);
+});
+
 test('all binding generators target frontend-ng and no removed external tree', async () => {
   const files = await Promise.all([
     read('build/Taskfile.yml'),

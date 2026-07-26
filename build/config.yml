@@ -58,9 +58,9 @@ dev_mode:
     - cmd: wails3 task common:install:frontend:deps
       type: once
     # Angular dev server in the background — provides HMR for the
-    # standalone app under frontend-ng/src. Wails3
-    # overrides the binary's Assets.Handler to proxy at this port,
-    # so go:embed dist/ isn't used while dev mode is live.
+    # standalone app under frontend-ng/src. Development windows load this
+    # loopback URL directly so WebKit permits the 9199 socket transport;
+    # go:embed dist/ remains the compiled production path.
     - cmd: wails3 task common:dev:frontend
       type: background
     # Regenerate the TS Wails bindings on every Go file change.
@@ -72,8 +72,10 @@ dev_mode:
     # updated".
     - cmd: wails3 task common:generate:bindings
       type: blocking
-    # Build the Go binary with Wails' built-in MCP service. The portable
-    # launcher removes stale managed values and supplies only
+    # Compile only the host-native Go development binary with Wails' built-in
+    # MCP service. Angular HMR already owns the frontend and this path must not
+    # rerun the production frontend or optional crew-sidecar build graph.
+    # The portable launcher removes stale managed values and supplies only
     # EXTRA_TAGS=mcp, so Wails MCP owns 9099.
     - cmd: node scripts/wails-dev-command.mjs build
       type: blocking

@@ -155,6 +155,23 @@ tasks:
     cmds:
       - task: "{{OS}}:run"
 
+  dev:build:
+    summary: Compile the host-native development binary without rebuilding the HMR frontend or optional crew sidecars
+    deps:
+      - common:go:work:sync
+      - common:generate:icons
+    cmds:
+      - cmd: mkdir -p "{{.BIN_DIR}}"
+        platforms: [darwin, linux]
+      - cmd: powershell -NoProfile -Command "New-Item -ItemType Directory -Force '{{.BIN_DIR}}' | Out-Null"
+        platforms: [windows]
+      - cd "{{.GO_DIR}}" && go build {{.BUILD_FLAGS}} -ldflags "-X dappco.re/go/update.Version={{.LTHN_VERSION}}" -o "../{{.OUTPUT}}" "{{.GO_CMD}}"
+    vars:
+      BUILD_FLAGS: '{{if .EXTRA_TAGS}}-tags {{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"'
+      LTHN_VERSION:
+        sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+      OUTPUT: '{{if eq OS "windows"}}{{.BIN_DIR}}/{{.APP_NAME}}.exe{{else}}{{.BIN_DIR}}/{{.APP_NAME}}{{end}}'
+
   dev:
     summary: Wails3 dev mode with Angular HMR and the built-in MCP service on 127.0.0.1:9099
     env:

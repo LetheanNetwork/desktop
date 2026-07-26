@@ -46,7 +46,13 @@ func angularWindowSpec(
 		profile = "main"
 	}
 	spec := windowSpecFromWebviewOptions(
-		appconfig.WebviewWindowOptions(profile, name, title, route, configs...),
+		appconfig.WebviewWindowOptions(
+			profile,
+			name,
+			title,
+			frontendWindowURL(route),
+			configs...,
+		),
 	)
 	spec.HideOnClose = true
 	spec.ShowDockIcon = true
@@ -62,7 +68,7 @@ func trayPanelWindowSpec(configs ...*config.Service) *WindowSpec {
 		"tray-popover",
 		trayPanelWindowName,
 		"Lethean Desktop",
-		trayPanelRoute,
+		frontendWindowURL(trayPanelRoute),
 		configs...,
 	))
 	spec.HideOnClose = true

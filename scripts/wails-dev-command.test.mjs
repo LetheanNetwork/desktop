@@ -31,6 +31,10 @@ const runManagedEntries = [
   ['LTHN_WAILS_WS_LISTEN', '127.0.0.1:9199'],
   ['LTHN_WAILS_WS_URL', 'ws://localhost:9199/wails/ws'],
 ];
+const taskForCommand = {
+  build: 'dev:build',
+  run: 'run',
+};
 
 const hostileAmbient = Object.freeze({
   PATH: '/example/bin',
@@ -72,7 +76,7 @@ test('launcher passes the exact native child boundary under hostile ambient valu
 
     assert.equal(status, 0);
     assert.equal(captured.executable, 'wails3');
-    assert.deepEqual(captured.args, ['task', command]);
+    assert.deepEqual(captured.args, ['task', taskForCommand[command]]);
     assert.equal(captured.options.stdio, 'inherit');
     assert.equal(Object.hasOwn(captured.options, 'shell'), false);
     assert.deepEqual(managedEntries(captured.options.env), expectedManaged);

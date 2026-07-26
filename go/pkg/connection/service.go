@@ -173,11 +173,7 @@ func optionsWithDefaults(options Options) Options {
 		options.AllowedOrigins = originsFromEnvironment()
 	}
 	if len(options.AllowedOrigins) == 0 {
-		options.AllowedOrigins = []string{
-			"wails://localhost",
-			"http://localhost:9099",
-			"http://127.0.0.1:9099",
-		}
+		options.AllowedOrigins = defaultAllowedOrigins()
 	}
 	if options.Token == "" {
 		options.Token = core.Trim(core.Getenv("LTHN_WAILS_WS_TOKEN"))
@@ -202,6 +198,32 @@ func optionsWithDefaults(options Options) Options {
 		options.ShutdownTimeout = defaultShutdownTimeout
 	}
 	return options
+}
+
+func defaultAllowedOrigins() []string {
+	origins := []string{
+		"wails://localhost",
+		"http://localhost:9099",
+		"http://127.0.0.1:9099",
+	}
+	rawPort := core.Trim(core.Getenv("WAILS_VITE_PORT"))
+	if rawPort == "" {
+		return origins
+	}
+	parsed := core.Atoi(rawPort)
+	if !parsed.OK {
+		return origins
+	}
+	port, ok := parsed.Value.(int)
+	if !ok || port <= 0 || port > 65535 {
+		return origins
+	}
+	originPort := core.Itoa(port)
+	return append(
+		origins,
+		core.Concat("wails://localhost:", originPort),
+		core.Concat("http://localhost:", originPort),
+	)
 }
 
 func originsFromEnvironment() []string {

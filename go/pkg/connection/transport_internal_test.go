@@ -155,6 +155,25 @@ func TestConnection_Transport_Good_AcceptsBearerToken(t *core.T) {
 	defer conn.Close()
 }
 
+func TestConnection_Transport_Good_AcceptsValidatedWailsDevOrigins(t *core.T) {
+	t.Setenv("LTHN_WAILS_WS_ORIGINS", "")
+	t.Setenv("WAILS_VITE_PORT", "9245")
+	svc, _ := startTransportFixture(t, Options{Address: "127.0.0.1:0"})
+
+	for _, origin := range []string{
+		"wails://localhost:9245",
+		"http://localhost:9245",
+	} {
+		headers := core.Header{"Origin": []string{origin}}
+		conn, _, dialErr := websocket.DefaultDialer.Dial(
+			"ws://"+svc.address()+svc.options.Path,
+			headers,
+		)
+		core.RequireNoError(t, dialErr)
+		core.AssertNoError(t, conn.Close())
+	}
+}
+
 func TestConnection_Transport_Bad_BlanksOversizedRequestID(t *core.T) {
 	svc, _ := startTransportFixture(t, Options{Address: "127.0.0.1:0"})
 	conn, _, dialErr := websocket.DefaultDialer.Dial("ws://"+svc.address()+svc.options.Path, nil)
@@ -261,4 +280,24 @@ func TestConnection_Options_Good_EnvironmentOverrides(t *core.T) {
 	core.AssertEqual(t, 2, len(svc.options.AllowedOrigins))
 	core.AssertEqual(t, "https://desktop.lethean.example", svc.options.AllowedOrigins[0])
 	core.AssertEqual(t, "https://mobile.lethean.example", svc.options.AllowedOrigins[1])
+}
+
+func TestConnection_Options_Good_AllowsValidatedWailsDevOrigin(t *core.T) {
+	t.Setenv("LTHN_WAILS_WS_ORIGINS", "")
+	t.Setenv("WAILS_VITE_PORT", "9245")
+
+	svc := NewService(Options{})
+
+	core.RequireTrue(t, len(svc.options.AllowedOrigins) == 5)
+	core.AssertEqual(t, "wails://localhost:9245", svc.options.AllowedOrigins[3])
+	core.AssertEqual(t, "http://localhost:9245", svc.options.AllowedOrigins[4])
+}
+
+func TestConnection_Options_Bad_RejectsInvalidWailsDevOriginPort(t *core.T) {
+	t.Setenv("LTHN_WAILS_WS_ORIGINS", "")
+	t.Setenv("WAILS_VITE_PORT", "9245.evil.example")
+
+	svc := NewService(Options{})
+
+	core.AssertEqual(t, 3, len(svc.options.AllowedOrigins))
 }

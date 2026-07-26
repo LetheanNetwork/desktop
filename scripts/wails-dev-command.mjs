@@ -14,7 +14,7 @@ const managedKeySet = new Set(managedKeys.map((key) => key.toLowerCase()));
 
 const commands = Object.freeze({
   build: Object.freeze({
-    task: 'build',
+    task: 'dev:build',
     env: Object.freeze({ EXTRA_TAGS: 'mcp' }),
   }),
   run: Object.freeze({

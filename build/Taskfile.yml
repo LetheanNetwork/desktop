@@ -14,7 +14,7 @@ tasks:
       - package.json
       - package-lock.json
     generates:
-      - node_modules
+      - node_modules/.package-lock.json
     preconditions:
       - sh: npm version
         msg: "Looks like npm isn't installed. Npm is part of the Node installer: https://nodejs.org/en/download/"
@@ -114,8 +114,9 @@ tasks:
   dev:frontend:
     summary: Runs Angular's development server with HMR for the Wails proxy
     dir: frontend-ng
-    deps:
-      - task: install:frontend:deps
+    preconditions:
+      - sh: test -d node_modules
+        msg: "Frontend dependencies are missing. Run: wails3 task common:install:frontend:deps"
     cmds:
       - npm start -- --host 127.0.0.1 --port "{{.VITE_PORT}}" --hmr --poll 1000
 
