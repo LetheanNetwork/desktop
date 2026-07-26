@@ -56,7 +56,6 @@ import (
 	"dappco.re/lthn/desktop/pkg/contentshield"
 	"dappco.re/lthn/desktop/pkg/deploys"
 	"dappco.re/lthn/desktop/pkg/downloader"
-	"dappco.re/lthn/desktop/pkg/files"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/git"
@@ -387,7 +386,8 @@ func (s *Service) Run() core.Result {
 	documentsSvc, _ := core.ServiceFor[*documents.Service](s.opts.Core, "office-documents")
 	// office/mail — Office mailbox catalogue. Core-registered; read-only v1.
 	mailSvc, _ := core.ServiceFor[*mail.Service](s.opts.Core, "office-mail")
-	// office/files — Office filesystem browser. Core-registered; read-only v1.
+	// office/files — sole provider-neutral Files binding. Its registered
+	// io.Medium mounts enforce the content and metadata boundary.
 	filesSvc, _ := core.ServiceFor[*officefile.Service](s.opts.Core, "office-files")
 	// coding/deploys — Coding role deploy history catalogue. Core-registered;
 	// reads and writes Trix-style markdown from ~/Lethean/deploys/. v1 scope:
@@ -519,7 +519,6 @@ func (s *Service) Run() core.Result {
 		gui.Bind(integrations.NewWailsService()),
 		gui.Bind(apikey.NewWailsService(s.opts.Core)),
 		gui.Bind(git.NewService(s.opts.Core)),
-		gui.Bind(files.NewService(s.opts.Core)),
 		gui.Bind(terminal.NewService(s.opts.Core)),
 		gui.Bind(build.NewService(s.opts.Core)),
 		gui.Bind(container.NewService(s.opts.Core)),
@@ -948,6 +947,7 @@ func (s *Service) Run() core.Result {
 	// so the frontend has one event-bus contract for everything.
 	// See sysevents.go for the table.
 	registerSystemEvents(s.opts.Core)
+	registerFilesEvents(s.opts.Core)
 
 	// Per-window lthn:window:* event re-broadcasts (ready / focus /
 	// blur / hide / show / resize / files-dropped). See sysevents.go.

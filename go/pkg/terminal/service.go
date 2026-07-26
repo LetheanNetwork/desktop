@@ -20,11 +20,11 @@ const (
 	eventExitPrefix = "lthn:term:exit:"
 )
 
-// Service is the Wails-bound terminal control plane. Like pkg/files it's a
-// plain (un-gated) service — a terminal runs the local user's own shell on
-// their own machine, the same trust class as reading a local file, not
-// account-sealed data. Bytes ride the Wails event bus (see service doc in
-// session.go); the methods here are the infrequent control operations.
+// Service is the Wails-bound terminal control plane. A terminal runs the local
+// user's own shell on their own machine; unlike the Files application, its
+// process and working-directory authority is explicit at session creation.
+// Bytes ride the Wails event bus (see service doc in session.go); the methods
+// here are the infrequent control operations.
 type Service struct {
 	core *core.Core
 
@@ -269,7 +269,7 @@ func (s *Service) resolveCwd(input OpenInput) string {
 }
 
 // resolveRepoPath finds a repo by bare name under the canonical workspace roots
-// (Code/{core,lthn,host-uk,lab,snider}), mirroring pkg/files + pkg/repos. ""
+// (Code/{core,lthn,host-uk,lab,snider}), mirroring pkg/repos. It returns ""
 // when no matching git repo is found.
 func resolveRepoPath(name string) string {
 	if name == "" {

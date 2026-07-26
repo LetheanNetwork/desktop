@@ -11,7 +11,7 @@ require (
 	dappco.re/go/container v0.11.0
 	dappco.re/go/i18n v0.12.1
 	dappco.re/go/inference v0.14.0
-	dappco.re/go/io v0.15.1
+	dappco.re/go/io v0.15.3
 	dappco.re/go/mcp v0.19.1
 	dappco.re/go/orm v0.1.2
 	dappco.re/go/process v0.16.1

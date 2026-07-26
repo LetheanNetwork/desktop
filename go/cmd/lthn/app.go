@@ -285,7 +285,9 @@ func newAppCore() *core.Core {
 		core.WithName("office-mail", mail.Register),
 		// office/files — Office role filesystem browser. Surfaces canonical
 		// workspace locations, recent files, and disk usage. Read-only v1.
-		// Wails: Files.ListLocations / ListRecent / GetDiskUsage.
+		// office-files — the sole Files application. Trusted composition
+		// registers narrow io.Medium mounts and keeps runtime metadata on
+		// the earlier application "io" service.
 		core.WithName("office-files", files.Register),
 		// coding/deploys — Coding role deploy history catalogue. Reads and
 		// writes Trix-style markdown files from ~/Lethean/deploys/. v1 scope:
