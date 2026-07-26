@@ -284,6 +284,14 @@ allows only the exact loopback development origins derived from
 `WAILS_VITE_PORT`. Production builds retain the embedded `wails://` asset
 route, and must not inherit this development URL behaviour.
 
+Native macOS development, test, server, and production Task entrypoints link
+at the product's macOS 26.0 floor. `MACOS_DEPLOYMENT_TARGET` in the root
+`Taskfile.yml` is authoritative; the Taskfiles must pass it through
+`CGO_CFLAGS`, `CGO_CXXFLAGS`, and `CGO_LDFLAGS`, because
+`MACOSX_DEPLOYMENT_TARGET` alone does not override Go 1.26's 11.0 final-link
+default. The development and production plists must declare the matching
+`26.0.0` minimum.
+
 The macOS development and production plists carry user-facing Documents and
 Downloads usage descriptions for the Files app. A denied protected-folder
 mount remains unavailable through its `io.Medium`; never bypass that result

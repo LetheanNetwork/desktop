@@ -95,6 +95,12 @@ WebKit rejects JavaScript WebSockets opened from the secure custom
 the development query. Production does not use this route: it loads embedded
 assets through `wails://`.
 
+The native product floor is macOS 26.0. Root Task entrypoints apply the
+matching cgo compile and link flags, and both application plists declare the
+same minimum. Prefer those Task entrypoints for linked Go builds and tests;
+an unwrapped `go build` or `go test` inherits Go 1.26's older macOS link
+default unless the same cgo flags are supplied.
+
 The Files app opens existing `Documents` and `Downloads` roots through
 sandboxed `io.Medium` providers. macOS prompts for those protected folders
 using the descriptions in `build/darwin/Info.dev.plist` and

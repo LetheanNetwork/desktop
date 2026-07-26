@@ -82,6 +82,7 @@ wails3 task ios:package:ipa IOS_PLATFORM=device \
 | Node | 22 | Angular frontend |
 | `wails3` | v3.0.0-alpha2.117 | pinned mobile overlay generator + task runner |
 | `task` (go-task) | 3.x | build runner |
+| macOS | 26.0 | native Wails/CoreGO runtime and link target |
 | Xcode | current stable | iOS SDK, linker, assets and signing |
 | JDK | 21 | Android Gradle build |
 | Android SDK | API 35 | Android compile and packaging tools |

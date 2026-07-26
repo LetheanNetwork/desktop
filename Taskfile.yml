@@ -38,6 +38,9 @@ vars:
   # Where the Go module + cmd live (Lethean canon: go/ subfolder).
   GO_DIR: "go"
   GO_CMD: "./cmd/lthn"
+  # The native Wails/CoreGO objects are built for macOS 26. Keep the Go
+  # link target and bundle metadata aligned with that real product floor.
+  MACOS_DEPLOYMENT_TARGET: "26.0"
   # Where the go-mlx repo lives. Override with LTHN_MLX_REPO env var
   # if go-mlx is checked out elsewhere on this machine.
   LTHN_MLX_REPO: '{{.LTHN_MLX_REPO | default "/Users/snider/Code/core/go-mlx"}}'
@@ -171,6 +174,11 @@ tasks:
       LTHN_VERSION:
         sh: git describe --tags --always --dirty 2>/dev/null || echo dev
       OUTPUT: '{{if eq OS "windows"}}{{.BIN_DIR}}/{{.APP_NAME}}.exe{{else}}{{.BIN_DIR}}/{{.APP_NAME}}{{end}}'
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '{{if eq OS "darwin"}}{{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_CFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_CXXFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_LDFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
 
   dev:
     summary: Wails3 dev mode with Angular HMR and the built-in MCP service on 127.0.0.1:9099
@@ -196,6 +204,11 @@ tasks:
     summary: Run the Go unit-test suite under go/pkg/...
     cmds:
       - cd "{{.GO_DIR}}" && go test ./pkg/...
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '{{if eq OS "darwin"}}{{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_CFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_CXXFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_LDFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
 
   lint:cousinvalidator:
     summary: "Run cousin-validator lint (forbid local isValid* outside pkg/paths/, Mantis #1505) — operator shortcut for focused run; task test:go already catches drift via the embedded test"
@@ -247,6 +260,11 @@ tasks:
       - cd "{{.GO_DIR}}" && go test -coverprofile=coverage.out ./pkg/...
       - cd "{{.GO_DIR}}" && go tool cover -html=coverage.out -o coverage.html
       - cd "{{.GO_DIR}}" && go tool cover -func=coverage.out
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '{{if eq OS "darwin"}}{{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_CFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_CXXFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_LDFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
 
   test:cover:frontend:
     summary: Angular frontend coverage (Vitest v8 → frontend-ng/coverage/)

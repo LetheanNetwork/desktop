@@ -79,7 +79,7 @@ jobs:
       matrix:
         include:
           - os:        macos
-            runner:    macos-14            # arm64 (Apple Silicon)
+            runner:    macos-26            # arm64; matches the native 26.0 floor
             artifact:  lthn-darwin-arm64
             ext:       .app
             task:      darwin:build

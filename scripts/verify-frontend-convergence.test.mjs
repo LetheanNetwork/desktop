@@ -64,6 +64,43 @@ test('macOS bundles explain protected Files mounts before requesting access', as
   }
 });
 
+test('macOS Go links and bundle metadata share the 26.0 deployment floor', async () => {
+  const root = await read('Taskfile.yml');
+  const common = await read('build/Taskfile.yml');
+  const darwin = await read('build/darwin/Taskfile.yml');
+  const workflow = await read('.github/workflows/build.yml');
+  const taskBlock = (source, name) =>
+    source.match(
+      new RegExp(`\\n  ${name}:\\n[\\s\\S]*?(?=\\n  [^ \\n][^\\n]*:\\n|\\s*$)`),
+    )?.[0];
+
+  assert.match(root, /\n  MACOS_DEPLOYMENT_TARGET: "26\.0"\n/);
+  assert.match(workflow, /- os:\s+macos\n\s+runner:\s+macos-26\b/);
+
+  for (const [source, name] of [
+    [root, 'dev:build'],
+    [root, 'test:go'],
+    [root, 'test:cover:go'],
+    [common, 'build:server'],
+    [darwin, 'build:native'],
+  ]) {
+    const block = taskBlock(source, name);
+    assert.ok(block, `missing ${name} task`);
+    assert.match(block, /MACOSX_DEPLOYMENT_TARGET: .*MACOS_DEPLOYMENT_TARGET/);
+    assert.match(block, /CGO_CFLAGS: .*mmacosx-version-min=.*MACOS_DEPLOYMENT_TARGET/);
+    assert.match(block, /CGO_CXXFLAGS: .*mmacosx-version-min=.*MACOS_DEPLOYMENT_TARGET/);
+    assert.match(block, /CGO_LDFLAGS: .*mmacosx-version-min=.*MACOS_DEPLOYMENT_TARGET/);
+  }
+
+  for (const path of ['build/darwin/Info.plist', 'build/darwin/Info.dev.plist']) {
+    const plist = await read(path);
+    assert.match(
+      plist,
+      /<key>LSMinimumSystemVersion<\/key>\s*<string>26\.0\.0<\/string>/,
+    );
+  }
+});
+
 test('all binding generators target frontend-ng and no removed external tree', async () => {
   const files = await Promise.all([
     read('build/Taskfile.yml'),

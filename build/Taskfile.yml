@@ -141,6 +141,11 @@ tasks:
       - cd "{{.GO_DIR}}" && go build -tags server {{.BUILD_FLAGS}} -o "../{{.BIN_DIR}}/{{.APP_NAME}}-server{{exeExt}}" "{{.GO_CMD}}"
     vars:
       BUILD_FLAGS: "{{.BUILD_FLAGS}}"
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '{{if eq OS "darwin"}}{{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_CFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_CXXFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
+      CGO_LDFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}}{{end}}'
 
   run:server:
     summary: Builds and runs the application in server mode
