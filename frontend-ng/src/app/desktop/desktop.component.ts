@@ -19,7 +19,7 @@ import { CommonModule } from '@angular/common';
 import { NavigationEnd, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { filter } from 'rxjs';
-import { APPS, LANGS, ORDER, TELEMETRY, Win } from './desktop.data';
+import { APPS, LANGS, ORDER, TELEMETRY, Win, WindowSnapState } from './desktop.data';
 import { WindowManagerService } from './window-manager.service';
 import { WindowRouteContent } from './window-route-content';
 import {
@@ -38,6 +38,8 @@ import {
   routeSegmentsForWindow,
 } from './desktop-route-tree';
 import { DESKTOP_STORAGE } from '../store/storage.service';
+import { WindowInteractionService } from './window-interaction.service';
+import type { KeyboardSnapDirection, WindowGroupingState } from './window-interaction.service';
 import { ShellMenuBar } from './shell/menu-bar';
 import { ShellTaskbarDock } from './shell/taskbar-dock';
 import { ShellStartMenu } from './shell/start-menu';
@@ -97,6 +99,7 @@ import type {
 export class DesktopComponent implements AfterViewInit, OnDestroy {
   readonly wm = inject(WindowManagerService);
   readonly prefs = inject(PreferencesService);
+  private readonly windowInteractions = inject(WindowInteractionService);
   private readonly router = inject(Router);
   private readonly storage = inject(DESKTOP_STORAGE);
   private readonly changeDetector = inject(ChangeDetectorRef);
@@ -186,7 +189,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     items: [],
   };
   csub: ShellContextSubmenuState = { open: false, left: 0, top: 0, index: -1 };
-  snap = { zone: null as string | null, left: 0, top: 0, w: 0, h: 0 };
+  snap = { zone: null as WindowSnapState | null, left: 0, top: 0, w: 0, h: 0 };
   selected: string[] = [];
   groups: ShellWindowGroup[] = [];
   shellTabs: any[] = [];
@@ -780,33 +783,37 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
   }
 
   // ── marquee multi-select + drag-to-dock grouping (click-drag UX) ──
-  hit(a: DOMRect, b: { left: number; top: number; right: number; bottom: number }) {
-    return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-  }
   startMarquee(ev: PointerEvent) {
     if (!this.wm.windowed() || this.session !== 'active' || ev.button !== 0) return;
     if ((ev.target as HTMLElement).closest('.win, .bar, .dock, .menubar, .menu, .dicon, .widget'))
       return;
-    const o = this.osEl.nativeElement.getBoundingClientRect(),
-      wl = this.winlayerEl.nativeElement;
-    const sx = ev.clientX,
-      sy = ev.clientY;
+    const host = this.osEl.nativeElement.getBoundingClientRect();
+    const windowLayer = this.winlayerEl.nativeElement;
+    const session = this.windowInteractions.beginMarquee({ x: ev.clientX, y: ev.clientY }, host);
     let moved = false;
     const mv = (e: PointerEvent) => {
-      const x = Math.min(sx, e.clientX),
-        y = Math.min(sy, e.clientY),
-        w = Math.abs(e.clientX - sx),
-        h = Math.abs(e.clientY - sy);
-      if (w > 4 || h > 4) moved = true;
-      this.marquee = { open: true, left: x - o.left, top: y - o.top, w, h };
-      const rect = { left: x, top: y, right: x + w, bottom: y + h },
-        els = Array.from(wl.querySelectorAll('.win')) as HTMLElement[];
-      this.selected = this.wins
-        .filter(
-          (win, i) =>
-            !win.min && !win.group && els[i] && this.hit(els[i].getBoundingClientRect(), rect),
-        )
-        .map((win) => win.id);
+      const elements = Array.from(windowLayer.querySelectorAll('.win')) as HTMLElement[];
+      const candidates = this.wins.flatMap((window, index) => {
+        const element = elements[index];
+        return element
+          ? [
+              {
+                id: window.id,
+                min: window.min,
+                group: window.group,
+                rect: element.getBoundingClientRect(),
+              },
+            ]
+          : [];
+      });
+      const update = this.windowInteractions.moveMarquee(
+        session,
+        { x: e.clientX, y: e.clientY },
+        candidates,
+      );
+      moved = moved || update.moved;
+      this.marquee = { ...update.marquee };
+      this.selected = update.selectedIds;
     };
     const up = () => {
       window.removeEventListener('pointermove', mv);
@@ -818,33 +825,24 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     window.addEventListener('pointerup', up);
   }
   groupDrag(ev: PointerEvent) {
-    const ids = this.selected.slice(),
-      o = this.osEl.nativeElement.getBoundingClientRect(),
-      dock = this.osEl.nativeElement.querySelector('.dock') as HTMLElement;
-    const start = ids.map((id) => {
-      const w = this.wins.find((x) => x.id === id)!;
-      return { id, x: w.x, y: w.y };
-    });
-    const sx = ev.clientX,
-      sy = ev.clientY;
+    const ids = this.selected.slice();
+    const host = this.osEl.nativeElement.getBoundingClientRect();
+    const dock = this.osEl.nativeElement.querySelector('.dock') as HTMLElement | null;
+    const session = this.windowInteractions.beginGroupDrag(
+      ids,
+      this.wins,
+      { x: ev.clientX, y: ev.clientY },
+      host,
+    );
     const mv = (e: PointerEvent) => {
-      const dx = e.clientX - sx,
-        dy = e.clientY - sy;
-      start.forEach((s) => this.wm.move(s.id, s.x + dx, s.y + dy));
-      const dR = dock?.getBoundingClientRect();
-      const over =
-        !!dR &&
-        e.clientX >= dR.left &&
-        e.clientX <= dR.right &&
-        e.clientY >= dR.top &&
-        e.clientY <= dR.bottom;
-      this.proxy = {
-        open: true,
-        left: e.clientX - o.left + 14,
-        top: e.clientY - o.top + 14,
-        n: ids.length,
-        over,
-      };
+      const update = this.windowInteractions.moveGroupDrag(
+        session,
+        { x: e.clientX, y: e.clientY },
+        this.wins,
+        dock?.getBoundingClientRect() ?? null,
+      );
+      this.wm.wins.set(update.windows);
+      this.proxy = { ...update.proxy };
     };
     const up = () => {
       window.removeEventListener('pointermove', mv);
@@ -857,56 +855,42 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     window.addEventListener('pointerup', up);
   }
   createGroup(ids: string[]) {
-    if (ids.length < 2) return;
-    const id = 'g' + Date.now();
-    const apps = ids
-      .map((wid) => this.wins.find((w) => w.id === wid))
-      .filter(Boolean)
-      .map((w) => (w as Win).app);
-    this.wm.wins.update((ws) =>
-      ws.map((w) => (ids.includes(w.id) ? { ...w, min: true, group: id } : w)),
+    const next = this.windowInteractions.createGroup(
+      this.windowGroupingState(),
+      ids,
+      $localize`:Window group name@@desktop.group.name:Group ${this.groups.length + 1}:groupNumber:`,
     );
-    this.groups.push({
-      id,
-      name: $localize`:Window group name@@desktop.group.name:Group ${this.groups.length + 1}:groupNumber:`,
-      ids: ids.slice(),
-      apps,
-      open: false,
-    });
-    this.selected = [];
-    if (this.focusId && ids.includes(this.focusId)) this.wm.focusId.set(null);
-    this.persist();
+    if (next) this.applyWindowGroupingState(next);
   }
   toggleGroup(id: string) {
-    const g = this.groups.find((x) => x.id === id);
-    if (!g) return;
-    g.open = !g.open;
-    this.wm.wins.update((ws) =>
-      ws.map((w) =>
-        g.ids.includes(w.id) ? { ...w, min: !g.open, z: g.open ? this.wm.nextZ() : w.z } : w,
-      ),
+    const next = this.windowInteractions.toggleGroup(this.windowGroupingState(), id, () =>
+      this.wm.nextZ(),
     );
-    if (g.open) this.wm.focusId.set(g.ids[g.ids.length - 1] ?? null);
-    else if (this.focusId && g.ids.includes(this.focusId)) this.wm.focusId.set(null);
-    this.persist();
+    if (next) this.applyWindowGroupingState(next);
   }
   splitGroup(id: string) {
-    const g = this.groups.find((x) => x.id === id);
-    if (!g) return;
-    this.wm.wins.update((ws) =>
-      ws.map((w) =>
-        g.ids.includes(w.id) ? { ...w, group: undefined, z: g.open ? this.wm.nextZ() : w.z } : w,
-      ),
+    const next = this.windowInteractions.splitGroup(this.windowGroupingState(), id, () =>
+      this.wm.nextZ(),
     );
-    this.groups = this.groups.filter((x) => x.id !== id);
-    this.persist();
+    if (next) this.applyWindowGroupingState(next);
   }
   closeGroup(id: string) {
-    const g = this.groups.find((x) => x.id === id);
-    if (!g) return;
-    this.wm.wins.update((ws) => ws.filter((w) => !g.ids.includes(w.id)));
-    if (this.focusId && g.ids.includes(this.focusId)) this.wm.focusId.set(null);
-    this.groups = this.groups.filter((x) => x.id !== id);
+    const next = this.windowInteractions.closeGroup(this.windowGroupingState(), id);
+    if (next) this.applyWindowGroupingState(next);
+  }
+  private windowGroupingState(): WindowGroupingState {
+    return {
+      windows: this.wins,
+      groups: this.groups,
+      focusId: this.focusId,
+      selectedIds: this.selected,
+    };
+  }
+  private applyWindowGroupingState(state: WindowGroupingState) {
+    this.wm.wins.set([...state.windows]);
+    this.groups = [...state.groups];
+    this.selected = [...state.selectedIds];
+    this.wm.focusId.set(state.focusId);
     this.persist();
   }
   groupItems(g: any): ShellContextItem[] {
@@ -1876,102 +1860,34 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  snapRect(s: string, R: DOMRect) {
-    const hw = R.width / 2,
-      hh = R.height / 2;
-    switch (s) {
-      case 'top':
-      case 'max':
-        return { x: 0, y: 0, w: R.width, h: R.height, max: true };
-      case 'left':
-        return { x: 0, y: 0, w: hw, h: R.height, max: false };
-      case 'right':
-        return { x: hw, y: 0, w: hw, h: R.height, max: false };
-      case 'tl':
-        return { x: 0, y: 0, w: hw, h: hh, max: false };
-      case 'tr':
-        return { x: hw, y: 0, w: hw, h: hh, max: false };
-      case 'bl':
-        return { x: 0, y: hh, w: hw, h: hh, max: false };
-      case 'br':
-        return { x: hw, y: hh, w: hw, h: hh, max: false };
-      default:
-        return { x: 0, y: 0, w: R.width, h: R.height, max: true };
-    }
-  }
-  snapWin(w: Win, s: string) {
-    const r = this.snapRect(s, this.winlayerEl.nativeElement.getBoundingClientRect());
+  snapWin(w: Win, s: WindowSnapState) {
+    const bounds = this.winlayerEl.nativeElement.getBoundingClientRect();
     this.wm.wins.update((ws) =>
-      ws.map((win) => {
-        if (win.id !== w.id) return win;
-        const prev = (win as any).snapState ? win.prev : { x: win.x, y: win.y, w: win.w, h: win.h };
-        return { ...win, ...r, prev, snapState: s };
-      }),
+      ws.map((window) =>
+        window.id === w.id ? this.windowInteractions.snapWindow(window, s, bounds) : window,
+      ),
     );
     this.persist();
   }
   unsnap(w: Win) {
     this.wm.wins.update((ws) =>
-      ws.map((win) =>
-        win.id === w.id ? { ...win, ...(win.prev ?? {}), max: false, snapState: null } : win,
+      ws.map((window) =>
+        window.id === w.id ? this.windowInteractions.unsnapWindow(window) : window,
       ),
     );
     this.persist();
   }
-  kbSnap(w: Win, dir: string) {
-    const KB: any = {
-      left: {
-        null: 'left',
-        right: null,
-        left: 'left',
-        tr: 'tl',
-        br: 'bl',
-        tl: 'tl',
-        bl: 'bl',
-        max: 'left',
-      },
-      right: {
-        null: 'right',
-        left: null,
-        right: 'right',
-        tl: 'tr',
-        bl: 'br',
-        tr: 'tr',
-        br: 'br',
-        max: 'right',
-      },
-      up: {
-        null: 'max',
-        left: 'tl',
-        right: 'tr',
-        bl: 'left',
-        br: 'right',
-        tl: 'tl',
-        tr: 'tr',
-        max: 'max',
-      },
-      down: {
-        null: '__min',
-        left: null,
-        right: null,
-        tl: 'left',
-        tr: 'right',
-        bl: null,
-        br: null,
-        max: null,
-      },
-    };
-    const s = (w as any).snapState || 'null';
-    const t = KB[dir][s];
-    if (t === '__min') {
+  kbSnap(w: Win, dir: KeyboardSnapDirection) {
+    const intent = this.windowInteractions.keyboardSnap(w, dir);
+    if (intent.kind === 'minimise') {
       this.wm.minimise(w.id, this.reduceMotion ? 0 : 190);
       return;
     }
-    if (t === null || t === undefined) {
+    if (intent.kind === 'unsnap') {
       this.unsnap(w);
       return;
     }
-    this.snapWin(w, t);
+    this.snapWin(w, intent.zone);
   }
 
   startDrag(ev: PointerEvent, w: Win) {
@@ -1982,51 +1898,24 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       return;
     }
     if (this.selected.length && !this.selected.includes(w.id)) this.selected = [];
-    const R = this.winlayerEl.nativeElement.getBoundingClientRect(),
-      oR = this.osEl.nativeElement.getBoundingClientRect();
-    const ox = ev.clientX - (R.left + w.x),
-      oy = ev.clientY - (R.top + w.y);
-    const rx = R.left - oR.left,
-      ry = R.top - oR.top,
-      t = 22;
+    const layer = this.winlayerEl.nativeElement.getBoundingClientRect();
+    const host = this.osEl.nativeElement.getBoundingClientRect();
+    const session = this.windowInteractions.beginDrag(
+      w,
+      { x: ev.clientX, y: ev.clientY },
+      layer,
+      host,
+    );
     const mv = (e: PointerEvent) => {
-      this.wm.move(
-        w.id,
-        Math.max(0, Math.min(e.clientX - R.left - ox, R.width - 60)),
-        Math.max(0, Math.min(e.clientY - R.top - oy, R.height - 40)),
+      const current = this.wins.find((window) => window.id === w.id);
+      if (!current) return;
+      const update = this.windowInteractions.moveDrag(
+        session,
+        { x: e.clientX, y: e.clientY },
+        current,
       );
-      const current = this.wins.find((win) => win.id === w.id);
-      if (current) (current as any).snapState = null;
-      const nx = e.clientX - R.left,
-        ny = e.clientY - R.top,
-        nL = nx < t,
-        nR = R.width - nx < t,
-        nT = ny < t,
-        nB = R.height - ny < t;
-      const z =
-        nT && nL
-          ? 'tl'
-          : nT && nR
-            ? 'tr'
-            : nB && nL
-              ? 'bl'
-              : nB && nR
-                ? 'br'
-                : nT
-                  ? 'top'
-                  : nL
-                    ? 'left'
-                    : nR
-                      ? 'right'
-                      : null;
-      this.snap.zone = z;
-      if (z) {
-        const s = this.snapRect(z, R);
-        this.snap.left = rx + s.x;
-        this.snap.top = ry + s.y;
-        this.snap.w = s.w;
-        this.snap.h = s.h;
-      }
+      this.wm.wins.set(this.wins.map((window) => (window.id === w.id ? update.window : window)));
+      this.snap = { ...update.snap };
     };
     const up = () => {
       window.removeEventListener('pointermove', mv);
@@ -2035,17 +1924,9 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       this.snap.zone = null;
       const current = this.wins.find((win) => win.id === w.id);
       if (z && current) {
-        const s = this.snapRect(z, R);
         this.wm.wins.update((ws) =>
-          ws.map((win) =>
-            win.id === w.id
-              ? {
-                  ...win,
-                  ...s,
-                  prev: { x: current.x, y: current.y, w: current.w, h: current.h },
-                  snapState: z,
-                }
-              : win,
+          ws.map((window) =>
+            window.id === w.id ? this.windowInteractions.snapWindow(current, z, layer) : window,
           ),
         );
       }
@@ -2058,12 +1939,20 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     if (!this.wm.windowed()) return;
     ev.preventDefault();
     ev.stopPropagation();
-    const sx = ev.clientX,
-      sy = ev.clientY,
-      sw = w.w,
-      sh = w.h;
-    const mv = (e: PointerEvent) =>
-      this.wm.resize(w.id, Math.max(360, sw + e.clientX - sx), Math.max(260, sh + e.clientY - sy));
+    const session = this.windowInteractions.beginResize(w, {
+      x: ev.clientX,
+      y: ev.clientY,
+    });
+    const mv = (e: PointerEvent) => {
+      const current = this.wins.find((window) => window.id === w.id);
+      if (!current) return;
+      const resized = this.windowInteractions.moveResize(
+        session,
+        { x: e.clientX, y: e.clientY },
+        current,
+      );
+      this.wm.wins.set(this.wins.map((window) => (window.id === w.id ? resized : window)));
+    };
     const up = () => {
       window.removeEventListener('pointermove', mv);
       window.removeEventListener('pointerup', up);

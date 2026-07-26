@@ -58,7 +58,7 @@
   - `WindowInteractionService.splitGroup(state, id, nextZ)`
   - `WindowInteractionService.closeGroup(state, id)`
 
-- [ ] **Step 1: Write the failing contract tests**
+- [x] **Step 1: Write the failing contract tests**
 
   Build literal fixtures for an 800-by-600 window layer, multiple window
   rectangles, two selected windows, and one group. Assert normalised marquee
@@ -66,7 +66,7 @@
   snap/unsnap restore state, keyboard intents, group movement, dock hit state,
   and all group transitions without asserting on mocks.
 
-- [ ] **Step 2: Run the new service spec and verify RED**
+- [x] **Step 2: Run the new service spec and verify RED**
 
   Run:
 
@@ -78,7 +78,7 @@
   Expected: compilation fails because
   `./window-interaction.service` does not exist.
 
-- [ ] **Step 3: Add the typed runtime snap state**
+- [x] **Step 3: Add the typed runtime snap state**
 
   Add this existing runtime state to `Win`:
 
@@ -96,7 +96,7 @@
   snapState?: WindowSnapState | null;
   ```
 
-- [ ] **Step 4: Implement the minimal stateless service**
+- [x] **Step 4: Implement the minimal stateless service**
 
   Use `@Injectable({ providedIn: 'root' })`. Keep the 4-pixel marquee
   threshold, 22-pixel snap threshold, 60/40 drag visibility bounds, 360/260
@@ -104,7 +104,7 @@
   literal service policy. Do not inject `WindowManagerService`, the DOM, or
   persistence.
 
-- [ ] **Step 5: Run the service spec and verify GREEN**
+- [x] **Step 5: Run the service spec and verify GREEN**
 
   Run the Task 1 command and require every interaction test to pass without
   warnings or unhandled errors.
@@ -122,20 +122,20 @@
 - Preserves: the existing template method names `startMarquee`,
   `startDrag`, `startResize`, `toggleGroup`, `splitGroup`, and `closeGroup`.
 
-- [ ] **Step 1: Inject the service and remove duplicate algorithms**
+- [x] **Step 1: Inject the service and remove duplicate algorithms**
 
   Inject `WindowInteractionService` with `inject()`. Delete `hit` and the
   component's geometry/transition tables. Convert the existing methods into
   pointer-lifecycle coordinators which read DOM rectangles and apply returned
   windows/groups/focus through `WindowManagerService`.
 
-- [ ] **Step 2: Keep state application explicit**
+- [x] **Step 2: Keep state application explicit**
 
   Add one private grouping-state application helper which assigns returned
   windows, groups, selected ids, and focus, then calls the existing
   `persist()`. Keep localised group-name construction in the component.
 
-- [ ] **Step 3: Run focused integration tests**
+- [x] **Step 3: Run focused integration tests**
 
   Run:
 
@@ -163,13 +163,13 @@
 - Produces: an updated Angular code map naming the interaction service as the
   algorithm owner.
 
-- [ ] **Step 1: Update the project code map**
+- [x] **Step 1: Update the project code map**
 
   Add `frontend-ng/src/app/desktop/window-interaction.service.ts` to the
   Angular map and state that `DesktopComponent` coordinates DOM pointer
   lifecycles while the service owns interaction algorithms.
 
-- [ ] **Step 2: Format and inspect**
+- [x] **Step 2: Format and inspect**
 
   Run Prettier on the changed TypeScript/spec files, then run:
 
@@ -182,7 +182,7 @@
   Confirm the diff contains no markup/style changes and
   `.playwright-mcp/` remains the only unrelated untracked path.
 
-- [ ] **Step 3: Run the complete frontend confidence gate**
+- [x] **Step 3: Run the complete frontend confidence gate**
 
   Run:
 
@@ -194,7 +194,7 @@
 
   Require zero test failures and a successful Angular production build.
 
-- [ ] **Step 4: Mark this plan complete and commit**
+- [x] **Step 4: Mark this plan complete and commit**
 
   Mark each checkbox only after its evidence exists, then commit the
   implementation, tests, plan, and `AGENTS.md` with:

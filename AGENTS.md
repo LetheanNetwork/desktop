@@ -144,6 +144,10 @@ Add CLI verbs as flat `cmdX(args []string) int` handlers which delegate to
   menus from the app/category registries.
 - `frontend-ng/src/app/desktop/window-manager.service.ts` — single source of
   truth for Angular window state.
+- `frontend-ng/src/app/desktop/window-interaction.service.ts` — tested,
+  stateless drag, resize, snap, marquee, group-drag, and grouping algorithms.
+  `DesktopComponent` retains DOM pointer lifecycles and applies interaction
+  results through the window manager.
 - `frontend-ng/src/app/desktop/shell/` — behaviour-preserving presenters for
   the menu bar, taskbar/dock, Start and context menus, tray panels,
   notifications, and command palette. `DesktopComponent` remains their

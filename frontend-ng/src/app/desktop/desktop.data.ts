@@ -19,6 +19,7 @@ import {
 // ── core types ──────────────────────────────────────────────────────────
 export type ViewMode = 'desktop' | 'shell' | 'device';
 export type DeviceSize = 'small' | 'large' | 'full';
+export type WindowSnapState = 'top' | 'max' | 'left' | 'right' | 'tl' | 'tr' | 'bl' | 'br';
 
 /** A registered application. `route` marks a core/ide dev panel. */
 export interface AppDef {
@@ -55,6 +56,7 @@ export interface Win {
   min: boolean;
   max: boolean;
   prev?: { x: number; y: number; w: number; h: number }; // pre-maximise geometry
+  snapState?: WindowSnapState | null;
   group?: string; // dock workspace group id
   minimizing?: boolean; // transient: minimise animation in flight
 }
