@@ -48,6 +48,20 @@ const liveCatalogue: FilesCatalogueView = {
   ],
 };
 
+function operationResult(operation: string, overrides: Record<string, unknown> = {}) {
+  return {
+    operationId: `files-${operation}`,
+    operation,
+    status: 'completed',
+    code: '',
+    source: { mountId: 'documents', path: 'notes.md' },
+    affected: [{ mountId: 'documents', path: 'notes.md' }],
+    message: `${operation} completed`,
+    receiptId: '',
+    ...overrides,
+  };
+}
+
 function directory(
   path = '',
   entries: DirectorySnapshotView['entries'] = [
@@ -102,12 +116,22 @@ const filesWin: Win = {
 
 describe('FilesApp browsing', () => {
   const offline = signal(true);
+  let changedHandler:
+    | ((event: {
+        operation: string;
+        operationId: string;
+        mountIds: readonly string[];
+        paths: readonly string[];
+        at: string;
+      }) => void)
+    | undefined;
+  const offEvents = vi.fn();
   const bridge = {
     listMounts: vi.fn(),
     listDirectory: vi.fn(),
     preview: vi.fn(),
     listTrash: vi.fn(),
-    onChanged: vi.fn(() => vi.fn()),
+    onChanged: vi.fn((_handler: NonNullable<typeof changedHandler>) => vi.fn()),
     createDirectory: vi.fn(),
     rename: vi.fn(),
     copy: vi.fn(),
@@ -123,6 +147,7 @@ describe('FilesApp browsing', () => {
 
   beforeEach(() => {
     offline.set(true);
+    changedHandler = undefined;
     vi.clearAllMocks();
     bridge.listMounts.mockResolvedValue(liveCatalogue);
     bridge.listDirectory.mockImplementation(async ({ path }: { path: string }) => directory(path));
@@ -141,6 +166,17 @@ describe('FilesApp browsing', () => {
       lines: 1,
       truncated: false,
       binary: false,
+    });
+    bridge.createDirectory.mockResolvedValue(operationResult('create-directory'));
+    bridge.rename.mockResolvedValue(operationResult('rename'));
+    bridge.copy.mockResolvedValue(operationResult('copy'));
+    bridge.move.mockResolvedValue(operationResult('move'));
+    bridge.trash.mockResolvedValue(operationResult('trash', { receiptId: 'receipt-1' }));
+    bridge.restore.mockResolvedValue(operationResult('restore'));
+    bridge.delete.mockResolvedValue(operationResult('delete'));
+    bridge.onChanged.mockImplementation((handler: NonNullable<typeof changedHandler>) => {
+      changedHandler = handler;
+      return offEvents;
     });
     TestBed.configureTestingModule({
       providers: [
@@ -323,5 +359,440 @@ describe('FilesApp browsing', () => {
     expect(text).toContain('Live unavailable');
     expect(text).not.toContain('welcome.txt');
     expect(text).not.toContain('218 GB free of 512 GB');
+  });
+});
+
+describe('FilesApp operations and events', () => {
+  const offline = signal(false);
+  let changedHandler:
+    | ((event: {
+        operation: string;
+        operationId: string;
+        mountIds: readonly string[];
+        paths: readonly string[];
+        at: string;
+      }) => void)
+    | undefined;
+  const offEvents = vi.fn();
+  const bridge = {
+    listMounts: vi.fn(),
+    listDirectory: vi.fn(),
+    preview: vi.fn(),
+    listTrash: vi.fn(),
+    onChanged: vi.fn(),
+    createDirectory: vi.fn(),
+    rename: vi.fn(),
+    copy: vi.fn(),
+    move: vi.fn(),
+    trash: vi.fn(),
+    restore: vi.fn(),
+    delete: vi.fn(),
+  };
+  const windowManager = {
+    setSub: vi.fn(),
+    setSysTab: vi.fn(),
+  };
+
+  beforeEach(() => {
+    offline.set(false);
+    changedHandler = undefined;
+    vi.clearAllMocks();
+    bridge.listMounts.mockResolvedValue(liveCatalogue);
+    bridge.listDirectory.mockImplementation(async ({ path }: { path: string }) => directory(path));
+    bridge.listTrash.mockResolvedValue({
+      entries: [
+        {
+          receiptId: 'receipt-1',
+          mountId: 'documents',
+          originalPath: 'notes.md',
+          name: 'notes.md',
+          kind: 'file',
+          sizeBytes: 2048,
+          trashedAt: '2026-07-26T12:00:00Z',
+          available: true,
+          errorCode: '',
+        },
+      ],
+      refreshedAt: '2026-07-26T12:00:00Z',
+    });
+    bridge.createDirectory.mockResolvedValue(operationResult('create-directory'));
+    bridge.rename.mockResolvedValue(operationResult('rename'));
+    bridge.copy.mockResolvedValue(operationResult('copy'));
+    bridge.move.mockResolvedValue(operationResult('move'));
+    bridge.trash.mockResolvedValue(operationResult('trash', { receiptId: 'receipt-1' }));
+    bridge.restore.mockResolvedValue(operationResult('restore'));
+    bridge.delete.mockResolvedValue(operationResult('delete'));
+    bridge.onChanged.mockImplementation((handler: NonNullable<typeof changedHandler>) => {
+      changedHandler = handler;
+      return offEvents;
+    });
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: ConnectionManagerService,
+          useValue: { offline: offline.asReadonly() },
+        },
+        { provide: DesktopFilesBridgeService, useValue: bridge },
+        { provide: WindowManagerService, useValue: windowManager },
+      ],
+    });
+  });
+
+  afterEach(() => TestBed.resetTestingModule());
+
+  async function create(win: Win = { ...filesWin, sub: 'documents' }) {
+    const fixture = TestBed.createComponent(FilesApp);
+    fixture.componentRef.setInput('win', { ...win });
+    await fixture.whenStable();
+    return fixture;
+  }
+
+  function select(element: HTMLElement, path: string): void {
+    element.querySelector<HTMLButtonElement>(`[data-path="${path}"]`)?.click();
+  }
+
+  it('shows actions only when the active mount capability permits them', async () => {
+    bridge.listMounts.mockResolvedValue({
+      ...liveCatalogue,
+      mounts: [
+        {
+          ...documentsMount,
+          capabilities: {
+            ...capabilities,
+            createDirectory: false,
+            rename: false,
+            copyFrom: false,
+            move: false,
+            trash: false,
+          },
+        },
+      ],
+    });
+    const fixture = await create();
+    const element = fixture.nativeElement as HTMLElement;
+    select(element, 'notes.md');
+    await fixture.whenStable();
+
+    expect(element.querySelector('[data-action="create-directory"]')).toBeNull();
+    expect(element.querySelector('[data-action="rename"]')).toBeNull();
+    expect(element.querySelector('[data-action="copy"]')).toBeNull();
+    expect(element.querySelector('[data-action="move"]')).toBeNull();
+    expect(element.querySelector('[data-action="trash"]')).toBeNull();
+  });
+
+  it('creates and renames with one validated name and provider-relative addresses', async () => {
+    const fixture = await create();
+    const element = fixture.nativeElement as HTMLElement;
+
+    element.querySelector<HTMLButtonElement>('[data-action="create-directory"]')?.click();
+    await fixture.whenStable();
+    const createName = element.querySelector<HTMLInputElement>('.fbdialog input');
+    if (!createName) throw new Error('Missing create name input.');
+    createName.value = 'Ideas';
+    createName.dispatchEvent(new Event('input', { bubbles: true }));
+    element.querySelector<HTMLButtonElement>('.fbdialog [data-action="submit"]')?.click();
+    await fixture.whenStable();
+    expect(bridge.createDirectory).toHaveBeenCalledWith({
+      mountId: 'documents',
+      parentPath: '',
+      name: 'Ideas',
+    });
+
+    fixture.componentInstance.dialog.set(null);
+    select(element, 'notes.md');
+    await fixture.whenStable();
+    element.querySelector<HTMLButtonElement>('[data-action="rename"]')?.click();
+    await fixture.whenStable();
+    const renameName = element.querySelector<HTMLInputElement>('.fbdialog input');
+    if (!renameName) throw new Error('Missing rename name input.');
+    renameName.value = 'ideas.md';
+    renameName.dispatchEvent(new Event('input', { bubbles: true }));
+    element.querySelector<HTMLButtonElement>('.fbdialog [data-action="submit"]')?.click();
+    await fixture.whenStable();
+    expect(bridge.rename).toHaveBeenCalledWith({
+      mountId: 'documents',
+      path: 'notes.md',
+      name: 'ideas.md',
+    });
+  });
+
+  it('copies and moves to explicit destination addresses without overwrite flags', async () => {
+    const fixture = await create();
+
+    fixture.componentInstance.handleIntent({
+      type: 'submit-operation',
+      operation: 'copy',
+      source: { mountId: 'documents', path: 'notes.md' },
+      destination: { mountId: 'documents', path: 'Archive/notes.md' },
+      recursive: false,
+      confirmed: false,
+    });
+    await fixture.whenStable();
+    expect(bridge.copy).toHaveBeenCalledWith({
+      source: { mountId: 'documents', path: 'notes.md' },
+      destination: { mountId: 'documents', path: 'Archive/notes.md' },
+    });
+    expect(bridge.copy.mock.calls[0][0]).not.toHaveProperty('overwrite');
+
+    fixture.componentInstance.handleIntent({
+      type: 'submit-operation',
+      operation: 'move',
+      source: { mountId: 'documents', path: 'notes.md' },
+      destination: { mountId: 'documents', path: 'Archive/notes.md' },
+      recursive: false,
+      confirmed: false,
+    });
+    await fixture.whenStable();
+    expect(bridge.move).toHaveBeenCalledWith({
+      source: { mountId: 'documents', path: 'notes.md' },
+      destination: { mountId: 'documents', path: 'Archive/notes.md' },
+    });
+  });
+
+  it('confirms Trash and supports Restore and permanent Delete from Trash', async () => {
+    const fixture = await create();
+    const element = fixture.nativeElement as HTMLElement;
+    select(element, 'notes.md');
+    await fixture.whenStable();
+    element.querySelector<HTMLButtonElement>('[data-action="trash"]')?.click();
+    await fixture.whenStable();
+    expect(bridge.trash).not.toHaveBeenCalled();
+    element.querySelector<HTMLButtonElement>('.fbdialog [data-action="confirm"]')?.click();
+    await fixture.whenStable();
+    expect(bridge.trash).toHaveBeenCalledWith({
+      mountId: 'documents',
+      path: 'notes.md',
+    });
+
+    await fixture.componentInstance.navigateToken('trash');
+    await fixture.whenStable();
+    select(element, 'notes.md');
+    await fixture.whenStable();
+    element.querySelector<HTMLButtonElement>('[data-action="restore"]')?.click();
+    await fixture.whenStable();
+    element.querySelector<HTMLButtonElement>('.fbdialog [data-action="confirm"]')?.click();
+    await fixture.whenStable();
+    expect(bridge.restore).toHaveBeenCalledWith({ receiptId: 'receipt-1' });
+
+    fixture.componentInstance.dialog.set(null);
+    element.querySelector<HTMLButtonElement>('[data-action="delete"]')?.click();
+    await fixture.whenStable();
+    element.querySelector<HTMLButtonElement>('.fbdialog [data-action="confirm"]')?.click();
+    await fixture.whenStable();
+    expect(bridge.delete).toHaveBeenCalledWith({
+      mountId: '',
+      path: '',
+      receiptId: 'receipt-1',
+      recursive: false,
+      confirmed: true,
+    });
+  });
+
+  it('requires a second explicit confirmation before recursive permanent deletion', async () => {
+    bridge.listTrash.mockResolvedValue({
+      entries: [
+        {
+          receiptId: 'receipt-folder',
+          mountId: 'documents',
+          originalPath: 'Archive',
+          name: 'Archive',
+          kind: 'directory',
+          sizeBytes: 0,
+          trashedAt: '2026-07-26T12:00:00Z',
+          available: true,
+          errorCode: '',
+        },
+      ],
+      refreshedAt: '2026-07-26T12:00:00Z',
+    });
+    const fixture = await create({ ...filesWin, sub: 'trash' });
+    const element = fixture.nativeElement as HTMLElement;
+    select(element, 'Archive');
+    await fixture.whenStable();
+    element.querySelector<HTMLButtonElement>('[data-action="delete"]')?.click();
+    await fixture.whenStable();
+
+    element.querySelector<HTMLButtonElement>('.fbdialog [data-action="confirm"]')?.click();
+    await fixture.whenStable();
+    expect(bridge.delete).not.toHaveBeenCalled();
+    expect(element.textContent).toContain('cannot be undone');
+
+    element.querySelector<HTMLButtonElement>('.fbdialog [data-action="confirm"]')?.click();
+    await fixture.whenStable();
+    expect(bridge.delete).toHaveBeenCalledWith({
+      mountId: '',
+      path: '',
+      receiptId: 'receipt-folder',
+      recursive: true,
+      confirmed: true,
+    });
+  });
+
+  it('keeps conflict and partial feedback visible and refreshes affected data', async () => {
+    const fixture = await create();
+    bridge.copy.mockResolvedValue(
+      operationResult('copy', {
+        status: 'conflict',
+        code: 'files.conflict',
+        destination: { mountId: 'documents', path: 'notes-copy.md' },
+        affected: [],
+        conflict: {
+          source: { mountId: 'documents', path: 'notes.md' },
+          destination: { mountId: 'documents', path: 'notes-copy.md' },
+          kind: 'file',
+        },
+        message: 'Destination already exists',
+      }),
+    );
+    fixture.componentInstance.handleIntent({
+      type: 'submit-operation',
+      operation: 'copy',
+      source: { mountId: 'documents', path: 'notes.md' },
+      destination: { mountId: 'documents', path: 'notes-copy.md' },
+      recursive: false,
+      confirmed: false,
+    });
+    await fixture.whenStable();
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+      'Destination already exists',
+    );
+
+    bridge.move.mockResolvedValue(
+      operationResult('move', {
+        status: 'partial',
+        code: 'files.partial_move',
+        message: 'Copy completed but source removal failed',
+        affected: [
+          { mountId: 'documents', path: 'notes.md' },
+          { mountId: 'documents', path: 'Archive/notes.md' },
+        ],
+      }),
+    );
+    fixture.componentInstance.handleIntent({
+      type: 'submit-operation',
+      operation: 'move',
+      source: { mountId: 'documents', path: 'notes.md' },
+      destination: { mountId: 'documents', path: 'Archive/notes.md' },
+      recursive: false,
+      confirmed: false,
+    });
+    await fixture.whenStable();
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+      'Copy completed but source removal failed',
+    );
+    expect(bridge.listDirectory).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows provider errors without substituting demo content', async () => {
+    const fixture = await create();
+    bridge.rename.mockRejectedValue(new Error('provider unavailable'));
+
+    fixture.componentInstance.handleIntent({
+      type: 'submit-operation',
+      operation: 'rename',
+      source: { mountId: 'documents', path: 'notes.md' },
+      name: 'ideas.md',
+      recursive: false,
+      confirmed: false,
+    });
+    await fixture.whenStable();
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('provider unavailable');
+    expect(text).not.toContain('welcome.txt');
+  });
+
+  it('subscribes once, coalesces event/local refresh, filters unknown mounts, and unsubscribes', async () => {
+    const fixture = await create();
+    expect(bridge.onChanged).toHaveBeenCalledTimes(1);
+    const initialCalls = bridge.listDirectory.mock.calls.length;
+
+    changedHandler?.({
+      operation: 'rename',
+      operationId: 'files-external',
+      mountIds: ['missing'],
+      paths: ['notes.md'],
+      at: '2026-07-26T12:00:00Z',
+    });
+    await fixture.whenStable();
+    expect(bridge.listDirectory).toHaveBeenCalledTimes(initialCalls);
+
+    await fixture.componentInstance.navigateToken('documents::Invoices');
+    await fixture.whenStable();
+    const nestedCalls = bridge.listDirectory.mock.calls.length;
+    changedHandler?.({
+      operation: 'rename',
+      operationId: 'files-unrelated',
+      mountIds: ['documents'],
+      paths: ['Archive/unrelated.txt'],
+      at: '2026-07-26T12:00:00Z',
+    });
+    await fixture.whenStable();
+    expect(bridge.listDirectory).toHaveBeenCalledTimes(nestedCalls);
+
+    changedHandler?.({
+      operation: 'rename',
+      operationId: 'files-external',
+      mountIds: ['documents'],
+      paths: ['Invoices/notes.md'],
+      at: '2026-07-26T12:00:00Z',
+    });
+    changedHandler?.({
+      operation: 'rename',
+      operationId: 'files-external-2',
+      mountIds: ['documents'],
+      paths: ['Invoices/notes.md'],
+      at: '2026-07-26T12:00:00Z',
+    });
+    await fixture.whenStable();
+    expect(bridge.listDirectory).toHaveBeenCalledTimes(nestedCalls + 1);
+
+    fixture.destroy();
+    expect(offEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it('coalesces an event emitted during a successful local operation into one refresh', async () => {
+    const fixture = await create();
+    const initialCalls = bridge.listDirectory.mock.calls.length;
+    bridge.rename.mockImplementation(async () => {
+      changedHandler?.({
+        operation: 'rename',
+        operationId: 'files-rename',
+        mountIds: ['documents'],
+        paths: ['notes.md', 'ideas.md'],
+        at: '2026-07-26T12:00:00Z',
+      });
+      return operationResult('rename');
+    });
+
+    fixture.componentInstance.handleIntent({
+      type: 'submit-operation',
+      operation: 'rename',
+      source: { mountId: 'documents', path: 'notes.md' },
+      name: 'ideas.md',
+      recursive: false,
+      confirmed: false,
+    });
+    await fixture.whenStable();
+
+    expect(bridge.listDirectory).toHaveBeenCalledTimes(initialCalls + 1);
+  });
+
+  it('performs safe mutations only in its isolated demo store while offline', async () => {
+    offline.set(true);
+    const fixture = await create({ ...filesWin, sub: 'documents' });
+
+    fixture.componentInstance.handleIntent({
+      type: 'submit-operation',
+      operation: 'create-directory',
+      source: { mountId: 'documents', path: '' },
+      name: 'Ideas',
+      recursive: false,
+      confirmed: false,
+    });
+    await fixture.whenStable();
+
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Ideas');
+    expect(bridge.createDirectory).not.toHaveBeenCalled();
+    expect(bridge.onChanged).not.toHaveBeenCalled();
   });
 });

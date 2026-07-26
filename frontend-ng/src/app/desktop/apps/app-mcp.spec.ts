@@ -1,4 +1,7 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { ConnectionManagerService } from '../../connection-manager.service';
+import { DesktopFilesBridgeService } from '../desktop-files-bridge.service';
 import { Win } from '../desktop.data';
 import { WindowManagerService } from '../window-manager.service';
 import { ControlApp } from './control.app';
@@ -38,8 +41,17 @@ const filesWin: Win = {
 
 describe('app-view WebMCP tools', () => {
   const registered = new Map<string, RegisteredTool>();
+  const offline = signal(true);
+  const filesBridge = {
+    listMounts: vi.fn(),
+    listDirectory: vi.fn(),
+    preview: vi.fn(),
+    listTrash: vi.fn(),
+    onChanged: vi.fn(),
+  };
 
   beforeEach(() => {
+    offline.set(true);
     registered.clear();
     vi.clearAllMocks();
     Object.defineProperty(document, 'modelContext', {
@@ -58,6 +70,14 @@ describe('app-view WebMCP tools', () => {
         {
           provide: WindowManagerService,
           useValue: windows,
+        },
+        {
+          provide: ConnectionManagerService,
+          useValue: { offline: offline.asReadonly() },
+        },
+        {
+          provide: DesktopFilesBridgeService,
+          useValue: filesBridge,
         },
       ],
     });
@@ -118,7 +138,10 @@ describe('app-view WebMCP tools', () => {
     expect(JSON.parse((result as any).content[0].text)).toMatchObject({
       location_id: 'documents',
       location_name: 'Documents',
+      mount_id: 'documents',
+      path: '',
       view: 'list',
+      data_state: 'demo',
       breadcrumbs: [
         { id: 'home', name: 'Home' },
         { id: 'documents', name: 'Documents' },
@@ -133,5 +156,10 @@ describe('app-view WebMCP tools', () => {
       'Unknown Files location',
     );
     await expect(call('files_set_view', { view: 'columns' })).rejects.toThrow('Unknown Files view');
+    expect(
+      [...registered.keys()].some((name) =>
+        /create|rename|copy|move|trash|restore|delete/i.test(name),
+      ),
+    ).toBe(false);
   });
 });

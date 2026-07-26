@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   CUSTOM_ELEMENTS_SCHEMA,
+  DestroyRef,
   Injector,
   Input,
   OnInit,
@@ -26,22 +27,29 @@ import { FilesStatusView } from './files/files-status.view';
 import { FilesToolbarView } from './files/files-toolbar.view';
 import type {
   DirectorySnapshotView,
+  FileAddressView,
   FilePreviewView,
   FilesActionIntent,
   FilesBrowserEntryView,
   FilesCatalogueView,
+  FilesChangedEvent,
   FilesDataSource,
   FilesDataState,
   FilesLocation,
+  FilesOperationKind,
   FilesOperationDialogView,
+  FileOperationResultView,
+  FilesViewState,
   FilesViewMode,
   TrashSnapshotView,
 } from './files/files-view.models';
 import {
   buildFilesViewState,
+  eventAffectsLocation,
   filesToken,
   parseFilesToken,
   reconcileLocation,
+  validRelativePath,
 } from './files/files-view-state';
 
 const EMPTY_CATALOGUE: FilesCatalogueView = {
@@ -103,6 +111,7 @@ export class FilesApp implements AppView, OnInit {
   private readonly wm = inject(WindowManagerService);
   private readonly pendingTasks = inject(PendingTasks);
   private readonly injector = inject(Injector);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly demoStore = new FilesDemoStore();
 
   readonly catalogue = signal<FilesCatalogueView>(EMPTY_CATALOGUE);
@@ -133,7 +142,24 @@ export class FilesApp implements AppView, OnInit {
   private loadVersion = 0;
   private previewVersion = 0;
   private hasSuccessfulView = false;
+  private refreshScheduled = false;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private refreshTaskDone: (() => void) | null = null;
+  private destroyed = false;
+  private filesEventsOff: (() => void) | null = null;
   private readonly observedMcpTokens = new Set<string>();
+
+  constructor() {
+    this.destroyRef.onDestroy(() => {
+      this.destroyed = true;
+      if (this.refreshTimer !== null) clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+      this.refreshTaskDone?.();
+      this.refreshTaskDone = null;
+      this.filesEventsOff?.();
+      this.filesEventsOff = null;
+    });
+  }
 
   ngOnInit(): void {
     this.viewMode.set(this.win.systab === 'grid' ? 'grid' : 'list');
@@ -187,8 +213,10 @@ export class FilesApp implements AppView, OnInit {
         this.dialog.set(null);
         return;
       case 'open-operation':
+        this.openOperation(intent);
+        return;
       case 'submit-operation':
-        // Task 14 owns mutation orchestration. The typed views are already wired.
+        this.pendingTasks.run(() => this.performOperation(intent));
         return;
     }
   }
@@ -303,10 +331,272 @@ export class FilesApp implements AppView, OnInit {
     }
   }
 
+  private openOperation(intent: Extract<FilesActionIntent, { type: 'open-operation' }>): void {
+    const source = intent.source;
+    switch (intent.operation) {
+      case 'create-directory':
+        if (!source) return;
+        this.dialog.set({
+          state: 'form',
+          operation: intent.operation,
+          title: $localize`:Create folder dialog title@@files.dialog.createFolder:Create folder`,
+          message: $localize`:Create folder dialog message@@files.dialog.createFolderMessage:Choose a name for the new folder.`,
+          source,
+        });
+        return;
+      case 'rename':
+        if (!source) return;
+        this.dialog.set({
+          state: 'form',
+          operation: intent.operation,
+          title: $localize`:Rename Files entry dialog title@@files.dialog.rename:Rename`,
+          message: $localize`:Rename Files entry dialog message@@files.dialog.renameMessage:Enter one new name for this item.`,
+          source,
+          name: basename(source.path),
+        });
+        return;
+      case 'copy':
+      case 'move':
+        if (!source) return;
+        this.dialog.set({
+          state: 'form',
+          operation: intent.operation,
+          title:
+            intent.operation === 'copy'
+              ? $localize`:Copy Files entry dialog title@@files.dialog.copy:Copy`
+              : $localize`:Move Files entry dialog title@@files.dialog.move:Move`,
+          message: $localize`:Transfer destination dialog message@@files.dialog.destinationMessage:Choose a registered destination and provider-relative path.`,
+          source,
+          destination: {
+            mountId: source.mountId,
+            path: source.path,
+          },
+        });
+        return;
+      case 'trash':
+        if (!source) return;
+        this.dialog.set({
+          state: 'confirm',
+          operation: intent.operation,
+          title: $localize`:Move to Trash dialog title@@files.dialog.trash:Move to Trash`,
+          message: $localize`:Move to Trash confirmation@@files.dialog.trashConfirm:Move this item to Trash?`,
+          source,
+          recursive: intent.recursive ?? false,
+        });
+        return;
+      case 'restore':
+        if (!source || !intent.receiptId) return;
+        this.dialog.set({
+          state: 'confirm',
+          operation: intent.operation,
+          title: $localize`:Restore Files entry dialog title@@files.dialog.restore:Restore`,
+          message: $localize`:Restore Files entry confirmation@@files.dialog.restoreConfirm:Restore this item to its original location?`,
+          source,
+          receiptId: intent.receiptId,
+        });
+        return;
+      case 'delete':
+        if (!source) return;
+        this.dialog.set({
+          state: 'confirm',
+          operation: intent.operation,
+          title: $localize`:Permanent Files delete dialog title@@files.dialog.delete:Permanently delete`,
+          message:
+            intent.recursive === true
+              ? $localize`:Recursive Files delete first confirmation@@files.dialog.deleteRecursiveFirst:This folder and its contents will be permanently deleted. Continue?`
+              : $localize`:Permanent Files delete confirmation@@files.dialog.deleteConfirm:This item will be permanently deleted. Continue?`,
+          source,
+          ...(intent.receiptId ? { receiptId: intent.receiptId } : {}),
+          recursive: intent.recursive ?? false,
+          requiresRecursiveConfirmation: intent.recursive === true,
+        });
+        return;
+    }
+  }
+
+  private async performOperation(
+    intent: Extract<FilesActionIntent, { type: 'submit-operation' }>,
+  ): Promise<void> {
+    const currentDialog = this.dialog();
+    if (
+      intent.operation === 'delete' &&
+      intent.recursive === true &&
+      intent.confirmed === true &&
+      currentDialog?.requiresRecursiveConfirmation
+    ) {
+      this.dialog.set({
+        ...currentDialog,
+        message: $localize`:Recursive Files delete second confirmation@@files.dialog.deleteRecursiveSecond:Confirm permanent recursive deletion. This cannot be undone.`,
+        requiresRecursiveConfirmation: false,
+      });
+      return;
+    }
+
+    const title = operationTitle(intent.operation);
+    this.dialog.set({
+      state: 'busy',
+      operation: intent.operation,
+      title,
+      message: $localize`:Files operation busy message@@files.dialog.working:Working…`,
+      ...(intent.source ? { source: intent.source } : {}),
+      ...(intent.destination ? { destination: intent.destination } : {}),
+      ...(intent.receiptId ? { receiptId: intent.receiptId } : {}),
+      recursive: intent.recursive ?? false,
+    });
+
+    try {
+      const result = await this.callOperation(intent);
+      this.showOperationResult(intent.operation, result);
+      if (result.status === 'completed' || result.status === 'partial') {
+        this.scheduleRefresh();
+      }
+    } catch (error) {
+      this.dialog.set({
+        state: 'error',
+        operation: intent.operation,
+        title,
+        message: errorMessage(error),
+        ...(intent.source ? { source: intent.source } : {}),
+        ...(intent.destination ? { destination: intent.destination } : {}),
+        ...(intent.receiptId ? { receiptId: intent.receiptId } : {}),
+        recursive: intent.recursive ?? false,
+      });
+    }
+  }
+
+  private async callOperation(
+    intent: Extract<FilesActionIntent, { type: 'submit-operation' }>,
+  ): Promise<FileOperationResultView> {
+    const source = this.source();
+    switch (intent.operation) {
+      case 'create-directory': {
+        const address = requiredAddress(intent.source);
+        return source.createDirectory({
+          mountId: address.mountId,
+          parentPath: address.path,
+          name: requiredName(intent.name),
+        });
+      }
+      case 'rename': {
+        const address = requiredAddress(intent.source);
+        return source.rename({
+          mountId: address.mountId,
+          path: address.path,
+          name: requiredName(intent.name),
+        });
+      }
+      case 'copy':
+      case 'move': {
+        const sourceAddress = requiredAddress(intent.source);
+        const destination = requiredAddress(intent.destination);
+        if (!destination.path) {
+          throw new Error(
+            $localize`:Files transfer destination required@@files.error.destinationRequired:A provider-relative destination path is required.`,
+          );
+        }
+        return intent.operation === 'copy'
+          ? source.copy({ source: sourceAddress, destination })
+          : source.move({ source: sourceAddress, destination });
+      }
+      case 'trash': {
+        if (intent.confirmed !== true) {
+          throw new Error(
+            $localize`:Files Trash confirmation required@@files.error.trashConfirmation:Moving an item to Trash requires confirmation.`,
+          );
+        }
+        const address = requiredAddress(intent.source);
+        return source.trash({
+          mountId: address.mountId,
+          path: address.path,
+        });
+      }
+      case 'restore':
+        if (intent.confirmed !== true || !intent.receiptId) {
+          throw new Error(
+            $localize`:Files restore confirmation required@@files.error.restoreConfirmation:Restoring an item requires its receipt and confirmation.`,
+          );
+        }
+        return source.restore({ receiptId: intent.receiptId });
+      case 'delete': {
+        if (intent.confirmed !== true) {
+          throw new Error(
+            $localize`:Files delete confirmation required@@files.error.deleteConfirmation:Permanent deletion requires confirmation.`,
+          );
+        }
+        const address = intent.source;
+        return source.delete({
+          mountId: intent.receiptId ? '' : requiredAddress(address).mountId,
+          path: intent.receiptId ? '' : requiredAddress(address).path,
+          receiptId: intent.receiptId ?? '',
+          recursive: intent.recursive ?? false,
+          confirmed: true,
+        });
+      }
+    }
+  }
+
+  private showOperationResult(
+    operation: FilesOperationKind,
+    result: FileOperationResultView,
+  ): void {
+    const state =
+      result.status === 'conflict'
+        ? 'conflict'
+        : result.status === 'partial'
+          ? 'partial'
+          : 'success';
+    this.dialog.set({
+      state,
+      operation,
+      title: operationTitle(operation),
+      message: result.message,
+      source: result.source,
+      ...(result.destination ? { destination: result.destination } : {}),
+      ...(result.receiptId ? { receiptId: result.receiptId } : {}),
+      result,
+    });
+  }
+
+  private scheduleRefresh(): void {
+    if (this.refreshScheduled || this.destroyed) return;
+    this.refreshScheduled = true;
+    this.refreshTaskDone = this.pendingTasks.add();
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      this.refreshScheduled = false;
+      if (this.destroyed) {
+        this.finishScheduledRefresh();
+        return;
+      }
+      void this.refresh().finally(() => this.finishScheduledRefresh());
+    }, 0);
+  }
+
+  private finishScheduledRefresh(): void {
+    this.refreshTaskDone?.();
+    this.refreshTaskDone = null;
+  }
+
+  private subscribeToEvents(): void {
+    if (this.connection.offline() || this.filesEventsOff) return;
+    this.filesEventsOff = this.bridge.onChanged((event) => {
+      if (!this.knownEvent(event)) return;
+      if (eventAffectsLocation(event, this.location())) {
+        this.scheduleRefresh();
+      }
+    });
+  }
+
+  private knownEvent(event: FilesChangedEvent): boolean {
+    const knownMounts = new Set(this.catalogue().mounts.map(({ id }) => id));
+    return event.mountIds.length > 0 && event.mountIds.every((mountId) => knownMounts.has(mountId));
+  }
+
   private markSuccessful(): void {
     this.hasSuccessfulView = true;
     this.failure.set('');
     this.dataState.set(this.connection.offline() ? 'demo' : 'live');
+    this.subscribeToEvents();
   }
 
   private applyLoadFailure(error: unknown, previousState: FilesDataState): void {
@@ -340,7 +630,15 @@ export class FilesApp implements AppView, OnInit {
           },
           execute: () => {
             const state = this.viewState();
-            const observed = [state.token, ...state.breadcrumbs.map(({ token }) => token)];
+            const entryTokens = state.entries.flatMap((entry) => {
+              const token = entryToken(state, entry);
+              return token ? [token] : [];
+            });
+            const observed = [
+              state.token,
+              ...state.breadcrumbs.map(({ token }) => token),
+              ...entryTokens,
+            ];
             observed.forEach((token) => this.observedMcpTokens.add(token));
             const mountId = state.location.kind === 'directory' ? state.location.mountId : '';
             const path = state.location.kind === 'directory' ? state.location.path : '';
@@ -366,6 +664,7 @@ export class FilesApp implements AppView, OnInit {
                       kind: entry.kind,
                       sizeBytes: entry.sizeBytes,
                       modifiedAt: entry.modifiedAt,
+                      token: entryToken(state, entry),
                     })),
                   }),
                 },
@@ -451,6 +750,64 @@ export class FilesApp implements AppView, OnInit {
 
 function entryKey(entry: FilesBrowserEntryView): string {
   return `${entry.mountId}::${entry.relativePath}::${entry.receiptId}`;
+}
+
+function entryToken(state: FilesViewState, entry: FilesBrowserEntryView): string {
+  if (entry.kind !== 'directory' || state.location.kind === 'trash') return '';
+  return filesToken({
+    kind: 'directory',
+    mountId: entry.mountId,
+    path: entry.relativePath,
+  });
+}
+
+function requiredAddress(address: FileAddressView | undefined): FileAddressView {
+  if (!address || !address.mountId || !validRelativePath(address.path)) {
+    throw new Error(
+      $localize`:Invalid Files address@@files.error.invalidAddress:The Files address is invalid.`,
+    );
+  }
+  return address;
+}
+
+function requiredName(name: string | undefined): string {
+  if (
+    !name ||
+    name.trim() !== name ||
+    name === '.' ||
+    name === '..' ||
+    name.includes('/') ||
+    name.includes('\\') ||
+    /[\u0000-\u001f\u007f]/.test(name)
+  ) {
+    throw new Error(
+      $localize`:Invalid Files name@@files.error.invalidName:Enter one valid name without path separators.`,
+    );
+  }
+  return name;
+}
+
+function basename(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1);
+}
+
+function operationTitle(operation: FilesOperationKind): string {
+  switch (operation) {
+    case 'create-directory':
+      return $localize`:Create folder operation title@@files.operation.createFolder:Create folder`;
+    case 'rename':
+      return $localize`:Rename operation title@@files.operation.rename:Rename`;
+    case 'copy':
+      return $localize`:Copy operation title@@files.operation.copy:Copy`;
+    case 'move':
+      return $localize`:Move operation title@@files.operation.move:Move`;
+    case 'trash':
+      return $localize`:Trash operation title@@files.operation.trash:Move to Trash`;
+    case 'restore':
+      return $localize`:Restore operation title@@files.operation.restore:Restore`;
+    case 'delete':
+      return $localize`:Delete operation title@@files.operation.delete:Permanently delete`;
+  }
 }
 
 function errorMessage(error: unknown): string {
