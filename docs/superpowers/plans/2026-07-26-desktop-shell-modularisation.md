@@ -31,7 +31,7 @@
   - `ShellWindowGroup`
   - `ShellValueEvent<T, E extends Event = Event>`
 
-- [ ] Add the immutable user, group, and value/event interfaces used by both presenters and `DesktopComponent`.
+- [x] Add the user, group, and value/event interfaces used by both presenters and `DesktopComponent`.
 
 ```ts
 export interface ShellUserIdentity {
@@ -76,12 +76,12 @@ export interface ShellValueEvent<T, E extends Event = Event> {
   - `categoryRequested: ShellValueEvent<DesktopMenuCategory>`
   - `trayRequested: ShellValueEvent<'lang' | 'wifi' | 'battery' | 'clock'>`
 
-- [ ] Write a failing component test that sets active app/category/language/clock inputs, verifies the existing labels, clicks real buttons, and asserts the emitted values and original DOM events.
-- [ ] Run `npx ng test --watch=false --include=src/app/desktop/shell/menu-bar.spec.ts` and observe the missing component failure.
-- [ ] Implement `ShellMenuBar` with required signal inputs, function outputs, `OnPush`, `display: contents`, and the unchanged menu-bar markup.
-- [ ] Replace the inline menu-bar block with `<lthn-shell-menu-bar>` and delegate each output to the existing parent method.
-- [ ] Move only menu-bar-owned selectors into `menu-bar.scss`.
-- [ ] Run the focused menu-bar and existing desktop specs and observe them pass.
+- [x] Write a failing component test that sets active app/category/language/clock inputs, verifies the existing labels, clicks real buttons, and asserts the emitted values and original DOM events.
+- [x] Run `npx ng test --watch=false --include=src/app/desktop/shell/menu-bar.spec.ts` and observe the missing component failure.
+- [x] Implement `ShellMenuBar` with required signal inputs, function outputs, `OnPush`, `display: contents`, and the unchanged menu-bar markup.
+- [x] Replace the inline menu-bar block with `<lthn-shell-menu-bar>` and delegate each output to the existing parent method.
+- [x] Move only menu-bar-owned selectors into `menu-bar.scss`.
+- [x] Run the focused menu-bar and existing desktop specs and observe them pass.
 
 ### Task 3: Extract the taskbar and dock
 
@@ -106,13 +106,13 @@ export interface ShellValueEvent<T, E extends Event = Event> {
   - `groupRequested: string`
   - `groupContextRequested: ShellValueEvent<ShellWindowGroup, MouseEvent>`
 
-- [ ] Write a failing component test that renders a user, two tasks, one running app, and one group, then verifies real click/context-menu outputs and the unchanged Trash control.
-- [ ] Run `npx ng test --watch=false --include=src/app/desktop/shell/taskbar-dock.spec.ts` and observe the missing component failure.
-- [ ] Implement `ShellTaskbarDock` with required signal inputs, function outputs, `OnPush`, `display: contents`, and unchanged taskbar/dock markup.
-- [ ] Replace the two inline blocks with `<lthn-shell-taskbar-dock>` and delegate outputs to the existing parent methods.
-- [ ] Replace anonymous user/group state shapes in `DesktopComponent` with the shared interfaces.
-- [ ] Move taskbar/dock-owned selectors into `taskbar-dock.scss`, retaining shared and outer-layout selectors in the parent stylesheet.
-- [ ] Run both presenter specs and the existing desktop spec and observe them pass.
+- [x] Write a failing component test that renders a user, two tasks, one running app, and one group, then verifies real click/context-menu outputs and the unchanged Trash control.
+- [x] Run `npx ng test --watch=false --include=src/app/desktop/shell/taskbar-dock.spec.ts` and observe the missing component failure.
+- [x] Implement `ShellTaskbarDock` with required signal inputs, function outputs, `OnPush`, `display: contents`, and unchanged taskbar/dock markup.
+- [x] Replace the two inline blocks with `<lthn-shell-taskbar-dock>` and delegate outputs to the existing parent methods.
+- [x] Replace anonymous user/group state shapes in `DesktopComponent` with the shared interfaces.
+- [x] Move taskbar/dock-owned selectors into `taskbar-dock.scss`, retaining shared and outer-layout selectors in the parent stylesheet.
+- [x] Run both presenter specs and the existing desktop spec and observe them pass.
 
 ### Task 4: Verify and commit the tranche
 
@@ -120,8 +120,8 @@ export interface ShellValueEvent<T, E extends Event = Event> {
 
 - Review all files changed by Tasks 1–3.
 
-- [ ] Run the three focused Angular specs together.
-- [ ] Run `cd frontend-ng && npm run build`.
-- [ ] Run `git diff --check`.
-- [ ] Confirm `.playwright-mcp/` remains untouched.
-- [ ] Commit with `refactor(frontend): modularise desktop shell chrome`.
+- [x] Run the three focused Angular specs together.
+- [x] Run `cd frontend-ng && npm run build`.
+- [x] Run `git diff --check`.
+- [x] Confirm `.playwright-mcp/` remains untouched.
+- [x] Commit with `refactor(frontend): modularise desktop shell chrome`.

@@ -1,0 +1,60 @@
+<div class="bar">
+  <button class="session" aria-haspopup="true" (click)="requestSession($event)">
+    <span class="ava">{{ user().initials }}</span
+    ><span class="who"
+      ><b>{{ user().name }}</b
+      ><small>{{ user().host }}</small></span
+    ><lthn-status-dot variant="ok"></lthn-status-dot>
+  </button>
+  <span class="bdiv"></span>
+  <div class="tasks">
+    <button
+      class="task"
+      *ngFor="let w of taskWins()"
+      [class.active]="!w.min && focusId() === w.id"
+      (click)="taskRequested.emit(w.id)"
+    >
+      <lthn-icon [attr.name]="apps()[w.app].icon" size="13"></lthn-icon
+      ><span class="tt">{{ apps()[w.app].title }}</span>
+    </button>
+  </div>
+</div>
+
+<div class="dock" [class.dropzone]="dropzone()">
+  <button
+    class="di"
+    *ngFor="let id of runningApps()"
+    [attr.aria-label]="apps()[id].title"
+    [attr.data-label]="apps()[id].title"
+    (click)="dockRequested.emit(id)"
+    (contextmenu)="requestDockContext(id, $event)"
+  >
+    <lthn-icon [attr.name]="apps()[id].icon" size="20"></lthn-icon><span class="dot"></span>
+  </button>
+  <button
+    class="di group"
+    *ngFor="let group of groups()"
+    [class.open]="group.open"
+    [attr.aria-label]="group.name"
+    [attr.data-label]="group.name"
+    (click)="groupRequested.emit(group.id)"
+    (contextmenu)="requestGroupContext(group, $event)"
+  >
+    <lthn-icon
+      *ngFor="let app of group.apps.slice(0, 4)"
+      [attr.name]="apps()[app].icon"
+      size="11"
+    ></lthn-icon
+    ><span class="gcount">{{ group.ids.length }}</span>
+  </button>
+  <span class="sep" *ngIf="runningApps().length || groups().length"></span>
+  <button
+    class="di"
+    aria-label="Trash"
+    i18n-aria-label="Trash label@@desktop.trash"
+    data-label="Trash"
+    i18n-data-label="Trash label@@desktop.trash"
+  >
+    <lthn-icon name="trash-can" size="18"></lthn-icon>
+  </button>
+</div>

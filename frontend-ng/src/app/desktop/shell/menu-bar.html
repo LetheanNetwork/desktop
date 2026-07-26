@@ -1,0 +1,65 @@
+<div class="menubar">
+  <button
+    class="hoplite-btn mbtn"
+    [class.on]="activeMenuKey() === 'system'"
+    [attr.aria-expanded]="activeMenuKey() === 'system'"
+    aria-haspopup="true"
+    (click)="requestMenu('system', $event)"
+    (mouseenter)="hoverMenu('system', $event)"
+    aria-label="Lethean"
+    i18n-aria-label="System menu label@@desktop.systemMenuLabel"
+  >
+    <img class="hoplite" src="hoplite_white.png" alt="" width="17" height="17" />
+  </button>
+  <button
+    class="mbtn app"
+    [class.on]="activeMenuKey() === 'app'"
+    [attr.aria-expanded]="activeMenuKey() === 'app'"
+    aria-haspopup="true"
+    (click)="requestMenu('app', $event)"
+    (mouseenter)="hoverMenu('app', $event)"
+  >
+    {{ activeAppTitle() }}
+  </button>
+  <button
+    class="mbtn route-category"
+    *ngFor="let category of categories()"
+    aria-haspopup="true"
+    (click)="requestCategory(category, $event)"
+  >
+    {{ category.title }}
+  </button>
+  <div class="right">
+    <button
+      class="trayi"
+      (click)="requestTray('lang', $event)"
+      aria-label="Language"
+      i18n-aria-label="Language tray label@@desktop.tray.languageLabel"
+    >
+      <span style="font-family: var(--font-mono); font-size: 11px">{{
+        language().toUpperCase()
+      }}</span></button
+    ><button
+      class="trayi"
+      (click)="requestTray('wifi', $event)"
+      aria-label="Network"
+      i18n-aria-label="Network tray label@@desktop.tray.networkLabel"
+    >
+      <lthn-icon name="wifi" size="12"></lthn-icon></button
+    ><button
+      class="trayi"
+      (click)="requestTray('battery', $event)"
+      aria-label="Battery"
+      i18n-aria-label="Battery tray label@@desktop.tray.batteryLabel"
+    >
+      <lthn-icon name="battery-three-quarters" size="13"></lthn-icon></button
+    ><button
+      class="trayi"
+      (click)="requestTray('clock', $event)"
+      aria-label="Date &amp; time"
+      i18n-aria-label="Date and time tray label@@desktop.tray.dateTimeLabel"
+    >
+      <span class="clock">{{ clockText() }}</span>
+    </button>
+  </div>
+</div>

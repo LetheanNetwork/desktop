@@ -17,71 +17,17 @@
 >
   <div class="wall" (contextmenu)="deskCtx($event)" (pointerdown)="startMarquee($event)"></div>
 
-  <div class="menubar">
-    <button
-      class="hoplite-btn mbtn"
-      [class.on]="mbKey === 'system'"
-      [attr.aria-expanded]="mbKey === 'system'"
-      aria-haspopup="true"
-      (click)="openMb('system', $event)"
-      (mouseenter)="hoverMb('system', $event)"
-      aria-label="Lethean"
-      i18n-aria-label="System menu label@@desktop.systemMenuLabel"
-    >
-      <img class="hoplite" src="hoplite_white.png" alt="" width="17" height="17" />
-    </button>
-    <button
-      class="mbtn app"
-      [class.on]="mbKey === 'app'"
-      [attr.aria-expanded]="mbKey === 'app'"
-      aria-haspopup="true"
-      (click)="openMb('app', $event)"
-      (mouseenter)="hoverMb('app', $event)"
-    >
-      {{ activeApp() }}
-    </button>
-    <button
-      class="mbtn route-category"
-      *ngFor="let category of categories"
-      aria-haspopup="true"
-      (click)="shellCat(category, $event)"
-    >
-      {{ category.title }}
-    </button>
-    <div class="right">
-      <button
-        class="trayi"
-        (click)="openTray('lang', $event)"
-        aria-label="Language"
-        i18n-aria-label="Language tray label@@desktop.tray.languageLabel"
-      >
-        <span style="font-family: var(--font-mono); font-size: 11px">{{
-          lang.toUpperCase()
-        }}</span></button
-      ><button
-        class="trayi"
-        (click)="openTray('wifi', $event)"
-        aria-label="Network"
-        i18n-aria-label="Network tray label@@desktop.tray.networkLabel"
-      >
-        <lthn-icon name="wifi" size="12"></lthn-icon></button
-      ><button
-        class="trayi"
-        (click)="openTray('battery', $event)"
-        aria-label="Battery"
-        i18n-aria-label="Battery tray label@@desktop.tray.batteryLabel"
-      >
-        <lthn-icon name="battery-three-quarters" size="13"></lthn-icon></button
-      ><button
-        class="trayi"
-        (click)="openTray('clock', $event)"
-        aria-label="Date &amp; time"
-        i18n-aria-label="Date and time tray label@@desktop.tray.dateTimeLabel"
-      >
-        <span class="clock">{{ clock }}</span>
-      </button>
-    </div>
-  </div>
+  <lthn-shell-menu-bar
+    [activeMenuKey]="mbKey"
+    [activeAppTitle]="activeApp()"
+    [categories]="categories"
+    [language]="lang"
+    [clockText]="clock"
+    (menuRequested)="openMb($event.value, $event.event)"
+    (menuHovered)="hoverMb($event.value, $event.event)"
+    (categoryRequested)="shellCat($event.value, $event.event)"
+    (trayRequested)="openTray($event.value, $event.event)"
+  />
 
   <div class="dicons">
     <div
@@ -497,68 +443,21 @@
     </div>
   </div>
 
-  <!-- taskbar — fresh session chip + running task buttons -->
-  <div class="bar">
-    <button class="session" aria-haspopup="true" (click)="toggleSession($event)">
-      <span class="ava">{{ user.initials }}</span
-      ><span class="who"
-        ><b>{{ user.name }}</b
-        ><small>{{ user.host }}</small></span
-      ><lthn-status-dot variant="ok"></lthn-status-dot>
-    </button>
-    <span class="bdiv"></span>
-    <div class="tasks">
-      <button
-        class="task"
-        *ngFor="let w of taskWins"
-        [class.active]="!w.min && wm.focusId() === w.id"
-        (click)="taskClick(w.id)"
-      >
-        <lthn-icon [attr.name]="APPS[w.app].icon" size="13"></lthn-icon
-        ><span class="tt">{{ APPS[w.app].title }}</span>
-      </button>
-    </div>
-  </div>
-
-  <!-- dock — running processes (not a launcher; decoupled from the task list) -->
-  <div class="dock" [class.dropzone]="proxy.open && proxy.over">
-    <button
-      class="di"
-      *ngFor="let id of runningApps"
-      [attr.aria-label]="APPS[id].title"
-      [attr.data-label]="APPS[id].title"
-      (click)="dockClick(id)"
-      (contextmenu)="dockCtx($event, id)"
-    >
-      <lthn-icon [attr.name]="APPS[id].icon" size="20"></lthn-icon><span class="dot"></span>
-    </button>
-    <button
-      class="di group"
-      *ngFor="let g of groups"
-      [class.open]="g.open"
-      [attr.aria-label]="g.name"
-      [attr.data-label]="g.name"
-      (click)="toggleGroup(g.id)"
-      (contextmenu)="groupCtx($event, g)"
-    >
-      <lthn-icon
-        *ngFor="let a of g.apps.slice(0, 4)"
-        [attr.name]="APPS[a].icon"
-        size="11"
-      ></lthn-icon
-      ><span class="gcount">{{ g.ids.length }}</span>
-    </button>
-    <span class="sep" *ngIf="runningApps.length || groups.length"></span>
-    <button
-      class="di"
-      aria-label="Trash"
-      i18n-aria-label="Trash label@@desktop.trash"
-      data-label="Trash"
-      i18n-data-label="Trash label@@desktop.trash"
-    >
-      <lthn-icon name="trash-can" size="18"></lthn-icon>
-    </button>
-  </div>
+  <lthn-shell-taskbar-dock
+    [user]="user"
+    [taskWins]="taskWins"
+    [focusId]="wm.focusId()"
+    [apps]="APPS"
+    [runningApps]="runningApps"
+    [groups]="groups"
+    [dropzone]="proxy.open && proxy.over"
+    (sessionRequested)="toggleSession($event)"
+    (taskRequested)="taskClick($event)"
+    (dockRequested)="dockClick($event)"
+    (dockContextRequested)="dockCtx($event.event, $event.value)"
+    (groupRequested)="toggleGroup($event)"
+    (groupContextRequested)="groupCtx($event.event, $event.value)"
+  />
 
   <!-- session chip → 2-column Start menu: programs (launcher) + session -->
   <div

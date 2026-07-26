@@ -232,37 +232,9 @@ lthn-desktop{background:var(--ink-0);color:var(--fg-1);font-family:var(--font-sa
   .wstat .row:first-of-type{border-top:0;padding-top:0}
   .wstat .nm{color:var(--fg-1)}
   .wstat .stt{margin-left:auto;font-family:var(--font-mono);font-size:10.5px;color:var(--fg-3)}
-  /* ══════════ MENU BAR (always top, macOS) ══════════ */
-  .menubar{position:absolute;top:0;left:0;right:0;height:26px;z-index:9500;display:flex;align-items:center;gap:18px;padding:0 14px;background:color-mix(in oklch,var(--ink-1) 72%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--line-1);font-size:13px;color:var(--fg-2)}
-  .menubar .app{font-weight:600;color:var(--fg-0)}
-  .menubar .mi{color:var(--fg-3)}
-  .menubar .right{margin-left:auto;display:flex;align-items:center;gap:16px}
-  .menubar .clock{font-size:12.5px;color:var(--fg-1)}
-  /* ══════════ TASKBAR (Windows concept, edge-dockable) ══════════ */
+  /* Shared taskbar/session menu identity */
   .ava{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(color-mix(in oklch,var(--brand-400) 82%,#000),var(--brand-600));color:#fff;font-size:10.5px;font-weight:700;font-family:var(--font-mono);flex:none}
   .ava.lg{width:34px;height:34px;font-size:13px}
-  .bar{position:absolute;z-index:9000;display:flex;align-items:center;gap:8px;background:color-mix(in oklch,var(--ink-1) 74%,transparent);backdrop-filter:blur(18px);border:0 solid var(--line-1)}
-  #os[data-bar="bottom"] .bar{left:0;right:0;bottom:0;height:48px;padding:0 10px;border-top-width:1px}
-  #os[data-bar="top"] .bar{left:0;right:0;top:26px;height:48px;padding:0 10px;border-bottom-width:1px}
-  #os[data-bar="left"] .bar{top:26px;bottom:0;left:0;width:56px;flex-direction:column;padding:10px 0;border-right-width:1px}
-  #os[data-bar="right"] .bar{top:26px;bottom:0;right:0;width:56px;flex-direction:column;padding:10px 0;border-left-width:1px}
-  .session{display:flex;align-items:center;gap:9px;height:34px;padding:0 12px 0 5px;border:1px solid var(--line-1);border-radius:999px;background:color-mix(in oklch,var(--ink-3) 55%,transparent);color:var(--fg-1);cursor:pointer;font:inherit;flex:none}
-  .session:hover{border-color:var(--line-2)}
-  .session .who{display:flex;flex-direction:column;line-height:1.15;text-align:left}
-  .session .who b{font-size:12px;color:var(--fg-0);font-weight:600}
-  .session .who small{font-size:10px;color:var(--fg-3);font-family:var(--font-mono)}
-  .bdiv{width:1px;height:24px;background:var(--line-1);flex:none}
-  .tasks{display:flex;align-items:center;gap:6px;flex:1;overflow:hidden}
-  .task{display:inline-flex;align-items:center;gap:8px;max-width:184px;height:34px;padding:0 12px;border:1px solid transparent;border-radius:9px;background:color-mix(in oklch,var(--ink-3) 42%,transparent);color:var(--fg-2);font:inherit;font-size:12.5px;cursor:pointer}
-  .task .tt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .task:hover:not(.active){background:color-mix(in oklch,var(--ink-4) 55%,transparent);color:var(--fg-0)}
-  .task.active{background:var(--brand-500);color:#fff;border-color:color-mix(in oklch,var(--brand-300) 50%,transparent)}
-  #os[data-bar="left"] .session,#os[data-bar="right"] .session{width:40px;height:40px;padding:0;justify-content:center;border-radius:12px}
-  #os[data-bar="left"] .session .who,#os[data-bar="right"] .session .who,#os[data-bar="left"] .session lthn-status-dot,#os[data-bar="right"] .session lthn-status-dot{display:none}
-  #os[data-bar="left"] .bdiv,#os[data-bar="right"] .bdiv{width:24px;height:1px}
-  #os[data-bar="left"] .tasks,#os[data-bar="right"] .tasks{flex-direction:column;align-items:stretch;width:100%}
-  #os[data-bar="left"] .task,#os[data-bar="right"] .task{max-width:none;width:40px;height:40px;justify-content:center;padding:0;margin:0 auto}
-  #os[data-bar="left"] .task .tt,#os[data-bar="right"] .task .tt{display:none}
   /* winlayer + wallpaper items reserve space for the taskbar edge */
   #os[data-bar="bottom"] #winlayer{bottom:48px}
   #os[data-bar="top"] #winlayer{top:74px}
@@ -272,27 +244,6 @@ lthn-desktop{background:var(--ink-0);color:var(--fg-1);font-family:var(--font-sa
   #os[data-bar="bottom"] .dicons{bottom:56px}
   #os[data-bar="left"] .dicons{left:66px}
   #os[data-bar="right"] .widgets{right:66px}
-  /* ══════════ DOCK (macOS) — floats adjacent to the taskbar ══════════ */
-  .dock{position:absolute;z-index:9000;display:flex;gap:10px;padding:8px 12px;border-radius:20px;background:color-mix(in oklch,var(--ink-2) 60%,transparent);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.08);box-shadow:0 12px 40px rgba(0,0,0,.5)}
-  #os[data-bar="bottom"] .dock{left:50%;transform:translateX(-50%);bottom:60px;flex-direction:row;align-items:flex-end}
-  #os[data-bar="top"] .dock{left:50%;transform:translateX(-50%);top:82px;flex-direction:row;align-items:flex-start}
-  #os[data-bar="left"] .dock{top:50%;transform:translateY(-50%);left:70px;flex-direction:column;align-items:flex-start}
-  #os[data-bar="right"] .dock{top:50%;transform:translateY(-50%);right:70px;flex-direction:column;align-items:flex-end}
-  .dock .di{position:relative;width:46px;height:46px;border-radius:12px;display:grid;place-items:center;font-size:20px;cursor:pointer;padding:0;font:inherit;background:linear-gradient(color-mix(in oklch,var(--brand-500) 26%,var(--ink-3)),var(--ink-3));border:1px solid rgba(255,255,255,.1);color:var(--brand-200);transition:transform .14s ease,margin .14s ease;transform-origin:bottom}
-  #os[data-bar="bottom"] .dock .di:hover,#os[data-bar="top"] .dock .di:hover{transform:scale(1.36) translateY(-6px);margin:0 8px}
-  .dock .di .dot{position:absolute;width:4px;height:4px;border-radius:50%;background:var(--fg-2)}
-  #os[data-bar="bottom"] .dock .di .dot,#os[data-bar="top"] .dock .di .dot{bottom:-6px;left:50%;transform:translateX(-50%)}
-  #os[data-bar="left"] .dock .di .dot{left:-6px;top:50%;transform:translateY(-50%)}
-  #os[data-bar="right"] .dock .di .dot{right:-6px;top:50%;transform:translateY(-50%)}
-  .dock .sep{background:rgba(255,255,255,.12)}
-  #os[data-bar="bottom"] .dock .sep,#os[data-bar="top"] .dock .sep{width:1px;align-self:stretch;margin:4px 2px}
-  #os[data-bar="left"] .dock .sep,#os[data-bar="right"] .dock .sep{height:1px;align-self:stretch;margin:2px 4px}
-  .dock .di[data-label]::after{content:attr(data-label);position:absolute;padding:3px 8px;border-radius:6px;background:var(--ink-0);border:1px solid var(--line-2);color:var(--fg-0);font-size:11px;font-weight:500;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .12s ease;z-index:20}
-  .dock .di[data-label]:hover::after{opacity:1}
-  #os[data-bar="bottom"] .dock .di[data-label]::after{bottom:calc(100% + 10px);left:50%;transform:translateX(-50%)}
-  #os[data-bar="top"] .dock .di[data-label]::after{top:calc(100% + 10px);left:50%;transform:translateX(-50%)}
-  #os[data-bar="left"] .dock .di[data-label]::after{left:calc(100% + 10px);top:50%;transform:translateY(-50%)}
-  #os[data-bar="right"] .dock .di[data-label]::after{right:calc(100% + 10px);top:50%;transform:translateY(-50%)}
   /* ══════════ MENUS (session dropdown + dock right-click) ══════════ */
   .menu{position:absolute;z-index:9600;min-width:186px;background:var(--ink-1);border:1px solid var(--line-2);border-radius:10px;box-shadow:0 16px 44px rgba(0,0,0,.55);padding:6px;font-size:13px}
   .menu[hidden]{display:none}
@@ -324,17 +275,6 @@ lthn-desktop{background:var(--ink-0);color:var(--fg-1);font-family:var(--font-sa
   .marquee[hidden]{display:none}
   .dragproxy{position:absolute;z-index:100000;display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;background:var(--brand-500);color:#fff;font-size:12px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.5);pointer-events:none;white-space:nowrap}
   .dragproxy[hidden]{display:none}
-  .dock.dropzone{outline:2px dashed var(--brand-300);outline-offset:4px;background:color-mix(in oklch,var(--brand-500) 24%,transparent)}
-  .di.group{position:relative;display:grid;grid-template-columns:repeat(2,1fr);gap:3px;place-items:center;padding:8px}
-  .di.group lthn-icon{font-size:11px}
-  .di.group.open{outline:2px solid color-mix(in oklch,var(--brand-300) 80%,transparent);outline-offset:2px}
-  .menubar .trayi{background:transparent;border:0;color:inherit;cursor:pointer;padding:0 7px;height:26px;display:inline-flex;align-items:center;font:inherit;border-radius:6px}
-  .menubar .trayi:hover{background:color-mix(in oklch,var(--fg-0) 10%,transparent)}
-  .menubar .mbtn{background:transparent;border:0;color:var(--fg-3);cursor:pointer;font:inherit;font-size:13px;padding:0 8px;height:26px;border-radius:6px;display:inline-flex;align-items:center}
-  .menubar .mbtn.app{color:var(--fg-0);font-weight:600}
-  .menubar .mbtn:hover,.menubar .mbtn.on{background:color-mix(in oklch,var(--fg-0) 12%,transparent);color:var(--fg-0)}
-  .hoplite-btn{padding:0 8px}
-  .hoplite{display:block;object-fit:contain}
   /* ══════════ ABOUT / SYSTEM modal ══════════ */
   .aboutmodal{position:absolute;inset:0;z-index:9700;display:grid;place-items:center;background:color-mix(in oklch,#000 46%,transparent);backdrop-filter:blur(3px);animation:popIn .16s ease}
   #os.reduce-motion .aboutmodal{animation:none}

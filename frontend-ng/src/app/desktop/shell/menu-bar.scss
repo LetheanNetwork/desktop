@@ -1,0 +1,80 @@
+.menubar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 9500;
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 14px;
+  gap: 18px;
+  color: var(--fg-2);
+  font-size: 13px;
+  background: color-mix(in oklch, var(--ink-1) 72%, transparent);
+  border-bottom: 1px solid var(--line-1);
+  backdrop-filter: blur(14px);
+}
+
+.menubar .right {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  gap: 16px;
+}
+
+.menubar .clock {
+  color: var(--fg-1);
+  font-size: 12.5px;
+}
+
+.menubar .trayi {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 7px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.menubar .trayi:hover {
+  background: color-mix(in oklch, var(--fg-0) 10%, transparent);
+}
+
+.menubar .mbtn {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 8px;
+  color: var(--fg-3);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.menubar .mbtn.app {
+  color: var(--fg-0);
+  font-weight: 600;
+}
+
+.menubar .mbtn:hover,
+.menubar .mbtn.on {
+  color: var(--fg-0);
+  background: color-mix(in oklch, var(--fg-0) 12%, transparent);
+}
+
+.hoplite-btn {
+  padding: 0 8px;
+}
+
+.hoplite {
+  display: block;
+  object-fit: contain;
+}

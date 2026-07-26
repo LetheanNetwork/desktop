@@ -38,6 +38,12 @@ import {
   routeSegmentsForWindow,
 } from './desktop-route-tree';
 import { DESKTOP_STORAGE } from '../store/storage.service';
+import { ShellMenuBar } from './shell/menu-bar';
+import { ShellTaskbarDock } from './shell/taskbar-dock';
+import type {
+  ShellUserIdentity,
+  ShellWindowGroup,
+} from './shell/shell.types';
 
 interface CtxItem {
   label?: string;
@@ -58,7 +64,7 @@ interface CtxItem {
 @Component({
   selector: 'lthn-desktop',
   standalone: true,
-  imports: [CommonModule, WindowRouteContent],
+  imports: [CommonModule, WindowRouteContent, ShellMenuBar, ShellTaskbarDock],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './desktop.component.html',
@@ -163,7 +169,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
   csub = { open: false, left: 0, top: 0, i: -1 };
   snap = { zone: null as string | null, left: 0, top: 0, w: 0, h: 0 };
   selected: string[] = [];
-  groups: { id: string; name: string; ids: string[]; apps: string[]; open: boolean }[] = [];
+  groups: ShellWindowGroup[] = [];
   shellTabs: any[] = [];
   marquee = { open: false, left: 0, top: 0, w: 0, h: 0 };
   proxy = { open: false, left: 0, top: 0, n: 0, over: false };
@@ -175,7 +181,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
   filtered: any[] = [];
   private metaDown = false;
   private metaCombo = false;
-  user = {
+  user: ShellUserIdentity = {
     initials: 'SR',
     name: 'Sarah Reeve',
     email: 'sarah@lethean.local',
