@@ -51,7 +51,7 @@ export const APPS: Record<string, AppDef> = {
     icon: 'wave-square',
     w: 660,
     h: 400,
-    hint: $localize`:Application launcher hint@@app.telemetry.hint:Live tok/s · watts · demo`,
+    hint: $localize`:Application launcher hint@@app.telemetry.hint:Process telemetry · power demo`,
   },
   activity: {
     id: 'activity',
@@ -150,7 +150,7 @@ export const APPS: Record<string, AppDef> = {
     icon: 'terminal',
     w: 760,
     h: 460,
-    hint: $localize`:Application launcher hint@@app.terminal.hint:Integrated terminal`,
+    hint: $localize`:Application launcher hint@@app.terminal.hint:Local PTY · browser demo`,
     dev: true,
     route: 'terminal',
   },

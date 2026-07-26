@@ -4,14 +4,26 @@ import {
   Component,
   CUSTOM_ELEMENTS_SCHEMA,
   Input,
+  OnInit,
+  computed,
   inject,
   ChangeDetectionStrategy,
   declareExperimentalWebMcpTool,
+  signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AppView } from './app-view';
-import { Win, FS } from '../desktop.data';
+import { Win, FS, type FsNode } from '../desktop.data';
 import { WindowManagerService } from '../window-manager.service';
+import { DesktopLiveDataService, FilesSnapshot } from '../desktop-live-data.service';
+import {
+  DesktopDataState,
+  desktopDataStateLabel,
+  desktopDataStateVariant,
+} from '../desktop-data-state';
+
+type FilePlace = [string, string, string];
+type FilePlaceGroup = [string, FilePlace[]];
 
 @Component({
   selector: 'lthn-files-app',
@@ -19,17 +31,17 @@ import { WindowManagerService } from '../window-manager.service';
   imports: [CommonModule],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   host: { style: 'display: contents' },
-  changeDetection: ChangeDetectionStrategy.Eager,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="fb">
       <div class="fbside">
-        <ng-container *ngFor="let grp of places">
+        <ng-container *ngFor="let grp of places()">
           <div class="slab">{{ grp[0] }}</div>
           <div
             class="fbplace"
             *ngFor="let p of grp[1]"
             [class.on]="on(p[0])"
-            (click)="wm.setSub(win.id, p[0])"
+            (click)="navigate(p[0])"
           >
             <lthn-icon [attr.name]="p[2]" size="15"></lthn-icon> {{ p[1] }}
           </div>
@@ -40,7 +52,7 @@ import { WindowManagerService } from '../window-manager.service';
           <div class="fbnav">
             <button
               [attr.disabled]="up() ? null : ''"
-              (click)="wm.setSub(win.id, up())"
+              (click)="navigate(up())"
               aria-label="Up"
               i18n-aria-label="Navigate to parent folder@@files.action.up"
             >
@@ -48,7 +60,7 @@ import { WindowManagerService } from '../window-manager.service';
             </button>
             <button
               [attr.disabled]="id() === 'home' ? '' : null"
-              (click)="wm.setSub(win.id, 'home')"
+              (click)="navigate('home')"
               aria-label="Home"
               i18n-aria-label="Navigate to home folder@@files.action.home"
             >
@@ -58,9 +70,7 @@ import { WindowManagerService } from '../window-manager.service';
           <div class="fbcrumb">
             <ng-container *ngFor="let c of crumb(); let i = index; let last = last">
               <span class="sep" *ngIf="i">/</span>
-              <span class="cr" [class.here]="last" (click)="wm.setSub(win.id, c[0])">{{
-                c[1]
-              }}</span>
+              <span class="cr" [class.here]="last" (click)="navigate(c[0])">{{ c[1] }}</span>
             </ng-container>
           </div>
           <div class="fbvtog">
@@ -100,7 +110,7 @@ import { WindowManagerService } from '../window-manager.service';
               class="fbrow"
               *ngFor="let it of items()"
               [attr.data-sub]="it.k === 'folder' ? it.to : null"
-              (click)="it.k === 'folder' && wm.setSub(win.id, it.to ?? '')"
+              (click)="it.k === 'folder' && navigate(it.to ?? '')"
             >
               <span class="nm"
                 ><lthn-icon [attr.name]="icon(it.k)" size="15"></lthn-icon
@@ -113,7 +123,7 @@ import { WindowManagerService } from '../window-manager.service';
             <div
               class="fbcell"
               *ngFor="let it of items()"
-              (click)="it.k === 'folder' && wm.setSub(win.id, it.to ?? '')"
+              (click)="it.k === 'folder' && navigate(it.to ?? '')"
             >
               <lthn-icon
                 class="fi"
@@ -127,20 +137,21 @@ import { WindowManagerService } from '../window-manager.service';
           </div>
         </div>
         <div class="fbstatus">
+          <lthn-badge [attr.variant]="dataStateVariant()" [attr.data-data-state]="dataState()">{{
+            dataStateLabel()
+          }}</lthn-badge>
           <span>{{ status() }}</span
-          ><span class="v" i18n="Disk free-space status@@files.freeSpace"
-            >218 GB free of 512 GB</span
-          >
+          ><span class="v">{{ diskLabel() }}</span>
         </div>
       </div>
     </div>
   `,
 })
-export class FilesApp implements AppView {
+export class FilesApp implements AppView, OnInit {
   @Input() win!: Win;
   wm = inject(WindowManagerService);
-  private readonly mcpTools = this.registerMcpTools();
-  places: [string, [string, string, string][]][] = [
+  private readonly liveData = inject(DesktopLiveDataService);
+  private readonly demoPlaces: FilePlaceGroup[] = [
     [
       $localize`:File browser sidebar group@@files.sidebar.favourites:Favourites`,
       [
@@ -163,11 +174,79 @@ export class FilesApp implements AppView {
       ],
     ],
   ];
+  private readonly liveSnapshot = signal<FilesSnapshot | null>(null);
+  private readonly liveFileSystem = signal<Record<string, FsNode>>({});
+  readonly dataState = signal<DesktopDataState>(
+    this.liveData.mode() === 'demo' ? 'demo' : 'loading',
+  );
+  readonly dataStateLabel = computed(() => desktopDataStateLabel(this.dataState()));
+  readonly dataStateVariant = computed(() => desktopDataStateVariant(this.dataState()));
+  readonly diskLabel = computed(() => {
+    const disk = this.liveSnapshot()?.disk;
+    return disk
+      ? `${disk.free} free of ${disk.total}`
+      : $localize`:Demo disk free-space status@@files.freeSpace:218 GB free of 512 GB`;
+  });
+  readonly places = computed<FilePlaceGroup[]>(() => {
+    const snapshot = this.liveSnapshot();
+    if (this.dataState() !== 'live' || !snapshot) return this.demoPlaces;
+    return [
+      [
+        $localize`:File browser sidebar group@@files.sidebar.favourites:Favourites`,
+        [['home', $localize`:File browser place@@files.place.home:Home`, 'house']],
+      ],
+      [
+        $localize`:File browser sidebar group@@files.sidebar.locations:Locations`,
+        snapshot.locations.map((location): FilePlace => [
+          locationId(location.name),
+          location.name,
+          locationIcon(location.name),
+        ]),
+      ],
+    ];
+  });
+  private readonly mcpTools = this.registerMcpTools();
+
+  ngOnInit(): void {
+    if (this.liveData.mode() === 'demo') {
+      this.dataState.set('demo');
+      return;
+    }
+    this.dataState.set('loading');
+    void this.refresh(this.win.sub || 'home');
+  }
+
+  async refresh(requestedId = this.id()): Promise<void> {
+    if (this.liveData.mode() === 'demo') return;
+    try {
+      const requestedLocation = locationNameForId(this.liveSnapshot(), requestedId);
+      const snapshot = await this.liveData.files(requestedLocation);
+      this.liveSnapshot.set(snapshot);
+      this.liveFileSystem.set(buildLiveFileSystem(snapshot, requestedId));
+      this.dataState.set('live');
+    } catch {
+      this.liveSnapshot.set(null);
+      this.liveFileSystem.set({});
+      this.dataState.set('unavailable');
+    }
+  }
+
+  navigate(id: string): void {
+    if (!id) return;
+    this.wm.setSub(this.win.id, id);
+    if (this.liveData.mode() === 'live') void this.refresh(id);
+  }
+
+  private fileSystem(): Record<string, FsNode> {
+    return this.dataState() === 'live' ? this.liveFileSystem() : FS;
+  }
+
   id() {
-    return FS[this.win.sub] ? this.win.sub : 'home';
+    const fileSystem = this.fileSystem();
+    return fileSystem[this.win.sub] ? this.win.sub : 'home';
   }
   folder() {
-    return FS[this.id()];
+    return this.fileSystem()[this.id()];
   }
   items() {
     return this.folder().items;
@@ -185,10 +264,11 @@ export class FilesApp implements AppView {
   }
   crumb(): [string, string][] {
     const out: [string, string][] = [];
+    const fileSystem = this.fileSystem();
     let c: string | null = this.id();
-    while (c && FS[c]) {
-      out.unshift([c, FS[c].name]);
-      c = FS[c].up;
+    while (c && fileSystem[c]) {
+      out.unshift([c, fileSystem[c].name]);
+      c = fileSystem[c].up;
     }
     return out;
   }
@@ -232,7 +312,13 @@ export class FilesApp implements AppView {
   }
 
   private async registerMcpTools(): Promise<void> {
-    const locations = Object.keys(FS);
+    const locations = [
+      ...Object.keys(FS),
+      'code',
+      'lthn-models',
+      'recordings',
+      'screenshots',
+    ].filter((id, index, values) => values.indexOf(id) === index);
 
     await Promise.all([
       declareExperimentalWebMcpTool({
@@ -274,12 +360,13 @@ export class FilesApp implements AppView {
           additionalProperties: false,
         },
         execute: ({ location_id }) => {
-          if (!Object.hasOwn(FS, location_id)) {
+          const available = Object.keys(this.fileSystem());
+          if (!available.includes(location_id)) {
             throw new Error(
-              `Unknown Files location "${location_id}". Expected one of: ${locations.join(', ')}.`,
+              `Unknown Files location "${location_id}". Expected one of: ${available.join(', ')}.`,
             );
           }
-          this.wm.setSub(this.win.id, location_id);
+          this.navigate(location_id);
           return {
             content: [
               {
@@ -322,4 +409,81 @@ export class FilesApp implements AppView {
       }),
     ]);
   }
+}
+
+function buildLiveFileSystem(snapshot: FilesSnapshot, requestedId: string): Record<string, FsNode> {
+  const recentItems: FsNode['items'] = snapshot.recent.map((file) => ({
+    n: file.name,
+    k: fileKind(file.name),
+    c: file.size,
+    m: `${file.when} · ${file.path}`,
+  }));
+  const locationItems: FsNode['items'] = snapshot.locations.map((location) => ({
+    n: location.name,
+    k: 'folder',
+    to: locationId(location.name),
+    c: `${location.count} ${location.count === 1 ? 'item' : 'items'} · ${location.size}`,
+  }));
+  const fileSystem: Record<string, FsNode> = {
+    home: {
+      name: $localize`:File browser place@@files.place.home:Home`,
+      up: null,
+      items: [...locationItems, ...recentItems],
+    },
+  };
+  for (const location of snapshot.locations) {
+    const id = locationId(location.name);
+    fileSystem[id] = {
+      name: location.name,
+      up: 'home',
+      items: requestedId === id ? recentItems : [],
+    };
+  }
+  return fileSystem;
+}
+
+function locationId(name: string): string {
+  return (
+    name
+      .toLocaleLowerCase('en-GB')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'location'
+  );
+}
+
+function locationNameForId(snapshot: FilesSnapshot | null, id: string): string {
+  if (!id || id === 'home') return '';
+  const liveName = snapshot?.locations.find((location) => locationId(location.name) === id)?.name;
+  if (liveName) return liveName;
+  const known: Record<string, string> = {
+    code: 'Code',
+    documents: 'Documents',
+    models: 'lthn / models',
+    'lthn-models': 'lthn / models',
+    recordings: 'Recordings',
+    screenshots: 'Screenshots',
+  };
+  return known[id] ?? '';
+}
+
+function locationIcon(name: string): string {
+  const id = locationId(name);
+  if (id.includes('model')) return 'cube';
+  if (id.includes('record')) return 'microphone';
+  if (id.includes('screen')) return 'image';
+  if (id === 'code') return 'code';
+  return 'folder';
+}
+
+function fileKind(name: string): string {
+  const extension = name.split('.').at(-1)?.toLocaleLowerCase('en-GB') ?? '';
+  if (extension === 'pdf') return 'pdf';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(extension)) return 'img';
+  if (['zip', 'gz', 'tgz', 'tar', 'dmg'].includes(extension)) return 'zip';
+  if (['gguf', 'safetensors'].includes(extension)) return 'model';
+  if (['mp3', 'wav', 'm4a', 'flac'].includes(extension)) return 'audio';
+  if (['ts', 'js', 'go', 'json', 'yaml', 'yml', 'md', 'html', 'css', 'scss'].includes(extension)) {
+    return 'code';
+  }
+  return 'doc';
 }

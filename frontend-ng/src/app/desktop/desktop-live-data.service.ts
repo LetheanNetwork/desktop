@@ -1,0 +1,361 @@
+import { Injectable, computed, inject } from '@angular/core';
+import { ConnectionManagerService } from '../connection-manager.service';
+import type { DesktopControlSnapshot } from '../store/desktop-controls.models';
+import { DesktopControlsBridgeService } from './desktop-controls-bridge.service';
+import { SurfaceBridgeService } from './surfaces/surface-bridge.service';
+
+const TELEMETRY_METHOD = 'dappco.re/lthn/desktop/pkg/telemetry.Service.CurrentSample';
+const MODELS_METHOD = 'dappco.re/lthn/desktop/pkg/models.WailsService.List';
+const BENCHMARK_HISTORY_METHOD = 'dappco.re/lthn/desktop/pkg/benchmark.Service.History';
+const PROCESS_LIST_METHOD = 'dappco.re/lthn/desktop/pkg/build.Service.ProcessList';
+const FILES_SERVICE = 'dappco.re/lthn/desktop/pkg/office/files.Service';
+
+export type DesktopDataMode = 'demo' | 'live';
+
+export interface ProcessTelemetry {
+  readonly heapAllocMB: number;
+  readonly heapSysMB: number;
+  readonly stackInUseMB: number;
+  readonly numGoroutines: number;
+  readonly numCgoCalls: number;
+  readonly uptimeSeconds: number;
+  readonly numGC: number;
+  readonly lastGCPauseMs: number;
+  readonly wattsActive: number;
+  readonly wattsIdle: number;
+}
+
+export interface LocalModelEntry {
+  readonly name: string;
+  readonly path: string;
+  readonly sizeBytes: number;
+  readonly isDirectory: boolean;
+}
+
+export interface BenchmarkRun {
+  readonly id: string;
+  readonly timestamp: string;
+  readonly bencher: string;
+  readonly model: string;
+  readonly contextLength: number;
+  readonly promptTokensPerSecond: number;
+  readonly generatedTokensPerSecond: number;
+  readonly promptLength: number;
+  readonly outputLength: number;
+  readonly peakWatts?: number;
+  readonly peakMemoryMB?: number;
+  readonly endpoint?: string;
+}
+
+export interface DesktopProcess {
+  readonly id: string;
+  readonly command: string;
+  readonly status: string;
+  readonly exitCode: number;
+}
+
+export interface FileLocation {
+  readonly name: string;
+  readonly count: number;
+  readonly size: string;
+  readonly brand: boolean;
+}
+
+export interface RecentFile {
+  readonly name: string;
+  readonly path: string;
+  readonly when: string;
+  readonly size: string;
+}
+
+export interface DiskUsage {
+  readonly free: string;
+  readonly total: string;
+  readonly usedPercent: number;
+}
+
+export interface FilesSnapshot {
+  readonly locations: readonly FileLocation[];
+  readonly recent: readonly RecentFile[];
+  readonly totalRecent: number;
+  readonly disk: DiskUsage;
+}
+
+export type ControlDataSection =
+  'telemetry' | 'models' | 'benchmarkRuns' | 'processes' | 'settings';
+
+export interface ControlLiveSnapshot {
+  readonly telemetry?: ProcessTelemetry;
+  readonly models?: readonly LocalModelEntry[];
+  readonly benchmarkRuns?: readonly BenchmarkRun[];
+  readonly processes?: readonly DesktopProcess[];
+  readonly settings?: DesktopControlSnapshot;
+  readonly unavailable: readonly ControlDataSection[];
+}
+
+@Injectable({ providedIn: 'root' })
+export class DesktopLiveDataService {
+  private readonly connection = inject(ConnectionManagerService);
+  private readonly bridge = inject(SurfaceBridgeService);
+  private readonly controls = inject(DesktopControlsBridgeService);
+
+  readonly mode = computed<DesktopDataMode>(() => (this.connection.offline() ? 'demo' : 'live'));
+
+  async telemetry(): Promise<ProcessTelemetry> {
+    this.requireLiveMode();
+    return parseTelemetry(await this.bridge.call(TELEMETRY_METHOD));
+  }
+
+  async models(): Promise<readonly LocalModelEntry[]> {
+    this.requireLiveMode();
+    const raw = await this.bridge.call(MODELS_METHOD);
+    if (!Array.isArray(raw)) {
+      throw new Error('The local model catalogue response is unavailable.');
+    }
+    return raw.map(parseModel);
+  }
+
+  async benchmarkRuns(limit = 20): Promise<readonly BenchmarkRun[]> {
+    this.requireLiveMode();
+    const raw = await this.bridge.call(BENCHMARK_HISTORY_METHOD, [
+      {
+        Bencher: '',
+        Model: '',
+        MinCtx: 0,
+        MaxCtx: 0,
+        Limit: limit,
+        Offset: 0,
+      },
+    ]);
+    if (!Array.isArray(raw)) {
+      throw new Error('The benchmark history response is unavailable.');
+    }
+    return raw.map(parseBenchmarkRun);
+  }
+
+  async processes(): Promise<readonly DesktopProcess[]> {
+    this.requireLiveMode();
+    const raw = await this.bridge.call(PROCESS_LIST_METHOD);
+    if (!Array.isArray(raw)) {
+      throw new Error('The process registry response is unavailable.');
+    }
+    return raw.map(parseProcess);
+  }
+
+  async files(locationName = ''): Promise<FilesSnapshot> {
+    this.requireLiveMode();
+    const [locationsRaw, recentRaw, diskRaw] = await Promise.all([
+      this.bridge.call(`${FILES_SERVICE}.ListLocations`),
+      this.bridge.call(`${FILES_SERVICE}.ListRecent`, [{ locationName, limit: 50 }]),
+      this.bridge.call(`${FILES_SERVICE}.GetDiskUsage`),
+    ]);
+    return parseFilesSnapshot(locationsRaw, recentRaw, diskRaw);
+  }
+
+  async control(): Promise<ControlLiveSnapshot> {
+    this.requireLiveMode();
+    const reads = await Promise.allSettled([
+      this.telemetry(),
+      this.models(),
+      this.benchmarkRuns(20),
+      this.processes(),
+      this.controls.settings(),
+    ] as const);
+    const sectionNames: readonly ControlDataSection[] = [
+      'telemetry',
+      'models',
+      'benchmarkRuns',
+      'processes',
+      'settings',
+    ];
+    const unavailable = reads.flatMap((result, index) =>
+      result.status === 'rejected' ? [sectionNames[index]] : [],
+    );
+    if (unavailable.length === sectionNames.length) {
+      throw new Error('Live Control data is unavailable.');
+    }
+
+    return {
+      ...fulfilledProperty('telemetry', reads[0]),
+      ...fulfilledProperty('models', reads[1]),
+      ...fulfilledProperty('benchmarkRuns', reads[2]),
+      ...fulfilledProperty('processes', reads[3]),
+      ...fulfilledProperty('settings', reads[4]),
+      unavailable,
+    };
+  }
+
+  private requireLiveMode(): void {
+    if (this.mode() === 'demo') {
+      throw new Error('Demo mode does not call live desktop services.');
+    }
+  }
+}
+
+function fulfilledProperty<Key extends string, Value>(
+  key: Key,
+  result: PromiseSettledResult<Value>,
+): Partial<Record<Key, Value>> {
+  return result.status === 'fulfilled' ? ({ [key]: result.value } as Record<Key, Value>) : {};
+}
+
+function parseTelemetry(raw: unknown): ProcessTelemetry {
+  const record = requiredRecord(raw, 'process telemetry');
+  return {
+    heapAllocMB: requiredNumber(record, 'heap_alloc_mb', 'process telemetry'),
+    heapSysMB: requiredNumber(record, 'heap_sys_mb', 'process telemetry'),
+    stackInUseMB: requiredNumber(record, 'stack_in_use_mb', 'process telemetry'),
+    numGoroutines: requiredNumber(record, 'num_goroutines', 'process telemetry'),
+    numCgoCalls: requiredNumber(record, 'num_cgo_calls', 'process telemetry'),
+    uptimeSeconds: requiredNumber(record, 'uptime_seconds', 'process telemetry'),
+    numGC: requiredNumber(record, 'num_gc', 'process telemetry'),
+    lastGCPauseMs: requiredNumber(record, 'last_gc_pause_ms', 'process telemetry'),
+    wattsActive: requiredNumber(record, 'watts_active', 'process telemetry'),
+    wattsIdle: requiredNumber(record, 'watts_idle', 'process telemetry'),
+  };
+}
+
+function parseModel(raw: unknown): LocalModelEntry {
+  const record = requiredRecord(raw, 'local model catalogue');
+  return {
+    name: requiredString(record, 'name', 'local model catalogue'),
+    path: requiredString(record, 'path', 'local model catalogue'),
+    sizeBytes: requiredNumber(record, 'size', 'local model catalogue'),
+    isDirectory: requiredBoolean(record, 'is_dir', 'local model catalogue'),
+  };
+}
+
+function parseBenchmarkRun(raw: unknown): BenchmarkRun {
+  const record = requiredRecord(raw, 'benchmark history');
+  return {
+    id: requiredString(record, 'id', 'benchmark history'),
+    timestamp: requiredString(record, 'timestamp', 'benchmark history'),
+    bencher: requiredString(record, 'bencher', 'benchmark history'),
+    model: requiredString(record, 'model', 'benchmark history'),
+    contextLength: requiredNumber(record, 'ctx', 'benchmark history'),
+    promptTokensPerSecond: requiredNumber(record, 'pp_tok_sec', 'benchmark history'),
+    generatedTokensPerSecond: requiredNumber(record, 'tg_tok_sec', 'benchmark history'),
+    promptLength: requiredNumber(record, 'prompt_len', 'benchmark history'),
+    outputLength: requiredNumber(record, 'output_len', 'benchmark history'),
+    ...optionalNumber(record, 'peak_watts', 'peakWatts'),
+    ...optionalNumber(record, 'peak_mem_mb', 'peakMemoryMB'),
+    ...optionalString(record, 'endpoint', 'endpoint'),
+  };
+}
+
+function parseProcess(raw: unknown): DesktopProcess {
+  const record = requiredRecord(raw, 'process registry');
+  return {
+    id: requiredString(record, 'id', 'process registry'),
+    command: requiredString(record, 'command', 'process registry'),
+    status: requiredString(record, 'status', 'process registry'),
+    exitCode: requiredNumber(record, 'exit_code', 'process registry'),
+  };
+}
+
+function parseFilesSnapshot(
+  locationsRaw: unknown,
+  recentRaw: unknown,
+  diskRaw: unknown,
+): FilesSnapshot {
+  const locationsRecord = requiredRecord(locationsRaw, 'file locations');
+  const locations = locationsRecord['locations'];
+  if (!Array.isArray(locations)) {
+    throw new Error('The file locations response has no valid locations.');
+  }
+
+  const recentRecord = requiredRecord(recentRaw, 'recent files');
+  const recent = recentRecord['recent'];
+  if (!Array.isArray(recent)) {
+    throw new Error('The recent files response has no valid recent rows.');
+  }
+
+  const diskRecord = requiredRecord(diskRaw, 'disk usage');
+  const disk = requiredRecord(diskRecord['disk'], 'disk usage');
+
+  return {
+    locations: locations.map(parseFileLocation),
+    recent: recent.map(parseRecentFile),
+    totalRecent: requiredNumber(recentRecord, 'total', 'recent files'),
+    disk: {
+      free: requiredString(disk, 'free', 'disk usage'),
+      total: requiredString(disk, 'total', 'disk usage'),
+      usedPercent: requiredNumber(disk, 'used', 'disk usage'),
+    },
+  };
+}
+
+function parseFileLocation(raw: unknown): FileLocation {
+  const record = requiredRecord(raw, 'file locations');
+  return {
+    name: requiredString(record, 'name', 'file locations'),
+    count: requiredNumber(record, 'count', 'file locations'),
+    size: requiredString(record, 'size', 'file locations'),
+    brand: record['brand'] === true,
+  };
+}
+
+function parseRecentFile(raw: unknown): RecentFile {
+  const record = requiredRecord(raw, 'recent files');
+  return {
+    name: requiredString(record, 'name', 'recent files'),
+    path: requiredString(record, 'path', 'recent files'),
+    when: requiredString(record, 'when', 'recent files'),
+    size: requiredString(record, 'size', 'recent files'),
+  };
+}
+
+function requiredRecord(raw: unknown, description: string): Record<string, unknown> {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`The ${description} response is unavailable.`);
+  }
+  return raw as Record<string, unknown>;
+}
+
+function requiredNumber(record: Record<string, unknown>, key: string, description: string): number {
+  const value = record[key];
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`The ${description} response has no valid ${key}.`);
+  }
+  return value;
+}
+
+function requiredString(record: Record<string, unknown>, key: string, description: string): string {
+  const value = record[key];
+  if (typeof value !== 'string' || value === '') {
+    throw new Error(`The ${description} response has no valid ${key}.`);
+  }
+  return value;
+}
+
+function requiredBoolean(
+  record: Record<string, unknown>,
+  key: string,
+  description: string,
+): boolean {
+  const value = record[key];
+  if (typeof value !== 'boolean') {
+    throw new Error(`The ${description} response has no valid ${key}.`);
+  }
+  return value;
+}
+
+function optionalNumber<OutputKey extends string>(
+  record: Record<string, unknown>,
+  sourceKey: string,
+  outputKey: OutputKey,
+): Partial<Record<OutputKey, number>> {
+  const value = record[sourceKey];
+  return typeof value === 'number' && Number.isFinite(value)
+    ? ({ [outputKey]: value } as Record<OutputKey, number>)
+    : {};
+}
+
+function optionalString<OutputKey extends string>(
+  record: Record<string, unknown>,
+  sourceKey: string,
+  outputKey: OutputKey,
+): Partial<Record<OutputKey, string>> {
+  const value = record[sourceKey];
+  return typeof value === 'string' ? ({ [outputKey]: value } as Record<OutputKey, string>) : {};
+}

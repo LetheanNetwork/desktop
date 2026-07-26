@@ -42,7 +42,7 @@ export const APP_REGISTRY: Record<string, AppComponentLoader> = {
   explorer: loadDevPanel,
   codesearch: loadDevPanel,
   scm: loadDevPanel,
-  terminal: loadDevPanel,
+  terminal: () => import('./terminal.app').then(({ TerminalApp }) => TerminalApp),
   build: loadDevPanel,
   procmon: loadDevPanel,
   containers: loadDevPanel,
