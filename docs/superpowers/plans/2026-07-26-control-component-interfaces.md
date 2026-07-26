@@ -80,7 +80,7 @@ describe("Control view state", () => {
     ]);
     expect(state.models.rows).toHaveLength(6);
     expect(state.runs.rows).toHaveLength(4);
-    expect(state.power.samples).toHaveLength(20);
+    expect(state.power.samples).toHaveLength(12);
     expect(state.system.processRows).toHaveLength(6);
     expect(state.system.daemonRows).toHaveLength(4);
     expect(state.settings.groups.map(({ name }) => name)).toEqual([
