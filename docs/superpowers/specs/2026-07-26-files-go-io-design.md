@@ -109,8 +109,9 @@ Before enabling the local mount in a release:
 
 - add an adversarial regression test to `core/go-io/go/local` that attempts a
   component or symlink swap between validation and use;
-- replace validate-then-use with handle-relative, no-follow operations for
-  every local Medium method;
+- replace validate-then-use with Go 1.26 `os.Root` handle-relative operations
+  for every local Medium method; internal relative symlinks may be followed,
+  but an absolute or escaping target must fail at the rooted operation;
 - make unsupported platform paths fail closed rather than falling back to the
   old unrestricted operation;
 - retain the `io.Medium` interface so other providers and consumers do not
@@ -168,6 +169,7 @@ type Mount struct {
     Brand        bool
     Capabilities Capabilities
     Medium       coreio.Medium
+    ContainmentAudited bool
 }
 
 type Options struct {
@@ -185,7 +187,10 @@ type Service struct {
 `Mount.Medium` is internal and is never serialised. Mount IDs are unique,
 stable, and server-owned. Provider kind is display information such as
 `local`, `s3`, `sftp`, `webdav`, `cube`, or `memory`; it is not used by the
-browser to select a code path.
+browser to select a code path. Trusted Go composition must explicitly mark a
+mount `ContainmentAudited` only after its provider has proved that a relative
+path or link cannot escape its Medium boundary; registration rejects unmarked
+mounts.
 
 `NewService(Options)` provides deterministic dependency injection.
 `Register(*core.Core)` composes the canonical desktop mounts and returns the
@@ -318,8 +323,9 @@ created, and never deletes the source.
 The current `io.Medium` contract has no portable link-aware operation.
 Recursive traversal therefore never follows symbolic links or other
 link/reparse entries. A provider must surface a link as such or guarantee
-no-follow containment when the mount is registered; otherwise recursive and
-direct content operations fail closed with an unsupported-provider result.
+rooted containment which rejects every escaping target when the mount is
+registered; otherwise recursive and direct content operations fail closed with
+an unsupported-provider result.
 
 ### Trash, restore, and delete
 
@@ -332,11 +338,16 @@ client-supplied paths; only the service creates them. Trashing renames the
 entry into that namespace and records only the receipt needed to restore its
 original relative path.
 
-`go-store` may persist desktop runtime metadata such as favourites, recent
-locations, and trash receipts, but its persistence must itself be configured
-over a Medium. It is not an alternate filesystem boundary and does not read or
-write user file content. When a go-io Store Medium is the selected file
-provider, the Files service still talks exclusively through `io.Medium`.
+The first strict implementation persists favourites, recent locations, and
+trash receipts as one versioned document through a dedicated `io.Medium`.
+Pinned/current go-store is not used for this document: it consumes a
+structurally different legacy Medium contract and stages SQLite/workspace files
+on local paths internally. A future go-store implementation is acceptable only
+after every persistent byte and temporary stage is transported through an
+audited `io.Medium`. It is never an alternate filesystem boundary and never
+reads or writes user file content. When a go-io Store Medium is itself the
+selected file provider, the Files service still talks exclusively through
+`io.Medium`.
 
 Restore checks for destination conflict before renaming the entry back.
 Permanent deletion is separate, explicit, and requires the caller to confirm
