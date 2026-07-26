@@ -144,9 +144,11 @@ Add CLI verbs as flat `cmdX(args []string) int` handlers which delegate to
   menus from the app/category registries.
 - `frontend-ng/src/app/desktop/window-manager.service.ts` — single source of
   truth for Angular window state.
-- `frontend-ng/src/app/desktop/shell/` — behaviour-preserving presentation
-  seams for desktop chrome. `DesktopComponent` remains their coordinator;
-  shell components receive typed inputs and emit interaction intents.
+- `frontend-ng/src/app/desktop/shell/` — behaviour-preserving presenters for
+  the menu bar, taskbar/dock, Start and context menus, tray panels,
+  notifications, and command palette. `DesktopComponent` remains their
+  coordinator; shell components receive typed inputs and emit interaction
+  intents.
 - `frontend-ng/src/app/desktop/surfaces/` — lazy product surfaces and shared
   bridge/page primitives.
 - `frontend-ng/src/app/store/` — NgRx state which crosses components or

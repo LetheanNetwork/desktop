@@ -1,0 +1,106 @@
+<div
+  class="menu sessionmenu"
+  #panel
+  [hidden]="!open()"
+  [style.left.px]="position().left"
+  [style.top.px]="position().top"
+  [style.bottom.px]="position().bottom"
+>
+  <div class="startpanel">
+    <div class="sp-apps">
+      <div class="sp-h" i18n="Start menu program heading@@desktop.start.programs">Programs</div>
+      <ng-container *ngFor="let category of categories()">
+        <div
+          class="mi sm-cat"
+          role="button"
+          [attr.aria-expanded]="!!openCategories()[category.id]"
+          (click)="categoryRequested.emit(category.id)"
+        >
+          <lthn-icon [attr.name]="category.icon" size="15"></lthn-icon>
+          <div class="mt">
+            <b>{{ category.title }}</b>
+            <small i18n="Category app count@@desktop.start.appCount">
+              {{ category.apps.length }} apps
+            </small>
+          </div>
+          <span class="chev">
+            <lthn-icon
+              [attr.name]="openCategories()[category.id] ? 'chevron-down' : 'chevron-right'"
+              size="10"
+            ></lthn-icon>
+          </span>
+        </div>
+        <div
+          class="mi sm-child"
+          [class.haschild]="app.children.length"
+          *ngFor="let app of openCategories()[category.id] ? category.apps : []"
+          (click)="appRequested.emit(app)"
+          (mouseenter)="hoverApp(app, $event)"
+        >
+          <lthn-icon [attr.name]="app.icon" size="14"></lthn-icon>
+          <div class="mt">
+            <b>{{ app.title }}</b>
+            <small>{{ app.hint }}</small>
+          </div>
+          <span class="chev" *ngIf="app.children.length">›</span>
+        </div>
+      </ng-container>
+    </div>
+    <div class="sp-user">
+      <div class="mhead">
+        <span class="ava lg">{{ user().initials }}</span>
+        <div>
+          <b>{{ user().name }}</b>
+          <small>{{ user().email }}</small>
+        </div>
+      </div>
+      <div class="msep"></div>
+      <div
+        class="mi"
+        (click)="requestSession('lock', $event)"
+        i18n="Lock screen action@@desktop.session.lock"
+      >
+        <lthn-icon name="lock" size="13"></lthn-icon> Lock screen
+      </div>
+      <div
+        class="mi"
+        (click)="requestSession('switch', $event)"
+        i18n="Switch user action@@desktop.session.switch"
+      >
+        <lthn-icon name="user-group" size="13"></lthn-icon> Switch user…
+      </div>
+      <div class="msep"></div>
+      <div
+        class="mi"
+        (click)="requestSession('logout', $event)"
+        i18n="Log out action@@desktop.session.logout"
+      >
+        <lthn-icon name="right-from-bracket" size="13"></lthn-icon> Log out
+      </div>
+      <div
+        class="mi"
+        (click)="requestSession('shutdown', $event)"
+        i18n="Shut down action@@desktop.session.shutdown"
+      >
+        <lthn-icon name="power-off" size="13"></lthn-icon> Shut down…
+      </div>
+    </div>
+  </div>
+  <div
+    class="submenu"
+    *ngIf="submenuOpen()"
+    [style.left.px]="submenuLeft()"
+    [style.top.px]="submenuTop()"
+  >
+    <div
+      class="mi"
+      *ngFor="let child of submenuItems()"
+      (click)="childRequested.emit({ appId: submenuParent(), childId: child[0] })"
+    >
+      <lthn-icon [attr.name]="child[1]" size="14"></lthn-icon>
+      <div class="mt">
+        <b>{{ child[2] }}</b>
+      </div>
+    </div>
+  </div>
+</div>

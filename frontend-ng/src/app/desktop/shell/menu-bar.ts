@@ -8,9 +8,7 @@ import {
   output,
 } from '@angular/core';
 import type { DesktopMenuCategory } from '../desktop-route-tree';
-import type { ShellValueEvent } from './shell.types';
-
-export type ShellTrayKey = 'lang' | 'wifi' | 'battery' | 'clock';
+import type { ShellTrayKey, ShellValueEvent } from './shell.types';
 
 @Component({
   selector: 'lthn-shell-menu-bar',

@@ -1,0 +1,36 @@
+.startpanel {
+  display: flex;
+  gap: 6px;
+  min-height: 392px;
+}
+.sm-cat .chev lthn-icon {
+  color: var(--fg-4);
+}
+.sm-child {
+  margin-left: 13px;
+  border-left: 1px solid var(--line-1);
+}
+.sm-child .mt small {
+  color: var(--fg-4);
+}
+.sp-apps {
+  width: 230px;
+  max-height: min(480px, 58vh);
+  overflow: auto;
+  padding-right: 6px;
+  border-right: 1px solid var(--line-1);
+}
+.sp-user {
+  width: 190px;
+  padding-left: 2px;
+  display: flex;
+  flex-direction: column;
+}
+.sp-h {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  padding: 6px 10px 5px;
+}

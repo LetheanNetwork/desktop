@@ -1,0 +1,97 @@
+<div class="paletteov" [hidden]="!open()" (pointerdown)="backdropRequested.emit($event)">
+  <div
+    class="palette"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Command palette"
+    i18n-aria-label="Command palette dialog label@@desktop.palette.dialogLabel"
+  >
+    <div class="pl-in">
+      <lthn-icon name="magnifying-glass" size="14"></lthn-icon>
+      <input
+        #queryInput
+        [value]="query()"
+        (input)="queryChanged.emit($event)"
+        (keydown)="keyRequested.emit($event)"
+        placeholder="Type a command…"
+        i18n-placeholder="Command palette placeholder@@desktop.palette.placeholder"
+        autocomplete="off"
+        aria-label="Command"
+        i18n-aria-label="Command input label@@desktop.palette.commandLabel"
+      />
+    </div>
+    <div class="pl-list">
+      <div
+        class="pl-cmd"
+        *ngFor="let command of commands(); let index = index"
+        [class.on]="index === selectedIndex()"
+        (click)="commandRequested.emit(index)"
+        (mouseenter)="selectionRequested.emit(index)"
+      >
+        <span class="ci">
+          <lthn-icon [attr.name]="command.icon" size="12"></lthn-icon>
+        </span>
+        <span>{{ command.label }}</span>
+        <span class="sec">{{ command.section }}</span>
+      </div>
+      <div
+        class="pl-empty"
+        *ngIf="!commands().length"
+        i18n="No matching commands message@@desktop.palette.noMatches"
+      >
+        No commands match “{{ query() }}”
+      </div>
+    </div>
+    <div class="pl-foot">
+      <span i18n="Command palette keyboard help@@desktop.palette.navigate">
+        <kbd>↑</kbd><kbd>↓</kbd> navigate
+      </span>
+      <span i18n="Command palette keyboard help@@desktop.palette.run"><kbd>↵</kbd> run</span>
+      <span i18n="Command palette keyboard help@@desktop.palette.close">
+        <kbd>esc</kbd> close
+      </span>
+    </div>
+  </div>
+  <div class="pl-widgets" *ngIf="!query()">
+    <div class="plw">
+      <div class="plw-h">
+        <lthn-icon name="clock" size="11"></lthn-icon>
+        <ng-container i18n="Time widget heading@@desktop.palette.time">Time</ng-container>
+      </div>
+      <div class="plw-big">{{ clockText() }}</div>
+      <div class="plw-sub">{{ dateText() }}</div>
+    </div>
+    <div class="plw">
+      <div class="plw-h">
+        <lthn-icon name="chart-line" size="11"></lthn-icon>
+        <ng-container i18n="Throughput widget heading@@desktop.widget.throughput">
+          Throughput
+        </ng-container>
+      </div>
+      <div class="plw-big">
+        41.8<small i18n="Tokens per second unit@@unit.tokensPerSecondInline"> tok/s</small>
+      </div>
+      <lthn-sparkline
+        [attr.data]="throughputJson()"
+        color="var(--brand-300)"
+        width="150"
+        height="30"
+        fill
+      ></lthn-sparkline>
+    </div>
+    <div class="plw">
+      <div class="plw-h">
+        <lthn-icon name="bolt" size="11"></lthn-icon>
+        <ng-container i18n="Power widget heading@@desktop.palette.power">Power</ng-container>
+      </div>
+      <div class="plw-big">207<small i18n="Watts unit@@unit.wattsInline"> W</small></div>
+      <lthn-sparkline
+        [attr.data]="wattsJson()"
+        color="#febc2e"
+        width="150"
+        height="30"
+        fill
+      ></lthn-sparkline>
+    </div>
+  </div>
+</div>

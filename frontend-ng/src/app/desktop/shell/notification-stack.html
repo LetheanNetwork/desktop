@@ -1,0 +1,19 @@
+<div class="notifs">
+  <div class="notif" *ngFor="let notification of notifications()">
+    <span class="ni">
+      <lthn-icon [attr.name]="notification.icon" size="14"></lthn-icon>
+    </span>
+    <div class="nt">
+      <b>{{ notification.title }}</b>
+      <small *ngIf="notification.body">{{ notification.body }}</small>
+    </div>
+    <button
+      class="nx"
+      aria-label="Dismiss"
+      i18n-aria-label="Dismiss notification action@@desktop.notification.dismiss"
+      (click)="dismissRequested.emit(notification.id)"
+    >
+      ✕
+    </button>
+  </div>
+</div>

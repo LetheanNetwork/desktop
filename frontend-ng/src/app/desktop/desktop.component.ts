@@ -40,18 +40,27 @@ import {
 import { DESKTOP_STORAGE } from '../store/storage.service';
 import { ShellMenuBar } from './shell/menu-bar';
 import { ShellTaskbarDock } from './shell/taskbar-dock';
+import { ShellStartMenu } from './shell/start-menu';
+import { ShellContextMenu } from './shell/context-menu';
+import { ShellTrayPanel } from './shell/tray-panel';
+import { ShellNotificationStack } from './shell/notification-stack';
+import { ShellCommandPalette } from './shell/command-palette';
 import type {
+  ShellCommand,
+  ShellContextItem,
+  ShellContextMenuState,
+  ShellContextSubmenuState,
+  ShellNotification,
+  ShellPaletteState,
+  ShellPosition,
+  ShellSessionAction,
+  ShellStartSubmenuState,
+  ShellTrayKey,
+  ShellTrayState,
   ShellUserIdentity,
+  ShellWorldClock,
   ShellWindowGroup,
 } from './shell/shell.types';
-
-interface CtxItem {
-  label?: string;
-  icon?: string;
-  sep?: boolean;
-  act?: () => void;
-  children?: CtxItem[];
-}
 
 /**
  * Lethean desktop OS — MERGED chrome. macOS-style windows + top menu bar, a
@@ -64,7 +73,17 @@ interface CtxItem {
 @Component({
   selector: 'lthn-desktop',
   standalone: true,
-  imports: [CommonModule, WindowRouteContent, ShellMenuBar, ShellTaskbarDock],
+  imports: [
+    CommonModule,
+    WindowRouteContent,
+    ShellMenuBar,
+    ShellTaskbarDock,
+    ShellStartMenu,
+    ShellContextMenu,
+    ShellTrayPanel,
+    ShellNotificationStack,
+    ShellCommandPalette,
+  ],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   encapsulation: ViewEncapsulation.None,
   templateUrl: './desktop.component.html',
@@ -154,31 +173,31 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
   }
   clock = '';
   sessionOpen = false;
-  sessionPos: { left: number; top: number | null; bottom: number | null } = {
+  sessionPos: ShellPosition = {
     left: 0,
     top: 0,
     bottom: null,
   };
-  ctx: { open: boolean; left: number; top: number; title: string; items: CtxItem[] } = {
+  ctx: ShellContextMenuState = {
     open: false,
     left: 0,
     top: 0,
     title: '',
     items: [],
   };
-  csub = { open: false, left: 0, top: 0, i: -1 };
+  csub: ShellContextSubmenuState = { open: false, left: 0, top: 0, index: -1 };
   snap = { zone: null as string | null, left: 0, top: 0, w: 0, h: 0 };
   selected: string[] = [];
   groups: ShellWindowGroup[] = [];
   shellTabs: any[] = [];
   marquee = { open: false, left: 0, top: 0, w: 0, h: 0 };
   proxy = { open: false, left: 0, top: 0, n: 0, over: false };
-  tray = { open: false, key: '', left: 0, top: 0 };
+  tray: ShellTrayState = { open: false, key: '', left: 0, top: 0 };
   mbKey = '';
   readonly langs = LANGS;
-  palette = { open: false, q: '', i: 0 };
+  palette: ShellPaletteState = { open: false, query: '', index: 0 };
   paletteLastFocus: HTMLElement | null = null;
-  filtered: any[] = [];
+  filtered: ShellCommand[] = [];
   private metaDown = false;
   private metaCombo = false;
   user: ShellUserIdentity = {
@@ -200,13 +219,13 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
 
   @ViewChild('osEl') osEl!: ElementRef<HTMLElement>;
   @ViewChild('winlayerEl') winlayerEl!: ElementRef<HTMLElement>;
-  @ViewChild('sessionMenuEl') sessionMenuEl!: ElementRef<HTMLElement>;
-  @ViewChild('ctxMenuEl') ctxMenuEl!: ElementRef<HTMLElement>;
-  @ViewChild('trayEl') trayEl!: ElementRef<HTMLElement>;
-  @ViewChild('plInput') plInput!: ElementRef<HTMLInputElement>;
+  @ViewChild(ShellStartMenu) startMenu!: ShellStartMenu;
+  @ViewChild(ShellContextMenu) contextMenu!: ShellContextMenu;
+  @ViewChild(ShellTrayPanel) trayPanel!: ShellTrayPanel;
+  @ViewChild(ShellCommandPalette) commandPalette!: ShellCommandPalette;
 
   openCats: Record<string, boolean> = {};
-  sub = { open: false, left: 0, top: 0, parent: '' };
+  sub: ShellStartSubmenuState = { open: false, left: 0, top: 0, parent: '' };
   // Column headings and metric labels are UI chrome. Rows, tree nodes, cards,
   // kanban content, console lines, and terminal output model CoreGO payload data.
   DEVPANEL: any = {
@@ -464,6 +483,9 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       tz: 'Asia/Singapore',
     },
   ];
+  get worldClocks(): ShellWorldClock[] {
+    return this.clocks.map(({ city, tz }) => ({ city, time: this.fmtTz(tz) }));
+  }
   pkgs = [
     {
       name: 'llama.cpp',
@@ -489,7 +511,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     return JSON.stringify(this.watts);
   }
 
-  notifs: { id: number; icon: string; title: string; body: string }[] = [];
+  notifs: ShellNotification[] = [];
   private nid = 0;
   notify(icon: string, title: string, body = '') {
     const id = ++this.nid;
@@ -699,6 +721,9 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     const c = this.categories.find((x) => x.id === id);
     return c ? c.title : '';
   }
+  toggleStartCategory(id: string) {
+    this.openCats = { ...this.openCats, [id]: !this.openCats[id] };
+  }
   launchFromDock(app: string) {
     this.closeMenus();
     this.wm.launch(app);
@@ -735,7 +760,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     return this.routeCatalog.apps[appId]?.children ?? [];
   }
   placeSub(rowEl: HTMLElement) {
-    const sm = this.sessionMenuEl?.nativeElement,
+    const sm = this.startMenu?.panelElement,
       o = this.osEl?.nativeElement;
     if (!sm || !o) return;
     const smR = sm.getBoundingClientRect(),
@@ -884,7 +909,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     this.groups = this.groups.filter((x) => x.id !== id);
     this.persist();
   }
-  groupItems(g: any): CtxItem[] {
+  groupItems(g: any): ShellContextItem[] {
     return [
       {
         label: g.open
@@ -916,7 +941,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
   }
 
   // ── menu-bar tray panels — contents come from the related app ──
-  openTray(key: string, ev: Event) {
+  openTray(key: ShellTrayKey, ev: Event) {
     ev.stopPropagation();
     this.sessionOpen = false;
     this.ctx.open = false;
@@ -932,7 +957,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     setTimeout(() => this.placeTray(btn), 0);
   }
   placeTray(btn: HTMLElement) {
-    const p = this.trayEl?.nativeElement,
+    const p = this.trayPanel?.panelElement,
       o = this.osEl?.nativeElement;
     if (!p || !o) return;
     const oR = o.getBoundingClientRect(),
@@ -996,7 +1021,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     this.sessionOpen = false;
     this.about = true;
   }
-  mbItems(key: string): CtxItem[] {
+  mbItems(key: string): ShellContextItem[] {
     const f = this.wins.find((w) => w.id === this.focusId && !w.min);
     if (key === 'system')
       return [
@@ -1151,7 +1176,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
               act: () => this.wm.maximise(f.id, this.windowBounds()),
             },
             { sep: true },
-          ] as CtxItem[])
+          ] as ShellContextItem[])
         : []
     ).concat(
       ws.length
@@ -1187,7 +1212,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     setTimeout(() => this.placeMb(el), 0);
   }
   placeMb(el: HTMLElement) {
-    const m = this.ctxMenuEl?.nativeElement,
+    const m = this.contextMenu?.panelElement,
       o = this.osEl?.nativeElement;
     if (!m || !o) return;
     const oR = o.getBoundingClientRect(),
@@ -1203,14 +1228,14 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
   }
 
   // ── command palette — tap Cmd / Windows key to toggle ──
-  commands(): any[] {
+  commands(): ShellCommand[] {
     const f = this.wins.find((w) => w.id === this.focusId && !w.min);
-    const c: any[] = [];
+    const c: ShellCommand[] = [];
     this.order.forEach((id) =>
       c.push({
         icon: this.APPS[id].icon,
         label: $localize`:Command palette action@@desktop.command.openApp:Open ${this.APPS[id].title}:appTitle:`,
-        sec: $localize`:Command palette section@@desktop.command.section.app:App`,
+        section: $localize`:Command palette section@@desktop.command.section.app:App`,
         run: () => this.wm.launch(id),
       }),
     );
@@ -1218,13 +1243,13 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       {
         icon: 'moon',
         label: $localize`:Command palette action@@desktop.command.themeDark:Theme: Dark`,
-        sec: $localize`:Command palette section@@desktop.command.section.theme:Theme`,
+        section: $localize`:Command palette section@@desktop.command.section.theme:Theme`,
         run: () => this.setMode('dark'),
       },
       {
         icon: 'sun',
         label: $localize`:Command palette action@@desktop.command.themeLight:Theme: Light`,
-        sec: $localize`:Command palette section@@desktop.command.section.theme:Theme`,
+        section: $localize`:Command palette section@@desktop.command.section.theme:Theme`,
         run: () => this.setMode('light'),
       },
     );
@@ -1232,13 +1257,13 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       {
         icon: 'palette',
         label: $localize`:Command palette action@@desktop.command.brandLethean:Brand: Lethean`,
-        sec: $localize`:Command palette section@@desktop.command.section.theme:Theme`,
+        section: $localize`:Command palette section@@desktop.command.section.theme:Theme`,
         run: () => this.setBrand('lethean'),
       },
       {
         icon: 'palette',
         label: $localize`:Command palette action@@desktop.command.brandHostUk:Brand: Host UK`,
-        sec: $localize`:Command palette section@@desktop.command.section.theme:Theme`,
+        section: $localize`:Command palette section@@desktop.command.section.theme:Theme`,
         run: () => this.setBrand('hostuk'),
       },
     );
@@ -1246,7 +1271,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       c.push({
         icon: 'table-columns',
         label: $localize`:Command palette action@@desktop.command.taskbarEdge:Taskbar: ${this.edgeLabel(bb)}:edge:`,
-        sec: $localize`:Command palette section@@desktop.command.section.desktop:Desktop`,
+        section: $localize`:Command palette section@@desktop.command.section.desktop:Desktop`,
         run: () => this.setBar(bb),
       }),
     );
@@ -1255,7 +1280,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       label: this.showWidgets
         ? $localize`:Command palette action@@desktop.command.hideWidgets:Hide widgets`
         : $localize`:Command palette action@@desktop.command.showWidgets:Show widgets`,
-      sec: $localize`:Command palette section@@desktop.command.section.desktop:Desktop`,
+      section: $localize`:Command palette section@@desktop.command.section.desktop:Desktop`,
       run: () => (this.showWidgets = !this.showWidgets),
     });
     c.push({
@@ -1263,7 +1288,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       label: this.showIcons
         ? $localize`:Command palette action@@desktop.command.hideDesktopIcons:Hide desktop icons`
         : $localize`:Command palette action@@desktop.command.showDesktopIcons:Show desktop icons`,
-      sec: $localize`:Command palette section@@desktop.command.section.desktop:Desktop`,
+      section: $localize`:Command palette section@@desktop.command.section.desktop:Desktop`,
       run: () => (this.showIcons = !this.showIcons),
     });
     c.push({
@@ -1271,7 +1296,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       label: this.reduceMotion
         ? $localize`:Command palette action@@desktop.command.disableReduceMotion:Disable reduce motion`
         : $localize`:Command palette action@@desktop.command.enableReduceMotion:Enable reduce motion`,
-      sec: $localize`:Command palette section@@desktop.command.section.desktop:Desktop`,
+      section: $localize`:Command palette section@@desktop.command.section.desktop:Desktop`,
       run: () => (this.reduceMotion = !this.reduceMotion),
     });
     if (f)
@@ -1279,19 +1304,19 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
         {
           icon: 'window-minimize',
           label: $localize`:Command palette action@@desktop.command.minimiseWindow:Minimise window`,
-          sec: $localize`:Command palette section@@desktop.command.section.window:Window`,
+          section: $localize`:Command palette section@@desktop.command.section.window:Window`,
           run: () => this.wm.minimise(f.id, this.reduceMotion ? 0 : 190),
         },
         {
           icon: 'expand',
           label: $localize`:Command palette action@@desktop.command.zoomWindow:Zoom window`,
-          sec: $localize`:Command palette section@@desktop.command.section.window:Window`,
+          section: $localize`:Command palette section@@desktop.command.section.window:Window`,
           run: () => this.wm.maximise(f.id, this.windowBounds()),
         },
         {
           icon: 'xmark',
           label: $localize`:Command palette action@@desktop.command.closeWindow:Close window`,
-          sec: $localize`:Command palette section@@desktop.command.section.window:Window`,
+          section: $localize`:Command palette section@@desktop.command.section.window:Window`,
           run: () => this.wm.close(f.id),
         },
       );
@@ -1301,7 +1326,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
         c.push({
           icon: this.APPS[w.app].icon,
           label: $localize`:Command palette action@@desktop.command.switchToApp:Switch to ${this.APPS[w.app].title}:appTitle:`,
-          sec: $localize`:Command palette section@@desktop.command.section.window:Window`,
+          section: $localize`:Command palette section@@desktop.command.section.window:Window`,
           run: () => this.wm.focus(w.id),
         }),
       );
@@ -1309,41 +1334,41 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       {
         icon: 'lock',
         label: $localize`:Command palette action@@desktop.command.lockScreen:Lock screen`,
-        sec: $localize`:Command palette section@@desktop.command.section.session:Session`,
+        section: $localize`:Command palette section@@desktop.command.section.session:Session`,
         run: () => this.sessionAction('lock'),
       },
       {
         icon: 'right-from-bracket',
         label: $localize`:Command palette action@@desktop.command.logOut:Log out`,
-        sec: $localize`:Command palette section@@desktop.command.section.session:Session`,
+        section: $localize`:Command palette section@@desktop.command.section.session:Session`,
         run: () => this.sessionAction('logout'),
       },
       {
         icon: 'power-off',
         label: $localize`:Command palette action@@desktop.command.shutDown:Shut down`,
-        sec: $localize`:Command palette section@@desktop.command.section.session:Session`,
+        section: $localize`:Command palette section@@desktop.command.section.session:Session`,
         run: () => this.sessionAction('shutdown'),
       },
     );
     return c;
   }
   filterCmds() {
-    const q = this.palette.q.toLowerCase();
+    const q = this.palette.query.toLowerCase();
     this.filtered = this.commands().filter((c) =>
-      (c.label + ' ' + c.sec).toLowerCase().includes(q),
+      (c.label + ' ' + c.section).toLowerCase().includes(q),
     );
-    if (this.palette.i >= this.filtered.length)
-      this.palette.i = Math.max(0, this.filtered.length - 1);
+    if (this.palette.index >= this.filtered.length)
+      this.palette.index = Math.max(0, this.filtered.length - 1);
   }
   openPalette() {
     if (this.session !== 'active') return;
     this.closeMenus();
     this.paletteLastFocus = document.activeElement as HTMLElement;
     this.palette.open = true;
-    this.palette.q = '';
-    this.palette.i = 0;
+    this.palette.query = '';
+    this.palette.index = 0;
     this.filterCmds();
-    setTimeout(() => this.plInput?.nativeElement.focus(), 0);
+    setTimeout(() => this.commandPalette?.focusInput(), 0);
   }
   closePalette() {
     this.palette.open = false;
@@ -1363,8 +1388,8 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     if (c && c.run) c.run();
   }
   onPlInput(e: Event) {
-    this.palette.q = (e.target as HTMLInputElement).value;
-    this.palette.i = 0;
+    this.palette.query = (e.target as HTMLInputElement).value;
+    this.palette.index = 0;
     this.filterCmds();
   }
   plKey(e: KeyboardEvent) {
@@ -1374,13 +1399,13 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     }
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      this.palette.i = Math.min(this.palette.i + 1, this.filtered.length - 1);
+      this.palette.index = Math.min(this.palette.index + 1, this.filtered.length - 1);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      this.palette.i = Math.max(this.palette.i - 1, 0);
+      this.palette.index = Math.max(this.palette.index - 1, 0);
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      this.runCmd(this.palette.i);
+      this.runCmd(this.palette.index);
     } else if (e.key === 'Escape') {
       e.preventDefault();
       this.closePalette();
@@ -1477,7 +1502,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     setTimeout(() => this.placeSession(btn), 0);
   }
   placeSession(btn: HTMLElement) {
-    const m = this.sessionMenuEl?.nativeElement,
+    const m = this.startMenu?.panelElement,
       o = this.osEl?.nativeElement;
     if (!m || !o) return;
     const oR = o.getBoundingClientRect(),
@@ -1504,7 +1529,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
   }
 
   // ── dock right-click → window actions ──
-  winItems(w: Win): CtxItem[] {
+  winItems(w: Win): ShellContextItem[] {
     return [
       {
         label: $localize`:Window context action@@desktop.context.bringToFront:Bring to front`,
@@ -1536,7 +1561,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       },
     ];
   }
-  desktopItems(): CtxItem[] {
+  desktopItems(): ShellContextItem[] {
     return [
       {
         label: $localize`:Desktop context action@@desktop.context.newWindow:New window`,
@@ -1652,12 +1677,12 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
   }
   openCtxSub(i: number, ev: Event) {
     const row = ev.currentTarget as HTMLElement;
-    this.csub.i = i;
+    this.csub.index = i;
     this.csub.open = true;
     setTimeout(() => this.placeCtxSub(row), 0);
   }
   placeCtxSub(rowEl: HTMLElement) {
-    const m = this.ctxMenuEl?.nativeElement,
+    const m = this.contextMenu?.panelElement,
       o = this.osEl?.nativeElement;
     if (!m || !o) return;
     const mR = m.getBoundingClientRect(),
@@ -1669,7 +1694,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     this.csub.top = Math.max(0, rR.top - mR.top);
   }
   clampCtx() {
-    const m = this.ctxMenuEl?.nativeElement,
+    const m = this.contextMenu?.panelElement,
       o = this.osEl?.nativeElement;
     if (!m || !o) return;
     const oR = o.getBoundingClientRect(),
@@ -1682,7 +1707,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     this.ctx.left = Math.max(8, left);
     this.ctx.top = Math.max(8, top);
   }
-  runCtx(it: CtxItem, ev: Event) {
+  runCtx(it: ShellContextItem, ev: Event) {
     ev.stopPropagation();
     this.ctx.open = false;
     this.csub.open = false;
@@ -1708,7 +1733,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       month: 'long',
     });
   }
-  sessionAction(kind: string, ev?: Event) {
+  sessionAction(kind: ShellSessionAction, ev?: Event) {
     ev?.stopPropagation();
     this.closeMenus();
     if (kind === 'lock') this.session = 'locked';

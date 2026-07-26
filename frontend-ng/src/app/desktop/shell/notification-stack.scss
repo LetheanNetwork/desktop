@@ -1,0 +1,88 @@
+.notifs {
+  position: absolute;
+  top: 34px;
+  right: 14px;
+  z-index: 9800;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 300px;
+  pointer-events: none;
+}
+#os[data-bar='top'] .notifs {
+  top: 82px;
+}
+#os[data-bar='right'] .notifs {
+  right: 66px;
+}
+.mode-shell .notifs {
+  display: none;
+}
+.notif {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 11px;
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--ink-2) 92%, transparent);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow-2);
+  animation: notifIn 0.18s ease;
+}
+.notif .ni {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in oklch, var(--brand-500) 22%, var(--ink-3));
+  color: var(--brand-200);
+}
+.notif .nt {
+  flex: 1;
+  min-width: 0;
+}
+.notif .nt b {
+  display: block;
+  font-size: 12.5px;
+  color: var(--fg-0);
+  font-weight: 600;
+}
+.notif .nt small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--fg-3);
+  margin-top: 1px;
+}
+.notif .nx {
+  flex: none;
+  background: transparent;
+  border: 0;
+  color: var(--fg-4);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 5px;
+}
+.notif .nx:hover {
+  color: var(--fg-1);
+}
+@keyframes notifIn {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+#os.reduce-motion .notif {
+  animation: none;
+}
+#os[data-mode='light'] .notif .ni {
+  color: var(--brand-700);
+}

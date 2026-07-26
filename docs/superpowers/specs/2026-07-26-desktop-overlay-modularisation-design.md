@@ -37,12 +37,15 @@ Create five standalone Angular 22 presentation components under
 3. `ShellTrayPanel` renders the four menu-bar tray variants.
 4. `ShellNotificationStack` renders transient notification cards.
 5. `ShellCommandPalette` renders the palette, results, keyboard-help footer,
-   and query input.
+   query input, and the existing empty-query time/throughput/power widgets.
 
 Each component uses required signal inputs, function-based outputs, `OnPush`,
-`ViewEncapsulation.None`, and a `display: contents` host. Children emit typed
-interaction intents with the original DOM event when the coordinator needs it.
-They do not execute window, session, route, persistence, or backend actions.
+`ViewEncapsulation.None`, and a `display: contents` host. Mutable legacy state
+is bound as primitive and array fields rather than as whole objects, ensuring
+`OnPush` children are refreshed without changing the coordinator's state
+semantics. Children emit typed interaction intents with the original DOM event
+when the coordinator needs it. They do not execute window, session, route,
+persistence, or backend actions.
 
 `shell.types.ts` becomes the shared contract location for context items,
 notifications, commands, panel state, submenu state, session actions, language
@@ -69,7 +72,7 @@ light-mode, reduced-motion, and focus-ring rules remain in
 Selectors owned only by one extracted surface move to its component stylesheet:
 
 - Start menu: `.startpanel`, `.sm-*`, `.sp-*`;
-- command palette: `.palette*`, `.pl-*`;
+- command palette: `.palette*`, `.pl-*`, and `.plw*`;
 - tray panel: `.traypanel`, `.tr-*`, `.trh`;
 - notification stack: `.notifs`, `.notif`, `.ni`, `.nt`, `.nx`, and
   `notifIn`;
@@ -107,4 +110,3 @@ behavioural migration.
 - Run all five presenter specs and the desktop spec together.
 - Run the Angular production build and `git diff --check`.
 - Confirm the user-owned `.playwright-mcp/` directory remains untouched.
-

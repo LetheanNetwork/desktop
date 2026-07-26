@@ -44,7 +44,7 @@
   - `ShellWorldClock`
   - `ShellChildRequest`
 
-- [ ] Replace the anonymous context, panel, notification, command, and submenu
+- [x] Replace the anonymous context, panel, notification, command, and submenu
   shapes in `DesktopComponent` with the shared interfaces after the presenter
   tests have established their public API.
 
@@ -63,8 +63,8 @@
 **Interfaces:**
 
 - Consumes: routed `DesktopMenuCategory` rows, `ShellUserIdentity`,
-  `ShellPosition`, `ShellStartSubmenuState`, open-category state, and routed
-  child tuples.
+  `ShellPosition`, primitive `ShellStartSubmenuState` fields, open-category
+  state, and routed child tuples.
 - Produces:
   - `categoryRequested: string`
   - `appRequested: DesktopMenuApp`
@@ -73,17 +73,17 @@
   - `sessionRequested: ShellValueEvent<ShellSessionAction>`
   - `panelElement: HTMLElement | undefined`
 
-- [ ] Write a test which renders one category, one child application, the
+- [x] Write a test which renders one category, one child application, the
   identity panel, and submenu, then asserts the real category, app, child, and
   session-control outputs.
-- [ ] Run
+- [x] Run
   `npx ng test --watch=false --include=src/app/desktop/shell/start-menu.spec.ts`
   and observe failure because `ShellStartMenu` does not exist.
-- [ ] Implement the component with the unchanged markup and typed intents.
-- [ ] Replace the inline block and point `placeSession`/`placeSub` at the child
+- [x] Implement the component with the unchanged markup and typed intents.
+- [x] Replace the inline block and point `placeSession`/`placeSub` at the child
   panel handle.
-- [ ] Move only `.startpanel`, `.sm-*`, and `.sp-*` rules.
-- [ ] Run the Start-menu and desktop specs and observe them pass.
+- [x] Move only `.startpanel`, `.sm-*`, and `.sp-*` rules.
+- [x] Run the Start-menu and desktop specs and observe them pass.
 
 ### Task 3: Extract the context menu
 
@@ -98,20 +98,21 @@
 
 **Interfaces:**
 
-- Consumes: `ShellContextMenuState` and `ShellContextSubmenuState`.
+- Consumes: primitive `ShellContextMenuState` and
+  `ShellContextSubmenuState` fields plus the context-item array.
 - Produces:
   - `submenuRequested: ShellValueEvent<number, MouseEvent>`
   - `submenuDismissed: void`
   - `itemRequested: ShellValueEvent<ShellContextItem>`
   - `panelElement: HTMLElement | undefined`
 
-- [ ] Write a test which renders a heading, action, separator, parent item, and
+- [x] Write a test which renders a heading, action, separator, parent item, and
   nested action, then asserts hover, close, and selection outputs.
-- [ ] Run the focused test and observe the missing-component failure.
-- [ ] Implement the unchanged context-menu markup and outputs.
-- [ ] Replace the inline block and point `placeMb`, `placeCtxSub`, and
+- [x] Run the focused test and observe the missing-component failure.
+- [x] Implement the unchanged context-menu markup and outputs.
+- [x] Replace the inline block and point `placeMb`, `placeCtxSub`, and
   `clampCtx` at the child panel handle.
-- [ ] Run the context-menu and desktop specs and observe them pass.
+- [x] Run the context-menu and desktop specs and observe them pass.
 
 ### Task 4: Extract the tray panel
 
@@ -127,21 +128,22 @@
 
 **Interfaces:**
 
-- Consumes: `ShellTrayState`, language rows, selected language, clock, date,
-  world clocks, formatted world-clock values, and power sparkline JSON.
+- Consumes: primitive `ShellTrayState` fields, language rows, selected
+  language, clock, date, world clocks, formatted world-clock values, and power
+  sparkline JSON.
 - Produces:
   - `languageRequested: string`
   - `appRequested: { appId: string; subId?: string }`
   - `panelElement: HTMLElement | undefined`
 
-- [ ] Write a test which exercises the Language and Power variants and asserts
+- [x] Write a test which exercises the Language and Power variants and asserts
   the selected language and Control/Power launch intent.
-- [ ] Run the focused test and observe the missing-component failure.
-- [ ] Implement all four existing tray variants without changing copy or
+- [x] Run the focused test and observe the missing-component failure.
+- [x] Implement all four existing tray variants without changing copy or
   controls.
-- [ ] Replace the inline block and point `placeTray` at the child panel handle.
-- [ ] Move `.traypanel`, `.tr-*`, and `.trh` rules.
-- [ ] Run the tray-panel and desktop specs and observe them pass.
+- [x] Replace the inline block and point `placeTray` at the child panel handle.
+- [x] Move `.traypanel`, `.tr-*`, and `.trh` rules.
+- [x] Run the tray-panel and desktop specs and observe them pass.
 
 ### Task 5: Extract notifications
 
@@ -160,13 +162,13 @@
 - Consumes: `readonly ShellNotification[]`.
 - Produces: `dismissRequested: number`.
 
-- [ ] Write a test which renders title/body/icon content, omits an empty body,
+- [x] Write a test which renders title/body/icon content, omits an empty body,
   and emits the selected notification id from the real Dismiss button.
-- [ ] Run the focused test and observe the missing-component failure.
-- [ ] Implement the notification stack and replace the inline block.
-- [ ] Move the notification selectors and animation without changing
+- [x] Run the focused test and observe the missing-component failure.
+- [x] Implement the notification stack and replace the inline block.
+- [x] Move the notification selectors and animation without changing
   taskbar-edge, shell-mode, reduced-motion, or light-mode behaviour.
-- [ ] Run the notification and desktop specs and observe them pass.
+- [x] Run the notification and desktop specs and observe them pass.
 
 ### Task 6: Extract the command palette
 
@@ -182,7 +184,8 @@
 
 **Interfaces:**
 
-- Consumes: `ShellPaletteState` and `readonly ShellCommand[]`.
+- Consumes: primitive `ShellPaletteState` fields, `readonly ShellCommand[]`,
+  clock/date text, and throughput/power sparkline JSON.
 - Produces:
   - `queryChanged: Event`
   - `keyRequested: KeyboardEvent`
@@ -191,14 +194,15 @@
   - `backdropRequested: Event`
   - `focusInput(): void`
 
-- [ ] Write a test which exercises input, ArrowDown, row hover, row selection,
-  backdrop selection, selected-row styling, and empty-result copy.
-- [ ] Run the focused test and observe the missing-component failure.
-- [ ] Implement the palette and replace the inline block.
-- [ ] Point `openPalette` at `focusInput()` and retain all filtering, keyboard,
+- [x] Write tests which exercise input, ArrowDown, row hover, row selection,
+  backdrop selection, selected-row styling, empty-result copy, and the
+  empty-query time/throughput/power widgets.
+- [x] Run the focused test and observe the missing-component failure.
+- [x] Implement the palette and replace the inline block.
+- [x] Point `openPalette` at `focusInput()` and retain all filtering, keyboard,
   command, and focus-restoration logic in the parent.
-- [ ] Move `.palette*` and `.pl-*` rules.
-- [ ] Run the palette and desktop specs and observe them pass.
+- [x] Move `.palette*` and `.pl-*` rules.
+- [x] Run the palette and desktop specs and observe them pass.
 
 ### Task 7: Verify and commit the tranche
 
@@ -206,12 +210,11 @@
 
 - Review every file changed by Tasks 1–6.
 
-- [ ] Run all five presenter specs and
+- [x] Run all five presenter specs and
   `src/app/desktop/desktop.component.spec.ts` together.
-- [ ] Run `cd frontend-ng && npm run build`.
-- [ ] Run Prettier on the new shell TypeScript, HTML, and spec files.
-- [ ] Run `git diff --check`.
-- [ ] Confirm `.playwright-mcp/` remains untouched.
-- [ ] Update `AGENTS.md` with the new overlay component map.
-- [ ] Commit with `refactor(frontend): modularise desktop overlays`.
-
+- [x] Run `cd frontend-ng && npm run build`.
+- [x] Run Prettier on the new shell TypeScript, HTML, and spec files.
+- [x] Run `git diff --check`.
+- [x] Confirm `.playwright-mcp/` remains untouched.
+- [x] Update `AGENTS.md` with the new overlay component map.
+- [x] Commit with `refactor(frontend): modularise desktop overlays`.

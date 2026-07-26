@@ -460,142 +460,39 @@
   />
 
   <!-- session chip → 2-column Start menu: programs (launcher) + session -->
-  <div
-    class="menu sessionmenu"
-    #sessionMenuEl
-    [hidden]="!sessionOpen"
-    [style.left.px]="sessionPos.left"
-    [style.top.px]="sessionPos.top"
-    [style.bottom.px]="sessionPos.bottom"
-  >
-    <div class="startpanel">
-      <div class="sp-apps">
-        <div class="sp-h" i18n="Start menu program heading@@desktop.start.programs">Programs</div>
-        <ng-container *ngFor="let c of categories">
-          <div
-            class="mi sm-cat"
-            role="button"
-            [attr.aria-expanded]="!!openCats[c.id]"
-            (click)="openCats[c.id] = !openCats[c.id]"
-          >
-            <lthn-icon [attr.name]="c.icon" size="15"></lthn-icon>
-            <div class="mt">
-              <b>{{ c.title }}</b
-              ><small i18n="Category app count@@desktop.start.appCount"
-                >{{ c.apps.length }} apps</small
-              >
-            </div>
-            <span class="chev"
-              ><lthn-icon
-                [attr.name]="openCats[c.id] ? 'chevron-down' : 'chevron-right'"
-                size="10"
-              ></lthn-icon
-            ></span>
-          </div>
-          <div
-            class="mi sm-child"
-            [class.haschild]="app.children.length"
-            *ngFor="let app of openCats[c.id] ? c.apps : []"
-            (click)="startLaunch(app)"
-            (mouseenter)="onProg(app, $event)"
-          >
-            <lthn-icon [attr.name]="app.icon" size="14"></lthn-icon>
-            <div class="mt">
-              <b>{{ app.title }}</b
-              ><small>{{ app.hint }}</small>
-            </div>
-            <span class="chev" *ngIf="app.children.length">›</span>
-          </div>
-        </ng-container>
-      </div>
-      <div class="sp-user">
-        <div class="mhead">
-          <span class="ava lg">{{ user.initials }}</span>
-          <div>
-            <b>{{ user.name }}</b
-            ><small>{{ user.email }}</small>
-          </div>
-        </div>
-        <div class="msep"></div>
-        <div
-          class="mi"
-          (click)="sessionAction('lock', $event)"
-          i18n="Lock screen action@@desktop.session.lock"
-        >
-          <lthn-icon name="lock" size="13"></lthn-icon> Lock screen
-        </div>
-        <div
-          class="mi"
-          (click)="sessionAction('switch', $event)"
-          i18n="Switch user action@@desktop.session.switch"
-        >
-          <lthn-icon name="user-group" size="13"></lthn-icon> Switch user…
-        </div>
-        <div class="msep"></div>
-        <div
-          class="mi"
-          (click)="sessionAction('logout', $event)"
-          i18n="Log out action@@desktop.session.logout"
-        >
-          <lthn-icon name="right-from-bracket" size="13"></lthn-icon> Log out
-        </div>
-        <div
-          class="mi"
-          (click)="sessionAction('shutdown', $event)"
-          i18n="Shut down action@@desktop.session.shutdown"
-        >
-          <lthn-icon name="power-off" size="13"></lthn-icon> Shut down…
-        </div>
-      </div>
-    </div>
-    <div class="submenu" *ngIf="sub.open" [style.left.px]="sub.left" [style.top.px]="sub.top">
-      <div class="mi" *ngFor="let c of submenuFor(sub.parent)" (click)="startSub(sub.parent, c[0])">
-        <lthn-icon [attr.name]="c[1]" size="14"></lthn-icon>
-        <div class="mt">
-          <b>{{ c[2] }}</b>
-        </div>
-      </div>
-    </div>
-  </div>
+  <lthn-shell-start-menu
+    [open]="sessionOpen"
+    [position]="sessionPos"
+    [categories]="categories"
+    [openCategories]="openCats"
+    [user]="user"
+    [submenuOpen]="sub.open"
+    [submenuLeft]="sub.left"
+    [submenuTop]="sub.top"
+    [submenuParent]="sub.parent"
+    [submenuItems]="submenuFor(sub.parent)"
+    (categoryRequested)="toggleStartCategory($event)"
+    (appRequested)="startLaunch($event)"
+    (appHovered)="onProg($event.value, $event.event)"
+    (childRequested)="startSub($event.appId, $event.childId)"
+    (sessionRequested)="sessionAction($event.value, $event.event)"
+  />
 
   <!-- right-click menus (desktop / window / dock / icon) with submenus -->
-  <div
-    class="menu ctxmenu"
-    #ctxMenuEl
-    [hidden]="!ctx.open"
-    [style.left.px]="ctx.left"
-    [style.top.px]="ctx.top"
-  >
-    <div class="mhead" *ngIf="ctx.title">
-      <b>{{ ctx.title }}</b>
-    </div>
-    <div class="msep" *ngIf="ctx.title"></div>
-    <ng-container *ngFor="let it of ctx.items; let i = index">
-      <div class="msep" *ngIf="it.sep"></div>
-      <div class="mi haschild" *ngIf="!it.sep && it.children" (mouseenter)="openCtxSub(i, $event)">
-        <lthn-icon [attr.name]="it.icon || 'circle'" size="13"></lthn-icon> {{ it.label
-        }}<span class="chev">›</span>
-      </div>
-      <div
-        class="mi"
-        *ngIf="!it.sep && !it.children"
-        (click)="runCtx(it, $event)"
-        (mouseenter)="csub.open = false"
-      >
-        <lthn-icon [attr.name]="it.icon || 'circle'" size="13"></lthn-icon> {{ it.label }}
-      </div>
-    </ng-container>
-    <div
-      class="submenu ctxsub"
-      *ngIf="csub.open"
-      [style.left.px]="csub.left"
-      [style.top.px]="csub.top"
-    >
-      <div class="mi" *ngFor="let c of ctx.items[csub.i]?.children" (click)="runCtx(c, $event)">
-        <lthn-icon [attr.name]="c.icon || 'angle-right'" size="13"></lthn-icon> {{ c.label }}
-      </div>
-    </div>
-  </div>
+  <lthn-shell-context-menu
+    [open]="ctx.open"
+    [left]="ctx.left"
+    [top]="ctx.top"
+    [heading]="ctx.title"
+    [items]="ctx.items"
+    [submenuOpen]="csub.open"
+    [submenuLeft]="csub.left"
+    [submenuTop]="csub.top"
+    [submenuIndex]="csub.index"
+    (submenuRequested)="openCtxSub($event.value, $event.event)"
+    (submenuDismissed)="csub.open = false"
+    (itemRequested)="runCtx($event.value, $event.event)"
+  />
 
   <!-- click-drag snap preview -->
   <div
@@ -608,114 +505,20 @@
   ></div>
 
   <!-- menu-bar tray panel (contents from the related app) -->
-  <div
-    class="menu traypanel"
-    #trayEl
-    [hidden]="!tray.open"
-    [style.left.px]="tray.left"
-    [style.top.px]="tray.top"
-    [ngSwitch]="tray.key"
-  >
-    <ng-container *ngSwitchCase="'lang'">
-      <div class="trh">
-        <lthn-icon name="language" size="13"></lthn-icon>
-        <ng-container i18n="Language tray heading@@desktop.tray.languageHeading"
-          >Language</ng-container
-        ><span class="tr-r">{{ lang.toUpperCase() }}</span>
-      </div>
-      <div class="mi" *ngFor="let l of langs" (click)="setLang(l[0])">
-        <lthn-icon [attr.name]="l[0] === lang ? 'check' : 'globe'" size="12"></lthn-icon> {{ l[1]
-        }}<span class="tr-r" style="font-family: var(--font-mono); font-size: 10px">{{
-          l[0].toUpperCase()
-        }}</span>
-      </div>
-      <div class="msep"></div>
-      <button
-        class="tr-btn"
-        (click)="trayOpen('settings', 'translations')"
-        i18n="Edit translations action@@desktop.tray.editTranslations"
-      >
-        Edit translations…
-      </button>
-    </ng-container>
-    <ng-container *ngSwitchCase="'wifi'">
-      <div class="trh">
-        <lthn-icon name="wifi" size="13"></lthn-icon>
-        <ng-container i18n="Network tray heading@@desktop.tray.networkHeading">Network</ng-container
-        ><span class="tr-r" i18n="Application title@@app.lethernet.title">LetherNet</span>
-      </div>
-      <div class="tr-row">
-        <span i18n="Wi-Fi label@@desktop.tray.wifi">Wi-Fi</span><lthn-toggle on></lthn-toggle>
-      </div>
-      <div class="tr-row">
-        <span>lethean-mesh</span><lthn-status-dot variant="ok"></lthn-status-dot>
-      </div>
-      <div class="msep"></div>
-      <div class="tr-kv">
-        <span i18n="Network region label@@desktop.tray.region">Region</span><b>eu-west-2</b>
-      </div>
-      <div class="tr-kv">
-        <span i18n="Network peers label@@desktop.tray.peers">Peers</span
-        ><b i18n="Online peer count@@desktop.tray.onlinePeers">4 online</b>
-      </div>
-      <div class="tr-kv">
-        <span i18n="Pooled throughput label@@desktop.tray.pooled">Pooled</span><b>286 tok/s</b>
-      </div>
-      <button
-        class="tr-btn"
-        (click)="trayOpen('lethernet')"
-        i18n="Open LetherNet action@@desktop.tray.openLetherNet"
-      >
-        Open LetherNet
-      </button>
-    </ng-container>
-    <ng-container *ngSwitchCase="'battery'">
-      <div class="trh">
-        <lthn-icon name="battery-three-quarters" size="13"></lthn-icon>
-        <ng-container i18n="Power tray heading@@desktop.tray.powerHeading">Power</ng-container
-        ><span class="tr-r">84%</span>
-      </div>
-      <div class="tr-big">
-        3h 20m<small i18n="Battery time remaining@@desktop.tray.remaining"> remaining</small>
-      </div>
-      <lthn-sparkline
-        [attr.data]="wattsJson"
-        color="#febc2e"
-        width="228"
-        height="34"
-        fill
-      ></lthn-sparkline>
-      <div class="tr-kv">
-        <span i18n="Current power draw label@@desktop.tray.drawingNow">Drawing now</span
-        ><b>207 W</b>
-      </div>
-      <div class="tr-kv">
-        <span i18n="Daily power total label@@desktop.tray.dailyTotal">24h total</span><b>4.7 kWh</b>
-      </div>
-      <button
-        class="tr-btn"
-        (click)="trayOpen('control', 'power')"
-        i18n="Open power view action@@desktop.tray.openPower"
-      >
-        Open Power
-      </button>
-    </ng-container>
-    <ng-container *ngSwitchCase="'clock'">
-      <div class="trh">
-        <lthn-icon name="clock" size="13"></lthn-icon>
-        <ng-container i18n="Date and time tray heading@@desktop.tray.dateTimeHeading"
-          >Date &amp; time</ng-container
-        >
-      </div>
-      <div class="tr-big">{{ clock }}</div>
-      <div class="tr-sub">{{ today() }}</div>
-      <div class="msep"></div>
-      <div class="tr-kv" *ngFor="let c of clocks">
-        <span>{{ c.city }}</span
-        ><b>{{ fmtTz(c.tz) }}</b>
-      </div>
-    </ng-container>
-  </div>
+  <lthn-shell-tray-panel
+    [open]="tray.open"
+    [trayKey]="tray.key"
+    [left]="tray.left"
+    [top]="tray.top"
+    [languages]="langs"
+    [language]="lang"
+    [clockText]="clock"
+    [dateText]="today()"
+    [worldClocks]="worldClocks"
+    [wattsJson]="wattsJson"
+    (languageRequested)="setLang($event)"
+    (appRequested)="trayOpen($event.appId, $event.subId)"
+  />
 
   <!-- marquee selection + group drag proxy -->
   <div
@@ -804,23 +607,7 @@
   </div>
 
   <!-- notifications -->
-  <div class="notifs">
-    <div class="notif" *ngFor="let n of notifs">
-      <span class="ni"><lthn-icon [attr.name]="n.icon" size="14"></lthn-icon></span>
-      <div class="nt">
-        <b>{{ n.title }}</b
-        ><small *ngIf="n.body">{{ n.body }}</small>
-      </div>
-      <button
-        class="nx"
-        aria-label="Dismiss"
-        i18n-aria-label="Dismiss notification action@@desktop.notification.dismiss"
-        (click)="dismiss(n.id)"
-      >
-        ✕
-      </button>
-    </div>
-  </div>
+  <lthn-shell-notification-stack [notifications]="notifs" (dismissRequested)="dismiss($event)" />
 
   <!-- session screens (lock / switch / login / shutdown) -->
   <div class="lockscreen" [class.off]="session === 'off'" *ngIf="session !== 'active'">
@@ -885,98 +672,19 @@
   </div>
 
   <!-- command palette (tap Cmd / Windows key) -->
-  <div class="paletteov" [hidden]="!palette.open" (pointerdown)="palClick($event)">
-    <div
-      class="palette"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Command palette"
-      i18n-aria-label="Command palette dialog label@@desktop.palette.dialogLabel"
-    >
-      <div class="pl-in">
-        <lthn-icon name="magnifying-glass" size="14"></lthn-icon
-        ><input
-          #plInput
-          [value]="palette.q"
-          (input)="onPlInput($event)"
-          (keydown)="plKey($event)"
-          placeholder="Type a command…"
-          i18n-placeholder="Command palette placeholder@@desktop.palette.placeholder"
-          autocomplete="off"
-          aria-label="Command"
-          i18n-aria-label="Command input label@@desktop.palette.commandLabel"
-        />
-      </div>
-      <div class="pl-list">
-        <div
-          class="pl-cmd"
-          *ngFor="let c of filtered; let i = index"
-          [class.on]="i === palette.i"
-          (click)="runCmd(i)"
-          (mouseenter)="palette.i = i"
-        >
-          <span class="ci"><lthn-icon [attr.name]="c.icon" size="12"></lthn-icon></span
-          ><span>{{ c.label }}</span
-          ><span class="sec">{{ c.sec }}</span>
-        </div>
-        <div
-          class="pl-empty"
-          *ngIf="!filtered.length"
-          i18n="No matching commands message@@desktop.palette.noMatches"
-        >
-          No commands match “{{ palette.q }}”
-        </div>
-      </div>
-      <div class="pl-foot">
-        <span i18n="Command palette keyboard help@@desktop.palette.navigate"
-          ><kbd>↑</kbd><kbd>↓</kbd> navigate</span
-        ><span i18n="Command palette keyboard help@@desktop.palette.run"><kbd>↵</kbd> run</span
-        ><span i18n="Command palette keyboard help@@desktop.palette.close"
-          ><kbd>esc</kbd> close</span
-        >
-      </div>
-    </div>
-    <div class="pl-widgets" *ngIf="!palette.q">
-      <div class="plw">
-        <div class="plw-h">
-          <lthn-icon name="clock" size="11"></lthn-icon>
-          <ng-container i18n="Time widget heading@@desktop.palette.time">Time</ng-container>
-        </div>
-        <div class="plw-big">{{ clock }}</div>
-        <div class="plw-sub">{{ today() }}</div>
-      </div>
-      <div class="plw">
-        <div class="plw-h">
-          <lthn-icon name="chart-line" size="11"></lthn-icon>
-          <ng-container i18n="Throughput widget heading@@desktop.widget.throughput"
-            >Throughput</ng-container
-          >
-        </div>
-        <div class="plw-big">
-          41.8<small i18n="Tokens per second unit@@unit.tokensPerSecondInline"> tok/s</small>
-        </div>
-        <lthn-sparkline
-          [attr.data]="throughputJson"
-          color="var(--brand-300)"
-          width="150"
-          height="30"
-          fill
-        ></lthn-sparkline>
-      </div>
-      <div class="plw">
-        <div class="plw-h">
-          <lthn-icon name="bolt" size="11"></lthn-icon>
-          <ng-container i18n="Power widget heading@@desktop.palette.power">Power</ng-container>
-        </div>
-        <div class="plw-big">207<small i18n="Watts unit@@unit.wattsInline"> W</small></div>
-        <lthn-sparkline
-          [attr.data]="wattsJson"
-          color="#febc2e"
-          width="150"
-          height="30"
-          fill
-        ></lthn-sparkline>
-      </div>
-    </div>
-  </div>
+  <lthn-shell-command-palette
+    [open]="palette.open"
+    [query]="palette.query"
+    [selectedIndex]="palette.index"
+    [commands]="filtered"
+    [clockText]="clock"
+    [dateText]="today()"
+    [throughputJson]="throughputJson"
+    [wattsJson]="wattsJson"
+    (queryChanged)="onPlInput($event)"
+    (keyRequested)="plKey($event)"
+    (commandRequested)="runCmd($event)"
+    (selectionRequested)="palette.index = $event"
+    (backdropRequested)="palClick($event)"
+  />
 </div>

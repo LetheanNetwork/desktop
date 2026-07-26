@@ -1,0 +1,118 @@
+<div
+  class="menu traypanel"
+  #panel
+  [hidden]="!open()"
+  [style.left.px]="left()"
+  [style.top.px]="top()"
+  [ngSwitch]="trayKey()"
+>
+  <ng-container *ngSwitchCase="'lang'">
+    <div class="trh">
+      <lthn-icon name="language" size="13"></lthn-icon>
+      <ng-container i18n="Language tray heading@@desktop.tray.languageHeading">
+        Language
+      </ng-container>
+      <span class="tr-r">{{ language().toUpperCase() }}</span>
+    </div>
+    <div class="mi" *ngFor="let row of languages()" (click)="languageRequested.emit(row[0])">
+      <lthn-icon [attr.name]="row[0] === language() ? 'check' : 'globe'" size="12"></lthn-icon>
+      {{ row[1] }}
+      <span class="tr-r" style="font-family: var(--font-mono); font-size: 10px">
+        {{ row[0].toUpperCase() }}
+      </span>
+    </div>
+    <div class="msep"></div>
+    <button
+      class="tr-btn"
+      (click)="appRequested.emit({ appId: 'settings', subId: 'translations' })"
+      i18n="Edit translations action@@desktop.tray.editTranslations"
+    >
+      Edit translations…
+    </button>
+  </ng-container>
+  <ng-container *ngSwitchCase="'wifi'">
+    <div class="trh">
+      <lthn-icon name="wifi" size="13"></lthn-icon>
+      <ng-container i18n="Network tray heading@@desktop.tray.networkHeading">
+        Network
+      </ng-container>
+      <span class="tr-r" i18n="Application title@@app.lethernet.title">LetherNet</span>
+    </div>
+    <div class="tr-row">
+      <span i18n="Wi-Fi label@@desktop.tray.wifi">Wi-Fi</span>
+      <lthn-toggle on></lthn-toggle>
+    </div>
+    <div class="tr-row">
+      <span>lethean-mesh</span>
+      <lthn-status-dot variant="ok"></lthn-status-dot>
+    </div>
+    <div class="msep"></div>
+    <div class="tr-kv">
+      <span i18n="Network region label@@desktop.tray.region">Region</span>
+      <b>eu-west-2</b>
+    </div>
+    <div class="tr-kv">
+      <span i18n="Network peers label@@desktop.tray.peers">Peers</span>
+      <b i18n="Online peer count@@desktop.tray.onlinePeers">4 online</b>
+    </div>
+    <div class="tr-kv">
+      <span i18n="Pooled throughput label@@desktop.tray.pooled">Pooled</span>
+      <b>286 tok/s</b>
+    </div>
+    <button
+      class="tr-btn"
+      (click)="appRequested.emit({ appId: 'lethernet' })"
+      i18n="Open LetherNet action@@desktop.tray.openLetherNet"
+    >
+      Open LetherNet
+    </button>
+  </ng-container>
+  <ng-container *ngSwitchCase="'battery'">
+    <div class="trh">
+      <lthn-icon name="battery-three-quarters" size="13"></lthn-icon>
+      <ng-container i18n="Power tray heading@@desktop.tray.powerHeading">Power</ng-container>
+      <span class="tr-r">84%</span>
+    </div>
+    <div class="tr-big">
+      3h 20m
+      <small i18n="Battery time remaining@@desktop.tray.remaining"> remaining</small>
+    </div>
+    <lthn-sparkline
+      [attr.data]="wattsJson()"
+      color="#febc2e"
+      width="228"
+      height="34"
+      fill
+    ></lthn-sparkline>
+    <div class="tr-kv">
+      <span i18n="Current power draw label@@desktop.tray.drawingNow">Drawing now</span>
+      <b>207 W</b>
+    </div>
+    <div class="tr-kv">
+      <span i18n="Daily power total label@@desktop.tray.dailyTotal">24h total</span>
+      <b>4.7 kWh</b>
+    </div>
+    <button
+      class="tr-btn"
+      (click)="appRequested.emit({ appId: 'control', subId: 'power' })"
+      i18n="Open power view action@@desktop.tray.openPower"
+    >
+      Open Power
+    </button>
+  </ng-container>
+  <ng-container *ngSwitchCase="'clock'">
+    <div class="trh">
+      <lthn-icon name="clock" size="13"></lthn-icon>
+      <ng-container i18n="Date and time tray heading@@desktop.tray.dateTimeHeading">
+        Date &amp; time
+      </ng-container>
+    </div>
+    <div class="tr-big">{{ clockText() }}</div>
+    <div class="tr-sub">{{ dateText() }}</div>
+    <div class="msep"></div>
+    <div class="tr-kv" *ngFor="let worldClock of worldClocks()">
+      <span>{{ worldClock.city }}</span>
+      <b>{{ worldClock.time }}</b>
+    </div>
+  </ng-container>
+</div>

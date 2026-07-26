@@ -1,0 +1,42 @@
+<div class="menu ctxmenu" #panel [hidden]="!open()" [style.left.px]="left()" [style.top.px]="top()">
+  <div class="mhead" *ngIf="heading()">
+    <b>{{ heading() }}</b>
+  </div>
+  <div class="msep" *ngIf="heading()"></div>
+  <ng-container *ngFor="let item of items(); let index = index">
+    <div class="msep" *ngIf="item.sep"></div>
+    <div
+      class="mi haschild"
+      *ngIf="!item.sep && item.children"
+      (mouseenter)="requestSubmenu(index, $event)"
+    >
+      <lthn-icon [attr.name]="item.icon || 'circle'" size="13"></lthn-icon>
+      {{ item.label }}
+      <span class="chev">›</span>
+    </div>
+    <div
+      class="mi"
+      *ngIf="!item.sep && !item.children"
+      (click)="requestItem(item, $event)"
+      (mouseenter)="submenuDismissed.emit()"
+    >
+      <lthn-icon [attr.name]="item.icon || 'circle'" size="13"></lthn-icon>
+      {{ item.label }}
+    </div>
+  </ng-container>
+  <div
+    class="submenu ctxsub"
+    *ngIf="submenuOpen()"
+    [style.left.px]="submenuLeft()"
+    [style.top.px]="submenuTop()"
+  >
+    <div
+      class="mi"
+      *ngFor="let child of items()[submenuIndex()]?.children"
+      (click)="requestItem(child, $event)"
+    >
+      <lthn-icon [attr.name]="child.icon || 'angle-right'" size="13"></lthn-icon>
+      {{ child.label }}
+    </div>
+  </div>
+</div>
