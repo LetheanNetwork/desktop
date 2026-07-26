@@ -3,7 +3,7 @@
 // Wails surface for the content service. Methods are bound on the
 // *Service receiver and exposed to the frontend via wails3 generate
 // bindings — the TS shape lands at
-// frontend/bindings/dappco.re/lthn/desktop/pkg/marketing/content/service.
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/marketing/content/service.
 
 package content
 

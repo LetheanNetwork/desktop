@@ -112,7 +112,7 @@ tasks:
       - wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico
 
   dev:frontend:
-    summary: Runs Angular's development server with HMR for the Wails proxy
+    summary: Runs Angular's HMR server for the Wails development window
     dir: frontend-ng
     preconditions:
       - sh: test -d node_modules

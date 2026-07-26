@@ -5,7 +5,7 @@
 // ~/Lethean/sales/deals/{id}.md — no separate persistence file.
 //
 // Wire shapes match the ForecastRow + ForecastKpi interfaces consumed by
-// the <lthn-view-forecast> Lit element in the Sales role view.
+// the Angular forecast surface in the Sales category.
 //
 // Probability weights (v1 defaults):
 //
@@ -27,7 +27,7 @@ package forecast
 
 // ForecastRow is the JSON wire type for one per-quarter forecast row.
 // Field names match ForecastRow in
-// frontend/src/lit/views/sales/forecast.ts exactly.
+// frontend-ng/src/app/desktop/surfaces/sales/forecast.ts exactly.
 // Numbers are in £000 so the bar chart can scale all four lines against
 // a single integer max.
 //
@@ -54,7 +54,7 @@ type ForecastRow struct {
 
 // ForecastKpi is the JSON wire type for one headline KPI card.
 // Field names match ForecastKpi in
-// frontend/src/lit/views/sales/forecast.ts exactly.
+// frontend-ng/src/app/desktop/surfaces/sales/forecast.ts exactly.
 //
 // Usage example:
 //

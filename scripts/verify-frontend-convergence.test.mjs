@@ -56,6 +56,14 @@ test('Wails development installs frontend dependencies once before starting HMR'
   assert.doesNotMatch(devBuild, /pre-build|build:frontend|install:frontend:deps/);
 });
 
+test('macOS bundles explain protected Files mounts before requesting access', async () => {
+  for (const path of ['build/darwin/Info.plist', 'build/darwin/Info.dev.plist']) {
+    const plist = await read(path);
+    assert.match(plist, /<key>NSDocumentsFolderUsageDescription<\/key>\s*<string>[^<]+<\/string>/);
+    assert.match(plist, /<key>NSDownloadsFolderUsageDescription<\/key>\s*<string>[^<]+<\/string>/);
+  }
+});
+
 test('all binding generators target frontend-ng and no removed external tree', async () => {
   const files = await Promise.all([
     read('build/Taskfile.yml'),

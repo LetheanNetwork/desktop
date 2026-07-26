@@ -1,8 +1,10 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
 // plugin_view_capability.go — backend half of Mantis #1523 + #1576. The
-// frontend broker at frontend/src/lit/api-fetch.ts (grantTokenToFrame)
-// brokers a session-token capability into a third-party iframe via
+// frontend broker at
+// frontend-ng/src/app/desktop/surfaces/extensions/plugin-auth-broker.ts
+// (grantTokenToFrame) brokers a session-token capability into a third-party
+// iframe via
 // the §5.1 postMessage handshake (RFC.plugin-views.md). Before the
 // broker delivers the token bytes it POSTs to /v1/plugin-view/capability-grant
 // so the audit row commits FIRST; on failure the broker aborts the
@@ -121,7 +123,7 @@ type PluginInstalledChecker func(code string) bool
 // NOT appear in the request body. Legacy `capability` scalar shape
 // rejected with 400 + codePluginViewGrantInvalid per §3.1.
 //
-// Usage example (from frontend/src/lit/api-fetch.ts grantTokenToFrame):
+// Usage example (from the Angular plugin-auth-broker grantTokenToFrame):
 //
 //	await apiFetch("/v1/plugin-view/capability-grant", {
 //	    method: "POST",
@@ -221,13 +223,13 @@ func isValidPostMessageOrigin(s string) bool {
 // HTTP status mapping:
 //
 //   - 400 — body parse failed / required field missing / unknown
-//           capability literal / outcome != "granted" / legacy scalar
-//           shape / caller-asserted correlation_id
+//     capability literal / outcome != "granted" / legacy scalar
+//     shape / caller-asserted correlation_id
 //   - 404 — plugin_id not installed (PluginInstalledChecker returned false)
 //   - 500 — audit.Default().Record returned !OK (broker must NOT
-//           proceed with postMessage)
+//     proceed with postMessage)
 //   - 200 — grant recorded; response body carries correlation_id;
-//           broker is clear to postMessage the token
+//     broker is clear to postMessage the token
 func (s *Service) handlePluginViewCapabilityGrant(c *gin.Context) {
 	// Layer 1 body cap (Cerberus #1568 F1) — wraps the body reader
 	// BEFORE ShouldBindJSON so the JSON decoder errors at the cap, not
@@ -330,8 +332,8 @@ func (s *Service) handlePluginViewCapabilityGrant(c *gin.Context) {
 		return
 	}
 	// Origin scheme + grammar validation — refuse javascript:/data:/file:
-	// (XSS vectors if the audit row ever surfaces in a Lit view that
-	// renders meta.origin as a hyperlink) AND require an absolute URL
+	// (XSS vectors if the audit row ever surfaces in an Angular or Lit view
+	// that renders meta.origin as a hyperlink) AND require an absolute URL
 	// (refuse "../../etc" or bare hostnames). Per RFC.body-cap-middleware.md
 	// §3.1 / Amendment A1.
 	if !isValidPostMessageOrigin(req.Origin) {

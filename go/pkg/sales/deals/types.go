@@ -7,7 +7,7 @@
 // docs); the body below is free-form notes.
 //
 // Wire shape matches the Deal interface consumed by the
-// <lthn-view-deals> Lit element in the Sales role view.
+// Angular deals surface in the Sales category.
 //
 // Deals are also the source-of-truth for pipeline stage — pkg/sales/pipeline
 // derives its Kanban view by scanning this directory.
@@ -22,7 +22,7 @@ import core "dappco.re/go"
 
 // Activity is the JSON wire type for one activity-log entry.
 // Field names match the Activity interface in
-// frontend/src/lit/views/sales/deals.ts exactly.
+// frontend-ng/src/app/desktop/surfaces/sales/deals.ts exactly.
 //
 // Usage example:
 //
@@ -42,7 +42,7 @@ type Activity struct {
 }
 
 // DocLink is the JSON wire type for one linked document.
-// Field names match DocLink in frontend/src/lit/views/sales/deals.ts.
+// Field names match DocLink in frontend-ng/src/app/desktop/surfaces/sales/deals.ts.
 //
 // Usage example:
 //
@@ -54,9 +54,9 @@ type DocLink struct {
 	S string `json:"s"`
 }
 
-// Deal is the JSON wire type returned to the Lit frontend.
+// Deal is the JSON wire type returned to the Angular frontend.
 // Field names match the Deal interface in
-// frontend/src/lit/views/sales/deals.ts exactly.
+// frontend-ng/src/app/desktop/surfaces/sales/deals.ts exactly.
 //
 // Usage example:
 //

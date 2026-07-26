@@ -1,314 +1,373 @@
 ---
 title: Development Guide
-description: How to build, test, and extend the lthn binary — prerequisites, Go + frontend toolchains, audit gate, subsystem-adding workflow, dispatch-handler patterns.
+description: Build, run, test, and extend the Lethean Desktop CLI, Wails host, and Angular frontend.
 ---
 
 <!-- SPDX-License-Identifier: EUPL-1.2 -->
 
 # Development Guide
 
-This guide covers everything needed to build, test, extend, and contribute to lthn.
+Lethean Desktop builds the `lthn` CLI router and the native/browser hosts that
+consume its Go services. The Angular application is the only product
+frontend. Wails owns native host behaviour and transport; Angular owns
+rendering and navigation.
 
-**Module path:** `dappco.re/lthn/desktop`
-**Licence:** EUPL-1.2
-**Language:** Go 1.26 + Angular (frontend)
+Read [`../AGENTS.md`](../AGENTS.md) before changing architecture, CoreGO
+composition, file access, or frontend boundaries.
 
----
+## 1. Toolchain and checkout
 
-## Table of Contents
+Use the versions declared by:
 
-1. [Prerequisites](#1-prerequisites)
-2. [Build](#2-build)
-3. [Run](#3-run)
-4. [Test](#4-test)
-5. [Audit gate](#5-audit-gate)
-6. [Adding a subcommand](#6-adding-a-subcommand)
-7. [Adding a subsystem](#7-adding-a-subsystem)
-8. [Frontend development](#8-frontend-development)
-9. [WebSocket connection manager](#9-websocket-connection-manager)
-10. [Coding standards](#10-coding-standards)
+- `go/go.mod`
+- `frontend-ng/package.json`
+- `frontend-ng/package-lock.json`
+- `.github/workflows/build.yml`
 
----
-
-## 1. Prerequisites
-
-- Go 1.26 or newer.
-- Node 20+ and npm (for the frontend).
-- macOS for the GUI / tray (Apple Silicon for full inference performance).
-- `gofmt` and `golangci-lint` on PATH for the audit gate.
-- `bash` + `python3` for the v0.9.0 compliance audit script.
-
-lthn/desktop uses workspace mode (the canonical Lethean pattern). The `go.work` at the repo root pulls live dev sources from `external/` submodules. Clone with submodules to set it up:
+Required local commands are Go, Node.js, npm, Wails 3, and Task. A normal clone
+contains the complete source topology:
 
 ```bash
-git clone --recursive <repo-url> lthn-desktop
+git clone <repo-url> lthn-desktop
 cd lthn-desktop
 go work sync
+cd frontend-ng
+npm ci
+cd ..
+wails3 task doctor
 ```
 
-If you cloned without `--recursive`, fetch the submodules:
+There are no required Git submodules or `external/` source checkouts.
+`go.work` contains only `./go`; CoreGO dependencies resolve from the versioned
+`dappco.re/go*` modules in `go/go.mod`.
+
+`task doctor` distinguishes required failures from optional resources. Missing
+crew repositories, generated bindings, or occupied development ports are
+reported with direct remedies. Optional sibling repositories can be selected
+with:
+
+```text
+LTHN_MLX_REPO
+LTHN_AGENT_REPO
+LTHN_AI_REPO
+```
+
+## 2. Development modes
+
+### Browser-only UI and demo development
 
 ```bash
-git submodule update --init --recursive
+cd frontend-ng
+npm run demo
 ```
 
----
+Open:
 
-## 2. Build
+```text
+http://127.0.0.1:9245/?lthn-offline=1&lthn-view=desktop#/
+http://127.0.0.1:9245/?lthn-offline=1&lthn-view=shell#/
+http://127.0.0.1:9245/?lthn-offline=1&lthn-view=device&lthn-device=small#/
+```
+
+`lthn-offline=1` deliberately disables Wails socket retries and event
+subscriptions. Demo data remains visibly labelled and isolated per app
+window, so UI work is deterministic without a native backend.
+
+### Full Wails development
+
+From the repository root:
+
+```bash
+wails3 task dev
+```
+
+The development topology is:
+
+| Port | Owner | Purpose |
+|---|---|---|
+| `9245` | Angular development server | HMR and development assets |
+| `9099` | Wails MCP service | Development-only WebView automation |
+| `9199` | Lethean connection service | Generated binding calls and events |
+
+On macOS the development window loads the Angular loopback URL directly.
+WebKit rejects JavaScript WebSockets opened from the secure custom
+`wails://` scheme, so the host injects the exact validated `lthn-ws` URL into
+the development query. Production does not use this route: it loads embedded
+assets through `wails://`.
+
+The Files app opens existing `Documents` and `Downloads` roots through
+sandboxed `io.Medium` providers. macOS prompts for those protected folders
+using the descriptions in `build/darwin/Info.dev.plist` and
+`build/darwin/Info.plist`. If access was previously denied, enable Lethean
+Desktop under **System Settings → Privacy & Security → Files & Folders**.
+Denial deliberately leaves the provider unavailable; it never falls back to
+raw host paths.
+
+Angular changes update through HMR. Go changes regenerate TypeScript bindings,
+compile the host-native development binary, and relaunch Wails without
+rebuilding the production frontend or optional crew sidecars.
+
+If a previous session owns a port, close the running application before
+starting another session or running focused desktop tests.
+
+## 3. Builds and packages
+
+Build only the Angular production bundle:
+
+```bash
+cd frontend-ng
+npm run build
+```
+
+Output is written directly to:
+
+```text
+go/cmd/lthn/dist/index.html
+```
+
+`go/cmd/lthn/embed.go` embeds that directory into production builds.
+
+Build or package the current platform:
+
+```bash
+wails3 task build
+wails3 task package
+```
+
+Platform-specific tasks live under:
+
+```text
+build/darwin/
+build/linux/
+build/windows/
+build/ios/
+build/android/
+```
+
+The root production pre-build may stage `lthn-mlx`, `lthn-agent`, and
+`lthn-ai`. Their source repositories are optional; absence must not prevent a
+GUI-only build.
+
+Build the CLI router directly when no native package is needed:
 
 ```bash
 go build -o bin/lthn ./go/cmd/lthn
 ```
 
-Produces a single binary at `bin/lthn`. The frontend is not embedded yet — when the GUI is wired, the Wails build step will compile the frontend assets into the binary.
-
-For a release-shape macOS build (signed `.app` bundle):
+The CLI remains usable independently of the GUI:
 
 ```bash
-task darwin:package    # TODO — wire via core/gui's package pipeline
+./bin/lthn help
+./bin/lthn version
+./bin/lthn serve
+./bin/lthn ai
 ```
 
----
+## 4. Generated Wails bindings
 
-## 3. Run
+Generate the desktop bindings with:
 
 ```bash
-./bin/lthn                 # default mode (banner pointing at help — GUI not yet wired)
-./bin/lthn version         # v0.1.0
-./bin/lthn help            # full subcommand list
-./bin/lthn help ai         # subcommand-specific help
-./bin/lthn ai              # subsystem dispatch (verb-shaped)
-./bin/lthn serve --port 8000   # HTTP server when wired
-./bin/lthn gui             # Wails launch when wired
+wails3 task common:generate:bindings
 ```
 
-Unknown subcommands return exit 2 with a help pointer. Missing required args return exit 2 with usage guidance. All routine output goes to `core.Stdout()`; errors and usage guidance go to `core.Stderr()`.
+Every platform generator writes to the shared ignored directory:
 
----
+```text
+frontend-ng/bindings/
+```
 
-## 4. Test
+Desktop, iOS, and Android tasks use flavour markers so one platform cannot
+silently reuse another platform's bindings. Mobile public binding tasks
+restore the desktop flavour afterwards. Generation uses `go work sync`; it
+does not recreate the removed submodule workspace.
+
+When adding a bindable service or method, regenerate bindings and run the
+frontend contract suite before relying on generated TypeScript.
+
+## 5. Tests and confidence gates
+
+Focused iteration:
 
 ```bash
-go test -count=1 ./go/...
+go test ./go/pkg/<changed-package>
+
+cd frontend-ng
+npx ng test --watch=false --include=src/path/to/file.spec.ts
 ```
 
-Tests follow the canonical Test triplet pattern. For every public symbol `Foo` in `pkg/x/x.go`:
+Repository entrypoints:
 
-```go
-// pkg/x/x_test.go
-func TestX_Foo_Good(t *core.T) { /* happy path */ }
-func TestX_Foo_Bad(t *core.T)  { /* error path */ }
-func TestX_Foo_Ugly(t *core.T) { /* edge case */ }
+```bash
+wails3 task test:go
+wails3 task test:frontend
+wails3 task test
+
+wails3 task test:cover:go
+wails3 task test:cover:frontend
+wails3 task test:cover
 ```
 
-And an example in `pkg/x/x_example_test.go`:
+The ordered frontend confidence gate used by CI is:
 
-```go
-func ExampleFoo() {
-    // Usage example body that prints expected output.
-    // Output: …
-}
+```bash
+wails3 task verify:frontend
 ```
 
-Use `core.AssertEqual`, `core.AssertTrue`, `core.AssertNotNil`, `core.AssertNoError`, etc. — never `testify`. The `*T` test fixture is from `dappco.re/go` (alias `core`), not `testing.T`.
+It runs formatting, type/build checks, Angular tests, executable development
+contracts, capability inventory, production build, and output verification in
+one deterministic order.
 
-The audit's `ax7-triplet-gaps`, `example-gaps`, `missing-test-files`, and `missing-example-files` dimensions catch missing tests/examples per public symbol. The scaffold today carries a backlog in these dimensions — fill the gap as the symbol is added (TDD), don't accumulate.
-
----
-
-## 5. Audit gate
-
-From the repo root with `go.work` active:
+Before stopping after code changes, run checks proportional to the scope:
 
 ```bash
 gofmt -l go/
-go work sync
+git diff --check
 go vet ./go/...
-go test -count=1 ./go/...
-bash /Users/snider/Code/core/go/tests/cli/v090-upgrade/audit.sh .
+wails3 task test
+cd frontend-ng && npm run build
 ```
 
-The audit script reports compliance dimensions across the v0.9.0 Core idiom. Eight **code-wrongness** dimensions must stay at zero on every commit:
+The repository has known historical formatting, coverage, and CoreGO
+compliance debt. Report broad diagnostics honestly; do not rewrite unrelated
+packages or weaken tests to manufacture an all-green global claim.
 
-- `legacy-imports` — `dappco.re/go/core` → `dappco.re/go`
-- `banned-imports` — `fmt`, `errors`, `strings`, `os`, `log`, `path`, `path/filepath`, `os/exec`, `io/ioutil`, `encoding/json`, `bytes`
-- `err-shape-funcs` — `func ... error` should be `func ... core.Result`
-- `tuple-result-shape` — `func ... (*T, error)` should collapse to single-return `core.Result` with value in `r.Value`
-- `result-discards` — `_ = expr(...)` in production likely throws away a Result
-- `service-name-empty` — `c.Service("", ...)` empty service-name registration
-- `service-usage-example` — every `NewService`-declaring file must carry a `// Usage example:` marker
-- `service-canonical-shape` — packages with `NewService` must also declare a free `Register(c *core.Core) core.Result` function
+## 6. Audit entrypoint
 
-Completeness dimensions (tests, examples, docs, licence) may carry a backlog during scaffold work; do not regress what is already at zero.
+Run:
 
----
+```bash
+bash build/audit.sh
+```
 
-## 6. Adding a subcommand
+Use `-v` for full captured output:
 
-Subcommands live as flat handler functions in `cmd/lthn/main.go`. To add `lthn newcmd`:
+```bash
+bash build/audit.sh -v
+```
 
-1. Add a `cmdNewcmd(args []string) int` function near the existing handlers. Use `core.Print`, `core.Println`, `core.Sprintf` for output. Parse flags with `core.ParseFlag`.
-2. Add a `case "newcmd":` in `main()` that calls `core.Exit(cmdNewcmd(args[1:]))`.
-3. Add a help section for the subcommand in `cmdHelp`'s switch.
-4. If the subcommand needs subsystem state, construct it via `core.New()` + `<pkg>.Register(c)`.
-5. Write the test triplet and example: `cmd/lthn/main_test.go` extends with `TestMain_CmdNewcmd_{Good,Bad,Ugly}` plus an `Example` in `cmd/lthn/main_example_test.go`.
+The script treats Go vet/build/test and frontend build/test/contract failures
+as blocking. The external CoreGO v0.9.0 audit is a no-regression diagnostic:
+its large pre-existing compliance backlog is reported but is not an all-zero
+gate for unrelated changes. If the external audit checkout is absent, the
+script records that fact and continues with repository-owned gates.
 
-The handler returns the desired exit code: 0 success, 1 runtime failure, 2 usage error.
+## 7. Adding a CLI command
 
----
-
-## 7. Adding a subsystem
-
-Each `pkg/*` directory is a self-contained subsystem. To add `pkg/x/`:
-
-1. Create `pkg/x/x.go` with the canonical shape:
+CLI verbs are flat handlers in `go/cmd/lthn/main.go`:
 
 ```go
-// Package x does <thing>.
-//
-// Usage example:
-//
-//	c := core.New()
-//	s := x.NewService(x.Options{})
-//	if r := s.Register(c); !r.OK { return r }
-package x
-
-import core "dappco.re/go"
-
-type Options struct { /* … */ }
-
-type Service struct { opts Options }
-
-func NewService(opts Options) *Service { return &Service{opts: opts} }
-
-func (s *Service) Register(c *core.Core) core.Result {
-    // Wire actions, signals, lifecycle hooks here.
-    return core.Ok(s)
-}
-
-func Register(c *core.Core) core.Result {
-    return NewService(Options{}).Register(c)
+func cmdNewcmd(args []string) int {
+	// Parse the verb's arguments, delegate to go/pkg capability, and return
+	// 0 for success, 1 for runtime failure, or 2 for usage failure.
+	return 0
 }
 ```
 
-2. Create `pkg/x/x_test.go` with `TestX_NewService_{Good,Bad,Ugly}`, `TestX_Service_Register_{Good,Bad,Ugly}`, `TestX_Register_{Good,Bad,Ugly}`.
-3. Create `pkg/x/x_example_test.go` with `ExampleNewService`, `ExampleService_Register`, `ExampleRegister`.
-4. If the subsystem needs a CLI entry, add a subcommand in `cmd/lthn/main.go`.
-5. Run the audit gate — all eight code-wrongness dimensions should stay at zero.
+Register the dispatch branch and help text in the same file. Reusable
+capability belongs in `go/pkg/*`, never in `cmd/lthn`.
 
-The free `Register(c *core.Core) core.Result` function is canonical per Mantis #1336; without it the `service-canonical-shape` audit dimension fails.
+Use existing CoreGO process boundaries:
 
----
+- `core.Args`, `core.Exit`
+- `core.Print`, `core.Println`
+- `core.ParseFlag`
+- `core.Result`, `core.Ok`, `core.Fail`
 
-## 8. Frontend development
+Add focused Good/Bad/Ugly tests and a runnable example for new public
+behaviour.
 
-```bash
-cd frontend-ng
-npm install
-npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
-```
+## 8. Adding a Go service
 
-The browser-only shell is available at:
+A canonical service exposes:
 
-- `http://127.0.0.1:9245/#/` — the desktop shell.
-- `http://127.0.0.1:9245/#/w/:app` — a standalone native-window host.
+```go
+type Options struct {
+	// Explicit dependencies.
+}
 
-Production build:
+type Service struct {
+	// Owned state.
+}
 
-```bash
-npx ng build    # → ../go/cmd/lthn/dist/index.html
-```
+func NewService(options Options) *Service {
+	return &Service{}
+}
 
-Angular writes the browser bundle directly to the directory embedded by
-`go/cmd/lthn/embed.go`. The application remains client-side rendered: do not
-add Angular SSR, a server entry point, or hydration.
+func (service *Service) Register(coreInstance *core.Core) core.Result {
+	return core.Ok(service)
+}
 
----
-
-## 9. WebSocket connection manager
-
-The GUI backend exposes Wails bindings and events through
-`pkg/connection`. Its local development endpoint is:
-
-```text
-ws://localhost:9099/wails/ws
-```
-
-Backend configuration is resolved when the connection service is
-constructed:
-
-| Environment variable | Purpose | Default |
-|---|---|---|
-| `LTHN_WAILS_WS_LISTEN` | Backend TCP listen address | `127.0.0.1:9099` |
-| `LTHN_WAILS_WS_PATH` | HTTP WebSocket upgrade path | `/wails/ws` |
-| `LTHN_WAILS_WS_URL` | URL or root-relative path published to clients | `ws://localhost:9099/wails/ws` |
-| `LTHN_WAILS_WS_ORIGINS` | Comma-separated exact browser Origins | Native Wails and loopback origins |
-| `LTHN_WAILS_WS_TOKEN` | Optional upgrade token | Empty on loopback |
-| `LTHN_WAILS_WS_TRUST_PROXY` | Acknowledge that an authenticating proxy is the sole route to a non-loopback listener | `false` |
-
-The Angular client accepts an injected URL, an intentional bootstrap
-override, backend-served configuration, or a URL previously selected through
-`ConnectionManagerService.configure()`. It converts an HTTPS same-origin
-path to WSS. It rejects remote plaintext WS, URL credentials, and fragments.
-Only the non-secret URL is persisted; tokens are never written to browser
-storage.
-
-### Secure reverse proxy
-
-For a host proxy, leave the Go listener on loopback and publish a WSS route.
-For example, the essential nginx upgrade shape is:
-
-```nginx
-location /wails/ws {
-    proxy_pass http://127.0.0.1:9099/wails/ws;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header Origin $http_origin;
+func Register(coreInstance *core.Core) core.Result {
+	return NewService(Options{}).Register(coreInstance)
 }
 ```
 
-Terminate TLS and authenticate the user before this location, then configure:
+Include a `// Usage example:` marker and package examples. Register lifecycle
+and service wiring through `core.Core`; do not hide process-wide composition
+in package globals.
 
-```bash
-LTHN_WAILS_WS_URL=/wails/ws
-LTHN_WAILS_WS_ORIGINS=https://desktop.example
-```
+All file-backed product operations must ultimately pass through a registered
+`dappco.re/go/io.Medium`. Renderer calls carry mount IDs and
+provider-relative paths, never absolute host paths. A missing Medium fails
+closed.
 
-The browser will resolve the relative path as
-`wss://desktop.example/wails/ws`. A proxy in another container or network
-namespace may require a non-loopback listen address. In that case, firewall
-the backend from direct access and set either
-`LTHN_WAILS_WS_TOKEN` or the explicit
-`LTHN_WAILS_WS_TRUST_PROXY=true` acknowledgement.
+Tests which need user-data roots must use `t.TempDir()` and an isolated
+`HOME`. Never write into the developer's real `~/Lethean/` tree.
 
-Browser WebSocket clients supply a short-lived token as `access_token` when
-the backend token is enabled. Non-browser clients may instead send
-`Authorization: Bearer <token>`. Never place a long-lived token in
-`LTHN_WAILS_WS_URL`, page history, served JavaScript, proxy access logs, or
-mobile persistent storage. Any token used outside loopback must travel over
-WSS.
+## 9. Adding an Angular surface
 
-Run the focused transport checks with:
+The canonical registries are:
 
-```bash
-cd go && go test -race ./pkg/connection
-cd ../frontend-ng
-npx ng test --configuration=ci --include=src/app/connection-manager.service.spec.ts
-```
+- `frontend-ng/src/app/desktop/desktop-catalogue.data.ts`
+- `frontend-ng/src/app/desktop/surfaces/surface-registry.ts`
+- `frontend-ng/src/app/desktop/apps/app-view.ts`
+- `frontend-ng/src/app/desktop/desktop-route-tree.ts`
 
----
+Add the application/category metadata and lazy standalone component, then let
+the route tree derive navigation. Extend route/registry tests rather than
+adding a parallel view switcher.
 
-## 10. Coding standards
+Prefer:
 
-- **UK English** throughout: `colour`, `behaviour`, `centre`, `organisation`, `licence`. Never American spellings.
-- **CoreGO wrappers** for all stdlib equivalents (see audit gate above).
-- **`core.Result` return shape** — never `error`, never `(T, error)`.
-- **Mantis #1336 Service shape** for every `pkg/*` subsystem — `NewService` + method `Register` + free `Register`.
-- **`// Usage example:` doc marker** for every file declaring a service or top-level entry point.
-- **TDD** — every public symbol ships with its `Test*_{Good,Bad,Ugly}` triplet + `Example*` in the same commit. Do not accumulate test backlog.
-- **No version pins in docs** — `go.mod` and `package.json` are the source of truth for dependency versions. Describe what a dep is, not what version it's at.
-- **No hidden user bloat** — user-visible data goes under `~/Lethean/`, never `~/.lthn/` or other dot-dirs.
-- **No supply-chain bloat** — frontend dependencies stay deliberate and recorded in `frontend-ng/package.json`; backend code stays within Go stdlib + `golang.org/x/*` + `dappco.re/*`.
+- standalone components;
+- `ChangeDetectionStrategy.OnPush`;
+- signals for component-local reactive state;
+- NgRx for shared or transport-driven state; and
+- typed bridge services which validate unknown native payloads.
 
-When in doubt, read the v0.9.0 audit at `core/go/tests/cli/v090-upgrade/audit.sh` — the dimensions encode the standards.
+Lit remains intentional only for reusable custom elements under
+`frontend-ng/src/kit/` and plugin descriptors whose `kind` is `lit`. Do not
+restore the retired Lit application.
+
+## 10. Connection configuration
+
+The generic connection service defaults to
+`ws://localhost:9099/wails/ws`. Full Wails development moves the Lethean
+transport to 9199 because the development-only Wails MCP service owns 9099.
+
+| Environment variable | Purpose |
+|---|---|
+| `LTHN_WAILS_WS_LISTEN` | Backend listen address |
+| `LTHN_WAILS_WS_PATH` | HTTP WebSocket upgrade path |
+| `LTHN_WAILS_WS_URL` | Public WebSocket URL or root-relative proxy path |
+| `LTHN_WAILS_WS_ORIGINS` | Comma-separated exact browser origins |
+| `LTHN_WAILS_WS_TOKEN` | Optional upgrade token |
+| `LTHN_WAILS_WS_TRUST_PROXY` | Explicit non-loopback proxy acknowledgement |
+
+Loopback is the safe default. Remote browser clients require WSS plus an exact
+origin policy and authentication. Never place long-lived tokens in URLs,
+browser history, generated JavaScript, logs, or persistent mobile storage.
+
+## 11. Coding standards
+
+- Use British English in code, copy, tests, and docs.
+- Use EUPL-1.2 identifiers and headers.
+- Treat manifests as dependency-version truth; avoid copied patch-version
+  claims in prose.
+- Keep the CLI usable when GUI assets or hosts fail.
+- Preserve hash routing and client-side rendering.
+- Do not add SSR, hydration, a second product frontend, feature paywalls, or
+  “Pro” gates.
+- Use TDD for behavioural changes.
+- Preserve unrelated work in dirty worktrees.

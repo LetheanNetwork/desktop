@@ -6,7 +6,7 @@
 // body is the document text — Trix-style split.
 //
 // Wire shape matches the DocRow interface consumed by the
-// <lthn-view-documents> Lit element in the Office role view.
+// Angular documents surface in the Office category.
 //
 // Usage example (Wails):
 //
@@ -16,9 +16,9 @@ package documents
 
 import core "dappco.re/go"
 
-// DocRow is the JSON wire type returned to the Lit frontend.
+// DocRow is the JSON wire type returned to the Angular frontend.
 // Field names match the DocRow interface in
-// frontend/src/lit/views/office/documents.ts exactly.
+// frontend-ng/src/app/desktop/surfaces/office/documents.ts exactly.
 //
 // Usage example:
 //

@@ -39,7 +39,7 @@
 // adjudication, mirroring tasks adopter): wails3 generates the TS
 // binding filename from the Go type name lowercased — *WailsService →
 // wailsservice.ts under
-// frontend/bindings/dappco.re/lthn/desktop/pkg/vi/. The pre-stamp shape
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/vi/. The pre-stamp shape
 // lived at service.ts; the frontend imports "@desktop/vi/service" today.
 // Method IDs (ByID hashes) are also keyed off the FQ type name and will
 // shift. A follow-on Mantis ticket covers re-running `wails3 generate` +

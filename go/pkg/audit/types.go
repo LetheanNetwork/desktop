@@ -118,9 +118,8 @@ const (
 )
 
 // MetaKey* literals — the reserved keys the substrate writes into
-// Event.Meta. Exported as named constants so callsites and the TS
-// mirror (frontend/src/lit/obs/audit-constants.ts AUDIT_META_KEYS)
-// stay in lockstep, and so a forensic walker can grep on a single
+// Event.Meta. Exported as named constants so callsites and any Angular
+// decoder stay in lockstep, and so a forensic walker can grep on a single
 // canonical literal rather than the bare "error_code" string.
 //
 // Mantis #1720 v2 dual-key shape — MetaKeyErrorCode answers WHY
@@ -162,12 +161,12 @@ const (
 // OR the canonical "unknown_error" fallback — so the chip-filter UI and the
 // forensic log-tailer can group failures by a stable, finite vocabulary.
 //
-//   // Canonical emit shape (every Failed callsite):
-//   _ = audit.Default().Record(audit.Event{
-//       Event:   audit.EventMarketplaceInstallFailed,
-//       Outcome: audit.OutcomeFailed,
-//       Meta:    map[string]any{"error_code": audit.ErrorCode(r)},
-//   })
+//	// Canonical emit shape (every Failed callsite):
+//	_ = audit.Default().Record(audit.Event{
+//	    Event:   audit.EventMarketplaceInstallFailed,
+//	    Outcome: audit.OutcomeFailed,
+//	    Meta:    map[string]any{"error_code": audit.ErrorCode(r)},
+//	})
 //
 // NEVER pass r.Error() / err.Error() / r.Value.(error).Error() directly to
 // Meta["error_code"]. Raw error prose routinely echoes caller-controlled
@@ -193,13 +192,13 @@ const (
 // Shape A surfacing).
 //
 //   - Requested  — emitted at top of handler, AFTER input parsing succeeds,
-//                  BEFORE any policy gate. Outcome: ok.
+//     BEFORE any policy gate. Outcome: ok.
 //   - Rejected   — emitted if a policy gate denies. Outcome: denied.
-//                  Carries Meta["reason"] from the package's closed-set.
+//     Carries Meta["reason"] from the package's closed-set.
 //   - Succeeded  — emitted post-handler on the OK path. Outcome: ok.
 //   - Failed     — emitted post-handler on the non-OK path. Outcome: failed
-//                  (or error for an internal/transport class). Carries
-//                  Meta["error_code"] sourced via audit.ErrorCode(r).
+//     (or error for an internal/transport class). Carries
+//     Meta["error_code"] sourced via audit.ErrorCode(r).
 //
 // EventTierReject is the substrate-level Rejected emit for tier-auth gates
 // (Mantis #1758) — it fires BEFORE the per-package Rejected helper would,
@@ -211,12 +210,12 @@ const (
 // Launch/Stop/FetchManifest), pkg/downloader, pkg/gateway, pkg/queue,
 // pkg/sessions, pkg/vi (PRFetch/Probe), pkg/process.
 const (
-	EventAuthUnlockFailed       = "auth.unlock.failed"
-	EventAuthLockoutTriggered   = "auth.lockout.triggered"
-	EventAuthLockRequested      = "auth.lock.requested"
-	EventAuthSessionIssued      = "auth.session.issued"
+	EventAuthUnlockFailed        = "auth.unlock.failed"
+	EventAuthLockoutTriggered    = "auth.lockout.triggered"
+	EventAuthLockRequested       = "auth.lock.requested"
+	EventAuthSessionIssued       = "auth.session.issued"
 	EventAuthSessionVerifyFailed = "auth.session.verify_failed"
-	EventAuthAccountProvisioned = "auth.account.provisioned"
+	EventAuthAccountProvisioned  = "auth.account.provisioned"
 
 	// EventAuthAccountCreated fires when pkg/account.Service.Create
 	// successfully lands a new account on disk via the

@@ -23,7 +23,7 @@ import core "dappco.re/go"
 
 // MailFolder is the JSON wire type for a mailbox folder.
 // Matches the MailFolder interface in
-// frontend/src/lit/views/office/mail.ts exactly.
+// frontend-ng/src/app/desktop/surfaces/office/mail.ts exactly.
 //
 // Usage example:
 //
@@ -45,7 +45,7 @@ type MailFolder struct {
 
 // MailThread is the JSON wire type for a single email thread.
 // Matches the MailThread interface in
-// frontend/src/lit/views/office/mail.ts exactly.
+// frontend-ng/src/app/desktop/surfaces/office/mail.ts exactly.
 //
 // Usage example:
 //
@@ -361,10 +361,10 @@ func folderLabel(slug string) string {
 // deprecatedProviders is the set of mail providers for which
 // Auth.Kind=="password" is rejected per §1.5 Q2 ruling.
 var deprecatedProviders = map[string]bool{
-	"gmail.com":    true,
-	"outlook.com":  true,
-	"live.com":     true,
-	"hotmail.com":  true,
-	"yahoo.com":    true,
-	"aol.com":      true,
+	"gmail.com":   true,
+	"outlook.com": true,
+	"live.com":    true,
+	"hotmail.com": true,
+	"yahoo.com":   true,
+	"aol.com":     true,
 }

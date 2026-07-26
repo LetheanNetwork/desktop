@@ -2,7 +2,7 @@
 
 // Wails3 Service shape for the models package — wraps the free
 // List function so Wails generates a TS binding at
-// frontend/bindings/dappco.re/lthn/desktop/pkg/models/. Bound by
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/models/. Bound by
 // application.NewService(models.NewWailsService()) in
 // pkg/desktop/desktop.go; the package-level List() stays for
 // non-WebView callers.
@@ -10,7 +10,6 @@
 package models
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
 )

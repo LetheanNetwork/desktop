@@ -41,8 +41,8 @@
 // New top-level prefix (e.g. "queue.*", "sessions.*") requires:
 //   1. Registration in this comment block.
 //   2. Mantis ticket recording the schema bump.
-//   3. Mirror update in frontend/src/lit/obs/audit-constants.ts so the
-//      chip-filter UI surfaces the new keyspace.
+//   3. A matching update to any Angular audit-filter decoder which exposes
+//      the new keyspace. The Go registry remains canonical.
 //
 // Two-key shape (Mantis #1720 ADD-1, RFC §7 Q-4 v2):
 //

@@ -134,7 +134,7 @@ func Register(c *core.Core) core.Result {
 // ----- Wails3 Service shape ----------------------------------------
 //
 // Implements application.Service so Wails generates a TS binding
-// at frontend/bindings/dappco.re/lthn/desktop/pkg/telemetry/service.ts.
+// at frontend-ng/bindings/dappco.re/lthn/desktop/pkg/telemetry/service.ts.
 // The Sample method below is what the WebView calls; the package-level
 // Sample()  / Core action above stay for non-WebView callers.
 

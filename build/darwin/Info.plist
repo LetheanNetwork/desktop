@@ -50,6 +50,10 @@
 		<string>0.1.0</string>
 		<key>LSMinimumSystemVersion</key>
 		<string>12.0.0</string>
+		<key>NSDocumentsFolderUsageDescription</key>
+		<string>Lethean Desktop uses your Documents folder when you browse and manage files in the Files app.</string>
+		<key>NSDownloadsFolderUsageDescription</key>
+		<string>Lethean Desktop uses your Downloads folder when you browse and manage files in the Files app.</string>
 		<key>NSHighResolutionCapable</key>
 		<string>true</string>
 		<key>NSHumanReadableCopyright</key>

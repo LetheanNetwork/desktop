@@ -1,13 +1,13 @@
 version: '3'
 
-# lthn — Lethean Desktop. Wails3-canonical Taskfile structure
-# (lifted from `wails3 init -t lit`), adapted for the Lethean
-# go/ subfolder layout. The platform task files in build/{darwin,
+# lthn — Lethean Desktop. Wails3-canonical Taskfile structure,
+# adapted for the Lethean go/ subfolder layout and Angular frontend.
+# The platform task files in build/{darwin,
 # linux,windows,ios,android}/Taskfile.yml all build the same cmd/lthn
 # product entrypoint; the mobile tasks additionally generate Wails overlays.
 #
 # Our module lives at go/ (Lethean canon). Adaptations live in this
-# top file: BIN_DIR points outside go/, the go build / go mod tidy
+# top file: BIN_DIR points outside go/, the go build / go work sync
 # / wails3 generate bindings commands all `cd go` first.
 #
 # Common verbs:

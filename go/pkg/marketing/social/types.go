@@ -10,7 +10,7 @@
 // promotes them to `.lthn` per RFC §3.1.
 //
 // Wire shapes match the SocialPost interface consumed by the
-// <lthn-view-social> Lit element in the Marketing role view.
+// Angular social surface in the Marketing category.
 //
 // Usage example (Wails):
 //
@@ -20,7 +20,7 @@ package social
 
 // SocialPost is the JSON wire type for a single social post card.
 // Field names match the SocialPost interface in
-// frontend/src/lit/views/marketing/social.ts.
+// frontend-ng/src/app/desktop/surfaces/marketing/social.ts.
 //
 // Usage example:
 //

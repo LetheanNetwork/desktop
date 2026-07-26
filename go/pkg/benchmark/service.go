@@ -312,7 +312,7 @@ func (s *Service) Bench(ctx core.Context, req Bench, bencherName string) core.Re
 // ----- Wails3 Service shape -------------------------------------------
 //
 // Implements application.Service so Wails generates a TS binding
-// at frontend/bindings/dappco.re/lthn/desktop/pkg/benchmark/service.ts.
+// at frontend-ng/bindings/dappco.re/lthn/desktop/pkg/benchmark/service.ts.
 
 // ServiceName labels the binding namespace exposed to JS.
 func (s *Service) ServiceName() string { return "Benchmark" }

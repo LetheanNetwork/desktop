@@ -17,9 +17,9 @@ package runbooks
 
 import core "dappco.re/go"
 
-// RunbookEntry is the JSON wire type returned to the Lit frontend.
+// RunbookEntry is the JSON wire type returned to the Angular frontend.
 // Field names match the RunbookEntry interface in
-// frontend/src/lit/views/operations/runbooks.ts exactly.
+// frontend-ng/src/app/desktop/surfaces/operations/runbooks.ts exactly.
 //
 // Usage example:
 //
@@ -104,7 +104,7 @@ type RunbookRecord struct {
 	//
 	// RunbookRecord is the persistence type (yaml-only) — Version
 	// stays inside the package; the RunbookEntry wire type consumed
-	// by the Lit frontend has no Version field by design.
+	// by the Angular frontend has no Version field by design.
 	Version int `yaml:"version,omitempty"`
 }
 

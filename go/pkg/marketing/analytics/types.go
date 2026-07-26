@@ -9,7 +9,7 @@
 // constants so the view renders correctly in preview mode.
 //
 // Wire shapes match the Source + PageRow interfaces consumed by the
-// <lthn-view-analytics> Lit element in the Marketing role view.
+// Angular analytics surface in the Marketing category.
 //
 // Usage example (Wails):
 //
@@ -19,7 +19,7 @@ package analytics
 
 // AnalyticsSource is the JSON wire type for one traffic source row.
 // Field names match the Source interface in
-// frontend/src/lit/views/marketing/analytics.ts.
+// frontend-ng/src/app/desktop/surfaces/marketing/analytics.ts.
 //
 // Usage example:
 //
@@ -35,7 +35,7 @@ type AnalyticsSource struct {
 
 // AnalyticsPage is the JSON wire type for one top-page row.
 // Field names match the PageRow interface in
-// frontend/src/lit/views/marketing/analytics.ts.
+// frontend-ng/src/app/desktop/surfaces/marketing/analytics.ts.
 //
 // Usage example:
 //

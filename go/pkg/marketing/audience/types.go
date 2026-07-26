@@ -14,7 +14,7 @@
 // raw subscriber count.
 //
 // Wire shapes match the Segment interface consumed by the
-// <lthn-view-audience> Lit element in the Marketing role view.
+// Angular audience surface in the Marketing category.
 //
 // Usage example (Wails):
 //
@@ -24,7 +24,7 @@ package audience
 
 // Segment is the JSON wire type for a single subscriber segment row.
 // Field names match the Segment interface in
-// frontend/src/lit/views/marketing/audience.ts.
+// frontend-ng/src/app/desktop/surfaces/marketing/audience.ts.
 //
 // Usage example:
 //

@@ -10,7 +10,7 @@
 // promotes them to `.lthn` per RFC §3.1.
 //
 // Wire shapes match the Campaign interface consumed by the
-// <lthn-view-campaigns> Lit element in the Marketing role view.
+// Angular campaigns surface in the Marketing category.
 //
 // Usage example (Wails):
 //
@@ -20,7 +20,7 @@ package campaigns
 
 // Campaign is the JSON wire type for a single campaign row.
 // Field names match the Campaign interface in
-// frontend/src/lit/views/marketing/campaigns.ts.
+// frontend-ng/src/app/desktop/surfaces/marketing/campaigns.ts.
 //
 // Usage example:
 //

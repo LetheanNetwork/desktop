@@ -2,7 +2,7 @@
 
 // Wails3 Service shape for the sessions package — wraps the free
 // Create / Append / Read / List functions so Wails generates a TS
-// binding at frontend/bindings/dappco.re/lthn/desktop/pkg/sessions/.
+// binding at frontend-ng/bindings/dappco.re/lthn/desktop/pkg/sessions/.
 // Bound by application.NewService(sessions.NewWailsService(core)) in
 // pkg/desktop/desktop.go; the package-level functions stay for
 // non-WebView callers (CLI verbs, Action bus consumers).
@@ -10,7 +10,6 @@
 package sessions
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/inference"
 	"dappco.re/lthn/desktop/pkg/paths"

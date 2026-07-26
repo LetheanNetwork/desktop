@@ -3,7 +3,7 @@
 // Wails surface for the marketplace service. Methods are bound on
 // the *Service receiver and exposed to the frontend via wails3
 // generate bindings — the TS shape lands at
-// frontend/bindings/dappco.re/lthn/desktop/pkg/marketplace/service.
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/marketplace/service.
 
 package marketplace
 
@@ -17,7 +17,7 @@ const (
 	installOp           = "marketplace.Install"
 )
 
-// SearchOutput is the shape returned to the Lit window.
+// SearchOutput is the shape returned to the Angular window.
 type SearchOutput struct {
 	Packages []Package `json:"packages"`
 }
@@ -45,7 +45,7 @@ func (s *Service) Info(code string) core.Result {
 	return core.Ok(InfoOutput{Package: pkg})
 }
 
-// InstalledOutput is the shape returned to the Lit window — the
+// InstalledOutput is the shape returned to the Angular window — the
 // list of currently-installed plugins. Empty until the plugin
 // runtime lands and starts tracking state on disk.
 type InstalledOutput struct {

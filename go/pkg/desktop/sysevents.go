@@ -1,7 +1,7 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
 // System event re-broadcasting. CoreGUI lifecycle and window events
-// get republished as "lthn:*" custom events so the Lit frontend has
+// get republished as "lthn:*" custom events so the Angular frontend has
 // one consistent event-bus contract:
 //
 //   Events.On("lthn:app:opened-url", e => { route(e.data) })

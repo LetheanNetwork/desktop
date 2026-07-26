@@ -149,7 +149,7 @@ func Schemas() []orm.Schema {
 }
 
 // SiteStatus is the JSON-shaped row the Wails Sites() response
-// returns to the Lit window. Derived from the latest SiteProbe per
+// returns to the Angular window. Derived from the latest SiteProbe per
 // domain plus the SiteCatalogue entry that named it.
 //
 // The shape lines up with the RFC.vi.md "Site" contract — fields the

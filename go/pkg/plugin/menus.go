@@ -2,7 +2,7 @@
 
 // Menus — read-only Wails surface enumerating plugin menu
 // entries. The tray construction (pkg/desktop/desktop.go) calls
-// MenuEntries at boot to add per-plugin menu items; the Lit
+// MenuEntries at boot to add per-plugin menu items; the Angular
 // canvas-host index lists them so users can launch a plugin
 // surface from the same place they launch built-in surfaces.
 //

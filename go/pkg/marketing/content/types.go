@@ -11,7 +11,7 @@
 // until a write promotes them to `.lthn` per RFC §3.1.
 //
 // Wire shapes match the ContentColumn + ContentItem interfaces consumed by
-// the <lthn-view-content> Lit element in the Marketing role view.
+// the Angular content surface in the Marketing category.
 //
 // Usage example (Wails):
 //
@@ -21,7 +21,7 @@ package content
 
 // ContentItem is the JSON wire type for a single content card.
 // Field names match the ContentItem interface in
-// frontend/src/lit/views/marketing/content.ts.
+// frontend-ng/src/app/desktop/surfaces/marketing/content.ts.
 //
 // Usage example:
 //
@@ -55,7 +55,7 @@ type ContentItem struct {
 
 // ContentColumn is the JSON wire type for one pipeline stage column.
 // Field names match the ContentColumn interface in
-// frontend/src/lit/views/marketing/content.ts.
+// frontend-ng/src/app/desktop/surfaces/marketing/content.ts.
 //
 // Usage example:
 //

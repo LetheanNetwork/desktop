@@ -27,7 +27,7 @@ type RouteView struct {
 
 // Cerberus Mantis #1426 — defence-in-depth caps on the WGenerate /
 // WChat Wails surface. Threat model: a compromised renderer (post-
-// XSS — currently blocked by Lit auto-escape + bridge auth) or a
+// XSS — currently blocked by renderer auto-escaping + bridge auth) or a
 // future plugin-tier caller (#1421) could submit billion-message
 // arrays or multi-GiB payloads, OOM-ing the runtime before the
 // inference router gets a chance to reject. These caps stop the

@@ -169,7 +169,7 @@ func renderTrix(rec DeployRecord, notes string) ([]byte, error) {
 }
 
 // relativeAge formats a duration (now - t) as a short human-readable string.
-// Matches the fixture age values in frontend/src/lit/views/coding/deploys.ts.
+// Matches the fixture age values in frontend-ng/src/app/desktop/surfaces/coding/deploys.ts.
 func relativeAge(t core.Time, now core.Time) string {
 	if t.IsZero() {
 		return ""

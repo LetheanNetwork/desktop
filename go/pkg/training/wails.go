@@ -4,7 +4,7 @@
 // *training.Service so the operator UI can drive the autocratic-cascade
 // Phase A rotation, observe live Status, and stop a rotation mid-flight.
 // Wails generates a TS binding at
-// frontend/bindings/dappco.re/lthn/desktop/pkg/training/.
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/training/.
 // Bound by application.NewService(training.NewWailsService(...)) in
 // pkg/desktop/desktop.go; the underlying Service stays for non-Wails
 // callers (CLI training drivers, in-process curriculum loops).
@@ -65,7 +65,7 @@ func NewWailsService(c *core.Core, svc *Service) *WailsService {
 
 // ServiceName labels the binding namespace exposed to JS as
 // "Training" — Wails generates the TS binding under
-// frontend/bindings/dappco.re/lthn/desktop/pkg/training/.
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/training/.
 func (w *WailsService) ServiceName() string { return "Training" }
 
 // ServiceStartup is the Wails3 lifecycle hook called once after the

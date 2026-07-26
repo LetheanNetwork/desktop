@@ -119,8 +119,10 @@ version.
 - `go/cmd/lthn/embed.go` — embeds Angular `dist/` and native icons.
 - `go/pkg/desktop/` — Wails application, windows, tray, deep links, SPA
   mounting, native policy, and runtime events.
-- `go/pkg/connection/` — WebSocket transport used by the Wails runtime. The
-  default development endpoint is `ws://localhost:9099/wails/ws`.
+- `go/pkg/connection/` — WebSocket transport used by the Wails runtime. Its
+  generic loopback default is `ws://localhost:9099/wails/ws`; full
+  `wails3 task dev` moves the Lethean transport to 9199 because the
+  development-only Wails MCP service owns 9099.
 - `go/pkg/server/` and `go/pkg/api/` — HTTP gateway, route groups, OpenAPI, and
   SDK generation.
 - `go/pkg/runner/` — inference-facing service used by CLI, server, and GUI.
@@ -282,6 +284,11 @@ allows only the exact loopback development origins derived from
 `WAILS_VITE_PORT`. Production builds retain the embedded `wails://` asset
 route, and must not inherit this development URL behaviour.
 
+The macOS development and production plists carry user-facing Documents and
+Downloads usage descriptions for the Files app. A denied protected-folder
+mount remains unavailable through its `io.Medium`; never bypass that result
+with raw host file access.
+
 Run `task doctor` before development when the toolchain, generated bindings,
 optional crew repositories, or ports are in doubt. Run `task verify:frontend`
 for the same ordered Angular confidence gate used by CI.
@@ -349,27 +356,27 @@ The complete Go suite is large, noisy, and contains long security sweeps.
 “address already in use”; close the development app before that focused test or
 record the environmental collision separately.
 
-## Known main-branch migration drift
+## Migration-retirement status
 
-Treat these as known debt, not as canonical instructions:
+The active development topology is converged:
 
-- `build/Taskfile.yml` still passes the removed
-  `../external/gui/go/...` path to `generate:bindings`; a clean binding
-  regeneration/CI checkout needs that command repaired before `-clean=true`
-  is trusted.
-- `.github/workflows/build.yml` still describes and checks out recursive
-  submodules even though this tree has no `.gitmodules`.
-- `build/audit.sh` still runs `bun` commands under the removed `frontend/`
-  application. Do not use it as the current all-in-one gate until it targets
-  `frontend-ng`/npm.
-- Several Go comments still point to `frontend/src/lit` or
-  `frontend/bindings`; map them to the Angular surface or
-  `frontend-ng/bindings` before treating the comment as a contract.
-- `CLAUDE.md`, `docs/development.md`, and parts of other prose still describe
-  the removed `external/` workspace or pre-Wails scaffold state.
-- The tracked Lit design ZIP and duplicate handover are redundant archives;
-  the ignored `frontend-lit-ref/` snapshot is local user material.
+- binding generation targets only `frontend-ng/bindings`, synchronises the
+  root Go workspace, carries platform-specific cache markers, and restores
+  desktop bindings after mobile generation;
+- CI performs a normal checkout with no recursive submodules;
+- `build/audit.sh` uses `frontend-ng` and npm;
+- active production Go comments point at Angular surfaces and
+  `frontend-ng/bindings`; and
+- `CLAUDE.md` defers to this contract while `docs/development.md` describes a
+  normal clone, HMR, tests, builds, and the current transport ports.
 
-Fix these coherently as a migration-retirement change with tests. Do not
-silently delete reference material, mobile support files, or generated
-bindings just because their directory names look old.
+The executable convergence contracts in
+`scripts/verify-frontend-convergence.test.mjs` guard these decisions. A
+disposable clean-checkout proof is recorded in
+`docs/superpowers/plans/2026-07-26-migration-retirement.md`.
+
+The tracked Lit design ZIP and duplicate handover remain reference archives,
+and the ignored `frontend-lit-ref/` snapshot remains local user material.
+Likewise, the two tracked files under `frontend/` remain mobile support
+inputs. Do not delete reference material, mobile support files, or generated
+bindings merely because their directory names look old.

@@ -467,12 +467,12 @@ func NewService(opts Options) *Service {
 		coreapi.WithMiddleware(BodyCapMiddleware(MaxBodyBytesDefault, DefaultBodyCapOverrides)),
 		// Cerberus Mantis #1422 (2026-05-16) — CSP defence-in-depth.
 		//
-		// Primary defence: Lit auto-escapes all interpolated content in
-		// html`...` templates — a raw <script> string becomes the literal
-		// six-character sequence, never an executable element.
+		// Primary defence: Angular templates and the Lit kit auto-escape
+		// interpolated content — a raw <script> string becomes literal text,
+		// never an executable element.
 		//
 		// This CSP is the second layer: if an unexpected sink (unsafeHTML
-		// misuse, a new component bypassing Lit's escape, or a future
+		// misuse, a new component bypassing framework escaping, or a future
 		// innerHTML write carrying external content) ever reaches the
 		// browser, the policy refuses inline-script execution and eval().
 		//
@@ -526,8 +526,8 @@ func NewService(opts Options) *Service {
 		coreapi.WithMiddleware(webViewOnlyRejectMiddleware(&webviewOnlyPrefixes)))
 
 	// Cerberus Mantis #1430 (2026-05-16) — bearer auth re-enabled. The
-	// WebView fetch interceptor lives at frontend/src/lit/api-fetch.ts;
-	// it loads the token via apikey.Reveal() on first call + injects
+	// Angular broker lives at frontend-ng/src/app/desktop/surfaces/
+	// extensions/plugin-auth-broker.ts; it loads the session token and injects
 	// Authorization: Bearer on every same-origin API request. Without
 	// this, every local process can reach every API endpoint without
 	// authentication.

@@ -51,7 +51,7 @@ dev_mode:
       - "*.ts" # The Angular source directory is excluded above; ng serve watches it.
     git_ignore: true
   executes:
-    # npm install — once at session start. Cheap when node_modules is
+    # npm ci — once at session start. Cheap when node_modules is
     # already populated; necessary on a fresh clone or after lockfile
     # bumps. The `once` type fires only the first time the dev loop
     # runs, not on every rebuild trigger.

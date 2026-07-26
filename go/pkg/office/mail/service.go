@@ -496,7 +496,7 @@ func parseThreads(raw []byte) ([]MailThreadRecord, error) {
 
 // relativeWhen formats a timestamp as:
 // "now" (< 5 min), "HH:MM" (today), "yest" (yesterday), "X d" (older).
-// Matches the fixture strings in frontend/src/lit/views/office/mail.ts.
+// Matches the fixture strings in frontend-ng/src/app/desktop/surfaces/office/mail.ts.
 func relativeWhen(t core.Time, now core.Time) string {
 	if t.IsZero() {
 		return ""

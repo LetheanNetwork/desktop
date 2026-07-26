@@ -17,7 +17,6 @@
 package repos
 
 import (
-
 	core "dappco.re/go"
 	scmgit "dappco.re/go/scm/git"
 )
@@ -119,7 +118,7 @@ func Register(c *core.Core) core.Result {
 }
 
 // Status describes one repo's git state — branch, ahead/behind
-// counts, dirty file counts. JSON-shaped for the Lit window.
+// counts, dirty file counts. JSON-shaped for the Angular window.
 type Status struct {
 	Name      string `json:"name"`
 	Path      string `json:"path"`
@@ -183,7 +182,7 @@ func (s *Service) scanRoots(roots []string) []string {
 }
 
 // statuses runs the scm/git Status probe against the given paths
-// and shapes the result for the Lit window. Calls fan out to N
+// and shapes the result for the Angular window. Calls fan out to N
 // `git` invocations concurrently inside scmgit — bounded by its
 // internal worker pool, not by us.
 func (s *Service) statuses(ctx core.Context, paths []string) []Status {

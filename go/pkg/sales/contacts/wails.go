@@ -3,7 +3,7 @@
 // Wails surface for the contacts service. Methods are bound on the
 // *Service receiver and exposed to the frontend via wails3 generate
 // bindings — the TS shape lands at
-// frontend/bindings/dappco.re/lthn/desktop/pkg/sales/contacts/service.
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/sales/contacts/service.
 
 package contacts
 

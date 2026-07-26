@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 // Wails service surface for pkg/lemma. Exposes the Admin client
-// methods to the WebView so Lit elements can drive model picker,
+// methods to the WebView so Angular surfaces can drive model picker,
 // downloader, and live status without leaking the Bearer token to JS.
 //
 // Bound by application.NewService(lemma.NewWailsService(...)) in
@@ -9,7 +9,7 @@
 // for non-WebView callers (CLI verbs, Core actions, MCP tools).
 //
 // Wails generates the TypeScript binding under
-// frontend/bindings/dappco.re/lthn/desktop/pkg/lemma/.
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/lemma/.
 
 package lemma
 
@@ -56,7 +56,7 @@ var errLemmaNotConfigured = core.E("lemma.WailsService",
 
 // ServiceName labels the binding namespace exposed to JS as "Lemma".
 // Wails-generated TS lives at
-// frontend/bindings/dappco.re/lthn/desktop/pkg/lemma/.
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/lemma/.
 func (s *WailsService) ServiceName() string { return "Lemma" }
 
 // ConfigureEndpoint lets the UI redirect at runtime — useful when the
@@ -72,7 +72,7 @@ func (s *WailsService) ConfigureEndpoint(baseURL string) {
 
 // Status returns the boot-time snapshot of the running serve instance.
 // First failure-mode the UI hits is "lthn-mlx not running" — surfaces
-// as an error string the Lit element renders into the status pill.
+// as an error string the Angular surface renders into the status pill.
 //
 //	const st = await Lemma.Status()
 func (s *WailsService) Status(ctx context.Context) (ServeStatus, error) {
@@ -138,8 +138,8 @@ func (s *WailsService) Profiles(ctx context.Context) (ProfilesList, error) {
 //     the serve file). That is acceptable: an adapter overlay is a
 //     transient A/B test, not a default-model selection.
 //
-//	await Lemma.Reload({ ModelPath: picked, ProfilePath: prof })          // → host serve (persists)
-//	await Lemma.Reload({ ModelPath: picked, AdapterPath: adapterDir })    // → driver admin/reload (overlay)
+//     await Lemma.Reload({ ModelPath: picked, ProfilePath: prof })          // → host serve (persists)
+//     await Lemma.Reload({ ModelPath: picked, AdapterPath: adapterDir })    // → driver admin/reload (overlay)
 func (s *WailsService) Reload(ctx context.Context, req ReloadRequest) error {
 	// Adapter overlay → driver admin/reload (host serve has no adapter field).
 	if core.Trim(req.AdapterPath) != "" {

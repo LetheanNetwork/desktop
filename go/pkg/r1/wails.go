@@ -3,7 +3,7 @@
 // Wails3 Service shape for the r1 package — wraps the package-level
 // Write / Read / ListModels / ListSubjects / ListProbes functions so
 // Wails generates a TS binding at
-// frontend/bindings/dappco.re/lthn/desktop/pkg/r1/.
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/r1/.
 // Bound by application.NewService(r1.NewWailsService()) in
 // pkg/desktop/desktop.go; the package-level functions stay for
 // non-WebView callers (training-loop pipelines, cascade orchestrator,
@@ -39,7 +39,7 @@ func NewWailsService() *WailsService { return &WailsService{} }
 
 // ServiceName labels the binding namespace exposed to JS as
 // "R1Corpus" — Wails generates the TS binding under
-// frontend/bindings/dappco.re/lthn/desktop/pkg/r1/.
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/r1/.
 func (s *WailsService) ServiceName() string { return "R1Corpus" }
 
 // ServiceStartup is the Wails3 lifecycle hook called once after the

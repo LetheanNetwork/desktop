@@ -6,7 +6,7 @@
 // the searchable header; the body below is the post-mortem markdown.
 //
 // Wire shape matches the IncidentEntry interface consumed by the
-// <lthn-view-incidents> Lit element in the Operations role view.
+// Angular incidents surface in the Operations category.
 //
 // Usage example (Wails):
 //
@@ -16,9 +16,9 @@ package incidents
 
 import core "dappco.re/go"
 
-// IncidentEntry is the JSON wire type returned to the Lit frontend.
+// IncidentEntry is the JSON wire type returned to the Angular frontend.
 // Field names match the IncidentEntry interface in
-// frontend/src/lit/views/operations/incidents.ts exactly.
+// frontend-ng/src/app/desktop/surfaces/operations/incidents.ts exactly.
 //
 // Usage example:
 //
@@ -115,7 +115,7 @@ type IncidentRecord struct {
 	//
 	// IncidentRecord is the persistence type (yaml-only) — Version
 	// stays inside the package; the IncidentEntry wire type consumed
-	// by the Lit frontend has no Version field by design.
+	// by the Angular frontend has no Version field by design.
 	Version int `yaml:"version,omitempty"`
 }
 

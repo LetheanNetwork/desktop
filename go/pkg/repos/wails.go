@@ -3,12 +3,11 @@
 // Wails surface for the repos service. Methods are bound on the
 // *Service receiver and exposed to the frontend via wails3 generate
 // bindings — the TS shape lands at
-// frontend/bindings/dappco.re/lthn/desktop/pkg/repos/service.
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/repos/service.
 
 package repos
 
 import (
-
 	core "dappco.re/go"
 )
 
@@ -22,7 +21,7 @@ type StatusInput struct {
 	Force bool     `json:"force,omitempty"`
 }
 
-// StatusOutput is the shape returned to the Lit window — flat
+// StatusOutput is the shape returned to the Angular window — flat
 // array of repo states plus the count of roots scanned for
 // debugging "why is my repo missing".
 type StatusOutput struct {

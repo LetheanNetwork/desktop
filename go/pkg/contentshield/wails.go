@@ -3,7 +3,7 @@
 // Wails3 Service shape for the contentshield package — wraps the
 // package-level Score / ScorePair / Suggestions functions so Wails
 // generates a TS binding at
-// frontend/bindings/dappco.re/lthn/desktop/pkg/contentshield/.
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/contentshield/.
 // Bound by application.NewService(contentshield.NewWailsService()) in
 // pkg/desktop/desktop.go; the package-level functions stay for
 // non-WebView callers (Core actions, CLI verbs, training-loop
@@ -39,7 +39,7 @@ func NewWailsService() *WailsService { return &WailsService{} }
 
 // ServiceName labels the binding namespace exposed to JS as
 // "ContentShield" — Wails generates the TS binding under
-// frontend/bindings/dappco.re/lthn/desktop/pkg/contentshield/.
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/contentshield/.
 func (s *WailsService) ServiceName() string { return "ContentShield" }
 
 // ServiceStartup is the Wails3 lifecycle hook called once after the

@@ -154,7 +154,7 @@ func (PRActivity) Schema() orm.Schema {
 }
 
 // ActivityEntry is the JSON-shaped row the Wails Activity() response
-// returns to the Lit window. Derived from the latest PRActivity per
+// returns to the Angular window. Derived from the latest PRActivity per
 // (provider, owner, repo, pr_number).
 //
 // The shape lines up with the RFC.vi.md "ActivityItem" contract —

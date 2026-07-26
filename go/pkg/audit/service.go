@@ -608,7 +608,7 @@ func Register(c *core.Core) core.Result {
 }
 
 // ServiceName labels the binding namespace. Wails bindings would land
-// at frontend/bindings/.../audit/ if any were added (no Wails surface
+// at frontend-ng/bindings/.../audit/ if any were added (no Wails surface
 // today — the consumer is the REST endpoint + frontend fetch).
 func (s *Service) ServiceName() string { return "Audit" }
 

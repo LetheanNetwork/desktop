@@ -6,7 +6,7 @@
 // searchable header; the body below is free-form notes.
 //
 // Wire shape matches the Contact interface consumed by the
-// <lthn-view-contacts> Lit element in the Sales role view.
+// Angular contacts surface in the Sales category.
 //
 // Usage example (Wails):
 //
@@ -16,9 +16,9 @@ package contacts
 
 import core "dappco.re/go"
 
-// Contact is the JSON wire type returned to the Lit frontend.
+// Contact is the JSON wire type returned to the Angular frontend.
 // Field names match the Contact interface in
-// frontend/src/lit/views/sales/contacts.ts exactly.
+// frontend-ng/src/app/desktop/surfaces/sales/contacts.ts exactly.
 //
 // Usage example:
 //

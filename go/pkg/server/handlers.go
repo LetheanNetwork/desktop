@@ -312,7 +312,7 @@ func writeGinError(c *gin.Context, status int, msg, kind string) {
 
 // cspPolicyBase is the static portion of the Content-Security-Policy
 // value applied to every response the lthn server emits. It forms
-// the second defence layer behind Lit's built-in auto-escape (the
+// the second defence layer behind Angular and Lit's built-in auto-escape (the
 // primary defence). The frame-src directive is appended per-response
 // by cspMiddleware so the live plugin-port registry (Cerberus CRIT-1
 // per plans/code/lthn/desktop/views/RFC.plugin-views.md §3.3) is

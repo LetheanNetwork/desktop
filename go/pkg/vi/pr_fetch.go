@@ -145,7 +145,7 @@ func Fetch(c *core.Core, repo PRRepo) core.Result {
 		// Cerberus pass-6 HIGH — refuse non-https HTMLURL at fetch-
 		// time. A compromised or malicious upstream forge can return
 		// `javascript:fetch(...)` in html_url; that URL gets persisted,
-		// rendered as a Lit href, and one click runs JS in the same
+		// rendered as an Angular href, and one click runs JS in the same
 		// origin as every Wails binding (full RCE on the host).
 		// Skip rows whose URL isn't https:// rather than store-and-
 		// pray. The frontend will also gate at render-time (belt +
@@ -190,7 +190,7 @@ func Fetch(c *core.Core, repo PRRepo) core.Result {
 
 // isSafePRURL gates the upstream-supplied html_url before persistence.
 // Cerberus pass-6 — a compromised or malicious upstream forge can
-// return `javascript:fetch(...)` in html_url, which renders as a Lit
+// return `javascript:fetch(...)` in html_url, which renders as an Angular
 // `<a href=...>` in the activity window and one click runs JS in
 // the same origin as every Wails binding (full RCE).
 //

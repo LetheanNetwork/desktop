@@ -3,7 +3,7 @@
 // Wails surface for the php service. Methods are bound on the
 // *Service receiver and exposed to the frontend via wails3
 // generate bindings — the TS shape lands at
-// frontend/bindings/dappco.re/lthn/desktop/pkg/php/service.
+// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/php/service.
 
 package php
 
@@ -15,7 +15,7 @@ import (
 
 const composerSource = "composer"
 
-// DetectOutput is the shape returned to the Lit window — the
+// DetectOutput is the shape returned to the Angular window — the
 // list of Laravel projects discovered, plus the roots walked
 // for "why isn't my project here?" debugging.
 type DetectOutput struct {
@@ -80,7 +80,7 @@ func (s *Service) Project(path string) core.Result {
 	})
 }
 
-// ScriptsOutput is the shape returned to the Lit window — the
+// ScriptsOutput is the shape returned to the Angular window — the
 // composer.json scripts section + canonical artisan commands.
 type ScriptsOutput struct {
 	Path            string        `json:"path"`

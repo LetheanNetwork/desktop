@@ -760,7 +760,7 @@ func newAppCore() *core.Core {
 // inconsistency immediately).
 //
 // Names are the binding-name segment of the generated TS path
-// `frontend/bindings/dappco.re/.../<pkg>/<service>` — the lowercased
+// `frontend-ng/bindings/dappco.re/.../<pkg>/<service>` — the lowercased
 // service-pkg identifier the WebView reaches via
 // `wails-runtime → Service.Method` calls. Two-name discipline:
 // short-name when the pkg owns one canonical service-type; pkg-prefixed

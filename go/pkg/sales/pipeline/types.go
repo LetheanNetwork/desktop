@@ -5,7 +5,7 @@
 // — deals own their stage; this package is a read-time rollup.
 //
 // Wire shapes match the PipelineColumn + Deal interfaces consumed by the
-// <lthn-view-pipeline> Lit element in the Sales role view.
+// Angular pipeline surface in the Sales category.
 //
 // Usage example (Wails):
 //
@@ -15,7 +15,7 @@ package pipeline
 
 // PipelineDeal is the JSON wire type for a deal card inside a column.
 // Field names match the inline Deal interface in
-// frontend/src/lit/views/sales/pipeline.ts.
+// frontend-ng/src/app/desktop/surfaces/sales/pipeline.ts.
 //
 // Usage example:
 //
@@ -36,7 +36,7 @@ type PipelineDeal struct {
 
 // PipelineColumn is the JSON wire type for one stage column.
 // Field names match the PipelineColumn interface in
-// frontend/src/lit/views/sales/pipeline.ts exactly.
+// frontend-ng/src/app/desktop/surfaces/sales/pipeline.ts exactly.
 //
 // Usage example:
 //
