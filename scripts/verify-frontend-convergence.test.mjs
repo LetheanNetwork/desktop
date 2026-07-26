@@ -18,6 +18,14 @@ test('keeps the Angular root client-rendered without hydration triggers', async 
   assert.match(template, /<router-outlet\s*\/>/);
 });
 
+test('frontend exposes the documented deterministic demo server', async () => {
+  const packageJSON = JSON.parse(await read('frontend-ng/package.json'));
+  assert.equal(
+    packageJSON.scripts.demo,
+    'ng serve --host 127.0.0.1 --port 9245 --hmr --poll 1000',
+  );
+});
+
 test('all binding generators target frontend-ng and no removed external tree', async () => {
   const files = await Promise.all([
     read('build/Taskfile.yml'),

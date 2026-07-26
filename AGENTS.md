@@ -219,6 +219,13 @@ Frontend-only development:
 
 ```bash
 cd frontend-ng
+npm run demo
+```
+
+The expanded equivalent is:
+
+```bash
+cd frontend-ng
 npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
 # http://127.0.0.1:9245/#/
 ```

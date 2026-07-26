@@ -4,6 +4,7 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
+    "demo": "ng serve --host 127.0.0.1 --port 9245 --hmr --poll 1000",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
