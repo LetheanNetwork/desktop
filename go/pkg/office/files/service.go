@@ -47,6 +47,7 @@ type Service struct {
 	pendingMounts []Mount
 	mounts        map[string]Mount
 	runtime       RuntimeMetadata
+	runtimeMu     sync.Mutex
 	limits        Limits
 	locks         map[string]*sync.Mutex
 }

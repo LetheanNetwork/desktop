@@ -57,6 +57,16 @@ func registeredMemoryService(
 	return service
 }
 
+func registeredService(
+	t *core.T,
+	mounts []Mount,
+	runtime RuntimeMetadata,
+) *Service {
+	service := NewService(Options{Mounts: mounts, Runtime: runtime})
+	core.RequireTrue(t, service.Register(core.New()).OK)
+	return service
+}
+
 func TestService_RegisterMounts_Good(t *core.T) {
 	medium := coreio.NewMemoryMedium()
 	service := NewService(Options{

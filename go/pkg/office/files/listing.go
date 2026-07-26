@@ -26,7 +26,10 @@ func (s *Service) listMounts() core.Result {
 	if err != nil {
 		return core.Fail(providerFailure("ListMounts", "", "", err))
 	}
-	runtime = normaliseRuntimeSnapshot(runtime)
+	runtime, err = validateAndNormaliseRuntimeSnapshot(runtime)
+	if err != nil {
+		return core.Fail(err)
+	}
 	mounts := make([]FileMount, 0, len(s.pendingMounts))
 	for _, configured := range s.pendingMounts {
 		mount, ok := s.mounts[configured.ID]
@@ -35,10 +38,22 @@ func (s *Service) listMounts() core.Result {
 		}
 		mounts = append(mounts, publicMount(mount))
 	}
+	favourites := make([]Favourite, 0, len(runtime.Favourites))
+	for _, favourite := range runtime.Favourites {
+		if _, ok := s.mounts[favourite.MountID]; ok {
+			favourites = append(favourites, favourite)
+		}
+	}
+	recents := make([]Recent, 0, len(runtime.Recent))
+	for _, recent := range runtime.Recent {
+		if _, ok := s.mounts[recent.MountID]; ok {
+			recents = append(recents, recent)
+		}
+	}
 	return core.Ok(MountCatalogue{
 		Mounts:     mounts,
-		Favourites: append([]Favourite(nil), runtime.Favourites...),
-		Recent:     append([]Recent(nil), runtime.Recent...),
+		Favourites: favourites,
+		Recent:     recents,
 	})
 }
 

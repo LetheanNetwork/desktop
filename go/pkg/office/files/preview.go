@@ -86,7 +86,7 @@ func (s *Service) preview(input PreviewInput) core.Result {
 			lines = bytes.Count(payload, []byte{'\n'}) + 1
 		}
 	}
-	return core.Ok(FilePreview{
+	preview := FilePreview{
 		MountID:      mount.ID,
 		RelativePath: relativePath,
 		Name:         path.Base(relativePath),
@@ -97,7 +97,42 @@ func (s *Service) preview(input PreviewInput) core.Result {
 		Lines:        lines,
 		Truncated:    truncated,
 		Binary:       binary,
+	}
+	if err := s.recordRecent(preview); err != nil {
+		return core.Fail(providerFailure(
+			"PreviewRecordRecent",
+			mount.ID,
+			relativePath,
+			err,
+		))
+	}
+	return core.Ok(preview)
+}
+
+func (s *Service) recordRecent(preview FilePreview) error {
+	s.runtimeMu.Lock()
+	defer s.runtimeMu.Unlock()
+	snapshot, err := s.runtime.Load()
+	if err != nil {
+		return err
+	}
+	rows := make([]Recent, 0, len(snapshot.Recent)+1)
+	rows = append(rows, Recent{
+		MountID:  preview.MountID,
+		Path:     preview.RelativePath,
+		Name:     preview.Name,
+		Kind:     EntryFile,
+		OpenedAt: core.Now().UTC().Format(core.RFC3339Nano),
 	})
+	for _, recent := range snapshot.Recent {
+		if recent.MountID == preview.MountID &&
+			recent.Path == preview.RelativePath {
+			continue
+		}
+		rows = append(rows, recent)
+	}
+	snapshot.Recent = rows
+	return s.runtime.Save(snapshot)
 }
 
 func previewMIME(relativePath string, binary bool) string {
