@@ -7,9 +7,11 @@
 Turn Lethean Desktop's Files application into a working, provider-neutral file
 browser whose entire data path is backed by CoreGO `io.Medium`.
 
-The Files application must work with sandboxed local storage immediately and
-must accept S3, SFTP, WebDAV, SQLite, Store, Cube, Memory, or another Medium
-without changing its Angular component contract.
+The Files application must work against Memory and other already-audited media
+during development. Sandboxed local storage is enabled for production only
+after the upstream local-Medium security gate in this design passes. S3, SFTP,
+WebDAV, SQLite, Store, Cube, or another Medium must fit without changing the
+Angular component contract.
 
 This is both an application boundary and a security boundary. A Files feature
 is not complete if it reaches a file through a second local-only path.
@@ -73,14 +75,24 @@ type Medium interface {
 }
 ```
 
-The current `go/pkg/office/files` service does not use that boundary. It scans
-hard-coded host locations through Core filesystem wrappers, reads absolute
-paths, and obtains disk capacity with a direct platform syscall. Its Wails
-contract reports saved local locations and recent files rather than browsing a
-Medium.
+Neither current Files Wails surface uses that boundary:
 
-The Angular Files component then reconstructs a shallow pseudo-filesystem from
-those local-only rows. This is the seam to replace.
+- `go/pkg/office/files` scans hard-coded host locations through Core filesystem
+  wrappers and obtains disk capacity with a direct platform syscall. Its Wails
+  contract reports saved local locations and recent files rather than browsing
+  a Medium.
+- `go/pkg/files` resolves repository names into host-absolute paths, accepts an
+  unrestricted absolute `Path`, and reads through `core.ReadFile`. It is used
+  by the Coding and Agents source viewer and explicitly has no production
+  sandbox.
+
+Both services identify themselves as `Files` when Wails binds them. Keeping two
+file-access façades with different trust models would leave an easy bypass even
+if the Office browser were repaired.
+
+The Angular Files component reconstructs a shallow pseudo-filesystem from the
+Office service's local-only rows, while source-viewer copy still describes the
+second service as `Files.Read`. These are the seams to replace together.
 
 ## Upstream boundary gate
 
@@ -140,8 +152,12 @@ not establish the product-level pivot around `io.Medium`.
 
 ## Go component boundary
 
-`go/pkg/office/files` remains the trusted Wails façade. Its internal shape
-becomes:
+`go/pkg/office/files` becomes the single trusted Wails façade. The separate
+`go/pkg/files` binding is retired after its source-preview consumer moves to
+the provider-neutral `Preview` method. Desktop binds one Files service, with
+one mount registry and one security policy.
+
+Its internal shape becomes:
 
 ```go
 type Mount struct {
@@ -182,6 +198,12 @@ provider is another Mount and needs no service or frontend branch.
 
 The existing application-wide I/O service remains the owner of
 `~/Lethean/data`. Files does not reuse that Medium to escape its declared root.
+
+Repository source roots are registered as narrow mounts. Coding and Agents
+carry a mount ID plus a provider-relative source path; they do not ask Files to
+rediscover a repository by name or convert a finding into an absolute host
+path. Any repository catalogue which supplies these addresses must obtain its
+file observations through the registered Medium boundary as well.
 
 ## Provider-neutral wire contract
 
@@ -239,6 +261,7 @@ The Files service rejects:
 - `..` components;
 - NUL and bidi/control characters;
 - path separators in a single-entry name;
+- any client address into a server-owned internal namespace;
 - a destination that resolves to the source; and
 - operations on the mount root which would delete, rename, or trash it.
 
@@ -248,6 +271,11 @@ replacement for Medium containment.
 Breadcrumbs are derived from the validated relative path. The host root,
 provider endpoint, bucket credentials, SSH details, encryption keys, and
 resolved absolute paths never cross Wails.
+
+Security and conflict decisions use Medium methods which preserve an error,
+normally `Stat`, rather than treating the convenience booleans from `Exists`,
+`IsFile`, or `IsDir` as proof. An unavailable provider must not be
+misinterpreted as “path does not exist” and thereby permit a write.
 
 ## Operation semantics
 
@@ -260,7 +288,8 @@ by a server maximum. Cursor state contains no host path or credential.
 `Preview` opens `Medium.ReadStream` and consumes a bounded prefix from that
 stream. It never opens the same path through another API. Binary or oversized
 content returns metadata and an explicit unsupported/truncated state rather
-than an unbounded body.
+than an unbounded body. Its response contains the mount ID and relative path,
+not the absolute path previously returned by `go/pkg/files.Read`.
 
 ### Create and rename
 
@@ -269,26 +298,45 @@ conflicts through the same Medium, then calls `Medium.Rename`.
 
 ### Copy and move
 
-Single files use `coreio.Copy`. Directories are traversed through
-`Medium.List`; destination directories use `EnsureDir`, and leaves use
-`coreio.Copy`.
+File bytes flow from the source `Medium.ReadStream` into the destination
+`Medium.WriteStream`. The transfer loop may use Go's byte-copy primitives, but
+both file handles come from registered media and byte accounting remains under
+the Files service. Directories are traversed only through `Medium.List`, and
+destination directories use `Medium.EnsureDir`.
 
 Cross-provider copy receives source and destination mount IDs and otherwise
 uses the same algorithm. Move deletes the source only after every destination
 write succeeds. A destination success followed by a source-delete failure is
 reported as a typed partial move and is never described as atomic.
 
+Recursive work is preflighted and enforced against server-owned maximum depth,
+entry-count, and total-byte limits. Accounting continues during transfer so a
+provider-side change cannot turn a bounded copy into an unbounded one.
+Exceeding a limit aborts safely, reports any destination entries already
+created, and never deletes the source.
+
+The current `io.Medium` contract has no portable link-aware operation.
+Recursive traversal therefore never follows symbolic links or other
+link/reparse entries. A provider must surface a link as such or guarantee
+no-follow containment when the mount is registered; otherwise recursive and
+direct content operations fail closed with an unsupported-provider result.
+
 ### Trash, restore, and delete
 
 Trash is a desktop operation built on the selected Medium, not a call to an OS
-trash API. A writable mount reserves an internal trash namespace. Trashing
-renames the entry into that namespace and records only the receipt needed to
-restore its original relative path.
+trash API. A writable mount reserves an internal trash namespace and verifies
+its ownership marker through that Medium before advertising trash support. A
+collision with pre-existing unowned data disables trash for the mount.
+Internal names are hidden from ordinary listings and rejected from
+client-supplied paths; only the service creates them. Trashing renames the
+entry into that namespace and records only the receipt needed to restore its
+original relative path.
 
 `go-store` may persist desktop runtime metadata such as favourites, recent
-locations, and trash receipts. It does not read or write user file content.
-The only exception is when a go-io Store Medium is itself the selected file
-provider; the Files service still talks exclusively through `io.Medium`.
+locations, and trash receipts, but its persistence must itself be configured
+over a Medium. It is not an alternate filesystem boundary and does not read or
+write user file content. When a go-io Store Medium is the selected file
+provider, the Files service still talks exclusively through `io.Medium`.
 
 Restore checks for destination conflict before renaming the entry back.
 Permanent deletion is separate, explicit, and requires the caller to confirm
@@ -363,6 +411,11 @@ A dedicated `DesktopFilesBridgeService` owns Files Wails method names and
 response validation. The general `DesktopLiveDataService` no longer has to
 reconstruct a filesystem from location/recent/disk calls.
 
+Existing read-only WebMCP navigation and preview behaviour is retained against
+the new bridge. Mutating Files WebMCP actions are not exposed until a separate
+capability and explicit-consent design exists; a renderer tool must not gain a
+write path merely because the visible Files UI gained one.
+
 ## Navigation state
 
 `win.sub` stores a reversible, non-secret Files location token containing a
@@ -430,12 +483,17 @@ Use red-green tests at each boundary.
 - Bad tests cover unknown mounts, missing entries, read-only capabilities,
   destination conflicts, and failed providers;
 - Ugly tests cover absolute paths, traversal, controls, root mutation,
+  internal namespace access, recursive depth/entry/byte limits, link entries,
   recursive delete confirmation, partial move, and bounded preview/listing;
-- local integration uses `t.TempDir()` and seeds exclusively through
-  `io.NewSandboxed`;
+- after the repaired go-io version is pinned, local integration uses
+  `t.TempDir()` and seeds exclusively through `io.NewSandboxed`;
 - no test writes to the real `~/Lethean` tree;
 - source-contract tests reject raw filesystem imports and bypass calls; and
 - runnable examples use Memory Mediums.
+
+The Coding and Agents source-viewer tests use a registered repository mount and
+relative path, reject the old absolute-path input, and prove that desktop binds
+only the canonical Office Files service.
 
 ### Angular
 
@@ -463,6 +521,14 @@ features as aspirational.
 Update `AGENTS.md` with the invariant that `io.Medium` is the only permitted
 file data path for product services. `go-store` is runtime metadata or an
 implementation behind a selected Medium, never an alternate Files data path.
+
+This tranche migrates both Wails-bound Files packages and adds a zero-bypass
+guard for their source. It does not prove that every older product package is
+already compliant. A repository-wide audit and staged migration must enumerate
+remaining direct filesystem/Core-wrapper calls, assign each to an `io.Medium`,
+and add an enforceable source boundary. Lethean Desktop must not be described
+as globally sealed until that audit is clean; new file-backed work must follow
+the invariant immediately.
 
 ## Deferred work
 
