@@ -160,6 +160,87 @@ type TrashReceipt struct {
 	TrashedAt    string `json:"trashedAt"`
 }
 
+// FileMount is the provider-neutral mount catalogue row exposed to Angular.
+type FileMount struct {
+	ID           string       `json:"id"`
+	Name         string       `json:"name"`
+	Kind         string       `json:"kind"`
+	Icon         string       `json:"icon"`
+	Brand        bool         `json:"brand,omitempty"`
+	Capabilities Capabilities `json:"capabilities"`
+	Capacity     *Capacity    `json:"capacity,omitempty"`
+}
+
+// Capacity is optional provider-reported capacity data.
+type Capacity struct {
+	FreeBytes  int64 `json:"freeBytes"`
+	TotalBytes int64 `json:"totalBytes"`
+}
+
+// FileEntry is one provider-relative directory row.
+type FileEntry struct {
+	Name         string    `json:"name"`
+	RelativePath string    `json:"relativePath"`
+	Kind         EntryKind `json:"kind"`
+	SizeBytes    int64     `json:"sizeBytes"`
+	ModifiedAt   string    `json:"modifiedAt"`
+	Mode         uint32    `json:"mode"`
+	Hidden       bool      `json:"hidden"`
+}
+
+// Breadcrumb is a reversible provider-relative navigation segment.
+type Breadcrumb struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// MountCatalogue is the Files Home response.
+type MountCatalogue struct {
+	Mounts     []FileMount `json:"mounts"`
+	Favourites []Favourite `json:"favourites"`
+	Recent     []Recent    `json:"recent"`
+}
+
+// ListDirectoryInput contains only a registered mount ID and provider-relative
+// address.
+type ListDirectoryInput struct {
+	MountID string `json:"mountId"`
+	Path    string `json:"path,omitempty"`
+	Cursor  string `json:"cursor,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+}
+
+// DirectorySnapshot is a deterministic bounded directory page.
+type DirectorySnapshot struct {
+	Mount       FileMount    `json:"mount"`
+	Path        string       `json:"path"`
+	Breadcrumbs []Breadcrumb `json:"breadcrumbs"`
+	Entries     []FileEntry  `json:"entries"`
+	NextCursor  string       `json:"nextCursor,omitempty"`
+	TotalKnown  int          `json:"totalKnown"`
+	RefreshedAt string       `json:"refreshedAt"`
+}
+
+// PreviewInput addresses one provider-relative entry.
+type PreviewInput struct {
+	MountID string `json:"mountId"`
+	Path    string `json:"path"`
+}
+
+// FilePreview is a bounded renderer-safe file preview.
+type FilePreview struct {
+	MountID      string `json:"mountId"`
+	RelativePath string `json:"relativePath"`
+	Name         string `json:"name"`
+	Content      string `json:"content,omitempty"`
+	MIME         string `json:"mime"`
+	BytesRead    int64  `json:"bytesRead"`
+	SizeBytes    int64  `json:"sizeBytes"`
+	Lines        int    `json:"lines"`
+	Truncated    bool   `json:"truncated"`
+	Binary       bool   `json:"binary"`
+}
+
 // Failure is a stable Files error which deliberately omits provider roots,
 // endpoints, credentials, and low-level causes from its rendered text.
 type Failure struct {

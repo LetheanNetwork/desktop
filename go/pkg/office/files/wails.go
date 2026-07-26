@@ -11,6 +11,21 @@ import (
 	core "dappco.re/go"
 )
 
+// ListMounts returns the registered provider-neutral mount catalogue.
+func (s *Service) ListMounts() core.Result {
+	return s.listMounts()
+}
+
+// ListDirectory returns a deterministic bounded directory page.
+func (s *Service) ListDirectory(input ListDirectoryInput) core.Result {
+	return s.listDirectory(input)
+}
+
+// Preview returns a bounded text or binary file preview.
+func (s *Service) Preview(input PreviewInput) core.Result {
+	return s.preview(input)
+}
+
 // ListLocations returns the ordered catalogue of canonical workspace
 // locations with item counts and rolled-up sizes.
 // Non-existent paths produce a row with count=0 and size="0 KB".

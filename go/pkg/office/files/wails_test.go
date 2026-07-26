@@ -1,79 +1,137 @@
-// SPDX-Licence-Identifier: EUPL-1.2
+// SPDX-License-Identifier: EUPL-1.2
 
 package files
 
 import (
-	"testing"
+	goio "io"
+	"io/fs"
+
+	core "dappco.re/go"
+	coreio "dappco.re/go/io"
 )
 
-// TestServiceName — ServiceName returns the correct Wails binding namespace.
-func TestServiceName(t *testing.T) {
-	svc := &Service{}
-	if svc.ServiceName() != "Files" {
-		t.Fatalf("expected ServiceName='Files', got %q", svc.ServiceName())
-	}
+type failingMedium struct {
+	coreio.Medium
+	readErr        error
+	writeErr       error
+	writeModeErr   error
+	ensureDirErr   error
+	deleteErr      error
+	deleteAllErr   error
+	renameErr      error
+	listErr        error
+	statErr        error
+	openErr        error
+	createErr      error
+	appendErr      error
+	readStreamErr  error
+	writeStreamErr error
 }
 
-// TestLocationRow_Fields — LocationRow carries all fields the frontend expects.
-func TestLocationRow_Fields(t *testing.T) {
-	row := LocationRow{Name: "Code", Count: 124, Size: "4.2 GB"}
-	if row.Name == "" || row.Size == "" {
-		t.Fatal("LocationRow missing required fields")
+func (medium *failingMedium) Read(path string) (string, error) {
+	if medium.readErr != nil {
+		return "", medium.readErr
 	}
+	return medium.Medium.Read(path)
 }
 
-// TestRecentRow_Fields — RecentRow carries all fields the frontend expects.
-func TestRecentRow_Fields(t *testing.T) {
-	row := RecentRow{Name: "sow-v2.md", Path: "~/Documents/", When: "14:42", Size: "38 KB"}
-	if row.Name == "" || row.Path == "" || row.When == "" || row.Size == "" {
-		t.Fatal("RecentRow missing required fields")
+func (medium *failingMedium) Write(path, content string) error {
+	if medium.writeErr != nil {
+		return medium.writeErr
 	}
+	return medium.Medium.Write(path, content)
 }
 
-// TestDiskMeter_Fields — DiskMeter carries Free, Total, Used.
-func TestDiskMeter_Fields(t *testing.T) {
-	meter := DiskMeter{Free: "312 GB", Total: "1 TB", Used: 68}
-	if meter.Free == "" || meter.Total == "" {
-		t.Fatal("DiskMeter missing required fields")
+func (medium *failingMedium) WriteMode(
+	path string,
+	content string,
+	mode fs.FileMode,
+) error {
+	if medium.writeModeErr != nil {
+		return medium.writeModeErr
 	}
-	if meter.Used < 0 || meter.Used > 100 {
-		t.Fatalf("DiskMeter.Used out of range: %d", meter.Used)
-	}
+	return medium.Medium.WriteMode(path, content, mode)
 }
 
-// TestListLocationsOutput_Fields — ListLocationsOutput carries locations slice.
-func TestListLocationsOutput_Fields(t *testing.T) {
-	out := ListLocationsOutput{
-		Locations: []LocationRow{{Name: "Code", Count: 10, Size: "1 GB"}},
+func (medium *failingMedium) EnsureDir(path string) error {
+	if medium.ensureDirErr != nil {
+		return medium.ensureDirErr
 	}
-	if len(out.Locations) == 0 {
-		t.Fatal("ListLocationsOutput.Locations must not be empty")
-	}
+	return medium.Medium.EnsureDir(path)
 }
 
-// TestListRecentInput_Defaults — ListRecentInput zero value is valid.
-func TestListRecentInput_Defaults(t *testing.T) {
-	var in ListRecentInput
-	if in.Limit != 0 {
-		t.Fatal("ListRecentInput.Limit default should be 0 (use service default 20)")
+func (medium *failingMedium) Delete(path string) error {
+	if medium.deleteErr != nil {
+		return medium.deleteErr
 	}
+	return medium.Medium.Delete(path)
 }
 
-// TestListRecentOutput_Fields — ListRecentOutput carries recent slice + total.
-func TestListRecentOutput_Fields(t *testing.T) {
-	out := ListRecentOutput{
-		Recent: []RecentRow{{Name: "x.md", Path: "~/", When: "now", Size: "1 KB"}},
-		Total:  1,
+func (medium *failingMedium) DeleteAll(path string) error {
+	if medium.deleteAllErr != nil {
+		return medium.deleteAllErr
 	}
-	if len(out.Recent) == 0 {
-		t.Fatal("ListRecentOutput.Recent must not be empty")
-	}
+	return medium.Medium.DeleteAll(path)
 }
 
-// TestDiskUsageOutput_Fields — DiskUsageOutput wraps DiskMeter.
-func TestDiskUsageOutput_Fields(t *testing.T) {
-	out := DiskUsageOutput{Disk: DiskMeter{Free: "100 GB", Total: "500 GB", Used: 80}}
-	if out.Disk.Free == "" {
-		t.Fatal("DiskUsageOutput.Disk.Free must not be empty")
+func (medium *failingMedium) Rename(oldPath, newPath string) error {
+	if medium.renameErr != nil {
+		return medium.renameErr
 	}
+	return medium.Medium.Rename(oldPath, newPath)
+}
+
+func (medium *failingMedium) List(path string) ([]fs.DirEntry, error) {
+	if medium.listErr != nil {
+		return nil, medium.listErr
+	}
+	return medium.Medium.List(path)
+}
+
+func (medium *failingMedium) Stat(path string) (fs.FileInfo, error) {
+	if medium.statErr != nil {
+		return nil, medium.statErr
+	}
+	return medium.Medium.Stat(path)
+}
+
+func (medium *failingMedium) Open(path string) (fs.File, error) {
+	if medium.openErr != nil {
+		return nil, medium.openErr
+	}
+	return medium.Medium.Open(path)
+}
+
+func (medium *failingMedium) Create(path string) (goio.WriteCloser, error) {
+	if medium.createErr != nil {
+		return nil, medium.createErr
+	}
+	return medium.Medium.Create(path)
+}
+
+func (medium *failingMedium) Append(path string) (goio.WriteCloser, error) {
+	if medium.appendErr != nil {
+		return nil, medium.appendErr
+	}
+	return medium.Medium.Append(path)
+}
+
+func (medium *failingMedium) ReadStream(path string) (goio.ReadCloser, error) {
+	if medium.readStreamErr != nil {
+		return nil, medium.readStreamErr
+	}
+	return medium.Medium.ReadStream(path)
+}
+
+func (medium *failingMedium) WriteStream(path string) (goio.WriteCloser, error) {
+	if medium.writeStreamErr != nil {
+		return nil, medium.writeStreamErr
+	}
+	return medium.Medium.WriteStream(path)
+}
+
+func TestServiceName(t *core.T) {
+	service := &Service{}
+
+	core.AssertEqual(t, "Files", service.ServiceName())
 }
