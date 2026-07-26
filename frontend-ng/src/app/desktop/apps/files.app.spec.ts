@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import '../../../kit/lthn-core';
 import { ConnectionManagerService } from '../../connection-manager.service';
 import { DesktopFilesBridgeService } from '../desktop-files-bridge.service';
 import type { Win } from '../desktop.data';
