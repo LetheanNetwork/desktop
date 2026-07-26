@@ -274,6 +274,7 @@ type FileOperationResult struct {
 	Affected    []FileAddress   `json:"affected"`
 	Conflict    *FileConflict   `json:"conflict,omitempty"`
 	Message     string          `json:"message"`
+	ReceiptID   string          `json:"receiptId,omitempty"`
 }
 
 // CreateDirectoryInput creates one validated child of a relative parent.
@@ -294,6 +295,45 @@ type RenameInput struct {
 type TransferInput struct {
 	Source      FileAddress `json:"source"`
 	Destination FileAddress `json:"destination"`
+}
+
+// TrashInput moves one provider-relative entry into the mount's owned trash.
+type TrashInput struct {
+	MountID string `json:"mountId"`
+	Path    string `json:"path"`
+}
+
+// RestoreInput resolves a trusted trash receipt.
+type RestoreInput struct {
+	ReceiptID string `json:"receiptId"`
+}
+
+// DeleteInput permanently deletes exactly one direct address or trash receipt.
+type DeleteInput struct {
+	MountID   string `json:"mountId,omitempty"`
+	Path      string `json:"path,omitempty"`
+	ReceiptID string `json:"receiptId,omitempty"`
+	Recursive bool   `json:"recursive,omitempty"`
+	Confirmed bool   `json:"confirmed"`
+}
+
+// TrashEntry is the renderer-safe projection of a trusted receipt.
+type TrashEntry struct {
+	ReceiptID    string    `json:"receiptId"`
+	MountID      string    `json:"mountId"`
+	OriginalPath string    `json:"originalPath"`
+	Name         string    `json:"name"`
+	Kind         EntryKind `json:"kind"`
+	SizeBytes    int64     `json:"sizeBytes"`
+	TrashedAt    string    `json:"trashedAt"`
+	Available    bool      `json:"available"`
+	ErrorCode    ErrorCode `json:"errorCode,omitempty"`
+}
+
+// TrashSnapshot is a refreshed projection of runtime receipts.
+type TrashSnapshot struct {
+	Entries     []TrashEntry `json:"entries"`
+	RefreshedAt string       `json:"refreshedAt"`
 }
 
 // FileEvent is a small invalidation signal broadcast after mutation.

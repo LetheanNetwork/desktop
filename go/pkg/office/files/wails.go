@@ -47,6 +47,26 @@ func (s *Service) Move(input TransferInput) core.Result {
 	return s.move(input)
 }
 
+// Trash moves an entry into the mount's owned trash namespace.
+func (s *Service) Trash(input TrashInput) core.Result {
+	return s.trash(input)
+}
+
+// ListTrash projects trusted runtime receipts through their registered media.
+func (s *Service) ListTrash() core.Result {
+	return s.listTrash()
+}
+
+// Restore reverses a trusted trash receipt when its destination is available.
+func (s *Service) Restore(input RestoreInput) core.Result {
+	return s.restore(input)
+}
+
+// Delete permanently deletes one explicitly confirmed address or receipt.
+func (s *Service) Delete(input DeleteInput) core.Result {
+	return s.delete(input)
+}
+
 // ListLocations returns the ordered catalogue of canonical workspace
 // locations with item counts and rolled-up sizes.
 // Non-existent paths produce a row with count=0 and size="0 KB".
