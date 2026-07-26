@@ -16,11 +16,8 @@ import { AppView } from './app-view';
 import { Win, FS, type FsNode } from '../desktop.data';
 import { WindowManagerService } from '../window-manager.service';
 import { DesktopLiveDataService, FilesSnapshot } from '../desktop-live-data.service';
-import {
-  DesktopDataState,
-  desktopDataStateLabel,
-  desktopDataStateVariant,
-} from '../desktop-data-state';
+import { DesktopDataStateBadge } from '../desktop-data-state-badge';
+import { DesktopDataState } from '../desktop-data-state';
 
 type FilePlace = [string, string, string];
 type FilePlaceGroup = [string, FilePlace[]];
@@ -28,7 +25,7 @@ type FilePlaceGroup = [string, FilePlace[]];
 @Component({
   selector: 'lthn-files-app',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, DesktopDataStateBadge],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   host: { style: 'display: contents' },
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -137,9 +134,7 @@ type FilePlaceGroup = [string, FilePlace[]];
           </div>
         </div>
         <div class="fbstatus">
-          <lthn-badge [attr.variant]="dataStateVariant()" [attr.data-data-state]="dataState()">{{
-            dataStateLabel()
-          }}</lthn-badge>
+          <lthn-desktop-data-state [state]="dataState()" />
           <span>{{ status() }}</span
           ><span class="v">{{ diskLabel() }}</span>
         </div>
@@ -179,8 +174,6 @@ export class FilesApp implements AppView, OnInit {
   readonly dataState = signal<DesktopDataState>(
     this.liveData.mode() === 'demo' ? 'demo' : 'loading',
   );
-  readonly dataStateLabel = computed(() => desktopDataStateLabel(this.dataState()));
-  readonly dataStateVariant = computed(() => desktopDataStateVariant(this.dataState()));
   readonly diskLabel = computed(() => {
     const disk = this.liveSnapshot()?.disk;
     return disk

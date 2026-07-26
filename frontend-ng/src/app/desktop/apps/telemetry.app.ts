@@ -19,11 +19,8 @@ import { CommonModule } from '@angular/common';
 import { AppView } from './app-view';
 import { Win, TELEMETRY } from '../desktop.data';
 import { DesktopLiveDataService, ProcessTelemetry } from '../desktop-live-data.service';
-import {
-  DesktopDataState,
-  desktopDataStateLabel,
-  desktopDataStateVariant,
-} from '../desktop-data-state';
+import { DesktopDataStateBadge } from '../desktop-data-state-badge';
+import { DesktopDataState } from '../desktop-data-state';
 
 const TELEMETRY_POLL_MS = 5_000;
 const MAX_HISTORY_SAMPLES = 60;
@@ -31,7 +28,7 @@ const MAX_HISTORY_SAMPLES = 60;
 @Component({
   selector: 'lthn-telemetry-app',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, DesktopDataStateBadge],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   host: { style: 'display: contents' },
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -72,9 +69,7 @@ const MAX_HISTORY_SAMPLES = 60;
         </div>
       </div>
       <div class="metaband">
-        <lthn-badge [attr.variant]="dataStateVariant()" [attr.data-data-state]="dataState()">{{
-          dataStateLabel()
-        }}</lthn-badge>
+        <lthn-desktop-data-state [state]="dataState()" />
         <ng-container *ngIf="sample() as current; else demoMetadata">
           <span
             >Goroutines <b>{{ current.numGoroutines }}</b></span
@@ -112,8 +107,6 @@ export class TelemetryApp implements AppView, OnInit, OnDestroy {
   readonly dataState = signal<DesktopDataState>('demo');
   private readonly heapHistory = signal<readonly number[]>([]);
   private readonly powerHistory = signal<readonly number[]>([]);
-  readonly dataStateLabel = computed(() => desktopDataStateLabel(this.dataState()));
-  readonly dataStateVariant = computed(() => desktopDataStateVariant(this.dataState()));
   readonly primaryLabel = computed(() =>
     this.sample()
       ? $localize`:Process heap telemetry metric@@telemetry.heapAllocation:Heap allocation`
