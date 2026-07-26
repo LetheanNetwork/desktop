@@ -36,7 +36,7 @@ func (s *Service) listMounts() core.Result {
 		if !ok {
 			continue
 		}
-		mounts = append(mounts, publicMount(mount))
+		mounts = append(mounts, s.publicMount(mount))
 	}
 	favourites := make([]Favourite, 0, len(runtime.Favourites))
 	for _, favourite := range runtime.Favourites {
@@ -139,7 +139,7 @@ func (s *Service) listDirectory(input ListDirectoryInput) core.Result {
 		nextCursor = strconv.Itoa(end)
 	}
 	return core.Ok(DirectorySnapshot{
-		Mount:       publicMount(mount),
+		Mount:       s.publicMount(mount),
 		Path:        relativePath,
 		Breadcrumbs: breadcrumbs(relativePath),
 		Entries:     page,
@@ -211,14 +211,20 @@ func fileEntry(parent string, entry fs.DirEntry, info fs.FileInfo) FileEntry {
 	}
 }
 
-func publicMount(mount Mount) FileMount {
+func (s *Service) publicMount(mount Mount) FileMount {
+	capabilities := mount.Capabilities
+	if !s.internalReady[mount.ID] {
+		capabilities.CopyTo = false
+		capabilities.Trash = false
+		capabilities.Restore = false
+	}
 	return FileMount{
 		ID:           mount.ID,
 		Name:         mount.Name,
 		Kind:         mount.Kind,
 		Icon:         mount.Icon,
 		Brand:        mount.Brand,
-		Capabilities: mount.Capabilities,
+		Capabilities: capabilities,
 	}
 }
 

@@ -290,6 +290,12 @@ type RenameInput struct {
 	Name    string `json:"name"`
 }
 
+// TransferInput addresses the source and destination of a copy or move.
+type TransferInput struct {
+	Source      FileAddress `json:"source"`
+	Destination FileAddress `json:"destination"`
+}
+
 // FileEvent is a small invalidation signal broadcast after mutation.
 type FileEvent struct {
 	Operation   string    `json:"operation"`

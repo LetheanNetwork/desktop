@@ -50,6 +50,7 @@ type Service struct {
 	runtimeMu     sync.Mutex
 	limits        Limits
 	locks         map[string]*sync.Mutex
+	internalReady map[string]bool
 }
 
 // NewService constructs the Files service from trusted mount composition.
@@ -70,6 +71,7 @@ func NewService(options Options) *Service {
 		runtime:       options.Runtime,
 		limits:        limits,
 		locks:         make(map[string]*sync.Mutex),
+		internalReady: make(map[string]bool),
 	}
 }
 
@@ -112,6 +114,7 @@ func (s *Service) Register(c *core.Core) core.Result {
 		if err := s.addMount(mount); err != nil {
 			return core.Fail(err)
 		}
+		s.initialiseInternalNamespace(mount)
 	}
 	return core.Ok(s)
 }
@@ -149,6 +152,7 @@ func (s *Service) addMount(mount Mount) error {
 	}
 	s.mounts[mount.ID] = mount
 	s.locks[mount.ID] = &sync.Mutex{}
+	s.internalReady[mount.ID] = false
 	return nil
 }
 

@@ -36,6 +36,17 @@ func (s *Service) Rename(input RenameInput) core.Result {
 	return s.rename(input)
 }
 
+// Copy streams a bounded source into the destination mount's owned staging
+// namespace before committing it.
+func (s *Service) Copy(input TransferInput) core.Result {
+	return s.copy(input)
+}
+
+// Move renames within one mount or copies then removes across mounts.
+func (s *Service) Move(input TransferInput) core.Result {
+	return s.move(input)
+}
+
 // ListLocations returns the ordered catalogue of canonical workspace
 // locations with item counts and rolled-up sizes.
 // Non-existent paths produce a row with count=0 and size="0 KB".
