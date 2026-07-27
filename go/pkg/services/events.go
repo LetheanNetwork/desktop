@@ -143,3 +143,26 @@ func serviceErrorScope(result core.Result) string {
 	}
 	return "services"
 }
+
+// auditSignalRequested records a named-signal request under its own key.
+//
+// Not auditRequested with the name cast to a RestartPolicy: that would file
+// "terminate" under restart_policy, and an audit trail whose fields mean
+// whatever the caller needed them to mean is not an audit trail.
+func (service *Service) auditSignalRequested(id string, name Signal) {
+	if service == nil || service.options.Audit == nil {
+		return
+	}
+	_ = service.options.Audit.Record(audit.Event{
+		Event:   audit.EventServiceSignalRequested,
+		TS:      service.options.Now().UTC().Unix(),
+		Scope:   serviceAuditScope,
+		Outcome: audit.OutcomeOK,
+		Meta: map[string]any{
+			"service_id": id,
+			// The name, never the kernel constant. A reader of this trail
+			// should not have to know what 15 means on which platform.
+			"signal": string(name),
+		},
+	})
+}

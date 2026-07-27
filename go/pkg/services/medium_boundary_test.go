@@ -47,11 +47,20 @@ func TestManagedServiceMediumBoundary_GoodHasNoHostFilesystemBypass(t *core.T) {
 
 func assertManagedServiceMediumBoundary(t *core.T, name string, file *ast.File) {
 	t.Helper()
+	// signals.go is the one file allowed syscall, and only for signal
+	// constants — never for filesystem work. It is named here rather than the
+	// rule being softened, so that a second file reaching for syscall still
+	// fails this test and has to justify itself the same way.
+	signalConstants := name == "signals.go"
 	coreAliases := make(map[string]bool)
 	for _, spec := range file.Imports {
 		importPath := core.TrimSuffix(core.TrimPrefix(spec.Path.Value, `"`), `"`)
 		switch importPath {
-		case "os", "path/filepath", "syscall":
+		case "syscall":
+			if !signalConstants {
+				t.Errorf("%s imports forbidden filesystem package %s", name, importPath)
+			}
+		case "os", "path/filepath":
 			t.Errorf("%s imports forbidden filesystem package %s", name, importPath)
 		case "dappco.re/go":
 			alias := "core"

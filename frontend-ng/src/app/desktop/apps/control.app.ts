@@ -310,6 +310,12 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
         case 'restart':
           await this.servicesBridge.restart(intent.id);
           break;
+        case 'signal':
+          await this.servicesBridge.signal(intent.id, intent.signal);
+          break;
+        case 'kill':
+          await this.servicesBridge.kill(intent.id);
+          break;
         case 'output': {
           const output = await this.servicesBridge.output(intent.id);
           if (!this.destroyed) this.serviceOutput.set(output);
@@ -349,9 +355,14 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
       return;
     }
 
+    // Demo mode has no process, so a signal has nothing to reach and must not
+    // pretend otherwise. A kill is shown as a stop, which is what it is.
+    if (intent.kind === 'signal') return;
+    const demoKind = intent.kind === 'kill' ? 'stop' : intent.kind;
+
     const services = catalogue.services.map((snapshot, index) =>
       index === serviceIndex
-        ? demoLifecycleSnapshot(snapshot, intent.kind, index)
+        ? demoLifecycleSnapshot(snapshot, demoKind, index)
         : cloneServiceSnapshot(snapshot),
     );
     this.servicesResource.set(

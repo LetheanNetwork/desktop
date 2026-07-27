@@ -100,3 +100,52 @@ func TestWailsService_UglyBindingLifecycleDoesNotOwnCoreShutdown(t *core.T) {
 
 	core.AssertEqual(t, StateRunning, fixture.snapshot(t).State)
 }
+
+func TestWailsService_Signal_GoodDelegatesToTheManager(t *core.T) {
+	fixture := newServiceFixture(t)
+	wails := NewWailsService(fixture.service)
+	core.RequireTrue(t, wails.Start(fixture.definition.ID).OK)
+
+	result := wails.Signal(SignalRequest{ID: fixture.definition.ID, Signal: SignalHangup})
+
+	core.RequireTrue(t, result.OK, result.Error())
+	core.AssertEqual(t, 1, len(fixture.runtime.recordedSignals()))
+}
+
+func TestWailsService_Kill_GoodDelegatesToTheManager(t *core.T) {
+	fixture := newServiceFixture(t)
+	wails := NewWailsService(fixture.service)
+	core.RequireTrue(t, wails.Start(fixture.definition.ID).OK)
+
+	result := wails.Kill(fixture.definition.ID)
+
+	core.RequireTrue(t, result.OK, result.Error())
+	core.AssertEqual(t, []string{"proc-1"}, fixture.runtime.recordedKills())
+}
+
+// The boundary refuses before the manager is reached. The manager checks too,
+// but it should not be the only thing between a renderer and a syscall.
+func TestWailsService_Signal_BadRefusesAnUnknownNameAtTheBoundary(t *core.T) {
+	fixture := newServiceFixture(t)
+	wails := NewWailsService(fixture.service)
+	core.RequireTrue(t, wails.Start(fixture.definition.ID).OK)
+
+	for _, name := range []Signal{"", "9", "SIGTERM", "obliterate"} {
+		result := wails.Signal(SignalRequest{ID: fixture.definition.ID, Signal: name})
+
+		core.AssertFalse(t, result.OK, core.Concat("expected ", string(name), " to be refused"))
+		core.AssertEqual(t, ErrorSignalUnknown, ErrorCodeOf(result))
+	}
+
+	core.AssertEqual(t, 0, len(fixture.runtime.recordedSignals()))
+}
+
+func TestWailsService_Ugly_UnboundManagerFailsRatherThanPanicking(t *core.T) {
+	wails := NewWailsService(nil)
+
+	signalled := wails.Signal(SignalRequest{ID: "anything", Signal: SignalTerminate})
+	killed := wails.Kill("anything")
+
+	core.AssertFalse(t, signalled.OK, "an unbound manager must fail typed")
+	core.AssertFalse(t, killed.OK, "an unbound manager must fail typed")
+}

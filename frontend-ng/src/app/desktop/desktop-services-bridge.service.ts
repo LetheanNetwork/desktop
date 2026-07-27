@@ -34,7 +34,24 @@ export const SERVICES_METHODS = {
   restart: `${SERVICES_SERVICE}.Restart`,
   output: `${SERVICES_SERVICE}.Output`,
   setPolicy: `${SERVICES_SERVICE}.SetPolicy`,
+  signal: `${SERVICES_SERVICE}.Signal`,
+  kill: `${SERVICES_SERVICE}.Kill`,
 } as const;
+
+/**
+ * The whole signal vocabulary. A number is not in it, and cannot be made to
+ * be: the renderer chooses a name, and Go maps it at the last moment.
+ */
+export const SERVICE_SIGNALS = ['terminate', 'interrupt', 'hangup', 'kill'] as const;
+
+export type DesktopServiceSignal = (typeof SERVICE_SIGNALS)[number];
+
+function requestSignal(name: string): DesktopServiceSignal {
+  if (!(SERVICE_SIGNALS as readonly string[]).includes(name)) {
+    throw new Error('That is not a signal this manager sends.');
+  }
+  return name as DesktopServiceSignal;
+}
 
 export interface ServicesEventSource {
   on(name: string, handler: (payload: unknown) => void): () => void;
@@ -76,6 +93,23 @@ export class DesktopServicesBridgeService implements DesktopServicesDataSource {
 
   async restart(id: string): Promise<DesktopServiceSnapshot> {
     return this.read(SERVICES_METHODS.restart, [requestServiceID(id)], parseSnapshot);
+  }
+
+  /**
+   * Deliver a named signal. Not a decision to stop — a service that ignores
+   * `hangup` stays running, and the snapshot returned says so.
+   */
+  async signal(id: string, name: string): Promise<DesktopServiceSnapshot> {
+    return this.read(
+      SERVICES_METHODS.signal,
+      [{ id: requestServiceID(id), signal: requestSignal(name) }],
+      parseSnapshot,
+    );
+  }
+
+  /** End the process tree. Unlike a signal, this does mean stop. */
+  async kill(id: string): Promise<DesktopServiceSnapshot> {
+    return this.read(SERVICES_METHODS.kill, [requestServiceID(id)], parseSnapshot);
   }
 
   async output(id: string, limit = 64 * 1_024): Promise<DesktopServiceOutput> {

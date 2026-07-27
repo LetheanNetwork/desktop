@@ -20,6 +20,13 @@ type ProcessHandle interface {
 type ProcessRuntime interface {
 	StartWithOptions(core.Context, coreprocess.RunOptions) core.Result
 	Get(string) core.Result
+	// Signal delivers a named signal to the process group. The name is
+	// carried all the way down and mapped at the last moment inside
+	// signals.go, which is the one file permitted to know what a kernel
+	// constant is.
+	Signal(string, Signal) core.Result
+	// Kill ends the whole process tree without waiting.
+	Kill(string) core.Result
 }
 
 // WorkingDirectoryResolver resolves a trusted provider-relative reference for
@@ -55,6 +62,28 @@ func (runtime *namedProcessRuntime) Get(id string) core.Result {
 		))
 	}
 	return runtime.service.Get(id)
+}
+
+func (runtime *namedProcessRuntime) Signal(id string, name Signal) core.Result {
+	if runtime == nil || runtime.service == nil {
+		return core.Fail(core.E(
+			"services.ProcessRuntime.Signal",
+			"named process service is unavailable",
+			nil,
+		))
+	}
+	return deliverNamedSignal(runtime.service, id, name)
+}
+
+func (runtime *namedProcessRuntime) Kill(id string) core.Result {
+	if runtime == nil || runtime.service == nil {
+		return core.Fail(core.E(
+			"services.ProcessRuntime.Kill",
+			"named process service is unavailable",
+			nil,
+		))
+	}
+	return runtime.service.Kill(id)
 }
 
 type emptyWorkingDirectoryResolver struct{}

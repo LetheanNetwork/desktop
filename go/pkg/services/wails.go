@@ -73,6 +73,37 @@ func (service *WailsService) Restart(id string) core.Result {
 	return service.manager.Restart(id)
 }
 
+// Signal delivers a named signal to one known running managed service.
+//
+// The request carries a name, never a signal number — the renderer chooses
+// from a fixed vocabulary for the same reason it cannot choose a command or an
+// absolute path.
+func (service *WailsService) Signal(request SignalRequest) core.Result {
+	if result := service.requireManager("services.WailsService.Signal"); !result.OK {
+		return result
+	}
+	// Refused here as well as in the manager. The boundary is where a
+	// malformed request should stop, and the manager should not be the only
+	// thing standing between a renderer and a syscall.
+	if !validSignal(request.Signal) {
+		return failureResult(
+			ErrorSignalUnknown,
+			"services.WailsService.Signal",
+			"That is not a signal this manager sends.",
+			nil,
+		)
+	}
+	return service.manager.Signal(request)
+}
+
+// Kill ends one known managed-service process tree without waiting.
+func (service *WailsService) Kill(id string) core.Result {
+	if result := service.requireManager("services.WailsService.Kill"); !result.OK {
+		return result
+	}
+	return service.manager.Kill(id)
+}
+
 // Output returns a bounded transient output tail for a known running service.
 func (service *WailsService) Output(request OutputRequest) core.Result {
 	if result := service.requireManager("services.WailsService.Output"); !result.OK {

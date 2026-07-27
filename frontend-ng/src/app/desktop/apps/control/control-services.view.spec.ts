@@ -120,4 +120,32 @@ describe('ControlServicesView', () => {
       'No services are available',
     );
   });
+
+  it('keeps force actions off the main row, behind an overflow', async () => {
+    const fixture = await createFixture(connectedResource());
+    const overflow = fixture.nativeElement.querySelector('details.service__force');
+
+    // The unusual responses must not sit beside Stop at equal weight.
+    expect(overflow).not.toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('.service__actions > [data-action="kill"]'),
+    ).toBeNull();
+    expect(overflow.querySelector('[data-action="kill"]')).not.toBeNull();
+    expect(overflow.querySelector('[data-action="signal-hangup"]')).not.toBeNull();
+  });
+
+  it('emits a named signal intent, never a number', async () => {
+    const fixture = await createFixture(connectedResource());
+    const emitted: unknown[] = [];
+    fixture.componentInstance.action.subscribe((intent: unknown) => emitted.push(intent));
+
+    fixture.nativeElement.querySelector('[data-action="signal-hangup"]').click();
+    fixture.nativeElement.querySelector('[data-action="kill"]').click();
+    await fixture.whenStable();
+
+    expect(emitted).toEqual([
+      expect.objectContaining({ kind: 'signal', signal: 'hangup' }),
+      expect.objectContaining({ kind: 'kill' }),
+    ]);
+  });
 });

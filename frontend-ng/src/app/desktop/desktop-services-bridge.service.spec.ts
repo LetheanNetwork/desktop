@@ -110,6 +110,31 @@ describe('DesktopServicesBridgeService', () => {
     ]);
   });
 
+  it('sends a named signal, never a signal number', async () => {
+    surface.call.mockResolvedValue(snapshotWireFixture());
+
+    await service.signal('serve', 'hangup');
+    await service.kill('serve');
+
+    expect(surface.call.mock.calls).toEqual([
+      [SERVICES_METHODS.signal, [{ id: 'serve', signal: 'hangup' }]],
+      [SERVICES_METHODS.kill, ['serve']],
+    ]);
+  });
+
+  it('refuses a signal outside the vocabulary before reaching Wails', async () => {
+    surface.call.mockResolvedValue(snapshotWireFixture());
+
+    // A number is exactly what the named vocabulary exists to keep out.
+    await expect(service.signal('serve', '9')).rejects.toThrow();
+    await expect(service.signal('serve', 'SIGTERM')).rejects.toThrow();
+    await expect(service.signal('serve', 'obliterate')).rejects.toThrow();
+    await expect(service.signal('serve', '')).rejects.toThrow();
+    await expect(service.signal('../etc', 'terminate')).rejects.toThrow();
+
+    expect(surface.call).not.toHaveBeenCalled();
+  });
+
   it('uses bounded typed requests for output and policy changes', async () => {
     surface.call
       .mockResolvedValueOnce({
@@ -214,6 +239,15 @@ describe('DesktopServicesBridgeService', () => {
     });
 
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('makes no signal or kill call in offline demo mode', async () => {
+    offline.set(true);
+
+    await expect(service.signal('serve', 'terminate')).rejects.toThrow();
+    await expect(service.kill('serve')).rejects.toThrow();
+
+    expect(surface.call).not.toHaveBeenCalled();
   });
 
   it('installs no listener and calls no Wails method in offline demo mode', async () => {

@@ -126,6 +126,27 @@ import type {
                       <span i18n="Read service output action@@control.services.output">Output</span>
                     </button>
                   }
+                  @if (canForce(service)) {
+                    <details class="service__force">
+                      <summary i18n="More service actions@@control.services.more">More</summary>
+                      <button
+                        type="button"
+                        data-action="signal-hangup"
+                        [disabled]="isPending(service.definition.id)"
+                        (click)="emitSignal(service.definition.id, 'hangup')"
+                      >
+                        <span i18n="Reload service action@@control.services.hangup">Reload (hangup)</span>
+                      </button>
+                      <button
+                        type="button"
+                        data-action="kill"
+                        [disabled]="isPending(service.definition.id)"
+                        (click)="emitAction('kill', service.definition.id)"
+                      >
+                        <span i18n="Kill service action@@control.services.kill">Force kill</span>
+                      </button>
+                    </details>
+                  }
                 </div>
               </div>
             </article>
@@ -396,8 +417,20 @@ export class ControlServicesView {
     return service.state === 'running';
   }
 
-  emitAction(kind: ControlServiceIntent['kind'], id: string): void {
+  emitAction(kind: 'start' | 'stop' | 'restart' | 'output' | 'kill', id: string): void {
     this.action.emit({ kind, id });
+  }
+
+  emitSignal(id: string, signal: string): void {
+    this.action.emit({ kind: 'signal', id, signal });
+  }
+
+  /**
+   * Only when something is actually running. There is nothing to signal or
+   * kill otherwise, and offering it would be a button that can only fail.
+   */
+  canForce(service: { readonly processId: string }): boolean {
+    return Boolean(service.processId);
   }
 
   stateLabel(state: DesktopServiceState): string {

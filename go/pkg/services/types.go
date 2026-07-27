@@ -80,7 +80,40 @@ const (
 	ErrorRestartBudgetExhausted ErrorCode = "restart_budget_exhausted"
 	// ErrorShutdownIncomplete means one or more managed processes did not stop.
 	ErrorShutdownIncomplete ErrorCode = "shutdown_incomplete"
+	// ErrorSignalUnknown means the requested signal name is not one this
+	// manager delivers.
+	ErrorSignalUnknown ErrorCode = "signal_unknown"
+	// ErrorSignalUnsupported means the named signal has no meaning on this
+	// platform.
+	ErrorSignalUnsupported ErrorCode = "signal_unsupported"
+	// ErrorServiceNotRunning means there is no managed process to signal.
+	ErrorServiceNotRunning ErrorCode = "service_not_running"
+	// ErrorProcessSignalFailed means the operating system refused delivery.
+	ErrorProcessSignalFailed ErrorCode = "process_signal_failed"
 )
+
+// Signal is a named signal. The name is the whole wire contract: a kernel
+// constant never crosses the Wails boundary, for the same reason a command or
+// an absolute path never does.
+type Signal string
+
+const (
+	// SignalTerminate asks a process to stop. Catchable, so a service may
+	// flush state and remove its socket before exiting.
+	SignalTerminate Signal = "terminate"
+	// SignalInterrupt is what a terminal sends on Ctrl-C.
+	SignalInterrupt Signal = "interrupt"
+	// SignalHangup means reload, by long convention.
+	SignalHangup Signal = "hangup"
+	// SignalKill cannot be caught. Use it when nothing else has worked.
+	SignalKill Signal = "kill"
+)
+
+// SignalRequest names one managed service and one signal.
+type SignalRequest struct {
+	ID     string `json:"id"`
+	Signal Signal `json:"signal"`
+}
 
 var definitionIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 

@@ -24,9 +24,15 @@ values with truthful live data.
       request rate, active/peak memory, and KV-cache use. Until LEM exposes
       those measurements, connected Control and Telemetry intentionally render
       `—` and empty chart series rather than copying demo or benchmark values.
-- [ ] Extend the process surface with PID, CPU, memory, start time, and
-      signal/kill actions. `build.Service.ProcessList` currently exposes only
-      tracked process ID, command, state, and exit code.
+- [x] Extend the managed service surface with signal and kill actions.
+      `services.Snapshot` already carried PID, start time, and exit code;
+      `dappco.re/go/process` already exposed Signal/Kill, so this needed no
+      upstream change. Named signals only — a signal number never crosses the
+      Wails boundary.
+- [ ] Add per-service CPU and memory. This begins upstream, not here:
+      `process.Info` carries no CPU, memory, or resource surface of any kind,
+      so `dappco.re/go/process` needs one first, then a tag, then a bump.
+      Do not shell out to `ps` because the library appears not to support it.
 - [x] Add a typed daemon/service registry with lifecycle state, PID, project
       ownership, bounded restart policy, and start/stop/restart actions.
 - [ ] Add provider health/readiness probes and per-service CPU/memory

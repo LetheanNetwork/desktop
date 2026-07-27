@@ -919,3 +919,184 @@ func boundedUTF8Tail(output string, limit int) (string, bool) {
 	}
 	return output[start:], true
 }
+
+// Signal delivers a named signal to a running managed service.
+//
+// Deliberately does NOT clear desired-running state. A signal is a message,
+// not a decision: if `terminate` causes a well-behaved service to exit and its
+// policy says restart, restarting is correct. Only Kill and Stop mean "I want
+// this stopped".
+//
+// Nor does it change State. The process may act on the signal, may ignore it,
+// or may take a minute — the exit reconciler is what notices, the same as it
+// would for any other exit. Reporting StateStopping here would be the manager
+// claiming something it does not know.
+func (service *Service) Signal(request SignalRequest) core.Result {
+	id := request.ID
+
+	// Validated here so an unknown name never reaches the runtime, then
+	// carried on as a name. Only signals.go maps it.
+	if resolved := resolveSignal(request.Signal, ""); !resolved.OK {
+		service.auditFailed(audit.EventServiceSignalFailed, id, resolved)
+		return resolved
+	}
+
+	service.mu.Lock()
+	if result := service.readyLocked("services.Service.Signal"); !result.OK {
+		service.mu.Unlock()
+		return result
+	}
+	record, ok := service.records[id]
+	if !ok {
+		service.mu.Unlock()
+		result := definitionNotFound("services.Service.Signal", id)
+		service.auditFailed(audit.EventServiceSignalFailed, id, result)
+		return result
+	}
+	if record.operation {
+		service.mu.Unlock()
+		result := operationInProgress("services.Service.Signal", id)
+		service.auditFailed(audit.EventServiceSignalFailed, id, result)
+		return result
+	}
+	// Refused rather than reported as success. A script that signals a
+	// stopped service has a bug, and telling it everything is fine is how
+	// that bug survives.
+	if record.process == nil || record.snapshot.ProcessID == "" {
+		service.mu.Unlock()
+		result := failureResult(
+			ErrorServiceNotRunning,
+			"services.Service.Signal",
+			"This service is not running, so there is nothing to signal.",
+			nil,
+		)
+		service.auditFailed(audit.EventServiceSignalFailed, id, result)
+		return result
+	}
+	processID := record.snapshot.ProcessID
+	snapshot := cloneSnapshot(record.snapshot)
+	service.mu.Unlock()
+
+	service.auditSignalRequested(id, request.Signal)
+
+	delivered := service.options.Process.Signal(processID, request.Signal)
+	if !delivered.OK {
+		result := failureResult(
+			ErrorProcessSignalFailed,
+			"services.Service.Signal",
+			"The signal could not be delivered.",
+			delivered.Err(),
+		)
+		service.auditFailed(audit.EventServiceSignalFailed, id, result)
+		return result
+	}
+
+	service.auditSucceeded(audit.EventServiceSignalSucceeded, id, processID)
+	return core.Ok(snapshot)
+}
+
+// Kill ends the managed process tree without waiting for it to agree.
+//
+// Clears desired-running state before delivering, exactly as Stop does. That
+// ordering is the whole difference between a kill that works and a kill that
+// appears to work: a policy-managed service whose process disappears looks to
+// the exit reconciler like a crash, and it would be restarted a moment later.
+func (service *Service) Kill(id string) core.Result {
+	service.mu.Lock()
+	if result := service.readyLocked("services.Service.Kill"); !result.OK {
+		service.mu.Unlock()
+		return result
+	}
+	record, ok := service.records[id]
+	if !ok {
+		service.mu.Unlock()
+		result := definitionNotFound("services.Service.Kill", id)
+		service.auditFailed(audit.EventServiceKillFailed, id, result)
+		return result
+	}
+	if record.operation {
+		service.mu.Unlock()
+		result := operationInProgress("services.Service.Kill", id)
+		service.auditFailed(audit.EventServiceKillFailed, id, result)
+		return result
+	}
+	policy := record.definition.RestartPolicy
+
+	// Already stopped, or waiting on a restart timer: there is no tree to
+	// kill, so cancel any pending restart and settle. Idempotent by design —
+	// killing twice is what people do when the first one seemed not to work.
+	if record.process == nil || record.snapshot.ProcessID == "" {
+		previous := cloneSnapshot(record.snapshot)
+		if record.restartCancel != nil {
+			record.restartCancel()
+			record.restartCancel = nil
+		}
+		record.snapshot.State = StateStopped
+		record.snapshot.Desired = false
+		next := cloneSnapshot(record.snapshot)
+		service.mu.Unlock()
+		service.auditRequested(audit.EventServiceKillRequested, id, policy)
+		service.fireEvent("kill", previous, next, "")
+		service.auditSucceeded(audit.EventServiceKillSucceeded, id, "")
+		return core.Ok(next)
+	}
+
+	record.operation = true
+	previous := cloneSnapshot(record.snapshot)
+	record.snapshot.State = StateStopping
+	// Before delivery, not after. See the doc comment.
+	record.snapshot.Desired = false
+	if record.restartCancel != nil {
+		record.restartCancel()
+		record.restartCancel = nil
+	}
+	killing := cloneSnapshot(record.snapshot)
+	generation := record.generation
+	processID := record.snapshot.ProcessID
+	service.mu.Unlock()
+
+	service.auditRequested(audit.EventServiceKillRequested, id, policy)
+	service.fireEvent("kill", previous, killing, "")
+
+	killed := service.options.Process.Kill(processID)
+	if !killed.OK {
+		return service.failStop(
+			id,
+			generation,
+			"kill",
+			killing,
+			audit.EventServiceKillFailed,
+			ErrorProcessStopFailed,
+			"The service process tree could not be killed.",
+			killed.Err(),
+		)
+	}
+
+	service.mu.Lock()
+	record, ok = service.records[id]
+	if !ok || record.generation != generation {
+		service.mu.Unlock()
+		result := failureResult(
+			ErrorProcessLookupFailed,
+			"services.Service.Kill",
+			"The service process generation changed while killing.",
+			nil,
+		)
+		service.auditFailed(audit.EventServiceKillFailed, id, result)
+		return result
+	}
+	record.operation = false
+	record.process = nil
+	record.snapshot.State = StateStopped
+	record.snapshot.Desired = false
+	record.snapshot.ProcessID = ""
+	record.snapshot.PID = 0
+	record.snapshot.StoppedAt = service.options.Now().UTC().Format(time.RFC3339Nano)
+	record.snapshot.LastError = nil
+	snapshot := cloneSnapshot(record.snapshot)
+	service.mu.Unlock()
+
+	service.fireEvent("kill", killing, snapshot, "")
+	service.auditSucceeded(audit.EventServiceKillSucceeded, id, processID)
+	return core.Ok(snapshot)
+}

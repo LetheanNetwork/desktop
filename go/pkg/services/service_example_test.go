@@ -49,6 +49,21 @@ func (runtime *exampleProcessRuntime) Get(id string) core.Result {
 	return core.Ok(services.ProcessHandle(runtime.process))
 }
 
+func (runtime *exampleProcessRuntime) Signal(id string, _ services.Signal) core.Result {
+	if id != runtime.process.info.ID {
+		return core.Fail(core.E("example.Signal", "not found", nil))
+	}
+	return core.Ok(true)
+}
+
+func (runtime *exampleProcessRuntime) Kill(id string) core.Result {
+	if id != runtime.process.info.ID {
+		return core.Fail(core.E("example.Kill", "not found", nil))
+	}
+	runtime.process.once.Do(func() { close(runtime.process.done) })
+	return core.Ok(true)
+}
+
 func ExampleService() {
 	medium := coreio.NewMemoryMedium()
 	catalogue := services.NewMediumCatalogue(

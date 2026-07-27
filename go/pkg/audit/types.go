@@ -768,6 +768,22 @@ const (
 	// EventServiceRestartFailed records a stable restart failure code.
 	EventServiceRestartFailed = "service.restart.failed"
 
+	// EventServiceSignalRequested records an explicit named-signal delivery
+	// request. The name is recorded; a kernel constant never is.
+	EventServiceSignalRequested = "service.signal.requested"
+	// EventServiceSignalSucceeded records a delivered signal. Delivery is not
+	// a claim that the process acted on it.
+	EventServiceSignalSucceeded = "service.signal.succeeded"
+	// EventServiceSignalFailed records a stable signal failure code.
+	EventServiceSignalFailed = "service.signal.failed"
+
+	// EventServiceKillRequested records an explicit process-tree kill request.
+	EventServiceKillRequested = "service.kill.requested"
+	// EventServiceKillSucceeded records a completed process-tree kill.
+	EventServiceKillSucceeded = "service.kill.succeeded"
+	// EventServiceKillFailed records a stable kill failure code.
+	EventServiceKillFailed = "service.kill.failed"
+
 	// EventServiceDefinitionChanged records a successful trusted catalogue or
 	// bounded policy change. Execution bytes never appear in Meta.
 	EventServiceDefinitionChanged = "service.definition.changed"

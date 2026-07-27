@@ -96,7 +96,12 @@ export type ControlServiceIntent =
   | { readonly kind: 'start'; readonly id: string }
   | { readonly kind: 'stop'; readonly id: string }
   | { readonly kind: 'restart'; readonly id: string }
-  | { readonly kind: 'output'; readonly id: string };
+  | { readonly kind: 'output'; readonly id: string }
+  // The unusual responses. Kept off the main row deliberately — a kill
+  // sitting beside stop at equal weight invites the click that costs
+  // somebody their unsaved state.
+  | { readonly kind: 'signal'; readonly id: string; readonly signal: string }
+  | { readonly kind: 'kill'; readonly id: string };
 
 export const SERVICES_DEMO_SOURCE = 'Lethean demo fixture';
 

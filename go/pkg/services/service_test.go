@@ -96,6 +96,53 @@ type fakeProcessRuntime struct {
 	processes    map[string]ProcessHandle
 	getCalls     []string
 	startSignal  chan struct{}
+	signals      []recordedSignal
+	kills        []string
+	// Explicit flags rather than sniffing a zero core.Result: a zero Result
+	// is not reliably distinguishable from a deliberate failure, and the
+	// fake failing by default made five green tests look red.
+	signalFails bool
+	killFails   bool
+}
+
+// recordedSignal is what the fake saw, so a test can prove the manager
+// delivered through the runtime rather than reaching for syscall itself.
+type recordedSignal struct {
+	ID     string
+	Signal Signal
+}
+
+func (runtime *fakeProcessRuntime) Signal(id string, sig Signal) core.Result {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	runtime.signals = append(runtime.signals, recordedSignal{ID: id, Signal: sig})
+	if runtime.signalFails {
+		return core.Fail(core.E("fake.Signal", "refused", nil))
+	}
+	return core.Ok(true)
+}
+
+func (runtime *fakeProcessRuntime) Kill(id string) core.Result {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	runtime.kills = append(runtime.kills, id)
+	if runtime.killFails {
+		return core.Fail(core.E("fake.Kill", "refused", nil))
+	}
+	return core.Ok(true)
+}
+
+// recordedSignals returns a copy so assertions cannot race the manager.
+func (runtime *fakeProcessRuntime) recordedSignals() []recordedSignal {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	return append([]recordedSignal(nil), runtime.signals...)
+}
+
+func (runtime *fakeProcessRuntime) recordedKills() []string {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	return append([]string(nil), runtime.kills...)
 }
 
 func (runtime *fakeProcessRuntime) StartWithOptions(

@@ -134,6 +134,14 @@ version.
   state.
 - `go/pkg/permissions/` — application entitlement policy plus a separate,
   explicit-request native permission status bridge.
+- `go/pkg/services/signals.go` — the only file in the manager permitted to
+  import `syscall`, and only for signal constants. Everything above it — the
+  manager, the runtime interface, the Wails boundary, the renderer — speaks
+  named signals (`terminate`, `interrupt`, `hangup`, `kill`). That is what
+  makes "a renderer cannot choose a signal number" structural rather than a
+  check somebody has to remember. `Kill` clears desired-running state before
+  delivering, as `Stop` does, or the exit reconciler restarts what was just
+  killed; a bare signal deliberately does not.
 - `go/pkg/services/` — manual-by-default background service catalogue and
   lifecycle manager. It persists definitions through the registered
   application `io.Medium` and delegates every runtime operation to the named
