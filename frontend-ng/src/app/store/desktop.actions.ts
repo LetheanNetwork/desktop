@@ -21,6 +21,20 @@ export const desktopActions = createActionGroup({
       normalise?: boolean;
       persist?: boolean;
     }>(),
+    'Load Session': emptyProps(),
+    'Load Session Success': props<{
+      state: DesktopHydration;
+      revision: number;
+      migratedBrowserState: boolean;
+      seedWindowIds?: SeedWindowIds;
+    }>(),
+    'Load Session Failure': props<{ error: string }>(),
+    'Save Session Requested': emptyProps(),
+    'Save Session Success': props<{
+      revision: number;
+      migratedBrowserState: boolean;
+    }>(),
+    'Save Session Failure': props<{ error: string }>(),
     'Launch App': props<{ appId: string; windowId?: string }>(),
     'Focus Window': props<{ id: string }>(),
     'Close Window': props<{ id: string }>(),

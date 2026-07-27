@@ -1,11 +1,8 @@
 import { createFeature, createReducer, createSelector, on } from '@ngrx/store';
-import { APPS } from '../desktop/desktop-catalogue.data';
+import { APPS, CTRL_NAV, GAMES_NAV, SETTINGS_NAV } from '../desktop/desktop-catalogue.data';
 import { DeviceSize, ViewMode, Win } from '../desktop/desktop.data';
-import {
-  DesktopHydration,
-  SeedWindowIds,
-  desktopActions,
-} from './desktop.actions';
+import { filesToken, parseFilesToken } from '../desktop/apps/files/files-view-state';
+import { DesktopHydration, SeedWindowIds, desktopActions } from './desktop.actions';
 
 export interface DesktopState {
   wins: Win[];
@@ -14,6 +11,10 @@ export interface DesktopState {
   device: DeviceSize;
   devCat: string | null;
   z: number;
+  persistence: 'loading' | 'ready' | 'unavailable';
+  persistenceRevision: number;
+  persistenceError: string | null;
+  migratedBrowserState: boolean;
 }
 
 export const initialDesktopState: DesktopState = {
@@ -23,12 +24,55 @@ export const initialDesktopState: DesktopState = {
   device: 'small',
   devCat: null,
   z: 10,
+  persistence: 'loading',
+  persistenceRevision: 0,
+  persistenceError: null,
+  migratedBrowserState: false,
 };
 
-const createWindowId = (): string =>
-  'w' + Date.now() + Math.random().toString(36).slice(2, 5);
+const createWindowId = (): string => 'w' + Date.now() + Math.random().toString(36).slice(2, 5);
+
+const STATIC_SUB_ROUTES: Readonly<Partial<Record<string, ReadonlySet<string>>>> = {
+  control: new Set(CTRL_NAV.map(([path]) => path)),
+  games: new Set(GAMES_NAV.map(([path]) => path)),
+  settings: new Set(SETTINGS_NAV.map(([path]) => path)),
+};
+const CONTROL_SYSTEM_TABS = new Set(['overview', 'processes', 'daemons']);
+const FILE_VIEW_TABS = new Set(['list', 'grid']);
+
+const isFilesApp = (app: string): boolean => app === 'files' || app === 'surface-office-files';
+
+const normaliseWindow = (win: Win): Win | null => {
+  const app = APPS[win.app];
+  if (!app || win.id === 'shell') return null;
+
+  let sub = '';
+  const staticRoutes = STATIC_SUB_ROUTES[win.app];
+  if (staticRoutes) {
+    sub = staticRoutes.has(win.sub) ? win.sub : (app.defaultSub ?? [...staticRoutes][0] ?? '');
+  } else if (isFilesApp(win.app)) {
+    sub = filesToken(parseFilesToken(win.sub));
+  } else {
+    sub = app.defaultSub ?? '';
+  }
+
+  let systab = '';
+  if (win.app === 'control' && CONTROL_SYSTEM_TABS.has(win.systab ?? '')) {
+    systab = win.systab ?? '';
+  } else if (isFilesApp(win.app) && FILE_VIEW_TABS.has(win.systab ?? '')) {
+    systab = win.systab ?? '';
+  }
+
+  return {
+    ...win,
+    sub,
+    systab,
+    minimizing: false,
+  };
+};
 
 const focusWindow = (state: DesktopState, id: string): DesktopState => {
+  if (!state.wins.some((win) => win.id === id)) return state;
   let z = state.z;
   const wins = state.wins.map((win) => {
     if (win.id !== id) return win;
@@ -38,11 +82,7 @@ const focusWindow = (state: DesktopState, id: string): DesktopState => {
   return { ...state, wins, focusId: id, devCat: null, z };
 };
 
-const launchApp = (
-  state: DesktopState,
-  appId: string,
-  windowId?: string,
-): DesktopState => {
+const launchApp = (state: DesktopState, appId: string, windowId?: string): DesktopState => {
   const existing = state.wins.find((win) => win.app === appId);
   if (existing) return focusWindow(state, existing.id);
 
@@ -80,30 +120,18 @@ const closeWindow = (state: DesktopState, id: string): DesktopState => {
 
   const wins = state.wins.filter((win) => win.id !== id);
   const focusId =
-    state.focusId === id
-      ? wins.length
-        ? wins[Math.max(0, index - 1)].id
-        : null
-      : state.focusId;
+    state.focusId === id ? (wins.length ? wins[Math.max(0, index - 1)].id : null) : state.focusId;
 
   return { ...state, wins, focusId };
 };
 
 const isWindowed = (state: DesktopState): boolean =>
-  state.view === 'desktop' ||
-  (state.view === 'device' && state.device === 'full');
+  state.view === 'desktop' || (state.view === 'device' && state.device === 'full');
 
-const applyMode = (
-  state: DesktopState,
-  seedWindowIds?: SeedWindowIds,
-): DesktopState => {
-  const wins = state.wins.filter(
-    (win) => win.id !== 'shell' && APPS[win.app],
-  );
+const applyMode = (state: DesktopState, seedWindowIds?: SeedWindowIds): DesktopState => {
+  const wins = state.wins.filter((win) => win.id !== 'shell' && APPS[win.app]);
   const focusId =
-    state.focusId && !wins.some((win) => win.id === state.focusId)
-      ? null
-      : state.focusId;
+    state.focusId && !wins.some((win) => win.id === state.focusId) ? null : state.focusId;
   let next = { ...state, wins, focusId };
 
   if (isWindowed(next) && next.wins.length === 0) {
@@ -114,10 +142,7 @@ const applyMode = (
   return next;
 };
 
-const hydrateState = (
-  state: DesktopState,
-  hydration: DesktopHydration | null,
-): DesktopState => {
+const hydrateState = (state: DesktopState, hydration: DesktopHydration | null): DesktopState => {
   if (!hydration) return state;
 
   let next = state;
@@ -128,9 +153,14 @@ const hydrateState = (
   }
   if (typeof hydration.z === 'number') next = { ...next, z: hydration.z };
   if (Array.isArray(hydration.wins)) {
+    const wins = hydration.wins.flatMap((win) => {
+      const normalised = normaliseWindow(win);
+      return normalised ? [normalised] : [];
+    });
     next = {
       ...next,
-      wins: hydration.wins.filter((win) => APPS[win.app]),
+      wins,
+      z: Math.max(next.z, 10, ...wins.map((win) => win.z)),
     };
   }
   if (hydration.focusId !== undefined) {
@@ -143,26 +173,51 @@ export const desktopReducer = createReducer(
   initialDesktopState,
   on(
     desktopActions.hydrate,
-    (
-      state,
-      { state: hydration, seedWindowIds, normalise = true },
-    ): DesktopState => {
+    (state, { state: hydration, seedWindowIds, normalise = true }): DesktopState => {
       const hydrated = hydrateState(state, hydration);
       return normalise ? applyMode(hydrated, seedWindowIds) : hydrated;
     },
   ),
-  on(desktopActions.launchApp, (state, { appId, windowId }) =>
-    launchApp(state, appId, windowId),
+  on(desktopActions.loadSession, (state) => ({
+    ...state,
+    persistence: 'loading' as const,
+    persistenceError: null,
+  })),
+  on(
+    desktopActions.loadSessionSuccess,
+    (state, { state: hydration, revision, migratedBrowserState, seedWindowIds }) => ({
+      ...applyMode(hydrateState(state, hydration), seedWindowIds),
+      persistence: 'ready' as const,
+      persistenceRevision: revision,
+      persistenceError: null,
+      migratedBrowserState,
+    }),
   ),
+  on(desktopActions.loadSessionFailure, (state, { error }) => ({
+    ...state,
+    persistence: 'unavailable' as const,
+    persistenceError: error,
+  })),
+  on(desktopActions.saveSessionSuccess, (state, { revision, migratedBrowserState }) => ({
+    ...state,
+    persistence: 'ready' as const,
+    persistenceRevision: revision,
+    persistenceError: null,
+    migratedBrowserState,
+  })),
+  on(desktopActions.saveSessionFailure, (state, { error }) => ({
+    ...state,
+    persistence: 'unavailable' as const,
+    persistenceError: error,
+  })),
+  on(desktopActions.launchApp, (state, { appId, windowId }) => launchApp(state, appId, windowId)),
   on(desktopActions.focusWindow, (state, { id }) => focusWindow(state, id)),
   on(desktopActions.closeWindow, (state, { id }) => closeWindow(state, id)),
   on(desktopActions.minimiseWindow, (state, { id, delayMs = 0 }) => {
     if (delayMs > 0) {
       return {
         ...state,
-        wins: state.wins.map((win) =>
-          win.id === id ? { ...win, minimizing: true } : win,
-        ),
+        wins: state.wins.map((win) => (win.id === id ? { ...win, minimizing: true } : win)),
       };
     }
 
@@ -199,27 +254,19 @@ export const desktopReducer = createReducer(
   }),
   on(desktopActions.moveWindow, (state, { id, x, y }) => ({
     ...state,
-    wins: state.wins.map((win) =>
-      win.id === id ? { ...win, x, y } : win,
-    ),
+    wins: state.wins.map((win) => (win.id === id ? { ...win, x, y } : win)),
   })),
   on(desktopActions.resizeWindow, (state, { id, w, h }) => ({
     ...state,
-    wins: state.wins.map((win) =>
-      win.id === id ? { ...win, w, h } : win,
-    ),
+    wins: state.wins.map((win) => (win.id === id ? { ...win, w, h } : win)),
   })),
   on(desktopActions.setSub, (state, { id, sub }) => ({
     ...state,
-    wins: state.wins.map((win) =>
-      win.id === id ? { ...win, sub } : win,
-    ),
+    wins: state.wins.map((win) => (win.id === id ? { ...win, sub } : win)),
   })),
   on(desktopActions.setSysTab, (state, { id, systab }) => ({
     ...state,
-    wins: state.wins.map((win) =>
-      win.id === id ? { ...win, systab } : win,
-    ),
+    wins: state.wins.map((win) => (win.id === id ? { ...win, systab } : win)),
   })),
   on(desktopActions.setView, (state, { view, seedWindowIds }) =>
     applyMode({ ...state, view }, seedWindowIds),
@@ -248,18 +295,11 @@ export const desktopReducer = createReducer(
 export const desktopFeature = createFeature({
   name: 'desktop',
   reducer: desktopReducer,
-  extraSelectors: ({
-    selectWins,
-    selectFocusId,
-    selectView,
-    selectDevice,
-    selectZ,
-  }) => {
+  extraSelectors: ({ selectWins, selectFocusId, selectView, selectDevice, selectZ }) => {
     const selectWindowed = createSelector(
       selectView,
       selectDevice,
-      (view, device) =>
-        view === 'desktop' || (view === 'device' && device === 'full'),
+      (view, device) => view === 'desktop' || (view === 'device' && device === 'full'),
     );
     const selectRenderWins = createSelector(
       selectWins,
@@ -268,9 +308,7 @@ export const desktopFeature = createFeature({
       (wins, windowed, focusId) => {
         const renderable = wins.filter((win) => !win.group);
         if (windowed) return renderable;
-        const active = focusId
-          ? renderable.find((win) => win.id === focusId)
-          : null;
+        const active = focusId ? renderable.find((win) => win.id === focusId) : null;
         return active ? [active] : [];
       },
     );
@@ -279,8 +317,7 @@ export const desktopFeature = createFeature({
       selectDevice,
       selectRenderWins,
       (view, device, renderWins) =>
-        (view === 'shell' || (view === 'device' && device !== 'full')) &&
-        renderWins.length === 0,
+        (view === 'shell' || (view === 'device' && device !== 'full')) && renderWins.length === 0,
     );
     const selectOpenWins = createSelector(selectWins, (wins) =>
       wins.filter((win) => !win.group && APPS[win.app]),

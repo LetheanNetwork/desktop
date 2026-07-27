@@ -280,6 +280,9 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       this.prefs.customName();
       this.applyDesign();
     });
+    effect(() => {
+      this.groups = reconcileShellGroups(this.groups, this.wm.wins());
+    });
     afterNextRender(() => {
       // Lit uses light DOM. Register it only after Angular has reconciled any
       // prerendered nodes, avoiding custom-element DOM mutations during hydration.
@@ -392,53 +395,25 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     this.brand = b;
   }
   persist() {
-    try {
-      const stored = JSON.parse(this.storage.getItem('lthn.desktop') || 'null');
-      const windowState = stored && typeof stored === 'object' ? stored : {};
-      this.storage.setItem(
-        'lthn.desktop',
-        JSON.stringify({
-          ...windowState,
-          bar: this.bar,
-          wall: this.wall,
-          mode: this.mode,
-          brand: this.brand,
-          design: this.design,
-          customHue: this.customHue,
-          customName: this.customName,
-          lang: this.lang,
-          showIcons: this.showIcons,
-          reduceMotion: this.reduceMotion,
-          showWidgets: this.showWidgets,
-          openCats: this.openCats,
-          groups: this.groups,
-          shellTabs: this.shellTabs,
-        }),
-      );
-    } catch {}
+    if (this.prefs.offline()) {
+      try {
+        this.storage.setItem(
+          'lthn.desktop',
+          JSON.stringify({
+            openCats: this.openCats,
+            groups: this.groups,
+            shellTabs: this.shellTabs,
+          }),
+        );
+      } catch {}
+    }
     this.wm.persist();
   }
   restore() {
+    if (!this.prefs.offline()) return;
     try {
       const s = JSON.parse(this.storage.getItem('lthn.desktop') || 'null');
       if (!s) return;
-      (
-        [
-          'bar',
-          'wall',
-          'mode',
-          'brand',
-          'design',
-          'customHue',
-          'customName',
-          'lang',
-          'showIcons',
-          'reduceMotion',
-          'showWidgets',
-        ] as const
-      ).forEach((k) => {
-        if (s[k] !== undefined) (this as any)[k] = s[k];
-      });
       this.openCats = s.openCats || {};
       this.groups = s.groups || [];
       if (Array.isArray(s.shellTabs)) this.shellTabs = s.shellTabs;
@@ -1694,4 +1669,30 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     window.addEventListener('pointermove', mv);
     window.addEventListener('pointerup', up);
   }
+}
+
+function reconcileShellGroups(
+  current: readonly ShellWindowGroup[],
+  windows: readonly Win[],
+): ShellWindowGroup[] {
+  const existing = new Map(current.map((group) => [group.id, group]));
+  const grouped = new Map<string, Win[]>();
+  for (const window of windows) {
+    if (!window.group) continue;
+    const members = grouped.get(window.group);
+    if (members) members.push(window);
+    else grouped.set(window.group, [window]);
+  }
+  return [...grouped.entries()].map(([id, members], index) => {
+    const previous = existing.get(id);
+    return {
+      id,
+      name:
+        previous?.name ||
+        $localize`:Restored window group name@@desktop.group.restoredName:Group ${index + 1}:groupNumber:`,
+      ids: members.map(({ id: windowID }) => windowID),
+      apps: members.map(({ app }) => app),
+      open: members.some(({ min }) => !min),
+    };
+  });
 }

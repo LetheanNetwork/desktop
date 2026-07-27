@@ -1,17 +1,7 @@
-import {
-  Injectable,
-  Signal,
-  WritableSignal,
-  inject,
-} from '@angular/core';
+import { InjectionToken, Injectable, Signal, WritableSignal, inject } from '@angular/core';
+import { DOCUMENT } from '@angular/common';
 import { Store, createSelector } from '@ngrx/store';
-import {
-  AppDef,
-  DESKTOP_DATA,
-  DeviceSize,
-  ViewMode,
-  Win,
-} from './desktop.data';
+import { AppDef, DESKTOP_DATA, DeviceSize, ViewMode, Win } from './desktop.data';
 import { desktopActions, DesktopHydration } from '../store/desktop.actions';
 import {
   selectDevCat,
@@ -26,8 +16,28 @@ import {
   selectWins,
 } from '../store/desktop.reducer';
 
-const createWindowId = (): string =>
-  'w' + Date.now() + Math.random().toString(36).slice(2, 5);
+const createWindowId = (): string => 'w' + Date.now() + Math.random().toString(36).slice(2, 5);
+
+export interface DesktopViewport {
+  readonly width: number;
+  readonly height: number;
+}
+
+export type DesktopViewportReader = () => DesktopViewport;
+
+export const DESKTOP_VIEWPORT = new InjectionToken<DesktopViewportReader>('DESKTOP_VIEWPORT', {
+  providedIn: 'root',
+  factory: () => {
+    const document = inject(DOCUMENT);
+    return () => ({
+      width: document.documentElement.clientWidth || document.defaultView?.innerWidth || 1_280,
+      height: document.documentElement.clientHeight || document.defaultView?.innerHeight || 800,
+    });
+  },
+});
+
+const MINIMUM_VISIBLE_TITLE_WIDTH = 96;
+const TITLE_BAR_HEIGHT = 34;
 
 const selectFacadeWins = createSelector(selectWins, (wins): Win[] =>
   wins.map((win) => ({
@@ -48,23 +58,20 @@ const selectFacadeWins = createSelector(selectWins, (wins): Win[] =>
 export class WindowManagerService {
   private readonly store = inject(Store);
   private readonly data = inject(DESKTOP_DATA);
+  private readonly viewport = inject(DESKTOP_VIEWPORT);
 
-  readonly view = this.writableStoreSignal(
-    this.store.selectSignal(selectView),
-    (view) => ({ view }),
-  );
-  readonly device = this.writableStoreSignal(
-    this.store.selectSignal(selectDevice),
-    (device) => ({ device }),
-  );
-  readonly devCat = this.writableStoreSignal(
-    this.store.selectSignal(selectDevCat),
-    (devCat) => ({ devCat }),
-  );
-  readonly wins = this.writableStoreSignal(
-    this.store.selectSignal(selectFacadeWins),
-    (wins) => ({ wins }),
-  );
+  readonly view = this.writableStoreSignal(this.store.selectSignal(selectView), (view) => ({
+    view,
+  }));
+  readonly device = this.writableStoreSignal(this.store.selectSignal(selectDevice), (device) => ({
+    device,
+  }));
+  readonly devCat = this.writableStoreSignal(this.store.selectSignal(selectDevCat), (devCat) => ({
+    devCat,
+  }));
+  readonly wins = this.writableStoreSignal(this.store.selectSignal(selectFacadeWins), (wins) => ({
+    wins,
+  }));
   readonly focusId = this.writableStoreSignal(
     this.store.selectSignal(selectFocusId),
     (focusId) => ({ focusId }),
@@ -82,6 +89,43 @@ export class WindowManagerService {
 
   app(id: string): AppDef | undefined {
     return this.apps[id];
+  }
+
+  reconcileHydration(state: DesktopHydration): DesktopHydration {
+    if (!state.wins) return state;
+    const measured = this.viewport();
+    const width = Math.max(320, Math.floor(measured.width));
+    const height = Math.max(240, Math.floor(measured.height));
+    return {
+      ...state,
+      wins: state.wins.map((window) => {
+        const app = this.app(window.app);
+        if (window.max) {
+          return {
+            ...window,
+            x: 0,
+            y: 0,
+            w: width,
+            h: height,
+            prev: {
+              x: 70,
+              y: 24,
+              w: app?.w ?? Math.min(window.w, width),
+              h: app?.h ?? Math.min(window.h, height),
+            },
+          };
+        }
+        return {
+          ...window,
+          x: clamp(
+            window.x,
+            MINIMUM_VISIBLE_TITLE_WIDTH - window.w,
+            width - MINIMUM_VISIBLE_TITLE_WIDTH,
+          ),
+          y: clamp(window.y, 0, height - TITLE_BAR_HEIGHT),
+        };
+      }),
+    };
   }
 
   setView(view: ViewMode): void {
@@ -102,9 +146,7 @@ export class WindowManagerService {
   }
 
   launch(appId: string): void {
-    this.store.dispatch(
-      desktopActions.launchApp({ appId, windowId: createWindowId() }),
-    );
+    this.store.dispatch(desktopActions.launchApp({ appId, windowId: createWindowId() }));
   }
 
   focus(id: string): void {
@@ -163,9 +205,7 @@ export class WindowManagerService {
   }
 
   private patch(state: DesktopHydration): void {
-    this.store.dispatch(
-      desktopActions.hydrate({ state, normalise: false }),
-    );
+    this.store.dispatch(desktopActions.hydrate({ state, normalise: false }));
   }
 
   private writableStoreSignal<T>(
@@ -174,9 +214,12 @@ export class WindowManagerService {
   ): WritableSignal<T> {
     const writable = selected as WritableSignal<T>;
     writable.set = (value: T) => this.patch(hydration(value));
-    writable.update = (update: (value: T) => T) =>
-      writable.set(update(selected()));
+    writable.update = (update: (value: T) => T) => writable.set(update(selected()));
     writable.asReadonly = () => selected;
     return writable;
   }
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
 }

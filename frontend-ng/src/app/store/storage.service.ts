@@ -54,4 +54,10 @@ export class StorageService {
       this.storage.setItem(key, JSON.stringify(value));
     } catch {}
   }
+
+  remove(key: string): void {
+    try {
+      this.storage.removeItem(key);
+    } catch {}
+  }
 }

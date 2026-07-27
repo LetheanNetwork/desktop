@@ -28,6 +28,10 @@ const desktopState: DesktopState = {
   device: 'small',
   devCat: null,
   z: 11,
+  persistence: 'ready',
+  persistenceRevision: 1,
+  persistenceError: null,
+  migratedBrowserState: true,
 };
 
 describe('StandaloneAppHost', () => {

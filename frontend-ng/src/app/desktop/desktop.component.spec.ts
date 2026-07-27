@@ -2,8 +2,10 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { provideState, provideStore, Store } from '@ngrx/store';
 import { routes } from '../app.routes';
+import { ConnectionManagerService } from '../connection-manager.service';
 import { desktopActions } from '../store/desktop.actions';
 import { desktopFeature, DesktopState } from '../store/desktop.reducer';
+import { DESKTOP_STORAGE } from '../store/storage.service';
 import { DesktopComponent } from './desktop.component';
 import { Win } from './desktop.data';
 import { readDesktopRouteCatalog } from './desktop-route-tree';
@@ -44,6 +46,10 @@ const seededState: DesktopState = {
   device: 'small',
   devCat: null,
   z: 12,
+  persistence: 'ready',
+  persistenceRevision: 1,
+  persistenceError: null,
+  migratedBrowserState: true,
 };
 
 describe('DesktopComponent route shell', () => {
@@ -51,11 +57,29 @@ describe('DesktopComponent route shell', () => {
   let router: Router;
   let store: Store;
   let windowManager: WindowManagerService;
+  const browserStorage = {
+    length: 0,
+    clear: vi.fn(),
+    getItem: vi.fn(() => null),
+    key: vi.fn(() => null),
+    removeItem: vi.fn(),
+    setItem: vi.fn(),
+  } satisfies Storage;
 
   beforeEach(async () => {
+    vi.clearAllMocks();
     await TestBed.configureTestingModule({
       imports: [DesktopComponent],
-      providers: [provideRouter(routes), provideStore(), provideState(desktopFeature)],
+      providers: [
+        provideRouter(routes),
+        provideStore(),
+        provideState(desktopFeature),
+        { provide: DESKTOP_STORAGE, useValue: browserStorage },
+        {
+          provide: ConnectionManagerService,
+          useValue: { offline: () => false },
+        },
+      ],
     }).compileComponents();
 
     router = TestBed.inject(Router);
@@ -116,6 +140,41 @@ describe('DesktopComponent route shell', () => {
       element.querySelectorAll<HTMLElement>('.ctxmenu .ctxsub .mi'),
     ).map((item) => item.textContent?.trim());
     expect(childLabels).toEqual(catalog.apps['control'].children.map(([, , title]) => title));
+  });
+
+  it('does not restore or persist browser state in connected mode', () => {
+    expect(browserStorage.getItem).not.toHaveBeenCalled();
+
+    fixture.componentInstance.persist();
+
+    expect(browserStorage.getItem).not.toHaveBeenCalled();
+    expect(browserStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('reconstructs durable group membership without browser metadata', () => {
+    store.dispatch(
+      desktopActions.hydrate({
+        state: {
+          wins: [
+            { ...controlWin, min: true, group: 'restored-group' },
+            { ...telemetryWin, min: true, group: 'restored-group' },
+          ],
+          focusId: null,
+        },
+        normalise: false,
+      }),
+    );
+    TestBed.flushEffects();
+
+    expect(fixture.componentInstance.groups).toEqual([
+      {
+        id: 'restored-group',
+        name: 'Group 1',
+        ids: ['control-window', 'telemetry-window'],
+        apps: ['control', 'telemetry'],
+        open: false,
+      },
+    ]);
   });
 
   it('launches a menu child through the facade and reflects it in the URL', async () => {

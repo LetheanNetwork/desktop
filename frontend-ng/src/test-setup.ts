@@ -1,4 +1,4 @@
-import { afterEach } from 'vitest';
+import { afterAll, afterEach } from 'vitest';
 
 const createTestStorage = (): Storage => {
   const values = new Map<string, string>();
@@ -37,6 +37,24 @@ if (window !== globalThis) {
   defineStorage(window, 'sessionStorage', testSessionStorage);
 }
 
+// @wailsio/runtime installs a short-lived drag-environment polling interval at
+// module import. A fast Vitest file can finish before its first tick, after
+// which the package callback would reference a torn-down jsdom `window`.
+// Track browser-owned intervals so each test environment closes them before
+// teardown. Production uses the unmodified browser timer implementation.
+const browserSetInterval = window.setInterval.bind(window);
+const browserClearInterval = window.clearInterval.bind(window);
+const browserIntervals = new Set<number>();
+window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]): number => {
+  const id = Reflect.apply(browserSetInterval, window, [handler, timeout, ...args]) as number;
+  browserIntervals.add(id);
+  return id;
+}) as typeof window.setInterval;
+window.clearInterval = ((id?: number): void => {
+  if (id !== undefined) browserIntervals.delete(id);
+  browserClearInterval(id);
+}) as typeof window.clearInterval;
+
 // jsdom's canvas stub logs a "not implemented" error before returning null.
 // Components already treat a null context as the non-WebGL fallback, so keep
 // that browser contract without polluting otherwise-green test output.
@@ -52,4 +70,9 @@ Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
 afterEach(() => {
   testLocalStorage.clear();
   testSessionStorage.clear();
+});
+
+afterAll(() => {
+  for (const id of browserIntervals) browserClearInterval(id);
+  browserIntervals.clear();
 });

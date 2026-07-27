@@ -27,6 +27,7 @@ export class PreferencesService {
   private readonly document = inject(DOCUMENT);
   private readonly storage = inject(DESKTOP_STORAGE);
   private readonly connection = inject(ConnectionManagerService);
+  readonly offline = this.connection.offline;
 
   readonly bar = signal<TaskbarEdge>('bottom');
   readonly mode = signal<Mode>('dark');

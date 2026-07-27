@@ -33,10 +33,7 @@ describe('desktop reducer', () => {
       initialDesktopState,
       desktopActions.hydrate({
         state: {
-          wins: [
-            win({ id: 'shell' }),
-            win({ id: 'unknown', app: 'missing' }),
-          ],
+          wins: [win({ id: 'shell' }), win({ id: 'unknown', app: 'missing' })],
           focusId: 'unknown',
           view: 'desktop',
           device: 'small',
@@ -52,6 +49,82 @@ describe('desktop reducer', () => {
     ]);
     expect(hydrated.focusId).toBe('telemetry-id');
     expect(hydrated.z).toBe(32);
+  });
+
+  it('loads a durable session, canonicalises routes, and records its revision', () => {
+    const loaded = desktopReducer(
+      initialDesktopState,
+      desktopActions.loadSessionSuccess({
+        state: {
+          wins: [
+            win({
+              id: 'control-one',
+              app: 'control',
+              sub: 'retired-route',
+              systab: 'retired-tab',
+            }),
+            win({
+              id: 'files-one',
+              app: 'files',
+              sub: 'not a valid mount',
+              systab: 'retired-view',
+              z: 12,
+            }),
+            win({ id: 'unknown-one', app: 'retired-app', z: 13 }),
+          ],
+          focusId: 'unknown-one',
+          view: 'desktop',
+          device: 'full',
+          z: 13,
+        },
+        revision: 7,
+        migratedBrowserState: true,
+        seedWindowIds: ['unused-one', 'unused-two'],
+      }),
+    );
+
+    expect(loaded.wins).toHaveLength(2);
+    expect(loaded.wins[0]).toMatchObject({
+      id: 'control-one',
+      sub: 'models',
+      systab: '',
+    });
+    expect(loaded.wins[1]).toMatchObject({
+      id: 'files-one',
+      sub: 'home',
+      systab: '',
+    });
+    expect(loaded.focusId).toBeNull();
+    expect(loaded.persistence).toBe('ready');
+    expect(loaded.persistenceRevision).toBe(7);
+    expect(loaded.persistenceError).toBeNull();
+    expect(loaded.migratedBrowserState).toBe(true);
+  });
+
+  it('fails closed on unavailable state and advances only committed revisions', () => {
+    const loading = desktopReducer(
+      state({ persistence: 'ready', persistenceRevision: 4 }),
+      desktopActions.loadSession(),
+    );
+    expect(loading.persistence).toBe('loading');
+
+    const failed = desktopReducer(
+      loading,
+      desktopActions.loadSessionFailure({ error: 'state unavailable' }),
+    );
+    expect(failed.persistence).toBe('unavailable');
+    expect(failed.persistenceRevision).toBe(4);
+    expect(failed.persistenceError).toBe('state unavailable');
+
+    const saved = desktopReducer(
+      state({ persistenceRevision: 4, migratedBrowserState: false }),
+      desktopActions.saveSessionSuccess({
+        revision: 5,
+        migratedBrowserState: true,
+      }),
+    );
+    expect(saved.persistenceRevision).toBe(5);
+    expect(saved.migratedBrowserState).toBe(true);
   });
 
   it('launches with cascade geometry or focuses and restores an existing app', () => {
@@ -97,7 +170,7 @@ describe('desktop reducer', () => {
     expect(existing.z).toBe(21);
   });
 
-  it('focuses a window with the next z and still records an unknown focus id', () => {
+  it('focuses a window with the next z and ignores an unknown focus id', () => {
     const focused = desktopReducer(
       state({ wins: [win({ min: true })], z: 11, devCat: 'system' }),
       desktopActions.focusWindow({ id: 'w1' }),
@@ -109,9 +182,7 @@ describe('desktop reducer', () => {
     expect(focused.z).toBe(12);
 
     const unknown = desktopReducer(focused, desktopActions.focusWindow({ id: 'missing' }));
-    expect(unknown.wins).toEqual(focused.wins);
-    expect(unknown.focusId).toBe('missing');
-    expect(unknown.z).toBe(12);
+    expect(unknown).toBe(focused);
   });
 
   it('closes a focused window and selects the adjacent predecessor', () => {
@@ -169,10 +240,7 @@ describe('desktop reducer', () => {
     expect(maximized.focusId).toBe('w1');
     expect(maximized.devCat).toBeNull();
 
-    const restored = desktopReducer(
-      maximized,
-      desktopActions.maximiseWindow({ id: 'w1' }),
-    );
+    const restored = desktopReducer(maximized, desktopActions.maximiseWindow({ id: 'w1' }));
 
     expect(restored.wins[0]).toMatchObject({
       x: 70,

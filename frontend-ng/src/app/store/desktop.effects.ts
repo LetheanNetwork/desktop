@@ -1,24 +1,43 @@
 import { Injectable, afterNextRender, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
-import { Store } from '@ngrx/store';
+import { Action, Store } from '@ngrx/store';
 import {
+  ReplaySubject,
+  catchError,
   concat,
+  concatMap,
+  debounce,
+  defer,
   filter,
+  from,
   map,
   mergeMap,
   of,
-  ReplaySubject,
+  switchMap,
   take,
-  tap,
   timer,
   withLatestFrom,
 } from 'rxjs';
-import { desktopActions, DesktopHydration } from './desktop.actions';
-import { DesktopState, selectDesktopState } from './desktop.reducer';
+import {
+  DesktopShellSessionSnapshot,
+  DesktopStateBridgeService,
+  desktopHydrationFromSession,
+  desktopSessionFromState,
+  isDesktopStateConflict,
+  parseLegacyDesktopSession,
+} from '../desktop/desktop-state-bridge.service';
+import { WindowManagerService } from '../desktop/window-manager.service';
+import { DesktopHydration, SeedWindowIds, desktopActions } from './desktop.actions';
+import {
+  DesktopState,
+  desktopReducer,
+  initialDesktopState,
+  selectDesktopState,
+} from './desktop.reducer';
 import { StorageService } from './storage.service';
 
 const STORE_KEY = 'lthn.desktop';
-
+const GEOMETRY_SAVE_DELAY_MS = 150;
 const INITIAL_WINDOW_IDS = ['w-initial-control', 'w-initial-telemetry'] as const;
 
 const mutatingActions = [
@@ -39,11 +58,19 @@ const mutatingActions = [
   desktopActions.clear,
 ] as const;
 
+const continuousMutationTypes = new Set<string>([
+  desktopActions.hydrate.type,
+  desktopActions.moveWindow.type,
+  desktopActions.resizeWindow.type,
+]);
+
 @Injectable()
 export class DesktopEffects {
   private readonly actions$ = inject(Actions);
   private readonly store = inject(Store);
   private readonly storage = inject(StorageService);
+  private readonly bridge = inject(DesktopStateBridgeService);
+  private readonly windows = inject(WindowManagerService);
   private readonly rendered$ = new ReplaySubject<void>(1);
 
   constructor() {
@@ -64,12 +91,25 @@ export class DesktopEffects {
       ),
       this.rendered$.pipe(
         take(1),
-        map(() =>
-          desktopActions.hydrate({
-            state: this.storage.read<DesktopHydration>(STORE_KEY),
-            seedWindowIds: INITIAL_WINDOW_IDS,
-            persist: false,
-          }),
+        map(() => desktopActions.loadSession()),
+      ),
+    ),
+  );
+
+  readonly loadSession$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(desktopActions.loadSession),
+      switchMap(() =>
+        from(this.loadSession()).pipe(
+          catchError((error: unknown) =>
+            of(
+              isDesktopStateConflict(error)
+                ? desktopActions.loadSession()
+                : desktopActions.loadSessionFailure({
+                    error: messageFor(error),
+                  }),
+            ),
+          ),
         ),
       ),
     ),
@@ -85,41 +125,117 @@ export class DesktopEffects {
     ),
   );
 
-  readonly persist$ = createEffect(
-    () =>
-      this.actions$.pipe(
-        ofType(...mutatingActions),
-        filter((action) => action.type !== desktopActions.hydrate.type || action.persist !== false),
-        withLatestFrom(this.store.select(selectDesktopState)),
-        tap(([, state]) => this.persist(state)),
+  readonly requestSave$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(...mutatingActions),
+      filter(shouldPersistMutation),
+      debounce((action) =>
+        continuousMutationTypes.has(action.type) ? timer(GEOMETRY_SAVE_DELAY_MS) : of(0),
       ),
-    { dispatch: false },
+      withLatestFrom(this.store.select(selectDesktopState)),
+      filter(([, state]) => state.persistence === 'ready'),
+      map(() => desktopActions.saveSessionRequested()),
+    ),
   );
 
-  private persist(state: DesktopState): void {
-    const stored = this.storage.read<Record<string, unknown>>(STORE_KEY);
-    const shell = stored && typeof stored === 'object' ? stored : {};
+  readonly saveSession$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(desktopActions.saveSessionRequested),
+      concatMap(() =>
+        this.store.select(selectDesktopState).pipe(
+          take(1),
+          filter((state) => state.persistence === 'ready'),
+          concatMap((state) =>
+            defer(() =>
+              this.bridge.saveShellSession(
+                state.persistenceRevision,
+                desktopSessionFromState(state, true),
+              ),
+            ).pipe(
+              map((snapshot) =>
+                desktopActions.saveSessionSuccess({
+                  revision: snapshot.revision,
+                  migratedBrowserState: snapshot.session.migratedBrowserState,
+                }),
+              ),
+              catchError((error: unknown) =>
+                of(
+                  isDesktopStateConflict(error)
+                    ? desktopActions.loadSession()
+                    : desktopActions.saveSessionFailure({
+                        error: messageFor(error),
+                      }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 
-    this.storage.write(STORE_KEY, {
-      ...shell,
-      view: state.view,
-      device: state.device,
-      focusId: state.focusId,
-      z: state.z,
-      wins: state.wins.map((win) => ({
-        id: win.id,
-        app: win.app,
-        sub: win.sub,
-        systab: win.systab,
-        x: win.x,
-        y: win.y,
-        w: win.w,
-        h: win.h,
-        z: win.z,
-        min: win.min,
-        max: win.max,
-        group: win.group,
-      })),
+  private async loadSession(): Promise<Action> {
+    let snapshot = await this.bridge.loadShellSession();
+    if (!this.bridge.isOffline() && !snapshot.session.migratedBrowserState) {
+      const legacy = parseLegacyDesktopSession(this.storage.read<unknown>(STORE_KEY));
+      if (legacy) {
+        const normalised = normalisedLegacyState(
+          this.windows.reconcileHydration(desktopHydrationFromSession(legacy)),
+          INITIAL_WINDOW_IDS,
+        );
+        snapshot = await this.bridge.saveShellSession(
+          snapshot.revision,
+          desktopSessionFromState(normalised, true),
+        );
+        this.storage.remove(STORE_KEY);
+      }
+    }
+    return this.loadedAction(snapshot);
+  }
+
+  private loadedAction(snapshot: DesktopShellSessionSnapshot): Action {
+    return desktopActions.loadSessionSuccess({
+      state: this.windows.reconcileHydration(desktopHydrationFromSession(snapshot.session)),
+      revision: snapshot.revision,
+      migratedBrowserState: snapshot.session.migratedBrowserState,
+      seedWindowIds: INITIAL_WINDOW_IDS,
     });
   }
+}
+
+function normalisedLegacyState(
+  hydration: DesktopHydration,
+  seedWindowIds: SeedWindowIds,
+): DesktopState {
+  return desktopReducer(
+    initialDesktopState,
+    desktopActions.hydrate({
+      state: hydration,
+      seedWindowIds,
+    }),
+  );
+}
+
+function shouldPersistMutation(action: ReturnType<(typeof mutatingActions)[number]>): boolean {
+  if (
+    action.type === desktopActions.hydrate.type &&
+    'persist' in action &&
+    action.persist === false
+  ) {
+    return false;
+  }
+  if (
+    action.type === desktopActions.minimiseWindow.type &&
+    'delayMs' in action &&
+    (action.delayMs ?? 0) > 0
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function messageFor(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error) return error;
+  return 'The desktop session is unavailable.';
 }

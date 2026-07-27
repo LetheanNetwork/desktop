@@ -1,9 +1,15 @@
 import { TestBed } from '@angular/core/testing';
 import { Action } from '@ngrx/store';
 import { provideMockActions } from '@ngrx/effects/testing';
-import { provideMockStore } from '@ngrx/store/testing';
+import { MockStore, provideMockStore } from '@ngrx/store/testing';
 import { firstValueFrom, Subject } from 'rxjs';
+import {
+  DesktopShellSessionSnapshot,
+  DesktopStateBridgeService,
+  DesktopStateConflictError,
+} from '../desktop/desktop-state-bridge.service';
 import { Win } from '../desktop/desktop.data';
+import { WindowManagerService } from '../desktop/window-manager.service';
 import { desktopActions } from './desktop.actions';
 import { DesktopEffects } from './desktop.effects';
 import { DesktopState } from './desktop.reducer';
@@ -20,7 +26,7 @@ const persistedWin: Win = {
   h: 560,
   z: 11,
   min: false,
-  max: true,
+  max: false,
   prev: { x: 1, y: 2, w: 3, h: 4 },
   minimizing: true,
 };
@@ -32,6 +38,39 @@ const desktopState: DesktopState = {
   device: 'small',
   devCat: 'system',
   z: 11,
+  persistence: 'ready',
+  persistenceRevision: 4,
+  persistenceError: null,
+  migratedBrowserState: true,
+};
+
+const shellSnapshot: DesktopShellSessionSnapshot = {
+  version: 1,
+  revision: 4,
+  updatedAt: '2026-07-27T10:00:00Z',
+  session: {
+    view: 'desktop',
+    device: 'small',
+    focusId: 'w1',
+    z: 11,
+    windows: [
+      {
+        id: 'w1',
+        app: 'control',
+        sub: 'models',
+        systemTab: '',
+        group: '',
+        x: 70,
+        y: 24,
+        width: 780,
+        height: 560,
+        z: 11,
+        min: false,
+        max: false,
+      },
+    ],
+    migratedBrowserState: true,
+  },
 };
 
 describe('StorageService', () => {
@@ -57,12 +96,15 @@ describe('StorageService', () => {
     service = TestBed.inject(StorageService);
   });
 
-  it('reads and writes JSON through localStorage and treats malformed JSON as empty', () => {
+  it('reads, writes, and removes JSON while treating malformed JSON as empty', () => {
     service.write(key, { view: 'shell' });
     expect(service.read(key)).toEqual({ view: 'shell' });
 
     memory.setItem(key, '{broken');
     expect(service.read(key)).toBeNull();
+
+    service.remove(key);
+    expect(memory.getItem(key)).toBeNull();
   });
 });
 
@@ -81,16 +123,35 @@ describe('DESKTOP_STORAGE', () => {
 describe('DesktopEffects', () => {
   let actions$: Subject<Action>;
   let effects: DesktopEffects;
+  let store: MockStore;
+  let bridge: {
+    isOffline: ReturnType<typeof vi.fn>;
+    loadShellSession: ReturnType<typeof vi.fn>;
+    saveShellSession: ReturnType<typeof vi.fn>;
+  };
   let storage: {
     read: ReturnType<typeof vi.fn>;
     write: ReturnType<typeof vi.fn>;
+    remove: ReturnType<typeof vi.fn>;
+  };
+  let windows: {
+    reconcileHydration: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
     actions$ = new Subject<Action>();
+    bridge = {
+      isOffline: vi.fn(() => false),
+      loadShellSession: vi.fn(),
+      saveShellSession: vi.fn(),
+    };
     storage = {
       read: vi.fn(),
       write: vi.fn(),
+      remove: vi.fn(),
+    };
+    windows = {
+      reconcileHydration: vi.fn((state) => state),
     };
 
     TestBed.configureTestingModule({
@@ -98,24 +159,133 @@ describe('DesktopEffects', () => {
         DesktopEffects,
         provideMockActions(() => actions$),
         provideMockStore({ initialState: { desktop: desktopState } }),
+        { provide: DesktopStateBridgeService, useValue: bridge },
         { provide: StorageService, useValue: storage },
+        { provide: WindowManagerService, useValue: windows },
       ],
     });
     effects = TestBed.inject(DesktopEffects);
+    store = TestBed.inject(MockStore);
   });
 
-  afterEach(() => actions$.complete());
+  afterEach(() => {
+    actions$.complete();
+    vi.useRealTimers();
+  });
 
-  it('dispatches a deterministic pre-hydration state without reading browser storage', async () => {
+  it('dispatches deterministic safe state before requesting connected hydration', async () => {
     const action = await firstValueFrom(effects.hydrate$);
 
+    expect(bridge.loadShellSession).not.toHaveBeenCalled();
     expect(storage.read).not.toHaveBeenCalled();
     expect(action).toMatchObject({
       type: '[Desktop] Hydrate',
       state: null,
       persist: false,
+      seedWindowIds: ['w-initial-control', 'w-initial-telemetry'],
     });
-    expect(action.seedWindowIds).toEqual(['w-initial-control', 'w-initial-telemetry']);
+  });
+
+  it('loads connected state through the bridge and reconciles its viewport', async () => {
+    bridge.loadShellSession.mockResolvedValue(shellSnapshot);
+    const loaded = firstValueFrom(effects.loadSession$);
+
+    actions$.next(desktopActions.loadSession());
+
+    await expect(loaded).resolves.toMatchObject({
+      type: '[Desktop] Load Session Success',
+      revision: 4,
+      migratedBrowserState: true,
+      state: {
+        view: 'desktop',
+        device: 'small',
+        focusId: 'w1',
+      },
+    });
+    expect(windows.reconcileHydration).toHaveBeenCalledTimes(1);
+    expect(storage.read).not.toHaveBeenCalled();
+  });
+
+  it('migrates legacy browser state and removes it only after a successful save', async () => {
+    bridge.loadShellSession.mockResolvedValue({
+      ...shellSnapshot,
+      revision: 0,
+      updatedAt: '',
+      session: {
+        ...shellSnapshot.session,
+        focusId: '',
+        windows: [],
+        migratedBrowserState: false,
+      },
+    });
+    storage.read.mockReturnValue({
+      view: 'shell',
+      device: 'large',
+      focusId: 'legacy-one',
+      z: 8,
+      wins: [
+        {
+          id: 'legacy-one',
+          app: 'files',
+          sub: 'home',
+          systab: 'grid',
+          x: 20,
+          y: 30,
+          w: 820,
+          h: 560,
+          z: 8,
+          min: false,
+          max: false,
+        },
+      ],
+      mode: 'light',
+    });
+    bridge.saveShellSession.mockImplementation(
+      (_revision: number, session: DesktopShellSessionSnapshot['session']) =>
+        Promise.resolve({
+          version: 1,
+          revision: 1,
+          updatedAt: '2026-07-27T10:01:00Z',
+          session,
+        }),
+    );
+    const loaded = firstValueFrom(effects.loadSession$);
+
+    actions$.next(desktopActions.loadSession());
+    const result = await loaded;
+
+    expect(result).toMatchObject({
+      type: '[Desktop] Load Session Success',
+      revision: 1,
+      migratedBrowserState: true,
+      state: {
+        view: 'shell',
+        device: 'large',
+        focusId: 'legacy-one',
+      },
+    });
+    expect(bridge.saveShellSession).toHaveBeenCalledWith(
+      0,
+      expect.objectContaining({
+        view: 'shell',
+        migratedBrowserState: true,
+      }),
+    );
+    expect(storage.remove).toHaveBeenCalledWith('lthn.desktop');
+  });
+
+  it('keeps legacy evidence when migration or connected load fails', async () => {
+    bridge.loadShellSession.mockRejectedValue(new Error('desktop state is malformed'));
+    const failed = firstValueFrom(effects.loadSession$);
+
+    actions$.next(desktopActions.loadSession());
+
+    await expect(failed).resolves.toEqual(
+      desktopActions.loadSessionFailure({
+        error: 'desktop state is malformed',
+      }),
+    );
+    expect(storage.remove).not.toHaveBeenCalled();
   });
 
   it('completes a delayed minimise with the same action after the delay', async () => {
@@ -128,81 +298,78 @@ describe('DesktopEffects', () => {
     );
   });
 
-  it('persists every mutating action', () => {
-    storage.read.mockReturnValue({});
-    effects.persist$.subscribe();
+  it('debounces drag geometry but requests discrete persistence immediately', async () => {
+    vi.useFakeTimers();
+    const requested: Action[] = [];
+    effects.requestSave$.subscribe((action) => requested.push(action));
 
-    const mutatingActions = [
-      desktopActions.hydrate({ state: null }),
-      desktopActions.launchApp({ appId: 'control', windowId: 'w2' }),
-      desktopActions.focusWindow({ id: 'w1' }),
-      desktopActions.closeWindow({ id: 'w1' }),
-      desktopActions.minimiseWindow({ id: 'w1' }),
-      desktopActions.maximiseWindow({ id: 'w1' }),
-      desktopActions.moveWindow({ id: 'w1', x: 1, y: 2 }),
-      desktopActions.resizeWindow({ id: 'w1', w: 3, h: 4 }),
-      desktopActions.setSub({ id: 'w1', sub: 'runs' }),
-      desktopActions.setSysTab({ id: 'w1', systab: 'list' }),
-      desktopActions.setView({ view: 'shell' }),
-      desktopActions.setDevice({ device: 'large' }),
-      desktopActions.toggleDevCat({ id: 'system' }),
-      desktopActions.goHome(),
-      desktopActions.clear(),
-    ];
+    actions$.next(desktopActions.moveWindow({ id: 'w1', x: 1, y: 2 }));
+    actions$.next(desktopActions.resizeWindow({ id: 'w1', w: 700, h: 500 }));
+    await vi.advanceTimersByTimeAsync(149);
+    expect(requested).toEqual([]);
 
-    mutatingActions.forEach((action) => actions$.next(action));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(requested).toEqual([desktopActions.saveSessionRequested()]);
 
-    expect(storage.write).toHaveBeenCalledTimes(mutatingActions.length);
+    actions$.next(desktopActions.closeWindow({ id: 'w1' }));
+    await Promise.resolve();
+    expect(requested).toEqual([
+      desktopActions.saveSessionRequested(),
+      desktopActions.saveSessionRequested(),
+    ]);
   });
 
-  it('does not persist the deterministic pre-hydration action', () => {
-    effects.persist$.subscribe();
+  it('serialises one complete durable session and records its new revision', async () => {
+    bridge.saveShellSession.mockResolvedValue({
+      ...shellSnapshot,
+      revision: 5,
+    });
+    const saved = firstValueFrom(effects.saveSession$);
 
-    actions$.next(
-      desktopActions.hydrate({
-        state: null,
-        seedWindowIds: ['w-initial-control', 'w-initial-telemetry'],
-        persist: false,
+    actions$.next(desktopActions.saveSessionRequested());
+
+    await expect(saved).resolves.toEqual(
+      desktopActions.saveSessionSuccess({
+        revision: 5,
+        migratedBrowserState: true,
       }),
     );
-
-    expect(storage.write).not.toHaveBeenCalled();
+    expect(bridge.saveShellSession).toHaveBeenCalledWith(
+      4,
+      expect.objectContaining({
+        focusId: 'w1',
+        migratedBrowserState: true,
+      }),
+    );
+    const serialised = JSON.stringify(bridge.saveShellSession.mock.calls[0]);
+    expect(serialised).not.toContain('prev');
+    expect(serialised).not.toContain('minimizing');
   });
 
-  it('merges shell-owned storage and writes only the service window shape', () => {
-    storage.read.mockReturnValue({
-      bar: 'top',
-      wall: 'aurora',
-      view: 'shell',
-      wins: [{ id: 'old' }],
-    });
-    effects.persist$.subscribe();
+  it('reloads a revision conflict instead of overwriting newer state', async () => {
+    bridge.saveShellSession.mockRejectedValue(new DesktopStateConflictError());
+    const reloaded = firstValueFrom(effects.saveSession$);
 
-    actions$.next(desktopActions.focusWindow({ id: 'w1' }));
+    actions$.next(desktopActions.saveSessionRequested());
 
-    expect(storage.write).toHaveBeenLastCalledWith('lthn.desktop', {
-      bar: 'top',
-      wall: 'aurora',
-      view: 'desktop',
-      device: 'small',
-      focusId: 'w1',
-      z: 11,
-      wins: [
-        {
-          id: 'w1',
-          app: 'control',
-          sub: 'models',
-          systab: '',
-          x: 70,
-          y: 24,
-          w: 780,
-          h: 560,
-          z: 11,
-          min: false,
-          max: true,
-          group: undefined,
-        },
-      ],
+    await expect(reloaded).resolves.toEqual(desktopActions.loadSession());
+  });
+
+  it('contains invalid in-memory state as a failed save without killing the effect', async () => {
+    store.setState({
+      desktop: {
+        ...desktopState,
+        focusId: 'missing-window',
+      },
     });
+    const failed = firstValueFrom(effects.saveSession$);
+
+    actions$.next(desktopActions.saveSessionRequested());
+
+    await expect(failed).resolves.toMatchObject({
+      type: '[Desktop] Save Session Failure',
+      error: expect.stringContaining('invalid desktop state'),
+    });
+    expect(bridge.saveShellSession).not.toHaveBeenCalled();
   });
 });

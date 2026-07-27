@@ -4,6 +4,7 @@ import { HashLocationStrategy, LocationStrategy } from '@angular/common';
 import { Router } from '@angular/router';
 import { App } from './app';
 import { appConfig } from './app.config';
+import { DesktopStateBridgeService } from './desktop/desktop-state-bridge.service';
 import { StorageService } from './store/storage.service';
 
 describe('App first paint', () => {
@@ -12,15 +13,39 @@ describe('App first paint', () => {
   const storage = {
     read: vi.fn(() => null),
     write: vi.fn(),
+    remove: vi.fn(),
+  };
+  const desktopState = {
+    isOffline: vi.fn(() => false),
+    loadShellSession: vi.fn(async () => ({
+      version: 1,
+      revision: 1,
+      updatedAt: '2026-07-27T10:00:00Z',
+      session: {
+        view: 'desktop',
+        device: 'full',
+        focusId: '',
+        z: 10,
+        windows: [],
+        migratedBrowserState: true,
+      },
+    })),
+    saveShellSession: vi.fn(),
   };
 
   beforeEach(async () => {
     storage.read.mockClear();
     storage.write.mockClear();
+    storage.remove.mockClear();
+    desktopState.loadShellSession.mockClear();
 
     await TestBed.configureTestingModule({
       imports: [App],
-      providers: [...appConfig.providers, { provide: StorageService, useValue: storage }],
+      providers: [
+        ...appConfig.providers,
+        { provide: StorageService, useValue: storage },
+        { provide: DesktopStateBridgeService, useValue: desktopState },
+      ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(App);
@@ -59,6 +84,7 @@ describe('App first paint', () => {
     expect(desktop).not.toBeNull();
     expect(getComputedStyle(desktop!).display).toBe('flex');
     expect(getComputedStyle(desktop!).height).toBe('100%');
-    expect(storage.read).toHaveBeenCalledWith('lthn.desktop');
+    expect(desktopState.loadShellSession).toHaveBeenCalledTimes(1);
+    expect(storage.read).not.toHaveBeenCalled();
   });
 });

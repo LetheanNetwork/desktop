@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { MockStore, provideMockStore } from '@ngrx/store/testing';
 import { Win } from './desktop.data';
-import { WindowManagerService } from './window-manager.service';
+import { DESKTOP_VIEWPORT, WindowManagerService } from './window-manager.service';
 import { desktopActions } from '../store/desktop.actions';
 import { DesktopState } from '../store/desktop.reducer';
 
@@ -26,6 +26,10 @@ const desktopState: DesktopState = {
   device: 'small',
   devCat: 'system',
   z: 11,
+  persistence: 'ready',
+  persistenceRevision: 1,
+  persistenceError: null,
+  migratedBrowserState: true,
 };
 
 describe('WindowManagerService facade', () => {
@@ -36,6 +40,10 @@ describe('WindowManagerService facade', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       providers: [
+        {
+          provide: DESKTOP_VIEWPORT,
+          useValue: () => ({ width: 1_000, height: 700 }),
+        },
         provideMockStore({
           initialState: { desktop: desktopState },
         }),
@@ -76,14 +84,10 @@ describe('WindowManagerService facade', () => {
     );
 
     facade.setDevice('large');
-    expect(dispatch).toHaveBeenLastCalledWith(
-      desktopActions.setDevice({ device: 'large' }),
-    );
+    expect(dispatch).toHaveBeenLastCalledWith(desktopActions.setDevice({ device: 'large' }));
 
     facade.toggleDevCat('developer');
-    expect(dispatch).toHaveBeenLastCalledWith(
-      desktopActions.toggleDevCat({ id: 'developer' }),
-    );
+    expect(dispatch).toHaveBeenLastCalledWith(desktopActions.toggleDevCat({ id: 'developer' }));
 
     facade.launch('telemetry');
     expect(dispatch).toHaveBeenLastCalledWith(
@@ -95,13 +99,9 @@ describe('WindowManagerService facade', () => {
     );
 
     facade.focus('w1');
-    expect(dispatch).toHaveBeenLastCalledWith(
-      desktopActions.focusWindow({ id: 'w1' }),
-    );
+    expect(dispatch).toHaveBeenLastCalledWith(desktopActions.focusWindow({ id: 'w1' }));
     facade.close('w1');
-    expect(dispatch).toHaveBeenLastCalledWith(
-      desktopActions.closeWindow({ id: 'w1' }),
-    );
+    expect(dispatch).toHaveBeenLastCalledWith(desktopActions.closeWindow({ id: 'w1' }));
     facade.minimise('w1', 190);
     expect(dispatch).toHaveBeenLastCalledWith(
       desktopActions.minimiseWindow({ id: 'w1', delayMs: 190 }),
@@ -114,17 +114,13 @@ describe('WindowManagerService facade', () => {
       }),
     );
     facade.move('w1', 1, 2);
-    expect(dispatch).toHaveBeenLastCalledWith(
-      desktopActions.moveWindow({ id: 'w1', x: 1, y: 2 }),
-    );
+    expect(dispatch).toHaveBeenLastCalledWith(desktopActions.moveWindow({ id: 'w1', x: 1, y: 2 }));
     facade.resize('w1', 3, 4);
     expect(dispatch).toHaveBeenLastCalledWith(
       desktopActions.resizeWindow({ id: 'w1', w: 3, h: 4 }),
     );
     facade.setSub('w1', 'runs');
-    expect(dispatch).toHaveBeenLastCalledWith(
-      desktopActions.setSub({ id: 'w1', sub: 'runs' }),
-    );
+    expect(dispatch).toHaveBeenLastCalledWith(desktopActions.setSub({ id: 'w1', sub: 'runs' }));
     facade.setSysTab('w1', 'list');
     expect(dispatch).toHaveBeenLastCalledWith(
       desktopActions.setSysTab({ id: 'w1', systab: 'list' }),
@@ -216,5 +212,42 @@ describe('WindowManagerService facade', () => {
         normalise: false,
       }),
     );
+  });
+
+  it('reconciles restored geometry so every title bar remains reachable', () => {
+    const reconciled = facade.reconcileHydration({
+      wins: [
+        {
+          ...openWin,
+          id: 'right',
+          x: 4_000,
+          y: -300,
+        },
+        {
+          ...openWin,
+          id: 'left',
+          x: -4_000,
+          y: 2_000,
+        },
+        {
+          ...openWin,
+          id: 'max',
+          max: true,
+          x: 20,
+          y: 20,
+        },
+      ],
+    });
+
+    expect(reconciled.wins?.[0]).toMatchObject({ x: 904, y: 0 });
+    expect(reconciled.wins?.[1]).toMatchObject({ x: -684, y: 666 });
+    expect(reconciled.wins?.[2]).toMatchObject({
+      x: 0,
+      y: 0,
+      w: 1_000,
+      h: 700,
+      max: true,
+      prev: { x: 70, y: 24, w: 780, h: 560 },
+    });
   });
 });
