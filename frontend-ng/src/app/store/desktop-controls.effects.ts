@@ -4,7 +4,7 @@ import { catchError, concatMap, from, map, of, switchMap, tap } from 'rxjs';
 import { DesktopControlsBridgeService } from '../desktop/desktop-controls-bridge.service';
 import { PreferencesService } from '../desktop/preferences.service';
 import { desktopControlsActions } from './desktop-controls.actions';
-import { DesktopControlSnapshot } from './desktop-controls.models';
+import { DesktopControlChange, DesktopControlSnapshot } from './desktop-controls.models';
 
 @Injectable()
 export class DesktopControlsEffects {
@@ -32,16 +32,20 @@ export class DesktopControlsEffects {
     ),
   );
 
-  readonly setControl$ = createEffect(() =>
+  readonly applyDraft$ = createEffect(() =>
     this.actions$.pipe(
-      ofType(desktopControlsActions.setControl),
-      concatMap(({ key, value }) =>
-        from(this.bridge.set(key, value)).pipe(
-          map((snapshot) => desktopControlsActions.setControlSuccess({ key, snapshot })),
+      ofType(desktopControlsActions.applyDraft),
+      concatMap(({ changes }) =>
+        from(this.bridge.setMany(changes)).pipe(
+          map((snapshot) =>
+            desktopControlsActions.applyDraftSuccess({
+              snapshot,
+              restartRequired: restartRequiredLabels(snapshot, changes),
+            }),
+          ),
           catchError((error: unknown) =>
             of(
-              desktopControlsActions.setControlFailure({
-                key,
+              desktopControlsActions.applyDraftFailure({
                 error: messageFor(error),
               }),
             ),
@@ -54,31 +58,25 @@ export class DesktopControlsEffects {
   readonly applyRendererControls$ = createEffect(
     () =>
       this.actions$.pipe(
-        ofType(desktopControlsActions.loadSuccess, desktopControlsActions.setControlSuccess),
-        tap(({ snapshot }) => this.applyRendererControls(snapshot)),
+        ofType(desktopControlsActions.loadSuccess, desktopControlsActions.applyDraftSuccess),
+        tap(({ snapshot }) => this.preferences.applySnapshot(snapshot)),
       ),
     { dispatch: false },
   );
+}
 
-  private applyRendererControls(snapshot: DesktopControlSnapshot): void {
-    const interfaceTheme = snapshot.controls.find(
-      ({ key }) => key === 'desktop.theme.interface',
-    )?.value;
-    if (interfaceTheme === 'dark' || interfaceTheme === 'light') {
-      this.preferences.mode.set(interfaceTheme);
-    }
-
-    const reduceMotion = snapshot.controls.find(
-      ({ key }) => key === 'desktop.theme.reduce_motion',
-    )?.value;
-    if (typeof reduceMotion === 'boolean') {
-      this.preferences.reduceMotion.set(reduceMotion);
-    }
-  }
+function restartRequiredLabels(
+  snapshot: DesktopControlSnapshot,
+  changes: readonly DesktopControlChange[],
+): readonly string[] {
+  const changedKeys = new Set(changes.map(({ key }) => key));
+  return snapshot.controls
+    .filter(({ key, restartRequired }) => restartRequired && changedKeys.has(key))
+    .map(({ label }) => label);
 }
 
 function messageFor(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error) return error;
-  return 'The desktop setting could not be saved.';
+  return 'The desktop settings could not be saved.';
 }

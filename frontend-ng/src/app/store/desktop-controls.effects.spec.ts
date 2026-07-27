@@ -1,4 +1,3 @@
-import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Action } from '@ngrx/store';
 import { provideMockActions } from '@ngrx/effects/testing';
@@ -10,7 +9,6 @@ import { DesktopControlsEffects } from './desktop-controls.effects';
 import { DesktopControlSnapshot } from './desktop-controls.reducer';
 
 const snapshot: DesktopControlSnapshot = {
-  configPath: '/tmp/lthn.yaml',
   controls: [
     {
       key: 'desktop.theme.interface',
@@ -26,16 +24,16 @@ const snapshot: DesktopControlSnapshot = {
       choices: ['dark', 'light'],
     },
     {
-      key: 'desktop.theme.reduce_motion',
-      group: 'Theme',
-      label: 'Reduce motion',
-      description: 'Reduce transitions.',
+      key: 'desktop.single_instance.enabled',
+      group: 'Single instance',
+      label: 'Single instance',
+      description: 'Hand off later launches.',
       kind: 'toggle',
-      value: true,
-      defaultValue: false,
+      value: false,
+      defaultValue: true,
       configured: true,
-      live: true,
-      restartRequired: false,
+      live: false,
+      restartRequired: true,
     },
   ],
 };
@@ -44,24 +42,18 @@ describe('DesktopControlsEffects', () => {
   let actions$: Subject<Action>;
   let bridge: {
     settings: ReturnType<typeof vi.fn>;
-    set: ReturnType<typeof vi.fn>;
+    setMany: ReturnType<typeof vi.fn>;
   };
-  let prefs: {
-    mode: ReturnType<typeof signal<'dark' | 'light'>>;
-    reduceMotion: ReturnType<typeof signal<boolean>>;
-  };
+  let prefs: { applySnapshot: ReturnType<typeof vi.fn> };
   let effects: DesktopControlsEffects;
 
   beforeEach(() => {
     actions$ = new Subject<Action>();
     bridge = {
       settings: vi.fn(),
-      set: vi.fn(),
+      setMany: vi.fn(),
     };
-    prefs = {
-      mode: signal<'dark' | 'light'>('dark'),
-      reduceMotion: signal(false),
-    };
+    prefs = { applySnapshot: vi.fn() };
     TestBed.configureTestingModule({
       providers: [
         DesktopControlsEffects,
@@ -81,7 +73,7 @@ describe('DesktopControlsEffects', () => {
     );
   });
 
-  it('loads the effective catalogue through the Go bridge', async () => {
+  it('loads the effective catalogue through the selected connected or demo provider', async () => {
     bridge.settings.mockResolvedValue(snapshot);
     const result = firstValueFrom(effects.load$);
 
@@ -90,32 +82,38 @@ describe('DesktopControlsEffects', () => {
     await expect(result).resolves.toEqual(desktopControlsActions.loadSuccess({ snapshot }));
   });
 
-  it('writes a control and returns the committed effective snapshot', async () => {
-    bridge.set.mockResolvedValue(snapshot);
-    const result = firstValueFrom(effects.setControl$);
+  it('writes one complete draft and returns one restart summary', async () => {
+    bridge.setMany.mockResolvedValue(snapshot);
+    const changes = [
+      { key: 'desktop.theme.interface', value: 'light' as const },
+      { key: 'desktop.single_instance.enabled', value: false },
+    ];
+    const result = firstValueFrom(effects.applyDraft$);
 
-    actions$.next(
-      desktopControlsActions.setControl({
-        key: 'desktop.theme.interface',
-        value: 'light',
-      }),
-    );
+    actions$.next(desktopControlsActions.applyDraft({ changes }));
 
     await expect(result).resolves.toEqual(
-      desktopControlsActions.setControlSuccess({
-        key: 'desktop.theme.interface',
+      desktopControlsActions.applyDraftSuccess({
         snapshot,
+        restartRequired: ['Single instance'],
       }),
     );
-    expect(bridge.set).toHaveBeenCalledWith('desktop.theme.interface', 'light');
+    expect(bridge.setMany).toHaveBeenCalledTimes(1);
+    expect(bridge.setMany).toHaveBeenCalledWith(changes);
   });
 
-  it('applies renderer-owned theme controls live after a committed snapshot', () => {
+  it('projects only committed snapshots into renderer preferences', () => {
     effects.applyRendererControls$.subscribe();
 
     actions$.next(desktopControlsActions.loadSuccess({ snapshot }));
+    actions$.next(
+      desktopControlsActions.editControl({
+        key: 'desktop.theme.interface',
+        value: 'dark',
+      }),
+    );
 
-    expect(prefs.mode()).toBe('light');
-    expect(prefs.reduceMotion()).toBe(true);
+    expect(prefs.applySnapshot).toHaveBeenCalledTimes(1);
+    expect(prefs.applySnapshot).toHaveBeenCalledWith(snapshot);
   });
 });

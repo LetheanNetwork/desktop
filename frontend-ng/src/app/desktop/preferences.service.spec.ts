@@ -1,0 +1,109 @@
+import { DOCUMENT } from '@angular/common';
+import { signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { ConnectionManagerService } from '../connection-manager.service';
+import { DesktopControlSnapshot, DesktopControlValue } from '../store/desktop-controls.models';
+import { DESKTOP_STORAGE } from '../store/storage.service';
+import { PreferencesService } from './preferences.service';
+
+const preferenceValues: ReadonlyArray<readonly [string, DesktopControlValue]> = [
+  ['desktop.shell.taskbar_edge', 'left'],
+  ['desktop.shell.show_icons', false],
+  ['desktop.shell.show_widgets', false],
+  ['desktop.theme.interface', 'light'],
+  ['desktop.theme.brand', 'hostuk'],
+  ['desktop.theme.design', 'custom'],
+  ['desktop.theme.custom_hue', 190],
+  ['desktop.theme.custom_name', 'Calm'],
+  ['desktop.theme.wallpaper', 'mist'],
+  ['desktop.theme.reduce_motion', true],
+  ['desktop.locale.language', 'cy'],
+];
+
+const preferenceSnapshot: DesktopControlSnapshot = {
+  controls: preferenceValues.map(([key, value]) => ({
+    key,
+    group: 'Theme',
+    label: String(key),
+    description: String(key),
+    kind:
+      typeof value === 'boolean'
+        ? ('toggle' as const)
+        : typeof value === 'number'
+          ? ('number' as const)
+          : ('text' as const),
+    value,
+    defaultValue: value,
+    configured: true,
+    live: true,
+    restartRequired: false,
+  })),
+};
+
+describe('PreferencesService', () => {
+  const offline = signal(false);
+  let values: Map<string, string>;
+  let storage: Storage;
+
+  beforeEach(() => {
+    offline.set(false);
+    values = new Map();
+    storage = {
+      get length() {
+        return values.size;
+      },
+      clear: vi.fn(() => values.clear()),
+      getItem: vi.fn((key: string) => values.get(key) ?? null),
+      key: vi.fn((index: number) => [...values.keys()][index] ?? null),
+      removeItem: vi.fn((key: string) => values.delete(key)),
+      setItem: vi.fn((key: string, value: string) => values.set(key, value)),
+    };
+    TestBed.configureTestingModule({
+      providers: [
+        PreferencesService,
+        { provide: DESKTOP_STORAGE, useValue: storage },
+        {
+          provide: ConnectionManagerService,
+          useValue: { offline: offline.asReadonly() },
+        },
+      ],
+    });
+  });
+
+  it('projects the authoritative connected snapshot without browser persistence', async () => {
+    values.set(
+      'lthn.prefs',
+      JSON.stringify({ mode: 'dark', wallpaper: 'graphite', showIcons: true }),
+    );
+    const service = TestBed.inject(PreferencesService);
+
+    service.applySnapshot(preferenceSnapshot);
+    TestBed.flushEffects();
+
+    expect(service.bar()).toBe('left');
+    expect(service.mode()).toBe('light');
+    expect(service.brand()).toBe('hostuk');
+    expect(service.design()).toBe('custom');
+    expect(service.customHue()).toBe(190);
+    expect(service.customName()).toBe('Calm');
+    expect(service.wallpaper()).toBe('mist');
+    expect(service.lang()).toBe('cy');
+    expect(service.showIcons()).toBe(false);
+    expect(service.showWidgets()).toBe(false);
+    expect(service.reduceMotion()).toBe(true);
+    expect(storage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('restores and persists only inside explicit offline demo mode', () => {
+    offline.set(true);
+    values.set('lthn.prefs', JSON.stringify({ mode: 'light', wallpaper: 'dusk' }));
+
+    const service = TestBed.inject(PreferencesService);
+    service.showIcons.set(false);
+    TestBed.flushEffects();
+
+    expect(service.mode()).toBe('light');
+    expect(service.wallpaper()).toBe('dusk');
+    expect(storage.setItem).toHaveBeenCalled();
+  });
+});

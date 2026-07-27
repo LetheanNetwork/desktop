@@ -1,12 +1,12 @@
 import {
+  ChangeDetectionStrategy,
   Component,
   CUSTOM_ELEMENTS_SCHEMA,
   Input,
   OnInit,
+  computed,
   inject,
-  ChangeDetectionStrategy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { AppView } from './app-view';
 import { AppNavItem } from '../desktop-route-tree';
@@ -14,346 +14,422 @@ import { Win } from '../desktop.data';
 import { PreferencesService } from '../preferences.service';
 import { WindowManagerService } from '../window-manager.service';
 import { desktopControlsActions } from '../../store/desktop-controls.actions';
-import { DesktopControl } from '../../store/desktop-controls.models';
+import { DesktopControl, DesktopControlValue } from '../../store/desktop-controls.models';
 import {
   desktopControlsFeature,
   selectDesktopControlGroups,
+  selectDirtyDesktopControlChanges,
+  selectDraftDesktopControls,
+  selectHasDirtyDesktopControls,
 } from '../../store/desktop-controls.reducer';
+
+const CURATED_PREFERENCE_KEYS = new Set([
+  'desktop.theme.design',
+  'desktop.theme.custom_hue',
+  'desktop.theme.custom_name',
+  'desktop.theme.wallpaper',
+  'desktop.shell.taskbar_edge',
+  'desktop.shell.show_icons',
+  'desktop.shell.show_widgets',
+]);
 
 @Component({
   selector: 'lthn-settings-app',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   host: { style: 'display: contents' },
-  changeDetection: ChangeDetectionStrategy.Eager,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <nav class="rail">
-      <a
-        *ngFor="let item of nav; let last = last"
-        [class.on]="(win.sub || 'interface') === item[0]"
-        [class.last]="last"
-        (click)="wm.setSub(win.id, item[0])"
-      >
-        <lthn-icon [attr.name]="item[1]" [attr.aria-label]="item[2]" size="15"></lthn-icon>
-      </a>
+      @for (item of nav; track item[0]; let last = $last) {
+        <a
+          [class.on]="(win.sub || 'interface') === item[0]"
+          [class.last]="last"
+          (click)="wm.setSub(win.id, item[0])"
+        >
+          <lthn-icon [attr.name]="item[1]" [attr.aria-label]="item[2]" size="15"></lthn-icon>
+        </a>
+      }
     </nav>
-    <div class="appbody" [ngSwitch]="win.sub || 'interface'">
-      <ng-container *ngSwitchCase="'translations'">
-        <div class="ctoolbar">
-          <h1 i18n="Translations settings heading@@settings.translations.heading">Translations</h1>
-          <span
-            class="cfgsrc"
-            i18n="Translation file breadcrumb@@settings.translations.fileBreadcrumb"
-            >locales/{{ prefs.lang() }}.yaml · corego/pkg/i18n</span
-          >
-        </div>
-        <div class="i18n">
-          <div class="i18nrow i18nhead">
-            <span i18n="Translation key column@@settings.translations.column.key">Key</span
-            ><span i18n="English source column@@settings.translations.column.english">English</span
-            ><span>{{ prefs.lang().toUpperCase() }}</span>
+    <div class="appbody">
+      @switch (win.sub || 'interface') {
+        @case ('translations') {
+          <div class="ctoolbar">
+            <h1 i18n="Translations settings heading@@settings.translations.heading">
+              Translations
+            </h1>
+            <span
+              class="cfgsrc"
+              i18n="Translation file breadcrumb@@settings.translations.fileBreadcrumb"
+              >locales/{{ prefs.lang() }}.yaml · corego/pkg/i18n</span
+            >
           </div>
-          <div class="i18nrow" *ngFor="let row of i18nKeys">
-            <span class="i18nk">{{ row[0] }}</span>
-            <span class="i18nen">{{ row[1] }}</span>
-            <span class="i18ncell" contenteditable="true">{{ translated(row) }}</span>
-          </div>
-        </div>
-        <p class="cfghint" i18n="Translation editor help@@settings.translations.help">
-          <lthn-icon name="circle-info" size="11"></lthn-icon> Click a
-          {{ prefs.lang().toUpperCase() }} cell to edit — writes to
-          <code>locales/{{ prefs.lang() }}.yaml</code> via corego/pkg/i18n.
-        </p>
-      </ng-container>
-      <ng-container *ngSwitchDefault>
-        <div class="ctoolbar">
-          <h1 i18n="UI preferences heading@@settings.preferences.heading">UI preferences</h1>
-        </div>
-        <div class="setgroup">
-          <span class="glab" i18n="Settings group@@settings.group.appearance">Appearance</span>
-          <div class="setrow">
-            <div class="k" i18n="Design preference@@settings.design">
-              Design<small>Brand token ramp</small>
+          <div class="i18n">
+            <div class="i18nrow i18nhead">
+              <span i18n="Translation key column@@settings.translations.column.key">Key</span
+              ><span i18n="English source column@@settings.translations.column.english"
+                >English</span
+              ><span>{{ prefs.lang().toUpperCase() }}</span>
             </div>
-            <div class="prefseg" role="group">
-              <button
-                [class.on]="prefs.design() === 'lethean'"
-                (click)="prefs.design.set('lethean')"
-              >
-                <ng-container i18n="Lethean design option@@settings.design.lethean"
-                  >Lethean</ng-container
-                >
-              </button>
-              <button
-                [class.on]="prefs.design() === 'custom'"
-                (click)="prefs.design.set('custom')"
-                i18n="Custom design option@@settings.design.custom"
-              >
-                Custom
-              </button>
-            </div>
-          </div>
-          <div class="themed" *ngIf="prefs.design() === 'custom'">
-            <input
-              class="cfgin"
-              style="width:100%"
-              [value]="prefs.customName()"
-              (input)="setCustomName($event)"
-              aria-label="Design name"
-              i18n-aria-label="Custom design name input@@settings.design.nameLabel"
-            />
-            <div class="thlab" i18n="Accent colour label@@settings.design.accent">Accent</div>
-            <div class="thswatches">
-              <button
-                class="thsw"
-                *ngFor="let hue of hues"
-                [class.on]="prefs.customHue() === hue[0]"
-                [title]="hue[1]"
-                [style.background]="'oklch(0.62 0.15 ' + hue[0] + ')'"
-                (click)="prefs.customHue.set(hue[0])"
-              ></button>
-            </div>
-            <div class="thlab" i18n="Generated colour ramp label@@settings.design.generatedRamp">
-              Generated ramp
-            </div>
-            <div class="thramp">
-              <span
-                *ngFor="let shade of [200, 300, 400, 500, 600, 700]"
-                [style.background]="'var(--brand-' + shade + ')'"
-              ></span>
-            </div>
-          </div>
-          <div class="setrow">
-            <div class="k" i18n="Wallpaper preference@@settings.wallpaper">
-              Wallpaper<small>Desktop background</small>
-            </div>
-            <div class="prefseg" role="group">
-              <button
-                *ngFor="let wallpaper of wallpapers"
-                [class.on]="prefs.wallpaper() === wallpaper"
-                (click)="prefs.wallpaper.set(wallpaper)"
-              >
-                {{ wallpaperLabel(wallpaper) }}
-              </button>
-            </div>
-          </div>
-        </div>
-        <div class="setgroup">
-          <span class="glab" i18n="Settings group@@settings.group.desktop">Desktop</span>
-          <div class="setrow">
-            <div class="k" i18n="Taskbar edge preference@@settings.taskbarEdge">
-              Taskbar edge<small>Dock the taskbar to any screen edge</small>
-            </div>
-            <div class="prefseg" role="group">
-              <button
-                *ngFor="let edge of edges"
-                [class.on]="prefs.bar() === edge"
-                (click)="prefs.bar.set(edge)"
-              >
-                {{ edgeLabel(edge) }}
-              </button>
-            </div>
-          </div>
-          <div class="setrow">
-            <div class="k" i18n="Desktop layout preference@@settings.layout">
-              Layout<small>Floating windows, app shell, or device frame</small>
-            </div>
-            <div class="prefseg" role="group">
-              <button
-                [class.on]="wm.view() === 'desktop'"
-                (click)="wm.setView('desktop')"
-                i18n="Desktop layout option@@settings.layout.desktop"
-              >
-                Desktop
-              </button>
-              <button
-                [class.on]="wm.view() === 'shell'"
-                (click)="wm.setView('shell')"
-                i18n="App shell layout option@@settings.layout.appShell"
-              >
-                App shell
-              </button>
-              <button
-                [class.on]="wm.view() === 'device'"
-                (click)="wm.setView('device')"
-                i18n="Device layout option@@settings.layout.device"
-              >
-                Device
-              </button>
-            </div>
-          </div>
-          <div class="setrow">
-            <div class="k" i18n="Device size preference@@settings.deviceSize">
-              Device size<small>Small, large, or full</small>
-            </div>
-            <div class="prefseg" role="group">
-              <button
-                *ngFor="let device of devices"
-                [class.on]="wm.device() === device"
-                (click)="wm.setDevice(device)"
-              >
-                {{ deviceLabel(device) }}
-              </button>
-            </div>
-          </div>
-          <div class="setrow">
-            <div class="k" i18n="Desktop icon preference@@settings.desktopIcons">
-              Desktop icons<small>Show launcher tiles on the wallpaper</small>
-            </div>
-            <div class="prefseg" role="group">
-              <button
-                [class.on]="prefs.showIcons()"
-                (click)="prefs.showIcons.set(true)"
-                i18n="Enabled option@@common.on"
-              >
-                On
-              </button>
-              <button
-                [class.on]="!prefs.showIcons()"
-                (click)="prefs.showIcons.set(false)"
-                i18n="Disabled option@@common.off"
-              >
-                Off
-              </button>
-            </div>
-          </div>
-          <div class="setrow">
-            <div class="k" i18n="Desktop widgets preference@@settings.widgets">
-              Widgets<small>Chart, world clock &amp; package status</small>
-            </div>
-            <div class="prefseg" role="group">
-              <button
-                [class.on]="prefs.showWidgets()"
-                (click)="prefs.showWidgets.set(true)"
-                i18n="Enabled option@@common.on"
-              >
-                On
-              </button>
-              <button
-                [class.on]="!prefs.showWidgets()"
-                (click)="prefs.showWidgets.set(false)"
-                i18n="Disabled option@@common.off"
-              >
-                Off
-              </button>
-            </div>
-          </div>
-        </div>
-        <section class="desktop-controls-panel" aria-labelledby="desktop-controls-heading">
-          <div class="controls-heading">
-            <div>
-              <h1 id="desktop-controls-heading">Desktop controls</h1>
-              <p>Wails, operating-system and security behaviour in one persisted panel.</p>
-            </div>
-            @if (configPath()) {
-              <code class="config-path">{{ configPath() }}</code>
+            @for (row of i18nKeys; track row[0]) {
+              <div class="i18nrow">
+                <span class="i18nk">{{ row[0] }}</span>
+                <span class="i18nen">{{ row[1] }}</span>
+                <span class="i18ncell" contenteditable="true">{{ translated(row) }}</span>
+              </div>
             }
           </div>
-
-          @if (controlsError()) {
-            <p class="controls-error" role="alert">{{ controlsError() }}</p>
+          <p class="cfghint" i18n="Translation editor help@@settings.translations.help">
+            <lthn-icon name="circle-info" size="11"></lthn-icon> Click a
+            {{ prefs.lang().toUpperCase() }} cell to edit — writes to
+            <code>locales/{{ prefs.lang() }}.yaml</code> via corego/pkg/i18n.
+          </p>
+        }
+        @default {
+          <div class="ctoolbar">
+            <h1 i18n="UI preferences heading@@settings.preferences.heading">UI preferences</h1>
+          </div>
+          <div class="settings-actions" aria-label="Settings draft actions">
+            <button
+              type="button"
+              data-action="reset-settings"
+              [disabled]="controlsLoading() || controlsSaving()"
+              (click)="resetDraft()"
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              data-action="discard-settings"
+              [disabled]="!hasDraftChanges() || controlsSaving()"
+              (click)="discardDraft()"
+            >
+              Discard
+            </button>
+            <button
+              type="button"
+              class="primary"
+              data-action="apply-settings"
+              [disabled]="!hasDraftChanges() || controlsSaving()"
+              (click)="applyDraft()"
+            >
+              {{ controlsSaving() ? 'Applying…' : 'Apply' }}
+            </button>
+          </div>
+          @if (restartSummary()) {
+            <p class="controls-restart-summary" role="status">{{ restartSummary() }}</p>
           }
-          @if (controlsLoading() && controlGroups().length === 0) {
-            <p class="controls-status">Loading desktop controls…</p>
-          }
-
-          @for (group of controlGroups(); track group.name) {
-            <div class="setgroup control-group">
-              <span class="glab">{{ group.name }}</span>
-              @for (control of group.controls; track control.key) {
-                <div
-                  class="setrow desktop-control"
-                  [attr.data-control-key]="control.key"
-                  [class.is-saving]="isSaving(control.key)"
+          <div class="setgroup">
+            <span class="glab" i18n="Settings group@@settings.group.appearance">Appearance</span>
+            <div class="setrow">
+              <div class="k" i18n="Design preference@@settings.design">
+                Design<small>Brand token ramp</small>
+              </div>
+              <div class="prefseg" role="group">
+                <button
+                  [class.on]="preferenceValue('desktop.theme.design', 'lethean') === 'lethean'"
+                  (click)="editPreference('desktop.theme.design', 'lethean')"
                 >
-                  <div class="k">
-                    {{ control.label }}
-                    <small>{{ control.description }}</small>
-                    <span class="control-badges">
-                      @if (control.live) {
-                        <span class="control-badge live">Live</span>
-                      }
-                      @if (control.restartRequired) {
-                        <span class="control-badge restart">Restart required</span>
-                      }
-                      @if (control.configured) {
-                        <span class="control-badge configured">Custom</span>
-                      }
-                      @if (isSaving(control.key)) {
-                        <span class="control-badge saving">Saving…</span>
-                      }
-                    </span>
-                  </div>
-
-                  @switch (control.kind) {
-                    @case ('toggle') {
-                      <div class="prefseg" role="group" [attr.aria-label]="control.label">
-                        <button
-                          [class.on]="control.value === true"
-                          [disabled]="isSaving(control.key)"
-                          (click)="setToggle(control, true)"
-                        >
-                          On
-                        </button>
-                        <button
-                          [class.on]="control.value === false"
-                          [disabled]="isSaving(control.key)"
-                          (click)="setToggle(control, false)"
-                        >
-                          Off
-                        </button>
-                      </div>
-                    }
-                    @case ('select') {
-                      <select
-                        class="cfgin control-input"
-                        [value]="control.value"
-                        [disabled]="isSaving(control.key)"
-                        [attr.aria-label]="control.label"
-                        (change)="setChoice(control, $event)"
-                      >
-                        @for (choice of control.choices ?? []; track choice) {
-                          <option [value]="choice">{{ choice }}</option>
-                        }
-                      </select>
-                    }
-                    @case ('number') {
-                      <input
-                        class="cfgin control-input"
-                        type="number"
-                        [value]="control.value"
-                        [attr.min]="control.minimum ?? null"
-                        [attr.max]="control.maximum ?? null"
-                        [attr.step]="control.step ?? null"
-                        [disabled]="isSaving(control.key)"
-                        [attr.aria-label]="control.label"
-                        (change)="setNumber(control, $event)"
-                      />
-                    }
-                    @default {
-                      <input
-                        class="cfgin control-input"
-                        type="text"
-                        [value]="control.value"
-                        [disabled]="isSaving(control.key)"
-                        [attr.aria-label]="control.label"
-                        (change)="setText(control, $event)"
-                      />
-                    }
+                  <ng-container i18n="Lethean design option@@settings.design.lethean"
+                    >Lethean</ng-container
+                  >
+                </button>
+                <button
+                  [class.on]="preferenceValue('desktop.theme.design', 'lethean') === 'custom'"
+                  (click)="editPreference('desktop.theme.design', 'custom')"
+                  i18n="Custom design option@@settings.design.custom"
+                >
+                  Custom
+                </button>
+              </div>
+            </div>
+            @if (preferenceValue('desktop.theme.design', 'lethean') === 'custom') {
+              <div class="themed">
+                <input
+                  class="cfgin"
+                  style="width:100%"
+                  [value]="preferenceValue('desktop.theme.custom_name', 'Host UK')"
+                  (input)="setCustomName($event)"
+                  aria-label="Design name"
+                  i18n-aria-label="Custom design name input@@settings.design.nameLabel"
+                />
+                <div class="thlab" i18n="Accent colour label@@settings.design.accent">Accent</div>
+                <div class="thswatches">
+                  @for (hue of hues; track hue[0]) {
+                    <button
+                      class="thsw"
+                      [class.on]="preferenceValue('desktop.theme.custom_hue', 305) === hue[0]"
+                      [title]="hue[1]"
+                      [style.background]="'oklch(0.62 0.15 ' + hue[0] + ')'"
+                      (click)="editPreference('desktop.theme.custom_hue', hue[0])"
+                    ></button>
                   }
                 </div>
-              }
+                <div
+                  class="thlab"
+                  i18n="Generated colour ramp label@@settings.design.generatedRamp"
+                >
+                  Generated ramp
+                </div>
+                <div class="thramp">
+                  @for (shade of [200, 300, 400, 500, 600, 700]; track shade) {
+                    <span [style.background]="'var(--brand-' + shade + ')'"></span>
+                  }
+                </div>
+              </div>
+            }
+            <div class="setrow">
+              <div class="k" i18n="Wallpaper preference@@settings.wallpaper">
+                Wallpaper<small>Desktop background</small>
+              </div>
+              <div class="prefseg" role="group">
+                @for (wallpaper of wallpapers; track wallpaper) {
+                  <button
+                    [class.on]="preferenceValue('desktop.theme.wallpaper', 'aurora') === wallpaper"
+                    (click)="editPreference('desktop.theme.wallpaper', wallpaper)"
+                  >
+                    {{ wallpaperLabel(wallpaper) }}
+                  </button>
+                }
+              </div>
             </div>
-          }
-        </section>
-      </ng-container>
+          </div>
+          <div class="setgroup">
+            <span class="glab" i18n="Settings group@@settings.group.desktop">Desktop</span>
+            <div class="setrow">
+              <div class="k" i18n="Taskbar edge preference@@settings.taskbarEdge">
+                Taskbar edge<small>Dock the taskbar to any screen edge</small>
+              </div>
+              <div class="prefseg" role="group">
+                @for (edge of edges; track edge) {
+                  <button
+                    [class.on]="preferenceValue('desktop.shell.taskbar_edge', 'bottom') === edge"
+                    (click)="editPreference('desktop.shell.taskbar_edge', edge)"
+                  >
+                    {{ edgeLabel(edge) }}
+                  </button>
+                }
+              </div>
+            </div>
+            <div class="setrow">
+              <div class="k" i18n="Desktop layout preference@@settings.layout">
+                Layout<small>Floating windows, app shell, or device frame</small>
+              </div>
+              <div class="prefseg" role="group">
+                <button
+                  [class.on]="wm.view() === 'desktop'"
+                  (click)="wm.setView('desktop')"
+                  i18n="Desktop layout option@@settings.layout.desktop"
+                >
+                  Desktop
+                </button>
+                <button
+                  [class.on]="wm.view() === 'shell'"
+                  (click)="wm.setView('shell')"
+                  i18n="App shell layout option@@settings.layout.appShell"
+                >
+                  App shell
+                </button>
+                <button
+                  [class.on]="wm.view() === 'device'"
+                  (click)="wm.setView('device')"
+                  i18n="Device layout option@@settings.layout.device"
+                >
+                  Device
+                </button>
+              </div>
+            </div>
+            <div class="setrow">
+              <div class="k" i18n="Device size preference@@settings.deviceSize">
+                Device size<small>Small, large, or full</small>
+              </div>
+              <div class="prefseg" role="group">
+                @for (device of devices; track device) {
+                  <button [class.on]="wm.device() === device" (click)="wm.setDevice(device)">
+                    {{ deviceLabel(device) }}
+                  </button>
+                }
+              </div>
+            </div>
+            <div class="setrow">
+              <div class="k" i18n="Desktop icon preference@@settings.desktopIcons">
+                Desktop icons<small>Show launcher tiles on the wallpaper</small>
+              </div>
+              <div class="prefseg" role="group">
+                <button
+                  [class.on]="preferenceValue('desktop.shell.show_icons', true) === true"
+                  (click)="editPreference('desktop.shell.show_icons', true)"
+                  i18n="Enabled option@@common.on"
+                >
+                  On
+                </button>
+                <button
+                  [class.on]="preferenceValue('desktop.shell.show_icons', true) === false"
+                  (click)="editPreference('desktop.shell.show_icons', false)"
+                  i18n="Disabled option@@common.off"
+                >
+                  Off
+                </button>
+              </div>
+            </div>
+            <div class="setrow">
+              <div class="k" i18n="Desktop widgets preference@@settings.widgets">
+                Widgets<small>Chart, world clock &amp; package status</small>
+              </div>
+              <div class="prefseg" role="group">
+                <button
+                  [class.on]="preferenceValue('desktop.shell.show_widgets', true) === true"
+                  (click)="editPreference('desktop.shell.show_widgets', true)"
+                  i18n="Enabled option@@common.on"
+                >
+                  On
+                </button>
+                <button
+                  [class.on]="preferenceValue('desktop.shell.show_widgets', true) === false"
+                  (click)="editPreference('desktop.shell.show_widgets', false)"
+                  i18n="Disabled option@@common.off"
+                >
+                  Off
+                </button>
+              </div>
+            </div>
+          </div>
+          <section class="desktop-controls-panel" aria-labelledby="desktop-controls-heading">
+            <div class="controls-heading">
+              <div>
+                <h1 id="desktop-controls-heading">Desktop controls</h1>
+                <p>Wails, operating-system and security behaviour in one persisted panel.</p>
+              </div>
+            </div>
+
+            @if (controlsError()) {
+              <p class="controls-error" role="alert">{{ controlsError() }}</p>
+            }
+            @if (controlsLoading() && controlGroups().length === 0) {
+              <p class="controls-status">Loading desktop controls…</p>
+            }
+
+            @for (group of visibleControlGroups(); track group.name) {
+              <div class="setgroup control-group">
+                <span class="glab">{{ group.name }}</span>
+                @for (control of group.controls; track control.key) {
+                  <div
+                    class="setrow desktop-control"
+                    [attr.data-control-key]="control.key"
+                    [class.is-saving]="controlsSaving()"
+                  >
+                    <div class="k">
+                      {{ control.label }}
+                      <small>{{ control.description }}</small>
+                      <span class="control-badges">
+                        @if (control.live) {
+                          <span class="control-badge live">Live</span>
+                        }
+                        @if (control.restartRequired) {
+                          <span class="control-badge restart">Restart required</span>
+                        }
+                        @if (control.configured) {
+                          <span class="control-badge configured">Custom</span>
+                        }
+                        @if (controlsSaving()) {
+                          <span class="control-badge saving">Saving…</span>
+                        }
+                      </span>
+                    </div>
+
+                    @switch (control.kind) {
+                      @case ('toggle') {
+                        <div class="prefseg" role="group" [attr.aria-label]="control.label">
+                          <button
+                            [class.on]="control.value === true"
+                            [disabled]="controlsSaving()"
+                            (click)="setToggle(control, true)"
+                          >
+                            On
+                          </button>
+                          <button
+                            [class.on]="control.value === false"
+                            [disabled]="controlsSaving()"
+                            (click)="setToggle(control, false)"
+                          >
+                            Off
+                          </button>
+                        </div>
+                      }
+                      @case ('select') {
+                        <select
+                          class="cfgin control-input"
+                          [value]="control.value"
+                          [disabled]="controlsSaving()"
+                          [attr.aria-label]="control.label"
+                          (change)="setChoice(control, $event)"
+                        >
+                          @for (choice of control.choices ?? []; track choice) {
+                            <option [value]="choice">{{ choice }}</option>
+                          }
+                        </select>
+                      }
+                      @case ('number') {
+                        <input
+                          class="cfgin control-input"
+                          type="number"
+                          [value]="control.value"
+                          [attr.min]="control.minimum ?? null"
+                          [attr.max]="control.maximum ?? null"
+                          [attr.step]="control.step ?? null"
+                          [disabled]="controlsSaving()"
+                          [attr.aria-label]="control.label"
+                          (change)="setNumber(control, $event)"
+                        />
+                      }
+                      @default {
+                        <input
+                          class="cfgin control-input"
+                          type="text"
+                          [value]="control.value"
+                          [disabled]="controlsSaving()"
+                          [attr.aria-label]="control.label"
+                          (change)="setText(control, $event)"
+                        />
+                      }
+                    }
+                  </div>
+                }
+              </div>
+            }
+          </section>
+        }
+      }
     </div>
   `,
   styles: `
     .desktop-controls-panel {
       margin-top: 22px;
       padding-bottom: 24px;
+    }
+    .settings-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 7px;
+      margin: 0 16px 12px;
+    }
+    .settings-actions button {
+      min-width: 72px;
+      padding: 6px 10px;
+      border: 1px solid var(--border, #30343b);
+      border-radius: 6px;
+      background: var(--surface-2, #181a20);
+      color: var(--text, #e7e9ed);
+      cursor: pointer;
+    }
+    .settings-actions button.primary {
+      border-color: color-mix(in srgb, var(--brand-500, #8f56c2) 70%, transparent);
+      background: var(--brand-600, #73419f);
+    }
+    .settings-actions button:disabled {
+      cursor: default;
+      opacity: 0.48;
     }
     .controls-heading {
       display: flex;
@@ -372,14 +448,6 @@ import {
       color: var(--text-muted, #8d929b);
       font-size: 11px;
     }
-    .config-path {
-      max-width: 52%;
-      overflow: hidden;
-      color: var(--text-muted, #8d929b);
-      font-size: 10px;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
     .controls-error {
       margin: 0 16px 12px;
       padding: 8px 10px;
@@ -387,6 +455,11 @@ import {
       border-radius: 7px;
       background: color-mix(in srgb, #ef6b73 10%, transparent);
       color: #ef9aa0;
+      font-size: 11px;
+    }
+    .controls-restart-summary {
+      margin: 0 16px 12px;
+      color: #e3b35b;
       font-size: 11px;
     }
     .control-group {
@@ -433,11 +506,22 @@ export class SettingsApp implements AppView, OnInit {
   readonly prefs = inject(PreferencesService);
   readonly wm = inject(WindowManagerService);
   private readonly store = inject(Store);
+  readonly draftControls = this.store.selectSignal(selectDraftDesktopControls);
   readonly controlGroups = this.store.selectSignal(selectDesktopControlGroups);
+  readonly visibleControlGroups = computed(() =>
+    this.controlGroups()
+      .map((group) => ({
+        ...group,
+        controls: group.controls.filter(({ key }) => !CURATED_PREFERENCE_KEYS.has(key)),
+      }))
+      .filter(({ controls }) => controls.length > 0),
+  );
   readonly controlsLoading = this.store.selectSignal(desktopControlsFeature.selectLoading);
   readonly controlsError = this.store.selectSignal(desktopControlsFeature.selectError);
-  readonly configPath = this.store.selectSignal(desktopControlsFeature.selectConfigPath);
-  readonly savingKeys = this.store.selectSignal(desktopControlsFeature.selectSavingKeys);
+  readonly controlsSaving = this.store.selectSignal(desktopControlsFeature.selectSaving);
+  readonly restartSummary = this.store.selectSignal(desktopControlsFeature.selectRestartSummary);
+  readonly dirtyChanges = this.store.selectSignal(selectDirtyDesktopControlChanges);
+  readonly hasDraftChanges = this.store.selectSignal(selectHasDirtyDesktopControls);
   readonly wallpapers = ['aurora', 'dusk', 'mist', 'graphite'] as const;
   readonly devices = ['small', 'large', 'full'] as const;
   readonly edges = ['top', 'right', 'bottom', 'left'] as const;
@@ -494,10 +578,6 @@ export class SettingsApp implements AppView, OnInit {
     this.store.dispatch(desktopControlsActions.load());
   }
 
-  isSaving(key: string): boolean {
-    return this.savingKeys().includes(key);
-  }
-
   setToggle(control: DesktopControl, value: boolean): void {
     this.setControl(control, value);
   }
@@ -517,12 +597,38 @@ export class SettingsApp implements AppView, OnInit {
   }
 
   private setControl(control: DesktopControl, value: boolean | number | string): void {
-    if (this.isSaving(control.key) || control.value === value) return;
-    this.store.dispatch(desktopControlsActions.setControl({ key: control.key, value }));
+    if (this.controlsSaving() || control.value === value) return;
+    this.store.dispatch(desktopControlsActions.editControl({ key: control.key, value }));
   }
 
   setCustomName(event: Event): void {
-    this.prefs.customName.set((event.target as HTMLInputElement).value);
+    this.editPreference('desktop.theme.custom_name', (event.target as HTMLInputElement).value);
+  }
+
+  preferenceValue(key: string, fallback: DesktopControlValue): DesktopControlValue {
+    const value = this.draftControls().find((control) => control.key === key)?.value;
+    return value === undefined ? fallback : value;
+  }
+
+  editPreference(key: string, value: DesktopControlValue): void {
+    if (this.controlsSaving()) return;
+    this.store.dispatch(desktopControlsActions.editControl({ key, value }));
+  }
+
+  applyDraft(): void {
+    const changes = this.dirtyChanges();
+    if (this.controlsSaving() || changes.length === 0) return;
+    this.store.dispatch(desktopControlsActions.applyDraft({ changes }));
+  }
+
+  discardDraft(): void {
+    if (this.controlsSaving()) return;
+    this.store.dispatch(desktopControlsActions.discardDraft());
+  }
+
+  resetDraft(): void {
+    if (this.controlsSaving() || this.controlsLoading()) return;
+    this.store.dispatch(desktopControlsActions.resetDraft());
   }
 
   wallpaperLabel(wallpaper: string): string {

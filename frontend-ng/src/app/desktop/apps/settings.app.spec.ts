@@ -1,15 +1,66 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideMockStore } from '@ngrx/store/testing';
 import { Store } from '@ngrx/store';
-import { PreferencesService } from '../preferences.service';
-import { WindowManagerService } from '../window-manager.service';
+import { provideMockStore } from '@ngrx/store/testing';
 import { desktopControlsActions } from '../../store/desktop-controls.actions';
+import { DesktopControl } from '../../store/desktop-controls.models';
 import {
   desktopControlsFeature,
   selectDesktopControlGroups,
+  selectDirtyDesktopControlChanges,
+  selectDraftDesktopControls,
+  selectHasDirtyDesktopControls,
 } from '../../store/desktop-controls.reducer';
+import { PreferencesService } from '../preferences.service';
+import { WindowManagerService } from '../window-manager.service';
 import { SettingsApp } from './settings.app';
+
+const controls: readonly DesktopControl[] = [
+  {
+    key: 'desktop.theme.interface',
+    group: 'Theme',
+    label: 'Interface theme',
+    description: 'Desktop colour mode.',
+    kind: 'select',
+    value: 'dark',
+    defaultValue: 'dark',
+    configured: false,
+    live: true,
+    restartRequired: false,
+    choices: ['dark', 'light'],
+  },
+  {
+    key: 'desktop.single_instance.enabled',
+    group: 'Single instance',
+    label: 'Single-instance hand-off',
+    description: 'Hand later launches to the running process.',
+    kind: 'toggle',
+    value: true,
+    defaultValue: true,
+    configured: false,
+    live: false,
+    restartRequired: true,
+  },
+];
+
+const groups = [
+  { name: 'Theme', controls: [controls[0]] },
+  { name: 'Single instance', controls: [controls[1]] },
+];
+
+const win = {
+  id: 'settings',
+  app: 'settings',
+  sub: 'interface',
+  systab: '',
+  x: 0,
+  y: 0,
+  w: 780,
+  h: 560,
+  z: 1,
+  min: false,
+  max: false,
+};
 
 describe('SettingsApp desktop controls', () => {
   beforeEach(() => {
@@ -37,53 +88,23 @@ describe('SettingsApp desktop controls', () => {
       providers: [
         provideMockStore({
           selectors: [
+            { selector: selectDraftDesktopControls, value: controls },
+            { selector: selectDesktopControlGroups, value: groups },
             {
-              selector: selectDesktopControlGroups,
-              value: [
-                {
-                  name: 'Theme',
-                  controls: [
-                    {
-                      key: 'desktop.theme.interface',
-                      group: 'Theme',
-                      label: 'Interface theme',
-                      description: 'Desktop colour mode.',
-                      kind: 'select',
-                      value: 'dark',
-                      defaultValue: 'dark',
-                      configured: false,
-                      live: true,
-                      restartRequired: false,
-                      choices: ['dark', 'light'],
-                    },
-                  ],
-                },
-                {
-                  name: 'Single instance',
-                  controls: [
-                    {
-                      key: 'desktop.single_instance.enabled',
-                      group: 'Single instance',
-                      label: 'Single-instance hand-off',
-                      description: 'Hand later launches to the running process.',
-                      kind: 'toggle',
-                      value: true,
-                      defaultValue: true,
-                      configured: false,
-                      live: false,
-                      restartRequired: true,
-                    },
-                  ],
-                },
-              ],
+              selector: selectDirtyDesktopControlChanges,
+              value: [{ key: 'desktop.theme.interface', value: 'light' }],
             },
+            { selector: selectHasDirtyDesktopControls, value: true },
             { selector: desktopControlsFeature.selectLoading, value: false },
-            { selector: desktopControlsFeature.selectError, value: null },
             {
-              selector: desktopControlsFeature.selectConfigPath,
-              value: '/Users/test/Lethean/conf/lthn.yaml',
+              selector: desktopControlsFeature.selectError,
+              value: 'Previous save failed safely.',
             },
-            { selector: desktopControlsFeature.selectSavingKeys, value: [] },
+            { selector: desktopControlsFeature.selectSaving, value: false },
+            {
+              selector: desktopControlsFeature.selectRestartSummary,
+              value: 'Restart required for: Single-instance hand-off.',
+            },
           ],
         }),
         { provide: PreferencesService, useValue: prefs },
@@ -92,49 +113,26 @@ describe('SettingsApp desktop controls', () => {
     });
   });
 
-  it('loads and renders the grouped persisted control panel', async () => {
+  it('loads and renders the grouped draft with accessible status', async () => {
     const store = TestBed.inject(Store);
     const dispatch = vi.spyOn(store, 'dispatch');
     const fixture = TestBed.createComponent(SettingsApp);
-    fixture.componentRef.setInput('win', {
-      id: 'settings',
-      app: 'settings',
-      sub: 'interface',
-      systab: '',
-      x: 0,
-      y: 0,
-      w: 780,
-      h: 560,
-      z: 1,
-      min: false,
-      max: false,
-    });
+    fixture.componentRef.setInput('win', win);
+
     await fixture.whenStable();
 
     expect(dispatch).toHaveBeenCalledWith(desktopControlsActions.load());
     expect(fixture.nativeElement.textContent).toContain('Desktop controls');
-    expect(fixture.nativeElement.textContent).toContain('Theme');
     expect(fixture.nativeElement.textContent).toContain('Interface theme');
     expect(fixture.nativeElement.textContent).toContain('Restart required');
+    expect(fixture.nativeElement.textContent).toContain('Previous save failed safely.');
   });
 
-  it('dispatches a selected control value through NgRx', async () => {
+  it('edits only the draft when a control changes', async () => {
     const store = TestBed.inject(Store);
     const dispatch = vi.spyOn(store, 'dispatch');
     const fixture = TestBed.createComponent(SettingsApp);
-    fixture.componentRef.setInput('win', {
-      id: 'settings',
-      app: 'settings',
-      sub: 'interface',
-      systab: '',
-      x: 0,
-      y: 0,
-      w: 780,
-      h: 560,
-      z: 1,
-      min: false,
-      max: false,
-    });
+    fixture.componentRef.setInput('win', win);
     await fixture.whenStable();
 
     const select = fixture.nativeElement.querySelector(
@@ -145,10 +143,36 @@ describe('SettingsApp desktop controls', () => {
     await fixture.whenStable();
 
     expect(dispatch).toHaveBeenCalledWith(
-      desktopControlsActions.setControl({
+      desktopControlsActions.editControl({
         key: 'desktop.theme.interface',
         value: 'light',
       }),
     );
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: desktopControlsActions.applyDraft.type }),
+    );
+  });
+
+  it('applies, discards, and resets through explicit draft actions', async () => {
+    const store = TestBed.inject(Store);
+    const dispatch = vi.spyOn(store, 'dispatch');
+    const fixture = TestBed.createComponent(SettingsApp);
+    fixture.componentRef.setInput('win', win);
+    await fixture.whenStable();
+
+    (fixture.nativeElement.querySelector('[data-action="apply-settings"]') as HTMLElement).click();
+    (
+      fixture.nativeElement.querySelector('[data-action="discard-settings"]') as HTMLElement
+    ).click();
+    (fixture.nativeElement.querySelector('[data-action="reset-settings"]') as HTMLElement).click();
+    await fixture.whenStable();
+
+    expect(dispatch).toHaveBeenCalledWith(
+      desktopControlsActions.applyDraft({
+        changes: [{ key: 'desktop.theme.interface', value: 'light' }],
+      }),
+    );
+    expect(dispatch).toHaveBeenCalledWith(desktopControlsActions.discardDraft());
+    expect(dispatch).toHaveBeenCalledWith(desktopControlsActions.resetDraft());
   });
 });

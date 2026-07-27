@@ -294,7 +294,7 @@ describe('ControlApp', () => {
         },
       ],
       processes: [],
-      settings: { configPath: '/tmp/lthn.yaml', controls: [] },
+      settings: { controls: [] },
       unavailable: [],
     });
 
@@ -451,7 +451,6 @@ describe('ControlApp', () => {
     mode.set('live');
     liveData.control.mockResolvedValue({
       settings: {
-        configPath: '/tmp/Lethean/conf/lthn.yaml',
         controls: [
           {
             key: 'desktop.wails.window.main.width',

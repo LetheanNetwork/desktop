@@ -10,6 +10,8 @@
 // ─────────────────────────────────────────────────────────────────────────
 import { DOCUMENT } from '@angular/common';
 import { Injectable, effect, inject, signal } from '@angular/core';
+import { ConnectionManagerService } from '../connection-manager.service';
+import { DesktopControlSnapshot, DesktopControlValue } from '../store/desktop-controls.models';
 import { DESKTOP_STORAGE } from '../store/storage.service';
 
 export type Mode = 'dark' | 'light';
@@ -24,6 +26,7 @@ const KEY = 'lthn.prefs';
 export class PreferencesService {
   private readonly document = inject(DOCUMENT);
   private readonly storage = inject(DESKTOP_STORAGE);
+  private readonly connection = inject(ConnectionManagerService);
 
   readonly bar = signal<TaskbarEdge>('bottom');
   readonly mode = signal<Mode>('dark');
@@ -40,15 +43,68 @@ export class PreferencesService {
   readonly reduceMotion = signal<boolean>(false);
 
   constructor() {
-    this.restore();
-    // one effect keeps the DOM/token attributes in sync with prefs
+    if (this.connection.offline()) this.restore();
+    // One effect keeps the DOM/token attributes in sync. Browser persistence
+    // belongs exclusively to the explicit offline demo provider.
     effect(() => {
       const root = this.document.documentElement,
         body = this.document.body;
       root.setAttribute('data-brand', this.brand());
       body.setAttribute('data-brand', this.brand());
-      this.persist();
+      if (this.connection.offline()) this.persist();
     });
+  }
+
+  /** Project one committed appconfig snapshot into renderer-owned signals. */
+  applySnapshot(snapshot: DesktopControlSnapshot): void {
+    const value = (key: string): DesktopControlValue | undefined =>
+      snapshot.controls.find((control) => control.key === key)?.value;
+
+    const bar = value('desktop.shell.taskbar_edge');
+    if (isOneOf(bar, ['top', 'right', 'bottom', 'left'])) this.bar.set(bar);
+
+    const mode = value('desktop.theme.interface');
+    if (isOneOf(mode, ['dark', 'light'])) this.mode.set(mode);
+
+    const brand = value('desktop.theme.brand');
+    if (isOneOf(brand, ['lethean', 'hostuk'])) this.brand.set(brand);
+
+    const design = value('desktop.theme.design');
+    if (isOneOf(design, ['lethean', 'custom'])) this.design.set(design);
+
+    const customHue = value('desktop.theme.custom_hue');
+    if (
+      typeof customHue === 'number' &&
+      Number.isFinite(customHue) &&
+      customHue >= 0 &&
+      customHue <= 360
+    ) {
+      this.customHue.set(customHue);
+    }
+
+    const customName = value('desktop.theme.custom_name');
+    if (typeof customName === 'string' && customName.length <= 2_048) {
+      this.customName.set(customName);
+    }
+
+    const wallpaper = value('desktop.theme.wallpaper');
+    if (isOneOf(wallpaper, ['aurora', 'dusk', 'mist', 'graphite'])) {
+      this.wallpaper.set(wallpaper);
+    }
+
+    const language = value('desktop.locale.language');
+    if (isOneOf(language, ['en', 'cy', 'de', 'es', 'fr', 'ja'])) {
+      this.lang.set(language);
+    }
+
+    const showIcons = value('desktop.shell.show_icons');
+    if (typeof showIcons === 'boolean') this.showIcons.set(showIcons);
+
+    const showWidgets = value('desktop.shell.show_widgets');
+    if (typeof showWidgets === 'boolean') this.showWidgets.set(showWidgets);
+
+    const reduceMotion = value('desktop.theme.reduce_motion');
+    if (typeof reduceMotion === 'boolean') this.reduceMotion.set(reduceMotion);
   }
 
   /** Design label shown in About / Settings. */
@@ -72,6 +128,7 @@ export class PreferencesService {
   }
 
   persist() {
+    if (!this.connection.offline()) return;
     try {
       this.storage.setItem(
         KEY,
@@ -92,6 +149,7 @@ export class PreferencesService {
     } catch {}
   }
   restore() {
+    if (!this.connection.offline()) return;
     try {
       const s = JSON.parse(this.storage.getItem(KEY) || 'null');
       if (!s) return;
@@ -108,4 +166,11 @@ export class PreferencesService {
       if (typeof s.reduceMotion === 'boolean') this.reduceMotion.set(s.reduceMotion);
     } catch {}
   }
+}
+
+function isOneOf<const T extends string>(
+  value: DesktopControlValue | undefined,
+  choices: readonly T[],
+): value is T {
+  return typeof value === 'string' && choices.includes(value as T);
 }

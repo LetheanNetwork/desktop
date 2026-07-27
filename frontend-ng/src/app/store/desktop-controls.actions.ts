@@ -1,5 +1,9 @@
 import { createActionGroup, emptyProps, props } from '@ngrx/store';
-import { DesktopControlSnapshot, DesktopControlValue } from './desktop-controls.models';
+import {
+  DesktopControlChange,
+  DesktopControlSnapshot,
+  DesktopControlValue,
+} from './desktop-controls.models';
 
 export const desktopControlsActions = createActionGroup({
   source: 'Desktop controls',
@@ -7,11 +11,14 @@ export const desktopControlsActions = createActionGroup({
     Load: emptyProps(),
     'Load success': props<{ snapshot: DesktopControlSnapshot }>(),
     'Load failure': props<{ error: string }>(),
-    'Set control': props<{ key: string; value: DesktopControlValue }>(),
-    'Set control success': props<{
-      key: string;
+    'Edit control': props<{ key: string; value: DesktopControlValue }>(),
+    'Discard draft': emptyProps(),
+    'Reset draft': emptyProps(),
+    'Apply draft': props<{ changes: readonly DesktopControlChange[] }>(),
+    'Apply draft success': props<{
       snapshot: DesktopControlSnapshot;
+      restartRequired: readonly string[];
     }>(),
-    'Set control failure': props<{ key: string; error: string }>(),
+    'Apply draft failure': props<{ error: string }>(),
   },
 });

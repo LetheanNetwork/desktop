@@ -157,7 +157,6 @@ describe('DesktopLiveDataService', () => {
       throw new Error(`Unexpected method: ${method}`);
     });
     controls.settings.mockResolvedValue({
-      configPath: '/tmp/Lethean/conf/lthn.yaml',
       controls: [
         {
           key: 'desktop.show_widgets',

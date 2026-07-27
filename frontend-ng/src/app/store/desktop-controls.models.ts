@@ -19,9 +19,15 @@ export interface DesktopControl {
 }
 
 export interface DesktopControlSnapshot {
-  readonly configPath: string;
   readonly controls: readonly DesktopControl[];
 }
+
+export interface DesktopControlChange {
+  readonly key: string;
+  readonly value: DesktopControlValue;
+}
+
+export type DesktopControlDraft = Readonly<Record<string, DesktopControlValue>>;
 
 export interface DesktopControlGroup {
   readonly name: string;
