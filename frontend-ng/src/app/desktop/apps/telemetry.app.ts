@@ -1,34 +1,44 @@
 // ─────────────────────────────────────────────────────────────────────────
 // apps/telemetry.app.ts — bounded process-telemetry view.
 //
-// The surface owns its short-lived polling window and keeps the original
-// labelled demo composition for offline previews and unavailable live data.
+// The surface keeps deterministic offline demo data, retains stale connected
+// values, and reconciles guarded live refreshes through one resource.
 // ─────────────────────────────────────────────────────────────────────────
 import {
   ChangeDetectionStrategy,
   Component,
   CUSTOM_ELEMENTS_SCHEMA,
   Input,
-  OnDestroy,
   OnInit,
   computed,
   inject,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { AppView } from './app-view';
 import { Win, TELEMETRY } from '../desktop.data';
-import { DesktopLiveDataService, ProcessTelemetry } from '../desktop-live-data.service';
-import { DesktopDataStateBadge } from '../desktop-data-state-badge';
-import { DesktopDataState } from '../desktop-data-state';
+import { DesktopLiveDataService } from '../desktop-live-data.service';
+import {
+  beginDesktopDataRefresh,
+  createConnectedResource,
+  createDemoResource,
+  rejectDesktopData,
+  resolveDesktopData,
+  type DesktopDataResource,
+} from '../desktop-data-resource';
+import { DesktopDataStatusView } from '../desktop-data-status.view';
+import type { TelemetryDemoSeries, TelemetryViewData } from './telemetry/telemetry-view.models';
+import { createDemoTelemetryView, createLiveTelemetryView } from './telemetry/telemetry-view-state';
 
 const TELEMETRY_POLL_MS = 5_000;
-const MAX_HISTORY_SAMPLES = 60;
+const TELEMETRY_STALE_AFTER_MS = TELEMETRY_POLL_MS * 2;
+const TELEMETRY_DEMO_SOURCE = $localize`:Telemetry demo source@@telemetry.source.demo:Lethean demo fixture`;
+const TELEMETRY_LIVE_SOURCE = $localize`:Telemetry live source@@telemetry.source.live:Local process runtime`;
+const TELEMETRY_UNAVAILABLE = $localize`:Telemetry unavailable error@@telemetry.data.unavailable:Live telemetry is unavailable.`;
 
 @Component({
   selector: 'lthn-telemetry-app',
   standalone: true,
-  imports: [CommonModule, DesktopDataStateBadge],
+  imports: [DesktopDataStatusView],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   host: { style: 'display: contents' },
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -45,7 +55,7 @@ const MAX_HISTORY_SAMPLES = 60;
             {{ primaryValue() }}<small> {{ primaryUnit() }}</small>
           </div>
           <lthn-sparkline
-            [attr.data]="primaryJson"
+            [attr.data]="primaryJson()"
             color="var(--brand-300)"
             width="260"
             height="46"
@@ -58,9 +68,11 @@ const MAX_HISTORY_SAMPLES = 60;
             style="background:radial-gradient(60% 80% at 70% 20%,color-mix(in oklch,#febc2e 14%,transparent),transparent)"
           ></div>
           <span class="lab">{{ powerLabel() }}</span>
-          <div class="num">{{ powerValue() }}<small i18n="Watts unit@@unit.watts"> W</small></div>
+          <div class="num">
+            {{ powerValue() }}<small> {{ powerUnit() }}</small>
+          </div>
           <lthn-sparkline
-            [attr.data]="wattsJson"
+            [attr.data]="powerJson()"
             color="#febc2e"
             width="260"
             height="46"
@@ -69,125 +81,85 @@ const MAX_HISTORY_SAMPLES = 60;
         </div>
       </div>
       <div class="metaband">
-        <lthn-desktop-data-state [state]="dataState()" />
-        <ng-container *ngIf="sample() as current; else demoMetadata">
+        <lthn-desktop-data-status [status]="resource()" (retry)="refresh()" />
+        @for (item of metadata(); track item.label) {
           <span
-            >Goroutines <b>{{ current.numGoroutines }}</b></span
-          ><span
-            >GC pause <b>{{ current.lastGCPauseMs }} ms</b></span
-          ><span
-            >CGO calls <b>{{ current.numCgoCalls }}</b></span
-          ><span
-            >Uptime <b>{{ uptimeLabel() }}</b></span
+            >{{ item.label }} <b>{{ item.value }}</b></span
           >
-        </ng-container>
-        <ng-template #demoMetadata>
-          <span i18n="Telemetry model label and value@@telemetry.model"
-            >Model <b>llama-3.1-70b</b></span
-          ><span i18n="Telemetry region label and value@@telemetry.region"
-            >Region <b>eu-west-2</b></span
-          ><span i18n="Telemetry cache label and value@@telemetry.kvCache">KV-cache <b>62%</b></span
-          ><span i18n="Telemetry uptime label and value@@telemetry.uptime"
-            >Uptime <b>6d 4h</b></span
-          >
-        </ng-template>
+        }
       </div>
     </div>
   `,
 })
-export class TelemetryApp implements AppView, OnInit, OnDestroy {
+export class TelemetryApp implements AppView, OnInit {
   private readonly liveData = inject(DesktopLiveDataService);
-  private pollHandle: number | undefined;
+  private refreshInFlight = false;
 
   @Input() win!: Win;
-  /** Design-fixture history used only when live samples are unavailable. */
-  @Input() throughput = TELEMETRY.throughput;
-  @Input() watts = TELEMETRY.watts;
-  readonly sample = signal<ProcessTelemetry | null>(null);
-  readonly dataState = signal<DesktopDataState>('demo');
-  private readonly heapHistory = signal<readonly number[]>([]);
-  private readonly powerHistory = signal<readonly number[]>([]);
-  readonly primaryLabel = computed(() =>
-    this.sample()
-      ? $localize`:Process heap telemetry metric@@telemetry.heapAllocation:Heap allocation`
-      : $localize`:Telemetry metric@@telemetry.throughput:Throughput`,
+  @Input() throughput: readonly number[] = TELEMETRY.throughput;
+  @Input() watts: readonly number[] = TELEMETRY.watts;
+
+  readonly resource = signal<DesktopDataResource<TelemetryViewData>>(
+    createDemoResource(
+      createDemoTelemetryView({
+        throughput: this.throughput,
+        watts: this.watts,
+      }),
+      TELEMETRY_DEMO_SOURCE,
+    ),
   );
-  readonly primaryValue = computed(() => this.sample()?.heapAllocMB.toFixed(1) ?? '41.8');
-  readonly primaryUnit = computed(() =>
-    this.sample()
-      ? $localize`:Megabytes unit@@unit.megabytes:MB`
-      : $localize`:Tokens per second unit@@unit.tokensPerSecondInline:tok/s`,
+  readonly view = computed(() => this.resource().value);
+  readonly primaryLabel = computed(
+    () =>
+      this.view()?.primary.label ??
+      $localize`:Process heap telemetry metric@@telemetry.heapAllocation:Heap allocation`,
   );
-  readonly powerValue = computed(() => {
-    const watts = this.sample()?.wattsActive ?? 0;
-    return watts > 0 ? watts.toFixed(0) : '207';
-  });
-  readonly powerLabel = computed(() =>
-    this.sample() && this.sample()!.wattsActive <= 0
-      ? $localize`:Demo power telemetry metric@@telemetry.demoPowerDraw:Power draw · demo`
-      : $localize`:Telemetry metric@@telemetry.powerDraw:Power draw`,
+  readonly primaryValue = computed(() => this.view()?.primary.value ?? '—');
+  readonly primaryUnit = computed(() => this.view()?.primary.unit ?? '');
+  readonly powerLabel = computed(
+    () => this.view()?.power.label ?? $localize`:Telemetry metric@@telemetry.powerDraw:Power draw`,
   );
-  readonly uptimeLabel = computed(() => formatUptime(this.sample()?.uptimeSeconds ?? 0));
+  readonly powerValue = computed(() => this.view()?.power.value ?? '—');
+  readonly powerUnit = computed(() => this.view()?.power.unit ?? '');
+  readonly metadata = computed(() => this.view()?.metadata ?? []);
+  readonly primaryJson = computed(() => JSON.stringify(this.view()?.primary.history ?? []));
+  readonly powerJson = computed(() => JSON.stringify(this.view()?.power.history ?? []));
 
   ngOnInit(): void {
+    const demo = createDemoTelemetryView(this.demoSeries());
     if (this.liveData.mode() === 'demo') {
-      this.dataState.set('demo');
+      this.resource.set(createDemoResource(demo, TELEMETRY_DEMO_SOURCE));
       return;
     }
-    this.dataState.set('loading');
-    void this.refresh();
-    this.pollHandle = window.setInterval(() => void this.refresh(), TELEMETRY_POLL_MS);
-  }
 
-  ngOnDestroy(): void {
-    if (this.pollHandle !== undefined) {
-      window.clearInterval(this.pollHandle);
-      this.pollHandle = undefined;
-    }
+    this.resource.set(createConnectedResource<TelemetryViewData>(TELEMETRY_LIVE_SOURCE));
+    void this.refresh();
   }
 
   async refresh(): Promise<void> {
-    if (this.liveData.mode() === 'demo') return;
+    if (this.liveData.mode() === 'demo' || this.refreshInFlight) return;
+    this.refreshInFlight = true;
+    this.resource.update((resource) =>
+      beginDesktopDataRefresh(resource, Date.now(), TELEMETRY_STALE_AFTER_MS),
+    );
+
     try {
       const sample = await this.liveData.telemetry();
-      const firstSample = this.sample() === null;
-      this.sample.set(sample);
-      this.heapHistory.update((history) =>
-        appendHistory(firstSample ? [] : history, sample.heapAllocMB),
+      const mapped = createLiveTelemetryView(sample, this.resource().value, this.demoSeries());
+      this.resource.update((resource) =>
+        resolveDesktopData(resource, mapped.value, mapped.state, TELEMETRY_LIVE_SOURCE, Date.now()),
       );
-      if (sample.wattsActive > 0) {
-        this.powerHistory.update((history) =>
-          appendHistory(firstSample ? [] : history, sample.wattsActive),
-        );
-      }
-      this.dataState.set(sample.wattsActive > 0 ? 'live' : 'mixed');
     } catch {
-      this.sample.set(null);
-      this.heapHistory.set([]);
-      this.powerHistory.set([]);
-      this.dataState.set('unavailable');
+      this.resource.update((resource) => rejectDesktopData(resource, TELEMETRY_UNAVAILABLE));
+    } finally {
+      this.refreshInFlight = false;
     }
   }
 
-  get primaryJson() {
-    return JSON.stringify(this.sample() ? this.heapHistory() : this.throughput);
+  private demoSeries(): TelemetryDemoSeries {
+    return {
+      throughput: this.throughput,
+      watts: this.watts,
+    };
   }
-
-  get wattsJson() {
-    return JSON.stringify(this.powerHistory().length ? this.powerHistory() : this.watts);
-  }
-}
-
-function appendHistory(history: readonly number[], value: number): readonly number[] {
-  return [...history, value].slice(-MAX_HISTORY_SAMPLES);
-}
-
-function formatUptime(seconds: number): string {
-  const wholeSeconds = Math.max(0, Math.floor(seconds));
-  const days = Math.floor(wholeSeconds / 86_400);
-  const hours = Math.floor((wholeSeconds % 86_400) / 3_600);
-  const minutes = Math.floor((wholeSeconds % 3_600) / 60);
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
 }
