@@ -23,6 +23,8 @@ vars:
   # Renamed from the wails3-scaffold `wails-cross` so multiple wails3
   # projects on one machine don't collide on the same Docker image tag.
   CROSS_IMAGE: lthn-cross
+  # Optional fixed sibling runtime staged by the root build:lem task.
+  WINDOWS_LEM_STAGE: '{{printf "%s/build/windows/bin/lem.exe" .ROOT_DIR}}'
 
 tasks:
   build:
@@ -141,11 +143,21 @@ tasks:
     cmds:
       # Create the Microsoft WebView2 bootstrapper if it doesn't exist
       - '{{.WAILS3_TOOL}} generate webview2bootstrapper -dir "{{.ROOT_DIR}}/build/windows/nsis"'
-      - | 
+      - |
         {{if eq OS "windows"}}
-        makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}\{{.BIN_DIR}}\{{.APP_NAME}}.exe" project.nsi
+        if exist "{{.WINDOWS_LEM_STAGE}}" (
+          makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}\{{.BIN_DIR}}\{{.APP_NAME}}.exe" -DARG_LEM_BINARY="{{.WINDOWS_LEM_STAGE}}" project.nsi
+        ) else (
+          echo   LEM sidecar: optional runtime unavailable; build it or set LTHN_LEM_BIN
+          makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}\{{.BIN_DIR}}\{{.APP_NAME}}.exe" project.nsi
+        )
         {{else}}
-        makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" project.nsi
+        if [ -f "{{.WINDOWS_LEM_STAGE}}" ]; then
+          makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" -DARG_LEM_BINARY="{{.WINDOWS_LEM_STAGE}}" project.nsi
+        else
+          echo "  LEM sidecar: optional runtime unavailable; build it or set LTHN_LEM_BIN"
+          makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" project.nsi
+        fi
         {{end}}
     vars:
       ARCH: '{{.ARCH | default ARCH}}'

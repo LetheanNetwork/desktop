@@ -133,6 +133,12 @@ version.
   `go-process.Service`. Angular uses the `Lifecycle` Wails wrapper; native
   launchd/systemd installation remains an explicit separate compatibility
   path.
+- `go/pkg/models/` — Medium-backed, path-private catalogue for `lem/models`;
+  renderer references are opaque `model-…` IDs.
+- `go/pkg/modelruntime/` — bounded LEM client and the sole renderer-facing
+  model-runtime state machine. It coordinates the managed `inference`
+  service, catalogue, credential, immutable snapshots, sampling, and explicit
+  Start/Load/Unload/Restart/Stop operations.
 - `go/pkg/telemetry/`, `go/pkg/fleet/`, `go/pkg/marketplace/`, and the other
   `go/pkg/*` directories — independently registered product services.
 
@@ -168,6 +174,10 @@ Add CLI verbs as flat `cmdX(args []string) int` handlers which delegate to
   policy/output requests, rejects execution-bearing responses, forwards
   `lthn:services:changed`, and makes no Wails call or event subscription in
   offline demo mode.
+- `frontend-ng/src/app/desktop/desktop-model-runtime-resource.service.ts` —
+  ref-counted shared ModelRuntime snapshot/event/poll resource used by Control
+  and Telemetry, with deterministic in-memory lifecycle operations in offline
+  demo mode.
 - `frontend-ng/src/app/desktop/apps/control/control-services.view.ts` —
   Control's working Services interface under the stable internal `daemons`
   tab value. It presents manual Start/Stop/Restart and explicit bounded output
@@ -266,6 +276,35 @@ application `io.Medium`; desired state, process identity, output, and errors
 remain transient. Explicit Core/Desktop shutdown stops running services, while
 closing windows leaves them alive under the tray-owned Core.
 
+LEM is the fixed sibling `lem`/`lem.exe` managed-service executable. It starts
+model-less on `127.0.0.1:36911` only after an explicit action:
+
+```text
+lem serve --addr 127.0.0.1:36911 --shutdown-timeout 10s
+```
+
+There is no PATH fallback, renderer endpoint, renderer credential, or native
+renderer model path. Models live under `lem/models` on the registered
+application Medium and the admin credential lives at `lem/admin.token`.
+Unsupported runtime metrics remain absent; connected Angular surfaces render
+`—` and empty series instead of substituting demo or benchmark values.
+
+Focused model-runtime checks:
+
+```bash
+node --test scripts/verify-model-runtime-convergence.test.mjs
+go test ./go/pkg/services ./go/pkg/models ./go/pkg/modelruntime ./go/pkg/desktop ./go/cmd/lthn -count=1
+go test -race ./go/pkg/services ./go/pkg/modelruntime -count=1
+go vet ./go/pkg/services ./go/pkg/models ./go/pkg/modelruntime ./go/pkg/desktop ./go/cmd/lthn
+cd frontend-ng
+npx ng test --watch=false \
+  --include=src/app/desktop/desktop-model-runtime-bridge.service.spec.ts \
+  --include=src/app/desktop/desktop-model-runtime-resource.service.spec.ts \
+  --include=src/app/desktop/apps/control.app.spec.ts \
+  --include=src/app/desktop/apps/telemetry.app.spec.ts \
+  --include=src/app/tray-panel/tray-panel.spec.ts
+```
+
 The external v0.9.0 audit currently reports a large pre-existing compliance
 backlog; it is **not** a green all-zero gate on this branch. Run it as a
 before/after no-regression diagnostic for changed Go scope. Do not claim the
@@ -346,8 +385,12 @@ npm run build
 
 Platform builds and packages are routed through `Taskfile.yml` and
 `build/{darwin,linux,windows,ios,android}/`. The root pre-build can also stage
-`lthn-mlx`, `lthn-agent`, and `lthn-ai`; their checkout locations are
-overridable with `LTHN_MLX_REPO`, `LTHN_AGENT_REPO`, and `LTHN_AI_REPO`.
+LEM, `lthn-mlx`, `lthn-agent`, and `lthn-ai`; their checkout locations are
+overridable with `LTHN_LEM_REPO`, `LTHN_MLX_REPO`, `LTHN_AGENT_REPO`, and
+`LTHN_AI_REPO`. `LTHN_LEM_BIN` supplies a prebuilt matching-platform LEM
+binary. The macOS application bundle, Linux AppImage/nFPM packages, and
+default Windows NSIS installer copy it beside `lthn`; missing optional source
+leaves the runtime unavailable without blocking a GUI-only build.
 Do not assume those optional sibling repositories are present in CI or on
 another developer's machine.
 

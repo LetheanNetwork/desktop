@@ -14,6 +14,8 @@ vars:
   # Renamed from the wails3-scaffold `wails-cross` so multiple wails3
   # projects on one machine don't collide on the same Docker image tag.
   CROSS_IMAGE: lthn-cross
+  # Optional fixed sibling runtime staged by the root build:lem task.
+  LINUX_LEM_STAGE: 'build/linux/bin/lem'
 
 tasks:
   build:
@@ -144,12 +146,34 @@ tasks:
       - cp "{{.APP_BINARY}}" "{{.APP_NAME}}"
       - cp ../../appicon.png "{{.APP_NAME}}.png"
       - '{{.WAILS3_TOOL}} generate appimage -binary "{{.APP_NAME}}" -icon {{.ICON}} -desktopfile {{.DESKTOP_FILE}} -outputdir {{.OUTPUT_DIR}} -builddir {{.ROOT_DIR}}/build/linux/appimage/build'
+      # The Wails generator deliberately accepts one primary executable.
+      # Re-run its retained linuxdeploy AppDir once when LEM is staged so the
+      # fixed sibling lands at usr/bin/lem inside the final AppImage.
+      - |-
+        if [ -x "{{.ROOT_DIR}}/{{.LINUX_LEM_STAGE}}" ]; then
+          APPDIR="{{.ROOT_DIR}}/build/linux/appimage/build/{{.APP_NAME}}-{{.APPIMAGE_ARCH}}.AppDir"
+          TOOL="{{.ROOT_DIR}}/build/linux/appimage/build/linuxdeploy-{{.APPIMAGE_ARCH}}.AppImage"
+          OUTPUT="{{.APP_NAME}}-{{.APPIMAGE_ARCH}}.AppImage"
+          cp "{{.ROOT_DIR}}/{{.LINUX_LEM_STAGE}}" "$APPDIR/usr/bin/lem"
+          (
+            cd "{{.ROOT_DIR}}/build/linux/appimage/build"
+            DEPLOY_GTK_VERSION="{{.GTK_VERSION}}" NO_STRIP=1 OUTPUT="$OUTPUT" \
+              "$TOOL" --appimage-extract-and-run --appdir "$APPDIR" --output appimage --plugin gtk
+            mv -f "$OUTPUT" "{{.ROOT_DIR}}/bin/$OUTPUT"
+          )
+          echo "  packaged LEM beside usr/bin/lthn in $OUTPUT"
+        else
+          echo "  LEM sidecar: optional runtime unavailable; build it or set LTHN_LEM_BIN"
+        fi
     vars:
       APP_NAME: '{{.APP_NAME}}'
       APP_BINARY: '../../../bin/{{.APP_NAME}}'
       ICON: '{{.APP_NAME}}.png'
       DESKTOP_FILE: '../{{.APP_NAME}}.desktop'
       OUTPUT_DIR: '../../../bin'
+      APPIMAGE_ARCH: '{{if eq (.ARCH | default ARCH) "arm64"}}aarch64{{else}}x86_64{{end}}'
+      GTK_VERSION:
+        sh: 'ldd "{{.ROOT_DIR}}/bin/{{.APP_NAME}}" | grep -q "libgtk-4.so" && echo 4 || echo 3'
 
   create:deb:
     summary: Creates a deb package
@@ -184,17 +208,53 @@ tasks:
   generate:deb:
     summary: Creates a deb package
     cmds:
-      - '{{.WAILS3_TOOL}} tool package -name "{{.APP_NAME}}" -format deb -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin'
+      - task: generate:nfpm
+        vars:
+          FORMAT: deb
 
   generate:rpm:
     summary: Creates a rpm package
     cmds:
-      - '{{.WAILS3_TOOL}} tool package -name "{{.APP_NAME}}" -format rpm -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin'
+      - task: generate:nfpm
+        vars:
+          FORMAT: rpm
 
   generate:aur:
     summary: Creates a arch linux packager package
     cmds:
-      - '{{.WAILS3_TOOL}} tool package -name "{{.APP_NAME}}" -format archlinux -config ./build/linux/nfpm/nfpm.yaml -out {{.ROOT_DIR}}/bin'
+      - task: generate:nfpm
+        vars:
+          FORMAT: archlinux
+
+  generate:nfpm:
+    summary: Creates one Linux package with the optional sibling LEM runtime
+    internal: true
+    cmds:
+      - |-
+        set -e
+        BASE="./build/linux/nfpm/nfpm.yaml"
+        CONFIG="$BASE"
+        GENERATED=""
+        if [ -x "{{.LINUX_LEM_STAGE}}" ]; then
+          GENERATED="$(mktemp -t lthn-nfpm-lem.XXXXXX.yaml)"
+          awk -v source="{{.LINUX_LEM_STAGE}}" '
+            { print }
+            /^contents:$/ {
+              print "  - src: \"" source "\""
+              print "    dst: \"/usr/local/bin/lem\""
+            }
+          ' "$BASE" > "$GENERATED"
+          CONFIG="$GENERATED"
+          echo "  packaging LEM beside /usr/local/bin/lthn"
+        else
+          echo "  LEM sidecar: optional runtime unavailable; build it or set LTHN_LEM_BIN"
+        fi
+        trap 'if [ -n "$GENERATED" ]; then rm -f "$GENERATED"; fi' EXIT
+        {{.WAILS3_TOOL}} tool package \
+          -name "{{.APP_NAME}}" \
+          -format "{{.FORMAT}}" \
+          -config "$CONFIG" \
+          -out "{{.ROOT_DIR}}/bin"
 
   generate:dotdesktop:
     summary: Generates a `.desktop` file

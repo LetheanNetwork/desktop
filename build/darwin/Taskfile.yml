@@ -21,6 +21,9 @@ vars:
   # resource or nested .app is needed — it runs from any path. Override
   # with LTHN_MLX_BIN=/path/to/lthn-mlx for CI / a prebuilt binary.
   LTHN_MLX_BIN: '{{.LTHN_MLX_BIN | default "build/darwin/bin/lthn-mlx"}}'
+  # Fixed sibling model runtime. Produced by root build:lem or supplied
+  # directly in CI; absence keeps the rest of the application package usable.
+  DARWIN_LEM_STAGE: 'build/darwin/bin/lem'
 
 tasks:
   build:
@@ -212,6 +215,15 @@ tasks:
         fi
       - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
       - cp build/darwin/Info.plist "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents"
+      # LEM is resolved only as a fixed sibling of lthn. Do not replace this
+      # conditional package copy with PATH discovery.
+      - |-
+        if [ -x "{{.DARWIN_LEM_STAGE}}" ]; then
+          cp "{{.DARWIN_LEM_STAGE}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS/lem"
+          echo "  bundled LEM sidecar at Contents/MacOS/lem"
+        else
+          echo "  LEM sidecar: optional runtime unavailable; build it or set LTHN_LEM_BIN"
+        fi
       # Self-contained helper: lthn-mlx (embeds its own metallib via
       # -tags embed_metallib) dropped alongside the main executable in
       # Contents/MacOS, so the lthn binary can spawn it via pkg/lemma with

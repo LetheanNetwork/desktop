@@ -53,6 +53,13 @@ vars:
   # Where the core/go-ai repo lives (the lthn-ai host crew member).
   # Override with LTHN_AI_REPO if checked out elsewhere.
   LTHN_AI_REPO: '{{.LTHN_AI_REPO | default "/Users/snider/Code/core/go-ai"}}'
+  # LEM is the manually-started local model runtime. Production packages use
+  # a fixed sibling binary; they never discover it through PATH. A matching
+  # prebuilt binary can be supplied by CI with LTHN_LEM_BIN.
+  LTHN_LEM_REPO: '{{.LTHN_LEM_REPO | default "/Users/snider/Code/core/go-inference"}}'
+  LTHN_LEM_BIN: '{{.LTHN_LEM_BIN | default ""}}'
+  LEM_BINARY_NAME: '{{if eq OS "windows"}}lem.exe{{else}}lem{{end}}'
+  LEM_STAGE_PATH: 'build/{{OS}}/bin/{{.LEM_BINARY_NAME}}'
 
 tasks:
   build:
@@ -68,12 +75,70 @@ tasks:
       - task: package
 
   pre-build:
-    summary: "Prep the ground before the wails3 OS build — stage the crew binaries (lthn-mlx, lthn-agent, lthn-ai) + install frontend deps (idempotent)"
+    summary: "Prep the ground before the wails3 OS build — stage optional sidecars (LEM, lthn-mlx, lthn-agent, lthn-ai) + install frontend deps"
     deps:
+      - build:lem
       - build:lthn-mlx
       - build:lthn-agent
       - build:lthn-ai
       - common:install:frontend:deps
+
+  build:lem:
+    summary: Build or copy the host-platform LEM runtime into its package staging directory
+    desc: |
+      LEM remains optional and manual-by-default. LTHN_LEM_BIN supplies a
+      prebuilt matching-platform binary; otherwise the supported go-inference
+      task builds from LTHN_LEM_REPO. macOS uses the self-contained embedded
+      Metal build, while Linux and Windows use the portable native build.
+      Missing optional source leaves the desktop package usable without model
+      runtime support. There is deliberately no PATH fallback.
+    cmds:
+      - cmd: |-
+          set -e
+          REPO="{{.LTHN_LEM_REPO}}"
+          SOURCE="{{.LTHN_LEM_BIN}}"
+          STAGE="{{.LEM_STAGE_PATH}}"
+          NAME="{{.LEM_BINARY_NAME}}"
+          if [ -z "$SOURCE" ]; then
+            if [ ! -f "$REPO/Taskfile.yml" ]; then
+              echo "  LEM sidecar: optional runtime unavailable; build it or set LTHN_LEM_BIN"
+              exit 0
+            fi
+            ( cd "$REPO" && {{if eq OS "darwin"}}task build:embed{{else}}task build:native{{end}} )
+            SOURCE="$REPO/bin/$NAME"
+          fi
+          if [ ! -f "$SOURCE" ]; then
+            echo "  LEM sidecar: optional runtime unavailable; build it or set LTHN_LEM_BIN"
+            exit 0
+          fi
+          mkdir -p "$(dirname "$STAGE")"
+          cp "$SOURCE" "$STAGE"
+          chmod 0755 "$STAGE"
+          echo "  LEM sidecar → $STAGE"
+        platforms: [darwin, linux]
+      - cmd: |-
+          powershell -NoProfile -Command "& {
+            $repo = '{{.LTHN_LEM_REPO}}'
+            $source = '{{.LTHN_LEM_BIN}}'
+            $stage = '{{.LEM_STAGE_PATH}}'
+            if ([string]::IsNullOrWhiteSpace($source)) {
+              if (-not (Test-Path -LiteralPath (Join-Path $repo 'Taskfile.yml') -PathType Leaf)) {
+                Write-Output '  LEM sidecar: optional runtime unavailable; build it or set LTHN_LEM_BIN'
+                exit 0
+              }
+              Push-Location $repo
+              try { task build:native } finally { Pop-Location }
+              $source = Join-Path $repo 'bin/lem.exe'
+            }
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+              Write-Output '  LEM sidecar: optional runtime unavailable; build it or set LTHN_LEM_BIN'
+              exit 0
+            }
+            New-Item -ItemType Directory -Force (Split-Path -Parent $stage) | Out-Null
+            Copy-Item -LiteralPath $source -Destination $stage -Force
+            Write-Output \"  LEM sidecar -> $stage\"
+          }"
+        platforms: [windows]
 
   build:lthn-mlx:
     summary: Build the self-contained lthn-mlx (embedded metallib) into build/darwin/bin
@@ -153,6 +218,7 @@ tasks:
 
   package:
     summary: Packages a production build
+    deps: [pre-build]
     cmds:
       - task: "{{OS}}:package"
 

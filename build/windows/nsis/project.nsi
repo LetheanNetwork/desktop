@@ -87,6 +87,9 @@ Section
     SetOutPath $INSTDIR
     
     !insertmacro wails.files
+    !ifdef ARG_LEM_BINARY
+        File "/oname=lem.exe" "${ARG_LEM_BINARY}"
+    !endif
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"

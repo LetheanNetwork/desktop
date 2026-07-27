@@ -17,12 +17,13 @@ values with truthful live data.
 
 ### Control
 
-- [ ] Add a model-runtime summary contract with loaded/running state,
-      generated and prompt token rates, request rate, VRAM, KV-cache use, runtime
-      source, and load/unload actions. The current model catalogue only reports
-      local file name, path, size, and directory state.
-- [ ] Add bounded model and request time-series data so the throughput chart is
-      live activity rather than recent benchmark history.
+- [x] Add a path-free model-runtime summary with opaque model IDs, lifecycle
+      state, runtime source, and explicit Start/Load/Unload/Restart/Stop
+      actions through the central managed-services system.
+- [ ] Add a bounded upstream LEM telemetry endpoint for prompt/decode rates,
+      request rate, active/peak memory, and KV-cache use. Until LEM exposes
+      those measurements, connected Control and Telemetry intentionally render
+      `—` and empty chart series rather than copying demo or benchmark values.
 - [ ] Extend the process surface with PID, CPU, memory, start time, and
       signal/kill actions. `build.Service.ProcessList` currently exposes only
       tracked process ID, command, state, and exit code.
@@ -39,9 +40,11 @@ values with truthful live data.
 
 ### Telemetry
 
-- [ ] Add runner telemetry for current model, generated/prompt tokens per
-      second, requests per minute, queue depth, region/runtime, KV-cache use, and
-      model uptime.
+- [x] Use the shared path-free runtime snapshot for current model, runtime,
+      supported memory/throughput values, and model uptime.
+- [ ] Extend the upstream LEM telemetry endpoint with requests per minute,
+      queue depth, KV-cache use, and bounded history. The desktop contract is
+      already optional-field-safe and must keep unsupported values unavailable.
 - [ ] Implement the macOS power helper promised by
       `telemetry.Reading.watts_active` and `watts_idle`; provide equivalent
       platform sources for Windows and Linux.

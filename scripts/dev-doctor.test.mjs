@@ -32,6 +32,7 @@ test('reports a ready development environment from injected probes', async () =>
   assert.equal(report.checks.filter(({ status }) => status === 'warning').length, 0);
   assert.match(renderDoctorReport(report), /Ready for development/);
   assert.match(renderDoctorReport(report), /Angular HMR.*9245/);
+  assert.match(renderDoctorReport(report), /LEM sidecar: ready at bin\/lem/);
 });
 
 test('fails when a required development command is unavailable', async () => {
@@ -112,6 +113,7 @@ test('uses repository overrides and treats absent crew repositories as optional'
       LTHN_MLX_REPO: '/opt/lethean/go-mlx',
       LTHN_AGENT_REPO: '/opt/lethean/agent',
       LTHN_AI_REPO: '/opt/lethean/go-ai',
+      LTHN_LEM_REPO: '/opt/lethean/go-inference',
     },
     commandProbe,
     portProbe,
@@ -126,10 +128,62 @@ test('uses repository overrides and treats absent crew repositories as optional'
     report.checks
       .filter(({ status }) => status === 'warning')
       .map(({ name }) => name),
-    ['go-mlx repository', 'agent repository', 'go-ai repository'],
+    [
+      'go-mlx repository',
+      'agent repository',
+      'go-ai repository',
+      'go-inference repository',
+    ],
   );
   assert.deepEqual(
     seenPaths.filter((path) => path.startsWith('/opt/lethean/')),
-    ['/opt/lethean/go-mlx', '/opt/lethean/agent', '/opt/lethean/go-ai'],
+    [
+      '/opt/lethean/go-mlx',
+      '/opt/lethean/agent',
+      '/opt/lethean/go-ai',
+      '/opt/lethean/go-inference',
+    ],
   );
+});
+
+test('warns clearly when the optional LEM sidecar is absent', async () => {
+  const report = await inspectDevelopmentEnvironment({
+    cwd: '/workspace/desktop',
+    homeDir: '/home/developer',
+    environment: {},
+    commandProbe,
+    portProbe,
+    pathProbe: async (path) => !path.endsWith('/bin/lem'),
+  });
+
+  assert.equal(report.ok, true);
+  const lem = report.checks.find(({ name }) => name === 'LEM sidecar');
+  assert.deepEqual(lem, {
+    kind: 'path',
+    name: 'LEM sidecar',
+    status: 'warning',
+    detail: 'optional runtime unavailable; build it or set LTHN_LEM_BIN',
+    hint: 'Run task build:lem, or point LTHN_LEM_BIN at a matching-platform binary.',
+  });
+});
+
+test('uses an explicit prebuilt LEM binary without probing a PATH fallback', async () => {
+  const seenPaths = [];
+  const report = await inspectDevelopmentEnvironment({
+    cwd: '/workspace/desktop',
+    homeDir: '/home/developer',
+    environment: { LTHN_LEM_BIN: '/opt/lethean/bin/lem' },
+    commandProbe,
+    portProbe,
+    pathProbe: async (path) => {
+      seenPaths.push(path);
+      return true;
+    },
+  });
+
+  assert.match(
+    renderDoctorReport(report),
+    /LEM sidecar: ready at \/opt\/lethean\/bin\/lem/,
+  );
+  assert.equal(seenPaths.includes('/workspace/desktop/bin/lem'), false);
 });

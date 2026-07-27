@@ -2,7 +2,7 @@ import { execFile as execFileCallback } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
@@ -125,6 +125,14 @@ export async function inspectDevelopmentEnvironment({
       required: false,
       hint: 'Optional: set LTHN_AI_REPO when go-ai lives elsewhere.',
     },
+    {
+      name: 'go-inference repository',
+      path:
+        environment.LTHN_LEM_REPO ||
+        join(homeDir, 'Code', 'core', 'go-inference'),
+      required: false,
+      hint: 'Optional: set LTHN_LEM_REPO when go-inference lives elsewhere.',
+    },
   ];
 
   const pathChecks = await Promise.all(
@@ -153,11 +161,51 @@ export async function inspectDevelopmentEnvironment({
     }),
   );
 
-  const checks = [...commands, ...pathChecks, ...ports];
+  const lemName = process.platform === 'win32' ? 'lem.exe' : 'lem';
+  const explicitLEM = environment.LTHN_LEM_BIN || '';
+  const lemCandidates = explicitLEM
+    ? [explicitLEM]
+    : [
+        join(cwd, 'bin', lemName),
+        join(cwd, 'build', platformDirectory(process.platform), 'bin', lemName),
+      ];
+  let readyLEM = '';
+  for (const candidate of lemCandidates) {
+    if (await pathProbe(candidate)) {
+      readyLEM = candidate;
+      break;
+    }
+  }
+  const lemCheck = {
+    kind: 'path',
+    name: 'LEM sidecar',
+    status: readyLEM ? 'ok' : 'warning',
+    detail: readyLEM
+      ? `ready at ${displayPath(cwd, readyLEM)}`
+      : 'optional runtime unavailable; build it or set LTHN_LEM_BIN',
+    hint: readyLEM
+      ? ''
+      : 'Run task build:lem, or point LTHN_LEM_BIN at a matching-platform binary.',
+  };
+
+  const checks = [...commands, ...pathChecks, lemCheck, ...ports];
   return {
     ok: checks.every(({ status }) => status !== 'error'),
     checks,
   };
+}
+
+function platformDirectory(platform) {
+  if (platform === 'win32') return 'windows';
+  return platform;
+}
+
+function displayPath(cwd, path) {
+  const candidate = relative(cwd, path);
+  if (candidate === '' || candidate.startsWith('..') || isAbsolute(candidate)) {
+    return path;
+  }
+  return candidate.replaceAll('\\', '/');
 }
 
 export function renderDoctorReport(report) {

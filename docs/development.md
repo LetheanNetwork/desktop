@@ -51,6 +51,8 @@ with:
 LTHN_MLX_REPO
 LTHN_AGENT_REPO
 LTHN_AI_REPO
+LTHN_LEM_REPO
+LTHN_LEM_BIN
 ```
 
 ## 2. Development modes
@@ -117,6 +119,33 @@ rebuilding the production frontend or optional crew sidecars.
 If a previous session owns a port, close the running application before
 starting another session or running focused desktop tests.
 
+### Manual LEM model runtime
+
+LEM is an optional fixed sibling process, not an automatically started
+dependency. Control starts it only after an explicit user action, through the
+central managed-services system and `go-process`. A start is deliberately
+model-less:
+
+```text
+lem serve --addr 127.0.0.1:36911 --shutdown-timeout 10s
+```
+
+The renderer can then select a model by opaque `model-…` ID. Catalogue
+discovery is limited to `~/Lethean/lem/models` through the registered
+application `io.Medium`; native model paths never cross Wails. The Go runtime
+reads LEM's bounded admin credential through the same Medium at
+`lem/admin.token`. The token, endpoint, command, arguments, environment, and
+working directory remain trusted-Go details.
+
+The lifecycle is explicit: **Start**, **Load**, **Unload**, **Restart**, and
+**Stop**. Closing a window does not stop a running service, while application
+shutdown does. Registration, catalogue reads, subscriptions, and refreshes
+never start LEM or load a model.
+
+Browser demo mode simulates that lifecycle entirely in memory. It makes no
+Wails call or event subscription, which keeps Control and Telemetry available
+for deterministic UI work without a model or backend.
+
 ## 3. Builds and packages
 
 Build only the Angular production bundle:
@@ -151,9 +180,20 @@ build/ios/
 build/android/
 ```
 
-The root production pre-build may stage `lthn-mlx`, `lthn-agent`, and
+The root production pre-build may stage LEM, `lthn-mlx`, `lthn-agent`, and
 `lthn-ai`. Their source repositories are optional; absence must not prevent a
-GUI-only build.
+GUI-only build. LEM is built from `LTHN_LEM_REPO` with go-inference's
+`build:embed` task on macOS or `build:native` on Linux/Windows. CI can provide
+a matching-platform binary with `LTHN_LEM_BIN`. The macOS application bundle,
+Linux AppImage/nFPM packages, and default Windows NSIS installer place it
+beside `lthn` as `lem` or `lem.exe`; runtime discovery never falls back to
+`PATH`.
+
+To stage only the current-platform LEM sidecar:
+
+```bash
+go tool wails3 task build:lem
+```
 
 Build the CLI router directly when no native package is needed:
 
@@ -202,6 +242,26 @@ go test ./go/pkg/<changed-package>
 cd frontend-ng
 npx ng test --watch=false --include=src/path/to/file.spec.ts
 ```
+
+Focused model-runtime confidence gate:
+
+```bash
+node --test scripts/verify-model-runtime-convergence.test.mjs
+go test ./go/pkg/services ./go/pkg/models ./go/pkg/modelruntime ./go/pkg/desktop ./go/cmd/lthn -count=1
+go test -race ./go/pkg/services ./go/pkg/modelruntime -count=1
+go vet ./go/pkg/services ./go/pkg/models ./go/pkg/modelruntime ./go/pkg/desktop ./go/cmd/lthn
+
+cd frontend-ng
+npx ng test --watch=false \
+  --include=src/app/desktop/desktop-model-runtime-bridge.service.spec.ts \
+  --include=src/app/desktop/desktop-model-runtime-resource.service.spec.ts \
+  --include=src/app/desktop/apps/control.app.spec.ts \
+  --include=src/app/desktop/apps/telemetry.app.spec.ts \
+  --include=src/app/tray-panel/tray-panel.spec.ts
+```
+
+These checks inspect, compile, and simulate lifecycle state. They do not start
+LEM or load a model.
 
 Repository entrypoints:
 
