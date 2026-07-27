@@ -9,6 +9,7 @@ import {
   Component,
   CUSTOM_ELEMENTS_SCHEMA,
   Input,
+  OnDestroy,
   OnInit,
   computed,
   inject,
@@ -91,9 +92,11 @@ const TELEMETRY_UNAVAILABLE = $localize`:Telemetry unavailable error@@telemetry.
     </div>
   `,
 })
-export class TelemetryApp implements AppView, OnInit {
+export class TelemetryApp implements AppView, OnInit, OnDestroy {
   private readonly liveData = inject(DesktopLiveDataService);
   private refreshInFlight = false;
+  private pollHandle: number | undefined;
+  private destroyed = false;
 
   @Input() win!: Win;
   @Input() throughput: readonly number[] = TELEMETRY.throughput;
@@ -134,10 +137,19 @@ export class TelemetryApp implements AppView, OnInit {
 
     this.resource.set(createConnectedResource<TelemetryViewData>(TELEMETRY_LIVE_SOURCE));
     void this.refresh();
+    this.pollHandle = window.setInterval(() => void this.refresh(), TELEMETRY_POLL_MS);
+  }
+
+  ngOnDestroy(): void {
+    this.destroyed = true;
+    if (this.pollHandle !== undefined) {
+      window.clearInterval(this.pollHandle);
+      this.pollHandle = undefined;
+    }
   }
 
   async refresh(): Promise<void> {
-    if (this.liveData.mode() === 'demo' || this.refreshInFlight) return;
+    if (this.liveData.mode() === 'demo' || this.refreshInFlight || this.destroyed) return;
     this.refreshInFlight = true;
     this.resource.update((resource) =>
       beginDesktopDataRefresh(resource, Date.now(), TELEMETRY_STALE_AFTER_MS),
@@ -145,11 +157,13 @@ export class TelemetryApp implements AppView, OnInit {
 
     try {
       const sample = await this.liveData.telemetry();
+      if (this.destroyed) return;
       const mapped = createLiveTelemetryView(sample, this.resource().value, this.demoSeries());
       this.resource.update((resource) =>
         resolveDesktopData(resource, mapped.value, mapped.state, TELEMETRY_LIVE_SOURCE, Date.now()),
       );
     } catch {
+      if (this.destroyed) return;
       this.resource.update((resource) => rejectDesktopData(resource, TELEMETRY_UNAVAILABLE));
     } finally {
       this.refreshInFlight = false;

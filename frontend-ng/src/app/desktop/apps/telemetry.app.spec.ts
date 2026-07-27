@@ -211,4 +211,57 @@ describe('TelemetryApp', () => {
     resolve(SAMPLE);
     await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('mixed'));
   });
+
+  it('polls every five seconds and stops polling when destroyed', async () => {
+    vi.useFakeTimers();
+    mode.set('live');
+    liveData.telemetry.mockResolvedValue(SAMPLE);
+    const fixture = create();
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(liveData.telemetry).toHaveBeenCalledOnce();
+
+    liveData.telemetry.mockClear();
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(liveData.telemetry).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(liveData.telemetry).toHaveBeenCalledOnce();
+
+    fixture.destroy();
+    liveData.telemetry.mockClear();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(liveData.telemetry).not.toHaveBeenCalled();
+  });
+
+  it('does not create a polling timer in demo mode', () => {
+    vi.useFakeTimers();
+    const setInterval = vi.spyOn(window, 'setInterval');
+    const fixture = create();
+
+    vi.advanceTimersByTime(15_000);
+
+    expect(setInterval).not.toHaveBeenCalled();
+    expect(liveData.telemetry).not.toHaveBeenCalled();
+    fixture.destroy();
+  });
+
+  it('ignores a live result that settles after destruction', async () => {
+    mode.set('live');
+    let resolve!: (sample: ProcessTelemetry) => void;
+    liveData.telemetry.mockReturnValue(
+      new Promise<ProcessTelemetry>((accept) => {
+        resolve = accept;
+      }),
+    );
+    const fixture = create();
+    const resourceAtDestroy = fixture.componentInstance.resource();
+
+    fixture.destroy();
+    resolve(SAMPLE);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fixture.componentInstance.resource()).toBe(resourceAtDestroy);
+    expect(fixture.componentInstance.resource().value).toBeNull();
+  });
 });
