@@ -5,7 +5,7 @@
 // one consistent event-bus contract:
 //
 //   Events.On("lthn:app:opened-url", e => { route(e.data) })
-//   Events.On("lthn:window:files-dropped", e => { import(e.data) })
+//   Events.On("lthn:host:intent", e => { route(e.data) })
 //   Events.On("lthn:window:ready", e => { /* bindings now safe */ })
 //
 // One subscriber pattern across theme / notification / tray / context
@@ -34,14 +34,14 @@ import (
 // Event re-broadcasts:
 //
 //	guilifecycle.ActionApplicationStarted         → "lthn:app:started"
-//	guilifecycle.ActionOpenedWithFile             → "lthn:app:opened-file" (file path)
+//	guilifecycle.ActionOpenedWithFile             → "lthn:host:intent" (opaque Files capability)
 //	guilifecycle.ActionLaunchedWithUrl            → "lthn:app:opened-url" (full URL — lthn://… or similar)
 //	guienvironment.ActionThemeChanged             → "lthn:theme"
 //	guiwindow.ActionWindowFocused                 → "lthn:window:focus"
 //	guiwindow.ActionWindowBlurred                 → "lthn:window:blur"
 //	guiwindow.ActionWindowMoved                   → "lthn:window:move"
 //	guiwindow.ActionWindowResized                 → "lthn:window:resize"
-//	guiwindow.ActionFilesDropped                  → "lthn:window:files-dropped"
+//	guiwindow.ActionFilesDropped                  → "lthn:host:intent" (opaque Files capabilities)
 //	guiwindow.ActionWindowHidden                  → "lthn:window:hide"
 //	guiwindow.ActionWindowShown                   → "lthn:window:show"
 //	guiwindow.ActionWindowMinimised               → "lthn:window:minimise"
@@ -63,7 +63,13 @@ func registerSystemEvents(c *core.Core) {
 		case guilifecycle.ActionApplicationStarted:
 			return emitCoreEvent(c, "lthn:app:started", nil)
 		case guilifecycle.ActionOpenedWithFile:
-			return emitCoreEvent(c, "lthn:app:opened-file", event.Path)
+			return emitHostItemIntent(
+				c,
+				HostIntentOpenItems,
+				[]string{event.Path},
+				nil,
+				"",
+			)
 		case guilifecycle.ActionLaunchedWithUrl:
 			opened := emitCoreEvent(c, "lthn:app:opened-url", event.URL)
 			if handled := handleDeepLink(c, event.URL); !handled.OK {
@@ -85,24 +91,13 @@ func registerSystemEvents(c *core.Core) {
 		case guiwindow.ActionWindowResized:
 			return emitWindowEvent(c, "resize", event.Name, map[string]any{"width": event.Width, "height": event.Height})
 		case guiwindow.ActionFilesDropped:
-			payload := map[string]any{"files": event.Paths}
-			if event.Target != nil {
-				target := map[string]any{
-					"id": event.Target.ID,
-					"x":  event.Target.X,
-					"y":  event.Target.Y,
-				}
-				if len(event.Target.ClassList) > 0 {
-					target["classList"] = event.Target.ClassList
-				}
-				if len(event.Target.Attributes) > 0 {
-					target["attributes"] = event.Target.Attributes
-				}
-				payload["target"] = target
-			} else if event.TargetID != "" {
-				payload["target"] = map[string]any{"id": event.TargetID}
-			}
-			return emitWindowEvent(c, "files-dropped", event.Name, payload)
+			return emitHostItemIntent(
+				c,
+				HostIntentDropItems,
+				event.Paths,
+				event.Target,
+				event.TargetID,
+			)
 		case guiwindow.ActionWindowHidden:
 			return emitWindowEvent(c, "hide", event.Name, nil)
 		case guiwindow.ActionWindowShown:

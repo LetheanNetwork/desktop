@@ -961,8 +961,8 @@ func (s *Service) Run() core.Result {
 	// events with the right context data.
 
 	// System event re-broadcasts. Wails' ApplicationStarted /
-	// OpenedWithFile / LaunchedWithUrl get republished as lthn:app:*
-	// so the frontend has one event-bus contract for everything.
+	// OpenedWithFile is resolved to an opaque lthn:host:intent while
+	// LaunchedWithUrl remains on the allowlisted lthn:app:* path.
 	// See sysevents.go for the table.
 	registerSystemEvents(s.opts.Core)
 	registerFilesEvents(s.opts.Core)
@@ -970,7 +970,7 @@ func (s *Service) Run() core.Result {
 	registerModelRuntimeEvents(s.opts.Core)
 
 	// Per-window lthn:window:* event re-broadcasts (ready / focus /
-	// blur / hide / show / resize / files-dropped). See sysevents.go.
+	// blur / hide / show / resize). File drops use lthn:host:intent.
 	// Window registry pre-creation + compact-panel tray attachment are
 	// owned by gui.Service via GuiConfig.WindowRegistry + GuiConfig.Tray.
 

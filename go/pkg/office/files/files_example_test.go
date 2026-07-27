@@ -54,6 +54,12 @@ func ExampleService_CreateDirectory() {
 	// Output: completed
 }
 
+func ExampleResolveHostItems() {
+	result := files.ResolveHostItems(nil, []string{"/tmp/report.txt"})
+	core.Println(result.OK)
+	// Output: false
+}
+
 func exampleFilesService() (*files.Service, coreio.Medium) {
 	medium := coreio.NewMemoryMedium()
 	service := files.NewService(files.Options{

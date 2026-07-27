@@ -39,7 +39,14 @@ func registerMobileRuntimeEvents(app *application.App) {
 		if event == nil {
 			return
 		}
-		app.Event.Emit("lthn:app:opened-file", event.Context().Filename())
+		// Mobile host-item capability resolution is not available in the
+		// current Wails mobile runtime. Fail closed without forwarding the
+		// native filename; mobile support can replace this bounded intent
+		// once it can register an io.Medium-backed capability.
+		app.Event.Emit("lthn:host:intent", map[string]any{
+			"kind":      "items-unavailable",
+			"errorCode": "files.provider_unavailable",
+		})
 	})
 	app.Event.OnApplicationEvent(events.Common.ApplicationLaunchedWithUrl, func(event *application.ApplicationEvent) {
 		if event == nil {

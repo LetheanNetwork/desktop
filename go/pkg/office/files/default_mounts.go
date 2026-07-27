@@ -87,6 +87,7 @@ func DefaultOptions(c *core.Core) core.Result {
 			ID:                 spec.id,
 			Name:               spec.name,
 			Kind:               "local",
+			LocalRoot:          core.PathJoin(rootSegments...),
 			Icon:               spec.icon,
 			Brand:              spec.brand,
 			Capabilities:       ReadWriteCapabilities(),

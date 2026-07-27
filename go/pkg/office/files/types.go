@@ -94,6 +94,7 @@ type Mount struct {
 	ID                 string        `json:"-"`
 	Name               string        `json:"-"`
 	Kind               string        `json:"-"`
+	LocalRoot          string        `json:"-"`
 	Icon               string        `json:"-"`
 	Brand              bool          `json:"-"`
 	Capabilities       Capabilities  `json:"-"`

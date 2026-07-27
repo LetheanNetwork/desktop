@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	core "dappco.re/go"
+	coreio "dappco.re/go/io"
 )
 
 // Service owns the canonical provider-neutral Files surface.
@@ -26,8 +27,13 @@ type Service struct {
 	limits        Limits
 	locks         map[string]*sync.Mutex
 	internalReady map[string]bool
-	shutdownOnce  sync.Once
-	shutdownErr   error
+	hostMu        sync.RWMutex
+	hostMounts    map[string]Mount
+	hostOrder     []string
+
+	hostMediumFactory func(string) (coreio.Medium, error)
+	shutdownOnce      sync.Once
+	shutdownErr       error
 }
 
 // NewService constructs the Files service from trusted mount composition.
@@ -48,6 +54,10 @@ func NewService(options Options) *Service {
 		limits:        limits,
 		locks:         make(map[string]*sync.Mutex),
 		internalReady: make(map[string]bool),
+		hostMounts:    make(map[string]Mount),
+		hostMediumFactory: func(root string) (coreio.Medium, error) {
+			return coreio.NewSandboxed(root)
+		},
 	}
 }
 
@@ -117,6 +127,16 @@ func (s *Service) addMount(mount Mount) error {
 			nil,
 		)
 	}
+	if mount.LocalRoot != "" &&
+		(mount.Kind != "local" || !core.PathIsAbs(mount.LocalRoot)) {
+		return newFailure(
+			ErrorBoundaryRejected,
+			mount.ID,
+			"",
+			"local mount root is not an audited absolute local root",
+			nil,
+		)
+	}
 	if !mount.ContainmentAudited {
 		return newFailure(
 			ErrorBoundaryRejected,
@@ -137,6 +157,11 @@ func (s *Service) mount(id string) (Mount, error) {
 		return Mount{}, err
 	}
 	mount, ok := s.mounts[id]
+	if !ok {
+		s.hostMu.RLock()
+		mount, ok = s.hostMounts[id]
+		s.hostMu.RUnlock()
+	}
 	if !ok {
 		return Mount{}, newFailure(
 			ErrorInvalidMount,
@@ -160,7 +185,12 @@ func (s *Service) OnShutdown(core.Context) core.Result {
 		return core.Ok(nil)
 	}
 	s.shutdownOnce.Do(func() {
+		mounts := make([]Mount, 0, len(s.mounts))
 		for _, mount := range s.mounts {
+			mounts = append(mounts, mount)
+		}
+		mounts = append(mounts, s.hostMountSnapshot()...)
+		for _, mount := range mounts {
 			if !mount.Owned {
 				continue
 			}

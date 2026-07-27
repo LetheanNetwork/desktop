@@ -38,6 +38,9 @@ func (s *Service) listMounts() core.Result {
 		}
 		mounts = append(mounts, s.publicMount(mount))
 	}
+	for _, mount := range s.hostMountSnapshot() {
+		mounts = append(mounts, s.publicMount(mount))
+	}
 	favourites := make([]Favourite, 0, len(runtime.Favourites))
 	for _, favourite := range runtime.Favourites {
 		if _, ok := s.mounts[favourite.MountID]; ok {
