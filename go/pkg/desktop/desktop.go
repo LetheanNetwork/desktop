@@ -54,6 +54,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/container"
 	"dappco.re/lthn/desktop/pkg/contentshield"
 	"dappco.re/lthn/desktop/pkg/deploys"
+	"dappco.re/lthn/desktop/pkg/desktopstate"
 	"dappco.re/lthn/desktop/pkg/downloader"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/fleet"
@@ -409,6 +410,9 @@ func (s *Service) Run() core.Result {
 	// office/files — sole provider-neutral Files binding. Its registered
 	// io.Medium mounts enforce the content and metadata boundary.
 	filesSvc, _ := core.ServiceFor[*officefile.Service](s.opts.Core, "office-files")
+	// desktopstate — Core-owned, Medium-backed inner-shell and Terminal
+	// workspace documents. Bind the registered instance rather than a sibling.
+	desktopStateSvc, _ := core.ServiceFor[*desktopstate.Service](s.opts.Core, "desktopstate")
 	// coding/deploys — Coding role deploy history catalogue. Core-registered;
 	// reads and writes Trix-style markdown from ~/Lethean/deploys/. v1 scope:
 	// List / Get / Create. Wails: Deploys.List / Get / Create.
@@ -595,6 +599,7 @@ func (s *Service) Run() core.Result {
 		gui.Bind(documentsSvc),
 		gui.Bind(mailSvc),
 		gui.Bind(filesSvc),
+		gui.Bind(desktopstate.NewWailsService(desktopStateSvc)),
 		gui.Bind(deploysSvc),
 		gui.Bind(serverkeySvc),
 		gui.Bind(accountSvc),

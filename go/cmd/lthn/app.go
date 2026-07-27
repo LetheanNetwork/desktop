@@ -23,6 +23,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/benchmark"
 	"dappco.re/lthn/desktop/pkg/connection"
 	"dappco.re/lthn/desktop/pkg/deploys"
+	"dappco.re/lthn/desktop/pkg/desktopstate"
 	"dappco.re/lthn/desktop/pkg/fleet"
 	"dappco.re/lthn/desktop/pkg/gateway"
 	lthni18n "dappco.re/lthn/desktop/pkg/i18n"
@@ -135,6 +136,10 @@ func newAppCore() *core.Core {
 		core.WithName("io", io.NewService(io.IOConfig{
 			Root: dataDir.Value.(string),
 		})),
+		// desktopstate — versioned inner-shell and Terminal-workspace state.
+		// The service persists only bounded renderer-independent documents
+		// through the registered application io.Medium.
+		core.WithName("desktopstate", desktopstate.Register),
 		// lem-io — the sole application Medium for LEM credentials and
 		// model catalogue discovery. The root is trusted composition
 		// data; renderer contracts receive only opaque model IDs.

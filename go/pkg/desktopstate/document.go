@@ -3,7 +3,10 @@
 package desktopstate
 
 import (
+	"encoding/json"
+	goio "io"
 	"io/fs"
+	"strings"
 	"sync"
 	"time"
 
@@ -212,13 +215,22 @@ func (document *document[T]) decode(content string) core.Result {
 		)
 	}
 	var envelope documentEnvelope[T]
-	decoded := core.JSONUnmarshalString(content, &envelope)
-	if !decoded.OK {
+	decoder := json.NewDecoder(strings.NewReader(content))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&envelope); err != nil {
 		return stateFailure(
 			ErrorStateInvalid,
 			"desktopstate.document.Load",
 			"desktop state is malformed",
-			decoded.Err(),
+			err,
+		)
+	}
+	if err := decoder.Decode(&struct{}{}); err != goio.EOF {
+		return stateFailure(
+			ErrorStateInvalid,
+			"desktopstate.document.Load",
+			"desktop state contains trailing data",
+			err,
 		)
 	}
 	if envelope.Version != document.options.Version || envelope.Revision == 0 {
