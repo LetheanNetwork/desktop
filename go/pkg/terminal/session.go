@@ -22,6 +22,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"time"
 
@@ -43,6 +44,20 @@ const terminalDefaultShell = "/bin/zsh"
 // Implementations must NOT block — the pump runs subscribers synchronously, so
 // a slow subscriber slows every other subscriber on the same session.
 type TerminalSubscriber func(chunk []byte)
+
+// OutputChunk is a cursor-addressed PTY output range. Start is inclusive and
+// End is exclusive. Reset tells a reconnecting renderer that its requested
+// cursor expired and Data is the complete retained scrollback snapshot.
+type OutputChunk struct {
+	Start uint64
+	End   uint64
+	Data  []byte
+	Reset bool
+}
+
+// OutputSubscriber receives immutable cursor-addressed PTY output chunks.
+// Implementations must not block or mutate Data.
+type OutputSubscriber func(chunk OutputChunk)
 
 // TerminalSession is one PTY-backed shell. Lifecycle: NewTerminalSession →
 // Run (blocks until the shell exits) → Close (idempotent). The pool's Close
@@ -68,7 +83,9 @@ type TerminalSession struct {
 	ringStart   int    // index of oldest byte (0 until wrapped)
 	ringLen     int    // valid bytes in ring (≤ terminalRingCap)
 	wrapped     bool   // true once more than terminalRingCap bytes written
-	subscribers map[uint64]TerminalSubscriber
+	ringBase    uint64 // cursor of the oldest retained byte
+	outputEnd   uint64 // cursor immediately after the latest produced byte
+	subscribers map[uint64]OutputSubscriber
 	nextSubID   uint64
 	doneOnce    sync.Once
 	done        chan struct{}
@@ -155,7 +172,7 @@ func NewTerminalSession(opts SessionOptions) (*TerminalSession, error) {
 		pty:         f,
 		cmd:         cmd,
 		ring:        make([]byte, terminalRingCap),
-		subscribers: make(map[uint64]TerminalSubscriber),
+		subscribers: make(map[uint64]OutputSubscriber),
 		done:        make(chan struct{}),
 	}, nil
 }
@@ -170,8 +187,7 @@ func (s *TerminalSession) Run() error {
 		n, err := s.pty.Read(buf)
 		if n > 0 {
 			chunk := append([]byte(nil), buf[:n]...)
-			s.appendRing(chunk)
-			s.fanOut(chunk)
+			s.publish(chunk)
 		}
 		if err != nil {
 			break
@@ -211,21 +227,90 @@ func (s *TerminalSession) Resize(cols, rows int) {
 	_ = pty.Setsize(f, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 }
 
-// Subscribe registers a subscriber and returns the current ring snapshot (so a
-// new subscriber catches up on scrollback before the live stream) plus an
-// unsubscribe func. Safe to call concurrently.
+// Subscribe preserves the original byte-stream API. New reconnecting clients
+// should use SubscribeFrom so they can resume from an acknowledged cursor.
 func (s *TerminalSession) Subscribe(sub TerminalSubscriber) ([]byte, func()) {
+	replay, unsubscribe, err := s.SubscribeFrom(0, func(chunk OutputChunk) {
+		sub(chunk.Data)
+	})
+	if err != nil {
+		return nil, func() {}
+	}
+	return replay.Data, unsubscribe
+}
+
+// SubscribeFrom atomically registers a cursor-aware subscriber and returns the
+// output produced after after. A cursor older than retained scrollback returns
+// a Reset chunk; a future cursor is rejected without registering a subscriber.
+func (s *TerminalSession) SubscribeFrom(
+	after uint64,
+	sub OutputSubscriber,
+) (OutputChunk, func(), error) {
+	replay, id, err := s.subscribeFrom(after, nil, sub)
+	if err != nil {
+		return OutputChunk{}, nil, err
+	}
+	return replay, func() { s.unsubscribe(id) }, nil
+}
+
+// subscribeFrom is the session-level primitive used by the Wails service to
+// replace a renderer subscriber without a duplicate-or-gap window.
+func (s *TerminalSession) subscribeFrom(
+	after uint64,
+	replace *uint64,
+	sub OutputSubscriber,
+) (OutputChunk, uint64, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if sub == nil {
+		return OutputChunk{}, 0, core.E("terminal.SubscribeFrom", "subscriber required", nil)
+	}
+	if after > s.outputEnd {
+		return OutputChunk{}, 0, core.E(
+			"terminal.SubscribeFrom",
+			"cursor "+strconv.FormatUint(after, 10)+" is ahead of output "+strconv.FormatUint(s.outputEnd, 10),
+			nil,
+		)
+	}
+
+	if replace != nil {
+		delete(s.subscribers, *replace)
+	}
 	id := s.nextSubID
 	s.nextSubID++
 	s.subscribers[id] = sub
-	snapshot := s.ringSnapshot()
-	s.mu.Unlock()
+	replay := s.replayFromLocked(after)
 
-	return snapshot, func() {
-		s.mu.Lock()
-		delete(s.subscribers, id)
-		s.mu.Unlock()
+	return replay, id, nil
+}
+
+func (s *TerminalSession) unsubscribe(id uint64) {
+	s.mu.Lock()
+	delete(s.subscribers, id)
+	s.mu.Unlock()
+}
+
+func (s *TerminalSession) replayFromLocked(after uint64) OutputChunk {
+	if after == s.outputEnd {
+		return OutputChunk{Start: after, End: after}
+	}
+
+	snapshot := s.ringSnapshot()
+	if after < s.ringBase {
+		return OutputChunk{
+			Start: s.ringBase,
+			End:   s.outputEnd,
+			Data:  snapshot,
+			Reset: true,
+		}
+	}
+
+	offset := after - s.ringBase
+	return OutputChunk{
+		Start: after,
+		End:   s.outputEnd,
+		Data:  append([]byte(nil), snapshot[int(offset):]...),
 	}
 }
 
@@ -254,9 +339,14 @@ func (s *TerminalSession) Close() {
 func (s *TerminalSession) appendRing(p []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.appendRingLocked(p)
+}
 
+func (s *TerminalSession) appendRingLocked(p []byte) {
 	ringCap := len(s.ring)
+	s.outputEnd += uint64(len(p))
 	if ringCap == 0 {
+		s.ringBase = s.outputEnd
 		return
 	}
 	for _, b := range p {
@@ -269,6 +359,7 @@ func (s *TerminalSession) appendRing(p []byte) {
 			s.wrapped = true
 		}
 	}
+	s.ringBase = s.outputEnd - uint64(s.ringLen)
 }
 
 // ringSnapshot copies the ring's contents into a new slice in chronological
@@ -291,19 +382,27 @@ func (s *TerminalSession) ringSnapshot() []byte {
 	return out
 }
 
-// fanOut delivers a chunk to every subscriber under a read lock. New
-// subscribers can't miss bytes — Subscribe atomically grabs the ring snapshot
-// while holding the write lock.
-func (s *TerminalSession) fanOut(chunk []byte) {
-	s.mu.RLock()
-	subs := make([]TerminalSubscriber, 0, len(s.subscribers))
+// publish advances the ring cursor and captures the matching subscriber set in
+// one critical section. SubscribeFrom therefore cannot observe scrollback
+// without also receiving all subsequent live bytes exactly once.
+func (s *TerminalSession) publish(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+
+	chunk := append([]byte(nil), data...)
+	s.mu.Lock()
+	start := s.outputEnd
+	s.appendRingLocked(chunk)
+	output := OutputChunk{Start: start, End: s.outputEnd, Data: chunk}
+	subs := make([]OutputSubscriber, 0, len(s.subscribers))
 	for _, sub := range s.subscribers {
 		subs = append(subs, sub)
 	}
-	s.mu.RUnlock()
+	s.mu.Unlock()
 
 	for _, sub := range subs {
-		sub(chunk)
+		sub(output)
 	}
 }
 

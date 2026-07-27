@@ -3,11 +3,41 @@
 package terminal
 
 import (
+	"encoding/base64"
+	"sync"
 	"testing"
 	"time"
+
+	core "dappco.re/go"
 )
 
-func newTestService() *Service { return &Service{attached: make(map[string]func())} }
+type capturedTerminalEvent struct {
+	name string
+	data any
+}
+
+func newTestService() *Service {
+	return &Service{
+		attached: make(map[string]terminalAttachment),
+		emitEvent: func(string, any) {
+		},
+	}
+}
+
+func useTerminalPool(t *testing.T, sessions ...*TerminalSession) {
+	t.Helper()
+	previous := terminalPoolSingleton()
+	pool := NewTerminalPool()
+	for _, session := range sessions {
+		pool.sessions[session.ID] = session
+	}
+	terminalPoolOnce = sync.Once{}
+	terminalPoolOnce.Do(func() { terminalPoolInst = pool })
+	t.Cleanup(func() {
+		terminalPoolOnce = sync.Once{}
+		terminalPoolOnce.Do(func() { terminalPoolInst = previous })
+	})
+}
 
 func TestService_ResolveCwd_Good(t *testing.T) {
 	// Explicit Cwd wins over everything, with no filesystem lookup.
@@ -55,6 +85,146 @@ func TestService_Control_Ugly(t *testing.T) {
 	if r := s.Close(CloseInput{ID: "ghost"}); !r.OK {
 		t.Errorf("Close of unknown session should be a no-op OK, got %s", r.Error())
 	}
+}
+
+func TestService_Attach_CursorGoodRetainedReplay(t *testing.T) {
+	session := memSession(8)
+	session.ID = "retained"
+	session.appendRing([]byte("abcdef"))
+	useTerminalPool(t, session)
+
+	var events []capturedTerminalEvent
+	service := newTestService()
+	service.emitEvent = func(name string, data any) {
+		events = append(events, capturedTerminalEvent{name: name, data: data})
+	}
+	after := uint64(2)
+
+	if result := service.Attach(AttachInput{ID: session.ID, After: &after}); !result.OK {
+		t.Fatalf("attach: %s", result.Error())
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want one replay", len(events))
+	}
+	if events[0].name != eventOutPrefix+session.ID {
+		t.Fatalf("event name = %q, want %q", events[0].name, eventOutPrefix+session.ID)
+	}
+	assertTerminalChunk(t, events[0].data, 2, 6, "cdef", false)
+}
+
+func TestService_Attach_CursorBadFuture(t *testing.T) {
+	session := memSession(8)
+	session.ID = "future"
+	session.appendRing([]byte("abc"))
+	useTerminalPool(t, session)
+
+	service := newTestService()
+	after := uint64(4)
+	if result := service.Attach(AttachInput{ID: session.ID, After: &after}); result.OK {
+		t.Fatal("future cursor attach should fail")
+	}
+	if len(session.subscribers) != 0 {
+		t.Fatalf("future cursor registered %d subscribers, want none", len(session.subscribers))
+	}
+	if len(service.attached) != 0 {
+		t.Fatalf("future cursor recorded %d attachments, want none", len(service.attached))
+	}
+}
+
+func TestService_Attach_ReplacesSubscriber(t *testing.T) {
+	session := memSession(8)
+	session.ID = "replace"
+	useTerminalPool(t, session)
+
+	var events []capturedTerminalEvent
+	service := newTestService()
+	service.emitEvent = func(name string, data any) {
+		events = append(events, capturedTerminalEvent{name: name, data: data})
+	}
+	zero := uint64(0)
+	if result := service.Attach(AttachInput{ID: session.ID, After: &zero}); !result.OK {
+		t.Fatalf("first attach: %s", result.Error())
+	}
+	session.publish([]byte("a"))
+
+	one := uint64(1)
+	if result := service.Attach(AttachInput{ID: session.ID, After: &one}); !result.OK {
+		t.Fatalf("second attach: %s", result.Error())
+	}
+	session.publish([]byte("b"))
+
+	if len(session.subscribers) != 1 {
+		t.Fatalf("subscribers = %d, want one replacement", len(session.subscribers))
+	}
+	if len(events) != 2 {
+		t.Fatalf("live events = %d, want two", len(events))
+	}
+	assertTerminalChunk(t, events[0].data, 0, 1, "a", false)
+	assertTerminalChunk(t, events[1].data, 1, 2, "b", false)
+}
+
+func TestService_Attach_ReplayPrecedesConcurrentLiveOutput(t *testing.T) {
+	session := memSession(16)
+	session.ID = "ordered"
+	session.appendRing([]byte("old"))
+	useTerminalPool(t, session)
+
+	var (
+		eventsMu sync.Mutex
+		events   []capturedTerminalEvent
+	)
+	replayStarted := make(chan struct{})
+	releaseReplay := make(chan struct{})
+	service := newTestService()
+	service.emitEvent = func(name string, data any) {
+		eventsMu.Lock()
+		events = append(events, capturedTerminalEvent{name: name, data: data})
+		first := len(events) == 1
+		eventsMu.Unlock()
+		if first {
+			close(replayStarted)
+			<-releaseReplay
+		}
+	}
+
+	attachDone := make(chan core.Result)
+	go func() {
+		attachDone <- service.Attach(AttachInput{ID: session.ID})
+	}()
+	select {
+	case <-replayStarted:
+	case <-time.After(time.Second):
+		t.Fatal("replay did not start")
+	}
+
+	publishDone := make(chan struct{})
+	go func() {
+		session.publish([]byte("new"))
+		close(publishDone)
+	}()
+	close(releaseReplay)
+
+	select {
+	case result := <-attachDone:
+		if !result.OK {
+			t.Fatalf("attach: %s", result.Error())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("attach did not finish")
+	}
+	select {
+	case <-publishDone:
+	case <-time.After(time.Second):
+		t.Fatal("live publish did not finish")
+	}
+
+	eventsMu.Lock()
+	defer eventsMu.Unlock()
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want replay then live", len(events))
+	}
+	assertTerminalChunk(t, events[0].data, 0, 3, "old", false)
+	assertTerminalChunk(t, events[1].data, 3, 6, "new", false)
 }
 
 func TestService_Spawn_Good(t *testing.T) {
@@ -113,5 +283,30 @@ func TestService_List_Good(t *testing.T) {
 	}
 	if out.Sessions == nil {
 		t.Error("List sessions should be a non-nil slice")
+	}
+}
+
+func assertTerminalChunk(t *testing.T, value any, start, end uint64, data string, reset bool) {
+	t.Helper()
+	chunk, ok := value.(TerminalChunk)
+	if !ok {
+		t.Fatalf("event payload type = %T, want TerminalChunk", value)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(chunk.Data)
+	if err != nil {
+		t.Fatalf("decode event data: %v", err)
+	}
+	if chunk.Start != start || chunk.End != end || string(decoded) != data || chunk.Reset != reset {
+		t.Errorf(
+			"terminal chunk = {start:%d end:%d data:%q reset:%t}, want {start:%d end:%d data:%q reset:%t}",
+			chunk.Start,
+			chunk.End,
+			string(decoded),
+			chunk.Reset,
+			start,
+			end,
+			data,
+			reset,
+		)
 	}
 }

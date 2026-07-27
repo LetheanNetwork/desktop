@@ -28,15 +28,63 @@ const (
 type Service struct {
 	core *core.Core
 
-	mu       sync.Mutex
-	attached map[string]func() // session ID → unsubscribe, set by Attach
+	mu        sync.Mutex
+	attached  map[string]terminalAttachment
+	emitEvent func(name string, data any)
+}
+
+type terminalAttachment struct {
+	session      *TerminalSession
+	subscriberID uint64
+}
+
+type terminalEventGate struct {
+	mu      sync.Mutex
+	pending bool
+	queued  []OutputChunk
+	emit    func(OutputChunk)
+}
+
+func newTerminalEventGate(emit func(OutputChunk)) *terminalEventGate {
+	return &terminalEventGate{pending: true, emit: emit}
+}
+
+func (g *terminalEventGate) push(chunk OutputChunk) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.pending {
+		g.queued = append(g.queued, chunk)
+		return
+	}
+	g.emit(chunk)
+}
+
+func (g *terminalEventGate) replayAndOpen(replay OutputChunk) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if replay.Reset || replay.End > replay.Start || len(replay.Data) > 0 {
+		g.emit(replay)
+	}
+	for _, chunk := range g.queued {
+		g.emit(chunk)
+	}
+	g.queued = nil
+	g.pending = false
 }
 
 // NewService returns a terminal service bound to the core runtime.
 //
 //	gui.Bind(terminal.NewService(c))
 func NewService(c *core.Core) *Service {
-	return &Service{core: c, attached: make(map[string]func())}
+	return &Service{
+		core:     c,
+		attached: make(map[string]terminalAttachment),
+		emitEvent: func(name string, data any) {
+			gui.EmitEvent(c, name, data)
+		},
+	}
 }
 
 // ServiceName identifies the Wails binding namespace.
@@ -121,10 +169,22 @@ type OpenOutput struct {
 	Cwd   string `json:"cwd"`
 }
 
-// AttachInput / WriteInput / ResizeInput / CloseInput address a session by ID.
+// AttachInput requests output after the optional last acknowledged cursor.
 type AttachInput struct {
-	ID string `json:"id"`
+	ID    string  `json:"id"`
+	After *uint64 `json:"after,omitempty"`
 }
+
+// TerminalChunk is the renderer event payload. Data is base64-encoded PTY
+// bytes; Start and End identify the exact monotonic byte range.
+type TerminalChunk struct {
+	Start uint64 `json:"start"`
+	End   uint64 `json:"end"`
+	Data  string `json:"data"`
+	Reset bool   `json:"reset"`
+}
+
+// WriteInput / ResizeInput / CloseInput address a session by ID.
 type WriteInput struct {
 	ID   string `json:"id"`
 	Data string `json:"data"`
@@ -169,7 +229,7 @@ func (s *Service) Open(input OpenInput) core.Result {
 	id := sess.ID
 	go func() {
 		<-sess.Done()
-		gui.EmitEvent(s.core, eventExitPrefix+id, "")
+		s.emitEvent(eventExitPrefix+id, "")
 		s.mu.Lock()
 		delete(s.attached, id)
 		s.mu.Unlock()
@@ -178,9 +238,9 @@ func (s *Service) Open(input OpenInput) core.Result {
 	return core.Ok(OpenOutput{ID: id, Host: sess.Host, Shell: sess.Shell, Cwd: sess.Cwd})
 }
 
-// Attach wires a session's PTY output to the event bus and replays scrollback.
-// Idempotent per session — a re-attach drops the prior subscriber first so a
-// view re-mount doesn't double-stream.
+// Attach wires a session's PTY output to the event bus and resumes after the
+// renderer's last acknowledged cursor. Re-attaching atomically replaces the
+// previous subscriber; live output is held until replay has been emitted.
 func (s *Service) Attach(input AttachInput) core.Result {
 	if input.ID == "" {
 		return core.Fail(core.E("terminal.Attach", "id required", nil))
@@ -191,25 +251,40 @@ func (s *Service) Attach(input AttachInput) core.Result {
 	}
 
 	id := input.ID
-	s.mu.Lock()
-	if prev := s.attached[id]; prev != nil {
-		prev()
+	after := uint64(0)
+	if input.After != nil {
+		after = *input.After
 	}
-	s.mu.Unlock()
 
-	snapshot, unsub := sess.Subscribe(func(chunk []byte) {
-		gui.EmitEvent(s.core, eventOutPrefix+id, base64.StdEncoding.EncodeToString(chunk))
+	gate := newTerminalEventGate(func(chunk OutputChunk) {
+		s.emitEvent(eventOutPrefix+id, TerminalChunk{
+			Start: chunk.Start,
+			End:   chunk.End,
+			Data:  base64.StdEncoding.EncodeToString(chunk.Data),
+			Reset: chunk.Reset,
+		})
 	})
 
 	s.mu.Lock()
-	s.attached[id] = unsub
-	s.mu.Unlock()
-
-	// Replay scrollback (empty for a freshly-opened session, so no reorder vs
-	// the live callback in the common case).
-	if len(snapshot) > 0 {
-		gui.EmitEvent(s.core, eventOutPrefix+id, base64.StdEncoding.EncodeToString(snapshot))
+	var replace *uint64
+	if previous, ok := s.attached[id]; ok && previous.session == sess {
+		previousID := previous.subscriberID
+		replace = &previousID
 	}
+	replay, subscriberID, err := sess.subscribeFrom(after, replace, gate.push)
+	if err != nil {
+		s.mu.Unlock()
+		return core.Fail(core.E("terminal.Attach", err.Error(), nil))
+	}
+	if previous, ok := s.attached[id]; ok && previous.session != sess {
+		previous.session.unsubscribe(previous.subscriberID)
+	}
+	s.attached[id] = terminalAttachment{session: sess, subscriberID: subscriberID}
+
+	// Keep Attach serialised through the replay gate so a concurrent re-attach
+	// cannot leak a stale snapshot after its subscriber has been replaced.
+	gate.replayAndOpen(replay)
+	s.mu.Unlock()
 	return core.Ok(nil)
 }
 
@@ -239,8 +314,8 @@ func (s *Service) Resize(input ResizeInput) core.Result {
 func (s *Service) Close(input CloseInput) core.Result {
 	id := input.ID
 	s.mu.Lock()
-	if unsub := s.attached[id]; unsub != nil {
-		unsub()
+	if attachment, ok := s.attached[id]; ok {
+		attachment.session.unsubscribe(attachment.subscriberID)
 		delete(s.attached, id)
 	}
 	s.mu.Unlock()

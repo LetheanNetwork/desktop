@@ -16,7 +16,7 @@ func memSession(ringCap int) *TerminalSession {
 		Host:        "local",
 		Shell:       "/bin/sh",
 		ring:        make([]byte, ringCap),
-		subscribers: make(map[uint64]TerminalSubscriber),
+		subscribers: make(map[uint64]OutputSubscriber),
 		done:        make(chan struct{}),
 	}
 }
@@ -51,6 +51,117 @@ func TestTerminalSession_Ring_Ugly(t *testing.T) {
 	}
 }
 
+func TestTerminalSession_Cursor_GoodLiveMonotonic(t *testing.T) {
+	s := memSession(16)
+	var got []OutputChunk
+
+	replay, unsubscribe, err := s.SubscribeFrom(0, func(chunk OutputChunk) {
+		got = append(got, chunk)
+	})
+	if err != nil {
+		t.Fatalf("subscribe from current cursor: %v", err)
+	}
+	defer unsubscribe()
+	if len(replay.Data) != 0 || replay.Start != 0 || replay.End != 0 || replay.Reset {
+		t.Fatalf("fresh replay = %#v, want empty cursor zero", replay)
+	}
+
+	s.publish([]byte("abc"))
+	s.publish([]byte("de"))
+
+	if len(got) != 2 {
+		t.Fatalf("live chunks = %d, want 2", len(got))
+	}
+	assertOutputChunk(t, got[0], 0, 3, "abc", false)
+	assertOutputChunk(t, got[1], 3, 5, "de", false)
+}
+
+func TestTerminalSession_Cursor_GoodRetainedReplay(t *testing.T) {
+	s := memSession(8)
+	s.appendRing([]byte("abcdef"))
+
+	replay, unsubscribe, err := s.SubscribeFrom(2, func(OutputChunk) {})
+	if err != nil {
+		t.Fatalf("subscribe from retained cursor: %v", err)
+	}
+	defer unsubscribe()
+
+	assertOutputChunk(t, replay, 2, 6, "cdef", false)
+}
+
+func TestTerminalSession_Cursor_BadFutureCursor(t *testing.T) {
+	s := memSession(8)
+	s.appendRing([]byte("abc"))
+
+	if _, unsubscribe, err := s.SubscribeFrom(4, func(OutputChunk) {}); err == nil {
+		unsubscribe()
+		t.Fatal("future cursor should be rejected")
+	}
+	if len(s.subscribers) != 0 {
+		t.Fatalf("future cursor registered %d subscribers, want none", len(s.subscribers))
+	}
+}
+
+func TestTerminalSession_Cursor_UglyExpiredCursorResets(t *testing.T) {
+	s := memSession(8)
+	s.appendRing([]byte("abcdefghij"))
+
+	replay, unsubscribe, err := s.SubscribeFrom(1, func(OutputChunk) {})
+	if err != nil {
+		t.Fatalf("subscribe from expired cursor: %v", err)
+	}
+	defer unsubscribe()
+
+	assertOutputChunk(t, replay, 2, 10, "cdefghij", true)
+}
+
+func TestTerminalSession_Cursor_CurrentHasNoReplay(t *testing.T) {
+	s := memSession(8)
+	s.appendRing([]byte("abc"))
+
+	replay, unsubscribe, err := s.SubscribeFrom(3, func(OutputChunk) {})
+	if err != nil {
+		t.Fatalf("subscribe from current cursor: %v", err)
+	}
+	defer unsubscribe()
+
+	assertOutputChunk(t, replay, 3, 3, "", false)
+}
+
+func TestTerminalSession_Attach_ReplacesSubscriberAtomically(t *testing.T) {
+	s := memSession(8)
+	var first, second []OutputChunk
+
+	_, firstID, err := s.subscribeFrom(0, nil, func(chunk OutputChunk) {
+		first = append(first, chunk)
+	})
+	if err != nil {
+		t.Fatalf("first subscribe: %v", err)
+	}
+	s.publish([]byte("a"))
+
+	_, secondID, err := s.subscribeFrom(1, &firstID, func(chunk OutputChunk) {
+		second = append(second, chunk)
+	})
+	if err != nil {
+		t.Fatalf("replacement subscribe: %v", err)
+	}
+	if secondID == firstID {
+		t.Fatalf("replacement subscriber id = %d, want a new id", secondID)
+	}
+
+	s.publish([]byte("b"))
+
+	if len(first) != 1 {
+		t.Fatalf("replaced subscriber received %d chunks, want 1", len(first))
+	}
+	if len(second) != 1 {
+		t.Fatalf("replacement subscriber received %d chunks, want 1", len(second))
+	}
+	assertOutputChunk(t, first[0], 0, 1, "a", false)
+	assertOutputChunk(t, second[0], 1, 2, "b", false)
+}
+
 func TestTerminalSession_Resize_NoopOnZero(t *testing.T) {
 	// Zero dimensions and a nil PTY must both be silent no-ops, not panics.
 	s := memSession(16)
@@ -81,11 +192,14 @@ func TestTerminalSession_Echo_Good(t *testing.T) {
 
 	var mu sync.Mutex
 	var buf []byte
-	_, unsub := sess.Subscribe(func(chunk []byte) {
+	_, unsub, err := sess.SubscribeFrom(0, func(chunk OutputChunk) {
 		mu.Lock()
-		buf = append(buf, chunk...)
+		buf = append(buf, chunk.Data...)
 		mu.Unlock()
 	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
 	defer unsub()
 
 	if _, err := sess.Write([]byte("echo lthn_marker_42\n")); err != nil {
@@ -105,6 +219,23 @@ func TestTerminalSession_Echo_Good(t *testing.T) {
 			t.Fatal("did not observe command echo within 3s")
 		case <-time.After(20 * time.Millisecond):
 		}
+	}
+}
+
+func assertOutputChunk(t *testing.T, got OutputChunk, start, end uint64, data string, reset bool) {
+	t.Helper()
+	if got.Start != start || got.End != end || string(got.Data) != data || got.Reset != reset {
+		t.Errorf(
+			"output chunk = {start:%d end:%d data:%q reset:%t}, want {start:%d end:%d data:%q reset:%t}",
+			got.Start,
+			got.End,
+			string(got.Data),
+			got.Reset,
+			start,
+			end,
+			data,
+			reset,
+		)
 	}
 }
 
