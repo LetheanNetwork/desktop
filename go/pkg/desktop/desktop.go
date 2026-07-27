@@ -288,6 +288,17 @@ func (s *Service) Run() core.Result {
 	if s.opts.Connection == nil {
 		return core.Fail(core.E("desktop.Run", "Connection is required", nil))
 	}
+	servicesSvc, servicesOK := core.ServiceFor[*lthnservices.Service](
+		s.opts.Core,
+		"services",
+	)
+	if !servicesOK || servicesSvc == nil {
+		return core.Fail(core.E(
+			"desktop.Run",
+			"managed services are unavailable",
+			nil,
+		))
+	}
 	configSvc, _ := core.ServiceFor[*config.Service](s.opts.Core, "config")
 	singleInstanceEnabled := desktopSingleInstanceEnabled(configSvc)
 
@@ -586,7 +597,7 @@ func (s *Service) Run() core.Result {
 		gui.Bind(telemetry.NewService(telemetry.Options{})),
 		gui.Bind(benchmarkSvc),
 		gui.Bind(openaibenchSvc),
-		gui.Bind(lthnservices.NewWailsService()),
+		gui.Bind(lthnservices.NewWailsService(servicesSvc)),
 		// appconfig is the curated, typed settings bridge. It validates
 		// user-facing desktop controls before delegating persistence to
 		// the registered config service without exposing raw provider APIs.
@@ -941,6 +952,7 @@ func (s *Service) Run() core.Result {
 	// See sysevents.go for the table.
 	registerSystemEvents(s.opts.Core)
 	registerFilesEvents(s.opts.Core)
+	registerServicesEvents(s.opts.Core)
 
 	// Per-window lthn:window:* event re-broadcasts (ready / focus /
 	// blur / hide / show / resize / files-dropped). See sysevents.go.

@@ -8,8 +8,12 @@ import (
 	"time"
 
 	core "dappco.re/go"
+	coreio "dappco.re/go/io"
+	coreprocess "dappco.re/go/process"
 	"dappco.re/lthn/desktop/pkg/audit"
 )
+
+const defaultCataloguePath = "desktop/services/catalogue.json"
 
 // Options configures the managed-service catalogue and process boundary.
 type Options struct {
@@ -73,6 +77,78 @@ func NewService(options Options) *Service {
 		records:    make(map[string]*runtimeRecord),
 		builtinIDs: make(map[string]bool),
 	}
+}
+
+// Register resolves the named go-process and go-io services, then registers
+// the canonical Desktop managed-service manager.
+//
+// Usage example:
+//
+//	c := core.New(
+//		core.WithName("process", process.NewService(process.Options{})),
+//		core.WithName("io", io.NewService(io.IOConfig{})),
+//		core.WithName("services", services.Register),
+//	)
+func Register(c *core.Core) core.Result {
+	if c == nil {
+		return failureResult(
+			ErrorServicesUnavailable,
+			"services.Register",
+			"Core is unavailable.",
+			nil,
+		)
+	}
+	processService, ok := core.ServiceFor[*coreprocess.Service](c, "process")
+	if !ok || processService == nil {
+		return failureResult(
+			ErrorServicesUnavailable,
+			"services.Register",
+			"The named process service is unavailable.",
+			nil,
+		)
+	}
+	ioService, ok := core.ServiceFor[*coreio.Service](c, "io")
+	if !ok || ioService == nil || ioService.Medium == nil {
+		return failureResult(
+			ErrorServicesUnavailable,
+			"services.Register",
+			"The named I/O Medium is unavailable.",
+			nil,
+		)
+	}
+	args := core.Args()
+	if len(args) == 0 || args[0] == "" {
+		return failureResult(
+			ErrorServicesUnavailable,
+			"services.Register",
+			"The Lethean executable is unavailable.",
+			nil,
+		)
+	}
+	limits := DefaultLimits()
+	manager := NewService(Options{
+		Process: &namedProcessRuntime{service: processService},
+		Catalogue: NewMediumCatalogue(
+			ioService.Medium,
+			defaultCataloguePath,
+			limits,
+		),
+		Builtins: []Definition{
+			{
+				ID:                "serve",
+				DisplayName:       "Lethean Desktop API",
+				Description:       "OpenAI-compatible local Lethean API.",
+				Kind:              KindService,
+				Command:           args[0],
+				Arguments:         []string{"serve"},
+				RestartPolicy:     RestartNever,
+				GracePeriodMillis: 5_000,
+				Owner:             "lethean",
+			},
+		},
+		Limits: limits,
+	})
+	return manager.Register(c)
 }
 
 // Register attaches this instance to Core and returns it as the named service.

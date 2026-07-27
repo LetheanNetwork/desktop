@@ -53,6 +53,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/sales/pipeline"
 	"dappco.re/lthn/desktop/pkg/sandbox"
 	"dappco.re/lthn/desktop/pkg/serverkey"
+	lthnservices "dappco.re/lthn/desktop/pkg/services"
 	"dappco.re/lthn/desktop/pkg/tasks"
 	lthnupdate "dappco.re/lthn/desktop/pkg/update"
 	"dappco.re/lthn/desktop/pkg/vi"
@@ -128,6 +129,10 @@ func newAppCore() *core.Core {
 		core.WithName("io", io.NewService(io.IOConfig{
 			Root: dataDir.Value.(string),
 		})),
+		// services — manual-by-default optional background capabilities.
+		// Definitions persist through the registered io.Medium and every
+		// process lifecycle flows through the named go-process service.
+		core.WithName("services", lthnservices.Register),
 		// api — the Gin-based polyglot HTTP gateway. Its Engine
 		// drives route-group registration (api.Engine.Register(grp)).
 		// pkg/desktop mounts the Engine's http.Handler at /api/*
