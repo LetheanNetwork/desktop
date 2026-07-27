@@ -1,5 +1,7 @@
 import { TestBed } from '@angular/core/testing';
+import { createDemoResource } from '../../desktop-data-resource';
 import { ControlPowerView } from './control-power.view';
+import { createDemoServiceCatalogue, SERVICES_DEMO_SOURCE } from './control-services.models';
 import { ControlSettingsView } from './control-settings.view';
 import { ControlSystemView } from './control-system.view';
 import { createDemoControlViewState } from './control-view-state';
@@ -31,6 +33,10 @@ describe('Control secondary views', () => {
     fixture.componentRef.setInput('dataState', state.dataState);
     fixture.componentRef.setInput('model', state.system);
     fixture.componentRef.setInput('activeTab', 'overview');
+    fixture.componentRef.setInput(
+      'services',
+      createDemoResource(createDemoServiceCatalogue(), SERVICES_DEMO_SOURCE),
+    );
     const emitted = vi.fn();
     fixture.componentInstance.tabChange.subscribe(emitted);
 
@@ -42,6 +48,26 @@ describe('Control secondary views', () => {
     expect(buttons).toHaveLength(3);
     buttons[1].click();
     expect(emitted).toHaveBeenCalledWith('processes');
+  });
+
+  it('keeps the daemons state value while presenting the working Services view', async () => {
+    const state = createDemoControlViewState();
+    const fixture = TestBed.createComponent(ControlSystemView);
+    fixture.componentRef.setInput('dataState', state.dataState);
+    fixture.componentRef.setInput('model', state.system);
+    fixture.componentRef.setInput('activeTab', 'daemons');
+    fixture.componentRef.setInput(
+      'services',
+      createDemoResource(createDemoServiceCatalogue(), SERVICES_DEMO_SOURCE),
+    );
+
+    await fixture.whenStable();
+
+    const element = fixture.nativeElement as HTMLElement;
+    const buttons = element.querySelectorAll<HTMLButtonElement>('button.systab');
+    expect(buttons[2].textContent?.trim()).toBe('Services');
+    expect(element.querySelector('lthn-control-services-view')).not.toBeNull();
+    expect(element.textContent).toContain('Lethean API');
   });
 
   it('renders settings and emits Commit', async () => {

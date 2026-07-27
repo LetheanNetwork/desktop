@@ -9,20 +9,29 @@ import {
   output,
 } from '@angular/core';
 import { DesktopDataStateBadge } from '../../desktop-data-state-badge';
+import type { DesktopDataResource } from '../../desktop-data-resource';
 import type { DesktopDataState } from '../../desktop-data-state';
+import type {
+  ControlServiceIntent,
+  DesktopServiceCatalogue,
+  DesktopServiceOutput,
+} from './control-services.models';
+import { ControlServicesView } from './control-services.view';
 import type { ControlSystemTab, ControlSystemViewModel } from './control-view.models';
 
 @Component({
   selector: 'lthn-control-system-view',
   standalone: true,
-  imports: [DesktopDataStateBadge],
+  imports: [DesktopDataStateBadge, ControlServicesView],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   host: { style: 'display: contents' },
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="ctoolbar">
       <h1 i18n="System view heading@@control.system.heading">System</h1>
-      <lthn-desktop-data-state [state]="dataState()" />
+      @if (activeTab() !== 'daemons') {
+        <lthn-desktop-data-state [state]="dataState()" />
+      }
       <span class="systabs">
         @for (tab of tabs; track tab[0]) {
           <button
@@ -51,16 +60,13 @@ import type { ControlSystemTab, ControlSystemViewModel } from './control-view.mo
         </p>
       }
       @case ('daemons') {
-        <lthn-datatable
-          [attr.columns]="daemonColumnsJson()"
-          [attr.rows]="daemonRowsJson()"
-        ></lthn-datatable>
-        <p
-          style="font-size:11.5px;color:var(--fg-3);margin:10px 0 0"
-          i18n="Daemon table help@@control.system.daemonHelp"
-        >
-          JSON daemon registry — PID files + health endpoints.
-        </p>
+        <lthn-control-services-view
+          [resource]="services()"
+          [pendingIds]="pendingServiceIds()"
+          [outputView]="serviceOutput()"
+          (action)="serviceAction.emit($event)"
+          (retry)="servicesRetry.emit()"
+        />
       }
       @default {
         <div class="tiles">
@@ -95,15 +101,18 @@ export class ControlSystemView {
   readonly dataState = input.required<DesktopDataState>();
   readonly model = input.required<ControlSystemViewModel>();
   readonly activeTab = input.required<ControlSystemTab>();
+  readonly services = input.required<DesktopDataResource<DesktopServiceCatalogue>>();
+  readonly pendingServiceIds = input<readonly string[]>([]);
+  readonly serviceOutput = input<DesktopServiceOutput | null>(null);
   readonly tabChange = output<ControlSystemTab>();
+  readonly serviceAction = output<ControlServiceIntent>();
+  readonly servicesRetry = output<void>();
   readonly tabs: readonly [ControlSystemTab, string][] = [
     ['overview', $localize`:System tab@@control.system.tab.overview:Overview`],
     ['processes', $localize`:System tab@@control.system.tab.processes:Processes`],
-    ['daemons', $localize`:System tab@@control.system.tab.daemons:Daemons`],
+    ['daemons', $localize`:System tab@@control.system.tab.services:Services`],
   ];
   readonly processColumnsJson = computed(() => JSON.stringify(this.model().processColumns));
   readonly processRowsJson = computed(() => JSON.stringify(this.model().processRows));
-  readonly daemonColumnsJson = computed(() => JSON.stringify(this.model().daemonColumns));
-  readonly daemonRowsJson = computed(() => JSON.stringify(this.model().daemonRows));
   readonly cpuSamplesJson = computed(() => JSON.stringify(this.model().cpuSamples));
 }

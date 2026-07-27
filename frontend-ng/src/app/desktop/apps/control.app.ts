@@ -7,7 +7,9 @@ import {
   Component,
   CUSTOM_ELEMENTS_SCHEMA,
   Input,
+  OnDestroy,
   OnInit,
+  PendingTasks,
   declareExperimentalWebMcpTool,
   inject,
   signal,
@@ -15,11 +17,28 @@ import {
 import { AppView } from './app-view';
 import { CTRL_NAV, type Win } from '../desktop.data';
 import type { AppNavItem } from '../desktop-route-tree';
+import {
+  beginDesktopDataRefresh,
+  createConnectedResource,
+  createDemoResource,
+  rejectDesktopData,
+  resolveDesktopData,
+  type DesktopDataResource,
+} from '../desktop-data-resource';
 import { DesktopLiveDataService } from '../desktop-live-data.service';
+import { DesktopServicesBridgeService } from '../desktop-services-bridge.service';
 import { WindowManagerService } from '../window-manager.service';
 import { ControlModelsView } from './control/control-models.view';
 import { ControlPowerView } from './control/control-power.view';
 import { ControlRunsView } from './control/control-runs.view';
+import {
+  createDemoServiceCatalogue,
+  SERVICES_DEMO_SOURCE,
+  type ControlServiceIntent,
+  type DesktopServiceCatalogue,
+  type DesktopServiceOutput,
+  type DesktopServiceSnapshot,
+} from './control/control-services.models';
 import { ControlSettingsView } from './control/control-settings.view';
 import { ControlSystemView } from './control/control-system.view';
 import { createDemoControlViewState, mergeControlLiveSnapshot } from './control/control-view-state';
@@ -28,6 +47,10 @@ import type {
   ControlSystemTab,
   ControlViewState,
 } from './control/control-view.models';
+
+const SERVICES_LIVE_SOURCE = 'Local go-process runtime';
+const SERVICES_UNAVAILABLE = 'Live Services data is unavailable.';
+const SERVICES_STALE_AFTER_MS = 30_000;
 
 @Component({
   selector: 'lthn-control-app',
@@ -81,7 +104,12 @@ import type {
             [dataState]="viewState().dataState"
             [model]="viewState().system"
             [activeTab]="systemTab()"
+            [services]="servicesResource()"
+            [pendingServiceIds]="pendingServiceIds()"
+            [serviceOutput]="serviceOutput()"
             (tabChange)="wm.setSysTab(win.id, $event)"
+            (serviceAction)="handleServiceAction($event)"
+            (servicesRetry)="retryServices()"
           />
         }
         @case ('settings') {
@@ -95,29 +123,57 @@ import type {
     </div>
   `,
 })
-export class ControlApp implements AppView, OnInit {
+export class ControlApp implements AppView, OnInit, OnDestroy {
   @Input() win!: Win;
   @Input() nav: AppNavItem[] = [];
 
   readonly wm = inject(WindowManagerService);
   private readonly liveData = inject(DesktopLiveDataService);
+  private readonly servicesBridge = inject(DesktopServicesBridgeService);
+  private readonly pendingTasks = inject(PendingTasks);
   private readonly mcpTools = this.registerMcpTools();
   readonly viewState = signal<ControlViewState>({
     ...createDemoControlViewState(),
     dataState: this.liveData.mode() === 'demo' ? 'demo' : 'loading',
   });
+  readonly servicesResource = signal<DesktopDataResource<DesktopServiceCatalogue>>(
+    createDemoResource(createDemoServiceCatalogue(), SERVICES_DEMO_SOURCE),
+  );
+  readonly pendingServiceIds = signal<readonly string[]>([]);
+  readonly serviceOutput = signal<DesktopServiceOutput | null>(null);
+
+  private servicesEventsOff: (() => void) | null = null;
+  private servicesRefresh: Promise<void> | null = null;
+  private servicesRefreshQueued = false;
+  private destroyed = false;
 
   ngOnInit(): void {
     if (this.liveData.mode() === 'demo') return;
     void this.refresh();
+    this.servicesResource.set(
+      createConnectedResource<DesktopServiceCatalogue>(SERVICES_LIVE_SOURCE),
+    );
+    this.servicesEventsOff = this.servicesBridge.onChanged(() => {
+      this.pendingTasks.run(() => this.refreshServices());
+    });
+    this.pendingTasks.run(() => this.refreshServices());
+  }
+
+  ngOnDestroy(): void {
+    this.destroyed = true;
+    this.servicesEventsOff?.();
+    this.servicesEventsOff = null;
   }
 
   async refresh(): Promise<void> {
-    if (this.liveData.mode() === 'demo') return;
+    if (this.liveData.mode() === 'demo' || this.destroyed) return;
     this.viewState.update((state) => ({ ...state, dataState: 'loading' }));
     try {
-      this.viewState.set(mergeControlLiveSnapshot(await this.liveData.control()));
+      const snapshot = await this.liveData.control();
+      if (this.destroyed) return;
+      this.viewState.set(mergeControlLiveSnapshot(snapshot));
     } catch {
+      if (this.destroyed) return;
       this.viewState.set({
         ...createDemoControlViewState(),
         dataState: 'unavailable',
@@ -133,6 +189,161 @@ export class ControlApp implements AppView, OnInit {
   handleAction(_intent: ControlActionIntent): void {
     // The existing placeholder buttons remain inert until their typed backend
     // actions in TODO.md are implemented.
+  }
+
+  handleServiceAction(intent: ControlServiceIntent): void {
+    if (
+      this.destroyed ||
+      this.pendingServiceIds().includes(intent.id) ||
+      !this.hasService(intent.id)
+    ) {
+      return;
+    }
+    if (this.liveData.mode() === 'demo') {
+      this.applyDemoServiceAction(intent);
+      return;
+    }
+    this.pendingTasks.run(() => this.performServiceAction(intent));
+  }
+
+  retryServices(): void {
+    if (this.liveData.mode() === 'demo' || this.destroyed) return;
+    this.pendingTasks.run(() => this.refreshServices());
+  }
+
+  refreshServices(): Promise<void> {
+    if (this.liveData.mode() === 'demo' || this.destroyed) {
+      return Promise.resolve();
+    }
+    if (this.servicesRefresh) {
+      this.servicesRefreshQueued = true;
+      return this.servicesRefresh;
+    }
+
+    let refreshTask: Promise<void>;
+    refreshTask = this.performServicesRefresh().finally(async () => {
+      if (this.servicesRefresh === refreshTask) {
+        this.servicesRefresh = null;
+      }
+      if (this.servicesRefreshQueued && !this.destroyed) {
+        this.servicesRefreshQueued = false;
+        await this.refreshServices();
+      }
+    });
+    this.servicesRefresh = refreshTask;
+    return refreshTask;
+  }
+
+  private async performServicesRefresh(): Promise<void> {
+    const current = this.servicesResource();
+    if (current.mode !== 'connected' || current.refreshing) return;
+    this.servicesResource.set(
+      beginDesktopDataRefresh(current, Date.now(), SERVICES_STALE_AFTER_MS),
+    );
+
+    try {
+      const catalogue = await this.servicesBridge.catalogue();
+      if (this.destroyed) return;
+      this.servicesResource.update((resource) =>
+        resolveDesktopData(resource, catalogue, 'live', SERVICES_LIVE_SOURCE, Date.now()),
+      );
+    } catch {
+      if (this.destroyed) return;
+      this.servicesResource.update((resource) => rejectDesktopData(resource, SERVICES_UNAVAILABLE));
+    }
+  }
+
+  private async performServiceAction(intent: ControlServiceIntent): Promise<void> {
+    this.setServicePending(intent.id, true);
+    try {
+      switch (intent.kind) {
+        case 'start':
+          await this.servicesBridge.start(intent.id);
+          break;
+        case 'stop':
+          await this.servicesBridge.stop(intent.id);
+          break;
+        case 'restart':
+          await this.servicesBridge.restart(intent.id);
+          break;
+        case 'output': {
+          const output = await this.servicesBridge.output(intent.id);
+          if (!this.destroyed) this.serviceOutput.set(output);
+          return;
+        }
+      }
+      if (this.destroyed) return;
+      if (this.serviceOutput()?.id === intent.id) this.serviceOutput.set(null);
+      await this.refreshServices();
+    } catch {
+      if (!this.destroyed) this.markServicesUnavailable();
+    } finally {
+      if (!this.destroyed) this.setServicePending(intent.id, false);
+    }
+  }
+
+  private applyDemoServiceAction(intent: ControlServiceIntent): void {
+    const resource = this.servicesResource();
+    const catalogue = resource.value;
+    if (resource.mode !== 'demo' || catalogue === null) return;
+    const serviceIndex = catalogue.services.findIndex(
+      ({ definition }) => definition.id === intent.id,
+    );
+    if (serviceIndex < 0) return;
+    const service = catalogue.services[serviceIndex];
+
+    if (intent.kind === 'output') {
+      if (!service.processId) return;
+      this.serviceOutput.set({
+        id: intent.id,
+        processId: service.processId,
+        generation: service.restartCount + 1,
+        output: `Lethean demo fixture\n${service.definition.displayName} is ready.\n`,
+        truncated: false,
+        observedAt: 'demo',
+      });
+      return;
+    }
+
+    const services = catalogue.services.map((snapshot, index) =>
+      index === serviceIndex
+        ? demoLifecycleSnapshot(snapshot, intent.kind, index)
+        : cloneServiceSnapshot(snapshot),
+    );
+    this.servicesResource.set(
+      createDemoResource(
+        {
+          refreshedAt: 'demo',
+          services,
+        },
+        SERVICES_DEMO_SOURCE,
+      ),
+    );
+    if (this.serviceOutput()?.id === intent.id) this.serviceOutput.set(null);
+  }
+
+  private markServicesUnavailable(): void {
+    const resource = this.servicesResource();
+    if (resource.mode !== 'connected' || resource.refreshing) return;
+    const refreshing = beginDesktopDataRefresh(resource, Date.now(), SERVICES_STALE_AFTER_MS);
+    this.servicesResource.set(rejectDesktopData(refreshing, SERVICES_UNAVAILABLE));
+  }
+
+  private hasService(id: string): boolean {
+    return (
+      this.servicesResource().value?.services.some(({ definition }) => definition.id === id) ??
+      false
+    );
+  }
+
+  private setServicePending(id: string, pending: boolean): void {
+    this.pendingServiceIds.update((ids) =>
+      pending
+        ? ids.includes(id)
+          ? ids
+          : [...ids, id]
+        : ids.filter((candidate) => candidate !== id),
+    );
   }
 
   private async registerMcpTools(): Promise<void> {
@@ -196,4 +407,45 @@ export class ControlApp implements AppView, OnInit {
       }),
     ]);
   }
+}
+
+function cloneServiceSnapshot(snapshot: DesktopServiceSnapshot): DesktopServiceSnapshot {
+  return {
+    ...snapshot,
+    definition: { ...snapshot.definition },
+    lastError: snapshot.lastError ? { ...snapshot.lastError } : null,
+  };
+}
+
+function demoLifecycleSnapshot(
+  snapshot: DesktopServiceSnapshot,
+  action: 'start' | 'stop' | 'restart',
+  index: number,
+): DesktopServiceSnapshot {
+  const clone = cloneServiceSnapshot(snapshot);
+  if (action === 'stop') {
+    return {
+      ...clone,
+      state: 'stopped',
+      desired: false,
+      processId: '',
+      pid: 0,
+      stoppedAt: 'demo',
+      exitCode: 0,
+      lastError: null,
+    };
+  }
+  const restartCount = action === 'restart' ? clone.restartCount + 1 : clone.restartCount;
+  return {
+    ...clone,
+    state: 'running',
+    desired: true,
+    processId: `demo-${clone.definition.id}-${restartCount + 1}`,
+    pid: 5_000 + index,
+    startedAt: 'demo',
+    stoppedAt: '',
+    exitCode: 0,
+    restartCount,
+    lastError: null,
+  };
 }

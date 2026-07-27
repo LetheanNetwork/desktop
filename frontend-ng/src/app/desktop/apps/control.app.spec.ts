@@ -1,10 +1,15 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { DesktopLiveDataService } from '../desktop-live-data.service';
+import { DesktopServicesBridgeService } from '../desktop-services-bridge.service';
 import type { Win } from '../desktop.data';
 import { WindowManagerService } from '../window-manager.service';
 import { APP_REGISTRY } from './app-view';
 import { ControlApp } from './control.app';
+import type {
+  DesktopServiceSnapshot,
+  DesktopServicesChangedEvent,
+} from './control/control-services.models';
 
 const controlWin: Win = {
   id: 'control-window',
@@ -30,13 +35,35 @@ describe('ControlApp', () => {
     setSub: vi.fn(),
     setSysTab: vi.fn(),
   };
+  let servicesChanged: ((event: DesktopServicesChangedEvent) => void) | null = null;
+  let servicesOff = vi.fn();
+  const servicesBridge = {
+    catalogue: vi.fn(),
+    get: vi.fn(),
+    start: vi.fn(),
+    stop: vi.fn(),
+    restart: vi.fn(),
+    output: vi.fn(),
+    setPolicy: vi.fn(),
+    onChanged: vi.fn(),
+  };
 
   beforeEach(() => {
     mode.set('demo');
+    servicesChanged = null;
+    servicesOff = vi.fn();
     vi.clearAllMocks();
+    servicesBridge.catalogue.mockResolvedValue(serviceCatalogue('stopped'));
+    servicesBridge.onChanged.mockImplementation(
+      (handler: (event: DesktopServicesChangedEvent) => void) => {
+        servicesChanged = handler;
+        return servicesOff;
+      },
+    );
     TestBed.configureTestingModule({
       providers: [
         { provide: DesktopLiveDataService, useValue: liveData },
+        { provide: DesktopServicesBridgeService, useValue: servicesBridge },
         { provide: WindowManagerService, useValue: windowManager },
       ],
     });
@@ -78,6 +105,103 @@ describe('ControlApp', () => {
       expect((fixture.nativeElement as HTMLElement).querySelector(selector)).not.toBeNull();
       fixture.destroy();
     }
+  });
+
+  it('uses isolated demo service actions without Wails calls', async () => {
+    const fixture = await create({ ...controlWin, sub: 'system', systab: 'daemons' });
+    const element = fixture.nativeElement as HTMLElement;
+    const runner = element.querySelector('[data-service-id="runner"]');
+
+    expect(runner).not.toBeNull();
+    runner?.querySelector<HTMLButtonElement>('[data-action="start"]')?.click();
+    await fixture.whenStable();
+
+    expect(servicesBridge.catalogue).not.toHaveBeenCalled();
+    expect(servicesBridge.onChanged).not.toHaveBeenCalled();
+    expect(servicesBridge.start).not.toHaveBeenCalled();
+    expect(element.querySelector('[data-service-id="runner"]')?.textContent).toContain('Running');
+  });
+
+  it('loads live services, performs Start, then refreshes the canonical catalogue', async () => {
+    mode.set('live');
+    liveData.control.mockResolvedValue({
+      unavailable: ['telemetry', 'models', 'benchmarkRuns', 'processes', 'settings'],
+    });
+    servicesBridge.catalogue
+      .mockResolvedValueOnce(serviceCatalogue('stopped'))
+      .mockResolvedValueOnce(serviceCatalogue('running'));
+    servicesBridge.start.mockResolvedValue(serviceSnapshot('running'));
+    const fixture = await create({ ...controlWin, sub: 'system', systab: 'daemons' });
+
+    expect(servicesBridge.onChanged).toHaveBeenCalledOnce();
+    (fixture.nativeElement as HTMLElement)
+      .querySelector<HTMLButtonElement>('[data-service-id="serve"] [data-action="start"]')
+      ?.click();
+    await fixture.whenStable();
+
+    expect(servicesBridge.start).toHaveBeenCalledWith('serve');
+    expect(servicesBridge.catalogue).toHaveBeenCalledTimes(2);
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('[data-service-id="serve"]')
+        ?.textContent,
+    ).toContain('Running');
+  });
+
+  it('retains stale services after a failed event refresh and tears down events', async () => {
+    mode.set('live');
+    liveData.control.mockResolvedValue({
+      unavailable: ['telemetry', 'models', 'benchmarkRuns', 'processes', 'settings'],
+    });
+    servicesBridge.catalogue.mockResolvedValueOnce(serviceCatalogue('running'));
+    const fixture = await create({ ...controlWin, sub: 'system', systab: 'daemons' });
+    servicesBridge.catalogue.mockRejectedValueOnce(new Error('transport offline'));
+
+    servicesChanged?.({
+      id: 'serve',
+      operation: 'start',
+      previous: 'stopped',
+      state: 'running',
+      desired: true,
+      processId: 'proc-1',
+      errorCode: '',
+      at: '2026-07-27T12:00:00Z',
+    });
+    await fixture.whenStable();
+
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Live data stale');
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('[data-service-id="serve"]'),
+    ).not.toBeNull();
+    fixture.destroy();
+    expect(servicesOff).toHaveBeenCalledOnce();
+  });
+
+  it('loads bounded output only after the explicit Output action', async () => {
+    mode.set('live');
+    liveData.control.mockResolvedValue({
+      unavailable: ['telemetry', 'models', 'benchmarkRuns', 'processes', 'settings'],
+    });
+    servicesBridge.catalogue.mockResolvedValueOnce(serviceCatalogue('running'));
+    servicesBridge.output.mockResolvedValue({
+      id: 'serve',
+      processId: 'proc-1',
+      generation: 1,
+      output: 'ready\n',
+      truncated: false,
+      observedAt: '2026-07-27T12:00:00Z',
+    });
+    const fixture = await create({ ...controlWin, sub: 'system', systab: 'daemons' });
+
+    expect(servicesBridge.output).not.toHaveBeenCalled();
+    (fixture.nativeElement as HTMLElement)
+      .querySelector<HTMLButtonElement>('[data-service-id="serve"] [data-action="output"]')
+      ?.click();
+    await fixture.whenStable();
+
+    expect(servicesBridge.output).toHaveBeenCalledWith('serve');
+    expect((fixture.nativeElement as HTMLElement).querySelector('pre')?.textContent).toContain(
+      'ready',
+    );
   });
 
   it('remains the lazy component registered for Control', async () => {
@@ -339,3 +463,33 @@ describe('ControlApp', () => {
     ).not.toBe('[48.25]');
   });
 });
+
+function serviceSnapshot(state: 'stopped' | 'running'): DesktopServiceSnapshot {
+  return {
+    definition: {
+      id: 'serve',
+      displayName: 'Lethean Desktop API',
+      description: 'OpenAI-compatible local Lethean API.',
+      kind: 'service',
+      restartPolicy: 'never',
+      gracePeriodMillis: 5_000,
+      owner: 'lethean',
+    },
+    state,
+    desired: state === 'running',
+    processId: state === 'running' ? 'proc-1' : '',
+    pid: state === 'running' ? 4_821 : 0,
+    startedAt: state === 'running' ? '2026-07-27T12:00:00Z' : '',
+    stoppedAt: '',
+    exitCode: 0,
+    restartCount: 0,
+    lastError: null,
+  };
+}
+
+function serviceCatalogue(state: 'stopped' | 'running') {
+  return {
+    services: [serviceSnapshot(state)],
+    refreshedAt: '2026-07-27T12:00:00Z',
+  };
+}
