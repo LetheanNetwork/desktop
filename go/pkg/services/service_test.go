@@ -10,6 +10,7 @@ import (
 	core "dappco.re/go"
 	coreio "dappco.re/go/io"
 	coreprocess "dappco.re/go/process"
+	"dappco.re/lthn/desktop/pkg/audit"
 )
 
 type fakeManagedProcess struct {
@@ -73,12 +74,28 @@ func (process *fakeManagedProcess) Shutdown() core.Result {
 	return result
 }
 
+func (process *fakeManagedProcess) complete(
+	exitCode int,
+	status coreprocess.Status,
+	result core.Result,
+) {
+	process.mu.Lock()
+	process.info.Running = false
+	process.info.Status = status
+	process.info.ExitCode = exitCode
+	process.waitResult = result
+	process.mu.Unlock()
+	process.closeOnce.Do(func() { close(process.done) })
+}
+
 type fakeProcessRuntime struct {
-	mu          sync.Mutex
-	starts      []coreprocess.RunOptions
-	startResult core.Result
-	processes   map[string]ProcessHandle
-	getCalls    []string
+	mu           sync.Mutex
+	starts       []coreprocess.RunOptions
+	startResult  core.Result
+	startResults []core.Result
+	processes    map[string]ProcessHandle
+	getCalls     []string
+	startSignal  chan struct{}
 }
 
 func (runtime *fakeProcessRuntime) StartWithOptions(
@@ -89,6 +106,14 @@ func (runtime *fakeProcessRuntime) StartWithOptions(
 	defer runtime.mu.Unlock()
 	options.Args = append([]string(nil), options.Args...)
 	runtime.starts = append(runtime.starts, options)
+	if runtime.startSignal != nil {
+		runtime.startSignal <- struct{}{}
+	}
+	if len(runtime.startResults) > 0 {
+		result := runtime.startResults[0]
+		runtime.startResults = runtime.startResults[1:]
+		return result
+	}
 	return runtime.startResult
 }
 
@@ -115,6 +140,26 @@ func (runtime *fakeProcessRuntime) firstStart() coreprocess.RunOptions {
 	return runtime.starts[0]
 }
 
+type managedServiceAuditRecorder struct {
+	mu     sync.Mutex
+	events []audit.Event
+}
+
+func (recorder *managedServiceAuditRecorder) Record(event audit.Event) core.Result {
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	recorder.events = append(recorder.events, event)
+	return core.Ok(nil)
+}
+
+func (recorder *managedServiceAuditRecorder) snapshot() []audit.Event {
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	events := make([]audit.Event, len(recorder.events))
+	copy(events, recorder.events)
+	return events
+}
+
 type serviceFixture struct {
 	service    *Service
 	runtime    *fakeProcessRuntime
@@ -122,6 +167,8 @@ type serviceFixture struct {
 	medium     *coreio.MemoryMedium
 	definition Definition
 	now        time.Time
+	core       *core.Core
+	audit      *managedServiceAuditRecorder
 }
 
 func newServiceFixture(t *core.T) *serviceFixture {
@@ -142,12 +189,16 @@ func newServiceFixture(t *core.T) *serviceFixture {
 		startResult: core.Ok(ProcessHandle(process)),
 		processes:   map[string]ProcessHandle{"proc-1": process},
 	}
+	recorder := &managedServiceAuditRecorder{}
 	service := NewService(Options{
 		Process:   runtime,
 		Catalogue: catalogue,
 		Limits:    DefaultLimits(),
 		Now:       func() time.Time { return now },
+		Audit:     recorder,
 	})
+	coreApp := core.New()
+	core.RequireTrue(t, service.Register(coreApp).OK)
 	core.RequireTrue(t, service.OnStartup(core.Background()).OK)
 	fixture := &serviceFixture{
 		service:    service,
@@ -156,6 +207,8 @@ func newServiceFixture(t *core.T) *serviceFixture {
 		medium:     medium,
 		definition: definition,
 		now:        now,
+		core:       coreApp,
+		audit:      recorder,
 	}
 	t.Cleanup(func() {
 		result := fixture.service.Get(definition.ID)
@@ -203,6 +256,7 @@ func TestService_OnStartup_BadCatalogueFailureLeavesManagerUnavailableWithoutSta
 			DefaultLimits(),
 		),
 		Limits: DefaultLimits(),
+		Audit:  &managedServiceAuditRecorder{},
 	})
 
 	startup := service.OnStartup(core.Background())

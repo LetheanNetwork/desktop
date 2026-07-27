@@ -744,6 +744,34 @@ const (
 	//                (NEVER raw Result.Error() — substrate contract above).
 	EventProcessKillFailed = "process.kill.failed"
 
+	// EventServiceStartRequested records an explicit request to start a known
+	// managed-service ID. Meta contains service_id and restart_policy only.
+	EventServiceStartRequested = "service.start.requested"
+	// EventServiceStartSucceeded records the verified go-process identity
+	// created for a managed service. Meta may add process_id.
+	EventServiceStartSucceeded = "service.start.succeeded"
+	// EventServiceStartFailed records a stable managed-service error code.
+	EventServiceStartFailed = "service.start.failed"
+
+	// EventServiceStopRequested records an explicit request to stop a known
+	// managed-service ID.
+	EventServiceStopRequested = "service.stop.requested"
+	// EventServiceStopSucceeded records a completed graceful process-tree stop.
+	EventServiceStopSucceeded = "service.stop.succeeded"
+	// EventServiceStopFailed records a stable stop or lookup failure code.
+	EventServiceStopFailed = "service.stop.failed"
+
+	// EventServiceRestartRequested records a manual or policy restart request.
+	EventServiceRestartRequested = "service.restart.requested"
+	// EventServiceRestartSucceeded records the replacement process identity.
+	EventServiceRestartSucceeded = "service.restart.succeeded"
+	// EventServiceRestartFailed records a stable restart failure code.
+	EventServiceRestartFailed = "service.restart.failed"
+
+	// EventServiceDefinitionChanged records a successful trusted catalogue or
+	// bounded policy change. Execution bytes never appear in Meta.
+	EventServiceDefinitionChanged = "service.definition.changed"
+
 	// EventMarketplaceInstallRequested fires when pkg/marketplace.Service.Install
 	// is about to spawn images / persist the InstalledBundle record for a
 	// validated bundle manifest. Cerberus #54 C4 (Mantis #1692) —

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	core "dappco.re/go"
+	"dappco.re/lthn/desktop/pkg/audit"
 )
 
 // Options configures the managed-service catalogue and process boundary.
@@ -19,6 +20,7 @@ type Options struct {
 	WorkingDirectoryResolver WorkingDirectoryResolver
 	Now                      func() time.Time
 	After                    func(time.Duration) <-chan time.Time
+	Audit                    audit.Recorder
 }
 
 type runtimeRecord struct {
@@ -62,6 +64,9 @@ func NewService(options Options) *Service {
 	}
 	if options.After == nil {
 		options.After = time.After
+	}
+	if options.Audit == nil {
+		options.Audit = defaultAuditRecorder{}
 	}
 	return &Service{
 		options:    options,
@@ -231,11 +236,11 @@ func (service *Service) EnsureDefinition(definition Definition) core.Result {
 	saved := service.options.Catalogue.Save(document)
 
 	service.mu.Lock()
-	defer service.mu.Unlock()
 	if exists {
 		existing.operation = false
 	}
 	if !saved.OK {
+		service.mu.Unlock()
 		return saved
 	}
 	applied := applyPolicyOverride(definition, document.PolicyOverrides)
@@ -243,7 +248,9 @@ func (service *Service) EnsureDefinition(definition Definition) core.Result {
 		Definition: definitionView(applied),
 		State:      StateStopped,
 	}
+	previous := snapshot
 	if exists {
+		previous = cloneSnapshot(existing.snapshot)
 		existing.definition = cloneDefinition(applied)
 		existing.snapshot = snapshot
 		existing.process = nil
@@ -254,6 +261,9 @@ func (service *Service) EnsureDefinition(definition Definition) core.Result {
 		}
 	}
 	service.document = cloneCatalogueDocument(document)
+	service.mu.Unlock()
+	service.fireEvent("definition", previous, snapshot, "")
+	service.auditDefinitionChanged(definition.ID)
 	return core.Ok(cloneSnapshot(snapshot))
 }
 
@@ -294,13 +304,22 @@ func (service *Service) RemoveDefinition(owner, id string) core.Result {
 	saved := service.options.Catalogue.Save(document)
 
 	service.mu.Lock()
-	defer service.mu.Unlock()
 	record.operation = false
 	if !saved.OK {
+		service.mu.Unlock()
 		return saved
 	}
+	previous := cloneSnapshot(record.snapshot)
 	delete(service.records, id)
 	service.document = cloneCatalogueDocument(document)
+	service.mu.Unlock()
+	next := previous
+	next.State = StateStopped
+	next.Desired = false
+	next.ProcessID = ""
+	next.PID = 0
+	service.fireEvent("definition", previous, next, "")
+	service.auditDefinitionChanged(id)
 	return core.Ok(nil)
 }
 
@@ -343,16 +362,21 @@ func (service *Service) SetPolicy(override PolicyOverride) core.Result {
 	saved := service.options.Catalogue.Save(document)
 
 	service.mu.Lock()
-	defer service.mu.Unlock()
 	record.operation = false
 	if !saved.OK {
+		service.mu.Unlock()
 		return saved
 	}
+	previous := cloneSnapshot(record.snapshot)
 	record.definition.RestartPolicy = override.RestartPolicy
 	record.definition.GracePeriodMillis = override.GracePeriodMillis
 	record.snapshot.Definition = definitionView(record.definition)
 	service.document = cloneCatalogueDocument(document)
-	return core.Ok(cloneSnapshot(record.snapshot))
+	next := cloneSnapshot(record.snapshot)
+	service.mu.Unlock()
+	service.fireEvent("definition", previous, next, "")
+	service.auditDefinitionChanged(override.ID)
+	return core.Ok(next)
 }
 
 func (service *Service) composeRecords(
