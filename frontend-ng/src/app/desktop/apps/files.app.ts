@@ -15,6 +15,10 @@ import {
 } from '@angular/core';
 import { ConnectionManagerService } from '../../connection-manager.service';
 import { DesktopFilesBridgeService } from '../desktop-files-bridge.service';
+import {
+  DesktopHostIntentService,
+  type DesktopHostItem,
+} from '../desktop-host-intent.service';
 import type { Win } from '../desktop.data';
 import { WindowManagerService } from '../window-manager.service';
 import { AppView } from './app-view';
@@ -48,6 +52,7 @@ import {
   eventAffectsLocation,
   filesToken,
   parseFilesToken,
+  parentPath,
   reconcileLocation,
   validRelativePath,
 } from './files/files-view-state';
@@ -108,6 +113,7 @@ export class FilesApp implements AppView, OnInit {
 
   private readonly connection = inject(ConnectionManagerService);
   private readonly bridge = inject(DesktopFilesBridgeService);
+  private readonly hostIntents = inject(DesktopHostIntentService);
   private readonly wm = inject(WindowManagerService);
   private readonly pendingTasks = inject(PendingTasks);
   private readonly injector = inject(Injector);
@@ -147,6 +153,7 @@ export class FilesApp implements AppView, OnInit {
   private refreshTaskDone: (() => void) | null = null;
   private destroyed = false;
   private filesEventsOff: (() => void) | null = null;
+  private hostItemsOff: (() => void) | null = null;
   private readonly observedMcpTokens = new Set<string>();
 
   constructor() {
@@ -158,16 +165,19 @@ export class FilesApp implements AppView, OnInit {
       this.refreshTaskDone = null;
       this.filesEventsOff?.();
       this.filesEventsOff = null;
+      this.hostItemsOff?.();
+      this.hostItemsOff = null;
     });
   }
 
   ngOnInit(): void {
     this.viewMode.set(this.win.systab === 'grid' ? 'grid' : 'list');
     this.pendingTasks.run(async () => {
-      await Promise.all([
-        this.initialise(),
-        this.win.app === 'files' ? this.registerMcpTools() : Promise.resolve(),
-      ]);
+      await this.initialise();
+      this.hostItemsOff = this.hostIntents.onItems('files', (items) => {
+        this.pendingTasks.run(() => this.openHostItems(items));
+      });
+      if (this.win.app === 'files') await this.registerMcpTools();
     });
   }
 
@@ -265,6 +275,27 @@ export class FilesApp implements AppView, OnInit {
       if (version !== this.loadVersion) return;
       this.applyLoadFailure(error, this.dataState());
     }
+  }
+
+  private async openHostItems(items: readonly DesktopHostItem[]): Promise<void> {
+    const item = items[0];
+    if (!item) return;
+    if (item.kind === 'directory') {
+      await this.navigateLocation({
+        kind: 'directory',
+        mountId: item.mountId,
+        path: item.path,
+      });
+      return;
+    }
+
+    await this.navigateLocation({
+      kind: 'directory',
+      mountId: item.mountId,
+      path: parentPath(item.path),
+    });
+    this.selectedKey.set(`${item.mountId}::${item.path}::`);
+    await this.loadPreview(item.mountId, item.path);
   }
 
   private async navigateLocation(location: FilesLocation): Promise<void> {

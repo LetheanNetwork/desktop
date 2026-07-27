@@ -2,10 +2,12 @@ import {
   ChangeDetectionStrategy,
   Component,
   CUSTOM_ELEMENTS_SCHEMA,
+  DestroyRef,
   Input,
   OnInit,
   computed,
   inject,
+  signal,
 } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { AppView } from './app-view';
@@ -13,6 +15,10 @@ import { AppNavItem } from '../desktop-route-tree';
 import { Win } from '../desktop.data';
 import { PreferencesService } from '../preferences.service';
 import { WindowManagerService } from '../window-manager.service';
+import {
+  DesktopHostIntentService,
+  type DesktopHostItem,
+} from '../desktop-host-intent.service';
 import { desktopControlsActions } from '../../store/desktop-controls.actions';
 import { DesktopControl, DesktopControlValue } from '../../store/desktop-controls.models';
 import {
@@ -90,6 +96,14 @@ const CURATED_PREFERENCE_KEYS = new Set([
           <div class="ctoolbar">
             <h1 i18n="UI preferences heading@@settings.preferences.heading">UI preferences</h1>
           </div>
+          @if (importItem(); as item) {
+            <p class="controls-import-intent" role="status">
+              <strong>{{ item.name }}</strong>
+              <span i18n="Settings native import hand-off@@settings.import.ready">
+                is ready for import review. No changes have been applied.
+              </span>
+            </p>
+          }
           <div class="settings-actions" aria-label="Settings draft actions">
             <button
               type="button"
@@ -505,7 +519,10 @@ export class SettingsApp implements AppView, OnInit {
 
   readonly prefs = inject(PreferencesService);
   readonly wm = inject(WindowManagerService);
+  private readonly hostIntents = inject(DesktopHostIntentService);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly store = inject(Store);
+  readonly importItem = signal<DesktopHostItem | null>(null);
   readonly draftControls = this.store.selectSignal(selectDraftDesktopControls);
   readonly controlGroups = this.store.selectSignal(selectDesktopControlGroups);
   readonly visibleControlGroups = computed(() =>
@@ -575,6 +592,10 @@ export class SettingsApp implements AppView, OnInit {
   };
 
   ngOnInit(): void {
+    const offItems = this.hostIntents.onItems('settings', (items) => {
+      this.importItem.set(items[0] ?? null);
+    });
+    this.destroyRef.onDestroy(offItems);
     this.store.dispatch(desktopControlsActions.load());
   }
 

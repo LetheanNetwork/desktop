@@ -1,25 +1,11 @@
-import { DestroyRef, InjectionToken, Service, inject } from '@angular/core';
+import { Service, inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { Events } from '@wailsio/runtime';
 import { APPS } from './desktop/desktop-catalogue.data';
 import { readDesktopRouteCatalog, routeSegmentsForWindow } from './desktop/desktop-route-tree';
 
-const NAVIGATE_EVENT = 'navigate';
-const TRAY_OPEN_EVENT = 'lthn:tray:open';
 const MCP_DIRECTORY_APP_ID = 'surface-agents-flows';
-
-export interface DeepLinkEventSource {
-  on(name: string, handler: (payload: unknown) => void): () => void;
-}
-
-export const DEEP_LINK_EVENTS = new InjectionToken<DeepLinkEventSource>('DEEP_LINK_EVENTS', {
-  providedIn: 'root',
-  factory: () => ({
-    on(name, handler): () => void {
-      return Events.On(name, (event) => handler(event.data));
-    },
-  }),
-});
+const MAX_DEEP_LINK_FIELD_BYTES = 64;
+const MAX_TRAY_TARGET_BYTES = 96;
 
 interface DeepLinkTarget {
   readonly action: string;
@@ -30,39 +16,29 @@ interface DeepLinkTarget {
 @Service()
 export class DeepLinkNavigationService {
   private readonly router = inject(Router);
-  private readonly events = inject(DEEP_LINK_EVENTS);
-  private readonly destroyRef = inject(DestroyRef);
   private readonly routeCatalog = readDesktopRouteCatalog(this.router.config);
 
-  constructor() {
-    const offNavigate = this.events.on(NAVIGATE_EVENT, (payload) => {
-      void this.navigate(payload);
-    });
-    const offTray = this.events.on(TRAY_OPEN_EVENT, (payload) => {
-      void this.navigateTrayTarget(payload);
-    });
-    this.destroyRef.onDestroy(() => {
-      offNavigate();
-      offTray();
-    });
-  }
-
-  private async navigate(payload: unknown): Promise<void> {
+  async navigateDeepLink(payload: unknown): Promise<boolean> {
     const target = asDeepLinkTarget(payload);
-    if (!target) return;
+    if (!target) return false;
 
     const appId = appForDeepLink(target);
-    if (!appId) return;
+    if (!appId) return false;
 
-    await this.navigateToApp(appId);
+    return await this.navigateToApp(appId);
   }
 
-  private async navigateTrayTarget(payload: unknown): Promise<void> {
-    if (typeof payload !== 'string' || this.router.url === '/tray') return;
+  async navigateTrayTarget(payload: unknown): Promise<boolean> {
+    if (
+      typeof payload !== 'string' ||
+      payload.length > MAX_TRAY_TARGET_BYTES ||
+      this.router.url === '/tray'
+    ) {
+      return false;
+    }
     const target = payload.trim().toLocaleLowerCase('en-GB');
     if (target === 'desktop') {
-      await this.router.navigateByUrl('/');
-      return;
+      return await this.router.navigateByUrl('/');
     }
 
     const mapped: Record<string, readonly [app: string, sub?: string]> = {
@@ -73,36 +49,35 @@ export class DeepLinkNavigationService {
       tools: ['marketplace'],
     };
     const destination = target.startsWith('plugin:') ? ['marketplace'] : mapped[target];
-    if (!destination) return;
-    await this.navigateToApp(destination[0], destination[1]);
+    if (!destination) return false;
+    return await this.navigateToApp(destination[0], destination[1]);
   }
 
-  private async navigateToApp(appId: string, sub?: string): Promise<void> {
+  async navigateToApp(appId: string, sub?: string): Promise<boolean> {
     const segments = routeSegmentsForWindow(this.routeCatalog, appId, sub);
-    if (!segments.length) return;
+    if (!segments.length) return false;
 
-    await this.router.navigateByUrl(`/${segments.join('/')}`);
+    return await this.router.navigateByUrl(`/${segments.join('/')}`);
   }
 }
 
 function asDeepLinkTarget(payload: unknown): DeepLinkTarget | null {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+  if (!isRecord(payload) || !hasExactKeys(payload, ['action', 'resource', 'id'])) {
     return null;
   }
 
-  const record = payload as Record<string, unknown>;
   if (
-    typeof record['action'] !== 'string' ||
-    typeof record['resource'] !== 'string' ||
-    typeof record['id'] !== 'string'
+    !boundedString(payload['action'], MAX_DEEP_LINK_FIELD_BYTES) ||
+    !boundedString(payload['resource'], MAX_DEEP_LINK_FIELD_BYTES) ||
+    !boundedString(payload['id'], MAX_DEEP_LINK_FIELD_BYTES)
   ) {
     return null;
   }
 
   return {
-    action: record['action'].trim().toLocaleLowerCase('en-GB'),
-    resource: record['resource'].trim().toLocaleLowerCase('en-GB'),
-    id: record['id'].trim(),
+    action: payload['action'].trim().toLocaleLowerCase('en-GB'),
+    resource: payload['resource'].trim().toLocaleLowerCase('en-GB'),
+    id: payload['id'].trim(),
   };
 }
 
@@ -114,4 +89,21 @@ function appForDeepLink(target: DeepLinkTarget): string | null {
     return target.action;
   }
   return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasExactKeys(record: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(record);
+  return actual.length === keys.length && actual.every((key) => keys.includes(key));
+}
+
+function boundedString(value: unknown, maximum: number): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= maximum &&
+    !/[\u0000-\u001f\u007f]/.test(value)
+  );
 }

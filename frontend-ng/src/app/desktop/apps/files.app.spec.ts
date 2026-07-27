@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import '../../../kit/lthn-core';
 import { ConnectionManagerService } from '../../connection-manager.service';
 import { DesktopFilesBridgeService } from '../desktop-files-bridge.service';
+import { DesktopHostIntentService } from '../desktop-host-intent.service';
 import type { Win } from '../desktop.data';
 import { WindowManagerService } from '../window-manager.service';
 import type { DirectorySnapshotView, FilesCatalogueView } from './files/files-view.models';
@@ -145,11 +146,22 @@ describe('FilesApp browsing', () => {
     setSub: vi.fn(),
     setSysTab: vi.fn(),
   };
+  const hostIntents = {
+    claimItems: vi.fn().mockReturnValue(null),
+    onItems: vi.fn(
+      (app: 'files' | 'settings', consumer: (items: readonly unknown[]) => void) => {
+        const items = hostIntents.claimItems(app);
+        if (items) consumer(items);
+        return vi.fn();
+      },
+    ),
+  };
 
   beforeEach(() => {
     offline.set(true);
     changedHandler = undefined;
     vi.clearAllMocks();
+    hostIntents.claimItems.mockReturnValue(null);
     bridge.listMounts.mockResolvedValue(liveCatalogue);
     bridge.listDirectory.mockImplementation(async ({ path }: { path: string }) => directory(path));
     bridge.listTrash.mockResolvedValue({
@@ -186,6 +198,7 @@ describe('FilesApp browsing', () => {
           useValue: { offline: offline.asReadonly() },
         },
         { provide: DesktopFilesBridgeService, useValue: bridge },
+        { provide: DesktopHostIntentService, useValue: hostIntents },
         { provide: WindowManagerService, useValue: windowManager },
       ],
     });
@@ -291,6 +304,34 @@ describe('FilesApp browsing', () => {
     expect(windowManager.setSub).not.toHaveBeenCalledWith('files-window', 'grid');
   });
 
+  it('claims an opaque native file, opens its parent, and previews it', async () => {
+    offline.set(false);
+    hostIntents.claimItems.mockReturnValueOnce([
+      {
+        mountId: 'documents',
+        path: 'Invoices/notes.md',
+        name: 'notes.md',
+        kind: 'file',
+        mediaType: 'text/markdown',
+      },
+    ]);
+
+    await create();
+
+    expect(hostIntents.onItems).toHaveBeenCalledWith('files', expect.any(Function));
+    expect(windowManager.setSub).toHaveBeenCalledWith('files-window', 'documents::Invoices');
+    expect(bridge.listDirectory).toHaveBeenCalledWith({
+      mountId: 'documents',
+      path: 'Invoices',
+      cursor: '',
+      limit: 200,
+    });
+    expect(bridge.preview).toHaveBeenCalledWith({
+      mountId: 'documents',
+      path: 'Invoices/notes.md',
+    });
+  });
+
   it('does not let an earlier response replace later navigation', async () => {
     offline.set(false);
     let resolveInvoices!: (value: DirectorySnapshotView) => void;
@@ -393,11 +434,22 @@ describe('FilesApp operations and events', () => {
     setSub: vi.fn(),
     setSysTab: vi.fn(),
   };
+  const hostIntents = {
+    claimItems: vi.fn().mockReturnValue(null),
+    onItems: vi.fn(
+      (app: 'files' | 'settings', consumer: (items: readonly unknown[]) => void) => {
+        const items = hostIntents.claimItems(app);
+        if (items) consumer(items);
+        return vi.fn();
+      },
+    ),
+  };
 
   beforeEach(() => {
     offline.set(false);
     changedHandler = undefined;
     vi.clearAllMocks();
+    hostIntents.claimItems.mockReturnValue(null);
     bridge.listMounts.mockResolvedValue(liveCatalogue);
     bridge.listDirectory.mockImplementation(async ({ path }: { path: string }) => directory(path));
     bridge.listTrash.mockResolvedValue({
@@ -434,6 +486,7 @@ describe('FilesApp operations and events', () => {
           useValue: { offline: offline.asReadonly() },
         },
         { provide: DesktopFilesBridgeService, useValue: bridge },
+        { provide: DesktopHostIntentService, useValue: hostIntents },
         { provide: WindowManagerService, useValue: windowManager },
       ],
     });

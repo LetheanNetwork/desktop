@@ -16,7 +16,7 @@ import { desktopFeature } from './store/desktop.reducer';
 import { DesktopControlsEffects } from './store/desktop-controls.effects';
 import { desktopControlsFeature } from './store/desktop-controls.reducer';
 import { DesktopMcpService } from './desktop/desktop-mcp.service';
-import { DeepLinkNavigationService } from './deep-link-navigation.service';
+import { DesktopHostIntentService } from './desktop/desktop-host-intent.service';
 import { MobileRuntimeService } from './mobile-runtime.service';
 import { ConnectionManagerService } from './connection-manager.service';
 
@@ -38,7 +38,7 @@ export const appConfig: ApplicationConfig = {
     provideAppInitializer(() => inject(ConnectionManagerService).ready),
     provideAppInitializer(() => inject(DesktopMcpService).ready),
     provideAppInitializer(() => {
-      inject(DeepLinkNavigationService);
+      inject(DesktopHostIntentService);
     }),
     provideAppInitializer(() => inject(MobileRuntimeService).ready),
   ],

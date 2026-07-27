@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { Store } from '@ngrx/store';
 import { provideMockStore } from '@ngrx/store/testing';
 import { desktopControlsActions } from '../../store/desktop-controls.actions';
+import { DesktopHostIntentService } from '../desktop-host-intent.service';
 import { DesktopControl } from '../../store/desktop-controls.models';
 import {
   desktopControlsFeature,
@@ -63,7 +64,19 @@ const win = {
 };
 
 describe('SettingsApp desktop controls', () => {
+  const hostIntents = {
+    claimItems: vi.fn().mockReturnValue(null),
+    onItems: vi.fn(
+      (app: 'files' | 'settings', consumer: (items: readonly unknown[]) => void) => {
+        const items = hostIntents.claimItems(app);
+        if (items) consumer(items);
+        return vi.fn();
+      },
+    ),
+  };
+
   beforeEach(() => {
+    hostIntents.claimItems.mockReturnValue(null);
     const prefs = {
       lang: signal('en'),
       design: signal<'lethean' | 'custom'>('lethean'),
@@ -108,6 +121,7 @@ describe('SettingsApp desktop controls', () => {
           ],
         }),
         { provide: PreferencesService, useValue: prefs },
+        { provide: DesktopHostIntentService, useValue: hostIntents },
         { provide: WindowManagerService, useValue: wm },
       ],
     });
@@ -126,6 +140,26 @@ describe('SettingsApp desktop controls', () => {
     expect(fixture.nativeElement.textContent).toContain('Interface theme');
     expect(fixture.nativeElement.textContent).toContain('Restart required');
     expect(fixture.nativeElement.textContent).toContain('Previous save failed safely.');
+  });
+
+  it('shows an opaque .lthn hand-off for explicit import review', async () => {
+    hostIntents.claimItems.mockReturnValueOnce([
+      {
+        mountId: 'host-profile',
+        path: 'profile.lthn',
+        name: 'profile.lthn',
+        kind: 'file',
+        mediaType: 'application/x-lethean',
+      },
+    ]);
+    const fixture = TestBed.createComponent(SettingsApp);
+    fixture.componentRef.setInput('win', win);
+
+    await fixture.whenStable();
+
+    expect(hostIntents.onItems).toHaveBeenCalledWith('settings', expect.any(Function));
+    expect(fixture.nativeElement.textContent).toContain('profile.lthn');
+    expect(fixture.nativeElement.textContent).toContain('ready for import review');
   });
 
   it('edits only the draft when a control changes', async () => {

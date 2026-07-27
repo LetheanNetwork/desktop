@@ -2,11 +2,7 @@ import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router, RouterOutlet, Routes } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import {
-  DEEP_LINK_EVENTS,
-  DeepLinkEventSource,
-  DeepLinkNavigationService,
-} from './deep-link-navigation.service';
+import { DeepLinkNavigationService } from './deep-link-navigation.service';
 
 @Component({
   imports: [RouterOutlet],
@@ -71,41 +67,32 @@ const testRoutes: Routes = [
 ];
 
 describe('DeepLinkNavigationService', () => {
-  const listeners = new Map<string, (payload: unknown) => void>();
-  const events: DeepLinkEventSource = {
-    on: vi.fn((name, handler) => {
-      listeners.set(name, handler);
-      return () => listeners.delete(name);
-    }),
-  };
   let harness: RouterTestingHarness;
   let router: Router;
+  let service: DeepLinkNavigationService;
 
   beforeEach(async () => {
-    listeners.clear();
     TestBed.configureTestingModule({
-      providers: [provideRouter(testRoutes), { provide: DEEP_LINK_EVENTS, useValue: events }],
+      providers: [provideRouter(testRoutes)],
     });
     harness = await RouterTestingHarness.create();
     router = TestBed.inject(Router);
-    TestBed.inject(DeepLinkNavigationService);
+    service = TestBed.inject(DeepLinkNavigationService);
   });
 
   afterEach(() => TestBed.resetTestingModule());
 
   const navigate = async (payload: unknown): Promise<void> => {
-    listeners.get('navigate')?.(payload);
+    await service.navigateDeepLink(payload);
     await harness.fixture.whenStable();
   };
 
   const trayOpen = async (payload: unknown): Promise<void> => {
-    listeners.get('lthn:tray:open')?.(payload);
+    await service.navigateTrayTarget(payload);
     await harness.fixture.whenStable();
   };
 
   it('routes a registered app id through the desktop route catalogue', async () => {
-    expect(events.on).toHaveBeenCalledWith('navigate', expect.any(Function));
-
     await navigate({ action: 'chat', resource: '', id: '' });
 
     expect(router.url).toBe('/ai/chat');
@@ -118,8 +105,6 @@ describe('DeepLinkNavigationService', () => {
   });
 
   it('routes tray launch events through the same desktop catalogue', async () => {
-    expect(events.on).toHaveBeenCalledWith('lthn:tray:open', expect.any(Function));
-
     await trayOpen('chat');
 
     expect(router.url).toBe('/ai/chat');
@@ -133,6 +118,14 @@ describe('DeepLinkNavigationService', () => {
     expect(router.url).toBe('/');
 
     await navigate(null);
+    expect(router.url).toBe('/');
+  });
+
+  it('rejects extra keys and oversized compatibility payloads', async () => {
+    await navigate({ action: 'chat', resource: '', id: '', path: '/Users/private' });
+    expect(router.url).toBe('/');
+
+    await navigate({ action: 'x'.repeat(65), resource: '', id: '' });
     expect(router.url).toBe('/');
   });
 });
