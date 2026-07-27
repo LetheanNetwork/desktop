@@ -127,6 +127,12 @@ version.
   SDK generation.
 - `go/pkg/runner/` — inference-facing service used by CLI, server, and GUI.
 - `go/pkg/appconfig/` — settings catalogue consumed by the Angular controls.
+- `go/pkg/services/` — manual-by-default background service catalogue and
+  lifecycle manager. It persists definitions through the registered
+  application `io.Medium` and delegates every runtime operation to the named
+  `go-process.Service`. Angular uses the `Lifecycle` Wails wrapper; native
+  launchd/systemd installation remains an explicit separate compatibility
+  path.
 - `go/pkg/telemetry/`, `go/pkg/fleet/`, `go/pkg/marketplace/`, and the other
   `go/pkg/*` directories — independently registered product services.
 
@@ -157,6 +163,15 @@ Add CLI verbs as flat `cmdX(args []string) int` handlers which delegate to
   stateless drag, resize, snap, marquee, group-drag, and grouping algorithms.
   `DesktopComponent` retains DOM pointer lifecycles and applies interaction
   results through the window manager.
+- `frontend-ng/src/app/desktop/desktop-services-bridge.service.ts` — defensive
+  managed-services Wails bridge. It accepts known service IDs and bounded
+  policy/output requests, rejects execution-bearing responses, forwards
+  `lthn:services:changed`, and makes no Wails call or event subscription in
+  offline demo mode.
+- `frontend-ng/src/app/desktop/apps/control/control-services.view.ts` —
+  Control's working Services interface under the stable internal `daemons`
+  tab value. It presents manual Start/Stop/Restart and explicit bounded output
+  without exposing command, arguments, environment, or working directories.
 - `frontend-ng/src/app/desktop/shell/` — behaviour-preserving presenters for
   the menu bar, taskbar/dock, Start and context menus, tray panels,
   notifications, and command palette. `DesktopComponent` remains their
@@ -230,6 +245,26 @@ npx ng test --watch=false \
   --include=src/app/desktop/apps/files.app.spec.ts \
   --include=src/app/desktop/desktop-files-bridge.service.spec.ts
 ```
+
+Focused managed-services checks:
+
+```bash
+go test ./go/pkg/services ./go/pkg/desktop ./go/cmd/lthn -count=1
+go test -race ./go/pkg/services -count=1
+go vet ./go/pkg/services ./go/pkg/desktop ./go/cmd/lthn
+cd frontend-ng
+npx ng test --watch=false \
+  --include=src/app/desktop/desktop-services-bridge.service.spec.ts \
+  --include=src/app/desktop/apps/control/control-services.view.spec.ts \
+  --include=src/app/desktop/apps/control.app.spec.ts
+```
+
+Managed services never auto-start during registration, Core startup,
+catalogue reads, UI refresh, or event subscription. Trusted definitions and
+policy are stored at `desktop/services/catalogue.json` on the registered
+application `io.Medium`; desired state, process identity, output, and errors
+remain transient. Explicit Core/Desktop shutdown stops running services, while
+closing windows leaves them alive under the tray-owned Core.
 
 The external v0.9.0 audit currently reports a large pre-existing compliance
 backlog; it is **not** a green all-zero gate on this branch. Run it as a

@@ -26,8 +26,10 @@ values with truthful live data.
 - [ ] Extend the process surface with PID, CPU, memory, start time, and
       signal/kill actions. `build.Service.ProcessList` currently exposes only
       tracked process ID, command, state, and exit code.
-- [ ] Add a typed daemon/service registry with health, PID, project ownership,
-      restart policy, and start/stop/restart actions.
+- [x] Add a typed daemon/service registry with lifecycle state, PID, project
+      ownership, bounded restart policy, and start/stop/restart actions.
+- [ ] Add provider health/readiness probes and per-service CPU/memory
+      telemetry; process liveness is not readiness.
 - [ ] Wire the Control configuration inputs and Commit action to
       `appconfig.Service.Set`, including validation, optimistic state, rollback,
       and restart-required feedback.
