@@ -34,11 +34,14 @@ import (
 
 	core "dappco.re/go"
 	"dappco.re/go/config"
+	coreio "dappco.re/go/io"
 
 	lthn "dappco.re/lthn/desktop"
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/lthn/desktop/pkg/modelruntime"
 	"dappco.re/lthn/desktop/pkg/runner"
+	"dappco.re/lthn/desktop/pkg/services"
 )
 
 // TestApp_AuditSetSecret_Good_SwapsInPlaceForSubsequentRecord pins
@@ -288,8 +291,8 @@ func TestApp_NewAppCore_EmitsServiceRegistrationAudit_Good(t *testing.T) {
 	// gate previously let a forgotten catalogue-update slip through silently
 	// (audit hash flipped, no test failure). The exact-count gate forces
 	// the catalogue + the binding surface to be edited in lockstep.
-	core.AssertEqual(t, 45, len(wailsBindingCatalogue),
-		"wailsBindingCatalogue length must equal 45 — update catalogue + this pin together when intentionally adding/removing a Wails binding")
+	core.AssertEqual(t, 46, len(wailsBindingCatalogue),
+		"wailsBindingCatalogue length must equal 46 — update catalogue + this pin together when intentionally adding/removing a Wails binding")
 }
 
 // TestApp_AuditMeta_NoServiceInternals_Bad pins the Meta-PII discipline:
@@ -384,10 +387,49 @@ func noopServiceFactory(_ *core.Core) core.Result {
 //
 // Usage example:
 //
-//	core.AssertEqual(t, 45, len(wailsBindingCatalogue), "...")
+//	core.AssertEqual(t, 46, len(wailsBindingCatalogue), "...")
 func TestApp_WailsBindingCatalogue_CountPinned_Good(t *testing.T) {
-	core.AssertEqual(t, 45, len(wailsBindingCatalogue),
-		"wailsBindingCatalogue length must equal 45 — drift gate: update catalogue + this pin together when intentionally adding/removing a Wails binding in pkg/desktop/desktop.go")
+	core.AssertEqual(t, 46, len(wailsBindingCatalogue),
+		"wailsBindingCatalogue length must equal 46 — drift gate: update catalogue + this pin together when intentionally adding/removing a Wails binding in pkg/desktop/desktop.go")
+	found := false
+	for _, binding := range wailsBindingCatalogue {
+		if binding == "modelruntime" {
+			found = true
+			break
+		}
+	}
+	core.AssertTrue(t, found, "modelruntime must be included in the Wails binding catalogue")
+}
+
+func TestApp_NewAppCore_ModelRuntimeGoodRegistersInertTrustedComposition(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	c := newAppCore()
+	core.RequireTrue(t, c != nil, "newAppCore must succeed under an isolated HOME")
+	t.Cleanup(func() { _ = c.ServiceShutdown(core.Background()) })
+
+	runtime, runtimeOK := core.ServiceFor[*modelruntime.Service](c, "modelruntime")
+	core.AssertTrue(t, runtimeOK && runtime != nil,
+		"modelruntime must be registered on the shared Core")
+
+	lemIO, mediumOK := core.ServiceFor[*coreio.Service](c, "lem-io")
+	core.RequireTrue(t, mediumOK && lemIO != nil && lemIO.Medium != nil,
+		"lem-io must be a registered Medium")
+	core.AssertEqual(t, core.PathJoin(tmp, "Lethean"), lemIO.Options().Root)
+	core.AssertFalse(t, lemIO.Medium.IsDir("lem/models"),
+		"model-runtime composition must not create a model catalogue")
+
+	manager, managerOK := core.ServiceFor[*services.Service](c, "services")
+	core.RequireTrue(t, managerOK && manager != nil,
+		"managed services must be registered")
+	result := manager.Get("inference")
+	core.RequireTrue(t, result.OK, result.Error())
+	snapshot := result.Value.(services.Snapshot)
+	core.AssertEqual(t, services.StateStopped, snapshot.State)
+	core.AssertFalse(t, snapshot.Desired)
+	core.AssertEqual(t, "", snapshot.ProcessID)
+	core.AssertEqual(t, 0, snapshot.PID)
 }
 
 // TestApp_PostUnlock_TriggersMigrateLegacyKeys_Good pins the H#250 /

@@ -603,7 +603,7 @@ Run:
 ```bash
 go test ./go/cmd/lthn ./go/pkg/desktop ./go/pkg/modelruntime ./go/pkg/services -count=1
 cd go
-go tool wails3 generate bindings -ts -dry -f -tags mcp ./pkg/desktop/...
+go tool wails3 generate bindings -ts -d ../frontend-ng/bindings -dry -f '-tags mcp' ./pkg/desktop/...
 ```
 
 Expected: PASS and no Wails warnings.

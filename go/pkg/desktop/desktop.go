@@ -69,6 +69,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/marketing/content"
 	"dappco.re/lthn/desktop/pkg/marketing/social"
 	"dappco.re/lthn/desktop/pkg/marketplace"
+	"dappco.re/lthn/desktop/pkg/modelruntime"
 	"dappco.re/lthn/desktop/pkg/models"
 	"dappco.re/lthn/desktop/pkg/office/documents"
 	officefile "dappco.re/lthn/desktop/pkg/office/files"
@@ -296,6 +297,17 @@ func (s *Service) Run() core.Result {
 		return core.Fail(core.E(
 			"desktop.Run",
 			"managed services are unavailable",
+			nil,
+		))
+	}
+	modelRuntimeSvc, modelRuntimeOK := core.ServiceFor[*modelruntime.Service](
+		s.opts.Core,
+		"modelruntime",
+	)
+	if !modelRuntimeOK || modelRuntimeSvc == nil {
+		return core.Fail(core.E(
+			"desktop.Run",
+			"model runtime is unavailable",
 			nil,
 		))
 	}
@@ -543,6 +555,10 @@ func (s *Service) Run() core.Result {
 		// with read access to ~/Lethean/data/admin.token; JS only sees
 		// the typed verb signatures Wails generates from this struct.
 		gui.Bind(lemma.NewWailsService(lemma.AdminConfig{})),
+		// ModelRuntime is the path-safe replacement surface. Keep the
+		// legacy Lemma binding until the remaining tray consumer migrates;
+		// no new renderer code should depend on Lemma.
+		gui.Bind(modelruntime.NewWailsService(modelRuntimeSvc)),
 		// calibrate → lthn-mlx profiling CLI (discover / bench / auto-tune).
 		// Sibling to lemma: lemma is the HTTP admin client to a *running*
 		// serve; calibrate shells the one-shot profiling subcommands for
@@ -953,6 +969,7 @@ func (s *Service) Run() core.Result {
 	registerSystemEvents(s.opts.Core)
 	registerFilesEvents(s.opts.Core)
 	registerServicesEvents(s.opts.Core)
+	registerModelRuntimeEvents(s.opts.Core)
 
 	// Per-window lthn:window:* event re-broadcasts (ready / focus /
 	// blur / hide / show / resize / files-dropped). See sysevents.go.

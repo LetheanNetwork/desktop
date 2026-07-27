@@ -36,6 +36,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/marketplace"
 	"dappco.re/lthn/desktop/pkg/mdns"
 	lthnml "dappco.re/lthn/desktop/pkg/ml"
+	"dappco.re/lthn/desktop/pkg/modelruntime"
 	"dappco.re/lthn/desktop/pkg/office/documents"
 	"dappco.re/lthn/desktop/pkg/office/files"
 	"dappco.re/lthn/desktop/pkg/office/mail"
@@ -76,6 +77,11 @@ import (
 func newAppCore() *core.Core {
 	const appErrorFormat = "lthn: %s\n"
 
+	root := paths.Root()
+	if !root.OK {
+		core.Print(core.Stderr(), appErrorFormat, root.Error())
+		return nil
+	}
 	dbPath := paths.StoreDB()
 	if !dbPath.OK {
 		core.Print(core.Stderr(), appErrorFormat, dbPath.Error())
@@ -129,10 +135,20 @@ func newAppCore() *core.Core {
 		core.WithName("io", io.NewService(io.IOConfig{
 			Root: dataDir.Value.(string),
 		})),
+		// lem-io — the sole application Medium for LEM credentials and
+		// model catalogue discovery. The root is trusted composition
+		// data; renderer contracts receive only opaque model IDs.
+		core.WithName("lem-io", io.NewService(io.IOConfig{
+			Root: root.Value.(string),
+		})),
 		// services — manual-by-default optional background capabilities.
 		// Definitions persist through the registered io.Medium and every
 		// process lifecycle flows through the named go-process service.
 		core.WithName("services", lthnservices.Register),
+		// modelruntime — inert bridge over the manual inference service,
+		// fixed loopback LEM protocol, and Medium-backed model catalogue.
+		// Registration and startup never start LEM or load a model.
+		core.WithName("modelruntime", modelruntime.Register),
 		// api — the Gin-based polyglot HTTP gateway. Its Engine
 		// drives route-group registration (api.Engine.Register(grp)).
 		// pkg/desktop mounts the Engine's http.Handler at /api/*
@@ -780,6 +796,7 @@ var wailsBindingCatalogue = []string{
 	"server",
 	"sessions",
 	"models",
+	"modelruntime",
 	"downloader",
 	"firstlaunch",
 	"integrations",
