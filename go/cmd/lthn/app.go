@@ -7,7 +7,6 @@ package main
 import (
 	core "dappco.re/go"
 	"dappco.re/go/api"
-	"dappco.re/go/config"
 	"dappco.re/go/i18n"
 	"dappco.re/go/io"
 	"dappco.re/go/mcp/pkg/mcp"
@@ -19,6 +18,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/agents"
 	lthnai "dappco.re/lthn/desktop/pkg/ai"
+	"dappco.re/lthn/desktop/pkg/appconfig"
 	"dappco.re/lthn/desktop/pkg/audit"
 	"dappco.re/lthn/desktop/pkg/benchmark"
 	"dappco.re/lthn/desktop/pkg/connection"
@@ -98,17 +98,24 @@ func newAppCore() *core.Core {
 		core.Print(core.Stderr(), appErrorFormat, dataDir.Error())
 		return nil
 	}
-	configFile := paths.ConfigFile()
-	if !configFile.OK {
-		core.Print(core.Stderr(), appErrorFormat, configFile.Error())
+	confDir := paths.ConfDir()
+	if !confDir.OK {
+		core.Print(core.Stderr(), appErrorFormat, confDir.Error())
 		return nil
 	}
 
 	c := core.New(
-		core.WithName("config", config.NewConfigServiceWith(config.ServiceOptions{
-			Path:      configFile.Value.(string),
-			EnvPrefix: "LTHN",
+		// config-io owns the existing ~/Lethean/conf provider root. CoreGO
+		// config receives only the provider-relative lthn.yaml address.
+		core.WithName("config-io", io.NewService(io.IOConfig{
+			Root: confDir.Value.(string),
 		})),
+		core.WithName("config", appconfig.NewConfigService(
+			appconfig.ConfigServiceOptions{
+				Path:      "lthn.yaml",
+				EnvPrefix: "LTHN",
+			},
+		)),
 		core.WithName("store", store.NewService(store.StoreConfig{
 			DatabasePath:            dbPath.Value.(string),
 			WorkspaceStateDirectory: workspace.Value.(string),
@@ -831,6 +838,7 @@ var wailsBindingCatalogue = []string{
 	"office-documents",
 	"office-mail",
 	"office-files",
+	"desktopstate",
 	"coding-deploys",
 	"serverkey",
 	"account",

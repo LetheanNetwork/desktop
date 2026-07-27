@@ -3,6 +3,8 @@
 package appconfig
 
 import (
+	"sync"
+
 	core "dappco.re/go"
 	"dappco.re/go/config"
 	guisystray "dappco.re/go/render/display/webkit/pkg/systray"
@@ -23,6 +25,20 @@ type Options struct {
 // the Core-registered config service as its only persistence substrate.
 type Service struct {
 	core *core.Core
+	mu   sync.Mutex
+}
+
+// Change is one bounded Settings draft value.
+type Change struct {
+	Key   string `json:"key"`
+	Value any    `json:"value"`
+}
+
+type preparedControlChange struct {
+	key        string
+	value      any
+	previous   any
+	definition controlDefinition
 }
 
 // NewService constructs the desktop-control settings service.
@@ -47,7 +63,7 @@ func Register(c *core.Core) core.Result {
 }
 
 // Settings returns the grouped, user-facing control catalogue with effective
-// resolve-with-fallback values and the canonical persistence path.
+// resolve-with-fallback values. Provider paths remain a trusted Go concern.
 func (s *Service) Settings() core.Result {
 	cfgResult := s.configService()
 	if !cfgResult.OK {
@@ -83,52 +99,107 @@ func (s *Service) Settings() core.Result {
 		}
 		controls = append(controls, control)
 	}
-	return core.Ok(map[string]any{
-		"controls":    controls,
-		"config_path": cfg.Config().Path(),
-	})
+	return core.Ok(map[string]any{"controls": controls})
 }
 
 // Set validates and persists one user-facing control through config.Service.
 // Live-capable CoreGUI actions are dispatched after the durable commit.
 func (s *Service) Set(key string, value any) core.Result {
+	return s.SetMany([]Change{{Key: key, Value: value}})
+}
+
+// SetMany validates a complete Settings draft before mutating CoreGO config,
+// commits once through its atomic Medium, and applies live actions only after
+// durable success.
+func (s *Service) SetMany(changes []Change) core.Result {
+	if s == nil {
+		return core.Fail(core.E(
+			"appconfig.Service.SetMany",
+			"service is required",
+			nil,
+		))
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	cfgResult := s.configService()
 	if !cfgResult.OK {
 		return cfgResult
 	}
-	definition, ok := controlDefinitionFor(key)
-	if !ok {
-		return core.Fail(core.E(
-			"appconfig.Service.Set",
-			"unknown desktop control: "+key,
-			nil,
-		))
+	if len(changes) == 0 {
+		return s.Settings()
 	}
-	normalised, valid := definition.normalise(value)
-	if !valid {
-		return core.Fail(core.E(
-			"appconfig.Service.Set",
-			"invalid value for "+key,
-			nil,
-		))
-	}
+
+	prepared := make([]preparedControlChange, 0, len(changes))
+	seen := make(map[string]bool, len(changes))
 	cfg := cfgResult.Value.(*config.Service)
-	if r := cfg.Set(key, normalised); !r.OK {
-		return core.Fail(core.E(
-			"appconfig.Service.Set",
-			"set config value",
-			r.Err(),
-		))
+	for _, change := range changes {
+		if seen[change.Key] {
+			return core.Fail(core.E(
+				"appconfig.Service.SetMany",
+				"duplicate desktop control: "+change.Key,
+				nil,
+			))
+		}
+		seen[change.Key] = true
+		definition, ok := controlDefinitionFor(change.Key)
+		if !ok {
+			return core.Fail(core.E(
+				"appconfig.Service.SetMany",
+				"unknown desktop control: "+change.Key,
+				nil,
+			))
+		}
+		normalised, valid := definition.normalise(change.Value)
+		if !valid {
+			return core.Fail(core.E(
+				"appconfig.Service.SetMany",
+				"invalid value for "+change.Key,
+				nil,
+			))
+		}
+		previous, _ := definition.value(cfg)
+		prepared = append(prepared, preparedControlChange{
+			key:        change.Key,
+			value:      normalised,
+			previous:   previous,
+			definition: definition,
+		})
+	}
+
+	for _, change := range prepared {
+		if result := cfg.Set(change.key, change.value); !result.OK {
+			s.restorePrepared(cfg, prepared)
+			return core.Fail(core.E(
+				"appconfig.Service.SetMany",
+				"set config value",
+				result.Err(),
+			))
+		}
 	}
 	if r := cfg.Commit(); !r.OK {
+		s.restorePrepared(cfg, prepared)
 		return core.Fail(core.E(
-			"appconfig.Service.Set",
+			"appconfig.Service.SetMany",
 			"persist config value",
 			r.Err(),
 		))
 	}
-	s.applyLive(key, normalised, cfg)
+	for _, change := range prepared {
+		if change.definition.live {
+			s.applyLive(change.key, change.value, cfg)
+		}
+	}
 	return s.Settings()
+}
+
+func (s *Service) restorePrepared(
+	cfg *config.Service,
+	prepared []preparedControlChange,
+) {
+	for _, change := range prepared {
+		_ = cfg.Set(change.key, change.previous)
+	}
 }
 
 func (s *Service) configService() core.Result {
@@ -177,6 +248,22 @@ func number(value float64) *float64 {
 }
 
 var controlDefinitions = []controlDefinition{
+	{
+		key: "desktop.shell.taskbar_edge", group: "Desktop",
+		label: "Taskbar edge", description: "Dock the taskbar to one screen edge.",
+		kind: "select", defaultValue: "bottom",
+		choices: []string{"top", "right", "bottom", "left"}, live: true,
+	},
+	{
+		key: "desktop.shell.show_icons", group: "Desktop",
+		label: "Desktop icons", description: "Show application launchers on the desktop.",
+		kind: "toggle", defaultValue: true, live: true,
+	},
+	{
+		key: "desktop.shell.show_widgets", group: "Desktop",
+		label: "Desktop widgets", description: "Show clock and package widgets on the desktop.",
+		kind: "toggle", defaultValue: true, live: true,
+	},
 	{
 		key: "desktop.wails.window.main.width", group: "Window",
 		label: "Window width", description: "Width of the main desktop window in pixels.",
@@ -258,6 +345,35 @@ var controlDefinitions = []controlDefinition{
 		kind: "select", defaultValue: "dark", choices: []string{"dark", "light"}, live: true,
 	},
 	{
+		key: "desktop.theme.brand", group: "Theme",
+		label: "Brand", description: "Select the active brand token family.",
+		kind: "select", defaultValue: "lethean",
+		choices: []string{"lethean", "hostuk"}, live: true,
+	},
+	{
+		key: "desktop.theme.design", group: "Theme",
+		label: "Design", description: "Use the Lethean design or a custom accent.",
+		kind: "select", defaultValue: "lethean",
+		choices: []string{"lethean", "custom"}, live: true,
+	},
+	{
+		key: "desktop.theme.custom_hue", group: "Theme",
+		label: "Custom accent hue", description: "Hue used to generate the custom accent ramp.",
+		kind: "number", defaultValue: 305, minimum: number(0), maximum: number(360),
+		step: number(1), live: true,
+	},
+	{
+		key: "desktop.theme.custom_name", group: "Theme",
+		label: "Custom design name", description: "Reader-facing name for the custom design.",
+		kind: "text", defaultValue: "Host UK", live: true,
+	},
+	{
+		key: "desktop.theme.wallpaper", group: "Theme",
+		label: "Wallpaper", description: "Select the desktop background treatment.",
+		kind: "select", defaultValue: "aurora",
+		choices: []string{"aurora", "dusk", "mist", "graphite"}, live: true,
+	},
+	{
 		key: "desktop.theme.native", group: "Theme",
 		label: "Native window theme", description: "Follow the system or force native window chrome to dark or light.",
 		kind: "select", defaultValue: "system", choices: []string{"system", "dark", "light"},
@@ -267,6 +383,13 @@ var controlDefinitions = []controlDefinition{
 		key: "desktop.theme.reduce_motion", group: "Theme",
 		label: "Reduce motion", description: "Disable dock magnification and interface transitions.",
 		kind: "toggle", defaultValue: false, live: true,
+	},
+	{
+		key: "desktop.locale.language", group: "Language",
+		label: "Language", description: "Select the desktop interface language.",
+		kind: "select", defaultValue: "en",
+		choices:         []string{"en", "cy", "de", "es", "fr", "ja"},
+		restartRequired: true,
 	},
 	{
 		key: "permissions.network.outbound", group: "Permissions",

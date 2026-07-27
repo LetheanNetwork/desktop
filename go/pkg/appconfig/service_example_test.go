@@ -42,3 +42,9 @@ func ExampleService_Set() {
 	core.Println(method != nil)
 	// Output: true
 }
+
+func ExampleService_SetMany() {
+	var method func(*appconfig.Service, []appconfig.Change) core.Result = (*appconfig.Service).SetMany
+	core.Println(method != nil)
+	// Output: true
+}

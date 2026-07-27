@@ -286,13 +286,13 @@ func TestApp_NewAppCore_EmitsServiceRegistrationAudit_Good(t *testing.T) {
 	// trips the test. Update both this assertion + the catalogue
 	// together when intentionally adding a binding.
 	//
-	// Count == 45 is the hand-maintained mirror of pkg/desktop/desktop.go's
+	// Count == 46 is the hand-maintained mirror of pkg/desktop/desktop.go's
 	// Wails bindings (see Cerberus #50 ADD-1 / Mantis #1759). A `len > 0`
 	// gate previously let a forgotten catalogue-update slip through silently
 	// (audit hash flipped, no test failure). The exact-count gate forces
 	// the catalogue + the binding surface to be edited in lockstep.
-	core.AssertEqual(t, 45, len(wailsBindingCatalogue),
-		"wailsBindingCatalogue length must equal 45 — update catalogue + this pin together when intentionally adding/removing a Wails binding")
+	core.AssertEqual(t, 46, len(wailsBindingCatalogue),
+		"wailsBindingCatalogue length must equal 46 — update catalogue + this pin together when intentionally adding/removing a Wails binding")
 }
 
 // TestApp_AuditMeta_NoServiceInternals_Bad pins the Meta-PII discipline:
@@ -371,7 +371,7 @@ func noopServiceFactory(_ *core.Core) core.Result {
 // TestApp_WailsBindingCatalogue_CountPinned_Good is the dedicated
 // drift-detection gate for wailsBindingCatalogue (Cerberus #50 ADD-1 /
 // Mantis #1759 LOW). The catalogue in app.go is the hand-maintained
-// mirror of pkg/desktop/desktop.go's Wails-binding surface (45 bindings
+// mirror of pkg/desktop/desktop.go's Wails-binding surface (46 bindings
 // at the time of writing). A contributor adding a binding to
 // pkg/desktop without updating the catalogue would silently flip the
 // `wails_bindings_hash` Meta field in the boot composition audit row
@@ -387,18 +387,22 @@ func noopServiceFactory(_ *core.Core) core.Result {
 //
 // Usage example:
 //
-//	core.AssertEqual(t, 45, len(wailsBindingCatalogue), "...")
+//	core.AssertEqual(t, 46, len(wailsBindingCatalogue), "...")
 func TestApp_WailsBindingCatalogue_CountPinned_Good(t *testing.T) {
-	core.AssertEqual(t, 45, len(wailsBindingCatalogue),
-		"wailsBindingCatalogue length must equal 45 — drift gate: update catalogue + this pin together when intentionally adding/removing a Wails binding in pkg/desktop/desktop.go")
-	found := false
+	core.AssertEqual(t, 46, len(wailsBindingCatalogue),
+		"wailsBindingCatalogue length must equal 46 — drift gate: update catalogue + this pin together when intentionally adding/removing a Wails binding in pkg/desktop/desktop.go")
+	foundModelRuntime := false
+	foundDesktopState := false
 	for _, binding := range wailsBindingCatalogue {
 		if binding == "modelruntime" {
-			found = true
-			break
+			foundModelRuntime = true
+		}
+		if binding == "desktopstate" {
+			foundDesktopState = true
 		}
 	}
-	core.AssertTrue(t, found, "modelruntime must be included in the Wails binding catalogue")
+	core.AssertTrue(t, foundModelRuntime, "modelruntime must be included in the Wails binding catalogue")
+	core.AssertTrue(t, foundDesktopState, "desktopstate must be included in the Wails binding catalogue")
 }
 
 func TestApp_NewAppCore_ModelRuntimeGoodRegistersInertTrustedComposition(t *testing.T) {
