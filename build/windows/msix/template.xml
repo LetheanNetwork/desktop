@@ -8,17 +8,17 @@
         AllowPromptForPassword="false">
     </Settings>
     <Installer
-        Path="lthn-scaffold"
+        Path="lthn.exe"
         Arguments=""
-        InstallLocation="C:\Program Files\My Company\Lethean Desktop">
+        InstallLocation="C:\Program Files\Lethean\Lethean Desktop">
     </Installer>
     <PackageInformation
         PackageName="Lethean Desktop"
         PackageDisplayName="Lethean Desktop"
-        PublisherName="CN=My Company"
-        PublisherDisplayName="My Company"
+        PublisherName="CN=Lethean"
+        PublisherDisplayName="Lethean"
         Version="0.1.0.0"
-        PackageDescription="A lthn-scaffold application">
+        PackageDescription="Local AI, sovereign by design.">
         <Capabilities>
             <Capability Name="runFullTrust" />
             
@@ -26,9 +26,9 @@
         <Applications>
             <Application
                 Id="ai.lthn.desktop"
-                Description="A lthn-scaffold application"
+                Description="Local AI, sovereign by design."
                 DisplayName="Lethean Desktop"
-                ExecutableName="lthn-scaffold"
+                ExecutableName="lthn.exe"
                 EntryPoint="Windows.FullTrustApplication">
                 
             </Application>
@@ -42,12 +42,12 @@
         <Properties>
             <Framework>false</Framework>
             <DisplayName>Lethean Desktop</DisplayName>
-            <PublisherDisplayName>My Company</PublisherDisplayName>
-            <Description>A lthn-scaffold application</Description>
+            <PublisherDisplayName>Lethean</PublisherDisplayName>
+            <Description>Local AI, sovereign by design.</Description>
             <Logo>Assets\AppIcon.png</Logo>
         </Properties>
     </PackageInformation>
-    <SaveLocation PackagePath="lthn-scaffold.msix" />
+    <SaveLocation PackagePath="lthn.msix" />
     <PackageIntegrity>
         <CertificatePath></CertificatePath>
     </PackageIntegrity>

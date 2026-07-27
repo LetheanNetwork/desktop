@@ -2,54 +2,70 @@
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
-  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
-  IgnorableNamespaces="uap3">
-  
-  <Identity 
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap desktop rescap">
+  <Identity
     Name="ai.lthn.desktop"
-    Publisher="CN=My Company"
-    Version="0.1.0.0" 
-    ProcessorArchitecture="arm64" />
-  
+    Publisher="CN=Lethean"
+    Version="0.1.0.0"
+    ProcessorArchitecture="x64" />
+
   <Properties>
     <DisplayName>Lethean Desktop</DisplayName>
-    <PublisherDisplayName>My Company</PublisherDisplayName>
-    <Description>A lthn-scaffold application</Description>
+    <PublisherDisplayName>Lethean</PublisherDisplayName>
+    <Description>Local AI, sovereign by design.</Description>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
-  
+
   <Dependencies>
-    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
+    <TargetDeviceFamily
+      Name="Windows.Desktop"
+      MinVersion="10.0.17763.0"
+      MaxVersionTested="10.0.26100.0" />
   </Dependencies>
-  
+
   <Resources>
-    <Resource Language="en-us" />
+    <Resource Language="en-gb" />
   </Resources>
-  
+
   <Applications>
-    <Application Id="ai.lthn.desktop" Executable="lthn-scaffold" EntryPoint="Windows.FullTrustApplication">
+    <Application
+      Id="ai.lthn.desktop"
+      Executable="lthn.exe"
+      EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="Lethean Desktop"
-        Description="A lthn-scaffold application"
+        Description="Local AI, sovereign by design."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
         <uap:SplashScreen Image="Assets\SplashScreen.png" />
       </uap:VisualElements>
-      
+
       <Extensions>
-        <desktop:Extension Category="windows.fullTrustProcess" Executable="lthn-scaffold" />
-        
-        
+        <desktop:Extension
+          Category="windows.fullTrustProcess"
+          Executable="lthn.exe" />
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="lthn">
+            <uap:DisplayName>Lethean Desktop deep link</uap:DisplayName>
+          </uap:Protocol>
+        </uap:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="lethean-configuration">
+            <uap:DisplayName>Lethean Desktop configuration</uap:DisplayName>
+            <uap:SupportedFileTypes>
+              <uap:FileType>.lthn</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
       </Extensions>
     </Application>
   </Applications>
-  
+
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
-    
   </Capabilities>
 </Package>

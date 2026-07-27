@@ -12,8 +12,8 @@ priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
 description: "Local AI, sovereign by design."
 vendor: "Lethean"
-homepage: "https://wails.io"
-license: "MIT"
+homepage: "https://lethean.io"
+license: "EUPL-1.2"
 release: "1"
 
 contents:
@@ -23,6 +23,8 @@ contents:
     dst: "/usr/share/icons/hicolor/128x128/apps/lthn.png"
   - src: "./build/linux/lthn.desktop"
     dst: "/usr/share/applications/lthn.desktop"
+  - src: "./build/linux/application-x-lethean.xml"
+    dst: "/usr/share/mime/packages/application-x-lethean.xml"
 
 # Default dependencies for Debian 12/Ubuntu 22.04+ with WebKit 4.1
 depends:

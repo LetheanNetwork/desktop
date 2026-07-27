@@ -2,12 +2,13 @@
 Version=1.0
 Name=Lethean Desktop
 Comment=Local AI, sovereign by design.
-# The Exec line includes %u to pass the URL to the application
-Exec=/usr/local/bin/lthn %u
+# %U passes a selected .lthn document or lthn:// URL to the CLI router,
+# which starts the native desktop host before Wails translates the argument.
+Exec=/usr/local/bin/lthn %U
 Terminal=false
 Type=Application
 Icon=lthn
-Categories=Utility;
+Categories=Utility;Development;
 StartupWMClass=lthn
-
-MimeType=x-scheme-handler/lthn; 
+StartupNotify=true
+MimeType=x-scheme-handler/lthn;application/x-lethean;

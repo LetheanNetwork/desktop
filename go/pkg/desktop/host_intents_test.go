@@ -5,8 +5,10 @@ package desktop
 import (
 	core "dappco.re/go"
 	coreio "dappco.re/go/io"
+	gui "dappco.re/go/render/display/webkit"
 	guievents "dappco.re/go/render/display/webkit/pkg/events"
 	guilifecycle "dappco.re/go/render/display/webkit/pkg/lifecycle"
+	guinotification "dappco.re/go/render/display/webkit/pkg/notification"
 	guiwindow "dappco.re/go/render/display/webkit/pkg/window"
 	officefiles "dappco.re/lthn/desktop/pkg/office/files"
 )
@@ -150,6 +152,111 @@ func TestHostIntent_OpenedWithFile_UglyFailureDoesNotLeakPath(t *core.T) {
 	core.AssertNotEmpty(t, intent.ErrorCode)
 	assertHostIntentRedacted(t, intent, root)
 	core.AssertNotContains(t, core.JSONMarshalString(intent), missing)
+}
+
+func TestHostIntent_NotificationClicked_GoodRoutesKnownServerIntent(t *core.T) {
+	c, emitted, _, _ := hostIntentFixture(t)
+
+	result := c.ACTION(guinotification.ActionNotificationClicked{
+		ID: "lthn.model-runtime:load-complete",
+	})
+
+	core.RequireTrue(t, result.OK, result.Error())
+	core.RequireTrue(t, len(*emitted) == 1)
+	core.AssertEqual(t, "lthn:host:intent", (*emitted)[0].Name)
+	intent, ok := (*emitted)[0].Data.(HostIntent)
+	core.RequireTrue(t, ok)
+	core.AssertEqual(t, HostIntentNotification, intent.Kind)
+	core.AssertEqual(t, &HostNotificationIntent{
+		ID:       "lthn.model-runtime:load-complete",
+		IntentID: "model-runtime",
+		Event:    "click",
+	}, intent.Notification)
+}
+
+func TestHostIntent_NotificationAction_GoodRoutesAllowlistedOpen(t *core.T) {
+	c, emitted, _, _ := hostIntentFixture(t)
+
+	result := c.ACTION(guinotification.ActionNotificationActionTriggered{
+		NotificationID: "lthn.managed-services:runner",
+		ActionID:       "open",
+	})
+
+	core.RequireTrue(t, result.OK, result.Error())
+	core.RequireTrue(t, len(*emitted) == 1)
+	intent := (*emitted)[0].Data.(HostIntent)
+	core.AssertEqual(t, &HostNotificationIntent{
+		ID:       "lthn.managed-services:runner",
+		IntentID: "managed-services",
+		Event:    "action",
+		ActionID: "open",
+	}, intent.Notification)
+}
+
+func TestHostIntent_NotificationAction_BadRejectsUnknownAction(t *core.T) {
+	c, emitted, _, _ := hostIntentFixture(t)
+
+	result := c.ACTION(guinotification.ActionNotificationActionTriggered{
+		NotificationID: "lthn.managed-services:runner",
+		ActionID:       "execute",
+	})
+
+	core.RequireTrue(t, result.OK, result.Error())
+	core.AssertEqual(t, 0, len(*emitted))
+}
+
+func TestHostIntent_NotificationDismissed_GoodRoutesKnownIntent(t *core.T) {
+	c, emitted, _, _ := hostIntentFixture(t)
+
+	result := c.ACTION(guinotification.ActionNotificationDismissed{
+		ID: "lthn.files-operation:copy-complete",
+	})
+
+	core.RequireTrue(t, result.OK, result.Error())
+	core.RequireTrue(t, len(*emitted) == 1)
+	intent := (*emitted)[0].Data.(HostIntent)
+	core.AssertEqual(t, &HostNotificationIntent{
+		ID:       "lthn.files-operation:copy-complete",
+		IntentID: "files-operation",
+		Event:    "dismiss",
+	}, intent.Notification)
+}
+
+func TestHostIntent_NotificationDismissed_UglyRejectsUnknownIntent(t *core.T) {
+	c, emitted, _, _ := hostIntentFixture(t)
+
+	result := c.ACTION(guinotification.ActionNotificationDismissed{
+		ID: "third-party:anything",
+	})
+
+	core.RequireTrue(t, result.OK, result.Error())
+	core.AssertEqual(t, 0, len(*emitted))
+}
+
+func TestHostIntent_SecondInstanceFile_GoodUsesSameOpaqueCapability(t *core.T) {
+	c, emitted, root, medium := hostIntentFixture(t)
+	core.RequireNoError(t, medium.Write("profile.lthn", "version: 1"))
+
+	handleSecondInstanceLaunch(c, gui.SecondInstanceData{
+		Args: []string{
+			"lthn",
+			core.PathJoin(root, "profile.lthn"),
+		},
+	})
+
+	core.RequireTrue(t, len(*emitted) >= 2)
+	var found bool
+	for _, event := range *emitted {
+		if event.Name != "lthn:host:intent" {
+			continue
+		}
+		intent, ok := event.Data.(HostIntent)
+		core.RequireTrue(t, ok)
+		core.AssertEqual(t, HostIntentOpenItems, intent.Kind)
+		assertHostIntentRedacted(t, intent, root)
+		found = true
+	}
+	core.AssertTrue(t, found)
 }
 
 func assertHostIntentRedacted(t *core.T, payload any, actualRoot string) {

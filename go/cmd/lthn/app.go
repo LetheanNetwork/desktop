@@ -43,6 +43,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/office/mail"
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/paths"
+	"dappco.re/lthn/desktop/pkg/permissions"
 	"dappco.re/lthn/desktop/pkg/plugin"
 	lthnprocess "dappco.re/lthn/desktop/pkg/process"
 	"dappco.re/lthn/desktop/pkg/queue"
@@ -116,6 +117,10 @@ func newAppCore() *core.Core {
 				EnvPrefix: "LTHN",
 			},
 		)),
+		// permissions keeps application policy separate from verified
+		// operating-system state. Registration installs the entitlement
+		// checker but never prompts the host.
+		core.WithName("permissions", permissions.Register),
 		core.WithName("store", store.NewService(store.StoreConfig{
 			DatabasePath:            dbPath.Value.(string),
 			WorkspaceStateDirectory: workspace.Value.(string),
@@ -839,6 +844,7 @@ var wailsBindingCatalogue = []string{
 	"office-mail",
 	"office-files",
 	"desktopstate",
+	"permissions",
 	"coding-deploys",
 	"serverkey",
 	"account",

@@ -16,19 +16,33 @@ const (
 	// HostIntentItemsUnavailable reports a bounded capability resolution
 	// failure without exposing the selected native path.
 	HostIntentItemsUnavailable = "items-unavailable"
+	// HostIntentNotification carries one allowlisted native notification
+	// response back to the renderer.
+	HostIntentNotification = "notification"
 
-	maxHostTargetIDBytes = 64
-	maxHostCoordinate    = 32_768
+	maxHostTargetIDBytes       = 64
+	maxHostNotificationIDBytes = 128
+	maxHostCoordinate          = 32_768
 )
 
 // HostIntent is the single renderer-facing envelope for trusted native
 // lifecycle input.
 type HostIntent struct {
-	Kind       string                     `json:"kind"`
-	Items      []officefiles.HostItemView `json:"items,omitempty"`
-	Navigation map[string]string          `json:"navigation,omitempty"`
-	Target     *HostDropTarget            `json:"target,omitempty"`
-	ErrorCode  string                     `json:"errorCode,omitempty"`
+	Kind         string                     `json:"kind"`
+	Items        []officefiles.HostItemView `json:"items,omitempty"`
+	Navigation   map[string]string          `json:"navigation,omitempty"`
+	Notification *HostNotificationIntent    `json:"notification,omitempty"`
+	Target       *HostDropTarget            `json:"target,omitempty"`
+	ErrorCode    string                     `json:"errorCode,omitempty"`
+}
+
+// HostNotificationIntent contains no command, URL, path, or free-form action.
+// The intent and action IDs are both selected from server-owned catalogues.
+type HostNotificationIntent struct {
+	ID       string `json:"id"`
+	IntentID string `json:"intentId"`
+	Event    string `json:"event"`
+	ActionID string `json:"actionId,omitempty"`
 }
 
 // HostDropTarget retains only the bounded identity and coordinates required
@@ -139,7 +153,83 @@ func boundedHostDropTarget(
 }
 
 func validHostTargetID(id string) bool {
-	if id == "" || len(id) > maxHostTargetIDBytes {
+	return validHostIdentifier(id, maxHostTargetIDBytes)
+}
+
+func emitHostNotificationIntent(
+	c *core.Core,
+	event string,
+	notificationID string,
+	actionID string,
+) core.Result {
+	notification, ok := hostNotificationIntent(
+		event,
+		notificationID,
+		actionID,
+	)
+	if !ok {
+		return core.Ok(nil)
+	}
+	return emitCoreEvent(c, "lthn:host:intent", HostIntent{
+		Kind:         HostIntentNotification,
+		Notification: &notification,
+	})
+}
+
+func hostNotificationIntent(
+	event string,
+	notificationID string,
+	actionID string,
+) (HostNotificationIntent, bool) {
+	intentID, ok := hostNotificationIntentID(notificationID)
+	if !ok {
+		return HostNotificationIntent{}, false
+	}
+	switch event {
+	case "click", "dismiss":
+		if actionID != "" {
+			return HostNotificationIntent{}, false
+		}
+	case "action":
+		if actionID != "open" {
+			return HostNotificationIntent{}, false
+		}
+	default:
+		return HostNotificationIntent{}, false
+	}
+	return HostNotificationIntent{
+		ID:       notificationID,
+		IntentID: intentID,
+		Event:    event,
+		ActionID: actionID,
+	}, true
+}
+
+func hostNotificationIntentID(notificationID string) (string, bool) {
+	if !validHostIdentifier(
+		notificationID,
+		maxHostNotificationIDBytes,
+	) {
+		return "", false
+	}
+	for _, intentID := range []string{
+		"managed-services",
+		"model-runtime",
+		"terminal-session",
+		"files-operation",
+		"desktop-update",
+	} {
+		prefix := "lthn." + intentID
+		if notificationID == prefix ||
+			core.HasPrefix(notificationID, prefix+":") {
+			return intentID, true
+		}
+	}
+	return "", false
+}
+
+func validHostIdentifier(id string, maximum int) bool {
+	if id == "" || len(id) > maximum {
 		return false
 	}
 	for _, character := range []byte(id) {

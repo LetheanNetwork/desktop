@@ -78,6 +78,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/openaibench"
 	"dappco.re/lthn/desktop/pkg/opencode"
 	"dappco.re/lthn/desktop/pkg/paths"
+	"dappco.re/lthn/desktop/pkg/permissions"
 	lthnphp "dappco.re/lthn/desktop/pkg/php"
 	"dappco.re/lthn/desktop/pkg/plugin"
 	"dappco.re/lthn/desktop/pkg/r1"
@@ -410,6 +411,10 @@ func (s *Service) Run() core.Result {
 	// office/files — sole provider-neutral Files binding. Its registered
 	// io.Medium mounts enforce the content and metadata boundary.
 	filesSvc, _ := core.ServiceFor[*officefile.Service](s.opts.Core, "office-files")
+	permissionSvc, _ := core.ServiceFor[*permissions.Service](
+		s.opts.Core,
+		"permissions",
+	)
 	// desktopstate — Core-owned, Medium-backed inner-shell and Terminal
 	// workspace documents. Bind the registered instance rather than a sibling.
 	desktopStateSvc, _ := core.ServiceFor[*desktopstate.Service](s.opts.Core, "desktopstate")
@@ -600,6 +605,7 @@ func (s *Service) Run() core.Result {
 		gui.Bind(mailSvc),
 		gui.Bind(filesSvc),
 		gui.Bind(desktopstate.NewWailsService(desktopStateSvc)),
+		gui.Bind(permissions.NewWailsService(permissionSvc)),
 		gui.Bind(deploysSvc),
 		gui.Bind(serverkeySvc),
 		gui.Bind(accountSvc),
@@ -1121,14 +1127,22 @@ func handleSecondInstanceLaunch(c *core.Core, data gui.SecondInstanceData) {
 
 	for _, argument := range data.Args {
 		candidate := core.Trim(argument)
-		if !core.HasPrefix(core.Lower(candidate), "lthn://") {
-			continue
+		if core.HasPrefix(core.Lower(candidate), "lthn://") {
+			if handled := handleDeepLink(c, candidate); handled.OK {
+				return
+			} else {
+				core.Warn(
+					"desktop second-instance deep link ignored",
+					"err",
+					handled.Error(),
+				)
+				break
+			}
 		}
-		if handled := handleDeepLink(c, candidate); handled.OK {
+		if core.Lower(core.PathExt(candidate)) == ".lthn" {
+			restoreSecondInstanceWindow(c)
+			c.ACTION(guilifecycle.ActionOpenedWithFile{Path: candidate})
 			return
-		} else {
-			core.Warn("desktop second-instance deep link ignored", "err", handled.Error())
-			break
 		}
 	}
 	restoreSecondInstanceWindow(c)

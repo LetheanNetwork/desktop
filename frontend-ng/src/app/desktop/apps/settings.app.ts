@@ -5,6 +5,7 @@ import {
   DestroyRef,
   Input,
   OnInit,
+  PendingTasks,
   computed,
   inject,
   signal,
@@ -18,7 +19,10 @@ import { WindowManagerService } from '../window-manager.service';
 import {
   DesktopHostIntentService,
   type DesktopHostItem,
+  type DesktopPermissionID,
+  type DesktopPermissionSnapshot,
 } from '../desktop-host-intent.service';
+import { DesktopPermissionsBridgeService } from '../desktop-permissions-bridge.service';
 import { desktopControlsActions } from '../../store/desktop-controls.actions';
 import { DesktopControl, DesktopControlValue } from '../../store/desktop-controls.models';
 import {
@@ -349,68 +353,93 @@ const CURATED_PREFERENCE_KEYS = new Set([
                         @if (controlsSaving()) {
                           <span class="control-badge saving">Saving…</span>
                         }
+                        @if (permissionForControl(control.key); as permission) {
+                          <span class="control-badge host">
+                            Host: {{ permission.host }}
+                          </span>
+                        }
                       </span>
                     </div>
 
-                    @switch (control.kind) {
-                      @case ('toggle') {
-                        <div class="prefseg" role="group" [attr.aria-label]="control.label">
-                          <button
-                            [class.on]="control.value === true"
+                    <div class="control-actions">
+                      @switch (control.kind) {
+                        @case ('toggle') {
+                          <div class="prefseg" role="group" [attr.aria-label]="control.label">
+                            <button
+                              [class.on]="control.value === true"
+                              [disabled]="controlsSaving()"
+                              (click)="setToggle(control, true)"
+                            >
+                              On
+                            </button>
+                            <button
+                              [class.on]="control.value === false"
+                              [disabled]="controlsSaving()"
+                              (click)="setToggle(control, false)"
+                            >
+                              Off
+                            </button>
+                          </div>
+                        }
+                        @case ('select') {
+                          <select
+                            class="cfgin control-input"
+                            [value]="control.value"
                             [disabled]="controlsSaving()"
-                            (click)="setToggle(control, true)"
+                            [attr.aria-label]="control.label"
+                            (change)="setChoice(control, $event)"
                           >
-                            On
-                          </button>
-                          <button
-                            [class.on]="control.value === false"
+                            @for (choice of control.choices ?? []; track choice) {
+                              <option [value]="choice">{{ choice }}</option>
+                            }
+                          </select>
+                        }
+                        @case ('number') {
+                          <input
+                            class="cfgin control-input"
+                            type="number"
+                            [value]="control.value"
+                            [attr.min]="control.minimum ?? null"
+                            [attr.max]="control.maximum ?? null"
+                            [attr.step]="control.step ?? null"
                             [disabled]="controlsSaving()"
-                            (click)="setToggle(control, false)"
-                          >
-                            Off
-                          </button>
-                        </div>
+                            [attr.aria-label]="control.label"
+                            (change)="setNumber(control, $event)"
+                          />
+                        }
+                        @default {
+                          <input
+                            class="cfgin control-input"
+                            type="text"
+                            [value]="control.value"
+                            [disabled]="controlsSaving()"
+                            [attr.aria-label]="control.label"
+                            (change)="setText(control, $event)"
+                          />
+                        }
                       }
-                      @case ('select') {
-                        <select
-                          class="cfgin control-input"
-                          [value]="control.value"
-                          [disabled]="controlsSaving()"
-                          [attr.aria-label]="control.label"
-                          (change)="setChoice(control, $event)"
+                      @if (canRequestPermission(control.key)) {
+                        <button
+                          type="button"
+                          class="permission-request"
+                          [attr.data-action]="'request-permission-notifications'"
+                          [disabled]="requestingPermission() !== null"
+                          (click)="requestPermission('notifications')"
                         >
-                          @for (choice of control.choices ?? []; track choice) {
-                            <option [value]="choice">{{ choice }}</option>
-                          }
-                        </select>
+                          {{
+                            requestingPermission() === 'notifications'
+                              ? 'Requesting…'
+                              : 'Request host access'
+                          }}
+                        </button>
                       }
-                      @case ('number') {
-                        <input
-                          class="cfgin control-input"
-                          type="number"
-                          [value]="control.value"
-                          [attr.min]="control.minimum ?? null"
-                          [attr.max]="control.maximum ?? null"
-                          [attr.step]="control.step ?? null"
-                          [disabled]="controlsSaving()"
-                          [attr.aria-label]="control.label"
-                          (change)="setNumber(control, $event)"
-                        />
-                      }
-                      @default {
-                        <input
-                          class="cfgin control-input"
-                          type="text"
-                          [value]="control.value"
-                          [disabled]="controlsSaving()"
-                          [attr.aria-label]="control.label"
-                          (change)="setText(control, $event)"
-                        />
-                      }
-                    }
+                    </div>
                   </div>
                 }
               </div>
+            }
+            @if (permissionError()) {
+              <p class="controls-error" role="alert">{{ permissionError() }}</p>
             }
           </section>
         }
@@ -505,8 +534,29 @@ const CURATED_PREFERENCE_KEYS = new Set([
     .control-badge.saving {
       color: #8eb8ff;
     }
+    .control-badge.host {
+      color: #a8b3c7;
+    }
     .control-input {
       width: min(210px, 42%);
+    }
+    .control-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 7px;
+      width: min(310px, 52%);
+    }
+    .control-actions .control-input {
+      width: min(210px, 100%);
+    }
+    .permission-request {
+      padding: 5px 8px;
+      border: 1px solid var(--border, #30343b);
+      border-radius: 6px;
+      background: var(--surface-2, #181a20);
+      color: var(--text, #e7e9ed);
+      white-space: nowrap;
     }
     .desktop-control.is-saving {
       opacity: 0.75;
@@ -520,9 +570,14 @@ export class SettingsApp implements AppView, OnInit {
   readonly prefs = inject(PreferencesService);
   readonly wm = inject(WindowManagerService);
   private readonly hostIntents = inject(DesktopHostIntentService);
+  private readonly permissions = inject(DesktopPermissionsBridgeService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly pendingTasks = inject(PendingTasks);
   private readonly store = inject(Store);
   readonly importItem = signal<DesktopHostItem | null>(null);
+  readonly permissionSnapshots = signal<readonly DesktopPermissionSnapshot[]>([]);
+  readonly permissionError = signal('');
+  readonly requestingPermission = signal<DesktopPermissionID | null>(null);
   readonly draftControls = this.store.selectSignal(selectDraftDesktopControls);
   readonly controlGroups = this.store.selectSignal(selectDesktopControlGroups);
   readonly visibleControlGroups = computed(() =>
@@ -597,6 +652,44 @@ export class SettingsApp implements AppView, OnInit {
     });
     this.destroyRef.onDestroy(offItems);
     this.store.dispatch(desktopControlsActions.load());
+    this.pendingTasks.run(async () => {
+      try {
+        this.permissionSnapshots.set(await this.permissions.status());
+      } catch (error) {
+        this.permissionError.set(errorMessage(error));
+      }
+    });
+  }
+
+  permissionForControl(key: string): DesktopPermissionSnapshot | null {
+    const id = permissionIDForControl(key);
+    return this.permissionSnapshots().find((snapshot) => snapshot.id === id) ?? null;
+  }
+
+  canRequestPermission(key: string): boolean {
+    const permission = this.permissionForControl(key);
+    return (
+      permission?.id === 'notifications' &&
+      !['granted', 'restricted', 'unsupported'].includes(permission.host)
+    );
+  }
+
+  requestPermission(id: DesktopPermissionID): void {
+    if (this.requestingPermission() !== null || id !== 'notifications') return;
+    this.requestingPermission.set(id);
+    this.permissionError.set('');
+    this.pendingTasks.run(async () => {
+      try {
+        const snapshot = await this.permissions.request(id);
+        this.permissionSnapshots.update((current) =>
+          current.map((item) => (item.id === snapshot.id ? snapshot : item)),
+        );
+      } catch (error) {
+        this.permissionError.set(errorMessage(error));
+      } finally {
+        this.requestingPermission.set(null);
+      }
+    });
   }
 
   setToggle(control: DesktopControl, value: boolean): void {
@@ -685,4 +778,22 @@ export class SettingsApp implements AppView, OnInit {
     const lang = this.prefs.lang();
     return lang === 'en' ? row[1] : (this.translations[lang]?.[row[0]] ?? '');
   }
+}
+
+const PERMISSION_CONTROL_IDS: Readonly<Record<string, DesktopPermissionID>> = {
+  'desktop.permissions.microphone': 'microphone',
+  'desktop.permissions.camera': 'camera',
+  'desktop.permissions.geolocation': 'geolocation',
+  'desktop.permissions.notifications': 'notifications',
+  'desktop.permissions.clipboard_read': 'clipboard-read',
+};
+
+function permissionIDForControl(key: string): DesktopPermissionID | null {
+  return PERMISSION_CONTROL_IDS[key] ?? null;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error && error.message
+    ? error.message
+    : 'The native permission state is unavailable.';
 }

@@ -53,6 +53,12 @@ func main() {
 	if len(args) == 0 {
 		core.Exit(cmdDefault(args))
 	}
+	if len(args) == 1 && isNativeLaunchArgument(args[0]) {
+		// Native protocol and document associations launch the same CLI
+		// binary with one argument. Start Wails so its lifecycle adapter can
+		// translate the argument into a typed URL/file event.
+		core.Exit(cmdGUI(args))
+	}
 
 	switch args[0] {
 	case "version", "-v", "--version":
@@ -101,6 +107,23 @@ func main() {
 		core.Print(core.Stderr(), "lthn: unknown subcommand %q\nrun `lthn help` for available commands\n", args[0])
 		core.Exit(2)
 	}
+}
+
+const maxNativeLaunchArgumentBytes = 4096
+
+func isNativeLaunchArgument(argument string) bool {
+	argument = core.Trim(argument)
+	if argument == "" || len(argument) > maxNativeLaunchArgumentBytes {
+		return false
+	}
+	for _, character := range []byte(argument) {
+		if character < 0x20 || character == 0x7f {
+			return false
+		}
+	}
+	lower := core.Lower(argument)
+	return core.HasPrefix(lower, "lthn://") ||
+		core.Lower(core.PathExt(argument)) == ".lthn"
 }
 
 // cmdDefault is invoked when `lthn` is run without a subcommand.

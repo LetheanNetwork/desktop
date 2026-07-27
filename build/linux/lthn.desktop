@@ -1,10 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=lthn
-Exec=lthn
+Name=Lethean Desktop
+Comment=Local AI, sovereign by design.
+Exec=/usr/local/bin/lthn %U
 Icon=lthn
-Categories=Development;
+Categories=Utility;Development;
 Terminal=false
-Keywords=wails
 Version=1.0
-StartupNotify=false
+StartupWMClass=lthn
+StartupNotify=true
+MimeType=x-scheme-handler/lthn;application/x-lethean;

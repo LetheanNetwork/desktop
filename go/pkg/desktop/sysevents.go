@@ -51,9 +51,9 @@ import (
 //	guiwindow.ActionWindowFullscreened            → "lthn:window:fullscreen"
 //	guiwindow.ActionWindowUnfullscreened          → "lthn:window:unfullscreen"
 //	guiwindow.ActionWindowRuntimeReady            → "lthn:window:ready"
-//	guinotification.ActionNotificationClicked     → "lthn:notification:click" (notification id)
-//	guinotification.ActionNotificationActionTriggered → "lthn:notification:action" ({notification_id, action_id})
-//	guinotification.ActionNotificationDismissed   → "lthn:notification:dismiss" (notification id)
+//	guinotification.ActionNotificationClicked     → "lthn:host:intent" (allowlisted notification intent)
+//	guinotification.ActionNotificationActionTriggered → "lthn:host:intent" (allowlisted notification action)
+//	guinotification.ActionNotificationDismissed   → "lthn:host:intent" (allowlisted notification dismissal)
 func registerSystemEvents(c *core.Core) {
 	if c == nil {
 		return
@@ -117,14 +117,26 @@ func registerSystemEvents(c *core.Core) {
 		case guiwindow.ActionWindowRuntimeReady:
 			return emitWindowEvent(c, "ready", event.Name, nil)
 		case guinotification.ActionNotificationClicked:
-			return emitCoreEvent(c, "lthn:notification:click", event.ID)
+			return emitHostNotificationIntent(
+				c,
+				"click",
+				event.ID,
+				"",
+			)
 		case guinotification.ActionNotificationActionTriggered:
-			return emitCoreEvent(c, "lthn:notification:action", map[string]any{
-				"notification_id": event.NotificationID,
-				"action_id":       event.ActionID,
-			})
+			return emitHostNotificationIntent(
+				c,
+				"action",
+				event.NotificationID,
+				event.ActionID,
+			)
 		case guinotification.ActionNotificationDismissed:
-			return emitCoreEvent(c, "lthn:notification:dismiss", event.ID)
+			return emitHostNotificationIntent(
+				c,
+				"dismiss",
+				event.ID,
+				"",
+			)
 		default:
 			return core.Ok(nil)
 		}

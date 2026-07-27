@@ -4,6 +4,7 @@ import { Store } from '@ngrx/store';
 import { provideMockStore } from '@ngrx/store/testing';
 import { desktopControlsActions } from '../../store/desktop-controls.actions';
 import { DesktopHostIntentService } from '../desktop-host-intent.service';
+import { DesktopPermissionsBridgeService } from '../desktop-permissions-bridge.service';
 import { DesktopControl } from '../../store/desktop-controls.models';
 import {
   desktopControlsFeature,
@@ -31,6 +32,19 @@ const controls: readonly DesktopControl[] = [
     choices: ['dark', 'light'],
   },
   {
+    key: 'desktop.permissions.notifications',
+    group: 'Notifications',
+    label: 'Web notifications',
+    description: 'Policy for notification requests from WebView content.',
+    kind: 'select',
+    value: 'default',
+    defaultValue: 'default',
+    configured: false,
+    live: false,
+    restartRequired: true,
+    choices: ['default', 'allow', 'deny'],
+  },
+  {
     key: 'desktop.single_instance.enabled',
     group: 'Single instance',
     label: 'Single-instance hand-off',
@@ -46,7 +60,8 @@ const controls: readonly DesktopControl[] = [
 
 const groups = [
   { name: 'Theme', controls: [controls[0]] },
-  { name: 'Single instance', controls: [controls[1]] },
+  { name: 'Single instance', controls: [controls[2]] },
+  { name: 'Notifications', controls: [controls[1]] },
 ];
 
 const win = {
@@ -74,9 +89,31 @@ describe('SettingsApp desktop controls', () => {
       },
     ),
   };
+  const permissions = {
+    status: vi.fn().mockResolvedValue([
+      { id: 'microphone', policy: 'default', host: 'unsupported' },
+      { id: 'camera', policy: 'default', host: 'unsupported' },
+      { id: 'geolocation', policy: 'default', host: 'unsupported' },
+      { id: 'notifications', policy: 'default', host: 'granted' },
+      { id: 'clipboard-read', policy: 'default', host: 'unsupported' },
+    ]),
+    request: vi.fn(),
+  };
 
   beforeEach(() => {
     hostIntents.claimItems.mockReturnValue(null);
+    permissions.status.mockResolvedValue([
+      { id: 'microphone', policy: 'default', host: 'unsupported' },
+      { id: 'camera', policy: 'default', host: 'unsupported' },
+      { id: 'geolocation', policy: 'default', host: 'unsupported' },
+      { id: 'notifications', policy: 'default', host: 'granted' },
+      { id: 'clipboard-read', policy: 'default', host: 'unsupported' },
+    ]);
+    permissions.request.mockResolvedValue({
+      id: 'notifications',
+      policy: 'default',
+      host: 'granted',
+    });
     const prefs = {
       lang: signal('en'),
       design: signal<'lethean' | 'custom'>('lethean'),
@@ -122,6 +159,7 @@ describe('SettingsApp desktop controls', () => {
         }),
         { provide: PreferencesService, useValue: prefs },
         { provide: DesktopHostIntentService, useValue: hostIntents },
+        { provide: DesktopPermissionsBridgeService, useValue: permissions },
         { provide: WindowManagerService, useValue: wm },
       ],
     });
@@ -140,6 +178,7 @@ describe('SettingsApp desktop controls', () => {
     expect(fixture.nativeElement.textContent).toContain('Interface theme');
     expect(fixture.nativeElement.textContent).toContain('Restart required');
     expect(fixture.nativeElement.textContent).toContain('Previous save failed safely.');
+    expect(fixture.nativeElement.textContent).toContain('Host: granted');
   });
 
   it('shows an opaque .lthn hand-off for explicit import review', async () => {
@@ -160,6 +199,30 @@ describe('SettingsApp desktop controls', () => {
     expect(hostIntents.onItems).toHaveBeenCalledWith('settings', expect.any(Function));
     expect(fixture.nativeElement.textContent).toContain('profile.lthn');
     expect(fixture.nativeElement.textContent).toContain('ready for import review');
+  });
+
+  it('requests native notification permission only after the explicit button is used', async () => {
+    permissions.status.mockResolvedValueOnce([
+      { id: 'microphone', policy: 'default', host: 'unsupported' },
+      { id: 'camera', policy: 'default', host: 'unsupported' },
+      { id: 'geolocation', policy: 'default', host: 'unsupported' },
+      { id: 'notifications', policy: 'default', host: 'prompt' },
+      { id: 'clipboard-read', policy: 'default', host: 'unsupported' },
+    ]);
+    const fixture = TestBed.createComponent(SettingsApp);
+    fixture.componentRef.setInput('win', win);
+    await fixture.whenStable();
+
+    expect(permissions.request).not.toHaveBeenCalled();
+    (
+      fixture.nativeElement.querySelector(
+        '[data-action="request-permission-notifications"]',
+      ) as HTMLButtonElement
+    ).click();
+    await fixture.whenStable();
+
+    expect(permissions.request).toHaveBeenCalledWith('notifications');
+    expect(fixture.nativeElement.textContent).toContain('Host: granted');
   });
 
   it('edits only the draft when a control changes', async () => {
