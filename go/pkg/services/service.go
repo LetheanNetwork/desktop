@@ -3,6 +3,7 @@
 package services
 
 import (
+	"runtime"
 	"sort"
 	"sync"
 	"time"
@@ -145,10 +146,35 @@ func Register(c *core.Core) core.Result {
 				GracePeriodMillis: 5_000,
 				Owner:             "lethean",
 			},
+			{
+				ID:          "inference",
+				DisplayName: "LEM inference runtime",
+				Description: "Optional local model runtime, started only on request.",
+				Kind:        KindService,
+				Command:     inferenceExecutable(args[0]),
+				Arguments: []string{
+					"serve",
+					"--addr",
+					"127.0.0.1:36911",
+					"--shutdown-timeout",
+					"10s",
+				},
+				RestartPolicy:     RestartNever,
+				GracePeriodMillis: 15_000,
+				Owner:             "lethean",
+			},
 		},
 		Limits: limits,
 	})
 	return manager.Register(c)
+}
+
+func inferenceExecutable(lthnExecutable string) string {
+	name := "lem"
+	if runtime.GOOS == "windows" {
+		name = "lem.exe"
+	}
+	return core.PathJoin(core.PathDir(lthnExecutable), name)
 }
 
 // Register attaches this instance to Core and returns it as the named service.
