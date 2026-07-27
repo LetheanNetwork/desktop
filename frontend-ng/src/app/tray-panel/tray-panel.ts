@@ -10,13 +10,20 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import {
+  MODEL_RUNTIME_METHODS,
+  parseModelRuntimeSnapshot,
+  rejectModelRuntimeForbiddenFields,
+} from '../desktop/desktop-model-runtime-bridge.service';
+import type {
+  ModelRuntimeModel,
+  ModelRuntimeSnapshot,
+} from '../desktop/desktop-model-runtime.models';
 
 const WINDOW_BINDING = 'dappco.re/go/render/display/webkit.WindowBindingService';
 const WINDOW_OPEN_METHOD = `${WINDOW_BINDING}.Open`;
 const WINDOW_HIDE_METHOD = `${WINDOW_BINDING}.Hide`;
-const LEMMA_STATUS_METHOD = 'dappco.re/lthn/desktop/pkg/lemma.WailsService.Status';
-const TELEMETRY_METHOD =
-  'dappco.re/lthn/desktop/pkg/telemetry.Service.CurrentSample';
+const TELEMETRY_METHOD = 'dappco.re/lthn/desktop/pkg/telemetry.Service.CurrentSample';
 const TRAY_OPEN_EVENT = 'lthn:tray:open';
 const TRAY_PANEL_WINDOW = 'tray-panel';
 const REFRESH_INTERVAL_MS = 30_000;
@@ -42,14 +49,6 @@ export const TRAY_PANEL_RUNTIME = new InjectionToken<TrayPanelRuntime>('TRAY_PAN
 
 type TrayPanelTab = 'system' | 'runner' | 'activity';
 type TrayPanelTarget = 'desktop' | 'chat' | 'models' | 'settings' | 'telemetry';
-
-interface ModelStatus {
-  readonly modelPath: string;
-  readonly runtime: string;
-  readonly loadedAtUnix: number;
-  readonly contextLength: number;
-  readonly parallelSlots: number;
-}
 
 interface ProcessTelemetry {
   readonly heapAllocMB: number;
@@ -91,17 +90,27 @@ export class TrayPanel {
   readonly tabs: readonly TrayPanelTab[] = ['system', 'runner', 'activity'];
   readonly quickActions = QUICK_ACTIONS;
   readonly activeTab = signal<TrayPanelTab>('system');
-  readonly model = signal<ModelStatus | null>(null);
+  readonly runtimeSnapshot = signal<ModelRuntimeSnapshot | null>(null);
+  readonly model = computed<ModelRuntimeModel | null>(() => {
+    const snapshot = this.runtimeSnapshot();
+    if (!snapshot?.activeModelId) return null;
+    return snapshot.models.find((model) => model.id === snapshot.activeModelId) ?? null;
+  });
   readonly telemetry = signal<ProcessTelemetry | null>(null);
   readonly loading = signal(true);
   readonly launching = signal<TrayPanelTarget | null>(null);
   readonly statusMessage = signal('');
   readonly refreshedAt = signal<Date | null>(null);
 
-  readonly modelName = computed(() => basename(this.model()?.modelPath ?? ''));
+  readonly modelName = computed(() => this.model()?.displayName ?? '');
   readonly heapLabel = computed(() => formatMegabytes(this.telemetry()?.heapAllocMB));
   readonly uptimeLabel = computed(() => formatUptime(this.telemetry()?.uptimeSeconds));
-  readonly loadedLabel = computed(() => formatLoadedAt(this.model()?.loadedAtUnix));
+  readonly loadedLabel = computed(() => formatLoadedAt(this.model()?.loadedAt));
+  readonly runnerStateLabel = computed(() => formatRuntimeState(this.runtimeSnapshot()?.state));
+  readonly gcPauseLabel = computed(() => {
+    const pause = this.telemetry()?.lastGCPauseMs;
+    return pause === undefined ? '—' : `${pause.toFixed(1)} ms`;
+  });
 
   constructor() {
     if (!isPlatformBrowser(this.platformId)) return;
@@ -126,15 +135,16 @@ export class TrayPanel {
 
     try {
       const [modelResult, telemetryResult] = await Promise.allSettled([
-        this.runtime.call(LEMMA_STATUS_METHOD, []),
+        this.runtime.call(MODEL_RUNTIME_METHODS.snapshot, []),
         this.runtime.call(TELEMETRY_METHOD, []),
       ]);
 
-      let nextModel: ModelStatus | null = null;
+      let nextRuntime: ModelRuntimeSnapshot | null = null;
       let runnerUnavailable = modelResult.status === 'rejected';
       if (modelResult.status === 'fulfilled') {
         try {
-          nextModel = modelStatusFrom(modelResult.value);
+          nextRuntime = modelRuntimeSnapshotFrom(modelResult.value);
+          runnerUnavailable = ['unavailable', 'failed'].includes(nextRuntime.state);
         } catch {
           runnerUnavailable = true;
         }
@@ -149,12 +159,10 @@ export class TrayPanel {
         }
       }
 
-      this.model.set(nextModel);
+      this.runtimeSnapshot.set(nextRuntime);
       this.telemetry.set(nextTelemetry);
       this.statusMessage.set(
-        runnerUnavailable
-          ? 'The local runner is offline. Desktop tools remain available.'
-          : '',
+        runnerUnavailable ? 'The local runner is offline. Desktop tools remain available.' : '',
       );
       this.refreshedAt.set(new Date());
     } finally {
@@ -188,19 +196,10 @@ function unwrapResult(value: unknown): unknown {
   return Object.hasOwn(value, 'Value') ? value['Value'] : value['value'];
 }
 
-function modelStatusFrom(value: unknown): ModelStatus | null {
+function modelRuntimeSnapshotFrom(value: unknown): ModelRuntimeSnapshot {
   const raw = unwrapResult(value);
-  if (!isRecord(raw)) return null;
-  const modelPath = stringField(raw, 'model_path', 'ModelPath');
-  if (!modelPath) return null;
-  const config = isRecord(raw['config']) ? raw['config'] : {};
-  return {
-    modelPath,
-    runtime: stringField(raw, 'runtime', 'Runtime') || 'local',
-    loadedAtUnix: numberField(raw, 'loaded_at_unix', 'LoadedAtUnix'),
-    contextLength: numberField(config, 'context_length', 'ContextLength'),
-    parallelSlots: numberField(config, 'parallel_slots', 'ParallelSlots'),
-  };
+  rejectModelRuntimeForbiddenFields(raw);
+  return parseModelRuntimeSnapshot(raw);
 }
 
 function processTelemetryFrom(value: unknown): ProcessTelemetry | null {
@@ -217,13 +216,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function stringField(value: Record<string, unknown>, ...keys: string[]): string {
-  for (const key of keys) {
-    if (typeof value[key] === 'string') return value[key];
-  }
-  return '';
-}
-
 function numberField(value: Record<string, unknown>, ...keys: string[]): number {
   for (const key of keys) {
     if (typeof value[key] === 'number' && Number.isFinite(value[key])) return value[key];
@@ -231,28 +223,33 @@ function numberField(value: Record<string, unknown>, ...keys: string[]): number 
   return 0;
 }
 
-function basename(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? '';
-}
-
 function formatMegabytes(value: number | undefined): string {
-  return `${(value ?? 0).toFixed(1)} MB`;
+  return value === undefined ? '—' : `${value.toFixed(1)} MB`;
 }
 
 function formatUptime(value: number | undefined): string {
-  const seconds = Math.max(0, Math.floor(value ?? 0));
+  if (value === undefined) return '—';
+  const seconds = Math.max(0, Math.floor(value));
   const hours = Math.floor(seconds / 3_600);
   const minutes = Math.floor((seconds % 3_600) / 60);
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
 }
 
-function formatLoadedAt(value: number | undefined): string {
+function formatLoadedAt(value: string | undefined): string {
   if (!value) return 'Not loaded';
   return new Intl.DateTimeFormat('en-GB', {
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value * 1_000));
+  }).format(new Date(value));
+}
+
+function formatRuntimeState(value: ModelRuntimeSnapshot['state'] | undefined): string {
+  if (!value) return 'Unavailable';
+  return value
+    .split('-')
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
 }
 
 function errorMessage(error: unknown): string {

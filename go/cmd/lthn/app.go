@@ -795,7 +795,6 @@ var wailsBindingCatalogue = []string{
 	"runner",
 	"server",
 	"sessions",
-	"models",
 	"modelruntime",
 	"downloader",
 	"firstlaunch",

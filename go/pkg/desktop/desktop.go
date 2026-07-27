@@ -70,7 +70,6 @@ import (
 	"dappco.re/lthn/desktop/pkg/marketing/social"
 	"dappco.re/lthn/desktop/pkg/marketplace"
 	"dappco.re/lthn/desktop/pkg/modelruntime"
-	"dappco.re/lthn/desktop/pkg/models"
 	"dappco.re/lthn/desktop/pkg/office/documents"
 	officefile "dappco.re/lthn/desktop/pkg/office/files"
 	"dappco.re/lthn/desktop/pkg/office/mail"
@@ -534,7 +533,6 @@ func (s *Service) Run() core.Result {
 		gui.Bind(s.opts.Runner),
 		gui.Bind(s.opts.Server),
 		gui.Bind(sessions.NewWailsService(s.opts.Core)),
-		gui.Bind(models.NewWailsService()),
 		gui.Bind(downloaderSvc),
 		gui.Bind(firstlaunch.NewWailsService()),
 		gui.Bind(integrations.NewWailsService()),
@@ -549,15 +547,10 @@ func (s *Service) Run() core.Result {
 		gui.Bind(pluginSvc),
 		gui.Bind(sandboxSvc),
 		gui.Bind(contentshield.NewWailsService()),
-		// lemma → admin facade on lthn-mlx /v1/admin/* (status / reload /
-		// download / profiles). Exposes the Lemma surface to the WebView
-		// without leaking the Bearer token to JS — the service runs in-Go
-		// with read access to ~/Lethean/data/admin.token; JS only sees
-		// the typed verb signatures Wails generates from this struct.
-		gui.Bind(lemma.NewWailsService(lemma.AdminConfig{})),
-		// ModelRuntime is the path-safe replacement surface. Keep the
-		// legacy Lemma binding until the remaining tray consumer migrates;
-		// no new renderer code should depend on Lemma.
+		// ModelRuntime is the sole renderer-facing LEM surface. Trusted
+		// Go-side tray and fleet reconciliation below may still use the
+		// bounded lemma.Admin protocol client, but the WebView receives no
+		// native model paths, endpoint details, or credentials.
 		gui.Bind(modelruntime.NewWailsService(modelRuntimeSvc)),
 		// calibrate → lthn-mlx profiling CLI (discover / bench / auto-tune).
 		// Sibling to lemma: lemma is the HTTP admin client to a *running*

@@ -109,8 +109,14 @@ describe('app-view WebMCP tools', () => {
       system_tab: 'overview',
     });
     expect(state.models).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: 'llama-3.1-70b' })]),
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'model-0000000000000001',
+          name: 'gemma-4-e2b',
+        }),
+      ]),
     );
+    expect(JSON.stringify(state.models)).not.toMatch(/model_path|[/\\]Users/iu);
 
     await call('control_show_section', { section: 'power' });
     expect(windows.setSub).toHaveBeenCalledWith('w-control', 'power');

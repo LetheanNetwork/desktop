@@ -71,26 +71,6 @@ describe('DesktopLiveDataService', () => {
     });
   });
 
-  it('normalises local model catalogue entries without inventing runtime metrics', async () => {
-    surface.call.mockResolvedValue([
-      {
-        name: 'gemma-4-e2b-q4_k_m.gguf',
-        path: '/tmp/models/gemma-4-e2b-q4_k_m.gguf',
-        size: 2_147_483_648,
-        is_dir: false,
-      },
-    ]);
-
-    await expect(service.models()).resolves.toEqual([
-      {
-        name: 'gemma-4-e2b-q4_k_m.gguf',
-        path: '/tmp/models/gemma-4-e2b-q4_k_m.gguf',
-        sizeBytes: 2_147_483_648,
-        isDirectory: false,
-      },
-    ]);
-  });
-
   it('normalises recent benchmark history for Control charts and rows', async () => {
     surface.call.mockResolvedValue([
       {
@@ -152,6 +132,10 @@ describe('DesktopLiveDataService', () => {
     expect('files' in service).toBe(false);
   });
 
+  it('does not expose the retired absolute-path Models bridge', () => {
+    expect('models' in service).toBe(false);
+  });
+
   it('keeps successful Control sections when one backend service is unavailable', async () => {
     surface.call.mockImplementation(async (method: string) => {
       if (method.endsWith('.CurrentSample')) {
@@ -168,7 +152,6 @@ describe('DesktopLiveDataService', () => {
           watts_idle: 0,
         };
       }
-      if (method.endsWith('.List')) return [];
       if (method.endsWith('.History')) return [];
       if (method.endsWith('.ProcessList')) throw new Error('process registry offline');
       throw new Error(`Unexpected method: ${method}`);
@@ -194,7 +177,6 @@ describe('DesktopLiveDataService', () => {
     const snapshot = await service.control();
 
     expect(snapshot.telemetry?.heapAllocMB).toBe(64);
-    expect(snapshot.models).toEqual([]);
     expect(snapshot.benchmarkRuns).toEqual([]);
     expect(snapshot.settings?.controls[0].key).toBe('desktop.show_widgets');
     expect(snapshot.processes).toBeUndefined();

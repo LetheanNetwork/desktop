@@ -1,4 +1,9 @@
-import { createDemoControlViewState, mergeControlLiveSnapshot } from './control-view-state';
+import { createDemoModelRuntimeSnapshot } from '../../desktop-model-runtime-demo.data';
+import {
+  createDemoControlViewState,
+  mergeControlLiveSnapshot,
+  mergeControlModelRuntime,
+} from './control-view-state';
 
 describe('Control view state', () => {
   it('preserves the complete labelled Control demo', () => {
@@ -22,14 +27,6 @@ describe('Control view state', () => {
 
   it('replaces only successful live sections', () => {
     const state = mergeControlLiveSnapshot({
-      models: [
-        {
-          name: 'gemma.gguf',
-          path: '/tmp/gemma.gguf',
-          sizeBytes: 2_147_483_648,
-          isDirectory: false,
-        },
-      ],
       processes: [
         {
           id: 'build-1',
@@ -42,14 +39,7 @@ describe('Control view state', () => {
     });
 
     expect(state.dataState).toBe('mixed');
-    expect(state.models.rows).toEqual([
-      {
-        name: 'gemma.gguf',
-        size: '2 GB',
-        source: 'local file',
-        status: 'available',
-      },
-    ]);
+    expect(state.models.rows).toHaveLength(6);
     expect(state.system.processColumns.map(({ key }) => key)).toEqual([
       'command',
       'id',
@@ -58,5 +48,54 @@ describe('Control view state', () => {
     ]);
     expect(state.power.metrics[0].value).toBe('196 W');
     expect(state.settings.groups[0].name).toBe('Server');
+  });
+
+  it('replaces model fixtures with a path-free shared runtime snapshot', () => {
+    const runtime = {
+      ...createDemoModelRuntimeSnapshot('ready'),
+      metrics: {
+        promptTokensPerSecond: 42.25,
+        activeMemoryBytes: 2_147_483_648,
+        uptimeSeconds: 600,
+      },
+      history: [
+        {
+          state: 'ready' as const,
+          at: '2026-07-27T13:00:00Z',
+          promptTokensPerSecond: 40,
+        },
+        {
+          state: 'ready' as const,
+          at: '2026-07-27T13:00:05Z',
+          promptTokensPerSecond: 42.25,
+        },
+      ],
+    };
+
+    const state = mergeControlModelRuntime(createDemoControlViewState(), runtime, true);
+
+    expect(state.models.state).toBe('ready');
+    expect(state.models.activeModelId).toBe('model-0000000000000001');
+    expect(state.models.availableModels).toBe(runtime.models);
+    expect(state.models.metrics.map(({ value }) => value)).toEqual(['42.3', '2 GB', '3', '10m']);
+    expect(state.models.chart.samples).toEqual([40, 42.25]);
+    expect(state.models.rows[0]).toMatchObject({
+      id: 'model-0000000000000001',
+      name: 'gemma-4-e2b',
+      format: 'snapshot',
+      status: 'loaded',
+    });
+    expect(JSON.stringify(state.models.rows)).not.toMatch(/[/\\]|path/iu);
+  });
+
+  it('never copies demo runtime numbers into a connected snapshot with unsupported metrics', () => {
+    const runtime = createDemoModelRuntimeSnapshot('model-less');
+
+    const state = mergeControlModelRuntime(createDemoControlViewState(), runtime, true);
+
+    expect(state.models.metrics.map(({ value }) => value)).toEqual(['—', '—', '3', '—']);
+    expect(state.models.chart.samples).toEqual([]);
+    expect(JSON.stringify(state.models)).not.toContain('34.2');
+    expect(JSON.stringify(state.models)).not.toContain('18.4 GB');
   });
 });

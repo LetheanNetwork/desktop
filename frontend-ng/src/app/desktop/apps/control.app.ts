@@ -10,6 +10,7 @@ import {
   OnDestroy,
   OnInit,
   PendingTasks,
+  computed,
   declareExperimentalWebMcpTool,
   inject,
   signal,
@@ -25,7 +26,9 @@ import {
   resolveDesktopData,
   type DesktopDataResource,
 } from '../desktop-data-resource';
+import type { DesktopDataState } from '../desktop-data-state';
 import { DesktopLiveDataService } from '../desktop-live-data.service';
+import { DesktopModelRuntimeResource } from '../desktop-model-runtime-resource.service';
 import { DesktopServicesBridgeService } from '../desktop-services-bridge.service';
 import { WindowManagerService } from '../window-manager.service';
 import { ControlModelsView } from './control/control-models.view';
@@ -41,9 +44,14 @@ import {
 } from './control/control-services.models';
 import { ControlSettingsView } from './control/control-settings.view';
 import { ControlSystemView } from './control/control-system.view';
-import { createDemoControlViewState, mergeControlLiveSnapshot } from './control/control-view-state';
+import {
+  createDemoControlViewState,
+  mergeControlLiveSnapshot,
+  mergeControlModelRuntime,
+} from './control/control-view-state';
 import type {
   ControlActionIntent,
+  ControlModelIntent,
   ControlSystemTab,
   ControlViewState,
 } from './control/control-view.models';
@@ -81,9 +89,10 @@ const SERVICES_STALE_AFTER_MS = 30_000;
       @switch (win.sub || 'models') {
         @case ('models') {
           <lthn-control-models-view
-            [dataState]="viewState().dataState"
+            [dataState]="modelDataState()"
             [model]="viewState().models"
-            (loadModel)="handleAction({ kind: 'load-model' })"
+            [pending]="modelRuntimePending()"
+            (modelAction)="handleModelAction($event)"
           />
         }
         @case ('runs') {
@@ -129,12 +138,38 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
 
   readonly wm = inject(WindowManagerService);
   private readonly liveData = inject(DesktopLiveDataService);
+  private readonly modelRuntime = inject(DesktopModelRuntimeResource);
   private readonly servicesBridge = inject(DesktopServicesBridgeService);
   private readonly pendingTasks = inject(PendingTasks);
   private readonly mcpTools = this.registerMcpTools();
-  readonly viewState = signal<ControlViewState>({
+  private readonly baseViewState = signal<ControlViewState>({
     ...createDemoControlViewState(),
     dataState: this.liveData.mode() === 'demo' ? 'demo' : 'loading',
+  });
+  readonly modelRuntimeResource = this.modelRuntime.resource;
+  readonly modelRuntimePending = this.modelRuntime.pending;
+  readonly viewState = computed(() => {
+    const resource = this.modelRuntimeResource();
+    return mergeControlModelRuntime(
+      this.baseViewState(),
+      resource.value,
+      resource.mode === 'connected',
+    );
+  });
+  readonly modelDataState = computed<DesktopDataState>(() => {
+    switch (this.modelRuntimeResource().state) {
+      case 'demo':
+        return 'demo';
+      case 'loading':
+        return 'loading';
+      case 'live':
+        return 'live';
+      case 'mixed':
+      case 'stale':
+        return 'mixed';
+      case 'unavailable':
+        return 'unavailable';
+    }
   });
   readonly servicesResource = signal<DesktopDataResource<DesktopServiceCatalogue>>(
     createDemoResource(createDemoServiceCatalogue(), SERVICES_DEMO_SOURCE),
@@ -145,9 +180,11 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
   private servicesEventsOff: (() => void) | null = null;
   private servicesRefresh: Promise<void> | null = null;
   private servicesRefreshQueued = false;
+  private modelRuntimeDisconnect: (() => void) | null = null;
   private destroyed = false;
 
   ngOnInit(): void {
+    this.modelRuntimeDisconnect = this.modelRuntime.connect();
     if (this.liveData.mode() === 'demo') return;
     void this.refresh();
     this.servicesResource.set(
@@ -163,18 +200,20 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
     this.destroyed = true;
     this.servicesEventsOff?.();
     this.servicesEventsOff = null;
+    this.modelRuntimeDisconnect?.();
+    this.modelRuntimeDisconnect = null;
   }
 
   async refresh(): Promise<void> {
     if (this.liveData.mode() === 'demo' || this.destroyed) return;
-    this.viewState.update((state) => ({ ...state, dataState: 'loading' }));
+    this.baseViewState.update((state) => ({ ...state, dataState: 'loading' }));
     try {
       const snapshot = await this.liveData.control();
       if (this.destroyed) return;
-      this.viewState.set(mergeControlLiveSnapshot(snapshot));
+      this.baseViewState.set(mergeControlLiveSnapshot(snapshot));
     } catch {
       if (this.destroyed) return;
-      this.viewState.set({
+      this.baseViewState.set({
         ...createDemoControlViewState(),
         dataState: 'unavailable',
       });
@@ -189,6 +228,11 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
   handleAction(_intent: ControlActionIntent): void {
     // The existing placeholder buttons remain inert until their typed backend
     // actions in TODO.md are implemented.
+  }
+
+  handleModelAction(intent: ControlModelIntent): void {
+    if (this.destroyed || this.modelRuntimePending() !== null) return;
+    this.pendingTasks.run(() => this.modelRuntime.perform(intent));
   }
 
   handleServiceAction(intent: ControlServiceIntent): void {

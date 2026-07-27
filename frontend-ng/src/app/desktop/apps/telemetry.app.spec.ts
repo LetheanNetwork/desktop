@@ -2,8 +2,12 @@
 
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { createDemoResource, type DesktopDataResource } from '../desktop-data-resource';
 import type { ProcessTelemetry } from '../desktop-live-data.service';
 import { DesktopLiveDataService } from '../desktop-live-data.service';
+import { createDemoModelRuntimeSnapshot } from '../desktop-model-runtime-demo.data';
+import type { ModelRuntimeOperation, ModelRuntimeSnapshot } from '../desktop-model-runtime.models';
+import { DesktopModelRuntimeResource } from '../desktop-model-runtime-resource.service';
 import type { Win } from '../desktop.data';
 import { TelemetryApp } from './telemetry.app';
 
@@ -39,12 +43,34 @@ describe('TelemetryApp', () => {
     mode: mode.asReadonly(),
     telemetry: vi.fn<() => Promise<ProcessTelemetry>>(),
   };
+  const modelRuntimeState = signal<DesktopDataResource<ModelRuntimeSnapshot>>(
+    createDemoResource(createDemoModelRuntimeSnapshot(), 'Lethean demo fixture · Model runtime'),
+  );
+  const modelRuntimePending = signal<ModelRuntimeOperation | null>(null);
+  let modelRuntimeDisconnect = vi.fn();
+  const modelRuntime = {
+    resource: modelRuntimeState.asReadonly(),
+    pending: modelRuntimePending.asReadonly(),
+    connect: vi.fn(),
+    perform: vi.fn<(operation: ModelRuntimeOperation) => Promise<void>>(),
+  };
 
   beforeEach(() => {
     mode.set('demo');
     liveData.telemetry.mockReset();
+    modelRuntimeDisconnect = vi.fn();
+    modelRuntimeState.set(
+      createDemoResource(createDemoModelRuntimeSnapshot(), 'Lethean demo fixture · Model runtime'),
+    );
+    modelRuntimePending.set(null);
+    modelRuntime.connect.mockReset();
+    modelRuntime.connect.mockReturnValue(modelRuntimeDisconnect);
+    modelRuntime.perform.mockReset();
     TestBed.configureTestingModule({
-      providers: [{ provide: DesktopLiveDataService, useValue: liveData }],
+      providers: [
+        { provide: DesktopLiveDataService, useValue: liveData },
+        { provide: DesktopModelRuntimeResource, useValue: modelRuntime },
+      ],
     });
   });
 
@@ -55,10 +81,26 @@ describe('TelemetryApp', () => {
   });
 
   function create() {
+    if (mode() === 'live' && modelRuntimeState().mode === 'demo') {
+      setLiveModelRuntime(createDemoModelRuntimeSnapshot('model-less'));
+    }
     const fixture = TestBed.createComponent(TelemetryApp);
     fixture.componentRef.setInput('win', telemetryWin);
     fixture.detectChanges();
     return fixture;
+  }
+
+  function setLiveModelRuntime(snapshot: ModelRuntimeSnapshot): void {
+    modelRuntimeState.set({
+      mode: 'connected',
+      state: 'live',
+      source: 'Local LEM runtime',
+      updatedAt: Date.parse(snapshot.refreshedAt),
+      refreshing: false,
+      error: null,
+      canRetry: false,
+      value: snapshot,
+    });
   }
 
   it('renders deterministic labelled demo data without a live read', () => {
@@ -71,6 +113,7 @@ describe('TelemetryApp', () => {
     expect(text).toContain('41.8');
     expect(text).toContain('llama-3.1-70b');
     expect(liveData.telemetry).not.toHaveBeenCalled();
+    expect(modelRuntime.connect).toHaveBeenCalledOnce();
   });
 
   it('starts connected with loading placeholders and no fixture substitution', () => {
@@ -91,23 +134,43 @@ describe('TelemetryApp', () => {
     expect(text).not.toContain('llama-3.1-70b');
   });
 
-  it('renders live process data with explicitly demo-backed power', async () => {
+  it('renders unsupported connected metrics as unavailable without fixture substitution', async () => {
     mode.set('live');
     liveData.telemetry.mockResolvedValue(SAMPLE);
     const fixture = create();
 
-    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('mixed'));
+    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('live'));
     fixture.detectChanges();
     const text = fixture.nativeElement.textContent;
 
-    expect(text).toContain('Live + demo');
+    expect(text).toContain('Live data');
     expect(text).toContain('Local process runtime');
-    expect(text).toContain('Heap allocation');
-    expect(text).toContain('128.3');
-    expect(text).toContain('Power draw · demo');
-    expect(text).toContain('Goroutines 42');
+    expect(text).toContain('Throughput');
+    expect(text).toContain('Power draw');
+    expect(text).toContain('Model —');
+    expect(text).toContain('Memory —');
     expect(text).toContain('Uptime 2h 31m');
+    expect(text).not.toContain('41.8');
+    expect(text).not.toContain('207');
     expect(fixture.componentInstance.resource().updatedAt).not.toBeNull();
+  });
+
+  it('reacts to the same shared runtime snapshot without another process read', async () => {
+    mode.set('live');
+    setLiveModelRuntime(createDemoModelRuntimeSnapshot('model-less'));
+    liveData.telemetry.mockResolvedValue(SAMPLE);
+    const fixture = create();
+    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('live'));
+    liveData.telemetry.mockClear();
+    const ready = createDemoModelRuntimeSnapshot('ready');
+
+    setLiveModelRuntime(ready);
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.modelRuntimeResource().value).toBe(ready);
+    expect(fixture.nativeElement.textContent).toContain('gemma-4-e2b');
+    expect(fixture.nativeElement.textContent).toContain('41.8');
+    expect(liveData.telemetry).not.toHaveBeenCalled();
   });
 
   it('renders positive native power as wholly live', async () => {
@@ -143,7 +206,7 @@ describe('TelemetryApp', () => {
     mode.set('live');
     liveData.telemetry.mockResolvedValueOnce(SAMPLE);
     const fixture = create();
-    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('mixed'));
+    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('live'));
     const successful = fixture.componentInstance.resource();
 
     liveData.telemetry.mockRejectedValueOnce(new Error('connection dropped'));
@@ -156,7 +219,7 @@ describe('TelemetryApp', () => {
       value: successful.value,
       canRetry: true,
     });
-    expect(fixture.nativeElement.textContent).toContain('128.3');
+    expect(fixture.nativeElement.textContent).toContain('Throughput');
     expect(fixture.nativeElement.textContent).toContain('Live telemetry is unavailable.');
   });
 
@@ -170,29 +233,29 @@ describe('TelemetryApp', () => {
 
     fixture.nativeElement.querySelector('button[data-action="retry"]').click();
 
-    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('mixed'));
+    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('live'));
     expect(liveData.telemetry).toHaveBeenCalledTimes(2);
   });
 
   it('recovers stale data without resetting its successful history', async () => {
     mode.set('live');
     liveData.telemetry
-      .mockResolvedValueOnce(SAMPLE)
+      .mockResolvedValueOnce({ ...SAMPLE, wattsActive: 200 })
       .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValueOnce({ ...SAMPLE, heapAllocMB: 130 });
+      .mockResolvedValueOnce({ ...SAMPLE, wattsActive: 230 });
     const fixture = create();
-    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('mixed'));
+    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('live'));
 
     await fixture.componentInstance.refresh();
     expect(fixture.componentInstance.resource().state).toBe('stale');
     await fixture.componentInstance.refresh();
 
     expect(fixture.componentInstance.resource()).toMatchObject({
-      state: 'mixed',
+      state: 'live',
       error: null,
       canRetry: false,
     });
-    expect(fixture.componentInstance.resource().value?.primary.history).toEqual([128.25, 130]);
+    expect(fixture.componentInstance.resource().value?.power.history).toEqual([200, 230]);
   });
 
   it('skips an overlapping manual refresh', async () => {
@@ -209,7 +272,7 @@ describe('TelemetryApp', () => {
     expect(liveData.telemetry).toHaveBeenCalledOnce();
 
     resolve(SAMPLE);
-    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('mixed'));
+    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('live'));
   });
 
   it('polls every five seconds and stops polling when destroyed', async () => {
@@ -243,6 +306,14 @@ describe('TelemetryApp', () => {
     expect(setInterval).not.toHaveBeenCalled();
     expect(liveData.telemetry).not.toHaveBeenCalled();
     fixture.destroy();
+  });
+
+  it('disconnects its shared runtime consumer when the Telemetry window closes', () => {
+    const fixture = create();
+
+    fixture.destroy();
+
+    expect(modelRuntimeDisconnect).toHaveBeenCalledOnce();
   });
 
   it('ignores a live result that settles after destruction', async () => {

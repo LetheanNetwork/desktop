@@ -18,6 +18,7 @@ import {
 import { AppView } from './app-view';
 import { Win, TELEMETRY } from '../desktop.data';
 import { DesktopLiveDataService } from '../desktop-live-data.service';
+import { DesktopModelRuntimeResource } from '../desktop-model-runtime-resource.service';
 import {
   beginDesktopDataRefresh,
   createConnectedResource,
@@ -28,7 +29,11 @@ import {
 } from '../desktop-data-resource';
 import { DesktopDataStatusView } from '../desktop-data-status.view';
 import type { TelemetryDemoSeries, TelemetryViewData } from './telemetry/telemetry-view.models';
-import { createDemoTelemetryView, createLiveTelemetryView } from './telemetry/telemetry-view-state';
+import {
+  createDemoTelemetryView,
+  createLiveTelemetryView,
+  overlayRuntimeTelemetryView,
+} from './telemetry/telemetry-view-state';
 
 const TELEMETRY_POLL_MS = 5_000;
 const TELEMETRY_STALE_AFTER_MS = TELEMETRY_POLL_MS * 2;
@@ -94,8 +99,10 @@ const TELEMETRY_UNAVAILABLE = $localize`:Telemetry unavailable error@@telemetry.
 })
 export class TelemetryApp implements AppView, OnInit, OnDestroy {
   private readonly liveData = inject(DesktopLiveDataService);
+  private readonly modelRuntime = inject(DesktopModelRuntimeResource);
   private refreshInFlight = false;
   private pollHandle: number | undefined;
+  private modelRuntimeDisconnect: (() => void) | null = null;
   private destroyed = false;
 
   @Input() win!: Win;
@@ -111,7 +118,12 @@ export class TelemetryApp implements AppView, OnInit, OnDestroy {
       TELEMETRY_DEMO_SOURCE,
     ),
   );
-  readonly view = computed(() => this.resource().value);
+  readonly modelRuntimeResource = this.modelRuntime.resource;
+  readonly view = computed(() => {
+    const resource = this.resource();
+    if (resource.value === null || resource.mode === 'demo') return resource.value;
+    return overlayRuntimeTelemetryView(resource.value, this.modelRuntimeResource().value);
+  });
   readonly primaryLabel = computed(
     () =>
       this.view()?.primary.label ??
@@ -129,6 +141,7 @@ export class TelemetryApp implements AppView, OnInit, OnDestroy {
   readonly powerJson = computed(() => JSON.stringify(this.view()?.power.history ?? []));
 
   ngOnInit(): void {
+    this.modelRuntimeDisconnect = this.modelRuntime.connect();
     const demo = createDemoTelemetryView(this.demoSeries());
     if (this.liveData.mode() === 'demo') {
       this.resource.set(createDemoResource(demo, TELEMETRY_DEMO_SOURCE));
@@ -146,6 +159,8 @@ export class TelemetryApp implements AppView, OnInit, OnDestroy {
       window.clearInterval(this.pollHandle);
       this.pollHandle = undefined;
     }
+    this.modelRuntimeDisconnect?.();
+    this.modelRuntimeDisconnect = null;
   }
 
   async refresh(): Promise<void> {
@@ -158,7 +173,11 @@ export class TelemetryApp implements AppView, OnInit, OnDestroy {
     try {
       const sample = await this.liveData.telemetry();
       if (this.destroyed) return;
-      const mapped = createLiveTelemetryView(sample, this.resource().value, this.demoSeries());
+      const mapped = createLiveTelemetryView(
+        sample,
+        this.modelRuntimeResource().value,
+        this.resource().value,
+      );
       this.resource.update((resource) =>
         resolveDesktopData(resource, mapped.value, mapped.state, TELEMETRY_LIVE_SOURCE, Date.now()),
       );

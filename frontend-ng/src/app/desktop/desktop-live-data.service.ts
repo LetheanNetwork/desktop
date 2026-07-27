@@ -5,7 +5,6 @@ import { DesktopControlsBridgeService } from './desktop-controls-bridge.service'
 import { SurfaceBridgeService } from './surfaces/surface-bridge.service';
 
 const TELEMETRY_METHOD = 'dappco.re/lthn/desktop/pkg/telemetry.Service.CurrentSample';
-const MODELS_METHOD = 'dappco.re/lthn/desktop/pkg/models.WailsService.List';
 const BENCHMARK_HISTORY_METHOD = 'dappco.re/lthn/desktop/pkg/benchmark.Service.History';
 const PROCESS_LIST_METHOD = 'dappco.re/lthn/desktop/pkg/build.Service.ProcessList';
 
@@ -22,13 +21,6 @@ export interface ProcessTelemetry {
   readonly lastGCPauseMs: number;
   readonly wattsActive: number;
   readonly wattsIdle: number;
-}
-
-export interface LocalModelEntry {
-  readonly name: string;
-  readonly path: string;
-  readonly sizeBytes: number;
-  readonly isDirectory: boolean;
 }
 
 export interface BenchmarkRun {
@@ -53,12 +45,10 @@ export interface DesktopProcess {
   readonly exitCode: number;
 }
 
-export type ControlDataSection =
-  'telemetry' | 'models' | 'benchmarkRuns' | 'processes' | 'settings';
+export type ControlDataSection = 'telemetry' | 'benchmarkRuns' | 'processes' | 'settings';
 
 export interface ControlLiveSnapshot {
   readonly telemetry?: ProcessTelemetry;
-  readonly models?: readonly LocalModelEntry[];
   readonly benchmarkRuns?: readonly BenchmarkRun[];
   readonly processes?: readonly DesktopProcess[];
   readonly settings?: DesktopControlSnapshot;
@@ -76,15 +66,6 @@ export class DesktopLiveDataService {
   async telemetry(): Promise<ProcessTelemetry> {
     this.requireLiveMode();
     return parseTelemetry(await this.bridge.call(TELEMETRY_METHOD));
-  }
-
-  async models(): Promise<readonly LocalModelEntry[]> {
-    this.requireLiveMode();
-    const raw = await this.bridge.call(MODELS_METHOD);
-    if (!Array.isArray(raw)) {
-      throw new Error('The local model catalogue response is unavailable.');
-    }
-    return raw.map(parseModel);
   }
 
   async benchmarkRuns(limit = 20): Promise<readonly BenchmarkRun[]> {
@@ -118,14 +99,12 @@ export class DesktopLiveDataService {
     this.requireLiveMode();
     const reads = await Promise.allSettled([
       this.telemetry(),
-      this.models(),
       this.benchmarkRuns(20),
       this.processes(),
       this.controls.settings(),
     ] as const);
     const sectionNames: readonly ControlDataSection[] = [
       'telemetry',
-      'models',
       'benchmarkRuns',
       'processes',
       'settings',
@@ -139,10 +118,9 @@ export class DesktopLiveDataService {
 
     return {
       ...fulfilledProperty('telemetry', reads[0]),
-      ...fulfilledProperty('models', reads[1]),
-      ...fulfilledProperty('benchmarkRuns', reads[2]),
-      ...fulfilledProperty('processes', reads[3]),
-      ...fulfilledProperty('settings', reads[4]),
+      ...fulfilledProperty('benchmarkRuns', reads[1]),
+      ...fulfilledProperty('processes', reads[2]),
+      ...fulfilledProperty('settings', reads[3]),
       unavailable,
     };
   }
@@ -174,16 +152,6 @@ function parseTelemetry(raw: unknown): ProcessTelemetry {
     lastGCPauseMs: requiredNumber(record, 'last_gc_pause_ms', 'process telemetry'),
     wattsActive: requiredNumber(record, 'watts_active', 'process telemetry'),
     wattsIdle: requiredNumber(record, 'watts_idle', 'process telemetry'),
-  };
-}
-
-function parseModel(raw: unknown): LocalModelEntry {
-  const record = requiredRecord(raw, 'local model catalogue');
-  return {
-    name: requiredString(record, 'name', 'local model catalogue'),
-    path: requiredString(record, 'path', 'local model catalogue'),
-    sizeBytes: requiredNumber(record, 'size', 'local model catalogue'),
-    isDirectory: requiredBoolean(record, 'is_dir', 'local model catalogue'),
   };
 }
 
@@ -233,18 +201,6 @@ function requiredNumber(record: Record<string, unknown>, key: string, descriptio
 function requiredString(record: Record<string, unknown>, key: string, description: string): string {
   const value = record[key];
   if (typeof value !== 'string' || value === '') {
-    throw new Error(`The ${description} response has no valid ${key}.`);
-  }
-  return value;
-}
-
-function requiredBoolean(
-  record: Record<string, unknown>,
-  key: string,
-  description: string,
-): boolean {
-  const value = record[key];
-  if (typeof value !== 'boolean') {
     throw new Error(`The ${description} response has no valid ${key}.`);
   }
   return value;

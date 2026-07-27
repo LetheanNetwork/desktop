@@ -6,6 +6,9 @@ import type { ControlViewState } from './control-view.models';
 export const CONTROL_DEMO_VIEW_STATE = {
   dataState: 'demo',
   models: {
+    state: 'ready',
+    activeModelId: '',
+    availableModels: [],
     metrics: [
       {
         value: '34.2',

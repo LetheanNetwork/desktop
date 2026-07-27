@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 import type { ControlLiveSnapshot } from '../../desktop-live-data.service';
+import type { ModelRuntimeSnapshot } from '../../desktop-model-runtime.models';
 import { CONTROL_DEMO_VIEW_STATE } from './control-demo.data';
 import type {
-  ControlModelsViewModel,
   ControlRunsViewModel,
   ControlSettingsViewModel,
   ControlSystemViewModel,
@@ -26,84 +26,97 @@ export function mergeControlLiveSnapshot(snapshot: ControlLiveSnapshot): Control
   return {
     ...demo,
     dataState: 'mixed',
-    models: mergeModels(demo.models, snapshot),
     runs: mergeRuns(demo.runs, snapshot),
     system: mergeSystem(demo.system, snapshot),
     settings: mergeSettings(demo.settings, snapshot),
   };
 }
 
-function mergeModels(
-  demo: ControlModelsViewModel,
-  snapshot: ControlLiveSnapshot,
-): ControlModelsViewModel {
-  const metrics = demo.metrics.map((metric) => ({ ...metric }));
-  let chart = demo.chart;
-  let columns = demo.columns;
-  let rows = demo.rows;
+export function mergeControlModelRuntime(
+  state: ControlViewState,
+  snapshot: ModelRuntimeSnapshot | null,
+  connected: boolean,
+): ControlViewState {
+  if (snapshot === null && !connected) return state;
 
-  if (snapshot.models) {
-    const totalBytes = snapshot.models.reduce((total, model) => total + model.sizeBytes, 0);
-    metrics[1] = {
-      value: formatBytes(totalBytes),
-      label: $localize`:Model storage metric@@control.models.storage:Storage`,
-    };
-    metrics[2] = {
-      value: String(snapshot.models.length),
-      label: $localize`:Local model count metric@@control.models.localCount:Local models`,
-    };
-    columns = [
-      {
-        key: 'name',
-        label: $localize`:Model table column@@control.column.model:Model`,
-      },
-      {
-        key: 'size',
-        label: $localize`:Model size column@@control.column.size:Size`,
-      },
-      {
-        key: 'source',
-        label: $localize`:Model source column@@control.column.source:Source`,
-        type: 'mono',
-      },
-      {
-        key: 'status',
-        label: $localize`:Model table column@@control.column.state:State`,
-        type: 'status',
-      },
-    ];
-    rows = snapshot.models.map((model) => ({
-      name: model.name,
-      size: formatBytes(model.sizeBytes),
-      source: model.isDirectory ? 'local directory' : 'local file',
-      status: 'available',
-    }));
-  }
+  const models = snapshot?.models ?? [];
+  const throughput = snapshot?.metrics.promptTokensPerSecond;
+  const history =
+    snapshot?.history.flatMap((sample) =>
+      sample.promptTokensPerSecond === undefined ? [] : [sample.promptTokensPerSecond],
+    ) ?? [];
+  const peak = history.length ? Math.max(...history) : null;
 
-  if (snapshot.benchmarkRuns) {
-    const rates = snapshot.benchmarkRuns.map((run) => run.generatedTokensPerSecond);
-    const latest = rates[0];
-    metrics[0] = {
-      value: latest === undefined ? '—' : latest.toFixed(1),
-      label: $localize`:Latest generated throughput metric@@control.models.latestThroughput:Latest tg tok/s`,
-    };
-    chart = {
-      title: $localize`:Recent benchmark chart title@@control.models.recentBenchmarks:Benchmark throughput · recent runs`,
-      caption: rates.length
-        ? `peak ${Math.max(...rates).toFixed(1)} tok/s`
-        : $localize`:No benchmark history@@control.models.noBenchmarks:No benchmark history`,
-      samples: rates,
-    };
-  }
-
-  if (snapshot.telemetry) {
-    metrics[3] = {
-      value: formatUptime(snapshot.telemetry.uptimeSeconds),
-      label: demo.metrics[3].label,
-    };
-  }
-
-  return { metrics, chart, columns, rows };
+  return {
+    ...state,
+    models: {
+      state: snapshot?.state ?? 'unavailable',
+      activeModelId: snapshot?.activeModelId ?? '',
+      availableModels: models,
+      metrics: [
+        {
+          value: formatOptionalRate(throughput),
+          label: $localize`:Model runtime throughput metric@@control.models.runtimeThroughput:tok/s`,
+        },
+        {
+          value: formatOptionalBytes(snapshot?.metrics.activeMemoryBytes),
+          label: $localize`:Active model memory metric@@control.models.activeMemory:Active memory`,
+        },
+        {
+          value: snapshot === null ? '—' : String(models.length),
+          label: $localize`:Local model count metric@@control.models.localCount:Local models`,
+        },
+        {
+          value:
+            snapshot?.metrics.uptimeSeconds === undefined
+              ? '—'
+              : formatUptime(snapshot.metrics.uptimeSeconds),
+          label: $localize`:Model runtime uptime metric@@control.models.runtimeUptime:Uptime`,
+        },
+      ],
+      chart: {
+        title: $localize`:Throughput chart title@@control.models.throughputChart:Throughput · recent samples`,
+        caption:
+          peak === null
+            ? $localize`:Unavailable runtime history@@control.models.noRuntimeHistory:Runtime telemetry unavailable`
+            : `peak ${peak.toFixed(1)} tok/s`,
+        samples: history,
+      },
+      columns: [
+        {
+          key: 'id',
+          label: $localize`:Model identifier column@@control.column.modelId:ID`,
+          type: 'mono',
+        },
+        {
+          key: 'name',
+          label: $localize`:Model table column@@control.column.model:Model`,
+        },
+        {
+          key: 'format',
+          label: $localize`:Model format column@@control.column.format:Format`,
+          type: 'mono',
+        },
+        {
+          key: 'runtime',
+          label: $localize`:Model runtime column@@control.column.runtime:Runtime`,
+          type: 'mono',
+        },
+        {
+          key: 'status',
+          label: $localize`:Model table column@@control.column.state:State`,
+          type: 'status',
+        },
+      ],
+      rows: models.map((model) => ({
+        id: model.id,
+        name: model.displayName,
+        format: model.format,
+        runtime: model.runtime || '—',
+        status: model.loaded ? 'loaded' : model.loadable ? 'available' : 'unavailable',
+      })),
+    },
+  };
 }
 
 function mergeRuns(
@@ -224,7 +237,12 @@ function mergeSettings(
   };
 }
 
-function formatBytes(bytes: number): string {
+function formatOptionalRate(value: number | undefined): string {
+  return value === undefined ? '—' : value.toFixed(1);
+}
+
+function formatOptionalBytes(bytes: number | undefined): string {
+  if (bytes === undefined) return '—';
   if (bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   const unitIndex = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1_024)));

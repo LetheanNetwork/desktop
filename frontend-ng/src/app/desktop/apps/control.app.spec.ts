@@ -1,6 +1,10 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { createDemoResource, type DesktopDataResource } from '../desktop-data-resource';
 import { DesktopLiveDataService } from '../desktop-live-data.service';
+import { createDemoModelRuntimeSnapshot } from '../desktop-model-runtime-demo.data';
+import type { ModelRuntimeOperation, ModelRuntimeSnapshot } from '../desktop-model-runtime.models';
+import { DesktopModelRuntimeResource } from '../desktop-model-runtime-resource.service';
 import { DesktopServicesBridgeService } from '../desktop-services-bridge.service';
 import type { Win } from '../desktop.data';
 import { WindowManagerService } from '../window-manager.service';
@@ -35,6 +39,17 @@ describe('ControlApp', () => {
     setSub: vi.fn(),
     setSysTab: vi.fn(),
   };
+  const modelRuntimeState = signal<DesktopDataResource<ModelRuntimeSnapshot>>(
+    createDemoResource(createDemoModelRuntimeSnapshot(), 'Lethean demo fixture · Model runtime'),
+  );
+  const modelRuntimePending = signal<ModelRuntimeOperation | null>(null);
+  let modelRuntimeDisconnect = vi.fn();
+  const modelRuntime = {
+    resource: modelRuntimeState.asReadonly(),
+    pending: modelRuntimePending.asReadonly(),
+    connect: vi.fn(),
+    perform: vi.fn<(operation: ModelRuntimeOperation) => Promise<void>>(),
+  };
   let servicesChanged: ((event: DesktopServicesChangedEvent) => void) | null = null;
   let servicesOff = vi.fn();
   const servicesBridge = {
@@ -52,7 +67,14 @@ describe('ControlApp', () => {
     mode.set('demo');
     servicesChanged = null;
     servicesOff = vi.fn();
+    modelRuntimeDisconnect = vi.fn();
     vi.clearAllMocks();
+    modelRuntimeState.set(
+      createDemoResource(createDemoModelRuntimeSnapshot(), 'Lethean demo fixture · Model runtime'),
+    );
+    modelRuntimePending.set(null);
+    modelRuntime.connect.mockReturnValue(modelRuntimeDisconnect);
+    modelRuntime.perform.mockResolvedValue();
     servicesBridge.catalogue.mockResolvedValue(serviceCatalogue('stopped'));
     servicesBridge.onChanged.mockImplementation(
       (handler: (event: DesktopServicesChangedEvent) => void) => {
@@ -63,6 +85,7 @@ describe('ControlApp', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: DesktopLiveDataService, useValue: liveData },
+        { provide: DesktopModelRuntimeResource, useValue: modelRuntime },
         { provide: DesktopServicesBridgeService, useValue: servicesBridge },
         { provide: WindowManagerService, useValue: windowManager },
       ],
@@ -79,16 +102,31 @@ describe('ControlApp', () => {
     return fixture;
   }
 
+  function setLiveModelRuntime(snapshot: ModelRuntimeSnapshot): void {
+    modelRuntimeState.set({
+      mode: 'connected',
+      state: 'live',
+      source: 'Local LEM runtime',
+      updatedAt: Date.parse(snapshot.refreshedAt),
+      refreshing: false,
+      error: null,
+      canRetry: false,
+      value: snapshot,
+    });
+  }
+
   it('keeps the complete Control prototype available without live calls in demo mode', async () => {
     const fixture = await create();
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
 
     expect(text).toContain('Demo data');
     expect(text).toContain('Local models');
+    expect(text).toContain('Start');
     expect(
-      (fixture.nativeElement as HTMLElement).querySelector('lthn-stat[value="34.2"]'),
+      (fixture.nativeElement as HTMLElement).querySelector('lthn-stat[value="—"]'),
     ).not.toBeNull();
     expect(liveData.control).not.toHaveBeenCalled();
+    expect(modelRuntime.connect).toHaveBeenCalledOnce();
   });
 
   it('delegates each rail section to its standalone view', async () => {
@@ -125,7 +163,7 @@ describe('ControlApp', () => {
   it('loads live services, performs Start, then refreshes the canonical catalogue', async () => {
     mode.set('live');
     liveData.control.mockResolvedValue({
-      unavailable: ['telemetry', 'models', 'benchmarkRuns', 'processes', 'settings'],
+      unavailable: ['telemetry', 'benchmarkRuns', 'processes', 'settings'],
     });
     servicesBridge.catalogue
       .mockResolvedValueOnce(serviceCatalogue('stopped'))
@@ -150,7 +188,7 @@ describe('ControlApp', () => {
   it('retains stale services after a failed event refresh and tears down events', async () => {
     mode.set('live');
     liveData.control.mockResolvedValue({
-      unavailable: ['telemetry', 'models', 'benchmarkRuns', 'processes', 'settings'],
+      unavailable: ['telemetry', 'benchmarkRuns', 'processes', 'settings'],
     });
     servicesBridge.catalogue.mockResolvedValueOnce(serviceCatalogue('running'));
     const fixture = await create({ ...controlWin, sub: 'system', systab: 'daemons' });
@@ -179,7 +217,7 @@ describe('ControlApp', () => {
   it('loads bounded output only after the explicit Output action', async () => {
     mode.set('live');
     liveData.control.mockResolvedValue({
-      unavailable: ['telemetry', 'models', 'benchmarkRuns', 'processes', 'settings'],
+      unavailable: ['telemetry', 'benchmarkRuns', 'processes', 'settings'],
     });
     servicesBridge.catalogue.mockResolvedValueOnce(serviceCatalogue('running'));
     servicesBridge.output.mockResolvedValue({
@@ -208,8 +246,24 @@ describe('ControlApp', () => {
     await expect(APP_REGISTRY['control']()).resolves.toBe(ControlApp);
   });
 
-  it('replaces model fixtures with the local catalogue and truthful live summary values', async () => {
+  it('replaces model fixtures with the shared path-free runtime snapshot', async () => {
     mode.set('live');
+    const runtimeSnapshot: ModelRuntimeSnapshot = {
+      ...createDemoModelRuntimeSnapshot('ready'),
+      metrics: {
+        promptTokensPerSecond: 48.25,
+        activeMemoryBytes: 2_147_483_648,
+        uptimeSeconds: 600,
+      },
+      history: [
+        {
+          state: 'ready',
+          at: '2026-07-27T13:00:00Z',
+          promptTokensPerSecond: 48.25,
+        },
+      ],
+    };
+    setLiveModelRuntime(runtimeSnapshot);
     liveData.control.mockResolvedValue({
       telemetry: {
         heapAllocMB: 64,
@@ -223,14 +277,6 @@ describe('ControlApp', () => {
         wattsActive: 0,
         wattsIdle: 0,
       },
-      models: [
-        {
-          name: 'gemma-4-e2b-q4_k_m.gguf',
-          path: '/tmp/models/gemma-4-e2b-q4_k_m.gguf',
-          sizeBytes: 2_147_483_648,
-          isDirectory: false,
-        },
-      ],
       benchmarkRuns: [
         {
           id: '01J2BENCH',
@@ -255,7 +301,7 @@ describe('ControlApp', () => {
     const fixture = await create();
     await vi.waitFor(() => {
       fixture.detectChanges();
-      expect((fixture.nativeElement as HTMLElement).textContent).toContain('Live + demo');
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('Live data');
     });
     const element = fixture.nativeElement as HTMLElement;
     const rows = JSON.parse(
@@ -265,13 +311,60 @@ describe('ControlApp', () => {
 
     expect(rows).toEqual([
       {
-        name: 'gemma-4-e2b-q4_k_m.gguf',
-        size: '2 GB',
-        source: 'local file',
+        id: 'model-0000000000000001',
+        name: 'gemma-4-e2b',
+        format: 'snapshot',
+        runtime: 'metal',
+        status: 'loaded',
+      },
+      {
+        id: 'model-0000000000000002',
+        name: 'qwen-2.5-coder',
+        format: 'snapshot',
+        runtime: '—',
         status: 'available',
       },
+      {
+        id: 'model-0000000000000003',
+        name: 'mistral-small',
+        format: 'snapshot',
+        runtime: '—',
+        status: 'unavailable',
+      },
     ]);
-    expect(stats.map((stat) => stat.getAttribute('value'))).toEqual(['48.3', '2 GB', '1', '10m']);
+    expect(JSON.stringify(rows)).not.toMatch(/model_path|[/\\]Users|[/\\]tmp/iu);
+    expect(stats.map((stat) => stat.getAttribute('value'))).toEqual(['48.3', '2 GB', '3', '10m']);
+    expect(fixture.componentInstance.modelRuntimeResource().value).toBe(runtimeSnapshot);
+  });
+
+  it('routes the selected opaque model ID through the shared runtime resource', async () => {
+    mode.set('live');
+    setLiveModelRuntime(createDemoModelRuntimeSnapshot('model-less'));
+    liveData.control.mockResolvedValue({
+      unavailable: ['telemetry', 'benchmarkRuns', 'processes', 'settings'],
+    });
+    const fixture = await create();
+    const element = fixture.nativeElement as HTMLElement;
+    const select = element.querySelector<HTMLSelectElement>('[aria-label="Model to load"]');
+    if (!select) throw new Error('Expected the model selector.');
+    select.value = 'model-0000000000000001';
+    select.dispatchEvent(new Event('change'));
+    await fixture.whenStable();
+    element.querySelector<HTMLButtonElement>('[data-action="load"]')?.click();
+    await fixture.whenStable();
+
+    expect(modelRuntime.perform).toHaveBeenCalledWith({
+      kind: 'load',
+      modelId: 'model-0000000000000001',
+    });
+  });
+
+  it('disconnects its shared runtime consumer when the Control window closes', async () => {
+    const fixture = await create();
+
+    fixture.destroy();
+
+    expect(modelRuntimeDisconnect).toHaveBeenCalledOnce();
   });
 
   it('maps benchmark history into the existing runs chart and table', async () => {
@@ -293,7 +386,7 @@ describe('ControlApp', () => {
           endpoint: '',
         },
       ],
-      unavailable: ['telemetry', 'models', 'processes', 'settings'],
+      unavailable: ['telemetry', 'processes', 'settings'],
     });
 
     const fixture = await create({ ...controlWin, sub: 'runs' });
@@ -329,7 +422,7 @@ describe('ControlApp', () => {
           exitCode: 0,
         },
       ],
-      unavailable: ['telemetry', 'models', 'benchmarkRuns', 'settings'],
+      unavailable: ['telemetry', 'benchmarkRuns', 'settings'],
     });
 
     const fixture = await create({ ...controlWin, sub: 'system', systab: 'processes' });
@@ -389,7 +482,7 @@ describe('ControlApp', () => {
           },
         ],
       },
-      unavailable: ['telemetry', 'models', 'benchmarkRuns', 'processes'],
+      unavailable: ['telemetry', 'benchmarkRuns', 'processes'],
     });
 
     const fixture = await create({ ...controlWin, sub: 'settings' });
@@ -440,7 +533,7 @@ describe('ControlApp', () => {
           endpoint: '',
         },
       ],
-      unavailable: ['models', 'benchmarkRuns', 'processes', 'settings'],
+      unavailable: ['benchmarkRuns', 'processes', 'settings'],
     });
 
     const fixture = await create({ ...controlWin, sub: 'system', systab: 'overview' });

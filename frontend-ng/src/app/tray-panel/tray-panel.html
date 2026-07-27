@@ -33,7 +33,7 @@
           <span class="eyebrow">Runner ready</span>
           <strong data-testid="model-name">{{ modelName() }}</strong>
         </div>
-        <span class="runtime">{{ currentModel.runtime }}</span>
+        <span class="runtime">{{ currentModel.runtime || 'Local' }}</span>
       </div>
       <div class="mini-stats">
         <div>
@@ -91,25 +91,43 @@
     <div class="status-rows" role="tabpanel">
       @switch (activeTab()) {
         @case ('system') {
-          <div><span>Process heap</span><strong>{{ heapLabel() }}</strong></div>
-          <div><span>Uptime</span><strong>{{ uptimeLabel() }}</strong></div>
-          <div><span>Goroutines</span><strong>{{ telemetry()?.numGoroutines ?? 0 }}</strong></div>
+          <div>
+            <span>Process heap</span><strong>{{ heapLabel() }}</strong>
+          </div>
+          <div>
+            <span>Uptime</span><strong>{{ uptimeLabel() }}</strong>
+          </div>
+          <div>
+            <span>Goroutines</span><strong>{{ telemetry()?.numGoroutines ?? '—' }}</strong>
+          </div>
           <div>
             <span>Last GC pause</span>
-            <strong>{{ (telemetry()?.lastGCPauseMs ?? 0).toFixed(1) }} ms</strong>
+            <strong>{{ gcPauseLabel() }}</strong>
           </div>
         }
         @case ('runner') {
-          <div><span>Runtime</span><strong>{{ model()?.runtime ?? 'Offline' }}</strong></div>
-          <div><span>Context</span><strong>{{ model()?.contextLength ?? 0 }}</strong></div>
-          <div><span>Parallel slots</span><strong>{{ model()?.parallelSlots ?? 0 }}</strong></div>
-          <div><span>Loaded</span><strong>{{ loadedLabel() }}</strong></div>
+          <div>
+            <span>Runtime</span><strong>{{ model()?.runtime || '—' }}</strong>
+          </div>
+          <div>
+            <span>Context</span><strong>{{ model()?.contextLength ?? '—' }}</strong>
+          </div>
+          <div>
+            <span>State</span><strong>{{ runnerStateLabel() }}</strong>
+          </div>
+          <div>
+            <span>Loaded</span><strong>{{ loadedLabel() }}</strong>
+          </div>
         }
         @case ('activity') {
           <div><span>Desktop service</span><strong class="healthy">Running</strong></div>
-          <div><span>Runner</span><strong>{{ model() ? 'Ready' : 'Offline' }}</strong></div>
+          <div>
+            <span>Runner</span><strong>{{ runnerStateLabel() }}</strong>
+          </div>
           <div><span>Refresh</span><strong>Every 30 seconds</strong></div>
-          <div><span>Last checked</span><strong>{{ refreshedAt() ? 'Just now' : 'Starting' }}</strong></div>
+          <div>
+            <span>Last checked</span><strong>{{ refreshedAt() ? 'Just now' : 'Starting' }}</strong>
+          </div>
         }
       }
     </div>
@@ -132,7 +150,10 @@
           (click)="open(action.target)"
         >
           <span class="action-icon"><i class="fas {{ action.icon }}" aria-hidden="true"></i></span>
-          <span><strong>{{ action.label }}</strong><small>{{ action.detail }}</small></span>
+          <span
+            ><strong>{{ action.label }}</strong
+            ><small>{{ action.detail }}</small></span
+          >
           <i class="fas fa-chevron-right chevron" aria-hidden="true"></i>
         </button>
       }

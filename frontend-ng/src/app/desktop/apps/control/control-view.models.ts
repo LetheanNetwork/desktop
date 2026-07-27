@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 import type { DesktopDataState } from '../../desktop-data-state';
+import type { ModelRuntimeModel, ModelRuntimeState } from '../../desktop-model-runtime.models';
 
 export type ControlTableCell = string | number;
 export type ControlTableRow = Readonly<Record<string, ControlTableCell>>;
@@ -24,6 +25,9 @@ export interface ControlChart {
 }
 
 export interface ControlModelsViewModel {
+  readonly state: ModelRuntimeState;
+  readonly activeModelId: string;
+  readonly availableModels: readonly ModelRuntimeModel[];
   readonly metrics: readonly ControlMetric[];
   readonly chart: ControlChart;
   readonly columns: readonly ControlTableColumn[];
@@ -84,6 +88,11 @@ export interface ControlViewState {
 }
 
 export type ControlActionIntent =
-  | { readonly kind: 'load-model' }
-  | { readonly kind: 'new-run' }
-  | { readonly kind: 'commit-settings' };
+  { readonly kind: 'new-run' } | { readonly kind: 'commit-settings' };
+
+export type ControlModelIntent =
+  | { readonly kind: 'start' }
+  | { readonly kind: 'load'; readonly modelId: string }
+  | { readonly kind: 'unload' }
+  | { readonly kind: 'restart' }
+  | { readonly kind: 'stop' };
