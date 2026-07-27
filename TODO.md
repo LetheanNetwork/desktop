@@ -76,12 +76,12 @@ values with truthful live data.
 
 ### Terminal
 
-- [ ] Expose connection/reconnection state and recover or clearly end PTY tabs
+- [x] Expose connection/reconnection state and recover or clearly end PTY tabs
       when the Wails transport reconnects.
 - [ ] Add a safe, scripted interactive terminal simulator if browser demo mode
       needs more than the current read-only terminal fixture. Never execute local
       commands from an offline browser preview.
-- [ ] Add persisted terminal workspace/tab metadata without persisting terminal
+- [x] Add persisted terminal workspace/tab metadata without persisting terminal
       contents or secrets by default.
 
 ### Shared bridge behaviour

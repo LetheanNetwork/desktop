@@ -127,6 +127,13 @@ version.
   SDK generation.
 - `go/pkg/runner/` — inference-facing service used by CLI, server, and GUI.
 - `go/pkg/appconfig/` — settings catalogue consumed by the Angular controls.
+- `go/pkg/desktopstate/` — bounded, versioned shell-session and Terminal
+  workspace documents stored through the registered application `io.Medium`.
+- `go/pkg/terminal/` — transient PTY pool, cursor-addressed output replay, and
+  explicit attach/write/resize/close lifecycle. PTY contents are never desktop
+  state.
+- `go/pkg/permissions/` — application entitlement policy plus a separate,
+  explicit-request native permission status bridge.
 - `go/pkg/services/` — manual-by-default background service catalogue and
   lifecycle manager. It persists definitions through the registered
   application `io.Medium` and delegates every runtime operation to the named
@@ -169,6 +176,17 @@ Add CLI verbs as flat `cmdX(args []string) int` handlers which delegate to
   stateless drag, resize, snap, marquee, group-drag, and grouping algorithms.
   `DesktopComponent` retains DOM pointer lifecycles and applies interaction
   results through the window manager.
+- `frontend-ng/src/app/desktop/desktop-state-bridge.service.ts` — strict
+  shell-session validation plus connected Medium-backed and offline in-memory
+  state providers.
+- `frontend-ng/src/app/desktop/terminal-workspace.service.ts` — debounced,
+  revision-aware persistence for execution-free Terminal tab metadata.
+- `frontend-ng/src/app/desktop/desktop-host-intent.service.ts` — the single
+  bounded native-event boundary for opaque Files items, catalogue navigation,
+  notifications, and permission snapshots.
+- `frontend-ng/src/app/desktop/desktop-permissions-bridge.service.ts` —
+  explicit native permission status/request bridge; offline mode reports
+  unsupported without Wails traffic.
 - `frontend-ng/src/app/desktop/desktop-services-bridge.service.ts` — defensive
   managed-services Wails bridge. It accepts known service IDs and bounded
   policy/output requests, rejects execution-bearing responses, forwards
@@ -238,6 +256,63 @@ Each mutable content Medium owns only its audited `.lthn-files` namespace.
 Mutations emit `lthn:files:changed` with mount IDs and relative paths. Explicit
 offline transport uses one isolated in-memory demo store per Files window and
 must make no Wails call or event subscription.
+
+Structured inner-desktop state belongs to `go/pkg/desktopstate`, never browser
+storage or native window state. Its registered application Medium owns:
+
+```text
+desktop/state/shell-session.json
+desktop/state/terminal-workspace.json
+```
+
+Both documents are bounded, versioned, revision-checked, and staged before
+commit. The shell document stores only catalogue-derived view/window state.
+The Terminal document stores only tab presentation plus repository or Files
+mount intent; it must never contain commands, environment, input, output,
+absolute paths, PIDs, transient session IDs, tokens, or credentials. Offline
+transport substitutes isolated in-memory documents and makes no Wails call.
+
+Scalar Settings remain owned by `go/pkg/appconfig`. Angular edits a draft and
+persists the complete validated change set with `SetMany`; Go commits once
+through the config Medium and applies live CoreGUI changes only after durable
+success. A failed batch restores the previous values and must not partially
+apply live state. Permission policy is not operating-system authorisation:
+status reads never prompt, and a host request is allowed only from an explicit
+Settings action for a known capability.
+
+Terminal PTYs remain transient in `go/pkg/terminal`. Output events carry
+bounded cursor ranges; reconnect attaches after the last accepted cursor,
+drops duplicates, resets from retained scrollback after an overrun, and marks
+a missing session exited instead of silently starting replacement execution.
+An ordinary saved workspace may start a fresh shell only when its restored
+Terminal surface is intentionally opened; registration and state reads never
+start a process.
+
+Native files, drops, URLs, notifications, and permission snapshots converge on
+`lthn:host:intent`. Go resolves native paths into least-authority Files
+capabilities before emitting; Angular accepts only exact, bounded envelopes
+and catalogue-owned routes/actions. Never add a raw path, command, arbitrary
+URL, environment, or renderer-selected permission/action to that envelope.
+
+Focused desktop-state, Terminal, and native-intent checks:
+
+```bash
+go test ./go/pkg/desktopstate ./go/pkg/appconfig ./go/pkg/terminal \
+  ./go/pkg/permissions ./go/pkg/desktop ./go/cmd/lthn -count=1
+go vet ./go/pkg/desktopstate ./go/pkg/appconfig ./go/pkg/terminal \
+  ./go/pkg/permissions ./go/pkg/desktop ./go/cmd/lthn
+node --test scripts/verify-frontend-convergence.test.mjs \
+  scripts/verify-native-integration.test.mjs
+cd frontend-ng
+npx ng test --watch=false \
+  --include=src/app/desktop/desktop-state-bridge.service.spec.ts \
+  --include=src/app/desktop/terminal-workspace.service.spec.ts \
+  --include=src/app/desktop/surfaces/agents/terminal-session.spec.ts \
+  --include=src/app/desktop/surfaces/agents/terminal.spec.ts \
+  --include=src/app/desktop/desktop-host-intent.service.spec.ts \
+  --include=src/app/desktop/desktop-permissions-bridge.service.spec.ts \
+  --include=src/app/desktop/apps/settings.app.spec.ts
+```
 
 Use TDD for new behaviour. New public symbols should carry focused
 Good/Bad/Ugly tests and runnable examples in the matching package. Use
@@ -370,6 +445,14 @@ The macOS development and production plists carry user-facing Documents and
 Downloads usage descriptions for the Files app. A denied protected-folder
 mount remains unavailable through its `io.Medium`; never bypass that result
 with raw host file access.
+
+Native launch metadata must keep `ai.lthn.desktop`, executable `lthn`, the
+`lthn://` scheme, and `.lthn`/`application/x-lethean` associations aligned
+across macOS, Linux, Windows NSIS, and Windows MSIX. The CLI router recognises
+one bounded native launch argument and starts Wails so trusted Go can translate
+it into the typed host-intent boundary. Run
+`node --test scripts/verify-native-integration.test.mjs` after changing
+platform metadata or native input handling.
 
 Run `task doctor` before development when the toolchain, generated bindings,
 optional crew repositories, or ports are in doubt. Run `task verify:frontend`

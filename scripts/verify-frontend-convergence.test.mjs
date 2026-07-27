@@ -26,6 +26,39 @@ test('frontend exposes the documented deterministic demo server', async () => {
   );
 });
 
+test('desktop state and Terminal persistence remain bounded and Medium-backed', async () => {
+  const [stateService, stateDocument, stateModels, workspace, terminalSession, settings] =
+    await Promise.all([
+      read('go/pkg/desktopstate/service.go'),
+      read('go/pkg/desktopstate/document.go'),
+      read('go/pkg/desktopstate/models.go'),
+      read('frontend-ng/src/app/desktop/terminal-workspace.service.ts'),
+      read('frontend-ng/src/app/desktop/surfaces/agents/terminal-session.ts'),
+      read('go/pkg/appconfig/service.go'),
+    ]);
+
+  assert.match(stateService, /Medium coreio\.Medium/);
+  assert.match(stateService, /desktop\/state\/shell-session\.json/);
+  assert.match(stateService, /desktop\/state\/terminal-workspace\.json/);
+  assert.doesNotMatch(`${stateService}\n${stateDocument}`, /"(?:os|path\/filepath|syscall)"/);
+
+  const terminalTab = stateModels.match(/type TerminalTab struct \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(terminalTab, 'desktopstate.TerminalTab must remain a typed persistence boundary');
+  assert.doesNotMatch(
+    terminalTab,
+    /\b(?:Command|Environment|Input|Output|PID|SessionID|Credential)\b/,
+  );
+
+  assert.match(workspace, /if \(this\.isOffline\(\)\)/);
+  assert.match(workspace, /SaveTerminalWorkspace/);
+  assert.match(terminalSession, /after: this\.cursorTracker\.cursor/);
+  assert.match(terminalSession, /if \(chunk\.end <= this\.acceptedCursor\)/);
+
+  const commit = settings.indexOf('cfg.Commit()');
+  const liveApply = settings.indexOf('s.applyLive(');
+  assert.ok(commit >= 0 && liveApply > commit, 'Settings must apply live state only after commit');
+});
+
 test('Wails development installs frontend dependencies once before starting HMR', async () => {
   const config = await read('build/config.yml');
   const common = await read('build/Taskfile.yml');

@@ -71,3 +71,32 @@ test('build metadata declares one Lethean desktop identity and native launch con
   assert.doesNotMatch(msixTemplate, /scaffold|My Company/i);
   assert.match(msixTemplate, /ExecutableName="lthn\.exe"/);
 });
+
+test('native inputs cross one bounded host-intent and permission boundary', async () => {
+  const [main, hostIntents, systemEvents, angularIntents, permissions, permissionBridge] =
+    await Promise.all([
+      text('go/cmd/lthn/main.go'),
+      text('go/pkg/desktop/host_intents.go'),
+      text('go/pkg/desktop/sysevents.go'),
+      text('frontend-ng/src/app/desktop/desktop-host-intent.service.ts'),
+      text('go/pkg/permissions/service.go'),
+      text('frontend-ng/src/app/desktop/desktop-permissions-bridge.service.ts'),
+    ]);
+
+  assert.match(main, /isNativeLaunchArgument/);
+  assert.match(main, /lthn:\/\/.*\.lthn/s);
+  assert.match(hostIntents, /officefiles\.ResolveHostItems/);
+  assert.match(hostIntents, /HostIntentItemsUnavailable/);
+  assert.match(systemEvents, /emitHostNotificationIntent/);
+  assert.doesNotMatch(systemEvents, /"lthn:notification:(?:click|action|dismiss)"/);
+
+  const envelope = hostIntents.match(/type HostIntent struct \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(envelope, 'Go must retain one typed host-intent envelope');
+  assert.doesNotMatch(envelope, /\bPath\s+string\b/);
+
+  assert.match(angularIntents, /const MAX_HOST_INTENT_BYTES = 32 \* 1024/);
+  assert.match(angularIntents, /if \(this\.connection\.offline\(\)\) return;/);
+  assert.match(permissions, /Request\(rawID string\)/);
+  assert.match(permissionBridge, /if \(this\.connection\.offline\(\)\)/);
+  assert.match(permissionBridge, /Native permission requests are unavailable in offline demo mode/);
+});

@@ -112,6 +112,84 @@ Desktop under **System Settings → Privacy & Security → Files & Folders**.
 Denial deliberately leaves the provider unavailable; it never falls back to
 raw host paths.
 
+### Desktop state and Settings
+
+Connected structured UI state is owned by `go/pkg/desktopstate` and written
+through the registered application `io.Medium`:
+
+```text
+desktop/state/shell-session.json
+desktop/state/terminal-workspace.json
+```
+
+The versioned documents use bounded payloads, optimistic revisions, and a
+verified staged/backup commit. A missing Medium, malformed document, revision
+conflict, or failed recovery fails closed. The shell document contains only
+the current view/device, focus and z-order, and catalogue-derived window
+identity, route, grouping, geometry, minimise/maximise state. Native outer
+windows, Files authority, commands, credentials, and process state do not
+belong there.
+
+Scalar Settings remain in `go/pkg/appconfig`. The Settings surface edits an
+immutable draft: **Apply** validates the complete change set, commits it once,
+and only then applies live CoreGUI changes; **Discard** restores the committed
+snapshot; **Reset** prepares defaults as a draft. A failed commit preserves
+the previous committed/live state and reports the failure. Restart-required
+controls remain visibly identified.
+
+Application permission policy and verified host permission state are separate
+values in Settings. Status reads never prompt. A native request is made only
+after the user chooses **Request host access** for a capability which the host
+can actually request; unsupported hosts remain visibly unsupported.
+
+In explicit offline mode the shell session, Terminal workspace, Settings
+snapshot, and permission status use isolated in-memory providers. They are not
+written to the application Medium and they make no Wails call or event
+subscription.
+
+### Terminal workspace and reconnect behaviour
+
+`go/pkg/terminal` owns transient PTYs and bounded scrollback. Output chunks
+carry `start`/`end` cursors plus a `reset` flag. The Angular terminal retains
+its visible xterm buffer while transport reconnects, reattaches after its last
+accepted cursor, ignores duplicates, and requests recovery when it sees a gap.
+If the retained ring has moved past that cursor, the host sends one bounded
+reset snapshot. If the in-memory session no longer exists, the tab becomes
+visibly exited and offers an explicit fresh shell.
+
+The Terminal workspace document persists only tab order, active key, title,
+shell/agent kind, and a repository or Files mount plus provider-relative path.
+It never persists input, output, command arrays, environment, absolute paths,
+PIDs, transient session IDs, tokens, or credentials. On a later application
+run, an ordinary tab opens a fresh shell in its authorised workspace when the
+Terminal surface is opened. A shared-agent tab reattaches only when the
+trusted Terminal `List` result still reports that session; otherwise it stays
+exited.
+
+Browser demo Terminal remains deliberately non-executing and read-only. It
+starts no local process and installs no Wails listener.
+
+### Native launch and host intents
+
+macOS, Linux, Windows NSIS, and Windows MSIX use one product identity,
+executable, `lthn://` scheme, and `.lthn`/`application/x-lethean` association.
+Launching the CLI with one bounded associated URL or document starts the
+Wails host; ordinary CLI verbs retain their existing routing.
+
+Native opens, drops, notification responses, permission snapshots, tray
+targets, and deep links converge on the typed `lthn:host:intent` boundary.
+Trusted Go converts host paths into least-authority Files capabilities before
+emission. Angular validates the exact bounded envelope and routes only through
+the desktop catalogue. `.lthn` items open Settings import review; other
+supported items open Files. Unknown notifications, actions, permissions, and
+routes are ignored or reported unavailable without widening authority.
+
+After changing platform metadata or native event handling, run:
+
+```bash
+node --test scripts/verify-native-integration.test.mjs
+```
+
 Angular changes update through HMR. Go changes regenerate TypeScript bindings,
 compile the host-native development binary, and relaunch Wails without
 rebuilding the production frontend or optional crew sidecars.
@@ -241,6 +319,27 @@ go test ./go/pkg/<changed-package>
 
 cd frontend-ng
 npx ng test --watch=false --include=src/path/to/file.spec.ts
+```
+
+Focused desktop-state, Terminal, Settings, and native-intent gate:
+
+```bash
+go test ./go/pkg/desktopstate ./go/pkg/appconfig ./go/pkg/terminal \
+  ./go/pkg/permissions ./go/pkg/desktop ./go/cmd/lthn -count=1
+go vet ./go/pkg/desktopstate ./go/pkg/appconfig ./go/pkg/terminal \
+  ./go/pkg/permissions ./go/pkg/desktop ./go/cmd/lthn
+node --test scripts/verify-frontend-convergence.test.mjs \
+  scripts/verify-native-integration.test.mjs
+
+cd frontend-ng
+npx ng test --watch=false \
+  --include=src/app/desktop/desktop-state-bridge.service.spec.ts \
+  --include=src/app/desktop/terminal-workspace.service.spec.ts \
+  --include=src/app/desktop/surfaces/agents/terminal-session.spec.ts \
+  --include=src/app/desktop/surfaces/agents/terminal.spec.ts \
+  --include=src/app/desktop/desktop-host-intent.service.spec.ts \
+  --include=src/app/desktop/desktop-permissions-bridge.service.spec.ts \
+  --include=src/app/desktop/apps/settings.app.spec.ts
 ```
 
 Focused model-runtime confidence gate:
