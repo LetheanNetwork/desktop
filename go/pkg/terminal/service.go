@@ -8,6 +8,7 @@ import (
 
 	core "dappco.re/go"
 	gui "dappco.re/go/render/display/webkit"
+	officefiles "dappco.re/lthn/desktop/pkg/office/files"
 )
 
 // Event name prefixes for the byte stream. The session ID is appended so a
@@ -153,6 +154,8 @@ func Kill(id string) {
 type OpenInput struct {
 	Repo    string   `json:"repo,omitempty"`
 	Cwd     string   `json:"cwd,omitempty"`
+	MountID string   `json:"mountId,omitempty"`
+	Path    string   `json:"path,omitempty"`
 	Term    string   `json:"term,omitempty"`
 	Cols    int      `json:"cols,omitempty"`
 	Rows    int      `json:"rows,omitempty"`
@@ -210,12 +213,16 @@ type ListOutput struct {
 //	r := svc.Open(terminal.OpenInput{Repo: "desktop", Cols: 120, Rows: 32})
 //	if r.OK { out := r.Value.(terminal.OpenOutput); _ = out.ID }
 func (s *Service) Open(input OpenInput) core.Result {
+	cwd, workspaceErr := s.resolveWorkspace(input)
+	if workspaceErr != nil {
+		return core.Fail(core.E("terminal.Open", workspaceErr.Error(), nil))
+	}
 	kind := "shell"
 	if len(input.Command) > 0 {
 		kind = "command"
 	}
 	sess, err := terminalPoolSingleton().Open(SessionOptions{
-		Cwd:     s.resolveCwd(input),
+		Cwd:     cwd,
 		Term:    input.Term,
 		Cols:    input.Cols,
 		Rows:    input.Rows,
@@ -326,6 +333,54 @@ func (s *Service) Close(input CloseInput) core.Result {
 // List returns metadata for every live session (tab strip).
 func (s *Service) List() core.Result {
 	return core.Ok(ListOutput{Sessions: terminalPoolSingleton().Snapshot()})
+}
+
+// resolveWorkspace resolves an opaque Files address entirely in trusted Go.
+// Existing explicit Cwd/Repo inputs remain the compatibility path when no
+// mount capability is supplied.
+func (s *Service) resolveWorkspace(input OpenInput) (string, error) {
+	if input.MountID == "" {
+		if input.Path != "" {
+			return "", core.E(
+				"terminal.resolveWorkspace",
+				"a provider-relative path requires a mount",
+				nil,
+			)
+		}
+		return s.resolveCwd(input), nil
+	}
+	if core.Trim(input.Cwd) != "" || core.Trim(input.Repo) != "" {
+		return "", core.E(
+			"terminal.resolveWorkspace",
+			"mount, repository, and cwd authorities cannot be combined",
+			nil,
+		)
+	}
+	filesService, ok := core.ServiceFor[*officefiles.Service](s.core, "office-files")
+	if !ok || filesService == nil {
+		return "", core.E(
+			"terminal.resolveWorkspace",
+			"the Files workspace service is unavailable",
+			nil,
+		)
+	}
+	resolved := officefiles.ResolveLocalWorkspace(
+		filesService,
+		input.MountID,
+		input.Path,
+	)
+	if !resolved.OK {
+		return "", resolved.Err()
+	}
+	cwd, ok := resolved.Value.(string)
+	if !ok || cwd == "" {
+		return "", core.E(
+			"terminal.resolveWorkspace",
+			"the Files workspace result is invalid",
+			nil,
+		)
+	}
+	return cwd, nil
 }
 
 // resolveCwd picks the working directory for a new session: explicit Cwd wins,

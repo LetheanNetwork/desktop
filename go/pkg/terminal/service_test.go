@@ -9,6 +9,8 @@ import (
 	"time"
 
 	core "dappco.re/go"
+	coreio "dappco.re/go/io"
+	officefiles "dappco.re/lthn/desktop/pkg/office/files"
 )
 
 type capturedTerminalEvent struct {
@@ -62,6 +64,58 @@ func TestService_ResolveRepoPath_Unknown(t *testing.T) {
 	}
 	if got := resolveRepoPath(""); got != "" {
 		t.Errorf("empty name should resolve to empty, got %q", got)
+	}
+}
+
+func TestService_ResolveWorkspace_GoodUsesFilesCapability(t *testing.T) {
+	c := core.New()
+	medium := coreio.NewMemoryMedium()
+	if err := medium.EnsureDir("desktop"); err != nil {
+		t.Fatalf("create workspace fixture: %v", err)
+	}
+	filesService := officefiles.NewService(officefiles.Options{
+		Core: c,
+		Mounts: []officefiles.Mount{{
+			ID:                 "projects",
+			Name:               "Projects",
+			Kind:               "local",
+			LocalRoot:          "/trusted/projects",
+			Capabilities:       officefiles.ReadWriteCapabilities(),
+			Medium:             medium,
+			ContainmentAudited: true,
+		}},
+		Runtime: officefiles.NewMemoryRuntimeMetadata(),
+	})
+	if result := filesService.Register(c); !result.OK {
+		t.Fatalf("register Files service: %s", result.Error())
+	}
+	if result := c.RegisterService("office-files", filesService); !result.OK {
+		t.Fatalf("compose Files service: %s", result.Error())
+	}
+	service := NewService(c)
+
+	got, err := service.resolveWorkspace(OpenInput{
+		MountID: "projects",
+		Path:    "desktop",
+	})
+	if err != nil {
+		t.Fatalf("resolve Files workspace: %v", err)
+	}
+	if got != "/trusted/projects/desktop" {
+		t.Fatalf("workspace = %q, want /trusted/projects/desktop", got)
+	}
+}
+
+func TestService_ResolveWorkspace_BadFailsClosed(t *testing.T) {
+	service := NewService(core.New())
+	for _, input := range []OpenInput{
+		{MountID: "missing"},
+		{MountID: "missing", Path: "../escape"},
+		{Path: "relative-without-mount"},
+	} {
+		if _, err := service.resolveWorkspace(input); err == nil {
+			t.Fatalf("workspace %#v should fail", input)
+		}
 	}
 }
 

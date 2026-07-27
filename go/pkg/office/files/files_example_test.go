@@ -60,6 +60,28 @@ func ExampleResolveHostItems() {
 	// Output: false
 }
 
+func ExampleResolveLocalWorkspace() {
+	medium := coreio.NewMemoryMedium()
+	_ = medium.EnsureDir("desktop")
+	service := files.NewService(files.Options{
+		Mounts: []files.Mount{{
+			ID:                 "projects",
+			Name:               "Projects",
+			Kind:               "local",
+			LocalRoot:          "/workspace",
+			Capabilities:       files.ReadWriteCapabilities(),
+			Medium:             medium,
+			ContainmentAudited: true,
+		}},
+		Runtime: files.NewMemoryRuntimeMetadata(),
+	})
+	_ = service.Register(core.New())
+
+	result := files.ResolveLocalWorkspace(service, "projects", "desktop")
+	core.Println(result.Value)
+	// Output: /workspace/desktop
+}
+
 func exampleFilesService() (*files.Service, coreio.Medium) {
 	medium := coreio.NewMemoryMedium()
 	service := files.NewService(files.Options{

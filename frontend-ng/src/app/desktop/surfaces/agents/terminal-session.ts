@@ -10,6 +10,7 @@ import {
   Output,
   SimpleChanges,
   ViewChild,
+  effect,
   inject,
   signal,
 } from '@angular/core';
@@ -20,16 +21,22 @@ import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
+import { ConnectionManagerService, ConnectionState } from '../../../connection-manager.service';
 import { SurfaceBridgeService } from '../surface-bridge.service';
 
 const TERMINAL_SERVICE = 'dappco.re/lthn/desktop/pkg/terminal.Service';
+const MAXIMUM_TERMINAL_CHUNK_BYTES = 10 * 1024 * 1024;
+const MAXIMUM_TERMINAL_BASE64_BYTES = 14 * 1024 * 1024;
 
 export interface TerminalTab {
   readonly key: string;
   readonly title: string;
   readonly repo?: string;
   readonly cwd?: string;
+  readonly mountId?: string;
+  readonly workspacePath?: string;
   readonly attachId?: string;
+  readonly sharedAgentId?: string;
   readonly command?: readonly string[];
   readonly shared?: boolean;
   readonly exited?: boolean;
@@ -88,6 +95,9 @@ export interface TerminalReady {
     }
     @if (error()) {
       <div class="error" role="alert">{{ error() }}</div>
+    }
+    @if (transportStatus()) {
+      <div class="transport-status" role="status">{{ transportStatus() }}</div>
     }
   `,
   styles: `
@@ -164,10 +174,22 @@ export interface TerminalReady {
       border-radius: 6px;
       font: 9px var(--font-mono);
     }
+    .transport-status {
+      position: absolute;
+      inset: auto 12px 12px auto;
+      padding: 6px 8px;
+      color: var(--fg-2);
+      background: rgba(11, 14, 17, 0.88);
+      border: 1px solid var(--line-2);
+      border-radius: 6px;
+      font: 8px var(--font-mono);
+    }
   `,
 })
 export class AgentTerminalSession implements AfterViewInit, OnChanges, OnDestroy {
   private readonly bridge = inject(SurfaceBridgeService);
+  private readonly connection = inject(ConnectionManagerService);
+  private readonly cursorTracker = new TerminalCursorTracker();
   private terminal?: Terminal;
   private fitAddon?: FitAddon;
   private searchAddon?: SearchAddon;
@@ -176,6 +198,9 @@ export class AgentTerminalSession implements AfterViewInit, OnChanges, OnDestroy
   private sessionId = '';
   private disposed = false;
   private fitPending = false;
+  private reattachPending = false;
+  private sessionExited = false;
+  private previousConnectionState: ConnectionState = this.connection.state();
 
   @Input({ required: true }) tab!: TerminalTab;
   @Input() active = false;
@@ -184,9 +209,35 @@ export class AgentTerminalSession implements AfterViewInit, OnChanges, OnDestroy
   @ViewChild('host', { static: true }) host!: ElementRef<HTMLDivElement>;
 
   readonly error = signal('');
+  readonly transportStatus = signal('');
   readonly searchOpen = signal(false);
   readonly searchTerm = signal('');
   readonly searchCount = signal('');
+
+  constructor() {
+    effect(() => {
+      const state = this.connection.state();
+      const previous = this.previousConnectionState;
+      this.previousConnectionState = state;
+
+      if (state === 'connected') {
+        this.transportStatus.set('');
+        if (previous !== 'connected' && this.sessionId && !this.sessionExited) {
+          void this.attachAfterCursor();
+        }
+        return;
+      }
+      if (state === 'reconnecting' || state === 'connecting') {
+        this.transportStatus.set(
+          $localize`:Terminal reconnecting status@@surface.agents.terminal.reconnecting:Reconnecting terminal…`,
+        );
+      } else if (state === 'disconnected') {
+        this.transportStatus.set(
+          $localize`:Terminal disconnected status@@surface.agents.terminal.disconnected:Terminal disconnected`,
+        );
+      }
+    });
+  }
 
   ngAfterViewInit(): void {
     void this.boot();
@@ -252,6 +303,13 @@ export class AgentTerminalSession implements AfterViewInit, OnChanges, OnDestroy
   }
 
   private async boot(): Promise<void> {
+    if (this.connection.offline()) {
+      this.transportStatus.set(
+        $localize`:Terminal demo status@@surface.agents.terminal.demo:Demo terminal · no local process`,
+      );
+      return;
+    }
+
     const fontMono =
       getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() ||
       'Menlo, Monaco, monospace';
@@ -319,7 +377,14 @@ export class AgentTerminalSession implements AfterViewInit, OnChanges, OnDestroy
       return true;
     });
     terminal.onData((data) => {
-      if (!this.sessionId) return;
+      if (
+        !this.sessionId ||
+        this.sessionExited ||
+        this.reattachPending ||
+        this.connection.state() !== 'connected'
+      ) {
+        return;
+      }
       void this.bridge
         .call(`${TERMINAL_SERVICE}.Write`, [{ id: this.sessionId, data }])
         .catch((error: unknown) => this.setError(error));
@@ -345,6 +410,8 @@ export class AgentTerminalSession implements AfterViewInit, OnChanges, OnDestroy
               {
                 repo: this.tab.repo ?? '',
                 cwd: this.tab.cwd ?? '',
+                mountId: this.tab.mountId ?? '',
+                path: this.tab.workspacePath ?? '',
                 command: [...(this.tab.command ?? [])],
                 term: 'xterm-256color',
                 cols: terminal.cols,
@@ -357,7 +424,7 @@ export class AgentTerminalSession implements AfterViewInit, OnChanges, OnDestroy
       }
       this.sessionId = opened.id;
       await this.subscribe(opened.id);
-      await this.bridge.call(`${TERMINAL_SERVICE}.Attach`, [{ id: opened.id }]);
+      if (!(await this.attachAfterCursor())) return;
       this.ready.emit({
         key: this.tab.key,
         title: this.tab.repo || basename(opened.cwd) || basename(opened.shell) || this.tab.title,
@@ -376,19 +443,65 @@ export class AgentTerminalSession implements AfterViewInit, OnChanges, OnDestroy
     const { Events } = await import('@wailsio/runtime');
     this.offHandlers.push(
       Events.On(`lthn:term:out:${id}`, (event) => {
-        if (typeof event.data !== 'string') return;
-        try {
-          this.terminal?.write(base64Bytes(event.data));
-        } catch {
-          this.error.set(
-            $localize`:Terminal decode failure@@surface.agents.terminal.decodeFailure:Terminal output could not be decoded.`,
-          );
+        const decision = this.cursorTracker.accept(event.data);
+        switch (decision.kind) {
+          case 'write':
+            this.terminal?.write(decision.data);
+            break;
+          case 'reset':
+            this.terminal?.reset();
+            this.terminal?.write(decision.data);
+            break;
+          case 'gap':
+            this.transportStatus.set(
+              $localize`:Terminal resynchronising status@@surface.agents.terminal.resynchronising:Resynchronising terminal output…`,
+            );
+            void this.attachAfterCursor();
+            break;
+          case 'invalid':
+            this.error.set(
+              $localize`:Terminal decode failure@@surface.agents.terminal.decodeFailure:Terminal output could not be decoded.`,
+            );
+            break;
         }
       }),
       Events.On(`lthn:term:exit:${id}`, () => {
+        this.sessionExited = true;
         this.exited.emit(this.tab.key);
       }),
     );
+  }
+
+  private async attachAfterCursor(): Promise<boolean> {
+    if (
+      !this.sessionId ||
+      this.disposed ||
+      this.sessionExited ||
+      this.connection.state() !== 'connected' ||
+      this.reattachPending
+    ) {
+      return false;
+    }
+
+    this.reattachPending = true;
+    try {
+      await this.bridge.call(`${TERMINAL_SERVICE}.Attach`, [
+        { id: this.sessionId, after: this.cursorTracker.cursor },
+      ]);
+      this.error.set('');
+      this.transportStatus.set('');
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.error.set(message);
+      if (message.toLocaleLowerCase('en-GB').includes('session not found')) {
+        this.sessionExited = true;
+        this.exited.emit(this.tab.key);
+      }
+      return false;
+    } finally {
+      this.reattachPending = false;
+    }
   }
 
   private refit(): void {
@@ -437,9 +550,44 @@ function searchOptions() {
   } as const;
 }
 
-function base64Bytes(value: string): Uint8Array {
-  const binary = atob(value);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+export type TerminalCursorDecision =
+  | {
+      readonly kind: 'write' | 'reset';
+      readonly start: number;
+      readonly end: number;
+      readonly data: Uint8Array;
+    }
+  | { readonly kind: 'duplicate' | 'gap' | 'invalid' };
+
+export class TerminalCursorTracker {
+  private acceptedCursor = 0;
+
+  get cursor(): number {
+    return this.acceptedCursor;
+  }
+
+  accept(raw: unknown): TerminalCursorDecision {
+    const chunk = parseTerminalChunk(raw);
+    if (!chunk) return { kind: 'invalid' };
+    if (chunk.reset) {
+      this.acceptedCursor = chunk.end;
+      return {
+        kind: 'reset',
+        start: chunk.start,
+        end: chunk.end,
+        data: chunk.data,
+      };
+    }
+    if (chunk.end <= this.acceptedCursor) return { kind: 'duplicate' };
+    if (chunk.start !== this.acceptedCursor) return { kind: 'gap' };
+    this.acceptedCursor = chunk.end;
+    return {
+      kind: 'write',
+      start: chunk.start,
+      end: chunk.end,
+      data: chunk.data,
+    };
+  }
 }
 
 function basename(value: string): string {
@@ -460,4 +608,60 @@ function normaliseOpen(value: unknown): {
     cwd: typeof record['cwd'] === 'string' ? record['cwd'] : '',
     shell: typeof record['shell'] === 'string' ? record['shell'] : '',
   };
+}
+
+function parseTerminalChunk(raw: unknown): {
+  readonly start: number;
+  readonly end: number;
+  readonly data: Uint8Array;
+  readonly reset: boolean;
+} | null {
+  if (
+    !raw ||
+    typeof raw !== 'object' ||
+    Array.isArray(raw) ||
+    Object.keys(raw).some((key) => !['start', 'end', 'data', 'reset'].includes(key))
+  ) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const start = record['start'];
+  const end = record['end'];
+  const encoded = record['data'];
+  const reset = record['reset'];
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    (start as number) < 0 ||
+    (end as number) < (start as number) ||
+    typeof encoded !== 'string' ||
+    encoded.length > MAXIMUM_TERMINAL_BASE64_BYTES ||
+    typeof reset !== 'boolean'
+  ) {
+    return null;
+  }
+  try {
+    const data = strictBase64Bytes(encoded);
+    const length = (end as number) - (start as number);
+    if (data.length !== length || data.length > MAXIMUM_TERMINAL_CHUNK_BYTES) return null;
+    return {
+      start: start as number,
+      end: end as number,
+      data,
+      reset,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function strictBase64Bytes(value: string): Uint8Array {
+  if (
+    value.length % 4 !== 0 ||
+    (value && !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value))
+  ) {
+    throw new Error('Invalid base64 terminal data.');
+  }
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
