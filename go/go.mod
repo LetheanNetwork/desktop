@@ -41,7 +41,7 @@ require (
 	atomicgo.dev/cursor v0.2.0 // indirect
 	atomicgo.dev/keyboard v0.2.9 // indirect
 	atomicgo.dev/schedule v0.1.0 // indirect
-	dappco.re/go/cli v0.11.4 // indirect
+	dappco.re/go/cli v0.12.0 // indirect
 	dappco.re/go/webview v0.11.0 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
@@ -218,7 +218,7 @@ require (
 require (
 	dappco.re/go/log v0.13.1 // indirect
 	dappco.re/go/rag v0.15.1 // indirect
-	dappco.re/go/update v0.13.0
+	dappco.re/go/update v0.13.1
 	github.com/99designs/gqlgen v0.17.88 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/ProtonMail/go-crypto v1.4.0
