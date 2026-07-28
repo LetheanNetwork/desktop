@@ -15,10 +15,7 @@ import {
 } from '@angular/core';
 import { ConnectionManagerService } from '../../connection-manager.service';
 import { DesktopFilesBridgeService } from '../desktop-files-bridge.service';
-import {
-  DesktopHostIntentService,
-  type DesktopHostItem,
-} from '../desktop-host-intent.service';
+import { DesktopHostIntentService, type DesktopHostItem } from '../desktop-host-intent.service';
 import type { Win } from '../desktop.data';
 import { WindowManagerService } from '../window-manager.service';
 import { AppView } from './app-view';
@@ -88,6 +85,9 @@ const EMPTY_CATALOGUE: FilesCatalogueView = {
           [selection]="selection()"
           (intent)="handleIntent($event)"
         />
+        @if (failure()) {
+          <div class="fberror" role="alert">{{ failure() }}</div>
+        }
         <lthn-files-browser-view
           [state]="viewState()"
           [selectedKey]="selectedKey()"
@@ -215,6 +215,10 @@ export class FilesApp implements AppView, OnInit {
         return;
       case 'preview':
         this.pendingTasks.run(() => this.loadPreview(intent.mountId, intent.path));
+        return;
+      case 'open-host':
+      case 'reveal-host':
+        this.pendingTasks.run(() => this.performHostAction(intent));
         return;
       case 'close-preview':
         this.preview.set(null);
@@ -358,6 +362,28 @@ export class FilesApp implements AppView, OnInit {
       this.failure.set('');
     } catch (error) {
       if (version !== this.previewVersion) return;
+      this.failure.set(errorMessage(error));
+    }
+  }
+
+  private async performHostAction(
+    intent: Extract<FilesActionIntent, { type: 'open-host' | 'reveal-host' }>,
+  ): Promise<void> {
+    if (this.connection.offline()) {
+      this.failure.set(
+        $localize`:Files native action offline@@files.error.nativeOffline:This action is available in the native desktop app.`,
+      );
+      return;
+    }
+    try {
+      const address = { mountId: intent.mountId, path: intent.path };
+      if (intent.type === 'open-host') {
+        await this.bridge.open(address);
+      } else {
+        await this.bridge.reveal(address);
+      }
+      this.failure.set('');
+    } catch (error) {
       this.failure.set(errorMessage(error));
     }
   }

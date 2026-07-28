@@ -35,6 +35,8 @@ export const FILES_METHODS = {
   listMounts: `${FILES_SERVICE}.ListMounts`,
   listDirectory: `${FILES_SERVICE}.ListDirectory`,
   preview: `${FILES_SERVICE}.Preview`,
+  open: `${FILES_SERVICE}.Open`,
+  reveal: `${FILES_SERVICE}.Reveal`,
   createDirectory: `${FILES_SERVICE}.CreateDirectory`,
   rename: `${FILES_SERVICE}.Rename`,
   copy: `${FILES_SERVICE}.Copy`,
@@ -76,6 +78,14 @@ export class DesktopFilesBridgeService implements FilesDataSource {
   async preview(input: PreviewInput): Promise<FilePreviewView> {
     const request = previewRequest(input);
     return this.read(FILES_METHODS.preview, [request], parsePreview);
+  }
+
+  async open(input: FileAddressView): Promise<void> {
+    return this.invokeHostAction(FILES_METHODS.open, input);
+  }
+
+  async reveal(input: FileAddressView): Promise<void> {
+    return this.invokeHostAction(FILES_METHODS.reveal, input);
   }
 
   async createDirectory(input: CreateDirectoryInput): Promise<FileOperationResultView> {
@@ -138,6 +148,18 @@ export class DesktopFilesBridgeService implements FilesDataSource {
     const raw = args ? await this.surface.call(method, args) : await this.surface.call(method);
     rejectProviderFields(raw, 'Files response');
     return parser(raw);
+  }
+
+  private async invokeHostAction(method: string, input: FileAddressView): Promise<void> {
+    const request = {
+      mountId: requestMountId(input.mountId),
+      path: requestPath(input.path),
+    };
+    this.requireOnline();
+    const raw = await this.surface.call(method, [request]);
+    if (raw !== undefined && raw !== null) {
+      invalidResponse('Files host action response');
+    }
   }
 
   private requireOnline(): void {
@@ -218,6 +240,8 @@ function parseCapabilities(raw: unknown): FilesCapabilities {
   return {
     list: requiredBoolean(record['list'], 'list capability'),
     preview: requiredBoolean(record['preview'], 'preview capability'),
+    open: requiredBoolean(record['open'], 'open capability'),
+    reveal: requiredBoolean(record['reveal'], 'reveal capability'),
     createDirectory: requiredBoolean(record['createDirectory'], 'createDirectory capability'),
     write: requiredBoolean(record['write'], 'write capability'),
     rename: requiredBoolean(record['rename'], 'rename capability'),

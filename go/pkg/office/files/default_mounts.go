@@ -71,6 +71,9 @@ func DefaultOptions(c *core.Core) core.Result {
 	mounts := make([]Mount, 0, len(specs))
 	for _, spec := range specs {
 		rootSegments := append([]string{home}, spec.segments...)
+		capabilities := ReadWriteCapabilities()
+		capabilities.Open = true
+		capabilities.Reveal = true
 		medium, err := coreio.NewSandboxed(core.PathJoin(rootSegments...))
 		if err != nil {
 			if core.Is(err, fs.ErrNotExist) {
@@ -90,7 +93,7 @@ func DefaultOptions(c *core.Core) core.Result {
 			LocalRoot:          core.PathJoin(rootSegments...),
 			Icon:               spec.icon,
 			Brand:              spec.brand,
-			Capabilities:       ReadWriteCapabilities(),
+			Capabilities:       capabilities,
 			Medium:             medium,
 			Owned:              true,
 			ContainmentAudited: true,

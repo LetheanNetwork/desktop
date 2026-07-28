@@ -19,6 +19,8 @@ import { SurfaceBridgeService } from './surfaces/surface-bridge.service';
 const capabilities = {
   list: true,
   preview: true,
+  open: true,
+  reveal: true,
   createDirectory: true,
   write: true,
   rename: true,
@@ -241,6 +243,45 @@ describe('DesktopFilesBridgeService', () => {
     ).rejects.toThrow('invalid Files response');
   });
 
+  it('opens and reveals only a validated opaque Files address', async () => {
+    surface.call.mockResolvedValue(undefined);
+
+    await expect(
+      service.open({ mountId: 'documents', path: 'Invoices/receipt.txt' }),
+    ).resolves.toBeUndefined();
+    await expect(
+      service.reveal({ mountId: 'documents', path: 'Invoices/receipt.txt' }),
+    ).resolves.toBeUndefined();
+
+    expect(surface.call).toHaveBeenNthCalledWith(
+      1,
+      'dappco.re/lthn/desktop/pkg/office/files.Service.Open',
+      [{ mountId: 'documents', path: 'Invoices/receipt.txt' }],
+    );
+    expect(surface.call).toHaveBeenNthCalledWith(
+      2,
+      'dappco.re/lthn/desktop/pkg/office/files.Service.Reveal',
+      [{ mountId: 'documents', path: 'Invoices/receipt.txt' }],
+    );
+  });
+
+  it('rejects unsafe host-action addresses before making a Wails call', async () => {
+    await expect(service.open({ mountId: 'documents', path: '../private.txt' })).rejects.toThrow();
+    await expect(
+      service.reveal({ mountId: '/Users/sarah', path: 'private.txt' }),
+    ).rejects.toThrow();
+
+    expect(surface.call).not.toHaveBeenCalled();
+  });
+
+  it('rejects unexpected host-action response data', async () => {
+    surface.call.mockResolvedValue({ absolutePath: '/Users/sarah/Documents/receipt.txt' });
+
+    await expect(
+      service.open({ mountId: 'documents', path: 'Invoices/receipt.txt' }),
+    ).rejects.toThrow('invalid Files response');
+  });
+
   it.each([
     ['createDirectory', { mountId: 'documents', parentPath: '', name: 'Ideas' }, 'CreateDirectory'],
     ['rename', { mountId: 'documents', path: 'draft.txt', name: 'final.txt' }, 'Rename'],
@@ -373,6 +414,12 @@ describe('DesktopFilesBridgeService', () => {
     offline.set(true);
 
     await expect(service.listMounts()).rejects.toThrow('offline demo mode');
+    await expect(service.open({ mountId: 'documents', path: 'notes.md' })).rejects.toThrow(
+      'offline demo mode',
+    );
+    await expect(service.reveal({ mountId: 'documents', path: 'notes.md' })).rejects.toThrow(
+      'offline demo mode',
+    );
     const off = service.onChanged(vi.fn());
 
     expect(surface.call).not.toHaveBeenCalled();

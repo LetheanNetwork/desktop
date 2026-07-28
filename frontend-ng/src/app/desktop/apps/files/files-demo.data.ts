@@ -26,6 +26,8 @@ const KIB = 1024;
 const READ_WRITE: FilesCapabilities = {
   list: true,
   preview: true,
+  open: true,
+  reveal: true,
   createDirectory: true,
   write: true,
   rename: true,
@@ -40,6 +42,8 @@ const READ_WRITE: FilesCapabilities = {
 const READ_ONLY: FilesCapabilities = {
   list: true,
   preview: true,
+  open: false,
+  reveal: false,
   createDirectory: false,
   write: false,
   rename: false,

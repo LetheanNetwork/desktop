@@ -9,6 +9,8 @@ import {
 const capabilities = {
   list: true,
   preview: true,
+  open: true,
+  reveal: true,
   createDirectory: true,
   write: true,
   rename: true,

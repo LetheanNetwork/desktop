@@ -265,6 +265,13 @@ Mutations emit `lthn:files:changed` with mount IDs and relative paths. Explicit
 offline transport uses one isolated in-memory demo store per Files window and
 must make no Wails call or event subscription.
 
+Files `Open` and `Reveal` accept only a mount ID plus provider-relative path.
+Trusted Go must validate the entry through that mount's audited `io.Medium`
+before deriving a local host path and delegating to CoreGO's
+`browser.open_file` or `environment.open_file_manager` action. Only trusted
+local and session-scoped host mounts advertise those capabilities; offline
+demo controls remain visible but disabled and make no Wails call.
+
 Structured inner-desktop state belongs to `go/pkg/desktopstate`, never browser
 storage or native window state. Its registered application Medium owns:
 

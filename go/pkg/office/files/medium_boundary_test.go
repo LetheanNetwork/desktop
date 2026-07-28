@@ -145,6 +145,8 @@ func assertThinWailsFacade(t *core.T, source string) {
 		"ListMounts":      "listMounts",
 		"ListDirectory":   "listDirectory",
 		"Preview":         "preview",
+		"Open":            "openHost",
+		"Reveal":          "revealHost",
 		"CreateDirectory": "createDirectory",
 		"Rename":          "rename",
 		"Copy":            "copy",

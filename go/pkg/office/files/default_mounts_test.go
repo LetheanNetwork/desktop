@@ -31,6 +31,8 @@ func TestDefaultOptions_LocalMountsUseSandboxedMedia_Good(t *core.T) {
 	for _, mount := range options.Mounts {
 		core.AssertTrue(t, mount.Owned)
 		core.AssertTrue(t, mount.ContainmentAudited)
+		core.AssertTrue(t, mount.Capabilities.Open)
+		core.AssertTrue(t, mount.Capabilities.Reveal)
 	}
 }
 

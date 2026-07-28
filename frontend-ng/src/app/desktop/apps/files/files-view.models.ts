@@ -20,6 +20,8 @@ export interface FileAddressView {
 export interface FilesCapabilities {
   readonly list: boolean;
   readonly preview: boolean;
+  readonly open: boolean;
+  readonly reveal: boolean;
   readonly createDirectory: boolean;
   readonly write: boolean;
   readonly rename: boolean;
@@ -298,6 +300,16 @@ export type FilesActionIntent =
     }
   | {
       readonly type: 'preview';
+      readonly mountId: string;
+      readonly path: string;
+    }
+  | {
+      readonly type: 'open-host';
+      readonly mountId: string;
+      readonly path: string;
+    }
+  | {
+      readonly type: 'reveal-host';
       readonly mountId: string;
       readonly path: string;
     }

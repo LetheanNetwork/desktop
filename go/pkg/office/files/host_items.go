@@ -202,11 +202,17 @@ func (s *Service) prepareHostItem(hostPath string) (preparedHostItem, error) {
 	return preparedHostItem{
 		view: view,
 		mount: &Mount{
-			ID:                 mountID,
-			Name:               name,
-			Kind:               "host",
-			Icon:               hostItemIcon(kind),
-			Capabilities:       Capabilities{List: true, Preview: true},
+			ID:        mountID,
+			Name:      name,
+			Kind:      "host",
+			LocalRoot: hostItemRoot(hostPath, kind),
+			Icon:      hostItemIcon(kind),
+			Capabilities: Capabilities{
+				List:    true,
+				Preview: true,
+				Open:    true,
+				Reveal:  true,
+			},
 			Medium:             &readOnlyMedium{Medium: medium},
 			Owned:              true,
 			ContainmentAudited: true,
@@ -236,6 +242,7 @@ func (s *Service) registerHostMount(mount Mount) error {
 		return err
 	}
 	if mount.Name == "" || mount.Medium == nil ||
+		mount.LocalRoot == "" || !core.PathIsAbs(mount.LocalRoot) ||
 		!mount.ContainmentAudited || mount.Kind != "host" {
 		return hostItemFailure(
 			ErrorBoundaryRejected,
@@ -269,6 +276,13 @@ func (s *Service) registerHostMount(mount Mount) error {
 	s.hostMounts[mount.ID] = mount
 	s.hostOrder = append(s.hostOrder, mount.ID)
 	return nil
+}
+
+func hostItemRoot(hostPath string, kind EntryKind) string {
+	if kind == EntryDirectory {
+		return hostPath
+	}
+	return core.PathDir(hostPath)
 }
 
 func (s *Service) hostMountSnapshot() []Mount {
