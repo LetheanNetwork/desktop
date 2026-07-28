@@ -95,7 +95,10 @@ jobs:
             runner:    macos-26            # arm64; matches the native 26.0 floor
             artifact:  lthn-darwin-arm64
             ext:       .app
-            task:      darwin:build
+            # package, not build: `build` produces bin/lthn, `package` wraps it
+            # into bin/lthn.app. The bundling step below zips the .app, so
+            # building alone left it with nothing to find.
+            task:      darwin:package
           - os:        linux
             runner:    ubuntu-latest
             artifact:  lthn-linux-amd64
