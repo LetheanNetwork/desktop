@@ -1,4 +1,9 @@
 .menubar {
+  // Height comes from lthn-desktop (--menubar-height, 36px): the window canvas
+  // and the desktop icons offset by the same value, so three magic numbers
+  // that had to agree are now one. 36 sits between the platforms this shares a
+  // screen with — macOS title bars are 28, Chrome's tab strip runs to about 44
+  // — and at 26 the bar read as thinner than everything around it.
   position: absolute;
   top: 0;
   right: 0;
@@ -6,14 +11,25 @@
   z-index: 9500;
   display: flex;
   align-items: center;
-  height: 26px;
+  height: var(--menubar-height, 36px);
   padding: 0 14px;
   gap: 18px;
+
+  // The window is frameless, so the bar is what a person grabs to move it.
+  --wails-draggable: drag;
   color: var(--fg-2);
   font-size: 13px;
   background: color-mix(in oklch, var(--ink-1) 72%, transparent);
   border-bottom: 1px solid var(--line-1);
   backdrop-filter: blur(14px);
+}
+
+// Anything clickable inside a drag region has to opt out, or the press starts
+// a window move and the click never lands.
+.menubar button,
+.menubar input,
+.menubar select {
+  --wails-draggable: no-drag;
 }
 
 .menubar .right {
@@ -22,6 +38,91 @@
   margin-left: auto;
   gap: 16px;
 }
+
+// ─── native window controls ──────────────────────────────────────────────
+//
+// Drawn as macOS traffic lights, which is where they sit on macOS and Linux.
+// On Windows the same three become square caption buttons in the corner —
+// see the platform override below.
+
+.menubar .wctl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 6px;
+}
+
+.menubar .wc {
+  --wails-draggable: no-drag;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: filter 0.12s ease;
+}
+
+.menubar .wc.close { background: #ff5f57; }
+.menubar .wc.min { background: #febc2e; }
+.menubar .wc.max { background: #28c840; }
+
+.menubar .wc:hover { filter: brightness(1.15); }
+.menubar .wc:active { filter: brightness(0.85); }
+
+.menubar .wc:focus-visible {
+  outline: 2px solid var(--brand-400, #40c1c5);
+  outline-offset: 2px;
+}
+
+// No native window behind them — the browser demo. Shown rather than hidden so
+// the bar does not change shape between demo and native, but visibly inert.
+.menubar .wctl.unavailable .wc {
+  background: var(--line-1, #333);
+  cursor: default;
+}
+
+// Windows: square caption buttons in the corner, sized to the platform's own,
+// with close going red on hover as it does there.
+:host-context(.platform-windows) .menubar .wctl,
+.platform-windows .menubar .wctl {
+  gap: 0;
+  margin-right: -14px; // reach the true corner, past the bar padding
+  margin-left: 8px;
+  height: var(--menubar-height);
+}
+
+:host-context(.platform-windows) .menubar .wc,
+.platform-windows .menubar .wc {
+  width: 46px;
+  height: 100%;
+  border-radius: 0;
+  background: transparent;
+  position: relative;
+}
+
+.platform-windows .menubar .wc::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 10px;
+  height: 10px;
+  border: 1px solid currentColor;
+  color: var(--fg-2);
+}
+
+.platform-windows .menubar .wc.min::before { height: 0; border-width: 0 0 1px; width: 10px; }
+.platform-windows .menubar .wc.close::before {
+  border: 0;
+  background:
+    linear-gradient(currentColor, currentColor) center / 100% 1px no-repeat,
+    linear-gradient(currentColor, currentColor) center / 1px 100% no-repeat;
+  transform: rotate(45deg);
+}
+
+.platform-windows .menubar .wc:hover { background: rgba(255, 255, 255, 0.08); }
+.platform-windows .menubar .wc.close:hover { background: #e81123; color: #fff; }
 
 .menubar .clock {
   color: var(--fg-1);

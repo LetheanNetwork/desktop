@@ -4,9 +4,11 @@ import {
   Component,
   CUSTOM_ELEMENTS_SCHEMA,
   ViewEncapsulation,
+  inject,
   input,
   output,
 } from '@angular/core';
+import { DesktopWindowBridgeService } from '../desktop-window-bridge.service';
 import type { DesktopMenuCategory } from '../desktop-route-tree';
 import type { ShellTrayKey, ShellValueEvent } from './shell.types';
 
@@ -23,6 +25,30 @@ import type { ShellTrayKey, ShellValueEvent } from './shell.types';
   },
 })
 export class ShellMenuBar {
+  private readonly windowBridge = inject(DesktopWindowBridgeService);
+
+  /**
+   * Native window controls. The bar is the window's only chrome — it is
+   * frameless — so these are the real close, minimise and maximise, not the
+   * inner desktop's.
+   */
+  readonly controlSide = this.windowBridge.side;
+  readonly controlsAvailable = this.windowBridge.available;
+  readonly windowMaximised = this.windowBridge.maximised;
+  readonly windowError = this.windowBridge.lastError;
+
+  minimiseWindow(): void {
+    void this.windowBridge.minimise();
+  }
+
+  toggleMaximiseWindow(): void {
+    void this.windowBridge.toggleMaximise();
+  }
+
+  closeWindow(): void {
+    void this.windowBridge.close();
+  }
+
   readonly activeMenuKey = input.required<string>();
   readonly activeAppTitle = input.required<string>();
   readonly categories = input.required<readonly DesktopMenuCategory[]>();

@@ -1,4 +1,39 @@
 <div class="menubar">
+  <!-- Native window controls. Frameless window: these are the only close,
+       minimise and maximise a person has. Left on macOS and Linux, right on
+       Windows, beside the tray — the platform convention, not a preference. -->
+  <ng-template #windowControls>
+    <div class="wctl" [class.unavailable]="!controlsAvailable()" [attr.data-wc-error]="windowError() || null">
+      <button
+        class="wc close"
+        [disabled]="!controlsAvailable()"
+        (click)="closeWindow()"
+        title="Close"
+        i18n-title="Close window@@desktop.nativeWindow.close"
+        aria-label="Close window"
+        i18n-aria-label="Close window@@desktop.nativeWindow.closeLabel"
+      ></button>
+      <button
+        class="wc min"
+        [disabled]="!controlsAvailable()"
+        (click)="minimiseWindow()"
+        title="Minimise"
+        i18n-title="Minimise window@@desktop.nativeWindow.minimise"
+        aria-label="Minimise window"
+        i18n-aria-label="Minimise window@@desktop.nativeWindow.minimiseLabel"
+      ></button>
+      <button
+        class="wc max"
+        [disabled]="!controlsAvailable()"
+        (click)="toggleMaximiseWindow()"
+        [title]="windowMaximised() ? 'Restore' : 'Maximise'"
+        aria-label="Maximise or restore window"
+        i18n-aria-label="Maximise window@@desktop.nativeWindow.maximiseLabel"
+      ></button>
+    </div>
+  </ng-template>
+
+  <ng-container *ngIf="controlSide() === 'left'" [ngTemplateOutlet]="windowControls"></ng-container>
   <button
     class="hoplite-btn mbtn"
     [class.on]="activeMenuKey() === 'system'"
@@ -61,5 +96,6 @@
     >
       <span class="clock">{{ clockText() }}</span>
     </button>
+    <ng-container *ngIf="controlSide() === 'right'" [ngTemplateOutlet]="windowControls"></ng-container>
   </div>
 </div>

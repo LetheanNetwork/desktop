@@ -469,8 +469,11 @@ func applyAngularWindowProfile(options *application.WebviewWindowOptions) {
 	options.EnableFileDrop = true
 	// DefaultContextMenuDisabled preserves Angular-owned context menus.
 	options.DefaultContextMenuDisabled = true
-	// InvisibleTitleBarHeight preserves the existing draggable Angular title-bar region.
-	options.Mac.InvisibleTitleBarHeight = 40
+	// InvisibleTitleBarHeight matches the Angular bar's own height so the two
+	// agree. The bar also declares --wails-draggable, which is what lets its
+	// buttons opt out with no-drag; without that the window controls would
+	// start a window move instead of firing.
+	options.Mac.InvisibleTitleBarHeight = 36
 }
 
 func applyTrayPopoverProfile(options *application.WebviewWindowOptions) {
