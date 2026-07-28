@@ -37,7 +37,7 @@ func TestService_HostActions_GoodUseAuditedMediumBeforeDispatch(t *core.T) {
 	var openedPath string
 	var revealTask environment.TaskOpenFileManager
 	c.Action("browser.open_file", func(_ core.Context, options core.Options) core.Result {
-		openedPath = options.String(core.Concat("pa", "th"))
+		openedPath = options.String("path")
 		return core.Ok(nil)
 	})
 	c.Action(
@@ -91,7 +91,7 @@ func TestService_HostActions_GoodAllowAuditedLocalRoot(t *core.T) {
 
 	var opened string
 	c.Action("browser.open_file", func(_ core.Context, options core.Options) core.Result {
-		opened = options.String(core.Concat("pa", "th"))
+		opened = options.String("path")
 		return core.Ok(nil)
 	})
 
@@ -115,7 +115,7 @@ func TestService_HostActions_GoodPreserveSelectedHostLeastAuthority(t *core.T) {
 	core.RequireTrue(t, service.Register(c).OK)
 	var opened []string
 	c.Action("browser.open_file", func(_ core.Context, options core.Options) core.Result {
-		opened = append(opened, options.String(core.Concat("pa", "th")))
+		opened = append(opened, options.String("path"))
 		return core.Ok(nil)
 	})
 

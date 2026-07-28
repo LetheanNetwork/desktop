@@ -18,7 +18,7 @@ func (s *Service) openHost(input FileAddress) core.Result {
 	result := s.core.Action("browser.open_file").Run(
 		core.Background(),
 		core.NewOptions(core.Option{
-			Key:   core.Concat("pa", "th"),
+			Key:   "path",
 			Value: hostPath,
 		}),
 	)
