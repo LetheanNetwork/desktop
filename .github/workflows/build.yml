@@ -1,9 +1,16 @@
-# Lethean Desktop — desktop and mobile build + artifact upload.
+# Lethean Desktop — build, release, and the browser preview.
+#
+# There is one branch: main. `dev` is a maintained tag, not a branch — every
+# push to main moves it, so the `dev` release is always "what main builds right
+# now" and there is one place to get a nightly rather than a branch to keep
+# in step.
 #
 # Triggers:
-#   - push to main / dev   → CI build, upload as workflow artifacts (7d retention)
-#   - tag `v*`             → CI build + create GitHub Release with the binaries
-#   - manual dispatch      → on-demand build (useful for PR sanity checks)
+#   - push to main   → build, refresh the rolling `dev` prerelease, publish the
+#                      browser preview to GitHub Pages
+#   - tag `v*`       → build + a GitHub Release at that version
+#   - pull request   → build only, nothing published
+#   - manual dispatch
 #
 # Each target produces a single canonical artifact:
 #   - macOS (arm64): bin/lthn.app (ad-hoc signed, .zip-bundled for upload)
@@ -20,11 +27,15 @@ name: build
 
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ main ]
     tags:     [ "v*" ]
   pull_request:
     branches: [ main ]
   workflow_dispatch: {}
+
+# Pages needs id-token to deploy; the release jobs raise contents themselves.
+permissions:
+  contents: read
 
 env:
   GO_VERSION:   "1.26.2"
@@ -209,6 +220,124 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  pages:
+    name: browser preview → GitHub Pages
+    needs: frontend
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages:    write
+      id-token: write
+    environment:
+      name: github-pages
+      url:  ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache:        npm
+          cache-dependency-path: frontend-ng/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache:      true
+          cache-dependency-path: go/go.sum
+
+      - name: Install frontend dependencies
+        working-directory: frontend-ng
+        run: npm ci
+
+      # frontend-ng/bindings is generated and gitignored, so the preview build
+      # needs it made here the same way the desktop build does.
+      - name: Generate bindings
+        run: go tool wails3 task common:generate:bindings
+
+      # The preview has no Go process behind it, so it has to be told rather
+      # than left retrying a socket that will never answer. The app reads
+      # __LTHN_CONNECTION__.offline before the query flag, which a static host
+      # cannot supply.
+      - name: Declare the preview offline
+        working-directory: frontend-ng
+        run: |
+          set -e
+          # /wails/transport.js is served by the Go binary. On a static host it
+          # is a 404, so drop it rather than ship a broken script tag.
+          sed -i '\#<script src="/wails/transport.js"></script>#d' src/index.html
+          sed -i 's#</head>#  <script>globalThis.__LTHN_CONNECTION__={offline:true};</script>\n</head>#' src/index.html
+          grep -q "__LTHN_CONNECTION__" src/index.html
+          ! grep -q "wails/transport.js" src/index.html
+
+      # A project page is served from /<repo>/, so the base href has to match or
+      # every asset resolves against the user-page root. Routing is hash based,
+      # which is why no 404 rewrite is needed.
+      - name: Build the preview
+        working-directory: frontend-ng
+        run: npx ng build --configuration production --base-href "/${{ github.event.repository.name }}/"
+
+      # angular.json points the build at go/cmd/lthn/dist so the binary can
+      # embed it; that same output is what gets published.
+      - name: Check the preview built
+        run: test -f go/cmd/lthn/dist/index.html
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload the preview
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: go/cmd/lthn/dist
+
+      - name: Deploy
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+  dev-release:
+    name: rolling dev prerelease
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./dist
+
+      - name: Flatten artifacts
+        run: |
+          find ./dist -type f -exec mv {} ./dist/ \; 2>/dev/null || true
+          ls -la ./dist/
+
+      # `dev` is a tag this job moves, not a branch anybody commits to. The
+      # release is replaced in place so the download URL never changes and
+      # "latest dev" means "what main builds now".
+      - name: Refresh the dev prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name:   dev
+          name:       dev (rolling — main)
+          body: |
+            Built from `main` at ${{ github.sha }}.
+
+            This tag moves with every push to main; it is not a branch and not a
+            version. For a fixed build take a `v*` release instead.
+
+            Browser preview: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+          prerelease: true
+          files: |
+            dist/lthn-darwin-arm64.zip
+            dist/lthn-linux-amd64
+            dist/lthn-windows-amd64.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   release:
     name: release
     needs: build
@@ -230,6 +359,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ github.ref_name }}
           files: |
             dist/lthn-darwin-arm64.zip
             dist/lthn-linux-amd64

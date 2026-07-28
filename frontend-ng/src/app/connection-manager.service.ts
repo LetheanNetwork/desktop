@@ -95,6 +95,17 @@ export const CONNECTION_SOCKET_FACTORY = new InjectionToken<ConnectionSocketFact
 interface RuntimeConnectionConfiguration {
   readonly webSocketUrl?: string;
   readonly token?: string;
+
+  /**
+   * Declare up front that there is no Go process to reach.
+   *
+   * The query flag `?lthn-offline` does the same thing, but a static host —
+   * GitHub Pages, a design preview — serves one URL and cannot add a query to
+   * it. Without this the app spends its startup retrying a socket that was
+   * never going to answer, and reports itself disconnected rather than
+   * offline, which are different states to a person reading the screen.
+   */
+  readonly offline?: boolean;
 }
 
 interface PendingRequest {
@@ -410,7 +421,7 @@ export class ConnectionManagerService implements RuntimeTransport, OnDestroy {
 
     return {
       url: authenticatedURL(withoutAccessToken(this.normaliseURL(selectedURL)), token),
-      offline: options.offline ?? queryFlag(search.get('lthn-offline')),
+      offline: options.offline ?? runtime?.offline ?? queryFlag(search.get('lthn-offline')),
       reconnectDelayMs: positiveInteger(options.reconnectDelayMs, DEFAULT_RECONNECT_DELAY_MS),
       maxReconnectDelayMs: positiveInteger(
         options.maxReconnectDelayMs,
