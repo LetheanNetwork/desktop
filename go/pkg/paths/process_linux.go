@@ -12,7 +12,6 @@ package paths
 
 import (
 	core "dappco.re/go"
-	"golang.org/x/sys/unix"
 )
 
 // processAlive returns true when the supplied PID corresponds to a
@@ -127,14 +126,23 @@ func readProcBootTime() (int64, bool) {
 	return 0, false
 }
 
-// sysconfClkTck returns sysconf(_SC_CLK_TCK) — the kernel's
-// jiffies-per-second constant.
+// userHZ is the unit /proc reports process times in.
+//
+// Fixed at 100 by the kernel's ABI (include/asm-generic/param.h) and
+// deliberately independent of CONFIG_HZ, precisely so that /proc stays
+// parseable across kernels tuned differently. Field 22 of /proc/<pid>/stat —
+// the only thing this file converts — is in these units, so this is the right
+// constant rather than an approximation of one.
+//
+// It is not read from sysconf because there is no way to: golang.org/x/sys
+// exports Sysconf on Solaris only, and unix.SysconfClktck does not exist at
+// all. Reaching the real sysconf(3) would mean cgo, which this package does
+// not use, to obtain a number the ABI already fixes.
+const userHZ int64 = 100
+
+// sysconfClkTck returns the jiffies-per-second /proc reports in.
 func sysconfClkTck() (int64, bool) {
-	v, err := unix.SysconfClktck()
-	if err != nil {
-		return 0, false
-	}
-	return v, true
+	return userHZ, true
 }
 
 // parseInt64 is a small Atoi wrapper that returns ok=false on parse
