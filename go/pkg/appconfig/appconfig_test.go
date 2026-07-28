@@ -83,7 +83,9 @@ func TestWebviewWindowOptions_Good_MainWindow(t *core.T) {
 	core.AssertTrue(t, options.Frameless)
 	core.AssertTrue(t, options.EnableFileDrop)
 	core.AssertTrue(t, options.DefaultContextMenuDisabled)
-	core.AssertEqual(t, 40, options.Mac.InvisibleTitleBarHeight)
+	// 36 matches the Angular menu bar's own height — the two have to agree or
+	// the native drag region and the painted bar cover different pixels.
+	core.AssertEqual(t, 36, options.Mac.InvisibleTitleBarHeight)
 	core.AssertFalse(t, options.AlwaysOnTop)
 	core.AssertFalse(t, options.Windows.HiddenOnTaskbar)
 }

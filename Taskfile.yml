@@ -253,12 +253,6 @@ tasks:
     summary: Wails3 dev mode with Angular HMR and the built-in MCP service on 127.0.0.1:9099
     env:
       LTHN_DEV: "1"
-      # Where the frontend reaches Go. Without this the window hands the page
-      # no ?lthn-ws=, the frontend falls back to its default, and every Wails
-      # call fails with "The Wails WebSocket reported a connection error" —
-      # the default pointed at 9099, which is the MCP server, not the binding
-      # transport. One digit, and nothing bound worked in dev.
-      LTHN_WAILS_WS_URL: "ws://localhost:9199/wails/ws"
       # The built-in Wails MCP server is compiled out unless this tag is
       # present. Keep it on the development route only; release builds must
       # retain Wails' zero-port, zero-attack-surface default.

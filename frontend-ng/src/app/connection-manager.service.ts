@@ -14,10 +14,10 @@ import {
   type RuntimeTransport,
 } from '@wailsio/runtime';
 
-// 9199 is the Lethean binding transport. 9099 is the MCP server — a different
-// service that does not speak this protocol, and pointing here made every
-// bound call fail whenever the window did not supply ?lthn-ws=.
-const DEFAULT_WEBSOCKET_URL = 'ws://localhost:9199/wails/ws';
+// Matches connection.defaultPublicURL in go/pkg/connection/service.go, which
+// is the authority: the transport binds 127.0.0.1:9099 and serves /wails/ws
+// there. The MCP server shares the port on /mcp.
+const DEFAULT_WEBSOCKET_URL = 'ws://localhost:9099/wails/ws';
 const DEFAULT_RECONNECT_DELAY_MS = 1_000;
 const DEFAULT_MAX_RECONNECT_DELAY_MS = 30_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
