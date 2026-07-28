@@ -1,0 +1,25 @@
+name: Linux WebKit build dependencies
+description: >
+  Install what wails needs to compile on Linux. Anything that builds the Go
+  side — including generating the TypeScript bindings — links against GTK
+  through cgo, so this is needed by every Linux job and not only the one that
+  produces a binary.
+
+runs:
+  using: composite
+  steps:
+    - name: Install GTK4 and WebKitGTK
+      shell: bash
+      run: |
+        set -e
+        # wails v3 compiles its GTK4 path by default: pkg-config gtk4
+        # webkitgtk-6.0, from pkg/application/linux_cgo.go, which is built
+        # unless the `gtk3` tag is set. Installing the GTK3 pair without that
+        # tag is what made every Linux job fail with "Package 'gtk4', required
+        # by 'virtual:world', not found".
+        sudo apt-get update
+        sudo apt-get install -y \
+          libgtk-4-dev \
+          libwebkitgtk-6.0-dev \
+          pkg-config \
+          build-essential
