@@ -40,6 +40,8 @@ const (
 type Capabilities struct {
 	List            bool `json:"list"`
 	Preview         bool `json:"preview"`
+	Open            bool `json:"open"`
+	Reveal          bool `json:"reveal"`
 	CreateDirectory bool `json:"createDirectory"`
 	Write           bool `json:"write"`
 	Rename          bool `json:"rename"`

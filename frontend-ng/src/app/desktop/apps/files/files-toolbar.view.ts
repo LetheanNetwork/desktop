@@ -115,6 +115,40 @@ import type {
               </button>
             }
           } @else {
+            @if (
+              (entry.kind === 'file' || entry.kind === 'directory') && state().capabilities.open
+            ) {
+              <button
+                type="button"
+                data-action="open-host"
+                [disabled]="state().dataState === 'demo'"
+                [attr.title]="
+                  state().dataState === 'demo' ? 'Available in the native desktop app' : null
+                "
+                (click)="emitHostAction('open-host')"
+                i18n="Open file in host application@@files.action.openHost"
+                i18n-title="Offline host action explanation@@files.action.nativeOnly"
+              >
+                Open
+              </button>
+            }
+            @if (
+              (entry.kind === 'file' || entry.kind === 'directory') && state().capabilities.reveal
+            ) {
+              <button
+                type="button"
+                data-action="reveal-host"
+                [disabled]="state().dataState === 'demo'"
+                [attr.title]="
+                  state().dataState === 'demo' ? 'Available in the native desktop app' : null
+                "
+                (click)="emitHostAction('reveal-host')"
+                i18n="Reveal file in host file manager@@files.action.revealHost"
+                i18n-title="Offline host action explanation@@files.action.nativeOnly"
+              >
+                Show in folder
+              </button>
+            }
             @if (state().capabilities.rename) {
               <button
                 type="button"
@@ -191,6 +225,16 @@ export class FilesToolbarView {
   readonly state = input.required<FilesViewState>();
   readonly selection = input<FilesBrowserEntryView | null>(null);
   readonly intent = output<FilesActionIntent>();
+
+  emitHostAction(type: 'open-host' | 'reveal-host'): void {
+    const selection = this.selection();
+    if (!selection || this.state().dataState === 'demo') return;
+    this.intent.emit({
+      type,
+      mountId: selection.mountId,
+      path: selection.relativePath,
+    });
+  }
 
   openOperation(operation: FilesOperationKind): void {
     const selection = this.selection();

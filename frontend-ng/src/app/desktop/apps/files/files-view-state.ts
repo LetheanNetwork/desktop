@@ -305,6 +305,8 @@ function mergeCapabilities(values: readonly FilesCapabilities[]): FilesCapabilit
   const fields: readonly (keyof FilesCapabilities)[] = [
     'list',
     'preview',
+    'open',
+    'reveal',
     'createDirectory',
     'write',
     'rename',
@@ -324,6 +326,8 @@ function noCapabilities(): FilesCapabilities {
   return {
     list: false,
     preview: false,
+    open: false,
+    reveal: false,
     createDirectory: false,
     write: false,
     rename: false,

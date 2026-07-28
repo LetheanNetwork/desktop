@@ -12,6 +12,8 @@ import { FilesApp } from './files.app';
 const capabilities = {
   list: true,
   preview: true,
+  open: true,
+  reveal: true,
   createDirectory: true,
   write: true,
   rename: true,
@@ -132,6 +134,8 @@ describe('FilesApp browsing', () => {
     listMounts: vi.fn(),
     listDirectory: vi.fn(),
     preview: vi.fn(),
+    open: vi.fn(),
+    reveal: vi.fn(),
     listTrash: vi.fn(),
     onChanged: vi.fn((_handler: NonNullable<typeof changedHandler>) => vi.fn()),
     createDirectory: vi.fn(),
@@ -148,13 +152,11 @@ describe('FilesApp browsing', () => {
   };
   const hostIntents = {
     claimItems: vi.fn().mockReturnValue(null),
-    onItems: vi.fn(
-      (app: 'files' | 'settings', consumer: (items: readonly unknown[]) => void) => {
-        const items = hostIntents.claimItems(app);
-        if (items) consumer(items);
-        return vi.fn();
-      },
-    ),
+    onItems: vi.fn((app: 'files' | 'settings', consumer: (items: readonly unknown[]) => void) => {
+      const items = hostIntents.claimItems(app);
+      if (items) consumer(items);
+      return vi.fn();
+    }),
   };
 
   beforeEach(() => {
@@ -180,6 +182,8 @@ describe('FilesApp browsing', () => {
       truncated: false,
       binary: false,
     });
+    bridge.open.mockResolvedValue(undefined);
+    bridge.reveal.mockResolvedValue(undefined);
     bridge.createDirectory.mockResolvedValue(operationResult('create-directory'));
     bridge.rename.mockResolvedValue(operationResult('rename'));
     bridge.copy.mockResolvedValue(operationResult('copy'));
@@ -420,6 +424,8 @@ describe('FilesApp operations and events', () => {
     listMounts: vi.fn(),
     listDirectory: vi.fn(),
     preview: vi.fn(),
+    open: vi.fn(),
+    reveal: vi.fn(),
     listTrash: vi.fn(),
     onChanged: vi.fn(),
     createDirectory: vi.fn(),
@@ -436,13 +442,11 @@ describe('FilesApp operations and events', () => {
   };
   const hostIntents = {
     claimItems: vi.fn().mockReturnValue(null),
-    onItems: vi.fn(
-      (app: 'files' | 'settings', consumer: (items: readonly unknown[]) => void) => {
-        const items = hostIntents.claimItems(app);
-        if (items) consumer(items);
-        return vi.fn();
-      },
-    ),
+    onItems: vi.fn((app: 'files' | 'settings', consumer: (items: readonly unknown[]) => void) => {
+      const items = hostIntents.claimItems(app);
+      if (items) consumer(items);
+      return vi.fn();
+    }),
   };
 
   beforeEach(() => {
@@ -468,6 +472,8 @@ describe('FilesApp operations and events', () => {
       ],
       refreshedAt: '2026-07-26T12:00:00Z',
     });
+    bridge.open.mockResolvedValue(undefined);
+    bridge.reveal.mockResolvedValue(undefined);
     bridge.createDirectory.mockResolvedValue(operationResult('create-directory'));
     bridge.rename.mockResolvedValue(operationResult('rename'));
     bridge.copy.mockResolvedValue(operationResult('copy'));
@@ -513,6 +519,8 @@ describe('FilesApp operations and events', () => {
           ...documentsMount,
           capabilities: {
             ...capabilities,
+            open: false,
+            reveal: false,
             createDirectory: false,
             rename: false,
             copyFrom: false,
@@ -528,10 +536,60 @@ describe('FilesApp operations and events', () => {
     await fixture.whenStable();
 
     expect(element.querySelector('[data-action="create-directory"]')).toBeNull();
+    expect(element.querySelector('[data-action="open-host"]')).toBeNull();
+    expect(element.querySelector('[data-action="reveal-host"]')).toBeNull();
     expect(element.querySelector('[data-action="rename"]')).toBeNull();
     expect(element.querySelector('[data-action="copy"]')).toBeNull();
     expect(element.querySelector('[data-action="move"]')).toBeNull();
     expect(element.querySelector('[data-action="trash"]')).toBeNull();
+  });
+
+  it('opens and reveals selected entries through the connected Files bridge', async () => {
+    const fixture = await create();
+
+    fixture.componentInstance.handleIntent({
+      type: 'open-host',
+      mountId: 'documents',
+      path: 'notes.md',
+    });
+    fixture.componentInstance.handleIntent({
+      type: 'reveal-host',
+      mountId: 'documents',
+      path: 'notes.md',
+    });
+    await fixture.whenStable();
+
+    expect(bridge.open).toHaveBeenCalledWith({
+      mountId: 'documents',
+      path: 'notes.md',
+    });
+    expect(bridge.reveal).toHaveBeenCalledWith({
+      mountId: 'documents',
+      path: 'notes.md',
+    });
+    expect(fixture.componentInstance.failure()).toBe('');
+  });
+
+  it('surfaces host-action failures and never calls the live bridge offline', async () => {
+    const fixture = await create();
+    bridge.open.mockRejectedValueOnce(new Error('host application unavailable'));
+
+    fixture.componentInstance.handleIntent({
+      type: 'open-host',
+      mountId: 'documents',
+      path: 'notes.md',
+    });
+    await fixture.whenStable();
+    expect(fixture.componentInstance.failure()).toContain('host application unavailable');
+
+    offline.set(true);
+    fixture.componentInstance.handleIntent({
+      type: 'reveal-host',
+      mountId: 'documents',
+      path: 'notes.md',
+    });
+    await fixture.whenStable();
+    expect(bridge.reveal).not.toHaveBeenCalled();
   });
 
   it('creates and renames with one validated name and provider-relative addresses', async () => {

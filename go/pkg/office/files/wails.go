@@ -22,6 +22,24 @@ func (s *Service) Preview(input PreviewInput) core.Result {
 	return s.preview(input)
 }
 
+// Open opens an audited local Files capability in its default host application.
+//
+// Usage example:
+//
+//	result := service.Open(files.FileAddress{MountID: "documents", Path: "notes.md"})
+func (s *Service) Open(input FileAddress) core.Result {
+	return s.openHost(input)
+}
+
+// Reveal selects an audited local Files capability in the host file manager.
+//
+// Usage example:
+//
+//	result := service.Reveal(files.FileAddress{MountID: "documents", Path: "notes.md"})
+func (s *Service) Reveal(input FileAddress) core.Result {
+	return s.revealHost(input)
+}
+
 // CreateDirectory creates one child directory through its registered Medium.
 func (s *Service) CreateDirectory(input CreateDirectoryInput) core.Result {
 	return s.createDirectory(input)

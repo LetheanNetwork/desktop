@@ -65,7 +65,7 @@ values with truthful live data.
 - [x] Browse registered locations through capability-scoped `io.Medium`
       mounts, using only mount IDs and provider-relative paths.
 - [x] Provide bounded text/binary preview through `Files.Preview`.
-- [ ] Add explicit host open and reveal-in-host-file-manager operations behind
+- [x] Add explicit host open and reveal-in-host-file-manager operations behind
       mount capabilities; neither accepts an absolute renderer path.
 - [x] Create folders, rename, copy, move, trash, restore, and permanently
       delete with confirmation, conflict, and partial-result contracts.

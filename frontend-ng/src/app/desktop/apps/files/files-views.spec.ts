@@ -17,6 +17,8 @@ import { FilesToolbarView } from './files-toolbar.view';
 const capabilities = {
   list: true,
   preview: true,
+  open: true,
+  reveal: true,
   createDirectory: true,
   write: true,
   rename: true,
@@ -169,6 +171,48 @@ describe('Files presentation views', () => {
       { type: 'set-view', view: 'list' },
       { type: 'navigate', token: 'documents' },
     ]);
+  });
+
+  it('keeps host actions visible but disabled in demo, then emits opaque addresses live', async () => {
+    const selection = viewState().entries[1];
+    const fixture = await render(FilesToolbarView, {
+      state: viewState(),
+      selection,
+    });
+    const intents: FilesActionIntent[] = [];
+    fixture.componentInstance.intent.subscribe((intent) => intents.push(intent));
+    const element = fixture.nativeElement as HTMLElement;
+    const open = element.querySelector<HTMLButtonElement>('[data-action="open-host"]');
+    const reveal = element.querySelector<HTMLButtonElement>('[data-action="reveal-host"]');
+
+    expect(open).not.toBeNull();
+    expect(reveal).not.toBeNull();
+    expect(open?.disabled).toBe(true);
+    expect(reveal?.disabled).toBe(true);
+    expect(open?.title).toContain('native desktop');
+
+    fixture.componentRef.setInput('state', viewState({ dataState: 'live' }));
+    await fixture.whenStable();
+    element.querySelector<HTMLButtonElement>('[data-action="open-host"]')?.click();
+    element.querySelector<HTMLButtonElement>('[data-action="reveal-host"]')?.click();
+
+    expect(intents).toEqual([
+      { type: 'open-host', mountId: 'documents', path: 'notes.md' },
+      { type: 'reveal-host', mountId: 'documents', path: 'notes.md' },
+    ]);
+  });
+
+  it('does not offer host actions without mount capability', async () => {
+    const fixture = await render(FilesToolbarView, {
+      state: viewState({
+        capabilities: { ...capabilities, open: false, reveal: false },
+      }),
+      selection: viewState().entries[1],
+    });
+    const element = fixture.nativeElement as HTMLElement;
+
+    expect(element.querySelector('[data-action="open-host"]')).toBeNull();
+    expect(element.querySelector('[data-action="reveal-host"]')).toBeNull();
   });
 
   it('renders empty, grid, and list states and emits selection/open intents', async () => {
