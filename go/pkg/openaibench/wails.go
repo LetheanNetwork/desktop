@@ -46,7 +46,7 @@ func NewWailsService(c *core.Core, bm *benchmark.Service) *WailsService {
 
 // ServiceName labels the binding namespace exposed to JS as
 // "OpenaibenchSettings" — Wails generates the TS binding under
-// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/openaibench/.
+// frontend/bindings/dappco.re/lthn/desktop/pkg/openaibench/.
 func (w *WailsService) ServiceName() string { return "OpenaibenchSettings" }
 
 // ServiceStartup runs at app boot. No-op today — the benchmark.Service

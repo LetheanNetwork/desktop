@@ -2,27 +2,27 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `frontend-ng/` the sole product frontend, preserve the working native-WebView and separable WebSocket transport contracts, repair migration drift, verify the design-pack typography path, and retire duplicate frontend archives without losing recoverable work.
+**Goal:** Make `frontend/` the sole product frontend, preserve the working native-WebView and separable WebSocket transport contracts, repair migration drift, verify the design-pack typography path, and retire duplicate frontend archives without losing recoverable work.
 
-**Architecture:** Angular 22 remains one client-side-rendered application with one hash router and one NgRx window state, presented as Desktop OS, App Shell, phone, tablet, tray, or standalone native window. Wails remains the native host (WebView2 on Windows and the platform WebView elsewhere), while `pkg/connection` and `ConnectionManagerService` keep generated binding calls transport-independent so a separately served GUI can use the same backend later. The portable Lit elements and Sass token implementation stay inside `frontend-ng/`; only superseded whole-application copies are retired.
+**Architecture:** Angular 22 remains one client-side-rendered application with one hash router and one NgRx window state, presented as Desktop OS, App Shell, phone, tablet, tray, or standalone native window. Wails remains the native host (WebView2 on Windows and the platform WebView elsewhere), while `pkg/connection` and `ConnectionManagerService` keep generated binding calls transport-independent so a separately served GUI can use the same backend later. The portable Lit elements and Sass token implementation stay inside `frontend/`; only superseded whole-application copies are retired.
 
 **Tech Stack:** Go 1.26, the `dappco.re/go*` CoreGO framework, Wails 3 alpha, Angular 22 standalone components, TypeScript 6, NgRx 21, Lit 3, Vitest/jsdom, npm, Sass, self-hosted `@fontsource` assets, Font Awesome 7.
 
 ## Global Constraints
 
-- `frontend-ng/` is the canonical and only product frontend.
+- `frontend/` is the canonical and only product frontend.
 - Keep Angular client-side rendered and hash-routed; do not add SSR, prerendering as an application mode, or hydration.
 - Preserve `#/`, `#/w/:app`, and `#/tray`, plus all existing category/app/child route IDs.
 - Angular Router remains the navigation source of truth; NgRx remains the durable window-state source.
 - Desktop, App Shell, phone, and tablet remain presentations of the same route catalogue and component instances.
-- Keep `frontend-ng/src/foundations/`, `frontend-ng/src/kit/`, the `lit` dependency, and `kind: "lit"` plugin support.
+- Keep `frontend/src/foundations/`, `frontend/src/kit/`, the `lit` dependency, and `kind: "lit"` plugin support.
 - Preserve the design pack's platform typography policy: Geist/Geist Mono on web, SF Pro/SF Mono on Darwin and Apple mobile, Roboto/Noto fallbacks on Android, Instrument Serif for editorial text, and Font Awesome for icons.
 - Keep `lthn serve`, `lthn ai`, and other non-GUI commands independent from Wails window startup.
 - Preserve `pkg/connection` as the transport boundary; do not replace the configurable WebSocket transport with WebView-only IPC.
 - Do not publish transport access tokens in served JavaScript, persisted URLs, logs, or status output.
 - Follow the CoreGO wrappers, `core.Result`, service shape, British-English copy, EUPL-1.2 licence, and TDD rules in `AGENTS.md`.
 - Treat the external v0.9.0 audit as a before/after no-regression diagnostic, not an all-green prerequisite.
-- Do not delete `frontend/` until desktop, iOS, and Android binding generators all write successfully to `frontend-ng/bindings/`.
+- Do not delete `frontend/` until desktop, iOS, and Android binding generators all write successfully to `frontend/bindings/`.
 - Do not delete `frontend-lit-ref/` until all 361 retired files are rechecked against `67b012f^:frontend`.
 - Do not modify `/Users/snider/Downloads/Lethean-Desgin-Pack/`; it is read-only design reference material.
 - App-by-app capability restoration and visual refinement are a follow-on programme. This plan records the capability baseline and preserves every Angular surface, but does not redesign all 66 registered apps in one change.
@@ -40,16 +40,16 @@ New focused files:
 - `scripts/verify-frontend-build.test.mjs` — temporary-fixture tests for missing and valid font assets.
 - `scripts/verify-frontend-convergence.mjs` — rejects retired frontend paths and stale build assumptions.
 - `scripts/verify-frontend-convergence.test.mjs` — repository-contract tests for binding targets, CI checkout, and retired paths.
-- `frontend-ng/public/wails/transport.js` — harmless development-server fallback; Wails continues to intercept this reserved URL with its runtime-generated endpoint.
+- `frontend/public/wails/transport.js` — harmless development-server fallback; Wails continues to intercept this reserved URL with its runtime-generated endpoint.
 - `docs/frontend/capability-matrix.md` — generated source-evidence baseline, explicitly distinct from a runtime certification.
 - `docs/design/README.md` — retained design provenance, production locations, and Git recovery points after archive removal.
 
 Existing files changed in place:
 
-- `frontend-ng/src/app/app.html` and its render/contract tests — CSR-only first paint with no hydration triggers.
-- `frontend-ng/src/app/mobile-runtime.service.spec.ts` — desktop-native versus mobile presentation contract.
-- `frontend-ng/src/app/desktop/surfaces/surface-registry.spec.ts` — Angular terminology and route count.
-- `frontend-ng/package.json` — capability/build/convergence verification entrypoints.
+- `frontend/src/app/app.html` and its render/contract tests — CSR-only first paint with no hydration triggers.
+- `frontend/src/app/mobile-runtime.service.spec.ts` — desktop-native versus mobile presentation contract.
+- `frontend/src/app/desktop/surfaces/surface-registry.spec.ts` — Angular terminology and route count.
+- `frontend/package.json` — capability/build/convergence verification entrypoints.
 - `build/Taskfile.yml` and all five files under `build/{darwin,linux,windows,ios,android}/Taskfile.yml` — workspace sync, canonical binding outputs, and public mobile binding verification tasks.
 - `.github/workflows/build.yml`, `build/audit.sh`, and `Taskfile.yml` — current npm/Angular and no-submodule workflow.
 - `README.md`, `CLAUDE.md`, `docs/development.md`, `docs/architecture.md`, and stale Go source comments — current paths and native/remote transport contract.
@@ -63,11 +63,11 @@ Existing files changed in place:
 - Create: `scripts/frontend-capability-inventory.mjs`
 - Create: `scripts/frontend-capability-inventory.test.mjs`
 - Create: `docs/frontend/capability-matrix.md`
-- Modify: `frontend-ng/package.json`
-- Read: `frontend-ng/src/app/desktop/desktop.data.ts`
-- Read: `frontend-ng/src/app/desktop/apps/app-view.ts`
-- Read: `frontend-ng/src/app/desktop/surfaces/surface-registry.ts`
-- Read: `frontend-ng/src/app/desktop/surfaces/**/*.ts`
+- Modify: `frontend/package.json`
+- Read: `frontend/src/app/desktop/desktop.data.ts`
+- Read: `frontend/src/app/desktop/apps/app-view.ts`
+- Read: `frontend/src/app/desktop/surfaces/surface-registry.ts`
+- Read: `frontend/src/app/desktop/surfaces/**/*.ts`
 - Read: `go/cmd/lthn/app.go`
 - Read: `go/pkg/desktop/desktop.go`
 
@@ -216,29 +216,29 @@ Use the complete base-component map rather than guessing filenames:
 
 ```js
 const BASE_COMPONENTS = Object.freeze({
-  control: 'frontend-ng/src/app/desktop/apps/control.app.ts',
-  chat: 'frontend-ng/src/app/desktop/apps/chat.app.ts',
-  telemetry: 'frontend-ng/src/app/desktop/apps/telemetry.app.ts',
-  activity: 'frontend-ng/src/app/desktop/apps/activity.app.ts',
-  lethernet: 'frontend-ng/src/app/desktop/apps/lethernet.app.ts',
-  games: 'frontend-ng/src/app/desktop/apps/games.app.ts',
-  notepad: 'frontend-ng/src/app/desktop/apps/notepad.app.ts',
-  files: 'frontend-ng/src/app/desktop/apps/files.app.ts',
-  settings: 'frontend-ng/src/app/desktop/apps/settings.app.ts',
-  cpanel: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  explorer: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  codesearch: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  scm: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  terminal: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  build: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  procmon: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  containers: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  repos: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  forge: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  devops: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  marketplace: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  tasks: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  tenant: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
+  control: 'frontend/src/app/desktop/apps/control.app.ts',
+  chat: 'frontend/src/app/desktop/apps/chat.app.ts',
+  telemetry: 'frontend/src/app/desktop/apps/telemetry.app.ts',
+  activity: 'frontend/src/app/desktop/apps/activity.app.ts',
+  lethernet: 'frontend/src/app/desktop/apps/lethernet.app.ts',
+  games: 'frontend/src/app/desktop/apps/games.app.ts',
+  notepad: 'frontend/src/app/desktop/apps/notepad.app.ts',
+  files: 'frontend/src/app/desktop/apps/files.app.ts',
+  settings: 'frontend/src/app/desktop/apps/settings.app.ts',
+  cpanel: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  explorer: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  codesearch: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  scm: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  terminal: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  build: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  procmon: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  containers: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  repos: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  forge: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  devops: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  marketplace: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  tasks: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  tenant: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
 });
 
 const BASE_ROUTES = Object.freeze({
@@ -268,19 +268,19 @@ const BASE_ROUTES = Object.freeze({
 });
 
 const SPECIALISED_EVIDENCE = Object.freeze({
-  chat: ['frontend-ng/src/app/desktop/desktop-ai.service.ts'],
-  settings: ['frontend-ng/src/app/desktop/preferences.service.ts'],
+  chat: ['frontend/src/app/desktop/desktop-ai.service.ts'],
+  settings: ['frontend/src/app/desktop/preferences.service.ts'],
   'surface-agents-terminal': [
-    'frontend-ng/src/app/desktop/surfaces/agents/terminal-session.ts',
+    'frontend/src/app/desktop/surfaces/agents/terminal-session.ts',
   ],
   'surface-extensions-marketplace': [
-    'frontend-ng/src/app/desktop/surfaces/extensions/marketplace.ts',
+    'frontend/src/app/desktop/surfaces/extensions/marketplace.ts',
   ],
   'surface-extensions-plugin-view': [
-    'frontend-ng/src/app/desktop/surfaces/extensions/plugin-view-runtime.ts',
+    'frontend/src/app/desktop/surfaces/extensions/plugin-view-runtime.ts',
   ],
   'surface-extensions-opencode-shim': [
-    'frontend-ng/src/app/desktop/surfaces/extensions/opencode-shim.ts',
+    'frontend/src/app/desktop/surfaces/extensions/opencode-shim.ts',
   ],
 });
 ```
@@ -290,7 +290,7 @@ Define the two readers with these exact parsing boundaries:
 ```js
 async function readBaseApps(repoRoot) {
   const source = await readFile(
-    join(repoRoot, 'frontend-ng/src/app/desktop/desktop.data.ts'),
+    join(repoRoot, 'frontend/src/app/desktop/desktop.data.ts'),
     'utf8',
   );
   const block = source.slice(
@@ -306,7 +306,7 @@ async function readBaseApps(repoRoot) {
 
 async function readSurfaceApps(repoRoot) {
   const source = await readFile(
-    join(repoRoot, 'frontend-ng/src/app/desktop/surfaces/surface-registry.ts'),
+    join(repoRoot, 'frontend/src/app/desktop/surfaces/surface-registry.ts'),
     'utf8',
   );
   const block = source.slice(
@@ -322,7 +322,7 @@ async function readSurfaceApps(repoRoot) {
       repoRoot,
       id,
       `/${group}/${route}`,
-      `frontend-ng/src/app/desktop/surfaces/${group}/${route}.ts`,
+      `frontend/src/app/desktop/surfaces/${group}/${route}.ts`,
     );
   }));
 }
@@ -465,7 +465,7 @@ from `node:path`.
 
 - [ ] **Step 5: Add npm entrypoints and generate the matrix**
 
-Add these scripts to `frontend-ng/package.json`:
+Add these scripts to `frontend/package.json`:
 
 ```json
 "test:contracts": "node --test ../scripts/*.test.mjs",
@@ -476,7 +476,7 @@ Run:
 
 ```bash
 node --test scripts/frontend-capability-inventory.test.mjs
-cd frontend-ng && npm run audit:capabilities
+cd frontend && npm run audit:capabilities
 ```
 
 Expected: PASS, then a deterministic 66-row matrix with 23 base apps and 43 shared surfaces. The matrix must call fixture-only base apps `design-fixture`, not mock, dead, or live.
@@ -495,17 +495,17 @@ Expected: every unresolved contract has a concrete missing Go/binding/route evid
 - [ ] **Step 7: Commit the baseline**
 
 ```bash
-git add scripts/repository.mjs scripts/frontend-capability-inventory.mjs scripts/frontend-capability-inventory.test.mjs docs/frontend/capability-matrix.md frontend-ng/package.json
+git add scripts/repository.mjs scripts/frontend-capability-inventory.mjs scripts/frontend-capability-inventory.test.mjs docs/frontend/capability-matrix.md frontend/package.json
 git commit -m "docs(frontend): inventory Angular capability evidence"
 ```
 
 ### Task 2: Pin the CSR Router and Shared Presentation Contract
 
 **Files:**
-- Modify: `frontend-ng/src/app/app.html`
-- Modify: `frontend-ng/src/app/app.render.spec.ts`
-- Modify: `frontend-ng/src/app/mobile-runtime.service.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/surfaces/surface-registry.spec.ts`
+- Modify: `frontend/src/app/app.html`
+- Modify: `frontend/src/app/app.render.spec.ts`
+- Modify: `frontend/src/app/mobile-runtime.service.spec.ts`
+- Modify: `frontend/src/app/desktop/surfaces/surface-registry.spec.ts`
 - Modify: `scripts/verify-frontend-convergence.test.mjs` when created in this task
 - Create: `scripts/verify-frontend-convergence.test.mjs`
 
@@ -528,7 +528,7 @@ const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const read = (path) => readFile(`${repoRoot}/${path}`, 'utf8');
 
 test('keeps the Angular root client-rendered without hydration triggers', async () => {
-  const template = await read('frontend-ng/src/app/app.html');
+  const template = await read('frontend/src/app/app.html');
   assert.match(template, /@defer \(on immediate\)/);
   assert.doesNotMatch(template, /hydrate\s+on/);
   assert.match(template, /<router-outlet\s*\/>/);
@@ -547,7 +547,7 @@ Expected: FAIL because `app.html` contains `hydrate on interaction` and `hydrate
 
 - [ ] **Step 3: Remove the unsupported hydration triggers**
 
-Replace `frontend-ng/src/app/app.html` with:
+Replace `frontend/src/app/app.html` with:
 
 ```html
 @defer (on immediate) {
@@ -561,7 +561,7 @@ This preserves the immediate route-outlet first paint and its app-shell placehol
 
 - [ ] **Step 4: Extend first-paint assertions**
 
-In `frontend-ng/src/app/app.render.spec.ts`, keep the existing `#/` and `#/system/telemetry` assertions and add:
+In `frontend/src/app/app.render.spec.ts`, keep the existing `#/` and `#/system/telemetry` assertions and add:
 
 ```ts
 expect(element.querySelector('app-app-shell')).toBeNull();
@@ -642,7 +642,7 @@ The portable elements remain Lit; the routed surface components are Angular.
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false --include=src/app/app.render.spec.ts
 npx ng test --watch=false --include=src/app/mobile-runtime.service.spec.ts
 npx ng test --watch=false --include=src/app/desktop/surfaces/surface-registry.spec.ts
@@ -654,21 +654,21 @@ Expected: all focused specs and the full frontend suite pass; a browser developm
 - [ ] **Step 8: Commit the presentation contract**
 
 ```bash
-git add frontend-ng/src/app/app.html frontend-ng/src/app/app.render.spec.ts frontend-ng/src/app/mobile-runtime.service.spec.ts frontend-ng/src/app/desktop/surfaces/surface-registry.spec.ts scripts/verify-frontend-convergence.test.mjs
+git add frontend/src/app/app.html frontend/src/app/app.render.spec.ts frontend/src/app/mobile-runtime.service.spec.ts frontend/src/app/desktop/surfaces/surface-registry.spec.ts scripts/verify-frontend-convergence.test.mjs
 git commit -m "fix(frontend): keep the shared shell client rendered"
 ```
 
 ### Task 3: Verify Native/Remote Bootstrap and Font Assets
 
 **Files:**
-- Create: `frontend-ng/public/wails/transport.js`
+- Create: `frontend/public/wails/transport.js`
 - Create: `scripts/verify-frontend-build.mjs`
 - Create: `scripts/verify-frontend-build.test.mjs`
-- Modify: `frontend-ng/package.json`
-- Modify: `frontend-ng/src/app/connection-manager.service.spec.ts`
+- Modify: `frontend/package.json`
+- Modify: `frontend/src/app/connection-manager.service.spec.ts`
 - Modify: `go/pkg/connection/transport_internal_test.go`
-- Read: `frontend-ng/src/foundations/tokens/fonts.scss`
-- Read: `frontend-ng/src/foundations/tokens/platforms.scss`
+- Read: `frontend/src/foundations/tokens/fonts.scss`
+- Read: `frontend/src/foundations/tokens/platforms.scss`
 
 **Interfaces:**
 - Consumes: `globalThis.__LTHN_CONNECTION__.webSocketUrl`, `ConnectionManagerService`, and Wails' reserved `/wails/transport.js`.
@@ -694,7 +694,7 @@ import { verifyFrontendBuild } from './verify-frontend-build.mjs';
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 
 test('development transport bootstrap publishes the loopback default only', async () => {
-  const source = await readFile(`${repoRoot}/frontend-ng/public/wails/transport.js`, 'utf8');
+  const source = await readFile(`${repoRoot}/frontend/public/wails/transport.js`, 'utf8');
   const sandbox = { globalThis: {} };
   runInNewContext(source, sandbox);
   assert.deepEqual(
@@ -757,7 +757,7 @@ Expected: FAIL because the fallback and verifier do not exist.
 
 - [ ] **Step 3: Add the ng-serve fallback without changing native Wails interception**
 
-Create `frontend-ng/public/wails/transport.js`:
+Create `frontend/public/wails/transport.js`:
 
 ```js
 globalThis.__LTHN_CONNECTION__ = Object.freeze({
@@ -836,7 +836,7 @@ Import `pathToFileURL` from `node:url` and `resolve` from `node:path`.
 
 - [ ] **Step 5: Pin remote transport precedence and token secrecy**
 
-Extend `frontend-ng/src/app/connection-manager.service.spec.ts` with a case where:
+Extend `frontend/src/app/connection-manager.service.spec.ts` with a case where:
 
 ```ts
 configure(
@@ -877,7 +877,7 @@ This complements the existing Wails option test which asserts the supplied `appl
 
 - [ ] **Step 7: Add build verification entrypoints and run them**
 
-Add to `frontend-ng/package.json`:
+Add to `frontend/package.json`:
 
 ```json
 "verify:build": "node ../scripts/verify-frontend-build.mjs ../go/cmd/lthn/dist"
@@ -888,7 +888,7 @@ Run:
 ```bash
 node --test scripts/verify-frontend-build.test.mjs
 go test ./go/pkg/connection ./go/pkg/desktop
-cd frontend-ng
+cd frontend
 npm run build
 npm run verify:build
 ```
@@ -900,7 +900,7 @@ Expected: all tests pass; production CSS declares all four families; every refer
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
 ```
 
@@ -928,7 +928,7 @@ Expected on macOS: a normal Wails native window, `data-platform="darwin"`, compu
 - [ ] **Step 10: Commit native/remote bootstrap verification**
 
 ```bash
-git add frontend-ng/public/wails/transport.js scripts/verify-frontend-build.mjs scripts/verify-frontend-build.test.mjs frontend-ng/package.json frontend-ng/src/app/connection-manager.service.spec.ts go/pkg/connection/transport_internal_test.go
+git add frontend/public/wails/transport.js scripts/verify-frontend-build.mjs scripts/verify-frontend-build.test.mjs frontend/package.json frontend/src/app/connection-manager.service.spec.ts go/pkg/connection/transport_internal_test.go
 git commit -m "test(frontend): verify native transport and font assets"
 ```
 
@@ -947,7 +947,7 @@ git commit -m "test(frontend): verify native transport and font assets"
 - Modify: `Taskfile.yml`
 
 **Interfaces:**
-- Produces: desktop, iOS, and Android binding generators whose only TypeScript destination is `frontend-ng/bindings/`.
+- Produces: desktop, iOS, and Android binding generators whose only TypeScript destination is `frontend/bindings/`.
 - Produces: public `ios:bindings` and `android:bindings` verification tasks.
 - Produces: CI checkout with no recursive-submodule assumption.
 - Produces: an audit path using Angular/npm and the current no-regression audit policy.
@@ -969,7 +969,7 @@ Task 8; do not turn the full historical backlog into this task's scope.
 Append to `scripts/verify-frontend-convergence.test.mjs`:
 
 ```js
-test('all binding generators target frontend-ng and no removed external tree', async () => {
+test('all binding generators target frontend and no removed external tree', async () => {
   const files = await Promise.all([
     read('build/Taskfile.yml'),
     read('build/ios/Taskfile.yml'),
@@ -979,7 +979,7 @@ test('all binding generators target frontend-ng and no removed external tree', a
 
   assert.doesNotMatch(combined, /frontend\/bindings/);
   assert.doesNotMatch(combined, /external\/gui/);
-  assert.match(combined, /frontend-ng\/bindings/);
+  assert.match(combined, /frontend\/bindings/);
 });
 
 test('CI and audit use the current module and Angular topology', async () => {
@@ -987,7 +987,7 @@ test('CI and audit use the current module and Angular topology', async () => {
   const audit = await read('build/audit.sh');
 
   assert.doesNotMatch(workflow, /submodules:\s*recursive/);
-  assert.match(audit, /cd frontend-ng/);
+  assert.match(audit, /cd frontend/);
   assert.match(audit, /npm run build/);
   assert.match(audit, /npm run test:ci/);
   assert.doesNotMatch(audit, /bun run|cd frontend(?:\s|$)/);
@@ -1020,9 +1020,9 @@ Change `generate:bindings` to depend on `go:work:sync`, keep `dir: "{{.GO_DIR}}"
 
 ```yaml
     generates:
-      - ../frontend-ng/bindings/**/*
+      - ../frontend/bindings/**/*
     cmds:
-      - wails3 generate bindings -ts -d ../frontend-ng/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/...
+      - wails3 generate bindings -ts -d ../frontend/bindings -f '{{.BUILD_FLAGS}}' -clean=true ./pkg/desktop/...
 ```
 
 Rename `common:go:mod:tidy` to `common:go:work:sync` in:
@@ -1041,7 +1041,7 @@ In `build/ios/Taskfile.yml`, add:
 
 ```yaml
   bindings:
-    summary: Generate iOS TypeScript bindings into frontend-ng/bindings
+    summary: Generate iOS TypeScript bindings into frontend/bindings
     cmds:
       - task: generate:ios:bindings
 ```
@@ -1050,10 +1050,10 @@ Change its `generates` declaration to:
 
 ```yaml
     generates:
-      - frontend-ng/bindings/**/*
+      - frontend/bindings/**/*
 ```
 
-Keep the existing command destination `../frontend-ng/bindings`.
+Keep the existing command destination `../frontend/bindings`.
 
 - [ ] **Step 5: Repair and expose the Android binding task**
 
@@ -1061,7 +1061,7 @@ In `build/android/Taskfile.yml`, add:
 
 ```yaml
   bindings:
-    summary: Generate Android TypeScript bindings into frontend-ng/bindings
+    summary: Generate Android TypeScript bindings into frontend/bindings
     cmds:
       - task: generate:android:bindings
 ```
@@ -1070,10 +1070,10 @@ Change its `generates` declaration to:
 
 ```yaml
     generates:
-      - frontend-ng/bindings/**/*
+      - frontend/bindings/**/*
 ```
 
-Keep the existing `GOOS=android`, `CGO_ENABLED=0`, `-tags android`, and `../frontend-ng/bindings` command.
+Keep the existing `GOOS=android`, `CGO_ENABLED=0`, `-tags android`, and `../frontend/bindings` command.
 
 - [ ] **Step 6: Remove the obsolete CI submodule checkout**
 
@@ -1091,9 +1091,9 @@ Do not add a replacement dependency fetch; `go.work`, `go/go.mod`, and `go/go.su
 Change the frontend steps in `build/audit.sh` to:
 
 ```bash
-step "frontend build"  bash -c 'cd frontend-ng && npm run build'
-step "frontend test"   bash -c 'cd frontend-ng && npm run test:ci'
-step "frontend contracts" bash -c 'cd frontend-ng && npm run test:contracts'
+step "frontend build"  bash -c 'cd frontend && npm run build'
+step "frontend test"   bash -c 'cd frontend && npm run test:ci'
+step "frontend contracts" bash -c 'cd frontend && npm run test:contracts'
 ```
 
 Change `audit_v090` so a non-compliant existing backlog is an explicit
@@ -1128,8 +1128,8 @@ Change `Taskfile.yml`:
   test:frontend:
     summary: Run Angular Vitest plus frontend convergence contracts
     cmds:
-      - cd frontend-ng && npm run test:ci
-      - cd frontend-ng && npm run test:contracts
+      - cd frontend && npm run test:ci
+      - cd frontend && npm run test:contracts
 ```
 
 - [ ] **Step 9: Regenerate every binding flavour**
@@ -1144,7 +1144,7 @@ wails3 task android:bindings
 wails3 task common:generate:bindings
 ```
 
-Expected: every command succeeds, every generated file is under ignored `frontend-ng/bindings/`, no command reads `external/gui`, and the final desktop regeneration restores the normal host binding set.
+Expected: every command succeeds, every generated file is under ignored `frontend/bindings/`, no command reads `external/gui`, and the final desktop regeneration restores the normal host binding set.
 
 - [ ] **Step 10: Re-run plumbing contracts and frontend typecheck**
 
@@ -1152,7 +1152,7 @@ Run:
 
 ```bash
 node --test scripts/verify-frontend-convergence.test.mjs
-cd frontend-ng && npx tsc --noEmit
+cd frontend && npx tsc --noEmit
 ```
 
 Expected: PASS.
@@ -1305,7 +1305,7 @@ Make these exact truths consistent across `README.md`, `CLAUDE.md`, `docs/develo
 ```text
 go.work uses ./go only.
 There is no .gitmodules or external/ checkout.
-frontend-ng is Angular 22 CSR and builds to go/cmd/lthn/dist.
+frontend is Angular 22 CSR and builds to go/cmd/lthn/dist.
 Wails hosts native windows; WebView2 is the Windows host engine.
 ConnectionManagerService may connect over ws/wss independently of the WebView.
 lthn serve and lthn ai do not construct a Wails application.
@@ -1319,8 +1319,8 @@ Remove “when wired” language for already implemented GUI/server paths.
 For each Go file reported by the scoped `rg`, replace:
 
 ```text
-frontend/src/lit/...      -> the matching frontend-ng/src/app/... surface
-frontend/bindings        -> frontend-ng/bindings
+frontend/src/lit/...      -> the matching frontend/src/app/... surface
+frontend/bindings        -> frontend/bindings
 external/gui             -> the versioned dappco.re/go/render/display/webkit module
 ```
 
@@ -1440,9 +1440,9 @@ Create `docs/design/README.md` with:
 # Lethean Desktop Design Provenance
 
 The Lethean Design Pack is the visual upstream for Lethean Desktop. Production
-tokens live in `frontend-ng/src/foundations/`, reusable Lit elements live in
-`frontend-ng/src/kit/`, and the Angular desktop/app-shell implementation lives
-in `frontend-ng/src/app/desktop/`.
+tokens live in `frontend/src/foundations/`, reusable Lit elements live in
+`frontend/src/kit/`, and the Angular desktop/app-shell implementation lives
+in `frontend/src/app/desktop/`.
 
 The former whole-application Lit snapshot is recoverable from
 `67b012f^:frontend`. The in-repository Lit canvas and Lethean-5 archive are
@@ -1456,7 +1456,7 @@ product frontend.
 
 - [ ] **Step 5: Delete tracked archives and generated remnants with `apply_patch`**
 
-Delete exactly the files listed in this task's **Files** section. Remove the now-empty tracked `frontend/` and `docs/design/lit/` directory trees as a consequence; do not touch `frontend-ng/`.
+Delete exactly the files listed in this task's **Files** section. Remove the now-empty tracked `frontend/` and `docs/design/lit/` directory trees as a consequence; do not touch `frontend/`.
 
 - [ ] **Step 6: Move the verified ignored snapshot to Trash**
 
@@ -1475,7 +1475,7 @@ The snapshot remains recoverable both from Trash and from `67b012f^`.
 Remove `frontend-lit-ref/` from `.gitignore`. Update `AGENTS.md` so its
 directory map no longer lists `frontend/`, `frontend-lit-ref/`, or tracked
 `docs/design/lit/`; retain the recovery commits and the rule that Lit inside
-`frontend-ng/src/kit/` is intentional. Remove `AGENTS.md` from
+`frontend/src/kit/` is intentional. Remove `AGENTS.md` from
 `HISTORICAL_REFERENCE_ALLOWLIST` in
 `scripts/verify-frontend-convergence.mjs` after those current-state notes have
 been rewritten.
@@ -1485,7 +1485,7 @@ been rewritten.
 Run:
 
 ```bash
-test -d frontend-ng
+test -d frontend
 test ! -e frontend
 test ! -e frontend-lit-ref
 test ! -e docs/design/lit
@@ -1510,13 +1510,13 @@ Record in the commit body:
 ```text
 Old application: 67b012f^:frontend (361/361 blobs verified)
 Design canvas/archive: 412a479 and afb79be
-Canonical product frontend: frontend-ng/
+Canonical product frontend: frontend/
 ```
 
 ### Task 7: Wire Guardrails into the Normal Gates
 
 **Files:**
-- Modify: `frontend-ng/package.json`
+- Modify: `frontend/package.json`
 - Modify: `Taskfile.yml`
 - Modify: `.github/workflows/build.yml`
 - Modify: `scripts/verify-frontend-convergence.test.mjs`
@@ -1536,8 +1536,8 @@ test('keeps exactly one product frontend in the working tree', async () => {
   assert.equal(tracked.some((path) => path.startsWith('frontend-lit-ref/')), false);
   assert.equal(tracked.some((path) => path.startsWith('docs/design/lit/')), false);
   assert.equal(tracked.includes('docs/design/Lethean-5.zip'), false);
-  assert.equal(tracked.some((path) => path.startsWith('frontend-ng/src/')), true);
-  assert.equal(tracked.some((path) => path.startsWith('frontend-ng/src/kit/')), true);
+  assert.equal(tracked.some((path) => path.startsWith('frontend/src/')), true);
+  assert.equal(tracked.some((path) => path.startsWith('frontend/src/kit/')), true);
 });
 ```
 
@@ -1550,7 +1550,7 @@ import { gitLines } from './repository.mjs';
 
 - [ ] **Step 2: Make the frontend verify script a single deterministic gate**
 
-Add to `frontend-ng/package.json`:
+Add to `frontend/package.json`:
 
 ```json
 "verify": "npm run audit:capabilities && npm run test:contracts && npm run test:ci && npm run build && npm run verify:build"
@@ -1566,7 +1566,7 @@ Add to `Taskfile.yml`:
   verify:frontend:
     summary: Verify capability inventory, architecture contracts, Angular tests, build, and fonts
     cmds:
-      - cd frontend-ng && npm run verify
+      - cd frontend && npm run verify
 ```
 
 Keep `test:frontend` short enough for ordinary iteration; use `verify:frontend` before retirement completion and in CI.
@@ -1577,7 +1577,7 @@ After `npm ci` and binding generation in `.github/workflows/build.yml`, add:
 
 ```yaml
       - name: Verify canonical frontend
-        working-directory: frontend-ng
+        working-directory: frontend
         run: npm run verify
 ```
 
@@ -1598,7 +1598,7 @@ Expected: PASS and a freshly generated capability matrix with no uncommitted dif
 - [ ] **Step 6: Commit the guardrails**
 
 ```bash
-git add frontend-ng/package.json Taskfile.yml .github/workflows/build.yml scripts/verify-frontend-convergence.mjs scripts/verify-frontend-convergence.test.mjs docs/frontend/capability-matrix.md
+git add frontend/package.json Taskfile.yml .github/workflows/build.yml scripts/verify-frontend-convergence.mjs scripts/verify-frontend-convergence.test.mjs docs/frontend/capability-matrix.md
 git commit -m "ci(frontend): guard the canonical Angular architecture"
 ```
 
@@ -1621,7 +1621,7 @@ Run:
 
 ```bash
 wails3 task common:generate:bindings
-cd frontend-ng
+cd frontend
 npm ci
 npm run verify
 ```

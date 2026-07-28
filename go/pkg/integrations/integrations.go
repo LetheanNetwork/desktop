@@ -45,7 +45,7 @@ type ClientStatus struct {
 }
 
 // WailsService is the bindable surface. Wails generates TS at
-// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/integrations/.
+// frontend/bindings/dappco.re/lthn/desktop/pkg/integrations/.
 type WailsService struct{}
 
 // NewWailsService constructs the integrations service.

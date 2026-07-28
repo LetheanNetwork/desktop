@@ -23,7 +23,7 @@ import core "dappco.re/go"
 
 // MailFolder is the JSON wire type for a mailbox folder.
 // Matches the MailFolder interface in
-// frontend-ng/src/app/desktop/surfaces/office/mail.ts exactly.
+// frontend/src/app/desktop/surfaces/office/mail.ts exactly.
 //
 // Usage example:
 //
@@ -45,7 +45,7 @@ type MailFolder struct {
 
 // MailThread is the JSON wire type for a single email thread.
 // Matches the MailThread interface in
-// frontend-ng/src/app/desktop/surfaces/office/mail.ts exactly.
+// frontend/src/app/desktop/surfaces/office/mail.ts exactly.
 //
 // Usage example:
 //

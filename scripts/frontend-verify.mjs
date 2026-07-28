@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptPath = fileURLToPath(import.meta.url);
-const frontendRoot = resolve(dirname(scriptPath), '..', 'frontend-ng');
+const frontendRoot = resolve(dirname(scriptPath), '..', 'frontend');
 
 export const FRONTEND_VERIFICATION_STEPS = Object.freeze([
   'audit:capabilities',

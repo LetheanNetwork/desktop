@@ -3,7 +3,7 @@
 // Wails3 Service shape for the seeds package — wraps the
 // package-level ListSubjects / ListProbes / Read functions so Wails
 // generates a TS binding at
-// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/seeds/.
+// frontend/bindings/dappco.re/lthn/desktop/pkg/seeds/.
 // Bound by application.NewService(seeds.NewWailsService()) in
 // pkg/desktop/desktop.go; the package-level functions stay for
 // non-WebView callers (training-loop pipelines, cascade orchestrator,
@@ -51,7 +51,7 @@ func NewWailsService() *WailsService { return &WailsService{} }
 
 // ServiceName labels the binding namespace exposed to JS as
 // "Seeds" — Wails generates the TS binding under
-// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/seeds/.
+// frontend/bindings/dappco.re/lthn/desktop/pkg/seeds/.
 func (s *WailsService) ServiceName() string { return "Seeds" }
 
 // ServiceStartup is the Wails3 lifecycle hook called once after the

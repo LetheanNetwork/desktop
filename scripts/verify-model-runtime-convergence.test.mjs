@@ -49,7 +49,7 @@ test('production tasks stage one fixed sibling LEM sidecar per desktop platform'
 test('the renderer DTOs contain no execution, transport, credential, or native-path fields', async () => {
   const [goTypes, angularTypes] = await Promise.all([
     read('go/pkg/modelruntime/types.go'),
-    read('frontend-ng/src/app/desktop/desktop-model-runtime.models.ts'),
+    read('frontend/src/app/desktop/desktop-model-runtime.models.ts'),
   ]);
   const forbidden =
     /(?:json:"(?:path|model_path|command|arguments|environment|working_directory|endpoint|url|token|secret|credential|key)"|readonly\s+(?:path|modelPath|command|arguments|environment|workingDirectory|endpoint|url|token|secret|credential|key)\??:)/iu;
@@ -61,8 +61,8 @@ test('the renderer DTOs contain no execution, transport, credential, or native-p
 test('the WebView exposes only ModelRuntime, not the retired model-path or Lemma bindings', async () => {
   const [desktop, liveData, tray] = await Promise.all([
     read('go/pkg/desktop/desktop.go'),
-    read('frontend-ng/src/app/desktop/desktop-live-data.service.ts'),
-    read('frontend-ng/src/app/tray-panel/tray-panel.ts'),
+    read('frontend/src/app/desktop/desktop-live-data.service.ts'),
+    read('frontend/src/app/tray-panel/tray-panel.ts'),
   ]);
 
   assert.doesNotMatch(desktop, /gui\.Bind\(models\.NewWailsService/);

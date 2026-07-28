@@ -69,7 +69,7 @@ func TestWailsMCPDevWiring_Bad_LegacyBridgeInactive(t *core.T) {
 	app := readMCPWiringFixture(t, "app.go")
 	desktop := readMCPWiringFixture(t, "../../pkg/desktop/desktop.go")
 	subsystems := readMCPWiringFixture(t, "../../pkg/desktop/subsystems.go")
-	mainTS := readMCPWiringFixture(t, "../../../frontend-ng/src/main.ts")
+	mainTS := readMCPWiringFixture(t, "../../../frontend/src/main.ts")
 
 	core.AssertFalse(t, core.Contains(app, `"dappco.re/lthn/desktop/pkg/bridge"`))
 	core.AssertFalse(t, core.Contains(app, `core.WithName("bridge"`))
@@ -81,7 +81,7 @@ func TestWailsMCPDevWiring_Bad_LegacyBridgeInactive(t *core.T) {
 
 func TestWailsMCPDevWiring_Ugly_LegacyBridgeRetained(t *core.T) {
 	goBridge := readMCPWiringFixture(t, "../../pkg/bridge/bridge.go")
-	webBridge := readMCPWiringFixture(t, "../../../frontend-ng/src/wails-bridge.ts")
+	webBridge := readMCPWiringFixture(t, "../../../frontend/src/wails-bridge.ts")
 
 	core.AssertContains(t, goBridge, "package bridge")
 	core.AssertContains(t, goBridge, "func RegisterService")

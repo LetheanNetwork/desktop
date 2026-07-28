@@ -2,7 +2,7 @@
 
 // plugin_view_capability.go — backend half of Mantis #1523 + #1576. The
 // frontend broker at
-// frontend-ng/src/app/desktop/surfaces/extensions/plugin-auth-broker.ts
+// frontend/src/app/desktop/surfaces/extensions/plugin-auth-broker.ts
 // (grantTokenToFrame) brokers a session-token capability into a third-party
 // iframe via
 // the §5.1 postMessage handshake (RFC.plugin-views.md). Before the

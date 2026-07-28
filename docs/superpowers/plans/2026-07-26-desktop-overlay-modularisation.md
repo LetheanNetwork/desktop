@@ -23,8 +23,8 @@
 
 **Files:**
 
-- Modify: `frontend-ng/src/app/desktop/shell/shell.types.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.ts`
+- Modify: `frontend/src/app/desktop/shell/shell.types.ts`
+- Modify: `frontend/src/app/desktop/desktop.component.ts`
 
 **Interfaces:**
 
@@ -52,13 +52,13 @@
 
 **Files:**
 
-- Test: `frontend-ng/src/app/desktop/shell/start-menu.spec.ts`
-- Create: `frontend-ng/src/app/desktop/shell/start-menu.ts`
-- Create: `frontend-ng/src/app/desktop/shell/start-menu.html`
-- Create: `frontend-ng/src/app/desktop/shell/start-menu.scss`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.html`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.scss`
+- Test: `frontend/src/app/desktop/shell/start-menu.spec.ts`
+- Create: `frontend/src/app/desktop/shell/start-menu.ts`
+- Create: `frontend/src/app/desktop/shell/start-menu.html`
+- Create: `frontend/src/app/desktop/shell/start-menu.scss`
+- Modify: `frontend/src/app/desktop/desktop.component.ts`
+- Modify: `frontend/src/app/desktop/desktop.component.html`
+- Modify: `frontend/src/app/desktop/desktop.component.scss`
 
 **Interfaces:**
 
@@ -89,12 +89,12 @@
 
 **Files:**
 
-- Test: `frontend-ng/src/app/desktop/shell/context-menu.spec.ts`
-- Create: `frontend-ng/src/app/desktop/shell/context-menu.ts`
-- Create: `frontend-ng/src/app/desktop/shell/context-menu.html`
-- Create: `frontend-ng/src/app/desktop/shell/context-menu.scss`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.html`
+- Test: `frontend/src/app/desktop/shell/context-menu.spec.ts`
+- Create: `frontend/src/app/desktop/shell/context-menu.ts`
+- Create: `frontend/src/app/desktop/shell/context-menu.html`
+- Create: `frontend/src/app/desktop/shell/context-menu.scss`
+- Modify: `frontend/src/app/desktop/desktop.component.ts`
+- Modify: `frontend/src/app/desktop/desktop.component.html`
 
 **Interfaces:**
 
@@ -118,13 +118,13 @@
 
 **Files:**
 
-- Test: `frontend-ng/src/app/desktop/shell/tray-panel.spec.ts`
-- Create: `frontend-ng/src/app/desktop/shell/tray-panel.ts`
-- Create: `frontend-ng/src/app/desktop/shell/tray-panel.html`
-- Create: `frontend-ng/src/app/desktop/shell/tray-panel.scss`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.html`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.scss`
+- Test: `frontend/src/app/desktop/shell/tray-panel.spec.ts`
+- Create: `frontend/src/app/desktop/shell/tray-panel.ts`
+- Create: `frontend/src/app/desktop/shell/tray-panel.html`
+- Create: `frontend/src/app/desktop/shell/tray-panel.scss`
+- Modify: `frontend/src/app/desktop/desktop.component.ts`
+- Modify: `frontend/src/app/desktop/desktop.component.html`
+- Modify: `frontend/src/app/desktop/desktop.component.scss`
 
 **Interfaces:**
 
@@ -149,13 +149,13 @@
 
 **Files:**
 
-- Test: `frontend-ng/src/app/desktop/shell/notification-stack.spec.ts`
-- Create: `frontend-ng/src/app/desktop/shell/notification-stack.ts`
-- Create: `frontend-ng/src/app/desktop/shell/notification-stack.html`
-- Create: `frontend-ng/src/app/desktop/shell/notification-stack.scss`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.html`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.scss`
+- Test: `frontend/src/app/desktop/shell/notification-stack.spec.ts`
+- Create: `frontend/src/app/desktop/shell/notification-stack.ts`
+- Create: `frontend/src/app/desktop/shell/notification-stack.html`
+- Create: `frontend/src/app/desktop/shell/notification-stack.scss`
+- Modify: `frontend/src/app/desktop/desktop.component.ts`
+- Modify: `frontend/src/app/desktop/desktop.component.html`
+- Modify: `frontend/src/app/desktop/desktop.component.scss`
 
 **Interfaces:**
 
@@ -174,13 +174,13 @@
 
 **Files:**
 
-- Test: `frontend-ng/src/app/desktop/shell/command-palette.spec.ts`
-- Create: `frontend-ng/src/app/desktop/shell/command-palette.ts`
-- Create: `frontend-ng/src/app/desktop/shell/command-palette.html`
-- Create: `frontend-ng/src/app/desktop/shell/command-palette.scss`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.html`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.scss`
+- Test: `frontend/src/app/desktop/shell/command-palette.spec.ts`
+- Create: `frontend/src/app/desktop/shell/command-palette.ts`
+- Create: `frontend/src/app/desktop/shell/command-palette.html`
+- Create: `frontend/src/app/desktop/shell/command-palette.scss`
+- Modify: `frontend/src/app/desktop/desktop.component.ts`
+- Modify: `frontend/src/app/desktop/desktop.component.html`
+- Modify: `frontend/src/app/desktop/desktop.component.scss`
 
 **Interfaces:**
 
@@ -212,7 +212,7 @@
 
 - [x] Run all five presenter specs and
   `src/app/desktop/desktop.component.spec.ts` together.
-- [x] Run `cd frontend-ng && npm run build`.
+- [x] Run `cd frontend && npm run build`.
 - [x] Run Prettier on the new shell TypeScript, HTML, and spec files.
 - [x] Run `git diff --check`.
 - [x] Confirm `.playwright-mcp/` remains untouched.

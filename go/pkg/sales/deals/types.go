@@ -22,7 +22,7 @@ import core "dappco.re/go"
 
 // Activity is the JSON wire type for one activity-log entry.
 // Field names match the Activity interface in
-// frontend-ng/src/app/desktop/surfaces/sales/deals.ts exactly.
+// frontend/src/app/desktop/surfaces/sales/deals.ts exactly.
 //
 // Usage example:
 //
@@ -42,7 +42,7 @@ type Activity struct {
 }
 
 // DocLink is the JSON wire type for one linked document.
-// Field names match DocLink in frontend-ng/src/app/desktop/surfaces/sales/deals.ts.
+// Field names match DocLink in frontend/src/app/desktop/surfaces/sales/deals.ts.
 //
 // Usage example:
 //
@@ -56,7 +56,7 @@ type DocLink struct {
 
 // Deal is the JSON wire type returned to the Angular frontend.
 // Field names match the Deal interface in
-// frontend-ng/src/app/desktop/surfaces/sales/deals.ts exactly.
+// frontend/src/app/desktop/surfaces/sales/deals.ts exactly.
 //
 // Usage example:
 //

@@ -142,46 +142,46 @@ receive an exact validated socket URL. Production remains embedded.
 ### Angular
 
 - Create
-  `frontend-ng/src/app/desktop/apps/files/files-view.models.ts` — readonly
+  `frontend/src/app/desktop/apps/files/files-view.models.ts` — readonly
   provider-neutral view and action types.
 - Create
-  `frontend-ng/src/app/desktop/apps/files/files-demo.data.ts` — the complete
+  `frontend/src/app/desktop/apps/files/files-demo.data.ts` — the complete
   existing Files fixture represented as mounts and relative paths.
 - Create
-  `frontend-ng/src/app/desktop/apps/files/files-demo.store.ts` — deterministic
+  `frontend/src/app/desktop/apps/files/files-demo.store.ts` — deterministic
   in-memory demo browsing and safe demo mutations.
 - Create
-  `frontend-ng/src/app/desktop/apps/files/files-view-state.ts` and its spec —
+  `frontend/src/app/desktop/apps/files/files-view-state.ts` and its spec —
   navigation tokens, pure mapping, icons, labels, and state reconciliation.
 - Create
-  `frontend-ng/src/app/desktop/desktop-files-bridge.service.ts` and its spec —
+  `frontend/src/app/desktop/desktop-files-bridge.service.ts` and its spec —
   Wails method names, offline guard, strict response parsing, and event
   subscription.
-- Create `frontend-ng/src/app/desktop/apps/files/files-sidebar.view.ts`,
+- Create `frontend/src/app/desktop/apps/files/files-sidebar.view.ts`,
   `files-toolbar.view.ts`, `files-browser.view.ts`,
   `files-status.view.ts`, `files-preview.view.ts`, and
   `files-operation-dialog.view.ts` — standalone `OnPush` presentation views.
 - Create
-  `frontend-ng/src/app/desktop/apps/files/files-views.spec.ts` — isolated view
+  `frontend/src/app/desktop/apps/files/files-views.spec.ts` — isolated view
   input/output contracts.
-- Create `frontend-ng/src/app/desktop/apps/files/files.app.scss` — move the
+- Create `frontend/src/app/desktop/apps/files/files.app.scss` — move the
   existing `.fb*` visual contract out of the desktop shell stylesheet.
-- Rewrite `frontend-ng/src/app/desktop/apps/files.app.ts` and its spec — small
+- Rewrite `frontend/src/app/desktop/apps/files.app.ts` and its spec — small
   route/container owning live/demo orchestration, navigation, preview,
   mutations, events, and WebMCP.
-- Modify `frontend-ng/src/app/desktop/apps/app-mcp.spec.ts` — retain all three
+- Modify `frontend/src/app/desktop/apps/app-mcp.spec.ts` — retain all three
   existing Files tools against mount/path navigation.
-- Modify `frontend-ng/src/app/desktop/desktop-live-data.service.ts` and its
+- Modify `frontend/src/app/desktop/desktop-live-data.service.ts` and its
   spec — remove the retired shallow Files aggregate.
-- Modify `frontend-ng/src/app/desktop/desktop.data.ts` — remove the Files-only
+- Modify `frontend/src/app/desktop/desktop.data.ts` — remove the Files-only
   `FS`, `FsNode`, and `DesktopData.fs` fixture.
-- Modify `frontend-ng/src/app/desktop/desktop.component.scss` — remove the
+- Modify `frontend/src/app/desktop/desktop.component.scss` — remove the
   relocated `.fb*` block only.
-- Rewrite `frontend-ng/src/app/desktop/surfaces/office/files.ts` — reuse the
+- Rewrite `frontend/src/app/desktop/surfaces/office/files.ts` — reuse the
   canonical `FilesApp` instead of retaining a second fixture view.
-- Modify `frontend-ng/src/app/desktop/surfaces/agents/code.ts` — refer to
+- Modify `frontend/src/app/desktop/surfaces/agents/code.ts` — refer to
   mount-relative `Files.Preview`, never `Files.Read`.
-- Modify `frontend-ng/src/app/desktop/surfaces/surface-registry.spec.ts` — prove
+- Modify `frontend/src/app/desktop/surfaces/surface-registry.spec.ts` — prove
   the Office route resolves the canonical Files UI.
 
 ### Documentation and audit
@@ -2251,17 +2251,17 @@ git commit -m "feat(files): bind the sole Medium-backed service"
 **Files:**
 
 - Create:
-  `frontend-ng/src/app/desktop/apps/files/files-view.models.ts`
+  `frontend/src/app/desktop/apps/files/files-view.models.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/files/files-view-state.ts`
+  `frontend/src/app/desktop/apps/files/files-view-state.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/files/files-view-state.spec.ts`
+  `frontend/src/app/desktop/apps/files/files-view-state.spec.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/files/files-demo.data.ts`
+  `frontend/src/app/desktop/apps/files/files-demo.data.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/files/files-demo.store.ts`
+  `frontend/src/app/desktop/apps/files/files-demo.store.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/files/files-demo.store.spec.ts`
+  `frontend/src/app/desktop/apps/files/files-demo.store.spec.ts`
 
 **Interfaces:**
 
@@ -2340,7 +2340,7 @@ describe('FilesDemoStore', () => {
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/files/files-view-state.spec.ts \
   --include=src/app/desktop/apps/files/files-demo.store.spec.ts
@@ -2461,7 +2461,7 @@ imports Wails, fetches, accesses browser storage, or calls a host API.
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/files/files-view-state.spec.ts \
   --include=src/app/desktop/apps/files/files-demo.store.spec.ts
@@ -2470,7 +2470,7 @@ npx ng test --watch=false \
 Expected: PASS.
 
 ```bash
-git add frontend-ng/src/app/desktop/apps/files
+git add frontend/src/app/desktop/apps/files
 git commit -m "feat(frontend): type Files state and demo data"
 ```
 
@@ -2481,9 +2481,9 @@ git commit -m "feat(frontend): type Files state and demo data"
 **Files:**
 
 - Create:
-  `frontend-ng/src/app/desktop/desktop-files-bridge.service.ts`
+  `frontend/src/app/desktop/desktop-files-bridge.service.ts`
 - Create:
-  `frontend-ng/src/app/desktop/desktop-files-bridge.service.spec.ts`
+  `frontend/src/app/desktop/desktop-files-bridge.service.spec.ts`
 
 **Interfaces:**
 
@@ -2547,7 +2547,7 @@ invalid event, and unsubscribe.
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-files-bridge.service.spec.ts
 ```
@@ -2612,7 +2612,7 @@ fixture, or invalid capacity to zero.
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-files-bridge.service.spec.ts
 ```
@@ -2620,8 +2620,8 @@ npx ng test --watch=false \
 Expected: PASS.
 
 ```bash
-git add frontend-ng/src/app/desktop/desktop-files-bridge.service.ts \
-  frontend-ng/src/app/desktop/desktop-files-bridge.service.spec.ts
+git add frontend/src/app/desktop/desktop-files-bridge.service.ts \
+  frontend/src/app/desktop/desktop-files-bridge.service.spec.ts
 git commit -m "feat(frontend): add strict Files live bridge"
 ```
 
@@ -2632,24 +2632,24 @@ git commit -m "feat(frontend): add strict Files live bridge"
 **Files:**
 
 - Create:
-  `frontend-ng/src/app/desktop/apps/files/files-sidebar.view.ts`
+  `frontend/src/app/desktop/apps/files/files-sidebar.view.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/files/files-toolbar.view.ts`
+  `frontend/src/app/desktop/apps/files/files-toolbar.view.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/files/files-browser.view.ts`
+  `frontend/src/app/desktop/apps/files/files-browser.view.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/files/files-status.view.ts`
+  `frontend/src/app/desktop/apps/files/files-status.view.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/files/files-preview.view.ts`
+  `frontend/src/app/desktop/apps/files/files-preview.view.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/files/files-operation-dialog.view.ts`
+  `frontend/src/app/desktop/apps/files/files-operation-dialog.view.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/files/files-views.spec.ts`
+  `frontend/src/app/desktop/apps/files/files-views.spec.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/files/files.app.scss`
-- Modify: `frontend-ng/src/app/desktop/apps/files.app.ts` — attach the moved
+  `frontend/src/app/desktop/apps/files/files.app.scss`
+- Modify: `frontend/src/app/desktop/apps/files.app.ts` — attach the moved
   stylesheet to the still-working container before Task 13 rewrites it.
-- Modify: `frontend-ng/src/app/desktop/desktop.component.scss`
+- Modify: `frontend/src/app/desktop/desktop.component.scss`
 
 **Interfaces:**
 
@@ -2695,7 +2695,7 @@ it('emits a directory-open intent without knowing a provider', async () => {
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/files/files-views.spec.ts
 ```
@@ -2735,7 +2735,7 @@ chrome, shell breakpoints, or unrelated desktop selectors.
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/files/files-views.spec.ts
 ```
@@ -2743,9 +2743,9 @@ npx ng test --watch=false \
 Expected: PASS.
 
 ```bash
-git add frontend-ng/src/app/desktop/apps/files \
-  frontend-ng/src/app/desktop/apps/files.app.ts \
-  frontend-ng/src/app/desktop/desktop.component.scss
+git add frontend/src/app/desktop/apps/files \
+  frontend/src/app/desktop/apps/files.app.ts \
+  frontend/src/app/desktop/desktop.component.scss
 git commit -m "refactor(frontend): extract Files presentation views"
 ```
 
@@ -2755,8 +2755,8 @@ git commit -m "refactor(frontend): extract Files presentation views"
 
 **Files:**
 
-- Rewrite: `frontend-ng/src/app/desktop/apps/files.app.ts`
-- Rewrite: `frontend-ng/src/app/desktop/apps/files.app.spec.ts`
+- Rewrite: `frontend/src/app/desktop/apps/files.app.ts`
+- Rewrite: `frontend/src/app/desktop/apps/files.app.spec.ts`
 
 **Interfaces:**
 
@@ -2788,7 +2788,7 @@ Cover:
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/files.app.spec.ts
 ```
@@ -2869,7 +2869,7 @@ Home is assembled from live mount catalogue and recent rows through
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/files.app.spec.ts
 ```
@@ -2877,8 +2877,8 @@ npx ng test --watch=false \
 Expected: PASS.
 
 ```bash
-git add frontend-ng/src/app/desktop/apps/files.app.ts \
-  frontend-ng/src/app/desktop/apps/files.app.spec.ts
+git add frontend/src/app/desktop/apps/files.app.ts \
+  frontend/src/app/desktop/apps/files.app.spec.ts
 git commit -m "feat(frontend): browse Medium mounts in Files"
 ```
 
@@ -2888,9 +2888,9 @@ git commit -m "feat(frontend): browse Medium mounts in Files"
 
 **Files:**
 
-- Modify: `frontend-ng/src/app/desktop/apps/files.app.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/files.app.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/app-mcp.spec.ts`
+- Modify: `frontend/src/app/desktop/apps/files.app.ts`
+- Modify: `frontend/src/app/desktop/apps/files.app.spec.ts`
+- Modify: `frontend/src/app/desktop/apps/app-mcp.spec.ts`
 
 **Interfaces:**
 
@@ -2942,7 +2942,7 @@ wrapper in Task 15 reuses the UI but must not create a second registration.
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/files.app.spec.ts \
   --include=src/app/desktop/apps/app-mcp.spec.ts
@@ -3009,7 +3009,7 @@ tokens. Nested tokens can be used only after the tool has observed them in
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/files.app.spec.ts \
   --include=src/app/desktop/apps/app-mcp.spec.ts
@@ -3018,9 +3018,9 @@ npx ng test --watch=false \
 Expected: PASS.
 
 ```bash
-git add frontend-ng/src/app/desktop/apps/files.app.ts \
-  frontend-ng/src/app/desktop/apps/files.app.spec.ts \
-  frontend-ng/src/app/desktop/apps/app-mcp.spec.ts
+git add frontend/src/app/desktop/apps/files.app.ts \
+  frontend/src/app/desktop/apps/files.app.spec.ts \
+  frontend/src/app/desktop/apps/app-mcp.spec.ts
 git commit -m "feat(frontend): wire safe Files operations"
 ```
 
@@ -3030,13 +3030,13 @@ git commit -m "feat(frontend): wire safe Files operations"
 
 **Files:**
 
-- Modify: `frontend-ng/src/app/desktop/desktop-live-data.service.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop-live-data.service.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.data.ts`
-- Rewrite: `frontend-ng/src/app/desktop/surfaces/office/files.ts`
-- Modify: `frontend-ng/src/app/desktop/surfaces/agents/code.ts`
-- Modify: `frontend-ng/src/app/desktop/surfaces/surface-registry.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/index.ts` only if its export path changes.
+- Modify: `frontend/src/app/desktop/desktop-live-data.service.ts`
+- Modify: `frontend/src/app/desktop/desktop-live-data.service.spec.ts`
+- Modify: `frontend/src/app/desktop/desktop.data.ts`
+- Rewrite: `frontend/src/app/desktop/surfaces/office/files.ts`
+- Modify: `frontend/src/app/desktop/surfaces/agents/code.ts`
+- Modify: `frontend/src/app/desktop/surfaces/surface-registry.spec.ts`
+- Modify: `frontend/src/app/desktop/index.ts` only if its export path changes.
 
 **Interfaces:**
 
@@ -3062,7 +3062,7 @@ absent without making a browser test read repository source files.
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-live-data.service.spec.ts \
   --include=src/app/desktop/surfaces/surface-registry.spec.ts
@@ -3081,7 +3081,7 @@ Expected: FAIL while the retired aggregate and Office fixture still exist.
   data, other surfaces, or `DESKTOP_DATA` consumers.
 
 Run `rg -n '\b(FS|FsNode|FilesSnapshot|ListLocations|ListRecent|GetDiskUsage)\b'
-frontend-ng/src/app/desktop` and inspect every remaining match. Expected
+frontend/src/app/desktop` and inspect every remaining match. Expected
 matches are only design/history prose if any; no TypeScript consumer remains.
 
 - [x] **Step 4: Make Office Files a thin canonical wrapper**
@@ -3112,7 +3112,7 @@ relative address.
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-live-data.service.spec.ts \
   --include=src/app/desktop/surfaces/surface-registry.spec.ts \
@@ -3122,17 +3122,17 @@ npx ng test --watch=false \
 Expected: PASS.
 
 ```bash
-git add frontend-ng/src/app/desktop/desktop-live-data.service.ts \
-  frontend-ng/src/app/desktop/desktop-live-data.service.spec.ts \
-  frontend-ng/src/app/desktop/desktop.data.ts \
-  frontend-ng/src/app/desktop/surfaces/office/files.ts \
-  frontend-ng/src/app/desktop/surfaces/agents/code.ts \
-  frontend-ng/src/app/desktop/surfaces/surface-registry.spec.ts \
-  frontend-ng/src/app/desktop/index.ts
+git add frontend/src/app/desktop/desktop-live-data.service.ts \
+  frontend/src/app/desktop/desktop-live-data.service.spec.ts \
+  frontend/src/app/desktop/desktop.data.ts \
+  frontend/src/app/desktop/surfaces/office/files.ts \
+  frontend/src/app/desktop/surfaces/agents/code.ts \
+  frontend/src/app/desktop/surfaces/surface-registry.spec.ts \
+  frontend/src/app/desktop/index.ts
 git commit -m "refactor(frontend): retire duplicate Files fixtures"
 ```
 
-If `frontend-ng/src/app/desktop/index.ts` is unchanged, omit it from `git add`.
+If `frontend/src/app/desktop/index.ts` is unchanged, omit it from `git add`.
 
 ---
 
@@ -3212,7 +3212,7 @@ rg -n --glob '*.go' \
   go
 rg -n --glob '*.ts' \
   '(absolutePath|file://|Files\\.Read|ListLocations|ListRecent|GetDiskUsage)' \
-  frontend-ng/src
+  frontend/src
 ```
 
 Write `docs/security/io-medium-audit.md` with:
@@ -3250,7 +3250,7 @@ Expected: tests/vet PASS and `gofmt -l` prints nothing.
 ```bash
 cd /Users/snider/Lethean/agent/cladius/Code/lthn/desktop
 wails3 task verify:frontend
-cd frontend-ng
+cd frontend
 npm run build
 ```
 
@@ -3262,7 +3262,7 @@ Expected: ordered lint/type/test confidence gate PASS and production output at
 Start:
 
 ```bash
-cd frontend-ng
+cd frontend
 npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
 ```
 

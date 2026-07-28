@@ -77,7 +77,7 @@ tranche.
 
 ## Shared resource model
 
-Add `frontend-ng/src/app/desktop/desktop-data-resource.ts`.
+Add `frontend/src/app/desktop/desktop-data-resource.ts`.
 
 The public contract is:
 
@@ -156,7 +156,7 @@ The transition API rejects impossible combinations in development and tests:
 ## Shared status presenter
 
 Add
-`frontend-ng/src/app/desktop/desktop-data-status.view.ts`.
+`frontend/src/app/desktop/desktop-data-status.view.ts`.
 
 `DesktopDataStatusView` is a standalone, `OnPush` presentation component. It
 receives `DesktopDataStatus` and emits a retry intent. It does not receive the
@@ -177,7 +177,7 @@ Control and Files are not mechanically adapted in this tranche.
 ## Telemetry view data
 
 Add application-local
-`frontend-ng/src/app/desktop/apps/telemetry/telemetry-view.models.ts` and
+`frontend/src/app/desktop/apps/telemetry/telemetry-view.models.ts` and
 `telemetry-view-state.ts`.
 
 `TelemetryViewData` contains:
@@ -362,7 +362,7 @@ Use red-green Angular tests for each boundary.
 Final verification runs:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-data-resource.spec.ts \
   --include=src/app/desktop/desktop-data-status.view.spec.ts \

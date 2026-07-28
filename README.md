@@ -25,7 +25,7 @@ lthn/desktop/
 ├── go/
 │   ├── cmd/lthn/         — main binary and embedded frontend target
 │   └── pkg/              — tray, desktop, runner, telemetry, API, and other services
-├── frontend-ng/          — Angular CSR app
+├── frontend/          — Angular CSR app
 │   ├── src/app/          — standalone shell, hash routes, NgRx state, and app views
 │   ├── src/wails-bridge.ts — retained Wails event/WebMCP compatibility shim
 │   ├── src/locale/       — Angular localisation catalogues
@@ -41,7 +41,7 @@ lthn/desktop/
 
 ```bash
 # Frontend-only — Angular shell, no Go runtime:
-cd frontend-ng && npm ci
+cd frontend && npm ci
 npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
 # → http://127.0.0.1:9245/#/
 

@@ -27,7 +27,7 @@ package forecast
 
 // ForecastRow is the JSON wire type for one per-quarter forecast row.
 // Field names match ForecastRow in
-// frontend-ng/src/app/desktop/surfaces/sales/forecast.ts exactly.
+// frontend/src/app/desktop/surfaces/sales/forecast.ts exactly.
 // Numbers are in £000 so the bar chart can scale all four lines against
 // a single integer max.
 //
@@ -54,7 +54,7 @@ type ForecastRow struct {
 
 // ForecastKpi is the JSON wire type for one headline KPI card.
 // Field names match ForecastKpi in
-// frontend-ng/src/app/desktop/surfaces/sales/forecast.ts exactly.
+// frontend/src/app/desktop/surfaces/sales/forecast.ts exactly.
 //
 // Usage example:
 //

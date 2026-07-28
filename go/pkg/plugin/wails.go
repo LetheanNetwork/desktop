@@ -1,7 +1,7 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
 // Wails-bindable surface for the plugin host. Generated TS
-// lands at frontend-ng/bindings/dappco.re/lthn/desktop/pkg/plugin/service.
+// lands at frontend/bindings/dappco.re/lthn/desktop/pkg/plugin/service.
 //
 // marketplace.Service.Install/Remove delegate here; the
 // marketplace package keeps its catalogue role + this package

@@ -15,7 +15,7 @@ package pipeline
 
 // PipelineDeal is the JSON wire type for a deal card inside a column.
 // Field names match the inline Deal interface in
-// frontend-ng/src/app/desktop/surfaces/sales/pipeline.ts.
+// frontend/src/app/desktop/surfaces/sales/pipeline.ts.
 //
 // Usage example:
 //
@@ -36,7 +36,7 @@ type PipelineDeal struct {
 
 // PipelineColumn is the JSON wire type for one stage column.
 // Field names match the PipelineColumn interface in
-// frontend-ng/src/app/desktop/surfaces/sales/pipeline.ts exactly.
+// frontend/src/app/desktop/surfaces/sales/pipeline.ts exactly.
 //
 // Usage example:
 //

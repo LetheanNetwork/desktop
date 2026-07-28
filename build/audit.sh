@@ -74,9 +74,9 @@ audit_v090
 step "go vet"            go vet ./go/...
 step "go build"          bash -c 'go build -o /tmp/lthn-audit ./go/cmd/lthn && rm -f /tmp/lthn-audit'
 step "go test"           go test -count=1 ./go/...
-step "frontend build"    bash -c 'cd frontend-ng && npm run build'
-step "frontend test"     bash -c 'cd frontend-ng && npm run test:ci'
-step "frontend contracts" bash -c 'cd frontend-ng && npm run test:contracts'
+step "frontend build"    bash -c 'cd frontend && npm run build'
+step "frontend test"     bash -c 'cd frontend && npm run test:ci'
+step "frontend contracts" bash -c 'cd frontend && npm run test:contracts'
 
 echo
 echo PASS

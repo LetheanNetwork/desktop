@@ -526,7 +526,7 @@ func NewService(opts Options) *Service {
 		coreapi.WithMiddleware(webViewOnlyRejectMiddleware(&webviewOnlyPrefixes)))
 
 	// Cerberus Mantis #1430 (2026-05-16) — bearer auth re-enabled. The
-	// Angular broker lives at frontend-ng/src/app/desktop/surfaces/
+	// Angular broker lives at frontend/src/app/desktop/surfaces/
 	// extensions/plugin-auth-broker.ts; it loads the session token and injects
 	// Authorization: Bearer on every same-origin API request. Without
 	// this, every local process can reach every API endpoint without

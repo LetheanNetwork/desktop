@@ -12,14 +12,14 @@ const read = (path) => readFile(`${repoRoot}/${path}`, 'utf8');
 const execFile = promisify(execFileCallback);
 
 test('keeps the Angular root client-rendered without hydration triggers', async () => {
-  const template = await read('frontend-ng/src/app/app.html');
+  const template = await read('frontend/src/app/app.html');
   assert.match(template, /@defer \(on immediate\)/);
   assert.doesNotMatch(template, /hydrate\s+on/);
   assert.match(template, /<router-outlet\s*\/>/);
 });
 
 test('frontend exposes the documented deterministic demo server', async () => {
-  const packageJSON = JSON.parse(await read('frontend-ng/package.json'));
+  const packageJSON = JSON.parse(await read('frontend/package.json'));
   assert.equal(
     packageJSON.scripts.demo,
     'ng serve --host 127.0.0.1 --port 9245 --hmr --poll 1000',
@@ -32,8 +32,8 @@ test('desktop state and Terminal persistence remain bounded and Medium-backed', 
       read('go/pkg/desktopstate/service.go'),
       read('go/pkg/desktopstate/document.go'),
       read('go/pkg/desktopstate/models.go'),
-      read('frontend-ng/src/app/desktop/terminal-workspace.service.ts'),
-      read('frontend-ng/src/app/desktop/surfaces/agents/terminal-session.ts'),
+      read('frontend/src/app/desktop/terminal-workspace.service.ts'),
+      read('frontend/src/app/desktop/surfaces/agents/terminal-session.ts'),
       read('go/pkg/appconfig/service.go'),
     ]);
 
@@ -135,7 +135,7 @@ test('macOS Go links and bundle metadata share the 26.0 deployment floor', async
   }
 });
 
-test('all binding generators target frontend-ng and no removed external tree', async () => {
+test('all binding generators target frontend and no removed external tree', async () => {
   const files = await Promise.all([
     read('build/Taskfile.yml'),
     read('build/ios/Taskfile.yml'),
@@ -145,7 +145,7 @@ test('all binding generators target frontend-ng and no removed external tree', a
 
   assert.doesNotMatch(combined, /frontend\/bindings/);
   assert.doesNotMatch(combined, /external\/gui/);
-  assert.match(combined, /frontend-ng\/bindings/);
+  assert.match(combined, /frontend\/bindings/);
 });
 
 test('active build entrypoints use the module-pinned Wails tool', async () => {
@@ -206,7 +206,7 @@ test('CI and audit use the current module and Angular topology', async () => {
   const audit = await read('build/audit.sh');
 
   assert.doesNotMatch(workflow, /submodules:\s*recursive/);
-  assert.match(audit, /cd frontend-ng/);
+  assert.match(audit, /cd frontend/);
   assert.match(audit, /npm run build/);
   assert.match(audit, /npm run test:ci/);
   assert.doesNotMatch(audit, /bun run|cd frontend(?:\s|$)/);
@@ -261,7 +261,7 @@ test('binding tasks use the module-pinned Wails CLI and restore desktop bindings
   }
 
   await mkdir(join(harnessRoot, 'go/pkg/desktop'), { recursive: true });
-  await mkdir(join(harnessRoot, 'frontend-ng'), { recursive: true });
+  await mkdir(join(harnessRoot, 'frontend'), { recursive: true });
   await writeFile(join(harnessRoot, 'go/go.mod'), 'module example.test/desktop\n\ngo 1.26\n');
   await writeFile(join(harnessRoot, 'go/go.sum'), '');
   await writeFile(join(harnessRoot, 'go/pkg/desktop/desktop.go'), 'package desktop\n');
@@ -374,13 +374,13 @@ appendFileSync(process.env.LTHN_BINDING_RECORD, JSON.stringify(record) + '\\n');
     .trim()
     .split('\n')
     .map((line) => JSON.parse(line));
-  const bindingsDir = join(canonicalHarnessRoot, 'frontend-ng/bindings');
+  const bindingsDir = join(canonicalHarnessRoot, 'frontend/bindings');
   const desktopArgs = [
     'generate',
     'bindings',
     '-ts',
     '-d',
-    '../frontend-ng/bindings',
+    '../frontend/bindings',
     '-f',
     '',
     '-clean=true',
@@ -471,7 +471,7 @@ test('the root frontend test task runs convergence contracts', async () => {
 });
 
 test('frontend verification has one package, Task, and CI entrypoint', async () => {
-  const packageJSON = JSON.parse(await read('frontend-ng/package.json'));
+  const packageJSON = JSON.parse(await read('frontend/package.json'));
   const rootTaskfile = await read('Taskfile.yml');
   const commonTaskfile = await read('build/Taskfile.yml');
   const workflow = await read('.github/workflows/build.yml');

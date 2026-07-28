@@ -140,7 +140,7 @@ wails3 task dev
 
 ```text
 production build
-  -> frontend-ng writes go/cmd/lthn/dist/
+  -> frontend writes go/cmd/lthn/dist/
   -> go/cmd/lthn/embed.go embeds dist/
   -> native WebView requests
        /wails/*       -> Wails runtime/transport

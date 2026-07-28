@@ -3,7 +3,7 @@
 // Wails surface for the social service. Methods are bound on the
 // *Service receiver and exposed to the frontend via wails3 generate
 // bindings — the TS shape lands at
-// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/marketing/social/service.
+// frontend/bindings/dappco.re/lthn/desktop/pkg/marketing/social/service.
 
 package social
 

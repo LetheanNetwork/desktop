@@ -19,14 +19,14 @@ Canonical paths:
 - `go/cmd/lthn/` — CLI router, composition root, and embedded production
   assets.
 - `go/pkg/` — product services.
-- `frontend-ng/` — the only product frontend; Angular, standalone, CSR, and
+- `frontend/` — the only product frontend; Angular, standalone, CSR, and
   hash-routed.
-- `frontend-ng/bindings/` — ignored generated Wails TypeScript bindings.
+- `frontend/bindings/` — ignored generated Wails TypeScript bindings.
 - `frontend/` — two Wails mobile support files, not another application.
 - `docs/design/lit/` — visual reference material, not a build input.
 
 Dependencies resolve from `go/go.mod`, `go/go.sum`, `go.work`,
-`frontend-ng/package.json`, and `frontend-ng/package-lock.json`. There are no
+`frontend/package.json`, and `frontend/package-lock.json`. There are no
 required submodules or `external/` source checkouts.
 
 ## Start here
@@ -35,7 +35,7 @@ required submodules or `external/` source checkouts.
 go tool wails3 task doctor
 
 # Browser-only deterministic design/demo mode
-cd frontend-ng
+cd frontend
 npm ci
 npm run demo
 
@@ -54,7 +54,7 @@ binding transport on 9199. Production builds remain embedded under the
 go tool wails3 task verify:frontend
 go tool wails3 task test
 go vet ./go/...
-cd frontend-ng && npm run build
+cd frontend && npm run build
 ```
 
 Run `bash build/audit.sh` for the broader no-regression diagnostic plus
@@ -66,7 +66,7 @@ has a known historical backlog and is not an all-zero repository gate.
 - Use British English and EUPL-1.2.
 - Do not restore the retired Lit application, Bun workflow, submodules,
   Angular SSR, hydration, or another product frontend.
-- Keep runtime Lit where it is intentional: `frontend-ng/src/kit/` and
+- Keep runtime Lit where it is intentional: `frontend/src/kit/` and
   plugin descriptors whose `kind` is `lit`.
 - Every file-backed product operation must ultimately flow through a
   registered `dappco.re/go/io.Medium`.

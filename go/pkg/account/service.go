@@ -85,7 +85,7 @@ func Register(c *core.Core) core.Result {
 // ServiceName labels the binding namespace exposed to JS. The Wails
 // surface is currently empty (the only consumer is the REST endpoint),
 // but registering the service via application.NewService lets future
-// Wails bindings land at frontend-ng/bindings/dappco.re/lthn/desktop/pkg/account/.
+// Wails bindings land at frontend/bindings/dappco.re/lthn/desktop/pkg/account/.
 func (s *Service) ServiceName() string { return "Account" }
 
 // ServiceStartup is the Wails3 lifecycle hook; no-op (account

@@ -22,7 +22,7 @@ existing Wails 3 bridge.
 ## Global Constraints
 
 - Execute inline on `main`; do not use sub-agents or create a worktree.
-- `frontend-ng/` remains the only product frontend; do not add SSR,
+- `frontend/` remains the only product frontend; do not add SSR,
   prerendering, hydration, or another frontend framework.
 - Keep Angular 22 standalone components, `OnPush`, signals for local reactive
   state, and the existing Wails transport.
@@ -50,30 +50,30 @@ existing Wails 3 bridge.
 
 ## File Map
 
-- Create `frontend-ng/src/app/desktop/desktop-data-resource.ts` for immutable
+- Create `frontend/src/app/desktop/desktop-data-resource.ts` for immutable
   generic resource types, invariants, and transitions.
-- Create `frontend-ng/src/app/desktop/desktop-data-resource.spec.ts` for the
+- Create `frontend/src/app/desktop/desktop-data-resource.spec.ts` for the
   complete transition matrix.
-- Create `frontend-ng/src/app/desktop/desktop-data-status.view.ts` for
+- Create `frontend/src/app/desktop/desktop-data-status.view.ts` for
   provenance, receipt time, stale/unavailable copy, and retry presentation.
-- Create `frontend-ng/src/app/desktop/desktop-data-status.view.spec.ts` for the
+- Create `frontend/src/app/desktop/desktop-data-status.view.spec.ts` for the
   presenter's rendering and output contract.
 - Create
-  `frontend-ng/src/app/desktop/apps/telemetry/telemetry-view.models.ts` for
+  `frontend/src/app/desktop/apps/telemetry/telemetry-view.models.ts` for
   Telemetry-only readonly view types.
 - Create
-  `frontend-ng/src/app/desktop/apps/telemetry/telemetry-view-state.ts` for
+  `frontend/src/app/desktop/apps/telemetry/telemetry-view-state.ts` for
   deterministic demo mapping, live mapping, formatting, and bounded histories.
 - Create
-  `frontend-ng/src/app/desktop/apps/telemetry/telemetry-view-state.spec.ts` for
+  `frontend/src/app/desktop/apps/telemetry/telemetry-view-state.spec.ts` for
   pure view-state contracts.
-- Modify `frontend-ng/src/app/desktop/apps/telemetry.app.ts` so its only
+- Modify `frontend/src/app/desktop/apps/telemetry.app.ts` so its only
   writable view state is
   `DesktopDataResource<TelemetryViewData>`.
-- Modify `frontend-ng/src/app/desktop/apps/telemetry.app.spec.ts` for demo,
+- Modify `frontend/src/app/desktop/apps/telemetry.app.spec.ts` for demo,
   loading, live, mixed, unavailable, stale, retry, concurrency, polling, and
   destruction behaviour.
-- Modify `frontend-ng/src/app/desktop/desktop.component.scss` only to let the
+- Modify `frontend/src/app/desktop/desktop.component.scss` only to let the
   richer Telemetry metadata band wrap without losing its current visual
   hierarchy.
 
@@ -83,8 +83,8 @@ existing Wails 3 bridge.
 
 **Files:**
 
-- Create: `frontend-ng/src/app/desktop/desktop-data-resource.ts`
-- Test: `frontend-ng/src/app/desktop/desktop-data-resource.spec.ts`
+- Create: `frontend/src/app/desktop/desktop-data-resource.ts`
+- Test: `frontend/src/app/desktop/desktop-data-resource.spec.ts`
 
 **Interfaces:**
 
@@ -352,7 +352,7 @@ describe('desktop data resource', () => {
 - [ ] **Step 2: Run the spec and observe the missing-module failure**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-data-resource.spec.ts
 ```
@@ -553,8 +553,8 @@ Expected: all resource tests PASS.
 - [ ] **Step 6: Commit the resource contract**
 
 ```bash
-git add frontend-ng/src/app/desktop/desktop-data-resource.ts
-git add frontend-ng/src/app/desktop/desktop-data-resource.spec.ts
+git add frontend/src/app/desktop/desktop-data-resource.ts
+git add frontend/src/app/desktop/desktop-data-resource.spec.ts
 git commit -m "feat(frontend): add desktop data resource lifecycle"
 ```
 
@@ -564,8 +564,8 @@ git commit -m "feat(frontend): add desktop data resource lifecycle"
 
 **Files:**
 
-- Create: `frontend-ng/src/app/desktop/desktop-data-status.view.ts`
-- Test: `frontend-ng/src/app/desktop/desktop-data-status.view.spec.ts`
+- Create: `frontend/src/app/desktop/desktop-data-status.view.ts`
+- Test: `frontend/src/app/desktop/desktop-data-status.view.spec.ts`
 
 **Interfaces:**
 
@@ -696,7 +696,7 @@ describe('DesktopDataStatusView', () => {
 - [ ] **Step 2: Run the spec and observe the missing-component failure**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-data-status.view.spec.ts
 ```
@@ -868,7 +868,7 @@ property values are fixed language keywords.
 - [ ] **Step 4: Run the presenter and compatibility badge specs**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-data-status.view.spec.ts \
   --include=src/app/desktop/desktop-data-state-badge.spec.ts
@@ -879,8 +879,8 @@ Expected: both specs PASS; the existing compatibility badge remains unchanged.
 - [ ] **Step 5: Commit the status presenter**
 
 ```bash
-git add frontend-ng/src/app/desktop/desktop-data-status.view.ts
-git add frontend-ng/src/app/desktop/desktop-data-status.view.spec.ts
+git add frontend/src/app/desktop/desktop-data-status.view.ts
+git add frontend/src/app/desktop/desktop-data-status.view.spec.ts
 git commit -m "feat(frontend): add desktop data status presenter"
 ```
 
@@ -891,11 +891,11 @@ git commit -m "feat(frontend): add desktop data status presenter"
 **Files:**
 
 - Create:
-  `frontend-ng/src/app/desktop/apps/telemetry/telemetry-view.models.ts`
+  `frontend/src/app/desktop/apps/telemetry/telemetry-view.models.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/telemetry/telemetry-view-state.ts`
+  `frontend/src/app/desktop/apps/telemetry/telemetry-view-state.ts`
 - Test:
-  `frontend-ng/src/app/desktop/apps/telemetry/telemetry-view-state.spec.ts`
+  `frontend/src/app/desktop/apps/telemetry/telemetry-view-state.spec.ts`
 
 **Interfaces:**
 
@@ -1063,7 +1063,7 @@ describe('Telemetry view state', () => {
 - [ ] **Step 2: Run the spec and observe the missing-module failures**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/telemetry/telemetry-view-state.spec.ts
 ```
@@ -1255,9 +1255,9 @@ Expected: all mapping tests PASS.
 - [ ] **Step 6: Commit the Telemetry view state**
 
 ```bash
-git add frontend-ng/src/app/desktop/apps/telemetry/telemetry-view.models.ts
-git add frontend-ng/src/app/desktop/apps/telemetry/telemetry-view-state.ts
-git add frontend-ng/src/app/desktop/apps/telemetry/telemetry-view-state.spec.ts
+git add frontend/src/app/desktop/apps/telemetry/telemetry-view.models.ts
+git add frontend/src/app/desktop/apps/telemetry/telemetry-view-state.ts
+git add frontend/src/app/desktop/apps/telemetry/telemetry-view-state.spec.ts
 git commit -m "refactor(frontend): model Telemetry view state"
 ```
 
@@ -1267,9 +1267,9 @@ git commit -m "refactor(frontend): model Telemetry view state"
 
 **Files:**
 
-- Modify: `frontend-ng/src/app/desktop/apps/telemetry.app.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/telemetry.app.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.scss:71-79`
+- Modify: `frontend/src/app/desktop/apps/telemetry.app.ts`
+- Modify: `frontend/src/app/desktop/apps/telemetry.app.spec.ts`
+- Modify: `frontend/src/app/desktop/desktop.component.scss:71-79`
 
 **Interfaces:**
 
@@ -1512,7 +1512,7 @@ describe('TelemetryApp', () => {
 - [ ] **Step 2: Run the app spec and observe failures against the old signals**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/telemetry.app.spec.ts
 ```
@@ -1750,7 +1750,7 @@ In `desktop.component.scss`, preserve the existing values and add wrapping:
 - [ ] **Step 6: Run focused lifecycle tests**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-data-resource.spec.ts \
   --include=src/app/desktop/desktop-data-status.view.spec.ts \
@@ -1763,9 +1763,9 @@ Expected: all focused specs PASS.
 - [ ] **Step 7: Commit the Telemetry adoption**
 
 ```bash
-git add frontend-ng/src/app/desktop/apps/telemetry.app.ts
-git add frontend-ng/src/app/desktop/apps/telemetry.app.spec.ts
-git add frontend-ng/src/app/desktop/desktop.component.scss
+git add frontend/src/app/desktop/apps/telemetry.app.ts
+git add frontend/src/app/desktop/apps/telemetry.app.spec.ts
+git add frontend/src/app/desktop/desktop.component.scss
 git commit -m "feat(frontend): adopt data lifecycle in Telemetry"
 ```
 
@@ -1775,8 +1775,8 @@ git commit -m "feat(frontend): adopt data lifecycle in Telemetry"
 
 **Files:**
 
-- Modify: `frontend-ng/src/app/desktop/apps/telemetry.app.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/telemetry.app.spec.ts`
+- Modify: `frontend/src/app/desktop/apps/telemetry.app.ts`
+- Modify: `frontend/src/app/desktop/apps/telemetry.app.spec.ts`
 
 **Interfaces:**
 
@@ -1846,7 +1846,7 @@ it('ignores a live result that settles after destruction', async () => {
 - [ ] **Step 2: Run the app spec and observe cadence/teardown failures**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/telemetry.app.spec.ts
 ```
@@ -1917,7 +1917,7 @@ internal state and does not mutate the destroyed Angular resource.
 - [ ] **Step 4: Run the complete focused set**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-data-resource.spec.ts \
   --include=src/app/desktop/desktop-data-status.view.spec.ts \
@@ -1930,8 +1930,8 @@ Expected: all focused specs PASS, including cadence and late-result cleanup.
 - [ ] **Step 5: Commit lifecycle hardening**
 
 ```bash
-git add frontend-ng/src/app/desktop/apps/telemetry.app.ts
-git add frontend-ng/src/app/desktop/apps/telemetry.app.spec.ts
+git add frontend/src/app/desktop/apps/telemetry.app.ts
+git add frontend/src/app/desktop/apps/telemetry.app.spec.ts
 git commit -m "test(frontend): harden Telemetry polling lifecycle"
 ```
 

@@ -642,7 +642,7 @@ Required proofs:
 
 Convergence tests prove:
 
-- the canonical product frontend remains `frontend-ng`;
+- the canonical product frontend remains `frontend`;
 - development passes an explicit repository `bin/lem`;
 - packaged applications stage `lem`/`lem.exe` beside the Desktop executable;
 - production resolution has no PATH fallback;

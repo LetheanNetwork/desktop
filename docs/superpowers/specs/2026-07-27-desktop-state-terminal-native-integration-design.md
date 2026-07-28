@@ -378,12 +378,12 @@ desktop never prompts.
 The intended additions are:
 
 ```text
-frontend-ng/src/app/desktop/
+frontend/src/app/desktop/
   desktop-state-bridge.service.ts
   desktop-host-intent.service.ts
   terminal-workspace.models.ts
 
-frontend-ng/src/app/store/
+frontend/src/app/store/
   desktop-session.actions.ts
   desktop-session.effects.ts
 ```

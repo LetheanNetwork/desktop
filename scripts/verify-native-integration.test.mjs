@@ -78,9 +78,9 @@ test('native inputs cross one bounded host-intent and permission boundary', asyn
       text('go/cmd/lthn/main.go'),
       text('go/pkg/desktop/host_intents.go'),
       text('go/pkg/desktop/sysevents.go'),
-      text('frontend-ng/src/app/desktop/desktop-host-intent.service.ts'),
+      text('frontend/src/app/desktop/desktop-host-intent.service.ts'),
       text('go/pkg/permissions/service.go'),
-      text('frontend-ng/src/app/desktop/desktop-permissions-bridge.service.ts'),
+      text('frontend/src/app/desktop/desktop-permissions-bridge.service.ts'),
     ]);
 
   assert.match(main, /isNativeLaunchArgument/);

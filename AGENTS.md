@@ -10,7 +10,7 @@ or the other non-GUI commands.
 
 ## Product and UI decisions
 
-- `frontend-ng/` is the canonical and only product frontend.
+- `frontend/` is the canonical and only product frontend.
 - The frontend is Angular 22, standalone, client-side rendered, and
   hash-routed. Do not add Angular SSR, prerendering as an application mode,
   hydration, or a second frontend framework.
@@ -24,11 +24,11 @@ or the other non-GUI commands.
 
 ### What the similarly named directories mean
 
-- `frontend-ng/` — live Angular product source. Build, test, and develop here.
+- `frontend/` — live Angular product source. Build, test, and develop here.
 - `frontend/` — two tracked Wails mobile-generated support binding files. It is
   not a second application. iOS/Android tasks still mention this path, so do not
   delete it as cosmetic cleanup without repairing and testing those tasks.
-- `frontend-ng/bindings/` — ignored generated Wails TypeScript bindings.
+- `frontend/bindings/` — ignored generated Wails TypeScript bindings.
 - `frontend-lit-ref/` — ignored local snapshot of the retired Lit application.
   It is byte-for-byte recoverable as `67b012f^:frontend` (361 files), not a
   build input or source of truth. The owner has chosen Git history, rather than
@@ -40,7 +40,7 @@ or the other non-GUI commands.
   archives must not be added; Git is the archive.
 
 Lit is still an intentional runtime dependency inside the Angular project:
-`frontend-ng/src/kit/` implements reusable custom elements with Lit, and the
+`frontend/src/kit/` implements reusable custom elements with Lit, and the
 plugin-view runtime supports descriptors whose `kind` is `lit`. Retiring the
 old Lit application does **not** mean removing the `lit` package or those
 framework-neutral elements.
@@ -56,10 +56,10 @@ its runnable Angular 18 workspace is a reference fixture, not code to restore.
 
 The production ports already live in:
 
-- `frontend-ng/src/foundations/` — the pack's CSS tokens converted to Sass,
+- `frontend/src/foundations/` — the pack's CSS tokens converted to Sass,
   with self-hosted fonts for offline/CSP-safe builds and an Android profile.
-- `frontend-ng/src/kit/` — the active typed Lit custom-element layer.
-- `frontend-ng/src/app/desktop/` — the Angular 22 evolution of the pack's
+- `frontend/src/kit/` — the active typed Lit custom-element layer.
+- `frontend/src/app/desktop/` — the Angular 22 evolution of the pack's
   desktop mock, with NgRx, lazy routes, localisation, WebMCP, and Wails/CoreGO
   integration.
 
@@ -78,7 +78,7 @@ desktop/
 │   ├── go.mod                    # dappco.re/lthn/desktop
 │   ├── cmd/lthn/                 # CLI, composition root, embedded assets
 │   └── pkg/                      # product services
-├── frontend-ng/                  # canonical Angular application
+├── frontend/                  # canonical Angular application
 ├── frontend/                     # Wails mobile support bindings, not an app
 ├── build/                        # Wails/platform/task configuration
 ├── bundles/                      # marketplace bundle manifests
@@ -97,7 +97,7 @@ Use `go.mod`, `go.sum`, and `go.work` as the dependency truth.
 Version manifests are authoritative:
 
 - `go/go.mod` — Go toolchain, Wails, CoreGO, and backend modules.
-- `frontend-ng/package.json` and `package-lock.json` — Angular, TypeScript,
+- `frontend/package.json` and `package-lock.json` — Angular, TypeScript,
   NgRx, Lit, Wails runtime, xterm, and npm.
 - `.github/workflows/build.yml` — CI toolchain and platform matrix.
 
@@ -162,68 +162,68 @@ Add CLI verbs as flat `cmdX(args []string) int` handlers which delegate to
 
 ### Angular application
 
-- `frontend-ng/src/main.ts` — direct Angular bootstrap.
-- `frontend-ng/src/app/app.config.ts` — hash router, NgRx, transport, WebMCP,
+- `frontend/src/main.ts` — direct Angular bootstrap.
+- `frontend/src/app/app.config.ts` — hash router, NgRx, transport, WebMCP,
   deep-link, and mobile initialisers.
-- `frontend-ng/src/app/app.routes.ts` — top-level routes:
+- `frontend/src/app/app.routes.ts` — top-level routes:
   `#/`, `#/w/:app`, and `#/tray`.
-- `frontend-ng/src/app/desktop/desktop-catalogue.data.ts` — typed app,
+- `frontend/src/app/desktop/desktop-catalogue.data.ts` — typed app,
   category, ordering, and child-navigation catalogue.
-- `frontend-ng/src/app/desktop/dev-panel.data.ts` — typed CoreGO/IDE panel
+- `frontend/src/app/desktop/dev-panel.data.ts` — typed CoreGO/IDE panel
   fixtures and route lookup.
-- `frontend-ng/src/app/desktop/desktop-shell-fixtures.data.ts` — typed world
+- `frontend/src/app/desktop/desktop-shell-fixtures.data.ts` — typed world
   clock and package-status fixtures.
-- `frontend-ng/src/app/desktop/desktop.data.ts` — shared desktop state defaults
+- `frontend/src/app/desktop/desktop.data.ts` — shared desktop state defaults
   and compatibility exports for the split data modules.
-- `frontend-ng/src/app/desktop/apps/app-view.ts` — lazy component registry.
-- `frontend-ng/src/app/desktop/desktop-route-tree.ts` — derives the router and
+- `frontend/src/app/desktop/apps/app-view.ts` — lazy component registry.
+- `frontend/src/app/desktop/desktop-route-tree.ts` — derives the router and
   menus from the app/category registries.
-- `frontend-ng/src/app/desktop/window-manager.service.ts` — single source of
+- `frontend/src/app/desktop/window-manager.service.ts` — single source of
   truth for Angular window state.
-- `frontend-ng/src/app/desktop/window-interaction.service.ts` — tested,
+- `frontend/src/app/desktop/window-interaction.service.ts` — tested,
   stateless drag, resize, snap, marquee, group-drag, and grouping algorithms.
   `DesktopComponent` retains DOM pointer lifecycles and applies interaction
   results through the window manager.
-- `frontend-ng/src/app/desktop/desktop-state-bridge.service.ts` — strict
+- `frontend/src/app/desktop/desktop-state-bridge.service.ts` — strict
   shell-session validation plus connected Medium-backed and offline in-memory
   state providers.
-- `frontend-ng/src/app/desktop/terminal-workspace.service.ts` — debounced,
+- `frontend/src/app/desktop/terminal-workspace.service.ts` — debounced,
   revision-aware persistence for execution-free Terminal tab metadata.
-- `frontend-ng/src/app/desktop/desktop-host-intent.service.ts` — the single
+- `frontend/src/app/desktop/desktop-host-intent.service.ts` — the single
   bounded native-event boundary for opaque Files items, catalogue navigation,
   notifications, and permission snapshots.
-- `frontend-ng/src/app/desktop/desktop-permissions-bridge.service.ts` —
+- `frontend/src/app/desktop/desktop-permissions-bridge.service.ts` —
   explicit native permission status/request bridge; offline mode reports
   unsupported without Wails traffic.
-- `frontend-ng/src/app/desktop/desktop-services-bridge.service.ts` — defensive
+- `frontend/src/app/desktop/desktop-services-bridge.service.ts` — defensive
   managed-services Wails bridge. It accepts known service IDs and bounded
   policy/output requests, rejects execution-bearing responses, forwards
   `lthn:services:changed`, and makes no Wails call or event subscription in
   offline demo mode.
-- `frontend-ng/src/app/desktop/desktop-model-runtime-resource.service.ts` —
+- `frontend/src/app/desktop/desktop-model-runtime-resource.service.ts` —
   ref-counted shared ModelRuntime snapshot/event/poll resource used by Control
   and Telemetry, with deterministic in-memory lifecycle operations in offline
   demo mode.
-- `frontend-ng/src/app/desktop/apps/control/control-services.view.ts` —
+- `frontend/src/app/desktop/apps/control/control-services.view.ts` —
   Control's working Services interface under the stable internal `daemons`
   tab value. It presents manual Start/Stop/Restart and explicit bounded output
   without exposing command, arguments, environment, or working directories.
-- `frontend-ng/src/app/desktop/shell/` — behaviour-preserving presenters for
+- `frontend/src/app/desktop/shell/` — behaviour-preserving presenters for
   the menu bar, taskbar/dock, Start and context menus, tray panels,
   notifications, and command palette. `DesktopComponent` remains their
   coordinator; shell components receive typed inputs and emit interaction
   intents.
-- `frontend-ng/src/app/desktop/surfaces/` — lazy product surfaces and shared
+- `frontend/src/app/desktop/surfaces/` — lazy product surfaces and shared
   bridge/page primitives.
-- `frontend-ng/src/app/store/` — NgRx state which crosses components or
+- `frontend/src/app/store/` — NgRx state which crosses components or
   transport boundaries.
-- `frontend-ng/src/app/connection-manager.service.ts` — installs the Wails
+- `frontend/src/app/connection-manager.service.ts` — installs the Wails
   WebSocket transport before generated binding calls.
-- `frontend-ng/src/app/desktop/desktop-mcp.service.ts` — Angular WebMCP tools.
-- `frontend-ng/src/wails-bridge.ts` — unbootstrapped compatibility fallback;
+- `frontend/src/app/desktop/desktop-mcp.service.ts` — Angular WebMCP tools.
+- `frontend/src/wails-bridge.ts` — unbootstrapped compatibility fallback;
   it is not the primary transport.
-- `frontend-ng/src/foundations/` — design tokens and global foundations.
-- `frontend-ng/src/kit/` — active Lit-based reusable custom elements.
+- `frontend/src/foundations/` — design tokens and global foundations.
+- `frontend/src/kit/` — active Lit-based reusable custom elements.
 
 When adding an Angular app surface, update `APPS`/`CATEGORIES` and
 `APP_REGISTRY`, let `DESKTOP_APP_ROUTES` derive the route tree, and extend the
@@ -318,7 +318,7 @@ go vet ./go/pkg/desktopstate ./go/pkg/appconfig ./go/pkg/terminal \
   ./go/pkg/permissions ./go/pkg/desktop ./go/cmd/lthn
 node --test scripts/verify-frontend-convergence.test.mjs \
   scripts/verify-native-integration.test.mjs
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-state-bridge.service.spec.ts \
   --include=src/app/desktop/terminal-workspace.service.spec.ts \
@@ -340,7 +340,7 @@ Focused Files checks:
 ```bash
 go test ./go/pkg/office/files ./go/pkg/desktop ./go/cmd/lthn -count=1
 go vet ./go/pkg/office/files ./go/pkg/desktop ./go/cmd/lthn
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/files.app.spec.ts \
   --include=src/app/desktop/desktop-files-bridge.service.spec.ts
@@ -352,7 +352,7 @@ Focused managed-services checks:
 go test ./go/pkg/services ./go/pkg/desktop ./go/cmd/lthn -count=1
 go test -race ./go/pkg/services -count=1
 go vet ./go/pkg/services ./go/pkg/desktop ./go/cmd/lthn
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-services-bridge.service.spec.ts \
   --include=src/app/desktop/apps/control/control-services.view.spec.ts \
@@ -386,7 +386,7 @@ node --test scripts/verify-model-runtime-convergence.test.mjs
 go test ./go/pkg/services ./go/pkg/models ./go/pkg/modelruntime ./go/pkg/desktop ./go/cmd/lthn -count=1
 go test -race ./go/pkg/services ./go/pkg/modelruntime -count=1
 go vet ./go/pkg/services ./go/pkg/models ./go/pkg/modelruntime ./go/pkg/desktop ./go/cmd/lthn
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-model-runtime-bridge.service.spec.ts \
   --include=src/app/desktop/desktop-model-runtime-resource.service.spec.ts \
@@ -406,21 +406,21 @@ unrelated mechanical rewrites.
 Install the frontend exactly from its npm lockfile:
 
 ```bash
-cd frontend-ng
+cd frontend
 npm ci
 ```
 
 Frontend-only development:
 
 ```bash
-cd frontend-ng
+cd frontend
 npm run demo
 ```
 
 The expanded equivalent is:
 
 ```bash
-cd frontend-ng
+cd frontend
 npm start -- --host 127.0.0.1 --port 9245 --hmr --poll 1000
 # http://127.0.0.1:9245/#/
 ```
@@ -476,7 +476,7 @@ for the same ordered Angular confidence gate used by CI.
 Production Angular build:
 
 ```bash
-cd frontend-ng
+cd frontend
 npm run build
 # output: ../go/cmd/lthn/dist/index.html
 ```
@@ -498,7 +498,7 @@ Use focused tests while iterating:
 
 ```bash
 go test ./go/pkg/<changed-package>
-cd frontend-ng
+cd frontend
 npx ng test --watch=false --include=src/path/to/file.spec.ts
 ```
 
@@ -531,7 +531,7 @@ gofmt -l go/
 git diff --check
 go vet ./go/...
 go tool wails3 task test
-cd frontend-ng && npm run build
+cd frontend && npm run build
 ```
 
 The complete Go suite is large, noisy, and contains long security sweeps.
@@ -544,13 +544,13 @@ record the environmental collision separately.
 
 The active development topology is converged:
 
-- binding generation targets only `frontend-ng/bindings`, synchronises the
+- binding generation targets only `frontend/bindings`, synchronises the
   root Go workspace, carries platform-specific cache markers, and restores
   desktop bindings after mobile generation;
 - CI performs a normal checkout with no recursive submodules;
-- `build/audit.sh` uses `frontend-ng` and npm;
+- `build/audit.sh` uses `frontend` and npm;
 - active production Go comments point at Angular surfaces and
-  `frontend-ng/bindings`; and
+  `frontend/bindings`; and
 - `CLAUDE.md` defers to this contract while `docs/development.md` describes a
   normal clone, HMR, tests, builds, and the current transport ports.
 

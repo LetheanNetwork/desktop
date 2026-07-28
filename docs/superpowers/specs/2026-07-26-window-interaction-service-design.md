@@ -58,7 +58,7 @@ views.
 
 ## Service boundary
 
-Create `frontend-ng/src/app/desktop/window-interaction.service.ts`.
+Create `frontend/src/app/desktop/window-interaction.service.ts`.
 
 The service exposes typed sessions and results for:
 

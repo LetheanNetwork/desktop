@@ -329,19 +329,19 @@ git commit -m "fix: hide native paths behind files capabilities"
 
 **Files:**
 
-- Modify: `frontend-ng/src/app/desktop/desktop-controls-bridge.service.ts`
+- Modify: `frontend/src/app/desktop/desktop-controls-bridge.service.ts`
 - Modify:
-  `frontend-ng/src/app/desktop/desktop-controls-bridge.service.spec.ts`
-- Modify: `frontend-ng/src/app/store/desktop-controls.actions.ts`
-- Modify: `frontend-ng/src/app/store/desktop-controls.effects.ts`
-- Modify: `frontend-ng/src/app/store/desktop-controls.effects.spec.ts`
-- Modify: `frontend-ng/src/app/store/desktop-controls.reducer.ts`
-- Modify: `frontend-ng/src/app/store/desktop-controls.reducer.spec.ts`
-- Modify: `frontend-ng/src/app/store/desktop-controls.models.ts`
-- Modify: `frontend-ng/src/app/desktop/preferences.service.ts`
-- Create: `frontend-ng/src/app/desktop/preferences.service.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/settings.app.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/settings.app.spec.ts`
+  `frontend/src/app/desktop/desktop-controls-bridge.service.spec.ts`
+- Modify: `frontend/src/app/store/desktop-controls.actions.ts`
+- Modify: `frontend/src/app/store/desktop-controls.effects.ts`
+- Modify: `frontend/src/app/store/desktop-controls.effects.spec.ts`
+- Modify: `frontend/src/app/store/desktop-controls.reducer.ts`
+- Modify: `frontend/src/app/store/desktop-controls.reducer.spec.ts`
+- Modify: `frontend/src/app/store/desktop-controls.models.ts`
+- Modify: `frontend/src/app/desktop/preferences.service.ts`
+- Create: `frontend/src/app/desktop/preferences.service.spec.ts`
+- Modify: `frontend/src/app/desktop/apps/settings.app.ts`
+- Modify: `frontend/src/app/desktop/apps/settings.app.spec.ts`
 
 **Step 1: Read the Angular references required by the local Angular skill**
 
@@ -365,7 +365,7 @@ Test:
 **Step 3: Run the red tests**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/settings.app.spec.ts \
   --include=src/app/desktop/preferences.service.spec.ts \
@@ -392,18 +392,18 @@ npx ng test --watch=false \
 npx tsc -p tsconfig.app.json --noEmit
 cd ..
 git diff --check
-git add frontend-ng/src/app/desktop/desktop-controls-bridge.service.ts \
-  frontend-ng/src/app/desktop/desktop-controls-bridge.service.spec.ts \
-  frontend-ng/src/app/desktop/preferences.service.ts \
-  frontend-ng/src/app/desktop/preferences.service.spec.ts \
-  frontend-ng/src/app/desktop/apps/settings.app.ts \
-  frontend-ng/src/app/desktop/apps/settings.app.spec.ts \
-  frontend-ng/src/app/store/desktop-controls.actions.ts \
-  frontend-ng/src/app/store/desktop-controls.effects.ts \
-  frontend-ng/src/app/store/desktop-controls.effects.spec.ts \
-  frontend-ng/src/app/store/desktop-controls.reducer.ts \
-  frontend-ng/src/app/store/desktop-controls.reducer.spec.ts \
-  frontend-ng/src/app/store/desktop-controls.models.ts
+git add frontend/src/app/desktop/desktop-controls-bridge.service.ts \
+  frontend/src/app/desktop/desktop-controls-bridge.service.spec.ts \
+  frontend/src/app/desktop/preferences.service.ts \
+  frontend/src/app/desktop/preferences.service.spec.ts \
+  frontend/src/app/desktop/apps/settings.app.ts \
+  frontend/src/app/desktop/apps/settings.app.spec.ts \
+  frontend/src/app/store/desktop-controls.actions.ts \
+  frontend/src/app/store/desktop-controls.effects.ts \
+  frontend/src/app/store/desktop-controls.effects.spec.ts \
+  frontend/src/app/store/desktop-controls.reducer.ts \
+  frontend/src/app/store/desktop-controls.reducer.spec.ts \
+  frontend/src/app/store/desktop-controls.models.ts
 git commit -m "feat: add transactional desktop settings"
 ```
 
@@ -411,15 +411,15 @@ git commit -m "feat: add transactional desktop settings"
 
 **Files:**
 
-- Create: `frontend-ng/src/app/desktop/desktop-state-bridge.service.ts`
-- Create: `frontend-ng/src/app/desktop/desktop-state-bridge.service.spec.ts`
-- Modify: `frontend-ng/src/app/store/desktop.actions.ts`
-- Modify: `frontend-ng/src/app/store/desktop.effects.ts`
-- Modify: `frontend-ng/src/app/store/desktop.effects.spec.ts`
-- Modify: `frontend-ng/src/app/store/desktop.reducer.ts`
-- Modify: `frontend-ng/src/app/store/desktop.reducer.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/window-manager.service.ts`
-- Modify: `frontend-ng/src/app/app.config.ts` if a dedicated session effect is
+- Create: `frontend/src/app/desktop/desktop-state-bridge.service.ts`
+- Create: `frontend/src/app/desktop/desktop-state-bridge.service.spec.ts`
+- Modify: `frontend/src/app/store/desktop.actions.ts`
+- Modify: `frontend/src/app/store/desktop.effects.ts`
+- Modify: `frontend/src/app/store/desktop.effects.spec.ts`
+- Modify: `frontend/src/app/store/desktop.reducer.ts`
+- Modify: `frontend/src/app/store/desktop.reducer.spec.ts`
+- Modify: `frontend/src/app/desktop/window-manager.service.ts`
+- Modify: `frontend/src/app/app.config.ts` if a dedicated session effect is
   cleaner than adapting `DesktopEffects`
 
 **Step 1: Write failing tests**
@@ -442,7 +442,7 @@ Test:
 **Step 2: Run the red tests**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-state-bridge.service.spec.ts \
   --include=src/app/store/desktop.effects.spec.ts \
@@ -467,15 +467,15 @@ npx ng test --watch=false \
 npx tsc -p tsconfig.app.json --noEmit
 cd ..
 git diff --check
-git add frontend-ng/src/app/desktop/desktop-state-bridge.service.ts \
-  frontend-ng/src/app/desktop/desktop-state-bridge.service.spec.ts \
-  frontend-ng/src/app/desktop/window-manager.service.ts \
-  frontend-ng/src/app/store/desktop.actions.ts \
-  frontend-ng/src/app/store/desktop.effects.ts \
-  frontend-ng/src/app/store/desktop.effects.spec.ts \
-  frontend-ng/src/app/store/desktop.reducer.ts \
-  frontend-ng/src/app/store/desktop.reducer.spec.ts \
-  frontend-ng/src/app/app.config.ts
+git add frontend/src/app/desktop/desktop-state-bridge.service.ts \
+  frontend/src/app/desktop/desktop-state-bridge.service.spec.ts \
+  frontend/src/app/desktop/window-manager.service.ts \
+  frontend/src/app/store/desktop.actions.ts \
+  frontend/src/app/store/desktop.effects.ts \
+  frontend/src/app/store/desktop.effects.spec.ts \
+  frontend/src/app/store/desktop.reducer.ts \
+  frontend/src/app/store/desktop.reducer.spec.ts \
+  frontend/src/app/app.config.ts
 git commit -m "feat: restore desktop sessions through go-io"
 ```
 
@@ -535,17 +535,17 @@ git commit -m "feat: add resumable terminal output"
 **Files:**
 
 - Create:
-  `frontend-ng/src/app/desktop/terminal-workspace.models.ts`
+  `frontend/src/app/desktop/terminal-workspace.models.ts`
 - Create:
-  `frontend-ng/src/app/desktop/terminal-workspace.service.ts`
+  `frontend/src/app/desktop/terminal-workspace.service.ts`
 - Create:
-  `frontend-ng/src/app/desktop/terminal-workspace.service.spec.ts`
+  `frontend/src/app/desktop/terminal-workspace.service.spec.ts`
 - Modify:
-  `frontend-ng/src/app/desktop/surfaces/agents/terminal-session.ts`
+  `frontend/src/app/desktop/surfaces/agents/terminal-session.ts`
 - Create:
-  `frontend-ng/src/app/desktop/surfaces/agents/terminal-session.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/surfaces/agents/terminal.ts`
-- Modify: `frontend-ng/src/app/desktop/surfaces/agents/terminal.spec.ts`
+  `frontend/src/app/desktop/surfaces/agents/terminal-session.spec.ts`
+- Modify: `frontend/src/app/desktop/surfaces/agents/terminal.ts`
+- Modify: `frontend/src/app/desktop/surfaces/agents/terminal.spec.ts`
 
 **Step 1: Write failing tests**
 
@@ -566,7 +566,7 @@ Test:
 **Step 2: Run the red tests**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/terminal-workspace.service.spec.ts \
   --include=src/app/desktop/surfaces/agents/terminal-session.spec.ts \
@@ -593,13 +593,13 @@ npx ng test --watch=false \
 npx tsc -p tsconfig.app.json --noEmit
 cd ..
 git diff --check
-git add frontend-ng/src/app/desktop/terminal-workspace.models.ts \
-  frontend-ng/src/app/desktop/terminal-workspace.service.ts \
-  frontend-ng/src/app/desktop/terminal-workspace.service.spec.ts \
-  frontend-ng/src/app/desktop/surfaces/agents/terminal-session.ts \
-  frontend-ng/src/app/desktop/surfaces/agents/terminal-session.spec.ts \
-  frontend-ng/src/app/desktop/surfaces/agents/terminal.ts \
-  frontend-ng/src/app/desktop/surfaces/agents/terminal.spec.ts
+git add frontend/src/app/desktop/terminal-workspace.models.ts \
+  frontend/src/app/desktop/terminal-workspace.service.ts \
+  frontend/src/app/desktop/terminal-workspace.service.spec.ts \
+  frontend/src/app/desktop/surfaces/agents/terminal-session.ts \
+  frontend/src/app/desktop/surfaces/agents/terminal-session.spec.ts \
+  frontend/src/app/desktop/surfaces/agents/terminal.ts \
+  frontend/src/app/desktop/surfaces/agents/terminal.spec.ts
 git commit -m "feat: restore resilient terminal workspaces"
 ```
 
@@ -607,12 +607,12 @@ git commit -m "feat: restore resilient terminal workspaces"
 
 **Files:**
 
-- Create: `frontend-ng/src/app/desktop/desktop-host-intent.service.ts`
+- Create: `frontend/src/app/desktop/desktop-host-intent.service.ts`
 - Create:
-  `frontend-ng/src/app/desktop/desktop-host-intent.service.spec.ts`
-- Modify: `frontend-ng/src/app/deep-link-navigation.service.ts`
-- Modify: `frontend-ng/src/app/deep-link-navigation.service.spec.ts`
-- Modify: `frontend-ng/src/app/app.config.ts`
+  `frontend/src/app/desktop/desktop-host-intent.service.spec.ts`
+- Modify: `frontend/src/app/deep-link-navigation.service.ts`
+- Modify: `frontend/src/app/deep-link-navigation.service.spec.ts`
+- Modify: `frontend/src/app/app.config.ts`
 - Modify Files/Settings shell launch call sites identified by the failing
   contract tests
 
@@ -631,7 +631,7 @@ Test:
 **Step 2: Run the red tests**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-host-intent.service.spec.ts \
   --include=src/app/deep-link-navigation.service.spec.ts
@@ -652,11 +652,11 @@ npx ng test --watch=false \
 npx tsc -p tsconfig.app.json --noEmit
 cd ..
 git diff --check
-git add frontend-ng/src/app/desktop/desktop-host-intent.service.ts \
-  frontend-ng/src/app/desktop/desktop-host-intent.service.spec.ts \
-  frontend-ng/src/app/deep-link-navigation.service.ts \
-  frontend-ng/src/app/deep-link-navigation.service.spec.ts \
-  frontend-ng/src/app/app.config.ts
+git add frontend/src/app/desktop/desktop-host-intent.service.ts \
+  frontend/src/app/desktop/desktop-host-intent.service.spec.ts \
+  frontend/src/app/deep-link-navigation.service.ts \
+  frontend/src/app/deep-link-navigation.service.spec.ts \
+  frontend/src/app/app.config.ts
 git commit -m "feat: route typed native host intents"
 ```
 
@@ -801,7 +801,7 @@ or record the environmental collision; never kill unrelated processes.
 **Step 3: Run frontend and contract checks**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false
 npx tsc -p tsconfig.app.json --noEmit
 npm run build

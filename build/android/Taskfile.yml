@@ -256,7 +256,7 @@ tasks:
       - cd "{{.GO_DIR}}/cmd/lthn" && {{.WAILS3_TOOL}} android overlay:gen -out ../../../build/android/overlay.json -config ../../../build/config.yml
 
   bindings:
-    summary: Generate Android TypeScript bindings into frontend-ng/bindings
+    summary: Generate Android TypeScript bindings into frontend/bindings
     cmds:
       - task: generate:android:bindings
 
@@ -268,12 +268,12 @@ tasks:
       - go.mod
       - go.sum
     generates:
-      - frontend-ng/bindings/.android-bindings
+      - frontend/bindings/.android-bindings
     cmds:
       # Bindings are generated from the Go AST; CGO is disabled so the NDK
       # is not required for this step
-      - cd "{{.GO_DIR}}" && {{.WAILS3_TOOL}} generate bindings -ts -d ../frontend-ng/bindings -f '-tags android' -clean=true ./pkg/desktop/...
-      - node scripts/write-binding-marker.mjs frontend-ng/bindings/.android-bindings
+      - cd "{{.GO_DIR}}" && {{.WAILS3_TOOL}} generate bindings -ts -d ../frontend/bindings -f '-tags android' -clean=true ./pkg/desktop/...
+      - node scripts/write-binding-marker.mjs frontend/bindings/.android-bindings
     env:
       GOOS: android
       CGO_ENABLED: 0

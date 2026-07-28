@@ -27,7 +27,7 @@ macOS native WebView.
 - Work only in the `lthn/desktop` repository. Do not modify the versioned
   `dappco.re/go*` modules, the Go module cache, or
   `/Users/snider/Downloads/Lethean-Desgin-Pack/`.
-- Keep `frontend-ng/` as the sole product frontend and keep its client-side
+- Keep `frontend/` as the sole product frontend and keep its client-side
   hash router. Do not add SSR, prerendering, hydration, or a second frontend.
 - Reserve native-development listeners exactly as follows:
   Wails MCP `127.0.0.1:9099`, Lethean WebSocket transport
@@ -83,7 +83,7 @@ Existing files changed in place:
   activation; its transport fallback test remains unchanged.
 - `scripts/verify-frontend-build.mjs` — verifies the generated index activates
   its stylesheet without inline JavaScript, in addition to font assets.
-- `frontend-ng/angular.json` — disables production critical-CSS inlining while
+- `frontend/angular.json` — disables production critical-CSS inlining while
   retaining production optimisation and minification.
 - `go/pkg/desktop/desktop.go` — installs the Wails frontend handler as the
   existing Gin no-route fallback and corrects stale Vite wording.
@@ -114,7 +114,7 @@ Existing files changed in place:
   `LTHN_WAILS_WS_LISTEN=127.0.0.1:9199`, and
   `LTHN_WAILS_WS_URL=ws://localhost:9199/wails/ws`.
 - The standalone browser fallback in
-  `frontend-ng/public/wails/transport.js` remains
+  `frontend/public/wails/transport.js` remains
   `ws://localhost:9099/wails/ws`.
 
 - [ ] **Step 1: Write failing ordered-config and launcher tests**
@@ -580,9 +580,9 @@ git commit -m "fix(build): force production assets on macOS"
 **Files:**
 - Modify: `scripts/verify-frontend-build.test.mjs`
 - Modify: `scripts/verify-frontend-build.mjs`
-- Modify: `frontend-ng/angular.json`
+- Modify: `frontend/angular.json`
 - Read: `go/pkg/server/handlers.go`
-- Read: `frontend-ng/src/foundations/_tokens.scss`
+- Read: `frontend/src/foundations/_tokens.scss`
 
 **Interfaces:**
 - `verifyFrontendBuild(distDir)` continues to validate all referenced font
@@ -735,7 +735,7 @@ normal stylesheet from Angular's inline critical-CSS activation.
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npm run build
 npm run verify:build
 ```
@@ -747,7 +747,7 @@ print/onload link.
 
 - [ ] **Step 6: Disable only critical-CSS inlining**
 
-In `frontend-ng/angular.json`, change:
+In `frontend/angular.json`, change:
 
 ```json
 "inlineCritical": true
@@ -767,7 +767,7 @@ Leave `scripts: true`, `minify: true`, `removeSpecialComments: true`, and
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npm run build
 npm run verify:build
 ```
@@ -786,7 +786,7 @@ no `media="print"`.
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npm run test:contracts
 npm run build
 npm run verify:build
@@ -801,7 +801,7 @@ exists.
 - [ ] **Step 9: Commit the CSP-compatible build**
 
 ```bash
-git add frontend-ng/angular.json \
+git add frontend/angular.json \
   scripts/verify-frontend-build.mjs \
   scripts/verify-frontend-build.test.mjs
 git commit -m "fix(frontend): keep production styles CSP compatible"
@@ -869,7 +869,7 @@ Run:
 
 ```bash
 node --test scripts/verify-frontend-build.test.mjs
-cd frontend-ng
+cd frontend
 npm run test:contracts
 npm run build
 npm run verify:build
@@ -901,9 +901,9 @@ based at `5bdab24` for the same specification and code-quality reviewers.
 - Verify: `build/config.yml`
 - Verify: `go/pkg/desktop/frontend_assets.go`
 - Verify: `go/pkg/desktop/desktop.go`
-- Verify: `frontend-ng/angular.json`
-- Verify: `frontend-ng/src/foundations/_tokens.scss`
-- Verify: `frontend-ng/src/foundations/_icons.scss`
+- Verify: `frontend/angular.json`
+- Verify: `frontend/src/foundations/_tokens.scss`
+- Verify: `frontend/src/foundations/_icons.scss`
 - Verify: `go/cmd/lthn/dist/index.html`
 - Record evidence in:
   `.superpowers/sdd/2026-07-25-frontend-convergence/task-3-report.md`
@@ -931,7 +931,7 @@ Run from the repository root:
 node --test scripts/verify-frontend-build.test.mjs
 go test ./go/pkg/connection ./go/pkg/desktop ./go/pkg/server
 go vet ./go/pkg/connection ./go/pkg/desktop ./go/pkg/server
-cd frontend-ng
+cd frontend
 npm run test:contracts
 npm run build
 npm run verify:build
@@ -1004,7 +1004,7 @@ and a non-HTML font MIME type.
 Then touch an Angular source file without changing its contents:
 
 ```bash
-touch frontend-ng/src/styles.scss
+touch frontend/src/styles.scss
 ```
 
 Expected: the existing `ng serve` process reports a rebuild/HMR update and the
@@ -1049,7 +1049,7 @@ only descendants of the development command if cleanup is incomplete.
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npm run build
 npm run verify:build
 cd ..

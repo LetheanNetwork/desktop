@@ -174,8 +174,8 @@ export CGO_CFLAGS="-w"
 
 # Build the Angular frontend if the host has not already produced the
 # directory embedded by go/cmd/lthn/embed.go.
-if [ -d "frontend-ng" ] && [ -f "frontend-ng/package.json" ] && [ ! -f "go/cmd/lthn/dist/index.html" ]; then
-    (cd frontend-ng && npm install --silent && npm run build --silent)
+if [ -d "frontend" ] && [ -f "frontend/package.json" ] && [ ! -f "go/cmd/lthn/dist/index.html" ]; then
+    (cd frontend && npm install --silent && npm run build --silent)
 fi
 
 # Build

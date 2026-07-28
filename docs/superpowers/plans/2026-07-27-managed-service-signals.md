@@ -31,7 +31,7 @@
 - Real red-green Good/Bad/Ugly tests, `*core.T`, `io.NewMemoryMedium()`, and
   deterministic fakes. Never write to the real `~/Lethean/` tree, and never
   spawn a process that outlives a test.
-- `frontend-ng/` is the only product frontend. Offline demo mode makes no Wails
+- `frontend/` is the only product frontend. Offline demo mode makes no Wails
   call.
 
 ## File Map
@@ -46,12 +46,12 @@
 - Modify `go/pkg/services/wails.go` — `Signal(SignalRequest)` and `Kill(id)`.
 - Modify `go/pkg/services/wails_test.go` — delegation tests.
 - Modify `go/pkg/audit/types.go` — audit names for signal and kill.
-- Modify `frontend-ng/src/app/desktop/desktop-services-bridge.service.ts` — `signal(id, name)` and `kill(id)`.
-- Modify `frontend-ng/src/app/desktop/desktop-services-bridge.service.spec.ts` — wire, parse, offline-guard tests.
-- Modify `frontend-ng/src/app/desktop/apps/control/control-services.models.ts` — intents.
-- Modify `frontend-ng/src/app/desktop/apps/control/control-services.view.ts` — per-row overflow control.
-- Modify `frontend-ng/src/app/desktop/apps/control/control-services.view.spec.ts` — intent tests.
-- Modify `frontend-ng/src/app/desktop/apps/control.app.ts` — mutation orchestration.
+- Modify `frontend/src/app/desktop/desktop-services-bridge.service.ts` — `signal(id, name)` and `kill(id)`.
+- Modify `frontend/src/app/desktop/desktop-services-bridge.service.spec.ts` — wire, parse, offline-guard tests.
+- Modify `frontend/src/app/desktop/apps/control/control-services.models.ts` — intents.
+- Modify `frontend/src/app/desktop/apps/control/control-services.view.ts` — per-row overflow control.
+- Modify `frontend/src/app/desktop/apps/control/control-services.view.spec.ts` — intent tests.
+- Modify `frontend/src/app/desktop/apps/control.app.ts` — mutation orchestration.
 - Modify `TODO.md` — split the item; tick only the signal/kill half.
 - Modify `AGENTS.md` — record the named-signal contract.
 
@@ -136,7 +136,7 @@ section before starting.
 - [x] **Step 1: Run the full Go suite** — `GOWORK=$(pwd)/../go.work go test ./...`
       from `go/`. Every package must pass; report the count.
 - [x] **Step 2: Run the full frontend suite** — `npm run test:ci` in
-      `frontend-ng/`. Report files and tests passed.
+      `frontend/`. Report files and tests passed.
 - [x] **Step 3: Split the `TODO.md` item.** PID and start time are already
       delivered; tick the signal/kill half and leave CPU and memory as their
       own open item, noting that they begin in `dappco.re/go/process`.

@@ -21,7 +21,7 @@ package content
 
 // ContentItem is the JSON wire type for a single content card.
 // Field names match the ContentItem interface in
-// frontend-ng/src/app/desktop/surfaces/marketing/content.ts.
+// frontend/src/app/desktop/surfaces/marketing/content.ts.
 //
 // Usage example:
 //
@@ -55,7 +55,7 @@ type ContentItem struct {
 
 // ContentColumn is the JSON wire type for one pipeline stage column.
 // Field names match the ContentColumn interface in
-// frontend-ng/src/app/desktop/surfaces/marketing/content.ts.
+// frontend/src/app/desktop/surfaces/marketing/content.ts.
 //
 // Usage example:
 //

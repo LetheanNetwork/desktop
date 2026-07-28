@@ -26,9 +26,9 @@
 
 **Files:**
 
-- Test: `frontend-ng/src/app/desktop/desktop-catalogue.data.spec.ts`
-- Test: `frontend-ng/src/app/desktop/dev-panel.data.spec.ts`
-- Test: `frontend-ng/src/app/desktop/desktop-shell-fixtures.data.spec.ts`
+- Test: `frontend/src/app/desktop/desktop-catalogue.data.spec.ts`
+- Test: `frontend/src/app/desktop/dev-panel.data.spec.ts`
+- Test: `frontend/src/app/desktop/desktop-shell-fixtures.data.spec.ts`
 
 **Interfaces:**
 
@@ -58,7 +58,7 @@
   Run:
 
   ```bash
-  cd frontend-ng
+  cd frontend
   npx ng test --watch=false \
     --include=src/app/desktop/desktop-catalogue.data.spec.ts \
     --include=src/app/desktop/dev-panel.data.spec.ts \
@@ -72,10 +72,10 @@
 
 **Files:**
 
-- Create: `frontend-ng/src/app/desktop/desktop-catalogue.data.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.data.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop-route-tree.ts`
-- Modify: `frontend-ng/src/app/desktop/surfaces/surface-registry.ts`
+- Create: `frontend/src/app/desktop/desktop-catalogue.data.ts`
+- Modify: `frontend/src/app/desktop/desktop.data.ts`
+- Modify: `frontend/src/app/desktop/desktop-route-tree.ts`
+- Modify: `frontend/src/app/desktop/surfaces/surface-registry.ts`
 - Modify: `scripts/frontend-capability-inventory.mjs`
 - Modify direct production catalogue imports as identified by TypeScript.
 
@@ -113,10 +113,10 @@
 
 **Files:**
 
-- Create: `frontend-ng/src/app/desktop/dev-panel.data.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/dev-panel.app.ts`
-- Modify: `frontend-ng/src/app/desktop/window-route-content.ts`
+- Create: `frontend/src/app/desktop/dev-panel.data.ts`
+- Modify: `frontend/src/app/desktop/desktop.component.ts`
+- Modify: `frontend/src/app/desktop/apps/dev-panel.app.ts`
+- Modify: `frontend/src/app/desktop/window-route-content.ts`
 
 **Interfaces:**
 
@@ -150,9 +150,9 @@
 
 **Files:**
 
-- Create: `frontend-ng/src/app/desktop/desktop-shell-fixtures.data.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.data.ts`
+- Create: `frontend/src/app/desktop/desktop-shell-fixtures.data.ts`
+- Modify: `frontend/src/app/desktop/desktop.component.ts`
+- Modify: `frontend/src/app/desktop/desktop.data.ts`
 
 **Interfaces:**
 
@@ -195,7 +195,7 @@
   Run:
 
   ```bash
-  cd frontend-ng
+  cd frontend
   npx ng test --watch=false \
     --include=src/app/desktop/desktop-catalogue.data.spec.ts \
     --include=src/app/desktop/dev-panel.data.spec.ts \
@@ -229,7 +229,7 @@
   Run:
 
   ```bash
-  cd frontend-ng
+  cd frontend
   npm run test:ci
   npm run build
   ```

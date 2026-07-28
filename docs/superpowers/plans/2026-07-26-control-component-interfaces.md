@@ -42,11 +42,11 @@ services.
 **Files:**
 
 - Create:
-  `frontend-ng/src/app/desktop/apps/control/control-view.models.ts`
-- Create: `frontend-ng/src/app/desktop/apps/control/control-demo.data.ts`
-- Create: `frontend-ng/src/app/desktop/apps/control/control-view-state.ts`
+  `frontend/src/app/desktop/apps/control/control-view.models.ts`
+- Create: `frontend/src/app/desktop/apps/control/control-demo.data.ts`
+- Create: `frontend/src/app/desktop/apps/control/control-view-state.ts`
 - Test:
-  `frontend-ng/src/app/desktop/apps/control/control-view-state.spec.ts`
+  `frontend/src/app/desktop/apps/control/control-view-state.spec.ts`
 
 **Interfaces:**
 
@@ -137,7 +137,7 @@ describe("Control view state", () => {
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/control/control-view-state.spec.ts
 ```
@@ -302,7 +302,7 @@ Expected: 2 tests PASS.
 - [ ] **Step 7: Commit the typed state**
 
 ```bash
-git add frontend-ng/src/app/desktop/apps/control/
+git add frontend/src/app/desktop/apps/control/
 git commit -m "refactor(frontend): model typed Control view state"
 ```
 
@@ -313,13 +313,13 @@ git commit -m "refactor(frontend): model typed Control view state"
 **Files:**
 
 - Create:
-  `frontend-ng/src/app/desktop/desktop-data-state-badge.ts`
+  `frontend/src/app/desktop/desktop-data-state-badge.ts`
 - Test:
-  `frontend-ng/src/app/desktop/desktop-data-state-badge.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/telemetry.app.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/files.app.ts`
-- Test: `frontend-ng/src/app/desktop/apps/telemetry.app.spec.ts`
-- Test: `frontend-ng/src/app/desktop/apps/files.app.spec.ts`
+  `frontend/src/app/desktop/desktop-data-state-badge.spec.ts`
+- Modify: `frontend/src/app/desktop/apps/telemetry.app.ts`
+- Modify: `frontend/src/app/desktop/apps/files.app.ts`
+- Test: `frontend/src/app/desktop/apps/telemetry.app.spec.ts`
+- Test: `frontend/src/app/desktop/apps/files.app.spec.ts`
 
 **Interfaces:**
 
@@ -347,7 +347,7 @@ it("renders the canonical label, variant, and machine-readable state", () => {
 - [ ] **Step 2: Run the spec and observe the missing-component failure**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-data-state-badge.spec.ts
 ```
@@ -404,7 +404,7 @@ imports. Do not change polling, fallback, navigation, or visible copy.
 - [ ] **Step 5: Run badge, Telemetry, and Files specs**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-data-state-badge.spec.ts \
   --include=src/app/desktop/apps/telemetry.app.spec.ts \
@@ -416,9 +416,9 @@ Expected: all specs PASS.
 - [ ] **Step 6: Commit the badge**
 
 ```bash
-git add frontend-ng/src/app/desktop/desktop-data-state-badge*
-git add frontend-ng/src/app/desktop/apps/telemetry.app.ts
-git add frontend-ng/src/app/desktop/apps/files.app.ts
+git add frontend/src/app/desktop/desktop-data-state-badge*
+git add frontend/src/app/desktop/apps/telemetry.app.ts
+git add frontend/src/app/desktop/apps/files.app.ts
 git commit -m "refactor(frontend): share desktop data-state badge"
 ```
 
@@ -429,11 +429,11 @@ git commit -m "refactor(frontend): share desktop data-state badge"
 **Files:**
 
 - Create:
-  `frontend-ng/src/app/desktop/apps/control/control-models.view.ts`
+  `frontend/src/app/desktop/apps/control/control-models.view.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/control/control-runs.view.ts`
+  `frontend/src/app/desktop/apps/control/control-runs.view.ts`
 - Test:
-  `frontend-ng/src/app/desktop/apps/control/control-primary-views.spec.ts`
+  `frontend/src/app/desktop/apps/control/control-primary-views.spec.ts`
 
 **Interfaces:**
 
@@ -487,7 +487,7 @@ it("renders Runs from its typed input and emits New run", () => {
 - [ ] **Step 2: Run the spec and observe missing-component failures**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/control/control-primary-views.spec.ts
 ```
@@ -583,9 +583,9 @@ Expected: 2 tests PASS.
 - [ ] **Step 6: Commit the primary views**
 
 ```bash
-git add frontend-ng/src/app/desktop/apps/control/control-models.view.ts
-git add frontend-ng/src/app/desktop/apps/control/control-runs.view.ts
-git add frontend-ng/src/app/desktop/apps/control/control-primary-views.spec.ts
+git add frontend/src/app/desktop/apps/control/control-models.view.ts
+git add frontend/src/app/desktop/apps/control/control-runs.view.ts
+git add frontend/src/app/desktop/apps/control/control-primary-views.spec.ts
 git commit -m "refactor(frontend): extract Control model interfaces"
 ```
 
@@ -596,13 +596,13 @@ git commit -m "refactor(frontend): extract Control model interfaces"
 **Files:**
 
 - Create:
-  `frontend-ng/src/app/desktop/apps/control/control-power.view.ts`
+  `frontend/src/app/desktop/apps/control/control-power.view.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/control/control-system.view.ts`
+  `frontend/src/app/desktop/apps/control/control-system.view.ts`
 - Create:
-  `frontend-ng/src/app/desktop/apps/control/control-settings.view.ts`
+  `frontend/src/app/desktop/apps/control/control-settings.view.ts`
 - Test:
-  `frontend-ng/src/app/desktop/apps/control/control-secondary-views.spec.ts`
+  `frontend/src/app/desktop/apps/control/control-secondary-views.spec.ts`
 
 **Interfaces:**
 
@@ -663,7 +663,7 @@ it("renders settings and emits Commit", () => {
 - [ ] **Step 2: Run the spec and observe missing-component failures**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/control/control-secondary-views.spec.ts
 ```
@@ -711,10 +711,10 @@ Expected: 3 tests PASS.
 - [ ] **Step 7: Commit the secondary views**
 
 ```bash
-git add frontend-ng/src/app/desktop/apps/control/control-power.view.ts
-git add frontend-ng/src/app/desktop/apps/control/control-system.view.ts
-git add frontend-ng/src/app/desktop/apps/control/control-settings.view.ts
-git add frontend-ng/src/app/desktop/apps/control/control-secondary-views.spec.ts
+git add frontend/src/app/desktop/apps/control/control-power.view.ts
+git add frontend/src/app/desktop/apps/control/control-system.view.ts
+git add frontend/src/app/desktop/apps/control/control-settings.view.ts
+git add frontend/src/app/desktop/apps/control/control-secondary-views.spec.ts
 git commit -m "refactor(frontend): extract remaining Control interfaces"
 ```
 
@@ -724,9 +724,9 @@ git commit -m "refactor(frontend): extract remaining Control interfaces"
 
 **Files:**
 
-- Modify: `frontend-ng/src/app/desktop/apps/control.app.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/control.app.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/app-mcp.spec.ts`
+- Modify: `frontend/src/app/desktop/apps/control.app.ts`
+- Modify: `frontend/src/app/desktop/apps/control.app.spec.ts`
+- Modify: `frontend/src/app/desktop/apps/app-mcp.spec.ts`
 
 **Interfaces:**
 
@@ -763,7 +763,7 @@ it("remains the lazy component registered for Control", async () => {
 - [ ] **Step 2: Run existing Control and WebMCP specs**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/control.app.spec.ts \
   --include=src/app/desktop/apps/app-mcp.spec.ts
@@ -870,7 +870,7 @@ delegation, and abort cleanup unchanged.
 - [ ] **Step 6: Run Control, WebMCP, registry, and state specs**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/control/control-view-state.spec.ts \
   --include=src/app/desktop/apps/control/control-primary-views.spec.ts \
@@ -885,9 +885,9 @@ Expected: all focused specs PASS and the lazy registry still resolves
 - [ ] **Step 7: Commit the container extraction**
 
 ```bash
-git add frontend-ng/src/app/desktop/apps/control.app.ts
-git add frontend-ng/src/app/desktop/apps/control.app.spec.ts
-git add frontend-ng/src/app/desktop/apps/app-mcp.spec.ts
+git add frontend/src/app/desktop/apps/control.app.ts
+git add frontend/src/app/desktop/apps/control.app.spec.ts
+git add frontend/src/app/desktop/apps/app-mcp.spec.ts
 git commit -m "refactor(frontend): componentise the Control app"
 ```
 
@@ -897,7 +897,7 @@ git commit -m "refactor(frontend): componentise the Control app"
 
 **Files:**
 
-- Modify: `frontend-ng/package.json`
+- Modify: `frontend/package.json`
 - Modify: `scripts/verify-frontend-convergence.test.mjs`
 - Modify: `AGENTS.md`
 
@@ -911,7 +911,7 @@ Add to `verify-frontend-convergence.test.mjs`:
 
 ```js
 test("frontend exposes the documented deterministic demo server", async () => {
-  const packageJSON = JSON.parse(await read("frontend-ng/package.json"));
+  const packageJSON = JSON.parse(await read("frontend/package.json"));
   assert.equal(
     packageJSON.scripts.demo,
     "ng serve --host 127.0.0.1 --port 9245 --hmr --poll 1000",
@@ -946,7 +946,7 @@ keep the explicit `?lthn-offline=1` URL examples.
 - [ ] **Step 5: Run the contract suite**
 
 ```bash
-cd frontend-ng
+cd frontend
 npm run test:contracts
 ```
 
@@ -955,7 +955,7 @@ Expected: all Node contract tests PASS.
 - [ ] **Step 6: Commit the entrypoint**
 
 ```bash
-git add frontend-ng/package.json scripts/verify-frontend-convergence.test.mjs AGENTS.md
+git add frontend/package.json scripts/verify-frontend-convergence.test.mjs AGENTS.md
 git commit -m "chore(frontend): add deterministic demo command"
 ```
 
@@ -975,7 +975,7 @@ git commit -m "chore(frontend): add deterministic demo command"
 - [ ] **Step 1: Format the touched frontend files**
 
 ```bash
-cd frontend-ng
+cd frontend
 npx prettier --write \
   package.json \
   src/app/desktop/desktop-data-state-badge.ts \

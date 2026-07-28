@@ -7,7 +7,7 @@
 - Date: 2026-07-26
 - Baseline commit: `73c26e3c4f85251a568eb325efbde89cc46a08f2`
 - Scope: production and test Go under `go/`, plus renderer TypeScript under
-  `frontend-ng/src`
+  `frontend/src`
 - Pinned provider boundary: `dappco.re/go/io v0.15.3`
 
 The Go inventory used an opening parenthesis after named methods so
@@ -20,7 +20,7 @@ rg -n --glob '*.go' \
 
 rg -n --glob '*.ts' \
   '(absolutePath|file://|Files\.Read|ListLocations|ListRecent|GetDiskUsage)' \
-  frontend-ng/src
+  frontend/src
 ```
 
 The Go command found 55 package directories. `go/pkg/office/files` is not one

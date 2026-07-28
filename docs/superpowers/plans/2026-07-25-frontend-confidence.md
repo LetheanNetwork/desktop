@@ -23,8 +23,8 @@
 
 **Files:**
 
-- Modify: `frontend-ng/src/app/connection-manager.service.spec.ts`
-- Modify: `frontend-ng/src/app/connection-manager.service.ts`
+- Modify: `frontend/src/app/connection-manager.service.spec.ts`
+- Modify: `frontend/src/app/connection-manager.service.ts`
 
 - [x] Add a focused test proving `?lthn-offline=1` installs the Wails transport without opening a socket, reports an `offline` state, and rejects binding calls immediately with an offline-preview error.
 - [x] Run only the connection-manager spec and observe the new test fail for missing behaviour.
@@ -37,8 +37,8 @@
 
 **Files:**
 
-- Modify: `frontend-ng/src/app/mobile-runtime.service.spec.ts`
-- Modify: `frontend-ng/src/app/mobile-runtime.service.ts`
+- Modify: `frontend/src/app/mobile-runtime.service.spec.ts`
+- Modify: `frontend/src/app/mobile-runtime.service.ts`
 
 - [x] Add focused tests proving web previews accept `lthn-view=shell`, `lthn-view=device&lthn-device=small`, and ignore invalid values.
 - [x] Run only the mobile-runtime spec and observe the new tests fail.
@@ -50,10 +50,10 @@
 
 **Files:**
 
-- Modify: `frontend-ng/src/app/desktop/surfaces/surface-page.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/surfaces/surface-page.ts`
-- Modify: `frontend-ng/src/app/desktop/surfaces/surface-page.html`
-- Modify: `frontend-ng/src/app/desktop/surfaces/surface-page.scss`
+- Modify: `frontend/src/app/desktop/surfaces/surface-page.spec.ts`
+- Modify: `frontend/src/app/desktop/surfaces/surface-page.ts`
+- Modify: `frontend/src/app/desktop/surfaces/surface-page.html`
+- Modify: `frontend/src/app/desktop/surfaces/surface-page.scss`
 
 - [x] Add component tests proving a bridge-backed fixture starts labelled `Fixture data`, changes to `Live data` after a successful load, and changes to `Offline · fixture kept` after the initial backend failure while retaining rows.
 - [x] Run only the surface-page spec and observe the new assertions fail.
@@ -82,7 +82,7 @@
 **Files:**
 
 - Modify: `scripts/verify-frontend-convergence.test.mjs`
-- Modify: `frontend-ng/package.json`
+- Modify: `frontend/package.json`
 - Modify: `build/Taskfile.yml`
 - Modify: `Taskfile.yml`
 - Modify: `.github/workflows/build.yml`
@@ -100,7 +100,7 @@
 
 - Review all files changed by Tasks 1–5.
 
-- [x] Run `cd frontend-ng && npm run verify`.
-- [x] Run `cd frontend-ng && npx tsc --noEmit`.
+- [x] Run `cd frontend && npm run verify`.
+- [x] Run `cd frontend && npx tsc --noEmit`.
 - [x] Run `git diff --check`.
 - [x] Inspect `git status --short`, confirm `.playwright-mcp/` remains untouched, and record exact results in the handoff.

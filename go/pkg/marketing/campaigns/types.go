@@ -20,7 +20,7 @@ package campaigns
 
 // Campaign is the JSON wire type for a single campaign row.
 // Field names match the Campaign interface in
-// frontend-ng/src/app/desktop/surfaces/marketing/campaigns.ts.
+// frontend/src/app/desktop/surfaces/marketing/campaigns.ts.
 //
 // Usage example:
 //

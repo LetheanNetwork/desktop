@@ -29,7 +29,7 @@ The current `DesktopComponent` behaviour remains the product contract:
 ## Component boundaries
 
 Create five standalone Angular 22 presentation components under
-`frontend-ng/src/app/desktop/shell/`:
+`frontend/src/app/desktop/shell/`:
 
 1. `ShellStartMenu` renders the two-column Start/session menu and its routed
    child submenu.

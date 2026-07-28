@@ -18,7 +18,7 @@ import core "dappco.re/go"
 
 // Contact is the JSON wire type returned to the Angular frontend.
 // Field names match the Contact interface in
-// frontend-ng/src/app/desktop/surfaces/sales/contacts.ts exactly.
+// frontend/src/app/desktop/surfaces/sales/contacts.ts exactly.
 //
 // Usage example:
 //

@@ -3,7 +3,7 @@
 // Wails3 Service shape for pkg/r1/analytics — wraps the package-level
 // RecordsPerSubject / CrossTierCounts / LatestPerProbe /
 // FingerprintTrajectory entry points so Wails generates a TS binding
-// at frontend-ng/bindings/dappco.re/lthn/desktop/pkg/r1/analytics/.
+// at frontend/bindings/dappco.re/lthn/desktop/pkg/r1/analytics/.
 //
 // Bound by application.NewService(analytics.NewWailsService()) in
 // pkg/desktop/desktop.go; the package-level functions stay for
@@ -45,7 +45,7 @@ func NewWailsService() *WailsService { return &WailsService{} }
 
 // ServiceName labels the binding namespace exposed to JS as
 // "R1Analytics" — Wails generates the TS binding under
-// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/r1/analytics/.
+// frontend/bindings/dappco.re/lthn/desktop/pkg/r1/analytics/.
 func (s *WailsService) ServiceName() string { return "R1Analytics" }
 
 // ServiceStartup is the Wails3 lifecycle hook called once after the

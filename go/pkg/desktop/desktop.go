@@ -538,7 +538,7 @@ func (s *Service) Run() core.Result {
 	wailsBindings := []gui.Binding{
 		// In-this-repo packages — each ships its own *WailsService /
 		// *Service with Wails3 lifecycle + (T, error) methods. Bindings
-		// land at frontend-ng/bindings/dappco.re/lthn/desktop/pkg/<pkg>/.
+		// land at frontend/bindings/dappco.re/lthn/desktop/pkg/<pkg>/.
 		gui.Bind(s.opts.Runner),
 		gui.Bind(s.opts.Server),
 		gui.Bind(sessions.NewWailsService(s.opts.Core)),

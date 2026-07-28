@@ -20,8 +20,8 @@ composition, file access, or frontend boundaries.
 Use the versions declared by:
 
 - `go/go.mod`
-- `frontend-ng/package.json`
-- `frontend-ng/package-lock.json`
+- `frontend/package.json`
+- `frontend/package-lock.json`
 - `.github/workflows/build.yml`
 
 Required local commands are Go, Node.js, npm, and Task. Wails is invoked
@@ -32,7 +32,7 @@ complete source topology:
 git clone <repo-url> lthn-desktop
 cd lthn-desktop
 go work sync
-cd frontend-ng
+cd frontend
 npm ci
 cd ..
 go tool wails3 task doctor
@@ -60,7 +60,7 @@ LTHN_LEM_BIN
 ### Browser-only UI and demo development
 
 ```bash
-cd frontend-ng
+cd frontend
 npm run demo
 ```
 
@@ -229,7 +229,7 @@ for deterministic UI work without a model or backend.
 Build only the Angular production bundle:
 
 ```bash
-cd frontend-ng
+cd frontend
 npm run build
 ```
 
@@ -299,7 +299,7 @@ go tool wails3 task common:generate:bindings
 Every platform generator writes to the shared ignored directory:
 
 ```text
-frontend-ng/bindings/
+frontend/bindings/
 ```
 
 Desktop, iOS, and Android tasks use flavour markers so one platform cannot
@@ -317,7 +317,7 @@ Focused iteration:
 ```bash
 go test ./go/pkg/<changed-package>
 
-cd frontend-ng
+cd frontend
 npx ng test --watch=false --include=src/path/to/file.spec.ts
 ```
 
@@ -331,7 +331,7 @@ go vet ./go/pkg/desktopstate ./go/pkg/appconfig ./go/pkg/terminal \
 node --test scripts/verify-frontend-convergence.test.mjs \
   scripts/verify-native-integration.test.mjs
 
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-state-bridge.service.spec.ts \
   --include=src/app/desktop/terminal-workspace.service.spec.ts \
@@ -350,7 +350,7 @@ go test ./go/pkg/services ./go/pkg/models ./go/pkg/modelruntime ./go/pkg/desktop
 go test -race ./go/pkg/services ./go/pkg/modelruntime -count=1
 go vet ./go/pkg/services ./go/pkg/models ./go/pkg/modelruntime ./go/pkg/desktop ./go/cmd/lthn
 
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-model-runtime-bridge.service.spec.ts \
   --include=src/app/desktop/desktop-model-runtime-resource.service.spec.ts \
@@ -391,7 +391,7 @@ gofmt -l go/
 git diff --check
 go vet ./go/...
 go tool wails3 task test
-cd frontend-ng && npm run build
+cd frontend && npm run build
 ```
 
 The repository has known historical formatting, coverage, and CoreGO
@@ -485,10 +485,10 @@ Tests which need user-data roots must use `t.TempDir()` and an isolated
 
 The canonical registries are:
 
-- `frontend-ng/src/app/desktop/desktop-catalogue.data.ts`
-- `frontend-ng/src/app/desktop/surfaces/surface-registry.ts`
-- `frontend-ng/src/app/desktop/apps/app-view.ts`
-- `frontend-ng/src/app/desktop/desktop-route-tree.ts`
+- `frontend/src/app/desktop/desktop-catalogue.data.ts`
+- `frontend/src/app/desktop/surfaces/surface-registry.ts`
+- `frontend/src/app/desktop/apps/app-view.ts`
+- `frontend/src/app/desktop/desktop-route-tree.ts`
 
 Add the application/category metadata and lazy standalone component, then let
 the route tree derive navigation. Extend route/registry tests rather than
@@ -503,7 +503,7 @@ Prefer:
 - typed bridge services which validate unknown native payloads.
 
 Lit remains intentional only for reusable custom elements under
-`frontend-ng/src/kit/` and plugin descriptors whose `kind` is `lit`. Do not
+`frontend/src/kit/` and plugin descriptors whose `kind` is `lit`. Do not
 restore the retired Lit application.
 
 ## 10. Connection configuration

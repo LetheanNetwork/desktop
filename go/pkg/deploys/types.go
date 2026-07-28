@@ -26,7 +26,7 @@ import core "dappco.re/go"
 // DeployRecord is the persisted representation of one deploy event.
 // Stored as a Trix-style markdown file: YAML frontmatter + newline + body.
 // Matches the DeployRow interface in
-// frontend-ng/src/app/desktop/surfaces/coding/deploys.ts.
+// frontend/src/app/desktop/surfaces/coding/deploys.ts.
 //
 // Usage example:
 //
@@ -67,7 +67,7 @@ type DeployRecord struct {
 
 // DeployRow is the JSON wire type for one entry in the deploy history table.
 // Matches the DeployRow interface in
-// frontend-ng/src/app/desktop/surfaces/coding/deploys.ts exactly.
+// frontend/src/app/desktop/surfaces/coding/deploys.ts exactly.
 //
 // Usage example:
 //
@@ -98,7 +98,7 @@ type DeployRow struct {
 // EnvRow is the JSON wire type for one live environment card.
 // Derived from the most-recent DeployRecord per Env value.
 // Matches the EnvRow interface in
-// frontend-ng/src/app/desktop/surfaces/coding/deploys.ts exactly.
+// frontend/src/app/desktop/surfaces/coding/deploys.ts exactly.
 //
 // Usage example:
 //

@@ -24,7 +24,7 @@ package audience
 
 // Segment is the JSON wire type for a single subscriber segment row.
 // Field names match the Segment interface in
-// frontend-ng/src/app/desktop/surfaces/marketing/audience.ts.
+// frontend/src/app/desktop/surfaces/marketing/audience.ts.
 //
 // Usage example:
 //

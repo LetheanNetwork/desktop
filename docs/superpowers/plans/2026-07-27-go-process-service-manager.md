@@ -14,7 +14,7 @@
 
 - Work on the current `main` branch; preserve the existing user-owned `go.work.sum` modification and `.playwright-mcp/` directory.
 - Do not use subagents; execute inline because the user explicitly requested no subagent workflow.
-- `frontend-ng/` is the only product frontend; retain hash routing and browser demo mode.
+- `frontend/` is the only product frontend; retain hash routing and browser demo mode.
 - No process starts during Core registration, `OnStartup`, catalogue reads, UI refreshes, or event subscription.
 - Ordinary managed lifecycle must never call launchd, systemd, the legacy native controller, `os/exec`, or the package-global `go-process` runtime.
 - Every managed spawn, observation, output read, graceful shutdown, and process-tree termination goes through the named `*dappco.re/go/process.Service`.
@@ -62,15 +62,15 @@
 
 ### Angular bridge and Control interface
 
-- Create `frontend-ng/src/app/desktop/desktop-services-bridge.service.ts` — Wails calls, strict parsing, offline guard, and event source.
-- Create `frontend-ng/src/app/desktop/desktop-services-bridge.service.spec.ts` — wire, parser, mutation, secret-shape, and event tests.
-- Create `frontend-ng/src/app/desktop/apps/control/control-services.models.ts` — typed view state, intents, and deterministic demo catalogue.
-- Create `frontend-ng/src/app/desktop/apps/control/control-services.view.ts` — focused Services presenter with lifecycle actions and output details.
-- Create `frontend-ng/src/app/desktop/apps/control/control-services.view.spec.ts` — presenter rendering and intent tests.
-- Modify `frontend-ng/src/app/desktop/apps/control/control-system.view.ts` — retain `daemons` state value, render the new presenter, visible label Services.
-- Modify `frontend-ng/src/app/desktop/apps/control/control-secondary-views.spec.ts` — integration seam for the Services tab.
-- Modify `frontend-ng/src/app/desktop/apps/control.app.ts` — own demo/live resource, mutation orchestration, event invalidation, and teardown.
-- Modify `frontend-ng/src/app/desktop/apps/control.app.spec.ts` — connected/demo lifecycle and action tests.
+- Create `frontend/src/app/desktop/desktop-services-bridge.service.ts` — Wails calls, strict parsing, offline guard, and event source.
+- Create `frontend/src/app/desktop/desktop-services-bridge.service.spec.ts` — wire, parser, mutation, secret-shape, and event tests.
+- Create `frontend/src/app/desktop/apps/control/control-services.models.ts` — typed view state, intents, and deterministic demo catalogue.
+- Create `frontend/src/app/desktop/apps/control/control-services.view.ts` — focused Services presenter with lifecycle actions and output details.
+- Create `frontend/src/app/desktop/apps/control/control-services.view.spec.ts` — presenter rendering and intent tests.
+- Modify `frontend/src/app/desktop/apps/control/control-system.view.ts` — retain `daemons` state value, render the new presenter, visible label Services.
+- Modify `frontend/src/app/desktop/apps/control/control-secondary-views.spec.ts` — integration seam for the Services tab.
+- Modify `frontend/src/app/desktop/apps/control.app.ts` — own demo/live resource, mutation orchestration, event invalidation, and teardown.
+- Modify `frontend/src/app/desktop/apps/control.app.spec.ts` — connected/demo lifecycle and action tests.
 
 ### Documentation and contracts
 
@@ -1059,9 +1059,9 @@ git commit -m "feat(desktop): expose managed services through Wails"
 ### Task 6: Add the defensive Angular Services bridge
 
 **Files:**
-- Create: `frontend-ng/src/app/desktop/desktop-services-bridge.service.ts`
-- Create: `frontend-ng/src/app/desktop/desktop-services-bridge.service.spec.ts`
-- Create: `frontend-ng/src/app/desktop/apps/control/control-services.models.ts`
+- Create: `frontend/src/app/desktop/desktop-services-bridge.service.ts`
+- Create: `frontend/src/app/desktop/desktop-services-bridge.service.spec.ts`
+- Create: `frontend/src/app/desktop/apps/control/control-services.models.ts`
 
 **Interfaces:**
 - Consumes: Wails `services.WailsService` methods and `ConnectionManagerService.offline`.
@@ -1194,7 +1194,7 @@ it('installs no event listener and calls no Wails method offline', async () => {
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-services-bridge.service.spec.ts
 ```
@@ -1273,12 +1273,12 @@ git commit -m "feat(frontend): add managed services bridge"
 ### Task 7: Turn Control's Daemons tab into the Services manager
 
 **Files:**
-- Create: `frontend-ng/src/app/desktop/apps/control/control-services.view.ts`
-- Create: `frontend-ng/src/app/desktop/apps/control/control-services.view.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/control/control-system.view.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/control/control-secondary-views.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/control.app.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/control.app.spec.ts`
+- Create: `frontend/src/app/desktop/apps/control/control-services.view.ts`
+- Create: `frontend/src/app/desktop/apps/control/control-services.view.spec.ts`
+- Modify: `frontend/src/app/desktop/apps/control/control-system.view.ts`
+- Modify: `frontend/src/app/desktop/apps/control/control-secondary-views.spec.ts`
+- Modify: `frontend/src/app/desktop/apps/control.app.ts`
+- Modify: `frontend/src/app/desktop/apps/control.app.spec.ts`
 
 **Interfaces:**
 - Consumes: `DesktopDataResource<DesktopServiceCatalogue>`, `DesktopServicesBridgeService`, `DesktopServiceOutput`, and `ControlServiceIntent`.
@@ -1358,7 +1358,7 @@ it('retains stale services after a failed refresh and tears down events', async 
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/control/control-services.view.spec.ts \
   --include=src/app/desktop/apps/control/control-secondary-views.spec.ts \
@@ -1509,7 +1509,7 @@ environmental collision.
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-services-bridge.service.spec.ts \
   --include=src/app/desktop/apps/control/control-services.view.spec.ts \
@@ -1560,7 +1560,7 @@ Add focused commands:
 
 ```bash
 go test ./go/pkg/services ./go/pkg/desktop ./go/cmd/lthn -count=1
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-services-bridge.service.spec.ts \
   --include=src/app/desktop/apps/control/control-services.view.spec.ts \

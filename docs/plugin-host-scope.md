@@ -207,7 +207,7 @@ The host watches each `ManagedProcess.Done()` channel. On unexpected exit:
 
 ## Wails surface
 
-Bound on `*Service`, generated to `frontend-ng/bindings/.../pkg/plugin/service`:
+Bound on `*Service`, generated to `frontend/bindings/.../pkg/plugin/service`:
 
 ```go
 func (s *Service) Install(code string) (InstallOutput, error)

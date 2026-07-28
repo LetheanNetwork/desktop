@@ -18,7 +18,7 @@ import core "dappco.re/go"
 
 // IncidentEntry is the JSON wire type returned to the Angular frontend.
 // Field names match the IncidentEntry interface in
-// frontend-ng/src/app/desktop/surfaces/operations/incidents.ts exactly.
+// frontend/src/app/desktop/surfaces/operations/incidents.ts exactly.
 //
 // Usage example:
 //

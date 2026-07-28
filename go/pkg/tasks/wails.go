@@ -37,7 +37,7 @@
 // SECURITY-NOTE (frontend binding shift — surfaced for Cladius
 // adjudication): wails3 generates the TS binding filename from the Go
 // type name lowercased — *WailsService → wailsservice.ts under
-// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/tasks/. The pre-stamp
+// frontend/bindings/dappco.re/lthn/desktop/pkg/tasks/. The pre-stamp
 // shape lived at service.ts; the frontend imports
 // "@desktop/tasks/service" today. Method IDs (ByID hashes) are also
 // keyed off the FQ type name and will shift. A follow-on Mantis ticket

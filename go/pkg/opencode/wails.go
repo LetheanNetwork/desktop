@@ -2,7 +2,7 @@
 
 // Wails-bindable surface — exposes the opencode subsystem to the Angular
 // frontend. The TS binding generator emits a `wailsservice.ts` under
-// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/opencode/ that the
+// frontend/bindings/dappco.re/lthn/desktop/pkg/opencode/ that the
 // integrations-window + fleet-window consume.
 //
 // Methods are thin wrappers around the Service — they return the

@@ -3,7 +3,7 @@
 // Wails surface for the Office document catalogue service. Methods are
 // bound on the *Service receiver and exposed to the frontend via wails3
 // generate bindings — the TS shape lands at
-// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/office/documents/.
+// frontend/bindings/dappco.re/lthn/desktop/pkg/office/documents/.
 
 package documents
 

@@ -29,7 +29,7 @@ temporarily disconnected capability for dead mock code.
 
 ## Goals
 
-1. Make `frontend-ng/` the sole product frontend.
+1. Make `frontend/` the sole product frontend.
 2. Preserve the design pack's portable Lit elements and token engine.
 3. Keep Desktop, App Shell, phone, and tablet as presentations of one
    application and one route catalogue.
@@ -75,11 +75,11 @@ lazy routed surfaces.
 The production copy deliberately evolves the pack:
 
 - common colour, brand, mode, spacing, typography, and base tokens are carried
-  into `frontend-ng/src/foundations/`;
+  into `frontend/src/foundations/`;
 - Sass composition replaces the pack's direct CSS imports;
 - fonts are self-hosted for offline and CSP-safe operation;
 - Android joins the Darwin, iOS, and iPad platform profiles;
-- `frontend-ng/src/kit/` contains the active typed Lit elements;
+- `frontend/src/kit/` contains the active typed Lit elements;
 - Angular adds lazy routing, NgRx, localisation, WebMCP, Wails transports, and
   CoreGO-backed services.
 
@@ -117,8 +117,8 @@ with a retained portable design layer.
 ```mermaid
 flowchart TD
     Pack["Lethean Design Pack<br/>visual and token upstream"]
-    Foundations["frontend-ng/src/foundations<br/>production tokens"]
-    Kit["frontend-ng/src/kit<br/>portable Lit elements"]
+    Foundations["frontend/src/foundations<br/>production tokens"]
+    Kit["frontend/src/kit<br/>portable Lit elements"]
     Routes["Angular Router<br/>category and app catalogue"]
     State["NgRx window state<br/>plus local signals"]
     Shell["Normal App Shell"]
@@ -153,8 +153,8 @@ flowchart TD
 - The app/category registries supply metadata and lazy component loaders but
   must agree with the route tree through tests.
 - NgRx is the single durable window-state source.
-- `frontend-ng/src/foundations/` is the production token implementation.
-- `frontend-ng/src/kit/` is the product's portable custom-element
+- `frontend/src/foundations/` is the production token implementation.
+- `frontend/src/kit/` is the product's portable custom-element
   implementation.
 - CoreGO and Wails are authoritative for live capability and data.
 - Design fixtures are allowed, but must not impersonate live backend state.
@@ -201,8 +201,8 @@ UI failures should be honest:
 
 Retirement keeps:
 
-- `frontend-ng/src/foundations/`;
-- `frontend-ng/src/kit/`;
+- `frontend/src/foundations/`;
+- `frontend/src/kit/`;
 - the `lit` runtime dependency;
 - `kind: "lit"` plugin descriptors;
 - the hoplite assets and brand tokens used by the product;
@@ -242,7 +242,7 @@ observed difference.
 1. `frontend-lit-ref/`, after repeating the 361-blob Git comparison.
 2. `docs/design/lit/`, `docs/design/Lethean-5.zip`, and the duplicate handover.
 3. The top-level `frontend/` generated remnants, only after iOS and Android
-   task outputs point at `frontend-ng/bindings/` and regeneration is verified.
+   task outputs point at `frontend/bindings/` and regeneration is verified.
 4. The obsolete `.gitignore` entry for `frontend-lit-ref/`.
 5. Old `frontend/src/lit`, `frontend/bindings`, `external/*`, Bun, React
    reference, and submodule instructions once their live replacements are
@@ -311,7 +311,7 @@ this repository.
 Frontend gates:
 
 ```bash
-cd frontend-ng
+cd frontend
 npm run build
 npm run test:ci
 ```

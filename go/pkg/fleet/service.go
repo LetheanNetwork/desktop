@@ -640,7 +640,7 @@ func (s *Service) UpsertMachine(m Machine) core.Result {
 }
 
 // ServiceName / ServiceStartup / ServiceShutdown — Wails3 lifecycle.
-// Bindings land at frontend-ng/bindings/dappco.re/lthn/desktop/pkg/fleet/.
+// Bindings land at frontend/bindings/dappco.re/lthn/desktop/pkg/fleet/.
 func (s *Service) ServiceName() string { return "Fleet" }
 
 // ServiceStartup is the Wails3 lifecycle hook; no-op (Init already ran in New).

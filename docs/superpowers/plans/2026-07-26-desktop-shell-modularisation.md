@@ -22,7 +22,7 @@
 
 **Files:**
 
-- Create: `frontend-ng/src/app/desktop/shell/shell.types.ts`
+- Create: `frontend/src/app/desktop/shell/shell.types.ts`
 
 **Interfaces:**
 
@@ -59,13 +59,13 @@ export interface ShellValueEvent<T, E extends Event = Event> {
 
 **Files:**
 
-- Test: `frontend-ng/src/app/desktop/shell/menu-bar.spec.ts`
-- Create: `frontend-ng/src/app/desktop/shell/menu-bar.ts`
-- Create: `frontend-ng/src/app/desktop/shell/menu-bar.html`
-- Create: `frontend-ng/src/app/desktop/shell/menu-bar.scss`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.html`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.scss`
+- Test: `frontend/src/app/desktop/shell/menu-bar.spec.ts`
+- Create: `frontend/src/app/desktop/shell/menu-bar.ts`
+- Create: `frontend/src/app/desktop/shell/menu-bar.html`
+- Create: `frontend/src/app/desktop/shell/menu-bar.scss`
+- Modify: `frontend/src/app/desktop/desktop.component.ts`
+- Modify: `frontend/src/app/desktop/desktop.component.html`
+- Modify: `frontend/src/app/desktop/desktop.component.scss`
 
 **Interfaces:**
 
@@ -87,13 +87,13 @@ export interface ShellValueEvent<T, E extends Event = Event> {
 
 **Files:**
 
-- Test: `frontend-ng/src/app/desktop/shell/taskbar-dock.spec.ts`
-- Create: `frontend-ng/src/app/desktop/shell/taskbar-dock.ts`
-- Create: `frontend-ng/src/app/desktop/shell/taskbar-dock.html`
-- Create: `frontend-ng/src/app/desktop/shell/taskbar-dock.scss`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.html`
-- Modify: `frontend-ng/src/app/desktop/desktop.component.scss`
+- Test: `frontend/src/app/desktop/shell/taskbar-dock.spec.ts`
+- Create: `frontend/src/app/desktop/shell/taskbar-dock.ts`
+- Create: `frontend/src/app/desktop/shell/taskbar-dock.html`
+- Create: `frontend/src/app/desktop/shell/taskbar-dock.scss`
+- Modify: `frontend/src/app/desktop/desktop.component.ts`
+- Modify: `frontend/src/app/desktop/desktop.component.html`
+- Modify: `frontend/src/app/desktop/desktop.component.scss`
 
 **Interfaces:**
 
@@ -121,7 +121,7 @@ export interface ShellValueEvent<T, E extends Event = Event> {
 - Review all files changed by Tasks 1–3.
 
 - [x] Run the three focused Angular specs together.
-- [x] Run `cd frontend-ng && npm run build`.
+- [x] Run `cd frontend && npm run build`.
 - [x] Run `git diff --check`.
 - [x] Confirm `.playwright-mcp/` remains untouched.
 - [x] Commit with `refactor(frontend): modularise desktop shell chrome`.

@@ -292,12 +292,12 @@ tasks:
   test:frontend:
     summary: Run Angular Vitest plus frontend convergence contracts
     cmds:
-      - cd frontend-ng && npm run test:ci
-      - cd frontend-ng && npm run test:contracts
+      - cd frontend && npm run test:ci
+      - cd frontend && npm run test:contracts
 
   verify:frontend:
     summary: Run the complete deterministic Angular confidence gate
-    dir: frontend-ng
+    dir: frontend
     cmds:
       - npm run verify
 
@@ -313,12 +313,12 @@ tasks:
           echo "  Coverage reports written to:"
           echo "    go/coverage.out          per-statement, go-tool format"
           echo "    go/coverage.html         line-by-line HTML"
-          echo "    frontend-ng/coverage/    Angular Vitest coverage"
+          echo "    frontend/coverage/    Angular Vitest coverage"
           echo ""
           echo "  Inspect via:"
           echo "    go tool cover -func=go/coverage.out      # per-function table"
           echo "    open go/coverage.html                    # macOS HTML viewer"
-          echo "    frontend-ng/coverage/lcov.info           # Angular frontend LCOV"
+          echo "    frontend/coverage/lcov.info           # Angular frontend LCOV"
           echo "═══════════════════════════════════════════════════════════════"
 
   test:cover:go:
@@ -336,9 +336,9 @@ tasks:
       CGO_LDFLAGS: '{{if eq OS "darwin"}}-mmacosx-version-min={{.MACOS_DEPLOYMENT_TARGET}} -Wl,-no_warn_duplicate_libraries{{end}}'
 
   test:cover:frontend:
-    summary: Angular frontend coverage (Vitest v8 → frontend-ng/coverage/)
+    summary: Angular frontend coverage (Vitest v8 → frontend/coverage/)
     cmds:
-      - cd frontend-ng && npm run test:ci
+      - cd frontend && npm run test:ci
 
   api:spec:
     summary: Generate OpenAPI 3.1 spec from registered RouteGroups

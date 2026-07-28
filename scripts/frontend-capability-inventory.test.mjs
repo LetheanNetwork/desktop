@@ -24,7 +24,7 @@ test('inventories every base app and routed surface without calling it live', as
     const entry = report.entries.find((candidate) => candidate.id === id);
     assert.equal(entry?.sourceState, 'integrated', id);
     assert.equal(
-      entry?.evidence.includes('frontend-ng/src/app/desktop/desktop-files-bridge.service.ts'),
+      entry?.evidence.includes('frontend/src/app/desktop/desktop-files-bridge.service.ts'),
       true,
       id,
     );

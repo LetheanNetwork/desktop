@@ -33,7 +33,7 @@ dev_mode:
     dir:
       - .git
       - node_modules
-      - frontend-ng
+      - frontend
       - bin
       # Angular writes into go/cmd/lthn/dist on every build:frontend
       # step so go:embed picks it up. Excluding it prevents the watcher
@@ -58,14 +58,14 @@ dev_mode:
     - cmd: go tool wails3 task common:install:frontend:deps
       type: once
     # Angular dev server in the background — provides HMR for the
-    # standalone app under frontend-ng/src. Development windows load this
+    # standalone app under frontend/src. Development windows load this
     # loopback URL directly so WebKit permits the 9199 socket transport;
     # go:embed dist/ remains the compiled production path.
     - cmd: go tool wails3 task common:dev:frontend
       type: background
     # Regenerate the TS Wails bindings on every Go file change.
     # Without this step, changing a Wails Service method signature
-    # (or adding a new one) leaves frontend-ng/bindings/ stale and the
+    # (or adding a new one) leaves frontend/bindings/ stale and the
     # WebView keeps calling the old shape. ~1.6s sweep across the
     # package tree — cheap, and the difference between "i changed
     # Go and it broke silently" and "i changed Go and the binding

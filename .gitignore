@@ -12,7 +12,7 @@ go/cmd/lthn/dist/*
 .env.local
 
 # Wails generated
-frontend-ng/bindings/
+frontend/bindings/
 
 # Go build cache + test artefacts
 *.test
@@ -23,7 +23,7 @@ go/coverage.out
 go/coverage.html
 
 # Frontend coverage report
-frontend-ng/coverage/
+frontend/coverage/
 
 # IDE
 .idea/

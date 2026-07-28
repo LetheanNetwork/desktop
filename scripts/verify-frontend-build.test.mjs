@@ -41,7 +41,7 @@ async function verifyCompleteFontIndex(indexHTML) {
 }
 
 test('development transport bootstrap publishes the loopback default only', async () => {
-  const source = await readFile(`${repoRoot}/frontend-ng/public/wails/transport.js`, 'utf8');
+  const source = await readFile(`${repoRoot}/frontend/public/wails/transport.js`, 'utf8');
   const sandbox = { globalThis: {} };
   runInNewContext(source, sandbox);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.globalThis.__LTHN_CONNECTION__)), {

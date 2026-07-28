@@ -178,17 +178,17 @@ Inference handlers call into `pkg/runner.Service.Generate(...)` — the same pat
 
 ## 5. The frontend
 
-The production frontend lives at `frontend-ng/` and is a standalone Angular
+The production frontend lives at `frontend/` and is a standalone Angular
 application. It is client-side rendered and uses hash routing because Wails
 serves a static asset bundle rather than a History API server.
 
-- `frontend-ng/src/main.ts` bootstraps Angular directly. Development builds expose
+- `frontend/src/main.ts` bootstraps Angular directly. Development builds expose
   Wails' built-in MCP service on loopback through the `mcp` build tag; the former
   bridge shim remains in the tree as an unbootstrapped compatibility fallback.
-- `frontend-ng/src/app/app.config.ts` wires hash routing, NgRx, WebMCP, and app initialisation.
-- `frontend-ng/src/app/app.routes.ts` owns `#/` and `#/w/:app`.
-- `frontend-ng/src/locale/` carries the Angular localisation catalogues.
-- `frontend-ng/angular.json` writes the browser output directly to `go/cmd/lthn/dist/`, with `index.html` at the root.
+- `frontend/src/app/app.config.ts` wires hash routing, NgRx, WebMCP, and app initialisation.
+- `frontend/src/app/app.routes.ts` owns `#/` and `#/w/:app`.
+- `frontend/src/locale/` carries the Angular localisation catalogues.
+- `frontend/angular.json` writes the browser output directly to `go/cmd/lthn/dist/`, with `index.html` at the root.
 
 Production Wails builds embed that directory. During `wails3 task dev`, Wails
 proxies Angular's development server on port 9245, so frontend changes use HMR

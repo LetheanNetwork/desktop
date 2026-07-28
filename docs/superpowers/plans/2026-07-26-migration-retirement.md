@@ -24,7 +24,7 @@ Git detached worktrees.
 
 - Execute inline on `main`; do not use sub-agents.
 - Preserve the user's `go.work.sum` and `.playwright-mcp/` changes.
-- `frontend-ng/` remains the only product frontend.
+- `frontend/` remains the only product frontend.
 - Keep the two tracked mobile support files under `frontend/`.
 - Do not restore `external/`, `.gitmodules`, Bun, SSR, or the retired Lit app.
 - Do not change UX or product behaviour in this documentation/tooling tranche.
@@ -48,13 +48,13 @@ Git detached worktrees.
 **Interfaces:**
 
 - Consumes: the existing `test:contracts` frontend confidence entrypoint.
-- Produces: fresh evidence that bindings target `frontend-ng`, CI has no
-  submodule checkout, and the audit uses npm under `frontend-ng`.
+- Produces: fresh evidence that bindings target `frontend`, CI has no
+  submodule checkout, and the audit uses npm under `frontend`.
 
 - [x] **Step 1: Run the focused convergence contracts**
 
 ```bash
-cd frontend-ng
+cd frontend
 npm run test:contracts
 ```
 
@@ -66,11 +66,11 @@ binding restoration, and frontend verification contracts pass.
 Confirm:
 
 - `common:generate:bindings` generates only
-  `frontend-ng/bindings`;
+  `frontend/bindings`;
 - no build task references `external/gui`;
 - checkout steps use no recursive submodules; and
 - `build/audit.sh` runs npm build, test, and contract commands from
-  `frontend-ng`.
+  `frontend`.
 
 If the contract and implementation are already green, do not rewrite them.
 Correct comment-only scaffold language where it still describes Lit, npm
@@ -87,8 +87,8 @@ install, a proxy, or `go mod tidy` as the active development path.
 
 **Interfaces:**
 
-- Consumes: canonical generated bindings under `frontend-ng/bindings` and
-  Angular surfaces under `frontend-ng/src/app/desktop`.
+- Consumes: canonical generated bindings under `frontend/bindings` and
+  Angular surfaces under `frontend/src/app/desktop`.
 - Produces: source comments which point maintainers at the live consumer
   instead of the retired implementation.
 
@@ -102,7 +102,7 @@ rg -n --glob '*.go' --glob '!**/*_test.go' \
 - [x] **Step 2: Update generated-binding paths mechanically**
 
 Replace comment-only `frontend/bindings` references with
-`frontend-ng/bindings`. Do not change identifiers, imports, JSON fields, or
+`frontend/bindings`. Do not change identifiers, imports, JSON fields, or
 runtime behaviour.
 
 - [x] **Step 3: Map old Lit consumer paths to live Angular owners**
@@ -111,21 +111,21 @@ Use these exact route families:
 
 ```text
 frontend/src/lit/views/<group>/<name>.ts
-  -> frontend-ng/src/app/desktop/surfaces/<group>/<name>.ts
+  -> frontend/src/app/desktop/surfaces/<group>/<name>.ts
 
 frontend/src/lit/api-fetch.ts
-  -> frontend-ng/src/app/desktop/surfaces/extensions/plugin-auth-broker.ts
+  -> frontend/src/app/desktop/surfaces/extensions/plugin-auth-broker.ts
 
 frontend/src/lit/app-shell.ts plugin descriptor
-  -> frontend-ng/src/app/desktop/surfaces/extensions/plugin-view-runtime.ts
+  -> frontend/src/app/desktop/surfaces/extensions/plugin-view-runtime.ts
 
 frontend/src/lit/app-shell.ts built-in ids
-  -> frontend-ng/src/app/desktop/desktop-catalogue.data.ts
-     and frontend-ng/src/app/desktop/surfaces/surface-registry.ts
+  -> frontend/src/app/desktop/desktop-catalogue.data.ts
+     and frontend/src/app/desktop/surfaces/surface-registry.ts
 ```
 
 For audit constants, point to the live TypeScript symbol discovered under
-`frontend-ng/src`; do not invent a path.
+`frontend/src`; do not invent a path.
 
 - [x] **Step 4: Verify the comment retirement**
 
@@ -170,7 +170,7 @@ Document:
 git clone <repo-url> lthn-desktop
 cd lthn-desktop
 go work sync
-cd frontend-ng && npm ci && cd ..
+cd frontend && npm ci && cd ..
 wails3 task doctor
 
 wails3 task dev
@@ -221,7 +221,7 @@ only when explicitly describing what must not be restored.
 - [x] **Step 1: Run proportional checks in the working tree**
 
 ```bash
-npm --prefix frontend-ng run test:contracts
+npm --prefix frontend run test:contracts
 wails3 task verify:frontend
 go vet ./go/...
 wails3 task test
@@ -250,16 +250,16 @@ The path must be newly created for this proof and removed afterwards.
 Run inside the disposable worktree:
 
 ```bash
-cd frontend-ng && npm ci && cd ..
+cd frontend && npm ci && cd ..
 wails3 task doctor
 wails3 task common:generate:bindings
 wails3 task verify:frontend
-npm --prefix frontend-ng run build
+npm --prefix frontend run build
 ```
 
 Expected: doctor has no required errors; optional crew repositories may be
 warnings. Bindings generate from `go/pkg/desktop` into
-`frontend-ng/bindings`, all frontend checks pass, and production
+`frontend/bindings`, all frontend checks pass, and production
 `go/cmd/lthn/dist/index.html` exists.
 
 - [x] **Step 5: Run a bounded Wails development smoke**
@@ -302,7 +302,7 @@ state:
 - `npm ci` installed 497 packages from the lockfile;
 - `task doctor` reported every required tool, dependency, generated binding,
   optional crew checkout, and development port ready;
-- desktop bindings resolved `go/pkg/desktop` into `frontend-ng/bindings`;
+- desktop bindings resolved `go/pkg/desktop` into `frontend/bindings`;
 - the final 36 convergence contracts and all 268 Angular tests passed;
 - the production build and asset verifier passed, and
   `go/cmd/lthn/dist/index.html` existed;

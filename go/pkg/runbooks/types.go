@@ -19,7 +19,7 @@ import core "dappco.re/go"
 
 // RunbookEntry is the JSON wire type returned to the Angular frontend.
 // Field names match the RunbookEntry interface in
-// frontend-ng/src/app/desktop/surfaces/operations/runbooks.ts exactly.
+// frontend/src/app/desktop/surfaces/operations/runbooks.ts exactly.
 //
 // Usage example:
 //

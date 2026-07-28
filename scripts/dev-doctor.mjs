@@ -85,19 +85,19 @@ export async function inspectDevelopmentEnvironment({
   const paths = [
     {
       name: 'npm lockfile',
-      path: join(cwd, 'frontend-ng', 'package-lock.json'),
+      path: join(cwd, 'frontend', 'package-lock.json'),
       required: true,
-      hint: 'Restore frontend-ng/package-lock.json before installing dependencies.',
+      hint: 'Restore frontend/package-lock.json before installing dependencies.',
     },
     {
       name: 'frontend dependencies',
-      path: join(cwd, 'frontend-ng', 'node_modules'),
+      path: join(cwd, 'frontend', 'node_modules'),
       required: false,
-      hint: 'Run npm ci in frontend-ng or task common:install:frontend:deps.',
+      hint: 'Run npm ci in frontend or task common:install:frontend:deps.',
     },
     {
       name: 'generated Wails bindings',
-      path: join(cwd, 'frontend-ng', 'bindings'),
+      path: join(cwd, 'frontend', 'bindings'),
       required: false,
       hint: 'Run task common:generate:bindings; task dev also generates them when needed.',
     },

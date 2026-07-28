@@ -170,8 +170,8 @@ const maxPluginViewsPerManifest = 8
 // reservedViewIDs names the built-in view ids the lthn shell ships.
 // A plugin manifest declaring any of these is rejected at validation
 // time per RFC.plugin-views §2 identity rules. Values must stay in
-// lockstep with frontend-ng/src/app/desktop/desktop-catalogue.data.ts and
-// frontend-ng/src/app/desktop/surfaces/surface-registry.ts.
+// lockstep with frontend/src/app/desktop/desktop-catalogue.data.ts and
+// frontend/src/app/desktop/surfaces/surface-registry.ts.
 var reservedViewIDs = map[string]bool{
 	"admin":      true,
 	"planning":   true,

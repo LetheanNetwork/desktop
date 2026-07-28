@@ -47,7 +47,7 @@ import (
 // at install time (from the manifest PluginView block + the actual
 // loopback port assigned to the iframe-kind plugin).
 //
-// Mirrors the frontend-side TS interface in frontend-ng/src/app/desktop/
+// Mirrors the frontend-side TS interface in frontend/src/app/desktop/
 // surfaces/extensions/plugin-view-runtime.ts. Field names use JSON tags that
 // match the TS interface keys verbatim — the SDK gen emits the same
 // shape on both sides.

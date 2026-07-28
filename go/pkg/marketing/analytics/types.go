@@ -19,7 +19,7 @@ package analytics
 
 // AnalyticsSource is the JSON wire type for one traffic source row.
 // Field names match the Source interface in
-// frontend-ng/src/app/desktop/surfaces/marketing/analytics.ts.
+// frontend/src/app/desktop/surfaces/marketing/analytics.ts.
 //
 // Usage example:
 //
@@ -35,7 +35,7 @@ type AnalyticsSource struct {
 
 // AnalyticsPage is the JSON wire type for one top-page row.
 // Field names match the PageRow interface in
-// frontend-ng/src/app/desktop/surfaces/marketing/analytics.ts.
+// frontend/src/app/desktop/surfaces/marketing/analytics.ts.
 //
 // Usage example:
 //

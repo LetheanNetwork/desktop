@@ -20,7 +20,7 @@ package social
 
 // SocialPost is the JSON wire type for a single social post card.
 // Field names match the SocialPost interface in
-// frontend-ng/src/app/desktop/surfaces/marketing/social.ts.
+// frontend/src/app/desktop/surfaces/marketing/social.ts.
 //
 // Usage example:
 //

@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- `frontend-ng/` remains the only product frontend; do not add SSR, hydration, or another frontend framework.
+- `frontend/` remains the only product frontend; do not add SSR, hydration, or another frontend framework.
 - `lthn serve` remains the Desktop/CoreGO API and must work when the frontend or LEM sidecar is absent.
 - `inference` is manual-by-default and must never start from registration, startup, snapshot reads, events, Control, Telemetry, or tray rendering.
 - The trusted sidecar arguments are exactly `serve --addr 127.0.0.1:36911 --shutdown-timeout 10s`; omit `--model` and CORS flags.
@@ -603,7 +603,7 @@ Run:
 ```bash
 go test ./go/cmd/lthn ./go/pkg/desktop ./go/pkg/modelruntime ./go/pkg/services -count=1
 cd go
-go tool wails3 generate bindings -ts -d ../frontend-ng/bindings -dry -f '-tags mcp' ./pkg/desktop/...
+go tool wails3 generate bindings -ts -d ../frontend/bindings -dry -f '-tags mcp' ./pkg/desktop/...
 ```
 
 Expected: PASS and no Wails warnings.
@@ -620,12 +620,12 @@ git commit -m "feat(desktop): bind the LEM runtime bridge"
 ### Task 6: Add the strict Angular bridge and shared runtime resource
 
 **Files:**
-- Create: `frontend-ng/src/app/desktop/desktop-model-runtime.models.ts`
-- Create: `frontend-ng/src/app/desktop/desktop-model-runtime-bridge.service.ts`
-- Create: `frontend-ng/src/app/desktop/desktop-model-runtime-bridge.service.spec.ts`
-- Create: `frontend-ng/src/app/desktop/desktop-model-runtime-resource.service.ts`
-- Create: `frontend-ng/src/app/desktop/desktop-model-runtime-resource.service.spec.ts`
-- Create: `frontend-ng/src/app/desktop/desktop-model-runtime-demo.data.ts`
+- Create: `frontend/src/app/desktop/desktop-model-runtime.models.ts`
+- Create: `frontend/src/app/desktop/desktop-model-runtime-bridge.service.ts`
+- Create: `frontend/src/app/desktop/desktop-model-runtime-bridge.service.spec.ts`
+- Create: `frontend/src/app/desktop/desktop-model-runtime-resource.service.ts`
+- Create: `frontend/src/app/desktop/desktop-model-runtime-resource.service.spec.ts`
+- Create: `frontend/src/app/desktop/desktop-model-runtime-demo.data.ts`
 
 **Interfaces:**
 - Consumes: exact Wails methods under `dappco.re/lthn/desktop/pkg/modelruntime.WailsService`.
@@ -673,7 +673,7 @@ Mock `SurfaceBridgeService`, `ConnectionManagerService`, and the Wails event ada
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false --include=src/app/desktop/desktop-model-runtime-bridge.service.spec.ts
 ```
 
@@ -728,7 +728,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add frontend-ng/src/app/desktop/desktop-model-runtime*
+git add frontend/src/app/desktop/desktop-model-runtime*
 git commit -m "feat(frontend): share the LEM runtime resource"
 ```
 
@@ -737,23 +737,23 @@ git commit -m "feat(frontend): share the LEM runtime resource"
 ### Task 7: Drive Control, Telemetry, and the tray from the shared runtime
 
 **Files:**
-- Modify: `frontend-ng/src/app/desktop/apps/control.app.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/control.app.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/control/control-models.view.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/control/control-primary-views.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/control/control-view.models.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/control/control-view-state.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/control/control-view-state.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop-live-data.service.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop-live-data.service.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/telemetry.app.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/telemetry.app.spec.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/telemetry/telemetry-view.models.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/telemetry/telemetry-view-state.ts`
-- Modify: `frontend-ng/src/app/desktop/apps/telemetry/telemetry-view-state.spec.ts`
-- Modify: `frontend-ng/src/app/tray-panel/tray-panel.ts`
-- Modify: `frontend-ng/src/app/tray-panel/tray-panel.html`
-- Modify: `frontend-ng/src/app/tray-panel/tray-panel.spec.ts`
+- Modify: `frontend/src/app/desktop/apps/control.app.ts`
+- Modify: `frontend/src/app/desktop/apps/control.app.spec.ts`
+- Modify: `frontend/src/app/desktop/apps/control/control-models.view.ts`
+- Modify: `frontend/src/app/desktop/apps/control/control-primary-views.spec.ts`
+- Modify: `frontend/src/app/desktop/apps/control/control-view.models.ts`
+- Modify: `frontend/src/app/desktop/apps/control/control-view-state.ts`
+- Modify: `frontend/src/app/desktop/apps/control/control-view-state.spec.ts`
+- Modify: `frontend/src/app/desktop/desktop-live-data.service.ts`
+- Modify: `frontend/src/app/desktop/desktop-live-data.service.spec.ts`
+- Modify: `frontend/src/app/desktop/apps/telemetry.app.ts`
+- Modify: `frontend/src/app/desktop/apps/telemetry.app.spec.ts`
+- Modify: `frontend/src/app/desktop/apps/telemetry/telemetry-view.models.ts`
+- Modify: `frontend/src/app/desktop/apps/telemetry/telemetry-view-state.ts`
+- Modify: `frontend/src/app/desktop/apps/telemetry/telemetry-view-state.spec.ts`
+- Modify: `frontend/src/app/tray-panel/tray-panel.ts`
+- Modify: `frontend/src/app/tray-panel/tray-panel.html`
+- Modify: `frontend/src/app/tray-panel/tray-panel.spec.ts`
 - Modify: `go/pkg/desktop/desktop.go`
 - Modify: `go/cmd/lthn/app.go`
 - Modify: `go/cmd/lthn/app_test.go`
@@ -784,7 +784,7 @@ Prove the tray calls `ModelRuntime.Snapshot`, parses `activeModelId`/safe model 
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/apps/control.app.spec.ts \
   --include=src/app/desktop/apps/control/control-primary-views.spec.ts \
@@ -862,7 +862,7 @@ Expected: PASS.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add frontend-ng/src/app/desktop frontend-ng/src/app/tray-panel go/pkg/desktop/desktop.go go/cmd/lthn/app.go go/cmd/lthn/app_test.go
+git add frontend/src/app/desktop frontend/src/app/tray-panel go/pkg/desktop/desktop.go go/cmd/lthn/app.go go/cmd/lthn/app_test.go
 git commit -m "feat(frontend): wire Control and Telemetry to LEM"
 ```
 
@@ -878,7 +878,7 @@ git commit -m "feat(frontend): wire Control and Telemetry to LEM"
 - Modify: `scripts/dev-doctor.mjs`
 - Modify: `scripts/dev-doctor.test.mjs`
 - Create: `scripts/verify-model-runtime-convergence.test.mjs`
-- Modify: `frontend-ng/package.json`
+- Modify: `frontend/package.json`
 - Modify: `docs/development.md`
 - Modify: `AGENTS.md`
 - Modify: `TODO.md`
@@ -950,7 +950,7 @@ node --test scripts/verify-model-runtime-convergence.test.mjs scripts/dev-doctor
 go test ./go/pkg/services ./go/pkg/models ./go/pkg/modelruntime ./go/pkg/desktop ./go/cmd/lthn -count=1
 go test -race ./go/pkg/services ./go/pkg/modelruntime -count=1
 go vet ./go/pkg/services ./go/pkg/models ./go/pkg/modelruntime ./go/pkg/desktop ./go/cmd/lthn
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-model-runtime-bridge.service.spec.ts \
   --include=src/app/desktop/desktop-model-runtime-resource.service.spec.ts \
@@ -971,7 +971,7 @@ gofmt -l go/
 git diff --check
 go vet ./go/...
 go tool wails3 task test
-cd frontend-ng && npm run build
+cd frontend && npm run build
 ```
 
 Expected: PASS, or any unrelated pre-existing broad-gate failure recorded with exact command and output while all changed-scope gates remain green.
@@ -989,7 +989,7 @@ git diff --check
 Stage only the files from this plan; do not stage `go.work.sum` or `.playwright-mcp/`.
 
 ```bash
-git add Taskfile.yml build/darwin/Taskfile.yml build/linux/Taskfile.yml build/windows/Taskfile.yml scripts/dev-doctor.mjs scripts/dev-doctor.test.mjs scripts/verify-model-runtime-convergence.test.mjs frontend-ng/package.json docs/development.md AGENTS.md TODO.md
+git add Taskfile.yml build/darwin/Taskfile.yml build/linux/Taskfile.yml build/windows/Taskfile.yml scripts/dev-doctor.mjs scripts/dev-doctor.test.mjs scripts/verify-model-runtime-convergence.test.mjs frontend/package.json docs/development.md AGENTS.md TODO.md
 git commit -m "build(modelruntime): package the LEM sidecar"
 ```
 

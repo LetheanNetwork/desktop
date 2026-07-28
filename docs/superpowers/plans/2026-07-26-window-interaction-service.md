@@ -27,9 +27,9 @@
 
 **Files:**
 
-- Test: `frontend-ng/src/app/desktop/window-interaction.service.spec.ts`
-- Create: `frontend-ng/src/app/desktop/window-interaction.service.ts`
-- Modify: `frontend-ng/src/app/desktop/desktop.data.ts`
+- Test: `frontend/src/app/desktop/window-interaction.service.spec.ts`
+- Create: `frontend/src/app/desktop/window-interaction.service.ts`
+- Modify: `frontend/src/app/desktop/desktop.data.ts`
 
 **Interfaces:**
 
@@ -71,7 +71,7 @@
   Run:
 
   ```bash
-  cd frontend-ng
+  cd frontend
   npx ng test --watch=false --include=src/app/desktop/window-interaction.service.spec.ts
   ```
 
@@ -113,8 +113,8 @@
 
 **Files:**
 
-- Modify: `frontend-ng/src/app/desktop/desktop.component.ts`
-- Test: `frontend-ng/src/app/desktop/desktop.component.spec.ts`
+- Modify: `frontend/src/app/desktop/desktop.component.ts`
+- Test: `frontend/src/app/desktop/desktop.component.spec.ts`
 
 **Interfaces:**
 
@@ -140,7 +140,7 @@
   Run:
 
   ```bash
-  cd frontend-ng
+  cd frontend
   npx ng test --watch=false \
     --include=src/app/desktop/window-interaction.service.spec.ts \
     --include=src/app/desktop/window-manager.service.spec.ts \
@@ -165,7 +165,7 @@
 
 - [x] **Step 1: Update the project code map**
 
-  Add `frontend-ng/src/app/desktop/window-interaction.service.ts` to the
+  Add `frontend/src/app/desktop/window-interaction.service.ts` to the
   Angular map and state that `DesktopComponent` coordinates DOM pointer
   lifecycles while the service owns interaction algorithms.
 
@@ -187,7 +187,7 @@
   Run:
 
   ```bash
-  cd frontend-ng
+  cd frontend
   npm run test:ci
   npm run build
   ```

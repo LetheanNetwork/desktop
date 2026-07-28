@@ -644,7 +644,7 @@ Focused iteration:
 go test ./go/pkg/services ./go/pkg/desktop ./go/cmd/lthn -count=1
 go vet ./go/pkg/services ./go/pkg/desktop ./go/cmd/lthn
 
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-services-bridge.service.spec.ts \
   --include=src/app/desktop/apps/control.app.spec.ts \
@@ -658,7 +658,7 @@ gofmt -l go/
 git diff --check
 go tool wails3 task test:go
 go tool wails3 task verify:frontend
-cd frontend-ng && npm run build
+cd frontend && npm run build
 ```
 
 The external CoreGO compliance audit remains a before/after no-regression

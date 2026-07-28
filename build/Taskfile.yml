@@ -9,7 +9,7 @@ tasks:
 
   install:frontend:deps:
     summary: Install Angular frontend dependencies
-    dir: frontend-ng
+    dir: frontend
     sources:
       - package.json
       - package-lock.json
@@ -34,17 +34,17 @@ tasks:
     # inputs and skips the command when nothing changed, leaving the dev
     # cycle's blocking build free on Go-only edits.
     sources:
-      - frontend-ng/src/**/*
-      - frontend-ng/public/**/*
-      - frontend-ng/angular.json
-      - frontend-ng/package.json
-      - frontend-ng/package-lock.json
-      - frontend-ng/tsconfig*.json
-      - frontend-ng/bindings/**/*
+      - frontend/src/**/*
+      - frontend/public/**/*
+      - frontend/angular.json
+      - frontend/package.json
+      - frontend/package-lock.json
+      - frontend/tsconfig*.json
+      - frontend/bindings/**/*
     generates:
       - "{{.GO_DIR}}/cmd/lthn/dist/index.html"
     cmds:
-      - cd frontend-ng && npm run build -- --configuration {{.BUILD_CONFIGURATION}}
+      - cd frontend && npm run build -- --configuration {{.BUILD_CONFIGURATION}}
     vars:
       BUILD_CONFIGURATION: '{{if eq .DEV "true"}}development{{else}}production{{end}}'
 
@@ -54,16 +54,16 @@ tasks:
     deps:
       - task: install:frontend:deps
     sources:
-      - frontend-ng/src/**/*
-      - frontend-ng/public/**/*
-      - frontend-ng/angular.json
-      - frontend-ng/package.json
-      - frontend-ng/package-lock.json
-      - frontend-ng/tsconfig*.json
+      - frontend/src/**/*
+      - frontend/public/**/*
+      - frontend/angular.json
+      - frontend/package.json
+      - frontend/package-lock.json
+      - frontend/tsconfig*.json
     generates:
       - "{{.GO_DIR}}/cmd/lthn/dist/index.html"
     cmds:
-      - cd frontend-ng && npm run build -- --configuration {{.BUILD_CONFIGURATION}}
+      - cd frontend && npm run build -- --configuration {{.BUILD_CONFIGURATION}}
     vars:
       BUILD_CONFIGURATION: '{{if eq .DEV "true"}}development{{else}}production{{end}}'
 
@@ -81,11 +81,11 @@ tasks:
     generates:
       # Every target cleans the shared binding directory. A flavour/flags
       # marker prevents another target's output satisfying this task's cache.
-      - ../frontend-ng/bindings/.desktop-bindings-{{.BINDINGS_CACHE_KEY}}
+      - ../frontend/bindings/.desktop-bindings-{{.BINDINGS_CACHE_KEY}}
     cmds:
-      - '{{.WAILS3_TOOL}} generate bindings -ts -d ../frontend-ng/bindings -f ''{{.BUILD_FLAGS}}'' -clean=true ./pkg/desktop/...'
-      - node ../scripts/write-binding-marker.mjs ../frontend-ng/bindings/.desktop-bindings
-      - node ../scripts/write-binding-marker.mjs ../frontend-ng/bindings/.desktop-bindings-{{.BINDINGS_CACHE_KEY}}
+      - '{{.WAILS3_TOOL}} generate bindings -ts -d ../frontend/bindings -f ''{{.BUILD_FLAGS}}'' -clean=true ./pkg/desktop/...'
+      - node ../scripts/write-binding-marker.mjs ../frontend/bindings/.desktop-bindings
+      - node ../scripts/write-binding-marker.mjs ../frontend/bindings/.desktop-bindings-{{.BINDINGS_CACHE_KEY}}
     vars:
       BINDINGS_CACHE_KEY: '{{sha256sum (.BUILD_FLAGS | default "")}}'
 
@@ -113,7 +113,7 @@ tasks:
 
   dev:frontend:
     summary: Runs Angular's HMR server for the Wails development window
-    dir: frontend-ng
+    dir: frontend
     preconditions:
       - sh: test -d node_modules
         msg: "Frontend dependencies are missing. Run: go tool wails3 task common:install:frontend:deps"

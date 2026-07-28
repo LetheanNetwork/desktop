@@ -5,29 +5,29 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gitLines, pathExists } from './repository.mjs';
 
 const BASE_COMPONENTS = Object.freeze({
-  control: 'frontend-ng/src/app/desktop/apps/control.app.ts',
-  chat: 'frontend-ng/src/app/desktop/apps/chat.app.ts',
-  telemetry: 'frontend-ng/src/app/desktop/apps/telemetry.app.ts',
-  activity: 'frontend-ng/src/app/desktop/apps/activity.app.ts',
-  lethernet: 'frontend-ng/src/app/desktop/apps/lethernet.app.ts',
-  games: 'frontend-ng/src/app/desktop/apps/games.app.ts',
-  notepad: 'frontend-ng/src/app/desktop/apps/notepad.app.ts',
-  files: 'frontend-ng/src/app/desktop/apps/files.app.ts',
-  settings: 'frontend-ng/src/app/desktop/apps/settings.app.ts',
-  cpanel: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  explorer: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  codesearch: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  scm: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  terminal: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  build: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  procmon: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  containers: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  repos: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  forge: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  devops: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  marketplace: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  tasks: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
-  tenant: 'frontend-ng/src/app/desktop/apps/dev-panel.app.ts',
+  control: 'frontend/src/app/desktop/apps/control.app.ts',
+  chat: 'frontend/src/app/desktop/apps/chat.app.ts',
+  telemetry: 'frontend/src/app/desktop/apps/telemetry.app.ts',
+  activity: 'frontend/src/app/desktop/apps/activity.app.ts',
+  lethernet: 'frontend/src/app/desktop/apps/lethernet.app.ts',
+  games: 'frontend/src/app/desktop/apps/games.app.ts',
+  notepad: 'frontend/src/app/desktop/apps/notepad.app.ts',
+  files: 'frontend/src/app/desktop/apps/files.app.ts',
+  settings: 'frontend/src/app/desktop/apps/settings.app.ts',
+  cpanel: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  explorer: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  codesearch: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  scm: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  terminal: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  build: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  procmon: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  containers: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  repos: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  forge: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  devops: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  marketplace: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  tasks: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  tenant: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
 });
 
 const BASE_ROUTES = Object.freeze({
@@ -57,22 +57,22 @@ const BASE_ROUTES = Object.freeze({
 });
 
 const SPECIALISED_EVIDENCE = Object.freeze({
-  chat: ['frontend-ng/src/app/desktop/desktop-ai.service.ts'],
-  files: ['frontend-ng/src/app/desktop/desktop-files-bridge.service.ts'],
-  settings: ['frontend-ng/src/app/desktop/preferences.service.ts'],
-  'surface-agents-terminal': ['frontend-ng/src/app/desktop/surfaces/agents/terminal-session.ts'],
+  chat: ['frontend/src/app/desktop/desktop-ai.service.ts'],
+  files: ['frontend/src/app/desktop/desktop-files-bridge.service.ts'],
+  settings: ['frontend/src/app/desktop/preferences.service.ts'],
+  'surface-agents-terminal': ['frontend/src/app/desktop/surfaces/agents/terminal-session.ts'],
   'surface-extensions-marketplace': [
-    'frontend-ng/src/app/desktop/surfaces/extensions/marketplace.ts',
+    'frontend/src/app/desktop/surfaces/extensions/marketplace.ts',
   ],
   'surface-extensions-plugin-view': [
-    'frontend-ng/src/app/desktop/surfaces/extensions/plugin-view-runtime.ts',
+    'frontend/src/app/desktop/surfaces/extensions/plugin-view-runtime.ts',
   ],
   'surface-extensions-opencode-shim': [
-    'frontend-ng/src/app/desktop/surfaces/extensions/opencode-shim.ts',
+    'frontend/src/app/desktop/surfaces/extensions/opencode-shim.ts',
   ],
   'surface-office-files': [
-    'frontend-ng/src/app/desktop/apps/files.app.ts',
-    'frontend-ng/src/app/desktop/desktop-files-bridge.service.ts',
+    'frontend/src/app/desktop/apps/files.app.ts',
+    'frontend/src/app/desktop/desktop-files-bridge.service.ts',
   ],
 });
 
@@ -142,7 +142,7 @@ export function renderCapabilityMatrix(report) {
 
 async function readBaseApps(repoRoot) {
   const source = await readFile(
-    join(repoRoot, 'frontend-ng/src/app/desktop/desktop-catalogue.data.ts'),
+    join(repoRoot, 'frontend/src/app/desktop/desktop-catalogue.data.ts'),
     'utf8',
   );
   const block = source.slice(
@@ -157,7 +157,7 @@ async function readBaseApps(repoRoot) {
 
 async function readSurfaceApps(repoRoot) {
   const source = await readFile(
-    join(repoRoot, 'frontend-ng/src/app/desktop/surfaces/surface-registry.ts'),
+    join(repoRoot, 'frontend/src/app/desktop/surfaces/surface-registry.ts'),
     'utf8',
   );
   const block = source.slice(
@@ -174,7 +174,7 @@ async function readSurfaceApps(repoRoot) {
         repoRoot,
         id,
         `/${group}/${route}`,
-        `frontend-ng/src/app/desktop/surfaces/${group}/${route}.ts`,
+        `frontend/src/app/desktop/surfaces/${group}/${route}.ts`,
       );
     }),
   );

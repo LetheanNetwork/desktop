@@ -69,10 +69,10 @@ injection, `@wailsio/runtime`, Vitest.
 
 **Files:**
 
-- Modify: `frontend-ng/src/app/connection-manager.service.spec.ts`
-- Modify: `frontend-ng/src/app/connection-manager.service.ts`
-- Modify: `frontend-ng/src/app/app.config.ts`
-- Modify: `frontend-ng/src/index.html`
+- Modify: `frontend/src/app/connection-manager.service.spec.ts`
+- Modify: `frontend/src/app/connection-manager.service.ts`
+- Modify: `frontend/src/app/app.config.ts`
+- Modify: `frontend/src/index.html`
 
 **Interfaces:**
 
@@ -159,7 +159,7 @@ injection, `@wailsio/runtime`, Vitest.
 
 - [x] Run `wails3 task test` and require both Go and frontend suites green.
 
-- [x] Run `npx ng build` from `frontend-ng/`.
+- [x] Run `npx ng build` from `frontend/`.
 
 - [x] Run the v0.9.0 audit without invoking git. Record the repository's
   existing compliance backlog separately; verify the new package has zero

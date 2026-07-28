@@ -64,7 +64,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: frontend-ng/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install Task
         shell: bash
@@ -73,14 +73,14 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Install frontend dependencies
-        working-directory: frontend-ng
+        working-directory: frontend
         run: npm ci
 
       - name: Generate bindings
         run: go tool wails3 task common:generate:bindings
 
       - name: Verify frontend
-        working-directory: frontend-ng
+        working-directory: frontend
         run: npm run verify
 
   build:
@@ -136,7 +136,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache:        npm
-          cache-dependency-path: frontend-ng/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install Linux build deps
         if: matrix.os == 'linux' || matrix.os == 'android'
@@ -171,7 +171,7 @@ jobs:
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Install frontend dependencies
-        working-directory: frontend-ng
+        working-directory: frontend
         run: npm ci
 
       # duckdb ships as prebuilt cgo bindings, and every file in
@@ -189,11 +189,30 @@ jobs:
           echo "CGO_ENABLED=1" >> "$GITHUB_ENV"
           gcc --version | head -1
 
-      - name: Generate bindings (TypeScript)
-        if: matrix.os != 'ios' && matrix.os != 'android'
-        run: go tool wails3 task common:generate:bindings
-
+      # The desktop three go through the shared action: it runs the same
+      # Taskfile target this workflow invoked directly, so the build itself is
+      # unchanged — what moves is toolchain setup and artifact handling, which
+      # every CoreGO repo was keeping its own copy of.
+      #
+      # bindings are not a separate step: common:build:frontend already depends
+      # on generate:bindings, so the Taskfile covers it and a local build takes
+      # the same path CI does.
       - name: Build
+        if: matrix.os != 'ios' && matrix.os != 'android'
+        uses: dAppCore/build@v4
+        with:
+          build-name: lthn
+          STACK: wails3
+          task: ${{ matrix.task }}
+          # Packaging stays below: this workflow bundles per platform and
+          # publishes through its own release jobs.
+          package: false
+
+      # iOS and Android keep the direct invocation — the action has no mobile
+      # stack, and routing them through one that cannot build them would only
+      # move the failure.
+      - name: Build (mobile)
+        if: matrix.os == 'ios' || matrix.os == 'android'
         run: go tool wails3 task ${{ matrix.task }}
 
       - name: Bundle macOS .app
@@ -257,7 +276,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache:        npm
-          cache-dependency-path: frontend-ng/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -270,10 +289,10 @@ jobs:
         uses: ./.github/actions/linux-webkit
 
       - name: Install frontend dependencies
-        working-directory: frontend-ng
+        working-directory: frontend
         run: npm ci
 
-      # frontend-ng/bindings is generated and gitignored, so the preview build
+      # frontend/bindings is generated and gitignored, so the preview build
       # needs it made here the same way the desktop build does.
       - name: Generate bindings
         run: go tool wails3 task common:generate:bindings
@@ -283,7 +302,7 @@ jobs:
       # __LTHN_CONNECTION__.offline before the query flag, which a static host
       # cannot supply.
       - name: Declare the preview offline
-        working-directory: frontend-ng
+        working-directory: frontend
         run: |
           set -e
           # /wails/transport.js is served by the Go binary. On a static host it
@@ -297,7 +316,7 @@ jobs:
       # every asset resolves against the user-page root. Routing is hash based,
       # which is why no 404 rewrite is needed.
       - name: Build the preview
-        working-directory: frontend-ng
+        working-directory: frontend
         run: npx ng build --configuration production --base-href "/${{ github.event.repository.name }}/"
 
       # angular.json points the build at go/cmd/lthn/dist so the binary can

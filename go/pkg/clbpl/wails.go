@@ -4,7 +4,7 @@
 // Detector so the training UI can push (step, loss) samples in and
 // poll Peaks / Groked / subscribed envelope events. Wails generates
 // a TS binding at
-// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/clbpl/.
+// frontend/bindings/dappco.re/lthn/desktop/pkg/clbpl/.
 // Bound by application.NewService(clbpl.NewWailsService(...)) in
 // pkg/desktop/desktop.go; the package-level Detector stays for
 // non-WebView callers (offline analysis, CLI training drivers,
@@ -63,7 +63,7 @@ func NewWailsService(opts Options) *WailsService {
 
 // ServiceName labels the binding namespace exposed to JS as
 // "CLBPL" — Wails generates the TS binding under
-// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/clbpl/.
+// frontend/bindings/dappco.re/lthn/desktop/pkg/clbpl/.
 func (s *WailsService) ServiceName() string { return "CLBPL" }
 
 // ServiceStartup is the Wails3 lifecycle hook called once after the

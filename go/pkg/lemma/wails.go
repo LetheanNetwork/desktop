@@ -9,7 +9,7 @@
 // for non-WebView callers (CLI verbs, Core actions, MCP tools).
 //
 // Wails generates the TypeScript binding under
-// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/lemma/.
+// frontend/bindings/dappco.re/lthn/desktop/pkg/lemma/.
 
 package lemma
 
@@ -56,7 +56,7 @@ var errLemmaNotConfigured = core.E("lemma.WailsService",
 
 // ServiceName labels the binding namespace exposed to JS as "Lemma".
 // Wails-generated TS lives at
-// frontend-ng/bindings/dappco.re/lthn/desktop/pkg/lemma/.
+// frontend/bindings/dappco.re/lthn/desktop/pkg/lemma/.
 func (s *WailsService) ServiceName() string { return "Lemma" }
 
 // ConfigureEndpoint lets the UI redirect at runtime — useful when the

@@ -9,8 +9,8 @@
 
 **Files**
 
-- Add `frontend-ng/src/app/desktop/desktop-live-data.service.spec.ts`
-- Add `frontend-ng/src/app/desktop/desktop-live-data.service.ts`
+- Add `frontend/src/app/desktop/desktop-live-data.service.spec.ts`
+- Add `frontend/src/app/desktop/desktop-live-data.service.ts`
 
 Write failing tests for explicit offline mode, telemetry, model, benchmark,
 process, settings, and Files response parsing. Implement a root service that:
@@ -23,7 +23,7 @@ process, settings, and Files response parsing. Implement a root service that:
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false --include=src/app/desktop/desktop-live-data.service.spec.ts
 ```
 
@@ -31,8 +31,8 @@ npx ng test --watch=false --include=src/app/desktop/desktop-live-data.service.sp
 
 **Files**
 
-- Add `frontend-ng/src/app/desktop/apps/telemetry.app.spec.ts`
-- Modify `frontend-ng/src/app/desktop/apps/telemetry.app.ts`
+- Add `frontend/src/app/desktop/apps/telemetry.app.spec.ts`
+- Modify `frontend/src/app/desktop/apps/telemetry.app.ts`
 
 Test that offline mode performs no call, connected mode renders real process
 metrics, and failure retains labelled demo data. Keep a bounded sample history
@@ -44,8 +44,8 @@ Run the focused spec.
 
 **Files**
 
-- Add `frontend-ng/src/app/desktop/apps/files.app.spec.ts`
-- Modify `frontend-ng/src/app/desktop/apps/files.app.ts`
+- Add `frontend/src/app/desktop/apps/files.app.spec.ts`
+- Modify `frontend/src/app/desktop/apps/files.app.ts`
 
 Test demo navigation without bridge calls, live locations/recent rows/disk
 usage, location refresh, and a failed live read retaining demo data. Preserve
@@ -57,8 +57,8 @@ Run the focused spec.
 
 **Files**
 
-- Add `frontend-ng/src/app/desktop/apps/control.app.spec.ts`
-- Modify `frontend-ng/src/app/desktop/apps/control.app.ts`
+- Add `frontend/src/app/desktop/apps/control.app.spec.ts`
+- Modify `frontend/src/app/desktop/apps/control.app.ts`
 
 Test offline demo mode, partial live aggregation, model and benchmark table
 mapping, process telemetry, settings grouping, and honest mixed-data
@@ -70,9 +70,9 @@ Run the focused spec.
 
 **Files**
 
-- Add `frontend-ng/src/app/desktop/apps/terminal.app.spec.ts`
-- Add `frontend-ng/src/app/desktop/apps/terminal.app.ts`
-- Modify `frontend-ng/src/app/desktop/apps/app-view.ts`
+- Add `frontend/src/app/desktop/apps/terminal.app.spec.ts`
+- Add `frontend/src/app/desktop/apps/terminal.app.ts`
+- Modify `frontend/src/app/desktop/apps/app-view.ts`
 - Modify the applicable route/registry spec
 
 Test that offline mode selects the existing typed developer fixture and
@@ -98,7 +98,7 @@ operations, and watch events.
 Run:
 
 ```bash
-cd frontend-ng
+cd frontend
 npx ng test --watch=false \
   --include=src/app/desktop/desktop-live-data.service.spec.ts \
   --include=src/app/desktop/apps/telemetry.app.spec.ts \
