@@ -220,6 +220,24 @@ tasks:
         fi
       - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
       - cp build/darwin/Info.plist "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents"
+      # The checked-in plist carries the seed version from build/config.yml,
+      # which does not move when a release is tagged — so Finder, Get Info and
+      # the About panel would report 0.1.0 for every build ever shipped, while
+      # the binary inside reported the truth. Patch the copy, not the source:
+      # the working tree stays clean and `git describe` keeps meaning what it
+      # says. CFBundleVersion must be dotted digits or macOS rejects it, so it
+      # takes the tag with any -N-gsha-dirty suffix trimmed off; the
+      # human-facing CFBundleShortVersionString keeps the full description.
+      - |-
+        set -e
+        PLIST="{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Info.plist"
+        SHORT="{{.LTHN_VERSION}}"
+        SHORT="${SHORT#v}"
+        BUILDV="$(printf '%s' "$SHORT" | sed -E 's/[^0-9.].*$//; s/\.+$//')"
+        case "$BUILDV" in ''|.*) BUILDV="0.0.0" ;; esac
+        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SHORT" "$PLIST"
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILDV" "$PLIST"
+        echo "  bundle version $SHORT (CFBundleVersion $BUILDV)"
       # LEM is resolved only as a fixed sibling of lthn. Do not replace this
       # conditional package copy with PATH discovery.
       - |-
@@ -243,6 +261,11 @@ tasks:
           echo "  to stage it: run 'task pre-build' (needs the go-mlx metallib built)"
         fi
       - task: '{{if eq OS "darwin"}}codesign:adhoc{{else}}codesign:skip{{end}}'
+    vars:
+      # The same describe the binary stamp uses, so the plist and the binary
+      # inside it cannot disagree.
+      LTHN_VERSION:
+        sh: git describe --tags --match 'v*' --always --dirty 2>/dev/null || echo dev
 
   codesign:adhoc:
     summary: Ad-hoc signs the app bundle (macOS only)

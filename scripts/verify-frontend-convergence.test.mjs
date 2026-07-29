@@ -143,7 +143,13 @@ test('all binding generators target frontend and no removed external tree', asyn
   ]);
   const combined = files.join('\n');
 
-  assert.doesNotMatch(combined, /frontend\/bindings/);
+  // This guard is a pair: the superseded tree must be absent and the current
+  // one present. Before the Angular app took the `frontend` name the pair read
+  // "no frontend/bindings, yes frontend-ng/bindings"; renaming frontend-ng to
+  // frontend turned the second half into the first half's negation, so the
+  // test could not pass however the build was wired. The pair still holds —
+  // what moved is which name is superseded.
+  assert.doesNotMatch(combined, /frontend-ng/);
   assert.doesNotMatch(combined, /external\/gui/);
   assert.match(combined, /frontend\/bindings/);
 });
@@ -209,7 +215,10 @@ test('CI and audit use the current module and Angular topology', async () => {
   assert.match(audit, /cd frontend/);
   assert.match(audit, /npm run build/);
   assert.match(audit, /npm run test:ci/);
-  assert.doesNotMatch(audit, /bun run|cd frontend(?:\s|$)/);
+  // Same collapsed pair as the bindings guard above: `cd frontend` is now the
+  // required form, so forbidding it contradicted the line before. What must
+  // stay gone is the pre-rename directory and the retired Bun workflow.
+  assert.doesNotMatch(audit, /bun run|cd frontend-ng(?:\s|$)/);
 });
 
 test('binding generation synchronises the root Go workspace on every platform', async () => {
