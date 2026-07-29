@@ -207,44 +207,13 @@ jobs:
           echo "CGO_ENABLED=1" >> "$GITHUB_ENV"
           gcc --version | head -1
 
-      # windows:package builds the NSIS installer, and the runner image does
-      # not ship NSIS — it is absent from the windows-2025 tool list. Guarded
-      # rather than unconditional so this keeps working if a future image adds
-      # it. Chocolatey's shim directory is already on PATH, so makensis
-      # resolves straight after the install.
-      - name: Install NSIS (Windows)
-        if: matrix.os == 'windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          NSIS_DIR="/c/Program Files (x86)/NSIS"
-          if ! command -v makensis >/dev/null 2>&1; then
-            choco install nsis -y --no-progress
-          fi
-          # choco writes the machine PATH, which neither this already-running
-          # shell nor the build step below inherits — so the install succeeds
-          # and makensis stays "command not found". Name the directory.
-          if ! command -v makensis >/dev/null 2>&1; then
-            test -x "$NSIS_DIR/makensis.exe" \
-              || { echo "::error::NSIS installed but no makensis at $NSIS_DIR"; exit 1; }
-            printf '%s\n' 'C:\Program Files (x86)\NSIS' >> "$GITHUB_PATH"
-            export PATH="$NSIS_DIR:$PATH"
-          fi
-          # -VERSION, not /VERSION: this shell is MSYS, which rewrites a leading
-          # slash into a Windows path before the program sees it. makensis then
-          # receives something like C:/Program Files/Git/VERSION, reads it as a
-          # script to compile, and exits 1 having printed its config banner —
-          # which looks like NSIS is broken rather than the argument.
-          makensis -VERSION
-
-      # The desktop three go through the shared action: it runs the same
-      # Taskfile target this workflow invoked directly, so the build itself is
-      # unchanged — what moves is toolchain setup and artifact handling, which
-      # every CoreGO repo was keeping its own copy of.
+      # The whole desktop pipeline is one step. Installing NSIS, turning the
+      # .app into a .dmg, generating the Linux packages, naming the output so
+      # five platforms can share a release, and uploading it are all true of
+      # any Wails v3 project, so they live in the stack rather than here.
       #
-      # bindings are not a separate step: common:build:frontend already depends
-      # on generate:bindings, so the Taskfile covers it and a local build takes
-      # the same path CI does.
+      # bindings are not a separate step either: common:build:frontend already
+      # depends on generate:bindings, so a local build takes the path CI does.
       - name: Build
         if: matrix.os != 'ios' && matrix.os != 'android'
         uses: dAppCore/build@v4
@@ -252,8 +221,8 @@ jobs:
           build-name: lthn
           STACK: wails3
           wails3-command: ${{ matrix.wails3-command }}
-          # Packaging stays below: this workflow bundles per platform and
-          # publishes through its own release jobs.
+          # Publishing stays with this workflow — the rolling `dev` prerelease
+          # is this project's policy, not the stack's.
           package: false
 
       # iOS and Android keep the direct invocation — the action has no mobile
@@ -262,65 +231,6 @@ jobs:
       - name: Build (mobile)
         if: matrix.os == 'ios' || matrix.os == 'android'
         run: go tool wails3 task ${{ matrix.task }}
-
-      # The repo has carried create:dmg, create:nsis:installer and create:deb
-      # for as long as it has had a Taskfile, and CI called none of them — so
-      # the only way to install Lethean Desktop was to know where to put a file
-      # yourself. Windows builds its installer inside matrix.task; the other
-      # two are wrapped here, around a binary that already exists.
-      #
-      # create:dmg takes a precondition on bin/lthn.app rather than a
-      # dependency, so it packages what darwin:package just produced instead of
-      # building it again.
-      - name: Package the macOS .dmg
-        if: matrix.os == 'macos'
-        run: go tool wails3 task darwin:create:dmg
-
-      # generate:*, not create:*: the create tasks depend on `build`, which
-      # would compile the whole application a second time. These consume
-      # bin/lthn where it already is.
-      #
-      # .deb and .rpm only. AppImage needs linuxdeploy and a FUSE mount the
-      # runner does not offer, so it stays a local target until that earns
-      # solving.
-      - name: Package the Linux .deb and .rpm
-        if: matrix.os == 'linux'
-        run: |
-          set -euo pipefail
-          go tool wails3 task linux:generate:dotdesktop
-          go tool wails3 task linux:generate:deb
-          go tool wails3 task linux:generate:rpm
-
-      - name: Bundle macOS .app
-        if: matrix.os == 'macos'
-        run: |
-          set -euo pipefail
-          mkdir -p artifact
-          # task darwin:package produces bin/lthn.app; zip preserves the
-          # codesign + bundle structure across the upload boundary.
-          ditto -c -k --keepParent bin/lthn.app artifact/lthn-darwin-arm64.zip
-          cp bin/lthn.dmg artifact/lthn-darwin-arm64.dmg
-
-      - name: Stage Linux artifacts
-        if: matrix.os == 'linux'
-        run: |
-          set -euo pipefail
-          mkdir -p artifact
-          cp bin/lthn artifact/lthn-linux-amd64
-          # wails3 names these from the -name flag alone, so they arrive as a
-          # bare lthn.deb / lthn.rpm. Renamed to carry the platform, like every
-          # other asset in the release — the version is inside the package.
-          cp bin/lthn.deb artifact/lthn-linux-amd64.deb
-          cp bin/lthn.rpm artifact/lthn-linux-amd64.rpm
-
-      - name: Stage Windows artifacts
-        if: matrix.os == 'windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p artifact
-          cp bin/lthn.exe artifact/lthn-windows-amd64.exe
-          cp bin/lthn-amd64-installer.exe artifact/lthn-windows-amd64-installer.exe
 
       - name: Bundle iOS Simulator .app
         if: matrix.os == 'ios'
@@ -334,7 +244,11 @@ jobs:
           mkdir -p artifact
           cp bin/lthn.apk artifact/lthn-android-universal.apk
 
-      - name: Upload artifact
+      # Mobile only. The desktop three are uploaded by the stack, which named
+      # them the same way — leaving this ungated would ask it to upload an
+      # artifact/ directory that no longer gets created.
+      - name: Upload artifact (mobile)
+        if: matrix.os == 'ios' || matrix.os == 'android'
         uses: actions/upload-artifact@v7
         with:
           name:           ${{ matrix.artifact }}
