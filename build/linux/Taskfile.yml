@@ -262,6 +262,10 @@ tasks:
           -config "$CONFIG" \
           -out "{{.ROOT_DIR}}/bin"
     env:
+      # nfpm.yaml reads this too. Unset it falls back to nfpm's own default of
+      # amd64, which happens to be right for the only Linux target CI builds
+      # and would quietly mislabel the first arm64 package.
+      GOARCH: '{{.ARCH | default ARCH}}'
       # nfpm.yaml reads this. Debian and RPM both require a version starting
       # with a digit, which `git describe` output does not: it is `v0.2.0`, or
       # a bare commit when no tag is reachable. Strip the `v`, and give

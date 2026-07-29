@@ -12,7 +12,11 @@ platform: "linux"
 version: ${LTHN_PKG_VERSION}
 section: "default"
 priority: "extra"
-maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
+# A fixed project address, not ${GIT_COMMITTER_NAME}/${GIT_COMMITTER_EMAIL}:
+# those are unset on a CI runner, which yields the malformed `Maintainer:  <>`,
+# and set on a developer's machine, which stamps whoever happened to run the
+# build into a published package.
+maintainer: Lethean <dev@lethean.io>
 description: "Local AI, sovereign by design."
 vendor: "Lethean"
 homepage: "https://lethean.io"

@@ -204,6 +204,21 @@ jobs:
           echo "CGO_ENABLED=1" >> "$GITHUB_ENV"
           gcc --version | head -1
 
+      # windows:package builds the NSIS installer, and the runner image does
+      # not ship NSIS — it is absent from the windows-2025 tool list. Guarded
+      # rather than unconditional so this keeps working if a future image adds
+      # it. Chocolatey's shim directory is already on PATH, so makensis
+      # resolves straight after the install.
+      - name: Install NSIS (Windows)
+        if: matrix.os == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v makensis >/dev/null 2>&1; then
+            choco install nsis -y --no-progress
+          fi
+          makensis /VERSION
+
       # The desktop three go through the shared action: it runs the same
       # Taskfile target this workflow invoked directly, so the build itself is
       # unchanged — what moves is toolchain setup and artifact handling, which
@@ -274,13 +289,11 @@ jobs:
           set -euo pipefail
           mkdir -p artifact
           cp bin/lthn artifact/lthn-linux-amd64
-          # nfpm names these itself, from the package version — glob rather
-          # than predict, but insist on exactly one of each so a rename
-          # upstream fails here instead of shipping an empty release.
-          cp bin/*.deb artifact/
-          cp bin/*.rpm artifact/
-          test "$(find artifact -name '*.deb' | wc -l)" -eq 1
-          test "$(find artifact -name '*.rpm' | wc -l)" -eq 1
+          # wails3 names these from the -name flag alone, so they arrive as a
+          # bare lthn.deb / lthn.rpm. Renamed to carry the platform, like every
+          # other asset in the release — the version is inside the package.
+          cp bin/lthn.deb artifact/lthn-linux-amd64.deb
+          cp bin/lthn.rpm artifact/lthn-linux-amd64.rpm
 
       - name: Stage Windows artifacts
         if: matrix.os == 'windows'
@@ -444,8 +457,8 @@ jobs:
             out/lthn-darwin-arm64.zip
             out/lthn-darwin-arm64.dmg
             out/lthn-linux-amd64
-            out/*.deb
-            out/*.rpm
+            out/lthn-linux-amd64.deb
+            out/lthn-linux-amd64.rpm
             out/lthn-windows-amd64.exe
             out/lthn-windows-amd64-installer.exe
         env:
@@ -489,8 +502,8 @@ jobs:
             out/lthn-darwin-arm64.zip
             out/lthn-darwin-arm64.dmg
             out/lthn-linux-amd64
-            out/*.deb
-            out/*.rpm
+            out/lthn-linux-amd64.deb
+            out/lthn-linux-amd64.rpm
             out/lthn-windows-amd64.exe
             out/lthn-windows-amd64-installer.exe
             out/lthn-ios-simulator-arm64.zip
