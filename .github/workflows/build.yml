@@ -24,9 +24,9 @@
 # job checks out full history — a shallow clone has no tags to describe
 # against and everything reports itself as `dev`.
 #
-# Local builds: `task build` (auto-detects OS). CI mirrors that path
-# via OS-specific wails3 Taskfile targets — no separate CI build logic
-# to keep in sync.
+# Local builds: `wails3 build` / `wails3 package` (both auto-detect the OS).
+# CI runs the same two verbs through the shared action, so there is no separate
+# CI build logic to keep in step with the local one.
 
 name: build
 
@@ -100,24 +100,27 @@ jobs:
             runner:    macos-26            # arm64; matches the native 26.0 floor
             artifact:  lthn-darwin-arm64
             ext:       .app
-            # package, not build: `build` produces bin/lthn, `package` wraps it
-            # into bin/lthn.app. The bundling step below zips the .app, so
-            # building alone left it with nothing to find.
-            task:      darwin:package
+            # package, not build: `wails3 build` produces bin/lthn, `wails3
+            # package` wraps it into bin/lthn.app. The bundling step below zips
+            # the .app, so building alone leaves it nothing to find.
+            wails3-command: package
           - os:        linux
             runner:    ubuntu-latest
             artifact:  lthn-linux-amd64
             ext:       ""
-            task:      linux:build
+            # build, where the other two package: `wails3 package` on Linux also
+            # builds an AppImage, which wants linuxdeploy and a FUSE mount the
+            # runner does not offer. The .deb and .rpm are made directly below.
+            wails3-command: build
           - os:        windows
             runner:    windows-latest
             artifact:  lthn-windows-amd64
             ext:       .exe
             # package, not build: it builds bin/lthn.exe and then wraps it in
-            # the NSIS installer, in one invocation. Asking for the installer
-            # as a separate step would satisfy its `build` dependency by
-            # compiling the whole thing a second time.
-            task:      windows:package
+            # the NSIS installer, in one invocation. Asking for the installer as
+            # a separate step would satisfy its `build` dependency by compiling
+            # the whole thing a second time.
+            wails3-command: package
           - os:        ios
             runner:    macos-15
             artifact:  lthn-ios-simulator-arm64
@@ -233,7 +236,7 @@ jobs:
         with:
           build-name: lthn
           STACK: wails3
-          task: ${{ matrix.task }}
+          wails3-command: ${{ matrix.wails3-command }}
           # Packaging stays below: this workflow bundles per platform and
           # publishes through its own release jobs.
           package: false
