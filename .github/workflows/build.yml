@@ -217,8 +217,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          NSIS_DIR="/c/Program Files (x86)/NSIS"
           if ! command -v makensis >/dev/null 2>&1; then
             choco install nsis -y --no-progress
+          fi
+          # choco writes the machine PATH, which neither this already-running
+          # shell nor the build step below inherits — so the install succeeds
+          # and makensis stays "command not found". Name the directory.
+          if ! command -v makensis >/dev/null 2>&1; then
+            test -x "$NSIS_DIR/makensis.exe" \
+              || { echo "::error::NSIS installed but no makensis at $NSIS_DIR"; exit 1; }
+            printf '%s\n' 'C:\Program Files (x86)\NSIS' >> "$GITHUB_PATH"
+            export PATH="$NSIS_DIR:$PATH"
           fi
           makensis /VERSION
 
