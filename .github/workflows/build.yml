@@ -230,7 +230,12 @@ jobs:
             printf '%s\n' 'C:\Program Files (x86)\NSIS' >> "$GITHUB_PATH"
             export PATH="$NSIS_DIR:$PATH"
           fi
-          makensis /VERSION
+          # -VERSION, not /VERSION: this shell is MSYS, which rewrites a leading
+          # slash into a Windows path before the program sees it. makensis then
+          # receives something like C:/Program Files/Git/VERSION, reads it as a
+          # script to compile, and exits 1 having printed its config banner —
+          # which looks like NSIS is broken rather than the argument.
+          makensis -VERSION
 
       # The desktop three go through the shared action: it runs the same
       # Taskfile target this workflow invoked directly, so the build itself is

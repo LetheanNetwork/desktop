@@ -152,22 +152,22 @@ tasks:
     cmds:
       # Create the Microsoft WebView2 bootstrapper if it doesn't exist
       - '{{.WAILS3_TOOL}} generate webview2bootstrapper -dir "{{.ROOT_DIR}}/build/windows/nsis"'
+      # One shell, not two. Task interprets every command with its own POSIX
+      # shell on all platforms — including Windows — so the cmd-syntax branch
+      # this used to take there was a parse error, not a build:
+      #
+      #   1:24: a command can only contain words and redirects; encountered (
+      #
+      # It never surfaced because CI only ever ran windows:build, which does not
+      # reach the installer. Forward slashes for the same reason: makensis takes
+      # them, and they survive both shells without escaping.
       - |
-        {{if eq OS "windows"}}
-        if exist "{{.WINDOWS_LEM_STAGE}}" (
-          makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}\{{.BIN_DIR}}\{{.APP_NAME}}.exe" -DARG_LEM_BINARY="{{.WINDOWS_LEM_STAGE}}" project.nsi
-        ) else (
-          echo   LEM sidecar: optional runtime unavailable; build it or set LTHN_LEM_BIN
-          makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}\{{.BIN_DIR}}\{{.APP_NAME}}.exe" project.nsi
-        )
-        {{else}}
         if [ -f "{{.WINDOWS_LEM_STAGE}}" ]; then
           makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" -DARG_LEM_BINARY="{{.WINDOWS_LEM_STAGE}}" project.nsi
         else
           echo "  LEM sidecar: optional runtime unavailable; build it or set LTHN_LEM_BIN"
           makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" project.nsi
         fi
-        {{end}}
     vars:
       ARCH: '{{.ARCH | default ARCH}}'
       ARG_FLAG: '{{if eq .ARCH "amd64"}}AMD64{{else}}ARM64{{end}}'
