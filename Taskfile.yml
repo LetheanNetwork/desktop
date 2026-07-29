@@ -237,11 +237,17 @@ tasks:
         platforms: [darwin, linux]
       - cmd: powershell -NoProfile -Command "New-Item -ItemType Directory -Force '{{.BIN_DIR}}' | Out-Null"
         platforms: [windows]
-      - cd "{{.GO_DIR}}" && go build {{.BUILD_FLAGS}} -ldflags "-X dappco.re/go/update.Version={{.LTHN_VERSION}}" -o "../{{.OUTPUT}}" "{{.GO_CMD}}"
+      # The stamp names dappco.re/lthn/desktop.Version — the variable
+      # `lthn version` prints, and the one pkg/update copies into go-update.
+      - cd "{{.GO_DIR}}" && go build {{.BUILD_FLAGS}} -ldflags "-X dappco.re/lthn/desktop.Version={{.LTHN_VERSION}}" -o "../{{.OUTPUT}}" "{{.GO_CMD}}"
     vars:
       BUILD_FLAGS: '{{if .EXTRA_TAGS}}-tags {{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"'
+      # --match 'v*' because `dev` is a tag the release workflow moves to the
+      # tip of main on every push. Without the filter describe answers `dev`,
+      # or `dev-2-gb5ff9fd`, in preference to the release tag sitting on the
+      # same commit — so the version would track the channel, not the release.
       LTHN_VERSION:
-        sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+        sh: git describe --tags --match 'v*' --always --dirty 2>/dev/null || echo dev
       OUTPUT: '{{if eq OS "windows"}}{{.BIN_DIR}}/{{.APP_NAME}}.exe{{else}}{{.BIN_DIR}}/{{.APP_NAME}}{{end}}'
     env:
       MACOSX_DEPLOYMENT_TARGET: '{{if eq OS "darwin"}}{{.MACOS_DEPLOYMENT_TARGET}}{{end}}'

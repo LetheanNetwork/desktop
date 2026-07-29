@@ -54,10 +54,16 @@ tasks:
       - task: common:generate:icons
       - task: generate:dotdesktop
     cmds:
-      - cd "{{.GO_DIR}}" && go build {{.BUILD_FLAGS}} -o "../{{.OUTPUT}}" "{{.GO_CMD}}"
+      - cd "{{.GO_DIR}}" && go build {{.BUILD_FLAGS}} -ldflags "-X dappco.re/lthn/desktop.Version={{.LTHN_VERSION}}" -o "../{{.OUTPUT}}" "{{.GO_CMD}}"
     vars:
       # Strip flags (-w -s) removed for the same cgo/Arrow reason as darwin/windows.
       BUILD_FLAGS: '{{if eq .DEV "true"}}{{if .EXTRA_TAGS}}-tags {{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false{{end}}'
+      # Same stamp darwin carries. Without it a Linux build reports the
+      # package default, `dev`, and self-update has nothing to compare
+      # against the release feed. --match 'v*' skips the moving `dev` channel
+      # tag; see the root Taskfile.
+      LTHN_VERSION:
+        sh: git describe --tags --match 'v*' --always --dirty 2>/dev/null || echo dev
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{ .OUTPUT | default .DEFAULT_OUTPUT }}'
     env:
@@ -255,6 +261,21 @@ tasks:
           -format "{{.FORMAT}}" \
           -config "$CONFIG" \
           -out "{{.ROOT_DIR}}/bin"
+    env:
+      # nfpm.yaml reads this. Debian and RPM both require a version starting
+      # with a digit, which `git describe` output does not: it is `v0.2.0`, or
+      # a bare commit when no tag is reachable. Strip the `v`, and give
+      # anything else a numeric prefix rather than letting the packager fail
+      # on it — an untagged build is still a package, just not a released one.
+      LTHN_PKG_VERSION:
+        sh: |
+          v="$(git describe --tags --match 'v*' --always --dirty 2>/dev/null || echo dev)"
+          v="${v#v}"
+          case "$v" in
+            [0-9]*) ;;
+            *) v="0.0.0+$v" ;;
+          esac
+          printf '%s' "$v"
 
   generate:dotdesktop:
     summary: Generates a `.desktop` file

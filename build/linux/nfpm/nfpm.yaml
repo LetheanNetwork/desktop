@@ -6,7 +6,10 @@
 name: "lthn"
 arch: ${GOARCH}
 platform: "linux"
-version: "0.1.0"
+# Set by the generate:nfpm task from the same `git describe` that stamps the
+# binary, so `dpkg -l lthn` and `lthn version` cannot disagree. A literal here
+# went stale the moment a release was cut.
+version: ${LTHN_PKG_VERSION}
 section: "default"
 priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
@@ -26,24 +29,31 @@ contents:
   - src: "./build/linux/application-x-lethean.xml"
     dst: "/usr/share/mime/packages/application-x-lethean.xml"
 
-# Default dependencies for Debian 12/Ubuntu 22.04+ with WebKit 4.1
+# Wails v3 compiles its GTK4 path unless the `gtk3` build tag is set, and this
+# project does not set it — build/linux and the CI action both install
+# libgtk-4-dev + libwebkitgtk-6.0-dev, so the binary links GTK4 and WebKitGTK
+# 6.0. Declaring the GTK3 pair here described a build that is not the one being
+# packaged, and `libgtk-3-0` does not even resolve on Ubuntu 24.04 (renamed
+# libgtk-3-0t64 in the time_t transition) — so the package would have failed to
+# install, and where it did install the app would not start.
 depends:
-  - libgtk-3-0
-  - libwebkit2gtk-4.1-0
+  - libgtk-4-1
+  - libwebkitgtk-6.0-4
 
-# Distribution-specific overrides for different package formats and WebKit versions
+# Distribution-specific overrides: same two libraries, different names per
+# packaging family.
 overrides:
-  # RPM packages for RHEL/CentOS/AlmaLinux/Rocky Linux (WebKit 4.0)
+  # RHEL/CentOS/AlmaLinux/Rocky
   rpm:
     depends:
-      - gtk3
-      - webkit2gtk4.1
-  
-  # Arch Linux packages (WebKit 4.1)  
+      - gtk4
+      - webkitgtk6.0
+
+  # Arch Linux
   archlinux:
     depends:
-      - gtk3
-      - webkit2gtk-4.1
+      - gtk4
+      - webkitgtk-6.0
 
 # scripts section to ensure desktop database is updated after install
 scripts:

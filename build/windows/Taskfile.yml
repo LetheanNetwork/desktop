@@ -56,7 +56,7 @@ tasks:
       - task: generate:syso
         vars:
           ARCH: '{{.ARCH}}'
-      - cd "{{.GO_DIR}}" && go build {{.BUILD_FLAGS}} -o "../{{.BIN_DIR}}/{{.APP_NAME}}.exe" "{{.GO_CMD}}"
+      - cd "{{.GO_DIR}}" && go build {{.BUILD_FLAGS}} -ldflags "{{.LDFLAGS}}" -o "../{{.BIN_DIR}}/{{.APP_NAME}}.exe" "{{.GO_CMD}}"
       - cmd: powershell Remove-item {{.GO_DIR}}/cmd/lthn/*.syso
         platforms: [windows]
       - cmd: rm -f {{.GO_DIR}}/cmd/lthn/*.syso
@@ -65,7 +65,16 @@ tasks:
       # Strip flags (-w -s) removed for the same reason darwin drops them:
       # DuckDB Arrow C symbols imported via go-store's cgo break under
       # ld stripping. -H windowsgui stays — it picks the GUI subsystem.
-      BUILD_FLAGS: '{{if eq .DEV "true"}}{{if .EXTRA_TAGS}}-tags {{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-H windowsgui"{{end}}'
+      BUILD_FLAGS: '{{if eq .DEV "true"}}{{if .EXTRA_TAGS}}-tags {{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false{{end}}'
+      # --match 'v*' skips the moving `dev` channel tag; see the root Taskfile.
+      LTHN_VERSION:
+        sh: git describe --tags --match 'v*' --always --dirty 2>/dev/null || echo dev
+      # One -ldflags, composed here rather than two on the command line: go
+      # build honours the last -ldflags it is given and silently discards the
+      # earlier ones, so appending the version stamp as a second flag would
+      # have dropped -H windowsgui and shipped a console window behind the
+      # app. -H windowsgui is production-only; a dev build wants the console.
+      LDFLAGS: '{{if ne .DEV "true"}}-H windowsgui {{end}}-X dappco.re/lthn/desktop.Version={{.LTHN_VERSION}}'
     env:
       GOOS: windows
       CGO_ENABLED: '{{.CGO_ENABLED | default "0"}}'

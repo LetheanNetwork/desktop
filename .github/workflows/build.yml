@@ -12,12 +12,17 @@
 #   - pull request   → build only, nothing published
 #   - manual dispatch
 #
-# Each target produces a single canonical artifact:
-#   - macOS (arm64): bin/lthn.app (ad-hoc signed, .zip-bundled for upload)
-#   - Linux (amd64): bin/lthn (raw ELF)
-#   - Windows (amd64): bin/lthn.exe
-#   - iOS Simulator (arm64): bin/lthn.app (ad-hoc signed, zipped)
-#   - Android: bin/lthn.apk (arm64-v8a + x86_64, debug-key signed)
+# Each target produces something to install and, where the platform has no
+# installer format worth the name, the bare binary as well:
+#   - macOS (arm64): lthn.dmg, plus lthn.app ad-hoc signed and zipped
+#   - Linux (amd64): .deb and .rpm, plus the raw ELF
+#   - Windows (amd64): the NSIS installer, plus lthn.exe
+#   - iOS Simulator (arm64): lthn.app (ad-hoc signed, zipped)
+#   - Android: lthn.apk (arm64-v8a + x86_64, debug-key signed)
+#
+# Every binary is stamped with `git describe --tags`, which is why the build
+# job checks out full history — a shallow clone has no tags to describe
+# against and everything reports itself as `dev`.
 #
 # Local builds: `task build` (auto-detects OS). CI mirrors that path
 # via OS-specific wails3 Taskfile targets — no separate CI build logic
@@ -108,7 +113,11 @@ jobs:
             runner:    windows-latest
             artifact:  lthn-windows-amd64
             ext:       .exe
-            task:      windows:build
+            # package, not build: it builds bin/lthn.exe and then wraps it in
+            # the NSIS installer, in one invocation. Asking for the installer
+            # as a separate step would satisfy its `build` dependency by
+            # compiling the whole thing a second time.
+            task:      windows:package
           - os:        ios
             runner:    macos-15
             artifact:  lthn-ios-simulator-arm64
@@ -121,8 +130,14 @@ jobs:
             task:      android:package:fat
 
     steps:
+      # Full history, for the tags alone. The build stamps its version from
+      # `git describe --tags`, and the default shallow checkout fetches none —
+      # so describe fell through to its `|| echo dev` fallback on every run and
+      # every published binary called itself `dev`, tagged releases included.
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -215,26 +230,66 @@ jobs:
         if: matrix.os == 'ios' || matrix.os == 'android'
         run: go tool wails3 task ${{ matrix.task }}
 
+      # The repo has carried create:dmg, create:nsis:installer and create:deb
+      # for as long as it has had a Taskfile, and CI called none of them — so
+      # the only way to install Lethean Desktop was to know where to put a file
+      # yourself. Windows builds its installer inside matrix.task; the other
+      # two are wrapped here, around a binary that already exists.
+      #
+      # create:dmg takes a precondition on bin/lthn.app rather than a
+      # dependency, so it packages what darwin:package just produced instead of
+      # building it again.
+      - name: Package the macOS .dmg
+        if: matrix.os == 'macos'
+        run: go tool wails3 task darwin:create:dmg
+
+      # generate:*, not create:*: the create tasks depend on `build`, which
+      # would compile the whole application a second time. These consume
+      # bin/lthn where it already is.
+      #
+      # .deb and .rpm only. AppImage needs linuxdeploy and a FUSE mount the
+      # runner does not offer, so it stays a local target until that earns
+      # solving.
+      - name: Package the Linux .deb and .rpm
+        if: matrix.os == 'linux'
+        run: |
+          set -euo pipefail
+          go tool wails3 task linux:generate:dotdesktop
+          go tool wails3 task linux:generate:deb
+          go tool wails3 task linux:generate:rpm
+
       - name: Bundle macOS .app
         if: matrix.os == 'macos'
         run: |
+          set -euo pipefail
           mkdir -p artifact
-          # task darwin:build produces bin/lthn.app; zip preserves the
+          # task darwin:package produces bin/lthn.app; zip preserves the
           # codesign + bundle structure across the upload boundary.
           ditto -c -k --keepParent bin/lthn.app artifact/lthn-darwin-arm64.zip
+          cp bin/lthn.dmg artifact/lthn-darwin-arm64.dmg
 
-      - name: Stage Linux artifact
+      - name: Stage Linux artifacts
         if: matrix.os == 'linux'
         run: |
+          set -euo pipefail
           mkdir -p artifact
           cp bin/lthn artifact/lthn-linux-amd64
+          # nfpm names these itself, from the package version — glob rather
+          # than predict, but insist on exactly one of each so a rename
+          # upstream fails here instead of shipping an empty release.
+          cp bin/*.deb artifact/
+          cp bin/*.rpm artifact/
+          test "$(find artifact -name '*.deb' | wc -l)" -eq 1
+          test "$(find artifact -name '*.rpm' | wc -l)" -eq 1
 
-      - name: Stage Windows artifact
+      - name: Stage Windows artifacts
         if: matrix.os == 'windows'
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p artifact
           cp bin/lthn.exe artifact/lthn-windows-amd64.exe
+          cp bin/lthn-amd64-installer.exe artifact/lthn-windows-amd64-installer.exe
 
       - name: Bundle iOS Simulator .app
         if: matrix.os == 'ios'
@@ -348,11 +403,22 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: ./dist
+          # The Pages job uploads into the same run; its artifact is not a
+          # release asset.
+          pattern: lthn-*
 
+      # Flatten into a separate directory, and let it fail. Moving files into
+      # ./dist landed each one beside the directory it came out of — and the
+      # Linux artifact and its directory have the same name, `lthn-linux-amd64`,
+      # so that move was onto its own parent and mv refused it. The error went
+      # to /dev/null, `|| true` held the step green, and the Linux build has
+      # been quietly missing from every release since the workflow was written.
       - name: Flatten artifacts
         run: |
-          find ./dist -type f -exec mv {} ./dist/ \; 2>/dev/null || true
-          ls -la ./dist/
+          set -euo pipefail
+          mkdir -p out
+          find ./dist -type f -exec mv -t out/ {} +
+          ls -la out/
 
       # `dev` is a tag this job moves, not a branch anybody commits to. The
       # release is replaced in place so the download URL never changes and
@@ -370,10 +436,18 @@ jobs:
 
             Browser preview: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
           prerelease: true
+          # Every pattern must match something. Left to itself this action
+          # prints a shrug for one that does not and publishes the rest, which
+          # is the other half of why a missing Linux binary never surfaced.
+          fail_on_unmatched_files: true
           files: |
-            dist/lthn-darwin-arm64.zip
-            dist/lthn-linux-amd64
-            dist/lthn-windows-amd64.exe
+            out/lthn-darwin-arm64.zip
+            out/lthn-darwin-arm64.dmg
+            out/lthn-linux-amd64
+            out/*.deb
+            out/*.rpm
+            out/lthn-windows-amd64.exe
+            out/lthn-windows-amd64-installer.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -389,22 +463,38 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: ./dist
+          # The Pages job uploads into the same run; its artifact is not a
+          # release asset.
+          pattern: lthn-*
 
+      # Flatten into a separate directory, and let it fail. Moving files into
+      # ./dist landed each one beside the directory it came out of — and the
+      # Linux artifact and its directory have the same name, `lthn-linux-amd64`,
+      # so that move was onto its own parent and mv refused it. The error went
+      # to /dev/null, `|| true` held the step green, and the Linux build has
+      # been quietly missing from every release since the workflow was written.
       - name: Flatten artifacts
         run: |
-          find ./dist -type f -exec mv {} ./dist/ \; 2>/dev/null || true
-          ls -la ./dist/
+          set -euo pipefail
+          mkdir -p out
+          find ./dist -type f -exec mv -t out/ {} +
+          ls -la out/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
+          fail_on_unmatched_files: true
           files: |
-            dist/lthn-darwin-arm64.zip
-            dist/lthn-linux-amd64
-            dist/lthn-windows-amd64.exe
-            dist/lthn-ios-simulator-arm64.zip
-            dist/lthn-android-universal.apk
+            out/lthn-darwin-arm64.zip
+            out/lthn-darwin-arm64.dmg
+            out/lthn-linux-amd64
+            out/*.deb
+            out/*.rpm
+            out/lthn-windows-amd64.exe
+            out/lthn-windows-amd64-installer.exe
+            out/lthn-ios-simulator-arm64.zip
+            out/lthn-android-universal.apk
           generate_release_notes: true
           draft:      false
           prerelease: ${{ contains(github.ref, '-') }}
