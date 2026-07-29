@@ -140,7 +140,7 @@ tasks:
       # Go links syso files automatically when they live in the main
       # package directory. With go/cmd/lthn/ as our main, the syso
       # must land there — NOT at repo root like the scaffold default.
-      - '{{.WAILS3_TOOL}} generate syso -arch {{.ARCH}} -icon windows/icon.ico -manifest windows/wails.exe.manifest -info windows/info.json -out ../{{.GO_DIR}}/cmd/lthn/wails_windows_{{.ARCH}}.syso'
+      - '{{.WAILS3_TOOL}} generate syso -arch {{.ARCH}} -icon windows/icons.ico -manifest windows/wails.exe.manifest -info windows/info.json -out ../{{.GO_DIR}}/cmd/lthn/wails_windows_{{.ARCH}}.syso'
     vars:
       ARCH: '{{.ARCH | default ARCH}}'
 

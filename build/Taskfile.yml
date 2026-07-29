@@ -107,9 +107,9 @@ tasks:
       - "appicon.png"
     generates:
       - "darwin/icons.icns"
-      - "windows/icon.ico"
+      - "windows/icons.ico"
     cmds:
-      - '{{.WAILS3_TOOL}} generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico'
+      - '{{.WAILS3_TOOL}} generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icons.ico'
 
   dev:frontend:
     summary: Runs Angular's HMR server for the Wails development window
