@@ -24,7 +24,9 @@ vars:
   # projects on one machine don't collide on the same Docker image tag.
   CROSS_IMAGE: lthn-cross
   # Optional fixed sibling runtime staged by the root build:lem task.
-  WINDOWS_LEM_STAGE: '{{printf "%s/build/windows/bin/lem.exe" .ROOT_DIR}}'
+  # Host-form separators, for the same reason APP_EXE has them: this path is
+  # handed to NSIS as ARG_LEM_BINARY, and a mixed one fails in wails.files.
+  WINDOWS_LEM_STAGE: '{{if eq OS "windows"}}{{.ROOT_DIR}}\build\windows\bin\lem.exe{{else}}{{.ROOT_DIR}}/build/windows/bin/lem.exe{{end}}'
 
 tasks:
   build:
@@ -159,18 +161,27 @@ tasks:
       #   1:24: a command can only contain words and redirects; encountered (
       #
       # It never surfaced because CI only ever ran windows:build, which does not
-      # reach the installer. Forward slashes for the same reason: makensis takes
-      # them, and they survive both shells without escaping.
+      # reach the installer.
       - |
         if [ -f "{{.WINDOWS_LEM_STAGE}}" ]; then
-          makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" -DARG_LEM_BINARY="{{.WINDOWS_LEM_STAGE}}" project.nsi
+          makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.APP_EXE}}" -DARG_LEM_BINARY="{{.WINDOWS_LEM_STAGE}}" project.nsi
         else
           echo "  LEM sidecar: optional runtime unavailable; build it or set LTHN_LEM_BIN"
-          makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" project.nsi
+          makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.APP_EXE}}" project.nsi
         fi
     vars:
       ARCH: '{{.ARCH | default ARCH}}'
       ARG_FLAG: '{{if eq .ARCH "amd64"}}AMD64{{else}}ARM64{{end}}'
+      # NSIS's File is a compile-time directive and wants the path in the host's
+      # own form. Mixing them — ROOT_DIR arriving as D:\a\desktop\desktop and
+      # the rest appended with forward slashes — fails inside the wails.files
+      # macro, several frames from anything that names a path:
+      #
+      #   Error in macro wails.files on macroline 3
+      #
+      # Task's shell passes backslashes through a double-quoted string
+      # untouched, so the separator can follow the host rather than the shell.
+      APP_EXE: '{{if eq OS "windows"}}{{.ROOT_DIR}}\{{.BIN_DIR}}\{{.APP_NAME}}.exe{{else}}{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe{{end}}'
 
   create:msix:package:
     summary: Creates an MSIX package
