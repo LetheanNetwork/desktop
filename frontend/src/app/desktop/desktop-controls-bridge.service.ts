@@ -46,6 +46,7 @@ function parseSnapshot(raw: unknown): DesktopControlSnapshot {
     throw new Error('The desktop control catalogue is unavailable.');
   }
   return {
+    revision: requiredString(record, 'revision'),
     controls: record['controls'].map(parseControl),
   };
 }
@@ -130,6 +131,7 @@ function applyDemoChanges(
     }
   }
   return {
+    revision: incrementRevision(snapshot.revision),
     controls: snapshot.controls.map((control) =>
       pending.has(control.key)
         ? {
@@ -166,6 +168,7 @@ function acceptsControlValue(control: DesktopControl, value: DesktopControlValue
 
 function copySnapshot(snapshot: DesktopControlSnapshot): DesktopControlSnapshot {
   return {
+    revision: snapshot.revision,
     controls: snapshot.controls.map((control) => ({
       ...control,
       ...(control.choices ? { choices: [...control.choices] } : {}),
@@ -175,6 +178,7 @@ function copySnapshot(snapshot: DesktopControlSnapshot): DesktopControlSnapshot 
 
 function createDemoSnapshot(): DesktopControlSnapshot {
   return {
+    revision: '0',
     controls: [
       demoSelect(
         'desktop.shell.taskbar_edge',
@@ -278,6 +282,11 @@ function createDemoSnapshot(): DesktopControlSnapshot {
       },
     ],
   };
+}
+
+function incrementRevision(revision: string): string {
+  const value = Number.parseInt(revision, 10);
+  return Number.isSafeInteger(value) && value >= 0 ? String(value + 1) : '1';
 }
 
 function demoControl(

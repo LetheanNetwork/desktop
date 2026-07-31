@@ -6,6 +6,7 @@ import { DesktopControlsBridgeService } from './desktop-controls-bridge.service'
 import { SurfaceBridgeService } from './surfaces/surface-bridge.service';
 
 const snapshot: DesktopControlSnapshot = {
+  revision: '7',
   controls: [
     {
       key: 'desktop.wails.window.main.width',
@@ -48,6 +49,7 @@ describe('DesktopControlsBridgeService', () => {
 
   it('loads and normalises the curated Go control catalogue without provider paths', async () => {
     surface.call.mockResolvedValue({
+      revision: '7',
       controls: [
         {
           key: 'desktop.wails.window.main.width',
@@ -74,7 +76,7 @@ describe('DesktopControlsBridgeService', () => {
   });
 
   it('persists one bounded draft through SetMany', async () => {
-    surface.call.mockResolvedValue({ controls: [] });
+    surface.call.mockResolvedValue({ revision: '8', controls: [] });
     const changes: readonly DesktopControlChange[] = [
       { key: 'desktop.theme.interface', value: 'light' },
       { key: 'desktop.theme.reduce_motion', value: true },
@@ -111,6 +113,7 @@ describe('DesktopControlsBridgeService', () => {
     const after = await service.setMany([{ key: 'desktop.theme.interface', value: 'light' }]);
 
     expect(before.controls.length).toBeGreaterThan(0);
+    expect(after.revision).not.toBe(before.revision);
     expect(after.controls.find(({ key }) => key === 'desktop.theme.interface')?.value).toBe(
       'light',
     );
@@ -118,7 +121,7 @@ describe('DesktopControlsBridgeService', () => {
   });
 
   it('rejects malformed snapshots instead of inventing connected settings', async () => {
-    surface.call.mockResolvedValue({ controls: 'not-an-array' });
+    surface.call.mockResolvedValue({ revision: '7', controls: 'not-an-array' });
 
     await expect(service.settings()).rejects.toThrow('desktop control catalogue');
   });

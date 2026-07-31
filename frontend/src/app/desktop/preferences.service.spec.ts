@@ -21,6 +21,7 @@ const preferenceValues: ReadonlyArray<readonly [string, DesktopControlValue]> = 
 ];
 
 const preferenceSnapshot: DesktopControlSnapshot = {
+  revision: '1',
   controls: preferenceValues.map(([key, value]) => ({
     key,
     group: 'Theme',

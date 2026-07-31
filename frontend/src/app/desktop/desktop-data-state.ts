@@ -1,4 +1,4 @@
-export type DesktopDataState = 'demo' | 'loading' | 'live' | 'mixed' | 'unavailable';
+export type DesktopDataState = 'demo' | 'loading' | 'live' | 'mixed' | 'stale' | 'unavailable';
 
 export function desktopDataStateLabel(state: DesktopDataState): string {
   switch (state) {
@@ -10,6 +10,8 @@ export function desktopDataStateLabel(state: DesktopDataState): string {
       return $localize`:Live data state@@desktop.data.live:Live data`;
     case 'mixed':
       return $localize`:Mixed live and demo data state@@desktop.data.mixed:Live + demo`;
+    case 'stale':
+      return $localize`:Stale live data state@@desktop.data.stale:Live data stale`;
     case 'unavailable':
       return $localize`:Live data unavailable state@@desktop.data.unavailable:Live unavailable · demo shown`;
   }

@@ -9,6 +9,7 @@ import {
 } from './desktop-controls.reducer';
 
 const snapshot: DesktopControlSnapshot = {
+  revision: '0',
   controls: [
     {
       key: 'desktop.theme.interface',
@@ -50,8 +51,11 @@ describe('desktop controls reducer', () => {
     );
 
     expect(loaded.controls).toEqual(snapshot.controls);
+    expect(loaded.revision).toBe('0');
     expect(loaded.draft).toEqual({});
     expect(loaded.loading).toBe(false);
+    expect(loaded.stale).toBe(false);
+    expect(loaded.pendingExternalChange).toBeNull();
     const draftControls = selectDraftDesktopControls.projector(loaded.controls, loaded.draft);
     expect(selectDesktopControlGroups.projector(draftControls)).toEqual([
       { name: 'Theme', controls: [snapshot.controls[0]] },
@@ -109,6 +113,7 @@ describe('desktop controls reducer', () => {
     expect(saving.saving).toBe(true);
 
     const committed: DesktopControlSnapshot = {
+      revision: '1',
       controls: [snapshot.controls[0], { ...snapshot.controls[1], value: false, configured: true }],
     };
     const saved = desktopControlsReducer(
@@ -120,6 +125,7 @@ describe('desktop controls reducer', () => {
     );
 
     expect(saved.controls[1].value).toBe(false);
+    expect(saved.revision).toBe('1');
     expect(saved.draft).toEqual({});
     expect(saved.saving).toBe(false);
     expect(saved.restartSummary).toBe('Restart required for: Single instance.');
@@ -140,5 +146,71 @@ describe('desktop controls reducer', () => {
     expect(failed.draft).toEqual({});
     expect(failed.saving).toBe(false);
     expect(failed.error).toBe('could not persist');
+  });
+
+  it('preserves a dirty draft when settings change elsewhere', () => {
+    const dirty = {
+      ...initialDesktopControlsState,
+      revision: '1',
+      controls: snapshot.controls,
+      draft: { 'desktop.theme.interface': 'light' },
+    };
+    const notice = {
+      revision: '2',
+      keys: ['desktop.theme.interface'],
+      at: '2026-07-31T12:00:00Z',
+    } as const;
+
+    const pending = desktopControlsReducer(
+      dirty,
+      desktopControlsActions.externalChangePending({ notice }),
+    );
+
+    expect(pending.draft).toEqual(dirty.draft);
+    expect(pending.pendingExternalChange).toEqual(notice);
+    expect(pending.revision).toBe('1');
+  });
+
+  it('lets the user dismiss a notice or explicitly reload it', () => {
+    const pending = {
+      ...initialDesktopControlsState,
+      controls: snapshot.controls,
+      draft: { 'desktop.theme.interface': 'light' },
+      pendingExternalChange: {
+        revision: '2',
+        keys: ['desktop.theme.interface'],
+        at: '2026-07-31T12:00:00Z',
+      },
+    };
+
+    const dismissed = desktopControlsReducer(
+      pending,
+      desktopControlsActions.dismissExternalChange(),
+    );
+    expect(dismissed.draft).toEqual(pending.draft);
+    expect(dismissed.pendingExternalChange).toBeNull();
+
+    const reloaded = desktopControlsReducer(pending, desktopControlsActions.reloadExternalChange());
+    expect(reloaded.draft).toEqual({});
+    expect(reloaded.pendingExternalChange).toBeNull();
+  });
+
+  it('keeps prior values and marks a failed refresh stale', () => {
+    const state = {
+      ...initialDesktopControlsState,
+      controls: snapshot.controls,
+      draft: { 'desktop.theme.interface': 'light' },
+      loading: true,
+    };
+
+    const failed = desktopControlsReducer(
+      state,
+      desktopControlsActions.loadFailure({ error: 'refresh failed' }),
+    );
+
+    expect(failed.controls).toEqual(snapshot.controls);
+    expect(failed.draft).toEqual(state.draft);
+    expect(failed.stale).toBe(true);
+    expect(failed.error).toBe('refresh failed');
   });
 });

@@ -7,26 +7,33 @@ import {
   DesktopControlGroup,
   DesktopControlSnapshot,
   DesktopControlValue,
+  DesktopControlsChangeNotice,
 } from './desktop-controls.models';
 
 export type { DesktopControlSnapshot } from './desktop-controls.models';
 
 export interface DesktopControlsState {
+  readonly revision: string;
   readonly controls: readonly DesktopControl[];
   readonly draft: DesktopControlDraft;
   readonly loading: boolean;
   readonly saving: boolean;
+  readonly stale: boolean;
   readonly error: string | null;
   readonly restartSummary: string | null;
+  readonly pendingExternalChange: DesktopControlsChangeNotice | null;
 }
 
 export const initialDesktopControlsState: DesktopControlsState = {
+  revision: '',
   controls: [],
   draft: {},
   loading: false,
   saving: false,
+  stale: false,
   error: null,
   restartSummary: null,
+  pendingExternalChange: null,
 };
 
 const applySnapshot = (
@@ -34,11 +41,14 @@ const applySnapshot = (
   snapshot: DesktopControlSnapshot,
 ): DesktopControlsState => ({
   ...state,
+  revision: snapshot.revision,
   controls: snapshot.controls,
   draft: {},
   loading: false,
   saving: false,
+  stale: false,
   error: null,
+  pendingExternalChange: null,
 });
 
 export const desktopControlsReducer = createReducer(
@@ -55,6 +65,7 @@ export const desktopControlsReducer = createReducer(
   on(desktopControlsActions.loadFailure, (state, { error }) => ({
     ...state,
     loading: false,
+    stale: state.controls.length > 0,
     error,
   })),
   on(desktopControlsActions.editControl, (state, { key, value }) => {
@@ -97,6 +108,21 @@ export const desktopControlsReducer = createReducer(
     draft: {},
     saving: false,
     error,
+  })),
+  on(desktopControlsActions.externalChangePending, (state, { notice }) => ({
+    ...state,
+    pendingExternalChange: notice,
+  })),
+  on(desktopControlsActions.dismissExternalChange, (state) => ({
+    ...state,
+    pendingExternalChange: null,
+  })),
+  on(desktopControlsActions.reloadExternalChange, (state) => ({
+    ...state,
+    draft: {},
+    error: null,
+    restartSummary: null,
+    pendingExternalChange: null,
   })),
 );
 

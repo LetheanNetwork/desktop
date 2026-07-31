@@ -19,7 +19,14 @@ export interface DesktopControl {
 }
 
 export interface DesktopControlSnapshot {
+  readonly revision: string;
   readonly controls: readonly DesktopControl[];
+}
+
+export interface DesktopControlsChangeNotice {
+  readonly revision: string | null;
+  readonly keys: readonly string[];
+  readonly at: string | null;
 }
 
 export interface DesktopControlChange {

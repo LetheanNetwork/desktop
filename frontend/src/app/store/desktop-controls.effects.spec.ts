@@ -9,6 +9,7 @@ import { DesktopControlsEffects } from './desktop-controls.effects';
 import { DesktopControlSnapshot } from './desktop-controls.reducer';
 
 const snapshot: DesktopControlSnapshot = {
+  revision: '1',
   controls: [
     {
       key: 'desktop.theme.interface',

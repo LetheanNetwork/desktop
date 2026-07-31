@@ -3,6 +3,7 @@ import {
   DesktopControlChange,
   DesktopControlSnapshot,
   DesktopControlValue,
+  DesktopControlsChangeNotice,
 } from './desktop-controls.models';
 
 export const desktopControlsActions = createActionGroup({
@@ -20,5 +21,8 @@ export const desktopControlsActions = createActionGroup({
       restartRequired: readonly string[];
     }>(),
     'Apply draft failure': props<{ error: string }>(),
+    'External change pending': props<{ notice: DesktopControlsChangeNotice }>(),
+    'Dismiss external change': emptyProps(),
+    'Reload external change': emptyProps(),
   },
 });
