@@ -127,6 +127,9 @@ version.
   SDK generation.
 - `go/pkg/runner/` — inference-facing service used by CLI, server, and GUI.
 - `go/pkg/appconfig/` — settings catalogue consumed by the Angular controls.
+  Each successful durable `SetMany` batch advances an in-process revision and
+  emits one typed Core change event containing only revision, curated keys,
+  and timestamp; rejected and failed batches emit nothing.
 - `go/pkg/desktopstate/` — bounded, versioned shell-session and Terminal
   workspace documents stored through the registered application `io.Medium`.
 - `go/pkg/terminal/` — transient PTY pool, cursor-addressed output replay, and
@@ -204,6 +207,14 @@ Add CLI verbs as flat `cmdX(args []string) int` handlers which delegate to
   ref-counted shared ModelRuntime snapshot/event/poll resource used by Control
   and Telemetry, with deterministic in-memory lifecycle operations in offline
   demo mode.
+- `frontend/src/app/desktop/desktop-controls-bridge.service.ts` — selects the
+  connected appconfig/Wails provider or the explicit offline provider. Its
+  connected change stream validates only `lthn:desktop-controls:changed` and
+  tears down the Wails listener with its RxJS subscription.
+- `frontend/src/app/desktop/desktop-controls-offline.store.ts` — owns the
+  versioned `lthn.desktop-controls.v1` browser-demo document and same-origin
+  storage notifications. It may seed known values from legacy `lthn.prefs`,
+  never deletes that legacy key, and is never connected product authority.
 - `frontend/src/app/desktop/desktop-controls-panel.view.ts` — the shared typed
   desktop-control editor used by Settings and Control. It adapts NgRx selectors
   to Angular signals for rendering and dispatches typed actions; it never calls
@@ -224,9 +235,9 @@ Add CLI verbs as flat `cmdX(args []string) int` handlers which delegate to
   transport boundaries. `DesktopControlsEffects` is the sole asynchronous
   appconfig synchronisation path: it reads through the bounded bridge, commits
   complete drafts with `SetMany`, and publishes committed snapshots back to all
-  open reactive surfaces. Keep this store/effects boundary available for
-  backend-pushed refresh actions; component-local signals are view adapters,
-  not a replacement data store.
+  open reactive surfaces. It consumes pushed revisions, reloads a clean store,
+  and preserves a dirty draft behind explicit Reload or Keep editing actions.
+  Component-local signals are view adapters, not a replacement data store.
 - `frontend/src/app/connection-manager.service.ts` — installs the Wails
   WebSocket transport before generated binding calls.
 - `frontend/src/app/desktop/desktop-mcp.service.ts` — Angular WebMCP tools.
@@ -300,10 +311,28 @@ transport substitutes isolated in-memory documents and makes no Wails call.
 Scalar Settings remain owned by `go/pkg/appconfig`. Angular edits a draft and
 persists the complete validated change set with `SetMany`; Go commits once
 through the config Medium and applies live CoreGUI changes only after durable
-success. A failed batch restores the previous values and must not partially
-apply live state. Permission policy is not operating-system authorisation:
+success. It then emits `lthn:desktop-controls:changed` through the fixed
+Core-to-Wails adapter. Angular ignores its current revision, reloads clean
+stores, and never replaces a dirty draft without the user's explicit Reload.
+A failed batch restores the previous values and must not partially apply live
+state. Explicit offline transport uses only the versioned browser-demo store,
+makes no binding call or Wails event subscription, and never becomes a
+connected fallback. Permission policy is not operating-system authorisation:
 status reads never prompt, and a host request is allowed only from an explicit
 Settings action for a known capability.
+
+Focused reactive desktop-controls checks:
+
+```bash
+node --test scripts/verify-desktop-controls-sync.test.mjs
+go test ./go/pkg/appconfig ./go/pkg/desktop ./go/cmd/lthn -count=1
+cd frontend
+npx ng test --watch=false \
+  --include=src/app/store/desktop-controls.effects.spec.ts \
+  --include=src/app/desktop/desktop-controls-offline.store.spec.ts \
+  --include=src/app/desktop/desktop-controls-bridge.service.spec.ts \
+  --include=src/app/desktop/desktop-controls-panel.view.spec.ts
+```
 
 Terminal PTYs remain transient in `go/pkg/terminal`. Output events carry
 bounded cursor ranges; reconnect attaches after the last accepted cursor,

@@ -92,6 +92,9 @@ values with truthful live data.
 
 ### Shared bridge behaviour
 
+- [x] Reconcile appconfig desktop-control changes through one revisioned push
+      event and NgRx/RxJS state, with explicit dirty-draft conflicts and a
+      versioned offline browser-demo provider.
 - [ ] Move live app reconciliation to push events where services already emit
       change notifications; keep bounded polling only as a fallback.
 - [ ] Standardise live/demo/loading/mixed/unavailable status, last-refreshed
