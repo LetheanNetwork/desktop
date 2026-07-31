@@ -1,396 +1,126 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, InjectionToken, inject } from '@angular/core';
+import { Events } from '@wailsio/runtime';
+import { Observable } from 'rxjs';
 import { ConnectionManagerService } from '../connection-manager.service';
 import {
-  DesktopControl,
   DesktopControlChange,
-  DesktopControlKind,
   DesktopControlSnapshot,
+  DesktopControlsChangeNotice,
   DesktopControlValue,
 } from '../store/desktop-controls.models';
+import {
+  parseDesktopControlSnapshot,
+  validateDesktopControlChanges,
+} from './desktop-controls-codec';
+import { DesktopControlsOfflineStore } from './desktop-controls-offline.store';
 import { SurfaceBridgeService } from './surfaces/surface-bridge.service';
 
 const APPCONFIG_SERVICE = 'dappco.re/lthn/desktop/pkg/appconfig.Service';
-const MAX_CHANGES = 64;
+const DESKTOP_CONTROLS_CHANGED_EVENT = 'lthn:desktop-controls:changed';
 const MAX_KEY_BYTES = 128;
-const MAX_TEXT_BYTES = 2_048;
+const MAX_REVISION_BYTES = 64;
 const SAFE_CONTROL_KEY = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
+const RFC3339_TIMESTAMP =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+
+export interface DesktopControlsEventSource {
+  on(name: string, handler: (payload: unknown) => void): () => void;
+}
+
+export const DESKTOP_CONTROLS_EVENT_SOURCE = new InjectionToken<DesktopControlsEventSource>(
+  'DESKTOP_CONTROLS_EVENT_SOURCE',
+  {
+    providedIn: 'root',
+    factory: () => ({
+      on(name, handler): () => void {
+        return Events.On(name, (event) => handler(event.data));
+      },
+    }),
+  },
+);
 
 @Injectable({ providedIn: 'root' })
 export class DesktopControlsBridgeService {
   private readonly bridge = inject(SurfaceBridgeService);
   private readonly connection = inject(ConnectionManagerService);
-  private demoSnapshot = createDemoSnapshot();
+  private readonly events = inject(DESKTOP_CONTROLS_EVENT_SOURCE);
+  private readonly offlineStore = inject(DesktopControlsOfflineStore);
 
   async settings(): Promise<DesktopControlSnapshot> {
-    if (this.connection.offline()) return copySnapshot(this.demoSnapshot);
-    return parseSnapshot(await this.bridge.call(`${APPCONFIG_SERVICE}.Settings`));
+    if (this.connection.offline()) return this.offlineStore.settings();
+    return parseDesktopControlSnapshot(await this.bridge.call(`${APPCONFIG_SERVICE}.Settings`));
   }
 
   async setMany(changes: readonly DesktopControlChange[]): Promise<DesktopControlSnapshot> {
-    const bounded = validateChanges(changes);
-    if (this.connection.offline()) {
-      this.demoSnapshot = applyDemoChanges(this.demoSnapshot, bounded);
-      return copySnapshot(this.demoSnapshot);
-    }
-    return parseSnapshot(await this.bridge.call(`${APPCONFIG_SERVICE}.SetMany`, [bounded]));
+    if (this.connection.offline()) return this.offlineStore.setMany(changes);
+    const bounded = validateDesktopControlChanges(changes);
+    return parseDesktopControlSnapshot(
+      await this.bridge.call(`${APPCONFIG_SERVICE}.SetMany`, [bounded]),
+    );
   }
 
   async set(key: string, value: DesktopControlValue): Promise<DesktopControlSnapshot> {
     return this.setMany([{ key, value }]);
   }
+
+  changes(): Observable<DesktopControlsChangeNotice> {
+    if (this.connection.offline()) return this.offlineStore.changes();
+    return new Observable((subscriber) => {
+      const unsubscribe = this.events.on(DESKTOP_CONTROLS_CHANGED_EVENT, (raw) => {
+        const notice = parseChangeNotice(raw);
+        if (notice) subscriber.next(notice);
+      });
+      return unsubscribe;
+    });
+  }
 }
 
-function parseSnapshot(raw: unknown): DesktopControlSnapshot {
+function parseChangeNotice(raw: unknown): DesktopControlsChangeNotice | null {
   const record = asRecord(raw);
-  if (!record || !Array.isArray(record['controls'])) {
-    throw new Error('The desktop control catalogue is unavailable.');
+  if (!record || !hasExactKeys(record, ['revision', 'keys', 'at'])) return null;
+  const revision = record['revision'];
+  const keys = record['keys'];
+  const at = record['at'];
+  if (
+    typeof revision !== 'string' ||
+    revision.length === 0 ||
+    revision.length > MAX_REVISION_BYTES ||
+    !Array.isArray(keys) ||
+    keys.length === 0 ||
+    keys.length > 64 ||
+    typeof at !== 'string' ||
+    at.length === 0 ||
+    at.length > 64 ||
+    !RFC3339_TIMESTAMP.test(at) ||
+    Number.isNaN(Date.parse(at))
+  ) {
+    return null;
   }
-  return {
-    revision: requiredString(record, 'revision'),
-    controls: record['controls'].map(parseControl),
-  };
-}
-
-function parseControl(raw: unknown): DesktopControl {
-  const record = asRecord(raw);
-  if (!record) throw new Error('The desktop control catalogue contains an invalid entry.');
-  const key = requiredString(record, 'key');
-  const group = requiredString(record, 'group');
-  const label = requiredString(record, 'label');
-  const description = requiredString(record, 'description');
-  const kind = controlKind(record['kind']);
-  const value = controlValue(record['value']);
-  const defaultValue = controlValue(record['default']);
-  const choices = Array.isArray(record['choices'])
-    ? record['choices'].filter((choice): choice is string => typeof choice === 'string')
-    : undefined;
-  const control: DesktopControl = {
-    key,
-    group,
-    label,
-    description,
-    kind,
-    value,
-    defaultValue,
-    configured: record['configured'] === true,
-    live: record['live'] === true,
-    restartRequired: record['restart_required'] === true,
-    ...(choices ? { choices } : {}),
-    ...optionalNumber(record, 'minimum'),
-    ...optionalNumber(record, 'maximum'),
-    ...optionalNumber(record, 'step'),
-  };
-  if (!acceptsControlValue(control, value) || !acceptsControlValue(control, defaultValue)) {
-    throw new Error('The desktop control catalogue contains an invalid value.');
-  }
-  return control;
-}
-
-function validateChanges(
-  changes: readonly DesktopControlChange[],
-): readonly DesktopControlChange[] {
-  if (!Array.isArray(changes) || changes.length === 0) {
-    throw new Error('A desktop control draft is required.');
-  }
-  if (changes.length > MAX_CHANGES) {
-    throw new Error('Too many desktop control changes were requested.');
-  }
+  const parsedKeys: string[] = [];
   const seen = new Set<string>();
-  return changes.map((change) => {
+  for (const key of keys) {
     if (
-      !change ||
-      typeof change.key !== 'string' ||
-      change.key.length === 0 ||
-      change.key.length > MAX_KEY_BYTES ||
-      !SAFE_CONTROL_KEY.test(change.key) ||
-      seen.has(change.key)
+      typeof key !== 'string' ||
+      key.length === 0 ||
+      key.length > MAX_KEY_BYTES ||
+      !SAFE_CONTROL_KEY.test(key) ||
+      seen.has(key)
     ) {
-      throw new Error('The desktop control draft contains an invalid desktop control.');
+      return null;
     }
-    const value = controlValue(change.value);
-    if (
-      (typeof value === 'string' && value.length > MAX_TEXT_BYTES) ||
-      (typeof value === 'number' && !Number.isFinite(value))
-    ) {
-      throw new Error('The desktop control draft contains an invalid value.');
-    }
-    seen.add(change.key);
-    return { key: change.key, value };
-  });
-}
-
-function applyDemoChanges(
-  snapshot: DesktopControlSnapshot,
-  changes: readonly DesktopControlChange[],
-): DesktopControlSnapshot {
-  const pending = new Map(changes.map((change) => [change.key, change.value]));
-  for (const change of changes) {
-    const control = snapshot.controls.find(({ key }) => key === change.key);
-    if (!control || !acceptsControlValue(control, change.value)) {
-      throw new Error('The offline desktop control draft is invalid.');
-    }
+    seen.add(key);
+    parsedKeys.push(key);
   }
-  return {
-    revision: incrementRevision(snapshot.revision),
-    controls: snapshot.controls.map((control) =>
-      pending.has(control.key)
-        ? {
-            ...control,
-            value: pending.get(control.key) as DesktopControlValue,
-            configured: true,
-          }
-        : control,
-    ),
-  };
+  return { revision, keys: parsedKeys, at };
 }
 
-function acceptsControlValue(control: DesktopControl, value: DesktopControlValue): boolean {
-  switch (control.kind) {
-    case 'toggle':
-      return typeof value === 'boolean';
-    case 'number':
-      return (
-        typeof value === 'number' &&
-        Number.isFinite(value) &&
-        (control.minimum === undefined || value >= control.minimum) &&
-        (control.maximum === undefined || value <= control.maximum)
-      );
-    case 'select':
-      return (
-        typeof value === 'string' &&
-        value.length <= MAX_TEXT_BYTES &&
-        (control.choices?.includes(value) ?? false)
-      );
-    case 'text':
-      return typeof value === 'string' && value.length <= MAX_TEXT_BYTES;
-  }
-}
-
-function copySnapshot(snapshot: DesktopControlSnapshot): DesktopControlSnapshot {
-  return {
-    revision: snapshot.revision,
-    controls: snapshot.controls.map((control) => ({
-      ...control,
-      ...(control.choices ? { choices: [...control.choices] } : {}),
-    })),
-  };
-}
-
-function createDemoSnapshot(): DesktopControlSnapshot {
-  return {
-    revision: '0',
-    controls: [
-      demoSelect(
-        'desktop.shell.taskbar_edge',
-        'Desktop',
-        'Taskbar edge',
-        'Dock the taskbar to one screen edge.',
-        'bottom',
-        ['top', 'right', 'bottom', 'left'],
-      ),
-      demoToggle(
-        'desktop.shell.show_icons',
-        'Desktop',
-        'Desktop icons',
-        'Show application launchers on the desktop.',
-        true,
-      ),
-      demoToggle(
-        'desktop.shell.show_widgets',
-        'Desktop',
-        'Desktop widgets',
-        'Show clock and package widgets on the desktop.',
-        true,
-      ),
-      demoSelect(
-        'desktop.theme.interface',
-        'Theme',
-        'Interface theme',
-        'Apply the Angular desktop theme.',
-        'dark',
-        ['dark', 'light'],
-      ),
-      demoSelect(
-        'desktop.theme.brand',
-        'Theme',
-        'Brand',
-        'Select the active brand token family.',
-        'lethean',
-        ['lethean', 'hostuk'],
-      ),
-      demoSelect(
-        'desktop.theme.design',
-        'Theme',
-        'Design',
-        'Use the Lethean design or a custom accent.',
-        'lethean',
-        ['lethean', 'custom'],
-      ),
-      demoNumber(
-        'desktop.theme.custom_hue',
-        'Theme',
-        'Custom accent hue',
-        'Hue used to generate the custom accent ramp.',
-        305,
-        0,
-        360,
-      ),
-      demoText(
-        'desktop.theme.custom_name',
-        'Theme',
-        'Custom design name',
-        'Reader-facing name for the custom design.',
-        'Host UK',
-      ),
-      demoSelect(
-        'desktop.theme.wallpaper',
-        'Theme',
-        'Wallpaper',
-        'Select the desktop background treatment.',
-        'aurora',
-        ['aurora', 'dusk', 'mist', 'graphite'],
-      ),
-      demoToggle(
-        'desktop.theme.reduce_motion',
-        'Theme',
-        'Reduce motion',
-        'Disable dock magnification and interface transitions.',
-        false,
-      ),
-      {
-        ...demoSelect(
-          'desktop.locale.language',
-          'Language',
-          'Language',
-          'Select the desktop interface language.',
-          'en',
-          ['en', 'cy', 'de', 'es', 'fr', 'ja'],
-        ),
-        live: false,
-        restartRequired: true,
-      },
-      {
-        ...demoToggle(
-          'desktop.single_instance.enabled',
-          'Single instance',
-          'Single-instance hand-off',
-          'Hand later launches to the running process.',
-          true,
-        ),
-        live: false,
-        restartRequired: true,
-      },
-    ],
-  };
-}
-
-function incrementRevision(revision: string): string {
-  const value = Number.parseInt(revision, 10);
-  return Number.isSafeInteger(value) && value >= 0 ? String(value + 1) : '1';
-}
-
-function demoControl(
-  key: string,
-  group: string,
-  label: string,
-  description: string,
-  kind: DesktopControlKind,
-  defaultValue: DesktopControlValue,
-): DesktopControl {
-  return {
-    key,
-    group,
-    label,
-    description,
-    kind,
-    value: defaultValue,
-    defaultValue,
-    configured: false,
-    live: true,
-    restartRequired: false,
-  };
-}
-
-function demoToggle(
-  key: string,
-  group: string,
-  label: string,
-  description: string,
-  value: boolean,
-): DesktopControl {
-  return demoControl(key, group, label, description, 'toggle', value);
-}
-
-function demoSelect(
-  key: string,
-  group: string,
-  label: string,
-  description: string,
-  value: string,
-  choices: readonly string[],
-): DesktopControl {
-  return {
-    ...demoControl(key, group, label, description, 'select', value),
-    choices,
-  };
-}
-
-function demoNumber(
-  key: string,
-  group: string,
-  label: string,
-  description: string,
-  value: number,
-  minimum: number,
-  maximum: number,
-): DesktopControl {
-  return {
-    ...demoControl(key, group, label, description, 'number', value),
-    minimum,
-    maximum,
-    step: 1,
-  };
-}
-
-function demoText(
-  key: string,
-  group: string,
-  label: string,
-  description: string,
-  value: string,
-): DesktopControl {
-  return demoControl(key, group, label, description, 'text', value);
+function hasExactKeys(record: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(record);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(record, key));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : null;
-}
-
-function requiredString(record: Record<string, unknown>, key: string): string {
-  const value = record[key];
-  if (typeof value !== 'string' || value === '') {
-    throw new Error(`The desktop control catalogue has no ${key}.`);
-  }
-  return value;
-}
-
-function controlKind(value: unknown): DesktopControlKind {
-  if (value === 'toggle' || value === 'number' || value === 'select' || value === 'text') {
-    return value;
-  }
-  throw new Error('The desktop control catalogue has an invalid control kind.');
-}
-
-function controlValue(value: unknown): DesktopControlValue {
-  if (typeof value === 'boolean' || typeof value === 'string') return value;
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  throw new Error('The desktop control catalogue has an invalid value.');
-}
-
-function optionalNumber(
-  record: Record<string, unknown>,
-  key: 'maximum' | 'minimum' | 'step',
-): Partial<Record<'maximum' | 'minimum' | 'step', number>> {
-  const value = record[key];
-  return typeof value === 'number' && Number.isFinite(value) ? { [key]: value } : {};
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
