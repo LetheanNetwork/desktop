@@ -48,3 +48,9 @@ func ExampleService_SetMany() {
 	core.Println(method != nil)
 	// Output: true
 }
+
+func ExampleSubscribe() {
+	var subscribe func(*core.Core, func(*core.Core, appconfig.Event)) = appconfig.Subscribe
+	core.Println(subscribe != nil)
+	// Output: true
+}

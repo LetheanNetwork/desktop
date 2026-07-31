@@ -3,7 +3,9 @@
 package appconfig
 
 import (
+	"strconv"
 	"sync"
+	"sync/atomic"
 
 	core "dappco.re/go"
 	"dappco.re/go/config"
@@ -24,8 +26,9 @@ type Options struct {
 // Service exposes the curated desktop-control catalogue to Wails while using
 // the Core-registered config service as its only persistence substrate.
 type Service struct {
-	core *core.Core
-	mu   sync.Mutex
+	core     *core.Core
+	mu       sync.Mutex
+	revision atomic.Uint64
 }
 
 // Change is one bounded Settings draft value.
@@ -99,7 +102,10 @@ func (s *Service) Settings() core.Result {
 		}
 		controls = append(controls, control)
 	}
-	return core.Ok(map[string]any{"controls": controls})
+	return core.Ok(map[string]any{
+		"revision": revisionString(s.revision.Load()),
+		"controls": controls,
+	})
 }
 
 // Set validates and persists one user-facing control through config.Service.
@@ -190,7 +196,16 @@ func (s *Service) SetMany(changes []Change) core.Result {
 			s.applyLive(change.key, change.value, cfg)
 		}
 	}
+	keys := make([]string, 0, len(prepared))
+	for _, change := range prepared {
+		keys = append(keys, change.key)
+	}
+	s.fireEvent(keys)
 	return s.Settings()
+}
+
+func revisionString(revision uint64) string {
+	return strconv.FormatUint(revision, 10)
 }
 
 func (s *Service) restorePrepared(

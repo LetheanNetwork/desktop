@@ -34,6 +34,7 @@ func TestService_Settings_Good_GroupedFallbackCatalogue(t *core.T) {
 	core.RequireTrue(t, r.OK)
 	snapshot, ok := r.Value.(map[string]any)
 	core.RequireTrue(t, ok)
+	core.AssertEqual(t, "0", snapshot["revision"])
 	_, exposesConfigPath := snapshot["config_path"]
 	core.AssertFalse(t, exposesConfigPath)
 	width := controlByKey(t, snapshot, "desktop.wails.window.main.width")
