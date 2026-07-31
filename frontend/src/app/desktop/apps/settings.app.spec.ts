@@ -145,6 +145,8 @@ describe('SettingsApp desktop controls', () => {
             },
             { selector: selectHasDirtyDesktopControls, value: true },
             { selector: desktopControlsFeature.selectLoading, value: false },
+            { selector: desktopControlsFeature.selectStale, value: false },
+            { selector: desktopControlsFeature.selectPendingExternalChange, value: null },
             {
               selector: desktopControlsFeature.selectError,
               value: 'Previous save failed safely.',

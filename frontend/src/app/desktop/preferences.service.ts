@@ -3,16 +3,14 @@
 //
 // Window *state* lives in WindowManagerService; OS *preferences* live here:
 // theme, wallpaper, brand/design (incl. a custom accent), language, and the
-// desktop toggles (icons, widgets, reduce-motion). The Settings app and the
-// shell both read/write this one service, so there's a single prefs source and
-// one place to persist/sync (point persist()/restore() at the CoreGo config
-// store — this maps cleanly onto corego/pkg/config's Defaults→File→Env→Set).
+// desktop toggles (icons, widgets, reduce-motion). NgRx projects committed
+// snapshots into these renderer signals; persistence stays in the connected
+// appconfig Medium or the explicit offline controls repository.
 // ─────────────────────────────────────────────────────────────────────────
 import { DOCUMENT } from '@angular/common';
 import { Injectable, effect, inject, signal } from '@angular/core';
 import { ConnectionManagerService } from '../connection-manager.service';
 import { DesktopControlSnapshot, DesktopControlValue } from '../store/desktop-controls.models';
-import { DESKTOP_STORAGE } from '../store/storage.service';
 
 export type Mode = 'dark' | 'light';
 export type Brand = 'lethean' | 'hostuk';
@@ -20,12 +18,9 @@ export type Design = 'lethean' | 'custom';
 export type Wallpaper = 'aurora' | 'dusk' | 'mist' | 'graphite';
 export type TaskbarEdge = 'top' | 'right' | 'bottom' | 'left';
 
-const KEY = 'lthn.prefs';
-
 @Injectable({ providedIn: 'root' })
 export class PreferencesService {
   private readonly document = inject(DOCUMENT);
-  private readonly storage = inject(DESKTOP_STORAGE);
   private readonly connection = inject(ConnectionManagerService);
   readonly offline = this.connection.offline;
 
@@ -44,15 +39,13 @@ export class PreferencesService {
   readonly reduceMotion = signal<boolean>(false);
 
   constructor() {
-    if (this.connection.offline()) this.restore();
-    // One effect keeps the DOM/token attributes in sync. Browser persistence
-    // belongs exclusively to the explicit offline demo provider.
+    // One effect keeps the DOM/token attributes in sync. Persistence belongs
+    // exclusively to the selected connected or offline controls provider.
     effect(() => {
       const root = this.document.documentElement,
         body = this.document.body;
       root.setAttribute('data-brand', this.brand());
       body.setAttribute('data-brand', this.brand());
-      if (this.connection.offline()) this.persist();
     });
   }
 
@@ -126,46 +119,6 @@ export class PreferencesService {
     os.classList.toggle('no-icons', !this.showIcons());
     os.classList.toggle('no-widgets', !this.showWidgets());
     os.classList.toggle('reduce-motion', this.reduceMotion());
-  }
-
-  persist() {
-    if (!this.connection.offline()) return;
-    try {
-      this.storage.setItem(
-        KEY,
-        JSON.stringify({
-          bar: this.bar(),
-          mode: this.mode(),
-          brand: this.brand(),
-          design: this.design(),
-          customHue: this.customHue(),
-          customName: this.customName(),
-          wallpaper: this.wallpaper(),
-          lang: this.lang(),
-          showIcons: this.showIcons(),
-          showWidgets: this.showWidgets(),
-          reduceMotion: this.reduceMotion(),
-        }),
-      );
-    } catch {}
-  }
-  restore() {
-    if (!this.connection.offline()) return;
-    try {
-      const s = JSON.parse(this.storage.getItem(KEY) || 'null');
-      if (!s) return;
-      if (s.bar) this.bar.set(s.bar);
-      if (s.mode) this.mode.set(s.mode);
-      if (s.brand) this.brand.set(s.brand);
-      if (s.design) this.design.set(s.design);
-      if (typeof s.customHue === 'number') this.customHue.set(s.customHue);
-      if (s.customName) this.customName.set(s.customName);
-      if (s.wallpaper) this.wallpaper.set(s.wallpaper);
-      if (s.lang) this.lang.set(s.lang);
-      if (typeof s.showIcons === 'boolean') this.showIcons.set(s.showIcons);
-      if (typeof s.showWidgets === 'boolean') this.showWidgets.set(s.showWidgets);
-      if (typeof s.reduceMotion === 'boolean') this.reduceMotion.set(s.reduceMotion);
-    } catch {}
   }
 }
 

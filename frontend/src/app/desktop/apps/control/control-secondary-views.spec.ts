@@ -53,6 +53,8 @@ describe('Control secondary views', () => {
             { selector: selectHasDirtyDesktopControls, value: true },
             { selector: desktopControlsFeature.selectLoading, value: false },
             { selector: desktopControlsFeature.selectSaving, value: false },
+            { selector: desktopControlsFeature.selectStale, value: false },
+            { selector: desktopControlsFeature.selectPendingExternalChange, value: null },
             { selector: desktopControlsFeature.selectError, value: null },
             { selector: desktopControlsFeature.selectRestartSummary, value: null },
           ],

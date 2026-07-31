@@ -86,6 +86,29 @@ const PERMISSION_CONTROL_IDS: Readonly<Record<string, DesktopPermissionID>> = {
       @if (showRestartSummary() && restartSummary()) {
         <p class="controls-restart-summary" role="status">{{ restartSummary() }}</p>
       }
+      @if (pendingExternalChange()) {
+        <div class="controls-external-change" role="status">
+          <span>Settings changed elsewhere.</span>
+          <span class="controls-external-actions">
+            <button
+              type="button"
+              data-action="reload-external-settings"
+              [disabled]="loading() || saving()"
+              (click)="reloadExternalSettings()"
+            >
+              Reload
+            </button>
+            <button
+              type="button"
+              data-action="keep-editing-settings"
+              [disabled]="saving()"
+              (click)="keepEditing()"
+            >
+              Keep editing
+            </button>
+          </span>
+        </div>
+      }
       @if (error()) {
         <div class="controls-error" role="alert">
           <span>{{ error() }}</span>
@@ -271,6 +294,7 @@ const PERMISSION_CONTROL_IDS: Readonly<Record<string, DesktopPermissionID>> = {
     }
     .settings-actions button,
     .controls-error button,
+    .controls-external-change button,
     .permission-request {
       min-width: 72px;
       padding: 6px 10px;
@@ -300,6 +324,28 @@ const PERMISSION_CONTROL_IDS: Readonly<Record<string, DesktopPermissionID>> = {
       background: color-mix(in srgb, #ef6b73 10%, transparent);
       color: #ef9aa0;
       font-size: 11px;
+    }
+    .controls-external-change {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 0 16px 12px;
+      padding: 8px 10px;
+      border: 1px solid color-mix(in srgb, #e3b35b 40%, transparent);
+      border-radius: 7px;
+      background: color-mix(in srgb, #e3b35b 9%, transparent);
+      color: #e3c98f;
+      font-size: 11px;
+    }
+    .controls-external-actions {
+      display: flex;
+      gap: 7px;
+    }
+    .controls-external-change button {
+      min-width: auto;
+      padding: 4px 8px;
+      white-space: nowrap;
     }
     .controls-error button {
       min-width: auto;
@@ -389,11 +435,16 @@ export class DesktopControlsPanelView {
   readonly hasDraftChanges = this.store.selectSignal(selectHasDirtyDesktopControls);
   readonly loading = this.store.selectSignal(desktopControlsFeature.selectLoading);
   readonly saving = this.store.selectSignal(desktopControlsFeature.selectSaving);
+  readonly stale = this.store.selectSignal(desktopControlsFeature.selectStale);
   readonly error = this.store.selectSignal(desktopControlsFeature.selectError);
   readonly restartSummary = this.store.selectSignal(desktopControlsFeature.selectRestartSummary);
+  readonly pendingExternalChange = this.store.selectSignal(
+    desktopControlsFeature.selectPendingExternalChange,
+  );
   readonly dataState = computed<DesktopDataState>(() => {
     if (this.connection.offline()) return 'demo';
     if (this.loading()) return 'loading';
+    if (this.stale()) return 'stale';
     if (this.error()) return 'unavailable';
     return 'live';
   });
@@ -445,6 +496,16 @@ export class DesktopControlsPanelView {
   retry(): void {
     if (this.loading() || this.saving()) return;
     this.store.dispatch(desktopControlsActions.load());
+  }
+
+  reloadExternalSettings(): void {
+    if (this.loading() || this.saving()) return;
+    this.store.dispatch(desktopControlsActions.reloadExternalChange());
+  }
+
+  keepEditing(): void {
+    if (this.saving()) return;
+    this.store.dispatch(desktopControlsActions.dismissExternalChange());
   }
 
   permissionForControl(key: string): DesktopPermissionSnapshot | null {

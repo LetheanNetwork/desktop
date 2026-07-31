@@ -2,7 +2,7 @@
 
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideMockStore } from '@ngrx/store/testing';
+import { MockStore, provideMockStore } from '@ngrx/store/testing';
 import { Store } from '@ngrx/store';
 import { desktopControlsActions } from '../store/desktop-controls.actions';
 import type { DesktopControl, DesktopControlGroup } from '../store/desktop-controls.models';
@@ -112,6 +112,8 @@ describe('DesktopControlsPanelView', () => {
             { selector: selectHasDirtyDesktopControls, value: true },
             { selector: desktopControlsFeature.selectLoading, value: false },
             { selector: desktopControlsFeature.selectSaving, value: false },
+            { selector: desktopControlsFeature.selectStale, value: false },
+            { selector: desktopControlsFeature.selectPendingExternalChange, value: null },
             {
               selector: desktopControlsFeature.selectError,
               value: 'The previous save failed safely.',
@@ -242,6 +244,40 @@ describe('DesktopControlsPanelView', () => {
     expect(dispatch).toHaveBeenCalledWith(desktopControlsActions.discardDraft());
     expect(dispatch).toHaveBeenCalledWith(desktopControlsActions.resetDraft());
     expect(dispatch).toHaveBeenCalledWith(desktopControlsActions.load());
+  });
+
+  it('offers explicit reload and keep-editing actions for an external change', async () => {
+    const store = TestBed.inject(MockStore);
+    store.overrideSelector(desktopControlsFeature.selectPendingExternalChange, {
+      revision: '2',
+      keys: ['desktop.theme.interface'],
+      at: '2026-07-31T12:00:00Z',
+    });
+    store.refreshState();
+    const dispatch = vi.spyOn(store, 'dispatch');
+    const fixture = TestBed.createComponent(DesktopControlsPanelView);
+
+    await fixture.whenStable();
+
+    const element = fixture.nativeElement as HTMLElement;
+    expect(element.textContent).toContain('Settings changed elsewhere.');
+    element.querySelector<HTMLButtonElement>('[data-action="reload-external-settings"]')?.click();
+    element.querySelector<HTMLButtonElement>('[data-action="keep-editing-settings"]')?.click();
+    expect(dispatch).toHaveBeenCalledWith(desktopControlsActions.reloadExternalChange());
+    expect(dispatch).toHaveBeenCalledWith(desktopControlsActions.dismissExternalChange());
+  });
+
+  it('labels retained controls as stale after a failed refresh', async () => {
+    const store = TestBed.inject(MockStore);
+    store.overrideSelector(desktopControlsFeature.selectStale, true);
+    store.refreshState();
+    const fixture = TestBed.createComponent(DesktopControlsPanelView);
+
+    await fixture.whenStable();
+
+    const badge = (fixture.nativeElement as HTMLElement).querySelector('lthn-badge');
+    expect(badge?.textContent).toContain('Live data stale');
+    expect(badge?.getAttribute('variant')).toBe('warn');
   });
 
   it('emits a native permission request only after the explicit action', async () => {

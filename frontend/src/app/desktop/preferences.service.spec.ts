@@ -95,16 +95,16 @@ describe('PreferencesService', () => {
     expect(storage.setItem).not.toHaveBeenCalled();
   });
 
-  it('restores and persists only inside explicit offline demo mode', () => {
+  it('leaves offline persistence to the controls repository', () => {
     offline.set(true);
-    values.set('lthn.prefs', JSON.stringify({ mode: 'light', wallpaper: 'dusk' }));
+    values.set('lthn.prefs', JSON.stringify({ mode: 'dark', wallpaper: 'dusk' }));
 
     const service = TestBed.inject(PreferencesService);
-    service.showIcons.set(false);
+    service.applySnapshot(preferenceSnapshot);
     TestBed.flushEffects();
 
     expect(service.mode()).toBe('light');
-    expect(service.wallpaper()).toBe('dusk');
-    expect(storage.setItem).toHaveBeenCalled();
+    expect(service.wallpaper()).toBe('mist');
+    expect(storage.setItem).not.toHaveBeenCalled();
   });
 });
