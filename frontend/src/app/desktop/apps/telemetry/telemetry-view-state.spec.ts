@@ -1,91 +1,79 @@
 // SPDX-License-Identifier: EUPL-1.2
 
-import type { ProcessTelemetry } from '../../desktop-live-data.service';
 import { createDemoModelRuntimeSnapshot } from '../../desktop-model-runtime-demo.data';
-import type { TelemetryDemoSeries } from './telemetry-view.models';
-import {
-  createDemoTelemetryView,
-  createLiveTelemetryView,
-  overlayRuntimeTelemetryView,
-} from './telemetry-view-state';
-
-const SERIES: TelemetryDemoSeries = {
-  throughput: [28, 30, 46],
-  watts: [180, 199, 210],
-};
-
-const SAMPLE: ProcessTelemetry = {
-  heapAllocMB: 128.25,
-  heapSysMB: 192.5,
-  stackInUseMB: 4.75,
-  numGoroutines: 42,
-  numCgoCalls: 7,
-  uptimeSeconds: 9_061,
-  numGC: 18,
-  lastGCPauseMs: 0.43,
-  wattsActive: 0,
-  wattsIdle: 0,
-};
+import { SYSTEM_MONITOR_DEMO_SNAPSHOT } from '../../desktop-system-monitor-demo.data';
+import type { SystemMonitorSnapshot } from '../../desktop-system-monitor.models';
+import { createTelemetryView } from './telemetry-view-state';
 
 describe('Telemetry view state', () => {
-  it('creates a fresh deterministic demo without sharing mutable series', () => {
-    const first = createDemoTelemetryView(SERIES);
-    const second = createDemoTelemetryView(SERIES);
+  it('maps the deterministic host fixture into visibly labelled demo panels', () => {
+    const view = createTelemetryView(
+      SYSTEM_MONITOR_DEMO_SNAPSHOT,
+      createDemoModelRuntimeSnapshot('ready'),
+      'demo',
+    );
 
-    expect(first).toEqual(second);
-    expect(first.sample).toBeNull();
-    expect(first.primary).toMatchObject({
-      label: 'Throughput',
-      value: '41.8',
-      unit: 'tok/s',
+    expect(view.primary).toEqual({
+      label: 'CPU utilisation',
+      value: '34',
+      unit: '%',
+      history: SYSTEM_MONITOR_DEMO_SNAPSHOT.cpuHistory,
       provenance: 'demo',
-      history: SERIES.throughput,
     });
-    expect(first.power).toMatchObject({
-      label: 'Power draw',
-      value: '207',
-      unit: 'W',
+    expect(view.secondary).toEqual({
+      label: 'Memory used',
+      value: '58',
+      unit: '%',
+      history: SYSTEM_MONITOR_DEMO_SNAPSHOT.memoryHistory,
       provenance: 'demo',
-      history: SERIES.watts,
     });
-    expect(first.primary.history).not.toBe(SERIES.throughput);
-    expect(first.metadata.map(({ label }) => label)).toEqual([
+    expect(view.primary.history).not.toBe(SYSTEM_MONITOR_DEMO_SNAPSHOT.cpuHistory);
+    expect(view.metadata.map(({ label }) => label)).toEqual([
+      'Network ↓',
+      'Network ↑',
+      'Storage',
+      'Power',
+      'System',
       'Model',
-      'Region',
-      'KV-cache',
-      'Uptime',
+      'Model throughput',
     ]);
   });
 
-  it('maps unsupported connected runtime and power metrics to unavailable values', () => {
-    const result = createLiveTelemetryView(
-      SAMPLE,
+  it('renders unsupported connected readings as unavailable without fixture substitution', () => {
+    const snapshot: SystemMonitorSnapshot = {
+      observedAt: '2026-07-31T12:00:05Z',
+      source: 'Portable Go runtime',
+      platform: 'linux',
+      architecture: 'arm64',
+      cpu: { logicalCores: 8 },
+      cpuHistory: [],
+      memoryHistory: [],
+      networkReceivedHistory: [],
+      networkSentHistory: [],
+    };
+
+    const view = createTelemetryView(
+      snapshot,
       createDemoModelRuntimeSnapshot('model-less'),
-      null,
+      'live',
     );
 
-    expect(result.state).toBe('live');
-    expect(result.value.sample).toBe(SAMPLE);
-    expect(result.value.primary).toMatchObject({
-      label: 'Throughput',
-      value: '—',
-      unit: 'tok/s',
-      provenance: 'live',
-      history: [],
-    });
-    expect(result.value.power).toMatchObject({
-      label: 'Power draw',
-      value: '—',
-      unit: 'W',
-      provenance: 'live',
-      history: [],
-    });
-    expect(result.value.metadata.map(({ value }) => value)).toEqual(['—', '—', '—', '2h 31m']);
-    expect(JSON.stringify(result.value)).not.toContain('41.8');
-    expect(JSON.stringify(result.value)).not.toContain('207');
+    expect(view.primary).toMatchObject({ value: '—', unit: '%', history: [] });
+    expect(view.secondary).toMatchObject({ value: '—', unit: '%', history: [] });
+    expect(view.metadata.map(({ value }) => value)).toEqual([
+      '—',
+      '—',
+      '—',
+      '—',
+      'linux · arm64',
+      '—',
+      '—',
+    ]);
+    expect(JSON.stringify(view)).not.toContain('41.8');
+    expect(JSON.stringify(view)).not.toContain('207');
   });
 
-  it('overlays shared runtime throughput, model, memory, and history', () => {
+  it('combines live host metrics with compact shared model-runtime context', () => {
     const runtime = {
       ...createDemoModelRuntimeSnapshot('ready'),
       metrics: {
@@ -93,82 +81,36 @@ describe('Telemetry view state', () => {
         activeMemoryBytes: 2_147_483_648,
         uptimeSeconds: 600,
       },
-      history: [
-        {
-          state: 'ready' as const,
-          at: '2026-07-27T13:00:00Z',
-          promptTokensPerSecond: 40,
-        },
-        {
-          state: 'ready' as const,
-          at: '2026-07-27T13:00:05Z',
-          promptTokensPerSecond: 42.25,
-        },
-      ],
     };
-    const result = createLiveTelemetryView(SAMPLE, runtime, null);
-
-    expect(result.state).toBe('live');
-    expect(result.value.primary).toMatchObject({
-      value: '42.3',
-      history: [40, 42.25],
-    });
-    expect(result.value.metadata.map(({ value }) => value)).toEqual([
-      'gemma-4-e2b',
-      'metal',
-      '2 GB',
-      '10m',
-    ]);
-  });
-
-  it('maps positive native power as live data and caps its history', () => {
-    const runtime = createDemoModelRuntimeSnapshot('model-less');
-    const initial = createLiveTelemetryView({ ...SAMPLE, wattsActive: 200 }, runtime, null).value;
-    const previous = {
-      ...initial,
-      power: {
-        ...initial.power,
-        history: Object.freeze(Array.from({ length: 60 }, (_, index) => 100 + index)),
+    const snapshot: SystemMonitorSnapshot = {
+      ...SYSTEM_MONITOR_DEMO_SNAPSHOT,
+      source: 'macOS host APIs',
+      cpu: { logicalCores: 10, usagePercent: 37.5 },
+      memory: { totalBytes: 32 * 1_024 ** 3, usedBytes: 16 * 1_024 ** 3 },
+      network: {
+        receivedBytes: 10_000,
+        sentBytes: 5_000,
+        receivedBytesPerSecond: 1_200,
+        sentBytesPerSecond: 320,
       },
+      power: { source: 'ac', batteryPercent: 81, charging: true },
+      storage: { totalBytes: 512 * 1_024 ** 3, freeBytes: 218 * 1_024 ** 3 },
+      cpuHistory: [30, 35, 37.5],
+      memoryHistory: [48, 49, 50],
     };
 
-    const result = createLiveTelemetryView(
-      { ...SAMPLE, heapAllocMB: 999, wattsActive: 250 },
-      runtime,
-      previous,
-    );
+    const view = createTelemetryView(snapshot, runtime, 'live');
 
-    expect(result.value.power.history).toHaveLength(60);
-    expect(result.value.power.history[0]).toBe(101);
-    expect(result.value.power.history.at(-1)).toBe(250);
-    expect(previous.power.history[0]).toBe(100);
-  });
-
-  it('does not carry any demo chart points into a connected view', () => {
-    const demo = createDemoTelemetryView(SERIES);
-    const result = createLiveTelemetryView(
-      { ...SAMPLE, wattsActive: 220 },
-      createDemoModelRuntimeSnapshot('model-less'),
-      demo,
-    );
-
-    expect(result.value.primary.history).toEqual([]);
-    expect(result.value.power.history).toEqual([220]);
-  });
-
-  it('reconciles a newer shared snapshot without mutating process telemetry', () => {
-    const initial = createLiveTelemetryView(
-      SAMPLE,
-      createDemoModelRuntimeSnapshot('model-less'),
-      null,
-    ).value;
-    const runtime = createDemoModelRuntimeSnapshot('ready');
-
-    const overlaid = overlayRuntimeTelemetryView(initial, runtime);
-
-    expect(overlaid.sample).toBe(SAMPLE);
-    expect(overlaid.primary.value).toBe('41.8');
-    expect(overlaid.metadata[0].value).toBe('gemma-4-e2b');
-    expect(initial.primary.value).toBe('—');
+    expect(view.primary).toMatchObject({ value: '38', history: [30, 35, 37.5] });
+    expect(view.secondary).toMatchObject({ value: '50', history: [48, 49, 50] });
+    expect(view.metadata.map(({ value }) => value)).toEqual([
+      '1.2 KB/s',
+      '320 B/s',
+      '218 GB free of 512 GB',
+      'AC · 81% · charging',
+      'darwin · arm64',
+      'gemma-4-e2b',
+      '42.3 tok/s',
+    ]);
   });
 });

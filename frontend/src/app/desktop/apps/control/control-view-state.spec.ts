@@ -1,8 +1,17 @@
 import { createDemoModelRuntimeSnapshot } from '../../desktop-model-runtime-demo.data';
 import {
+  beginDesktopDataRefresh,
+  createConnectedResource,
+  createDemoResource,
+  resolveDesktopData,
+} from '../../desktop-data-resource';
+import { SYSTEM_MONITOR_DEMO_SNAPSHOT } from '../../desktop-system-monitor-demo.data';
+import type { SystemMonitorSnapshot } from '../../desktop-system-monitor.models';
+import {
   createDemoControlViewState,
   mergeControlLiveSnapshot,
   mergeControlModelRuntime,
+  mergeControlSystemMonitor,
 } from './control-view-state';
 
 describe('Control view state', () => {
@@ -34,7 +43,7 @@ describe('Control view state', () => {
           exitCode: 0,
         },
       ],
-      unavailable: ['telemetry', 'benchmarkRuns'],
+      unavailable: ['benchmarkRuns'],
     });
 
     expect(state.dataState).toBe('mixed');
@@ -96,5 +105,63 @@ describe('Control view state', () => {
     expect(state.models.chart.samples).toEqual([]);
     expect(JSON.stringify(state.models)).not.toContain('34.2');
     expect(JSON.stringify(state.models)).not.toContain('18.4 GB');
+  });
+
+  it('maps one live shared host snapshot into the System overview', () => {
+    const snapshot: SystemMonitorSnapshot = {
+      ...SYSTEM_MONITOR_DEMO_SNAPSHOT,
+      source: 'macOS host APIs',
+      cpu: { logicalCores: 10, usagePercent: 30 },
+      memory: { totalBytes: 32 * 1_024 ** 3, usedBytes: 18.4 * 1_024 ** 3 },
+      network: {
+        receivedBytes: 10_000,
+        sentBytes: 5_000,
+        receivedBytesPerSecond: 1_200,
+        sentBytesPerSecond: 320,
+      },
+      power: { source: 'ac', batteryPercent: 81, charging: true },
+      storage: { totalBytes: 512 * 1_024 ** 3, freeBytes: 218 * 1_024 ** 3 },
+      cpuHistory: [20, 25, 30],
+    };
+    const loading = createConnectedResource<SystemMonitorSnapshot>('Local host system');
+    const live = resolveDesktopData(
+      beginDesktopDataRefresh(loading, Date.now(), 10_000),
+      snapshot,
+      'live',
+      snapshot.source,
+      Date.now(),
+    );
+
+    const system = mergeControlSystemMonitor(createDemoControlViewState().system, live);
+
+    expect(system.metrics).toEqual([
+      { value: '30%', label: 'CPU · 10 logical' },
+      { value: '18.4 / 32 GB', label: 'Memory' },
+      { value: '294 / 512 GB', label: 'Storage used' },
+      { value: '1.2 KB/s ↓ · 320 B/s ↑', label: 'Network' },
+      { value: '81%', label: 'Battery · charging' },
+      { value: 'AC', label: 'Power source' },
+    ]);
+    expect(system.cpuSamples).toEqual([20, 25, 30]);
+    expect(system.cpuChartTitle).toBe('CPU · recent samples');
+    expect(system.cpuChartCaption).toBe('30% now');
+    expect(system.processRows).toHaveLength(6);
+  });
+
+  it('never substitutes host demo values while a connected System overview is unavailable', () => {
+    const connected = createConnectedResource<SystemMonitorSnapshot>('Local host system');
+
+    const system = mergeControlSystemMonitor(createDemoControlViewState().system, connected);
+
+    expect(system.metrics.map(({ value }) => value)).toEqual(['—', '—', '—', '—', '—', '—']);
+    expect(system.cpuSamples).toEqual([]);
+    expect(JSON.stringify(system.metrics)).not.toContain('18.4 / 32 GB');
+  });
+
+  it('preserves the labelled System fixture only in explicit demo mode', () => {
+    const demo = createDemoResource(SYSTEM_MONITOR_DEMO_SNAPSHOT, 'Lethean demo fixture');
+    const original = createDemoControlViewState().system;
+
+    expect(mergeControlSystemMonitor(original, demo)).toBe(original);
   });
 });

@@ -10,7 +10,9 @@ import {
 } from '@angular/core';
 import { DesktopDataStateBadge } from '../../desktop-data-state-badge';
 import type { DesktopDataResource } from '../../desktop-data-resource';
+import { DesktopDataStatusView } from '../../desktop-data-status.view';
 import type { DesktopDataState } from '../../desktop-data-state';
+import type { SystemMonitorSnapshot } from '../../desktop-system-monitor.models';
 import type {
   ControlServiceIntent,
   DesktopServiceCatalogue,
@@ -22,7 +24,7 @@ import type { ControlSystemTab, ControlSystemViewModel } from './control-view.mo
 @Component({
   selector: 'lthn-control-system-view',
   standalone: true,
-  imports: [DesktopDataStateBadge, ControlServicesView],
+  imports: [DesktopDataStateBadge, DesktopDataStatusView, ControlServicesView],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   host: { style: 'display: contents' },
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -69,6 +71,7 @@ import type { ControlSystemTab, ControlSystemViewModel } from './control-view.mo
         />
       }
       @default {
+        <lthn-desktop-data-status [status]="systemResource()" (retry)="systemRetry.emit()" />
         <div class="tiles">
           @for (metric of model().metrics; track metric.label) {
             <lthn-card pad="11">
@@ -78,8 +81,8 @@ import type { ControlSystemTab, ControlSystemViewModel } from './control-view.mo
         </div>
         <div class="panel">
           <div class="ph">
-            <b i18n="Demo CPU chart title@@control.system.cpuDemoChart">CPU · demo history</b>
-            <span i18n="Demo CPU value@@control.system.cpuDemoNow">34% demo</span>
+            <b>{{ model().cpuChartTitle }}</b>
+            <span>{{ model().cpuChartCaption }}</span>
           </div>
           <lthn-chart type="area" [attr.data]="cpuSamplesJson()" height="84"></lthn-chart>
         </div>
@@ -101,12 +104,14 @@ export class ControlSystemView {
   readonly dataState = input.required<DesktopDataState>();
   readonly model = input.required<ControlSystemViewModel>();
   readonly activeTab = input.required<ControlSystemTab>();
+  readonly systemResource = input.required<DesktopDataResource<SystemMonitorSnapshot>>();
   readonly services = input.required<DesktopDataResource<DesktopServiceCatalogue>>();
   readonly pendingServiceIds = input<readonly string[]>([]);
   readonly serviceOutput = input<DesktopServiceOutput | null>(null);
   readonly tabChange = output<ControlSystemTab>();
   readonly serviceAction = output<ControlServiceIntent>();
   readonly servicesRetry = output<void>();
+  readonly systemRetry = output<void>();
   readonly tabs: readonly [ControlSystemTab, string][] = [
     ['overview', $localize`:System tab@@control.system.tab.overview:Overview`],
     ['processes', $localize`:System tab@@control.system.tab.processes:Processes`],

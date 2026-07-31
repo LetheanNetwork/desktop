@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 import type { ControlLiveSnapshot } from '../../desktop-live-data.service';
+import type { DesktopDataResource } from '../../desktop-data-resource';
 import type { ModelRuntimeSnapshot } from '../../desktop-model-runtime.models';
+import type { SystemMonitorSnapshot, SystemPowerSource } from '../../desktop-system-monitor.models';
 import { CONTROL_DEMO_VIEW_STATE } from './control-demo.data';
 import type {
   ControlRunsViewModel,
@@ -25,7 +27,7 @@ export function mergeControlLiveSnapshot(snapshot: ControlLiveSnapshot): Control
     ...demo,
     dataState: 'mixed',
     runs: mergeRuns(demo.runs, snapshot),
-    system: mergeSystem(demo.system, snapshot),
+    system: mergeProcesses(demo.system, snapshot),
   };
 }
 
@@ -116,6 +118,73 @@ export function mergeControlModelRuntime(
   };
 }
 
+export function mergeControlSystemMonitor(
+  demo: ControlSystemViewModel,
+  resource: DesktopDataResource<SystemMonitorSnapshot>,
+): ControlSystemViewModel {
+  if (resource.mode === 'demo') return demo;
+  const snapshot = resource.value;
+  if (snapshot === null) {
+    return {
+      ...demo,
+      metrics: unavailableSystemMetrics(),
+      cpuSamples: [],
+      cpuChartTitle: $localize`:CPU chart title@@control.system.cpuChart:CPU · recent samples`,
+      cpuChartCaption: $localize`:Unavailable CPU value@@control.system.cpuUnavailable:Awaiting host sample`,
+    };
+  }
+
+  const usage = snapshot.cpu.usagePercent;
+  const power = snapshot.power;
+  return {
+    ...demo,
+    metrics: [
+      {
+        value: formatPercent(usage),
+        label: $localize`:Host CPU metric@@control.system.hostCpu:CPU · ${snapshot.cpu.logicalCores}:logicalCores: logical`,
+      },
+      {
+        value: snapshot.memory
+          ? formatBytePair(snapshot.memory.usedBytes, snapshot.memory.totalBytes)
+          : '—',
+        label: $localize`:Host memory metric@@control.system.hostMemory:Memory`,
+      },
+      {
+        value: snapshot.storage
+          ? formatBytePair(
+              snapshot.storage.totalBytes - snapshot.storage.freeBytes,
+              snapshot.storage.totalBytes,
+            )
+          : '—',
+        label: $localize`:Host storage metric@@control.system.hostStorage:Storage used`,
+      },
+      {
+        value: snapshot.network
+          ? `${formatRate(snapshot.network.receivedBytesPerSecond)} ↓ · ${formatRate(snapshot.network.sentBytesPerSecond)} ↑`
+          : '—',
+        label: $localize`:Host network metric@@control.system.hostNetwork:Network`,
+      },
+      {
+        value: formatPercent(power?.batteryPercent),
+        label:
+          power?.charging === true
+            ? $localize`:Charging battery metric@@control.system.batteryCharging:Battery · charging`
+            : $localize`:Battery metric@@control.system.battery:Battery`,
+      },
+      {
+        value: formatPowerSource(power?.source),
+        label: $localize`:Power source metric@@control.system.powerSource:Power source`,
+      },
+    ],
+    cpuSamples: snapshot.cpuHistory,
+    cpuChartTitle: $localize`:CPU chart title@@control.system.cpuChart:CPU · recent samples`,
+    cpuChartCaption:
+      usage === undefined
+        ? $localize`:Unavailable CPU value@@control.system.cpuUnavailable:Awaiting host sample`
+        : $localize`:Current CPU value@@control.system.cpuNow:${formatPercent(usage)}:usage: now`,
+  };
+}
+
 function mergeRuns(
   demo: ControlRunsViewModel,
   snapshot: ControlLiveSnapshot,
@@ -137,34 +206,12 @@ function mergeRuns(
   };
 }
 
-function mergeSystem(
+function mergeProcesses(
   demo: ControlSystemViewModel,
   snapshot: ControlLiveSnapshot,
 ): ControlSystemViewModel {
-  let metrics = demo.metrics;
   let processColumns = demo.processColumns;
   let processRows = demo.processRows;
-
-  if (snapshot.telemetry) {
-    metrics = [
-      {
-        value: formatMegabytes(snapshot.telemetry.heapAllocMB),
-        label: $localize`:Process heap metric@@control.system.processHeap:Process heap`,
-      },
-      {
-        value: formatMegabytes(snapshot.telemetry.heapSysMB),
-        label: $localize`:Reserved heap metric@@control.system.reservedHeap:Reserved heap`,
-      },
-      {
-        value: String(snapshot.telemetry.numGoroutines),
-        label: $localize`:Goroutine count metric@@control.system.goroutines:Goroutines`,
-      },
-      {
-        value: String(snapshot.telemetry.numGC),
-        label: $localize`:Garbage collection count metric@@control.system.gcCycles:GC cycles`,
-      },
-    ];
-  }
 
   if (snapshot.processes) {
     processColumns = [
@@ -198,7 +245,6 @@ function mergeSystem(
 
   return {
     ...demo,
-    metrics,
     processColumns,
     processRows,
   };
@@ -209,7 +255,54 @@ function formatOptionalRate(value: number | undefined): string {
 }
 
 function formatOptionalBytes(bytes: number | undefined): string {
-  if (bytes === undefined) return '—';
+  return bytes === undefined ? '—' : formatBytes(bytes);
+}
+
+function unavailableSystemMetrics(): ControlSystemViewModel['metrics'] {
+  return [
+    $localize`:CPU metric@@metric.cpu:CPU`,
+    $localize`:Memory metric@@metric.memory:Memory`,
+    $localize`:Storage metric@@metric.storage:Storage used`,
+    $localize`:Network metric@@metric.network:Network`,
+    $localize`:Battery metric@@metric.battery:Battery`,
+    $localize`:Power source metric@@control.system.powerSource:Power source`,
+  ].map((label) => ({ value: '—', label }));
+}
+
+function formatPercent(value: number | undefined): string {
+  return value === undefined ? '—' : `${Math.round(value)}%`;
+}
+
+function formatRate(bytesPerSecond: number | undefined): string {
+  return bytesPerSecond === undefined ? '—' : `${formatBytes(bytesPerSecond)}/s`;
+}
+
+function formatBytePair(usedBytes: number, totalBytes: number): string {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const unitIndex = Math.min(
+    units.length - 1,
+    Math.max(0, Math.floor(Math.log(totalBytes) / Math.log(1_024))),
+  );
+  const divisor = 1_024 ** unitIndex;
+  return `${formatNumber(usedBytes / divisor)} / ${formatNumber(totalBytes / divisor)} ${units[unitIndex]}`;
+}
+
+function formatNumber(value: number): string {
+  return value.toFixed(Number.isInteger(value) ? 0 : 1);
+}
+
+function formatPowerSource(source: SystemPowerSource | undefined): string {
+  switch (source) {
+    case 'ac':
+      return 'AC';
+    case 'battery':
+      return $localize`:Battery power source@@control.system.onBattery:Battery`;
+    default:
+      return '—';
+  }
+}
+
+function formatBytes(bytes: number): string {
   if (bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   const unitIndex = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1_024)));
@@ -226,11 +319,6 @@ function formatUptime(seconds: number): string {
   if (days > 0) return `${days}d ${hours}h`;
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
-}
-
-function formatMegabytes(value: number): string {
-  const precision = value >= 10 || Number.isInteger(value) ? 0 : 1;
-  return `${value.toFixed(precision)} MB`;
 }
 
 function benchmarkTime(timestamp: string): string {

@@ -67,7 +67,7 @@ interface QuickAction {
 const QUICK_ACTIONS: readonly QuickAction[] = [
   { target: 'chat', icon: 'fa-comments', label: 'Chat', detail: 'Talk to a model' },
   { target: 'models', icon: 'fa-cube', label: 'Models', detail: 'Browse and load' },
-  { target: 'telemetry', icon: 'fa-wave-square', label: 'Telemetry', detail: 'Live process view' },
+  { target: 'telemetry', icon: 'fa-wave-square', label: 'Telemetry', detail: 'Host system monitor' },
 ];
 
 @Component({

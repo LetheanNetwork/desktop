@@ -203,6 +203,8 @@ export const CONTROL_DEMO_VIEW_STATE = {
       },
     ],
     cpuSamples: TELEMETRY.throughput,
+    cpuChartTitle: $localize`:Demo CPU chart title@@control.system.cpuDemoChart:CPU · demo history`,
+    cpuChartCaption: $localize`:Demo CPU value@@control.system.cpuDemoNow:34% demo`,
     processColumns: [
       {
         key: 'proc',

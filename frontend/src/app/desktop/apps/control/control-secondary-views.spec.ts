@@ -12,6 +12,10 @@ import {
 } from '../../../store/desktop-controls.reducer';
 import { ConnectionManagerService } from '../../../connection-manager.service';
 import { createDemoResource } from '../../desktop-data-resource';
+import {
+  SYSTEM_MONITOR_DEMO_SNAPSHOT,
+  SYSTEM_MONITOR_DEMO_SOURCE,
+} from '../../desktop-system-monitor-demo.data';
 import { ControlPowerView } from './control-power.view';
 import { createDemoServiceCatalogue, SERVICES_DEMO_SOURCE } from './control-services.models';
 import { ControlSettingsView } from './control-settings.view';
@@ -90,6 +94,10 @@ describe('Control secondary views', () => {
     fixture.componentRef.setInput('model', state.system);
     fixture.componentRef.setInput('activeTab', 'overview');
     fixture.componentRef.setInput(
+      'systemResource',
+      createDemoResource(SYSTEM_MONITOR_DEMO_SNAPSHOT, SYSTEM_MONITOR_DEMO_SOURCE),
+    );
+    fixture.componentRef.setInput(
       'services',
       createDemoResource(createDemoServiceCatalogue(), SERVICES_DEMO_SOURCE),
     );
@@ -112,6 +120,10 @@ describe('Control secondary views', () => {
     fixture.componentRef.setInput('dataState', state.dataState);
     fixture.componentRef.setInput('model', state.system);
     fixture.componentRef.setInput('activeTab', 'daemons');
+    fixture.componentRef.setInput(
+      'systemResource',
+      createDemoResource(SYSTEM_MONITOR_DEMO_SNAPSHOT, SYSTEM_MONITOR_DEMO_SOURCE),
+    );
     fixture.componentRef.setInput(
       'services',
       createDemoResource(createDemoServiceCatalogue(), SERVICES_DEMO_SOURCE),

@@ -1,14 +1,15 @@
 // SPDX-Licence-Identifier: EUPL-1.2
 
-// Package telemetry samples the local lthn process and surfaces the
-// readings as a Reading struct. Drives the watts + memory readouts in
-// the tray popover and live-telemetry window.
+// Package telemetry samples both the local lthn process and the host system.
+// Process Reading values drive the tray diagnostics. HostSnapshot values are
+// bounded, renderer-safe system-monitor readings for Control and Telemetry.
 //
 // Today: portable subset — RSS via runtime.MemStats, goroutine + CGO
 // counts, uptime. macOS power sampling (Active/Idle wattage) needs
 // powermetrics or IOReport; that wires later via an XPC helper. The
-// Reading shape is stable so callers don't need to change when power
-// figures fill in.
+// The Reading shape is stable so tray callers don't need to change when power
+// figures fill in. Host metrics unsupported by a platform are omitted instead
+// of being replaced by process data or demo values.
 //
 // Usage example:
 //
@@ -89,6 +90,7 @@ type Options struct {
 // services can poll without importing this package directly.
 type Service struct {
 	opts Options
+	host *hostSampler
 }
 
 // NewService constructs the telemetry service.
@@ -98,7 +100,10 @@ type Service struct {
 //	t := telemetry.NewService(telemetry.Options{})
 //	t.Register(c)
 func NewService(opts Options) *Service {
-	return &Service{opts: opts}
+	return &Service{
+		opts: opts,
+		host: newHostSampler(newPlatformHostSource()),
+	}
 }
 
 // Register wires telemetry.sample onto the Core action bus.
@@ -116,7 +121,10 @@ func (s *Service) Register(c *core.Core) core.Result {
 	c.Action("telemetry.sample", func(_ core.Context, _ core.Options) core.Result {
 		return Sample()
 	})
-	return core.Ok(nil)
+	c.Action("telemetry.host", func(_ core.Context, _ core.Options) core.Result {
+		return s.CurrentHostSnapshot()
+	})
+	return core.Ok(s)
 }
 
 // Register constructs a default telemetry Service and wires it into
@@ -135,14 +143,14 @@ func Register(c *core.Core) core.Result {
 //
 // Implements application.Service so Wails generates a TS binding
 // at frontend/bindings/dappco.re/lthn/desktop/pkg/telemetry/service.ts.
-// The Sample method below is what the WebView calls; the package-level
-// Sample()  / Core action above stay for non-WebView callers.
+// The methods below are what the WebView calls; the package-level Sample()
+// and Core actions above stay available for non-WebView callers.
 
 // ServiceName labels the binding namespace exposed to JS.
 func (s *Service) ServiceName() string { return "Telemetry" }
 
-// ServiceStartup runs at app boot. No-op today; reserved for the
-// powermetrics / IOReport / XPC helper handshake when that lands.
+// ServiceStartup runs at app boot. Sampling remains demand-driven, so opening
+// the application does not start a background monitor.
 func (s *Service) ServiceStartup(_ core.Context, _ any) core.Result {
 	return core.Ok(nil)
 }
@@ -170,4 +178,27 @@ func (s *Service) CurrentSample() core.Result {
 		return core.Fail(core.NewError("telemetry: Sample returned unexpected value type"))
 	}
 	return core.Ok(reading)
+}
+
+// CurrentHostSnapshot returns one bounded host-wide system-monitor reading.
+// Metrics unsupported by the active platform source are omitted rather than
+// replaced with process readings or demo values.
+//
+// Usage example (from TS):
+//
+//	const r = await Call.ByName("dappco.re/lthn/desktop/pkg/telemetry.Service.CurrentHostSnapshot");
+//	console.log(r.cpu.logical_cores);
+func (s *Service) CurrentHostSnapshot() core.Result {
+	if s == nil || s.host == nil {
+		return core.Fail(core.NewError("telemetry: host sampler is unavailable"))
+	}
+	snapshot, err := s.host.sample()
+	if err != nil {
+		return core.Fail(core.E(
+			"telemetry.Service.CurrentHostSnapshot",
+			"sample host telemetry failed",
+			err,
+		))
+	}
+	return core.Ok(snapshot)
 }

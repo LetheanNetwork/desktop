@@ -9,12 +9,21 @@ import {
   selectHasDirtyDesktopControls,
 } from '../../store/desktop-controls.reducer';
 import { ConnectionManagerService } from '../../connection-manager.service';
-import { createDemoResource, type DesktopDataResource } from '../desktop-data-resource';
+import {
+  beginDesktopDataRefresh,
+  createConnectedResource,
+  createDemoResource,
+  resolveDesktopData,
+  type DesktopDataResource,
+} from '../desktop-data-resource';
 import { DesktopLiveDataService } from '../desktop-live-data.service';
 import { createDemoModelRuntimeSnapshot } from '../desktop-model-runtime-demo.data';
 import type { ModelRuntimeOperation, ModelRuntimeSnapshot } from '../desktop-model-runtime.models';
 import { DesktopModelRuntimeResource } from '../desktop-model-runtime-resource.service';
 import { DesktopServicesBridgeService } from '../desktop-services-bridge.service';
+import { SYSTEM_MONITOR_DEMO_SNAPSHOT } from '../desktop-system-monitor-demo.data';
+import type { SystemMonitorSnapshot } from '../desktop-system-monitor.models';
+import { DesktopSystemMonitorResource } from '../desktop-system-monitor-resource.service';
 import type { Win } from '../desktop.data';
 import { WindowManagerService } from '../window-manager.service';
 import { APP_REGISTRY } from './app-view';
@@ -82,6 +91,15 @@ describe('ControlApp', () => {
     connect: vi.fn(),
     perform: vi.fn<(operation: ModelRuntimeOperation) => Promise<void>>(),
   };
+  const systemMonitorState = signal<DesktopDataResource<SystemMonitorSnapshot>>(
+    createDemoResource(SYSTEM_MONITOR_DEMO_SNAPSHOT, 'Lethean demo fixture · Host system'),
+  );
+  let systemMonitorDisconnect = vi.fn();
+  const systemMonitor = {
+    resource: systemMonitorState.asReadonly(),
+    connect: vi.fn(),
+    refresh: vi.fn<() => Promise<void>>(),
+  };
   let servicesChanged: ((event: DesktopServicesChangedEvent) => void) | null = null;
   let servicesOff = vi.fn();
   const servicesBridge = {
@@ -100,6 +118,7 @@ describe('ControlApp', () => {
     servicesChanged = null;
     servicesOff = vi.fn();
     modelRuntimeDisconnect = vi.fn();
+    systemMonitorDisconnect = vi.fn();
     vi.clearAllMocks();
     modelRuntimeState.set(
       createDemoResource(createDemoModelRuntimeSnapshot(), 'Lethean demo fixture · Model runtime'),
@@ -107,6 +126,11 @@ describe('ControlApp', () => {
     modelRuntimePending.set(null);
     modelRuntime.connect.mockReturnValue(modelRuntimeDisconnect);
     modelRuntime.perform.mockResolvedValue();
+    systemMonitorState.set(
+      createDemoResource(SYSTEM_MONITOR_DEMO_SNAPSHOT, 'Lethean demo fixture · Host system'),
+    );
+    systemMonitor.connect.mockReturnValue(systemMonitorDisconnect);
+    systemMonitor.refresh.mockResolvedValue();
     servicesBridge.catalogue.mockResolvedValue(serviceCatalogue('stopped'));
     servicesBridge.onChanged.mockImplementation(
       (handler: (event: DesktopServicesChangedEvent) => void) => {
@@ -118,6 +142,7 @@ describe('ControlApp', () => {
       providers: [
         { provide: DesktopLiveDataService, useValue: liveData },
         { provide: DesktopModelRuntimeResource, useValue: modelRuntime },
+        { provide: DesktopSystemMonitorResource, useValue: systemMonitor },
         { provide: DesktopServicesBridgeService, useValue: servicesBridge },
         { provide: WindowManagerService, useValue: windowManager },
         { provide: ConnectionManagerService, useValue: { offline: () => mode() === 'demo' } },
@@ -141,6 +166,9 @@ describe('ControlApp', () => {
   afterEach(() => TestBed.resetTestingModule());
 
   async function create(win: Win = controlWin) {
+    if (mode() === 'live' && systemMonitorState().mode === 'demo') {
+      systemMonitorState.set(createConnectedResource<SystemMonitorSnapshot>('Local host system'));
+    }
     const fixture = TestBed.createComponent(ControlApp);
     fixture.componentRef.setInput('win', { ...win });
     fixture.detectChanges();
@@ -159,6 +187,19 @@ describe('ControlApp', () => {
       canRetry: false,
       value: snapshot,
     });
+  }
+
+  function setLiveSystemMonitor(snapshot: SystemMonitorSnapshot): void {
+    const loading = createConnectedResource<SystemMonitorSnapshot>('Local host system');
+    systemMonitorState.set(
+      resolveDesktopData(
+        beginDesktopDataRefresh(loading, Date.now(), 10_000),
+        snapshot,
+        'live',
+        snapshot.source,
+        Date.parse(snapshot.observedAt),
+      ),
+    );
   }
 
   it('keeps the complete Control prototype available without live calls in demo mode', async () => {
@@ -209,7 +250,7 @@ describe('ControlApp', () => {
   it('loads live services, performs Start, then refreshes the canonical catalogue', async () => {
     mode.set('live');
     liveData.control.mockResolvedValue({
-      unavailable: ['telemetry', 'benchmarkRuns', 'processes'],
+      unavailable: ['benchmarkRuns', 'processes'],
     });
     servicesBridge.catalogue
       .mockResolvedValueOnce(serviceCatalogue('stopped'))
@@ -234,7 +275,7 @@ describe('ControlApp', () => {
   it('retains stale services after a failed event refresh and tears down events', async () => {
     mode.set('live');
     liveData.control.mockResolvedValue({
-      unavailable: ['telemetry', 'benchmarkRuns', 'processes'],
+      unavailable: ['benchmarkRuns', 'processes'],
     });
     servicesBridge.catalogue.mockResolvedValueOnce(serviceCatalogue('running'));
     const fixture = await create({ ...controlWin, sub: 'system', systab: 'daemons' });
@@ -263,7 +304,7 @@ describe('ControlApp', () => {
   it('loads bounded output only after the explicit Output action', async () => {
     mode.set('live');
     liveData.control.mockResolvedValue({
-      unavailable: ['telemetry', 'benchmarkRuns', 'processes'],
+      unavailable: ['benchmarkRuns', 'processes'],
     });
     servicesBridge.catalogue.mockResolvedValueOnce(serviceCatalogue('running'));
     servicesBridge.output.mockResolvedValue({
@@ -311,18 +352,6 @@ describe('ControlApp', () => {
     };
     setLiveModelRuntime(runtimeSnapshot);
     liveData.control.mockResolvedValue({
-      telemetry: {
-        heapAllocMB: 64,
-        heapSysMB: 96,
-        stackInUseMB: 2,
-        numGoroutines: 12,
-        numCgoCalls: 3,
-        uptimeSeconds: 600,
-        numGC: 4,
-        lastGCPauseMs: 0.2,
-        wattsActive: 0,
-        wattsIdle: 0,
-      },
       benchmarkRuns: [
         {
           id: '01J2BENCH',
@@ -386,7 +415,7 @@ describe('ControlApp', () => {
     mode.set('live');
     setLiveModelRuntime(createDemoModelRuntimeSnapshot('model-less'));
     liveData.control.mockResolvedValue({
-      unavailable: ['telemetry', 'benchmarkRuns', 'processes'],
+      unavailable: ['benchmarkRuns', 'processes'],
     });
     const fixture = await create();
     const element = fixture.nativeElement as HTMLElement;
@@ -410,6 +439,7 @@ describe('ControlApp', () => {
     fixture.destroy();
 
     expect(modelRuntimeDisconnect).toHaveBeenCalledOnce();
+    expect(systemMonitorDisconnect).toHaveBeenCalledOnce();
   });
 
   it('maps benchmark history into the existing runs chart and table', async () => {
@@ -431,7 +461,7 @@ describe('ControlApp', () => {
           endpoint: '',
         },
       ],
-      unavailable: ['telemetry', 'processes'],
+      unavailable: ['processes'],
     });
 
     const fixture = await create({ ...controlWin, sub: 'runs' });
@@ -467,7 +497,7 @@ describe('ControlApp', () => {
           exitCode: 0,
         },
       ],
-      unavailable: ['telemetry', 'benchmarkRuns'],
+      unavailable: ['benchmarkRuns'],
     });
 
     const fixture = await create({ ...controlWin, sub: 'system', systab: 'processes' });
@@ -495,7 +525,7 @@ describe('ControlApp', () => {
   it('renders the shared NgRx settings catalogue without aggregate appconfig data', async () => {
     mode.set('live');
     liveData.control.mockResolvedValue({
-      unavailable: ['telemetry', 'benchmarkRuns', 'processes'],
+      unavailable: ['benchmarkRuns', 'processes'],
     });
 
     const fixture = await create({ ...controlWin, sub: 'settings' });
@@ -510,58 +540,37 @@ describe('ControlApp', () => {
     ).toBe('1280');
   });
 
-  it('uses process telemetry for the live System overview cards', async () => {
+  it('uses the shared host resource for the live System overview cards', async () => {
     mode.set('live');
+    setLiveSystemMonitor({
+      ...SYSTEM_MONITOR_DEMO_SNAPSHOT,
+      source: 'macOS host APIs',
+      cpu: { logicalCores: 10, usagePercent: 37.5 },
+      cpuHistory: [24, 31, 38],
+    });
     liveData.control.mockResolvedValue({
-      telemetry: {
-        heapAllocMB: 64,
-        heapSysMB: 96,
-        stackInUseMB: 2,
-        numGoroutines: 12,
-        numCgoCalls: 3,
-        uptimeSeconds: 600,
-        numGC: 4,
-        lastGCPauseMs: 0.2,
-        wattsActive: 0,
-        wattsIdle: 0,
-      },
-      benchmarkRuns: [
-        {
-          id: '01J2BENCH',
-          timestamp: '2026-07-26T08:41:00+01:00',
-          bencher: 'lthn-mlx',
-          model: 'gemma-4-e2b',
-          contextLength: 8_192,
-          promptTokensPerSecond: 2_040.5,
-          generatedTokensPerSecond: 48.25,
-          promptLength: 1_900,
-          outputLength: 256,
-          peakWatts: 12.5,
-          peakMemoryMB: 2_400,
-          endpoint: '',
-        },
-      ],
       unavailable: ['benchmarkRuns', 'processes'],
     });
 
     const fixture = await create({ ...controlWin, sub: 'system', systab: 'overview' });
     await vi.waitFor(() => {
       fixture.detectChanges();
-      expect((fixture.nativeElement as HTMLElement).textContent).toContain('Live + demo');
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('macOS host APIs');
     });
     const stats = [...(fixture.nativeElement as HTMLElement).querySelectorAll('lthn-stat')];
 
-    expect(stats.map((stat) => stat.getAttribute('value'))).toEqual(['64 MB', '96 MB', '12', '4']);
-    expect(stats.map((stat) => stat.getAttribute('label'))).toEqual([
-      'Process heap',
-      'Reserved heap',
-      'Goroutines',
-      'GC cycles',
+    expect(stats.map((stat) => stat.getAttribute('value'))).toEqual([
+      '38%',
+      '18.4 / 32 GB',
+      '294 / 512 GB',
+      '5.2 MB/s ↓ · 1.1 MB/s ↑',
+      '81%',
+      'AC',
     ]);
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain('CPU · demo history');
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('CPU · recent samples');
     expect(
       (fixture.nativeElement as HTMLElement).querySelector('lthn-chart')?.getAttribute('data'),
-    ).not.toBe('[48.25]');
+    ).toBe('[24,31,38]');
   });
 });
 

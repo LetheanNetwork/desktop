@@ -51,7 +51,7 @@ export const APPS: Record<string, AppDef> = {
     icon: 'wave-square',
     w: 660,
     h: 400,
-    hint: $localize`:Application launcher hint@@app.telemetry.hint:Process telemetry · power demo`,
+    hint: $localize`:Application launcher hint@@app.telemetry.hint:Host system · model runtime`,
   },
   activity: {
     id: 'activity',

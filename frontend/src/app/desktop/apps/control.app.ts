@@ -30,6 +30,7 @@ import type { DesktopDataState } from '../desktop-data-state';
 import { DesktopLiveDataService } from '../desktop-live-data.service';
 import { DesktopModelRuntimeResource } from '../desktop-model-runtime-resource.service';
 import { DesktopServicesBridgeService } from '../desktop-services-bridge.service';
+import { DesktopSystemMonitorResource } from '../desktop-system-monitor-resource.service';
 import { WindowManagerService } from '../window-manager.service';
 import { ControlModelsView } from './control/control-models.view';
 import { ControlPowerView } from './control/control-power.view';
@@ -48,6 +49,7 @@ import {
   createDemoControlViewState,
   mergeControlLiveSnapshot,
   mergeControlModelRuntime,
+  mergeControlSystemMonitor,
 } from './control/control-view-state';
 import type {
   ControlActionIntent,
@@ -110,15 +112,17 @@ const SERVICES_STALE_AFTER_MS = 30_000;
         }
         @case ('system') {
           <lthn-control-system-view
-            [dataState]="viewState().dataState"
-            [model]="viewState().system"
+            [dataState]="systemDataState()"
+            [model]="systemView()"
             [activeTab]="systemTab()"
+            [systemResource]="systemMonitorResource()"
             [services]="servicesResource()"
             [pendingServiceIds]="pendingServiceIds()"
             [serviceOutput]="serviceOutput()"
             (tabChange)="wm.setSysTab(win.id, $event)"
             (serviceAction)="handleServiceAction($event)"
             (servicesRetry)="retryServices()"
+            (systemRetry)="systemMonitor.refresh()"
           />
         }
         @case ('settings') {
@@ -136,6 +140,7 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
   private readonly liveData = inject(DesktopLiveDataService);
   private readonly modelRuntime = inject(DesktopModelRuntimeResource);
   private readonly servicesBridge = inject(DesktopServicesBridgeService);
+  readonly systemMonitor = inject(DesktopSystemMonitorResource);
   private readonly pendingTasks = inject(PendingTasks);
   private readonly mcpTools = this.registerMcpTools();
   private readonly baseViewState = signal<ControlViewState>({
@@ -144,6 +149,7 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
   });
   readonly modelRuntimeResource = this.modelRuntime.resource;
   readonly modelRuntimePending = this.modelRuntime.pending;
+  readonly systemMonitorResource = this.systemMonitor.resource;
   readonly viewState = computed(() => {
     const resource = this.modelRuntimeResource();
     return mergeControlModelRuntime(
@@ -167,6 +173,9 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
         return 'unavailable';
     }
   });
+  readonly systemView = computed(() =>
+    mergeControlSystemMonitor(this.viewState().system, this.systemMonitorResource()),
+  );
   readonly servicesResource = signal<DesktopDataResource<DesktopServiceCatalogue>>(
     createDemoResource(createDemoServiceCatalogue(), SERVICES_DEMO_SOURCE),
   );
@@ -177,10 +186,12 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
   private servicesRefresh: Promise<void> | null = null;
   private servicesRefreshQueued = false;
   private modelRuntimeDisconnect: (() => void) | null = null;
+  private systemMonitorDisconnect: (() => void) | null = null;
   private destroyed = false;
 
   ngOnInit(): void {
     this.modelRuntimeDisconnect = this.modelRuntime.connect();
+    this.systemMonitorDisconnect = this.systemMonitor.connect();
     if (this.liveData.mode() === 'demo') return;
     void this.refresh();
     this.servicesResource.set(
@@ -198,6 +209,8 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
     this.servicesEventsOff = null;
     this.modelRuntimeDisconnect?.();
     this.modelRuntimeDisconnect = null;
+    this.systemMonitorDisconnect?.();
+    this.systemMonitorDisconnect = null;
   }
 
   async refresh(): Promise<void> {
@@ -219,6 +232,12 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
   systemTab(): ControlSystemTab {
     const tab = this.win.systab;
     return tab === 'processes' || tab === 'daemons' ? tab : 'overview';
+  }
+
+  systemDataState(): DesktopDataState {
+    return this.systemTab() === 'overview'
+      ? this.systemMonitorResource().state
+      : this.viewState().dataState;
   }
 
   handleAction(_intent: ControlActionIntent): void {

@@ -2,12 +2,23 @@
 
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { createDemoResource, type DesktopDataResource } from '../desktop-data-resource';
-import type { ProcessTelemetry } from '../desktop-live-data.service';
-import { DesktopLiveDataService } from '../desktop-live-data.service';
+import {
+  beginDesktopDataRefresh,
+  createConnectedResource,
+  createDemoResource,
+  rejectDesktopData,
+  resolveDesktopData,
+  type DesktopDataResource,
+} from '../desktop-data-resource';
 import { createDemoModelRuntimeSnapshot } from '../desktop-model-runtime-demo.data';
-import type { ModelRuntimeOperation, ModelRuntimeSnapshot } from '../desktop-model-runtime.models';
+import type { ModelRuntimeSnapshot } from '../desktop-model-runtime.models';
 import { DesktopModelRuntimeResource } from '../desktop-model-runtime-resource.service';
+import {
+  SYSTEM_MONITOR_DEMO_SNAPSHOT,
+  SYSTEM_MONITOR_DEMO_SOURCE,
+} from '../desktop-system-monitor-demo.data';
+import type { SystemMonitorSnapshot } from '../desktop-system-monitor.models';
+import { DesktopSystemMonitorResource } from '../desktop-system-monitor-resource.service';
 import type { Win } from '../desktop.data';
 import { TelemetryApp } from './telemetry.app';
 
@@ -24,315 +35,161 @@ const telemetryWin: Win = {
   max: false,
 };
 
-const SAMPLE: ProcessTelemetry = {
-  heapAllocMB: 128.25,
-  heapSysMB: 192.5,
-  stackInUseMB: 4.75,
-  numGoroutines: 42,
-  numCgoCalls: 7,
-  uptimeSeconds: 9_061,
-  numGC: 18,
-  lastGCPauseMs: 0.43,
-  wattsActive: 0,
-  wattsIdle: 0,
-};
-
 describe('TelemetryApp', () => {
-  const mode = signal<'demo' | 'live'>('demo');
-  const liveData = {
-    mode: mode.asReadonly(),
-    telemetry: vi.fn<() => Promise<ProcessTelemetry>>(),
-  };
-  const modelRuntimeState = signal<DesktopDataResource<ModelRuntimeSnapshot>>(
-    createDemoResource(createDemoModelRuntimeSnapshot(), 'Lethean demo fixture · Model runtime'),
+  const systemState = signal<DesktopDataResource<SystemMonitorSnapshot>>(
+    createDemoResource(SYSTEM_MONITOR_DEMO_SNAPSHOT, SYSTEM_MONITOR_DEMO_SOURCE),
   );
-  const modelRuntimePending = signal<ModelRuntimeOperation | null>(null);
-  let modelRuntimeDisconnect = vi.fn();
-  const modelRuntime = {
-    resource: modelRuntimeState.asReadonly(),
-    pending: modelRuntimePending.asReadonly(),
+  let systemDisconnect = vi.fn();
+  const systemMonitor = {
+    resource: systemState.asReadonly(),
     connect: vi.fn(),
-    perform: vi.fn<(operation: ModelRuntimeOperation) => Promise<void>>(),
+    refresh: vi.fn<() => Promise<void>>(),
+  };
+  const modelState = signal<DesktopDataResource<ModelRuntimeSnapshot>>(
+    createDemoResource(createDemoModelRuntimeSnapshot('ready'), 'Lethean demo fixture'),
+  );
+  let modelDisconnect = vi.fn();
+  const modelRuntime = {
+    resource: modelState.asReadonly(),
+    connect: vi.fn(),
   };
 
   beforeEach(() => {
-    mode.set('demo');
-    liveData.telemetry.mockReset();
-    modelRuntimeDisconnect = vi.fn();
-    modelRuntimeState.set(
-      createDemoResource(createDemoModelRuntimeSnapshot(), 'Lethean demo fixture · Model runtime'),
+    vi.clearAllMocks();
+    systemDisconnect = vi.fn();
+    modelDisconnect = vi.fn();
+    systemState.set(createDemoResource(SYSTEM_MONITOR_DEMO_SNAPSHOT, SYSTEM_MONITOR_DEMO_SOURCE));
+    modelState.set(
+      createDemoResource(createDemoModelRuntimeSnapshot('ready'), 'Lethean demo fixture'),
     );
-    modelRuntimePending.set(null);
-    modelRuntime.connect.mockReset();
-    modelRuntime.connect.mockReturnValue(modelRuntimeDisconnect);
-    modelRuntime.perform.mockReset();
+    systemMonitor.connect.mockReturnValue(systemDisconnect);
+    systemMonitor.refresh.mockResolvedValue();
+    modelRuntime.connect.mockReturnValue(modelDisconnect);
     TestBed.configureTestingModule({
       providers: [
-        { provide: DesktopLiveDataService, useValue: liveData },
+        { provide: DesktopSystemMonitorResource, useValue: systemMonitor },
         { provide: DesktopModelRuntimeResource, useValue: modelRuntime },
       ],
     });
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-    TestBed.resetTestingModule();
-  });
+  afterEach(() => TestBed.resetTestingModule());
 
   function create() {
-    if (mode() === 'live' && modelRuntimeState().mode === 'demo') {
-      setLiveModelRuntime(createDemoModelRuntimeSnapshot('model-less'));
-    }
     const fixture = TestBed.createComponent(TelemetryApp);
     fixture.componentRef.setInput('win', telemetryWin);
-    fixture.detectChanges();
     return fixture;
   }
 
-  function setLiveModelRuntime(snapshot: ModelRuntimeSnapshot): void {
-    modelRuntimeState.set({
-      mode: 'connected',
-      state: 'live',
-      source: 'Local LEM runtime',
-      updatedAt: Date.parse(snapshot.refreshedAt),
-      refreshing: false,
-      error: null,
-      canRetry: false,
-      value: snapshot,
-    });
-  }
-
-  it('renders deterministic labelled demo data without a live read', () => {
+  it('renders deterministic labelled host demo data from the shared resource', async () => {
     const fixture = create();
-    const text = fixture.nativeElement.textContent;
+    await fixture.whenStable();
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
 
-    expect(fixture.componentInstance.resource().state).toBe('demo');
     expect(text).toContain('Demo data');
-    expect(text).toContain('Lethean demo fixture');
-    expect(text).toContain('41.8');
-    expect(text).toContain('llama-3.1-70b');
-    expect(liveData.telemetry).not.toHaveBeenCalled();
+    expect(text).toContain(SYSTEM_MONITOR_DEMO_SOURCE);
+    expect(text).toContain('CPU utilisation');
+    expect(text).toContain('34');
+    expect(text).toContain('Memory used');
+    expect(text).toContain('58');
+    expect(text).toContain('gemma-4-e2b');
+    expect(systemMonitor.connect).toHaveBeenCalledOnce();
     expect(modelRuntime.connect).toHaveBeenCalledOnce();
   });
 
-  it('starts connected with loading placeholders and no fixture substitution', () => {
-    mode.set('live');
-    liveData.telemetry.mockReturnValue(new Promise(() => undefined));
+  it('shows loading placeholders without substituting host or AI fixtures', async () => {
+    systemState.set(createConnectedResource<SystemMonitorSnapshot>('Local host system'));
+    modelState.set(createConnectedResource<ModelRuntimeSnapshot>('Local model runtime'));
     const fixture = create();
-    const text = fixture.nativeElement.textContent;
+    await fixture.whenStable();
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
 
-    expect(fixture.componentInstance.resource()).toMatchObject({
-      mode: 'connected',
-      state: 'loading',
-      refreshing: true,
-      value: null,
-    });
     expect(text).toContain('Loading live data');
-    expect(text).not.toContain('41.8');
-    expect(text).not.toContain('207');
-    expect(text).not.toContain('llama-3.1-70b');
+    expect(text).not.toContain('34');
+    expect(text).not.toContain('58');
+    expect(text).not.toContain('gemma-4-e2b');
   });
 
-  it('renders unsupported connected metrics as unavailable without fixture substitution', async () => {
-    mode.set('live');
-    liveData.telemetry.mockResolvedValue(SAMPLE);
-    const fixture = create();
-
-    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('live'));
-    fixture.detectChanges();
-    const text = fixture.nativeElement.textContent;
-
-    expect(text).toContain('Live data');
-    expect(text).toContain('Local process runtime');
-    expect(text).toContain('Throughput');
-    expect(text).toContain('Power draw');
-    expect(text).toContain('Model —');
-    expect(text).toContain('Memory —');
-    expect(text).toContain('Uptime 2h 31m');
-    expect(text).not.toContain('41.8');
-    expect(text).not.toContain('207');
-    expect(fixture.componentInstance.resource().updatedAt).not.toBeNull();
-  });
-
-  it('reacts to the same shared runtime snapshot without another process read', async () => {
-    mode.set('live');
-    setLiveModelRuntime(createDemoModelRuntimeSnapshot('model-less'));
-    liveData.telemetry.mockResolvedValue(SAMPLE);
-    const fixture = create();
-    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('live'));
-    liveData.telemetry.mockClear();
-    const ready = createDemoModelRuntimeSnapshot('ready');
-
-    setLiveModelRuntime(ready);
-    fixture.detectChanges();
-
-    expect(fixture.componentInstance.modelRuntimeResource().value).toBe(ready);
-    expect(fixture.nativeElement.textContent).toContain('gemma-4-e2b');
-    expect(fixture.nativeElement.textContent).toContain('41.8');
-    expect(liveData.telemetry).not.toHaveBeenCalled();
-  });
-
-  it('renders positive native power as wholly live', async () => {
-    mode.set('live');
-    liveData.telemetry.mockResolvedValue({ ...SAMPLE, wattsActive: 220.4 });
-    const fixture = create();
-
-    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('live'));
-    fixture.detectChanges();
-
-    expect(fixture.nativeElement.textContent).toContain('Live data');
-    expect(fixture.nativeElement.textContent).toContain('220');
-    expect(fixture.nativeElement.textContent).not.toContain('Power draw · demo');
-  });
-
-  it('makes a first failure unavailable without showing fixtures or raw errors', async () => {
-    mode.set('live');
-    liveData.telemetry.mockRejectedValue(new Error('socket secret detail'));
-    const fixture = create();
-
-    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('unavailable'));
-    fixture.detectChanges();
-    const text = fixture.nativeElement.textContent;
-
-    expect(text).toContain('Live telemetry is unavailable.');
-    expect(text).not.toContain('socket secret detail');
-    expect(text).not.toContain('41.8');
-    expect(text).not.toContain('207');
-    expect(fixture.componentInstance.resource().value).toBeNull();
-  });
-
-  it('retains the last successful sample and charts as stale after a later failure', async () => {
-    mode.set('live');
-    liveData.telemetry.mockResolvedValueOnce(SAMPLE);
-    const fixture = create();
-    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('live'));
-    const successful = fixture.componentInstance.resource();
-
-    liveData.telemetry.mockRejectedValueOnce(new Error('connection dropped'));
-    await fixture.componentInstance.refresh();
-    fixture.detectChanges();
-
-    expect(fixture.componentInstance.resource()).toMatchObject({
-      state: 'stale',
-      updatedAt: successful.updatedAt,
-      value: successful.value,
-      canRetry: true,
-    });
-    expect(fixture.nativeElement.textContent).toContain('Throughput');
-    expect(fixture.nativeElement.textContent).toContain('Live telemetry is unavailable.');
-  });
-
-  it('routes the status Retry action through the same refresh path', async () => {
-    mode.set('live');
-    liveData.telemetry.mockRejectedValueOnce(new Error('offline'));
-    const fixture = create();
-    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('unavailable'));
-    liveData.telemetry.mockResolvedValueOnce(SAMPLE);
-    fixture.detectChanges();
-
-    fixture.nativeElement.querySelector('button[data-action="retry"]').click();
-
-    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('live'));
-    expect(liveData.telemetry).toHaveBeenCalledTimes(2);
-  });
-
-  it('recovers stale data without resetting its successful history', async () => {
-    mode.set('live');
-    liveData.telemetry
-      .mockResolvedValueOnce({ ...SAMPLE, wattsActive: 200 })
-      .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValueOnce({ ...SAMPLE, wattsActive: 230 });
-    const fixture = create();
-    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('live'));
-
-    await fixture.componentInstance.refresh();
-    expect(fixture.componentInstance.resource().state).toBe('stale');
-    await fixture.componentInstance.refresh();
-
-    expect(fixture.componentInstance.resource()).toMatchObject({
-      state: 'live',
-      error: null,
-      canRetry: false,
-    });
-    expect(fixture.componentInstance.resource().value?.power.history).toEqual([200, 230]);
-  });
-
-  it('skips an overlapping manual refresh', async () => {
-    mode.set('live');
-    let resolve!: (sample: ProcessTelemetry) => void;
-    liveData.telemetry.mockReturnValue(
-      new Promise<ProcessTelemetry>((accept) => {
-        resolve = accept;
-      }),
+  it('reacts to the same live host and model snapshots used by Control', async () => {
+    const host: SystemMonitorSnapshot = {
+      ...SYSTEM_MONITOR_DEMO_SNAPSHOT,
+      source: 'macOS host APIs',
+      cpu: { logicalCores: 10, usagePercent: 37.5 },
+      memory: { totalBytes: 32 * 1_024 ** 3, usedBytes: 16 * 1_024 ** 3 },
+      cpuHistory: [30, 35, 37.5],
+      memoryHistory: [48, 49, 50],
+    };
+    const hostLoading = createConnectedResource<SystemMonitorSnapshot>('Local host system');
+    systemState.set(
+      resolveDesktopData(
+        beginDesktopDataRefresh(hostLoading, Date.now(), 10_000),
+        host,
+        'live',
+        host.source,
+        Date.parse(host.observedAt),
+      ),
     );
-    const fixture = create();
-
-    void fixture.componentInstance.refresh();
-    expect(liveData.telemetry).toHaveBeenCalledOnce();
-
-    resolve(SAMPLE);
-    await vi.waitFor(() => expect(fixture.componentInstance.resource().state).toBe('live'));
-  });
-
-  it('polls every five seconds and stops polling when destroyed', async () => {
-    vi.useFakeTimers();
-    mode.set('live');
-    liveData.telemetry.mockResolvedValue(SAMPLE);
-    const fixture = create();
-
-    await vi.advanceTimersByTimeAsync(0);
-    expect(liveData.telemetry).toHaveBeenCalledOnce();
-
-    liveData.telemetry.mockClear();
-    await vi.advanceTimersByTimeAsync(4_999);
-    expect(liveData.telemetry).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
-    expect(liveData.telemetry).toHaveBeenCalledOnce();
-
-    fixture.destroy();
-    liveData.telemetry.mockClear();
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(liveData.telemetry).not.toHaveBeenCalled();
-  });
-
-  it('does not create a polling timer in demo mode', () => {
-    vi.useFakeTimers();
-    const setInterval = vi.spyOn(window, 'setInterval');
-    const fixture = create();
-
-    vi.advanceTimersByTime(15_000);
-
-    expect(setInterval).not.toHaveBeenCalled();
-    expect(liveData.telemetry).not.toHaveBeenCalled();
-    fixture.destroy();
-  });
-
-  it('disconnects its shared runtime consumer when the Telemetry window closes', () => {
-    const fixture = create();
-
-    fixture.destroy();
-
-    expect(modelRuntimeDisconnect).toHaveBeenCalledOnce();
-  });
-
-  it('ignores a live result that settles after destruction', async () => {
-    mode.set('live');
-    let resolve!: (sample: ProcessTelemetry) => void;
-    liveData.telemetry.mockReturnValue(
-      new Promise<ProcessTelemetry>((accept) => {
-        resolve = accept;
-      }),
+    const runtime = createDemoModelRuntimeSnapshot('ready');
+    const modelLoading = createConnectedResource<ModelRuntimeSnapshot>('Local model runtime');
+    modelState.set(
+      resolveDesktopData(
+        beginDesktopDataRefresh(modelLoading, Date.now(), 10_000),
+        runtime,
+        'live',
+        'Local model runtime',
+        Date.now(),
+      ),
     );
+
     const fixture = create();
-    const resourceAtDestroy = fixture.componentInstance.resource();
+    await fixture.whenStable();
+    const element = fixture.nativeElement as HTMLElement;
+
+    expect(element.textContent).toContain('Live data');
+    expect(element.textContent).toContain('macOS host APIs');
+    expect(element.textContent).toContain('CPU utilisation');
+    expect(element.textContent).toContain('38');
+    expect(element.textContent).toContain('Memory used');
+    expect(element.textContent).toContain('50');
+    expect(element.textContent).toContain('gemma-4-e2b');
+    expect(element.querySelectorAll('lthn-sparkline')[0].getAttribute('data')).toBe('[30,35,37.5]');
+  });
+
+  it('routes stale-data Retry through the shared resource', async () => {
+    const loading = beginDesktopDataRefresh(
+      createConnectedResource<SystemMonitorSnapshot>('Local host system'),
+      Date.now(),
+      10_000,
+    );
+    systemState.set(rejectDesktopData(loading, 'Live system information is unavailable.'));
+    const fixture = create();
+    await fixture.whenStable();
+
+    (fixture.nativeElement as HTMLElement)
+      .querySelector<HTMLButtonElement>('button[data-action="retry"]')
+      ?.click();
+    await fixture.whenStable();
+
+    expect(systemMonitor.refresh).toHaveBeenCalledOnce();
+  });
+
+  it('does not install its own polling timer', () => {
+    vi.useFakeTimers();
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const fixture = create();
+
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+    fixture.destroy();
+    vi.useRealTimers();
+  });
+
+  it('disconnects both shared resources when the window closes', async () => {
+    const fixture = create();
+    await fixture.whenStable();
 
     fixture.destroy();
-    resolve(SAMPLE);
-    await Promise.resolve();
-    await Promise.resolve();
 
-    expect(fixture.componentInstance.resource()).toBe(resourceAtDestroy);
-    expect(fixture.componentInstance.resource().value).toBeNull();
+    expect(systemDisconnect).toHaveBeenCalledOnce();
+    expect(modelDisconnect).toHaveBeenCalledOnce();
   });
 });

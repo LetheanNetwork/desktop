@@ -2,24 +2,10 @@ import { Injectable, computed, inject } from '@angular/core';
 import { ConnectionManagerService } from '../connection-manager.service';
 import { SurfaceBridgeService } from './surfaces/surface-bridge.service';
 
-const TELEMETRY_METHOD = 'dappco.re/lthn/desktop/pkg/telemetry.Service.CurrentSample';
 const BENCHMARK_HISTORY_METHOD = 'dappco.re/lthn/desktop/pkg/benchmark.Service.History';
 const PROCESS_LIST_METHOD = 'dappco.re/lthn/desktop/pkg/build.Service.ProcessList';
 
 export type DesktopDataMode = 'demo' | 'live';
-
-export interface ProcessTelemetry {
-  readonly heapAllocMB: number;
-  readonly heapSysMB: number;
-  readonly stackInUseMB: number;
-  readonly numGoroutines: number;
-  readonly numCgoCalls: number;
-  readonly uptimeSeconds: number;
-  readonly numGC: number;
-  readonly lastGCPauseMs: number;
-  readonly wattsActive: number;
-  readonly wattsIdle: number;
-}
 
 export interface BenchmarkRun {
   readonly id: string;
@@ -43,10 +29,9 @@ export interface DesktopProcess {
   readonly exitCode: number;
 }
 
-export type ControlDataSection = 'telemetry' | 'benchmarkRuns' | 'processes';
+export type ControlDataSection = 'benchmarkRuns' | 'processes';
 
 export interface ControlLiveSnapshot {
-  readonly telemetry?: ProcessTelemetry;
   readonly benchmarkRuns?: readonly BenchmarkRun[];
   readonly processes?: readonly DesktopProcess[];
   readonly unavailable: readonly ControlDataSection[];
@@ -58,11 +43,6 @@ export class DesktopLiveDataService {
   private readonly bridge = inject(SurfaceBridgeService);
 
   readonly mode = computed<DesktopDataMode>(() => (this.connection.offline() ? 'demo' : 'live'));
-
-  async telemetry(): Promise<ProcessTelemetry> {
-    this.requireLiveMode();
-    return parseTelemetry(await this.bridge.call(TELEMETRY_METHOD));
-  }
 
   async benchmarkRuns(limit = 20): Promise<readonly BenchmarkRun[]> {
     this.requireLiveMode();
@@ -94,11 +74,10 @@ export class DesktopLiveDataService {
   async control(): Promise<ControlLiveSnapshot> {
     this.requireLiveMode();
     const reads = await Promise.allSettled([
-      this.telemetry(),
       this.benchmarkRuns(20),
       this.processes(),
     ] as const);
-    const sectionNames: readonly ControlDataSection[] = ['telemetry', 'benchmarkRuns', 'processes'];
+    const sectionNames: readonly ControlDataSection[] = ['benchmarkRuns', 'processes'];
     const unavailable = reads.flatMap((result, index) =>
       result.status === 'rejected' ? [sectionNames[index]] : [],
     );
@@ -107,9 +86,8 @@ export class DesktopLiveDataService {
     }
 
     return {
-      ...fulfilledProperty('telemetry', reads[0]),
-      ...fulfilledProperty('benchmarkRuns', reads[1]),
-      ...fulfilledProperty('processes', reads[2]),
+      ...fulfilledProperty('benchmarkRuns', reads[0]),
+      ...fulfilledProperty('processes', reads[1]),
       unavailable,
     };
   }
@@ -126,22 +104,6 @@ function fulfilledProperty<Key extends string, Value>(
   result: PromiseSettledResult<Value>,
 ): Partial<Record<Key, Value>> {
   return result.status === 'fulfilled' ? ({ [key]: result.value } as Record<Key, Value>) : {};
-}
-
-function parseTelemetry(raw: unknown): ProcessTelemetry {
-  const record = requiredRecord(raw, 'process telemetry');
-  return {
-    heapAllocMB: requiredNumber(record, 'heap_alloc_mb', 'process telemetry'),
-    heapSysMB: requiredNumber(record, 'heap_sys_mb', 'process telemetry'),
-    stackInUseMB: requiredNumber(record, 'stack_in_use_mb', 'process telemetry'),
-    numGoroutines: requiredNumber(record, 'num_goroutines', 'process telemetry'),
-    numCgoCalls: requiredNumber(record, 'num_cgo_calls', 'process telemetry'),
-    uptimeSeconds: requiredNumber(record, 'uptime_seconds', 'process telemetry'),
-    numGC: requiredNumber(record, 'num_gc', 'process telemetry'),
-    lastGCPauseMs: requiredNumber(record, 'last_gc_pause_ms', 'process telemetry'),
-    wattsActive: requiredNumber(record, 'watts_active', 'process telemetry'),
-    wattsIdle: requiredNumber(record, 'watts_idle', 'process telemetry'),
-  };
 }
 
 function parseBenchmarkRun(raw: unknown): BenchmarkRun {

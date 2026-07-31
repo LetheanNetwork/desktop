@@ -58,6 +58,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/serverkey"
 	lthnservices "dappco.re/lthn/desktop/pkg/services"
 	"dappco.re/lthn/desktop/pkg/tasks"
+	"dappco.re/lthn/desktop/pkg/telemetry"
 	lthnupdate "dappco.re/lthn/desktop/pkg/update"
 	"dappco.re/lthn/desktop/pkg/vi"
 )
@@ -121,6 +122,10 @@ func newAppCore() *core.Core {
 		// operating-system state. Registration installs the entitlement
 		// checker but never prompts the host.
 		core.WithName("permissions", permissions.Register),
+		// telemetry — host and process observations shared by CLI, Core
+		// actions, and the Wails system monitor. Registration samples no
+		// background data and starts no process.
+		core.WithName("telemetry", telemetry.Register),
 		core.WithName("store", store.NewService(store.StoreConfig{
 			DatabasePath:            dbPath.Value.(string),
 			WorkspaceStateDirectory: workspace.Value.(string),

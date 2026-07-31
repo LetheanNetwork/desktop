@@ -39,36 +39,12 @@ describe('DesktopLiveDataService', () => {
     offline.set(true);
 
     expect(service.mode()).toBe('demo');
-    await expect(service.telemetry()).rejects.toThrow('Demo mode');
+    await expect(service.control()).rejects.toThrow('Demo mode');
     expect(surface.call).not.toHaveBeenCalled();
   });
 
-  it('normalises the complete process telemetry response', async () => {
-    surface.call.mockResolvedValue({
-      heap_alloc_mb: 128.25,
-      heap_sys_mb: 192.5,
-      stack_in_use_mb: 4.75,
-      num_goroutines: 42,
-      num_cgo_calls: 7,
-      uptime_seconds: 9_061,
-      num_gc: 18,
-      last_gc_pause_ms: 0.43,
-      watts_active: 0,
-      watts_idle: 0,
-    });
-
-    await expect(service.telemetry()).resolves.toEqual({
-      heapAllocMB: 128.25,
-      heapSysMB: 192.5,
-      stackInUseMB: 4.75,
-      numGoroutines: 42,
-      numCgoCalls: 7,
-      uptimeSeconds: 9_061,
-      numGC: 18,
-      lastGCPauseMs: 0.43,
-      wattsActive: 0,
-      wattsIdle: 0,
-    });
+  it('does not expose a second process-telemetry bridge beside the shared host resource', () => {
+    expect('telemetry' in service).toBe(false);
   });
 
   it('normalises recent benchmark history for Control charts and rows', async () => {
@@ -138,31 +114,19 @@ describe('DesktopLiveDataService', () => {
 
   it('keeps successful Control sections without duplicating the NgRx settings read', async () => {
     surface.call.mockImplementation(async (method: string) => {
-      if (method.endsWith('.CurrentSample')) {
-        return {
-          heap_alloc_mb: 64,
-          heap_sys_mb: 96,
-          stack_in_use_mb: 2,
-          num_goroutines: 12,
-          num_cgo_calls: 3,
-          uptime_seconds: 600,
-          num_gc: 4,
-          last_gc_pause_ms: 0.2,
-          watts_active: 0,
-          watts_idle: 0,
-        };
-      }
       if (method.endsWith('.History')) return [];
       if (method.endsWith('.ProcessList')) throw new Error('process registry offline');
       throw new Error(`Unexpected method: ${method}`);
     });
     const snapshot = await service.control();
 
-    expect(snapshot.telemetry?.heapAllocMB).toBe(64);
     expect(snapshot.benchmarkRuns).toEqual([]);
     expect('settings' in snapshot).toBe(false);
     expect(controls.settings).not.toHaveBeenCalled();
     expect(snapshot.processes).toBeUndefined();
     expect(snapshot.unavailable).toEqual(['processes']);
+    expect(surface.call).not.toHaveBeenCalledWith(
+      expect.stringContaining('.CurrentSample'),
+    );
   });
 });

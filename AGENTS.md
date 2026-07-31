@@ -157,8 +157,14 @@ version.
   model-runtime state machine. It coordinates the managed `inference`
   service, catalogue, credential, immutable snapshots, sampling, and explicit
   Start/Load/Unload/Restart/Stop operations.
-- `go/pkg/telemetry/`, `go/pkg/fleet/`, `go/pkg/marketplace/`, and the other
-  `go/pkg/*` directories — independently registered product services.
+- `go/pkg/telemetry/` — retains cheap process diagnostics for the tray and adds
+  a demand-driven host snapshot for Control and Telemetry. Darwin uses bounded
+  Mach, sysctl, getifaddrs, and IOPowerSources readings; unsupported platform
+  fields remain absent. Storage is not sampled here because provider-backed
+  capacity must stay behind the Files `io.Medium` boundary. The CLI exposes
+  one-shot `lthn telemetry sample` and `lthn telemetry host` JSON readings.
+- `go/pkg/fleet/`, `go/pkg/marketplace/`, and the other `go/pkg/*`
+  directories — independently registered product services.
 
 Add CLI verbs as flat `cmdX(args []string) int` handlers which delegate to
 `go/pkg/*`; do not put reusable capability into `cmd/lthn`.
@@ -207,6 +213,11 @@ Add CLI verbs as flat `cmdX(args []string) int` handlers which delegate to
   ref-counted shared ModelRuntime snapshot/event/poll resource used by Control
   and Telemetry, with deterministic in-memory lifecycle operations in offline
   demo mode.
+- `frontend/src/app/desktop/desktop-system-monitor-resource.service.ts` — the
+  shared RxJS host-monitor resource used by Control and Telemetry. It starts one
+  bounded poller only while a consumer is open, retains 180 in-memory samples,
+  derives storage only from provider-safe Files mount capacity, and supplies a
+  deterministic offline demo without Wails traffic.
 - `frontend/src/app/desktop/desktop-controls-bridge.service.ts` — selects the
   connected appconfig/Wails provider or the explicit offline provider. Its
   connected change stream validates only `lthn:desktop-controls:changed` and
@@ -332,6 +343,26 @@ npx ng test --watch=false \
   --include=src/app/desktop/desktop-controls-offline.store.spec.ts \
   --include=src/app/desktop/desktop-controls-bridge.service.spec.ts \
   --include=src/app/desktop/desktop-controls-panel.view.spec.ts
+```
+
+Host system monitoring stays demand-driven. The first host reading exposes
+identity and monotonic counters but does not invent CPU or network rates; those
+appear only after a later valid delta. Connected storage remains unavailable
+unless Files providers report a common bounded capacity. Never bypass that gap
+with raw `os`, `path/filepath`, or renderer-provided host paths.
+
+Focused host-system-monitor checks:
+
+```bash
+go test ./go/pkg/telemetry ./go/pkg/desktop ./go/cmd/lthn -count=1
+go test -race ./go/pkg/telemetry -count=1
+go vet ./go/pkg/telemetry ./go/pkg/desktop ./go/cmd/lthn
+cd frontend
+npx ng test --watch=false \
+  --include=src/app/desktop/desktop-system-monitor-bridge.service.spec.ts \
+  --include=src/app/desktop/desktop-system-monitor-resource.service.spec.ts \
+  --include=src/app/desktop/apps/control.app.spec.ts \
+  --include=src/app/desktop/apps/telemetry.app.spec.ts
 ```
 
 Terminal PTYs remain transient in `go/pkg/terminal`. Output events carry

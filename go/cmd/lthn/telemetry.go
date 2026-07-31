@@ -9,24 +9,31 @@ import (
 	"dappco.re/lthn/desktop/pkg/telemetry"
 )
 
-// cmdTelemetry handles `lthn telemetry <verb>` — process-level
-// metrics sampling. Today: `sample` (one-shot JSON reading).
+// cmdTelemetry handles `lthn telemetry <verb>` — one-shot process and
+// host-system JSON readings.
 //
 // Usage example:
 //
 //	rc := cmdTelemetry([]string{"sample"})
 func cmdTelemetry(args []string) int {
 	if len(args) == 0 {
-		core.Print(core.Stderr(), "lthn telemetry: missing verb (sample)\n")
+		core.Print(core.Stderr(), "lthn telemetry: missing verb (sample / host)\n")
 		return 2
 	}
 	switch args[0] {
 	case "sample":
 		return telemetrySample(args[1:])
+	case "host":
+		return telemetryHost(args[1:])
 	default:
 		core.Print(core.Stderr(), "lthn telemetry: unknown verb %q\n", args[0])
 		return 2
 	}
+}
+
+func telemetryHost(_ []string) int {
+	service := telemetry.NewService(telemetry.Options{})
+	return printResultJSON(service.CurrentHostSnapshot(), "telemetry host")
 }
 
 func telemetrySample(_ []string) int {

@@ -47,6 +47,11 @@ func ExampleService_CurrentSample() {
 	_ = core.Sprintf("%T", ref)
 }
 
+func ExampleService_CurrentHostSnapshot() {
+	ref := (*subject.Service).CurrentHostSnapshot
+	_ = core.Sprintf("%T", ref)
+}
+
 func TestService_Sample_Good(t *core.T) {
 	ref := subject.Sample
 	typeName := core.Sprintf("%T", ref)
@@ -213,4 +218,25 @@ func TestService_Service_CurrentSample_Ugly(t *core.T) {
 	typeName := core.Sprintf("%T", ref)
 	core.AssertTrue(t, core.Contains(typeName, "func"))
 	core.AssertGreater(t, len("Service_CurrentSample"), 0)
+}
+
+func TestService_Service_CurrentHostSnapshot_Good(t *core.T) {
+	ref := (*subject.Service).CurrentHostSnapshot
+	typeName := core.Sprintf("%T", ref)
+	core.AssertContains(t, typeName, "func")
+	core.AssertNotEmpty(t, "Service_CurrentHostSnapshot")
+}
+
+func TestService_Service_CurrentHostSnapshot_Bad(t *core.T) {
+	ref := (*subject.Service).CurrentHostSnapshot
+	typeName := core.Sprintf("%T", ref)
+	core.AssertNotEqual(t, "", typeName)
+	core.AssertContains(t, "Bad:Service_CurrentHostSnapshot", "Service_CurrentHostSnapshot")
+}
+
+func TestService_Service_CurrentHostSnapshot_Ugly(t *core.T) {
+	ref := (*subject.Service).CurrentHostSnapshot
+	typeName := core.Sprintf("%T", ref)
+	core.AssertTrue(t, core.Contains(typeName, "func"))
+	core.AssertGreater(t, len("Service_CurrentHostSnapshot"), 0)
 }

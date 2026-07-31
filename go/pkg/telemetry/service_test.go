@@ -8,7 +8,6 @@
 package telemetry_test
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/telemetry"
 )
@@ -65,4 +64,33 @@ func TestTelemetry_Register_Bad_NilCore(t *core.T) {
 	svc := telemetry.NewService(telemetry.Options{})
 	r := svc.Register(nil)
 	core.AssertFalse(t, r.OK, "Register(nil) must Fail")
+}
+
+func TestTelemetry_CurrentHostSnapshot_GoodReturnsBoundedHostIdentity(t *core.T) {
+	svc := telemetry.NewService(telemetry.Options{})
+
+	r := svc.CurrentHostSnapshot()
+
+	core.RequireTrue(t, r.OK)
+	snapshot, ok := r.Value.(telemetry.HostSnapshot)
+	core.RequireTrue(t, ok)
+	core.AssertNotEmpty(t, snapshot.ObservedAt)
+	core.AssertNotEmpty(t, snapshot.Source)
+	core.AssertNotEmpty(t, snapshot.Platform)
+	core.AssertNotEmpty(t, snapshot.Architecture)
+	core.AssertGreaterOrEqual(t, snapshot.CPU.LogicalCores, 1)
+}
+
+func TestTelemetry_Register_GoodExposesTheSameHostSamplerOnCore(t *core.T) {
+	c := core.New()
+	svc := telemetry.NewService(telemetry.Options{})
+
+	r := svc.Register(c)
+
+	core.RequireTrue(t, r.OK)
+	core.AssertEqual(t, svc, r.Value)
+	actionResult := c.Action("telemetry.host").Run(core.Background(), core.NewOptions())
+	core.RequireTrue(t, actionResult.OK)
+	_, ok := actionResult.Value.(telemetry.HostSnapshot)
+	core.AssertTrue(t, ok)
 }

@@ -50,6 +50,8 @@ export type ControlSystemTab = 'overview' | 'processes' | 'daemons';
 export interface ControlSystemViewModel {
   readonly metrics: readonly ControlMetric[];
   readonly cpuSamples: readonly number[];
+  readonly cpuChartTitle: string;
+  readonly cpuChartCaption: string;
   readonly processColumns: readonly ControlTableColumn[];
   readonly processRows: readonly ControlTableRow[];
   readonly daemonColumns: readonly ControlTableColumn[];

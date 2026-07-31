@@ -40,9 +40,13 @@ values with truthful live data.
 - [x] Share the NgRx/RxJS desktop-control editor between Settings and Control,
       persisting one validated draft through `appconfig.Service.SetMany` with
       saving, rollback, error, and restart-required feedback.
-- [ ] Add a host power source and persisted hourly/daily roll-ups for average,
-      peak, idle, and energy-use cards.
-- [ ] Add CPU and memory history for the System overview chart.
+- [x] Add a host power-source reading through the platform telemetry contract.
+      Unsupported platforms keep the optional value unavailable.
+- [ ] Persist hourly/daily power roll-ups for average, peak, idle, and
+      energy-use cards after a real watts source exists.
+- [x] Add bounded CPU and memory history for the System overview chart. The
+      shared RxJS resource retains at most 180 five-second samples per active
+      desktop session.
 
 ### Telemetry
 
@@ -58,7 +62,9 @@ values with truthful live data.
       reading contract.
 - [ ] Stream or retain bounded telemetry history in Go so reopening the window
       does not start every chart from one sample.
-- [ ] Add sample timestamps, source names, and stale-data detection.
+- [x] Add sample timestamps, bounded source names, and stale-data detection.
+      The first CPU/network reading intentionally has no rate until a second
+      monotonic counter sample exists.
 
 ### Files
 

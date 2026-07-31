@@ -231,7 +231,7 @@ func cmdHelp(args []string) int {
 		core.Println("  validate URL         Probe a remote OpenAI-compat endpoint")
 		core.Println("  firstlaunch          Detect fresh-install state (JSON)")
 		core.Println("  permissions <verb>   Entitlement checker (check / set / list)")
-		core.Println("  telemetry <verb>     Local process metrics (sample)")
+		core.Println("  telemetry <verb>     Local process/host metrics (sample, host)")
 		core.Println("  service <verb>       OS daemon lifecycle (install / start / stop / status / list)")
 		core.Println("  api <verb>           OpenAPI gateway (spec / sdk LANGUAGE)")
 		core.Println("  fleet <verb>         Fleet substrate (machines / agents / queue / rules)")

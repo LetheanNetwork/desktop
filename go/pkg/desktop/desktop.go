@@ -415,6 +415,12 @@ func (s *Service) Run() core.Result {
 		s.opts.Core,
 		"permissions",
 	)
+	// telemetry — bind the Core-registered sampler so Core actions and all
+	// renderer windows share one set of host counter deltas.
+	telemetrySvc, _ := core.ServiceFor[*telemetry.Service](s.opts.Core, "telemetry")
+	if telemetrySvc == nil {
+		telemetrySvc = telemetry.NewService(telemetry.Options{})
+	}
 	// desktopstate — Core-owned, Medium-backed inner-shell and Terminal
 	// workspace documents. Bind the registered instance rather than a sibling.
 	desktopStateSvc, _ := core.ServiceFor[*desktopstate.Service](s.opts.Core, "desktopstate")
@@ -614,7 +620,7 @@ func (s *Service) Run() core.Result {
 		gui.Bind(s.opts.Keys),
 		gui.Bind(tools.NewWailsService(s.opts.Core)),
 		gui.Bind(validator.NewWailsService()),
-		gui.Bind(telemetry.NewService(telemetry.Options{})),
+		gui.Bind(telemetrySvc),
 		gui.Bind(benchmarkSvc),
 		gui.Bind(openaibenchSvc),
 		gui.Bind(lthnservices.NewWailsService(servicesSvc)),
