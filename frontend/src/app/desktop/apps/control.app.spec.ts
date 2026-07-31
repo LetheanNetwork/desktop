@@ -1,5 +1,14 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideMockStore } from '@ngrx/store/testing';
+import type { DesktopControlGroup } from '../../store/desktop-controls.models';
+import {
+  desktopControlsFeature,
+  selectDesktopControlGroups,
+  selectDirtyDesktopControlChanges,
+  selectHasDirtyDesktopControls,
+} from '../../store/desktop-controls.reducer';
+import { ConnectionManagerService } from '../../connection-manager.service';
 import { createDemoResource, type DesktopDataResource } from '../desktop-data-resource';
 import { DesktopLiveDataService } from '../desktop-live-data.service';
 import { createDemoModelRuntimeSnapshot } from '../desktop-model-runtime-demo.data';
@@ -28,6 +37,29 @@ const controlWin: Win = {
   min: false,
   max: false,
 };
+
+const desktopControlGroups: readonly DesktopControlGroup[] = [
+  {
+    name: 'Window',
+    controls: [
+      {
+        key: 'desktop.wails.window.main.width',
+        group: 'Window',
+        label: 'Window width',
+        description: 'Width in pixels.',
+        kind: 'number',
+        value: 1_280,
+        defaultValue: 1_440,
+        configured: true,
+        live: true,
+        restartRequired: false,
+        minimum: 800,
+        maximum: 3_840,
+        step: 10,
+      },
+    ],
+  },
+];
 
 describe('ControlApp', () => {
   const mode = signal<'demo' | 'live'>('demo');
@@ -88,6 +120,18 @@ describe('ControlApp', () => {
         { provide: DesktopModelRuntimeResource, useValue: modelRuntime },
         { provide: DesktopServicesBridgeService, useValue: servicesBridge },
         { provide: WindowManagerService, useValue: windowManager },
+        { provide: ConnectionManagerService, useValue: { offline: () => mode() === 'demo' } },
+        provideMockStore({
+          selectors: [
+            { selector: selectDesktopControlGroups, value: desktopControlGroups },
+            { selector: selectDirtyDesktopControlChanges, value: [] },
+            { selector: selectHasDirtyDesktopControls, value: false },
+            { selector: desktopControlsFeature.selectLoading, value: false },
+            { selector: desktopControlsFeature.selectSaving, value: false },
+            { selector: desktopControlsFeature.selectError, value: null },
+            { selector: desktopControlsFeature.selectRestartSummary, value: null },
+          ],
+        }),
       ],
     });
   });
@@ -163,7 +207,7 @@ describe('ControlApp', () => {
   it('loads live services, performs Start, then refreshes the canonical catalogue', async () => {
     mode.set('live');
     liveData.control.mockResolvedValue({
-      unavailable: ['telemetry', 'benchmarkRuns', 'processes', 'settings'],
+      unavailable: ['telemetry', 'benchmarkRuns', 'processes'],
     });
     servicesBridge.catalogue
       .mockResolvedValueOnce(serviceCatalogue('stopped'))
@@ -188,7 +232,7 @@ describe('ControlApp', () => {
   it('retains stale services after a failed event refresh and tears down events', async () => {
     mode.set('live');
     liveData.control.mockResolvedValue({
-      unavailable: ['telemetry', 'benchmarkRuns', 'processes', 'settings'],
+      unavailable: ['telemetry', 'benchmarkRuns', 'processes'],
     });
     servicesBridge.catalogue.mockResolvedValueOnce(serviceCatalogue('running'));
     const fixture = await create({ ...controlWin, sub: 'system', systab: 'daemons' });
@@ -217,7 +261,7 @@ describe('ControlApp', () => {
   it('loads bounded output only after the explicit Output action', async () => {
     mode.set('live');
     liveData.control.mockResolvedValue({
-      unavailable: ['telemetry', 'benchmarkRuns', 'processes', 'settings'],
+      unavailable: ['telemetry', 'benchmarkRuns', 'processes'],
     });
     servicesBridge.catalogue.mockResolvedValueOnce(serviceCatalogue('running'));
     servicesBridge.output.mockResolvedValue({
@@ -294,7 +338,6 @@ describe('ControlApp', () => {
         },
       ],
       processes: [],
-      settings: { controls: [] },
       unavailable: [],
     });
 
@@ -341,7 +384,7 @@ describe('ControlApp', () => {
     mode.set('live');
     setLiveModelRuntime(createDemoModelRuntimeSnapshot('model-less'));
     liveData.control.mockResolvedValue({
-      unavailable: ['telemetry', 'benchmarkRuns', 'processes', 'settings'],
+      unavailable: ['telemetry', 'benchmarkRuns', 'processes'],
     });
     const fixture = await create();
     const element = fixture.nativeElement as HTMLElement;
@@ -386,7 +429,7 @@ describe('ControlApp', () => {
           endpoint: '',
         },
       ],
-      unavailable: ['telemetry', 'processes', 'settings'],
+      unavailable: ['telemetry', 'processes'],
     });
 
     const fixture = await create({ ...controlWin, sub: 'runs' });
@@ -422,7 +465,7 @@ describe('ControlApp', () => {
           exitCode: 0,
         },
       ],
-      unavailable: ['telemetry', 'benchmarkRuns', 'settings'],
+      unavailable: ['telemetry', 'benchmarkRuns'],
     });
 
     const fixture = await create({ ...controlWin, sub: 'system', systab: 'processes' });
@@ -447,58 +490,22 @@ describe('ControlApp', () => {
     ]);
   });
 
-  it('groups the curated appconfig catalogue into live Control settings', async () => {
+  it('renders the shared NgRx settings catalogue without aggregate appconfig data', async () => {
     mode.set('live');
     liveData.control.mockResolvedValue({
-      settings: {
-        controls: [
-          {
-            key: 'desktop.wails.window.main.width',
-            group: 'Window',
-            label: 'Window width',
-            description: 'Width in pixels.',
-            kind: 'number',
-            value: 1_280,
-            defaultValue: 1_440,
-            configured: true,
-            live: true,
-            restartRequired: false,
-            minimum: 800,
-            maximum: 3_840,
-            step: 10,
-          },
-          {
-            key: 'desktop.show_widgets',
-            group: 'Desktop',
-            label: 'Show widgets',
-            description: 'Show desktop widgets.',
-            kind: 'toggle',
-            value: true,
-            defaultValue: true,
-            configured: false,
-            live: true,
-            restartRequired: false,
-          },
-        ],
-      },
       unavailable: ['telemetry', 'benchmarkRuns', 'processes'],
     });
 
     const fixture = await create({ ...controlWin, sub: 'settings' });
-    await vi.waitFor(() => {
-      fixture.detectChanges();
-      expect((fixture.nativeElement as HTMLElement).textContent).toContain('Live + demo');
-    });
     const element = fixture.nativeElement as HTMLElement;
 
-    expect(element.textContent).toContain('Window');
-    expect(element.textContent).toContain('desktop.wails.window.main.width');
+    expect(element.querySelector('lthn-desktop-controls-panel')).not.toBeNull();
+    expect(element.textContent).toContain('Window width');
     expect(
-      element.querySelector<HTMLInputElement>('input[aria-label="desktop.wails.window.main.width"]')
-        ?.value,
+      element.querySelector<HTMLInputElement>(
+        '[data-control-key="desktop.wails.window.main.width"] input',
+      )?.value,
     ).toBe('1280');
-    expect(element.textContent).toContain('desktop.show_widgets');
-    expect(element.querySelector('lthn-toggle[on]')).not.toBeNull();
   });
 
   it('uses process telemetry for the live System overview cards', async () => {
@@ -532,7 +539,7 @@ describe('ControlApp', () => {
           endpoint: '',
         },
       ],
-      unavailable: ['benchmarkRuns', 'processes', 'settings'],
+      unavailable: ['benchmarkRuns', 'processes'],
     });
 
     const fixture = await create({ ...controlWin, sub: 'system', systab: 'overview' });

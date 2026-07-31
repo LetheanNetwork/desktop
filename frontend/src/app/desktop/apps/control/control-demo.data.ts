@@ -330,32 +330,4 @@ export const CONTROL_DEMO_VIEW_STATE = {
       },
     ],
   },
-  settings: {
-    groups: [
-      {
-        name: $localize`:Configuration group@@control.config.group.server:Server`,
-        rows: [
-          { key: 'server.host', value: '127.0.0.1', source: 'file' },
-          { key: 'server.port', value: '1988', source: 'set' },
-          { key: 'server.cors', value: 'localhost', source: 'default' },
-        ],
-      },
-      {
-        name: $localize`:Configuration group@@control.config.group.models:Models`,
-        rows: [
-          { key: 'models.dir', value: '~/.lthn/models', source: 'env' },
-          {
-            key: 'models.autoload',
-            value: 'llama-3.1-70b',
-            source: 'file',
-          },
-        ],
-      },
-    ],
-    flags: [
-      { key: 'features.lethernet', on: true, source: 'file' },
-      { key: 'features.telemetry', on: false, source: 'default' },
-      { key: 'features.corePlay', on: true, source: 'set' },
-    ],
-  },
 } satisfies ControlViewState;

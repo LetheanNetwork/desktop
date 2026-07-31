@@ -136,7 +136,7 @@ describe('DesktopLiveDataService', () => {
     expect('models' in service).toBe(false);
   });
 
-  it('keeps successful Control sections when one backend service is unavailable', async () => {
+  it('keeps successful Control sections without duplicating the NgRx settings read', async () => {
     surface.call.mockImplementation(async (method: string) => {
       if (method.endsWith('.CurrentSample')) {
         return {
@@ -156,28 +156,12 @@ describe('DesktopLiveDataService', () => {
       if (method.endsWith('.ProcessList')) throw new Error('process registry offline');
       throw new Error(`Unexpected method: ${method}`);
     });
-    controls.settings.mockResolvedValue({
-      controls: [
-        {
-          key: 'desktop.show_widgets',
-          group: 'Desktop',
-          label: 'Show widgets',
-          description: 'Show desktop widgets.',
-          kind: 'toggle',
-          value: true,
-          defaultValue: true,
-          configured: false,
-          live: true,
-          restartRequired: false,
-        },
-      ],
-    });
-
     const snapshot = await service.control();
 
     expect(snapshot.telemetry?.heapAllocMB).toBe(64);
     expect(snapshot.benchmarkRuns).toEqual([]);
-    expect(snapshot.settings?.controls[0].key).toBe('desktop.show_widgets');
+    expect('settings' in snapshot).toBe(false);
+    expect(controls.settings).not.toHaveBeenCalled();
     expect(snapshot.processes).toBeUndefined();
     expect(snapshot.unavailable).toEqual(['processes']);
   });

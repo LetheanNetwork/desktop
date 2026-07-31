@@ -37,9 +37,9 @@ values with truthful live data.
       ownership, bounded restart policy, and start/stop/restart actions.
 - [ ] Add provider health/readiness probes and per-service CPU/memory
       telemetry; process liveness is not readiness.
-- [ ] Wire the Control configuration inputs and Commit action to
-      `appconfig.Service.Set`, including validation, optimistic state, rollback,
-      and restart-required feedback.
+- [x] Share the NgRx/RxJS desktop-control editor between Settings and Control,
+      persisting one validated draft through `appconfig.Service.SetMany` with
+      saving, rollback, error, and restart-required feedback.
 - [ ] Add a host power source and persisted hourly/daily roll-ups for average,
       peak, idle, and energy-use cards.
 - [ ] Add CPU and memory history for the System overview chart.

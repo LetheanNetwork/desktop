@@ -1,4 +1,16 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { Store } from '@ngrx/store';
+import { provideMockStore } from '@ngrx/store/testing';
+import { desktopControlsActions } from '../../../store/desktop-controls.actions';
+import type { DesktopControl, DesktopControlGroup } from '../../../store/desktop-controls.models';
+import {
+  desktopControlsFeature,
+  selectDesktopControlGroups,
+  selectDirtyDesktopControlChanges,
+  selectHasDirtyDesktopControls,
+} from '../../../store/desktop-controls.reducer';
+import { ConnectionManagerService } from '../../../connection-manager.service';
 import { createDemoResource } from '../../desktop-data-resource';
 import { ControlPowerView } from './control-power.view';
 import { createDemoServiceCatalogue, SERVICES_DEMO_SOURCE } from './control-services.models';
@@ -7,6 +19,48 @@ import { ControlSystemView } from './control-system.view';
 import { createDemoControlViewState } from './control-view-state';
 
 describe('Control secondary views', () => {
+  const widthControl: DesktopControl = {
+    key: 'desktop.wails.window.main.width',
+    group: 'Window',
+    label: 'Window width',
+    description: 'Width of the main desktop window in pixels.',
+    kind: 'number',
+    value: 1_440,
+    defaultValue: 1_440,
+    configured: false,
+    live: true,
+    restartRequired: false,
+    minimum: 800,
+    maximum: 3_840,
+    step: 10,
+  };
+  const groups: readonly DesktopControlGroup[] = [{ name: 'Window', controls: [widthControl] }];
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: ConnectionManagerService,
+          useValue: { offline: signal(false).asReadonly() },
+        },
+        provideMockStore({
+          selectors: [
+            { selector: selectDesktopControlGroups, value: groups },
+            {
+              selector: selectDirtyDesktopControlChanges,
+              value: [{ key: widthControl.key, value: 1_280 }],
+            },
+            { selector: selectHasDirtyDesktopControls, value: true },
+            { selector: desktopControlsFeature.selectLoading, value: false },
+            { selector: desktopControlsFeature.selectSaving, value: false },
+            { selector: desktopControlsFeature.selectError, value: null },
+            { selector: desktopControlsFeature.selectRestartSummary, value: null },
+          ],
+        }),
+      ],
+    });
+  });
+
   afterEach(() => TestBed.resetTestingModule());
 
   it('keeps the complete Power prototype', async () => {
@@ -70,20 +124,33 @@ describe('Control secondary views', () => {
     expect(element.textContent).toContain('Lethean API');
   });
 
-  it('renders settings and emits Commit', async () => {
-    const state = createDemoControlViewState();
+  it('renders and commits the shared NgRx desktop-control draft', async () => {
+    const store = TestBed.inject(Store);
+    const dispatch = vi.spyOn(store, 'dispatch');
     const fixture = TestBed.createComponent(ControlSettingsView);
-    fixture.componentRef.setInput('dataState', state.dataState);
-    fixture.componentRef.setInput('model', state.settings);
-    const emitted = vi.fn();
-    fixture.componentInstance.commit.subscribe(emitted);
-
     await fixture.whenStable();
 
     const element = fixture.nativeElement as HTMLElement;
-    expect(element.textContent).toContain('features.lethernet');
-    expect(element.querySelector('lthn-toggle[on]')).not.toBeNull();
-    element.querySelector<HTMLButtonElement>('button.nbtn')?.click();
-    expect(emitted).toHaveBeenCalledOnce();
+    expect(element.textContent).toContain('Configuration');
+    expect(element.textContent).toContain('Defaults → File → Env → Set');
+    expect(element.textContent).toContain('CORE_CONFIG_*');
+    expect(element.textContent).toContain('Window width');
+    const input = element.querySelector<HTMLInputElement>(
+      '[data-control-key="desktop.wails.window.main.width"] input',
+    );
+    if (!input) throw new Error('Expected the shared Window width control.');
+    input.value = '1280';
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    element.querySelector<HTMLButtonElement>('[data-action="apply-settings"]')?.click();
+    await fixture.whenStable();
+
+    expect(dispatch).toHaveBeenCalledWith(
+      desktopControlsActions.editControl({ key: widthControl.key, value: 1_280 }),
+    );
+    expect(dispatch).toHaveBeenCalledWith(
+      desktopControlsActions.applyDraft({
+        changes: [{ key: widthControl.key, value: 1_280 }],
+      }),
+    );
   });
 });

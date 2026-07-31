@@ -6,7 +6,6 @@ import {
   Input,
   OnInit,
   PendingTasks,
-  computed,
   inject,
   signal,
 } from '@angular/core';
@@ -23,17 +22,17 @@ import {
   type DesktopPermissionSnapshot,
 } from '../desktop-host-intent.service';
 import { DesktopPermissionsBridgeService } from '../desktop-permissions-bridge.service';
+import { DesktopControlsPanelView } from '../desktop-controls-panel.view';
 import { desktopControlsActions } from '../../store/desktop-controls.actions';
-import { DesktopControl, DesktopControlValue } from '../../store/desktop-controls.models';
+import { DesktopControlValue } from '../../store/desktop-controls.models';
 import {
   desktopControlsFeature,
-  selectDesktopControlGroups,
   selectDirtyDesktopControlChanges,
   selectDraftDesktopControls,
   selectHasDirtyDesktopControls,
 } from '../../store/desktop-controls.reducer';
 
-const CURATED_PREFERENCE_KEYS = new Set([
+const CURATED_PREFERENCE_KEYS = [
   'desktop.theme.design',
   'desktop.theme.custom_hue',
   'desktop.theme.custom_name',
@@ -41,12 +40,12 @@ const CURATED_PREFERENCE_KEYS = new Set([
   'desktop.shell.taskbar_edge',
   'desktop.shell.show_icons',
   'desktop.shell.show_widgets',
-]);
+] as const;
 
 @Component({
   selector: 'lthn-settings-app',
   standalone: true,
-  imports: [],
+  imports: [DesktopControlsPanelView],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   host: { style: 'display: contents' },
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -313,144 +312,22 @@ const CURATED_PREFERENCE_KEYS = new Set([
               </div>
             </div>
           </div>
-          <section class="desktop-controls-panel" aria-labelledby="desktop-controls-heading">
-            <div class="controls-heading">
-              <div>
-                <h1 id="desktop-controls-heading">Desktop controls</h1>
-                <p>Wails, operating-system and security behaviour in one persisted panel.</p>
-              </div>
-            </div>
-
-            @if (controlsError()) {
-              <p class="controls-error" role="alert">{{ controlsError() }}</p>
-            }
-            @if (controlsLoading() && controlGroups().length === 0) {
-              <p class="controls-status">Loading desktop controls…</p>
-            }
-
-            @for (group of visibleControlGroups(); track group.name) {
-              <div class="setgroup control-group">
-                <span class="glab">{{ group.name }}</span>
-                @for (control of group.controls; track control.key) {
-                  <div
-                    class="setrow desktop-control"
-                    [attr.data-control-key]="control.key"
-                    [class.is-saving]="controlsSaving()"
-                  >
-                    <div class="k">
-                      {{ control.label }}
-                      <small>{{ control.description }}</small>
-                      <span class="control-badges">
-                        @if (control.live) {
-                          <span class="control-badge live">Live</span>
-                        }
-                        @if (control.restartRequired) {
-                          <span class="control-badge restart">Restart required</span>
-                        }
-                        @if (control.configured) {
-                          <span class="control-badge configured">Custom</span>
-                        }
-                        @if (controlsSaving()) {
-                          <span class="control-badge saving">Saving…</span>
-                        }
-                        @if (permissionForControl(control.key); as permission) {
-                          <span class="control-badge host">
-                            Host: {{ permission.host }}
-                          </span>
-                        }
-                      </span>
-                    </div>
-
-                    <div class="control-actions">
-                      @switch (control.kind) {
-                        @case ('toggle') {
-                          <div class="prefseg" role="group" [attr.aria-label]="control.label">
-                            <button
-                              [class.on]="control.value === true"
-                              [disabled]="controlsSaving()"
-                              (click)="setToggle(control, true)"
-                            >
-                              On
-                            </button>
-                            <button
-                              [class.on]="control.value === false"
-                              [disabled]="controlsSaving()"
-                              (click)="setToggle(control, false)"
-                            >
-                              Off
-                            </button>
-                          </div>
-                        }
-                        @case ('select') {
-                          <select
-                            class="cfgin control-input"
-                            [value]="control.value"
-                            [disabled]="controlsSaving()"
-                            [attr.aria-label]="control.label"
-                            (change)="setChoice(control, $event)"
-                          >
-                            @for (choice of control.choices ?? []; track choice) {
-                              <option [value]="choice">{{ choice }}</option>
-                            }
-                          </select>
-                        }
-                        @case ('number') {
-                          <input
-                            class="cfgin control-input"
-                            type="number"
-                            [value]="control.value"
-                            [attr.min]="control.minimum ?? null"
-                            [attr.max]="control.maximum ?? null"
-                            [attr.step]="control.step ?? null"
-                            [disabled]="controlsSaving()"
-                            [attr.aria-label]="control.label"
-                            (change)="setNumber(control, $event)"
-                          />
-                        }
-                        @default {
-                          <input
-                            class="cfgin control-input"
-                            type="text"
-                            [value]="control.value"
-                            [disabled]="controlsSaving()"
-                            [attr.aria-label]="control.label"
-                            (change)="setText(control, $event)"
-                          />
-                        }
-                      }
-                      @if (canRequestPermission(control.key)) {
-                        <button
-                          type="button"
-                          class="permission-request"
-                          [attr.data-action]="'request-permission-notifications'"
-                          [disabled]="requestingPermission() !== null"
-                          (click)="requestPermission('notifications')"
-                        >
-                          {{
-                            requestingPermission() === 'notifications'
-                              ? 'Requesting…'
-                              : 'Request host access'
-                          }}
-                        </button>
-                      }
-                    </div>
-                  </div>
-                }
-              </div>
-            }
-            @if (permissionError()) {
-              <p class="controls-error" role="alert">{{ permissionError() }}</p>
-            }
-          </section>
+          <lthn-desktop-controls-panel
+            [excludedKeys]="curatedPreferenceKeys"
+            [showActions]="false"
+            [showRestartSummary]="false"
+            [permissions]="permissionSnapshots()"
+            [requestingPermission]="requestingPermission()"
+            (permissionRequest)="requestPermission($event)"
+          />
+          @if (permissionError()) {
+            <p class="controls-error" role="alert">{{ permissionError() }}</p>
+          }
         }
       }
     </div>
   `,
   styles: `
-    .desktop-controls-panel {
-      margin-top: 22px;
-      padding-bottom: 24px;
-    }
     .settings-actions {
       display: flex;
       justify-content: flex-end;
@@ -474,23 +351,6 @@ const CURATED_PREFERENCE_KEYS = new Set([
       cursor: default;
       opacity: 0.48;
     }
-    .controls-heading {
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
-      gap: 16px;
-      margin: 0 16px 12px;
-    }
-    .controls-heading h1 {
-      margin: 0;
-      font-size: 16px;
-    }
-    .controls-heading p,
-    .controls-status {
-      margin: 4px 0 0;
-      color: var(--text-muted, #8d929b);
-      font-size: 11px;
-    }
     .controls-error {
       margin: 0 16px 12px;
       padding: 8px 10px;
@@ -504,62 +364,6 @@ const CURATED_PREFERENCE_KEYS = new Set([
       margin: 0 16px 12px;
       color: #e3b35b;
       font-size: 11px;
-    }
-    .control-group {
-      margin-bottom: 12px;
-    }
-    .desktop-control .k {
-      min-width: 0;
-    }
-    .control-badges {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-      margin-top: 5px;
-    }
-    .control-badge {
-      padding: 1px 5px;
-      border: 1px solid var(--border, #30343b);
-      border-radius: 999px;
-      color: var(--text-muted, #8d929b);
-      font-size: 9px;
-      line-height: 14px;
-    }
-    .control-badge.live {
-      color: #65cdb0;
-    }
-    .control-badge.restart {
-      color: #e3b35b;
-    }
-    .control-badge.saving {
-      color: #8eb8ff;
-    }
-    .control-badge.host {
-      color: #a8b3c7;
-    }
-    .control-input {
-      width: min(210px, 42%);
-    }
-    .control-actions {
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      gap: 7px;
-      width: min(310px, 52%);
-    }
-    .control-actions .control-input {
-      width: min(210px, 100%);
-    }
-    .permission-request {
-      padding: 5px 8px;
-      border: 1px solid var(--border, #30343b);
-      border-radius: 6px;
-      background: var(--surface-2, #181a20);
-      color: var(--text, #e7e9ed);
-      white-space: nowrap;
-    }
-    .desktop-control.is-saving {
-      opacity: 0.75;
     }
   `,
 })
@@ -579,21 +383,12 @@ export class SettingsApp implements AppView, OnInit {
   readonly permissionError = signal('');
   readonly requestingPermission = signal<DesktopPermissionID | null>(null);
   readonly draftControls = this.store.selectSignal(selectDraftDesktopControls);
-  readonly controlGroups = this.store.selectSignal(selectDesktopControlGroups);
-  readonly visibleControlGroups = computed(() =>
-    this.controlGroups()
-      .map((group) => ({
-        ...group,
-        controls: group.controls.filter(({ key }) => !CURATED_PREFERENCE_KEYS.has(key)),
-      }))
-      .filter(({ controls }) => controls.length > 0),
-  );
   readonly controlsLoading = this.store.selectSignal(desktopControlsFeature.selectLoading);
-  readonly controlsError = this.store.selectSignal(desktopControlsFeature.selectError);
   readonly controlsSaving = this.store.selectSignal(desktopControlsFeature.selectSaving);
   readonly restartSummary = this.store.selectSignal(desktopControlsFeature.selectRestartSummary);
   readonly dirtyChanges = this.store.selectSignal(selectDirtyDesktopControlChanges);
   readonly hasDraftChanges = this.store.selectSignal(selectHasDirtyDesktopControls);
+  readonly curatedPreferenceKeys = CURATED_PREFERENCE_KEYS;
   readonly wallpapers = ['aurora', 'dusk', 'mist', 'graphite'] as const;
   readonly devices = ['small', 'large', 'full'] as const;
   readonly edges = ['top', 'right', 'bottom', 'left'] as const;
@@ -661,19 +456,6 @@ export class SettingsApp implements AppView, OnInit {
     });
   }
 
-  permissionForControl(key: string): DesktopPermissionSnapshot | null {
-    const id = permissionIDForControl(key);
-    return this.permissionSnapshots().find((snapshot) => snapshot.id === id) ?? null;
-  }
-
-  canRequestPermission(key: string): boolean {
-    const permission = this.permissionForControl(key);
-    return (
-      permission?.id === 'notifications' &&
-      !['granted', 'restricted', 'unsupported'].includes(permission.host)
-    );
-  }
-
   requestPermission(id: DesktopPermissionID): void {
     if (this.requestingPermission() !== null || id !== 'notifications') return;
     this.requestingPermission.set(id);
@@ -690,29 +472,6 @@ export class SettingsApp implements AppView, OnInit {
         this.requestingPermission.set(null);
       }
     });
-  }
-
-  setToggle(control: DesktopControl, value: boolean): void {
-    this.setControl(control, value);
-  }
-
-  setChoice(control: DesktopControl, event: Event): void {
-    this.setControl(control, (event.target as HTMLSelectElement).value);
-  }
-
-  setNumber(control: DesktopControl, event: Event): void {
-    const value = (event.target as HTMLInputElement).valueAsNumber;
-    if (!Number.isFinite(value)) return;
-    this.setControl(control, value);
-  }
-
-  setText(control: DesktopControl, event: Event): void {
-    this.setControl(control, (event.target as HTMLInputElement).value);
-  }
-
-  private setControl(control: DesktopControl, value: boolean | number | string): void {
-    if (this.controlsSaving() || control.value === value) return;
-    this.store.dispatch(desktopControlsActions.editControl({ key: control.key, value }));
   }
 
   setCustomName(event: Event): void {
@@ -778,18 +537,6 @@ export class SettingsApp implements AppView, OnInit {
     const lang = this.prefs.lang();
     return lang === 'en' ? row[1] : (this.translations[lang]?.[row[0]] ?? '');
   }
-}
-
-const PERMISSION_CONTROL_IDS: Readonly<Record<string, DesktopPermissionID>> = {
-  'desktop.permissions.microphone': 'microphone',
-  'desktop.permissions.camera': 'camera',
-  'desktop.permissions.geolocation': 'geolocation',
-  'desktop.permissions.notifications': 'notifications',
-  'desktop.permissions.clipboard_read': 'clipboard-read',
-};
-
-function permissionIDForControl(key: string): DesktopPermissionID | null {
-  return PERMISSION_CONTROL_IDS[key] ?? null;
 }
 
 function errorMessage(error: unknown): string {

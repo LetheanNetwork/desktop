@@ -5,7 +5,6 @@ import type { ModelRuntimeSnapshot } from '../../desktop-model-runtime.models';
 import { CONTROL_DEMO_VIEW_STATE } from './control-demo.data';
 import type {
   ControlRunsViewModel,
-  ControlSettingsViewModel,
   ControlSystemViewModel,
   ControlViewState,
 } from './control-view.models';
@@ -17,7 +16,6 @@ export function createDemoControlViewState(): ControlViewState {
     runs: { ...CONTROL_DEMO_VIEW_STATE.runs },
     power: { ...CONTROL_DEMO_VIEW_STATE.power },
     system: { ...CONTROL_DEMO_VIEW_STATE.system },
-    settings: { ...CONTROL_DEMO_VIEW_STATE.settings },
   };
 }
 
@@ -28,7 +26,6 @@ export function mergeControlLiveSnapshot(snapshot: ControlLiveSnapshot): Control
     dataState: 'mixed',
     runs: mergeRuns(demo.runs, snapshot),
     system: mergeSystem(demo.system, snapshot),
-    settings: mergeSettings(demo.settings, snapshot),
   };
 }
 
@@ -204,36 +201,6 @@ function mergeSystem(
     metrics,
     processColumns,
     processRows,
-  };
-}
-
-function mergeSettings(
-  demo: ControlSettingsViewModel,
-  snapshot: ControlLiveSnapshot,
-): ControlSettingsViewModel {
-  if (!snapshot.settings) return demo;
-
-  const grouped = new Map<string, Array<{ key: string; value: string; source: string }>>();
-  for (const control of snapshot.settings.controls) {
-    if (control.kind === 'toggle') continue;
-    const rows = grouped.get(control.group) ?? [];
-    rows.push({
-      key: control.key,
-      value: String(control.value),
-      source: control.configured ? 'set' : 'default',
-    });
-    grouped.set(control.group, rows);
-  }
-
-  return {
-    groups: [...grouped].map(([name, rows]) => ({ name, rows })),
-    flags: snapshot.settings.controls
-      .filter((control) => control.kind === 'toggle')
-      .map((control) => ({
-        key: control.key,
-        on: control.value === true,
-        source: control.configured ? 'set' : 'default',
-      })),
   };
 }
 

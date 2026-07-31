@@ -21,8 +21,7 @@ describe('Control view state', () => {
     expect(state.power.samples).toHaveLength(12);
     expect(state.system.processRows).toHaveLength(6);
     expect(state.system.daemonRows).toHaveLength(4);
-    expect(state.settings.groups.map(({ name }) => name)).toEqual(['Server', 'Models']);
-    expect(state.settings.flags).toHaveLength(3);
+    expect('settings' in state).toBe(false);
   });
 
   it('replaces only successful live sections', () => {
@@ -35,7 +34,7 @@ describe('Control view state', () => {
           exitCode: 0,
         },
       ],
-      unavailable: ['telemetry', 'benchmarkRuns', 'settings'],
+      unavailable: ['telemetry', 'benchmarkRuns'],
     });
 
     expect(state.dataState).toBe('mixed');
@@ -47,7 +46,7 @@ describe('Control view state', () => {
       'exit',
     ]);
     expect(state.power.metrics[0].value).toBe('196 W');
-    expect(state.settings.groups[0].name).toBe('Server');
+    expect('settings' in state).toBe(false);
   });
 
   it('replaces model fixtures with a path-free shared runtime snapshot', () => {

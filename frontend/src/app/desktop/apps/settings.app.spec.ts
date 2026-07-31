@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { Store } from '@ngrx/store';
 import { provideMockStore } from '@ngrx/store/testing';
 import { desktopControlsActions } from '../../store/desktop-controls.actions';
+import { ConnectionManagerService } from '../../connection-manager.service';
 import { DesktopHostIntentService } from '../desktop-host-intent.service';
 import { DesktopPermissionsBridgeService } from '../desktop-permissions-bridge.service';
 import { DesktopControl } from '../../store/desktop-controls.models';
@@ -81,13 +82,11 @@ const win = {
 describe('SettingsApp desktop controls', () => {
   const hostIntents = {
     claimItems: vi.fn().mockReturnValue(null),
-    onItems: vi.fn(
-      (app: 'files' | 'settings', consumer: (items: readonly unknown[]) => void) => {
-        const items = hostIntents.claimItems(app);
-        if (items) consumer(items);
-        return vi.fn();
-      },
-    ),
+    onItems: vi.fn((app: 'files' | 'settings', consumer: (items: readonly unknown[]) => void) => {
+      const items = hostIntents.claimItems(app);
+      if (items) consumer(items);
+      return vi.fn();
+    }),
   };
   const permissions = {
     status: vi.fn().mockResolvedValue([
@@ -161,6 +160,10 @@ describe('SettingsApp desktop controls', () => {
         { provide: DesktopHostIntentService, useValue: hostIntents },
         { provide: DesktopPermissionsBridgeService, useValue: permissions },
         { provide: WindowManagerService, useValue: wm },
+        {
+          provide: ConnectionManagerService,
+          useValue: { offline: signal(false).asReadonly() },
+        },
       ],
     });
   });
@@ -175,6 +178,7 @@ describe('SettingsApp desktop controls', () => {
 
     expect(dispatch).toHaveBeenCalledWith(desktopControlsActions.load());
     expect(fixture.nativeElement.textContent).toContain('Desktop controls');
+    expect(fixture.nativeElement.querySelector('lthn-desktop-controls-panel')).not.toBeNull();
     expect(fixture.nativeElement.textContent).toContain('Interface theme');
     expect(fixture.nativeElement.textContent).toContain('Restart required');
     expect(fixture.nativeElement.textContent).toContain('Previous save failed safely.');

@@ -56,39 +56,15 @@ export interface ControlSystemViewModel {
   readonly daemonRows: readonly ControlTableRow[];
 }
 
-export interface ControlSettingRow {
-  readonly key: string;
-  readonly value: string;
-  readonly source: string;
-}
-
-export interface ControlSettingGroup {
-  readonly name: string;
-  readonly rows: readonly ControlSettingRow[];
-}
-
-export interface ControlSettingFlag {
-  readonly key: string;
-  readonly on: boolean;
-  readonly source: string;
-}
-
-export interface ControlSettingsViewModel {
-  readonly groups: readonly ControlSettingGroup[];
-  readonly flags: readonly ControlSettingFlag[];
-}
-
 export interface ControlViewState {
   readonly dataState: DesktopDataState;
   readonly models: ControlModelsViewModel;
   readonly runs: ControlRunsViewModel;
   readonly power: ControlPowerViewModel;
   readonly system: ControlSystemViewModel;
-  readonly settings: ControlSettingsViewModel;
 }
 
-export type ControlActionIntent =
-  { readonly kind: 'new-run' } | { readonly kind: 'commit-settings' };
+export type ControlActionIntent = { readonly kind: 'new-run' };
 
 export type ControlModelIntent =
   | { readonly kind: 'start' }

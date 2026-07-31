@@ -122,11 +122,7 @@ const SERVICES_STALE_AFTER_MS = 30_000;
           />
         }
         @case ('settings') {
-          <lthn-control-settings-view
-            [dataState]="viewState().dataState"
-            [model]="viewState().settings"
-            (commit)="handleAction({ kind: 'commit-settings' })"
-          />
+          <lthn-control-settings-view />
         }
       }
     </div>

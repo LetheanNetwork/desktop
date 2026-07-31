@@ -204,6 +204,11 @@ Add CLI verbs as flat `cmdX(args []string) int` handlers which delegate to
   ref-counted shared ModelRuntime snapshot/event/poll resource used by Control
   and Telemetry, with deterministic in-memory lifecycle operations in offline
   demo mode.
+- `frontend/src/app/desktop/desktop-controls-panel.view.ts` — the shared typed
+  desktop-control editor used by Settings and Control. It adapts NgRx selectors
+  to Angular signals for rendering and dispatches typed actions; it never calls
+  the Wails bridge directly. Its status badge derives from the controls store
+  and explicit offline transport, not Control's unrelated telemetry resource.
 - `frontend/src/app/desktop/apps/control/control-services.view.ts` —
   Control's working Services interface under the stable internal `daemons`
   tab value. It presents manual Start/Stop/Restart and explicit bounded output
@@ -215,8 +220,13 @@ Add CLI verbs as flat `cmdX(args []string) int` handlers which delegate to
   intents.
 - `frontend/src/app/desktop/surfaces/` — lazy product surfaces and shared
   bridge/page primitives.
-- `frontend/src/app/store/` — NgRx state which crosses components or
-  transport boundaries.
+- `frontend/src/app/store/` — NgRx/RxJS state which crosses components or
+  transport boundaries. `DesktopControlsEffects` is the sole asynchronous
+  appconfig synchronisation path: it reads through the bounded bridge, commits
+  complete drafts with `SetMany`, and publishes committed snapshots back to all
+  open reactive surfaces. Keep this store/effects boundary available for
+  backend-pushed refresh actions; component-local signals are view adapters,
+  not a replacement data store.
 - `frontend/src/app/connection-manager.service.ts` — installs the Wails
   WebSocket transport before generated binding calls.
 - `frontend/src/app/desktop/desktop-mcp.service.ts` — Angular WebMCP tools.

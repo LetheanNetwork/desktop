@@ -1,7 +1,5 @@
 import { Injectable, computed, inject } from '@angular/core';
 import { ConnectionManagerService } from '../connection-manager.service';
-import type { DesktopControlSnapshot } from '../store/desktop-controls.models';
-import { DesktopControlsBridgeService } from './desktop-controls-bridge.service';
 import { SurfaceBridgeService } from './surfaces/surface-bridge.service';
 
 const TELEMETRY_METHOD = 'dappco.re/lthn/desktop/pkg/telemetry.Service.CurrentSample';
@@ -45,13 +43,12 @@ export interface DesktopProcess {
   readonly exitCode: number;
 }
 
-export type ControlDataSection = 'telemetry' | 'benchmarkRuns' | 'processes' | 'settings';
+export type ControlDataSection = 'telemetry' | 'benchmarkRuns' | 'processes';
 
 export interface ControlLiveSnapshot {
   readonly telemetry?: ProcessTelemetry;
   readonly benchmarkRuns?: readonly BenchmarkRun[];
   readonly processes?: readonly DesktopProcess[];
-  readonly settings?: DesktopControlSnapshot;
   readonly unavailable: readonly ControlDataSection[];
 }
 
@@ -59,7 +56,6 @@ export interface ControlLiveSnapshot {
 export class DesktopLiveDataService {
   private readonly connection = inject(ConnectionManagerService);
   private readonly bridge = inject(SurfaceBridgeService);
-  private readonly controls = inject(DesktopControlsBridgeService);
 
   readonly mode = computed<DesktopDataMode>(() => (this.connection.offline() ? 'demo' : 'live'));
 
@@ -101,14 +97,8 @@ export class DesktopLiveDataService {
       this.telemetry(),
       this.benchmarkRuns(20),
       this.processes(),
-      this.controls.settings(),
     ] as const);
-    const sectionNames: readonly ControlDataSection[] = [
-      'telemetry',
-      'benchmarkRuns',
-      'processes',
-      'settings',
-    ];
+    const sectionNames: readonly ControlDataSection[] = ['telemetry', 'benchmarkRuns', 'processes'];
     const unavailable = reads.flatMap((result, index) =>
       result.status === 'rejected' ? [sectionNames[index]] : [],
     );
@@ -120,7 +110,6 @@ export class DesktopLiveDataService {
       ...fulfilledProperty('telemetry', reads[0]),
       ...fulfilledProperty('benchmarkRuns', reads[1]),
       ...fulfilledProperty('processes', reads[2]),
-      ...fulfilledProperty('settings', reads[3]),
       unavailable,
     };
   }
