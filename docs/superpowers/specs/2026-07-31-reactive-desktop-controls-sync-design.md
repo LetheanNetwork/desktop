@@ -83,9 +83,11 @@ drafts, failed writes, failed commits, and rollback paths emit nothing.
 `Settings` and the successful `SetMany` result include the same revision. The
 connected revision is deliberately transient: it deduplicates events within
 one running host and is not product state. A backend restart replaces it, and
-connection recovery always performs an authoritative load rather than ordering
-revisions across host lifetimes. Offline snapshots persist their opaque local
-revision only so same-origin browser contexts can deduplicate identical state.
+connection recovery performs an authoritative load when the draft is clean. A
+dirty draft receives a pending-change notice and waits for explicit Reload or
+Apply rather than ordering revisions across host lifetimes. Offline snapshots
+persist their opaque local revision only so same-origin browser contexts can
+deduplicate identical state.
 
 The desktop host registers one adapter which publishes the Core event as:
 
@@ -114,9 +116,9 @@ does not expose arbitrary event names or raw Wails payloads.
    draft;
 3. a different event received while a draft is dirty records a pending external
    change without replacing the draft; and
-4. a transition from disconnected or reconnecting to connected always reloads
-   the authoritative snapshot, covering events missed while the socket was
-   unavailable.
+4. a transition from disconnected or reconnecting to connected reloads a clean
+   store, while a dirty store records a pending external change and waits for
+   explicit Reload or Apply.
 
 The successful `SetMany` response remains authoritative for the initiating
 surface. Event bursts are coalesced before refresh so one committed batch does
@@ -213,7 +215,8 @@ Angular tests prove:
 - the initiating revision is deduplicated;
 - clean stores refresh from a newer event;
 - dirty drafts survive newer events and expose Reload/Keep editing;
-- reconnect performs an authoritative refresh;
+- reconnect refreshes a clean store and preserves a dirty draft behind the
+  pending-change notice;
 - malformed events cannot mutate the store;
 - offline values survive reload through the versioned storage adapter;
 - malformed, oversized, and unknown offline values fail safely;
