@@ -971,6 +971,7 @@ func (s *Service) Run() core.Result {
 	// LaunchedWithUrl remains on the allowlisted lthn:app:* path.
 	// See sysevents.go for the table.
 	registerSystemEvents(s.opts.Core)
+	registerAppconfigEvents(s.opts.Core)
 	registerFilesEvents(s.opts.Core)
 	registerServicesEvents(s.opts.Core)
 	registerModelRuntimeEvents(s.opts.Core)
