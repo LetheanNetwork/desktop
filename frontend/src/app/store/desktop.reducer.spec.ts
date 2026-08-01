@@ -39,16 +39,17 @@ describe('desktop reducer', () => {
           device: 'small',
           z: 30,
         },
-        seedWindowIds: ['control-id', 'telemetry-id'],
+        seedWindowIds: ['welcome-id'],
       }),
     );
 
+    // A fresh desktop seeds Welcome and nothing else, and with no viewport
+    // passed it falls back to the corner cascade rather than centring.
     expect(hydrated.wins.map(({ id, app, x, y, z }) => ({ id, app, x, y, z }))).toEqual([
-      { id: 'control-id', app: 'control', x: 70, y: 24, z: 31 },
-      { id: 'telemetry-id', app: 'telemetry', x: 104, y: 54, z: 32 },
+      { id: 'welcome-id', app: 'welcome', x: 70, y: 24, z: 31 },
     ]);
-    expect(hydrated.focusId).toBe('telemetry-id');
-    expect(hydrated.z).toBe(32);
+    expect(hydrated.focusId).toBe('welcome-id');
+    expect(hydrated.z).toBe(31);
   });
 
   it('loads a durable session, canonicalises routes, and records its revision', () => {
@@ -79,7 +80,7 @@ describe('desktop reducer', () => {
         },
         revision: 7,
         migratedBrowserState: true,
-        seedWindowIds: ['unused-one', 'unused-two'],
+        seedWindowIds: ['unused-one'],
       }),
     );
 
@@ -286,7 +287,7 @@ describe('desktop reducer', () => {
       }),
       desktopActions.setView({
         view: 'shell',
-        seedWindowIds: ['unused-1', 'unused-2'],
+        seedWindowIds: ['unused-1'],
       }),
     );
 
@@ -296,16 +297,15 @@ describe('desktop reducer', () => {
       shell,
       desktopActions.setView({
         view: 'desktop',
-        seedWindowIds: ['control-id', 'telemetry-id'],
+        seedWindowIds: ['welcome-id'],
       }),
     );
 
     expect(desktop.wins.map(({ id, app }) => ({ id, app }))).toEqual([
-      { id: 'control-id', app: 'control' },
-      { id: 'telemetry-id', app: 'telemetry' },
+      { id: 'welcome-id', app: 'welcome' },
     ]);
-    expect(desktop.focusId).toBe('telemetry-id');
-    expect(desktop.z).toBe(16);
+    expect(desktop.focusId).toBe('welcome-id');
+    expect(desktop.z).toBe(15);
   });
 
   it('uses device Home to close the focused window, otherwise clears home state', () => {

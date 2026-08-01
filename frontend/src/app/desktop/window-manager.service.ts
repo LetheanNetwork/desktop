@@ -132,7 +132,8 @@ export class WindowManagerService {
     this.store.dispatch(
       desktopActions.setView({
         view,
-        seedWindowIds: [createWindowId(), createWindowId()],
+        seedWindowIds: [createWindowId()],
+        viewport: this.viewport(),
       }),
     );
   }
@@ -146,7 +147,13 @@ export class WindowManagerService {
   }
 
   launch(appId: string): void {
-    this.store.dispatch(desktopActions.launchApp({ appId, windowId: createWindowId() }));
+    this.store.dispatch(
+      desktopActions.launchApp({
+        appId,
+        windowId: createWindowId(),
+        viewport: this.viewport(),
+      }),
+    );
   }
 
   focus(id: string): void {

@@ -61,15 +61,35 @@ describe('app routes', () => {
     expect(catalog.apps['control'].loadComponent).toEqual(expect.any(Function));
   });
 
+  // Where each surface group ended up when the menu bar was folded from
+  // sixteen categories down to seven. The surfaces did not move — their route
+  // did, from /<group>/<path> to /<category>/<path> — so this map is the
+  // record of that and the reason the assertion below can still be exact.
+  const surfaceHome: Record<string, string> = {
+    agents: 'ai',
+    'ml-lab': 'ai',
+    coding: 'developer',
+    observe: 'system',
+    operations: 'system',
+    office: 'office',
+    planning: 'office',
+    marketing: 'office',
+    sales: 'office',
+    extensions: 'tools',
+  };
+
   it('exposes every ported Lit view as a menu-derived lazy child route', () => {
     const catalog = readDesktopRouteCatalog(routes);
 
-    for (const [categoryId, expectedPaths] of Object.entries(portedSurfaceRoutes)) {
+    for (const [groupId, expectedPaths] of Object.entries(portedSurfaceRoutes)) {
+      const categoryId = surfaceHome[groupId];
+      expect(categoryId, `no home recorded for surface group ${groupId}`).toBeDefined();
+
       const category = catalog.categories.find(({ id }) => id === categoryId);
       expect(category, `missing ${categoryId} route category`).toBeDefined();
       expect(
         category?.apps
-          .filter(({ id }) => id.startsWith(`surface-${categoryId}-`))
+          .filter(({ id }) => id.startsWith(`surface-${groupId}-`))
           .map(({ path }) => path)
           .sort(),
       ).toEqual([...expectedPaths].sort());
@@ -82,16 +102,17 @@ describe('app routes', () => {
   it('keeps extension surfaces at their decided hash-route paths', () => {
     const catalog = readDesktopRouteCatalog(routes);
 
+    // Extensions folded into Tools; the leaf paths are unchanged.
     expect(catalog.apps['surface-extensions-marketplace']).toMatchObject({
-      categoryPath: 'extensions',
+      categoryPath: 'tools',
       path: 'marketplace',
     });
     expect(catalog.apps['surface-extensions-plugin-view']).toMatchObject({
-      categoryPath: 'extensions',
+      categoryPath: 'tools',
       path: 'plugin-view',
     });
     expect(catalog.apps['surface-extensions-opencode-shim']).toMatchObject({
-      categoryPath: 'extensions',
+      categoryPath: 'tools',
       path: 'opencode-shim',
     });
   });

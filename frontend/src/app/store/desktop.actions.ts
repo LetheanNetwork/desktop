@@ -10,7 +10,15 @@ export interface DesktopHydration {
   z?: number;
 }
 
-export type SeedWindowIds = readonly [string, string];
+/**
+ * Ids for the windows a fresh desktop opens with.
+ *
+ * One, because a fresh desktop opens on Welcome alone. It was a pair when the
+ * seed was Control plus Telemetry; the tuple is kept rather than a bare string
+ * so adding a second seeded window later is a type change the callers are made
+ * to notice.
+ */
+export type SeedWindowIds = readonly [string];
 
 export const desktopActions = createActionGroup({
   source: 'Desktop',
@@ -35,7 +43,13 @@ export const desktopActions = createActionGroup({
       migratedBrowserState: boolean;
     }>(),
     'Save Session Failure': props<{ error: string }>(),
-    'Launch App': props<{ appId: string; windowId?: string }>(),
+    'Launch App': props<{
+      appId: string;
+      windowId?: string;
+      // Where to centre the window. The reducer is pure and cannot measure the
+      // screen, so the caller that can measure passes it in.
+      viewport?: { width: number; height: number };
+    }>(),
     'Focus Window': props<{ id: string }>(),
     'Close Window': props<{ id: string }>(),
     'Minimise Window': props<{ id: string; delayMs?: number }>(),
@@ -44,7 +58,11 @@ export const desktopActions = createActionGroup({
     'Resize Window': props<{ id: string; w: number; h: number }>(),
     'Set Sub': props<{ id: string; sub: string }>(),
     'Set Sys Tab': props<{ id: string; systab: string }>(),
-    'Set View': props<{ view: ViewMode; seedWindowIds?: SeedWindowIds }>(),
+    'Set View': props<{
+      view: ViewMode;
+      seedWindowIds?: SeedWindowIds;
+      viewport?: { width: number; height: number };
+    }>(),
     'Set Device': props<{ device: DeviceSize }>(),
     'Toggle Dev Cat': props<{ id: string }>(),
     'Go Home': emptyProps(),

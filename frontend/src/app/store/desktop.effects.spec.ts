@@ -182,7 +182,7 @@ describe('DesktopEffects', () => {
       type: '[Desktop] Hydrate',
       state: null,
       persist: false,
-      seedWindowIds: ['w-initial-control', 'w-initial-telemetry'],
+      seedWindowIds: ['w-initial-welcome'],
     });
   });
 

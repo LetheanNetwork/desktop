@@ -30,6 +30,9 @@ export const initialDesktopState: DesktopState = {
   migratedBrowserState: false,
 };
 
+/** The menu bar owns the top of the screen; a window must open below it. */
+const MENUBAR_CLEARANCE = 44;
+
 const createWindowId = (): string => 'w' + Date.now() + Math.random().toString(36).slice(2, 5);
 
 const STATIC_SUB_ROUTES: Readonly<Partial<Record<string, ReadonlySet<string>>>> = {
@@ -82,7 +85,12 @@ const focusWindow = (state: DesktopState, id: string): DesktopState => {
   return { ...state, wins, focusId: id, devCat: null, z };
 };
 
-const launchApp = (state: DesktopState, appId: string, windowId?: string): DesktopState => {
+const launchApp = (
+  state: DesktopState,
+  appId: string,
+  windowId?: string,
+  viewport?: { width: number; height: number },
+): DesktopState => {
   const existing = state.wins.find((win) => win.app === appId);
   if (existing) return focusWindow(state, existing.id);
 
@@ -96,8 +104,13 @@ const launchApp = (state: DesktopState, appId: string, windowId?: string): Deskt
     app: appId,
     sub: app.defaultSub ?? '',
     systab: '',
-    x: 70 + n * 34,
-    y: 24 + n * 30,
+    // Centred, then cascaded — a window opening in the top-left corner reads
+    // as something that failed to place itself. Without a viewport (no caller
+    // able to measure) it falls back to the old corner cascade.
+    x: viewport ? Math.max(12, Math.round((viewport.width - app.w) / 2) + n * 26) : 70 + n * 34,
+    y: viewport
+      ? Math.max(MENUBAR_CLEARANCE, Math.round((viewport.height - app.h) / 2) + n * 24)
+      : 24 + n * 30,
     w: app.w,
     h: app.h,
     z,
@@ -128,15 +141,21 @@ const closeWindow = (state: DesktopState, id: string): DesktopState => {
 const isWindowed = (state: DesktopState): boolean =>
   state.view === 'desktop' || (state.view === 'device' && state.device === 'full');
 
-const applyMode = (state: DesktopState, seedWindowIds?: SeedWindowIds): DesktopState => {
+const applyMode = (
+  state: DesktopState,
+  seedWindowIds?: SeedWindowIds,
+  viewport?: { width: number; height: number },
+): DesktopState => {
   const wins = state.wins.filter((win) => win.id !== 'shell' && APPS[win.app]);
   const focusId =
     state.focusId && !wins.some((win) => win.id === state.focusId) ? null : state.focusId;
   let next = { ...state, wins, focusId };
 
   if (isWindowed(next) && next.wins.length === 0) {
-    next = launchApp(next, 'control', seedWindowIds?.[0]);
-    next = launchApp(next, 'telemetry', seedWindowIds?.[1]);
+    // A fresh desktop opens on Welcome and nothing else. Two panels of live
+    // telemetry is what someone wants on their second visit, not their first —
+    // and in the browser demo neither of them has anything real to show.
+    next = launchApp(next, 'welcome', seedWindowIds?.[0], viewport);
   }
 
   return next;
@@ -210,7 +229,9 @@ export const desktopReducer = createReducer(
     persistence: 'unavailable' as const,
     persistenceError: error,
   })),
-  on(desktopActions.launchApp, (state, { appId, windowId }) => launchApp(state, appId, windowId)),
+  on(desktopActions.launchApp, (state, { appId, windowId, viewport }) =>
+    launchApp(state, appId, windowId, viewport),
+  ),
   on(desktopActions.focusWindow, (state, { id }) => focusWindow(state, id)),
   on(desktopActions.closeWindow, (state, { id }) => closeWindow(state, id)),
   on(desktopActions.minimiseWindow, (state, { id, delayMs = 0 }) => {
@@ -268,8 +289,8 @@ export const desktopReducer = createReducer(
     ...state,
     wins: state.wins.map((win) => (win.id === id ? { ...win, systab } : win)),
   })),
-  on(desktopActions.setView, (state, { view, seedWindowIds }) =>
-    applyMode({ ...state, view }, seedWindowIds),
+  on(desktopActions.setView, (state, { view, seedWindowIds, viewport }) =>
+    applyMode({ ...state, view }, seedWindowIds, viewport),
   ),
   on(desktopActions.setDevice, (state, { device }) => ({
     ...state,

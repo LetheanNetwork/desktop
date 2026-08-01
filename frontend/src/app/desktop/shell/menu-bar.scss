@@ -149,6 +149,11 @@
 .menubar .mbtn {
   display: inline-flex;
   align-items: center;
+
+  // A two-word label — "ML Lab" — wrapped onto a second line, which grew the
+  // button past the bar's 26px and dragged every other label off the shared
+  // baseline. One long name should not be able to reflow the whole bar.
+  white-space: nowrap;
   height: 26px;
   padding: 0 8px;
   color: var(--fg-3);

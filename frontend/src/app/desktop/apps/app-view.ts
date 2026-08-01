@@ -28,6 +28,7 @@ const loadDevPanel: AppComponentLoader = () =>
 
 /** App id → dynamic component import used directly by the Angular route tree. */
 export const APP_REGISTRY: Record<string, AppComponentLoader> = {
+  welcome: () => import('./welcome.app').then(({ WelcomeApp }) => WelcomeApp),
   control: () => import('./control.app').then(({ ControlApp }) => ControlApp),
   chat: () => import('./chat.app').then(({ ChatApp }) => ChatApp),
   telemetry: () => import('./telemetry.app').then(({ TelemetryApp }) => TelemetryApp),

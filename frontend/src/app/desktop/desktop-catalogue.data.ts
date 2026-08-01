@@ -28,6 +28,14 @@ export interface Category {
 export type AppNavItem = readonly [path: string, icon: string, title: string];
 
 export const APPS: Record<string, AppDef> = {
+  welcome: {
+    id: 'welcome',
+    title: $localize`:Application title@@app.welcome.title:Welcome`,
+    icon: 'hand-wave',
+    w: 620,
+    h: 380,
+    hint: $localize`:Application launcher hint@@app.welcome.hint:Start here`,
+  },
   control: {
     id: 'control',
     title: $localize`:Application title@@app.control.title:Control`,
@@ -278,7 +286,15 @@ export const CATEGORIES: Category[] = [
     id: 'system',
     label: $localize`:Application category@@category.system:System`,
     icon: 'gauge-high',
-    apps: ['control', 'telemetry', 'activity', 'settings'],
+    apps: [
+      'welcome',
+      'control',
+      'telemetry',
+      'activity',
+      'settings',
+      ...SURFACE_CATEGORY_APPS['observe'],
+      ...SURFACE_CATEGORY_APPS['operations'],
+    ],
   },
   {
     id: 'developer',
@@ -296,19 +312,27 @@ export const CATEGORIES: Category[] = [
       'forge',
       'devops',
       'marketplace',
+      ...SURFACE_CATEGORY_APPS['coding'],
     ],
   },
   {
     id: 'office',
     label: $localize`:Application category@@category.office:Office`,
     icon: 'briefcase',
-    apps: ['tasks', 'tenant', ...SURFACE_CATEGORY_APPS['office']],
+    apps: [
+      'tasks',
+      'tenant',
+      ...SURFACE_CATEGORY_APPS['office'],
+      ...SURFACE_CATEGORY_APPS['planning'],
+      ...SURFACE_CATEGORY_APPS['marketing'],
+      ...SURFACE_CATEGORY_APPS['sales'],
+    ],
   },
   {
     id: 'ai',
     label: $localize`:Application category@@category.ai:AI`,
     icon: 'robot',
-    apps: ['chat'],
+    apps: ['chat', ...SURFACE_CATEGORY_APPS['agents'], ...SURFACE_CATEGORY_APPS['ml-lab']],
   },
   {
     id: 'media',
@@ -320,7 +344,7 @@ export const CATEGORIES: Category[] = [
     id: 'tools',
     label: $localize`:Application category@@category.tools:Tools`,
     icon: 'screwdriver-wrench',
-    apps: ['files', 'notepad', 'terminal'],
+    apps: ['files', 'notepad', 'terminal', ...SURFACE_CATEGORY_APPS['extensions']],
   },
   {
     id: 'networking',
@@ -328,7 +352,6 @@ export const CATEGORIES: Category[] = [
     icon: 'network-wired',
     apps: ['lethernet'],
   },
-  ...SURFACE_CATEGORIES.filter(({ id }) => id !== 'office'),
 ];
 
 export const CTRL_NAV: AppNavItem[] = [

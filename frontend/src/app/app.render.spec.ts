@@ -63,19 +63,19 @@ describe('App first paint', () => {
 
     await vi.waitFor(() => {
       fixture.detectChanges();
-      expect(router.url).toBe('/system/telemetry');
+      expect(router.url).toBe('/system/welcome');
       expect(TestBed.inject(LocationStrategy)).toBeInstanceOf(HashLocationStrategy);
       expect(TestBed.inject(LocationStrategy).prepareExternalUrl('/')).toBe('#/');
       expect(TestBed.inject(LocationStrategy).prepareExternalUrl(router.url)).toBe(
-        '#/system/telemetry',
+        '#/system/welcome',
       );
       expect(element.querySelector('lthn-desktop #os')).not.toBeNull();
       expect(element.querySelector('.menubar')).not.toBeNull();
       expect(element.querySelector('.bar')).not.toBeNull();
       expect(element.querySelector('.dock')).not.toBeNull();
-      expect(element.querySelectorAll('#winlayer > .win')).toHaveLength(2);
-      expect(element.querySelector('lthn-control-app')).not.toBeNull();
-      expect(element.querySelector('lthn-telemetry-app')).not.toBeNull();
+      // One window, not two: a fresh desktop opens on Welcome alone.
+      expect(element.querySelectorAll('#winlayer > .win')).toHaveLength(1);
+      expect(element.querySelector('lthn-welcome-app')).not.toBeNull();
       expect(element.querySelector('app-app-shell')).toBeNull();
       expect(element.querySelector('router-outlet')).not.toBeNull();
     });

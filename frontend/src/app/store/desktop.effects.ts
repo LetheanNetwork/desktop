@@ -38,7 +38,9 @@ import { StorageService } from './storage.service';
 
 const STORE_KEY = 'lthn.desktop';
 const GEOMETRY_SAVE_DELAY_MS = 150;
-const INITIAL_WINDOW_IDS = ['w-initial-control', 'w-initial-telemetry'] as const;
+// Stable id for the one window a fresh desktop opens with, so a hydration
+// replay produces the same window rather than a new one each time.
+const INITIAL_WINDOW_IDS = ['w-initial-welcome'] as const;
 
 const mutatingActions = [
   desktopActions.hydrate,
