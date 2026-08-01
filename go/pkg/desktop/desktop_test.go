@@ -11,7 +11,8 @@ package desktop_test
 
 import (
 	core "dappco.re/go"
-	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/go/crypt/keys"
+	"dappco.re/lthn/desktop/pkg/keysvc"
 )
 
 // keysFixture constructs a keys.Service under a temp HOME and
@@ -24,7 +25,7 @@ import (
 func keysFixture(t *core.T) *keys.Service {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	r := keys.New()
+	r := keysvc.New()
 	core.AssertTrue(t, r.OK, "keys.New must succeed under temp HOME")
 	svc := r.Value.(*keys.Service)
 	tier0KEK := make([]byte, 32)
@@ -71,7 +72,7 @@ func TestDesktop_SingleInstanceKey_Reload(t *core.T) {
 	// are already on disk; re-wire the tier-0 KEK provider with
 	// the SAME fixed KEK so the second Service can unwrap the
 	// existing tier-0 master.
-	svc2 := keys.New().Value.(*keys.Service)
+	svc2 := keysvc.New().Value.(*keys.Service)
 	tier0KEK := make([]byte, 32)
 	for i := range tier0KEK {
 		tier0KEK[i] = 0x42

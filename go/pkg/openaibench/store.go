@@ -5,7 +5,7 @@ package openaibench
 import (
 	core "dappco.re/go"
 
-	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/go/crypt/keys"
 )
 
 // keyPrefix namespaces openaibench endpoint configs in the pkg/keys

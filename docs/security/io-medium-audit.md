@@ -46,7 +46,7 @@ provider capability, not a renderer-selected host path.
 | `go/pkg/audit/internal/rotation` | path probes during rotation | audit Medium rotation capability | metadata | P1 |
 | `go/pkg/bridge` | generic raw-path bridge helpers | remove renderer path authority; registered mount façade | boundary | P1 |
 | `go/pkg/firstlaunch` | marker probes and reads | application metadata Medium | metadata | P1 |
-| `go/pkg/keys` | Core-Fs key tiers and migrations | encrypted key-vault Medium | boundary | P1 |
+| `dappco.re/go/crypt/keys` (wired by `go/pkg/keysvc`) | Core-Fs key tiers and migrations | encrypted key-vault Medium | boundary | P1 |
 | `go/pkg/office/internal/safedir` | `Lstat` plus `MkdirAll` path guard | retire behind provider containment | boundary | P1 |
 | `go/pkg/paths` | layout, atomic files, locks, `/proc`, and Darwin syscalls | application-data Medium plus read-only platform capability | boundary | P1 |
 | `go/pkg/serverkey` | seed, token, and wallet paths | encrypted server-identity Medium | boundary | P1 |

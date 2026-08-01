@@ -40,7 +40,7 @@ import (
 	"dappco.re/go/inference/serving/provider/openai"
 	"dappco.re/go/ratelimit"
 
-	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/go/crypt/keys"
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 

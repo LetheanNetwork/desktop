@@ -11,8 +11,8 @@ package agents
 
 import (
 	core "dappco.re/go"
+	"dappco.re/go/crypt/keys"
 	"dappco.re/go/process"
-	"dappco.re/lthn/desktop/pkg/keys"
 	"dappco.re/lthn/desktop/pkg/terminal"
 )
 

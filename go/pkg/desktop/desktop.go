@@ -36,6 +36,7 @@ import (
 
 	core "dappco.re/go"
 	"dappco.re/go/config"
+	"dappco.re/go/crypt/keys"
 	gui "dappco.re/go/render/display/webkit"
 	guilifecycle "dappco.re/go/render/display/webkit/pkg/lifecycle"
 	guisystray "dappco.re/go/render/display/webkit/pkg/systray"
@@ -61,7 +62,6 @@ import (
 	"dappco.re/lthn/desktop/pkg/git"
 	"dappco.re/lthn/desktop/pkg/incidents"
 	"dappco.re/lthn/desktop/pkg/integrations"
-	"dappco.re/lthn/desktop/pkg/keys"
 	"dappco.re/lthn/desktop/pkg/lemma"
 	"dappco.re/lthn/desktop/pkg/lint"
 	"dappco.re/lthn/desktop/pkg/marketing/analytics"

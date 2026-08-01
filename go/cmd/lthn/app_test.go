@@ -36,9 +36,10 @@ import (
 	"dappco.re/go/config"
 	coreio "dappco.re/go/io"
 
+	"dappco.re/go/crypt/keys"
 	lthn "dappco.re/lthn/desktop"
 	"dappco.re/lthn/desktop/pkg/audit"
-	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/lthn/desktop/pkg/keysvc"
 	"dappco.re/lthn/desktop/pkg/modelruntime"
 	"dappco.re/lthn/desktop/pkg/runner"
 	"dappco.re/lthn/desktop/pkg/services"
@@ -486,7 +487,7 @@ func TestApp_PostUnlock_TriggersMigrateLegacyKeys_Good(t *testing.T) {
 			Path:      cfgFile,
 			EnvPrefix: "LTHN_TEST_H250",
 		})),
-		core.WithName("keys", keys.Register),
+		core.WithName("keys", keysvc.Register),
 		core.WithName("runner", runner.Register),
 	)
 	core.RequireTrue(t, c.ServiceStartup(core.Background(), nil).OK,

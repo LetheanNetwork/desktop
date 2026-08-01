@@ -13,12 +13,12 @@
 package runner_test
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/config"
 
+	"dappco.re/go/crypt/keys"
 	"dappco.re/lthn/desktop/pkg/audit"
-	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/lthn/desktop/pkg/keysvc"
 	"dappco.re/lthn/desktop/pkg/runner"
 )
 
@@ -47,7 +47,7 @@ func credentialFixture(t *core.T) (*core.Core, *keys.Service, *runner.Service) {
 			Path:      cfgFile,
 			EnvPrefix: "LTHN_TEST_CRED",
 		})),
-		core.WithName("keys", keys.Register),
+		core.WithName("keys", keysvc.Register),
 	)
 	core.AssertTrue(t, c.ServiceStartup(core.Background(), nil).OK,
 		"core ServiceStartup must succeed")
@@ -95,7 +95,7 @@ func lockedFixture(t *core.T) (*core.Core, *keys.Service, *runner.Service) {
 			Path:      cfgFile,
 			EnvPrefix: "LTHN_TEST_CRED_LOCKED",
 		})),
-		core.WithName("keys", keys.Register),
+		core.WithName("keys", keysvc.Register),
 	)
 	core.AssertTrue(t, c.ServiceStartup(core.Background(), nil).OK)
 

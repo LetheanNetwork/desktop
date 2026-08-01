@@ -27,9 +27,9 @@ package main
 
 import (
 	core "dappco.re/go"
+	"dappco.re/go/crypt/keys"
 	"dappco.re/go/store"
 	"dappco.re/lthn/desktop/pkg/fleet"
-	"dappco.re/lthn/desktop/pkg/keys"
 	"dappco.re/lthn/desktop/pkg/paths"
 )
 

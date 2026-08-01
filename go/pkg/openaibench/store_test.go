@@ -6,7 +6,8 @@ import (
 	core "dappco.re/go"
 	"dappco.re/go/config"
 
-	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/go/crypt/keys"
+	"dappco.re/lthn/desktop/pkg/keysvc"
 	"dappco.re/lthn/desktop/pkg/openaibench"
 )
 
@@ -28,7 +29,7 @@ func storeFixture(t *core.T) *core.Core {
 			Path:      cfgFile,
 			EnvPrefix: "LTHN_TEST_OAB_STORE",
 		})),
-		core.WithName("keys", keys.Register),
+		core.WithName("keys", keysvc.Register),
 	)
 	core.AssertTrue(t, c.ServiceStartup(core.Background(), nil).OK)
 	t.Cleanup(func() { _ = c.ServiceShutdown(core.Background()) })

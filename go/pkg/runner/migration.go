@@ -41,8 +41,8 @@ import (
 	core "dappco.re/go"
 	"dappco.re/go/inference/agent/ai"
 
+	"dappco.re/go/crypt/keys"
 	"dappco.re/lthn/desktop/pkg/audit"
-	"dappco.re/lthn/desktop/pkg/keys"
 )
 
 // migrationRefSuffix is the synthesised-ref tail appended to the route

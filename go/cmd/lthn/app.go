@@ -7,6 +7,7 @@ package main
 import (
 	core "dappco.re/go"
 	"dappco.re/go/api"
+	"dappco.re/go/crypt/keys"
 	"dappco.re/go/i18n"
 	"dappco.re/go/io"
 	"dappco.re/go/mcp/pkg/mcp"
@@ -28,7 +29,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/gateway"
 	lthni18n "dappco.re/lthn/desktop/pkg/i18n"
 	"dappco.re/lthn/desktop/pkg/incidents"
-	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/lthn/desktop/pkg/keysvc"
 	"dappco.re/lthn/desktop/pkg/marketing/analytics"
 	"dappco.re/lthn/desktop/pkg/marketing/audience"
 	"dappco.re/lthn/desktop/pkg/marketing/campaigns"
@@ -243,7 +244,7 @@ func newAppCore() *core.Core {
 		// keys — encrypted-at-rest provider-credentials store under
 		// ~/Lethean/data/keys/. Wails frontends write provider API
 		// keys via the binding; plaintext never crosses the WebView.
-		core.WithName("keys", keys.Register),
+		core.WithName("keys", keysvc.Register),
 		// fleet — compute-fleet view (machines, agents, routing
 		// rules) backed by master DuckDB. Frontends consume via the
 		// fleet-window Wails binding.

@@ -1768,7 +1768,7 @@ const (
 
 	// EventViTokenMigrated fires inside pkg/vi.MigrateLegacyTokens once
 	// per provider whose legacy `vi.tokens.<provider>` config literal is
-	// dispatched into the pkg/keys tier-1 substrate under ref
+	// dispatched into the crypt/keys tier-1 substrate under ref
 	// `vi-<provider>` and the legacy literal blanked. Closes the Stage E
 	// at-rest sealing requirement (Mantis #1748): a forensic walker can
 	// correlate "plaintext token disappeared from disk at T" with "the
@@ -2093,7 +2093,7 @@ const (
 	// fact-of-orphan, not the credential.
 	EventProviderCredentialStoredOrphan = "provider.credential.stored_orphan"
 
-	// EventKeysTier0Stored fires when pkg/keys.Service.PutTier0
+	// EventKeysTier0Stored fires when crypt/keys.Service.PutTier0
 	// successfully writes a tier-0 (pre-unlock substrate) ciphertext
 	// to disk. Tier-0 holds machine-local secrets that survive across
 	// account-lock cycles (today: the SingleInstance IPC key the
@@ -2101,7 +2101,7 @@ const (
 	// #1625 / Cerberus #1442). Mantis #1763 / Cerberus #77 F-1 —
 	// 10th audit-cluster adoption; closes the STRIDE-R Repudiation +
 	// A2/A3 audit-trail gap on operator-tier credential-mutation
-	// verbs in pkg/keys.
+	// verbs in crypt/keys.
 	//
 	// The broadcastTier1Change event-bus broadcast in this package
 	// is a consumer-cache flush signal — NOT an audit substrate; the
@@ -2128,7 +2128,7 @@ const (
 	// this row records the storage decision, not the credential.
 	EventKeysTier0Stored = "keys.tier0.stored"
 
-	// EventKeysTier0Deleted fires when pkg/keys.Service.DeleteTier0
+	// EventKeysTier0Deleted fires when crypt/keys.Service.DeleteTier0
 	// actually removes a tier-0 ciphertext (the non-idempotent path —
 	// the no-op variant where the file did not exist emits nothing,
 	// mirroring the broadcastTier1Change discipline on the tier-1
@@ -2148,7 +2148,7 @@ const (
 	// deletion decision, not the credential.
 	EventKeysTier0Deleted = "keys.tier0.deleted"
 
-	// EventKeysTier1Stored fires when pkg/keys.Service.PutTier1
+	// EventKeysTier1Stored fires when crypt/keys.Service.PutTier1
 	// successfully writes a tier-1 (post-unlock provider-credential)
 	// ciphertext to disk AND no prior ciphertext existed under the
 	// same ref (the "first-write" path; the EXISTING-ref overwrite
@@ -2157,7 +2157,7 @@ const (
 	//
 	// Sibling of EventProviderCredentialStored (which fires from the
 	// pkg/runner Wails-input + boot-scan paths in addition to this
-	// row) — pkg/keys emits at the at-rest mutation site; pkg/runner
+	// row) — crypt/keys emits at the at-rest mutation site; pkg/runner
 	// emits at the higher-level credential-import decision site;
 	// both rows land for the same Wails-input flow so the forensic
 	// trail covers the entire pipeline. Mantis #1763 / Cerberus #77
@@ -2181,7 +2181,7 @@ const (
 	// the credential.
 	EventKeysTier1Stored = "keys.tier1.stored"
 
-	// EventKeysTier1Replaced fires when pkg/keys.Service.PutTier1
+	// EventKeysTier1Replaced fires when crypt/keys.Service.PutTier1
 	// successfully writes a tier-1 ciphertext over an existing ref
 	// (the wasPresent path at service.go:1342 that also fires the
 	// Tier1KeyChanged{Kind: Tier1KeyReplaced} consumer-cache flush
@@ -2197,7 +2197,7 @@ const (
 	// reflecting first-write vs overwrite.
 	EventKeysTier1Replaced = "keys.tier1.replaced"
 
-	// EventKeysTier1Deleted fires when pkg/keys.Service.DeleteTier1
+	// EventKeysTier1Deleted fires when crypt/keys.Service.DeleteTier1
 	// actually removes a tier-1 ciphertext (the non-idempotent path
 	// at service.go:1406 that also fires the Tier1KeyChanged{Kind:
 	// Tier1KeyDeleted} consumer-cache flush broadcast). The no-op

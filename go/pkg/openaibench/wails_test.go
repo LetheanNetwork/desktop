@@ -7,8 +7,9 @@ import (
 	"dappco.re/go/config"
 	"dappco.re/go/orm"
 
+	"dappco.re/go/crypt/keys"
 	"dappco.re/lthn/desktop/pkg/benchmark"
-	"dappco.re/lthn/desktop/pkg/keys"
+	"dappco.re/lthn/desktop/pkg/keysvc"
 	"dappco.re/lthn/desktop/pkg/openaibench"
 )
 
@@ -31,7 +32,7 @@ func wsvcFixture(t *core.T) (*core.Core, *benchmark.Service, *openaibench.WailsS
 			Path:      cfgFile,
 			EnvPrefix: "LTHN_TEST_OAB_WSVC",
 		})),
-		core.WithName("keys", keys.Register),
+		core.WithName("keys", keysvc.Register),
 	)
 	core.AssertTrue(t, c.ServiceStartup(core.Background(), nil).OK)
 	t.Cleanup(func() { _ = c.ServiceShutdown(core.Background()) })

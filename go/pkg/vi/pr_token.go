@@ -41,8 +41,8 @@ import (
 	core "dappco.re/go"
 	"dappco.re/go/config"
 
+	"dappco.re/go/crypt/keys"
 	"dappco.re/lthn/desktop/pkg/audit"
-	"dappco.re/lthn/desktop/pkg/keys"
 )
 
 // TokenConfigKey returns the legacy config dot-path a provider's

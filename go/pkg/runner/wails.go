@@ -11,8 +11,8 @@ import (
 	core "dappco.re/go"
 	"dappco.re/go/inference"
 
+	"dappco.re/go/crypt/keys"
 	"dappco.re/lthn/desktop/pkg/audit"
-	"dappco.re/lthn/desktop/pkg/keys"
 )
 
 // RouteView is the lean read-only shape Settings → Runner consumes.
