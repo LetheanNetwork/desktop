@@ -5,6 +5,7 @@ package forecast_test
 import (
 	"testing"
 
+	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/sales/deals"
 	"dappco.re/lthn/desktop/pkg/sales/forecast"
 )
@@ -98,5 +99,64 @@ func TestServiceName_Good(t *testing.T) {
 	svc := forecast.NewService(nil)
 	if svc.ServiceName() != "Forecast" {
 		t.Fatalf("expected Forecast, got %q", svc.ServiceName())
+	}
+}
+
+// TestRegister_Good — the core.WithName-compatible factory wraps
+// NewService and returns it as the Result value.
+func TestRegister_Good(t *testing.T) {
+	c := core.New()
+	r := forecast.Register(c)
+	if !r.OK {
+		t.Fatalf("Register: %s", r.Error())
+	}
+	svc, ok := r.Value.(*forecast.Service)
+	if !ok || svc == nil {
+		t.Fatalf("Register did not return *forecast.Service, got %T", r.Value)
+	}
+	if svc.ServiceName() != "Forecast" {
+		t.Fatalf("expected Forecast, got %q", svc.ServiceName())
+	}
+}
+
+// TestQuarterly_ZeroQuarters_Good_DefaultsToFour — Quarters<=0 falls
+// back to the 4-quarter default rather than returning an empty slice.
+func TestQuarterly_ZeroQuarters_Good_DefaultsToFour(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := forecast.NewService(nil)
+	r := svc.Quarterly(forecast.QuarterlyInput{Quarters: 0})
+	if !r.OK {
+		t.Fatalf("Quarterly failed: %s", r.Error())
+	}
+	out := r.Value.(forecast.QuarterlyOutput)
+	if len(out.Rows) != 4 {
+		t.Fatalf("expected 4 rows (default), got %d", len(out.Rows))
+	}
+}
+
+// TestQuarterly_ExcessQuarters_Good_ClampsToEight — Quarters above 8
+// clamps down rather than returning an unbounded slice.
+func TestQuarterly_ExcessQuarters_Good_ClampsToEight(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := forecast.NewService(nil)
+	r := svc.Quarterly(forecast.QuarterlyInput{Quarters: 100})
+	if !r.OK {
+		t.Fatalf("Quarterly failed: %s", r.Error())
+	}
+	out := r.Value.(forecast.QuarterlyOutput)
+	if len(out.Rows) != 8 {
+		t.Fatalf("expected 8 rows (clamped), got %d", len(out.Rows))
+	}
+}
+
+// TestQuarterly_Bad_NoHome — loadAllDeals propagates a paths.Root()
+// failure (no resolvable $HOME) as a real Quarterly error rather than
+// silently returning an empty forecast.
+func TestQuarterly_Bad_NoHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	svc := forecast.NewService(nil)
+	r := svc.Quarterly(forecast.QuarterlyInput{Quarters: 4})
+	if r.OK {
+		t.Fatal("Quarterly succeeded with no $HOME to resolve paths.Root()")
 	}
 }
