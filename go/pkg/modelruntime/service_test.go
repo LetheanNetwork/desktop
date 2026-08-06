@@ -17,6 +17,17 @@ type fakeLifecycle struct {
 	calls          []string
 	startResult    core.Result
 	hasStartResult bool
+	// getResult/hasGetResult override Get's normal Ok(snapshot) reply —
+	// used to provoke Snapshot()'s publishUnavailable branches (a
+	// failed lifecycle read, or one that returns an unexpected Value
+	// type) that the snapshot-state-driven scenarios can't reach.
+	getResult    core.Result
+	hasGetResult bool
+	// restartResult/hasRestartResult override Restart's normal success
+	// reply — used to provoke Unload/Restart's "lifecycle restart
+	// failed" branches.
+	restartResult    core.Result
+	hasRestartResult bool
 }
 
 func (lifecycle *fakeLifecycle) Get(id string) core.Result {
@@ -25,6 +36,9 @@ func (lifecycle *fakeLifecycle) Get(id string) core.Result {
 	lifecycle.calls = append(lifecycle.calls, "lifecycle.get")
 	if id != inferenceServiceID {
 		return core.Fail(core.NewError("unknown service"))
+	}
+	if lifecycle.hasGetResult {
+		return lifecycle.getResult
 	}
 	return core.Ok(lifecycle.snapshot)
 }
@@ -64,6 +78,9 @@ func (lifecycle *fakeLifecycle) Restart(id string) core.Result {
 	lifecycle.calls = append(lifecycle.calls, "lifecycle.restart")
 	if id != inferenceServiceID {
 		return core.Fail(core.NewError("unknown service"))
+	}
+	if lifecycle.hasRestartResult {
+		return lifecycle.restartResult
 	}
 	lifecycle.snapshot.State = services.StateRunning
 	lifecycle.snapshot.Desired = true
@@ -178,12 +195,22 @@ type fakeCredentialProvider struct {
 	reads       int
 	invalidates int
 	clears      int
+	// results is an optional FIFO override queue — when non-empty,
+	// Credential() pops and returns the head instead of Ok(token).
+	// Used to provoke withCredential's "refreshed credential also
+	// unavailable" branch.
+	results []core.Result
 }
 
 func (provider *fakeCredentialProvider) Credential() core.Result {
 	provider.mu.Lock()
 	defer provider.mu.Unlock()
 	provider.reads++
+	if len(provider.results) > 0 {
+		next := provider.results[0]
+		provider.results = provider.results[1:]
+		return next
+	}
 	return core.Ok(provider.token)
 }
 

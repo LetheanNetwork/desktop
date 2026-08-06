@@ -46,3 +46,53 @@ func TestWailsService_BadFailsClosedWithoutRuntime(t *core.T) {
 		core.AssertEqual(t, ErrorRuntimeUnavailable, ErrorCodeOf(result))
 	}
 }
+
+// TestWailsService_ServiceStartup_Good and TestWailsService_ServiceShutdown_Good
+// — both are deliberately inert (Core owns runtime lifecycle), but had
+// 0% coverage because nothing ever called them.
+func TestWailsService_ServiceStartup_Good(t *core.T) {
+	wails := NewWailsService(nil)
+	result := wails.ServiceStartup(core.Background(), nil)
+	core.AssertTrue(t, result.OK)
+}
+
+func TestWailsService_ServiceShutdown_Good(t *core.T) {
+	wails := NewWailsService(nil)
+	result := wails.ServiceShutdown()
+	core.AssertTrue(t, result.OK)
+}
+
+// TestWailsService_GoodDelegatesEveryMethodToTheWiredRuntime — the nil-
+// runtime test above only exercises requireRuntime's fail-closed
+// branch; every method's actual delegation line
+// (`return service.runtime.X()`) was still dark. Wire a real fixture
+// runtime and confirm each WailsService method reaches the underlying
+// Service call (asserted via the fixture's lifecycle/client call log,
+// same signal the direct Service-level tests use).
+func TestWailsService_GoodDelegatesEveryMethodToTheWiredRuntime(t *core.T) {
+	fixture := newRuntimeFixture(t)
+	wails := NewWailsService(fixture.runtime)
+
+	snapshot := wails.Snapshot()
+	core.RequireTrue(t, snapshot.OK, snapshot.Error())
+	core.AssertEqual(t, StateStopped, snapshot.Value.(Snapshot).State)
+
+	start := wails.Start()
+	core.RequireTrue(t, start.OK, start.Error())
+	core.AssertEqual(t, StateModelLess, start.Value.(Snapshot).State)
+
+	restart := wails.Restart()
+	core.RequireTrue(t, restart.OK, restart.Error())
+
+	load := wails.Load(LoadRequest{ModelID: "model-1111111111111111"})
+	core.RequireTrue(t, load.OK, load.Error())
+	core.AssertEqual(t, "model-1111111111111111", load.Value.(Snapshot).ActiveModelID)
+
+	unload := wails.Unload()
+	core.RequireTrue(t, unload.OK, unload.Error())
+	core.AssertEqual(t, "", unload.Value.(Snapshot).ActiveModelID)
+
+	stop := wails.Stop()
+	core.RequireTrue(t, stop.OK, stop.Error())
+	core.AssertEqual(t, StateStopped, stop.Value.(Snapshot).State)
+}
