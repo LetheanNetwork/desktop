@@ -92,6 +92,26 @@ func TestService_Service_Transport_Ugly(t *core.T) {
 	core.AssertEqual(t, first, second)
 }
 
+func TestService_Transport_Good_JSClientDelegatesToService(t *core.T) {
+	svc := connection.NewService(connection.Options{
+		PublicURL: "wss://api.lethean.example/wails/ws",
+	})
+
+	client := string(svc.Transport().JSClient())
+
+	core.AssertContains(t, client, `"webSocketUrl":"wss://api.lethean.example/wails/ws"`)
+}
+
+func TestService_Transport_Good_DispatchWailsEventDelegatesToService(t *core.T) {
+	svc := connection.NewService(connection.Options{Address: "127.0.0.1:0"})
+	listener, ok := svc.Transport().(application.WailsEventListener)
+	core.RequireTrue(t, ok)
+
+	// No connected clients: dispatch must fan out over zero clients rather
+	// than panic or block.
+	listener.DispatchWailsEvent(&application.CustomEvent{Name: "lthn:test"})
+}
+
 func TestService_NewService_Bad_InsecureRemotePublicURL(t *core.T) {
 	svc := connection.NewService(connection.Options{
 		PublicURL: "ws://desktop.lethean.example/wails/ws",

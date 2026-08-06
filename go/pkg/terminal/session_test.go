@@ -222,6 +222,39 @@ func TestTerminalSession_Echo_Good(t *testing.T) {
 	}
 }
 
+func TestTerminalSession_Subscribe_Good(t *testing.T) {
+	s := memSession(8)
+	s.appendRing([]byte("ab"))
+	var mu sync.Mutex
+	var received []byte
+
+	replay, unsubscribe := s.Subscribe(func(chunk []byte) {
+		mu.Lock()
+		received = append(received, chunk...)
+		mu.Unlock()
+	})
+	if string(replay) != "ab" {
+		t.Fatalf("replay = %q, want %q", replay, "ab")
+	}
+
+	s.publish([]byte("c"))
+	mu.Lock()
+	got := string(received)
+	mu.Unlock()
+	if got != "c" {
+		t.Fatalf("live via Subscribe = %q, want %q", got, "c")
+	}
+
+	unsubscribe()
+	s.publish([]byte("d"))
+	mu.Lock()
+	got = string(received)
+	mu.Unlock()
+	if got != "c" {
+		t.Fatalf("received after unsubscribe = %q, want unchanged %q", got, "c")
+	}
+}
+
 func assertOutputChunk(t *testing.T, got OutputChunk, start, end uint64, data string, reset bool) {
 	t.Helper()
 	if got.Start != start || got.End != end || string(got.Data) != data || got.Reset != reset {

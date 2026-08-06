@@ -4,6 +4,7 @@ package telemetry
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -113,6 +114,46 @@ func TestHostSampler_BadRejectsImpossibleHostReadings(t *testing.T) {
 				power:        &powerReading{source: PowerSourceBattery, batteryPercent: float64Pointer(101)},
 			},
 		},
+		{
+			name: "empty source",
+			reading: hostReading{
+				observedAt:   time.Now(),
+				logicalCores: 4,
+			},
+		},
+		{
+			name: "oversized source",
+			reading: hostReading{
+				observedAt:   time.Now(),
+				source:       strings.Repeat("x", 129),
+				logicalCores: 4,
+			},
+		},
+		{
+			name: "zero logical cores",
+			reading: hostReading{
+				observedAt:   time.Now(),
+				source:       "test host API",
+				logicalCores: 0,
+			},
+		},
+		{
+			name: "excessive logical cores",
+			reading: hostReading{
+				observedAt:   time.Now(),
+				source:       "test host API",
+				logicalCores: 4_097,
+			},
+		},
+		{
+			name: "unknown power source",
+			reading: hostReading{
+				observedAt:   time.Now(),
+				source:       "test host API",
+				logicalCores: 4,
+				power:        &powerReading{source: PowerSource("quantum")},
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -163,6 +204,29 @@ func TestHostSampler_BadPropagatesSourceFailure(t *testing.T) {
 	sampler := newHostSampler(&sequenceHostSource{err: errors.New("host API unavailable")})
 	if _, err := sampler.sample(); err == nil {
 		t.Fatal("source failure was hidden")
+	}
+}
+
+func TestHostSampler_BadNilSamplerOrSource(t *testing.T) {
+	var nilSampler *hostSampler
+	if _, err := nilSampler.sample(); err == nil {
+		t.Fatal("a nil sampler should fail closed")
+	}
+
+	unsourced := newHostSampler(nil)
+	if _, err := unsourced.sample(); err == nil {
+		t.Fatal("a sampler with no source should fail closed")
+	}
+}
+
+func TestCPUUsage_BadZeroTotalReturnsUnavailable(t *testing.T) {
+	// Identical counters across two samples: busy delta and idle delta are
+	// both zero, so total is zero — the divide-by-zero guard must report
+	// "unavailable" rather than NaN.
+	previous := &cpuCounters{user: 10, system: 5, nice: 1, idle: 20}
+	current := &cpuCounters{user: 10, system: 5, nice: 1, idle: 20}
+	if usage, ok := cpuUsage(previous, current); ok {
+		t.Fatalf("zero-delta counters reported usage = %v, want unavailable", usage)
 	}
 }
 

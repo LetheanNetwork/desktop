@@ -107,6 +107,19 @@ func TestTelemetry_CurrentHostSnapshot_GoodReturnsBoundedHostIdentity(t *core.T)
 	core.AssertGreaterOrEqual(t, snapshot.CPU.LogicalCores, 1)
 }
 
+func TestTelemetry_Register_GoodExposesSampleActionOnCore(t *core.T) {
+	c := core.New()
+	r := telemetry.Register(c)
+	core.RequireTrue(t, r.OK)
+
+	actionResult := c.Action("telemetry.sample").Run(core.Background(), core.NewOptions())
+
+	core.RequireTrue(t, actionResult.OK)
+	reading, ok := actionResult.Value.(telemetry.Reading)
+	core.RequireTrue(t, ok)
+	core.AssertGreater(t, reading.HeapAllocMB, 0.0)
+}
+
 func TestTelemetry_Register_GoodExposesTheSameHostSamplerOnCore(t *core.T) {
 	c := core.New()
 	svc := telemetry.NewService(telemetry.Options{})
