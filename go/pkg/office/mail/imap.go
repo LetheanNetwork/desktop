@@ -123,7 +123,11 @@ func (s *Service) FetchOnce(input FetchOnceInput) core.Result {
 // threads.md, and updates the state file. Returns OK with count fetched.
 func (s *Service) fetchFolder(acct *MailAccount, folderSlug string) core.Result {
 	poolKey := acct.Name + "/" + folderSlug
-	client, err := s.imapConnect(acct, poolKey)
+	dial := s.imapConnect
+	if s.imapDialOverride != nil {
+		dial = s.imapDialOverride
+	}
+	client, err := dial(acct, poolKey)
 	if err != nil {
 		s.core.ACTION(MailEvent{
 			Kind:        EventConnectionFailed,

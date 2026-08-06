@@ -7,8 +7,11 @@
 package marketplace
 
 import (
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"sync"
+	"testing"
 
 	core "dappco.re/go"
 
@@ -158,4 +161,62 @@ func AllowedManifestHostSuffixesForTest() []string {
 //	res, _ := r.Value.(subject.FetchManifestSignedResult)
 func FetchManifestWithSigForTest(url string, client *http.Client) core.Result {
 	return fetchManifestWithSigClient(fetchManifestOp, url, client)
+}
+
+// WithFakeRegistry stands up a real httptest.NewTLSServer around
+// handler and temporarily repoints the package's registry surface at
+// it: httpsOnlyClient (a mutable package var — swapped, not
+// production code) gets the test server's already-cert-trusting
+// client, and the compile-time allowedManifestHostSuffixes allowlist
+// (Cerberus Mantis #1667/#1690 C2) gets the loopback host appended so
+// the host-allowlist gate the production registry surface enforces
+// doesn't reject the in-process listener. Both are restored via
+// t.Cleanup, so this never leaks state across tests and never weakens
+// production — the allowlist gate and TLS-client-choice
+// (httpsOnlyClient) are exercised for real against a real HTTP
+// server, they're just pointed at a loopback origin instead of the
+// live marketplace.lthn.ai mirror.
+//
+// This is the seam FetchIndex / FetchManifest / mcpList / mcpInstall
+// / Install's catalogue-staleness gates all route through in tests —
+// none of it is reachable by pointing at the real registry (that
+// would be a real network call, which the house rules forbid).
+//
+// Usage example (test code):
+//
+//	base := subject.WithFakeRegistry(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+//	    w.Write(indexJSON)
+//	}))
+//	r := svc.FetchIndex(base + "/v1/index.json")
+func WithFakeRegistry(t *testing.T, handler http.Handler) (baseURL string) {
+	t.Helper()
+	srv := httptest.NewTLSServer(handler)
+	t.Cleanup(srv.Close)
+
+	host, _, err := net.SplitHostPort(srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split fake registry addr: %v", err)
+	}
+
+	oldClient := httpsOnlyClient
+	oldHosts := allowedManifestHostSuffixes
+	fakeClient := srv.Client()
+	fakeClient.CheckRedirect = oldClient.CheckRedirect
+	httpsOnlyClient = fakeClient
+	allowedManifestHostSuffixes = append(append([]string{}, oldHosts...), host)
+	t.Cleanup(func() {
+		httpsOnlyClient = oldClient
+		allowedManifestHostSuffixes = oldHosts
+	})
+
+	return srv.URL
+}
+
+// IndexCachePathForTest exposes Service.indexCachePath so external
+// tests can seed the on-disk catalogue cache directly (e.g. to plant
+// a FetchedAt far enough in the past to trip the staleness gate,
+// which a live download can never produce since downloadIndex always
+// stamps core.Now()).
+func IndexCachePathForTest(s *Service) string {
+	return s.indexCachePath()
 }
