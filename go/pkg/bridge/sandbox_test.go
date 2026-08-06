@@ -97,6 +97,46 @@ func TestBridge_Sandbox_GatePassesAllowlistedImage_Good(t *core.T) {
 	}
 }
 
+// toolSandboxDetect surfaces available container runtimes. D-2a keeps
+// Detect on *Service directly (read-only runtime probe, different
+// threat class from spawn).
+func TestBridge_Sandbox_ToolSandboxDetect_Good(t *core.T) {
+	br := bridgeWithSandbox()
+	resp := br.toolSandboxDetect()
+	core.AssertEqual(t, true, resp["ok"])
+	core.AssertNotNil(t, resp["value"])
+}
+
+func TestBridge_Sandbox_ToolSandboxDetect_Bad_ServiceUnavailable(t *core.T) {
+	s := &Service{}
+	resp := s.toolSandboxDetect()
+	core.AssertEqual(t, false, resp["ok"])
+	core.AssertEqual(t, "sandbox service unavailable", resp["error"])
+}
+
+func TestBridge_Sandbox_SandboxSvc_Bad_NilService(t *core.T) {
+	var s *Service
+	core.AssertNil(t, s.sandboxSvc())
+}
+
+func TestBridge_Sandbox_SandboxSvc_Bad_NoServiceRuntime(t *core.T) {
+	s := &Service{}
+	core.AssertNil(t, s.sandboxSvc())
+}
+
+func TestBridge_Sandbox_SandboxSvc_Bad_ServiceNotRegistered(t *core.T) {
+	c := core.New()
+	s := &Service{ServiceRuntime: core.NewServiceRuntime[Options](c, Options{}), port: 9999}
+	core.AssertNil(t, s.sandboxSvc())
+}
+
+func TestBridge_Sandbox_ToolSandboxSpawn_Bad_ServiceUnavailable(t *core.T) {
+	s := &Service{}
+	resp := s.toolSandboxSpawn(map[string]any{"image": "ghcr.io/owner/img:1.0", "command": "echo"})
+	core.AssertEqual(t, false, resp["ok"])
+	core.AssertEqual(t, "sandbox service unavailable", resp["error"])
+}
+
 // ErrorCode contract sanity from the bridge's perspective — the
 // bridge response uses ErrorCode() exactly to derive the short tag
 // surfaced as `error_code`.

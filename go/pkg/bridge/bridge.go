@@ -137,6 +137,16 @@ type Service struct {
 	// bus; calls return through the existing window.eval_js transport.
 	webMCP     *webMCPState
 	webMCPCall webMCPCallFunc
+
+	// subscribeTimeout / subscribePoll override subscribeToWebViewEvents'
+	// default 10s deadline / 50ms poll cadence when non-zero. Test-only
+	// seam (smallest-safe testability knob, no public API change) so
+	// the "window" service registration wait — and its timeout branch —
+	// can be exercised in milliseconds instead of full wall-clock
+	// seconds. Zero value (the production default) keeps prior
+	// behaviour identical.
+	subscribeTimeout core.Duration
+	subscribePoll    core.Duration
 }
 
 // RegisterService returns a Core service factory for the bridge. The
@@ -275,7 +285,15 @@ func (s *Service) Port() int { return s.port }
 //
 // GUI-8 audit (2026-05-27): kept as-is.
 func (s *Service) subscribeToWebViewEvents() {
-	deadline := core.Now().Add(10 * core.Second)
+	timeout := s.subscribeTimeout
+	if timeout == 0 {
+		timeout = 10 * core.Second
+	}
+	poll := s.subscribePoll
+	if poll == 0 {
+		poll = 50 * core.Millisecond
+	}
+	deadline := core.Now().Add(timeout)
 	attempts := 0
 	for core.Now().Before(deadline) {
 		attempts++
@@ -298,7 +316,7 @@ func (s *Service) subscribeToWebViewEvents() {
 			}
 			return
 		}
-		core.Sleep(50 * core.Millisecond)
+		core.Sleep(poll)
 	}
 	core.Print(core.Stderr(),
 		"bridge: SubscribeEvent timed out after %d attempts — console/error capture degraded\n",
