@@ -4,6 +4,7 @@ package appconfig
 
 import (
 	"reflect"
+	"sync"
 
 	core "dappco.re/go"
 	"dappco.re/go/config"
@@ -365,9 +366,32 @@ func configSegment(value string) string {
 	return snakeName(string(data))
 }
 
+// snakeNameCache memoises snakeName by input — the Wails options
+// struct shapes are fixed at compile time, so every resolveConfigValue
+// walk re-converts the SAME field names (once per prefix: a single
+// WebviewWindowOptions call already walks its struct tree twice, for
+// the ".default" prefix and the profile-specific one) into the exact
+// same snake_case string every time. snakeName is a pure function of
+// its input, so caching by input string is always correct — never a
+// behavioural change, only skips redoing the same byte-slice build. A
+// plain mutex-guarded map is used rather than sync.Map: sync.Map's
+// Load/Store take `key any`, which boxes the string key into an
+// interface on every call and erases most of the saving; a native
+// map[string]string hashes the string directly.
+var (
+	snakeNameCacheMu sync.RWMutex
+	snakeNameCache   = make(map[string]string, 256)
+)
+
 func snakeName(value string) string {
 	if value == "" {
 		return ""
+	}
+	snakeNameCacheMu.RLock()
+	cached, ok := snakeNameCache[value]
+	snakeNameCacheMu.RUnlock()
+	if ok {
+		return cached
 	}
 	input := []byte(value)
 	output := make([]byte, 0, len(input)+4)
@@ -390,7 +414,11 @@ func snakeName(value string) string {
 		}
 		output = append(output, current)
 	}
-	return string(output)
+	result := string(output)
+	snakeNameCacheMu.Lock()
+	snakeNameCache[value] = result
+	snakeNameCacheMu.Unlock()
+	return result
 }
 
 func joinKey(prefix, key string) string {
