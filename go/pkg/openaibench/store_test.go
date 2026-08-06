@@ -144,6 +144,56 @@ func TestDeleteEndpoint_EmptyNameFails(t *core.T) {
 	core.AssertFalse(t, openaibench.DeleteEndpoint(c, "").OK)
 }
 
+func TestSaveEndpoint_NilCoreFails(t *core.T) {
+	r := openaibench.SaveEndpoint(nil, openaibench.EndpointConfig{
+		Name: "x", URL: "https://x/v1",
+	})
+	core.AssertFalse(t, r.OK)
+}
+
+func TestSaveEndpoint_KeysServiceNotRegisteredFails(t *core.T) {
+	r := openaibench.SaveEndpoint(core.New(), openaibench.EndpointConfig{
+		Name: "x", URL: "https://x/v1",
+	})
+	core.AssertFalse(t, r.OK)
+}
+
+func TestLoadEndpoints_NilCoreFails(t *core.T) {
+	r := openaibench.LoadEndpoints(nil)
+	core.AssertFalse(t, r.OK)
+}
+
+func TestLoadEndpoints_KeysServiceNotRegisteredFails(t *core.T) {
+	r := openaibench.LoadEndpoints(core.New())
+	core.AssertFalse(t, r.OK)
+}
+
+func TestLoadEndpoints_SkipsUnmarshalableRecord(t *core.T) {
+	c := storeFixture(t)
+	keysSvc, _ := core.ServiceFor[*keys.Service](c, "keys")
+	core.RequireTrue(t, keysSvc.PutTier1("openaibench:broken", []byte("not json")).OK)
+	core.RequireTrue(t, openaibench.SaveEndpoint(c, openaibench.EndpointConfig{
+		Name: "good", URL: "https://x/v1",
+	}).OK)
+
+	r := openaibench.LoadEndpoints(c)
+
+	core.RequireTrue(t, r.OK)
+	cfgs := r.Value.([]openaibench.EndpointConfig)
+	core.AssertEqual(t, 1, len(cfgs))
+	core.AssertEqual(t, "good", cfgs[0].Name)
+}
+
+func TestDeleteEndpoint_NilCoreFails(t *core.T) {
+	r := openaibench.DeleteEndpoint(nil, "x")
+	core.AssertFalse(t, r.OK)
+}
+
+func TestDeleteEndpoint_KeysServiceNotRegisteredFails(t *core.T) {
+	r := openaibench.DeleteEndpoint(core.New(), "x")
+	core.AssertFalse(t, r.OK)
+}
+
 func TestSaveEndpoint_BearerEncryptedAtRest(t *core.T) {
 	// Confirm the encrypted-at-rest claim: read the raw tier-1 file
 	// after save + verify the plaintext Bearer is NOT findable as bytes.

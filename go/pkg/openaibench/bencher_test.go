@@ -234,6 +234,50 @@ func TestModels_EmptyDataReturnsEmptySlice(t *core.T) {
 	core.AssertEqual(t, 0, len(r.Value.([]string)))
 }
 
+func TestBench_ZeroUsageTokensYieldZeroTokSec(t *core.T) {
+	// tokSec must not divide-by/against a zero token count into a
+	// bogus non-zero rate — a response with no prompt tokens reported
+	// (e.g. the endpoint didn't populate usage) should read as an
+	// honest "no measurement" 0, not a NaN or inflated number.
+	srv := fakeOpenAI(func(w core.ResponseWriter, _ *core.Request) {
+		_, _ = w.Write([]byte(`{
+		  "id": "chatcmpl-zero",
+		  "model": "gpt-4o-mini",
+		  "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}}],
+		  "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+		}`))
+	})
+	defer srv.Close()
+	b := openaibench.NewBencher(openaibench.Options{Name: "x", Endpoint: srv.URL + "/v1"})
+
+	r := b.Bench(core.Background(), benchmark.Bench{Model: "gpt-4o-mini", Prompt: "hi"})
+
+	core.RequireTrue(t, r.OK, r.Error())
+	run := r.Value.(benchmark.Run)
+	core.AssertEqual(t, float64(0), run.PpTokSec)
+	core.AssertEqual(t, float64(0), run.TgTokSec)
+}
+
+func TestBench_FallsBackToRequestModelWhenResponseModelIsEmpty(t *core.T) {
+	// firstNonEmpty: some endpoints echo an empty "model" field. Bench
+	// must report the request-stated model rather than an empty string.
+	srv := fakeOpenAI(func(w core.ResponseWriter, _ *core.Request) {
+		_, _ = w.Write([]byte(`{
+		  "id": "chatcmpl-noecho",
+		  "model": "",
+		  "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}}],
+		  "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+		}`))
+	})
+	defer srv.Close()
+	b := openaibench.NewBencher(openaibench.Options{Name: "x", Endpoint: srv.URL + "/v1"})
+
+	r := b.Bench(core.Background(), benchmark.Bench{Model: "requested-model", Prompt: "hi"})
+
+	core.RequireTrue(t, r.OK, r.Error())
+	core.AssertEqual(t, "requested-model", r.Value.(benchmark.Run).Model)
+}
+
 func TestBench_RegistersWithSubstrate(t *core.T) {
 	c := newTestCoreWithBenchmark(t)
 	svc := benchmark.NewService(benchmark.Options{})
