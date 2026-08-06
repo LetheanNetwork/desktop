@@ -317,3 +317,131 @@ func TestFingerprintTrajectory_UglyMissingDim(t *testing.T) {
 		t.Errorf("missing-dim trajectory returned %d points, want 0: %+v", len(points), points)
 	}
 }
+
+// --- Nil-receiver safety (View.Close / View.DB) ---
+
+// TestView_Close_NilReceiver covers Close's nil-safety guard — Close
+// is documented "safe on a nil receiver" but every other test in this
+// file closes a genuinely open *View, so the nil path was untested.
+func TestView_Close_NilReceiver(t *testing.T) {
+	var v *View
+	r := v.Close()
+	if !r.OK {
+		t.Errorf("Close on nil *View should return Ok, got Fail: %v", r.Value)
+	}
+}
+
+// TestView_DB_NilReceiver mirrors the Close nil-safety test for DB.
+func TestView_DB_NilReceiver(t *testing.T) {
+	var v *View
+	if got := v.DB(); got != nil {
+		t.Errorf("DB() on nil *View = %v, want nil", got)
+	}
+}
+
+// --- resolveRoot / Options.Root override ---
+
+// TestOpenView_Good_ExplicitRootOverride covers the opts.Root != ""
+// branch of resolveRoot — every other test in this file relies on the
+// $HOME-driven paths.R1Dir() default, so a caller-supplied Root
+// (documented as the test-override path in Options' own doc comment)
+// was never actually exercised.
+func TestOpenView_Good_ExplicitRootOverride(t *testing.T) {
+	root := t.TempDir()
+	r := OpenView(Options{Root: root})
+	if !r.OK {
+		t.Fatalf("OpenView with explicit Root override failed: %v", r.Value)
+	}
+	view := r.Value.(*View)
+	defer func() { _ = view.Close() }()
+
+	var n int
+	if err := view.DB().QueryRow("SELECT count(*) FROM r1").Scan(&n); err != nil {
+		t.Fatalf("count(*) on Root-overridden empty view: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("count(*) = %d, want 0 (no corpus written under the override root)", n)
+	}
+}
+
+// --- OpenView failure cascade (resolveRoot -> paths.R1Dir -> paths.Root) ---
+
+// unwritableHOME repoints $HOME at a directory this process cannot
+// write into, so paths.Root()'s MkdirAll("$HOME/Lethean") fails —
+// the earliest link in resolveRoot's chain (resolveRoot -> R1Dir ->
+// DataDir -> subdir -> Root) that can break under a real, denied-path
+// fault rather than a mock. Restores the mode via t.Cleanup so the
+// t.TempDir() harness can still remove the directory afterwards.
+func unwritableHOME(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	if err := os.Chmod(home, 0o500); err != nil {
+		t.Fatalf("chmod home read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(home, 0o700) })
+	t.Setenv("HOME", home)
+}
+
+// TestOpenView_Bad_UnwritableHome covers OpenView's rootR.OK guard —
+// resolveRoot itself failing when the corpus root cannot be created.
+func TestOpenView_Bad_UnwritableHome(t *testing.T) {
+	unwritableHOME(t)
+	r := OpenView(Options{})
+	if r.OK {
+		t.Fatal("OpenView with an unwritable HOME should fail, not silently succeed")
+	}
+}
+
+// TestRecordsPerSubject_Bad_OpenViewFails covers the !viewR.OK
+// passthrough — every Good test for this function opens successfully,
+// so the propagation branch itself was untested.
+func TestRecordsPerSubject_Bad_OpenViewFails(t *testing.T) {
+	unwritableHOME(t)
+	r := RecordsPerSubject(Options{}, "")
+	if r.OK {
+		t.Fatal("RecordsPerSubject with an unwritable HOME should fail")
+	}
+}
+
+// TestCrossTierCounts_Bad_OpenViewFails mirrors the RecordsPerSubject
+// propagation test for CrossTierCounts.
+func TestCrossTierCounts_Bad_OpenViewFails(t *testing.T) {
+	unwritableHOME(t)
+	r := CrossTierCounts(Options{}, "")
+	if r.OK {
+		t.Fatal("CrossTierCounts with an unwritable HOME should fail")
+	}
+}
+
+// TestLatestPerProbe_Bad_OpenViewFails supplies a valid (non-empty)
+// model/subject pair so the failure surfaces from OpenView's
+// propagation, not the earlier required-fields guard.
+func TestLatestPerProbe_Bad_OpenViewFails(t *testing.T) {
+	unwritableHOME(t)
+	r := LatestPerProbe(Options{}, "gemma4-e2b-it-q4", "english")
+	if r.OK {
+		t.Fatal("LatestPerProbe with an unwritable HOME should fail")
+	}
+}
+
+// TestFingerprintTrajectory_Bad_OpenViewFails mirrors the
+// LatestPerProbe propagation test for FingerprintTrajectory.
+func TestFingerprintTrajectory_Bad_OpenViewFails(t *testing.T) {
+	unwritableHOME(t)
+	r := FingerprintTrajectory(Options{}, "gemma4-e2b-it-q4", "english", "vocab_richness")
+	if r.OK {
+		t.Fatal("FingerprintTrajectory with an unwritable HOME should fail")
+	}
+}
+
+// --- FingerprintTrajectory required-field guards ---
+
+// TestFingerprintTrajectory_Bad_EmptyModel covers the model/subject
+// required-fields guard. TestFingerprintTrajectory_UglyMissingDim
+// already covers the empty-dim guard; this covers the sibling check.
+func TestFingerprintTrajectory_Bad_EmptyModel(t *testing.T) {
+	r := FingerprintTrajectory(Options{}, "", "english", "vocab_richness")
+	if r.OK {
+		t.Fatal("FingerprintTrajectory with an empty model should fail")
+	}
+}
