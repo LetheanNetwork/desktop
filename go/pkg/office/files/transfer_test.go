@@ -350,3 +350,23 @@ func TestService_MoveAcrossMedia_BadConflictNamesMove(t *core.T) {
 	core.AssertEqual(t, "move", operation.Operation)
 	core.AssertEqual(t, OperationConflict, operation.Status)
 }
+
+func TestService_TransferLimits_GoodFillsOnlyUnsetFields(t *core.T) {
+	defaults := DefaultLimits()
+
+	zeroed := &Service{}
+	zeroedLimits := zeroed.transferLimits()
+	core.AssertEqual(t, defaults.MaxRecursiveDepth, zeroedLimits.MaxRecursiveDepth)
+	core.AssertEqual(t, defaults.MaxRecursiveItems, zeroedLimits.MaxRecursiveItems)
+	core.AssertEqual(t, defaults.MaxTransferBytes, zeroedLimits.MaxTransferBytes)
+
+	explicit := &Service{limits: Limits{
+		MaxRecursiveDepth: 3,
+		MaxRecursiveItems: 7,
+		MaxTransferBytes:  11,
+	}}
+	got := explicit.transferLimits()
+	core.AssertEqual(t, 3, got.MaxRecursiveDepth)
+	core.AssertEqual(t, 7, got.MaxRecursiveItems)
+	core.AssertEqual(t, int64(11), got.MaxTransferBytes)
+}

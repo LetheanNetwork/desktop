@@ -222,3 +222,187 @@ func TestResolveHostItems_UglyNilServiceFailsClosed(t *core.T) {
 	core.AssertFalse(t, result.OK)
 	core.AssertContains(t, result.Error(), string(ErrorProviderUnavailable))
 }
+
+func TestHostItemProviderFailure_GoodMapsCauseToCode(t *core.T) {
+	notExist := hostItemProviderFailure(fs.ErrNotExist)
+	core.AssertContains(t, notExist.Error(), string(ErrorMissingEntry))
+
+	denied := hostItemProviderFailure(fs.ErrPermission)
+	core.AssertContains(t, denied.Error(), string(ErrorCapabilityDenied))
+
+	opaque := hostItemProviderFailure(core.E("test", "boom", nil))
+	core.AssertContains(t, opaque.Error(), string(ErrorProviderUnavailable))
+}
+
+func TestReadOnlyMedium_WriteOperations_BadAllDeniedFailClosed(t *core.T) {
+	root := t.TempDir()
+	base, err := coreio.NewSandboxed(root)
+	core.RequireNoError(t, err)
+	core.RequireNoError(t, base.Write("existing.txt", "content"))
+	medium := &readOnlyMedium{Medium: base}
+
+	core.AssertSame(t, fs.ErrPermission, medium.Write("new.txt", "x"))
+	core.AssertSame(
+		t,
+		fs.ErrPermission,
+		medium.WriteMode("new.txt", "x", 0600),
+	)
+	core.AssertSame(t, fs.ErrPermission, medium.EnsureDir("dir"))
+	core.AssertSame(t, fs.ErrPermission, medium.Delete("existing.txt"))
+	core.AssertSame(t, fs.ErrPermission, medium.DeleteAll("existing.txt"))
+	core.AssertSame(
+		t,
+		fs.ErrPermission,
+		medium.Rename("existing.txt", "moved.txt"),
+	)
+	_, createErr := medium.Create("new.txt")
+	core.AssertSame(t, fs.ErrPermission, createErr)
+	_, appendErr := medium.Append("existing.txt")
+	core.AssertSame(t, fs.ErrPermission, appendErr)
+	_, writeStreamErr := medium.WriteStream("new.txt")
+	core.AssertSame(t, fs.ErrPermission, writeStreamErr)
+
+	content, readErr := medium.Read("existing.txt")
+	core.AssertNoError(t, readErr)
+	core.AssertEqual(t, "content", content)
+}
+
+func TestReadOnlyMedium_Close_GoodDelegatesAndToleratesNil(t *core.T) {
+	base := &closingMedium{Medium: coreio.NewMemoryMedium()}
+	medium := &readOnlyMedium{Medium: base}
+
+	core.AssertNoError(t, medium.Close())
+	core.AssertEqual(t, 1, base.closeCalls)
+
+	nonCloser := &readOnlyMedium{Medium: coreio.NewMemoryMedium()}
+	core.AssertNoError(t, nonCloser.Close())
+
+	var nilMedium *readOnlyMedium
+	core.AssertNoError(t, nilMedium.Close())
+}
+
+func TestSelectedFileMedium_ScopedToOwnedName_GoodAndBad(t *core.T) {
+	root := t.TempDir()
+	base, err := coreio.NewSandboxed(root)
+	core.RequireNoError(t, err)
+	core.RequireNoError(t, base.Write("report.txt", "private"))
+	core.RequireNoError(t, base.Write("sibling.txt", "other"))
+	medium := newSelectedFileMedium(base, "report.txt")
+
+	core.AssertTrue(t, medium.IsFile("report.txt"))
+	core.AssertFalse(t, medium.IsFile("sibling.txt"))
+	core.AssertTrue(t, medium.Exists("report.txt"))
+	core.AssertFalse(t, medium.Exists("sibling.txt"))
+	core.AssertTrue(t, medium.Exists(""))
+	core.AssertTrue(t, medium.Exists("."))
+	core.AssertTrue(t, medium.IsDir(""))
+	core.AssertTrue(t, medium.IsDir("."))
+	core.AssertFalse(t, medium.IsDir("report.txt"))
+
+	content, readErr := medium.Read("report.txt")
+	core.AssertNoError(t, readErr)
+	core.AssertEqual(t, "private", content)
+	_, deniedReadErr := medium.Read("sibling.txt")
+	core.AssertSame(t, fs.ErrPermission, deniedReadErr)
+
+	file, openErr := medium.Open("report.txt")
+	core.AssertNoError(t, openErr)
+	core.AssertNoError(t, file.Close())
+	_, deniedOpenErr := medium.Open("sibling.txt")
+	core.AssertSame(t, fs.ErrPermission, deniedOpenErr)
+
+	stream, streamErr := medium.ReadStream("report.txt")
+	core.AssertNoError(t, streamErr)
+	core.AssertNoError(t, stream.Close())
+	_, deniedStreamErr := medium.ReadStream("sibling.txt")
+	core.AssertSame(t, fs.ErrPermission, deniedStreamErr)
+
+	rootInfo, statErr := medium.Stat("")
+	core.AssertNoError(t, statErr)
+	core.AssertTrue(t, rootInfo.IsDir())
+	ownInfo, ownStatErr := medium.Stat("report.txt")
+	core.AssertNoError(t, ownStatErr)
+	core.AssertFalse(t, ownInfo.IsDir())
+	_, deniedStatErr := medium.Stat("sibling.txt")
+	core.AssertSame(t, fs.ErrPermission, deniedStatErr)
+
+	entries, listErr := medium.List("")
+	core.AssertNoError(t, listErr)
+	core.RequireTrue(t, len(entries) == 1)
+	core.AssertEqual(t, "report.txt", entries[0].Name())
+	_, deniedListErr := medium.List("nested")
+	core.AssertSame(t, fs.ErrPermission, deniedListErr)
+}
+
+func TestSelectedFileMedium_List_UglyOwnNameAbsentFromParent(t *core.T) {
+	root := t.TempDir()
+	base, err := coreio.NewSandboxed(root)
+	core.RequireNoError(t, err)
+	medium := newSelectedFileMedium(base, "missing.txt")
+
+	entries, listErr := medium.List(".")
+
+	core.AssertNoError(t, listErr)
+	core.AssertEqual(t, 0, len(entries))
+}
+
+func TestSelectedFileMedium_Close_GoodDelegatesAndToleratesNil(t *core.T) {
+	base := &closingMedium{Medium: coreio.NewMemoryMedium()}
+	medium := &selectedFileMedium{Medium: base, name: "report.txt"}
+
+	core.AssertNoError(t, medium.Close())
+	core.AssertEqual(t, 1, base.closeCalls)
+
+	nonCloser := &selectedFileMedium{
+		Medium: coreio.NewMemoryMedium(),
+		name:   "report.txt",
+	}
+	core.AssertNoError(t, nonCloser.Close())
+
+	var nilMedium *selectedFileMedium
+	core.AssertNoError(t, nilMedium.Close())
+}
+
+func TestRemoveHostMounts_GoodClosesOnlyListedIDsAndTolerantOfMissing(
+	t *core.T,
+) {
+	service := registeredService(t, nil, &stubRuntimeMetadata{})
+	kept := &closingMedium{Medium: coreio.NewMemoryMedium()}
+	removed := &closingMedium{Medium: coreio.NewMemoryMedium()}
+	service.hostMu.Lock()
+	service.hostMounts["host-kept"] = Mount{
+		ID:                 "host-kept",
+		Name:               "kept",
+		Kind:               "host",
+		Medium:             kept,
+		ContainmentAudited: true,
+	}
+	service.hostMounts["host-removed"] = Mount{
+		ID:                 "host-removed",
+		Name:               "removed",
+		Kind:               "host",
+		Medium:             removed,
+		ContainmentAudited: true,
+	}
+	service.hostOrder = []string{"host-kept", "host-removed"}
+	service.hostMu.Unlock()
+
+	service.removeHostMounts([]HostItemView{
+		{MountID: "host-removed"},
+		{MountID: "host-unknown"},
+	})
+
+	core.AssertEqual(t, 1, removed.closeCalls)
+	core.AssertEqual(t, 0, kept.closeCalls)
+	core.AssertEqual(
+		t,
+		[]string{"host-kept"},
+		service.hostOrder,
+	)
+	core.AssertEqual(t, 1, len(service.hostMountSnapshot()))
+
+	var nilService *Service
+	nilService.removeHostMounts([]HostItemView{{MountID: "x"}})
+	service.removeHostMounts(nil)
+	core.AssertEqual(t, 1, len(service.hostMountSnapshot()))
+}

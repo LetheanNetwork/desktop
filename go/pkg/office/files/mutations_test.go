@@ -4,10 +4,59 @@ package files
 
 import (
 	"io/fs"
+	"time"
 
 	core "dappco.re/go"
 	coreio "dappco.re/go/io"
 )
+
+func TestEntryKindFromInfo_Good(t *core.T) {
+	core.AssertEqual(t, EntryOther, entryKindFromInfo(nil))
+	core.AssertEqual(
+		t,
+		EntryLink,
+		entryKindFromInfo(coreio.NewFileInfo(
+			"link",
+			0,
+			fs.ModeSymlink,
+			time.Time{},
+			false,
+		)),
+	)
+	core.AssertEqual(
+		t,
+		EntryDirectory,
+		entryKindFromInfo(coreio.NewFileInfo(
+			"dir",
+			0,
+			fs.ModeDir,
+			time.Time{},
+			true,
+		)),
+	)
+	core.AssertEqual(
+		t,
+		EntryFile,
+		entryKindFromInfo(coreio.NewFileInfo(
+			"file.txt",
+			5,
+			0644,
+			time.Time{},
+			false,
+		)),
+	)
+	core.AssertEqual(
+		t,
+		EntryOther,
+		entryKindFromInfo(coreio.NewFileInfo(
+			"device",
+			0,
+			fs.ModeDevice,
+			time.Time{},
+			false,
+		)),
+	)
+}
 
 func TestService_CreateDirectory_Good(t *core.T) {
 	medium := coreio.NewMemoryMedium()
