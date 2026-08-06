@@ -90,15 +90,20 @@ func (s *Service) Installed() core.Result {
 // manifest to the plugin host, and lets it fetch + write + start the
 // binary. For lthn-vm bundle installs use Service.Install instead.
 func (s *Service) InstallPlugin(code string) core.Result {
-	if s == nil || s.core == nil {
-		return core.Fail(core.E(installOp, "marketplace service is not bound to a Core", nil))
-	}
+	// Input first, binding second: an empty code is the caller's mistake
+	// whatever state the service is in, and the answer must not change
+	// depending on whether a Core is attached.
 	if core.Trim(code) == "" {
 		return core.Fail(core.E(installOp, codeRequiredMessage, nil))
 	}
+	// The catalogue is package data, so an unknown code is answerable —
+	// and answered — before the binding is consulted at all.
 	pkg, ok := findByCode(code)
 	if !ok {
 		return core.Fail(core.E(installOp, "plugin not found in catalogue: "+code, nil))
+	}
+	if s == nil || s.core == nil {
+		return core.Fail(core.E(installOp, "marketplace service is not bound to a Core", nil))
 	}
 	host, ok := core.ServiceFor[*plugin.Service](s.core, "plugin")
 	if !ok || host == nil {
@@ -121,11 +126,13 @@ func (s *Service) InstallPlugin(code string) core.Result {
 // Remove asks the plugin host to stop + clean up the named
 // plugin. Same host-discovery dance as Install.
 func (s *Service) Remove(code string) core.Result {
-	if s == nil || s.core == nil {
-		return core.Fail(core.E("marketplace.Remove", "marketplace service is not bound to a Core", nil))
-	}
+	// Same order as InstallPlugin: the caller's input is judged before
+	// the service's own state.
 	if core.Trim(code) == "" {
 		return core.Fail(core.E("marketplace.Remove", codeRequiredMessage, nil))
+	}
+	if s == nil || s.core == nil {
+		return core.Fail(core.E("marketplace.Remove", "marketplace service is not bound to a Core", nil))
 	}
 	host, ok := core.ServiceFor[*plugin.Service](s.core, "plugin")
 	if !ok || host == nil {
