@@ -3,8 +3,15 @@
 package runner
 
 import (
+	"context"
+	"iter"
+
 	core "dappco.re/go"
 	"dappco.re/go/inference"
+	"dappco.re/go/inference/agent/ai"
+
+	"dappco.re/lthn/desktop/pkg/paths"
+	"dappco.re/lthn/desktop/pkg/welfare"
 )
 
 func TestWelfare_userTurns_Good(t *core.T) {
@@ -101,4 +108,93 @@ func TestWelfare_chatCtxWelfare_Ugly_EmptyMessages(t *core.T) {
 	r, warn := s.chatCtxWelfare(core.Background(), nil)
 	core.AssertTrue(t, r.OK, "empty-message stub must succeed")
 	core.AssertFalse(t, warn, "empty-message path must never flag WarnUser")
+}
+
+// TestWelfare_welfareGuard_Good_NoUserTurnSkipsMediation covers
+// welfareGuard's own early-return ("if latest == \"\" { return
+// welfare.GuardResult{} }") — distinct from userTurns_Bad above,
+// which tests userTurns() directly rather than through the guard
+// that consumes it. A conversation with zero user turns (e.g. a
+// pure system+assistant seed) must never reach mediation.
+func TestWelfare_welfareGuard_Good_NoUserTurnSkipsMediation(t *core.T) {
+	s := &Service{welfare: welfare.New(welfare.Config{})}
+	g := s.welfareGuard(core.Background(), []inference.Message{
+		{Role: "system", Content: "you are helpful"},
+		{Role: "assistant", Content: "hello there"},
+	}, nil)
+	core.AssertFalse(t, g.Triggered, "a conversation with no user turn must never trigger the gate")
+}
+
+// okRouteModel is a mediation double whose reply always resolves to
+// lem_ok — the model judged the flagged turn a false positive.
+type okRouteModel struct {
+	calls int
+}
+
+func (m *okRouteModel) Generate(ctx context.Context, prompt string, opts ...inference.GenerateOption) iter.Seq[inference.Token] {
+	return m.Chat(ctx, []inference.Message{{Role: "user", Content: prompt}}, opts...)
+}
+
+func (m *okRouteModel) Chat(_ context.Context, messages []inference.Message, _ ...inference.GenerateOption) iter.Seq[inference.Token] {
+	m.calls++
+	reply := ""
+	if len(messages) == 2 && messages[0].Role == "system" {
+		reply = `{"tool":"lem_ok","params":{"reason":"heated but not hostile — benign sarcasm"}}`
+	} else {
+		for i := len(messages) - 1; i >= 0; i-- {
+			if messages[i].Role == "user" {
+				reply = messages[i].Content
+				break
+			}
+		}
+	}
+	return func(yield func(inference.Token) bool) {
+		if reply != "" {
+			yield(inference.Token{Text: reply})
+		}
+	}
+}
+
+func (m *okRouteModel) Classify(context.Context, []string, ...inference.GenerateOption) core.Result {
+	return core.Ok([]inference.ClassifyResult(nil))
+}
+func (m *okRouteModel) BatchGenerate(context.Context, []string, ...inference.GenerateOption) core.Result {
+	return core.Ok([]inference.BatchResult(nil))
+}
+func (m *okRouteModel) ModelType() string                  { return "ok-test" }
+func (m *okRouteModel) Info() inference.ModelInfo          { return inference.ModelInfo{} }
+func (m *okRouteModel) Metrics() inference.GenerateMetrics { return inference.GenerateMetrics{} }
+func (m *okRouteModel) Err() core.Result                   { return core.Ok(nil) }
+func (m *okRouteModel) Close() core.Result                 { return core.Ok(nil) }
+
+// TestWelfare_AppendWelfareFeedback_Good_LemOkWritesCorpusLine covers
+// appendWelfareFeedback (0% before this test — nothing in the suite
+// drove a lem_ok mediation decision, only lem_rephrase/lem_pause).
+// A false-positive judgement must append one line to
+// ~/Lethean/data/welfare/feedback.jsonl and still return the ORIGINAL
+// turn unchanged (lem_ok proceeds, it doesn't rephrase).
+func TestWelfare_AppendWelfareFeedback_Good_LemOkWritesCorpusLine(t *core.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	model := &okRouteModel{}
+	s := NewService(Options{
+		Routes:         []ai.ProviderRoute{{Name: "lem", ModelID: "local", Model: model}},
+		WelfareEnabled: true,
+	})
+
+	r := s.WChat(hostileHistory(), "lem")
+	core.AssertTrue(t, r.OK)
+	reply := r.Value.(ChatReply)
+	core.AssertEqual(t, "you absolute clueless moron!!!", reply.Text,
+		"lem_ok proceeds with the ORIGINAL turn, unlike lem_rephrase")
+	core.AssertFalse(t, reply.WarnUser)
+	core.AssertEqual(t, 2, model.calls, "one mediation call + one chat call")
+
+	dir := paths.WelfareDir()
+	core.AssertTrue(t, dir.OK, "WelfareDir must resolve under the fixture HOME")
+	body := core.ReadFile(core.PathJoin(dir.Value.(string), "feedback.jsonl"))
+	core.AssertTrue(t, body.OK, "appendWelfareFeedback must have written feedback.jsonl")
+	core.AssertContains(t, string(body.Value.([]byte)), "benign sarcasm",
+		"corpus line must carry the model's false-positive reason")
 }

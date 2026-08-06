@@ -162,6 +162,53 @@ func TestAtRestSchema_ValidateHashTagList_Bad(t *testing.T) {
 	}
 }
 
+// --- ValidateString ---------------------------------------------------
+
+// TestAtRestSchema_ValidateString_Good — any string value passes.
+func TestAtRestSchema_ValidateString_Good(t *testing.T) {
+	cases := []string{"p2", "", "free-form text with spaces"}
+	for _, c := range cases {
+		if err := recordfile.ValidateString(c); err != nil {
+			t.Fatalf("expected pass for %q, got %v", c, err)
+		}
+	}
+}
+
+// TestAtRestSchema_ValidateString_Bad — non-string values reject.
+func TestAtRestSchema_ValidateString_Bad(t *testing.T) {
+	bad := []any{42, true, nil, []string{"a"}, map[string]any{}}
+	for _, b := range bad {
+		err := recordfile.ValidateString(b)
+		if err == nil {
+			t.Fatalf("expected reject for %v, got nil", b)
+		}
+		if !errCodeIs(err, "recordfile.atrest.schema.bucketed_field_violation") {
+			t.Fatalf("expected bucketed_field_violation for %v, got %v", b, err)
+		}
+	}
+}
+
+// TestAtRestSchema_ValidateMonthBucket_Bad_OutOfRangeMonthDigits —
+// isYYYYMM's per-digit month-range guards (s[5] must be '0'/'1', s[6]
+// must be a digit) aren't reached by the existing malformed-shape
+// cases in ValidateMonthBucket_Bad (those trip the length/separator/
+// year-digit checks first). These pin the two remaining guards.
+func TestAtRestSchema_ValidateMonthBucket_Bad_OutOfRangeMonthDigits(t *testing.T) {
+	bad := []string{
+		"2026-95", // s[5] out of '0'-'1' range
+		"2026-1x", // s[6] not a digit
+	}
+	for _, b := range bad {
+		err := recordfile.ValidateMonthBucket(b)
+		if err == nil {
+			t.Fatalf("expected reject for %q, got nil", b)
+		}
+		if !errCodeIs(err, "recordfile.atrest.schema.bucketed_field_violation") {
+			t.Fatalf("expected bucketed_field_violation for %q, got %v", b, err)
+		}
+	}
+}
+
 // --- Composite per-surface MUST table (RFC §2.4 grep anchor) -------
 
 // TestAtRestSchema_HeaderFieldEnums_Bad — the load-bearing grep anchor

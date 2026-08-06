@@ -175,6 +175,107 @@ func TestAtRestCanonJSON_NestedMap_Good(t *testing.T) {
 	}
 }
 
+// TestAtRestCanonJSON_ScalarTypeCoverage_Good — the remaining scalar
+// branches in canonEncode's type switch that the header-shaped
+// fixtures above never reach: nil, bool-false, int32, the unsigned
+// integer family, and an integral float32.
+func TestAtRestCanonJSON_ScalarTypeCoverage_Good(t *testing.T) {
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{nil, "null"},
+		{false, "false"},
+		{true, "true"},
+		{int32(7), "7"},
+		{uint(9), "9"},
+		{uint32(11), "11"},
+		{uint64(13), "13"},
+		{float32(2.0), "2"}, // integral float32 re-encodes as integer
+	}
+	for _, tc := range cases {
+		r := recordfile.CanonicalJSON(tc.in)
+		if !r.OK {
+			t.Fatalf("encode %v (%T) failed: %s", tc.in, tc.in, r.Error())
+		}
+		got := string(r.Value.([]byte))
+		if got != tc.want {
+			t.Fatalf("scalar encoding mismatch for %v (%T):\n  got:  %s\n  want: %s", tc.in, tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestAtRestCanonJSON_StringSliceCoverage_Good — the []string
+// convenience case ([]string values are copied into []any then
+// delegated to canonEncodeSlice).
+func TestAtRestCanonJSON_StringSliceCoverage_Good(t *testing.T) {
+	r := recordfile.CanonicalJSON([]string{"a", "b"})
+	if !r.OK {
+		t.Fatalf("encode failed: %s", r.Error())
+	}
+	got := string(r.Value.([]byte))
+	want := `["a","b"]`
+	if got != want {
+		t.Fatalf("[]string encoding mismatch:\n  got:  %s\n  want: %s", got, want)
+	}
+}
+
+// TestAtRestCanonJSON_RemainingStringEscapes_Good — \b, \f, \r, and a
+// bare control character below the seven named escapes (which must
+// fall through to the generic \u00XX form).
+func TestAtRestCanonJSON_RemainingStringEscapes_Good(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"a\bb", `"a\bb"`},
+		{"a\fb", `"a\fb"`},
+		{"a\rb", `"a\rb"`},
+		{"a\x01b", `"a\u0001b"`}, // control char with no named escape
+	}
+	for _, tc := range cases {
+		r := recordfile.CanonicalJSON(tc.in)
+		if !r.OK {
+			t.Fatalf("encode %q failed: %s", tc.in, r.Error())
+		}
+		got := string(r.Value.([]byte))
+		if got != tc.want {
+			t.Fatalf("escape mismatch for %q:\n  got:  %s\n  want: %s", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestAtRestCanonJSON_SliceElementErrorPropagates_Bad — an
+// unsupported-type element inside a []any slice must surface the
+// same unsupported_type error the top-level encoder returns, not be
+// silently skipped.
+func TestAtRestCanonJSON_SliceElementErrorPropagates_Bad(t *testing.T) {
+	r := recordfile.CanonicalJSON([]any{"ok", make(chan int)})
+	if r.OK {
+		t.Fatalf("expected unsupported_type error for a bad slice element, got OK")
+	}
+	if r.Code() != "recordfile.atrest.canonjson.unsupported_type" {
+		t.Fatalf("expected unsupported_type, got %q", r.Code())
+	}
+}
+
+// TestAtRestCanonJSON_KeySortPrefixOrdering_Good — lessUTF16 must
+// order a key that is a strict prefix of another BEFORE the longer
+// key (the shared-prefix code path where the compare loop exhausts
+// without finding a differing code unit).
+func TestAtRestCanonJSON_KeySortPrefixOrdering_Good(t *testing.T) {
+	m := map[string]any{"ab": 1, "abc": 2, "a": 3}
+	r := recordfile.CanonicalJSON(m)
+	if !r.OK {
+		t.Fatalf("encode failed: %s", r.Error())
+	}
+	got := string(r.Value.([]byte))
+	want := `{"a":3,"ab":1,"abc":2}`
+	if got != want {
+		t.Fatalf("prefix sort mismatch:\n  got:  %s\n  want: %s", got, want)
+	}
+}
+
 // Smoke: confirm core.HMAC over canon-bytes produces stable hex on
 // re-encode (the operational property the MAC depends on).
 func TestAtRestCanonJSON_MACStability_Good(t *testing.T) {

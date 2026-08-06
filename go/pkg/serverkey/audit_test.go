@@ -40,6 +40,39 @@ func TestServerkey_AuditHMACSecret_Good_Deterministic(t *core.T) {
 	}
 }
 
+func TestServerkey_AuditHMACSecret_Bad_RootUnwritable(t *core.T) {
+	// paths.WalletsDir() fails when HOME resolves to an unwritable
+	// path (mirrors the Bootstrap_Bad fixture) — AuditHMACSecret must
+	// degrade to nil + a warning rather than panic.
+	tmp := t.TempDir()
+	tmpFile := core.PathJoin(tmp, "home-as-file")
+	w := core.WriteFile(tmpFile, []byte{}, 0o600)
+	core.AssertTrue(t, w.OK, "fixture file write should succeed")
+	t.Setenv("HOME", tmpFile)
+
+	svc := subject.NewService(nil)
+	secret := svc.AuditHMACSecret()
+	core.AssertTrue(t, secret == nil, "AuditHMACSecret should return nil when the wallets dir cannot resolve")
+}
+
+func TestServerkey_AuditHMACSecret_Bad_SeedWrongLength(t *core.T) {
+	// A .seed file present but not exactly seedSize bytes (corrupt /
+	// truncated write) must degrade to nil rather than derive a key
+	// from the wrong-length input.
+	home := homeFixture(t)
+	walletsDir := core.PathJoin(home, "Lethean", "wallets")
+	mk := core.MkdirAll(walletsDir, 0o700)
+	core.AssertTrue(t, mk.OK, "fixture wallets dir mkdir must succeed")
+
+	seedPath := core.PathJoin(walletsDir, ".seed")
+	w := core.WriteFile(seedPath, []byte("too-short"), 0o600)
+	core.AssertTrue(t, w.OK, "fixture short seed write must succeed")
+
+	svc := subject.NewService(nil)
+	secret := svc.AuditHMACSecret()
+	core.AssertTrue(t, secret == nil, "AuditHMACSecret should return nil when the on-disk seed has the wrong length")
+}
+
 func TestServerkey_AuditHMACSecret_Bad_NoSeedYet(t *core.T) {
 	// Call BEFORE Bootstrap — the .seed file doesn't exist yet so the
 	// helper SHOULD return nil + warn (NOT panic, NOT block boot).

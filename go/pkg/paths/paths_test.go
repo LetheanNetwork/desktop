@@ -171,11 +171,104 @@ func TestPaths_Subdir_Bad_PropagatesRootFail(t *core.T) {
 		{"ConfigFile", paths.ConfigFile},
 		{"StoreDB", paths.StoreDB},
 		{"WorkspaceDir", paths.WorkspaceDir},
+		{"MasterDB", paths.MasterDB},
+		{"KeysDir", paths.KeysDir},
+		{"DesktopDir", paths.DesktopDir},
+		{"AIDB", paths.AIDB},
+		{"MLDB", paths.MLDB},
+		{"R1Dir", paths.R1Dir},
+		{"TrainingCheckpointDir", paths.TrainingCheckpointDir},
+		{"WelfareDir", paths.WelfareDir},
 	}
 	for _, c := range calls {
 		r := c.fn()
 		core.AssertFalse(t, r.OK, c.name+" must Fail when HOME is unusable")
 	}
+}
+
+// --- Desktop per-app namespace + subsystem DBs -----------------------
+//
+// DesktopDir / AIDB / MLDB / R1Dir / TrainingCheckpointDir / WelfareDir
+// had zero test coverage before this block — nothing else in the
+// suite happened to call them.
+
+func TestPaths_DesktopDir_Good(t *core.T) {
+	home := homeFixture(t)
+	r := paths.DesktopDir()
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, core.PathJoin(home, "Lethean", "data", "desktop"), r.Value.(string))
+	stat := core.Stat(r.Value.(string))
+	core.AssertTrue(t, stat.OK)
+	core.AssertTrue(t, stat.Value.(core.FsFileInfo).IsDir())
+}
+
+func TestPaths_AIDB_Good(t *core.T) {
+	home := homeFixture(t)
+	r := paths.AIDB()
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, core.PathJoin(home, "Lethean", "data", "desktop", "ai.duckdb"), r.Value.(string))
+	// Path-only: file should not exist after the call.
+	stat := core.Stat(r.Value.(string))
+	core.AssertTrue(t, core.IsNotExist(stat.Value.(error)), "AIDB should not create the file itself")
+}
+
+func TestPaths_MLDB_Good(t *core.T) {
+	home := homeFixture(t)
+	r := paths.MLDB()
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, core.PathJoin(home, "Lethean", "data", "desktop", "ml.duckdb"), r.Value.(string))
+	stat := core.Stat(r.Value.(string))
+	core.AssertTrue(t, core.IsNotExist(stat.Value.(error)), "MLDB should not create the file itself")
+}
+
+func TestPaths_R1Dir_Good(t *core.T) {
+	home := homeFixture(t)
+	r := paths.R1Dir()
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, core.PathJoin(home, "Lethean", "data", "r1"), r.Value.(string))
+	stat := core.Stat(r.Value.(string))
+	core.AssertTrue(t, stat.OK)
+	core.AssertTrue(t, stat.Value.(core.FsFileInfo).IsDir())
+}
+
+func TestPaths_TrainingCheckpointDir_Good(t *core.T) {
+	home := homeFixture(t)
+	r := paths.TrainingCheckpointDir()
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, core.PathJoin(home, "Lethean", "data", "training", "checkpoints"), r.Value.(string))
+	stat := core.Stat(r.Value.(string))
+	core.AssertTrue(t, stat.OK)
+	core.AssertTrue(t, stat.Value.(core.FsFileInfo).IsDir())
+}
+
+func TestPaths_WelfareDir_Good(t *core.T) {
+	home := homeFixture(t)
+	r := paths.WelfareDir()
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, core.PathJoin(home, "Lethean", "data", "welfare"), r.Value.(string))
+	stat := core.Stat(r.Value.(string))
+	core.AssertTrue(t, stat.OK)
+	core.AssertTrue(t, stat.Value.(core.FsFileInfo).IsDir())
+}
+
+// TestPaths_KeysDir_Bad_ParentDenied — DataDir succeeds (created
+// earlier) but is then made read-only, so KeysDir's own MkdirAll for
+// the "keys" leaf fails. Distinct from the HOME-is-a-file propagation
+// case above: here Root()/DataDir() both succeed and only the final
+// per-function MkdirAll denies.
+func TestPaths_KeysDir_Bad_ParentDenied(t *core.T) {
+	homeFixture(t)
+	data := paths.DataDir()
+	core.AssertTrue(t, data.OK, "fixture DataDir must succeed")
+	dataDir := data.Value.(string)
+
+	if r := core.Chmod(dataDir, 0o500); !r.OK {
+		t.Skipf("chmod unsupported on this fs: %v", r.Error())
+	}
+	defer func() { core.Chmod(dataDir, 0o755) }() // restore before t.TempDir() cleanup
+
+	r := paths.KeysDir()
+	core.AssertFalse(t, r.OK, "KeysDir must fail when its parent directory denies write")
 }
 
 // Ugly: every helper exercised back-to-back under the same HOME so the
