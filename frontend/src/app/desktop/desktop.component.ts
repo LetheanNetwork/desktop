@@ -1429,7 +1429,13 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     } else if (kind === 'shutdown') {
       this.wm.clear();
       this.session = 'shutting';
-      setTimeout(() => (this.session = 'off'), 1300);
+      // Runs from a timeout — without markForCheck the power-off screen never
+      // paints under zoneless CD, exactly like every other deferred mutation
+      // in this component (see placeSub/placeTray/placeMb/placeSession).
+      setTimeout(() => {
+        this.session = 'off';
+        this.changeDetector.markForCheck();
+      }, 1300);
     }
   }
   resume(u?: any) {
