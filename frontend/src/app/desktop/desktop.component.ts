@@ -481,6 +481,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     if (smR.left + left + 184 > oR.right) left = rR.left - smR.left - 184 + 6;
     this.sub.left = left;
     this.sub.top = Math.max(0, rR.top - smR.top);
+    this.changeDetector.markForCheck(); // runs from a timeout
   }
   startSub(appId: string, subId: string) {
     this.closeMenus();
@@ -659,6 +660,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     if (left < 8) left = 8;
     this.tray.left = left;
     this.tray.top = r.bottom - oR.top + 6;
+    this.changeDetector.markForCheck(); // runs from a timeout
   }
   trayOpen(app: string, sub?: string) {
     this.closeMenus();
@@ -914,6 +916,10 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     if (left + mw > oR.width - 8) left = oR.width - mw - 8;
     this.ctx.left = Math.max(4, left);
     this.ctx.top = r.bottom - oR.top + 2;
+    // Runs from a timeout, so nothing else schedules a render: without this,
+    // the first menu of a session opens at 0,0 and stays there until an
+    // unrelated event repaints it.
+    this.changeDetector.markForCheck();
   }
   hoverMb(key: string, ev: Event) {
     if (this.ctx.open && this.mbKey && this.mbKey !== key) this.openMb(key, ev);
@@ -1218,6 +1224,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       top = Math.max(8, r.top - oR.top);
     }
     this.sessionPos = { left: Math.max(8, Math.min(left, oR.width - mw - 8)), top, bottom };
+    this.changeDetector.markForCheck(); // runs from a timeout
   }
 
   // ── dock right-click → window actions ──
@@ -1384,6 +1391,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     if (mR.left + left + 180 > oR.right) left = -(180 - 2);
     this.csub.left = left;
     this.csub.top = Math.max(0, rR.top - mR.top);
+    this.changeDetector.markForCheck(); // runs from a timeout
   }
   clampCtx() {
     const m = this.contextMenu?.panelElement,
@@ -1398,6 +1406,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     if (top + mh > oR.height - 8) top = oR.height - mh - 8;
     this.ctx.left = Math.max(8, left);
     this.ctx.top = Math.max(8, top);
+    this.changeDetector.markForCheck(); // runs from a timeout
   }
   runCtx(it: ShellContextItem, ev: Event) {
     ev.stopPropagation();
