@@ -11,7 +11,7 @@ const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 test('inventories every base app and routed surface without calling it live', async () => {
   const report = await collectCapabilityEvidence(repoRoot);
 
-  assert.equal(report.baseApps.length, 23);
+  assert.equal(report.baseApps.length, 24);
   assert.equal(report.surfaceApps.length, 43);
   assert.equal(report.surfaceApps.filter(({ contracts }) => contracts.length > 0).length, 34);
   assert.equal(new Set(report.surfaceApps.map(({ route }) => route)).size, 43);
