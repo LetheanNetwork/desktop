@@ -104,6 +104,44 @@ func TestOfficeDir_SymlinkRefused_Bad(t *testing.T) {
 	}
 }
 
+// TestOfficeDir_LstatOtherError_Bad — Lstat fails with a real error
+// that is NOT "does not exist" (here: ENOTDIR, a path component that
+// is a regular file rather than a directory). safedir.MkdirAll MUST
+// propagate the wrapped error via the "safedir.MkdirAll" code rather
+// than silently falling through to core.MkdirAll (which would itself
+// fail redundantly, masking the real cause).
+func TestOfficeDir_LstatOtherError_Bad(t *testing.T) {
+	tmp := t.TempDir()
+	blocker := core.PathJoin(tmp, "blocker")
+	if r := core.WriteFile(blocker, []byte("not a directory"), 0o600); !r.OK {
+		t.Fatalf("blocker file setup: %s", r.Error())
+	}
+
+	// "blocker" is a file, so any path underneath it cannot be
+	// traversed — Lstat must fail with ENOTDIR, not ENOENT.
+	dir := core.PathJoin(blocker, "office", "mail")
+
+	r := safedir.MkdirAll(dir, 0o700)
+	if r.OK {
+		t.Fatalf("safedir.MkdirAll accepted a path through a non-directory component")
+	}
+	err, _ := r.Value.(error)
+	if err == nil {
+		t.Fatalf("refused result carried no error")
+	}
+	if core.IsNotExist(err) {
+		t.Fatalf("expected a non-ENOENT lstat error, got IsNotExist-true: %v", err)
+	}
+	var werr *core.Err
+	if !core.As(err, &werr) {
+		t.Fatalf("refused error is not *core.Err: %T %v", err, err)
+	}
+	if werr.Operation != "safedir.MkdirAll" {
+		t.Fatalf("wrong refusal operation: got %q want %q (msg=%q)",
+			werr.Operation, "safedir.MkdirAll", werr.Message)
+	}
+}
+
 // TestOfficeDir_NonDirectoryRefused_Bad — defence-in-depth: attacker
 // pre-creates a regular file at the target path. safedir.MkdirAll MUST
 // refuse rather than letting subsequent writes try to treat a file as
