@@ -13,6 +13,7 @@ import { WindowManagerService } from '../desktop/window-manager.service';
 import { desktopActions } from './desktop.actions';
 import { DesktopEffects } from './desktop.effects';
 import { DesktopState } from './desktop.reducer';
+import { SOLO_APP_WINDOW } from './solo-window';
 import { DESKTOP_STORAGE, StorageService } from './storage.service';
 
 const persistedWin: Win = {
@@ -162,6 +163,7 @@ describe('DesktopEffects', () => {
         { provide: DesktopStateBridgeService, useValue: bridge },
         { provide: StorageService, useValue: storage },
         { provide: WindowManagerService, useValue: windows },
+        { provide: SOLO_APP_WINDOW, useValue: false },
       ],
     });
     effects = TestBed.inject(DesktopEffects);
@@ -370,6 +372,63 @@ describe('DesktopEffects', () => {
       type: '[Desktop] Save Session Failure',
       error: expect.stringContaining('invalid desktop state'),
     });
+    expect(bridge.saveShellSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('DesktopEffects in a torn-off window', () => {
+  let actions$: Subject<Action>;
+  let effects: DesktopEffects;
+  let bridge: {
+    isOffline: ReturnType<typeof vi.fn>;
+    loadShellSession: ReturnType<typeof vi.fn>;
+    saveShellSession: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    actions$ = new Subject<Action>();
+    bridge = {
+      isOffline: vi.fn(() => false),
+      loadShellSession: vi.fn(),
+      saveShellSession: vi.fn(),
+    };
+
+    TestBed.configureTestingModule({
+      providers: [
+        DesktopEffects,
+        provideMockActions(() => actions$),
+        provideMockStore({ initialState: { desktop: desktopState } }),
+        { provide: DesktopStateBridgeService, useValue: bridge },
+        { provide: StorageService, useValue: { read: vi.fn(), write: vi.fn(), remove: vi.fn() } },
+        { provide: WindowManagerService, useValue: { reconcileHydration: vi.fn((s) => s) } },
+        { provide: SOLO_APP_WINDOW, useValue: true },
+      ],
+    });
+    effects = TestBed.inject(DesktopEffects);
+  });
+
+  afterEach(() => {
+    actions$.complete();
+  });
+
+  it('never asks the shell session for its state', async () => {
+    await expect(firstValueFrom(effects.hydrate$, { defaultValue: null })).resolves.toBeNull();
+
+    expect(bridge.loadShellSession).not.toHaveBeenCalled();
+  });
+
+  it('never writes the application it renders back into the shell session', async () => {
+    const requested: Action[] = [];
+    effects.requestSave$.subscribe((action) => requested.push(action));
+
+    actions$.next(
+      desktopActions.launchApp({ appId: 'telemetry', windowId: 'solo-telemetry-window' }),
+    );
+    actions$.next(desktopActions.setSub({ id: 'solo-telemetry-window', sub: 'observe' }));
+    actions$.next(desktopActions.closeWindow({ id: 'solo-telemetry-window' }));
+    await Promise.resolve();
+
+    expect(requested).toEqual([]);
     expect(bridge.saveShellSession).not.toHaveBeenCalled();
   });
 });

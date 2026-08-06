@@ -2,6 +2,7 @@ import { Injectable, afterNextRender, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { Action, Store } from '@ngrx/store';
 import {
+  EMPTY,
   ReplaySubject,
   catchError,
   concat,
@@ -34,6 +35,7 @@ import {
   initialDesktopState,
   selectDesktopState,
 } from './desktop.reducer';
+import { SOLO_APP_WINDOW } from './solo-window';
 import { StorageService } from './storage.service';
 
 const STORE_KEY = 'lthn.desktop';
@@ -73,6 +75,10 @@ export class DesktopEffects {
   private readonly storage = inject(StorageService);
   private readonly bridge = inject(DesktopStateBridgeService);
   private readonly windows = inject(WindowManagerService);
+  // A torn-off application's own window reads one application and authors
+  // nothing: it neither loads nor saves the shell session, so the window the
+  // shell just handed over cannot be written back into the shell.
+  private readonly solo = inject(SOLO_APP_WINDOW);
   private readonly rendered$ = new ReplaySubject<void>(1);
 
   constructor() {
@@ -83,19 +89,23 @@ export class DesktopEffects {
   }
 
   readonly hydrate$ = createEffect(() =>
-    concat(
-      of(
-        desktopActions.hydrate({
-          state: null,
-          seedWindowIds: INITIAL_WINDOW_IDS,
-          persist: false,
-        }),
-      ),
-      this.rendered$.pipe(
-        take(1),
-        map(() => desktopActions.loadSession()),
-      ),
-    ),
+    this.solo
+      ? // defer, not the EMPTY singleton: createEffect brands the observable
+        // it is given, and a shared instance cannot be branded twice.
+        defer(() => EMPTY)
+      : concat(
+          of(
+            desktopActions.hydrate({
+              state: null,
+              seedWindowIds: INITIAL_WINDOW_IDS,
+              persist: false,
+            }),
+          ),
+          this.rendered$.pipe(
+            take(1),
+            map(() => desktopActions.loadSession()),
+          ),
+        ),
   );
 
   readonly loadSession$ = createEffect(() =>
@@ -130,6 +140,7 @@ export class DesktopEffects {
   readonly requestSave$ = createEffect(() =>
     this.actions$.pipe(
       ofType(...mutatingActions),
+      filter(() => !this.solo),
       filter(shouldPersistMutation),
       debounce((action) =>
         continuousMutationTypes.has(action.type) ? timer(GEOMETRY_SAVE_DELAY_MS) : of(0),
