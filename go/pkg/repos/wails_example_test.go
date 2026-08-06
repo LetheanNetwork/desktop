@@ -12,23 +12,8 @@ func ExampleService_Status() {
 	_ = core.Sprintf("%T", ref)
 }
 
-func TestWails_Service_Status_Good(t *core.T) {
-	ref := (*subject.Service).Status
-	typeName := core.Sprintf("%T", ref)
-	core.AssertContains(t, typeName, "func")
-	core.AssertNotEmpty(t, "Service_Status")
-}
-
-func TestWails_Service_Status_Bad(t *core.T) {
-	ref := (*subject.Service).Status
-	typeName := core.Sprintf("%T", ref)
-	core.AssertNotEqual(t, "", typeName)
-	core.AssertContains(t, "Bad:Service_Status", "Service_Status")
-}
-
-func TestWails_Service_Status_Ugly(t *core.T) {
-	ref := (*subject.Service).Status
-	typeName := core.Sprintf("%T", ref)
-	core.AssertTrue(t, core.Contains(typeName, "func"))
-	core.AssertGreater(t, len("Service_Status"), 0)
-}
+// TestWails_Service_Status_* — real behavioural tests, live in
+// wails_test.go. (Previously this file paired the Example with a
+// same-named Test that only formatted a method VALUE via %T and
+// never invoked it — see wails_test.go's doc comment for the full
+// mechanism writeup.)
