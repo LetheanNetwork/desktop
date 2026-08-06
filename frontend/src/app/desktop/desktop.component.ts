@@ -673,28 +673,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
   }
   applyDesign() {
     const os = this.osEl?.nativeElement;
-    if (!os) return;
-    if (this.design === 'custom') {
-      const H = this.customHue;
-      const R: [string, number, number][] = [
-        ['50', 0.96, 0.02],
-        ['100', 0.9, 0.045],
-        ['200', 0.82, 0.08],
-        ['300', 0.72, 0.115],
-        ['400', 0.62, 0.145],
-        ['500', 0.54, 0.16],
-        ['600', 0.46, 0.155],
-        ['700', 0.38, 0.13],
-        ['800', 0.3, 0.105],
-        ['900', 0.22, 0.075],
-      ];
-      R.forEach(([k, l, c]) => os.style.setProperty('--brand-' + k, `oklch(${l} ${c} ${H})`));
-      os.style.setProperty('--brand-name', `'${this.customName}'`);
-    } else {
-      ['50', '100', '200', '300', '400', '500', '600', '700', '800', '900', 'name'].forEach((k) =>
-        os.style.removeProperty('--brand-' + k),
-      );
-    }
+    if (os) this.prefs.applyDesignTo(os);
   }
 
   // ── menu bar — per-app dropdown menus (the app populates them; here mocked per focused app) ──

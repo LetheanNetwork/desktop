@@ -12,6 +12,20 @@ import { Injectable, effect, inject, signal } from '@angular/core';
 import { ConnectionManagerService } from '../connection-manager.service';
 import { DesktopControlSnapshot, DesktopControlValue } from '../store/desktop-controls.models';
 
+/** The custom accent ramp: token step, oklch lightness, oklch chroma. */
+const CUSTOM_BRAND_RAMP: readonly (readonly [string, number, number])[] = [
+  ['50', 0.96, 0.02],
+  ['100', 0.9, 0.045],
+  ['200', 0.82, 0.08],
+  ['300', 0.72, 0.115],
+  ['400', 0.62, 0.145],
+  ['500', 0.54, 0.16],
+  ['600', 0.46, 0.155],
+  ['700', 0.38, 0.13],
+  ['800', 0.3, 0.105],
+  ['900', 0.22, 0.075],
+];
+
 export type Mode = 'dark' | 'light';
 export type Brand = 'lethean' | 'hostuk';
 export type Design = 'lethean' | 'custom';
@@ -108,6 +122,29 @@ export class PreferencesService {
       : this.brand() === 'hostuk'
         ? $localize`:Design name@@preferences.design.hostUk:Host UK`
         : $localize`:Design name@@preferences.design.lethean:Lethean`;
+  }
+
+  /**
+   * Paint the chosen design onto one OS-screen element.
+   *
+   * The custom design is a hue, not a stylesheet: it writes the brand ramp as
+   * inline custom properties on the screen that carries it. Every window of
+   * this application paints from the same ramp — the desktop shell and a torn
+   * off application's solo window alike — so the treatment lives here rather
+   * than inside whichever component happens to own a screen.
+   */
+  applyDesignTo(os: HTMLElement): void {
+    if (this.design() !== 'custom') {
+      for (const [step] of CUSTOM_BRAND_RAMP) os.style.removeProperty('--brand-' + step);
+      os.style.removeProperty('--brand-name');
+      return;
+    }
+
+    const hue = this.customHue();
+    for (const [step, lightness, chroma] of CUSTOM_BRAND_RAMP) {
+      os.style.setProperty('--brand-' + step, `oklch(${lightness} ${chroma} ${hue})`);
+    }
+    os.style.setProperty('--brand-name', `'${this.customName()}'`);
   }
 
   /** Apply prefs that live on the OS-screen element (mode/wallpaper are scoped there,

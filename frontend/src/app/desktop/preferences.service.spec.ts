@@ -95,6 +95,33 @@ describe('PreferencesService', () => {
     expect(storage.setItem).not.toHaveBeenCalled();
   });
 
+  it('writes the custom accent ramp onto any screen that carries it', () => {
+    const service = TestBed.inject(PreferencesService);
+    const screen = document.createElement('div');
+
+    service.applySnapshot(preferenceSnapshot);
+    service.applyDesignTo(screen);
+
+    expect(screen.style.getPropertyValue('--brand-500')).toBe('oklch(0.54 0.16 190)');
+    expect(screen.style.getPropertyValue('--brand-50')).toBe('oklch(0.96 0.02 190)');
+    expect(screen.style.getPropertyValue('--brand-900')).toBe('oklch(0.22 0.075 190)');
+    expect(screen.style.getPropertyValue('--brand-name')).toBe("'Calm'");
+  });
+
+  it('clears the custom accent ramp when the design returns to the stylesheet', () => {
+    const service = TestBed.inject(PreferencesService);
+    const screen = document.createElement('div');
+
+    service.applySnapshot(preferenceSnapshot);
+    service.applyDesignTo(screen);
+    service.design.set('lethean');
+    service.applyDesignTo(screen);
+
+    expect(screen.style.getPropertyValue('--brand-500')).toBe('');
+    expect(screen.style.getPropertyValue('--brand-name')).toBe('');
+    expect(screen.getAttribute('style')).toBe('');
+  });
+
   it('leaves offline persistence to the controls repository', () => {
     offline.set(true);
     values.set('lthn.prefs', JSON.stringify({ mode: 'dark', wallpaper: 'dusk' }));
