@@ -1,13 +1,6 @@
 import { Type } from '@angular/core';
 import { ActivatedRouteSnapshot, Route, Routes } from '@angular/router';
-import {
-  APPS,
-  CATEGORIES,
-  CTRL_NAV,
-  GAMES_NAV,
-  SETTINGS_NAV,
-  type AppNavItem,
-} from './desktop-catalogue.data';
+import { APP_NAV, APPS, CATEGORIES, type AppNavItem } from './desktop-catalogue.data';
 import { APP_REGISTRY, AppComponentLoader, AppView } from './apps/app-view';
 
 export type { AppNavItem } from './desktop-catalogue.data';
@@ -20,6 +13,8 @@ export interface DesktopRouteData {
   app?: string;
   sub?: string;
   hint?: string;
+  /** App routes only: the pane a window opens on. */
+  defaultSub?: string;
 }
 
 export interface DesktopMenuApp {
@@ -30,6 +25,7 @@ export interface DesktopMenuApp {
   title: string;
   icon: string;
   hint: string;
+  defaultSub: string;
   children: AppNavItem[];
   loadComponent: AppComponentLoader;
 }
@@ -52,12 +48,6 @@ export interface DesktopRouteTarget {
   sub?: string;
 }
 
-const appNav: Partial<Record<string, readonly AppNavItem[]>> = {
-  control: CTRL_NAV,
-  games: GAMES_NAV,
-  settings: SETTINGS_NAV,
-};
-
 const dataOf = (route: Route): DesktopRouteData | null => {
   const data = route.data as Partial<DesktopRouteData> | undefined;
   return data?.category && data.title && data.icon && data.kind ? (data as DesktopRouteData) : null;
@@ -70,7 +60,7 @@ const appRoute = (categoryId: string, appId: string): Route => {
     throw new Error(`No route component registered for desktop app "${appId}"`);
   }
 
-  const nav = appNav[appId] ?? [];
+  const nav = APP_NAV[appId] ?? [];
   const children: Routes = nav.length
     ? [
         {
@@ -105,6 +95,7 @@ const appRoute = (categoryId: string, appId: string): Route => {
       hint: app.hint,
       kind: 'app',
       app: appId,
+      ...(nav.length ? { defaultSub: app.defaultSub ?? nav[0][0] } : {}),
     } satisfies DesktopRouteData,
     children,
   };
@@ -165,6 +156,7 @@ export function readDesktopRouteCatalog(config: Routes): DesktopRouteCatalog {
         title: appData.title,
         icon: appData.icon,
         hint: appData.hint ?? '',
+        defaultSub: appData.defaultSub ?? '',
         children,
         loadComponent: route.loadComponent as AppComponentLoader,
       };
@@ -177,6 +169,12 @@ export function readDesktopRouteCatalog(config: Routes): DesktopRouteCatalog {
   return { categories, apps };
 }
 
+/**
+ * The URL for a window. A sub the application does not publish as a pane —
+ * a retired pane path, or a Files location token — resolves to the pane the
+ * window is actually showing rather than dropping the segment, so focusing a
+ * window never rewrites its own state through the route.
+ */
 export function routeSegmentsForWindow(
   catalog: DesktopRouteCatalog,
   appId: string,
@@ -184,7 +182,10 @@ export function routeSegmentsForWindow(
 ): string[] {
   const app = catalog.apps[appId];
   if (!app) return [];
-  const child = app.children.find(([path]) => path === sub);
+  const child =
+    app.children.find(([path]) => path === sub) ??
+    app.children.find(([path]) => path === app.defaultSub) ??
+    app.children[0];
   return [app.categoryPath, app.path, ...(child ? [child[0]] : [])];
 }
 

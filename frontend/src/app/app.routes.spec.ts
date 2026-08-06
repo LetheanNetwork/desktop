@@ -4,31 +4,9 @@ import { StandaloneAppHost } from './standalone-app-host';
 import { TrayPanel } from './tray-panel/tray-panel';
 import { DESKTOP_APP_ROUTES, readDesktopRouteCatalog } from './desktop/desktop-route-tree';
 import { CATEGORIES, CTRL_NAV } from './desktop/desktop.data';
+import { APP_PANES } from './desktop/desktop-panes.data';
 
 describe('app routes', () => {
-  const portedSurfaceRoutes: Record<string, string[]> = {
-    agents: [
-      'activity',
-      'code',
-      'connect',
-      'dispatch',
-      'flows',
-      'scan',
-      'tasks',
-      'terminal',
-      'workspaces',
-    ],
-    coding: ['deploys', 'issues', 'prs', 'repos'],
-    marketing: ['analytics', 'audience', 'campaigns', 'content', 'social'],
-    'ml-lab': ['duckdb', 'influx', 'lora', 'ml-lab', 'models'],
-    observe: ['activity'],
-    office: ['documents', 'files', 'mail'],
-    operations: ['incidents', 'runbooks', 'status'],
-    planning: ['backlog', 'calendar', 'retros', 'roadmap', 'sprints', 'today'],
-    sales: ['contacts', 'deals', 'forecast', 'pipeline'],
-    extensions: ['marketplace', 'plugin-view', 'opencode-shim'],
-  };
-
   it('keeps the desktop shell, native-window host, and tray panel routes lazy', async () => {
     expect(routes[0]).toMatchObject({
       path: '',
@@ -56,64 +34,108 @@ describe('app routes', () => {
       category: 'system',
       title: 'Control',
       icon: 'cube',
+      defaultSub: 'models',
     });
     expect(catalog.apps['control'].children).toEqual(CTRL_NAV);
     expect(catalog.apps['control'].loadComponent).toEqual(expect.any(Function));
   });
 
-  // Where each surface group ended up when the menu bar was folded from
-  // sixteen categories down to seven. The surfaces did not move — their route
-  // did, from /<group>/<path> to /<category>/<path> — so this map is the
-  // record of that and the reason the assertion below can still be exact.
-  const surfaceHome: Record<string, string> = {
-    agents: 'ai',
-    'ml-lab': 'ai',
-    coding: 'developer',
-    observe: 'system',
-    operations: 'system',
-    office: 'office',
-    planning: 'office',
-    marketing: 'office',
-    sales: 'office',
-    extensions: 'tools',
+  // Where every ported surface ended up when sixty-six launchable applications
+  // were folded down to twenty-three. The surfaces did not change — their route
+  // did, from a top-level /<group>/<path> of their own to a pane of the
+  // application that owns them.
+  const surfaceRoutes: Record<string, string> = {
+    'surface-agents-activity': '/ai/agents/activity',
+    'surface-agents-code': '/ai/agents/code',
+    'surface-agents-connect': '/ai/agents/connect',
+    'surface-agents-dispatch': '/ai/agents/dispatch',
+    'surface-agents-flows': '/ai/agents/flows',
+    'surface-agents-scan': '/ai/agents/scan',
+    'surface-agents-tasks': '/ai/agents/tasks',
+    'surface-agents-terminal': '/ai/agents/terminal',
+    'surface-agents-workspaces': '/ai/agents/workspaces',
+    'surface-coding-deploys': '/developer/scm/deploys',
+    'surface-coding-issues': '/office/project-manager/issues',
+    'surface-coding-prs': '/developer/scm/pull-requests',
+    'surface-coding-repos': '/developer/scm/repositories',
+    'surface-marketing-analytics': '/office/marketing/analytics',
+    'surface-marketing-audience': '/office/marketing/audience',
+    'surface-marketing-campaigns': '/office/marketing/campaigns',
+    'surface-marketing-content': '/office/marketing/content',
+    'surface-marketing-social': '/office/marketing/social',
+    'surface-ml-lab-duckdb': '/developer/databases/duckdb',
+    'surface-ml-lab-influx': '/developer/databases/influxdb',
+    'surface-ml-lab-lora': '/ai/ml-lab/lora',
+    'surface-ml-lab-ml-lab': '/ai/ml-lab/workbench',
+    'surface-ml-lab-models': '/ai/ml-lab/models',
+    'surface-observe-activity': '/system/activity/observe',
+    'surface-office-files': '/tools/files/workspace',
+    'surface-operations-incidents': '/system/operations/incidents',
+    'surface-operations-runbooks': '/system/operations/runbooks',
+    'surface-operations-status': '/system/operations/status',
+    'surface-planning-backlog': '/office/project-manager/backlog',
+    'surface-planning-calendar': '/office/project-manager/calendar',
+    'surface-planning-retros': '/office/project-manager/retros',
+    'surface-planning-roadmap': '/office/project-manager/roadmap',
+    'surface-planning-sprints': '/office/project-manager/sprints',
+    'surface-planning-today': '/office/project-manager/today',
+    'surface-sales-contacts': '/office/crm/contacts',
+    'surface-sales-deals': '/office/crm/deals',
+    'surface-sales-forecast': '/office/crm/forecast',
+    'surface-sales-pipeline': '/office/crm/pipeline',
+    'surface-extensions-marketplace': '/system/marketplace/store',
+    'surface-extensions-plugin-view': '/system/marketplace/plugin-view',
+    'surface-extensions-opencode-shim': '/system/marketplace/opencode',
   };
 
-  it('exposes every ported Lit view as a menu-derived lazy child route', () => {
+  it('exposes every ported surface as a deep-linkable pane of its application', () => {
     const catalog = readDesktopRouteCatalog(routes);
-
-    for (const [groupId, expectedPaths] of Object.entries(portedSurfaceRoutes)) {
-      const categoryId = surfaceHome[groupId];
-      expect(categoryId, `no home recorded for surface group ${groupId}`).toBeDefined();
-
-      const category = catalog.categories.find(({ id }) => id === categoryId);
-      expect(category, `missing ${categoryId} route category`).toBeDefined();
+    const routed = APP_PANES.flatMap(({ app, path, surface }) => {
+      if (!surface) return [];
+      const menuApp = catalog.apps[app];
+      expect(menuApp, `no route for application ${app}`).toBeDefined();
       expect(
-        category?.apps
-          .filter(({ id }) => id.startsWith(`surface-${groupId}-`))
-          .map(({ path }) => path)
-          .sort(),
-      ).toEqual([...expectedPaths].sort());
-      expect(category?.apps.every(({ loadComponent }) => typeof loadComponent === 'function')).toBe(
-        true,
-      );
-    }
+        menuApp.children.some(([childPath]) => childPath === path),
+        `${app} publishes no ${path} pane`,
+      ).toBe(true);
+      return [[surface, `/${menuApp.categoryPath}/${menuApp.path}/${path}`] as const];
+    });
+
+    expect(Object.fromEntries(routed)).toEqual(surfaceRoutes);
   });
 
-  it('keeps extension surfaces at their decided hash-route paths', () => {
+  it('promotes Mail and Documents to applications of their own', () => {
     const catalog = readDesktopRouteCatalog(routes);
 
-    // Extensions folded into Tools; the leaf paths are unchanged.
-    expect(catalog.apps['surface-extensions-marketplace']).toMatchObject({
-      categoryPath: 'tools',
-      path: 'marketplace',
+    expect(catalog.apps['mail']).toMatchObject({ categoryPath: 'office', path: 'mail' });
+    expect(catalog.apps['documents']).toMatchObject({
+      categoryPath: 'office',
+      path: 'documents',
     });
-    expect(catalog.apps['surface-extensions-plugin-view']).toMatchObject({
-      categoryPath: 'tools',
-      path: 'plugin-view',
-    });
-    expect(catalog.apps['surface-extensions-opencode-shim']).toMatchObject({
-      categoryPath: 'tools',
-      path: 'opencode-shim',
-    });
+    expect(catalog.apps['mail'].children).toEqual([]);
+    expect(catalog.apps['documents'].children).toEqual([]);
+  });
+
+  it('retires every surface, developer-panel, and duplicate application id', () => {
+    const catalog = readDesktopRouteCatalog(routes);
+    const retired = [
+      'cpanel',
+      'explorer',
+      'codesearch',
+      'terminal',
+      'build',
+      'procmon',
+      'containers',
+      'repos',
+      'forge',
+      'devops',
+      'tasks',
+      'surface-agents-flows',
+      'surface-office-mail',
+      'surface-planning-today',
+    ];
+
+    expect(retired.filter((id) => catalog.apps[id])).toEqual([]);
+    expect(Object.keys(catalog.apps)).toHaveLength(23);
   });
 });

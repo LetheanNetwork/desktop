@@ -98,8 +98,47 @@ describe('desktop reducer', () => {
     expect(loaded.focusId).toBeNull();
     expect(loaded.persistence).toBe('ready');
     expect(loaded.persistenceRevision).toBe(7);
+
     expect(loaded.persistenceError).toBeNull();
     expect(loaded.migratedBrowserState).toBe(true);
+  });
+
+  it('drops windows for applications that became panes and keeps the rest', () => {
+    // A session saved before the catalogue was consolidated names windows for
+    // applications that no longer exist. Each is skipped; the survivors keep
+    // their geometry and are re-pointed at a pane the application publishes.
+    const loaded = desktopReducer(
+      initialDesktopState,
+      desktopActions.loadSessionSuccess({
+        state: {
+          wins: [
+            win({ id: 'explorer-one', app: 'explorer', sub: '' }),
+            win({ id: 'procmon-one', app: 'procmon', sub: '', z: 12 }),
+            win({ id: 'mail-surface', app: 'surface-office-mail', sub: '', z: 13 }),
+            win({ id: 'flows-surface', app: 'surface-agents-flows', sub: '', z: 14 }),
+            win({ id: 'ide-one', app: 'ide', sub: 'repos', z: 15 }),
+            win({ id: 'agents-one', app: 'agents', sub: 'flows', z: 16 }),
+            win({ id: 'files-one', app: 'files', sub: 'documents::Reports', z: 17 }),
+          ],
+          focusId: 'explorer-one',
+          view: 'desktop',
+          device: 'small',
+          z: 17,
+        },
+        revision: 3,
+        migratedBrowserState: true,
+        seedWindowIds: ['unused-one'],
+      }),
+    );
+
+    expect(loaded.wins.map(({ id, app, sub }) => ({ id, app, sub }))).toEqual([
+      // A retired pane path falls back to the application's default pane.
+      { id: 'ide-one', app: 'ide', sub: 'control-panel' },
+      { id: 'agents-one', app: 'agents', sub: 'flows' },
+      // Files still keeps its location token, which is not a pane path.
+      { id: 'files-one', app: 'files', sub: 'documents::Reports' },
+    ]);
+    expect(loaded.focusId).toBeNull();
   });
 
   it('fails closed on unavailable state and advances only committed revisions', () => {

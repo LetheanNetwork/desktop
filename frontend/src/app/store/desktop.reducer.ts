@@ -1,5 +1,5 @@
 import { createFeature, createReducer, createSelector, on } from '@ngrx/store';
-import { APPS, CTRL_NAV, GAMES_NAV, SETTINGS_NAV } from '../desktop/desktop-catalogue.data';
+import { APP_NAV, APPS } from '../desktop/desktop-catalogue.data';
 import { DeviceSize, ViewMode, Win } from '../desktop/desktop.data';
 import { filesToken, parseFilesToken } from '../desktop/apps/files/files-view-state';
 import { DesktopHydration, SeedWindowIds, desktopActions } from './desktop.actions';
@@ -35,26 +35,31 @@ const MENUBAR_CLEARANCE = 44;
 
 const createWindowId = (): string => 'w' + Date.now() + Math.random().toString(36).slice(2, 5);
 
-const STATIC_SUB_ROUTES: Readonly<Partial<Record<string, ReadonlySet<string>>>> = {
-  control: new Set(CTRL_NAV.map(([path]) => path)),
-  games: new Set(GAMES_NAV.map(([path]) => path)),
-  settings: new Set(SETTINGS_NAV.map(([path]) => path)),
-};
+/** Every published pane path, per application — the sub-route vocabulary. */
+const PANE_PATHS: Readonly<Partial<Record<string, ReadonlySet<string>>>> = Object.fromEntries(
+  Object.entries(APP_NAV).map(([app, nav]) => [app, new Set((nav ?? []).map(([path]) => path))]),
+);
 const CONTROL_SYSTEM_TABS = new Set(['overview', 'processes', 'daemons']);
 const FILE_VIEW_TABS = new Set(['list', 'grid']);
 
-const isFilesApp = (app: string): boolean => app === 'files' || app === 'surface-office-files';
+const isFilesApp = (app: string): boolean => app === 'files';
 
 const normaliseWindow = (win: Win): Win | null => {
+  // A window whose application no longer exists — a retired surface id, a
+  // panel that became a pane — is dropped rather than restored into nothing.
   const app = APPS[win.app];
   if (!app || win.id === 'shell') return null;
 
   let sub = '';
-  const staticRoutes = STATIC_SUB_ROUTES[win.app];
-  if (staticRoutes) {
-    sub = staticRoutes.has(win.sub) ? win.sub : (app.defaultSub ?? [...staticRoutes][0] ?? '');
+  const panePaths = PANE_PATHS[win.app];
+  if (panePaths?.has(win.sub)) {
+    sub = win.sub;
   } else if (isFilesApp(win.app)) {
+    // Files keeps its location in `sub`; an unknown token becomes home, which
+    // is also the path of its Local pane.
     sub = filesToken(parseFilesToken(win.sub));
+  } else if (panePaths?.size) {
+    sub = app.defaultSub ?? [...panePaths][0] ?? '';
   } else {
     sub = app.defaultSub ?? '';
   }

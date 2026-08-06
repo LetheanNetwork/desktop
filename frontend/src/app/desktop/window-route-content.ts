@@ -54,7 +54,9 @@ export class WindowRouteContent implements OnChanges {
   get componentInputs(): Record<string, unknown> {
     const inputs: Record<string, unknown> = { win: this.win };
     if (this.nav.length) inputs['nav'] = this.nav;
-    if (this.app?.dev) {
+    // Only an application that IS one developer panel takes the panel inputs.
+    // A panelled application has panes, and each pane resolves its own panel.
+    if (this.app?.dev && this.app.route && !this.nav.length) {
       inputs['app'] = this.app;
       inputs['panel'] = this.panel;
       inputs['empty'] = this.empty;

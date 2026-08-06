@@ -239,4 +239,39 @@ describe('DesktopComponent route shell', () => {
       expect(router.url).toBe('/media/games/engines');
     });
   });
+
+  it('opens a consolidated application on the pane its URL names', async () => {
+    await router.navigateByUrl('/office/project-manager/sprints');
+
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      const planner = windowManager.wins().find((win) => win.app === 'project-manager');
+      expect(planner?.sub).toBe('sprints');
+      expect(windowManager.focusId()).toBe(planner?.id);
+      expect(router.url).toBe('/office/project-manager/sprints');
+      expect(
+        (fixture.nativeElement as HTMLElement).querySelector('lthn-planning-sprints-surface'),
+      ).not.toBeNull();
+    });
+  });
+
+  it('keeps a Files location token when the route reflects its Local pane', async () => {
+    store.dispatch(
+      desktopActions.hydrate({
+        state: {
+          wins: [{ ...controlWin, id: 'files-window', app: 'files', sub: 'documents::Reports' }],
+          focusId: 'files-window',
+        },
+        normalise: false,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(router.url).toBe('/tools/files/home');
+    });
+    expect(windowManager.wins().find((win) => win.id === 'files-window')?.sub).toBe(
+      'documents::Reports',
+    );
+  });
 });

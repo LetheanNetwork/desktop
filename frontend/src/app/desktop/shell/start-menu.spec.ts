@@ -10,6 +10,7 @@ const app = {
   title: 'Settings',
   icon: 'sliders',
   hint: 'System preferences',
+  defaultSub: 'interface',
   children: [['translations', 'language', 'Translations']],
   loadComponent: async () => {
     throw new Error('The presentation test must not load routed applications');

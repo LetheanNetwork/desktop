@@ -1,377 +1,84 @@
-import type { AppDef, Category } from '../desktop-catalogue.data';
+// ─────────────────────────────────────────────────────────────────────────
+// surfaces/surface-registry.ts — the ported surface components.
+//
+// A surface is a pane, never a top-level application: desktop-panes.data.ts
+// binds each id below to one `/<category>/<app>/<pane>` route, and the two
+// promoted surfaces (Mail, Documents) are bound as whole applications in
+// desktop-catalogue.data.ts. `group`/`route` stay the component's identity —
+// the source file is always `surfaces/<group>/<route>.ts`, which is what the
+// capability audit reads.
+// ─────────────────────────────────────────────────────────────────────────
 import type { AppComponentLoader } from '../apps/app-view';
 
-interface SurfaceDefinition {
+/** Component identity: the file at `surfaces/<group>/<route>.ts`. */
+export interface SurfaceDefinition {
   readonly group: string;
   readonly route: string;
-  readonly title: string;
-  readonly icon: string;
 }
 
-const DEFINITIONS: readonly SurfaceDefinition[] = [
-  {
-    group: 'agents',
-    route: 'activity',
-    title: $localize`:Surface title@@surface.agents.activity.title:Activity`,
-    icon: 'wave-square',
-  },
-  {
-    group: 'agents',
-    route: 'code',
-    title: $localize`:Surface title@@surface.agents.code.title:Code`,
-    icon: 'code',
-  },
-  {
-    group: 'agents',
-    route: 'connect',
-    title: $localize`:Surface title@@surface.agents.connect.title:Connect`,
-    icon: 'link',
-  },
-  {
-    group: 'agents',
-    route: 'dispatch',
-    title: $localize`:Surface title@@surface.agents.dispatch.title:Dispatch`,
-    icon: 'paper-plane',
-  },
-  {
-    group: 'agents',
-    route: 'flows',
-    title: $localize`:Surface title@@surface.agents.flows.title:Flows`,
-    icon: 'diagram-project',
-  },
-  {
-    group: 'agents',
-    route: 'scan',
-    title: $localize`:Surface title@@surface.agents.scan.title:Scan`,
-    icon: 'radar',
-  },
-  {
-    group: 'agents',
-    route: 'tasks',
-    title: $localize`:Surface title@@surface.agents.tasks.title:Tasks`,
-    icon: 'list-check',
-  },
-  {
-    group: 'agents',
-    route: 'terminal',
-    title: $localize`:Surface title@@surface.agents.terminal.title:Terminal`,
-    icon: 'terminal',
-  },
-  {
-    group: 'agents',
-    route: 'workspaces',
-    title: $localize`:Surface title@@surface.agents.workspaces.title:Workspaces`,
-    icon: 'layer-group',
-  },
+export const SURFACE_DEFINITIONS: readonly SurfaceDefinition[] = [
+  { group: 'agents', route: 'activity' },
+  { group: 'agents', route: 'code' },
+  { group: 'agents', route: 'connect' },
+  { group: 'agents', route: 'dispatch' },
+  { group: 'agents', route: 'flows' },
+  { group: 'agents', route: 'scan' },
+  { group: 'agents', route: 'tasks' },
+  { group: 'agents', route: 'terminal' },
+  { group: 'agents', route: 'workspaces' },
 
-  {
-    group: 'coding',
-    route: 'deploys',
-    title: $localize`:Surface title@@surface.coding.deploys.title:Deploys`,
-    icon: 'rocket',
-  },
-  {
-    group: 'coding',
-    route: 'issues',
-    title: $localize`:Surface title@@surface.coding.issues.title:Issues`,
-    icon: 'circle-exclamation',
-  },
-  {
-    group: 'coding',
-    route: 'prs',
-    title: $localize`:Surface title@@surface.coding.prs.title:Pull requests`,
-    icon: 'code-pull-request',
-  },
-  {
-    group: 'coding',
-    route: 'repos',
-    title: $localize`:Surface title@@surface.coding.repos.title:Repositories`,
-    icon: 'code-branch',
-  },
+  { group: 'coding', route: 'deploys' },
+  { group: 'coding', route: 'issues' },
+  { group: 'coding', route: 'prs' },
+  { group: 'coding', route: 'repos' },
 
-  {
-    group: 'marketing',
-    route: 'analytics',
-    title: $localize`:Surface title@@surface.marketing.analytics.title:Analytics`,
-    icon: 'chart-line',
-  },
-  {
-    group: 'marketing',
-    route: 'audience',
-    title: $localize`:Surface title@@surface.marketing.audience.title:Audience`,
-    icon: 'users',
-  },
-  {
-    group: 'marketing',
-    route: 'campaigns',
-    title: $localize`:Surface title@@surface.marketing.campaigns.title:Campaigns`,
-    icon: 'bullhorn',
-  },
-  {
-    group: 'marketing',
-    route: 'content',
-    title: $localize`:Surface title@@surface.marketing.content.title:Content`,
-    icon: 'pen-nib',
-  },
-  {
-    group: 'marketing',
-    route: 'social',
-    title: $localize`:Surface title@@surface.marketing.social.title:Social`,
-    icon: 'share-nodes',
-  },
+  { group: 'marketing', route: 'analytics' },
+  { group: 'marketing', route: 'audience' },
+  { group: 'marketing', route: 'campaigns' },
+  { group: 'marketing', route: 'content' },
+  { group: 'marketing', route: 'social' },
 
-  {
-    group: 'ml-lab',
-    route: 'duckdb',
-    title: $localize`:Surface title@@surface.mlLab.duckdb.title:DuckDB`,
-    icon: 'database',
-  },
-  {
-    group: 'ml-lab',
-    route: 'influx',
-    title: $localize`:Surface title@@surface.mlLab.influx.title:InfluxDB`,
-    icon: 'chart-area',
-  },
-  {
-    group: 'ml-lab',
-    route: 'lora',
-    title: $localize`:Surface title@@surface.mlLab.lora.title:LoRA`,
-    icon: 'sliders',
-  },
-  {
-    group: 'ml-lab',
-    route: 'ml-lab',
-    title: $localize`:Surface title@@surface.mlLab.workbench.title:ML Lab`,
-    icon: 'flask',
-  },
-  {
-    group: 'ml-lab',
-    route: 'models',
-    title: $localize`:Surface title@@surface.mlLab.models.title:Models`,
-    icon: 'cubes',
-  },
+  { group: 'ml-lab', route: 'duckdb' },
+  { group: 'ml-lab', route: 'influx' },
+  { group: 'ml-lab', route: 'lora' },
+  { group: 'ml-lab', route: 'ml-lab' },
+  { group: 'ml-lab', route: 'models' },
 
-  {
-    group: 'observe',
-    route: 'activity',
-    title: $localize`:Surface title@@surface.observe.activity.title:Activity`,
-    icon: 'binoculars',
-  },
+  { group: 'observe', route: 'activity' },
 
-  {
-    group: 'office',
-    route: 'documents',
-    title: $localize`:Surface title@@surface.office.documents.title:Documents`,
-    icon: 'file-lines',
-  },
-  {
-    group: 'office',
-    route: 'files',
-    title: $localize`:Surface title@@surface.office.files.title:Files`,
-    icon: 'folder-open',
-  },
-  {
-    group: 'office',
-    route: 'mail',
-    title: $localize`:Surface title@@surface.office.mail.title:Mail`,
-    icon: 'envelope',
-  },
+  { group: 'office', route: 'documents' },
+  { group: 'office', route: 'files' },
+  { group: 'office', route: 'mail' },
 
-  {
-    group: 'operations',
-    route: 'incidents',
-    title: $localize`:Surface title@@surface.operations.incidents.title:Incidents`,
-    icon: 'triangle-exclamation',
-  },
-  {
-    group: 'operations',
-    route: 'runbooks',
-    title: $localize`:Surface title@@surface.operations.runbooks.title:Runbooks`,
-    icon: 'book',
-  },
-  {
-    group: 'operations',
-    route: 'status',
-    title: $localize`:Surface title@@surface.operations.status.title:Status`,
-    icon: 'heart-pulse',
-  },
+  { group: 'operations', route: 'incidents' },
+  { group: 'operations', route: 'runbooks' },
+  { group: 'operations', route: 'status' },
 
-  {
-    group: 'planning',
-    route: 'backlog',
-    title: $localize`:Surface title@@surface.planning.backlog.title:Backlog`,
-    icon: 'inbox',
-  },
-  {
-    group: 'planning',
-    route: 'calendar',
-    title: $localize`:Surface title@@surface.planning.calendar.title:Calendar`,
-    icon: 'calendar-days',
-  },
-  {
-    group: 'planning',
-    route: 'retros',
-    title: $localize`:Surface title@@surface.planning.retros.title:Retrospectives`,
-    icon: 'rotate-left',
-  },
-  {
-    group: 'planning',
-    route: 'roadmap',
-    title: $localize`:Surface title@@surface.planning.roadmap.title:Roadmap`,
-    icon: 'map',
-  },
-  {
-    group: 'planning',
-    route: 'sprints',
-    title: $localize`:Surface title@@surface.planning.sprints.title:Sprints`,
-    icon: 'person-running',
-  },
-  {
-    group: 'planning',
-    route: 'today',
-    title: $localize`:Surface title@@surface.planning.today.title:Today`,
-    icon: 'sun',
-  },
+  { group: 'planning', route: 'backlog' },
+  { group: 'planning', route: 'calendar' },
+  { group: 'planning', route: 'retros' },
+  { group: 'planning', route: 'roadmap' },
+  { group: 'planning', route: 'sprints' },
+  { group: 'planning', route: 'today' },
 
-  {
-    group: 'sales',
-    route: 'contacts',
-    title: $localize`:Surface title@@surface.sales.contacts.title:Contacts`,
-    icon: 'address-book',
-  },
-  {
-    group: 'sales',
-    route: 'deals',
-    title: $localize`:Surface title@@surface.sales.deals.title:Deals`,
-    icon: 'handshake',
-  },
-  {
-    group: 'sales',
-    route: 'forecast',
-    title: $localize`:Surface title@@surface.sales.forecast.title:Forecast`,
-    icon: 'chart-column',
-  },
-  {
-    group: 'sales',
-    route: 'pipeline',
-    title: $localize`:Surface title@@surface.sales.pipeline.title:Pipeline`,
-    icon: 'filter-circle-dollar',
-  },
+  { group: 'sales', route: 'contacts' },
+  { group: 'sales', route: 'deals' },
+  { group: 'sales', route: 'forecast' },
+  { group: 'sales', route: 'pipeline' },
 
-  {
-    group: 'extensions',
-    route: 'marketplace',
-    title: $localize`:Surface title@@surface.extensions.marketplace.title:Marketplace`,
-    icon: 'store',
-  },
-  {
-    group: 'extensions',
-    route: 'plugin-view',
-    title: $localize`:Surface title@@surface.extensions.pluginView.title:Plugin view`,
-    icon: 'puzzle-piece',
-  },
-  {
-    group: 'extensions',
-    route: 'opencode-shim',
-    title: $localize`:Surface title@@surface.extensions.opencode.title:OpenCode`,
-    icon: 'terminal',
-  },
+  { group: 'extensions', route: 'marketplace' },
+  { group: 'extensions', route: 'plugin-view' },
+  { group: 'extensions', route: 'opencode-shim' },
 ];
 
 export function surfaceAppId(group: string, route: string): string {
   return `surface-${group}-${route}`;
 }
 
-export const SURFACE_APPS: Record<string, AppDef> = Object.fromEntries(
-  DEFINITIONS.map(({ group, route, title, icon }) => {
-    const id = surfaceAppId(group, route);
-    return [
-      id,
-      {
-        id,
-        title,
-        icon,
-        route,
-        w: 920,
-        h: 640,
-        hint: title,
-      } satisfies AppDef,
-    ];
-  }),
+/** Every registered surface id, in declaration order. */
+export const SURFACE_IDS: readonly string[] = SURFACE_DEFINITIONS.map(({ group, route }) =>
+  surfaceAppId(group, route),
 );
-
-export const SURFACE_CATEGORY_APPS: Readonly<Record<string, readonly string[]>> =
-  Object.fromEntries(
-    [...new Set(DEFINITIONS.map(({ group }) => group))].map((group) => [
-      group,
-      DEFINITIONS.filter((definition) => definition.group === group).map(({ route }) =>
-        surfaceAppId(group, route),
-      ),
-    ]),
-  );
-
-export const SURFACE_CATEGORIES: Category[] = [
-  {
-    id: 'agents',
-    label: $localize`:Surface category@@category.agents:Agents`,
-    icon: 'robot',
-    apps: [...SURFACE_CATEGORY_APPS['agents']],
-  },
-  {
-    id: 'coding',
-    label: $localize`:Surface category@@category.coding:Coding`,
-    icon: 'code',
-    apps: [...SURFACE_CATEGORY_APPS['coding']],
-  },
-  {
-    id: 'marketing',
-    label: $localize`:Surface category@@category.marketing:Marketing`,
-    icon: 'bullhorn',
-    apps: [...SURFACE_CATEGORY_APPS['marketing']],
-  },
-  {
-    id: 'ml-lab',
-    label: $localize`:Surface category@@category.mlLab:ML Lab`,
-    icon: 'flask',
-    apps: [...SURFACE_CATEGORY_APPS['ml-lab']],
-  },
-  {
-    id: 'observe',
-    label: $localize`:Surface category@@category.observe:Observe`,
-    icon: 'binoculars',
-    apps: [...SURFACE_CATEGORY_APPS['observe']],
-  },
-  {
-    id: 'office',
-    label: $localize`:Surface category@@category.office:Office`,
-    icon: 'briefcase',
-    apps: [...SURFACE_CATEGORY_APPS['office']],
-  },
-  {
-    id: 'operations',
-    label: $localize`:Surface category@@category.operations:Operations`,
-    icon: 'gears',
-    apps: [...SURFACE_CATEGORY_APPS['operations']],
-  },
-  {
-    id: 'planning',
-    label: $localize`:Surface category@@category.planning:Planning`,
-    icon: 'calendar-check',
-    apps: [...SURFACE_CATEGORY_APPS['planning']],
-  },
-  {
-    id: 'sales',
-    label: $localize`:Surface category@@category.sales:Sales`,
-    icon: 'sterling-sign',
-    apps: [...SURFACE_CATEGORY_APPS['sales']],
-  },
-  {
-    id: 'extensions',
-    label: $localize`:Surface category@@category.extensions:Extensions`,
-    icon: 'puzzle-piece',
-    apps: [...SURFACE_CATEGORY_APPS['extensions']],
-  },
-];
 
 export const SURFACE_APP_REGISTRY: Record<string, AppComponentLoader> = {
   'surface-agents-activity': () =>

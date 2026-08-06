@@ -3,7 +3,8 @@ import { Router } from '@angular/router';
 import { APPS } from './desktop/desktop-catalogue.data';
 import { readDesktopRouteCatalog, routeSegmentsForWindow } from './desktop/desktop-route-tree';
 
-const MCP_DIRECTORY_APP_ID = 'surface-agents-flows';
+/** The tooling catalogue is the Agents application's Flows pane. */
+const MCP_DIRECTORY_TARGET: readonly [app: string, sub: string] = ['agents', 'flows'];
 const MAX_DEEP_LINK_FIELD_BYTES = 64;
 const MAX_TRAY_TARGET_BYTES = 96;
 
@@ -22,10 +23,10 @@ export class DeepLinkNavigationService {
     const target = asDeepLinkTarget(payload);
     if (!target) return false;
 
-    const appId = appForDeepLink(target);
-    if (!appId) return false;
+    const destination = appForDeepLink(target);
+    if (!destination) return false;
 
-    return await this.navigateToApp(appId);
+    return await this.navigateToApp(destination[0], destination[1]);
   }
 
   async navigateTrayTarget(payload: unknown): Promise<boolean> {
@@ -46,9 +47,11 @@ export class DeepLinkNavigationService {
       models: ['control', 'models'],
       settings: ['settings'],
       telemetry: ['telemetry'],
-      tools: ['marketplace'],
+      tools: ['marketplace', 'store'],
     };
-    const destination = target.startsWith('plugin:') ? ['marketplace'] : mapped[target];
+    const destination = target.startsWith('plugin:')
+      ? (['marketplace', 'plugin-view'] as const)
+      : mapped[target];
     if (!destination) return false;
     return await this.navigateToApp(destination[0], destination[1]);
   }
@@ -81,12 +84,12 @@ function asDeepLinkTarget(payload: unknown): DeepLinkTarget | null {
   };
 }
 
-function appForDeepLink(target: DeepLinkTarget): string | null {
+function appForDeepLink(target: DeepLinkTarget): readonly [app: string, sub?: string] | null {
   if (target.action === 'mcp' && target.resource === 'directory' && target.id === '') {
-    return MCP_DIRECTORY_APP_ID;
+    return MCP_DIRECTORY_TARGET;
   }
   if (target.resource === '' && target.id === '' && Object.hasOwn(APPS, target.action)) {
-    return target.action;
+    return [target.action];
   }
   return null;
 }
