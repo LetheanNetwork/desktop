@@ -132,3 +132,78 @@ func TestUpdate_Service_OnStartup_Ugly_InvalidValuesUseFallbacks(t *core.T) {
 	core.AssertEqual(t, update.DefaultChannel, cfg.Channel)
 	core.AssertEqual(t, upstream.NoCheck, cfg.CheckOnStartup)
 }
+
+// TestUpdate_Service_OnStartup_Bad_NilCore — a Service built via
+// update.New() directly (not through Register) never gets its core
+// field wired. OnStartup must refuse rather than nil-deref the
+// service lookup.
+func TestUpdate_Service_OnStartup_Bad_NilCore(t *core.T) {
+	r := update.New(upstream.UpdateServiceConfig{
+		RepoURL:        update.DefaultRepoURL,
+		Channel:        update.DefaultChannel,
+		CheckOnStartup: upstream.NoCheck,
+	})
+	core.RequireTrue(t, r.OK)
+	svc := r.Value.(*update.Service)
+
+	out := svc.OnStartup(core.Background())
+
+	core.AssertFalse(t, out.OK)
+	core.AssertContains(t, out.Error(), "core is nil")
+}
+
+// TestUpdate_Service_OnStartup_Bad_NoConfigService — a Core that
+// registers "update" but never registers "config". OnStartup degrades
+// to a silent core.Ok(nil) rather than erroring, since a missing
+// config service is a legitimate boot shape (config is optional).
+func TestUpdate_Service_OnStartup_Bad_NoConfigService(t *core.T) {
+	c := core.New(
+		core.WithName("update", update.Register),
+	)
+	core.RequireTrue(t, c.ServiceStartup(core.Background(), nil).OK)
+	t.Cleanup(func() {
+		_ = c.ServiceShutdown(core.Background())
+	})
+	svc, ok := core.ServiceFor[*update.Service](c, "update")
+	core.RequireTrue(t, ok)
+
+	r := svc.OnStartup(core.Background())
+
+	core.AssertTrue(t, r.OK)
+}
+
+// TestUpdate_Service_Start_Bad_NilInner — New() with a RepoURL upstream
+// rejects (missing repo path) degrades to inner=nil. Start() must
+// refuse with the "service unavailable" message rather than nil-deref
+// s.inner.
+func TestUpdate_Service_Start_Bad_NilInner(t *core.T) {
+	r := update.New(upstream.UpdateServiceConfig{
+		RepoURL: "https://github.com/owner-only",
+	})
+	core.RequireTrue(t, r.OK)
+	svc := r.Value.(*update.Service)
+
+	out := svc.Start()
+
+	core.AssertFalse(t, out.OK)
+	core.AssertContains(t, out.Error(), "service unavailable")
+}
+
+// TestUpdate_Service_Start_Good_NoCheckNoNetwork — a validly
+// constructed Service with CheckOnStartup=NoCheck. Start() delegates
+// to the upstream service, which for NoCheck returns OK without
+// touching the network (per upstream startGitHubCheck's NoCheck case)
+// — hermetic, no httptest server required.
+func TestUpdate_Service_Start_Good_NoCheckNoNetwork(t *core.T) {
+	r := update.New(upstream.UpdateServiceConfig{
+		RepoURL:        update.DefaultRepoURL,
+		Channel:        update.DefaultChannel,
+		CheckOnStartup: upstream.NoCheck,
+	})
+	core.RequireTrue(t, r.OK)
+	svc := r.Value.(*update.Service)
+
+	out := svc.Start()
+
+	core.AssertTrue(t, out.OK)
+}
