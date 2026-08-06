@@ -102,9 +102,20 @@ func (s *Service) streamRouterChat(
 		},
 	}))
 
-	lastFailure := core.Fail(core.E("runner.Service.WChatStream",
-		"all providers failed", nil))
-	for _, providerRoute := range router.Providers() {
+	// lastFailure defaults to the zero Result and is only pre-seeded with
+	// the "all providers failed" sentinel when the loop below has no
+	// iterations to run it in (an empty provider list) — every other exit
+	// path reassigns it before use. This keeps the sentinel's core.E/
+	// core.Fail construction off the success path, which is the
+	// overwhelming common case and would otherwise pay for a Result that
+	// gets thrown away unread on every successful chat turn.
+	providers := router.Providers()
+	var lastFailure core.Result
+	if len(providers) == 0 {
+		lastFailure = core.Fail(core.E("runner.Service.WChatStream",
+			"all providers failed", nil))
+	}
+	for _, providerRoute := range providers {
 		if err := ctx.Err(); err != nil {
 			lastFailure = core.Fail(core.E("runner.Service.WChatStream",
 				"request cancelled", err))
