@@ -135,6 +135,30 @@ describe('WindowInteractionService', () => {
     });
   });
 
+  it('drags when the layer is a real DOMRect, whose fields are prototype accessors', () => {
+    // The literals above spread cleanly, which is exactly how this bug hid: a
+    // browser DOMRect keeps left/top/width/height on the prototype, so
+    // spreading one into the session copied nothing and every moveDrag
+    // returned NaN. This rect reproduces that shape.
+    const plain = rect(100, 50, 800, 600);
+    const accessorRect = Object.create(
+      {},
+      Object.fromEntries(
+        (['left', 'top', 'right', 'bottom', 'width', 'height'] as const).map((key) => [
+          key,
+          { get: () => plain[key] },
+        ]),
+      ),
+    ) as InteractionRect;
+    const window = windowFixture();
+
+    const session = service.beginDrag(window, { x: 330, y: 180 }, accessorRect, accessorRect);
+    const update = service.moveDrag(session, { x: 430, y: 260 }, window);
+
+    expect(update.window.x).toBe(300);
+    expect(update.window.y).toBe(180);
+  });
+
   it('grows a resize from its pointer origin and enforces the existing minimum', () => {
     const window = windowFixture();
     const session = service.beginResize(window, { x: 500, y: 400 });

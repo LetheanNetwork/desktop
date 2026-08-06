@@ -234,7 +234,17 @@ export class WindowInteractionService {
       windowId: window.id,
       offsetX: pointer.x - (layer.left + window.x),
       offsetY: pointer.y - (layer.top + window.y),
-      layer: { ...layer },
+      // Not a spread: callers hand this a DOMRect, whose fields live on the
+      // prototype as accessors, so {...rect} copies nothing and every later
+      // moveDrag reads undefined and returns NaN — the window never moves.
+      layer: {
+        left: layer.left,
+        top: layer.top,
+        right: layer.right,
+        bottom: layer.bottom,
+        width: layer.width,
+        height: layer.height,
+      },
       previewOffsetX: layer.left - host.left,
       previewOffsetY: layer.top - host.top,
     };
