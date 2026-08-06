@@ -78,4 +78,49 @@ describe('plugin auth broker', () => {
     });
     expect(postMessage).not.toHaveBeenCalled();
   });
+
+  it('treats a network failure during the audit call as an audit failure', async () => {
+    setPluginSessionToken('LTHN-SESS-1.secret');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('network unreachable');
+      }),
+    );
+    const postMessage = vi.fn();
+
+    await expect(
+      grantTokenToFrame(
+        {
+          source: { postMessage } as unknown as Window,
+          targetOrigin: 'http://127.0.0.1:4096',
+          pluginCode: 'opencode',
+        },
+        ['session-token'],
+      ),
+    ).resolves.toEqual({ ok: false, reason: 'audit-failed' });
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it('reports postmessage-failed when the verified frame rejects the delivery', async () => {
+    setPluginSessionToken('LTHN-SESS-1.secret');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true }) as Response),
+    );
+    const postMessage = vi.fn(() => {
+      throw new DOMException('target origin mismatch');
+    });
+
+    await expect(
+      grantTokenToFrame(
+        {
+          source: { postMessage } as unknown as Window,
+          targetOrigin: 'http://127.0.0.1:4096',
+          pluginCode: 'opencode',
+        },
+        ['session-token'],
+      ),
+    ).resolves.toEqual({ ok: false, reason: 'postmessage-failed' });
+  });
 });

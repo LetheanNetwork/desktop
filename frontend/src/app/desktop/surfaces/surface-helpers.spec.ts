@@ -53,6 +53,8 @@ describe('ported surface helpers', () => {
     ).toHaveLength(4);
     expect(countFocusBlocks([{ tone: 'focus' }, { tone: 'ship' }, { tone: 'focus' }])).toBe(2);
     expect(toneColours('warn')[2]).toBe('var(--warning-400)');
+    expect(toneColours('ok')[2]).toBe('var(--success-400)');
+    expect(toneColours('brand')[2]).toBe('var(--brand-300)');
     expect(totalItems([{ items: [1, 2] }, { items: [3] }])).toBe(3);
   });
 
