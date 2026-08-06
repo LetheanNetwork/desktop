@@ -49,6 +49,47 @@ func TestDefaultOptions_BadProviderCreationFailure(t *core.T) {
 	core.AssertContains(t, result.Error(), string(ErrorProviderUnavailable))
 }
 
+func TestDefaultOptions_BadClosesEarlierMountsAfterLaterFailure(
+	t *core.T,
+) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	homeMedium := openSandboxedMedium(t, home)
+	core.RequireNoError(t, homeMedium.EnsureDir("Documents"))
+	core.RequireNoError(t, homeMedium.Write("Downloads", "not a directory"))
+	c := filesCoreFixture(t)
+
+	result := DefaultOptions(c)
+
+	core.AssertFalse(t, result.OK)
+	core.AssertContains(t, result.Error(), string(ErrorProviderUnavailable))
+}
+
+func TestRegister_Good(t *core.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	seedHomeDirectories(t, home, "Documents")
+	c := filesCoreFixture(t)
+
+	result := Register(c)
+
+	core.RequireTrue(t, result.OK, result.Error())
+	service, ok := result.Value.(*Service)
+	core.RequireTrue(t, ok)
+	_, mountErr := service.mount("documents")
+	core.AssertNoError(t, mountErr)
+	t.Cleanup(func() {
+		core.AssertTrue(t, service.OnShutdown(core.Background()).OK)
+	})
+}
+
+func TestRegister_BadPropagatesDefaultOptionsFailure(t *core.T) {
+	result := Register(nil)
+
+	core.AssertFalse(t, result.OK)
+	core.AssertContains(t, result.Error(), string(ErrorProviderUnavailable))
+}
+
 func TestDefaultOptions_RuntimeUsesRegisteredMedium_Ugly(t *core.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

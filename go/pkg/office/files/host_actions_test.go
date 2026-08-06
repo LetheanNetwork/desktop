@@ -271,13 +271,47 @@ func TestService_HostActions_UglyUnavailableCoreOrActionFailsClosed(t *core.T) {
 			})
 			core.RequireTrue(t, service.Register(c).OK)
 
-			result := service.Open(FileAddress{
+			openResult := service.Open(FileAddress{
+				MountID: "documents",
+				Path:    "report.txt",
+			})
+			revealResult := service.Reveal(FileAddress{
 				MountID: "documents",
 				Path:    "report.txt",
 			})
 
-			core.AssertFalse(t, result.OK)
-			core.AssertContains(t, result.Error(), string(ErrorProviderUnavailable))
+			core.AssertFalse(t, openResult.OK)
+			core.AssertContains(
+				t,
+				openResult.Error(),
+				string(ErrorProviderUnavailable),
+			)
+			core.AssertFalse(t, revealResult.OK)
+			core.AssertContains(
+				t,
+				revealResult.Error(),
+				string(ErrorProviderUnavailable),
+			)
 		})
 	}
+}
+
+func TestService_HostActions_UglyNilServiceFailsClosed(t *core.T) {
+	var nilService *Service
+
+	openResult := nilService.Open(FileAddress{MountID: "documents"})
+	revealResult := nilService.Reveal(FileAddress{MountID: "documents"})
+
+	core.AssertFalse(t, openResult.OK)
+	core.AssertContains(
+		t,
+		openResult.Error(),
+		string(ErrorProviderUnavailable),
+	)
+	core.AssertFalse(t, revealResult.OK)
+	core.AssertContains(
+		t,
+		revealResult.Error(),
+		string(ErrorProviderUnavailable),
+	)
 }

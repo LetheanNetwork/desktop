@@ -75,6 +75,105 @@ func TestWailsService_ServiceName(t *core.T) {
 	core.AssertEqual(t, "OpenaibenchSettings", wsvc.ServiceName())
 }
 
+func TestWailsService_ServiceStartupAndShutdownAreNoOps(t *core.T) {
+	_, _, wsvc := wsvcFixture(t)
+	core.AssertTrue(t, wsvc.ServiceStartup(core.Background(), nil).OK)
+	core.AssertTrue(t, wsvc.ServiceShutdown().OK)
+}
+
+func TestAddEndpoint_NilBenchmarkServiceFails(t *core.T) {
+	c := storeFixture(t)
+	wsvc := openaibench.NewWailsService(c, nil)
+
+	r := wsvc.AddEndpoint(openaibench.EndpointConfig{
+		Name: "x", URL: "https://x/v1",
+	})
+
+	core.AssertFalse(t, r.OK)
+}
+
+func TestAddEndpoint_InvalidConfigFailsBeforeRegistering(t *core.T) {
+	_, bm, wsvc := wsvcFixture(t)
+
+	r := wsvc.AddEndpoint(openaibench.EndpointConfig{URL: "https://x/v1"})
+
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, 0, len(bm.ListBenchers().Value.([]benchmark.BencherInfo)))
+}
+
+func TestRemoveEndpoint_NilBenchmarkServiceFails(t *core.T) {
+	c := storeFixture(t)
+	wsvc := openaibench.NewWailsService(c, nil)
+
+	r := wsvc.RemoveEndpoint("anything")
+
+	core.AssertFalse(t, r.OK)
+}
+
+func TestRegisterPersistedEndpoints_NilCoreFails(t *core.T) {
+	_, bm, _ := wsvcFixture(t)
+
+	r := openaibench.RegisterPersistedEndpoints(nil, bm)
+
+	core.AssertFalse(t, r.OK)
+}
+
+func TestRegisterPersistedEndpoints_NilBenchmarkServiceFails(t *core.T) {
+	c, _, _ := wsvcFixture(t)
+
+	r := openaibench.RegisterPersistedEndpoints(c, nil)
+
+	core.AssertFalse(t, r.OK)
+}
+
+func TestListEndpoints_PropagatesLoadFailure(t *core.T) {
+	wsvc := openaibench.NewWailsService(nil, nil)
+
+	r := wsvc.ListEndpoints()
+
+	core.AssertFalse(t, r.OK)
+}
+
+func TestRegisterPersistedEndpoints_SkipsRecordsMissingURL(t *core.T) {
+	// A record persisted before URL validation existed (or corrupted
+	// out-of-band) must be skipped, not crash NewBencher's nil path
+	// forward into a broken registration.
+	c, bm, _ := wsvcFixture(t)
+	keysSvc, _ := core.ServiceFor[*keys.Service](c, "keys")
+	core.RequireTrue(t, keysSvc.PutTier1(
+		"openaibench:no-url",
+		[]byte(`{"name":"no-url"}`),
+	).OK)
+
+	r := openaibench.RegisterPersistedEndpoints(c, bm)
+
+	core.RequireTrue(t, r.OK, r.Error())
+	core.AssertEqual(t, 0, len(bm.ListBenchers().Value.([]benchmark.BencherInfo)))
+}
+
+func TestRegisterPersistedEndpoints_SkipsDuplicateNameRegistration(
+	t *core.T,
+) {
+	// Two persisted records that happen to share a Name (e.g. hand-
+	// edited store) must not both land in the substrate; the second
+	// RegisterBencher rejection is logged and skipped.
+	c, bm, _ := wsvcFixture(t)
+	keysSvc, _ := core.ServiceFor[*keys.Service](c, "keys")
+	core.RequireTrue(t, keysSvc.PutTier1(
+		"openaibench:dup-a",
+		[]byte(`{"name":"dup","url":"https://a/v1"}`),
+	).OK)
+	core.RequireTrue(t, keysSvc.PutTier1(
+		"openaibench:dup-b",
+		[]byte(`{"name":"dup","url":"https://b/v1"}`),
+	).OK)
+
+	r := openaibench.RegisterPersistedEndpoints(c, bm)
+
+	core.RequireTrue(t, r.OK, r.Error())
+	core.AssertEqual(t, 1, len(bm.ListBenchers().Value.([]benchmark.BencherInfo)))
+}
+
 func TestListEndpoints_EmptyReturnsEmpty(t *core.T) {
 	_, _, wsvc := wsvcFixture(t)
 	r := wsvc.ListEndpoints()

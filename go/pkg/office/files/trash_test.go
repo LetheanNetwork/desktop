@@ -211,3 +211,23 @@ func TestService_DeleteDirect_Good(t *core.T) {
 	core.AssertFalse(t, medium.IsDir("archive"))
 	core.AssertFalse(t, medium.IsFile("archive/report.md"))
 }
+
+func TestValidateReceiptID_Good(t *core.T) {
+	core.AssertNoError(t, validateReceiptID("receipt-1"))
+}
+
+func TestValidateReceiptID_Bad(t *core.T) {
+	for name, id := range map[string]string{
+		"empty":         "",
+		"forward slash": "a/b",
+		"backslash":     `a\b`,
+		"unsafe rune":   "a\x01b",
+	} {
+		t.Run(name, func(t *core.T) {
+			err := validateReceiptID(id)
+
+			core.AssertError(t, err)
+			core.AssertContains(t, err.Error(), string(ErrorInvalidInput))
+		})
+	}
+}
