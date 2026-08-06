@@ -115,6 +115,12 @@ func tearOffDimensions(width, height int) (int, int, bool) {
 	return width, height, true
 }
 
+// dockAppEvent is broadcast when a solo window asks the shell to take its
+// application back. Every window receives it; the shell adopts, the solo
+// window ignores its own request. Frontend listener:
+// frontend/src/app/store/desktop.effects.ts (DOCK_APP_EVENT).
+const dockAppEvent = "lthn:app:dock"
+
 // AppWindowService is the renderer-facing tear-off binding. It is the only
 // route from the WebView to a second native window, and it accepts an
 // application identifier rather than a URL.
@@ -153,6 +159,78 @@ func (s *AppWindowService) OpenApp(request AppWindowRequest) core.Result {
 		))
 	}
 	return openNativeAppWindow(s.core, request)
+}
+
+// DockApp moves one application back out of its own native window and into
+// the shell. It is OpenApp mirrored, and it exists as a binding rather than as
+// a bare event from the solo window for three reasons: the application is
+// checked against the same whitelist a tear-off is, so an unrecognised
+// identifier is refused instead of broadcast; the shell window is revealed
+// before the request is announced, so the desktop is on screen by the time it
+// adopts; and the renderer gets a Result, so it knows the hand-over happened
+// before it closes the window holding the application.
+//
+// The shell — never this — writes the session. All Go does is say so.
+func (s *AppWindowService) DockApp(request AppWindowRequest) core.Result {
+	if s == nil || s.core == nil {
+		return core.Fail(core.E(
+			"desktop.AppWindowService.DockApp",
+			"tear-off binding is not bound to a Core",
+			nil,
+		))
+	}
+	return dockNativeAppWindow(s.core, request)
+}
+
+// dockNativeAppWindow validates a dock-back request, reveals the shell, and
+// puts the adoption on the WebView event bus for the shell to pick up.
+func dockNativeAppWindow(c *core.Core, request AppWindowRequest) core.Result {
+	if c == nil {
+		return core.Fail(core.E("desktop.dockNativeAppWindow", "core is nil", nil))
+	}
+	pane, ok := dockPane(request.App, request.Pane)
+	if !ok {
+		return core.Fail(core.E(
+			"desktop.dockNativeAppWindow",
+			"no shell window for application: "+request.App,
+			nil,
+		))
+	}
+	if !gui.OpenWindow(c, mainWindowName) {
+		return core.Fail(core.E(
+			"desktop.dockNativeAppWindow",
+			"reveal "+mainWindowName+" failed",
+			nil,
+		))
+	}
+	emitted := gui.EmitEvent(c, dockAppEvent, map[string]any{
+		"app":  request.App,
+		"pane": pane,
+	})
+	if !emitted.OK {
+		return core.Fail(core.E(
+			"desktop.dockNativeAppWindow",
+			"announce "+request.App+" failed",
+			emitted.Err(),
+		))
+	}
+	return core.Ok(request.App)
+}
+
+// dockPane validates the application and the pane it is carrying home, under
+// exactly the rules a tear-off is validated by: an application must be on the
+// whitelist and a pane must be a single safe route segment.
+func dockPane(appID, pane string) (string, bool) {
+	if !tearOffAppAllowed(appID) {
+		return "", false
+	}
+	if pane == "" {
+		return "", true
+	}
+	if !paths.IsValidPluginCode(pane) {
+		return "", false
+	}
+	return pane, true
 }
 
 // openNativeAppWindow opens or reveals the native window that hosts one

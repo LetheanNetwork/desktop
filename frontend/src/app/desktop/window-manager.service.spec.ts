@@ -131,6 +131,26 @@ describe('WindowManagerService facade', () => {
     expect(dispatch).toHaveBeenLastCalledWith(desktopActions.clear());
   });
 
+  it('adopts a docked application back into the shell, on the pane it left with', () => {
+    facade.dock('control', 'runs');
+
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ type: '[Desktop] Launch App', appId: 'control' }),
+    );
+    expect(dispatch).toHaveBeenLastCalledWith(desktopActions.setSub({ id: 'w1', sub: 'runs' }));
+  });
+
+  it('leaves the pane alone when the docked application carries none', () => {
+    facade.dock('control');
+
+    expect(dispatch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: '[Desktop] Launch App', appId: 'control' }),
+    );
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: '[Desktop] Set Sub' }),
+    );
+  });
+
   it('adapts legacy writable signal calls into non-normalising store hydration', () => {
     const grouped = { ...openWin, min: true, group: 'g1' };
 

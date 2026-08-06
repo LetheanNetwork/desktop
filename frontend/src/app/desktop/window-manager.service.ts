@@ -156,6 +156,21 @@ export class WindowManagerService {
     );
   }
 
+  /**
+   * Take one application back from its own native window.
+   *
+   * The inverse of a tear-off, and the shell's half of it: the solo window can
+   * only ask, because the shell is the single author of the persisted session.
+   * Launching is idempotent — an application already open here is focused
+   * rather than duplicated — so a repeated request cannot fork the window.
+   */
+  dock(appId: string, pane = ''): void {
+    this.launch(appId);
+    if (!pane) return;
+    const win = this.wins().find((candidate) => candidate.app === appId);
+    if (win && win.sub !== pane) this.setSub(win.id, pane);
+  }
+
   focus(id: string): void {
     this.store.dispatch(desktopActions.focusWindow({ id }));
   }
