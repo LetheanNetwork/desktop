@@ -103,3 +103,21 @@ func TestDeepLink_Parse_Ugly_WrongScheme(t *core.T) {
 	core.AssertFalse(t, result.OK)
 	core.AssertError(t, result.Value.(error))
 }
+
+func TestDeepLink_Parse_Bad_EmptyActionIsRejected(t *core.T) {
+	result := parseDeepLink("lthn://")
+
+	core.AssertFalse(t, result.OK)
+	core.AssertError(t, result.Value.(error))
+}
+
+func TestDeepLink_Handle_Ugly_MainWindowUnavailablePropagatesParsedTarget(t *core.T) {
+	// No "gui" service registered — gui.OpenWindow(c, mainWindowName) has
+	// nothing to look up and returns false, so handleDeepLink must
+	// surface a clean Fail rather than emit navigate against a window
+	// that was never restored.
+	result := handleDeepLink(core.New(), "lthn://chat")
+
+	core.AssertFalse(t, result.OK)
+	core.AssertContains(t, result.Error(), "main window is unavailable")
+}
