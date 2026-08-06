@@ -4,9 +4,9 @@
 //
 // The boot registry contains the main OS shell at /#/ and its compact tray
 // panel at /#/tray. Application windows are owned by Angular + NgRx and render
-// inside the shell. A single parameterised ad-hoc opener remains for future
-// native tear-off windows; those load Angular's standalone app route at
-// /#/w/<appId>.
+// inside the shell. Tearing one out opens an ad-hoc native window on Angular's
+// solo app route at /#/w/<appId> or /#/w/<appId>/<pane>; the request shape,
+// whitelist, and renderer binding live in app_window.go.
 
 package desktop
 
@@ -16,7 +16,6 @@ import (
 	gui "dappco.re/go/render/display/webkit"
 	guiwindow "dappco.re/go/render/display/webkit/pkg/window"
 	"dappco.re/lthn/desktop/pkg/appconfig"
-	"dappco.re/lthn/desktop/pkg/paths"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -173,51 +172,32 @@ func windowRegistry(configs ...*config.Service) []*WindowSpec {
 	}
 }
 
-// nativeAppWindowSpec builds the one supported native tear-off shape.
-// App IDs are constrained to one safe route segment before they are
-// used in either the native window name or Angular hash route.
-func nativeAppWindowSpec(appID string, configs ...*config.Service) *WindowSpec {
-	if !paths.IsValidPluginCode(appID) {
+// nativeAppWindowSpec builds the one supported native tear-off shape from a
+// renderer request. The application is checked against the tear-off
+// whitelist, the pane against the safe-segment rules, and a carried size
+// against the sane range, so an invalid request produces no window at all.
+func nativeAppWindowSpec(request AppWindowRequest, configs ...*config.Service) *WindowSpec {
+	route, ok := tearOffRoute(request.App, request.Pane)
+	if !ok {
 		return nil
 	}
-	return angularWindowSpec(
-		nativeAppWindowNamePrefix+appID,
-		"Lethean Desktop · "+appID,
-		nativeAppRoutePrefix+appID,
+	width, height, ok := tearOffDimensions(request.Width, request.Height)
+	if !ok {
+		return nil
+	}
+	spec := angularWindowSpec(
+		nativeAppWindowNamePrefix+request.App,
+		"Lethean Desktop · "+request.App,
+		route,
 		configs...,
 	)
-}
-
-// openNativeAppWindow opens or focuses one Angular standalone app-view
-// in a native frameless window. It is deliberately not wired to any
-// menu, bridge, or drag event yet; it is the future tear-off seam.
-func openNativeAppWindow(c *core.Core, appID string) bool {
-	if c == nil {
-		return false
+	// A carried size describes the window the operator was already looking
+	// at; without one the tear-off profile keeps its own default.
+	if width > 0 && height > 0 {
+		spec.Width = width
+		spec.Height = height
 	}
-	configSvc, _ := core.ServiceFor[*config.Service](c, "config")
-	spec := nativeAppWindowSpec(appID, configSvc)
-	if spec == nil {
-		return false
-	}
-	if !windowExists(c, spec.Name) {
-		return gui.OpenAdhocWindow(c, spec)
-	}
-
-	ctx := core.Background()
-	if spec.ShowDockIcon {
-		c.Action("dock.show_icon").Run(ctx, core.NewOptions())
-	}
-	restore := c.Action("window.restore").Run(ctx, core.NewOptions(
-		core.Option{Key: "task", Value: guiwindow.TaskRestore{Name: spec.Name}},
-	))
-	visible := c.Action("window.set_visibility").Run(ctx, core.NewOptions(
-		core.Option{Key: "task", Value: guiwindow.TaskSetVisibility{Name: spec.Name, Visible: true}},
-	))
-	focus := c.Action("window.focus").Run(ctx, core.NewOptions(
-		core.Option{Key: "task", Value: guiwindow.TaskFocus{Name: spec.Name}},
-	))
-	return restore.OK && visible.OK && focus.OK
+	return spec
 }
 
 // windowExists reports whether the named window is in CoreGUI's live

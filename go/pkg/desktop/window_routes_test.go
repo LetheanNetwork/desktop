@@ -47,7 +47,7 @@ func TestWindows_TrayPanelWindowSpec_Good_Popover(t *core.T) {
 
 func TestWindows_NativeAppWindowSpec_Good_HashRoute(t *core.T) {
 	app := windowRegistry()[0]
-	spec := nativeAppWindowSpec("chat")
+	spec := nativeAppWindowSpec(AppWindowRequest{App: "chat"})
 
 	core.AssertNotNil(t, spec)
 	core.AssertEqual(t, "app-view-chat", spec.Name)
@@ -59,14 +59,26 @@ func TestWindows_NativeAppWindowSpec_Good_HashRoute(t *core.T) {
 	core.AssertEqual(t, app.BackgroundColour, spec.BackgroundColour)
 }
 
+func TestWindows_NativeAppWindowSpec_Good_PaneRoute(t *core.T) {
+	spec := nativeAppWindowSpec(AppWindowRequest{App: "control", Pane: "models"})
+
+	core.AssertNotNil(t, spec)
+	core.AssertEqual(t, "app-view-control", spec.Name)
+	core.AssertEqual(t, "/#/w/control/models", spec.URL)
+}
+
+func TestWindows_NativeAppWindowSpec_Good_CarriedGeometry(t *core.T) {
+	spec := nativeAppWindowSpec(AppWindowRequest{App: "chat", Width: 720, Height: 520})
+
+	core.AssertNotNil(t, spec)
+	core.AssertEqual(t, 720, spec.Width)
+	core.AssertEqual(t, 520, spec.Height)
+}
+
 func TestWindows_NativeAppWindowSpec_Bad_EmptyAppID(t *core.T) {
-	core.AssertNil(t, nativeAppWindowSpec(""))
+	core.AssertNil(t, nativeAppWindowSpec(AppWindowRequest{}))
 }
 
 func TestWindows_NativeAppWindowSpec_Ugly_PathSegment(t *core.T) {
-	core.AssertNil(t, nativeAppWindowSpec("../chat"))
-}
-
-func TestWindows_OpenNativeAppWindow_Bad_InvalidAppID(t *core.T) {
-	core.AssertFalse(t, openNativeAppWindow(core.New(), "../chat"))
+	core.AssertNil(t, nativeAppWindowSpec(AppWindowRequest{App: "../chat"}))
 }

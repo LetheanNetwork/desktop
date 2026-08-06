@@ -630,6 +630,10 @@ func (s *Service) Run() core.Result {
 		gui.Bind(appconfigSvc),
 		// Window registry — see note above.
 		gui.Bind(windowSvc),
+		// Tear-off — the shell's own windows leaving for native ones. The
+		// renderer names an application from the catalogue whitelist; this
+		// binding assembles the solo route and owns the native window.
+		gui.Bind(NewAppWindowService(s.opts.Core)),
 	}
 
 	// Auto-register the local machine in the Fleet substrate. The UI

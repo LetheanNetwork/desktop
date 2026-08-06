@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { provideMockStore } from '@ngrx/store/testing';
+import { MockStore, provideMockStore } from '@ngrx/store/testing';
 import { ActivatedRoute, convertToParamMap, ParamMap, provideRouter } from '@angular/router';
 import { BehaviorSubject } from 'rxjs';
 import { routes } from './app.routes';
@@ -36,6 +36,7 @@ const desktopState: DesktopState = {
 
 describe('StandaloneAppHost', () => {
   let params: BehaviorSubject<ParamMap>;
+  let store: MockStore;
 
   beforeEach(() => {
     params = new BehaviorSubject(convertToParamMap({ app: 'telemetry' }));
@@ -48,11 +49,15 @@ describe('StandaloneAppHost', () => {
           provide: ActivatedRoute,
           useValue: {
             paramMap: params.asObservable(),
-            snapshot: { paramMap: params.value },
+            get snapshot() {
+              return { paramMap: params.value };
+            },
           },
         },
       ],
     });
+    store = TestBed.inject(MockStore);
+    vi.spyOn(store, 'dispatch');
   });
 
   it('renders the routed component with its store-owned window input', async () => {
@@ -66,7 +71,7 @@ describe('StandaloneAppHost', () => {
     });
   });
 
-  it('renders nothing for an unknown app route', () => {
+  it('degrades to a readable empty state for an unknown app route', () => {
     const fixture = TestBed.createComponent(StandaloneAppHost);
     fixture.detectChanges();
 
@@ -74,6 +79,31 @@ describe('StandaloneAppHost', () => {
     fixture.detectChanges();
 
     expect(fixture.componentInstance.win()).toBeNull();
-    expect(fixture.nativeElement.children).toHaveLength(0);
+    expect(fixture.nativeElement.querySelector('lthn-window-route-content')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.solo-empty')?.textContent).toContain(
+      'not installed',
+    );
+  });
+
+  it('shows the pane the window carried out of the shell', async () => {
+    params.next(convertToParamMap({ app: 'telemetry', pane: 'observe' }));
+    const fixture = TestBed.createComponent(StandaloneAppHost);
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.pane()).toBe('observe');
+    expect(store.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'w1', sub: 'observe' }),
+    );
+  });
+
+  it('renders no desktop chrome around the solo application', async () => {
+    const fixture = TestBed.createComponent(StandaloneAppHost);
+    fixture.detectChanges();
+
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('lthn-telemetry-app')).not.toBeNull();
+    });
+    expect(fixture.nativeElement.querySelector('.taskbar, .dock, .menubar, .titlebar')).toBeNull();
   });
 });

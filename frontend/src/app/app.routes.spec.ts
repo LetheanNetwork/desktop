@@ -18,12 +18,17 @@ describe('app routes', () => {
       loadComponent: expect.any(Function),
     });
     expect(routes[2]).toMatchObject({
+      path: 'w/:app/:pane',
+      loadComponent: expect.any(Function),
+    });
+    expect(routes[3]).toMatchObject({
       path: 'tray',
       loadComponent: expect.any(Function),
     });
     await expect(routes[0].loadComponent!()).resolves.toBe(DesktopComponent);
     await expect(routes[1].loadComponent!()).resolves.toBe(StandaloneAppHost);
-    await expect(routes[2].loadComponent!()).resolves.toBe(TrayPanel);
+    await expect(routes[2].loadComponent!()).resolves.toBe(StandaloneAppHost);
+    await expect(routes[3].loadComponent!()).resolves.toBe(TrayPanel);
   });
 
   it('builds category, app, and sub-view metadata from desktop data', () => {

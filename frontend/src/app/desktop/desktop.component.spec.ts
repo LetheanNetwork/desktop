@@ -6,6 +6,7 @@ import { ConnectionManagerService } from '../connection-manager.service';
 import { desktopActions } from '../store/desktop.actions';
 import { desktopFeature, DesktopState } from '../store/desktop.reducer';
 import { DESKTOP_STORAGE } from '../store/storage.service';
+import { DesktopAppWindowBridgeService } from './desktop-app-window-bridge.service';
 import { DesktopComponent } from './desktop.component';
 import { Win } from './desktop.data';
 import { readDesktopRouteCatalog } from './desktop-route-tree';
@@ -57,6 +58,12 @@ describe('DesktopComponent route shell', () => {
   let router: Router;
   let store: Store;
   let windowManager: WindowManagerService;
+  let openApp: ReturnType<typeof vi.fn>;
+  let appWindows: {
+    available: () => boolean;
+    lastError: () => string;
+    openApp: ReturnType<typeof vi.fn>;
+  };
   const browserStorage = {
     length: 0,
     clear: vi.fn(),
@@ -68,6 +75,12 @@ describe('DesktopComponent route shell', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    openApp = vi.fn().mockResolvedValue(true);
+    appWindows = {
+      available: () => true,
+      lastError: () => 'no native window route for application: control',
+      openApp,
+    };
     await TestBed.configureTestingModule({
       imports: [DesktopComponent],
       providers: [
@@ -75,6 +88,7 @@ describe('DesktopComponent route shell', () => {
         provideStore(),
         provideState(desktopFeature),
         { provide: DESKTOP_STORAGE, useValue: browserStorage },
+        { provide: DesktopAppWindowBridgeService, useValue: appWindows },
         {
           provide: ConnectionManagerService,
           useValue: { offline: () => false },
@@ -252,6 +266,39 @@ describe('DesktopComponent route shell', () => {
       expect(
         (fixture.nativeElement as HTMLElement).querySelector('lthn-planning-sprints-surface'),
       ).not.toBeNull();
+    });
+  });
+
+  it('hands the titlebar tear-off the application, its pane, and its size', async () => {
+    const control = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+      '#winlayer > .win .titlebar .tearoff',
+    );
+
+    control?.click();
+    await vi.waitFor(() => {
+      expect(openApp).toHaveBeenCalledWith({
+        app: 'control',
+        pane: 'models',
+        width: controlWin.w,
+        height: controlWin.h,
+      });
+    });
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(windowManager.wins().map(({ id }) => id)).toEqual([telemetryWin.id]);
+    });
+  });
+
+  it('leaves the in-shell window alone when the native window refuses to open', async () => {
+    openApp.mockResolvedValue(false);
+
+    await fixture.componentInstance.tearOff(controlWin);
+    fixture.detectChanges();
+
+    expect(windowManager.wins().map(({ id }) => id)).toEqual([controlWin.id, telemetryWin.id]);
+    expect(fixture.componentInstance.notifs[0]).toMatchObject({
+      icon: 'triangle-exclamation',
+      body: 'no native window route for application: control',
     });
   });
 

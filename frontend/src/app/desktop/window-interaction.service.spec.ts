@@ -159,6 +159,70 @@ describe('WindowInteractionService', () => {
     expect(update.window.y).toBe(180);
   });
 
+  it('arms the tear-off zone once the pointer leaves the shell', () => {
+    const window = windowFixture({ w: 400, h: 300 });
+    const layer = rect(100, 50, 800, 600);
+    const session = service.beginDrag(window, { x: 330, y: 180 }, layer, rect(80, 20, 840, 660));
+
+    const outside = service.moveDrag(session, { x: 960, y: 400 }, window);
+
+    expect(outside.tear).toEqual({
+      active: true,
+      left: 440,
+      top: 350,
+      w: 400,
+      h: 300,
+    });
+    expect(outside.snap.zone).toBeNull();
+  });
+
+  it('leaves the snap margins to snapping and never tears off inside them', () => {
+    const window = windowFixture();
+    const layer = rect(100, 50, 800, 600);
+    const session = service.beginDrag(window, { x: 330, y: 180 }, layer, rect(100, 50, 800, 600));
+
+    // Every margin the snap zones own, walked from the inside.
+    const margins: [name: string, x: number, y: number][] = [
+      ['top-left', 105, 55],
+      ['top-right', 895, 55],
+      ['bottom-left', 105, 645],
+      ['bottom-right', 895, 645],
+      ['top', 500, 55],
+      ['left', 105, 300],
+      ['right', 895, 300],
+    ];
+
+    for (const [, x, y] of margins) {
+      const update = service.moveDrag(session, { x, y }, window);
+      expect(update.snap.zone).not.toBeNull();
+      expect(update.tear.active).toBe(false);
+    }
+  });
+
+  it('tears off past the edge the snap margin would otherwise have claimed', () => {
+    const window = windowFixture();
+    const layer = rect(100, 50, 800, 600);
+    const session = service.beginDrag(window, { x: 330, y: 180 }, layer, rect(100, 50, 800, 600));
+
+    const justInside = service.moveDrag(session, { x: 100, y: 300 }, window);
+    const justOutside = service.moveDrag(session, { x: 99, y: 300 }, window);
+
+    expect(justInside.snap.zone).toBe('left');
+    expect(justInside.tear.active).toBe(false);
+    expect(justOutside.snap.zone).toBeNull();
+    expect(justOutside.tear.active).toBe(true);
+  });
+
+  it('holds the tear-off preview inside the shell so its label stays readable', () => {
+    const window = windowFixture({ w: 1200, h: 900 });
+    const layer = rect(100, 50, 800, 600);
+    const session = service.beginDrag(window, { x: 330, y: 180 }, layer, rect(100, 50, 800, 600));
+
+    const update = service.moveDrag(session, { x: -400, y: -400 }, window);
+
+    expect(update.tear).toEqual({ active: true, left: 0, top: 0, w: 800, h: 600 });
+  });
+
   it('grows a resize from its pointer origin and enforces the existing minimum', () => {
     const window = windowFixture();
     const session = service.beginResize(window, { x: 500, y: 400 });

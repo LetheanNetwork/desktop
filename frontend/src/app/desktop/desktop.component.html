@@ -135,6 +135,19 @@
           ></i
         ></span>
         <span class="tb-title">{{ APPS[w.app].title }}</span>
+        <button
+          class="tearoff"
+          type="button"
+          [disabled]="!appWindows.available()"
+          (pointerdown)="$event.stopPropagation()"
+          (click)="$event.stopPropagation(); tearOff(w)"
+          title="Move to its own window"
+          i18n-title="Tear-off window action@@desktop.window.tearOff"
+          aria-label="Move to its own window"
+          i18n-aria-label="Tear-off window action@@desktop.window.tearOff"
+        >
+          <lthn-icon name="arrow-up-right-from-square" size="11"></lthn-icon>
+        </button>
       </div>
       <!-- shell titlebar (category nav + tray) + unified tab strip (from st.wins) -->
       <ng-container *ngIf="wm.view() === 'shell'">
@@ -503,6 +516,23 @@
     [style.width.px]="snap.w"
     [style.height.px]="snap.h"
   ></div>
+
+  <!-- drag-past-the-edge tear-off preview: the same zone, leaving the shell -->
+  <div
+    class="snapzone tearzone"
+    [hidden]="!tear.active"
+    [style.left.px]="tear.left"
+    [style.top.px]="tear.top"
+    [style.width.px]="tear.w"
+    [style.height.px]="tear.h"
+  >
+    <span class="tearlabel">
+      <lthn-icon name="arrow-up-right-from-square" size="12"></lthn-icon>
+      <ng-container i18n="Tear-off drag hint@@desktop.window.tearOffRelease"
+        >Release to open in its own window</ng-container
+      >
+    </span>
+  </div>
 
   <!-- menu-bar tray panel (contents from the related app) -->
   <lthn-shell-tray-panel

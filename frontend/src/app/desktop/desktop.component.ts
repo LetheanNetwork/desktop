@@ -41,6 +41,7 @@ import {
   routeSegmentsForWindow,
 } from './desktop-route-tree';
 import { DESKTOP_STORAGE } from '../store/storage.service';
+import { DesktopAppWindowBridgeService } from './desktop-app-window-bridge.service';
 import { WindowInteractionService } from './window-interaction.service';
 import type { KeyboardSnapDirection, WindowGroupingState } from './window-interaction.service';
 import { ShellMenuBar } from './shell/menu-bar';
@@ -102,6 +103,7 @@ import type {
 export class DesktopComponent implements AfterViewInit, OnDestroy {
   readonly wm = inject(WindowManagerService);
   readonly prefs = inject(PreferencesService);
+  readonly appWindows = inject(DesktopAppWindowBridgeService);
   private readonly windowInteractions = inject(WindowInteractionService);
   private readonly router = inject(Router);
   private readonly storage = inject(DESKTOP_STORAGE);
@@ -193,6 +195,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
   };
   csub: ShellContextSubmenuState = { open: false, left: 0, top: 0, index: -1 };
   snap = { zone: null as WindowSnapState | null, left: 0, top: 0, w: 0, h: 0 };
+  tear = { active: false, left: 0, top: 0, w: 0, h: 0 };
   selected: string[] = [];
   groups: ShellWindowGroup[] = [];
   shellTabs: any[] = [];
@@ -1609,9 +1612,35 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     this.snapWin(w, intent.zone);
   }
 
+  /**
+   * Move one application out of the shell and into its own native window.
+   *
+   * A move, not a copy: the in-shell window closes only once Go reports the
+   * native window open. A failure leaves the window exactly where it was and
+   * says why, because half a move is an application that has disappeared.
+   */
+  async tearOff(w: Win): Promise<void> {
+    const moved = await this.appWindows.openApp({
+      app: w.app,
+      pane: this.paneOf(w),
+      width: w.w,
+      height: w.h,
+    });
+    if (!moved) {
+      this.notify(
+        'triangle-exclamation',
+        $localize`:Notification title@@desktop.tearOff.failedTitle:Could not open its own window`,
+        this.appWindows.lastError(),
+      );
+      return;
+    }
+    this.wm.close(w.id);
+    this.persist();
+  }
+
   startDrag(ev: PointerEvent, w: Win) {
     if (!this.wm.windowed() || w.max) return;
-    if ((ev.target as HTMLElement).closest('.lights i')) return; // don't drag from a window control
+    if ((ev.target as HTMLElement).closest('.lights i, .tearoff')) return; // not from a control
     if (this.selected.length > 1 && this.selected.includes(w.id)) {
       this.groupDrag(ev);
       return;
@@ -1635,13 +1664,22 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       );
       this.wm.wins.set(this.wins.map((window) => (window.id === w.id ? update.window : window)));
       this.snap = { ...update.snap };
+      // The preview only appears where the move can actually happen; in the
+      // browser demo there is no second window to release the drag into.
+      this.tear = { ...update.tear, active: update.tear.active && this.appWindows.available() };
     };
     const up = () => {
       window.removeEventListener('pointermove', mv);
       window.removeEventListener('pointerup', up);
       const z = this.snap.zone;
+      const torn = this.tear.active;
       this.snap.zone = null;
+      this.tear.active = false;
       const current = this.wins.find((win) => win.id === w.id);
+      if (torn && current) {
+        void this.tearOff(current);
+        return;
+      }
       if (z && current) {
         this.wm.wins.update((ws) =>
           ws.map((window) =>

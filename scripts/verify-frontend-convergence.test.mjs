@@ -468,6 +468,35 @@ appendFileSync(process.env.LTHN_BINDING_RECORD, JSON.stringify(record) + '\\n');
   await assert.rejects(readFile(join(bindingsDir, '.android-bindings'), 'utf8'));
 });
 
+test('the tear-off whitelist and the application catalogue name the same applications', async () => {
+  const [catalogue, appWindow] = await Promise.all([
+    read('frontend/src/app/desktop/desktop-catalogue.data.ts'),
+    read('go/pkg/desktop/app_window.go'),
+  ]);
+
+  const catalogueBlock = catalogue.slice(
+    catalogue.indexOf('export const APPS:'),
+    catalogue.indexOf('export const ORDER:'),
+  );
+  const catalogueIDs = [...catalogueBlock.matchAll(/^\s{2}'?([a-z][a-z0-9-]*)'?:\s*\{/gm)].map(
+    (match) => match[1],
+  );
+
+  const whitelistBlock = appWindow.slice(
+    appWindow.indexOf('var tearOffAppIDs = []string{'),
+    appWindow.indexOf('\n}', appWindow.indexOf('var tearOffAppIDs = []string{')),
+  );
+  const whitelistIDs = [...whitelistBlock.matchAll(/"([a-z][a-z0-9-]*)"/g)].map(
+    (match) => match[1],
+  );
+
+  assert.ok(catalogueIDs.length > 0, 'the application catalogue must declare applications');
+  // A native window may only be opened at an application Angular can render,
+  // so an application added to one side and not the other fails here rather
+  // than silently refusing to tear off at runtime.
+  assert.deepEqual(whitelistIDs.toSorted(), catalogueIDs.toSorted());
+});
+
 test('the root frontend test task runs convergence contracts', async () => {
   const taskfile = await read('Taskfile.yml');
   const frontendTask = taskfile.match(

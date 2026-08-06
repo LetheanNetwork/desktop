@@ -53,6 +53,7 @@ export interface DragSession {
   readonly offsetX: number;
   readonly offsetY: number;
   readonly layer: InteractionRect;
+  readonly host: InteractionRect;
   readonly previewOffsetX: number;
   readonly previewOffsetY: number;
 }
@@ -65,9 +66,23 @@ export interface SnapPreview {
   readonly h: number;
 }
 
+/**
+ * The drag has left the shell. Same rectangle idiom as the snap preview and
+ * the same coordinate space, so the shell can paint it with the same markup;
+ * `active` is what tells the two apart on release.
+ */
+export interface TearOffPreview {
+  readonly active: boolean;
+  readonly left: number;
+  readonly top: number;
+  readonly w: number;
+  readonly h: number;
+}
+
 export interface DragUpdate {
   readonly window: Win;
   readonly snap: SnapPreview;
+  readonly tear: TearOffPreview;
 }
 
 export interface ResizeSession {
@@ -234,17 +249,8 @@ export class WindowInteractionService {
       windowId: window.id,
       offsetX: pointer.x - (layer.left + window.x),
       offsetY: pointer.y - (layer.top + window.y),
-      // Not a spread: callers hand this a DOMRect, whose fields live on the
-      // prototype as accessors, so {...rect} copies nothing and every later
-      // moveDrag reads undefined and returns NaN — the window never moves.
-      layer: {
-        left: layer.left,
-        top: layer.top,
-        right: layer.right,
-        bottom: layer.bottom,
-        width: layer.width,
-        height: layer.height,
-      },
+      layer: copyRect(layer),
+      host: copyRect(host),
       previewOffsetX: layer.left - host.left,
       previewOffsetY: layer.top - host.top,
     };
@@ -261,7 +267,11 @@ export class WindowInteractionService {
       0,
       session.layer.height - MINIMUM_VISIBLE_HEIGHT,
     );
-    const zone = this.snapZone(pointer, session.layer);
+    // Past the shell's own edge the window is leaving, not snapping. The two
+    // regions cannot both claim a pointer: the snap margins live inside the
+    // host, so a pointer outside it suppresses them rather than competing.
+    const beyond = this.beyondHost(pointer, session.host);
+    const zone = beyond ? null : this.snapZone(pointer, session.layer);
 
     return {
       window: {
@@ -271,6 +281,9 @@ export class WindowInteractionService {
         snapState: null,
       },
       snap: zone ? this.snapPreview(zone, session) : { zone: null, left: 0, top: 0, w: 0, h: 0 },
+      tear: beyond
+        ? this.tearOffPreview(session, pointer, window)
+        : { active: false, left: 0, top: 0, w: 0, h: 0 },
     };
   }
 
@@ -540,7 +553,53 @@ export class WindowInteractionService {
     };
   }
 
+  private beyondHost(pointer: InteractionPoint, host: InteractionRect): boolean {
+    return (
+      pointer.x < host.left ||
+      pointer.x > host.right ||
+      pointer.y < host.top ||
+      pointer.y > host.bottom
+    );
+  }
+
+  /**
+   * The window at its own size, still under the grip that is carrying it, but
+   * held inside the shell so the release label stays readable. It reads as the
+   * window being lifted out rather than as a region being filled.
+   */
+  private tearOffPreview(
+    session: DragSession,
+    pointer: InteractionPoint,
+    window: Win,
+  ): TearOffPreview {
+    const w = Math.min(window.w, session.host.width);
+    const h = Math.min(window.h, session.host.height);
+    return {
+      active: true,
+      left: this.clamp(pointer.x - session.host.left - session.offsetX, 0, session.host.width - w),
+      top: this.clamp(pointer.y - session.host.top - session.offsetY, 0, session.host.height - h),
+      w,
+      h,
+    };
+  }
+
   private clamp(value: number, minimum: number, maximum: number): number {
     return Math.max(minimum, Math.min(value, maximum));
   }
+}
+
+/**
+ * Not a spread: callers hand these a DOMRect, whose fields live on the
+ * prototype as accessors, so `{...rect}` copies nothing and every later
+ * moveDrag reads undefined and returns NaN — the window never moves.
+ */
+function copyRect(rect: InteractionRect): InteractionRect {
+  return {
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+    width: rect.width,
+    height: rect.height,
+  };
 }

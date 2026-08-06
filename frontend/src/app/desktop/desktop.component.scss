@@ -32,6 +32,10 @@ lthn-desktop{--menubar-height:36px;background:var(--ink-0);color:var(--fg-1);fon
   .lights i.c{background:#ff5f57}.lights i.m{background:#febc2e}.lights i.x{background:#28c840}
   .tb-title{position:absolute;left:0;right:0;text-align:center;pointer-events:none;font-size:12.5px;font-weight:500;color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .win.focused .tb-title{color:var(--fg-0)}
+  /* The traffic lights own the left; the tear-off control owns the right. */
+  .tearoff{margin-left:auto;z-index:1;width:22px;height:22px;border:0;border-radius:6px;background:transparent;color:var(--fg-3);display:grid;place-items:center;cursor:pointer;padding:0}
+  .tearoff:hover:not(:disabled){background:color-mix(in oklch,var(--ink-3) 70%,transparent);color:var(--fg-0)}
+  .tearoff:disabled{opacity:.35;cursor:default}
   .appwrap{flex:1;min-height:0;display:flex;overflow:hidden;background:var(--ink-1)}
   .resize{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;z-index:3}
   .win.max .resize{display:none}
@@ -218,6 +222,12 @@ lthn-desktop{--menubar-height:36px;background:var(--ink-0);color:var(--fg-1);fon
   .submenu[hidden]{display:none}
   .snapzone{position:absolute;z-index:50;background:color-mix(in oklch,var(--brand-500) 22%,transparent);border:1px solid color-mix(in oklch,var(--brand-300) 55%,transparent);border-radius:12px;pointer-events:none;box-shadow:0 0 0 1px color-mix(in oklch,var(--brand-300) 20%,transparent) inset}
   .snapzone[hidden]{display:none}
+  /* Same rectangle as a snap zone, deliberately not the same offer: dashed
+     and unfilled, because the window is leaving rather than being placed. */
+  .tearzone{display:grid;place-items:center;background:color-mix(in oklch,var(--ink-0) 34%,transparent);border:2px dashed color-mix(in oklch,var(--brand-300) 80%,transparent);animation:tearPulse 1.4s ease-in-out infinite}
+  .tearlabel{display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;background:var(--brand-500);color:#fff;font-size:12px;font-weight:500;white-space:nowrap;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+  @keyframes tearPulse{0%,100%{border-color:color-mix(in oklch,var(--brand-300) 80%,transparent)}50%{border-color:color-mix(in oklch,var(--brand-300) 35%,transparent)}}
+  #os.reduce-motion .tearzone{animation:none}
   .win.sel{outline:2px solid color-mix(in oklch,var(--brand-300) 85%,transparent);outline-offset:1px}
   .marquee{position:absolute;z-index:60;border:1px solid var(--brand-300);background:color-mix(in oklch,var(--brand-500) 15%,transparent);border-radius:4px;pointer-events:none}
   .marquee[hidden]{display:none}
