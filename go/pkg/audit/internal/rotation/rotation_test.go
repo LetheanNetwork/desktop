@@ -90,6 +90,53 @@ func TestRotation_Compress_Bad_MissingSource(t *testing.T) {
 	}
 }
 
+// TestRotation_Compress_Bad_DestPathIsDirectory — a directory already
+// occupies the computed `.log.gz` output path (e.g. a stale partial
+// rotation, or a directory squatting the name). OpenFile with
+// O_CREATE|O_TRUNC on an existing directory fails (EISDIR) — Compress
+// must surface that as the "open dest" failure, not panic or silently
+// misbehave.
+func TestRotation_Compress_Bad_DestPathIsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	inPath := writeLog(t, dir, "2026-05-15", "body\n")
+	gzPath := core.PathJoin(dir, "2026-05-15"+CompressedSuffix)
+	if r := core.MkdirAll(gzPath, 0o700); !r.OK {
+		t.Fatalf("pre-create dest as directory: %s", r.Error())
+	}
+
+	if _, r := Compress(inPath, 0o600); r.OK {
+		t.Fatal("Compress accepted a destination path occupied by a directory")
+	}
+	// Source must be untouched — Compress failed before reaching the
+	// remove-source step.
+	if !core.Stat(inPath).OK {
+		t.Fatal("Compress removed the source despite failing to open dest")
+	}
+}
+
+// TestRotation_Compress_Bad_SourceIsDirectory — the computed source
+// path is a directory rather than a regular file. OpenFile(O_RDONLY)
+// on a directory succeeds (POSIX), but the subsequent io.Copy read
+// fails ("is a directory") — Compress must surface that as the
+// "stream copy" failure and clean up the partially-created dest.
+func TestRotation_Compress_Bad_SourceIsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	inPath := core.PathJoin(dir, "2026-05-15"+LogSuffix)
+	if r := core.MkdirAll(inPath, 0o700); !r.OK {
+		t.Fatalf("pre-create source as directory: %s", r.Error())
+	}
+
+	if _, r := Compress(inPath, 0o600); r.OK {
+		t.Fatal("Compress accepted a directory as its source")
+	}
+	// Partially-created dest must be cleaned up on the stream-copy
+	// failure path.
+	gzPath := core.PathJoin(dir, "2026-05-15"+CompressedSuffix)
+	if core.Stat(gzPath).OK {
+		t.Fatal("Compress left a partial .log.gz behind after a stream-copy failure")
+	}
+}
+
 // --- Compress: Ugly ---
 
 func TestRotation_Compress_Ugly_EmptySource(t *testing.T) {
@@ -143,6 +190,34 @@ func TestRotation_Candidate_Bad_WrongSuffix(t *testing.T) {
 	bad := core.PathJoin(dir, "2026-02-13"+LogSuffix)
 	if _, r := Candidate(bad); r.OK {
 		t.Fatal("Candidate accepted a .log source — should reject (needs .log.gz)")
+	}
+}
+
+// TestRotation_Candidate_Bad_RenameTargetOccupied — the computed
+// `.candidate` path is already occupied by a non-empty directory, so
+// the rename itself fails at the OS level. Candidate must surface
+// that failure via the typed "rename to .candidate" wrap rather than
+// silently losing the source.
+func TestRotation_Candidate_Bad_RenameTargetOccupied(t *testing.T) {
+	dir := t.TempDir()
+	gzPath := core.PathJoin(dir, "2026-02-13"+CompressedSuffix)
+	if r := core.WriteFile(gzPath, []byte("gzbytes"), 0o600); !r.OK {
+		t.Fatalf("WriteFile: %v", r.Value)
+	}
+	occupied := gzPath + ".candidate"
+	if r := core.MkdirAll(occupied, 0o700); !r.OK {
+		t.Fatalf("pre-create candidate target as directory: %s", r.Error())
+	}
+	if r := core.WriteFile(core.PathJoin(occupied, "squatter"), []byte("x"), 0o600); !r.OK {
+		t.Fatalf("occupy candidate target dir: %s", r.Error())
+	}
+
+	if _, r := Candidate(gzPath); r.OK {
+		t.Fatal("Candidate accepted a rename onto an occupied non-empty directory")
+	}
+	// Source must remain — rename failed, nothing should be lost.
+	if !core.Stat(gzPath).OK {
+		t.Fatal("Candidate lost the source .log.gz despite a failed rename")
 	}
 }
 
