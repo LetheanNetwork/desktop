@@ -459,3 +459,101 @@ func TestWritePathsOverride_ConcurrentCallersSerialised_Ugly(t *core.T) {
 	core.AssertEqual(t, 0, len(matches),
 		"no random-suffix tmp file may linger after concurrent writes settle")
 }
+
+// TestPathsOverride_SetModelsDirOverride_Bad_LegitimateSymlinkRejected
+// pins a KNOWN, INTENTIONAL-BUT-USER-HOSTILE finding (flagged per the
+// coverage brief rather than quietly tested around):
+//
+// SetModelsDirOverride's anti-redirection guard rejects the override
+// target whenever core.Lstat(p) itself is a symlink — see the doc
+// comment on the function ("the path itself + the resolved
+// $HOME-relative chain must NOT be a symlink ... Stat would follow it
+// and pass"). That check does NOT distinguish "attacker symlinked
+// ~/Models -> /etc" from "user's own models directory legitimately
+// lives on an external SSD and ~/Vault/lthn-models is a symlink to
+// it" — an extremely common real-world layout for large model files
+// on a space-constrained internal disk (the exact scenario the LEM
+// runtime this desktop app drives exists to serve). Today BOTH cases
+// hit the identical "path is not a directory (or is a symlink)"
+// rejection.
+//
+// This is the sandboxed-path-rules "rejects legitimate in-tree
+// symlinks" pain point named in the coverage brief. It is NOT a bug
+// in the sense of "wrong branch taken" — the code does exactly what
+// its own doc comment says — but it IS a usability regression against
+// a legitimate, common user setup, and worth a maintainer's conscious
+// call rather than silent acceptance. A prior narrower fix would
+// resolve p via core.Symlink-aware Stat, confirm the RESOLVED target
+// is a real directory under an allowed root (not `/etc`, not
+// `~/.ssh`, not `~/Library`), and reject only when the symlink
+// target itself escapes the allowlist — i.e. validate what the link
+// points AT, not merely that a link exists.
+func TestPathsOverride_SetModelsDirOverride_Bad_LegitimateSymlinkRejected(t *core.T) {
+	home := homeFixture(t)
+
+	// A perfectly legitimate real target directory (stands in for an
+	// external SSD / NAS mount) plus a symlink to it under $HOME —
+	// exactly the "large models live elsewhere, ~/Vault/lthn-models
+	// points at them" layout.
+	realDir := core.PathJoin(home, "external-drive-mount", "lthn-models")
+	core.AssertTrue(t, core.MkdirAll(realDir, 0o755).OK, "fixture real target dir must be creatable")
+
+	linkPath := core.PathJoin(home, "Vault-lthn-models-symlink")
+	core.AssertTrue(t, core.Symlink(realDir, linkPath).OK, "fixture symlink must be creatable")
+
+	r := paths.SetModelsDirOverride(linkPath)
+
+	// Current behaviour: REJECTED, even though realDir is a genuine,
+	// non-malicious, allowlist-eligible directory. Documenting the
+	// current behaviour (not silently working around it) per the
+	// coverage brief's explicit instruction.
+	core.AssertFalse(t, r.OK,
+		"FINDING: SetModelsDirOverride currently rejects a symlink to a legitimate directory "+
+			"exactly as it would reject a malicious redirect — same code path, same error message. "+
+			"A user who symlinks their models directory to external storage (common when models "+
+			"are large and the internal disk is small) cannot set that as their override target today.")
+}
+
+// --- Fault injection: writePathsOverride's I/O branches --------------
+
+// TestPathsOverride_SetModelsDirOverride_Bad_ConfDirUnresolvable —
+// ~/Lethean itself denies write access AFTER it has been created, so
+// ConfDir()'s own MkdirAll("~/Lethean/conf") fails and
+// pathsOverrideFile() falls back to "". SetModelsDirOverride must
+// propagate the resulting writePathsOverride failure rather than
+// silently reporting success while nothing was persisted.
+func TestPathsOverride_SetModelsDirOverride_Bad_ConfDirUnresolvable(t *core.T) {
+	home := homeFixture(t)
+	root := core.PathJoin(home, "Lethean")
+	core.AssertTrue(t, core.MkdirAll(root, 0o755).OK, "fixture ~/Lethean mkdir must succeed")
+
+	if r := core.Chmod(root, 0o500); !r.OK {
+		t.Skipf("chmod unsupported on this fs: %v", r.Error())
+	}
+	defer func() { core.Chmod(root, 0o755) }() // restore before t.TempDir() cleanup
+
+	// Override target lives directly under $HOME (NOT under the now
+	// read-only ~/Lethean), so validateOverridePath + the target's own
+	// MkdirAll/Lstat all succeed — only the paths.json persistence
+	// step (which needs to create ~/Lethean/conf) fails.
+	override := core.PathJoin(home, "my-models")
+	r := paths.SetModelsDirOverride(override)
+	core.AssertFalse(t, r.OK, "SetModelsDirOverride must fail when ~/Lethean/conf cannot be created")
+}
+
+// TestPathsOverride_SetModelsDirOverride_Bad_PathsJSONWriteDenied —
+// ~/Lethean/conf exists but denies write, so writePathsOverride's
+// core.WriteFile(tmp, ...) staging step fails.
+func TestPathsOverride_SetModelsDirOverride_Bad_PathsJSONWriteDenied(t *core.T) {
+	home := homeFixture(t)
+	confDir := paths.ConfDir().Value.(string)
+
+	if r := core.Chmod(confDir, 0o500); !r.OK {
+		t.Skipf("chmod unsupported on this fs: %v", r.Error())
+	}
+	defer func() { core.Chmod(confDir, 0o755) }() // restore before t.TempDir() cleanup
+
+	override := core.PathJoin(home, "my-models-2")
+	r := paths.SetModelsDirOverride(override)
+	core.AssertFalse(t, r.OK, "SetModelsDirOverride must fail when ~/Lethean/conf denies new-file writes")
+}

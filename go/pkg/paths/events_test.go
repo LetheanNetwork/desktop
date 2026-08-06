@@ -550,3 +550,79 @@ func TestHashForAudit_EmptyWhenSecretUnavailable_Bad(t *core.T) {
 }
 
 var _ = testing.AllocsPerRun
+
+// TestFlushDegradedCount_NoOpWhenNothingDegraded_Good — calling Flush
+// with a live secret but a zero counter (nothing was ever dropped)
+// must be a true no-op: returns 0, emits nothing.
+func TestFlushDegradedCount_NoOpWhenNothingDegraded_Good(t *core.T) {
+	homeFixture(t)
+	rec := withCaptureRecorder(t)
+
+	got := paths.FlushDegradedCount()
+	core.AssertEqual(t, int64(0), got, "flush with nothing degraded must return 0")
+	core.AssertEqual(t, 0, len(rec.snapshot()), "flush with nothing degraded must emit no events")
+}
+
+// TestFlushDegradedCount_SubscriberFanout_Good — the in-process
+// LockEvent subscriber list must ALSO receive the degraded-summary
+// event (not just the AuditRecorder), and SetAuditDegradedSinceForTest
+// must accept an override anchor without panicking mid-flush.
+func TestFlushDegradedCount_SubscriberFanout_Good(t *core.T) {
+	homeFixture(t)
+	withCaptureRecorder(t)
+	t.Cleanup(paths.ClearLockEventSubscribersForTest)
+	paths.SetAuditDegradedSinceForTest(core.Now().UTC())
+
+	var mu sync.Mutex
+	var got []paths.LockEvent
+	paths.SubscribeLockEvents(func(ev paths.LockEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, ev)
+	})
+
+	// A second subscriber that panics — FlushDegradedCount's fanout
+	// loop MUST recover per-subscriber so one bad listener doesn't
+	// stop the others or crash the flush.
+	paths.SubscribeLockEvents(func(paths.LockEvent) { panic("boom") })
+
+	// Drop one event (secret absent) to arm the degraded counter.
+	paths.SetAuditSecretProvider(func() []byte { return nil })
+	root := paths.Root().Value.(string)
+	fp := core.PathJoin(root, "office", "documents", "flush-fanout.md")
+	_ = core.MkdirAll(core.PathJoin(root, "office", "documents"), 0o700)
+	r := paths.AtomicWriteWithVersion(fp, paths.WriteInput{Body: []byte("x")})
+	core.AssertTrue(t, r.OK, r.Error())
+	core.AssertGreater(t, paths.AuditDegradedCount(), int64(0), "counter must be armed before flush")
+
+	paths.SetAuditSecretProvider(func() []byte {
+		return []byte("test-secret-32-bytes-1234567890ab")
+	})
+	count := paths.FlushDegradedCount()
+	core.AssertGreater(t, count, int64(0), "flush must report the accumulated drop count")
+
+	mu.Lock()
+	defer mu.Unlock()
+	found := false
+	for _, ev := range got {
+		if ev.Kind == paths.EventAuditDegradedSummary {
+			found = true
+		}
+	}
+	core.AssertTrue(t, found, "in-process subscribers must also receive the degraded-summary event")
+}
+
+// TestSubscribeLockEvents_Bad_NilFuncIgnored — a nil subscriber must
+// be silently dropped, not appended (which would panic the fanout
+// loop on the next emission).
+func TestSubscribeLockEvents_Bad_NilFuncIgnored(t *core.T) {
+	homeFixture(t)
+	withCaptureRecorder(t)
+	t.Cleanup(paths.ClearLockEventSubscribersForTest)
+
+	paths.SubscribeLockEvents(nil)
+
+	fp := tmpFile(t, "nil-subscriber.md")
+	r := paths.AtomicWriteWithVersion(fp, paths.WriteInput{Body: []byte("hi")})
+	core.AssertTrue(t, r.OK, "a nil subscriber registration must never panic emission: %s")
+}
