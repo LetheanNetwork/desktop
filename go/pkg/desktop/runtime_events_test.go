@@ -37,3 +37,24 @@ func TestRuntimeEventLimiter_Ugly_BatteryThresholds(t *core.T) {
 	core.AssertTrue(t, low.allowBattery(map[string]any{"level": 0.09}))
 	core.AssertFalse(t, low.allowBattery(map[string]any{"level": 0.09}))
 }
+
+// --- registerRuntimeSystemEvents ---------------------------------------
+//
+// The registration statements (guard + the six app.Event.OnApplicationEvent
+// calls) are exercised against a real, never-Run *application.App — same
+// safe seam as gui_runtime_test.go / window_platform_test.go. The inner
+// callback bodies only fire on a genuine native OS event (battery/network/
+// theme/lock/low-memory) which wails' alpha2 EventManager exposes no
+// in-process trigger for; that's an itemised leave-out, not a gap here.
+
+func TestRuntimeEvents_RegisterRuntimeSystemEvents_Bad_NilCoreIsNoop(t *core.T) {
+	registerRuntimeSystemEvents(nil, testWailsApp(t))
+}
+
+func TestRuntimeEvents_RegisterRuntimeSystemEvents_Bad_NilAppIsNoop(t *core.T) {
+	registerRuntimeSystemEvents(core.New(), nil)
+}
+
+func TestRuntimeEvents_RegisterRuntimeSystemEvents_Good_RegistersAgainstRealApp(t *core.T) {
+	registerRuntimeSystemEvents(core.New(), testWailsApp(t))
+}

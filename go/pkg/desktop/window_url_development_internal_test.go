@@ -30,3 +30,38 @@ func TestFrontendWindowURL_Ugly_EmptyDevelopmentServerRetainsWailsRoute(t *core.
 
 	core.AssertEqual(t, "/#/tools/files", frontendWindowURL("/#/tools/files"))
 }
+
+func TestFrontendWindowURL_Bad_WrongSchemeRetainsWailsRoute(t *core.T) {
+	t.Setenv("FRONTEND_DEVSERVER_URL", "ftp://localhost:9245")
+	t.Setenv("LTHN_WAILS_WS_URL", "")
+
+	core.AssertEqual(t, "/#/tools/files", frontendWindowURL("/#/tools/files"))
+}
+
+func TestFrontendWindowURL_Bad_EmptyHostRetainsWailsRoute(t *core.T) {
+	t.Setenv("FRONTEND_DEVSERVER_URL", "http:///no-host")
+	t.Setenv("LTHN_WAILS_WS_URL", "")
+
+	core.AssertEqual(t, "/#/tools/files", frontendWindowURL("/#/tools/files"))
+}
+
+func TestFrontendWindowURL_Good_NoSocketURLOmitsQuery(t *core.T) {
+	t.Setenv("FRONTEND_DEVSERVER_URL", "http://localhost:9245")
+	t.Setenv("LTHN_WAILS_WS_URL", "")
+
+	core.AssertEqual(t, "http://localhost:9245/#/tools/files", frontendWindowURL("/#/tools/files"))
+}
+
+func TestFrontendWindowURL_Ugly_InvalidSocketURLRetainsWailsRoute(t *core.T) {
+	t.Setenv("FRONTEND_DEVSERVER_URL", "http://localhost:9245")
+	t.Setenv("LTHN_WAILS_WS_URL", "://invalid")
+
+	core.AssertEqual(t, "/#/tools/files", frontendWindowURL("/#/tools/files"))
+}
+
+func TestFrontendWindowURL_Ugly_WrongSocketSchemeRetainsWailsRoute(t *core.T) {
+	t.Setenv("FRONTEND_DEVSERVER_URL", "http://localhost:9245")
+	t.Setenv("LTHN_WAILS_WS_URL", "http://localhost:9199/wails/ws")
+
+	core.AssertEqual(t, "/#/tools/files", frontendWindowURL("/#/tools/files"))
+}

@@ -259,6 +259,63 @@ func TestHostIntent_SecondInstanceFile_GoodUsesSameOpaqueCapability(t *core.T) {
 	core.AssertTrue(t, found)
 }
 
+// --- direct unit coverage for the small pure helpers -------------------
+
+func TestHostIntent_HostItemIntent_Bad_UnknownKindIsInvalidInput(t *core.T) {
+	intent := hostItemIntent(nil, "not-a-real-kind", nil, nil, "")
+	core.AssertEqual(t, HostIntentItemsUnavailable, intent.Kind)
+	core.AssertEqual(t, string(officefiles.ErrorInvalidInput), intent.ErrorCode)
+}
+
+func TestHostIntent_HostItemIntent_Ugly_ServiceUnavailable(t *core.T) {
+	intent := hostItemIntent(core.New(), HostIntentOpenItems, []string{"x"}, nil, "")
+	core.AssertEqual(t, HostIntentItemsUnavailable, intent.Kind)
+	core.AssertEqual(t, string(officefiles.ErrorProviderUnavailable), intent.ErrorCode)
+}
+
+func TestHostIntent_HostItemErrorCode_Good_UsesFailureCode(t *core.T) {
+	code := hostItemErrorCode(core.Fail(&officefiles.Failure{Code: officefiles.ErrorInvalidInput}))
+	core.AssertEqual(t, string(officefiles.ErrorInvalidInput), code)
+}
+
+func TestHostIntent_HostItemErrorCode_Bad_NonFailureValueFallsBack(t *core.T) {
+	code := hostItemErrorCode(core.Fail(core.E("x", "y", nil)))
+	core.AssertEqual(t, string(officefiles.ErrorProviderUnavailable), code)
+}
+
+func TestHostIntent_HostItemErrorCode_Ugly_EmptyCodeFallsBack(t *core.T) {
+	code := hostItemErrorCode(core.Fail(&officefiles.Failure{Code: ""}))
+	core.AssertEqual(t, string(officefiles.ErrorProviderUnavailable), code)
+}
+
+func TestHostIntent_BoundedHostDropTarget_Good_NilTargetUsesFallbackID(t *core.T) {
+	target := boundedHostDropTarget(nil, "files-drop-zone")
+	core.AssertEqual(t, &HostDropTarget{ID: "files-drop-zone"}, target)
+}
+
+func TestHostIntent_BoundedHostDropTarget_Bad_NilTargetNoFallbackIsNil(t *core.T) {
+	core.AssertNil(t, boundedHostDropTarget(nil, ""))
+}
+
+func TestHostIntent_HostNotificationIntent_Bad_UnknownEventIsRejected(t *core.T) {
+	_, ok := hostNotificationIntent("hover", "lthn.model-runtime", "")
+	core.AssertFalse(t, ok)
+}
+
+func TestHostIntent_HostNotificationIntentID_Good_ExactPrefixMatchesWithoutSuffix(t *core.T) {
+	id, ok := hostNotificationIntentID("lthn.desktop-update")
+	core.AssertTrue(t, ok)
+	core.AssertEqual(t, "desktop-update", id)
+}
+
+func TestHostIntent_ValidHostIdentifier_Bad_TooLongIsRejected(t *core.T) {
+	core.AssertFalse(t, validHostIdentifier(core.Repeat("a", maxHostTargetIDBytes+1), maxHostTargetIDBytes))
+}
+
+func TestHostIntent_ValidHostIdentifier_Ugly_DisallowedCharacterIsRejected(t *core.T) {
+	core.AssertFalse(t, validHostIdentifier("bad id!", maxHostTargetIDBytes))
+}
+
 func assertHostIntentRedacted(t *core.T, payload any, actualRoot string) {
 	t.Helper()
 	serialised := core.JSONMarshalString(payload)
