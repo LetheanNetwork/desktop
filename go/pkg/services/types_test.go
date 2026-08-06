@@ -82,6 +82,34 @@ func TestValidateDefinition_BadEnforcesArgumentAndGraceLimits(t *core.T) {
 	core.AssertEqual(t, ErrorDefinitionInvalid, ErrorCodeOf(ValidateDefinition(tooSlow, limits)))
 }
 
+// TestValidateDefinition_BadRejectsControlBytesInArguments exercises
+// the per-argument containsControl/utf8.ValidString check inside the
+// Arguments loop — distinct from invalidText's own control-byte guard
+// on Command/DisplayName/Description, which the other Bad tests here
+// already cover.
+func TestValidateDefinition_BadRejectsControlBytesInArguments(t *core.T) {
+	definition := validDefinition()
+	definition.Arguments = []string{"--flag", "contains\x00nul"}
+
+	result := ValidateDefinition(definition, DefaultLimits())
+
+	core.AssertFalse(t, result.OK)
+	core.AssertEqual(t, ErrorDefinitionInvalid, ErrorCodeOf(result))
+}
+
+// TestValidateDefinition_GoodAcceptsSafeRelativeWorkingDirectory pins
+// the accept path through validWorkingDirectory's non-empty-MountID
+// branch — TestValidateDefinition_UglyRejectsUnsafeWorkingDirectoryReferences
+// only ever exercises the reject branch.
+func TestValidateDefinition_GoodAcceptsSafeRelativeWorkingDirectory(t *core.T) {
+	definition := validDefinition()
+	definition.WorkingDirectory = WorkingDirectory{MountID: "projects", Path: "safe/nested/dir"}
+
+	result := ValidateDefinition(definition, DefaultLimits())
+
+	core.RequireTrue(t, result.OK, result.Error())
+}
+
 func TestValidateDefinition_UglyRejectsUnsafeWorkingDirectoryReferences(t *core.T) {
 	tests := []WorkingDirectory{
 		{MountID: "projects", Path: "/Users/sarah/Code"},
@@ -166,4 +194,35 @@ func TestErrorCodeOf_BadPreservesTypedFailureAndHidesOtherErrors(t *core.T) {
 	core.AssertEqual(t, ErrorDefinitionNotFound, ErrorCodeOf(typed))
 	core.AssertEqual(t, ErrorCode(""), ErrorCodeOf(core.Fail(core.E("test", "plain", nil))))
 	core.AssertEqual(t, ErrorCode(""), ErrorCodeOf(core.Ok(nil)))
+}
+
+func TestFailure_Error_Good_JoinsOperationAndMessage(t *core.T) {
+	failure := &Failure{Operation: "services.Service.Start", Message: "boom"}
+	core.AssertEqual(t, "services.Service.Start: boom", failure.Error())
+}
+
+func TestFailure_Error_Bad_NilReceiverReturnsEmpty(t *core.T) {
+	var failure *Failure
+	core.AssertEqual(t, "", failure.Error())
+}
+
+func TestFailure_Error_Ugly_EmptyOperationReturnsMessageOnly(t *core.T) {
+	failure := &Failure{Message: "boom"}
+	core.AssertEqual(t, "boom", failure.Error())
+}
+
+func TestFailure_Unwrap_Good_ReturnsCause(t *core.T) {
+	cause := core.E("test", "root cause", nil)
+	failure := &Failure{Message: "boom", Cause: cause}
+	core.AssertEqual(t, cause, failure.Unwrap())
+}
+
+func TestFailure_Unwrap_Bad_NilReceiverReturnsNil(t *core.T) {
+	var failure *Failure
+	core.AssertTrue(t, failure.Unwrap() == nil)
+}
+
+func TestFailure_Unwrap_Ugly_NoCauseReturnsNil(t *core.T) {
+	failure := &Failure{Message: "boom"}
+	core.AssertTrue(t, failure.Unwrap() == nil)
 }

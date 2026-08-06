@@ -72,6 +72,17 @@ func TestResolveSignal_Ugly_EmptyGoosFallsBackToThisHost(t *testing.T) {
 	core.AssertTrue(t, result.OK, result.Error())
 }
 
+// TestDeliverNamedSignal_Bad_UnknownNameNeverReachesService proves the
+// resolveSignal failure short-circuits deliverNamedSignal before it
+// ever touches the *coreprocess.Service — passing nil for service
+// would panic if the guard were missing.
+func TestDeliverNamedSignal_Bad_UnknownNameNeverReachesService(t *testing.T) {
+	result := deliverNamedSignal(nil, "any-id", Signal("obliterate"))
+
+	core.AssertFalse(t, result.OK, "an unknown signal name must be refused before reaching the service")
+	core.AssertEqual(t, ErrorSignalUnknown, ErrorCodeOf(result))
+}
+
 func TestValidSignal_Good_KnowsTheVocabulary(t *testing.T) {
 	for _, name := range []Signal{SignalTerminate, SignalInterrupt, SignalHangup, SignalKill} {
 		core.AssertTrue(t, validSignal(name), core.Concat(string(name), " must be valid"))

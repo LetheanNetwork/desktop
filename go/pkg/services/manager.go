@@ -152,8 +152,18 @@ func (ctl *controller) launchctlTarget() string {
 	return core.Concat(domain.Value.(string), "/", ctl.label)
 }
 
+// osCommandRun is the process.Run seam every OS service-manager
+// command (launchctl / systemctl) is dispatched through. Defaults to
+// the real process.Run — production behaviour is unchanged. launchctl
+// and systemctl are live system-management tools with no dry-run
+// mode, so hermetic coverage of the install/uninstall/status success
+// AND failure branches replaces this var for the duration of a test
+// (see withFakeOSCommand in manager_gap_test.go) rather than shelling
+// out to the developer's real launchd/systemd session.
+var osCommandRun = process.Run
+
 func (ctl *controller) launchctl(args ...string) core.Result {
-	return process.Run(core.Background(), "launchctl", args...)
+	return osCommandRun(core.Background(), "launchctl", args...)
 }
 
 func (ctl *controller) installLaunchAgent() core.Result {
@@ -248,7 +258,7 @@ func (ctl *controller) systemdUnitName() string {
 
 func (ctl *controller) systemctl(args ...string) core.Result {
 	full := append([]string{"--user"}, args...)
-	return process.Run(core.Background(), "systemctl", full...)
+	return osCommandRun(core.Background(), "systemctl", full...)
 }
 
 func (ctl *controller) installSystemdUserUnit() core.Result {
