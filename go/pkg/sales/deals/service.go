@@ -497,9 +497,13 @@ func (s *Service) loadAll() ([]DealRecord, error) {
 	// id (cutover invariant — once the encrypted record lands the
 	// plaintext gets removed, but a crash between AtomicWrite and
 	// Remove could leave both on disk). Stable name basis: filename
-	// without extension.
-	seen := map[string]bool{}
-	var records []DealRecord
+	// without extension. Both are presized off len(entries) — a firm
+	// upper bound (one record per file, some entries skipped as dirs
+	// or the non-matching extension) — so the common case (every
+	// entry yields a record) never pays Go's slice/map growth-copy
+	// cost across a 100+ record directory.
+	seen := make(map[string]bool, len(entries))
+	records := make([]DealRecord, 0, len(entries))
 	// First pass: .lthn (encrypted, header-only).
 	for _, entry := range entries {
 		if entry.IsDir() {

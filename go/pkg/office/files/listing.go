@@ -93,7 +93,17 @@ func (s *Service) listDirectory(input ListDirectoryInput) core.Result {
 			err,
 		))
 	}
-	rows := make([]FileEntry, 0, len(entries))
+	// Two-phase build: classify + sort every entry cheaply first (no
+	// string formatting/allocation beyond Name), then materialise the
+	// full FileEntry (ModifiedAt formatting, RelativePath join) ONLY
+	// for the entries that survive pagination. A large directory with
+	// a small requested page previously paid the full per-entry
+	// formatting cost for every discarded row — entry.Info() itself
+	// is unavoidable (needed for sort classification, and already
+	// satisfied without an extra syscall on top of the medium's List)
+	// but the FileEntry string-building is real, avoidable, per-record
+	// work that scales with collection size regardless of page size.
+	indexed := make([]indexedEntry, 0, len(entries))
 	for _, entry := range entries {
 		if relativePath == "" && entry.Name() == internalNamespace {
 			continue
@@ -107,22 +117,27 @@ func (s *Service) listDirectory(input ListDirectoryInput) core.Result {
 				infoErr,
 			))
 		}
-		rows = append(rows, fileEntry(relativePath, entry, info))
+		indexed = append(indexed, indexedEntry{
+			entry: entry,
+			info:  info,
+			kind:  entryKind(entry, info),
+			name:  entry.Name(),
+		})
 	}
-	sort.Slice(rows, func(left, right int) bool {
-		leftDirectory := rows[left].Kind == EntryDirectory
-		rightDirectory := rows[right].Kind == EntryDirectory
+	sort.Slice(indexed, func(left, right int) bool {
+		leftDirectory := indexed[left].kind == EntryDirectory
+		rightDirectory := indexed[right].kind == EntryDirectory
 		if leftDirectory != rightDirectory {
 			return leftDirectory
 		}
-		leftFolded := core.Lower(rows[left].Name)
-		rightFolded := core.Lower(rows[right].Name)
+		leftFolded := core.Lower(indexed[left].name)
+		rightFolded := core.Lower(indexed[right].name)
 		if leftFolded == rightFolded {
-			return rows[left].Name < rows[right].Name
+			return indexed[left].name < indexed[right].name
 		}
 		return leftFolded < rightFolded
 	})
-	total := len(rows)
+	total := len(indexed)
 	if offset > total {
 		return core.Fail(newFailure(
 			ErrorInvalidInput,
@@ -136,7 +151,10 @@ func (s *Service) listDirectory(input ListDirectoryInput) core.Result {
 	if end > total {
 		end = total
 	}
-	page := append([]FileEntry(nil), rows[offset:end]...)
+	page := make([]FileEntry, 0, end-offset)
+	for _, ie := range indexed[offset:end] {
+		page = append(page, fileEntry(relativePath, ie.entry, ie.info))
+	}
 	nextCursor := ""
 	if end < total {
 		nextCursor = strconv.Itoa(end)
@@ -192,21 +210,44 @@ func listOffset(cursor string) (int, error) {
 	return offset, nil
 }
 
-func fileEntry(parent string, entry fs.DirEntry, info fs.FileInfo) FileEntry {
-	kind := EntryOther
+// indexedEntry is the cheap, pre-format intermediate used to classify
+// and sort a full directory listing before pagination decides which
+// entries are worth the fuller FileEntry build (string formatting,
+// path join). entry.Info() has already run by the time this is
+// populated — the same fs.FileInfo is reused for the final FileEntry
+// so a page entry's fields are computed identically to the pre-split
+// code path, just deferred until after slicing.
+type indexedEntry struct {
+	entry fs.DirEntry
+	info  fs.FileInfo
+	kind  EntryKind
+	name  string
+}
+
+// entryKind classifies a directory entry. Symlinks take priority
+// (checked via both the cheap DirEntry type bits and the stat'd mode,
+// matching legacy behaviour for filesystems where the directory read
+// alone can't disambiguate); otherwise directory / regular file /
+// other.
+func entryKind(entry fs.DirEntry, info fs.FileInfo) EntryKind {
 	mode := info.Mode()
 	switch {
 	case entry.Type()&fs.ModeSymlink != 0 || mode&fs.ModeSymlink != 0:
-		kind = EntryLink
+		return EntryLink
 	case info.IsDir():
-		kind = EntryDirectory
+		return EntryDirectory
 	case mode.IsRegular():
-		kind = EntryFile
+		return EntryFile
 	}
+	return EntryOther
+}
+
+func fileEntry(parent string, entry fs.DirEntry, info fs.FileInfo) FileEntry {
+	mode := info.Mode()
 	return FileEntry{
 		Name:         entry.Name(),
 		RelativePath: joinRelative(parent, entry.Name()),
-		Kind:         kind,
+		Kind:         entryKind(entry, info),
 		SizeBytes:    info.Size(),
 		ModifiedAt:   info.ModTime().UTC().Format(core.RFC3339Nano),
 		Mode:         uint32(mode),

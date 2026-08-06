@@ -44,6 +44,7 @@ package chathistory
 import (
 	"database/sql"
 	_ "embed"
+	"sync"
 	"time"
 
 	core "dappco.re/go"
@@ -66,6 +67,18 @@ type History struct {
 	userID string
 	path   string
 	db     *sql.DB
+
+	// stmtMu guards lazy construction of the cached prepared
+	// statements below. A History is long-lived (opened once per app
+	// session) and LoadTurns is called repeatedly as chat panes
+	// open/reopen — bench evidence (BenchmarkTurnsQuery_RePrepare vs
+	// _PreparedStmt) showed database/sql's implicit prepare-per-Query
+	// call costs ~14% wall time against DuckDB even though it barely
+	// shows up in allocs/op (the cost is CPU inside the driver, not
+	// Go-side allocation). Caching the statement and reusing it across
+	// calls removes that repeated prepare cost.
+	stmtMu        sync.Mutex
+	loadTurnsStmt *sql.Stmt
 }
 
 // NewConversation captures the metadata needed to start tracking a
@@ -130,6 +143,14 @@ func (h *History) Close() error {
 	if h == nil || h.db == nil {
 		return nil
 	}
+	h.stmtMu.Lock()
+	if h.loadTurnsStmt != nil {
+		// Best-effort — db.Close() below is the meaningful outcome;
+		// a stmt-close failure here shouldn't mask it.
+		_ = h.loadTurnsStmt.Close()
+		h.loadTurnsStmt = nil
+	}
+	h.stmtMu.Unlock()
 	return h.db.Close()
 }
 
@@ -281,10 +302,11 @@ func (h *History) LoadTurns(conversationID string) ([]Turn, error) {
 	if core.Trim(conversationID) == "" {
 		return nil, core.E("chathistory.LoadTurns", "conversation id required", nil)
 	}
-	rows, err := h.db.Query(
-		`SELECT role, content, ordinal FROM turns WHERE conversation_id = ? ORDER BY ordinal`,
-		conversationID,
-	)
+	stmt, err := h.loadTurnsStatement()
+	if err != nil {
+		return nil, core.E("chathistory.LoadTurns", "prepare", err)
+	}
+	rows, err := stmt.Query(conversationID)
 	if err != nil {
 		return nil, core.E("chathistory.LoadTurns", "query", err)
 	}
@@ -305,6 +327,27 @@ func (h *History) LoadTurns(conversationID string) ([]Turn, error) {
 		return nil, core.E("chathistory.LoadTurns", "rows", err)
 	}
 	return out, nil
+}
+
+// loadTurnsStatement returns the cached LoadTurns prepared statement,
+// preparing it on first use. A failed prepare is NOT cached — a
+// closed/broken db keeps failing on every call (correct, matches
+// pre-cache behaviour) while a transient failure gets a clean retry
+// on the next call rather than being pinned permanently.
+func (h *History) loadTurnsStatement() (*sql.Stmt, error) {
+	h.stmtMu.Lock()
+	defer h.stmtMu.Unlock()
+	if h.loadTurnsStmt != nil {
+		return h.loadTurnsStmt, nil
+	}
+	stmt, err := h.db.Prepare(
+		`SELECT role, content, ordinal FROM turns WHERE conversation_id = ? ORDER BY ordinal`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	h.loadTurnsStmt = stmt
+	return stmt, nil
 }
 
 // CountTurns returns the total number of turns across all conversations.

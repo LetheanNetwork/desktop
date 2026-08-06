@@ -133,6 +133,25 @@ func (h *History) ExportJSONL(dest string) error {
 	}
 	defer convRows.Close()
 
+	// Prepared ONCE and reused for every conversation below — the
+	// inner turns-page query previously re-prepared on every
+	// convRows.Next() iteration (a per-record cost that multiplies
+	// with collection size). Bench evidence (BenchmarkTurnsQuery_Re
+	// Prepare vs _PreparedStmt, 100 conversations) showed the
+	// re-prepare pattern accounts for nearly all of ExportJSONL's
+	// total time.
+	turnStmt, err := h.db.Prepare(
+		`SELECT id, ordinal, role, content, tool_calls, tool_results,
+		        created_at, tokens_in, tokens_out, signal
+		   FROM turns
+		  WHERE conversation_id = ?
+		  ORDER BY ordinal`,
+	)
+	if err != nil {
+		return core.E("chathistory.ExportJSONL", "prepare turns", err)
+	}
+	defer turnStmt.Close()
+
 	for convRows.Next() {
 		var c JSONLConversation
 		var title, modelID, baseModel, adapterID sql.NullString
@@ -164,14 +183,7 @@ func (h *History) ExportJSONL(dest string) error {
 			}
 		}
 
-		turnRows, err := h.db.Query(
-			`SELECT id, ordinal, role, content, tool_calls, tool_results,
-			        created_at, tokens_in, tokens_out, signal
-			   FROM turns
-			  WHERE conversation_id = ?
-			  ORDER BY ordinal`,
-			c.ID,
-		)
+		turnRows, err := turnStmt.Query(c.ID)
 		if err != nil {
 			return core.E("chathistory.ExportJSONL", "query turns", err)
 		}
