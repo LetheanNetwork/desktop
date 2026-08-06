@@ -68,12 +68,12 @@ func TestIsKnownDialectContraction_NotInList_Ugly(t *testing.T) {
 	// The whole point — circumvention or invented compounds must NOT
 	// flag as dialect. The Cina-Gia'a case is the canonical example.
 	cases := []string{
-		"Cina-Gia'a",          // LEK circumvention example
-		"Gia'a",               // Italian-shaped phonetic
-		"frabbis'nork",        // invented
-		"Quan-Tum",            // pseudo-technical compound
-		"trans-modal",         // pseudo-technical (no apostrophe but still not in dialect set)
-		"random-word",         // ordinary compound, not dialect
+		"Cina-Gia'a",   // LEK circumvention example
+		"Gia'a",        // Italian-shaped phonetic
+		"frabbis'nork", // invented
+		"Quan-Tum",     // pseudo-technical compound
+		"trans-modal",  // pseudo-technical (no apostrophe but still not in dialect set)
+		"random-word",  // ordinary compound, not dialect
 	}
 	for _, c := range cases {
 		if IsKnownDialectContraction(c) {
@@ -129,5 +129,26 @@ func TestPseudoJargonDensity_DazZoeAndCinaGiaaMixed_BothSeparated_Ugly(t *testin
 	// signal preserved).
 	if dMixed < 0.15 {
 		t.Errorf("mixed density (%.3f) too low — circumvention signal lost", dMixed)
+	}
+}
+
+// --- asciiLower ---
+
+// TestAsciiLower_EmptyBad pins the empty-string fast path. Every
+// caller of asciiLower (IsKnownDialectContraction) already guards
+// token == "" before calling it, so this branch is otherwise
+// unreachable from the exported surface — exercised directly here
+// since asciiLower is itself a general-purpose unexported helper
+// whose own doc comment promises an ASCII-lowercase copy of s for
+// any s, empty included.
+func TestAsciiLower_EmptyBad(t *testing.T) {
+	if got := asciiLower(""); got != "" {
+		t.Errorf("asciiLower(\"\") = %q, want empty string", got)
+	}
+}
+
+func TestAsciiLower_MixedCaseGood(t *testing.T) {
+	if got := asciiLower("Y'All"); got != "y'all" {
+		t.Errorf("asciiLower(\"Y'All\") = %q, want %q", got, "y'all")
 	}
 }
