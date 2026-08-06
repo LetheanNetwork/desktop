@@ -53,12 +53,31 @@ const seededState: DesktopState = {
   migratedBrowserState: true,
 };
 
+/** A DOMRect the way a laid-out element reports one; jsdom measures zero. */
+const domRect = (left: number, top: number, width: number, height: number): DOMRect =>
+  ({
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  }) as DOMRect;
+
+/** A pointer event the drag handlers read: position, button, and target. */
+const pointerEvent = (type: string, clientX: number, clientY: number): MouseEvent =>
+  new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY, button: 0 });
+
 describe('DesktopComponent route shell', () => {
   let fixture: ComponentFixture<DesktopComponent>;
   let router: Router;
   let store: Store;
   let windowManager: WindowManagerService;
   let openApp: ReturnType<typeof vi.fn>;
+  let nativeWindowHost: boolean;
   let appWindows: {
     available: () => boolean;
     lastError: () => string;
@@ -76,8 +95,9 @@ describe('DesktopComponent route shell', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     openApp = vi.fn().mockResolvedValue(true);
+    nativeWindowHost = true;
     appWindows = {
-      available: () => true,
+      available: () => nativeWindowHost,
       lastError: () => 'no native window route for application: control',
       openApp,
     };
@@ -287,6 +307,69 @@ describe('DesktopComponent route shell', () => {
       fixture.detectChanges();
       expect(windowManager.wins().map(({ id }) => id)).toEqual([telemetryWin.id]);
     });
+  });
+
+  /**
+   * Part B of the tear-off: the same move offered by dragging the window past
+   * the shell's own edge. The measurements are stubbed because jsdom lays
+   * nothing out, and the release is a real pointerup on the real listeners.
+   */
+  const dragTitlebar = (to: { x: number; y: number }) => {
+    const element = fixture.nativeElement as HTMLElement;
+    const screen = element.querySelector('#os') as HTMLElement;
+    const layer = element.querySelector('#winlayer') as HTMLElement;
+    screen.getBoundingClientRect = () => domRect(0, 0, 1440, 900);
+    layer.getBoundingClientRect = () => domRect(0, 36, 1440, 864);
+    const titlebar = element.querySelector('#winlayer > .win .titlebar') as HTMLElement;
+
+    titlebar.dispatchEvent(pointerEvent('pointerdown', 400, 60));
+    window.dispatchEvent(pointerEvent('pointermove', to.x, to.y));
+  };
+
+  it('tears a window off when its drag is released past the shell edge', async () => {
+    dragTitlebar({ x: 1600, y: 520 });
+    expect(fixture.componentInstance.tear.active).toBe(true);
+
+    window.dispatchEvent(pointerEvent('pointerup', 1600, 520));
+
+    await vi.waitFor(() => {
+      expect(openApp).toHaveBeenCalledWith({
+        app: 'control',
+        pane: 'models',
+        width: controlWin.w,
+        height: controlWin.h,
+      });
+    });
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(windowManager.wins().map(({ id }) => id)).toEqual([telemetryWin.id]);
+    });
+    expect(fixture.componentInstance.tear.active).toBe(false);
+  });
+
+  it('snaps instead of tearing when the drag is released inside the shell', async () => {
+    dragTitlebar({ x: 1600, y: 520 });
+    window.dispatchEvent(pointerEvent('pointermove', 8, 400));
+    expect(fixture.componentInstance.tear.active).toBe(false);
+    expect(fixture.componentInstance.snap.zone).toBe('left');
+
+    window.dispatchEvent(pointerEvent('pointerup', 8, 400));
+    fixture.detectChanges();
+
+    expect(openApp).not.toHaveBeenCalled();
+    expect(windowManager.wins().map(({ id }) => id)).toEqual([controlWin.id, telemetryWin.id]);
+    expect(windowManager.wins()[0].snapState).toBe('left');
+  });
+
+  it('offers no tear-off past the edge when there is no native window host', () => {
+    nativeWindowHost = false;
+
+    dragTitlebar({ x: 1600, y: 520 });
+    window.dispatchEvent(pointerEvent('pointerup', 1600, 520));
+
+    expect(fixture.componentInstance.tear.active).toBe(false);
+    expect(openApp).not.toHaveBeenCalled();
+    expect(windowManager.wins().map(({ id }) => id)).toEqual([controlWin.id, telemetryWin.id]);
   });
 
   it('leaves the in-shell window alone when the native window refuses to open', async () => {
