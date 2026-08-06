@@ -7,6 +7,7 @@ import (
 
 	core "dappco.re/go"
 	coremcp "dappco.re/go/mcp/pkg/mcp"
+	guiwindow "dappco.re/go/render/display/webkit/pkg/window"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -166,4 +167,100 @@ func TestBridge_RegisterWebMCPTools_Ugly_RemovesUnregisteredTools(t *core.T) {
 	core.AssertNoError(t, err)
 	core.AssertNil(t, listedTool(listed, "desktop_read_state"),
 		"aborted Angular registrations must disappear from tools/list")
+}
+
+// ─── callWebMCPTool ─────────────────────────────────────────────────
+
+func TestWebMCP_CallWebMCPTool_Bad_NoServiceRuntime(t *core.T) {
+	s := &Service{}
+	r := s.callWebMCPTool(core.Background(), "chat_read_thread", nil)
+	core.AssertFalse(t, r.OK)
+	core.AssertContains(t, r.Error(), "no Core window transport")
+}
+
+func TestWebMCP_CallWebMCPTool_Good_EvalSucceeds(t *core.T) {
+	s, _ := evalHarness(t)
+	r := s.callWebMCPTool(core.Background(), "chat_read_thread", map[string]any{"detail": "full"})
+	core.AssertTrue(t, r.OK)
+	core.AssertEqual(t, "scripted-result", r.Value)
+}
+
+func TestWebMCP_CallWebMCPTool_Bad_EvalReturnsError(t *core.T) {
+	s, _ := evalHarness(t)
+	// The generated script JSON-embeds the tool name; naming the tool
+	// with the sentinel makes evalHarness's fake action return a
+	// JS-side EvalJSResult.Err, driving callWebMCPTool's failure path.
+	r := s.callWebMCPTool(core.Background(), forceEvalJSError, nil)
+	core.AssertFalse(t, r.OK)
+}
+
+// ─── refreshWebMCPTools ─────────────────────────────────────────────
+
+func TestWebMCP_RefreshWebMCPTools_Ugly_NilWebMCPStateIsNoOp(t *core.T) {
+	s := &Service{}
+	core.AssertNotPanics(t, func() { s.refreshWebMCPTools() })
+}
+
+func TestWebMCP_RefreshWebMCPTools_Good_AppliesLiveSnapshot(t *core.T) {
+	h := newWebMCPHarness(t)
+	c := core.New()
+	c.Action("window.eval_js", func(_ core.Context, _ core.Options) core.Result {
+		return core.Ok(guiwindow.EvalJSResult{Result: map[string]any{
+			"tools": []any{map[string]any{
+				"name":        "live_tool",
+				"description": "desc",
+				"inputSchema": map[string]any{"type": "object"},
+			}},
+		}})
+	})
+	h.service.ServiceRuntime = core.NewServiceRuntime[Options](c, Options{})
+
+	h.service.refreshWebMCPTools()
+
+	listed, err := h.clientSession.ListTools(core.Background(), nil)
+	core.AssertNoError(t, err)
+	core.AssertNotNil(t, listedTool(listed, "live_tool"),
+		"refreshWebMCPTools must pull + apply the WebView's current snapshot")
+}
+
+func TestWebMCP_RefreshWebMCPTools_Bad_EvalFails(t *core.T) {
+	h := newWebMCPHarness(t)
+	c := core.New()
+	c.Action("window.eval_js", func(_ core.Context, _ core.Options) core.Result {
+		return core.Fail(core.E("test", "eval unavailable", nil))
+	})
+	h.service.ServiceRuntime = core.NewServiceRuntime[Options](c, Options{})
+
+	core.AssertNotPanics(t, func() { h.service.refreshWebMCPTools() })
+
+	listed, err := h.clientSession.ListTools(core.Background(), nil)
+	core.AssertNoError(t, err)
+	core.AssertNil(t, listedTool(listed, "live_tool"))
+}
+
+// ─── webMCPText / webMCPErrorResult ─────────────────────────────────
+
+func TestWebMCP_WebMCPText_Good_StringPassesThrough(t *core.T) {
+	core.AssertEqual(t, "hello", webMCPText("hello"))
+}
+
+func TestWebMCP_WebMCPText_Ugly_NonStringIsJSONEncoded(t *core.T) {
+	got := webMCPText(map[string]any{"a": 1})
+	core.AssertContains(t, got, `"a":1`)
+}
+
+func TestWebMCP_WebMCPText_Bad_UnmarshalableFallsBackToSprintf(t *core.T) {
+	// channels cannot be JSON-marshalled — drives the core.Sprintf
+	// fallback branch rather than the JSON-encode branch.
+	got := webMCPText(make(chan int))
+	core.AssertNotEmpty(t, got)
+}
+
+func TestWebMCP_WebMCPErrorResult_Good(t *core.T) {
+	r := webMCPErrorResult("boom")
+	core.AssertTrue(t, r.IsError)
+	core.AssertEqual(t, 1, len(r.Content))
+	text, ok := r.Content[0].(*mcp.TextContent)
+	core.AssertTrue(t, ok)
+	core.AssertEqual(t, "boom", text.Text)
 }
