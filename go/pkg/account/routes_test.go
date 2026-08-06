@@ -213,6 +213,99 @@ func TestRoutes_CreateEndpoint_RequestIDOverriddenByServer_Ugly(t *core.T) {
 	core.AssertEqual(t, 36, len(echoed), "server-generated id MUST be 36-char UUID v4")
 }
 
+// --- Provision handler (Stage X.B) ---
+//
+// Only the fail-fast branches are exercised here — both reject before
+// Service.Provision reaches its Ed25519 keygen + iterated-S2K encrypt
+// (S2KCount 65011712), so these stay hermetic AND cheap. The happy
+// path through the real keygen/encrypt is pinned once, at the
+// service layer, by TestAccount_Provision_Good in provision_test.go;
+// duplicating that round-trip here would only add wall-clock cost
+// without adding coverage the service-level test doesn't already
+// give handleProvision's identical response-shaping code.
+
+func TestRoutes_ProvisionEndpoint_InvalidBody_Bad(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	eng := newTestEngine(t, svc)
+
+	rr := doPOST(eng, "/v1/account/provision", []byte("not-json-at-all"))
+
+	core.AssertEqual(t, http.StatusBadRequest, rr.Code, "malformed JSON → 400")
+	var env struct {
+		Success bool `json:"success"`
+		Error   struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	uR := core.JSONUnmarshal(rr.Body.Bytes(), &env)
+	core.AssertTrue(t, uR.OK)
+	core.AssertFalse(t, env.Success)
+	core.AssertEqual(t, "account.invalid_body", env.Error.Code)
+}
+
+func TestRoutes_ProvisionEndpoint_PassphraseRequired_Bad(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	eng := newTestEngine(t, svc)
+
+	body := core.JSONMarshal(subject.ProvisionInput{Passphrase: ""})
+	core.AssertTrue(t, body.OK)
+
+	rr := doPOST(eng, "/v1/account/provision", body.Value.([]byte))
+
+	core.AssertEqual(t, http.StatusBadRequest, rr.Code)
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	uR := core.JSONUnmarshal(rr.Body.Bytes(), &env)
+	core.AssertTrue(t, uR.OK)
+	core.AssertEqual(t, "account.provision.passphrase.required", env.Error.Code)
+}
+
+func TestRoutes_ProvisionEndpoint_Misconfigured_500(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil) // no SetServerKey call
+	eng := newTestEngine(t, svc)
+
+	body := core.JSONMarshal(subject.ProvisionInput{Passphrase: "any", RequestID: "x"})
+	core.AssertTrue(t, body.OK)
+
+	rr := doPOST(eng, "/v1/account/provision", body.Value.([]byte))
+
+	core.AssertEqual(t, http.StatusInternalServerError, rr.Code)
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	uR := core.JSONUnmarshal(rr.Body.Bytes(), &env)
+	core.AssertTrue(t, uR.OK)
+	core.AssertEqual(t, "account.provision.server_misconfigured", env.Error.Code)
+}
+
+func TestRoutes_ProvisionEndpoint_RequestIDOverriddenByServer_Ugly(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	eng := newTestEngine(t, svc)
+
+	const forgedID = "attacker-chosen-forensic-decoy-99999"
+	body := core.JSONMarshal(subject.ProvisionInput{
+		Passphrase: "", // fail-fast path keeps this cheap
+		RequestID:  forgedID,
+	})
+	core.AssertTrue(t, body.OK)
+
+	rr := doPOST(eng, "/v1/account/provision", body.Value.([]byte))
+
+	echoed := rr.Header().Get("X-Request-Id")
+	core.AssertNotEqual(t, "", echoed)
+	core.AssertNotEqual(t, forgedID, echoed,
+		"server-generated id MUST NOT equal caller-supplied forged id (Cerberus #1511)")
+}
+
 // --- Compile-time anchor: pkg/server.BootstrapPathScopes must list
 // our endpoint at the canonical path/scope tuple. This protects
 // against a silent rename in either side breaking the auth gate.
@@ -518,6 +611,29 @@ func TestHandleLock_BodyAccountIDOmittedUsesSession_Good(t *core.T) {
 		"omitted body account_id → 200 with session-bound id (Mantis #1587)")
 	core.AssertFalse(t, svc.HasUnlocked(fixtureAccountID),
 		"session-bound id MUST be the canonical source when body is empty")
+}
+
+// TestHandleLock_InvalidBody_400 — a bound session but malformed JSON
+// body → 400 account.invalid_body, before Service.Lock is ever
+// reached. No real account fixture is needed since ShouldBindJSON
+// fails before account_id is even consulted.
+func TestHandleLock_InvalidBody_400(t *core.T) {
+	_ = homeFixture(t)
+	svc := newUnlockable(t, "")
+	eng := newSessionEngine(t, svc, fixtureAccountID)
+
+	rr := doPOST(eng, "/v1/account/lock", []byte("not-json-at-all"))
+
+	core.AssertEqual(t, http.StatusBadRequest, rr.Code,
+		"malformed JSON body → 400, even with a bound session")
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	uR := core.JSONUnmarshal(rr.Body.Bytes(), &env)
+	core.AssertTrue(t, uR.OK)
+	core.AssertEqual(t, "account.invalid_body", env.Error.Code)
 }
 
 // TestHandleLock_NoSessionAccountIDReturns401_Bad — no

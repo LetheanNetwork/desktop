@@ -220,6 +220,154 @@ func TestSeal_BlobTooLarge_Bad(t *core.T) {
 	core.AssertEqual(t, "account.seal.blob.invalid", r.Code())
 }
 
+// TestSeal_BlobRequired_Bad exercises the len(Blob)==0 gate's
+// non-triggered fail-return (seal.go's blob_required branch) —
+// distinct from TestSeal_BlobTooLarge_Bad just above, which covers
+// the SHORT-BUT-NONZERO blob_invalid gate immediately below it. A
+// nil Blob and a too-short-but-present Blob are different validation
+// branches with different codes; both need their own pin.
+func TestSeal_BlobRequired_Bad(t *core.T) {
+	_ = homeFixture(t)
+	id, svc := seedMarkerAccount(t)
+
+	r := svc.Seal(subject.SealInput{
+		AccountID: id,
+		Version:   1,
+		Blob:      nil,
+	})
+
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, "account.seal.blob.required", r.Code())
+}
+
+// TestSeal_BlobRequired_LockoutTriggered_Bad drives `threshold`
+// consecutive empty-blob Seal attempts against the SAME account —
+// the threshold-th attempt must trip the shared lockout counter and
+// surface account_locked from WITHIN the blob_required gate's own
+// inline triggered branch. TestRoutes_SealEndpoint_AccountLocked_423
+// already exercises the version_unsupported gate's triggered branch;
+// recordSealFailure is shared machinery, but each call site's
+// triggered block is separate source (mirrors unlock.go's repeated-
+// inline-block shape), so covering one doesn't cover the others.
+func TestSeal_BlobRequired_LockoutTriggered_Bad(t *core.T) {
+	_ = homeFixture(t)
+	id, svc := seedMarkerAccount(t)
+	threshold, _, _ := subject.LockoutConstantsForTest()
+
+	var last core.Result
+	for i := 0; i < threshold; i++ {
+		last = svc.Seal(subject.SealInput{AccountID: id, Version: 1, Blob: nil})
+	}
+
+	core.AssertFalse(t, last.OK)
+	core.AssertEqual(t, "account.seal.account_locked", last.Code(),
+		"threshold-th empty-blob attempt MUST trip + surface account_locked from the blob_required gate's own triggered branch")
+}
+
+// --- Seal — Bad: structural disk-state failures (rootR / curR / pubR) ---
+//
+// The three tests below construct on-disk shapes Service.Create
+// never produces on its own, forcing Seal down paths its happy-path
+// fixture (seedMarkerAccount) can't reach: paths.Root() blocked by a
+// stray file, paths.ReadVersion(private.key) blocked by a directory
+// where a file belongs, and the Cerberus #1471 "structurally
+// impossible" state (private.key present, public.key absent).
+
+// TestSeal_LetheanRootBlockedByFile_Bad forces paths.Root()'s
+// MkdirAll to fail — a plain file already occupies ~/Lethean itself
+// — hitting Seal's rootR not-OK short-circuit, the earliest disk-
+// touching failure in Seal, reachable only once version + blob have
+// already passed validation.
+func TestSeal_LetheanRootBlockedByFile_Bad(t *core.T) {
+	home := homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, core.WriteFile(
+		core.PathJoin(home, "Lethean"), []byte("blocking file"), 0o600,
+	).OK)
+
+	r := svc.Seal(subject.SealInput{
+		AccountID: fixtureAccountID,
+		Version:   1,
+		Blob:      fixtureSealBlob(),
+	})
+
+	core.AssertFalse(t, r.OK, "paths.Root() MkdirAll over an existing file MUST fail closed")
+}
+
+// TestSeal_PrivateKeyPathIsDirectory_Bad forces paths.ReadVersion to
+// fail structurally — private.key resolves to a DIRECTORY, not a
+// file — hitting Seal's curR not-OK branch, the generic "read error
+// surfaces as write_failed" path, distinct from the NONEXISTENT
+// (Mtime.IsZero() → account.not_found) branch every other Bad test
+// in this file exercises via a simply-absent private.key.
+func TestSeal_PrivateKeyPathIsDirectory_Bad(t *core.T) {
+	home := homeFixture(t)
+	svc := subject.NewService(nil)
+	id := fixtureAccountID
+	dir := core.PathJoin(home, "Lethean", "account", id)
+	core.AssertTrue(t, core.MkdirAll(core.PathJoin(dir, "private.key"), 0o700).OK)
+
+	r := svc.Seal(subject.SealInput{
+		AccountID: id,
+		Version:   1,
+		Blob:      fixtureSealBlob(),
+	})
+
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, "account.seal.write_failed", r.Code())
+}
+
+// TestSeal_PrivateKeyPathIsDirectory_LockoutTriggered_Bad drives
+// `threshold` consecutive Seal attempts against a private.key path
+// that is a directory (forcing paths.ReadVersion to fail every time)
+// so the threshold-th attempt trips the shared lockout counter from
+// within the curR-not-OK gate's own inline triggered branch.
+func TestSeal_PrivateKeyPathIsDirectory_LockoutTriggered_Bad(t *core.T) {
+	home := homeFixture(t)
+	svc := subject.NewService(nil)
+	id := fixtureAccountID
+	dir := core.PathJoin(home, "Lethean", "account", id)
+	core.AssertTrue(t, core.MkdirAll(core.PathJoin(dir, "private.key"), 0o700).OK)
+	threshold, _, _ := subject.LockoutConstantsForTest()
+
+	var last core.Result
+	for i := 0; i < threshold; i++ {
+		last = svc.Seal(subject.SealInput{AccountID: id, Version: 1, Blob: fixtureSealBlob()})
+	}
+
+	core.AssertFalse(t, last.OK)
+	core.AssertEqual(t, "account.seal.account_locked", last.Code())
+}
+
+// TestSeal_PublicKeyMissing_Bad constructs the "structurally
+// impossible" state Cerberus #1471's leaf invariant is meant to rule
+// out — private.key present, public.key absent — by writing the
+// on-disk shape directly rather than going through Service.Create
+// (which always writes public.key before private.key). Exercises
+// Seal's pubR not-OK branch, which treats the state as write_failed
+// so an operator can triage the directory rather than the caller
+// silently sailing past a torn write.
+func TestSeal_PublicKeyMissing_Bad(t *core.T) {
+	home := homeFixture(t)
+	svc := subject.NewService(nil)
+	id := fixtureAccountID
+	dir := core.PathJoin(home, "Lethean", "account", id)
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+	core.AssertTrue(t, core.WriteFile(
+		core.PathJoin(dir, "private.key"), []byte("marker-or-whatever"), 0o600,
+	).OK)
+	// Deliberately NOT writing public.key.
+
+	r := svc.Seal(subject.SealInput{
+		AccountID: id,
+		Version:   1,
+		Blob:      fixtureSealBlob(),
+	})
+
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, "account.seal.write_failed", r.Code())
+}
+
 // --- Seal — Bad: version != 1 → version_unsupported + lockout-tick ---
 
 func TestSeal_VersionInvalid_Bad(t *core.T) {
@@ -650,6 +798,77 @@ func TestRoutes_SealEndpoint_AlreadySealed_409(t *core.T) {
 	rr2 := doPUT(eng, "/v1/account/"+id+"/seal", body2.Value.([]byte))
 	core.AssertEqual(t, http.StatusConflict, rr2.Code,
 		"different-blob retry → 409 (RFC §2.5 seal-once)")
+}
+
+// TestRoutes_SealEndpoint_VersionUnsupported_400 drives an
+// unsupported-version Seal through the HTTP route (not the direct
+// Service call the equivalent Service-level test uses) so
+// statusForSealCode's shared 400 case-block — which handleSeal only
+// reaches via a Service-returned code, never the URL/body validation
+// short-circuits above it — is actually exercised.
+func TestRoutes_SealEndpoint_VersionUnsupported_400(t *core.T) {
+	_ = homeFixture(t)
+	id, svc := seedMarkerAccount(t)
+	eng := newTestEngine(t, svc)
+
+	body := core.JSONMarshal(subject.SealInput{
+		AccountID: id,
+		Version:   2, // unsupported in v1
+		Blob:      fixtureSealBlob(),
+	})
+	core.AssertTrue(t, body.OK)
+
+	rr := doPUT(eng, "/v1/account/"+id+"/seal", body.Value.([]byte))
+
+	core.AssertEqual(t, http.StatusBadRequest, rr.Code)
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	uR := core.JSONUnmarshal(rr.Body.Bytes(), &env)
+	core.AssertTrue(t, uR.OK)
+	core.AssertEqual(t, "account.seal.version_unsupported", env.Error.Code)
+}
+
+// TestRoutes_SealEndpoint_AccountLocked_423 drives the shared lockout
+// counter past threshold via cheap direct Service.Seal calls, then
+// issues the final over-threshold attempt through the HTTP route so
+// statusForSealCode's account_locked → 423 branch (only reachable via
+// a Service-returned code) is exercised end-to-end.
+func TestRoutes_SealEndpoint_AccountLocked_423(t *core.T) {
+	_ = homeFixture(t)
+	id, svc := seedMarkerAccount(t)
+	eng := newTestEngine(t, svc)
+	threshold, _, _ := subject.LockoutConstantsForTest()
+
+	for i := 0; i < threshold; i++ {
+		r := svc.Seal(subject.SealInput{
+			AccountID: id,
+			Version:   2, // unsupported — ticks the shared lockout counter
+			Blob:      fixtureSealBlob(),
+		})
+		core.AssertFalse(t, r.OK)
+	}
+
+	body := core.JSONMarshal(subject.SealInput{
+		AccountID: id,
+		Version:   1,
+		Blob:      fixtureSealBlob(),
+	})
+	core.AssertTrue(t, body.OK)
+
+	rr := doPUT(eng, "/v1/account/"+id+"/seal", body.Value.([]byte))
+
+	core.AssertEqual(t, http.StatusLocked, rr.Code)
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	uR := core.JSONUnmarshal(rr.Body.Bytes(), &env)
+	core.AssertTrue(t, uR.OK)
+	core.AssertEqual(t, "account.seal.account_locked", env.Error.Code)
 }
 
 // --- distinguishDecrypt single-timing-bucket pins (Mantis #1531) ---

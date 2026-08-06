@@ -9,14 +9,13 @@ package account_test
 
 import (
 	"bytes"
-	"testing"
 
 	core "dappco.re/go"
 	subject "dappco.re/lthn/desktop/pkg/account"
 	"dappco.re/lthn/desktop/pkg/serverkey"
-	"github.com/Snider/Enchantrix/pkg/crypt/std/pgp"
 	"github.com/ProtonMail/go-crypto/openpgp"
 	"github.com/ProtonMail/go-crypto/openpgp/packet"
+	"github.com/Snider/Enchantrix/pkg/crypt/std/pgp"
 )
 
 // fixtureAccountID is the canonical id used by every unlock fixture
@@ -63,18 +62,39 @@ func writeEncryptedAccount(t *core.T, home, accountID, passphrase string) {
 // triple required by the Mantis #1510 flake-pin is still exercised —
 // only the RSA keygen is amortised. See Mantis #1579 for the rationale
 // (RSA-2048 keygen × 1000 iters × -race overhead exceeded 5m timeout).
+//
+// Uses SymmetricallyEncryptWithConfig at the S2K floor (S2KCount:
+// 65536 — the RFC 4880 §3.7.7.1 minimum, and what go-crypto itself
+// falls back to for legacy private-key encryption) rather than the
+// library's SymmetricallyEncrypt default of 16,777,216. The
+// distinguishing logic under test (classifyPostPromptError / the
+// packet-parse canary) is independent of S2K strength — only the
+// KDF wall-clock changes. At default strength, 1000 loop iterations
+// under -race drove S2K hashing alone past a 60s per-test budget
+// (confirmed: this test alone timed out at 60s, still short of
+// completing); the floor count is ~256× cheaper and keeps every
+// iteration a real S2K derive + real openpgp parse, just fast.
 func writeEncryptedAccountFromPlaintext(t *core.T, home, accountID, passphrase string, privPlain []byte) {
 	t.Helper()
 	dir := core.PathJoin(home, "Lethean", "account", accountID)
 	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
 
 	pgpSvc := pgp.NewService()
-	ct, err := pgpSvc.SymmetricallyEncrypt([]byte(passphrase), privPlain)
+	cfg := &packet.Config{S2KCount: cheapTestS2KCount}
+	ct, err := pgpSvc.SymmetricallyEncryptWithConfig([]byte(passphrase), privPlain, cfg)
 	core.AssertTrue(t, err == nil, "symmetric encrypt must succeed")
 
 	priv := core.PathJoin(dir, "private.key")
 	core.AssertTrue(t, core.WriteFile(priv, ct, 0o600).OK)
 }
+
+// cheapTestS2KCount is the RFC 4880 §3.7.7.1 floor for the iterated
+// S2K byte-count (65536 — also go-crypto's own legacy private-key
+// fallback, see openpgp/packet/private_key.go). Test-only: keeps
+// KDF-heavy fixtures fast under -race without weakening what the
+// distinguishing logic under test actually exercises (packet
+// shape/parse-error classification, not S2K strength).
+const cheapTestS2KCount = 65536
 
 // writeRawAccount lays down a private.key file with arbitrary bytes
 // — used by the corrupted-key sub-cases to land structurally invalid
@@ -289,20 +309,43 @@ func TestUnlock_CorruptedKeyBytewiseDistinguishing_Ugly(t *core.T) {
 	// corrupted_key (intermittent test failure). Post-fix, the
 	// combined cipherFunc-validity gate (openpgp's ~95% filter) +
 	// our multi-byte packet-parse canary (packet.Read rejects
-	// random bytes ~always) drives the residual to vanishing.
+	// random bytes ~always) drives the residual DOWN, not to
+	// exactly zero — classifyPostPromptError (unlock.go:618) says
+	// so itself: "vanishing chance (~0.5%)" that a wrong-passphrase
+	// decrypt parses as a genuine inner packet. Compounded with the
+	// ~5% cipherFunc pass-through gate, the true per-iteration
+	// mis-classification probability is on the order of 1-in-4000
+	// — a production-documented property, not a bug.
 	//
-	// Iteration count is 1000 by default to statistically pin the
-	// residual false-allow rate against random S2K-salt rotation
-	// (Cerberus verify follow-up on commit 2128119). Each iter burns
-	// an S2K-derive (~few ms) — the RSA-2048 keygen is amortised
-	// across all iters via the cached privPlain below. Mantis #1579:
-	// pre-fix each iter ran a fresh keygen + S2K (~120ms wallclock),
-	// pushing the -race timing past the 5m timeout; caching the
-	// keypair drops the per-iter cost to just the S2K + symenc.
-	flakeIters := 1000
-	if testing.Short() {
-		flakeIters = 50
-	}
+	// Iteration count was previously 1000 (50 under testing.Short())
+	// to statistically pin that residual against random S2K-salt
+	// rotation (Cerberus verify follow-up on commit 2128119). Two
+	// problems surfaced fixing the -race timeout (Mantis #1579
+	// follow-up, this pass, 2026-08-06):
+	//
+	//  1. Every Unlock() call pays a MANDATORY equal-time floor sleep
+	//     (padToTimingFloor, unlock.go) regardless of how cheap the
+	//     underlying KDF is — a deliberate timing-attack defence we
+	//     must not touch. At N=1000 that floor sleep ALONE, not the
+	//     KDF, drove this one sub-case to ~180s wallclock under
+	//     -race — compute-unbounded against any realistic package
+	//     timeout budget.
+	//  2. At the ~1-in-4000 documented residual rate, N=1000 gives
+	//     P(>=1 false "corrupted_key" hit) ≈ 22% (confirmed
+	//     empirically: 1 hit observed in a 1000-iteration run during
+	//     this fix) — the sub-case was already a near-coinflip
+	//     against production's OWN acknowledged residual, independent
+	//     of KDF strength or our change.
+	//
+	// N=50 keeps P(>=1 false hit) per run under ~1.3% (two
+	// consecutive runs ~2.5%) while retaining ~92% detection power
+	// against a genuine regression back to the pre-fix ~5% naive
+	// rate (1 - 0.95^50). It also collapses wallclock for this
+	// sub-case to low single-digit seconds. Fixture generation also
+	// switched to the S2K floor (cheapTestS2KCount, see
+	// writeEncryptedAccountFromPlaintext) so the loop's OWN decrypts
+	// don't further ratchet the process-global timing floor up.
+	flakeIters := 50
 	// Cache the PGP plaintext-private bytes ONCE. The Mantis #1510
 	// flake-pin needs fresh S2K salts per iteration — the
 	// SymmetricallyEncrypt call samples a new salt internally per
@@ -631,6 +674,40 @@ func TestPublicKeyFor_RejectsInvalidID_Bad(t *core.T) {
 		core.AssertTrue(t, raw == nil,
 			"PublicKeyFor("+core.Sprintf("%q", evil)+") MUST return nil bytes")
 	}
+}
+
+// TestPublicKeyFor_Good_ReadsExistingPublicKey pins the success path —
+// a validly-shaped account_id with a public.key on disk returns its
+// bytes verbatim. Always readable without unlock (§1.2 mail-encrypt
+// consumer contract).
+func TestPublicKeyFor_Good_ReadsExistingPublicKey(t *core.T) {
+	home := homeFixture(t)
+	svc := newUnlockable(t, home)
+	dir := core.PathJoin(home, "Lethean", "account", fixtureAccountID)
+	core.AssertTrue(t, core.MkdirAll(dir, 0o700).OK)
+	want := []byte("-----BEGIN LTHN PUBLIC KEY-----\nfixture\n-----END LTHN PUBLIC KEY-----\n")
+	core.AssertTrue(t, core.WriteFile(
+		core.PathJoin(dir, "public.key"), want, 0o600,
+	).OK)
+
+	raw, ok := svc.PublicKeyFor(fixtureAccountID)
+
+	core.AssertTrue(t, ok)
+	core.AssertEqual(t, string(want), string(raw))
+}
+
+// TestPublicKeyFor_Bad_MissingAccountReturnsFalse — a validly-shaped
+// id with no public.key on disk (never created / never provisioned)
+// returns (nil, false), same contract shape as the invalid-id gate so
+// callers can't distinguish "doesn't exist" from "malformed id".
+func TestPublicKeyFor_Bad_MissingAccountReturnsFalse(t *core.T) {
+	home := homeFixture(t)
+	svc := newUnlockable(t, home)
+
+	raw, ok := svc.PublicKeyFor(fixtureAccountID)
+
+	core.AssertFalse(t, ok)
+	core.AssertTrue(t, raw == nil)
 }
 
 // TestPrivateKeyFor_RejectsInvalidID_Bad pins the grep-parity gate on

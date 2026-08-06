@@ -237,6 +237,45 @@ func TestAccount_AccountStatus_Good_FreshInstall(t *core.T) {
 	core.AssertEqual(t, "", out.AccountID)
 }
 
+// TestAccount_AccountStatus_Bad_NonDirEntryIgnored — a stray file
+// sitting directly under ~/Lethean/account/ (never a real account
+// shape) must be skipped, not mistaken for an account directory.
+func TestAccount_AccountStatus_Bad_NonDirEntryIgnored(t *core.T) {
+	home := homeFixture(t)
+	svc := subject.NewService(nil)
+	accountRoot := core.PathJoin(home, "Lethean", "account")
+	core.AssertTrue(t, core.MkdirAll(accountRoot, 0o700).OK)
+	core.AssertTrue(t, core.WriteFile(
+		core.PathJoin(accountRoot, "stray.txt"), []byte("not an account"), 0o600,
+	).OK)
+
+	r := svc.AccountStatus()
+
+	core.AssertTrue(t, r.OK)
+	out := r.Value.(subject.AccountStatus)
+	core.AssertFalse(t, out.HasAccount)
+}
+
+// TestAccount_AccountStatus_Bad_AccountRootNotADirectory — the
+// ~/Lethean/account path itself exists but is a plain file (corrupt
+// install / manual tamper). Stat succeeds so the early not-found
+// short-circuit doesn't fire, but the subsequent ReadDir must fail
+// closed to HasAccount=false rather than propagate an error.
+func TestAccount_AccountStatus_Bad_AccountRootNotADirectory(t *core.T) {
+	home := homeFixture(t)
+	svc := subject.NewService(nil)
+	core.AssertTrue(t, core.MkdirAll(core.PathJoin(home, "Lethean"), 0o700).OK)
+	core.AssertTrue(t, core.WriteFile(
+		core.PathJoin(home, "Lethean", "account"), []byte("not a directory"), 0o600,
+	).OK)
+
+	r := svc.AccountStatus()
+
+	core.AssertTrue(t, r.OK)
+	out := r.Value.(subject.AccountStatus)
+	core.AssertFalse(t, out.HasAccount)
+}
+
 // --- Create — #1574 audit emission ---
 
 // TestCreate_EmitsAuditEvent_Good pins the Mantis #1574 (MED) /
@@ -371,4 +410,68 @@ func TestService_Cutover_Create_RefuseOverwrite_Bad(t *core.T) {
 	core.AssertFalse(t, r.OK, "Create MUST refuse to overwrite existing private.key")
 	core.AssertEqual(t, "account.exists", r.Code(),
 		"refuse-to-overwrite MUST surface account.exists (Cerberus #1460 (a))")
+}
+
+// TestAccount_Create_Bad_AccountDirBlockedByFile — a plain file
+// already occupies the canonical account directory path (no
+// private.key inside it, since it isn't a directory at all, so the
+// refuse-to-overwrite leaf check doesn't fire) — MkdirAll for the
+// account directory itself must fail closed rather than silently
+// writing the private.key leaf into a directory it never actually
+// created.
+func TestAccount_Create_Bad_AccountDirBlockedByFile(t *core.T) {
+	home := homeFixture(t)
+	svc := subject.NewService(nil)
+	in := validInput()
+	blockedDir := core.PathJoin(home, "Lethean", "account", in.AccountID)
+	core.AssertTrue(t, core.MkdirAll(
+		core.PathJoin(home, "Lethean", "account"), 0o700,
+	).OK)
+	core.AssertTrue(t, core.WriteFile(blockedDir, []byte("in the way"), 0o600).OK)
+
+	r := svc.Create(in)
+
+	core.AssertFalse(t, r.OK,
+		"MkdirAll over an existing file MUST fail, not silently proceed")
+}
+
+// --- Register / lifecycle (Wails3 + core.WithName contract) ---
+
+func TestRegister_GoodReturnsUsableService(t *core.T) {
+	r := subject.Register(nil)
+
+	core.RequireTrue(t, r.OK)
+	svc, ok := r.Value.(*subject.Service)
+	core.RequireTrue(t, ok)
+	core.AssertTrue(t, svc != nil)
+}
+
+func TestService_ServiceName_Good(t *core.T) {
+	svc := subject.NewService(nil)
+
+	core.AssertEqual(t, "Account", svc.ServiceName())
+}
+
+func TestService_ServiceStartup_GoodIsNoOp(t *core.T) {
+	svc := subject.NewService(nil)
+
+	r := svc.ServiceStartup(core.Background(), nil)
+
+	core.AssertTrue(t, r.OK)
+}
+
+func TestService_ServiceShutdown_GoodClearsUnlockedState(t *core.T) {
+	_ = homeFixture(t)
+	svc := subject.NewService(nil)
+	subject.SeedUnlockedForTest(svc, fixtureAccountID, []byte("fixture-priv-bytes"))
+	core.AssertTrue(t, svc.HasUnlocked(fixtureAccountID))
+
+	r := svc.ServiceShutdown()
+
+	core.AssertTrue(t, r.OK)
+	core.AssertFalse(t, svc.HasUnlocked(fixtureAccountID))
+
+	// Idempotent — a second shutdown must not panic on nil maps.
+	second := svc.ServiceShutdown()
+	core.AssertTrue(t, second.OK)
 }

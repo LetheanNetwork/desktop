@@ -117,3 +117,25 @@ func LockoutHasEntryForTest(s *Service, accountID string) bool {
 func LockoutConstantsForTest() (threshold int, windowSeconds int64, cooldownSeconds int64) {
 	return lockoutThreshold, lockoutWindowSeconds, lockoutCooldownSeconds
 }
+
+// SeedUnlockedForTest plants raw bytes directly into the in-memory
+// unlocked-private-key map, bypassing the real Unlock decrypt path.
+// Used by ServiceShutdown's state-clearing test so it doesn't have to
+// pay a real PGP keygen + iterated-S2K decrypt (seconds of wall-clock
+// per call across this package's already-heavy suite) just to prove a
+// trivial "shutdown nils the maps" behaviour that has nothing to do
+// with the decrypt path itself.
+//
+// Usage example (from service_test.go):
+//
+//	subject.SeedUnlockedForTest(svc, "abc123", []byte("fixture-priv"))
+func SeedUnlockedForTest(s *Service, accountID string, priv []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unlocked == nil {
+		s.unlocked = map[string][]byte{}
+	}
+	cp := make([]byte, len(priv))
+	copy(cp, priv)
+	s.unlocked[accountID] = cp
+}
