@@ -32,6 +32,13 @@ func MatchSearchExported(r RunbookRecord, q string) bool {
 	return matchSearch(r, q)
 }
 
+// HasRecordSuffixExported exposes hasRecordSuffix for external test
+// packages — covers both the legacy ".md" and encrypted ".lthn"
+// record-file suffixes recognised by countMdFiles' seed short-circuit.
+func HasRecordSuffixExported(nm string) bool {
+	return hasRecordSuffix(nm)
+}
+
 // WriteRecordExported exposes writeRecord for service-tier tests that
 // need to bypass the wails IsValidID gate and exercise the WithinDir
 // belt directly (Mantis #1607).

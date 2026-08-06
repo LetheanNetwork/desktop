@@ -222,6 +222,91 @@ func TestCollectSuggestions_EmptyBad(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// tierSeverity / tierNote — default branches
+// ---------------------------------------------------------------------------
+
+func TestTierSeverity_Good(t *testing.T) {
+	cases := []struct {
+		tier int
+		want string
+	}{
+		{TierSoftAgreement, "low"},
+		{TierHollowFlattery, "medium"},
+		{TierSubmission, "high"},
+	}
+	for _, c := range cases {
+		if got := tierSeverity(c.tier); got != c.want {
+			t.Errorf("tierSeverity(%d) = %q, want %q", c.tier, got, c.want)
+		}
+	}
+}
+
+func TestTierSeverity_UnknownTierBad(t *testing.T) {
+	// TierAppropriateEmpathy (0) and any out-of-range tier fall
+	// through to the "info" default — CollectSuggestions never
+	// actually calls tierSeverity with these (the sycophancy loop
+	// only ranges over SycophancyPatterns whose Tier is always 1-3),
+	// so the default branch is only reachable by calling the
+	// unexported helper directly.
+	for _, tier := range []int{TierAppropriateEmpathy, 99, -1} {
+		if got := tierSeverity(tier); got != "info" {
+			t.Errorf("tierSeverity(%d) = %q, want %q", tier, got, "info")
+		}
+	}
+}
+
+func TestTierNote_Good(t *testing.T) {
+	cases := []struct {
+		tier int
+		want string
+	}{
+		{TierSoftAgreement, "mild agreement filler, common in AI responses"},
+		{TierHollowFlattery, "excessive praise without substantive content"},
+		{TierSubmission, "complete deference, model yielding to perceived authority"},
+	}
+	for _, c := range cases {
+		if got := tierNote(c.tier); got != c.want {
+			t.Errorf("tierNote(%d) = %q, want %q", c.tier, got, c.want)
+		}
+	}
+}
+
+func TestTierNote_UnknownTierBad(t *testing.T) {
+	for _, tier := range []int{TierAppropriateEmpathy, 99, -1} {
+		if got := tierNote(tier); got != "natural acknowledgement" {
+			t.Errorf("tierNote(%d) = %q, want %q", tier, got, "natural acknowledgement")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// clamp
+// ---------------------------------------------------------------------------
+
+func TestClamp_Good(t *testing.T) {
+	if got := clamp(50, 0, 100); got != 50 {
+		t.Errorf("clamp(50, 0, 100) = %v, want 50 (within range, unchanged)", got)
+	}
+}
+
+func TestClamp_BelowFloorBad(t *testing.T) {
+	// DetectSycophancy only ever calls clamp with a non-negative
+	// totalWeight, so the v < lo branch is otherwise dead from the
+	// exported surface — pin it directly since clamp is a general
+	// two-sided helper (its own doc comment promises "the inclusive
+	// range [lo, hi]", not just a ceiling).
+	if got := clamp(-5, 0, 100); got != 0 {
+		t.Errorf("clamp(-5, 0, 100) = %v, want 0 (floor)", got)
+	}
+}
+
+func TestClamp_AboveCeilingBad(t *testing.T) {
+	if got := clamp(150, 0, 100); got != 100 {
+		t.Errorf("clamp(150, 0, 100) = %v, want 100 (ceiling)", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TierLabel
 // ---------------------------------------------------------------------------
 

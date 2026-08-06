@@ -3,6 +3,7 @@
 package documents
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -60,6 +61,82 @@ func newTestServiceNoGate(t *testing.T) *Service {
 	t.Setenv("HOME", t.TempDir())
 	c := core.New()
 	return NewService(c)
+}
+
+// unwritableHOME repoints $HOME at a directory this process cannot
+// write into, so paths.Root()'s MkdirAll("$HOME/Lethean") fails —
+// the earliest link in docsDir's resolution chain (docsDir ->
+// paths.Root) that can break under a real, denied-path fault rather
+// than a mock. Restores the mode via t.Cleanup so the t.TempDir()
+// harness can still remove the directory afterwards.
+func unwritableHOME(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	if err := os.Chmod(home, 0o500); err != nil {
+		t.Fatalf("chmod home read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(home, 0o700) })
+	t.Setenv("HOME", home)
+}
+
+// TestRegister_WrapsNewService covers the Core-registration entry
+// point wired via core.WithName("office-documents", documents.
+// Register) in app.go — every other test in this package constructs
+// the Service directly via NewService, so Register itself had no
+// direct exercise.
+func TestRegister_WrapsNewService(t *testing.T) {
+	r := Register(nil)
+	if !r.OK {
+		t.Fatalf("Register: %v", r.Value)
+	}
+	svc, ok := r.Value.(*Service)
+	if !ok {
+		t.Fatalf("Register value = %T, want *Service", r.Value)
+	}
+	if got := svc.ServiceName(); got != "Documents" {
+		t.Errorf("Register-constructed service name = %q, want %q", got, "Documents")
+	}
+}
+
+// TestDocsDir_Bad_UnwritableHome covers docsDir's root.OK failure
+// branch — every other test in this package resolves docsDir()
+// successfully under a fresh writable $HOME.
+func TestDocsDir_Bad_UnwritableHome(t *testing.T) {
+	unwritableHOME(t)
+	r := docsDir()
+	if r.OK {
+		t.Fatal("docsDir with an unwritable HOME should fail")
+	}
+}
+
+// TestReadBodyHash_Ugly_DirectoryPath covers readBodyHash's !r.OK
+// branch (paths.ReadVersion itself failing). TestReadBodyHash_Bad's
+// nonexistent-file case takes a DIFFERENT path inside ReadVersion —
+// ENOENT there returns Ok(ReadOutput{}) with a zero Mtime, which
+// readBodyHash's second guard (zero-Mtime -> "file does not exist")
+// catches, not this one. A directory path makes ReadVersion itself
+// return Fail (paths.ReadVersion rejects "path resolves to a
+// directory"), which is the only other way to reach 511-513.
+func TestReadBodyHash_Ugly_DirectoryPath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dirR := docsDir()
+	if !dirR.OK {
+		t.Fatalf("docsDir: %v", dirR.Error())
+	}
+	_, _, err := readBodyHash(dirR.Value.(string))
+	if err == nil {
+		t.Fatal("readBodyHash on a directory path should fail")
+	}
+}
+
+// TestSessionUnlocked_Bad_NilGate covers sessionUnlocked's nil-gate
+// branch directly — every other test drives it indirectly via
+// Save/Delete's post-write emit guard with a gate already wired.
+func TestSessionUnlocked_Bad_NilGate(t *testing.T) {
+	svc := newTestServiceNoGate(t)
+	if svc.sessionUnlocked() {
+		t.Error("sessionUnlocked on a Service with no gate wired must report false")
+	}
 }
 
 // TestScan_Empty — empty docs dir produces an empty record list.

@@ -128,3 +128,174 @@ func TestEventConstants(t *testing.T) {
 		}
 	}
 }
+
+// TestSubscribe_Good — a subscriber registered via Subscribe receives
+// a DocChanged broadcast fired through c.ACTION. Mirrors
+// pkg/tasks/events_test.go's TestEvents_Subscribe_Good shape for the
+// equivalent documents.Subscribe helper.
+func TestSubscribe_Good(t *testing.T) {
+	c := core.New()
+
+	var got []DocChanged
+	var mu core.Mutex
+	Subscribe(c, func(ev DocChanged) {
+		mu.Lock()
+		got = append(got, ev)
+		mu.Unlock()
+	})
+
+	c.ACTION(DocChanged{Kind: "created", Slug: "release-notes", At: core.Now()})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 {
+		t.Fatalf("subscriber received %d events, want 1", len(got))
+	}
+	if got[0].Kind != "created" || got[0].Slug != "release-notes" {
+		t.Errorf("subscriber event = %+v, want Kind=created Slug=release-notes", got[0])
+	}
+}
+
+// TestSubscribe_Ugly_IgnoresOtherMessageTypes covers the type-
+// assertion miss path — a broadcast of an unrelated message type must
+// not reach fn.
+func TestSubscribe_Ugly_IgnoresOtherMessageTypes(t *testing.T) {
+	c := core.New()
+
+	called := false
+	Subscribe(c, func(DocChanged) { called = true })
+
+	type otherMessage struct{ X int }
+	c.ACTION(otherMessage{X: 1})
+
+	if called {
+		t.Error("Subscribe's fn must not fire for a non-DocChanged message")
+	}
+}
+
+// --- List / Get behavioural coverage ---
+//
+// Every test above this point in the file only checks field shapes;
+// none actually calls svc.List or svc.Get. These drive the real
+// scan/filter/limit and lookup/error paths.
+
+// TestList_Good_MultipleDocsFilteredByState covers List's per-record
+// scan loop (toRow + append), the State filter's continue branch, and
+// the matching-record append branch in one corpus: two "draft" docs
+// and one "ready" doc, filtered down to State="draft".
+func TestList_Good_MultipleDocsFilteredByState(t *testing.T) {
+	svc := newTestService(t)
+	base := testSlug(t)
+	slugA, slugB, slugC := base+"-a", base+"-b", base+"-c"
+	for _, s := range []string{slugA, slugB, slugC} {
+		cleanupDoc(t, s)
+	}
+
+	for _, in := range []CreateInput{
+		{Slug: slugA, Body: "# A\n", State: "draft"},
+		{Slug: slugB, Body: "# B\n", State: "draft"},
+		{Slug: slugC, Body: "# C\n", State: "ready"},
+	} {
+		if r := svc.Create(in); !r.OK {
+			t.Fatalf("Create(%s) failed: %v", in.Slug, r.Error())
+		}
+	}
+
+	r := svc.List(ListInput{State: "draft"})
+	if !r.OK {
+		t.Fatalf("List failed: %v", r.Error())
+	}
+	out := r.Value.(ListOutput)
+	if out.Total != 3 {
+		t.Errorf("List(draft).Total = %d, want 3 (unfiltered library count)", out.Total)
+	}
+	if len(out.Docs) != 2 {
+		t.Fatalf("List(draft).Docs = %d, want 2 (slugC's ready state must be filtered out)", len(out.Docs))
+	}
+	for _, d := range out.Docs {
+		if d.State != "draft" {
+			t.Errorf("List(draft) returned a non-draft doc: %+v", d)
+		}
+	}
+}
+
+// TestList_Good_LimitTruncates covers the Limit>0 truncation branch.
+func TestList_Good_LimitTruncates(t *testing.T) {
+	svc := newTestService(t)
+	base := testSlug(t)
+	slugs := []string{base + "-a", base + "-b", base + "-c"}
+	for _, s := range slugs {
+		cleanupDoc(t, s)
+		if r := svc.Create(CreateInput{Slug: s, Body: "# Doc\n"}); !r.OK {
+			t.Fatalf("Create(%s) failed: %v", s, r.Error())
+		}
+	}
+
+	r := svc.List(ListInput{Limit: 1})
+	if !r.OK {
+		t.Fatalf("List failed: %v", r.Error())
+	}
+	out := r.Value.(ListOutput)
+	if len(out.Docs) != 1 {
+		t.Errorf("List(Limit: 1).Docs = %d, want 1 (truncated from 3)", len(out.Docs))
+	}
+	if out.Total != 3 {
+		t.Errorf("List(Limit: 1).Total = %d, want 3 (unfiltered library count)", out.Total)
+	}
+}
+
+// TestList_Bad_ScanFails covers List's scanDocs error propagation —
+// an unwritable HOME breaks docsDir deep inside scanDocs. A bare
+// *Service{} is fine here: List is read-only and never touches
+// s.core or the session gate.
+func TestList_Bad_ScanFails(t *testing.T) {
+	unwritableHOME(t)
+	svc := &Service{}
+	r := svc.List(ListInput{})
+	if r.OK {
+		t.Fatal("List with an unwritable HOME should fail")
+	}
+}
+
+// TestGet_Bad_InvalidSlug covers Get's paths.IsValidID guard.
+func TestGet_Bad_InvalidSlug(t *testing.T) {
+	svc := newTestService(t)
+	r := svc.Get(GetInput{Slug: "../etc/passwd"})
+	if r.OK {
+		t.Fatal("Get with a traversal slug should fail")
+	}
+}
+
+// TestGet_Bad_NotFound covers Get's loadDoc error branch for a
+// validly-shaped but nonexistent slug.
+func TestGet_Bad_NotFound(t *testing.T) {
+	svc := newTestService(t)
+	r := svc.Get(GetInput{Slug: "totally-nonexistent-document-slug"})
+	if r.OK {
+		t.Fatal("Get with a nonexistent slug should fail")
+	}
+}
+
+// TestGet_Good_ReturnsBody is the sibling Good case establishing that
+// the two Bad tests above are testing real failure, not a universally
+// broken Get.
+func TestGet_Good_ReturnsBody(t *testing.T) {
+	svc := newTestService(t)
+	slug := testSlug(t)
+	cleanupDoc(t, slug)
+	if r := svc.Create(CreateInput{Slug: slug, Body: "# Hello\n\nBody text.", State: "draft"}); !r.OK {
+		t.Fatalf("Create failed: %v", r.Error())
+	}
+
+	r := svc.Get(GetInput{Slug: slug})
+	if !r.OK {
+		t.Fatalf("Get failed: %v", r.Error())
+	}
+	detail := r.Value.(DocDetail)
+	if detail.State != "draft" {
+		t.Errorf("Get.State = %q, want draft", detail.State)
+	}
+	if detail.Body == "" {
+		t.Error("Get.Body must not be empty")
+	}
+}

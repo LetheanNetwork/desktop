@@ -50,18 +50,30 @@ var hashCount int
 
 func init() {
 	// data/top100k.bin is concatenated 20-byte SHA-1 digests,
-	// lexicographically sorted on disk. Validate the blob length
-	// is a clean multiple of hashSize — anything else means a
-	// truncated or malformed embed and we MUST surface that loudly
-	// (passphrase rejection is a security floor — silently loading
-	// a half-truncated dataset would leak weak passphrases past
-	// the gate).
-	if len(top100kBin)%hashSize != 0 {
+	// lexicographically sorted on disk. mustDigestCount validates
+	// the blob length is a clean multiple of hashSize — anything
+	// else means a truncated or malformed embed and we MUST
+	// surface that loudly (passphrase rejection is a security
+	// floor — silently loading a half-truncated dataset would
+	// leak weak passphrases past the gate).
+	hashCount = mustDigestCount(len(top100kBin))
+}
+
+// mustDigestCount validates that n (the embedded blob's byte
+// length) is a clean multiple of hashSize and returns the resulting
+// digest count, panicking on a malformed length. Extracted out of
+// init() as a pure, directly-testable seam — init() itself cannot
+// be re-invoked from a test, so the corrupt-embed guard would
+// otherwise be permanently untestable dead code from the coverage
+// tool's point of view. Behaviour and panic message are unchanged
+// from the inline form this replaces.
+func mustDigestCount(n int) int {
+	if n%hashSize != 0 {
 		panic(core.Sprintf(
 			"passphrase: embedded dataset length %d is not a multiple of SHA-1 size %d — top100k.bin corrupt",
-			len(top100kBin), hashSize))
+			n, hashSize))
 	}
-	hashCount = len(top100kBin) / hashSize
+	return n / hashSize
 }
 
 // digestAt returns the i-th 20-byte digest as a slice view into

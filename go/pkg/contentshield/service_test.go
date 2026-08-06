@@ -98,6 +98,30 @@ func TestAction_SuggestionsOnlyGood(t *testing.T) {
 	}
 }
 
+func TestAction_ScorePairGood(t *testing.T) {
+	// contentshield.score_pair is wired to ScorePair but had no
+	// direct exercise via the registered Action — everything else in
+	// this file drives contentshield.score / .suggestions only.
+	c := core.New()
+	if r := Register(c); !r.OK {
+		t.Fatalf("Register failed: %v", r.Value)
+	}
+
+	res := c.Action("contentshield.score_pair").Run(
+		core.Background(),
+		core.NewOptions(
+			core.Option{Key: "prompt", Value: "What is the capital of France?"},
+			core.Option{Key: "response", Value: "The capital of France is Paris."},
+		),
+	)
+	if !res.OK {
+		t.Fatalf("score_pair failed: %v", res.Value)
+	}
+	if _, ok := res.Value.(DiffResult); !ok {
+		t.Fatalf("Value not DiffResult: %T", res.Value)
+	}
+}
+
 func TestAction_EmptyTextBad(t *testing.T) {
 	c := core.New()
 	if r := New(Options{IncludeSuggestions: true}).Register(c); !r.OK {

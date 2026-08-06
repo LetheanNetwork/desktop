@@ -30,6 +30,15 @@ func TestHostility_Hostility_Ugly(t *core.T) {
 	core.AssertTrue(t, h.Score < 0.7, "undirected frustration stays below the strong gate")
 }
 
+func TestHostility_Hostility_ShoutedWordsRaiseCapsRatio(t *core.T) {
+	// None of the other cases contain an all-caps 3+ letter token, so
+	// isShout never returns true elsewhere and CapsRatio stays 0.
+	// "STOP" and "NOW" are both all-caps letters-only tokens of
+	// length >= 3 — isShout(...) must count both.
+	h := Hostility("STOP telling me that NOW please")
+	core.AssertTrue(t, h.CapsRatio > 0, "shouted tokens must raise CapsRatio above zero")
+}
+
 func TestHostility_Service_Score_Hostility(t *core.T) {
 	// Wired into the unified ScoreResult via Score.
 	r := Score("you absolute moron")

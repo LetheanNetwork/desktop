@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	core "dappco.re/go"
-	subject "dappco.re/lthn/desktop/pkg/runbooks"
 	"dappco.re/lthn/desktop/pkg/paths"
+	subject "dappco.re/lthn/desktop/pkg/runbooks"
 )
 
 // stubSessionGate is the test double for the consumer-defined
@@ -168,6 +168,46 @@ func TestServiceName_Runbooks(t *testing.T) {
 	svc := subject.NewService(nil)
 	if got := svc.ServiceName(); got != "Runbooks" {
 		t.Errorf("want 'Runbooks' got %q", got)
+	}
+}
+
+// TestRegister_WrapsNewService covers the Core-registration entry
+// point wired via core.WithName("runbooks", runbooks.Register) in
+// app.go — every other test in this package constructs the Service
+// directly with subject.NewService, so Register itself had no direct
+// exercise.
+func TestRegister_WrapsNewService(t *testing.T) {
+	r := subject.Register(nil)
+	if !r.OK {
+		t.Fatalf("Register: %s", r.Error())
+	}
+	svc, ok := r.Value.(*subject.Service)
+	if !ok {
+		t.Fatalf("Register value = %T, want *subject.Service", r.Value)
+	}
+	if got := svc.ServiceName(); got != "Runbooks" {
+		t.Errorf("Register-constructed service name = %q, want %q", got, "Runbooks")
+	}
+}
+
+// TestHasRecordSuffix covers both record-file suffixes countMdFiles'
+// seed short-circuit recognises (legacy ".md" and encrypted ".lthn")
+// plus the neither-suffix miss.
+func TestHasRecordSuffix(t *testing.T) {
+	cases := []struct {
+		name string
+		nm   string
+		want bool
+	}{
+		{"legacy md", "rotate-runtime-api-keys.md", true},
+		{"encrypted lthn", "rotate-runtime-api-keys.lthn", true},
+		{"unrelated file", "README.txt", false},
+		{"no extension", "rotate-runtime-api-keys", false},
+	}
+	for _, c := range cases {
+		if got := subject.HasRecordSuffixExported(c.nm); got != c.want {
+			t.Errorf("%s: HasRecordSuffixExported(%q) = %v, want %v", c.name, c.nm, got, c.want)
+		}
 	}
 }
 
