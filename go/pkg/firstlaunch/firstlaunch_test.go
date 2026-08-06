@@ -82,3 +82,25 @@ func TestFirstLaunch_Detect_Ugly_CorruptYAML(t *core.T) {
 	core.AssertTrue(t, state.HasConfigFile)
 	core.AssertFalse(t, state.HasRoutes, "corrupt yaml should be treated as 'no routes'")
 }
+
+// TestFirstLaunch_Detect_Ugly_UnreadableYAML is real fault injection
+// (chmod, not a fake): the file EXISTS (pathExists/Stat sees it, so
+// HasConfigFile stays true) but is unreadable, driving yamlHasRoutes's
+// core.ReadFile !r.OK branch — distinct from the corrupt-parse branch
+// above. The content deliberately HAS routes so a false positive
+// (falling through to the parse path) would be caught by HasRoutes
+// wrongly flipping true. Permission restored in cleanup so
+// t.TempDir()'s own removal doesn't trip over it.
+func TestFirstLaunch_Detect_Ugly_UnreadableYAML(t *core.T) {
+	_, conf, _ := flFixture(t)
+	path := core.PathJoin(conf, lthnYAML)
+	yaml := []byte("routes:\n  default:\n    base_url: http://localhost:11434/v1\n")
+	core.AssertTrue(t, core.WriteFile(path, yaml, 0o644).OK)
+	core.RequireTrue(t, core.Chmod(path, 0o000).OK)
+	t.Cleanup(func() { _ = core.Chmod(path, 0o644) })
+
+	r := firstlaunch.Detect(nil)
+	state := r.Value.(firstlaunch.State)
+	core.AssertTrue(t, state.HasConfigFile, "Stat still sees the file — only read access is denied")
+	core.AssertFalse(t, state.HasRoutes, "unreadable yaml should be treated as 'no routes'")
+}
