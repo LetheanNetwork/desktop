@@ -193,3 +193,49 @@ func TestBundle_RandomPassword_Good(t *core.T) {
 	// TestBundle_SubstituteRandom_* below via the route Target path
 	// (which also runs through the substitution flow).
 }
+
+// TestBundle_SubstituteRandom_Ugly_MalformedTokensLeftLiteral drives
+// substituteRandom's three "give up and strip/leave" branches
+// (persistSetting is the only call site) — a missing closing paren, a
+// non-numeric length, and a zero/negative length. None of these should
+// panic or infinite-loop; persistSetting is best-effort so RegisterBundle
+// still succeeds regardless of what store.set does with the value.
+func TestBundle_SubstituteRandom_Ugly_MalformedTokensLeftLiteral(t *core.T) {
+	c := newPluginCore(t)
+	t.Cleanup(func() { _ = plugin.UnregisterBundle(c, "x") })
+
+	r := plugin.RegisterBundle(c, "x", plugin.BundleInput{
+		Settings: []plugin.BundleSettingEntry{
+			{Key: "unterminated", Type: "secret", Default: "${random.password(16)"},
+			{Key: "non-numeric", Type: "secret", Default: "${random.password(abc)}"},
+			{Key: "zero-length", Type: "secret", Default: "${random.password(0)}"},
+		},
+	})
+	core.AssertTrue(t, r.OK, "malformed random tokens are best-effort, not a hard failure")
+}
+
+// ─── slug (via actionRouteName, reached through RegisterBundle) ────────
+
+func TestBundle_Slug_Good_DigitsPreserved(t *core.T) {
+	c := newPluginCore(t)
+	t.Cleanup(func() { _ = plugin.UnregisterBundle(c, "x") })
+
+	r := plugin.RegisterBundle(c, "x", plugin.BundleInput{
+		Routes: []plugin.BundleRouteEntry{{Title: "Open v2 Chat", Target: "/chat"}},
+	})
+	core.RequireTrue(t, r.OK)
+	names := r.Value.([]string)
+	core.AssertContains(t, names, "lthn.route.x.open-v2-chat")
+}
+
+func TestBundle_Slug_Ugly_AllSymbolsFallsBackToUntitled(t *core.T) {
+	c := newPluginCore(t)
+	t.Cleanup(func() { _ = plugin.UnregisterBundle(c, "x") })
+
+	r := plugin.RegisterBundle(c, "x", plugin.BundleInput{
+		Routes: []plugin.BundleRouteEntry{{Title: "!!!", Target: "/x"}},
+	})
+	core.RequireTrue(t, r.OK)
+	names := r.Value.([]string)
+	core.AssertContains(t, names, "lthn.route.x.untitled")
+}

@@ -287,6 +287,40 @@ func TestProxy_StripsAndInjectsCSP_OnErrorResponse_Good(t *core.T) {
 	}
 }
 
+// TestProxy_Name_Good pins the RouteGroup surface name used in
+// /v1/openapi.
+func TestProxy_Name_Good(t *core.T) {
+	pg := subject.NewProxyGroup()
+	core.AssertEqual(t, "plugin", pg.Name())
+}
+
+// TestProxy_BasePath_Good pins the mount prefix every plugin route
+// lives under.
+func TestProxy_BasePath_Good(t *core.T) {
+	pg := subject.NewProxyGroup()
+	core.AssertEqual(t, "/v1/api/plugin", pg.BasePath())
+}
+
+// TestProxy_Has_Good_ReflectsSetAndDelete verifies Has() tracks the
+// target table across Set/Delete.
+func TestProxy_Has_Good_ReflectsSetAndDelete(t *core.T) {
+	pg := subject.NewProxyGroup()
+	core.AssertFalse(t, pg.Has("testpkg"))
+	pg.Set("testpkg", "http://127.0.0.1:1")
+	core.AssertTrue(t, pg.Has("testpkg"))
+	pg.Delete("testpkg")
+	core.AssertFalse(t, pg.Has("testpkg"))
+}
+
+// TestProxy_Set_Bad_MalformedTargetURLIsSilentlyIgnored covers Set's
+// url.Parse failure branch — a malformed target must not panic or
+// register a broken proxy entry.
+func TestProxy_Set_Bad_MalformedTargetURLIsSilentlyIgnored(t *core.T) {
+	pg := subject.NewProxyGroup()
+	pg.Set("bad", "http://[::1]:not-a-port")
+	core.AssertFalse(t, pg.Has("bad"))
+}
+
 // TestProxy_StripsAndInjectsCSP_NoCSPHeader_Good covers the path
 // where the plugin webapp DOESN'T set a CSP header at all — the
 // proxy must still inject the restrictive policy so an attacker

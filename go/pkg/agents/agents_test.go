@@ -139,3 +139,113 @@ func TestCli_Service_JsonLine_Ugly(t *core.T) {
 func TestCli_Service_ResolveBinary_Good(t *core.T) {
 	core.AssertTrue(t, resolveAgentBinary() != "", "resolveAgentBinary always returns a path or the bare name")
 }
+
+// --- agents.go: New / Register / ServiceName / ServiceStartup ---
+
+func TestAgents_New_Good_DefaultsToDefaultMCPURL(t *core.T) {
+	svc := New(Config{})
+	core.AssertEqual(t, DefaultMCPURL, svc.mcpURL)
+	core.AssertEqual(t, "", svc.mcpToken)
+}
+
+func TestAgents_New_Good_ExplicitMCPURLPreserved(t *core.T) {
+	svc := New(Config{MCPURL: "http://127.0.0.1:9999", MCPToken: "tok"})
+	core.AssertEqual(t, "http://127.0.0.1:9999", svc.mcpURL)
+	core.AssertEqual(t, "tok", svc.mcpToken)
+}
+
+func TestAgents_New_Ugly_WhitespaceMCPURLFallsBackToDefault(t *core.T) {
+	svc := New(Config{MCPURL: "   "})
+	core.AssertEqual(t, DefaultMCPURL, svc.mcpURL)
+}
+
+func TestAgents_Register_Good(t *core.T) {
+	c := core.New()
+	r := Register(c)
+	core.RequireTrue(t, r.OK)
+	svc, ok := r.Value.(*Service)
+	core.RequireTrue(t, ok)
+	core.AssertSame(t, c, svc.core)
+}
+
+func TestAgents_Service_ServiceName_Good(t *core.T) {
+	svc := New(Config{})
+	core.AssertEqual(t, "Agents", svc.ServiceName())
+}
+
+func TestAgents_Service_ServiceStartup_Good_NoOp(t *core.T) {
+	svc := New(Config{})
+	r := svc.ServiceStartup(core.Background(), nil)
+	core.AssertTrue(t, r.OK)
+}
+
+// --- agents.go: StartChannels / ServiceShutdown ---
+
+func TestAgents_Service_ServiceShutdown_Good_NoListenerIsNoOp(t *core.T) {
+	svc := New(Config{})
+	r := svc.ServiceShutdown()
+	core.AssertTrue(t, r.OK)
+}
+
+func TestAgents_Service_StartChannels_Bad_NilCoreIsNoOp(t *core.T) {
+	svc := New(Config{})
+	svc.StartChannels(nil, "tok")
+	core.AssertNil(t, svc.listener, "nil core must not wire a listener")
+}
+
+// TestAgents_Service_StartChannels_Good_IdempotentAndStoppable points the
+// listener at a real (loopback) fixture server per channels_test.go's
+// channelTestServer, starts it, proves sync.Once makes a second call a
+// no-op (mcpToken from the second call is NOT applied), then stops it
+// via ServiceShutdown so the background goroutine doesn't outlive the
+// test.
+func TestAgents_Service_StartChannels_Good_IdempotentAndStoppable(t *core.T) {
+	srv := channelTestServer("") // empty stream body — connects, drains, idles
+	defer srv.Close()
+
+	c := core.New()
+	svc := New(Config{MCPURL: srv.URL})
+	svc.StartChannels(c, "first-token")
+	core.RequireTrue(t, svc.listener != nil)
+	core.AssertEqual(t, "first-token", svc.mcpToken)
+
+	svc.StartChannels(c, "second-token") // sync.Once — must not replace state
+	core.AssertEqual(t, "first-token", svc.mcpToken, "second StartChannels call is a no-op")
+
+	r := svc.ServiceShutdown()
+	core.AssertTrue(t, r.OK)
+}
+
+// TestAgents_Service_StartChannels_Good_RelaysChannelEventViaEmitEvent
+// proves the relay closure StartChannels wires up (channel listener ->
+// gui.EmitEvent(c, "lthn:agents:channel", ...)) actually runs end to
+// end against a real fixture channel notification. gui.EmitEvent calls
+// c.Action("events.emit") — registering a real handler under that name
+// gives a synchronous, race-free signal the instant the relay fires,
+// rather than a blind sleep. dappco.re/go/render/display/webkit's
+// EmitEvent needs no WebView to do this (it just dispatches a Core
+// action), so this is fully hermetic.
+func TestAgents_Service_StartChannels_Good_RelaysChannelEventViaEmitEvent(t *core.T) {
+	const evt = "event: message\n" +
+		`data: {"jsonrpc":"2.0","method":"notifications/claude/channel","params":{"channel":"agent.blocked","data":{}}}` +
+		"\n\n"
+	srv := channelTestServer(evt)
+	defer srv.Close()
+
+	c := core.New()
+	relayed := make(chan string, 1)
+	c.Action("events.emit", func(_ core.Context, opts core.Options) core.Result {
+		relayed <- "fired"
+		return core.Ok(nil)
+	})
+
+	svc := New(Config{MCPURL: srv.URL})
+	svc.StartChannels(c, "")
+	t.Cleanup(func() { _ = svc.ServiceShutdown() })
+
+	select {
+	case <-relayed:
+	case <-core.After(2 * core.Second):
+		t.Fatal("relay closure never called gui.EmitEvent within 2s")
+	}
+}

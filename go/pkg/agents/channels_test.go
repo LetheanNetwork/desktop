@@ -72,6 +72,122 @@ func TestChannels_Listener_Consume_Ugly(t *core.T) {
 	core.AssertFalse(t, relayed, "non-channel notification must not relay")
 }
 
+// TestChannels_Listener_Initialize_Bad_NonOKStatus covers initialize's
+// own status-check branch (distinct from the unreachable-server /
+// client.Do-error case TestChannels_Listener_Consume_Bad already
+// covers) — the POST reaches a live server that rejects it outright.
+func TestChannels_Listener_Initialize_Bad_NonOKStatus(t *core.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	l := newChannelListener(srv.URL, "", func(string, any) {})
+	connected, err := l.consume(context.Background())
+	core.AssertFalse(t, connected)
+	core.RequireTrue(t, err != nil)
+	core.AssertTrue(t, core.Contains(err.Error(), "initialize status 500"))
+}
+
+// TestChannels_Listener_Consume_Bad_GetStreamNonOKStatus covers the SSE
+// GET's own status-check branch: initialize succeeds (POST 200) but the
+// stream GET is rejected.
+func TestChannels_Listener_Consume_Bad_GetStreamNonOKStatus(t *core.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+	}))
+	defer srv.Close()
+
+	l := newChannelListener(srv.URL, "", func(string, any) {})
+	connected, err := l.consume(context.Background())
+	core.AssertFalse(t, connected)
+	core.RequireTrue(t, err != nil)
+	core.AssertTrue(t, core.Contains(err.Error(), "stream GET status 503"))
+}
+
+// TestChannels_Listener_Dispatch_Bad_MalformedJSONSkipped is real fault
+// injection: an SSE payload that isn't valid JSON must be silently
+// skipped, never relayed, never panic.
+func TestChannels_Listener_Dispatch_Bad_MalformedJSONSkipped(t *core.T) {
+	const evt = "event: message\ndata: {not json\n\n"
+	srv := channelTestServer(evt)
+	defer srv.Close()
+
+	relayed := false
+	l := newChannelListener(srv.URL, "", func(string, any) { relayed = true })
+	connected, err := l.consume(context.Background())
+	core.AssertTrue(t, connected)
+	core.AssertTrue(t, err == nil)
+	core.AssertFalse(t, relayed)
+}
+
+// TestChannels_Listener_SetBearer_Good_InjectsAuthorizationHeader covers
+// setBearer's non-empty branch (every other test in this file uses an
+// empty bearer, the unit-test default) by capturing the header a real
+// fixture server actually received.
+func TestChannels_Listener_SetBearer_Good_InjectsAuthorizationHeader(t *core.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			gotAuth = r.Header.Get("Authorization")
+		}
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+	}))
+	defer srv.Close()
+
+	l := newChannelListener(srv.URL, "sk-lthn-secret", func(string, any) {})
+	_, _ = l.consume(context.Background())
+	core.AssertEqual(t, "Bearer sk-lthn-secret", gotAuth)
+}
+
+// TestChannels_Listener_Run_Bad_UnreachableBacksOffThenStopsOnCancel
+// drives run()'s reconnect loop against an unreachable endpoint: the
+// first iteration fails to connect (Debug log + no backoff reset +
+// select's time.After branch), the second iteration's select picks the
+// ctx.Done() branch once the outer timeout fires. Real time passes
+// (minBackoff is an internal 1s const, no seam to shrink it) but the
+// whole test is bounded well under 2s.
+func TestChannels_Listener_Run_Bad_UnreachableBacksOffThenStopsOnCancel(t *core.T) {
+	l := newChannelListener("http://127.0.0.1:1/mcp", "", func(string, any) {})
+	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
+	defer cancel()
+	l.run(ctx) // must return on its own once ctx's deadline passes
+	core.AssertTrue(t, ctx.Err() != nil)
+}
+
+// TestChannels_Listener_Run_Good_ConnectedResetsBackoffThenStopsOnCancel
+// covers run()'s "connected == true -> reset backoff" branch, which the
+// unreachable-server backoff test above never reaches (that one never
+// connects). The fixture serves one event then ends the stream, so
+// consume() returns (true, nil); the outer ctx's short timeout then
+// stops run() via the select's ctx.Done() case.
+func TestChannels_Listener_Run_Good_ConnectedResetsBackoffThenStopsOnCancel(t *core.T) {
+	const evt = "event: message\n" +
+		`data: {"jsonrpc":"2.0","method":"notifications/claude/channel","params":{"channel":"x","data":{}}}` +
+		"\n\n"
+	srv := channelTestServer(evt)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	l := newChannelListener(srv.URL, "", func(string, any) {})
+	l.run(ctx)
+	core.AssertTrue(t, ctx.Err() != nil)
+}
+
 // TestChannels_Listener_Delivery_Good is the end-to-end proof the httptest
 // mock can't give: a REAL coremcp server (with the claude/channel capability)
 // broadcasts via ChannelSend — exactly as lthn-agent serve does — and the
