@@ -78,3 +78,18 @@ func TestRunner_WrapInnerFail_RealError_Good(t *core.T) {
 	core.AssertTrue(t, len(out.Error()) > 0,
 		"wrapInnerFail must produce a non-empty error string")
 }
+
+// TestRunner_FirstString_Good_ReturnsHead — firstString's non-empty
+// branch: the WForceDeleteTier1 audit-Meta convention is "first
+// referencing route name". Only the empty-slice branch was reachable
+// through the existing WForceDeleteTier1 test fixtures.
+func TestRunner_FirstString_Good_ReturnsHead(t *core.T) {
+	core.AssertEqual(t, "route-a", firstString([]string{"route-a", "route-b"}))
+}
+
+// TestRunner_FirstString_Bad_EmptySlice — nil/empty input returns ""
+// rather than panicking on an out-of-range index.
+func TestRunner_FirstString_Bad_EmptySlice(t *core.T) {
+	core.AssertEqual(t, "", firstString(nil))
+	core.AssertEqual(t, "", firstString([]string{}))
+}
