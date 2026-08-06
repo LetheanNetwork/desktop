@@ -124,6 +124,69 @@ func TestCatalogue_List_UglyFailsClosedWithoutMediumOrRoots(t *core.T) {
 	core.AssertEqual(t, CatalogueUnavailable, CatalogueErrorCodeOf(missingPrefix))
 }
 
+// TestCatalogueFailure_Error_Good covers CatalogueFailure.Error() on a
+// real instance — the example/happy-path tests only ever inspect the
+// code via CatalogueErrorCodeOf, so the Error() string accessor itself
+// (part of the `error` interface contract) had never been called
+// directly.
+func TestCatalogueFailure_Error_Good(t *core.T) {
+	failure := &CatalogueFailure{Code: CatalogueUnavailable, Message: "unavailable"}
+	core.AssertEqual(t, "unavailable", failure.Error())
+}
+
+// TestCatalogueFailure_Error_NilReceiver_Bad — Error() on a nil
+// *CatalogueFailure must return "" rather than panicking, matching
+// the nil-safe convention CoreGO error wrappers use throughout.
+func TestCatalogueFailure_Error_NilReceiver_Bad(t *core.T) {
+	var failure *CatalogueFailure
+	core.AssertEqual(t, "", failure.Error())
+}
+
+func TestCatalogueFailure_Unwrap_Good(t *core.T) {
+	cause := core.NewError("root cause")
+	failure := &CatalogueFailure{Code: CatalogueUnavailable, Cause: cause}
+	core.AssertEqual(t, cause, failure.Unwrap())
+}
+
+func TestCatalogueFailure_Unwrap_NilReceiver_Bad(t *core.T) {
+	var failure *CatalogueFailure
+	core.AssertTrue(t, failure.Unwrap() == nil)
+}
+
+// TestCatalogueErrorCodeOf_OKResult_Good — an OK result has no error
+// to classify; CodeOf must short-circuit to "" without inspecting
+// result.Err().
+func TestCatalogueErrorCodeOf_OKResult_Good(t *core.T) {
+	core.AssertEqual(t, CatalogueErrorCode(""), CatalogueErrorCodeOf(core.Ok(nil)))
+}
+
+// TestCatalogueErrorCodeOf_ForeignError_Bad — a Fail Result wrapping
+// an error that is NOT a *CatalogueFailure must classify as "" (the
+// core.As branch misses) rather than panicking on a bad type assert.
+func TestCatalogueErrorCodeOf_ForeignError_Bad(t *core.T) {
+	foreign := core.Fail(core.NewError("some unrelated failure"))
+	core.AssertEqual(t, CatalogueErrorCode(""), CatalogueErrorCodeOf(foreign))
+}
+
+// TestValidModelName_ControlCharacters_Bad — a name containing a raw
+// control byte (below 0x20) or DEL (0x7f) must be rejected even
+// though it contains none of the other banned characters.
+func TestValidModelName_ControlCharacters_Bad(t *core.T) {
+	core.AssertFalse(t, validModelName("model\x01name"))
+	core.AssertFalse(t, validModelName("model\x7fname"))
+}
+
+// TestValidModelName_TooLong_Bad — a name over maxModelNameBytes must
+// be rejected.
+func TestValidModelName_TooLong_Bad(t *core.T) {
+	long := strings.Repeat("a", maxModelNameBytes+1)
+	core.AssertFalse(t, validModelName(long))
+}
+
+func TestValidModelName_Valid_Good(t *core.T) {
+	core.AssertTrue(t, validModelName("gemma-4-e2b"))
+}
+
 func TestCatalogue_List_UglyRejectsMoreThanBoundedEntries(t *core.T) {
 	medium := coreio.NewMemoryMedium()
 	for index := 0; index < maxCatalogueEntries+1; index++ {
