@@ -129,22 +129,40 @@ func BenchmarkWChatStream_TokenLoop_40Tokens(b *core.B) {
 // from the surrounding channel-range/builder cost that
 // BenchmarkWChatStream_TokenLoop_40Tokens measures together. Every
 // token in a stream calls this exact code path once.
+//
+// The four map values are read through indirected vars (not string
+// literals): a literal string constant boxed into `any` is a case the
+// compiler can statically intern (zero extra allocation beyond the
+// map itself), which is NOT what streamRouterChat's real call site
+// does — there every value is a runtime variable (callID, token.Text,
+// providerRoute.Name/ModelID). Using literals here undercounts by
+// ~4 allocs/op; the indirection keeps this bench honest.
 func BenchmarkEmitChatEvent_Delta(b *core.B) {
 	s := &Service{eventEmitter: func(string, any) core.Result { return core.Ok(nil) }}
+	callID, delta, provider, model := benchDeltaFields()
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		r := s.emitChatEvent(eventChatDelta, map[string]any{
-			"call_id":  "bench-call",
-			"delta":    "quick ",
-			"provider": "lem",
-			"model":    "bench-model",
+			"call_id":  callID,
+			"delta":    delta,
+			"provider": provider,
+			"model":    model,
 		})
 		if !r.OK {
 			b.Fatal(r.Error())
 		}
 	}
+}
+
+// benchDeltaFields returns the four field values as runtime variables
+// (never inlined back to constants at the call site) — see
+// BenchmarkEmitChatEvent_Delta's comment for why this matters.
+//
+//go:noinline
+func benchDeltaFields() (callID, delta, provider, model string) {
+	return "bench-call", "quick ", "lem", "bench-model"
 }
 
 // BenchmarkRouterForSelector_Empty measures the fast path every
