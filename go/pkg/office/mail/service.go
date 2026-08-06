@@ -35,6 +35,7 @@ import (
 	"dappco.re/lthn/desktop/pkg/office/internal/safedir"
 	"dappco.re/lthn/desktop/pkg/paths"
 	"github.com/Snider/Enchantrix/pkg/crypt/std/pgp"
+	imapclient "github.com/emersion/go-imap/v2/imapclient"
 	"gopkg.in/yaml.v3"
 )
 
@@ -151,6 +152,17 @@ type Service struct {
 	// live in fetchBodyFromIMAP when §4.2 lazy-fetch lands. Tests
 	// set this to a closure returning canned RFC822 bytes.
 	bodyFetchOverride func(FetchBodyInput) ([]byte, error)
+
+	// imapDialOverride lets tests substitute fetchFolder's connection
+	// step with a dial against an in-memory IMAP server (e.g.
+	// github.com/emersion/go-imap/v2/imapserver/imapmemserver) run
+	// over a real 127.0.0.1:0 TLS listener, so the fetch/parse/
+	// UIDVALIDITY-rotation/thread-append logic in fetchFolder gets
+	// real coverage without weakening imapConnect's own strict TLS
+	// discipline (imapConnect itself is untouched — it always builds
+	// its own bare *imapclient.Options{} with no injectable TLS
+	// config, matching production exactly). nil in production.
+	imapDialOverride func(*MailAccount, string) (*imapclient.Client, error)
 }
 
 // imapConn is one pooled IMAP connection with its LRU timestamp.
