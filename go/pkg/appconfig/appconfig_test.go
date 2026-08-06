@@ -134,10 +134,17 @@ func TestWebviewWindowOptions_Ugly_TrayAndTearOffPreserveProfiles(t *core.T) {
 	core.AssertTrue(t, tray.Mac.WebviewPreferences.AllowsBackForwardNavigationGestures.IsSet())
 	core.AssertFalse(t, tray.Mac.WebviewPreferences.AllowsBackForwardNavigationGestures.Get())
 
-	core.AssertEqual(t, 1440, tearOff.Width)
-	core.AssertEqual(t, 900, tearOff.Height)
+	// One application, not a second desktop: the shell's chrome, the shell's
+	// invisible title bar, and a minimum an application window can actually
+	// honour — a carried size below the declared minimum never arrives.
+	core.AssertEqual(t, 900, tearOff.Width)
+	core.AssertEqual(t, 640, tearOff.Height)
+	core.AssertEqual(t, 320, tearOff.MinWidth)
+	core.AssertEqual(t, 320, tearOff.MinHeight)
 	core.AssertTrue(t, tearOff.Frameless)
 	core.AssertTrue(t, tearOff.EnableFileDrop)
+	core.AssertTrue(t, tearOff.DefaultContextMenuDisabled)
+	core.AssertEqual(t, 36, tearOff.Mac.InvisibleTitleBarHeight)
 	core.AssertFalse(t, tearOff.AlwaysOnTop)
 	core.AssertFalse(t, tearOff.Hidden)
 }
