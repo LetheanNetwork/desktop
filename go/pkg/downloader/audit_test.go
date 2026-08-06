@@ -312,3 +312,24 @@ func TestDownloader_AuditMeta_NoRawBearer_Bad(t *core.T) {
 		}
 	}
 }
+
+// TestDomainOnly_Good — a well-formed URL reduces to its lowercase
+// hostname with no path/query/fragment/port.
+func TestDomainOnly_Good(t *core.T) {
+	core.AssertEqual(t, "hf.co", domainOnly("https://HF.co/foo/resolve/main/x.gguf?token=secret"))
+}
+
+// TestDomainOnly_Bad — empty and unparseable inputs both degrade to
+// "" rather than panicking.
+func TestDomainOnly_Bad(t *core.T) {
+	core.AssertEqual(t, "", domainOnly(""))
+	core.AssertEqual(t, "", domainOnly("   "))
+	core.AssertEqual(t, "", domainOnly("://not a url"))
+}
+
+// TestDomainOnly_Ugly — a bare relative path (no scheme/host) parses
+// without error but carries no hostname, so domainOnly still yields
+// "".
+func TestDomainOnly_Ugly(t *core.T) {
+	core.AssertEqual(t, "", domainOnly("/just/a/path"))
+}

@@ -257,7 +257,13 @@ func fetchHFTree(apiURL string) ([]hfTreeEntry, error) {
 		return nil, core.E("downloader.hf", "tree body read failed",
 			bodyR.Value.(error))
 	}
-	body, _ := bodyR.Value.([]byte)
+	// core.ReadAll's Result.Value is `string`, NOT []byte — a
+	// `Value.([]byte)` cast silently returns nil here, so the JSON
+	// decode below always saw an empty payload and masked every real
+	// HF tree response as "contract drift" (same bug class already
+	// fixed in pkg/vi/pr_fetch.go's doFetch — see that file's comment).
+	bodyStr, _ := bodyR.Value.(string)
+	body := []byte(bodyStr)
 
 	var entries []hfTreeEntry
 	if r := core.JSONUnmarshal(body, &entries); !r.OK {

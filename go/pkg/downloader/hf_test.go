@@ -20,6 +20,9 @@
 package downloader
 
 import (
+	"net/http"
+	"net/http/httptest"
+
 	core "dappco.re/go"
 
 	"dappco.re/lthn/desktop/pkg/audit"
@@ -246,4 +249,79 @@ func TestDownloader_HFManifest_FileNotInTree_Bad(t *core.T) {
 	core.AssertFalse(t, r.OK,
 		"file missing from tree MUST return failure")
 	core.AssertTrue(t, core.Contains(r.Error(), "downloader.hf.file_not_found"))
+}
+
+// --- fetchHFTree — the real network path (hfTreeFetcher left nil) ---
+//
+// Every ResolveHFManifest test above bypasses fetchHFTree's httpClient
+// body entirely via the hfTreeFetcher seam. These tests drive the seam
+// closed (nil, production default) and swap the package-private
+// httpClient var to a hermetic TLS server so the real GET + status +
+// bounded-read + JSON-decode logic executes for real.
+
+// withRealHTTPClient swaps httpClient for the duration of the test and
+// ensures hfTreeFetcher is nil so fetchHFTree takes the production
+// network path rather than the test seam.
+func withRealHTTPClient(t *core.T, client *http.Client) {
+	t.Helper()
+	origClient := httpClient
+	origFetcher := hfTreeFetcher
+	httpClient = client
+	hfTreeFetcher = nil
+	t.Cleanup(func() {
+		httpClient = origClient
+		hfTreeFetcher = origFetcher
+	})
+}
+
+func TestDownloader_FetchHFTree_Good(t *core.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"type":"file","path":"model.gguf","size":2048,` +
+			`"lfs":{"sha256":"` + "a3f5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6071829" + `","size":2048}}]`))
+	}))
+	defer ts.Close()
+	withRealHTTPClient(t, ts.Client())
+
+	entries, err := fetchHFTree(ts.URL)
+	core.RequireNoError(t, err)
+	core.RequireTrue(t, len(entries) == 1)
+	core.AssertEqual(t, "model.gguf", entries[0].Path)
+	core.AssertEqual(t, "a3f5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6071829", entries[0].LFS.SHA256)
+}
+
+func TestDownloader_FetchHFTree_Bad_Unauthorized(t *core.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer ts.Close()
+	withRealHTTPClient(t, ts.Client())
+
+	_, err := fetchHFTree(ts.URL)
+	core.AssertError(t, err)
+	core.AssertContains(t, err.Error(), "private repo or token required")
+}
+
+func TestDownloader_FetchHFTree_Bad_ServerError(t *core.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+	withRealHTTPClient(t, ts.Client())
+
+	_, err := fetchHFTree(ts.URL)
+	core.AssertError(t, err)
+	core.AssertContains(t, err.Error(), "500")
+}
+
+func TestDownloader_FetchHFTree_Ugly_MalformedJSON(t *core.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{not json`))
+	}))
+	defer ts.Close()
+	withRealHTTPClient(t, ts.Client())
+
+	_, err := fetchHFTree(ts.URL)
+	core.AssertError(t, err)
+	core.AssertContains(t, err.Error(), "JSON decode failed")
 }
