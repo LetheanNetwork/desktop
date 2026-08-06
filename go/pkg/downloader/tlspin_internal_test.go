@@ -9,6 +9,7 @@ package downloader
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"net/http"
 	"net/http/httptest"
 
@@ -171,6 +172,81 @@ func TestTLSPin_Match_Good(t *core.T) {
 		t.Fatalf("Get must succeed when pin matches: %v", err)
 	}
 	_ = resp.Body.Close()
+	core.AssertEqual(t, 200, resp.StatusCode)
+}
+
+// TestPinnedTransport_Good — exercises the REAL pinnedTransport()
+// closure (not a hand-copied duplicate of its logic) end-to-end: a
+// client built from its returned *http.Transport, RootCAs swapped to
+// trust the hermetic test server's own leaf, completes a real
+// handshake and accepts because the SNI host carries no pin policy.
+func TestPinnedTransport_Good(t *core.T) {
+	srv := httptest.NewTLSServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		_, _ = w.Write([]byte("pinned-transport-ok"))
+	}))
+	defer srv.Close()
+
+	transport := pinnedTransport()
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	transport.TLSClientConfig.RootCAs = pool
+
+	client := &http.Client{Transport: transport}
+	resp, err := client.Get(srv.URL)
+	core.RequireNoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	core.AssertEqual(t, 200, resp.StatusCode)
+}
+
+// TestPinnedTransport_Bad — the real pinnedTransport() closure refuses
+// the handshake when a wrong pin is planted for the SNI host, proving
+// the production VerifyConnection hook (not the test's own copy) is
+// what fires.
+func TestPinnedTransport_Bad(t *core.T) {
+	srv := httptest.NewTLSServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		_, _ = w.Write([]byte("should-never-arrive"))
+	}))
+	defer srv.Close()
+	withPinnedHost(t, "example.com", []string{"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"})
+
+	transport := pinnedTransport()
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	transport.TLSClientConfig.RootCAs = pool
+	transport.TLSClientConfig.ServerName = "example.com"
+
+	client := &http.Client{Transport: transport}
+	resp, err := client.Get(srv.URL)
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("Get must FAIL when SPKI pin mismatches via the real pinnedTransport()")
+	}
+	if !contains(err.Error(), reasonTLSPinMismatch) {
+		t.Fatalf("error must contain %q, got %v", reasonTLSPinMismatch, err)
+	}
+}
+
+// TestPinnedTransport_Ugly — the real pinnedTransport() closure
+// accepts when the planted pin matches the live leaf's SPKI digest.
+func TestPinnedTransport_Ugly(t *core.T) {
+	srv := httptest.NewTLSServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		_, _ = w.Write([]byte("pin-matched"))
+	}))
+	defer srv.Close()
+
+	leaf := srv.Certificate()
+	withPinnedHost(t, "example.com", []string{spkiPin(leaf)})
+
+	transport := pinnedTransport()
+	pool := x509.NewCertPool()
+	pool.AddCert(leaf)
+	transport.TLSClientConfig.RootCAs = pool
+	transport.TLSClientConfig.ServerName = "example.com"
+
+	client := &http.Client{Transport: transport}
+	resp, err := client.Get(srv.URL)
+	core.RequireNoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
 	core.AssertEqual(t, 200, resp.StatusCode)
 }
 

@@ -440,3 +440,193 @@ func TestDownloader_Quarantine_ExistingFileRefused_Bad(t *core.T) {
 	core.AssertTrue(t, read.OK)
 	core.AssertEqual(t, "stale-bytes", string(read.Value.([]byte)))
 }
+
+// TestDownloader_WailsService_NilReceiver_Bad — a nil *WailsService
+// (e.g. a lazy core.ServiceFor resolve that came back empty) degrades
+// safely on every renderer-reachable method rather than panicking.
+func TestDownloader_WailsService_NilReceiver_Bad(t *core.T) {
+	var svc *downloader.WailsService
+	svc.SetEmitter(func(string, any) {}) // must not panic
+	id := svc.Download("https://example.com/x", "x.gguf")
+	core.AssertTrue(t, id != "", "Download must still return a job id")
+	id2 := svc.DownloadVerified("https://example.com/x", "x.gguf", "deadbeef")
+	core.AssertTrue(t, id2 != "")
+}
+
+// TestDownloader_WailsService_DownloadVerified_NoEmitterNoCore_Ugly —
+// constructing WailsService with a nil Core (no Register wiring) runs
+// DownloadVerified SYNCHRONOUSLY (the s.core==nil defensive fallback)
+// rather than via c.Go; with no SetEmitter call, fire's nil-emit
+// guard drops the progress/done events silently. The download itself
+// still completes and lands the file — proving the sync fallback
+// path is functionally equivalent to the c.Go-spawned path, just
+// blocking.
+func TestDownloader_WailsService_DownloadVerified_NoEmitterNoCore_Ugly(t *core.T) {
+	home := homeFixture(t)
+	payload := []byte("SYNC-NO-EMITTER-BYTES")
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	svc := downloader.NewWailsService(nil)
+	expected := core.SHA256HexString(string(payload))
+	id := svc.DownloadVerified(srv.URL, "sync-no-emitter.gguf", expected)
+	core.AssertTrue(t, id != "")
+
+	dest := core.PathJoin(home, "Lethean", "conf", "models", "sync-no-emitter.gguf")
+	read := core.ReadFile(dest)
+	core.RequireTrue(t, read.OK, "synchronous DownloadVerified must still land the file on disk")
+	core.AssertEqual(t, string(payload), string(read.Value.([]byte)))
+}
+
+// TestDownloader_WailsService_Download_NilCore_Bad — Download's own
+// s.core==nil defensive fallback (distinct code path from
+// DownloadVerified's) runs synchronously rather than dropping the
+// call. Download always hits the digest-required gate (empty
+// sha256hex), so this proves the sync-fallback branch executes
+// without needing a real fetch.
+func TestDownloader_WailsService_Download_NilCore_Bad(t *core.T) {
+	homeFixture(t)
+	svc := downloader.NewWailsService(nil)
+
+	var doneMu core.Mutex
+	var done map[string]any
+	svc.SetEmitter(func(name string, data any) {
+		if name != "downloader:done" {
+			return
+		}
+		doneMu.Lock()
+		defer doneMu.Unlock()
+		done, _ = data.(map[string]any)
+	})
+
+	id := svc.Download("https://example.com/x.gguf", "x.gguf")
+	core.AssertTrue(t, id != "")
+
+	// Synchronous — no c.Go, no polling needed.
+	doneMu.Lock()
+	got := done
+	doneMu.Unlock()
+	core.RequireTrue(t, got != nil, "downloader:done must fire synchronously")
+	core.AssertEqual(t, false, got["ok"])
+}
+
+// TestDownloader_FetchVerified_Bad_ModelsDirUnavailable — when
+// paths.ModelsDir() can't resolve (HOME pointing at a file, not a
+// directory), FetchVerified fails at the ModelsDir gate before any
+// network round-trip.
+func TestDownloader_FetchVerified_Bad_ModelsDirUnavailable(t *core.T) {
+	blocker := t.TempDir() + "/not-a-directory"
+	core.RequireTrue(t, core.WriteFile(blocker, []byte("x"), 0o644).OK)
+	t.Setenv("HOME", blocker)
+
+	r := downloader.FetchVerified("http://127.0.0.1:1/x", "x.gguf", "", nil)
+	core.AssertFalse(t, r.OK)
+}
+
+// TestDownloader_FetchVerified_Bad_QuarantineDirBlocked — ModelsDir()
+// resolves fine but a plain file sits where the .quarantine/
+// subdirectory needs to be created; FetchVerified fails at the
+// quarantine-dir gate before touching the network.
+func TestDownloader_FetchVerified_Bad_QuarantineDirBlocked(t *core.T) {
+	home := homeFixture(t)
+	modelsDir := core.PathJoin(home, "Lethean", "conf", "models")
+	core.RequireTrue(t, core.MkdirAll(modelsDir, 0o755).OK)
+	blocker := core.PathJoin(modelsDir, ".quarantine")
+	core.RequireTrue(t, core.WriteFile(blocker, []byte("not-a-dir"), 0o644).OK)
+
+	var hits core.AtomicInt32
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte("should-never-arrive"))
+	}))
+	defer srv.Close()
+
+	r := downloader.FetchVerified(srv.URL, "x.gguf", "", nil)
+	core.AssertFalse(t, r.OK)
+	core.AssertEqual(t, int32(0), hits.Load(), "quarantine-dir gate must fire before any network read")
+}
+
+// TestDownloader_WailsService_ServiceName_Good — the Wails binding
+// namespace is stable.
+func TestDownloader_WailsService_ServiceName_Good(t *core.T) {
+	svc := downloader.NewWailsService(core.New())
+	core.AssertEqual(t, "Downloader", svc.ServiceName())
+}
+
+// TestDownloader_WailsService_ServiceShutdown_Good — documented no-op
+// (in-flight downloads drain via Core's own c.Go waitGroup); must
+// return Ok rather than erroring or panicking.
+func TestDownloader_WailsService_ServiceShutdown_Good(t *core.T) {
+	svc := downloader.NewWailsService(core.New())
+	r := svc.ServiceShutdown()
+	core.AssertTrue(t, r.OK)
+}
+
+// TestDownloader_WailsService_ResolveHFManifest_Bad — the Wails
+// wrapper delegates straight through to the package-level
+// ResolveHFManifest; its own input-validation Bad path proves the
+// delegation is wired (no network round-trip needed to prove that).
+func TestDownloader_WailsService_ResolveHFManifest_Bad(t *core.T) {
+	svc := downloader.NewWailsService(core.New())
+	r := svc.ResolveHFManifest("", "file.gguf")
+	core.AssertFalse(t, r.OK)
+	core.AssertContains(t, r.Error(), "repoID")
+}
+
+// TestDownloader_WailsService_DownloadVerified_Good — the FULL
+// renderer-reachable success path: a real digest, a real HTTP
+// round-trip, progress + terminal "downloader:done" events fired
+// with ok=true and the resolved dest path. Every prior
+// DownloadVerified test only exercised the empty-digest reject arm;
+// this is the actual download-and-verify body (runVerified) that had
+// never run under test.
+func TestDownloader_WailsService_DownloadVerified_Good(t *core.T) {
+	home := homeFixture(t)
+	payload := []byte("WAILS-VERIFIED-BYTES")
+	srv := httptest.NewServer(core.HandlerFunc(func(w core.ResponseWriter, _ *core.Request) {
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	c := core.New()
+	core.AssertTrue(t, c.ServiceStartup(core.Background(), nil).OK)
+	defer func() { _ = c.ServiceShutdown(core.Background()) }()
+	svc := downloader.NewWailsService(c)
+
+	var doneMu core.Mutex
+	var done map[string]any
+	svc.SetEmitter(func(name string, data any) {
+		if name != "downloader:done" {
+			return
+		}
+		doneMu.Lock()
+		defer doneMu.Unlock()
+		done, _ = data.(map[string]any)
+	})
+
+	expected := core.SHA256HexString(string(payload))
+	id := svc.DownloadVerified(srv.URL, "wails-verified.gguf", expected)
+	core.AssertTrue(t, id != "")
+
+	// Spawned via c.Go — poll briefly rather than a single fixed sleep.
+	var got map[string]any
+	for i := 0; i < 40; i++ {
+		doneMu.Lock()
+		got = done
+		doneMu.Unlock()
+		if got != nil {
+			break
+		}
+		core.Sleep(25 * core.Millisecond)
+	}
+	core.AssertTrue(t, got != nil, "downloader:done must fire")
+	core.AssertEqual(t, true, got["ok"])
+	dest, _ := got["dest"].(string)
+	core.AssertEqual(t, core.PathJoin(home, "Lethean", "conf", "models", "wails-verified.gguf"), dest)
+
+	read := core.ReadFile(dest)
+	core.AssertTrue(t, read.OK)
+	core.AssertEqual(t, string(payload), string(read.Value.([]byte)))
+}
