@@ -52,11 +52,35 @@ func TestWindows_NativeAppWindowSpec_Good_HashRoute(t *core.T) {
 	core.AssertNotNil(t, spec)
 	core.AssertEqual(t, "app-view-chat", spec.Name)
 	core.AssertEqual(t, "/#/w/chat", spec.URL)
-	core.AssertEqual(t, app.Width, spec.Width)
-	core.AssertEqual(t, app.Height, spec.Height)
+	// The shell's native chrome, painted by the same Angular; the size is one
+	// application's, not the whole desktop's.
 	core.AssertEqual(t, app.Frameless, spec.Frameless)
 	core.AssertEqual(t, app.Mac.InvisibleTitleBarHeight, spec.Mac.InvisibleTitleBarHeight)
 	core.AssertEqual(t, app.BackgroundColour, spec.BackgroundColour)
+	core.AssertEqual(t, 900, spec.Width)
+	core.AssertEqual(t, 640, spec.Height)
+}
+
+// A carried size below the window's own declared minimum never arrives: the
+// platform resolves the contradiction in the minimum's favour, which is how a
+// 660x400 application opened at desktop size. The tear-off window's floor is
+// therefore the smallest size the binding will carry.
+func TestWindows_NativeAppWindowSpec_Good_MinimumIsOneApplication(t *core.T) {
+	shell := windowRegistry()[0]
+	spec := nativeAppWindowSpec(AppWindowRequest{App: "telemetry", Width: 660, Height: 400})
+
+	core.AssertNotNil(t, spec)
+	core.AssertEqual(t, 660, spec.Width)
+	core.AssertEqual(t, 400, spec.Height)
+	core.AssertEqual(t, minimumTearOffDimension, spec.MinWidth)
+	core.AssertEqual(t, minimumTearOffDimension, spec.MinHeight)
+	core.AssertTrue(
+		t,
+		spec.MinWidth <= spec.Width && spec.MinHeight <= spec.Height,
+		"a window cannot open smaller than the minimum it declares",
+	)
+	core.AssertEqual(t, 1000, shell.MinWidth, "the desktop shell keeps its own usable minimum")
+	core.AssertEqual(t, 680, shell.MinHeight)
 }
 
 func TestWindows_NativeAppWindowSpec_Good_PaneRoute(t *core.T) {

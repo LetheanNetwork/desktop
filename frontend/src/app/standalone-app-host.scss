@@ -1,0 +1,24 @@
+/* Solo shell — the host element is the screen (ViewEncapsulation.None).
+   Everything inside it is styled by the desktop's own global sheet; these
+   rules only give that sheet the surface it expects: a full-height flex
+   column carrying the desktop's typography and ink. The menu bar height is
+   zero because a solo window has no menu bar to reserve space for. */
+app-standalone-app-host {
+  --menubar-height: 0px;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ink-0);
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+}
+
+app-standalone-app-host .solo-empty {
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--fg-3);
+}

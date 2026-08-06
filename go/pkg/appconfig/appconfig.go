@@ -417,8 +417,11 @@ func WebviewWindowOptions(
 	}
 
 	switch profile {
-	case "main", "tear-off":
+	case "main":
 		applyAngularWindowProfile(&options)
+	case "tear-off":
+		applyAngularWindowProfile(&options)
+		applyTearOffWindowProfile(&options)
 	case "tray-popover":
 		applyTrayPopoverProfile(&options)
 	case "mobile":
@@ -474,6 +477,30 @@ func applyAngularWindowProfile(options *application.WebviewWindowOptions) {
 	// buttons opt out with no-drag; without that the window controls would
 	// start a window move instead of firing.
 	options.Mac.InvisibleTitleBarHeight = 36
+}
+
+// applyTearOffWindowProfile narrows the Angular shell profile to the one
+// application a torn-off window holds. It keeps the shell's frameless chrome,
+// file drops, and invisible title bar — the same Angular paints them — and
+// replaces the minimum, because the shell's minimum is the size the whole
+// desktop needs and an application window is not the whole desktop.
+//
+// A tear-off carries the size the application had inside the shell, and the
+// smallest of those sits well under the desktop minimum. A window asked to
+// open smaller than the minimum it also declares is a contradiction the
+// platform resolves in the minimum's favour, so the carried size never
+// arrived. The floor here is the smallest size the tear-off binding accepts,
+// which pkg/desktop pins from its own side.
+func applyTearOffWindowProfile(options *application.WebviewWindowOptions) {
+	// Width opens a size-less tear-off as one application rather than as a
+	// second copy of the desktop.
+	options.Width = 900
+	// Height matches that single-application default.
+	options.Height = 640
+	// MinWidth is the smallest carried width a tear-off may request.
+	options.MinWidth = 320
+	// MinHeight is the smallest carried height a tear-off may request.
+	options.MinHeight = 320
 }
 
 func applyTrayPopoverProfile(options *application.WebviewWindowOptions) {
