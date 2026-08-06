@@ -263,6 +263,69 @@ func TestConnection_Transport_Bad_BoundsPendingRequestsPerClient(t *core.T) {
 	client.releaseRequest()
 }
 
+// TestWailsTransport_NilGuards exercises every "t == nil || t.service == nil"
+// defensive branch on the wailsTransport adapter: a zero-value transport with
+// no bound service, and a genuinely nil *wailsTransport receiver. Wails never
+// constructs the adapter this way in production (NewService always sets
+// service), but the guards are real code paths and worth locking down.
+func TestWailsTransport_NilGuards(t *core.T) {
+	unbound := &wailsTransport{}
+	core.AssertError(t, unbound.Start(core.Background(), nil))
+	core.AssertError(t, unbound.ServeAssets(nil))
+	core.AssertNil(t, unbound.JSClient())
+	core.AssertNoError(t, unbound.Stop())
+	unbound.DispatchWailsEvent(&application.CustomEvent{Name: "lthn:test"})
+
+	var nilTransport *wailsTransport
+	core.AssertError(t, nilTransport.Start(core.Background(), nil))
+	core.AssertError(t, nilTransport.ServeAssets(nil))
+	core.AssertNil(t, nilTransport.JSClient())
+	core.AssertNoError(t, nilTransport.Stop())
+	nilTransport.DispatchWailsEvent(&application.CustomEvent{Name: "lthn:test"})
+}
+
+func TestConnection_Transport_Bad_DoubleStartFails(t *core.T) {
+	_, transport := startTransportFixture(t, Options{Address: "127.0.0.1:0"})
+	processor := application.NewMessageProcessor(application.DefaultLogger(nil))
+	err := transport.Start(core.Background(), processor)
+	core.AssertError(t, err, "already started")
+}
+
+func TestConnection_Transport_Bad_RejectsNonGetMethod(t *core.T) {
+	svc, _ := startTransportFixture(t, Options{Address: "127.0.0.1:0"})
+	resp := core.HTTPPost("http://"+svc.address()+svc.options.Path, "text/plain", nil)
+	core.RequireTrue(t, resp.OK)
+	response := resp.Value.(*core.Response)
+	defer response.Body.Close()
+	core.AssertEqual(t, core.StatusMethodNotAllowed, response.StatusCode)
+}
+
+// TestConnection_HandleRequest_BadNoProcessor drives the unstarted-processor
+// branch of handleRequest directly: a service that never had Start called has
+// a nil processor, and the request must come back as a protocol error rather
+// than panicking on the nil dereference.
+func TestConnection_HandleRequest_BadNoProcessor(t *core.T) {
+	svc := NewService(Options{Address: "127.0.0.1:0"})
+	client := &socketClient{
+		send: make(chan *wailsSocketMessage, 1),
+		done: make(chan struct{}),
+	}
+
+	svc.handleRequest(core.Background(), client, wailsSocketMessage{
+		ID:   "req-1",
+		Type: messageTypeRequest,
+	})
+
+	select {
+	case msg := <-client.send:
+		core.AssertEqual(t, "req-1", msg.ID)
+		core.RequireTrue(t, msg.Response != nil)
+		core.AssertEqual(t, core.StatusUnprocessableEntity, msg.Response.StatusCode)
+	default:
+		t.Fatal("expected a protocol-error response queued on client.send")
+	}
+}
+
 func TestConnection_Options_Good_EnvironmentOverrides(t *core.T) {
 	t.Setenv("LTHN_WAILS_WS_LISTEN", "127.0.0.1:9191")
 	t.Setenv("LTHN_WAILS_WS_PATH", "/proxy/wails/ws")
