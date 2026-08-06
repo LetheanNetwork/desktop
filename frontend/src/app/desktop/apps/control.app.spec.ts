@@ -108,6 +108,8 @@ describe('ControlApp', () => {
     start: vi.fn(),
     stop: vi.fn(),
     restart: vi.fn(),
+    signal: vi.fn(),
+    kill: vi.fn(),
     output: vi.fn(),
     setPolicy: vi.fn(),
     onChanged: vi.fn(),
@@ -327,6 +329,86 @@ describe('ControlApp', () => {
     expect((fixture.nativeElement as HTMLElement).querySelector('pre')?.textContent).toContain(
       'ready',
     );
+  });
+
+  it('delivers every named signal the panel offers to the live bridge', async () => {
+    mode.set('live');
+    liveData.control.mockResolvedValue({ unavailable: ['benchmarkRuns', 'processes'] });
+    servicesBridge.catalogue.mockResolvedValue(serviceCatalogue('running'));
+    servicesBridge.signal.mockResolvedValue(serviceSnapshot('running'));
+    const fixture = await create({ ...controlWin, sub: 'system', systab: 'daemons' });
+    const element = fixture.nativeElement as HTMLElement;
+
+    for (const name of ['terminate', 'interrupt', 'hangup']) {
+      element
+        .querySelector<HTMLButtonElement>(`[data-service-id="serve"] [data-action="signal-${name}"]`)
+        ?.click();
+      await fixture.whenStable();
+    }
+
+    expect(servicesBridge.signal.mock.calls).toEqual([
+      ['serve', 'terminate'],
+      ['serve', 'interrupt'],
+      ['serve', 'hangup'],
+    ]);
+    expect(servicesBridge.kill).not.toHaveBeenCalled();
+  });
+
+  it('kills only once confirmed, and shows the snapshot the kill replied with', async () => {
+    mode.set('live');
+    liveData.control.mockResolvedValue({ unavailable: ['benchmarkRuns', 'processes'] });
+    servicesBridge.catalogue.mockResolvedValueOnce(serviceCatalogue('running'));
+    servicesBridge.kill.mockResolvedValue(serviceSnapshot('stopped'));
+    const fixture = await create({ ...controlWin, sub: 'system', systab: 'daemons' });
+    const element = fixture.nativeElement as HTMLElement;
+
+    element
+      .querySelector<HTMLButtonElement>('[data-service-id="serve"] [data-action="kill"]')
+      ?.click();
+    await fixture.whenStable();
+    expect(servicesBridge.kill).not.toHaveBeenCalled();
+
+    // The catalogue read that follows fails, so what remains on screen can only
+    // have come from the kill's own reply.
+    servicesBridge.catalogue.mockRejectedValueOnce(new Error('transport offline'));
+    element
+      .querySelector<HTMLButtonElement>('[data-service-id="serve"] [data-action="confirm"]')
+      ?.click();
+    await fixture.whenStable();
+
+    expect(servicesBridge.kill).toHaveBeenCalledWith('serve');
+    expect(element.querySelector('[data-service-id="serve"]')?.textContent).toContain('Stopped');
+  });
+
+  it('refuses a kill intent that arrives without its confirmation', async () => {
+    mode.set('live');
+    liveData.control.mockResolvedValue({ unavailable: ['benchmarkRuns', 'processes'] });
+    servicesBridge.catalogue.mockResolvedValue(serviceCatalogue('running'));
+    const fixture = await create({ ...controlWin, sub: 'system', systab: 'daemons' });
+
+    fixture.componentInstance.handleServiceAction({ kind: 'kill', id: 'serve', confirmed: false });
+    await fixture.whenStable();
+
+    expect(servicesBridge.kill).not.toHaveBeenCalled();
+  });
+
+  it("reports the manager's own reason when a signal is refused", async () => {
+    mode.set('live');
+    liveData.control.mockResolvedValue({ unavailable: ['benchmarkRuns', 'processes'] });
+    servicesBridge.catalogue.mockResolvedValueOnce(serviceCatalogue('running'));
+    servicesBridge.signal.mockRejectedValue(
+      new Error('Windows cannot send hangup to a process.'),
+    );
+    const fixture = await create({ ...controlWin, sub: 'system', systab: 'daemons' });
+    const element = fixture.nativeElement as HTMLElement;
+
+    element
+      .querySelector<HTMLButtonElement>('[data-service-id="serve"] [data-action="signal-hangup"]')
+      ?.click();
+    await fixture.whenStable();
+
+    expect(element.textContent).toContain('Windows cannot send hangup to a process.');
+    expect(element.querySelector('[data-service-id="serve"]')).not.toBeNull();
   });
 
   it('remains the lazy component registered for Control', async () => {

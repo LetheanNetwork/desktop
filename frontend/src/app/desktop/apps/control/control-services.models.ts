@@ -20,7 +20,26 @@ export type DesktopServiceErrorCode =
   | 'process_lookup_failed'
   | 'process_stop_failed'
   | 'restart_budget_exhausted'
-  | 'shutdown_incomplete';
+  | 'shutdown_incomplete'
+  // The signal codes. Mirrors go/pkg/services/types.go, which grew these when
+  // named signals landed; a code the renderer does not know is rejected as an
+  // invalid response, so an incomplete mirror turns a precise failure into a
+  // whole catalogue that will not parse.
+  | 'signal_unknown'
+  | 'signal_unsupported'
+  | 'service_not_running'
+  | 'process_signal_failed';
+
+/**
+ * The whole signal vocabulary, declared once for this side of the wire.
+ *
+ * It lives beside the other wire models rather than in the bridge because both
+ * ends need it: the renderer chooses a name from here, and the bridge refuses
+ * anything that is not in here. A number is not in it and cannot be made to be.
+ */
+export const SERVICE_SIGNALS = ['terminate', 'interrupt', 'hangup', 'kill'] as const;
+
+export type DesktopServiceSignal = (typeof SERVICE_SIGNALS)[number];
 
 export interface DesktopServiceDefinition {
   readonly id: string;
@@ -87,6 +106,8 @@ export interface DesktopServicesDataSource {
   start(id: string): Promise<DesktopServiceSnapshot>;
   stop(id: string): Promise<DesktopServiceSnapshot>;
   restart(id: string): Promise<DesktopServiceSnapshot>;
+  signal(id: string, name: DesktopServiceSignal): Promise<DesktopServiceSnapshot>;
+  kill(id: string): Promise<DesktopServiceSnapshot>;
   output(id: string, limit?: number): Promise<DesktopServiceOutput>;
   setPolicy(override: DesktopServicePolicyOverride): Promise<DesktopServiceSnapshot>;
   onChanged(handler: (event: DesktopServicesChangedEvent) => void): () => void;
@@ -100,8 +121,13 @@ export type ControlServiceIntent =
   // The unusual responses. Kept off the main row deliberately — a kill
   // sitting beside stop at equal weight invites the click that costs
   // somebody their unsaved state.
-  | { readonly kind: 'signal'; readonly id: string; readonly signal: string }
-  | { readonly kind: 'kill'; readonly id: string };
+  //
+  // The signal is a vocabulary name rather than a string, so a name the bridge
+  // would refuse cannot be built here at all. `confirmed` follows the Files
+  // idiom for a destructive operation: the intent carries the answer, and the
+  // handler refuses it when the answer is not yes.
+  | { readonly kind: 'signal'; readonly id: string; readonly signal: DesktopServiceSignal }
+  | { readonly kind: 'kill'; readonly id: string; readonly confirmed: boolean };
 
 export const SERVICES_DEMO_SOURCE = 'Lethean demo fixture';
 

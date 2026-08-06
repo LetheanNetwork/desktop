@@ -258,6 +258,11 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
     ) {
       return;
     }
+    // A kill ends the process tree, so it is only ever performed on an answered
+    // question. The view asks; an intent that arrives without the answer is
+    // refused here rather than trusted, exactly as Files refuses an
+    // unconfirmed permanent delete.
+    if (intent.kind === 'kill' && intent.confirmed !== true) return;
     if (this.liveData.mode() === 'demo') {
       this.applyDemoServiceAction(intent);
       return;
@@ -315,21 +320,22 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
   private async performServiceAction(intent: ControlServiceIntent): Promise<void> {
     this.setServicePending(intent.id, true);
     try {
+      let snapshot: DesktopServiceSnapshot;
       switch (intent.kind) {
         case 'start':
-          await this.servicesBridge.start(intent.id);
+          snapshot = await this.servicesBridge.start(intent.id);
           break;
         case 'stop':
-          await this.servicesBridge.stop(intent.id);
+          snapshot = await this.servicesBridge.stop(intent.id);
           break;
         case 'restart':
-          await this.servicesBridge.restart(intent.id);
+          snapshot = await this.servicesBridge.restart(intent.id);
           break;
         case 'signal':
-          await this.servicesBridge.signal(intent.id, intent.signal);
+          snapshot = await this.servicesBridge.signal(intent.id, intent.signal);
           break;
         case 'kill':
-          await this.servicesBridge.kill(intent.id);
+          snapshot = await this.servicesBridge.kill(intent.id);
           break;
         case 'output': {
           const output = await this.servicesBridge.output(intent.id);
@@ -338,13 +344,32 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
         }
       }
       if (this.destroyed) return;
+      // Every mutation answers with the service's own snapshot. Showing it now
+      // means the row is right before the catalogue round-trip returns, which
+      // matters most for a kill: the state it settled on is in this reply.
+      this.applyServiceSnapshot(snapshot);
       if (this.serviceOutput()?.id === intent.id) this.serviceOutput.set(null);
       await this.refreshServices();
-    } catch {
-      if (!this.destroyed) this.markServicesUnavailable();
+    } catch (error) {
+      // The manager's refusal says something specific — that this service is
+      // not running, or that the platform cannot deliver that signal. Carrying
+      // the message means the panel reports the reason rather than a generic
+      // outage it did not have.
+      if (!this.destroyed) this.markServicesUnavailable(errorMessage(error));
     } finally {
       if (!this.destroyed) this.setServicePending(intent.id, false);
     }
+  }
+
+  private applyServiceSnapshot(snapshot: DesktopServiceSnapshot): void {
+    this.servicesResource.update((resource) => {
+      const catalogue = resource.value;
+      if (resource.mode !== 'connected' || catalogue === null) return resource;
+      const services = catalogue.services.map((current) =>
+        current.definition.id === snapshot.definition.id ? snapshot : current,
+      );
+      return { ...resource, value: { ...catalogue, services } };
+    });
   }
 
   private applyDemoServiceAction(intent: ControlServiceIntent): void {
@@ -392,11 +417,11 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
     if (this.serviceOutput()?.id === intent.id) this.serviceOutput.set(null);
   }
 
-  private markServicesUnavailable(): void {
+  private markServicesUnavailable(reason: string = SERVICES_UNAVAILABLE): void {
     const resource = this.servicesResource();
     if (resource.mode !== 'connected' || resource.refreshing) return;
     const refreshing = beginDesktopDataRefresh(resource, Date.now(), SERVICES_STALE_AFTER_MS);
-    this.servicesResource.set(rejectDesktopData(refreshing, SERVICES_UNAVAILABLE));
+    this.servicesResource.set(rejectDesktopData(refreshing, reason));
   }
 
   private hasService(id: string): boolean {
@@ -477,6 +502,10 @@ export class ControlApp implements AppView, OnInit, OnDestroy {
       }),
     ]);
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : SERVICES_UNAVAILABLE;
 }
 
 function cloneServiceSnapshot(snapshot: DesktopServiceSnapshot): DesktopServiceSnapshot {

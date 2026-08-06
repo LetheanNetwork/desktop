@@ -3,7 +3,10 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ConnectionManagerService } from '../connection-manager.service';
-import { createDemoServiceCatalogue } from './apps/control/control-services.models';
+import {
+  createDemoServiceCatalogue,
+  SERVICE_SIGNALS,
+} from './apps/control/control-services.models';
 import {
   DesktopServicesBridgeService,
   SERVICES_EVENT_SOURCE,
@@ -120,6 +123,33 @@ describe('DesktopServicesBridgeService', () => {
       [SERVICES_METHODS.signal, [{ id: 'serve', signal: 'hangup' }]],
       [SERVICES_METHODS.kill, ['serve']],
     ]);
+  });
+
+  it('sends every name in the vocabulary with the same request shape', async () => {
+    surface.call.mockResolvedValue(snapshotWireFixture());
+
+    for (const name of SERVICE_SIGNALS) {
+      await service.signal('serve', name);
+    }
+
+    expect(surface.call.mock.calls).toEqual(
+      SERVICE_SIGNALS.map((name) => [SERVICES_METHODS.signal, [{ id: 'serve', signal: name }]]),
+    );
+  });
+
+  it('accepts the signal failure codes the manager can report', async () => {
+    for (const code of [
+      'signal_unknown',
+      'signal_unsupported',
+      'service_not_running',
+      'process_signal_failed',
+    ]) {
+      surface.call.mockResolvedValueOnce({
+        ...snapshotWireFixture(),
+        lastError: { code, message: 'Windows cannot send hangup to a process.' },
+      });
+      await expect(service.get('serve')).resolves.toMatchObject({ lastError: { code } });
+    }
   });
 
   it('refuses a signal outside the vocabulary before reaching Wails', async () => {

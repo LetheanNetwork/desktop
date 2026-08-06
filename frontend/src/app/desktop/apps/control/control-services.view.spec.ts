@@ -140,12 +140,116 @@ describe('ControlServicesView', () => {
     fixture.componentInstance.action.subscribe((intent: unknown) => emitted.push(intent));
 
     fixture.nativeElement.querySelector('[data-action="signal-hangup"]').click();
-    fixture.nativeElement.querySelector('[data-action="kill"]').click();
+    await fixture.whenStable();
+
+    expect(emitted).toEqual([{ kind: 'signal', id: 'api', signal: 'hangup' }]);
+  });
+
+  it('offers every signal the panel delivers, and no bare kill signal', async () => {
+    const fixture = await createFixture(connectedResource());
+    const overflow = fixture.nativeElement.querySelector(
+      '[data-service-id="api"] details.service__force',
+    );
+    const emitted: unknown[] = [];
+    fixture.componentInstance.action.subscribe((intent: unknown) => emitted.push(intent));
+
+    for (const name of ['terminate', 'interrupt', 'hangup']) {
+      overflow.querySelector(`[data-action="signal-${name}"]`).click();
+    }
     await fixture.whenStable();
 
     expect(emitted).toEqual([
-      expect.objectContaining({ kind: 'signal', signal: 'hangup' }),
-      expect.objectContaining({ kind: 'kill' }),
+      { kind: 'signal', id: 'api', signal: 'terminate' },
+      { kind: 'signal', id: 'api', signal: 'interrupt' },
+      { kind: 'signal', id: 'api', signal: 'hangup' },
     ]);
+    // A bare kill signal leaves the service desired-running, so the reconciler
+    // restarts it. Force kill is the only route that means stop.
+    expect(overflow.querySelector('[data-action="signal-kill"]')).toBeNull();
+  });
+
+  it('asks before killing and emits nothing until the answer is yes', async () => {
+    const fixture = await createFixture(connectedResource());
+    const emitted: unknown[] = [];
+    fixture.componentInstance.action.subscribe((intent: unknown) => emitted.push(intent));
+    const service = () => fixture.nativeElement.querySelector('[data-service-id="api"]');
+
+    service().querySelector('[data-action="kill"]').click();
+    await fixture.whenStable();
+
+    expect(emitted).toEqual([]);
+    expect(service().textContent).toContain('This ends the process tree at once');
+    expect(service().querySelector('[data-action="kill"]')).toBeNull();
+
+    service().querySelector('[data-action="confirm"]').click();
+    await fixture.whenStable();
+
+    expect(emitted).toEqual([{ kind: 'kill', id: 'api', confirmed: true }]);
+    expect(service().querySelector('[data-action="kill"]')).not.toBeNull();
+  });
+
+  it('dismisses a kill confirmation without emitting anything', async () => {
+    const fixture = await createFixture(connectedResource());
+    const emitted: unknown[] = [];
+    fixture.componentInstance.action.subscribe((intent: unknown) => emitted.push(intent));
+    const service = () => fixture.nativeElement.querySelector('[data-service-id="api"]');
+
+    service().querySelector('[data-action="kill"]').click();
+    await fixture.whenStable();
+    service().querySelector('[data-action="dismiss"]').click();
+    await fixture.whenStable();
+
+    expect(emitted).toEqual([]);
+    expect(service().textContent).not.toContain('This ends the process tree at once');
+    expect(service().querySelector('[data-action="kill"]')).not.toBeNull();
+  });
+
+  it('drops a kill confirmation when the process it was asked about is replaced', async () => {
+    const resource = connectedResource();
+    const catalogue = resource.value as DesktopServiceCatalogue;
+    const [api, ...rest] = catalogue.services;
+    const fixture = await createFixture(resource);
+    const service = () => fixture.nativeElement.querySelector('[data-service-id="api"]');
+
+    service().querySelector('[data-action="kill"]').click();
+    await fixture.whenStable();
+    expect(service().querySelector('[data-action="confirm"]')).not.toBeNull();
+
+    fixture.componentRef.setInput('resource', {
+      ...resource,
+      value: { ...catalogue, services: [{ ...api, processId: 'demo-api-2' }, ...rest] },
+    });
+    await fixture.whenStable();
+
+    expect(service().querySelector('[data-action="confirm"]')).toBeNull();
+    expect(service().querySelector('[data-action="kill"]')).not.toBeNull();
+  });
+
+  it('shows a signal failure recorded against a service without losing the list', async () => {
+    const resource = connectedResource();
+    const catalogue = resource.value as DesktopServiceCatalogue;
+    const [api, ...rest] = catalogue.services;
+    const fixture = await createFixture({
+      ...resource,
+      value: {
+        ...catalogue,
+        services: [
+          {
+            ...api,
+            lastError: {
+              code: 'signal_unsupported',
+              message: 'Windows cannot send hangup to a process.',
+            },
+          },
+          ...rest,
+        ],
+      },
+    });
+    const element = fixture.nativeElement as HTMLElement;
+
+    expect(element.querySelector('[data-service-id="api"] .service__failure')?.textContent).toContain(
+      'Windows cannot send hangup to a process.',
+    );
+    expect(element.querySelectorAll('.service')).toHaveLength(catalogue.services.length);
   });
 });

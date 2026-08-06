@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: EUPL-1.2
 
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import type { DesktopDataResource } from '../../desktop-data-resource';
 import { DesktopDataStatusView } from '../../desktop-data-status.view';
 import type {
@@ -8,6 +15,7 @@ import type {
   DesktopRestartPolicy,
   DesktopServiceCatalogue,
   DesktopServiceOutput,
+  DesktopServiceSignal,
   DesktopServiceSnapshot,
   DesktopServiceState,
 } from './control-services.models';
@@ -129,22 +137,49 @@ import type {
                   @if (canForce(service)) {
                     <details class="service__force">
                       <summary i18n="More service actions@@control.services.more">More</summary>
-                      <button
-                        type="button"
-                        data-action="signal-hangup"
-                        [disabled]="isPending(service.definition.id)"
-                        (click)="emitSignal(service.definition.id, 'hangup')"
-                      >
-                        <span i18n="Reload service action@@control.services.hangup">Reload (hangup)</span>
-                      </button>
-                      <button
-                        type="button"
-                        data-action="kill"
-                        [disabled]="isPending(service.definition.id)"
-                        (click)="emitAction('kill', service.definition.id)"
-                      >
-                        <span i18n="Kill service action@@control.services.kill">Force kill</span>
-                      </button>
+                      @for (name of signals; track name) {
+                        <button
+                          type="button"
+                          [attr.data-action]="'signal-' + name"
+                          [disabled]="isPending(service.definition.id)"
+                          (click)="emitSignal(service.definition.id, name)"
+                        >
+                          {{ signalLabel(name) }}
+                        </button>
+                      }
+                      @if (isConfirmingKill(service)) {
+                        <p class="service__confirm" role="status">
+                          <span i18n="Kill service confirmation@@control.services.killConfirm">
+                            This ends the process tree at once. Anything the service has not saved
+                            is lost. Continue?
+                          </span>
+                        </p>
+                        <button
+                          type="button"
+                          class="danger"
+                          data-action="confirm"
+                          [disabled]="isPending(service.definition.id)"
+                          (click)="confirmKill(service.definition.id)"
+                        >
+                          <span i18n="Confirm service kill@@control.services.killConfirmAction">
+                            Confirm
+                          </span>
+                        </button>
+                        <button type="button" data-action="dismiss" (click)="dismissKill()">
+                          <span i18n="Dismiss service kill@@control.services.killDismiss">
+                            Dismiss
+                          </span>
+                        </button>
+                      } @else {
+                        <button
+                          type="button"
+                          data-action="kill"
+                          [disabled]="isPending(service.definition.id)"
+                          (click)="requestKill(service.definition.id, service.processId)"
+                        >
+                          <span i18n="Kill service action@@control.services.kill">Force kill</span>
+                        </button>
+                      }
                     </details>
                   }
                 </div>
@@ -339,6 +374,22 @@ import type {
       cursor: progress;
       opacity: 0.5;
     }
+    .service__actions button.danger {
+      border-color: var(--danger-400);
+      background: color-mix(in oklch, var(--danger-500) 22%, var(--ink-3));
+    }
+    .service__actions button.danger:hover:not(:disabled) {
+      border-color: var(--danger-400);
+      color: var(--fg-0);
+    }
+    .service__confirm {
+      max-width: 210px;
+      margin: 6px 0;
+      color: var(--fg-2);
+      font-size: 11px;
+      line-height: 1.4;
+      text-align: left;
+    }
     .services__empty,
     .services__output {
       border: 1px solid var(--line-1);
@@ -395,8 +446,19 @@ export class ControlServicesView {
   readonly action = output<ControlServiceIntent>();
   readonly retry = output<void>();
 
+  /**
+   * The three names the panel offers as a message to a running service.
+   *
+   * `kill` is in the wire vocabulary too, but it is not here: a bare kill
+   * signal leaves the service desired-running, so the restart reconciler puts
+   * it straight back. Force kill is the route that means stop, and it is the
+   * one with the confirmation.
+   */
+  readonly signals: readonly DesktopServiceSignal[] = ['terminate', 'interrupt', 'hangup'];
+
   readonly services = computed(() => this.resource().value?.services ?? []);
   private readonly pending = computed(() => new Set(this.pendingIds()));
+  private readonly confirmingKill = signal<{ id: string; processId: string } | null>(null);
 
   isPending(id: string): boolean {
     return this.pending().has(id);
@@ -417,12 +479,40 @@ export class ControlServicesView {
     return service.state === 'running';
   }
 
-  emitAction(kind: 'start' | 'stop' | 'restart' | 'output' | 'kill', id: string): void {
+  emitAction(kind: 'start' | 'stop' | 'restart' | 'output', id: string): void {
     this.action.emit({ kind, id });
   }
 
-  emitSignal(id: string, signal: string): void {
+  emitSignal(id: string, signal: DesktopServiceSignal): void {
     this.action.emit({ kind: 'signal', id, signal });
+  }
+
+  /**
+   * A confirmation belongs to the process it was asked about. If that process
+   * has since gone and another has taken its place, the question no longer has
+   * the same answer, so it is no longer being asked.
+   */
+  isConfirmingKill(service: DesktopServiceSnapshot): boolean {
+    const confirming = this.confirmingKill();
+    return (
+      confirming !== null &&
+      confirming.id === service.definition.id &&
+      confirming.processId === service.processId
+    );
+  }
+
+  /** Ask first. Nothing is emitted until the second click. */
+  requestKill(id: string, processId: string): void {
+    this.confirmingKill.set({ id, processId });
+  }
+
+  confirmKill(id: string): void {
+    this.confirmingKill.set(null);
+    this.action.emit({ kind: 'kill', id, confirmed: true });
+  }
+
+  dismissKill(): void {
+    this.confirmingKill.set(null);
   }
 
   /**
@@ -447,6 +537,25 @@ export class ControlServicesView {
         return $localize`:Exited service state@@control.services.state.exited:Exited`;
       case 'failed':
         return $localize`:Failed service state@@control.services.state.failed:Failed`;
+    }
+  }
+
+  /**
+   * Named for what the signal does to a service, with the signal itself in
+   * brackets. "Stop" is already taken by the managed graceful stop, and using
+   * it for terminate would say the wrong thing: a terminated service whose
+   * policy is to restart comes back.
+   */
+  signalLabel(name: DesktopServiceSignal): string {
+    switch (name) {
+      case 'terminate':
+        return $localize`:Terminate service action@@control.services.terminate:Ask to stop (terminate)`;
+      case 'interrupt':
+        return $localize`:Interrupt service action@@control.services.interrupt:Interrupt`;
+      case 'hangup':
+        return $localize`:Reload service action@@control.services.hangup:Reload (hangup)`;
+      case 'kill':
+        return $localize`:Kill signal action@@control.services.killSignal:Kill signal`;
     }
   }
 

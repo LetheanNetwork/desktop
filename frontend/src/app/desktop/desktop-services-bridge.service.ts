@@ -3,19 +3,21 @@
 import { InjectionToken, Service, inject } from '@angular/core';
 import { Events } from '@wailsio/runtime';
 import { ConnectionManagerService } from '../connection-manager.service';
-import type {
-  DesktopRestartPolicy,
-  DesktopServiceCatalogue,
-  DesktopServiceDefinition,
-  DesktopServiceErrorCode,
-  DesktopServiceFailure,
-  DesktopServiceKind,
-  DesktopServiceOutput,
-  DesktopServicePolicyOverride,
-  DesktopServiceSnapshot,
-  DesktopServicesChangedEvent,
-  DesktopServicesDataSource,
-  DesktopServiceState,
+import {
+  SERVICE_SIGNALS,
+  type DesktopRestartPolicy,
+  type DesktopServiceCatalogue,
+  type DesktopServiceDefinition,
+  type DesktopServiceErrorCode,
+  type DesktopServiceFailure,
+  type DesktopServiceKind,
+  type DesktopServiceOutput,
+  type DesktopServicePolicyOverride,
+  type DesktopServiceSignal,
+  type DesktopServiceSnapshot,
+  type DesktopServicesChangedEvent,
+  type DesktopServicesDataSource,
+  type DesktopServiceState,
 } from './apps/control/control-services.models';
 import { SurfaceBridgeService } from './surfaces/surface-bridge.service';
 
@@ -37,14 +39,6 @@ export const SERVICES_METHODS = {
   signal: `${SERVICES_SERVICE}.Signal`,
   kill: `${SERVICES_SERVICE}.Kill`,
 } as const;
-
-/**
- * The whole signal vocabulary. A number is not in it, and cannot be made to
- * be: the renderer chooses a name, and Go maps it at the last moment.
- */
-export const SERVICE_SIGNALS = ['terminate', 'interrupt', 'hangup', 'kill'] as const;
-
-export type DesktopServiceSignal = (typeof SERVICE_SIGNALS)[number];
 
 function requestSignal(name: string): DesktopServiceSignal {
   if (!(SERVICE_SIGNALS as readonly string[]).includes(name)) {
@@ -200,6 +194,10 @@ const ERROR_CODES: readonly DesktopServiceErrorCode[] = [
   'process_stop_failed',
   'restart_budget_exhausted',
   'shutdown_incomplete',
+  'signal_unknown',
+  'signal_unsupported',
+  'service_not_running',
+  'process_signal_failed',
 ];
 const FORBIDDEN_RESPONSE_FIELDS = new Set([
   'command',
