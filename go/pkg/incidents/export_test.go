@@ -78,3 +78,47 @@ func LoadOneExported(id string) (IncidentRecord, string, error) {
 func WriteRecordExported(r IncidentRecord, dirPath string, ifVersion int) core.Result {
 	return (&Service{}).writeRecord(r, dirPath, ifVersion)
 }
+
+// CountMonthFilesExported exposes countMonthFiles for external test
+// packages covering the ID-suffix-counter helper directly (both the
+// happy directory-scan path and the missing-directory zero-fallback).
+//
+// Usage example:
+//
+//	n := incidents.CountMonthFilesExported(dir)
+func CountMonthFilesExported(dirPath string) int {
+	return countMonthFiles(dirPath)
+}
+
+// IncidentStateEnumOutExported exposes incidentStateEnumOut for
+// external test packages covering the internal→header status mapping,
+// including its "unknown state projects open" fallback.
+//
+// Usage example:
+//
+//	hdr := incidents.IncidentStateEnumOutExported("resolved") // "closed"
+func IncidentStateEnumOutExported(internal string) string {
+	return incidentStateEnumOut(internal)
+}
+
+// IncidentStateEnumInExported exposes incidentStateEnumIn for external
+// test packages covering the header→internal status mapping,
+// including its "unrecognised bucket returns empty" fallback.
+//
+// Usage example:
+//
+//	st := incidents.IncidentStateEnumInExported("open") // "investigating"
+func IncidentStateEnumInExported(headerStatus string) string {
+	return incidentStateEnumIn(headerStatus)
+}
+
+// StringFromRawExported exposes stringFromRaw for external test
+// packages covering the substrate Header.Raw string-extraction helper
+// (nil map, missing key, and non-string value all fall back to "").
+//
+// Usage example:
+//
+//	s := incidents.StringFromRawExported(m, "status")
+func StringFromRawExported(m map[string]any, key string) string {
+	return stringFromRaw(m, key)
+}
