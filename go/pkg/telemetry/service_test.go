@@ -66,6 +66,32 @@ func TestTelemetry_Register_Bad_NilCore(t *core.T) {
 	core.AssertFalse(t, r.OK, "Register(nil) must Fail")
 }
 
+func TestTelemetry_Service_ServiceName_Good_ReturnsTelemetry(t *core.T) {
+	svc := telemetry.NewService(telemetry.Options{})
+	core.AssertEqual(t, "Telemetry", svc.ServiceName())
+}
+
+func TestTelemetry_Service_ServiceLifecycle_Good_StartupAndShutdownAreOK(t *core.T) {
+	svc := telemetry.NewService(telemetry.Options{})
+
+	r := svc.ServiceStartup(core.Background(), nil)
+	core.AssertTrue(t, r.OK)
+
+	r = svc.ServiceShutdown()
+	core.AssertTrue(t, r.OK)
+}
+
+func TestTelemetry_Service_CurrentSample_Good_ReturnsReading(t *core.T) {
+	svc := telemetry.NewService(telemetry.Options{})
+
+	r := svc.CurrentSample()
+
+	core.RequireTrue(t, r.OK)
+	reading, ok := r.Value.(telemetry.Reading)
+	core.RequireTrue(t, ok)
+	core.AssertGreater(t, reading.HeapAllocMB, 0.0)
+}
+
 func TestTelemetry_CurrentHostSnapshot_GoodReturnsBoundedHostIdentity(t *core.T) {
 	svc := telemetry.NewService(telemetry.Options{})
 
