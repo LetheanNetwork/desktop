@@ -135,3 +135,47 @@ func TestValidateTerminalWorkspace_UglyRejectsAuthorityConfusion(t *core.T) {
 	missingActive.ActiveKey = "terminal-missing"
 	core.AssertFalse(t, ValidateTerminalWorkspace(missingActive).OK)
 }
+
+func TestValidText_Good(t *core.T) {
+	core.AssertTrue(t, validText("desktop", 32))
+}
+
+func TestValidText_Bad(t *core.T) {
+	for name, value := range map[string]string{
+		"empty":        "",
+		"too long":     "abcdef",
+		"invalid utf8": "a\xffb",
+		"control rune": "a\x01b",
+		"delete rune":  "a\x7fb",
+	} {
+		t.Run(name, func(t *core.T) {
+			core.AssertFalse(t, validText(value, 4))
+		})
+	}
+}
+
+func TestInvalidWorkspaceRef_Good(t *core.T) {
+	for name, ref := range map[string]WorkspaceRef{
+		"empty":           {},
+		"repository only": {Repository: "desktop"},
+		"mount and path":  {MountID: "documents", Path: "notes/a.md"},
+	} {
+		t.Run(name, func(t *core.T) {
+			core.AssertFalse(t, invalidWorkspaceRef(ref))
+		})
+	}
+}
+
+func TestInvalidWorkspaceRef_Bad(t *core.T) {
+	for name, ref := range map[string]WorkspaceRef{
+		"both authorities":      {MountID: "documents", Repository: "desktop"},
+		"invalid mount id":      {MountID: "not valid!"},
+		"invalid repository id": {Repository: "not valid!"},
+		"path without mount":    {Path: "notes/a.md"},
+		"path traversal":        {MountID: "documents", Path: "../secret"},
+	} {
+		t.Run(name, func(t *core.T) {
+			core.AssertTrue(t, invalidWorkspaceRef(ref))
+		})
+	}
+}

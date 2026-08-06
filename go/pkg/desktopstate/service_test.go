@@ -137,6 +137,53 @@ func TestService_Register_BadFailsClosedWithoutNamedMedium(t *core.T) {
 	core.AssertEqual(t, ErrorStateUnavailable, ErrorCodeOf(result))
 }
 
+func TestService_Register_BadNilCoreFailsClosed(t *core.T) {
+	result := Register(nil)
+
+	core.AssertFalse(t, result.OK)
+	core.AssertEqual(t, ErrorStateUnavailable, ErrorCodeOf(result))
+}
+
+func TestService_Register_BadNilReceiverOrMissingInputsFailClosed(
+	t *core.T,
+) {
+	var nilService *Service
+	nilResult := nilService.Register(core.New())
+	core.AssertFalse(t, nilResult.OK)
+	core.AssertEqual(t, ErrorStateUnavailable, ErrorCodeOf(nilResult))
+
+	nilCoreResult := (&Service{
+		options: Options{Medium: coreio.NewMemoryMedium()},
+	}).Register(nil)
+	core.AssertFalse(t, nilCoreResult.OK)
+	core.AssertEqual(t, ErrorStateUnavailable, ErrorCodeOf(nilCoreResult))
+
+	noMediumResult := (&Service{}).Register(core.New())
+	core.AssertFalse(t, noMediumResult.OK)
+	core.AssertEqual(t, ErrorStateUnavailable, ErrorCodeOf(noMediumResult))
+}
+
+func TestService_LoadSave_BadUnavailableServiceFailsClosed(t *core.T) {
+	var nilService *Service
+	zeroed := &Service{}
+
+	for name, result := range map[string]core.Result{
+		"nil LoadShellSession":       nilService.LoadShellSession(),
+		"nil SaveShellSession":       nilService.SaveShellSession(SaveShellSessionInput{}),
+		"nil LoadTerminalWorkspace":  nilService.LoadTerminalWorkspace(),
+		"nil SaveTerminalWorkspace":  nilService.SaveTerminalWorkspace(SaveTerminalWorkspaceInput{}),
+		"zero LoadShellSession":      zeroed.LoadShellSession(),
+		"zero SaveShellSession":      zeroed.SaveShellSession(SaveShellSessionInput{}),
+		"zero LoadTerminalWorkspace": zeroed.LoadTerminalWorkspace(),
+		"zero SaveTerminalWorkspace": zeroed.SaveTerminalWorkspace(SaveTerminalWorkspaceInput{}),
+	} {
+		t.Run(name, func(t *core.T) {
+			core.AssertFalse(t, result.OK)
+			core.AssertEqual(t, ErrorStateUnavailable, ErrorCodeOf(result))
+		})
+	}
+}
+
 func TestWailsService_GoodDelegatesOnlyTypedStateOperations(t *core.T) {
 	service := NewService(Options{Medium: coreio.NewMemoryMedium()})
 	wails := NewWailsService(service)
