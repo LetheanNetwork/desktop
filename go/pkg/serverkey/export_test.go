@@ -121,3 +121,48 @@ func ExportedBootstrapAllowedScopes() map[string]bool {
 	}
 	return out
 }
+
+// ExportedBuildBootstrapToken assembles an LTHN-BOOT-1. token string
+// from an arbitrary header map + raw signature bytes, bypassing
+// IssueBootstrapTokenForScope's mint discipline entirely. Test-only —
+// lets the format/TTL/scope/claim edge cases inside VerifyBootstrapToken
+// (missing iat/exp/nonce, expired exp, wrong scope, …) be forged
+// directly without a live signing key, since every one of those
+// checks runs BEFORE the PGP signature is verified.
+func ExportedBuildBootstrapToken(header map[string]any, sig []byte) string {
+	canon, r := canonicalise(header)
+	if !r.OK {
+		return ""
+	}
+	return tokenPrefix + core.Base64URLEncode(canon) + "." + core.Base64URLEncode(sig)
+}
+
+// ExportedBuildSessionToken is ExportedBuildBootstrapToken's
+// LTHN-SESS-1. counterpart for VerifySessionToken's equivalent
+// pre-signature claim checks.
+func ExportedBuildSessionToken(header map[string]any, sig []byte) string {
+	canon, r := canonicalise(header)
+	if !r.OK {
+		return ""
+	}
+	return sessionTokenPrefix + core.Base64URLEncode(canon) + "." + core.Base64URLEncode(sig)
+}
+
+// ExportedInjectExpiredNonce seeds an already-expired entry into the
+// bootstrap consumed-nonce set so the next VerifyBootstrapToken call
+// exercises evictExpiredNoncesLocked's delete branch — a state that
+// otherwise only arises after minutes of real wall-clock time.
+func (s *Service) ExportedInjectExpiredNonce(rawNonce string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.consumedNonces[s.nonceKey(rawNonce)] = core.UnixTime(0)
+}
+
+// ExportedInjectExpiredSessionNonce is
+// ExportedInjectExpiredNonce's session-nonce-set counterpart, for
+// evictExpiredSessionNoncesLocked coverage.
+func (s *Service) ExportedInjectExpiredSessionNonce(rawNonce string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.consumedSessionNonces[s.nonceKey(rawNonce)] = core.UnixTime(0)
+}
