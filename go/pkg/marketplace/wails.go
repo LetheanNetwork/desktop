@@ -57,6 +57,11 @@ type InstalledOutput struct {
 // host's on-disk scan keeps this consistent with what's actually
 // present in ~/Lethean/conf/plugins/.
 func (s *Service) Installed() core.Result {
+	// Nil-guard like every other method in this package: ServiceFor panics
+	// on a nil Core, and a service with no Core has nothing installed.
+	if s == nil || s.core == nil {
+		return core.Ok(InstalledOutput{Packages: []InstalledPackage{}})
+	}
 	host, ok := core.ServiceFor[*plugin.Service](s.core, "plugin")
 	if !ok || host == nil {
 		return core.Ok(InstalledOutput{Packages: []InstalledPackage{}})
@@ -85,6 +90,9 @@ func (s *Service) Installed() core.Result {
 // manifest to the plugin host, and lets it fetch + write + start the
 // binary. For lthn-vm bundle installs use Service.Install instead.
 func (s *Service) InstallPlugin(code string) core.Result {
+	if s == nil || s.core == nil {
+		return core.Fail(core.E(installOp, "marketplace service is not bound to a Core", nil))
+	}
 	if core.Trim(code) == "" {
 		return core.Fail(core.E(installOp, codeRequiredMessage, nil))
 	}
@@ -113,6 +121,9 @@ func (s *Service) InstallPlugin(code string) core.Result {
 // Remove asks the plugin host to stop + clean up the named
 // plugin. Same host-discovery dance as Install.
 func (s *Service) Remove(code string) core.Result {
+	if s == nil || s.core == nil {
+		return core.Fail(core.E("marketplace.Remove", "marketplace service is not bound to a Core", nil))
+	}
 	if core.Trim(code) == "" {
 		return core.Fail(core.E("marketplace.Remove", codeRequiredMessage, nil))
 	}
