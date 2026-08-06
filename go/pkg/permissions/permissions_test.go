@@ -11,6 +11,7 @@ package permissions
 
 import (
 	core "dappco.re/go"
+	"dappco.re/go/config"
 )
 
 // Internal package test — direct access to resolveEntitlement so we
@@ -105,4 +106,26 @@ func TestPermissions_Install_Good_UnknownKey(t *core.T) {
 		e := c.Entitled(action, 1)
 		core.AssertNotNil(t, e)
 	}
+}
+
+// Install + a config service that actually HAS a permissions.<action>
+// entry drives the closure's success path (cfgSvc.Get finds the key
+// and falls through to resolveEntitlement) — every other Install test
+// above only reaches the early-return branches.
+func TestPermissions_Install_Good_ConfiguredValueFound(t *core.T) {
+	c := core.New(core.WithName(
+		"config",
+		config.NewConfigServiceWith(config.ServiceOptions{
+			Path: core.PathJoin(t.TempDir(), "lthn.yaml"),
+		}),
+	))
+	core.RequireTrue(t, c.ServiceStartup(core.Background(), nil).OK)
+	t.Cleanup(func() { _ = c.ServiceShutdown(core.Background()) })
+	cfg, ok := core.ServiceFor[*config.Service](c, "config")
+	core.RequireTrue(t, ok)
+	core.RequireTrue(t, cfg.Set("permissions.network.outbound", true).OK)
+
+	Install(c)
+	e := c.Entitled("network.outbound", 0)
+	core.AssertTrue(t, e.Allowed, "configured true value should allow via resolveEntitlement")
 }
