@@ -134,9 +134,9 @@ func TestWebviewWindowOptions_Ugly_TrayAndTearOffPreserveProfiles(t *core.T) {
 	core.AssertTrue(t, tray.Mac.WebviewPreferences.AllowsBackForwardNavigationGestures.IsSet())
 	core.AssertFalse(t, tray.Mac.WebviewPreferences.AllowsBackForwardNavigationGestures.Get())
 
-	// One application, not a second desktop: the shell's chrome, the shell's
-	// invisible title bar, and a minimum an application window can actually
-	// honour — a carried size below the declared minimum never arrives.
+	// One application, not a second desktop: the shell's chrome and a minimum
+	// an application window can actually honour — a carried size below the
+	// declared minimum never arrives.
 	core.AssertEqual(t, 900, tearOff.Width)
 	core.AssertEqual(t, 640, tearOff.Height)
 	core.AssertEqual(t, 320, tearOff.MinWidth)
@@ -144,9 +144,18 @@ func TestWebviewWindowOptions_Ugly_TrayAndTearOffPreserveProfiles(t *core.T) {
 	core.AssertTrue(t, tearOff.Frameless)
 	core.AssertTrue(t, tearOff.EnableFileDrop)
 	core.AssertTrue(t, tearOff.DefaultContextMenuDisabled)
-	core.AssertEqual(t, 36, tearOff.Mac.InvisibleTitleBarHeight)
 	core.AssertFalse(t, tearOff.AlwaysOnTop)
 	core.AssertFalse(t, tearOff.Hidden)
+
+	// A solo title bar is almost entirely controls, and the invisible title
+	// bar cannot see them: it starts a window drag for any press in the top
+	// strip before the WebView is consulted. The tear-off keeps only the
+	// DOM-aware --wails-draggable, which honours the buttons' no-drag; the
+	// shell's own bar, which is a bar rather than a row of controls, keeps
+	// both.
+	core.AssertEqual(t, 0, tearOff.Mac.InvisibleTitleBarHeight)
+	main := appconfig.WebviewWindowOptions("main", "app", "Lethean Desktop", "/#/")
+	core.AssertEqual(t, 36, main.Mac.InvisibleTitleBarHeight)
 }
 
 func TestApplicationOptions_Good_ConfigOverride(t *core.T) {

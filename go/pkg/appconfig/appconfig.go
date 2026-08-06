@@ -501,6 +501,23 @@ func applyTearOffWindowProfile(options *application.WebviewWindowOptions) {
 	options.MinWidth = 320
 	// MinHeight is the smallest carried height a tear-off may request.
 	options.MinHeight = 320
+	// InvisibleTitleBarHeight leaves the top strip to the title bar the solo
+	// window draws itself.
+	//
+	// Two things can claim that strip and only one of them can see the DOM.
+	// The invisible title bar is pure geometry: Wails' macOS delegate starts a
+	// window drag for any press in the top N pixels before the WebView is
+	// consulted (webview_window_darwin.m, handleLeftMouseDown), so it cannot
+	// tell the bar from the close button sitting in it. The CSS mechanism can:
+	// --wails-draggable is read off the element under the pointer, which is
+	// what lets the traffic lights opt out with no-drag and still be pressed.
+	//
+	// The shell's menu bar spans its whole strip and has nothing to lose to
+	// the coarser rule. A solo window's title bar is almost entirely controls,
+	// so it keeps the DOM-aware one and drops the other. Dragging still works
+	// — the delegate records the press either way and --wails-draggable turns
+	// it into a window move.
+	options.Mac.InvisibleTitleBarHeight = 0
 }
 
 func applyTrayPopoverProfile(options *application.WebviewWindowOptions) {

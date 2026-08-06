@@ -5,6 +5,13 @@
    zero because a solo window has no menu bar to reserve space for. */
 app-standalone-app-host {
   --menubar-height: 0px;
+
+  /* The window chrome this document draws for itself. 36px is not a taste:
+     it is the height Go declares for the invisible drag strip on macOS
+     (appconfig's Angular window profile, Mac.InvisibleTitleBarHeight), and
+     the height the shell's own menu bar uses. One number, three places that
+     have to agree. */
+  --solo-titlebar-height: 36px;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -15,10 +22,110 @@ app-standalone-app-host {
   font-family: var(--font-sans);
 }
 
+/* ── the solo window's own title bar ──────────────────────────────────────
+   The shell's window titlebar, at the menu bar's height, with the shell's
+   traffic lights and centred title. The controls are buttons rather than the
+   shell's decorative <i> elements because these ones are real: they close a
+   window, and a person navigating by keyboard needs to reach them. */
+app-standalone-app-host .titlebar.solotitle {
+  height: var(--solo-titlebar-height);
+  padding: 0 12px;
+  gap: 10px;
+  cursor: default;
+
+  /* Frameless: this strip is what a person grabs to move the window. Wails
+     reads the custom property off the element under the pointer, so the
+     controls opt out below and nothing else in the window opts in. */
+  --wails-draggable: drag;
+}
+
+app-standalone-app-host .solotitle .lights {
+  z-index: 1;
+}
+
+app-standalone-app-host .solotitle .lights button {
+  --wails-draggable: no-drag;
+  display: block;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: filter 0.12s ease;
+}
+
+app-standalone-app-host .solotitle .lights .c { background: #ff5f57; }
+app-standalone-app-host .solotitle .lights .m { background: #febc2e; }
+app-standalone-app-host .solotitle .lights .x { background: #28c840; }
+
+app-standalone-app-host .solotitle .lights button:hover { filter: brightness(1.15); }
+app-standalone-app-host .solotitle .lights button:active { filter: brightness(0.85); }
+
+app-standalone-app-host .solotitle .lights button:focus-visible {
+  outline: 2px solid var(--brand-400, #40c1c5);
+  outline-offset: 2px;
+}
+
+/* No native window behind them — the browser demo. Shown rather than hidden
+   so the bar does not change shape between demo and native, but visibly
+   inert, exactly as the shell's menu bar does it. */
+app-standalone-app-host .solotitle .lights.unavailable button {
+  background: var(--line-1, #333);
+  cursor: default;
+}
+
+/* The way back in. Sits where the shell's titlebar carries its tear-off
+   control, and is drawn the same, because it is the same control reversed. */
+app-standalone-app-host .solotitle .dockback {
+  --wails-draggable: no-drag;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--fg-3);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+app-standalone-app-host .solotitle .dockback:hover:not(:disabled) {
+  color: var(--fg-0);
+  background: color-mix(in oklch, var(--ink-3) 70%, transparent);
+}
+
+app-standalone-app-host .solotitle .dockback:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Whichever group is second on the bar takes the far edge. macOS and Linux
+   put the window controls first, Windows puts them last — the platform
+   convention the bridge reads from the runtime, not a preference. */
+app-standalone-app-host .solotitle[data-controls='left'] .dockback,
+app-standalone-app-host .solotitle[data-controls='right'] .lights {
+  margin-left: auto;
+}
+
 app-standalone-app-host .solo-empty {
   margin: auto;
   padding: 24px;
   text-align: center;
   font-size: 13px;
   color: var(--fg-3);
+}
+
+/* A control that failed says why. Silence here is a window a person cannot
+   close and cannot explain. */
+app-standalone-app-host .solo-error {
+  flex: none;
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 11.5px;
+  color: var(--fg-2);
+  background: color-mix(in oklch, #ff5f57 22%, var(--ink-2));
+  border-top: 1px solid var(--line-1);
 }

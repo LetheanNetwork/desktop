@@ -63,4 +63,41 @@ describe('DesktopAppWindowBridgeService', () => {
     expect(bridge().available()).toBe(false);
     expect(call).not.toHaveBeenCalled();
   });
+
+  it('asks Go to hand the application back, naming it and its pane', async () => {
+    const docked = await bridge().dockApp({ app: 'control', pane: 'models' });
+
+    expect(docked).toBe(true);
+    expect(call).toHaveBeenCalledWith(APP_WINDOW_METHODS.dockApp, [
+      { app: 'control', pane: 'models', width: 0, height: 0 },
+    ]);
+  });
+
+  it('reports a refused dock-back rather than closing over it', async () => {
+    // The solo window closes only on true. A false here is what keeps the
+    // application on screen instead of vanishing between two windows.
+    call.mockRejectedValue(new Error('no shell window for application: terminal'));
+
+    const docked = await bridge().dockApp({ app: 'terminal' });
+
+    expect(docked).toBe(false);
+    expect(bridge().lastError()).toContain('no shell window');
+  });
+
+  it('docks nothing when no application is named', async () => {
+    const docked = await bridge().dockApp({ app: '' });
+
+    expect(docked).toBe(false);
+    expect(call).not.toHaveBeenCalled();
+    expect(bridge().lastError()).toContain('no application named');
+  });
+
+  it('docks nothing in the browser demo, where there is no shell to return to', async () => {
+    offline = true;
+
+    const docked = await bridge().dockApp({ app: 'chat' });
+
+    expect(docked).toBe(false);
+    expect(call).not.toHaveBeenCalled();
+  });
 });

@@ -55,10 +55,15 @@ func TestWindows_NativeAppWindowSpec_Good_HashRoute(t *core.T) {
 	// The shell's native chrome, painted by the same Angular; the size is one
 	// application's, not the whole desktop's.
 	core.AssertEqual(t, app.Frameless, spec.Frameless)
-	core.AssertEqual(t, app.Mac.InvisibleTitleBarHeight, spec.Mac.InvisibleTitleBarHeight)
 	core.AssertEqual(t, app.BackgroundColour, spec.BackgroundColour)
 	core.AssertEqual(t, 900, spec.Width)
 	core.AssertEqual(t, 640, spec.Height)
+	// The one place the tear-off parts from the shell's chrome: its title bar
+	// is a row of controls rather than a bar, so the strip is left to the
+	// DOM-aware --wails-draggable, which honours their no-drag. The shell's
+	// coarser invisible title bar would start a window drag on every press.
+	core.AssertEqual(t, 36, app.Mac.InvisibleTitleBarHeight)
+	core.AssertEqual(t, 0, spec.Mac.InvisibleTitleBarHeight)
 }
 
 // A carried size below the window's own declared minimum never arrives: the

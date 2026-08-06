@@ -82,6 +82,52 @@ func TestAppWindow_OpenApp_Bad_NoCore(t *core.T) {
 	core.AssertError(t, result.Value.(error))
 }
 
+func TestAppWindow_DockPane_Good_ApplicationOnly(t *core.T) {
+	pane, ok := dockPane("chat", "")
+
+	core.AssertTrue(t, ok)
+	core.AssertEqual(t, "", pane)
+}
+
+func TestAppWindow_DockPane_Good_ApplicationAndPane(t *core.T) {
+	pane, ok := dockPane("project-manager", "backlog")
+
+	core.AssertTrue(t, ok)
+	core.AssertEqual(t, "backlog", pane)
+}
+
+func TestAppWindow_DockPane_Bad_UnknownApplication(t *core.T) {
+	_, ok := dockPane("terminal", "")
+
+	core.AssertFalse(t, ok, "a retired application id is adopted by no shell")
+}
+
+func TestAppWindow_DockPane_Ugly_PaneEscapesItsSegment(t *core.T) {
+	_, ok := dockPane("chat", "../../etc/passwd")
+
+	core.AssertFalse(t, ok)
+}
+
+func TestAppWindow_DockApp_Bad_UnknownApplication(t *core.T) {
+	result := NewAppWindowService(core.New()).DockApp(AppWindowRequest{App: "../chat"})
+
+	core.AssertFalse(t, result.OK)
+	core.AssertError(t, result.Value.(error))
+}
+
+func TestAppWindow_DockApp_Bad_NoCore(t *core.T) {
+	result := NewAppWindowService(nil).DockApp(AppWindowRequest{App: "chat"})
+
+	core.AssertFalse(t, result.OK)
+	core.AssertError(t, result.Value.(error))
+}
+
+func TestAppWindow_DockAppEvent_Good_MatchesTheRendererListener(t *core.T) {
+	// frontend/src/app/desktop/desktop-app-window-bridge.service.ts exports the
+	// same string as DOCK_APP_EVENT; the shell listens for it and adopts.
+	core.AssertEqual(t, "lthn:app:dock", dockAppEvent)
+}
+
 func TestAppWindow_ServiceName_Good_RendererFacingName(t *core.T) {
 	core.AssertEqual(t, "AppWindow", NewAppWindowService(core.New()).ServiceName())
 }

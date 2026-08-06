@@ -10,11 +10,34 @@ import {
 } from '../desktop/desktop-state-bridge.service';
 import { Win } from '../desktop/desktop.data';
 import { WindowManagerService } from '../desktop/window-manager.service';
+import { DOCK_APP_EVENT } from '../desktop/desktop-app-window-bridge.service';
+import { DESKTOP_HOST_EVENTS } from '../desktop/desktop-host-intent.service';
 import { desktopActions } from './desktop.actions';
 import { DesktopEffects } from './desktop.effects';
 import { DesktopState } from './desktop.reducer';
 import { SOLO_APP_WINDOW } from './solo-window';
 import { DESKTOP_STORAGE, StorageService } from './storage.service';
+
+interface TestHostEvents {
+  on(name: string, handler: (payload: unknown) => void): () => void;
+  emit(name: string, payload: unknown): void;
+}
+
+/** The native event bus, stood in for: Go broadcasts, every window hears. */
+function testHostEvents(): TestHostEvents {
+  const handlers = new Map<string, Set<(payload: unknown) => void>>();
+  return {
+    on(name, handler) {
+      const existing = handlers.get(name) ?? new Set();
+      existing.add(handler);
+      handlers.set(name, existing);
+      return () => existing.delete(handler);
+    },
+    emit(name, payload) {
+      handlers.get(name)?.forEach((handler) => handler(payload));
+    },
+  };
+}
 
 const persistedWin: Win = {
   id: 'w1',
@@ -137,7 +160,9 @@ describe('DesktopEffects', () => {
   };
   let windows: {
     reconcileHydration: ReturnType<typeof vi.fn>;
+    dock: ReturnType<typeof vi.fn>;
   };
+  let hostEvents: TestHostEvents;
 
   beforeEach(() => {
     actions$ = new Subject<Action>();
@@ -153,7 +178,9 @@ describe('DesktopEffects', () => {
     };
     windows = {
       reconcileHydration: vi.fn((state) => state),
+      dock: vi.fn(),
     };
+    hostEvents = testHostEvents();
 
     TestBed.configureTestingModule({
       providers: [
@@ -164,6 +191,7 @@ describe('DesktopEffects', () => {
         { provide: StorageService, useValue: storage },
         { provide: WindowManagerService, useValue: windows },
         { provide: SOLO_APP_WINDOW, useValue: false },
+        { provide: DESKTOP_HOST_EVENTS, useValue: hostEvents },
       ],
     });
     effects = TestBed.inject(DesktopEffects);
@@ -173,6 +201,36 @@ describe('DesktopEffects', () => {
   afterEach(() => {
     actions$.complete();
     vi.useRealTimers();
+  });
+
+  it('adopts an application a solo window asked the shell to take back', () => {
+    const subscription = effects.adoptDockedApp$.subscribe();
+
+    hostEvents.emit(DOCK_APP_EVENT, { app: 'control', pane: 'models' });
+
+    expect(windows.dock).toHaveBeenCalledWith('control', 'models');
+    subscription.unsubscribe();
+  });
+
+  it('adopts an application that carries no pane', () => {
+    const subscription = effects.adoptDockedApp$.subscribe();
+
+    hostEvents.emit(DOCK_APP_EVENT, { app: 'telemetry' });
+
+    expect(windows.dock).toHaveBeenCalledWith('telemetry', '');
+    subscription.unsubscribe();
+  });
+
+  it('adopts nothing for an application the catalogue does not have', () => {
+    const subscription = effects.adoptDockedApp$.subscribe();
+
+    hostEvents.emit(DOCK_APP_EVENT, { app: 'terminal' });
+    hostEvents.emit(DOCK_APP_EVENT, { app: 'control', pane: '../../etc/passwd' });
+    hostEvents.emit(DOCK_APP_EVENT, 'control');
+    hostEvents.emit(DOCK_APP_EVENT, null);
+
+    expect(windows.dock).not.toHaveBeenCalled();
+    subscription.unsubscribe();
   });
 
   it('dispatches deterministic safe state before requesting connected hydration', async () => {
@@ -384,6 +442,8 @@ describe('DesktopEffects in a torn-off window', () => {
     loadShellSession: ReturnType<typeof vi.fn>;
     saveShellSession: ReturnType<typeof vi.fn>;
   };
+  let windows: { reconcileHydration: ReturnType<typeof vi.fn>; dock: ReturnType<typeof vi.fn> };
+  let hostEvents: TestHostEvents;
 
   beforeEach(() => {
     actions$ = new Subject<Action>();
@@ -392,6 +452,8 @@ describe('DesktopEffects in a torn-off window', () => {
       loadShellSession: vi.fn(),
       saveShellSession: vi.fn(),
     };
+    windows = { reconcileHydration: vi.fn((s) => s), dock: vi.fn() };
+    hostEvents = testHostEvents();
 
     TestBed.configureTestingModule({
       providers: [
@@ -400,8 +462,9 @@ describe('DesktopEffects in a torn-off window', () => {
         provideMockStore({ initialState: { desktop: desktopState } }),
         { provide: DesktopStateBridgeService, useValue: bridge },
         { provide: StorageService, useValue: { read: vi.fn(), write: vi.fn(), remove: vi.fn() } },
-        { provide: WindowManagerService, useValue: { reconcileHydration: vi.fn((s) => s) } },
+        { provide: WindowManagerService, useValue: windows },
         { provide: SOLO_APP_WINDOW, useValue: true },
+        { provide: DESKTOP_HOST_EVENTS, useValue: hostEvents },
       ],
     });
     effects = TestBed.inject(DesktopEffects);
@@ -415,6 +478,18 @@ describe('DesktopEffects in a torn-off window', () => {
     await expect(firstValueFrom(effects.hydrate$, { defaultValue: null })).resolves.toBeNull();
 
     expect(bridge.loadShellSession).not.toHaveBeenCalled();
+  });
+
+  it('ignores the dock-back it asked for itself', () => {
+    // Go broadcasts to every window, the requester included. Adopting here
+    // would put the application back into the very session this window is
+    // forbidden to author — the tear-off undoing itself, one window along.
+    const subscription = effects.adoptDockedApp$.subscribe();
+
+    hostEvents.emit(DOCK_APP_EVENT, { app: 'telemetry', pane: 'observe' });
+
+    expect(windows.dock).not.toHaveBeenCalled();
+    subscription.unsubscribe();
   });
 
   it('never writes the application it renders back into the shell session', async () => {
