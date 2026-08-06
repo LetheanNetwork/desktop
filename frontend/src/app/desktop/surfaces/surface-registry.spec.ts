@@ -2,15 +2,18 @@ import { signal, type Type } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ConnectionManagerService } from '../../connection-manager.service';
 import { DesktopFilesBridgeService } from '../desktop-files-bridge.service';
+import { APP_REGISTRY } from '../apps/app-view';
+import { APP_PANES } from '../desktop-panes.data';
 import { DEFAULT_DESKTOP_DATA, type Win } from '../desktop.data';
 import { WindowManagerService } from '../window-manager.service';
-import { SURFACE_APPS, SURFACE_APP_REGISTRY, SURFACE_CATEGORIES } from './surface-registry';
+import { SURFACE_APP_REGISTRY, SURFACE_DEFINITIONS, SURFACE_IDS } from './surface-registry';
 
 describe('surface registry', () => {
-  it('registers all 43 Angular surface routes exactly once', () => {
-    expect(Object.keys(SURFACE_APPS)).toHaveLength(43);
-    expect(Object.keys(SURFACE_APP_REGISTRY)).toEqual(Object.keys(SURFACE_APPS));
-    expect(SURFACE_CATEGORIES.map(({ id }) => id)).toEqual([
+  it('registers all 43 surface components exactly once', () => {
+    expect(SURFACE_DEFINITIONS).toHaveLength(43);
+    expect(Object.keys(SURFACE_APP_REGISTRY)).toEqual([...SURFACE_IDS]);
+    expect(new Set(SURFACE_IDS).size).toBe(43);
+    expect([...new Set(SURFACE_DEFINITIONS.map(({ group }) => group))]).toEqual([
       'agents',
       'coding',
       'marketing',
@@ -22,8 +25,25 @@ describe('surface registry', () => {
       'sales',
       'extensions',
     ]);
-    const routeKeys = Object.values(SURFACE_APPS).map(({ id, route }) => `${id}:${route}`);
-    expect(new Set(routeKeys).size).toBe(43);
+  });
+
+  it('gives every surface exactly one home — a pane, or a promoted application', () => {
+    const paneHomes = APP_PANES.flatMap(({ app, path, surface }) =>
+      surface ? [{ surface, home: `${app}/${path}` }] : [],
+    );
+    const applicationHomes = [
+      { surface: 'surface-office-mail', home: 'mail' },
+      { surface: 'surface-office-documents', home: 'documents' },
+    ];
+    const homes = new Map<string, string[]>();
+    for (const { surface, home } of [...paneHomes, ...applicationHomes]) {
+      homes.set(surface, [...(homes.get(surface) ?? []), home]);
+    }
+
+    expect([...homes.keys()].sort()).toEqual([...SURFACE_IDS].sort());
+    expect([...homes.entries()].filter(([, places]) => places.length !== 1)).toEqual([]);
+    expect(APP_REGISTRY['mail']).toBe(SURFACE_APP_REGISTRY['surface-office-mail']);
+    expect(APP_REGISTRY['documents']).toBe(SURFACE_APP_REGISTRY['surface-office-documents']);
   });
 
   it('resolves every lazy loader to a real standalone Angular component', async () => {
@@ -39,7 +59,7 @@ describe('surface registry', () => {
     }
   });
 
-  it('reuses canonical Files for the Office catalogue route without fixture metrics', async () => {
+  it('reuses canonical Files for the Workspace pane without fixture metrics', async () => {
     const offline = signal(true);
     const registerTool = vi.fn();
     Object.defineProperty(document, 'modelContext', {
@@ -74,9 +94,9 @@ describe('surface registry', () => {
     const component = (await SURFACE_APP_REGISTRY['surface-office-files']()) as Type<unknown>;
     const fixture = TestBed.createComponent(component);
     const win: Win = {
-      id: 'office-files-window',
-      app: 'surface-office-files',
-      sub: 'home',
+      id: 'workspace-pane-window',
+      app: 'files',
+      sub: 'workspace',
       systab: 'grid',
       x: 0,
       y: 0,
@@ -96,7 +116,11 @@ describe('surface registry', () => {
     expect(element.textContent).toContain('welcome.txt');
     expect(element.querySelector('lthn-surface-page')).toBeNull();
     expect(element.textContent).not.toContain('~/Documents · 5 recent');
-    expect(registerTool).not.toHaveBeenCalled();
+    // The pane belongs to the Files window now, so it publishes the Files
+    // tools rather than being a second, tool-less filesystem application.
+    expect(
+      (registerTool.mock.calls as [{ name: string }][]).map(([tool]) => tool.name).sort(),
+    ).toEqual(['files_navigate', 'files_read_location', 'files_set_view']);
   });
 
   it('removes the old filesystem fixture from shared desktop data', () => {

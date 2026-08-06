@@ -374,3 +374,18 @@ export const EMPTY_DEV_PANEL: DevPanelView = { kind: 'empty' };
 export function devPanelFor(route: string): DevPanelView {
   return DEV_PANEL_CATALOGUE[route as DevPanelRoute] ?? EMPTY_DEV_PANEL;
 }
+
+/**
+ * The honest empty state for a developer route, or null when the panel always
+ * has rows. A clean working tree is a result, not an absent panel, so Git says
+ * so rather than rendering a table with nothing in it.
+ */
+export function devPanelEmptyFor(route: string): [string, string, string] | null {
+  return route === 'git'
+    ? [
+        $localize`:Source control empty-state title@@devPanel.git.noChanges:No changes`,
+        'code-branch',
+        $localize`:Source control empty-state message@@devPanel.git.cleanTree:Working tree clean — nothing to commit`,
+      ]
+    : null;
+}

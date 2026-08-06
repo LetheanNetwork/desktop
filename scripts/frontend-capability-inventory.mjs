@@ -4,56 +4,61 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { gitLines, pathExists } from './repository.mjs';
 
+const COMPOSITE_COMPONENT = 'frontend/src/app/desktop/apps/composite.app.ts';
+const DEV_PANEL_COMPONENT = 'frontend/src/app/desktop/apps/dev-panel.app.ts';
+
+// The component each application route loads. A panelled application loads the
+// shared composite shell; the pane rows below carry the panes' own components.
 const BASE_COMPONENTS = Object.freeze({
   welcome: 'frontend/src/app/desktop/apps/welcome.app.ts',
   control: 'frontend/src/app/desktop/apps/control.app.ts',
-  chat: 'frontend/src/app/desktop/apps/chat.app.ts',
   telemetry: 'frontend/src/app/desktop/apps/telemetry.app.ts',
-  activity: 'frontend/src/app/desktop/apps/activity.app.ts',
-  lethernet: 'frontend/src/app/desktop/apps/lethernet.app.ts',
-  games: 'frontend/src/app/desktop/apps/games.app.ts',
-  notepad: 'frontend/src/app/desktop/apps/notepad.app.ts',
-  files: 'frontend/src/app/desktop/apps/files.app.ts',
+  activity: COMPOSITE_COMPONENT,
+  operations: COMPOSITE_COMPONENT,
+  marketplace: COMPOSITE_COMPONENT,
   settings: 'frontend/src/app/desktop/apps/settings.app.ts',
-  cpanel: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
-  explorer: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
-  codesearch: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
-  scm: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
-  terminal: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
-  build: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
-  procmon: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
-  containers: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
-  repos: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
-  forge: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
-  devops: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
-  marketplace: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
-  tasks: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
-  tenant: 'frontend/src/app/desktop/apps/dev-panel.app.ts',
+  ide: COMPOSITE_COMPONENT,
+  scm: COMPOSITE_COMPONENT,
+  databases: COMPOSITE_COMPONENT,
+  'project-manager': COMPOSITE_COMPONENT,
+  mail: 'frontend/src/app/desktop/surfaces/office/mail.ts',
+  documents: 'frontend/src/app/desktop/surfaces/office/documents.ts',
+  crm: COMPOSITE_COMPONENT,
+  marketing: COMPOSITE_COMPONENT,
+  tenant: DEV_PANEL_COMPONENT,
+  chat: 'frontend/src/app/desktop/apps/chat.app.ts',
+  agents: COMPOSITE_COMPONENT,
+  'ml-lab': COMPOSITE_COMPONENT,
+  games: 'frontend/src/app/desktop/apps/games.app.ts',
+  files: COMPOSITE_COMPONENT,
+  notepad: 'frontend/src/app/desktop/apps/notepad.app.ts',
+  lethernet: 'frontend/src/app/desktop/apps/lethernet.app.ts',
 });
 
+// One hash route per application. Pane routes are these plus the pane path.
 const BASE_ROUTES = Object.freeze({
+  welcome: '/system/welcome',
   control: '/system/control',
   telemetry: '/system/telemetry',
   activity: '/system/activity',
+  operations: '/system/operations',
+  marketplace: '/system/marketplace',
   settings: '/system/settings',
-  cpanel: '/developer/control-panel',
-  explorer: '/developer/explorer',
-  codesearch: '/developer/search',
-  scm: '/developer/git',
-  build: '/developer/build',
-  procmon: '/developer/process',
-  containers: '/developer/containers',
-  repos: '/developer/repos',
-  forge: '/developer/forge',
-  devops: '/developer/devops',
-  marketplace: '/developer/marketplace',
-  tasks: '/office/tasks',
+  ide: '/developer/ide',
+  scm: '/developer/scm',
+  databases: '/developer/databases',
+  'project-manager': '/office/project-manager',
+  mail: '/office/mail',
+  documents: '/office/documents',
+  crm: '/office/crm',
+  marketing: '/office/marketing',
   tenant: '/office/tenant',
   chat: '/ai/chat',
+  agents: '/ai/agents',
+  'ml-lab': '/ai/ml-lab',
   games: '/media/games',
   files: '/tools/files',
   notepad: '/tools/notepad',
-  terminal: '/tools/terminal',
   lethernet: '/networking/lethernet',
 });
 
@@ -94,15 +99,15 @@ const CONTRACT_PATTERN = /(?:bridgeMethod|loadEndpoint|endpoint):\s*['"`]([^'"`]
  * }} CapabilityEntry
  * @typedef {{
  *   baseApps: CapabilityEntry[];
- *   surfaceApps: CapabilityEntry[];
+ *   paneApps: CapabilityEntry[];
  *   entries: CapabilityEntry[];
  * }} CapabilityReport
  */
 
 export async function collectCapabilityEvidence(repoRoot) {
   const baseApps = await readBaseApps(repoRoot);
-  const surfaceApps = await readSurfaceApps(repoRoot);
-  const entries = [...baseApps, ...surfaceApps];
+  const paneApps = await readPaneApps(repoRoot);
+  const entries = [...baseApps, ...paneApps];
 
   for (const entry of entries) {
     const hasIntegration = entry.contracts.length > 0 || entry.specialisedEvidence.length > 0;
@@ -114,7 +119,7 @@ export async function collectCapabilityEvidence(repoRoot) {
         : 'unresolved';
     entry.limitations.push('Runtime path not certified by this source audit.');
   }
-  return { baseApps, surfaceApps, entries };
+  return { baseApps, paneApps, entries };
 }
 
 export function renderCapabilityMatrix(report) {
@@ -148,36 +153,66 @@ async function readBaseApps(repoRoot) {
   );
   const block = source.slice(
     source.indexOf('export const APPS:'),
-    source.indexOf('export const CATEGORIES:'),
+    source.indexOf('export const ORDER:'),
   );
-  const ids = [...block.matchAll(/^\s{2}([a-z][a-z0-9_-]+):\s*\{/gm)].map((match) => match[1]);
+  const ids = [...block.matchAll(/^\s{2}'?([a-z][a-z0-9-]*)'?:\s*\{/gm)].map((match) => match[1]);
+  for (const id of ids) {
+    if (!BASE_ROUTES[id] || !BASE_COMPONENTS[id]) {
+      throw new Error(`Application "${id}" has no audited route or component`);
+    }
+  }
   return Promise.all(
     ids.map((id) => entryFromComponent(repoRoot, id, BASE_ROUTES[id], BASE_COMPONENTS[id])),
   );
 }
 
-async function readSurfaceApps(repoRoot) {
+/**
+ * Every pane declared in desktop-panes.data.ts, at its real deep-link route.
+ * A surface pane is audited under its surface id so its specialised evidence
+ * still resolves; a developer or application-view pane is audited under
+ * `<app>.<pane>`.
+ */
+async function readPaneApps(repoRoot) {
+  const surfaces = await readSurfaceComponents(repoRoot);
+  const source = await readFile(
+    join(repoRoot, 'frontend/src/app/desktop/desktop-panes.data.ts'),
+    'utf8',
+  );
+  const block = source.slice(source.indexOf('export const APP_PANES:'), source.indexOf('];'));
+  const panes = [
+    ...block.matchAll(/\{\s*app: '([^']+)',\s*path: '([^']+)',\s*(surface|view|dev): '([^']+)',/g),
+  ];
+  return Promise.all(
+    panes.map(([, app, path, kind, value]) => {
+      const route = `${BASE_ROUTES[app]}/${path}`;
+      if (kind === 'surface') {
+        const component = surfaces.get(value);
+        if (!component) throw new Error(`Pane ${app}/${path} names unknown surface "${value}"`);
+        return entryFromComponent(repoRoot, value, route, component);
+      }
+      const component =
+        kind === 'dev'
+          ? DEV_PANEL_COMPONENT
+          : `frontend/src/app/desktop/apps/${value}.app.ts`;
+      return entryFromComponent(repoRoot, `${app}.${path}`, route, component);
+    }),
+  );
+}
+
+async function readSurfaceComponents(repoRoot) {
   const source = await readFile(
     join(repoRoot, 'frontend/src/app/desktop/surfaces/surface-registry.ts'),
     'utf8',
   );
   const block = source.slice(
-    source.indexOf('const DEFINITIONS:'),
+    source.indexOf('export const SURFACE_DEFINITIONS:'),
     source.indexOf('export function surfaceAppId'),
   );
-  const definitions = [
-    ...block.matchAll(/group:\s*'([^']+)'[\s\S]*?route:\s*'([^']+)'[\s\S]*?title:/g),
-  ];
-  return Promise.all(
-    definitions.map(([, group, route]) => {
-      const id = `surface-${group}-${route}`;
-      return entryFromComponent(
-        repoRoot,
-        id,
-        `/${group}/${route}`,
-        `frontend/src/app/desktop/surfaces/${group}/${route}.ts`,
-      );
-    }),
+  return new Map(
+    [...block.matchAll(/group: '([^']+)', route: '([^']+)'/g)].map(([, group, route]) => [
+      `surface-${group}-${route}`,
+      `frontend/src/app/desktop/surfaces/${group}/${route}.ts`,
+    ]),
   );
 }
 

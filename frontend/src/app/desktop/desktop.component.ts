@@ -21,7 +21,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { filter } from 'rxjs';
 import { APPS, ORDER } from './desktop-catalogue.data';
 import { CLOCKS, PKGS } from './desktop-shell-fixtures.data';
-import { devPanelFor, type DevPanelView } from './dev-panel.data';
+import { devPanelEmptyFor, devPanelFor, type DevPanelView } from './dev-panel.data';
 import { LANGS, TELEMETRY, Win, WindowSnapState } from './desktop.data';
 import { WindowManagerService } from './window-manager.service';
 import { WindowRouteContent } from './window-route-content';
@@ -366,13 +366,7 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
     return devPanelFor(route);
   }
   emptyFor(w: Win): [string, string, string] | null {
-    return APPS[w.app]?.route === 'git'
-      ? [
-          $localize`:Source control empty-state title@@devPanel.git.noChanges:No changes`,
-          'code-branch',
-          $localize`:Source control empty-state message@@devPanel.git.cleanTree:Working tree clean — nothing to commit`,
-        ]
-      : null;
+    return devPanelEmptyFor(APPS[w.app]?.route ?? '');
   }
 
   setBar(b: TaskbarEdge) {
@@ -824,8 +818,9 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
         },
       ];
     if (key === 'View') {
-      if (f && f.app === 'control')
-        return this.submenuFor('control').map(([k, i, l]) => ({
+      // Every panelled application publishes its panes here, not just Control.
+      if (f && this.submenuFor(f.app).length)
+        return this.submenuFor(f.app).map(([k, i, l]) => ({
           label: l,
           icon: i,
           act: () => this.wm.setSub(f.id, k),
@@ -1162,9 +1157,16 @@ export class DesktopComponent implements AfterViewInit, OnDestroy {
       this.wm.focus(win.id);
       win = this.wins.find((candidate) => candidate.id === win?.id) ?? win;
     }
-    if (win && target.sub && win.sub !== target.sub) {
+    // Compare panes, not raw subs: an application whose sub carries its own
+    // state (Files' location token) is already on the pane the URL names, and
+    // re-setting it would throw that state away on every focus.
+    if (win && target.sub && this.paneOf(win) !== target.sub) {
       this.wm.setSub(win.id, target.sub);
     }
+  }
+
+  private paneOf(win: Win): string {
+    return routeSegmentsForWindow(this.routeCatalog, win.app, win.sub)[2] ?? '';
   }
 
   private reflectFocusedWindowInRoute(): void {

@@ -1,11 +1,25 @@
 import { ChangeDetectionStrategy, Component, Input, computed, inject } from '@angular/core';
 import { DesktopLiveDataService } from '../desktop-live-data.service';
-import { APPS, type AppDef } from '../desktop-catalogue.data';
+import { type AppDef } from '../desktop-catalogue.data';
 import { Win } from '../desktop.data';
 import { devPanelFor, type DevPanelView } from '../dev-panel.data';
 import { AgentsTerminalSurface } from '../surfaces/agents/terminal';
 import { AppView } from './app-view';
 import { DevPanelApp } from './dev-panel.app';
+
+// Terminal is a pane of the IDE, not an application, so its offline fixture
+// carries its own panel identity rather than reading one out of the catalogue.
+const TERMINAL_PANEL: AppDef = {
+  id: 'ide.terminal',
+  title: $localize`:Application title@@app.terminal.title:Terminal`,
+  icon: 'terminal',
+  category: 'developer',
+  w: 760,
+  h: 460,
+  hint: $localize`:Application launcher hint@@app.terminal.hint:Local PTY · browser demo`,
+  dev: true,
+  route: 'terminal',
+};
 
 @Component({
   selector: 'lthn-terminal-app',
@@ -64,7 +78,7 @@ export class TerminalApp implements AppView {
   private readonly liveData = inject(DesktopLiveDataService);
 
   @Input({ required: true }) win!: Win;
-  @Input() app: AppDef = APPS['terminal'];
+  @Input() app: AppDef = TERMINAL_PANEL;
   @Input() panel: DevPanelView = devPanelFor('terminal');
   @Input() empty: [string, string, string] | null = null;
 

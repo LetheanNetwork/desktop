@@ -38,27 +38,31 @@ const testRoutes: Routes = [
               app: 'chat',
             },
           },
-        ],
-      },
-      {
-        path: 'agents',
-        data: {
-          category: 'agents',
-          title: 'Agents',
-          icon: 'robot',
-          kind: 'category',
-        },
-        children: [
           {
-            path: 'flows',
+            path: 'agents',
             loadComponent: () => Promise.resolve(TestSurface),
             data: {
-              category: 'agents',
-              title: 'Flows',
-              icon: 'diagram-project',
+              category: 'ai',
+              title: 'Agents',
+              icon: 'robot',
               kind: 'app',
-              app: 'surface-agents-flows',
+              app: 'agents',
+              defaultSub: 'activity',
             },
+            children: [
+              {
+                path: 'flows',
+                data: {
+                  category: 'ai',
+                  title: 'Flows',
+                  icon: 'diagram-project',
+                  kind: 'subview',
+                  app: 'agents',
+                  sub: 'flows',
+                },
+                children: [],
+              },
+            ],
           },
         ],
       },
@@ -98,10 +102,10 @@ describe('DeepLinkNavigationService', () => {
     expect(router.url).toBe('/ai/chat');
   });
 
-  it('maps the MCP directory target to the real tooling catalogue surface', async () => {
+  it('maps the MCP directory target to the Agents application Flows pane', async () => {
     await navigate({ action: 'mcp', resource: 'directory', id: '' });
 
-    expect(router.url).toBe('/agents/flows');
+    expect(router.url).toBe('/ai/agents/flows');
   });
 
   it('routes tray launch events through the same desktop catalogue', async () => {

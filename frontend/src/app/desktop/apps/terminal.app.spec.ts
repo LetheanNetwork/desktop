@@ -5,13 +5,14 @@ import type { Win } from '../desktop.data';
 import { AgentsTerminalSurface } from '../surfaces/agents/terminal';
 import { SurfaceBridgeService } from '../surfaces/surface-bridge.service';
 import { DevPanelApp } from './dev-panel.app';
-import { APP_REGISTRY } from './app-view';
+import { PANE_REGISTRY } from './app-view';
+import { paneFor } from '../desktop-panes.data';
 import { TerminalApp } from './terminal.app';
 
 const terminalWin: Win = {
   id: 'terminal-window',
-  app: 'terminal',
-  sub: '',
+  app: 'ide',
+  sub: 'terminal',
   x: 0,
   y: 0,
   w: 920,
@@ -81,7 +82,10 @@ describe('TerminalApp', () => {
     expect((fixture.nativeElement as HTMLElement).querySelector('[data-demo-terminal]')).toBeNull();
   });
 
-  it('is the lazy component registered for the base Terminal application', async () => {
-    await expect(APP_REGISTRY['terminal']()).resolves.toBe(TerminalApp);
+  it('is the lazy component behind the IDE Terminal pane', async () => {
+    const pane = paneFor('ide', 'terminal');
+
+    expect(pane?.view).toBe('terminal');
+    await expect(PANE_REGISTRY['terminal']()).resolves.toBe(TerminalApp);
   });
 });
