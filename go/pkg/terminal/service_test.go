@@ -340,6 +340,198 @@ func TestService_List_Good(t *testing.T) {
 	}
 }
 
+func TestService_ServiceName_Good(t *testing.T) {
+	if got := (&Service{}).ServiceName(); got != "Terminal" {
+		t.Errorf("ServiceName = %q, want %q", got, "Terminal")
+	}
+}
+
+func TestService_NewService_GoodEmitEventDelegatesToCore(t *testing.T) {
+	// NewService's own emitEvent closure (not the test double newTestService
+	// installs) forwards to gui.EmitEvent. c has no "events.emit" action
+	// registered, so this exercises the closure as a safe no-op.
+	c := core.New()
+	s := NewService(c)
+	s.emitEvent("lthn:test:noop", "payload")
+}
+
+// TestService_Open_GoodCommandSessionLifecycle spawns a real /bin/cat PTY
+// session through Service.Open (the "command" kind branch), exercises the
+// session-found success branch of Write and Resize, then kills it and waits
+// for the pool's watcher goroutine to emit the exit event and drop the
+// service's attachment bookkeeping.
+func TestService_Open_GoodCommandSessionLifecycle(t *testing.T) {
+	var mu sync.Mutex
+	var events []capturedTerminalEvent
+	service := newTestService()
+	service.emitEvent = func(name string, data any) {
+		mu.Lock()
+		events = append(events, capturedTerminalEvent{name: name, data: data})
+		mu.Unlock()
+	}
+
+	r := service.Open(OpenInput{Command: []string{"/bin/cat"}, Cols: 80, Rows: 24})
+	if !r.OK {
+		t.Skipf("open: %s", r.Error())
+	}
+	out, ok := r.Value.(OpenOutput)
+	if !ok {
+		t.Fatalf("value type = %T, want OpenOutput", r.Value)
+	}
+	if out.ID == "" {
+		t.Fatal("Open returned an empty id")
+	}
+	if out.Shell != "/bin/cat" {
+		t.Errorf("Shell = %q, want /bin/cat", out.Shell)
+	}
+	if out.Host != "local" {
+		t.Errorf("Host = %q, want local", out.Host)
+	}
+
+	if wr := service.Write(WriteInput{ID: out.ID, Data: "hi\n"}); !wr.OK {
+		t.Errorf("write to live session: %s", wr.Error())
+	}
+	if rr := service.Resize(ResizeInput{ID: out.ID, Cols: 100, Rows: 40}); !rr.OK {
+		t.Errorf("resize live session: %s", rr.Error())
+	}
+
+	terminalPoolSingleton().Close(out.ID)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		mu.Lock()
+		found := false
+		for _, e := range events {
+			if e.name == eventExitPrefix+out.ID {
+				found = true
+			}
+		}
+		mu.Unlock()
+		if found {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("exit event was not observed within 2s")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// TestService_Open_GoodDefaultShellKind exercises the "shell" (no explicit
+// Command) branch of Open's kind selection.
+func TestService_Open_GoodDefaultShellKind(t *testing.T) {
+	service := newTestService()
+	r := service.Open(OpenInput{})
+	if !r.OK {
+		t.Skipf("open: %s", r.Error())
+	}
+	out, ok := r.Value.(OpenOutput)
+	if !ok {
+		t.Fatalf("value type = %T, want OpenOutput", r.Value)
+	}
+	t.Cleanup(func() { terminalPoolSingleton().Close(out.ID) })
+	if out.Shell == "" {
+		t.Error("expected a non-empty default shell")
+	}
+}
+
+func TestService_Open_BadWorkspaceError(t *testing.T) {
+	r := newTestService().Open(OpenInput{Path: "relative-without-mount"})
+	if r.OK {
+		t.Fatal("open with a Path but no MountID should fail")
+	}
+}
+
+func TestService_Open_BadSpawnFails(t *testing.T) {
+	r := newTestService().Open(OpenInput{Command: []string{"/definitely/not/a/binary-xyzzy"}})
+	if r.OK {
+		t.Fatal("open with an unresolvable command should fail")
+	}
+}
+
+func TestService_Close_GoodDropsAttachedSubscriber(t *testing.T) {
+	session := memSession(8)
+	session.ID = "close-me"
+	useTerminalPool(t, session)
+	service := newTestService()
+	zero := uint64(0)
+	if r := service.Attach(AttachInput{ID: session.ID, After: &zero}); !r.OK {
+		t.Fatalf("attach: %s", r.Error())
+	}
+	if len(session.subscribers) != 1 {
+		t.Fatalf("subscribers = %d, want 1 before close", len(session.subscribers))
+	}
+
+	if r := service.Close(CloseInput{ID: session.ID}); !r.OK {
+		t.Fatalf("close: %s", r.Error())
+	}
+
+	if len(session.subscribers) != 0 {
+		t.Errorf("subscribers = %d after close, want 0", len(session.subscribers))
+	}
+	service.mu.Lock()
+	_, attached := service.attached[session.ID]
+	service.mu.Unlock()
+	if attached {
+		t.Error("attached bookkeeping should drop the closed session")
+	}
+}
+
+func TestService_List_GoodWithSessions(t *testing.T) {
+	session := memSession(8)
+	session.ID = "listed"
+	session.Host = "local"
+	session.Shell = "/bin/sh"
+	session.Label = "test-session"
+	session.Kind = "shell"
+	useTerminalPool(t, session)
+
+	r := newTestService().List()
+	if !r.OK {
+		t.Fatalf("list: %s", r.Error())
+	}
+	out, ok := r.Value.(ListOutput)
+	if !ok {
+		t.Fatalf("value type = %T, want ListOutput", r.Value)
+	}
+	if len(out.Sessions) != 1 || out.Sessions[0].ID != "listed" {
+		t.Fatalf("sessions = %#v, want one entry for %q", out.Sessions, "listed")
+	}
+	if out.Sessions[0].Label != "test-session" || out.Sessions[0].Kind != "shell" {
+		t.Errorf("session metadata = %#v, want label/kind carried through", out.Sessions[0])
+	}
+}
+
+func TestTerminalEventGate_Good(t *testing.T) {
+	var emitted []OutputChunk
+	gate := newTerminalEventGate(func(chunk OutputChunk) {
+		emitted = append(emitted, chunk)
+	})
+
+	// While pending, push queues instead of emitting immediately.
+	gate.push(OutputChunk{Start: 0, End: 1, Data: []byte("a")})
+	gate.push(OutputChunk{Start: 1, End: 2, Data: []byte("b")})
+	if len(emitted) != 0 {
+		t.Fatalf("emitted before open = %d, want 0 (queued while pending)", len(emitted))
+	}
+
+	// A zero-width, non-reset, empty replay must not itself be emitted.
+	gate.replayAndOpen(OutputChunk{Start: 0, End: 0})
+	if len(emitted) != 2 {
+		t.Fatalf("emitted after open = %d, want the two queued chunks", len(emitted))
+	}
+	if string(emitted[0].Data) != "a" || string(emitted[1].Data) != "b" {
+		t.Fatalf("emitted chunks = %#v, want a then b in order", emitted)
+	}
+
+	// Once open, push emits directly.
+	gate.push(OutputChunk{Start: 2, End: 3, Data: []byte("c")})
+	if len(emitted) != 3 || string(emitted[2].Data) != "c" {
+		t.Fatalf("post-open push should emit immediately, got %#v", emitted)
+	}
+}
+
 func assertTerminalChunk(t *testing.T, value any, start, end uint64, data string, reset bool) {
 	t.Helper()
 	chunk, ok := value.(TerminalChunk)
