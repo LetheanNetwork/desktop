@@ -28,11 +28,20 @@ import (
 // with Count > 1 runs N instances on consecutive ports from BasePort —
 // the path for lthn-ai managing a fleet of lthn-agent workers.
 
+// crewHealthDialTimeout, crewHealthDeadline, crewHealthPollInterval, and the
+// respawn backoff bounds are vars (not const) purely as a testability seam:
+// crew_test.go shrinks them for fast, deterministic health-gate + respawn
+// tests instead of a real 30s deadline / 1s-32s backoff ladder. Production
+// never reassigns them — the values below are the real defaults.
+var (
+	crewHealthDialTimeout  = 2 * time.Second
+	crewHealthDeadline     = 30 * time.Second
+	crewHealthPollInterval = 500 * time.Millisecond
+	crewBackoffMin         = 1 * time.Second
+	crewBackoffMax         = 30 * time.Second
+)
+
 const (
-	crewHealthDialTimeout = 2 * time.Second
-	crewHealthDeadline    = 30 * time.Second
-	crewBackoffMin        = 1 * time.Second
-	crewBackoffMax        = 30 * time.Second
 	// crewBinDirEnv overrides where crew binaries are resolved from (a
 	// directory). Dev convenience; production resolves the bundled
 	// sidecars next to the lthn executable (see resolveCrewBinary).
@@ -361,7 +370,7 @@ func crewHealthy(addr string) bool {
 			_ = conn.Close()
 			return true
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(crewHealthPollInterval)
 	}
 	return false
 }

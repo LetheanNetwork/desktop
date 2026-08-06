@@ -157,3 +157,48 @@ func TestStartSessionRequiresHistory(t *testing.T) {
 		t.Fatal("expected error when history nil, got nil")
 	}
 }
+
+// TestStartSessionNilReceiverFails — the defensive nil-Service guard.
+func TestStartSessionNilReceiverFails(t *testing.T) {
+	var svc *Service
+	if _, err := svc.StartSession("snider", SessionMeta{}); err == nil {
+		t.Fatal("expected error for a nil *Service receiver, got nil")
+	}
+}
+
+// TestConversationIDNilReceiverIsEmpty — defensive nil-Session guard.
+func TestConversationIDNilReceiverIsEmpty(t *testing.T) {
+	var sess *Session
+	if got := sess.ConversationID(); got != "" {
+		t.Fatalf("ConversationID on nil *Session = %q, want empty", got)
+	}
+}
+
+// TestSendNilReceiverFails — the defensive nil-Session guard (distinct from
+// the closed-session check TestSendCapturesBothTurns already exercises).
+func TestSendNilReceiverFails(t *testing.T) {
+	var sess *Session
+	if _, err := sess.Send(context.Background(), "hello"); err == nil {
+		t.Fatal("expected error for a nil *Session receiver, got nil")
+	}
+}
+
+// TestEndNilReceiverIsNoop — End on a nil *Session must not panic and
+// reports no error (nothing to close).
+func TestEndNilReceiverIsNoop(t *testing.T) {
+	var sess *Session
+	if err := sess.End(); err != nil {
+		t.Fatalf("End on nil *Session = %v, want nil", err)
+	}
+}
+
+// TestServiceBaseURLAndModelID — the two trivial config-echo getters.
+func TestServiceBaseURLAndModelID(t *testing.T) {
+	svc := New(Config{BaseURL: "http://example.invalid/v1", ModelID: "custom-model"})
+	if got := svc.BaseURL(); got != "http://example.invalid/v1" {
+		t.Fatalf("BaseURL() = %q, want the configured value", got)
+	}
+	if got := svc.ModelID(); got != "custom-model" {
+		t.Fatalf("ModelID() = %q, want custom-model", got)
+	}
+}

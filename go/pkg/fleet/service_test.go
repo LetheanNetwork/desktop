@@ -10,8 +10,11 @@
 package fleet_test
 
 import (
+	"os"
+
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/fleet"
+	"dappco.re/lthn/desktop/pkg/paths"
 )
 
 // homeFixture rebinds $HOME to a t-scoped temp dir + returns the
@@ -61,6 +64,26 @@ func TestService_New_Ugly(t *core.T) {
 	core.AssertTrue(t, r2.OK)
 	svc2 := r2.Value.(*fleet.Service)
 	core.AssertTrue(t, svc2.Close().OK)
+}
+
+// New()'s own `if r := paths.DataDir(); !r.OK` guard (service.go) is
+// unreachable in practice: paths.MasterDB() — called first, one line above
+// — calls DataDir() itself internally and returns early on failure, so by
+// the time New()'s own DataDir() check runs, DataDir() has already
+// succeeded. Traced via pkg/paths/paths.go (MasterDB delegates to DataDir),
+// not guessed; deliberately left uncovered rather than faked.
+
+// TestService_New_Bad_DBPathIsDirectory covers New()'s
+// store.OpenDuckDBReadWrite failure branch: the target db path exists but
+// is a directory, so DuckDB's own open refuses it with an IO error.
+func TestService_New_Bad_DBPathIsDirectory(t *core.T) {
+	t.Setenv("HOME", t.TempDir())
+	dbPathR := paths.MasterDB()
+	core.AssertTrue(t, dbPathR.OK, "paths.MasterDB must resolve under a fresh HOME")
+	dbPath := dbPathR.Value.(string)
+	core.AssertTrue(t, os.Mkdir(dbPath, 0o755) == nil, "seed the db path as a directory")
+	r := fleet.New()
+	core.AssertFalse(t, r.OK, "fleet.New must Fail when the target db path is a directory, not a file")
 }
 
 // --- Register (free function) ---
@@ -305,7 +328,7 @@ func TestService_Service_UpsertAgent_Good(t *core.T) {
 	core.AssertTrue(t, svc.UpsertAgent(fleet.Agent{
 		ID: "openai-default", Name: "OpenAI · GPT-5",
 		Provider: "openai-compat", Kind: "remote",
-		BaseURL: "https://api.openai.com/v1",
+		BaseURL:   "https://api.openai.com/v1",
 		APIKeyRef: "key:openai:default", Model: "gpt-5",
 		Persona: "concise reviewer",
 	}).OK)
@@ -569,4 +592,50 @@ func TestService_Service_ServiceShutdown_Ugly(t *core.T) {
 	core.AssertTrue(t, mr.OK)
 	sr := svc.ServiceShutdown()
 	core.AssertTrue(t, sr.OK)
+}
+
+// --- SuperviseLocalCrew (method on *Service) ---
+//
+// SuperviseLocalCrew's non-empty-capability branch calls the real
+// superviseCrew/defaultCrew machinery (crew.go), which would normally spawn
+// the lthn-ai / lthn-agent sidecars. Test_Ugly below stays hermetic by
+// construction, not by luck: this package's test binary never calls
+// process.Init/SetDefault (grep confirms — nothing in pkg/fleet does), so
+// process.Default() is nil and process.Start/StartWithOptions always fail
+// closed with ErrServiceNotInitialized before any exec.LookPath happens —
+// verified directly in crew_test.go's TestCrew_Launch_Bad_SpawnFailureRecordsNoInstance.
+// The Ugly test below only grants the "inference" capability (never
+// "sandbox"), so it can only ever reach the lthn-ai member, whose spawn path
+// runs through that same always-nil-Default gate — the lthn-agent member
+// (Watch:true, spawns via a PTY with no such gate) is never matched.
+
+func TestService_Service_SuperviseLocalCrew_Good_NoSelfMachineIsNoop(t *core.T) {
+	svc := homeFixture(t)
+	r := svc.SuperviseLocalCrew(core.Background(), nil)
+	core.AssertTrue(t, r.OK, "no is_self machine registered — must be a clean no-op")
+}
+
+func TestService_Service_SuperviseLocalCrew_Bad_ClosedServiceFails(t *core.T) {
+	t.Setenv("HOME", t.TempDir())
+	r := fleet.New()
+	core.AssertTrue(t, r.OK)
+	svc := r.Value.(*fleet.Service)
+	core.AssertTrue(t, svc.Close().OK)
+	sr := svc.SuperviseLocalCrew(core.Background(), nil)
+	core.AssertFalse(t, sr.OK, "SuperviseLocalCrew after Close must Fail (Machines() fails on a nil db)")
+}
+
+func TestService_Service_SuperviseLocalCrew_Ugly_SelfMachineWithCapabilityAttemptsCrew(t *core.T) {
+	t.Setenv("LTHN_DEV", "") // don't let an ambient LTHN_DEV skip the inference member
+	svc := homeFixture(t)
+	core.AssertTrue(t, svc.UpsertMachine(fleet.Machine{
+		ID: "self", Name: "this Mac", IsSelf: true,
+		Capabilities: []string{fleet.CapabilityInference},
+	}).OK)
+	r := svc.SuperviseLocalCrew(core.Background(), nil)
+	core.AssertTrue(t, r.OK, "SuperviseLocalCrew must return OK even when the sidecar spawn itself fails")
+	// A second call replaces the first crew (prev.stop() nil-safe path) —
+	// asserts the swap doesn't panic or Fail.
+	r2 := svc.SuperviseLocalCrew(core.Background(), nil)
+	core.AssertTrue(t, r2.OK, "second SuperviseLocalCrew call (crew swap) must also be OK")
 }

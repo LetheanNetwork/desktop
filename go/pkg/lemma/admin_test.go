@@ -5,6 +5,7 @@ package lemma
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -358,4 +359,118 @@ func TestAdminUnauthorizedIsExplicit(t *testing.T) {
 func writeFile(t *testing.T, path, content string) error {
 	t.Helper()
 	return os.WriteFile(path, []byte(content), 0o600)
+}
+
+// TestAdmin_RequestFailedWrapping_Bad drives every remaining "request
+// failed" wrap branch (Status/Profiles/Reload/DownloadJob/SFTStart/
+// SFTStatus/SFTStop/SFTAdapters — each has its own doJSON call site) through
+// one wrong-Bearer 401, so each method's local core.E(...) wrap line runs
+// at least once. TestAdminUnauthorizedIsExplicit above already covers
+// Machine's; Download's is covered by TestAdminBadStatusSurfacesUpstreamBody.
+func TestAdmin_RequestFailedWrapping_Bad(t *testing.T) {
+	srv := fakeAdminServer(t, "correct-token", nil) // every path 401s on the wrong token before any canned lookup
+	defer srv.Close()
+	admin, _ := NewAdmin(AdminConfig{BaseURL: srv.URL, Token: "wrong-token"})
+	ctx := context.Background()
+
+	if _, err := admin.Status(ctx); err == nil {
+		t.Error("Status: expected wrapped request-failed error")
+	}
+	if _, err := admin.Profiles(ctx); err == nil {
+		t.Error("Profiles: expected wrapped request-failed error")
+	}
+	if err := admin.Reload(ctx, ReloadRequest{ConfirmMachine: "m"}); err == nil {
+		t.Error("Reload: expected wrapped request-failed error")
+	}
+	if _, err := admin.DownloadJob(ctx, "job-1"); err == nil {
+		t.Error("DownloadJob: expected wrapped request-failed error")
+	}
+	if _, err := admin.SFTStart(ctx, SFTStartRequest{ModelPath: "/m", DatasetPath: "/d"}); err == nil {
+		t.Error("SFTStart: expected wrapped request-failed error")
+	}
+	if _, err := admin.SFTStatus(ctx, "job-1"); err == nil {
+		t.Error("SFTStatus: expected wrapped request-failed error")
+	}
+	if _, err := admin.SFTStop(ctx, "job-1"); err == nil {
+		t.Error("SFTStop: expected wrapped request-failed error")
+	}
+	if _, err := admin.SFTAdapters(ctx); err == nil {
+		t.Error("SFTAdapters: expected wrapped request-failed error")
+	}
+}
+
+// TestAdmin_DownloadJob_Bad_EmptyJobID — the pre-flight validation guard,
+// no HTTP call is even attempted.
+func TestAdmin_DownloadJob_Bad_EmptyJobID(t *testing.T) {
+	admin, _ := NewAdmin(AdminConfig{Token: "t"})
+	if _, err := admin.DownloadJob(context.Background(), ""); err == nil {
+		t.Fatal("expected an error for an empty job id")
+	}
+}
+
+// TestAdmin_SFTStart_Bad_MissingDatasetPath — ModelPath alone isn't enough;
+// this is a distinct validation line from the ModelPath-missing case that
+// TestAdmin_RequestFailedWrapping_Bad's SFTStart call already exercises.
+func TestAdmin_SFTStart_Bad_MissingDatasetPath(t *testing.T) {
+	admin, _ := NewAdmin(AdminConfig{Token: "t"})
+	if _, err := admin.SFTStart(context.Background(), SFTStartRequest{ModelPath: "/m"}); err == nil {
+		t.Fatal("expected an error for a missing dataset_path")
+	}
+}
+
+// TestAdmin_SFTStop_Bad_EmptyJobID — the pre-flight validation guard.
+func TestAdmin_SFTStop_Bad_EmptyJobID(t *testing.T) {
+	admin, _ := NewAdmin(AdminConfig{Token: "t"})
+	if _, err := admin.SFTStop(context.Background(), ""); err == nil {
+		t.Fatal("expected an error for an empty job id")
+	}
+}
+
+// TestAdmin_NewAdmin_Ugly_DefaultTokenPathUnderHome — no explicit Token or
+// TokenPath: NewAdmin must fall back to ~/Lethean/data/admin.token.
+func TestAdmin_NewAdmin_Ugly_DefaultTokenPathUnderHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	tokDir := filepath.Join(home, "Lethean", "data")
+	if err := os.MkdirAll(tokDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	const tok = "lthn-mlx_default-path-token"
+	if err := writeFile(t, filepath.Join(tokDir, "admin.token"), tok); err != nil {
+		t.Fatalf("seed token: %v", err)
+	}
+	srv := fakeAdminServer(t, tok, map[string]any{
+		"GET /v1/admin/machine": MachineInfo{Hash: "default-path-ok"},
+	})
+	defer srv.Close()
+
+	admin, err := NewAdmin(AdminConfig{BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("NewAdmin: %v", err)
+	}
+	mi, err := admin.Machine(context.Background())
+	if err != nil {
+		t.Fatalf("Machine: %v", err)
+	}
+	if mi.Hash != "default-path-ok" {
+		t.Fatalf("Machine.Hash = %q, want default-path-ok", mi.Hash)
+	}
+}
+
+// TestAdmin_LoadTokenFromFile_Bad_PathIsDirectory — a non-ENOENT read
+// failure (path is a directory, not a file) must NOT be mistaken for
+// ErrNoTokenFile; it has to surface as a real error.
+func TestAdmin_LoadTokenFromFile_Bad_PathIsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	tokPath := filepath.Join(dir, "admin.token")
+	if err := os.Mkdir(tokPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	_, err := loadTokenFromFile(tokPath)
+	if err == nil {
+		t.Fatal("expected an error when the token path is a directory")
+	}
+	if errors.Is(err, ErrNoTokenFile) {
+		t.Fatalf("a directory-as-path error must not be reported as ErrNoTokenFile: %v", err)
+	}
 }
