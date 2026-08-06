@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gitLines, pathExists } from './repository.mjs';
 
 const BASE_COMPONENTS = Object.freeze({
+  welcome: 'frontend/src/app/desktop/apps/welcome.app.ts',
   control: 'frontend/src/app/desktop/apps/control.app.ts',
   chat: 'frontend/src/app/desktop/apps/chat.app.ts',
   telemetry: 'frontend/src/app/desktop/apps/telemetry.app.ts',

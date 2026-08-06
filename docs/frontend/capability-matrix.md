@@ -70,3 +70,4 @@
 | /tools/files | frontend/src/app/desktop/apps/files.app.ts | none declared | integrated | frontend/src/app/desktop/desktop-files-bridge.service.ts | Runtime path not certified by this source audit. |
 | /tools/notepad | frontend/src/app/desktop/apps/notepad.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
 | /tools/terminal | frontend/src/app/desktop/apps/dev-panel.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
+|  | frontend/src/app/desktop/apps/welcome.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
