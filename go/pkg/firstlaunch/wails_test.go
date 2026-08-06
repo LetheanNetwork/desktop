@@ -14,9 +14,26 @@ import (
 	"os"
 
 	core "dappco.re/go"
+	lthn "dappco.re/lthn/desktop"
 	"dappco.re/lthn/desktop/pkg/firstlaunch"
 	"dappco.re/lthn/desktop/pkg/paths"
 )
+
+// TestWails_WailsService_Build_Good_UsesSharedDesktopVersion was
+// migrated from wails_example_test.go (the fake-mechanism file's one
+// genuine test, previously stranded alongside its non-invoking
+// _Good/_Bad/_Ugly triplet) — this is Build's proper home.
+func TestWails_WailsService_Build_Good_UsesSharedDesktopVersion(t *core.T) {
+	original := lthn.Version
+	t.Cleanup(func() { lthn.Version = original })
+	lthn.Version = "v8.7.6-test"
+
+	r := firstlaunch.NewWailsService().Build()
+
+	core.AssertTrue(t, r.OK)
+	info := r.Value.(firstlaunch.BuildInfo)
+	core.AssertEqual(t, "8.7.6-test", info.Version)
+}
 
 func TestWails_WailsService_ServiceLifecycle_Good(t *core.T) {
 	svc := firstlaunch.NewWailsService()
