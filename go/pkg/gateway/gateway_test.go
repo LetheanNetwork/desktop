@@ -324,6 +324,100 @@ func TestGateway_NewService_Ugly(t *core.T) {
 	core.AssertTrue(t, r.OK)
 }
 
+// ─── NewRoutes / coreapi.RouteGroup ─────────────────────────────────────
+
+func TestGateway_NewRoutes_Good(t *core.T) {
+	c := newGatewayCore(t)
+	svc := gateway.NewService(c)
+	routes := gateway.NewRoutes(svc)
+
+	core.AssertNotNil(t, routes)
+	core.AssertEqual(t, "gateway", routes.Name())
+	core.AssertEqual(t, "", routes.BasePath())
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	routes.RegisterRoutes(&engine.RouterGroup)
+
+	seedBundle(t, c, "opencode", []marketplace.Permission{
+		{Scope: "project.metadata", Mode: "read"},
+	})
+	req := httptest.NewRequest("POST", "/v1/api/gateway/project.metadata/read", nil)
+	req.Header.Set("Bundle-ID", "opencode")
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusOK, w.Code)
+	core.AssertContains(t, w.Body.String(), "projects")
+}
+
+// ─── serviceNotifyInvoke byte caps + success path ───────────────────────
+
+func TestGateway_Handle_ServiceNotify_MessageByteCap(t *core.T) {
+	c := newGatewayCore(t)
+	seedBundle(t, c, "opencode", []marketplace.Permission{
+		{Scope: "service.notify", Mode: "invoke"},
+	})
+	_, r := newTestRouter(t, c)
+
+	huge := strings.Repeat("x", 4097)
+	body := strings.NewReader(`{"title":"hi","message":"` + huge + `"}`)
+	req := httptest.NewRequest("POST", "/v1/api/gateway/service.notify/invoke", body)
+	req.Header.Set("Bundle-ID", "opencode")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusBadRequest, w.Code)
+	core.AssertContains(t, w.Body.String(), "message exceeds byte cap")
+}
+
+func TestGateway_Handle_ServiceNotify_SubtitleByteCap(t *core.T) {
+	c := newGatewayCore(t)
+	seedBundle(t, c, "opencode", []marketplace.Permission{
+		{Scope: "service.notify", Mode: "invoke"},
+	})
+	_, r := newTestRouter(t, c)
+
+	huge := strings.Repeat("x", 257)
+	body := strings.NewReader(`{"title":"hi","message":"hi","subtitle":"` + huge + `"}`)
+	req := httptest.NewRequest("POST", "/v1/api/gateway/service.notify/invoke", body)
+	req.Header.Set("Bundle-ID", "opencode")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusBadRequest, w.Code)
+	core.AssertContains(t, w.Body.String(), "subtitle exceeds byte cap")
+}
+
+func TestGateway_Handle_ServiceNotify_GoodDispatchesAndStampsID(t *core.T) {
+	c := newGatewayCore(t)
+	seedBundle(t, c, "opencode", []marketplace.Permission{
+		{Scope: "service.notify", Mode: "invoke"},
+	})
+	dispatched := false
+	c.Action("notification.send", func(_ core.Context, options core.Options) core.Result {
+		task := options.Get("task")
+		core.RequireTrue(t, task.OK)
+		dispatched = true
+		return core.Ok(nil)
+	})
+	_, r := newTestRouter(t, c)
+
+	body := strings.NewReader(`{"title":"hi","message":"there"}`)
+	req := httptest.NewRequest("POST", "/v1/api/gateway/service.notify/invoke", body)
+	req.Header.Set("Bundle-ID", "opencode")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	core.AssertEqual(t, core.StatusOK, w.Code)
+	core.AssertTrue(t, dispatched)
+	// No id supplied → the handler stamps "<bundleID>:<generated>".
+	core.AssertContains(t, w.Body.String(), `"id":"opencode:`)
+}
+
 // ─── Register (factory) ────────────────────────────────────────────────
 
 func TestGateway_Register_Good(t *core.T) {
