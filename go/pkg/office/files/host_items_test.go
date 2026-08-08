@@ -406,3 +406,146 @@ func TestRemoveHostMounts_GoodClosesOnlyListedIDsAndTolerantOfMissing(
 	service.removeHostMounts(nil)
 	core.AssertEqual(t, 1, len(service.hostMountSnapshot()))
 }
+
+func TestResolveHostItems_BadNilFactoryFailsClosed(t *core.T) {
+	service := registeredService(t, nil, &stubRuntimeMetadata{})
+	service.hostMediumFactory = nil
+
+	result := ResolveHostItems(service, []string{
+		core.PathJoin(t.TempDir(), "unreachable.txt"),
+	})
+
+	core.AssertFalse(t, result.OK)
+	core.AssertContains(t, result.Error(), string(ErrorProviderUnavailable))
+}
+
+func TestResolveHostItems_GoodDeepestLocalMountWins(t *core.T) {
+	root := t.TempDir()
+	outer, err := coreio.NewSandboxed(root)
+	core.RequireNoError(t, err)
+	core.RequireNoError(t, outer.EnsureDir("projects"))
+	core.RequireNoError(t, outer.Write("projects/readme.md", "hello"))
+	inner, err := coreio.NewSandboxed(core.PathJoin(root, "projects"))
+	core.RequireNoError(t, err)
+	service := registeredService(t, []Mount{
+		{
+			ID:                 "home",
+			Name:               "Home",
+			Kind:               "local",
+			LocalRoot:          root,
+			Capabilities:       ReadWriteCapabilities(),
+			Medium:             outer,
+			Owned:              true,
+			ContainmentAudited: true,
+		},
+		{
+			ID:                 "projects",
+			Name:               "Projects",
+			Kind:               "local",
+			LocalRoot:          core.PathJoin(root, "projects"),
+			Capabilities:       ReadWriteCapabilities(),
+			Medium:             inner,
+			Owned:              true,
+			ContainmentAudited: true,
+		},
+	}, &stubRuntimeMetadata{})
+
+	result := ResolveHostItems(service, []string{
+		core.PathJoin(root, "projects", "readme.md"),
+	})
+
+	core.RequireTrue(t, result.OK, result.Error())
+	items := result.Value.([]HostItemView)
+	core.RequireTrue(t, len(items) == 1)
+	core.AssertEqual(t, "projects", items[0].MountID)
+	core.AssertEqual(t, "readme.md", items[0].Path)
+}
+
+func TestResolveHostItems_BadRejectsLocalRootItself(t *core.T) {
+	root := t.TempDir()
+	medium, err := coreio.NewSandboxed(root)
+	core.RequireNoError(t, err)
+	service := registeredService(t, []Mount{{
+		ID:                 "documents",
+		Name:               "Documents",
+		Kind:               "local",
+		LocalRoot:          root,
+		Capabilities:       ReadWriteCapabilities(),
+		Medium:             medium,
+		Owned:              true,
+		ContainmentAudited: true,
+	}}, &stubRuntimeMetadata{})
+
+	// Selecting an authorised mount's root itself is not a nameable
+	// host item — the view construction rejects the empty relative
+	// path rather than aliasing the whole mount.
+	result := ResolveHostItems(service, []string{root})
+
+	core.AssertFalse(t, result.OK)
+	core.AssertContains(t, result.Error(), string(ErrorInvalidInput))
+}
+
+func TestResolveHostItems_BadMissingLocalFile(t *core.T) {
+	root := t.TempDir()
+	medium, err := coreio.NewSandboxed(root)
+	core.RequireNoError(t, err)
+	service := registeredService(t, []Mount{{
+		ID:                 "documents",
+		Name:               "Documents",
+		Kind:               "local",
+		LocalRoot:          root,
+		Capabilities:       ReadWriteCapabilities(),
+		Medium:             medium,
+		Owned:              true,
+		ContainmentAudited: true,
+	}}, &stubRuntimeMetadata{})
+
+	result := ResolveHostItems(service, []string{
+		core.PathJoin(root, "ghost.md"),
+	})
+
+	core.AssertFalse(t, result.OK)
+}
+
+func TestResolveHostItems_GoodOpensSelectedDirectory(t *core.T) {
+	service := registeredService(t, nil, &stubRuntimeMetadata{})
+	root := t.TempDir()
+	source, err := coreio.NewSandboxed(root)
+	core.RequireNoError(t, err)
+	core.RequireNoError(t, source.EnsureDir("bundle"))
+	core.RequireNoError(t, source.Write("bundle/asset.txt", "content"))
+
+	result := ResolveHostItems(service, []string{
+		core.PathJoin(root, "bundle"),
+	})
+
+	core.RequireTrue(t, result.OK, result.Error())
+	items := result.Value.([]HostItemView)
+	core.RequireTrue(t, len(items) == 1)
+	core.AssertTrue(t, core.HasPrefix(items[0].MountID, "host-"))
+	core.AssertEqual(t, EntryDirectory, items[0].Kind)
+	core.AssertEqual(t, "", items[0].Path)
+}
+
+func TestResolveHostItems_UglyDirectoryReopenFails(t *core.T) {
+	service := registeredService(t, nil, &stubRuntimeMetadata{})
+	root := t.TempDir()
+	source, err := coreio.NewSandboxed(root)
+	core.RequireNoError(t, err)
+	core.RequireNoError(t, source.EnsureDir("bundle"))
+	target := core.PathJoin(root, "bundle")
+	// The parent open succeeds so the Stat + kind checks run; the
+	// second factory call — reopening the selected directory as its
+	// own medium — fails, which must fail the whole selection closed.
+	service.hostMediumFactory = func(path string) (coreio.Medium, error) {
+		if path == target {
+			return nil, fs.ErrPermission
+		}
+		return coreio.NewSandboxed(path)
+	}
+
+	result := ResolveHostItems(service, []string{target})
+
+	core.AssertFalse(t, result.OK)
+	core.AssertEqual(t, 0, len(service.hostMountSnapshot()))
+}
