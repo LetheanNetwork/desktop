@@ -9,19 +9,23 @@
 | /ai/agents/code | frontend/src/app/desktop/surfaces/agents/code.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
 | /ai/agents/connect | frontend/src/app/desktop/surfaces/agents/connect.ts | dappco.re/lthn/desktop/pkg/agents.Service.ClaudeConnectRecipe | integrated | go/pkg/agents/connect.go#Service.ClaudeConnectRecipe | Runtime path not certified by this source audit. |
 | /ai/agents/dispatch | frontend/src/app/desktop/surfaces/agents/dispatch.ts | dappco.re/lthn/desktop/pkg/agents.Service.Dispatch | integrated | go/pkg/agents/cli.go#Service.Dispatch | Runtime path not certified by this source audit. |
-| /ai/agents/flows | frontend/src/app/desktop/surfaces/agents/flows.ts | dappco.re/lthn/desktop/pkg/tools.WailsService.List | unresolved | component/route only | Runtime path not certified by this source audit. |
+| /ai/agents/flows | frontend/src/app/desktop/surfaces/agents/flows.ts | dappco.re/lthn/desktop/pkg/tools.WailsService.List | integrated | go/pkg/tools/tools.go#WailsService.List | Runtime path not certified by this source audit. |
 | /ai/agents/scan | frontend/src/app/desktop/surfaces/agents/scan.ts | dappco.re/lthn/desktop/pkg/agents.Service.Scan | integrated | go/pkg/agents/cli.go#Service.Scan | Runtime path not certified by this source audit. |
 | /ai/agents/tasks | frontend/src/app/desktop/surfaces/agents/tasks.ts | dappco.re/lthn/desktop/pkg/agents.Service.Tasks | integrated | go/pkg/agents/cli.go#Service.Tasks | Runtime path not certified by this source audit. |
 | /ai/agents/terminal | frontend/src/app/desktop/surfaces/agents/terminal.ts | none declared | integrated | frontend/src/app/desktop/surfaces/agents/terminal-session.ts | Runtime path not certified by this source audit. |
 | /ai/agents/workspaces | frontend/src/app/desktop/surfaces/agents/workspaces.ts | dappco.re/lthn/desktop/pkg/agents.Service.Prep | integrated | go/pkg/agents/cli.go#Service.Prep | Runtime path not certified by this source audit. |
 | /ai/chat | frontend/src/app/desktop/apps/chat.app.ts | none declared | integrated | frontend/src/app/desktop/desktop-ai.service.ts | Runtime path not certified by this source audit. |
 | /ai/ml-lab | frontend/src/app/desktop/apps/composite.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
-| /ai/ml-lab/lora | frontend/src/app/desktop/surfaces/ml-lab/lora.ts | /v1/ml-lab/runs | unresolved | component/route only | Runtime path not certified by this source audit. |
-| /ai/ml-lab/models | frontend/src/app/desktop/surfaces/ml-lab/models.ts | /v1/ml-lab/models | unresolved | component/route only | Runtime path not certified by this source audit. |
-| /ai/ml-lab/workbench | frontend/src/app/desktop/surfaces/ml-lab/ml-lab.ts | /v1/ml-lab/ask | unresolved | component/route only | Runtime path not certified by this source audit. |
+| /ai/ml-lab/lora | frontend/src/app/desktop/surfaces/ml-lab/lora.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
+| /ai/ml-lab/models | frontend/src/app/desktop/surfaces/ml-lab/models.ts | dappco.re/lthn/desktop/pkg/modelruntime.WailsService.Snapshot | integrated | go/pkg/modelruntime/wails.go#WailsService.Snapshot | Runtime path not certified by this source audit. |
+| /ai/ml-lab/workbench | frontend/src/app/desktop/surfaces/ml-lab/ml-lab.ts | /v1/completions | integrated | go/cmd/lthn/main.go#/v1/completions<br>go/pkg/api/runner_group.go#/v1/completions<br>go/pkg/server/handlers.go#/v1/completions<br>go/pkg/server/service.go#/v1/completions | Runtime path not certified by this source audit. |
+| /ai/opencode | frontend/src/app/desktop/apps/composite.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
+| /ai/opencode/profiles | frontend/src/app/desktop/surfaces/opencode/profiles.ts | none declared | integrated | frontend/src/app/desktop/surfaces/opencode/profiles.ts | Runtime path not certified by this source audit. |
+| /ai/opencode/sessions | frontend/src/app/desktop/surfaces/opencode/sessions.ts | none declared | integrated | frontend/src/app/desktop/surfaces/opencode/sessions.ts | Runtime path not certified by this source audit. |
+| /ai/opencode/workspace | frontend/src/app/desktop/surfaces/extensions/opencode-shim.ts | none declared | integrated | frontend/src/app/desktop/surfaces/extensions/opencode-shim.ts | Runtime path not certified by this source audit. |
 | /developer/databases | frontend/src/app/desktop/apps/composite.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
-| /developer/databases/duckdb | frontend/src/app/desktop/surfaces/ml-lab/duckdb.ts | /v1/ml-lab/duckdb | unresolved | component/route only | Runtime path not certified by this source audit. |
-| /developer/databases/influxdb | frontend/src/app/desktop/surfaces/ml-lab/influx.ts | /v1/ml-lab/influx | unresolved | component/route only | Runtime path not certified by this source audit. |
+| /developer/databases/duckdb | frontend/src/app/desktop/surfaces/ml-lab/duckdb.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
+| /developer/databases/influxdb | frontend/src/app/desktop/surfaces/ml-lab/influx.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
 | /developer/ide | frontend/src/app/desktop/apps/composite.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
 | /developer/ide/build | frontend/src/app/desktop/apps/dev-panel.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
 | /developer/ide/containers | frontend/src/app/desktop/apps/dev-panel.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
@@ -32,7 +36,7 @@
 | /developer/ide/git | frontend/src/app/desktop/apps/dev-panel.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
 | /developer/ide/processes | frontend/src/app/desktop/apps/dev-panel.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
 | /developer/ide/search | frontend/src/app/desktop/apps/dev-panel.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
-| /developer/ide/terminal | frontend/src/app/desktop/apps/terminal.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
+| /developer/ide/terminal | frontend/src/app/desktop/apps/terminal.app.ts | none declared | integrated | frontend/src/app/desktop/desktop-live-data.service.ts | Runtime path not certified by this source audit. |
 | /developer/scm | frontend/src/app/desktop/apps/composite.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
 | /developer/scm/deploys | frontend/src/app/desktop/surfaces/coding/deploys.ts | dappco.re/lthn/desktop/pkg/deploys.Service.List | integrated | go/pkg/deploys/wails.go#Service.List | Runtime path not certified by this source audit. |
 | /developer/scm/pull-requests | frontend/src/app/desktop/surfaces/coding/prs.ts | dappco.re/lthn/desktop/pkg/vi.Service.Activity | integrated | go/pkg/vi/service.go#Service.Activity | Runtime path not certified by this source audit. |
@@ -63,11 +67,10 @@
 | /office/project-manager/today | frontend/src/app/desktop/surfaces/planning/today.ts | dappco.re/lthn/desktop/pkg/tasks.Service.List | integrated | go/pkg/tasks/wails.go#Service.List | Runtime path not certified by this source audit. |
 | /office/tenant | frontend/src/app/desktop/apps/dev-panel.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
 | /system/activity | frontend/src/app/desktop/apps/composite.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
-| /system/activity/observe | frontend/src/app/desktop/surfaces/observe/activity.ts | /v1/audit/events?limit=250 | unresolved | component/route only | Runtime path not certified by this source audit. |
+| /system/activity/observe | frontend/src/app/desktop/surfaces/observe/activity.ts | /v1/audit/events?limit=250 | integrated | go/cmd/lthn/app.go#/v1/audit/events<br>go/pkg/audit/routes.go#/v1/audit/events<br>go/pkg/audit/service.go#/v1/audit/events<br>go/pkg/audit/types.go#/v1/audit/events<br>go/pkg/server/service.go#/v1/audit/events | Runtime path not certified by this source audit. |
 | /system/activity/streams | frontend/src/app/desktop/apps/activity.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
-| /system/control | frontend/src/app/desktop/apps/control.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
+| /system/control | frontend/src/app/desktop/apps/control.app.ts | none declared | integrated | frontend/src/app/desktop/desktop-live-data.service.ts<br>frontend/src/app/desktop/desktop-services-bridge.service.ts | Runtime path not certified by this source audit. |
 | /system/marketplace | frontend/src/app/desktop/apps/composite.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
-| /system/marketplace/opencode | frontend/src/app/desktop/surfaces/extensions/opencode-shim.ts | none declared | integrated | frontend/src/app/desktop/surfaces/extensions/opencode-shim.ts | Runtime path not certified by this source audit. |
 | /system/marketplace/plugin-view | frontend/src/app/desktop/surfaces/extensions/plugin-view.ts | none declared | integrated | frontend/src/app/desktop/surfaces/extensions/plugin-view-runtime.ts | Runtime path not certified by this source audit. |
 | /system/marketplace/store | frontend/src/app/desktop/surfaces/extensions/marketplace.ts | none declared | integrated | frontend/src/app/desktop/surfaces/extensions/marketplace.ts | Runtime path not certified by this source audit. |
 | /system/operations | frontend/src/app/desktop/apps/composite.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
@@ -75,7 +78,7 @@
 | /system/operations/runbooks | frontend/src/app/desktop/surfaces/operations/runbooks.ts | dappco.re/lthn/desktop/pkg/runbooks.Service.List | integrated | go/pkg/runbooks/wails.go#Service.List | Runtime path not certified by this source audit. |
 | /system/operations/status | frontend/src/app/desktop/surfaces/operations/status.ts | dappco.re/lthn/desktop/pkg/vi.Service.Sites | integrated | go/pkg/vi/service.go#Service.Sites | Runtime path not certified by this source audit. |
 | /system/settings | frontend/src/app/desktop/apps/settings.app.ts | none declared | integrated | frontend/src/app/desktop/preferences.service.ts | Runtime path not certified by this source audit. |
-| /system/telemetry | frontend/src/app/desktop/apps/telemetry.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
+| /system/telemetry | frontend/src/app/desktop/apps/telemetry.app.ts | none declared | integrated | frontend/src/app/desktop/desktop-system-monitor-bridge.service.ts | Runtime path not certified by this source audit. |
 | /system/welcome | frontend/src/app/desktop/apps/welcome.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |
 | /tools/files | frontend/src/app/desktop/apps/composite.app.ts | none declared | integrated | frontend/src/app/desktop/desktop-files-bridge.service.ts | Runtime path not certified by this source audit. |
 | /tools/files/home | frontend/src/app/desktop/apps/files.app.ts | none declared | design-fixture | component/route only | Runtime path not certified by this source audit. |

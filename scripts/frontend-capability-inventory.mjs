@@ -66,6 +66,12 @@ const BASE_ROUTES = Object.freeze({
 
 const SPECIALISED_EVIDENCE = Object.freeze({
   chat: ['frontend/src/app/desktop/desktop-ai.service.ts'],
+  control: [
+    'frontend/src/app/desktop/desktop-live-data.service.ts',
+    'frontend/src/app/desktop/desktop-services-bridge.service.ts',
+  ],
+  telemetry: ['frontend/src/app/desktop/desktop-system-monitor-bridge.service.ts'],
+  'ide.terminal': ['frontend/src/app/desktop/desktop-live-data.service.ts'],
   files: ['frontend/src/app/desktop/desktop-files-bridge.service.ts'],
   settings: ['frontend/src/app/desktop/preferences.service.ts'],
   'surface-agents-terminal': ['frontend/src/app/desktop/surfaces/agents/terminal-session.ts'],
