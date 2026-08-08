@@ -121,3 +121,46 @@ func TestFleet_FleetKeys_Good(t *testing.T) {
 
 	core.AssertEqual(t, 0, fleetKeys())
 }
+
+// seedFleetRows creates the three inspector tables with one row each
+// (the activity row in status 'running' so the queue verb has an
+// in-flight entry to render).
+func seedFleetRows(t *testing.T, dbPath string) {
+	t.Helper()
+	core.RequireTrue(t, core.MkdirAll(core.PathDir(dbPath), 0o755).OK)
+	r := store.OpenDuckDBReadWrite(dbPath)
+	core.RequireTrue(t, r.OK)
+	db := r.Value.(*store.DuckDB)
+	for _, stmt := range []string{
+		`CREATE TABLE agents (id VARCHAR, name VARCHAR, provider VARCHAR, kind VARCHAR,
+			base_url VARCHAR, api_key_ref VARCHAR, model VARCHAR, persona VARCHAR, status VARCHAR)`,
+		`INSERT INTO agents VALUES ('a1','coder','anthropic','api','https://api.example',
+			'ref-1','claude','pairs on Go','idle')`,
+		`CREATE TABLE fleet_machines (id VARCHAR, name VARCHAR, arch VARCHAR, host VARCHAR,
+			port INTEGER, status VARCHAR, model VARCHAR, load_pct INTEGER, tps DOUBLE,
+			is_self BOOLEAN, capabilities VARCHAR)`,
+		`INSERT INTO fleet_machines VALUES ('m1','laptop','arm64','10.0.0.2',8000,'online',
+			'lem-8b',12,42.5,true,'["metal"]')`,
+		`CREATE TABLE agent_activity (id VARCHAR, agent VARCHAR, caller VARCHAR, task_id VARCHAR,
+			machine_id VARCHAR, model VARCHAR, action VARCHAR, status VARCHAR,
+			started_at BIGINT, summary VARCHAR)`,
+		`INSERT INTO agent_activity VALUES ('t1','coder','cli','task-9','m1','lem-8b',
+			'generate','running',1700000000,'in flight')`,
+	} {
+		_, err := db.Conn().Exec(stmt)
+		core.RequireTrue(t, err == nil, stmt)
+	}
+	core.RequireTrue(t, db.Close().OK)
+}
+
+// TestFleet_FleetVerbs_SeededRows_Good — with one row in each table
+// the agents / machines / activity / queue verbs render their full
+// row-iteration paths.
+func TestFleet_FleetVerbs_SeededRows_Good(t *testing.T) {
+	seedFleetRows(t, newFleetHome(t))
+
+	core.AssertEqual(t, 0, fleetAgents())
+	core.AssertEqual(t, 0, fleetMachines())
+	core.AssertEqual(t, 0, fleetActivity([]string{"5"}))
+	core.AssertEqual(t, 0, fleetQueue())
+}
