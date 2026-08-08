@@ -90,6 +90,17 @@ type Service struct {
 	// rotation interval is short enough (default 60s) that lock
 	// contention with the writer goroutine stays well below auth-
 	// emit latency budgets.
+	// cancelled is the owning Core's live context Done channel,
+	// captured by OnStartup immediately before the rotation
+	// goroutine spawns (ServiceStartup replaces the Core context, so
+	// a construction-time capture would hold a channel whose cancel
+	// handle was dropped). Nil for nil-core fixtures, where s.stop
+	// (Close) is the exit signal. loopUp guards double-spawn across
+	// repeated startups; loopMu guards both fields.
+	cancelled <-chan struct{}
+	loopUp    bool
+	loopMu    core.Mutex
+
 	mu          core.Mutex
 	currentFile *core.OSFile
 	currentDate string // YYYY-MM-DD of the handle's day
@@ -167,13 +178,14 @@ func New(c *core.Core, in Options) *Service {
 		secret: secret,
 		stop:   make(chan struct{}),
 	}
-	// Spawn the rotation goroutine. Uses c.Go when c is non-nil so
-	// the supervised-goroutine machinery (panic recovery + shutdown
-	// signalling) wraps it; falls back to a bare go statement when
-	// the caller passed nil core (test fixtures).
-	if c != nil {
-		c.Go(s.rotationLoop)
-	} else {
+	// With a real Core the rotation goroutine spawns from OnStartup,
+	// not here — ServiceStartup replaces the Core's context, so a
+	// loop spawned at construction would capture a Done channel
+	// whose cancel handle gets dropped, stalling every shutdown a
+	// full tick while the drain waits out core.After. Nil-core
+	// callers (test fixtures) have no lifecycle; they keep the
+	// construction-time spawn and stop via Close.
+	if c == nil {
 		go s.rotationLoop()
 	}
 	return s
@@ -627,12 +639,48 @@ func (s *Service) ServiceShutdown() core.Result {
 	return s.Close()
 }
 
+// OnStartup implements core.Startable. Captures the live Core
+// context (ServiceStartup replaces the Core's context immediately
+// before services start) and spawns the rotation + retention worker
+// under the supervised-goroutine machinery, so the shutdown drain's
+// context cancel wakes it promptly. Guarded so repeated startups
+// cannot double-spawn; the loop clears the guard on exit, so a
+// startup after a full shutdown respawns with the fresh context.
+//
+// Usage example (driven by the Core, never called directly):
+//
+//	c.RegisterService("audit", svc) // auto-discovers Startable
+//	c.ServiceStartup(core.Background(), nil)
+func (s *Service) OnStartup(ctx core.Context) core.Result {
+	if s.core == nil || s.root == "" {
+		return core.Ok(nil)
+	}
+	s.loopMu.Lock()
+	defer s.loopMu.Unlock()
+	if s.loopUp {
+		return core.Ok(nil)
+	}
+	s.loopUp = true
+	s.cancelled = ctx.Done()
+	s.core.Go(s.rotationLoop)
+	return core.Ok(nil)
+}
+
+// OnShutdown implements core.Stoppable — the ServiceShutdown hook the
+// Close contract asks boot wiring for. By the time services stop, the
+// rotation goroutine has already exited via the context-cancel arm;
+// Close flushes + closes the live handle so the final cascade-batched
+// events are durable before the process exits.
+func (s *Service) OnShutdown(_ core.Context) core.Result {
+	return s.Close()
+}
+
 // Close synchronously shuts the rotation goroutine, fsyncs the live
 // handle, and closes it. Safe to call multiple times — second + later
 // calls are no-ops.
 //
-// Boot wiring SHOULD call Close from a ServiceShutdown hook so the
-// final cascade-batched events flush before the process exits.
+// Boot wiring gets this on ServiceShutdown for free via OnShutdown
+// above; nil-core fixtures call it directly.
 //
 // Usage example:
 //
@@ -679,7 +727,9 @@ func (s *Service) Close() core.Result {
 //     `.log.gz.candidate` (the persistent "logged-once" retention
 //     marker per RFC §4.2).
 //
-// Exits cleanly on s.stop closure OR c.IsShutdown returning true.
+// Exits on s.stop closure (Close), the owning Core's context cancel
+// (ServiceShutdown, captured by OnStartup), or the post-tick
+// IsShutdown check as belt-and-braces.
 func (s *Service) rotationLoop() {
 	if s.root == "" {
 		// Degraded Service — nothing to rotate.
@@ -689,9 +739,25 @@ func (s *Service) rotationLoop() {
 	if tick <= 0 {
 		tick = defaultRotationCheckInterval
 	}
+	// ServiceShutdown drains Core-tracked goroutines BEFORE any
+	// OnStop runs, so s.stop cannot be the wake signal at shutdown
+	// time — the Core context cancel is. OnStartup captured the live
+	// Done channel into s.cancelled before spawning; nil (nil-core
+	// fixtures) never fires, leaving the s.stop arm to cover that
+	// composition.
+	s.loopMu.Lock()
+	cancelled := s.cancelled
+	s.loopMu.Unlock()
+	defer func() {
+		s.loopMu.Lock()
+		s.loopUp = false
+		s.loopMu.Unlock()
+	}()
 	for {
 		select {
 		case <-s.stop:
+			return
+		case <-cancelled:
 			return
 		case <-core.After(tick):
 		}
