@@ -66,14 +66,21 @@ func cmdOpenCode(args []string) int {
 	}
 }
 
-// opencodeBase is the control surface root on localhost.
-const (
+// opencodeBase is the control surface root on localhost. Vars, not
+// consts — the test suite repoints them at an httptest server so the
+// CLI verbs exercise their full request/response arms without a live
+// serve daemon (and without ever reaching a real sandbox surface).
+// Production never mutates them.
+var (
 	opencodeBase           = "http://localhost:8000/v1/api/opencode/sandbox"
 	opencodeProfBase       = "http://localhost:8000/v1/api/opencode/profile"
 	opencodeHostConfigBase = "http://localhost:8000/v1/api/opencode/host-config"
 	opencodeEnableBase     = "http://localhost:8000/v1/api/opencode/enable"
 	opencodeDisableBase    = "http://localhost:8000/v1/api/opencode/disable"
 	opencodeEnabledBase    = "http://localhost:8000/v1/api/opencode/enabled"
+	opencodeImportBase     = "http://localhost:8000/v1/api/opencode/import"
+	opencodeImportsBase    = "http://localhost:8000/v1/api/opencode/imports"
+	opencodeUpgradeBase    = "http://localhost:8000/v1/api/opencode/upgrade"
 )
 
 // httpClient is the shared client for control calls. Generous timeout —
@@ -368,8 +375,7 @@ func opencodeProviders(args []string) int {
 //	lthn opencode import
 //	# {"projects":9,"providers":21,"providers_with_auth":1}
 func opencodeImport() int {
-	req := core.NewHTTPRequest(core.MethodPost,
-		"http://localhost:8000/v1/api/opencode/import", nil).Value.(*core.Request)
+	req := core.NewHTTPRequest(core.MethodPost, opencodeImportBase, nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode import: %s\n", err)
@@ -392,7 +398,7 @@ func opencodeImport() int {
 //	lthn opencode imports               # projects, newest first
 //	lthn opencode imports providers     # provider definitions
 func opencodeImports(args []string) int {
-	url := "http://localhost:8000/v1/api/opencode/imports"
+	url := opencodeImportsBase
 	if len(args) > 0 && args[0] == "providers" {
 		url += "/providers"
 	}
@@ -462,8 +468,7 @@ func opencodeWeb(args []string) int {
 //	lthn opencode upgrade
 //	# {"updated":true,"digest":"sha256:...","restarted":["oc-..."]}
 func opencodeUpgrade() int {
-	req := core.NewHTTPRequest(core.MethodPost,
-		"http://localhost:8000/v1/api/opencode/upgrade", nil).Value.(*core.Request)
+	req := core.NewHTTPRequest(core.MethodPost, opencodeUpgradeBase, nil).Value.(*core.Request)
 	body, code, err := doRequest(req)
 	if err != nil {
 		core.Print(core.Stderr(), "lthn opencode upgrade: %s\n", err)
