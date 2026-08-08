@@ -24,10 +24,59 @@ const (
 	runtimeVersionFlag = "--version"
 )
 
+// Default shell-out budgets. Every probe this service makes is
+// bounded so a wedged daemon or a missing socket can never hang the
+// panel. Tuned for a responsive UI on an idle host.
+const (
+	defaultVersionBudget = 2 * core.Second // per-runtime `--version`
+	defaultListBudget    = 3 * core.Second // per-runtime `ps`
+	defaultListAllBudget = 4 * core.Second // whole List() fan-out
+	defaultLogsBudget    = 5 * core.Second // `logs --tail N`
+)
+
+// Budgets bounds each class of shell-out the service performs. A
+// zero field takes its production default, so the zero value — and
+// therefore a Service constructed without budgets — always behaves
+// exactly as before. Exists because these deadlines are wall-clock:
+// on a heavily loaded host even a trivial binary can take seconds
+// just to fork, so callers that are not driving a UI (tests,
+// batch probes) need to raise the ceiling without slowing the app.
+type Budgets struct {
+	Version core.Duration
+	List    core.Duration
+	ListAll core.Duration
+	Logs    core.Duration
+}
+
 // Service owns the container surface. Holds *core.Core for late
 // resolution of the process service (boot order).
 type Service struct {
-	core *core.Core
+	core    *core.Core
+	budgets Budgets
+}
+
+// budget returns want when it is positive, otherwise fallback. Keeps
+// every call site a one-liner and makes the zero-value guarantee
+// impossible to forget.
+func budget(want, fallback core.Duration) core.Duration {
+	if want > 0 {
+		return want
+	}
+	return fallback
+}
+
+// SetBudgets overrides the shell-out deadlines. Zero fields keep
+// their production defaults. Intended for non-UI callers — tests and
+// batch probes — that would rather wait than lose a result.
+//
+// Usage example:
+//
+//	svc.SetBudgets(container.Budgets{Version: 30 * core.Second})
+func (s *Service) SetBudgets(b Budgets) {
+	if s == nil {
+		return
+	}
+	s.budgets = b
 }
 
 // NewService constructs the container surface against a Core
@@ -92,7 +141,7 @@ func (s *Service) quickVersion(cmd, flag string) string {
 	if ps == nil {
 		return ""
 	}
-	ctx, cancel := core.WithTimeout(core.Background(), 2*core.Second)
+	ctx, cancel := core.WithTimeout(core.Background(), budget(s.budgets.Version, defaultVersionBudget))
 	defer cancel()
 	r := ps.Run(ctx, cmd, flag)
 	if !r.OK {
@@ -169,7 +218,7 @@ func (s *Service) listDocker(ctx core.Context) []Container {
 	if ps == nil {
 		return nil
 	}
-	c, cancel := core.WithTimeout(ctx, 3*core.Second)
+	c, cancel := core.WithTimeout(ctx, budget(s.budgets.List, defaultListBudget))
 	defer cancel()
 	r := ps.Run(c, "docker", "ps", "--format", "{{json .}}", "--no-trunc")
 	if !r.OK {
@@ -209,7 +258,7 @@ func (s *Service) listPodman(ctx core.Context) []Container {
 	if ps == nil {
 		return nil
 	}
-	c, cancel := core.WithTimeout(ctx, 3*core.Second)
+	c, cancel := core.WithTimeout(ctx, budget(s.budgets.List, defaultListBudget))
 	defer cancel()
 	r := ps.Run(c, "podman", "ps", "--format", "json")
 	if !r.OK {

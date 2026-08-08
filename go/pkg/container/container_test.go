@@ -63,13 +63,33 @@ func withFakeRuntimesOnPath(t *testing.T) {
 	t.Setenv("PATH", dir)
 }
 
+// testBudget is deliberately far above every production default.
+// The probes shell out to a real /bin/sh, and the production
+// deadlines are wall-clock: under a full-suite run the machine is
+// saturated and a fork alone was measured taking >2s, tripping the
+// 2s version budget and silently discarding the fake's output. That
+// made QuickVersion/ProbeRuntime/Detect/List fail at exactly their
+// budget line (2.04s vs 2s, 4.10s vs 4s) purely from host load.
+// Raising the ceiling for tests keeps the assertions about parsing
+// and detection, not about how busy the machine happens to be. The
+// shipped budgets stay untouched and are asserted separately by the
+// Budget_* tests below.
+const testBudget = 60 * core.Second
+
 // newServiceWithProcess wires process.Service alongside container.Service
 // so detection/listing can actually shell out — needed for every test
 // that reaches proc.Run.
 func newServiceWithProcess(t *testing.T) *Service {
 	t.Helper()
 	c := core.New(core.WithName("process", process.NewService(process.Options{})))
-	return NewService(c)
+	svc := NewService(c)
+	svc.SetBudgets(Budgets{
+		Version: testBudget,
+		List:    testBudget,
+		ListAll: testBudget,
+		Logs:    testBudget,
+	})
+	return svc
 }
 
 func TestContainer_ShortID_Good_TruncatesLongID(t *testing.T) {
@@ -208,6 +228,70 @@ func TestContainer_NewService_Bad_NilCoreStillConstructs(t *testing.T) {
 	if svc.proc() != nil {
 		t.Error("proc() on a nil-core Service should be nil")
 	}
+}
+
+func TestContainer_Budget_Good_OverrideWins(t *testing.T) {
+	if got := budget(7*core.Second, 2*core.Second); got != 7*core.Second {
+		t.Errorf("budget(7s, 2s) = %v, want 7s", got)
+	}
+}
+
+func TestContainer_Budget_Bad_ZeroFallsBackToDefault(t *testing.T) {
+	if got := budget(0, 2*core.Second); got != 2*core.Second {
+		t.Errorf("budget(0, 2s) = %v, want the 2s default", got)
+	}
+}
+
+func TestContainer_Budget_Ugly_NegativeFallsBackToDefault(t *testing.T) {
+	// A negative deadline would make every context expire instantly,
+	// so it must be treated as "unset" rather than honoured.
+	if got := budget(-1*core.Second, 2*core.Second); got != 2*core.Second {
+		t.Errorf("budget(-1s, 2s) = %v, want the 2s default", got)
+	}
+}
+
+// TestContainer_Budgets_Good_ShippedDefaultsUnchanged pins the
+// production deadlines. The test helper raises budgets to keep
+// assertions host-load independent — this test makes sure that
+// cannot hide a change to what the app actually ships with.
+func TestContainer_Budgets_Good_ShippedDefaultsUnchanged(t *testing.T) {
+	cases := []struct {
+		name string
+		got  core.Duration
+		want core.Duration
+	}{
+		{"version", defaultVersionBudget, 2 * core.Second},
+		{"list", defaultListBudget, 3 * core.Second},
+		{"listAll", defaultListAllBudget, 4 * core.Second},
+		{"logs", defaultLogsBudget, 5 * core.Second},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("shipped %s budget = %v, want %v", c.name, c.got, c.want)
+		}
+	}
+}
+
+// TestContainer_SetBudgets_Bad_ZeroValueKeepsDefaults proves the
+// zero-value guarantee: a Service that never had budgets set must
+// resolve to exactly the shipped deadlines.
+func TestContainer_SetBudgets_Bad_ZeroValueKeepsDefaults(t *testing.T) {
+	svc := NewService(nil)
+	if got := budget(svc.budgets.Version, defaultVersionBudget); got != defaultVersionBudget {
+		t.Errorf("unset version budget resolved to %v, want %v", got, defaultVersionBudget)
+	}
+	svc.SetBudgets(Budgets{List: 9 * core.Second})
+	if got := budget(svc.budgets.Version, defaultVersionBudget); got != defaultVersionBudget {
+		t.Errorf("partially-set Budgets changed version budget to %v, want %v", got, defaultVersionBudget)
+	}
+	if got := budget(svc.budgets.List, defaultListBudget); got != 9*core.Second {
+		t.Errorf("list budget = %v, want the 9s override", got)
+	}
+}
+
+func TestContainer_SetBudgets_Ugly_NilReceiver(t *testing.T) {
+	var svc *Service
+	svc.SetBudgets(Budgets{Version: core.Second}) // must not panic
 }
 
 func TestContainer_Register_Good_ReturnsOKService(t *testing.T) {
