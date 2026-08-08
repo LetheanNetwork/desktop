@@ -143,3 +143,34 @@ func TestMain_BuildServerOpts_Ugly_GUIOmitsDuplicateProxyGroups(t *core.T) {
 	core.AssertEqual(t, "", guiOpts.Addr)
 	core.AssertEqual(t, ":8000", serveOpts.Addr)
 }
+
+// TestMain_CmdVersion_Good — prints the v-prefixed version and exits
+// clean.
+func TestMain_CmdVersion_Good(t *core.T) {
+	core.AssertEqual(t, 0, cmdVersion(nil))
+}
+
+// TestMain_CmdHelp_Good — the general help, the inline ai/serve
+// topics, and the fleet delegation all exit clean.
+func TestMain_CmdHelp_Good(t *core.T) {
+	core.AssertEqual(t, 0, cmdHelp(nil))
+	core.AssertEqual(t, 0, cmdHelp([]string{"ai"}))
+	core.AssertEqual(t, 0, cmdHelp([]string{"serve"}))
+	core.AssertEqual(t, 0, cmdHelp([]string{"fleet"}))
+}
+
+// TestMain_CmdHelp_Bad — verbs without inline help point at their
+// no-args verb list; unknown subcommands are rejected.
+func TestMain_CmdHelp_Bad(t *core.T) {
+	core.AssertEqual(t, 2, cmdHelp([]string{"config"}))
+	core.AssertEqual(t, 2, cmdHelp([]string{"unknownverb"}))
+}
+
+// TestMain_CmdAI_Bad — missing and unknown verbs, plus the chat /
+// generate usage errors reached through the dispatcher.
+func TestMain_CmdAI_Bad(t *core.T) {
+	core.AssertEqual(t, 2, cmdAI(nil))
+	core.AssertEqual(t, 2, cmdAI([]string{"nonsense"}))
+	core.AssertEqual(t, 2, cmdAI([]string{"chat"}))
+	core.AssertEqual(t, 2, cmdAI([]string{"generate"}))
+}

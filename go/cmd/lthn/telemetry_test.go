@@ -17,3 +17,7 @@ func TestCmdTelemetry_BadRejectsMissingVerb(t *core.T) {
 func TestCmdTelemetry_UglyRejectsUnknownVerb(t *core.T) {
 	core.AssertEqual(t, 2, cmdTelemetry([]string{"unknown"}))
 }
+
+func TestCmdTelemetry_Sample_Good(t *core.T) {
+	core.AssertEqual(t, 0, cmdTelemetry([]string{"sample"}))
+}

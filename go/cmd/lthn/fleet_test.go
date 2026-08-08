@@ -113,3 +113,11 @@ func TestFleet_FleetSummary_EmptyDB_Good(t *testing.T) {
 
 	core.AssertEqual(t, 0, fleetSummary())
 }
+
+// TestFleet_FleetKeys_Good — a transient app Core boot under an
+// isolated HOME finds the keys service with nothing stored yet.
+func TestFleet_FleetKeys_Good(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	core.AssertEqual(t, 0, fleetKeys())
+}
