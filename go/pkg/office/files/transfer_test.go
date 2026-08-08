@@ -438,3 +438,208 @@ func TestTransfer_InitialiseInternalNamespace_Ugly(t *core.T) {
 	wrapped := &failingMedium{Medium: unreadable, readErr: fs.ErrPermission}
 	core.AssertFalse(t, registerWithMedium(t, wrapped).internalReady["docs"])
 }
+
+func TestService_Move_BadValidationArms(t *core.T) {
+	noMove := ReadWriteCapabilities()
+	noMove.Move = false
+	noCopyFrom := ReadWriteCapabilities()
+	noCopyFrom.CopyFrom = false
+	noCopyTo := ReadWriteCapabilities()
+	noCopyTo.CopyTo = false
+	service := registeredService(t, []Mount{
+		memoryMount("documents", coreio.NewMemoryMedium(), ReadWriteCapabilities()),
+		memoryMount("frozen", coreio.NewMemoryMedium(), noMove),
+		memoryMount("no-out", coreio.NewMemoryMedium(), noCopyFrom),
+		memoryMount("no-in", coreio.NewMemoryMedium(), noCopyTo),
+	}, &stubRuntimeMetadata{})
+
+	badSource := service.Move(TransferInput{
+		Source:      FileAddress{MountID: "ghost", Path: "a.md"},
+		Destination: FileAddress{MountID: "documents", Path: "a.md"},
+	})
+	core.AssertFalse(t, badSource.OK)
+
+	badDestination := service.Move(TransferInput{
+		Source:      FileAddress{MountID: "documents", Path: "a.md"},
+		Destination: FileAddress{MountID: "ghost", Path: "a.md"},
+	})
+	core.AssertFalse(t, badDestination.OK)
+
+	badSourcePath := service.Move(TransferInput{
+		Source:      FileAddress{MountID: "documents", Path: "../a.md"},
+		Destination: FileAddress{MountID: "documents", Path: "b.md"},
+	})
+	core.AssertFalse(t, badSourcePath.OK)
+
+	badDestinationPath := service.Move(TransferInput{
+		Source:      FileAddress{MountID: "documents", Path: "a.md"},
+		Destination: FileAddress{MountID: "documents", Path: "../b.md"},
+	})
+	core.AssertFalse(t, badDestinationPath.OK)
+
+	moveDenied := service.Move(TransferInput{
+		Source:      FileAddress{MountID: "frozen", Path: "a.md"},
+		Destination: FileAddress{MountID: "documents", Path: "a.md"},
+	})
+	core.AssertFalse(t, moveDenied.OK)
+	core.AssertContains(t, moveDenied.Error(), string(ErrorCapabilityDenied))
+
+	copyFromDenied := service.Copy(TransferInput{
+		Source:      FileAddress{MountID: "no-out", Path: "a.md"},
+		Destination: FileAddress{MountID: "documents", Path: "a.md"},
+	})
+	core.AssertFalse(t, copyFromDenied.OK)
+	core.AssertContains(t, copyFromDenied.Error(), string(ErrorCapabilityDenied))
+
+	copyToDenied := service.Copy(TransferInput{
+		Source:      FileAddress{MountID: "documents", Path: "a.md"},
+		Destination: FileAddress{MountID: "no-in", Path: "a.md"},
+	})
+	core.AssertFalse(t, copyToDenied.OK)
+	core.AssertContains(t, copyToDenied.Error(), string(ErrorCapabilityDenied))
+}
+
+func TestService_MoveAcrossMedia_BadUnownedDestinationNamespace(t *core.T) {
+	source := coreio.NewMemoryMedium()
+	destination := coreio.NewMemoryMedium()
+	core.RequireNoError(t, source.Write("report.md", "content"))
+	core.RequireNoError(
+		t,
+		destination.Write(".lthn-files/unrelated", "foreign"),
+	)
+	service := registeredService(t, []Mount{
+		memoryMount("source", source, ReadWriteCapabilities()),
+		memoryMount("destination", destination, ReadWriteCapabilities()),
+	}, &stubRuntimeMetadata{})
+
+	result := service.Move(TransferInput{
+		Source:      FileAddress{MountID: "source", Path: "report.md"},
+		Destination: FileAddress{MountID: "destination", Path: "report.md"},
+	})
+
+	core.AssertFalse(t, result.OK)
+	core.AssertContains(t, result.Error(), string(ErrorCapabilityDenied))
+}
+
+func TestService_MoveAcrossMedia_BadPreflightAndStageFaults(t *core.T) {
+	source := coreio.NewMemoryMedium()
+	core.RequireNoError(t, source.Write("report.md", "content"))
+	destination := &failingMedium{Medium: coreio.NewMemoryMedium()}
+	service := registeredService(t, []Mount{
+		memoryMount("source", source, ReadWriteCapabilities()),
+		memoryMount("destination", destination, ReadWriteCapabilities()),
+	}, &stubRuntimeMetadata{})
+
+	destination.statErr = fs.ErrPermission
+	preflight := service.Move(TransferInput{
+		Source:      FileAddress{MountID: "source", Path: "report.md"},
+		Destination: FileAddress{MountID: "destination", Path: "report.md"},
+	})
+	core.AssertFalse(t, preflight.OK)
+	destination.statErr = nil
+
+	destination.writeStreamErr = fs.ErrPermission
+	staged := service.Move(TransferInput{
+		Source:      FileAddress{MountID: "source", Path: "report.md"},
+		Destination: FileAddress{MountID: "destination", Path: "report.md"},
+	})
+	core.AssertFalse(t, staged.OK)
+	core.AssertTrue(t, source.IsFile("report.md"))
+}
+
+func TestService_MoveWithinMount_BadArms(t *core.T) {
+	broken := &failingMedium{Medium: coreio.NewMemoryMedium()}
+	core.RequireNoError(t, broken.Write("draft.txt", "hello"))
+	core.RequireNoError(t, broken.Write("taken.txt", "existing"))
+	service := registeredService(t, []Mount{
+		memoryMount("documents", broken, ReadWriteCapabilities()),
+	}, NewMemoryRuntimeMetadata())
+
+	missing := service.Move(TransferInput{
+		Source:      FileAddress{MountID: "documents", Path: "absent.txt"},
+		Destination: FileAddress{MountID: "documents", Path: "elsewhere.txt"},
+	})
+	core.AssertFalse(t, missing.OK)
+
+	conflict := service.Move(TransferInput{
+		Source:      FileAddress{MountID: "documents", Path: "draft.txt"},
+		Destination: FileAddress{MountID: "documents", Path: "taken.txt"},
+	})
+	core.RequireTrue(t, conflict.OK)
+	core.AssertEqual(
+		t,
+		OperationConflict,
+		conflict.Value.(FileOperationResult).Status,
+	)
+
+	broken.ensureDirErr = fs.ErrPermission
+	parentBroken := service.Move(TransferInput{
+		Source:      FileAddress{MountID: "documents", Path: "draft.txt"},
+		Destination: FileAddress{MountID: "documents", Path: "archive/draft.txt"},
+	})
+	core.AssertFalse(t, parentBroken.OK)
+	broken.ensureDirErr = nil
+
+	broken.renameErr = fs.ErrPermission
+	renameBroken := service.Move(TransferInput{
+		Source:      FileAddress{MountID: "documents", Path: "draft.txt"},
+		Destination: FileAddress{MountID: "documents", Path: "final.txt"},
+	})
+	core.AssertFalse(t, renameBroken.OK)
+}
+
+func TestService_MoveWithinMount_UglyRejectsLinkAndDestStatError(t *core.T) {
+	link := &symlinkMedium{Medium: coreio.NewMemoryMedium()}
+	core.RequireNoError(t, link.Write("escape", "payload"))
+	service := registeredService(t, []Mount{
+		memoryMount("documents", link, ReadWriteCapabilities()),
+	}, NewMemoryRuntimeMetadata())
+
+	result := service.Move(TransferInput{
+		Source:      FileAddress{MountID: "documents", Path: "escape"},
+		Destination: FileAddress{MountID: "documents", Path: "moved"},
+	})
+	core.AssertFalse(t, result.OK)
+	core.AssertContains(t, result.Error(), string(ErrorUnsupportedEntry))
+
+	medium := coreio.NewMemoryMedium()
+	core.RequireNoError(t, medium.Write("draft.txt", "hello"))
+	wrapped := &statPathFailureMedium{
+		Medium:   medium,
+		failPath: "blocked.txt",
+		err:      fs.ErrPermission,
+	}
+	statService := registeredService(t, []Mount{
+		memoryMount("documents", wrapped, ReadWriteCapabilities()),
+	}, NewMemoryRuntimeMetadata())
+
+	statBroken := statService.Move(TransferInput{
+		Source:      FileAddress{MountID: "documents", Path: "draft.txt"},
+		Destination: FileAddress{MountID: "documents", Path: "blocked.txt"},
+	})
+	core.AssertFalse(t, statBroken.OK)
+}
+
+func TestService_MoveAcrossMedia_UglySourceDirectoryDeleteIsPartial(t *core.T) {
+	source := &failingMedium{Medium: coreio.NewMemoryMedium()}
+	core.RequireNoError(t, source.Write("bundle/asset.txt", "content"))
+	destination := coreio.NewMemoryMedium()
+	service := registeredService(t, []Mount{
+		memoryMount("source", source, ReadWriteCapabilities()),
+		memoryMount("destination", destination, ReadWriteCapabilities()),
+	}, &stubRuntimeMetadata{})
+	source.deleteAllErr = fs.ErrPermission
+
+	result := service.Move(TransferInput{
+		Source:      FileAddress{MountID: "source", Path: "bundle"},
+		Destination: FileAddress{MountID: "destination", Path: "bundle"},
+	})
+
+	core.RequireTrue(t, result.OK)
+	operation := result.Value.(FileOperationResult)
+	core.AssertEqual(t, OperationPartial, operation.Status)
+	core.AssertEqual(t, ErrorPartialMove, operation.Code)
+	content, err := destination.Read("bundle/asset.txt")
+	core.AssertNoError(t, err)
+	core.AssertEqual(t, "content", content)
+}
