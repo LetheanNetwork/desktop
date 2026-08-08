@@ -46,9 +46,10 @@ describe('app routes', () => {
   });
 
   // Where every ported surface ended up when sixty-six launchable applications
-  // were folded down to twenty-three. The surfaces did not change — their route
-  // did, from a top-level /<group>/<path> of their own to a pane of the
-  // application that owns them.
+  // were folded down to the consolidated catalogue. The surfaces did not change
+  // — their route did, from a top-level /<group>/<path> of their own to a pane
+  // of the application that owns them. OpenCode's later promotion (#108) moved
+  // its surfaces from the Marketplace shim route to an application of its own.
   const surfaceRoutes: Record<string, string> = {
     'surface-agents-activity': '/ai/agents/activity',
     'surface-agents-code': '/ai/agents/code',
@@ -90,7 +91,9 @@ describe('app routes', () => {
     'surface-sales-pipeline': '/office/crm/pipeline',
     'surface-extensions-marketplace': '/system/marketplace/store',
     'surface-extensions-plugin-view': '/system/marketplace/plugin-view',
-    'surface-extensions-opencode-shim': '/system/marketplace/opencode',
+    'surface-opencode-sessions': '/ai/opencode/sessions',
+    'surface-opencode-profiles': '/ai/opencode/profiles',
+    'surface-extensions-opencode-shim': '/ai/opencode/workspace',
   };
 
   it('exposes every ported surface as a deep-linkable pane of its application', () => {
@@ -141,6 +144,6 @@ describe('app routes', () => {
     ];
 
     expect(retired.filter((id) => catalog.apps[id])).toEqual([]);
-    expect(Object.keys(catalog.apps)).toHaveLength(23);
+    expect(Object.keys(catalog.apps)).toHaveLength(24);
   });
 });

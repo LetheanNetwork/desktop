@@ -54,6 +54,7 @@ var tearOffAppIDs = []string{
 	"marketplace",
 	"ml-lab",
 	"notepad",
+	"opencode",
 	"operations",
 	"project-manager",
 	"scm",

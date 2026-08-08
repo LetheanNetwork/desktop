@@ -29,6 +29,7 @@ const BASE_COMPONENTS = Object.freeze({
   chat: 'frontend/src/app/desktop/apps/chat.app.ts',
   agents: COMPOSITE_COMPONENT,
   'ml-lab': COMPOSITE_COMPONENT,
+  opencode: COMPOSITE_COMPONENT,
   games: 'frontend/src/app/desktop/apps/games.app.ts',
   files: COMPOSITE_COMPONENT,
   notepad: 'frontend/src/app/desktop/apps/notepad.app.ts',
@@ -56,6 +57,7 @@ const BASE_ROUTES = Object.freeze({
   chat: '/ai/chat',
   agents: '/ai/agents',
   'ml-lab': '/ai/ml-lab',
+  opencode: '/ai/opencode',
   games: '/media/games',
   files: '/tools/files',
   notepad: '/tools/notepad',
@@ -76,6 +78,8 @@ const SPECIALISED_EVIDENCE = Object.freeze({
   'surface-extensions-opencode-shim': [
     'frontend/src/app/desktop/surfaces/extensions/opencode-shim.ts',
   ],
+  'surface-opencode-sessions': ['frontend/src/app/desktop/surfaces/opencode/sessions.ts'],
+  'surface-opencode-profiles': ['frontend/src/app/desktop/surfaces/opencode/profiles.ts'],
   'surface-office-files': [
     'frontend/src/app/desktop/apps/files.app.ts',
     'frontend/src/app/desktop/desktop-files-bridge.service.ts',

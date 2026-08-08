@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 // desktop-catalogue.data.ts — the application catalogue.
 //
-// Twenty-three applications, each one window. Anything smaller is a pane:
+// Twenty-four applications, each one window. Anything smaller is a pane:
 // a sub-route declared in desktop-panes.data.ts and rendered by the shared
 // CompositeApp rail. An application declares the category it launches from,
 // so CATEGORIES is derived rather than restated.
@@ -233,6 +233,17 @@ export const APPS: Record<string, AppDef> = {
     hint: $localize`:Application launcher hint@@app.mlLab.hint:Workbench · models · LoRA`,
     dev: true,
     defaultSub: 'workbench',
+  },
+  opencode: {
+    id: 'opencode',
+    title: $localize`:Application title@@app.opencode.title:OpenCode`,
+    icon: 'terminal',
+    category: 'ai',
+    w: 960,
+    h: 660,
+    hint: $localize`:Application launcher hint@@app.opencode.hint:Sandboxed coding agent · sessions · profiles`,
+    dev: true,
+    defaultSub: 'sessions',
   },
   games: {
     id: 'games',

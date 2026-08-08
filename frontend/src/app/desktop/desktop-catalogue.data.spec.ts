@@ -3,7 +3,7 @@ import { APP_PANES, panesFor } from './desktop-panes.data';
 import { devPanelFor } from './dev-panel.data';
 
 describe('desktop application catalogue', () => {
-  it('publishes twenty-three applications across the seven launcher categories', () => {
+  it('publishes twenty-four applications across the seven launcher categories', () => {
     expect(Object.keys(APPS)).toEqual([
       'welcome',
       'control',
@@ -24,6 +24,7 @@ describe('desktop application catalogue', () => {
       'chat',
       'agents',
       'ml-lab',
+      'opencode',
       'games',
       'files',
       'notepad',
@@ -36,7 +37,7 @@ describe('desktop application catalogue', () => {
       ],
       ['developer', ['ide', 'scm', 'databases']],
       ['office', ['project-manager', 'mail', 'documents', 'crm', 'marketing', 'tenant']],
-      ['ai', ['chat', 'agents', 'ml-lab']],
+      ['ai', ['chat', 'agents', 'ml-lab', 'opencode']],
       ['media', ['games']],
       ['tools', ['files', 'notepad']],
       ['networking', ['lethernet']],

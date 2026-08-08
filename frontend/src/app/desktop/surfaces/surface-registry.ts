@@ -69,6 +69,9 @@ export const SURFACE_DEFINITIONS: readonly SurfaceDefinition[] = [
   { group: 'extensions', route: 'marketplace' },
   { group: 'extensions', route: 'plugin-view' },
   { group: 'extensions', route: 'opencode-shim' },
+
+  { group: 'opencode', route: 'sessions' },
+  { group: 'opencode', route: 'profiles' },
 ];
 
 export function surfaceAppId(group: string, route: string): string {
@@ -181,4 +184,8 @@ export const SURFACE_APP_REGISTRY: Record<string, AppComponentLoader> = {
     import('./extensions/opencode-shim').then(
       ({ ExtensionsOpencodeShimSurface }) => ExtensionsOpencodeShimSurface,
     ),
+  'surface-opencode-sessions': () =>
+    import('./opencode/sessions').then(({ OpencodeSessionsSurface }) => OpencodeSessionsSurface),
+  'surface-opencode-profiles': () =>
+    import('./opencode/profiles').then(({ OpencodeProfilesSurface }) => OpencodeProfilesSurface),
 };

@@ -66,6 +66,7 @@ export const APP_REGISTRY: Record<string, AppComponentLoader> = {
   marketing: loadComposite,
   agents: loadComposite,
   'ml-lab': loadComposite,
+  opencode: loadComposite,
   files: loadComposite,
   // Promoted surfaces: the surface is the whole application.
   mail: SURFACE_APP_REGISTRY['surface-office-mail'],

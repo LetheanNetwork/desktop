@@ -83,13 +83,6 @@ export const APP_PANES: readonly AppPane[] = [
     icon: 'puzzle-piece',
     title: $localize`:Application pane@@app.marketplace.pane.pluginView:Plugin view`,
   },
-  {
-    app: 'marketplace',
-    path: 'opencode',
-    surface: 'surface-extensions-opencode-shim',
-    icon: 'terminal',
-    title: $localize`:Application pane@@app.marketplace.pane.opencode:OpenCode`,
-  },
 
   // ── Developer ─────────────────────────────────────────────────────────
   {
@@ -403,6 +396,27 @@ export const APP_PANES: readonly AppPane[] = [
     surface: 'surface-ml-lab-lora',
     icon: 'sliders',
     title: $localize`:Application pane@@app.mlLab.pane.lora:LoRA`,
+  },
+  {
+    app: 'opencode',
+    path: 'sessions',
+    surface: 'surface-opencode-sessions',
+    icon: 'terminal',
+    title: $localize`:Application pane@@app.opencode.pane.sessions:Sessions`,
+  },
+  {
+    app: 'opencode',
+    path: 'profiles',
+    surface: 'surface-opencode-profiles',
+    icon: 'sliders',
+    title: $localize`:Application pane@@app.opencode.pane.profiles:Profiles`,
+  },
+  {
+    app: 'opencode',
+    path: 'workspace',
+    surface: 'surface-extensions-opencode-shim',
+    icon: 'window-maximize',
+    title: $localize`:Application pane@@app.opencode.pane.workspace:Workspace`,
   },
 
   // ── Tools ─────────────────────────────────────────────────────────────

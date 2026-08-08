@@ -12,7 +12,7 @@ describe('desktop pane catalogue', () => {
     expect(tree).toEqual([
       ['activity', ['streams', 'observe']],
       ['operations', ['incidents', 'runbooks', 'status']],
-      ['marketplace', ['store', 'plugin-view', 'opencode']],
+      ['marketplace', ['store', 'plugin-view']],
       [
         'ide',
         [
@@ -51,9 +51,10 @@ describe('desktop pane catalogue', () => {
         ],
       ],
       ['ml-lab', ['workbench', 'models', 'lora']],
+      ['opencode', ['sessions', 'profiles', 'workspace']],
       ['files', ['home', 'workspace']],
     ]);
-    expect(APP_PANES).toHaveLength(54);
+    expect(APP_PANES).toHaveLength(56);
   });
 
   it('binds every pane to a registered application and exactly one component', () => {

@@ -9,10 +9,10 @@ import { WindowManagerService } from '../window-manager.service';
 import { SURFACE_APP_REGISTRY, SURFACE_DEFINITIONS, SURFACE_IDS } from './surface-registry';
 
 describe('surface registry', () => {
-  it('registers all 43 surface components exactly once', () => {
-    expect(SURFACE_DEFINITIONS).toHaveLength(43);
+  it('registers all 45 surface components exactly once', () => {
+    expect(SURFACE_DEFINITIONS).toHaveLength(45);
     expect(Object.keys(SURFACE_APP_REGISTRY)).toEqual([...SURFACE_IDS]);
-    expect(new Set(SURFACE_IDS).size).toBe(43);
+    expect(new Set(SURFACE_IDS).size).toBe(45);
     expect([...new Set(SURFACE_DEFINITIONS.map(({ group }) => group))]).toEqual([
       'agents',
       'coding',
@@ -24,6 +24,7 @@ describe('surface registry', () => {
       'planning',
       'sales',
       'extensions',
+      'opencode',
     ]);
   });
 
@@ -52,7 +53,7 @@ describe('surface registry', () => {
         async ([id, loader]) => [id, await loader()] as const,
       ),
     );
-    expect(loaded).toHaveLength(43);
+    expect(loaded).toHaveLength(45);
     for (const [id, component] of loaded) {
       expect(component, id).toBeTypeOf('function');
       expect((component as unknown as { ɵcmp?: unknown }).ɵcmp, id).toBeDefined();
