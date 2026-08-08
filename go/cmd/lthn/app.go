@@ -654,6 +654,19 @@ func newAppCore() *core.Core {
 		paths.SetAuditRecorder(&pathsAuditAdapter{svc: auditSvc})
 		paths.SetAuditSecretProvider(serverkeySvc.AuditHMACSecret)
 
+		// The recorder + secret provider are package-level globals in
+		// pkg/paths, bound above to THIS Core's audit service and
+		// serverkey. A Core that shuts down would otherwise leave them
+		// pointing into a dead composition — the next newAppCore in the
+		// same process then fails its serverkey bootstrap sync-recording
+		// through the stale recorder (whose audit day-file directory may
+		// no longer exist). The unwire service restores the documented
+		// noop defaults on shutdown so every boot starts from the same
+		// posture.
+		if r := c.RegisterService("paths-audit-unwire", pathsAuditUnwire{}); !r.OK {
+			core.Print(core.Stderr(), "lthn: paths-audit-unwire RegisterService failed: %s\n", r.Error())
+		}
+
 		// Mantis #1533 — flush any LockEvents that were dropped during
 		// the pre-secret cold-boot window (between paths-package init
 		// and the SetAuditSecretProvider line above). emitLockEvent
@@ -923,6 +936,26 @@ func emitCompositionAudit(c *core.Core, auditSvc *audit.Service) {
 		return
 	}
 	_ = audit.Default().Record(ev)
+}
+
+// pathsAuditUnwire restores pkg/paths' package-level audit globals
+// (recorder + secret provider) to their noop defaults when the Core
+// shuts down. Registered by the boot wiring immediately after the
+// globals are installed; core.RegisterService auto-discovers the
+// Stoppable so ServiceShutdown drives the reset with no further
+// wiring.
+//
+// Usage example (boot wire, after SetAuditRecorder):
+//
+//	c.RegisterService("paths-audit-unwire", pathsAuditUnwire{})
+type pathsAuditUnwire struct{}
+
+// OnShutdown implements core.Stoppable. Nil restores each global's
+// noop default per the pkg/paths contract.
+func (pathsAuditUnwire) OnShutdown(_ core.Context) core.Result {
+	paths.SetAuditRecorder(nil)
+	paths.SetAuditSecretProvider(nil)
+	return core.Ok(nil)
 }
 
 // pathsAuditAdapter bridges pkg/paths.AuditRecorder onto pkg/audit's
