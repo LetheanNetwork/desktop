@@ -13,7 +13,7 @@ test('inventories every application and pane route without calling it live', asy
 
   assert.equal(report.baseApps.length, 24);
   assert.equal(report.paneApps.length, 56);
-  assert.equal(report.paneApps.filter(({ contracts }) => contracts.length > 0).length, 32);
+  assert.equal(report.paneApps.filter(({ contracts }) => contracts.length > 0).length, 29);
   assert.equal(new Set(report.entries.map(({ route }) => route)).size, 80);
   // Every pane route hangs off the application route it belongs to.
   const applicationRoutes = new Set(report.baseApps.map(({ route }) => route));
@@ -52,6 +52,6 @@ test('renders evidence and limitations instead of mock-or-live guesses', async (
   assert.match(markdown, /^# Frontend Capability Matrix/m);
   assert.match(markdown, /Source state is not runtime maturity/);
   assert.match(markdown, /dappco\.re\/lthn\/desktop\/pkg\/tasks\.Service\.List/);
-  assert.match(markdown, /\/v1\/ml-lab\/duckdb/);
+  assert.match(markdown, /\/v1\/completions/);
   assert.doesNotMatch(markdown, /\| Live \|/);
 });

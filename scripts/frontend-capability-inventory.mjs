@@ -249,25 +249,30 @@ async function resolveContract(repoRoot, contract) {
     (path) => path.endsWith('.go') && !path.endsWith('_test.go'),
   );
   const method = contract.match(
-    /^dappco\.re\/lthn\/desktop\/(pkg\/.+)\.Service\.([A-Za-z][A-Za-z0-9_]*)$/,
+    /^dappco\.re\/lthn\/desktop\/(pkg\/.+)\.([A-Z][A-Za-z0-9_]*)\.([A-Za-z][A-Za-z0-9_]*)$/,
   );
   if (method) {
-    const [, packagePath, methodName] = method;
+    const [, packagePath, receiverType, methodName] = method;
     const candidates = goFiles.filter((path) => path.startsWith(`go/${packagePath}/`));
-    const declaration = new RegExp(`func\\s*\\([^)]*\\*Service\\)\\s*${methodName}\\s*\\(`);
+    const declaration = new RegExp(
+      `func\\s*\\([^)]*\\*${receiverType}\\)\\s*${methodName}\\s*\\(`,
+    );
     const evidence = [];
     for (const path of candidates) {
       const source = await readFile(join(repoRoot, path), 'utf8');
-      if (declaration.test(source)) evidence.push(`${path}#Service.${methodName}`);
+      if (declaration.test(source)) evidence.push(`${path}#${receiverType}.${methodName}`);
     }
     return { resolved: evidence.length > 0, evidence };
   }
 
   if (contract.startsWith('/')) {
+    // A load endpoint may carry query parameters the Go route
+    // declaration never states — resolve on the path alone.
+    const route = contract.split('?')[0];
     const evidence = [];
     for (const path of goFiles) {
       const source = await readFile(join(repoRoot, path), 'utf8');
-      if (source.includes(contract)) evidence.push(`${path}#${contract}`);
+      if (source.includes(route)) evidence.push(`${path}#${route}`);
     }
     return { resolved: evidence.length > 0, evidence };
   }

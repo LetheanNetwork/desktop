@@ -18,7 +18,6 @@ export class MlLabDuckdbSurface extends SurfaceRoute {
 FROM lora_runs
 ORDER BY started_at DESC
 LIMIT 50;`,
-    endpoint: '/v1/ml-lab/duckdb',
     actions: [
       { id: 'run', label: 'Run query', icon: 'play', kind: 'run' },
       { id: 'clear', label: 'Clear', icon: 'eraser', kind: 'clear' },

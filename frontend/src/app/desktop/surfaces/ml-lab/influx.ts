@@ -18,7 +18,6 @@ export class MlLabInfluxSurface extends SurfaceRoute {
   |> range(start: \${start}, stop: \${stop})
   |> filter(fn: (r) => r._measurement == "loss")
   |> aggregateWindow(every: 1m, fn: mean)`,
-    endpoint: '/v1/ml-lab/influx',
     chart: [2.41, 1.92, 1.52, 1.18, 0.91, 0.71, 0.57, 0.46],
     metrics: [
       { label: 'Latest loss', value: '0.46', tone: 'brand' },

@@ -489,6 +489,7 @@ export class SurfacePage implements OnChanges, OnInit, OnDestroy {
       const title = [
         row['title'],
         row['name'],
+        row['displayName'],
         row['subject'],
         row['customer'],
         row['repo'],

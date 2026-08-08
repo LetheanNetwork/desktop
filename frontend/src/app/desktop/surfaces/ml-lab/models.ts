@@ -57,9 +57,9 @@ export class MlLabModelsSurface extends SurfaceRoute {
       },
     ],
     searchPlaceholder: 'Filter name, architecture, fingerprint or producer',
-    loadEndpoint: '/v1/ml-lab/models',
+    bridgeMethod: 'dappco.re/lthn/desktop/pkg/modelruntime.WailsService.Snapshot',
     pollMs: 60_000,
     liveKeys: ['models'],
-    footer: 'SHA-256 identity projection · local model files · refreshed every 60 s',
+    footer: 'ModelRuntime.Snapshot catalogue · local model files · refreshed every 60 s',
   };
 }

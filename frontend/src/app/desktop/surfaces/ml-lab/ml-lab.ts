@@ -15,7 +15,7 @@ export class MlLabWorkbenchSurface extends SurfaceRoute {
     kind: 'editor',
     editorLabel: 'Ask the lab',
     editorText: 'Compare the selected model and active LoRA run.',
-    endpoint: '/v1/ml-lab/ask',
+    endpoint: '/v1/completions',
     endpointPayload: 'ask',
     actions: [{ id: 'ask', label: 'Ask', icon: 'paper-plane', kind: 'run' }],
     metrics: [

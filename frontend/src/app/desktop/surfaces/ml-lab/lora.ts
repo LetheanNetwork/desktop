@@ -80,9 +80,6 @@ export class MlLabLoraSurface extends SurfaceRoute {
       },
     ],
     searchPlaceholder: 'Filter by run, model, data set or mode',
-    loadEndpoint: '/v1/ml-lab/runs',
-    pollMs: 60_000,
-    liveKeys: ['runs'],
     footer: 'local .train artefacts · live run events · controls are audited',
   };
 }
