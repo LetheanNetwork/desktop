@@ -38,24 +38,34 @@ import (
 	"strings"
 
 	core "dappco.re/go"
+	"dappco.re/go/render/display/webkit"
 )
 
-// bindingPrefix is the module path every binding name starts with.
+// bindingPrefix is the module path in-repo binding names start with.
 const bindingPrefix = "dappco.re/lthn/desktop/"
 
-// fullBindingPattern matches a complete binding name written as one
-// literal, in single quotes, double quotes or backticks.
-var fullBindingPattern = regexp.MustCompile(
-	"['\"`]" + regexp.QuoteMeta(bindingPrefix) + `([A-Za-z0-9_/]+\.[A-Za-z0-9_.]+)['"` + "`]",
-)
+// externalPrefix is the module path for CoreGO bindings the renderer
+// calls. These resolve against library types rather than repo source,
+// so they are checked by reflection in the companion test below.
+const externalPrefix = "dappco.re/go/"
 
-// constBindingPattern captures `const NAME = '<binding>'` so a
-// prefix-only constant can be resolved when a template literal later
-// appends the method.
-var constBindingPattern = regexp.MustCompile(
-	`(?m)const\s+([A-Za-z0-9_]+)\s*=\s*['"` + "`]" +
-		regexp.QuoteMeta(bindingPrefix) + `([A-Za-z0-9_/]+\.[A-Za-z0-9_]+)['"` + "`]",
-)
+// fullPattern matches a complete binding name written as one literal,
+// in single quotes, double quotes or backticks.
+func fullPattern(prefix string) *regexp.Regexp {
+	return regexp.MustCompile(
+		"['\"`]" + regexp.QuoteMeta(prefix) + `([A-Za-z0-9_/]+\.[A-Za-z0-9_.]+)['"` + "`]",
+	)
+}
+
+// constPattern captures `const NAME = '<binding>'` so a prefix-only
+// constant can be resolved when a template literal later appends the
+// method.
+func constPattern(prefix string) *regexp.Regexp {
+	return regexp.MustCompile(
+		`(?m)const\s+([A-Za-z0-9_]+)\s*=\s*['"` + "`]" +
+			regexp.QuoteMeta(prefix) + `([A-Za-z0-9_/]+\.[A-Za-z0-9_]+)['"` + "`]",
+	)
+}
 
 // templateBindingPattern captures `${CONST}.Method` — the prefix-plus-
 // method shape used by the permissions and services bridges.
@@ -87,7 +97,13 @@ var scanSkipDirs = map[string]bool{
 // directory, receiver type and optional method. Returns ok=false when
 // the name is too short to carry a type.
 func parseBindingName(name string) (pkgDir, typ, method string, ok bool) {
-	rest := strings.TrimPrefix(name, bindingPrefix)
+	return parseBindingNameFor(bindingPrefix, name)
+}
+
+// parseBindingNameFor is parseBindingName against an arbitrary module
+// prefix, so in-repo and CoreGO names share one splitter.
+func parseBindingNameFor(prefix, name string) (pkgDir, typ, method string, ok bool) {
+	rest := strings.TrimPrefix(name, prefix)
 	slash := strings.LastIndex(rest, "/")
 	dir, tail := "", rest
 	if slash >= 0 {
@@ -108,8 +124,14 @@ func parseBindingName(name string) (pkgDir, typ, method string, ok bool) {
 // collectBindingRefs walks the frontend source tree and returns every
 // binding claim it makes, sorted and de-duplicated.
 func collectBindingRefs(t *core.T, frontendDir string) []bindingRef {
+	return collectBindingRefsFor(t, frontendDir, bindingPrefix)
+}
+
+// collectBindingRefsFor scans for names under one module prefix.
+func collectBindingRefsFor(t *core.T, frontendDir, prefix string) []bindingRef {
 	t.Helper()
 	seen := map[string]bindingRef{}
+	fullRE, constRE := fullPattern(prefix), constPattern(prefix)
 
 	walkErr := filepath.Walk(frontendDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -139,7 +161,7 @@ func collectBindingRefs(t *core.T, frontendDir string) []bindingRef {
 		rel, _ := filepath.Rel(frontendDir, path)
 
 		add := func(name string) {
-			pkgDir, typ, method, ok := parseBindingName(name)
+			pkgDir, typ, method, ok := parseBindingNameFor(prefix, name)
 			if !ok {
 				return
 			}
@@ -152,15 +174,15 @@ func collectBindingRefs(t *core.T, frontendDir string) []bindingRef {
 		}
 
 		// Shape 1 — a complete name in one literal.
-		for _, m := range fullBindingPattern.FindAllStringSubmatch(source, -1) {
-			add(bindingPrefix + m[1])
+		for _, m := range fullRE.FindAllStringSubmatch(source, -1) {
+			add(prefix + m[1])
 		}
 
 		// Shape 2 — `${PREFIX_CONST}.Method`, resolved against the
 		// prefix constants declared in the same file.
 		prefixes := map[string]string{}
-		for _, m := range constBindingPattern.FindAllStringSubmatch(source, -1) {
-			prefixes[m[1]] = bindingPrefix + m[2]
+		for _, m := range constRE.FindAllStringSubmatch(source, -1) {
+			prefixes[m[1]] = prefix + m[2]
 		}
 		for _, m := range templateBindingPattern.FindAllStringSubmatch(source, -1) {
 			if prefix, found := prefixes[m[1]]; found {
@@ -272,6 +294,71 @@ func TestDesktop_BindingDrift_Good_EveryFrontendNameResolves(t *core.T) {
 	if len(dead) > 0 {
 		t.Fatalf("frontend names %d binding(s) the Go side does not expose:\n  %s",
 			len(dead), strings.Join(dead, "\n  "))
+	}
+}
+
+// externalBindingRegistry holds a zero-value instance of every CoreGO
+// type the renderer names. Zero values are safe and deliberate: only
+// the method set is read, so nothing is constructed against a Core and
+// no process starts.
+//
+// Adding a CoreGO binding to the frontend without adding it here fails
+// the gate rather than silently skipping it — an unguarded external
+// call is exactly the blind spot this test exists to remove.
+func externalBindingRegistry() []any {
+	return []any{
+		&webkit.WindowBindingService{},
+	}
+}
+
+// TestDesktop_BindingDrift_Good_EveryCoreGONameResolves guards the
+// binding names that point at CoreGO rather than this repo. The tray
+// panel names webkit.WindowBindingService.Open / .Hide; nothing in the
+// build couples those strings to render's API, so a rename upstream
+// would kill the tray panel silently. Reflection over the real types
+// is the right instrument here — the receivers live in a module, not
+// in source this repo can parse.
+func TestDesktop_BindingDrift_Good_EveryCoreGONameResolves(t *core.T) {
+	frontendDir, _ := repoPaths(t)
+	refs := collectBindingRefsFor(t, frontendDir, externalPrefix)
+
+	registry := externalBindingRegistry()
+
+	// Every distinct external type the frontend names must be present
+	// in the registry, otherwise the reflection check below would
+	// report a miss it cannot explain.
+	registered := map[string]bool{}
+	for _, svc := range registry {
+		for _, name := range webkit.BindingNames(svc) {
+			if _, typ, _, ok := parseBindingNameFor(externalPrefix, name); ok {
+				registered[typ] = true
+			}
+		}
+	}
+	var unregistered []string
+	called := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if !registered[ref.typ] {
+			unregistered = append(unregistered,
+				ref.name+" (called from "+ref.file+")")
+			continue
+		}
+		if ref.method != "" {
+			called = append(called, ref.name)
+		}
+	}
+	if len(unregistered) > 0 {
+		t.Fatalf("frontend names %d CoreGO binding(s) absent from externalBindingRegistry — "+
+			"add the type there so it is guarded:\n  %s",
+			len(unregistered), strings.Join(unregistered, "\n  "))
+	}
+
+	t.Logf("resolving %d CoreGO binding name(s) held by the frontend", len(called))
+	core.AssertTrue(t, len(called) > 0)
+
+	if missing := webkit.UnresolvedBindingNames(called, registry...); len(missing) > 0 {
+		t.Fatalf("frontend calls CoreGO bindings that no longer exist:\n  %s",
+			strings.Join(missing, "\n  "))
 	}
 }
 
