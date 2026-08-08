@@ -7,7 +7,6 @@
 package lint
 
 import (
-
 	core "dappco.re/go"
 )
 

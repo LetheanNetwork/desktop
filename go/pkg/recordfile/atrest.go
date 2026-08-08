@@ -131,12 +131,12 @@ type AtomicWriteRequest struct {
 // AtRestDeps bundles the lib-defined collaborators an AtRestWriter
 // needs. Consumer constructs once at Service.New time.
 type AtRestDeps[T any] struct {
-	Surface Surface             // canonical surface label
-	Keys    AccountKeys         // wraps account.Service
-	PGP     PGPService          // wraps pgp.NewService()
-	Schema  HeaderSchema[T]     // per-surface field whitelist
-	Atomic  AtomicWriter        // wraps paths.AtomicWriteWithVersion
-	Now     func() int64        // unix-seconds source; defaults to core.UnixNow
+	Surface Surface         // canonical surface label
+	Keys    AccountKeys     // wraps account.Service
+	PGP     PGPService      // wraps pgp.NewService()
+	Schema  HeaderSchema[T] // per-surface field whitelist
+	Atomic  AtomicWriter    // wraps paths.AtomicWriteWithVersion
+	Now     func() int64    // unix-seconds source; defaults to core.UnixNow
 }
 
 // AtRestWriter is the generic at-rest substrate. T is the per-writer
@@ -208,23 +208,34 @@ type WriteRequest[T any] struct {
 //
 //  1. Asserts SingleUnlockedAccount() — multi-unlock returns
 //     typed "recordfile.atrest.multi_account_ambiguous".
+//
 //  2. Asserts req.AccountID matches the unlocked id — mismatch
 //     returns "recordfile.atrest.account_id_mismatch".
+//
 //  3. Resolves the public key + computes its sha256 fingerprint.
+//
 //  4. Validates the schema's HeaderFor output (reserved-key check +
 //     per-field validator).
-//  5. Stitches BodyYAML + BodyText via Stitch.
-//  6. PGP-encrypts the stitched payload under the public key.
-//  7. Enforces MaxPayloadBytes on the ciphertext.
-//  8. Computes body.checksum = sha256(stitched plaintext).
-//  9. Composes the header map (substrate-owned keys + schema keys).
-// 10. Computes header.mac = HMAC-SHA256(pubkey, canon-json(header
-//     minus header.mac)).
-// 11. Encodes Trix with Magic="LTHN".
-// 12. Calls Atomic.Write with the IfMatch gate.
 //
-//	r := w.Write(req)
-//	if !r.OK { return r }
+//  5. Stitches BodyYAML + BodyText via Stitch.
+//
+//  6. PGP-encrypts the stitched payload under the public key.
+//
+//  7. Enforces MaxPayloadBytes on the ciphertext.
+//
+//  8. Computes body.checksum = sha256(stitched plaintext).
+//
+//  9. Composes the header map (substrate-owned keys + schema keys).
+//
+//  10. Computes header.mac = HMAC-SHA256(pubkey, canon-json(header
+//     minus header.mac)).
+//
+//  11. Encodes Trix with Magic="LTHN".
+//
+//  12. Calls Atomic.Write with the IfMatch gate.
+//
+//     r := w.Write(req)
+//     if !r.OK { return r }
 func (w *AtRestWriter[T]) Write(req WriteRequest[T]) core.Result {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -392,21 +403,29 @@ type Header struct {
 //
 //  1. Asserts SingleUnlockedAccount() — multi-unlock returns
 //     typed reject BEFORE any disk read (#1636).
+//
 //  2. Reads + Trix-decodes the file (Magic="LTHN" check, header
 //     allocation cap inherited from trix.MaxHeaderSize).
+//
 //  3. Parses + validates the header structural keys (schema present
 //     + matches SchemaVersion, surface matches deps.Surface).
+//
 //  4. Resolves public key for the unlocked account and verifies
 //     header.mac BEFORE any decrypt work (header MAC defence; T1).
+//
 //  5. Pre-checks fingerprint header vs computed fingerprint (T3 —
 //     cheap reject before PGP decrypt).
+//
 //  6. Enforces MaxPayloadBytes on the ciphertext (T5 cap).
+//
 //  7. Acquires PrivateKeyHandle + decrypts inside handle.Use(...).
+//
 //  8. Verifies body.checksum vs sha256(plaintext) (defence-in-depth).
+//
 //  9. Splits the plaintext back into frontmatter + body.
 //
-//	r := w.Read(path)
-//	if r.OK { res := r.Value.(recordfile.ReadResult) }
+//     r := w.Read(path)
+//     if r.OK { res := r.Value.(recordfile.ReadResult) }
 func (w *AtRestWriter[T]) Read(path string) core.Result {
 	w.mu.Lock()
 	defer w.mu.Unlock()

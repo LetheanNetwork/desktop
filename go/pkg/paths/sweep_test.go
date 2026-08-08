@@ -167,9 +167,9 @@ func TestSweepTmpOrphans_NonTmpPattern_Ignored_Good(t *testing.T) {
 		mustWrite("notes.md"),
 		mustWrite("notes.tmp"),
 		mustWrite("notes.tmp.draft"),
-		mustWrite("notes.tmp.abcd1234"),                // 8 hex — wrong length
-		mustWrite("notes.tmp.deadbeefcafef00d00"),      // 20 hex — wrong length
-		mustWrite("notes.tmp.deadbeefcafef00g"),        // 16 chars but 'g' is non-hex
+		mustWrite("notes.tmp.abcd1234"),           // 8 hex — wrong length
+		mustWrite("notes.tmp.deadbeefcafef00d00"), // 20 hex — wrong length
+		mustWrite("notes.tmp.deadbeefcafef00g"),   // 16 chars but 'g' is non-hex
 	}
 
 	r := paths.SweepTmpOrphans(root)

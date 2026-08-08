@@ -94,4 +94,3 @@ func (s *Service) Register(c *core.Core) core.Result {
 func Register(c *core.Core) core.Result {
 	return NewService(Options{}).Register(c)
 }
-

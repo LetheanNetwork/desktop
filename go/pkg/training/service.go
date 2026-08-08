@@ -750,14 +750,14 @@ func fingerprintFor(text string) map[string]float64 {
 		// U lane phonetic-tier dimensions — captured at R₁ generation
 		// per [[feedback-data-is-the-return-no-rescoring]]. SyllableCount
 		// converted to float64 to fit the uniform fingerprint map type.
-		"syllable_count":       float64(imp.SyllableCount),
-		"rhyme_density":        imp.RhymeDensity,
-		"sigil_entropy":        imp.SigilEntropy,
-		"alliteration_density": imp.AlliterationDensity,
-		"assonance_density":    imp.AssonanceDensity,
-		"pun_density":          imp.PunDensity,
+		"syllable_count":        float64(imp.SyllableCount),
+		"rhyme_density":         imp.RhymeDensity,
+		"sigil_entropy":         imp.SigilEntropy,
+		"alliteration_density":  imp.AlliterationDensity,
+		"assonance_density":     imp.AssonanceDensity,
+		"pun_density":           imp.PunDensity,
 		"pseudo_jargon_density": imp.PseudoJargonDensity,
-		"meter_regularity":     imp.MeterRegularity,
+		"meter_regularity":      imp.MeterRegularity,
 	}
 }
 

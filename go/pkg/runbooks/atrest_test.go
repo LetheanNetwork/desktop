@@ -24,8 +24,8 @@ import (
 
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/account"
-	subject "dappco.re/lthn/desktop/pkg/runbooks"
 	"dappco.re/lthn/desktop/pkg/recordfile"
+	subject "dappco.re/lthn/desktop/pkg/runbooks"
 	"github.com/Snider/Enchantrix/pkg/crypt/std/pgp"
 )
 

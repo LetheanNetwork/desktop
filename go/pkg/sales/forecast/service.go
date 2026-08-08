@@ -301,8 +301,8 @@ func buildRows(summaries []DealSummary, n int, now core.Time) []ForecastRow {
 		// Add committed to best + low (accumulated separately above —
 		// committed is already the "won" slice).
 		committed := (accs[i].committedPence + 500) / 1000
-		best := (accs[i].committedPence+accs[i].bestPence+500) / 1000
-		low := (accs[i].committedPence+accs[i].lowPence+500) / 1000
+		best := (accs[i].committedPence + accs[i].bestPence + 500) / 1000
+		low := (accs[i].committedPence + accs[i].lowPence + 500) / 1000
 		rows[i] = ForecastRow{
 			Q:         quarterLabel(yr, qtr),
 			Target:    0, // v1: targets not yet configurable; 0 = no target set

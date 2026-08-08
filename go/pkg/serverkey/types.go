@@ -167,9 +167,9 @@ type AccountStatusOutput struct {
 //	r := svc.IssueSessionToken(accountID)
 //	if r.OK { out := r.Value.(SessionTokenOutput); _ = out.Token }
 type SessionTokenOutput struct {
-	Token     string `json:"session_token"`         // LTHN-SESS-1.<header>.<sig>
-	ExpiresAt int64  `json:"expires_at"`            // unix seconds — for UI hints only; verifier is authoritative
-	AccountID string `json:"account_id"`            // the unlocked account_id this token authorises
+	Token     string `json:"session_token"` // LTHN-SESS-1.<header>.<sig>
+	ExpiresAt int64  `json:"expires_at"`    // unix seconds — for UI hints only; verifier is authoritative
+	AccountID string `json:"account_id"`    // the unlocked account_id this token authorises
 }
 
 // SessionVerifyOutput is the success-shape Verifier.VerifySessionToken

@@ -65,7 +65,7 @@ func TestReconcile_parseHostPort_Bad(t *core.T) {
 	cases := []string{
 		"",
 		"no-arrow",
-		"127.0.0.1->4096/tcp",   // no host port
+		"127.0.0.1->4096/tcp", // no host port
 		"127.0.0.1:nope->4096/tcp",
 	}
 	for _, tc := range cases {
@@ -187,10 +187,10 @@ func TestReconcile_emitDenials_Good_LabelMismatch(t *core.T) {
 	rec := withFakeAudit(t)
 	svc := &Service{}
 	out := "" +
-		"lthn-opencode-oc-1\t127.0.0.1:51823->4096/tcp\tour-install\n" +    // adopt — no denial
+		"lthn-opencode-oc-1\t127.0.0.1:51823->4096/tcp\tour-install\n" + // adopt — no denial
 		"lthn-opencode-evil\t127.0.0.1:51824->4096/tcp\tattacker-install\n" + // mismatch
-		"lthn-opencode-legacy\t127.0.0.1:51825->4096/tcp\t\n" +                // missing label
-		"redis\t0.0.0.0:6379->6379/tcp\t\n"                                    // alien — no denial
+		"lthn-opencode-legacy\t127.0.0.1:51825->4096/tcp\t\n" + // missing label
+		"redis\t0.0.0.0:6379->6379/tcp\t\n" // alien — no denial
 	svc.emitDenials(out, "our-install")
 	events := rec.snapshot()
 	if len(events) != 2 {

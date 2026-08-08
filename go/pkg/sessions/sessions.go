@@ -44,13 +44,13 @@ import (
 // prompt} to the history before the runner call. No truncation cap
 // on the storage side — prompts can be multi-paragraph.
 type SessionInfo struct {
-	ID           string   `json:"id"`
-	Title        string   `json:"title"`
-	CreatedAt    int64    `json:"created_at"`
-	UpdatedAt    int64    `json:"updated_at"`
-	Messages     int      `json:"messages"`
-	Snippet      string   `json:"snippet,omitempty"`
-	SystemPrompt string   `json:"system_prompt,omitempty"`
+	ID           string `json:"id"`
+	Title        string `json:"title"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+	Messages     int    `json:"messages"`
+	Snippet      string `json:"snippet,omitempty"`
+	SystemPrompt string `json:"system_prompt,omitempty"`
 	// Tags is the free-text label set the user has attached to this
 	// session. Lowercased + de-duplicated on the way in (SetTags
 	// enforces both). The rail renders chips beneath the title and a

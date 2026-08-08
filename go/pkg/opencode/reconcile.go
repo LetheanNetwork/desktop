@@ -27,7 +27,6 @@
 package opencode
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/orm"
 
@@ -87,18 +86,18 @@ type reconcileLine struct {
 //	"skip"            — name-prefix didn't match (alien container)
 //	"bad_port"        — gate would have passed but Ports unparseable
 type reconcileVerdict struct {
-	Line     reconcileLine
+	Line      reconcileLine
 	SandboxID string // post-prefix-trim ID; empty for skip/bad rows
 	HostPort  int    // 0 unless Status=="adopt"
 	Status    string
 }
 
 const (
-	verdictAdopt          = "adopt"
-	verdictMissingLabel   = "missing_label"
-	verdictLabelMismatch  = "label_mismatch"
-	verdictSkip           = "skip"
-	verdictBadPort        = "bad_port"
+	verdictAdopt         = "adopt"
+	verdictMissingLabel  = "missing_label"
+	verdictLabelMismatch = "label_mismatch"
+	verdictSkip          = "skip"
+	verdictBadPort       = "bad_port"
 )
 
 // classifyReconcile is the pure adoption-gate decision. Given one

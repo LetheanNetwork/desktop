@@ -34,10 +34,10 @@ import (
 // account list governs single-unlock semantics; multi-unlock is
 // simulated by extending unlocked.
 type testKeys struct {
-	pub        []byte
-	priv       []byte
-	unlocked   []string // account IDs treated as unlocked
-	denyPriv   bool     // when true, PrivateKeyFor returns (nil, false)
+	pub      []byte
+	priv     []byte
+	unlocked []string // account IDs treated as unlocked
+	denyPriv bool     // when true, PrivateKeyFor returns (nil, false)
 }
 
 func (k *testKeys) PublicKeyFor(_ string) ([]byte, error) {
@@ -572,8 +572,10 @@ type countingKeys struct {
 	count int
 }
 
-func (c *countingKeys) PublicKeyFor(id string) ([]byte, error)  { return c.inner.PublicKeyFor(id) }
-func (c *countingKeys) SingleUnlockedAccount() (string, error)  { return c.inner.SingleUnlockedAccount() }
+func (c *countingKeys) PublicKeyFor(id string) ([]byte, error) { return c.inner.PublicKeyFor(id) }
+func (c *countingKeys) SingleUnlockedAccount() (string, error) {
+	return c.inner.SingleUnlockedAccount()
+}
 func (c *countingKeys) PrivateKeyFor(id string) (recordfile.PrivateKeyHandle, bool) {
 	c.mu.Lock()
 	c.count++
@@ -586,9 +588,11 @@ func (c *countingKeys) PrivateKeyFor(id string) (recordfile.PrivateKeyHandle, bo
 // example for countingKeys typechecks; not exercised in this test.
 type passthroughAtomic struct{ inner *fakeAtomic }
 
-func (p *passthroughAtomic) Write(req recordfile.AtomicWriteRequest) error { return errors.New("unused") }
-func (p *passthroughAtomic) ReadFile(path string) ([]byte, error)          { return nil, errors.New("unused") }
-func (p *passthroughAtomic) Remove(path string) error                      { return errors.New("unused") }
+func (p *passthroughAtomic) Write(req recordfile.AtomicWriteRequest) error {
+	return errors.New("unused")
+}
+func (p *passthroughAtomic) ReadFile(path string) ([]byte, error) { return nil, errors.New("unused") }
+func (p *passthroughAtomic) Remove(path string) error             { return errors.New("unused") }
 
 // TestAtRest_PrivateKeyHandleZeroisedAfterUse_Good — calling Use a
 // second time on the SAME handle MUST fail (single-shot contract).
@@ -758,7 +762,7 @@ func TestAtRest_NewAtRestWriter_DepPanics_Ugly(t *testing.T) {
 		Surface: recordfile.SurfaceSalesDeals,
 		Keys:    &testKeys{},
 		// PGP intentionally nil.
-		Schema:  dealsSchema,
-		Atomic:  newFakeAtomic(),
+		Schema: dealsSchema,
+		Atomic: newFakeAtomic(),
 	})
 }

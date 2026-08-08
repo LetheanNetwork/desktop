@@ -111,7 +111,7 @@ func ExampleService_UpsertAgent() {
 	_ = svc.UpsertAgent(fleet.Agent{
 		ID: "openai-default", Name: "OpenAI · GPT-5",
 		Provider: "openai-compat", Kind: "remote",
-		BaseURL: "https://api.openai.com/v1",
+		BaseURL:   "https://api.openai.com/v1",
 		APIKeyRef: "key:openai:default", Model: "gpt-5",
 	})
 }

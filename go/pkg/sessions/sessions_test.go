@@ -1097,8 +1097,12 @@ func TestSessions_Tags_Duplicate_IsolatedSlice(t *core.T) {
 	srcTags := sessions.List(c).Value.([]sessions.SessionInfo)
 	var srcInfo, newInfo sessions.SessionInfo
 	for _, info := range srcTags {
-		if info.ID == id { srcInfo = info }
-		if info.ID == newID { newInfo = info }
+		if info.ID == id {
+			srcInfo = info
+		}
+		if info.ID == newID {
+			newInfo = info
+		}
 	}
 	core.AssertEqual(t, 2, len(srcInfo.Tags), "source unchanged")
 	core.AssertEqual(t, 3, len(newInfo.Tags))

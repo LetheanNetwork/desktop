@@ -163,14 +163,7 @@ func TestWails_Service_Catalog_Ugly_NullEntries(t *core.T) {
 }
 
 // NOTE on findLintBinary's not-found branches (Run/Catalog's
-// `binary == ""` checks): unreachable on Snider's own dev box.
-// findLintBinary()'s fallback candidate list includes the hardcoded
-// path /Users/snider/Code/core/lint/bin/core-lint (lint.go), which is
-// a real, executable file on this machine — so once a test's fake
-// $PATH entry is out of scope (not applicable to these Run/Catalog
-// tests, which always keep a fake on $PATH anyway) the loop would
-// still resolve there before ever returning "". This is a pre-
-// existing production landmine (a personal absolute path baked into
-// the fallback list), out of scope for a coverage-only lane to fix;
-// see lint_internal_test.go's TestFindLintBinary_Ugly_* for the
-// direct writeup.
+// `binary == ""` checks): the fallback list is $HOME-relative only,
+// so a fake $HOME plus an empty $PATH makes "" reachable on any box —
+// lint_internal_test.go's TestFindLintBinary_Ugly_* asserts it
+// directly.

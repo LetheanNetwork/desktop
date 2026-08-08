@@ -303,10 +303,10 @@ func TestAtomicCutover_Contacts_Update_VersionStale_Ugly(t *testing.T) {
 	var saw bool
 	for attempt := 0; attempt < 32 && !saw; attempt++ {
 		var (
-			mu       sync.Mutex
-			results  []core.Result
-			wg       sync.WaitGroup
-			start    = make(chan struct{})
+			mu      sync.Mutex
+			results []core.Result
+			wg      sync.WaitGroup
+			start   = make(chan struct{})
 		)
 		wg.Add(2)
 		go func() {

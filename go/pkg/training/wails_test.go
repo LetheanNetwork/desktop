@@ -229,7 +229,7 @@ func TestWailsTraining_Stop_UglyCancelsMidRotation(t *testing.T) {
 		Subjects:         []string{"english", "european"},
 		SeedsRoot:        root,
 		ProbesPerSubject: 2,
-		CLBPLOptions: tightCLBPL(),
+		CLBPLOptions:     tightCLBPL(),
 		Epoch2MaxSteps:   5000,
 	})
 	_ = svc.Register(c)

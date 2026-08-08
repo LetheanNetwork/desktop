@@ -277,14 +277,14 @@ func TestMoveDeal_ProbePattern_Ugly(t *testing.T) {
 		to     string
 		expect bool // true = expect OK
 	}{
-		{"won", false},      // illegal — qual cannot skip
-		{"engage", true},    // qual → engage ✓
-		{"won", false},      // illegal — engage cannot skip
-		{"propose", true},   // engage → propose ✓
-		{"won", false},      // illegal — propose cannot skip to won
-		{"qual", false},     // illegal — propose cannot rewind two
-		{"engage", true},    // propose → engage ✓
-		{"propose", true},   // engage → propose ✓
+		{"won", false},    // illegal — qual cannot skip
+		{"engage", true},  // qual → engage ✓
+		{"won", false},    // illegal — engage cannot skip
+		{"propose", true}, // engage → propose ✓
+		{"won", false},    // illegal — propose cannot skip to won
+		{"qual", false},   // illegal — propose cannot rewind two
+		{"engage", true},  // propose → engage ✓
+		{"propose", true}, // engage → propose ✓
 	}
 	for i, a := range attempts {
 		r := svc.MoveDeal(pipeline.MoveInput{DealID: id, ToStage: a.to})

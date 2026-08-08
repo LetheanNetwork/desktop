@@ -90,7 +90,7 @@ const (
 	// of entries; thousands of entries would still fit in 4 MiB at
 	// JSON-density. 256 KiB for a single manifest — a manifest is
 	// metadata + envrefs + image refs, never large.
-	maxIndexBytes    = 4 << 20  // 4 MiB
+	maxIndexBytes    = 4 << 20   // 4 MiB
 	maxManifestBytes = 256 << 10 // 256 KiB
 
 	// maxRegistryRedirects matches the downloader's explicit-cap

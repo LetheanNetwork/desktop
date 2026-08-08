@@ -100,8 +100,8 @@ func parseMediate(reply string) MediateResult {
 	var msg struct {
 		Tool   string `json:"tool"`
 		Params struct {
-			Reason         string `json:"reason"`
-			Text           string `json:"text"`
+			Reason      string `json:"reason"`
+			Text        string `json:"text"`
 			LemWarnUser bool   `json:"lem_warn_user"`
 		} `json:"params"`
 	}

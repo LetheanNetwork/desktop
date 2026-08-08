@@ -54,13 +54,13 @@ type Surface string
 //
 //	hdr := map[string]any{"surface": string(recordfile.SurfaceSalesDeals)}
 const (
-	SurfaceSalesDeals          Surface = "sales.deals"
-	SurfaceIncidents           Surface = "incidents"
-	SurfaceRunbooks            Surface = "runbooks"
-	SurfaceMarketingCampaigns  Surface = "marketing.campaigns"
-	SurfaceMarketingAudience   Surface = "marketing.audience"
-	SurfaceMarketingSocial     Surface = "marketing.social"
-	SurfaceMarketingContent    Surface = "marketing.content"
+	SurfaceSalesDeals         Surface = "sales.deals"
+	SurfaceIncidents          Surface = "incidents"
+	SurfaceRunbooks           Surface = "runbooks"
+	SurfaceMarketingCampaigns Surface = "marketing.campaigns"
+	SurfaceMarketingAudience  Surface = "marketing.audience"
+	SurfaceMarketingSocial    Surface = "marketing.social"
+	SurfaceMarketingContent   Surface = "marketing.content"
 )
 
 // SchemaVersion is the canonical version string carried in every
@@ -131,15 +131,15 @@ type HeaderSchema[T any] struct {
 // Kept package-private — callers don't need to know the exact list,
 // only that the substrate owns these fields.
 var reservedHeaderKeys = map[string]struct{}{
-	"schema":                    {},
-	"id":                        {},
-	"version":                   {},
-	"account":                   {},
-	"surface":                   {},
-	"body.checksum":             {},
-	"header.mac":                {},
-	"created_at":                {},
-	"updated_at":                {},
+	"schema":        {},
+	"id":            {},
+	"version":       {},
+	"account":       {},
+	"surface":       {},
+	"body.checksum": {},
+	"header.mac":    {},
+	"created_at":    {},
+	"updated_at":    {},
 }
 
 // validateConsumerHeader runs schema.AllowedKeys + reserved-keys

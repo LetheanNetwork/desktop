@@ -58,20 +58,20 @@ func TestPRFetch_LatestPerPR_Good(t *core.T) {
 	older := vi.PRActivity{
 		ID: "pra-older-1", Provider: "forge", Owner: "lthn", Repo: "desktop",
 		PRNumber: 7, Title: "old title", Author: "snider", State: "open",
-		URL: "https://forge.lthn.sh/lthn/desktop/pulls/7",
+		URL:       "https://forge.lthn.sh/lthn/desktop/pulls/7",
 		CheckedAt: t0.Add(-1 * core.Hour),
 	}
 	newer := vi.PRActivity{
 		ID: "pra-newer-1", Provider: "forge", Owner: "lthn", Repo: "desktop",
 		PRNumber: 7, Title: "new title", Author: "snider", State: "open",
-		URL: "https://forge.lthn.sh/lthn/desktop/pulls/7",
+		URL:       "https://forge.lthn.sh/lthn/desktop/pulls/7",
 		CheckedAt: t0,
 	}
 	// PR #1 on a different repo, also watched.
 	other := vi.PRActivity{
 		ID: "pra-other-1", Provider: "github", Owner: "LetheanNetwork", Repo: "desktop",
 		PRNumber: 1, Title: "gh pr", Author: "external", State: "open",
-		URL: "https://github.com/LetheanNetwork/desktop/pull/1",
+		URL:       "https://github.com/LetheanNetwork/desktop/pull/1",
 		CheckedAt: t0,
 	}
 	core.RequireTrue(t, orm.Insert(c, &older).OK)

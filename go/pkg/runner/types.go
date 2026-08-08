@@ -18,15 +18,15 @@ package runner
 // (RFC v1.1 §3.1, §6 Option A):
 //
 //   - APIKey    — DEPRECATED legacy plaintext field. Surfaced ONLY
-//                 so the boot-time migration scan in pkg/runner/
-//                 migration.go can lift the plaintext into the tier-1
-//                 substrate and rewrite the config with the new ref.
-//                 Post-migration this field is empty on disk.
+//     so the boot-time migration scan in pkg/runner/
+//     migration.go can lift the plaintext into the tier-1
+//     substrate and rewrite the config with the new ref.
+//     Post-migration this field is empty on disk.
 //   - APIKeyRef — NEW opaque handle into pkg/keys.Service tier-1
-//                 (e.g. "openai-default"). The runner resolves the
-//                 ref via keys.GetTier1 at route-build time; the
-//                 plaintext only lives in the *openai.Backend
-//                 wrapper's cached field for the route's lifetime.
+//     (e.g. "openai-default"). The runner resolves the
+//     ref via keys.GetTier1 at route-build time; the
+//     plaintext only lives in the *openai.Backend
+//     wrapper's cached field for the route's lifetime.
 //
 // When both fields are populated the ref WINS — the credential the
 // operator most recently dispatched through WSetDynamicRoutes (or the

@@ -941,14 +941,14 @@ func TestBootstrapAuth_ConstantTimeBearerCompare_Good(t *core.T) {
 	// full 32 leaks N as a measurable timing signal. Post-fix, all
 	// must 401 with the same body.
 	candidates := []string{
-		"",                                                                                           // empty
-		"x",                                                                                          // 0-byte prefix overlap
-		"a" + "x",                                                                                    // 1-byte prefix overlap
-		"abcdefgh" + "x",                                                                             // 8-byte prefix overlap
-		"abcdefghijklmnop" + "x",                                                                     // 16-byte prefix overlap
-		"abcdefghijklmnopqrstuvwxyz01234" + "x",                                                      // 31-byte prefix overlap (1 byte different)
-		"abcdefghijklmnopqrstuvwxyz012345" + "extra",                                                 // correct prefix + extra (length mismatch)
-		"abcdefghijklmnopqrstuvwxyz012346",                                                           // full length, last byte different
+		"",                                      // empty
+		"x",                                     // 0-byte prefix overlap
+		"a" + "x",                               // 1-byte prefix overlap
+		"abcdefgh" + "x",                        // 8-byte prefix overlap
+		"abcdefghijklmnop" + "x",                // 16-byte prefix overlap
+		"abcdefghijklmnopqrstuvwxyz01234" + "x", // 31-byte prefix overlap (1 byte different)
+		"abcdefghijklmnopqrstuvwxyz012345" + "extra", // correct prefix + extra (length mismatch)
+		"abcdefghijklmnopqrstuvwxyz012346",           // full length, last byte different
 	}
 
 	// --- Path 1: WithBootstrapAuth (BootstrapAndSessionAuth-less option) ---

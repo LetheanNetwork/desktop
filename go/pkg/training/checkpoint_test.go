@@ -29,12 +29,12 @@ func TestCheckpoint_SaveLoad_RoundTrip_Good(t *testing.T) {
 	tempCheckpointHome(t)
 
 	cp := Checkpoint{
-		Model:     "gemma4-e2b-it-q4",
-		Substrate: "CONT",
-		Tier:      0,
-		Subjects:  []string{"english", "european", "russian"},
-		SubjectIndex:  1,
-		ProbeIndex:    4,
+		Model:          "gemma4-e2b-it-q4",
+		Substrate:      "CONT",
+		Tier:           0,
+		Subjects:       []string{"english", "european", "russian"},
+		SubjectIndex:   1,
+		ProbeIndex:     4,
 		GrokedSubjects: []string{"english"},
 		CompletedProbes: []ProbeKey{
 			{Subject: "english", ProbeID: "P01"},

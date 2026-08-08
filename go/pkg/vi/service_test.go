@@ -216,11 +216,11 @@ func TestService_Activity_Good(t *core.T) {
 	rows := []vi.PRActivity{
 		{ID: "pra-f1", Provider: "forge", Owner: "lthn", Repo: "desktop",
 			PRNumber: 7, Title: "Lethean forge PR", Author: "snider", State: "open",
-			URL: "https://forge.lthn.sh/lthn/desktop/pulls/7",
+			URL:      "https://forge.lthn.sh/lthn/desktop/pulls/7",
 			OpenedAt: t0.Add(-24 * core.Hour), UpdatedAt: t0, CheckedAt: t0},
 		{ID: "pra-g1", Provider: "github", Owner: "LetheanNetwork", Repo: "desktop",
 			PRNumber: 1, Title: "GitHub mirror PR", Author: "external", State: "open",
-			URL: "https://github.com/LetheanNetwork/desktop/pull/1",
+			URL:      "https://github.com/LetheanNetwork/desktop/pull/1",
 			OpenedAt: t0.Add(-2 * core.Hour), UpdatedAt: t0, CheckedAt: t0},
 	}
 	for i := range rows {

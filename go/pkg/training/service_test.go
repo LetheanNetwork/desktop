@@ -360,9 +360,9 @@ func (g *gatedRunner) GenerateResponse(prompt string) core.Result {
 	g.mu.Unlock()
 	return g.inner.GenerateResponse(prompt)
 }
-func (g *gatedRunner) ModelID() string  { return g.inner.ModelID() }
+func (g *gatedRunner) ModelID() string   { return g.inner.ModelID() }
 func (g *gatedRunner) Substrate() string { return g.inner.Substrate() }
-func (g *gatedRunner) Tier() int        { return g.inner.Tier() }
+func (g *gatedRunner) Tier() int         { return g.inner.Tier() }
 
 func (g *gatedRunner) entered() bool {
 	g.mu.Lock()

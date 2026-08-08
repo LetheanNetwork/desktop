@@ -37,10 +37,10 @@ func TestPassphrase_IsCommon_Good_UncommonRejects(t *core.T) {
 	// Random-ish strong passphrases MUST NOT flag — defends
 	// against a buggy lookup that always returns true.
 	for _, p := range []string{
-		"correct horse battery staple",     // diceware
-		"ssauwL4HrNDvyJPbcfEUYbBE",         // random 24-char
+		"correct horse battery staple",          // diceware
+		"ssauwL4HrNDvyJPbcfEUYbBE",              // random 24-char
 		"my-cat-is-named-fluffy-and-i-love-her", // semantically structured but not leaked
-		"Tr0ub4dor&3",                       // xkcd-style strong-enough
+		"Tr0ub4dor&3",                           // xkcd-style strong-enough
 		"a-very-long-passphrase-that-no-one-would-use-elsewhere",
 	} {
 		core.AssertFalse(t, subject.IsCommon(p),

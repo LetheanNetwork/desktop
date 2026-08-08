@@ -52,7 +52,6 @@
 package sessions
 
 import (
-
 	core "dappco.re/go"
 
 	"dappco.re/lthn/desktop/pkg/account"
@@ -267,15 +266,6 @@ func isSealedEnvelope(raw []byte) bool {
 		return false
 	}
 	return core.HasPrefix(string(raw[:len(envelopeMagic)]), envelopeMagic)
-}
-
-// isSealedEnvelopeString is the string-keyed convenience used inside
-// List() iteration where store.get_all returns map[string]string.
-func isSealedEnvelopeString(raw string) bool {
-	if len(raw) < len(envelopeMagic) {
-		return false
-	}
-	return core.HasPrefix(raw[:len(envelopeMagic)], envelopeMagic)
 }
 
 // envelopeMACInput canonicalises the MAC input fields so the read

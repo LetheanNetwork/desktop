@@ -213,12 +213,12 @@ func parseWorkspaces(stdout string) core.Result {
 // DispatchRequest mirrors workspace/dispatch's flags. Repo + Task are the
 // essentials; Agent picks the harness.
 type DispatchRequest struct {
-	Repo     string `json:"repo"`
-	Org      string `json:"org,omitempty"`
-	Task     string `json:"task"`
-	Agent    string `json:"agent,omitempty"`
-	Issue    int    `json:"issue,omitempty"`
-	PR       int    `json:"pr,omitempty"`
+	Repo         string `json:"repo"`
+	Org          string `json:"org,omitempty"`
+	Task         string `json:"task"`
+	Agent        string `json:"agent,omitempty"`
+	Issue        int    `json:"issue,omitempty"`
+	PR           int    `json:"pr,omitempty"`
 	Branch       string `json:"branch,omitempty"`
 	Template     string `json:"template,omitempty"`
 	PlanTemplate string `json:"plan_template,omitempty"` // premade task → --plan-template

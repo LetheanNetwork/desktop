@@ -18,8 +18,8 @@ import (
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
 	gomail "github.com/emersion/go-message/mail"
-	gosmtp "github.com/emersion/go-smtp"
 	"github.com/emersion/go-sasl"
+	gosmtp "github.com/emersion/go-smtp"
 )
 
 // Send builds a MIME message and sends it via SMTP.

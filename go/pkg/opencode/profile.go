@@ -15,7 +15,6 @@
 package opencode
 
 import (
-
 	core "dappco.re/go"
 	goiostore "dappco.re/go/io/store"
 )
@@ -50,16 +49,16 @@ const (
 // control surface accepts. Sized to current opencode-serve provider
 // catalogue — extend deliberately, not opportunistically.
 var profileAllowedProviderKeys = map[string]bool{
-	"lthn":         true,
-	"openai":       true,
-	"anthropic":    true,
-	"ollama":       true,
-	"openrouter":   true,
-	"google":       true,
-	"groq":         true,
-	"mistral":      true,
-	"deepseek":     true,
-	"xai":          true,
+	"lthn":           true,
+	"openai":         true,
+	"anthropic":      true,
+	"ollama":         true,
+	"openrouter":     true,
+	"google":         true,
+	"groq":           true,
+	"mistral":        true,
+	"deepseek":       true,
+	"xai":            true,
 	"github-copilot": true,
 }
 

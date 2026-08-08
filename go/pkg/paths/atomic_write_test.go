@@ -741,8 +741,8 @@ func TestIsAtRestEncryptedPath_Coverage(t *core.T) {
 	homeFixture(t)
 	root := paths.Root().Value.(string)
 	cases := []struct {
-		path    string
-		want    bool
+		path string
+		want bool
 	}{
 		{core.PathJoin(root, "wallets/server.key"), true},
 		{core.PathJoin(root, "account/abc/private.key"), true},

@@ -17,7 +17,6 @@
 package validator
 
 import (
-
 	core "dappco.re/go"
 )
 

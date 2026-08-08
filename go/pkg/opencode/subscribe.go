@@ -235,4 +235,3 @@ func (s *Service) streamEvents(ctx core.Context, target, authHeader string) erro
 	}
 	return scanner.Err()
 }
-

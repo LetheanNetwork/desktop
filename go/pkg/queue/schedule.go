@@ -15,7 +15,6 @@
 package queue
 
 import (
-
 	core "dappco.re/go"
 )
 

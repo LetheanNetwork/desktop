@@ -32,13 +32,13 @@ import (
 
 // Append-path error codes. Reserved schema.
 const (
-	CodeAppendInvalidPath     = "paths.append.invalid_path"
-	CodeAppendOpenFailed      = "paths.append.open_failed"
-	CodeAppendWriteFailed     = "paths.append.write_failed"
-	CodeAppendFsyncFailed     = "paths.append.fsync_failed"
-	CodeAppendRotateFailed    = "paths.append.rotate_failed"
-	CodeAppendRotateSplit     = "paths.append.rotate_split"
-	CodeAppendRecordTooLarge  = "paths.append.record_too_large"
+	CodeAppendInvalidPath    = "paths.append.invalid_path"
+	CodeAppendOpenFailed     = "paths.append.open_failed"
+	CodeAppendWriteFailed    = "paths.append.write_failed"
+	CodeAppendFsyncFailed    = "paths.append.fsync_failed"
+	CodeAppendRotateFailed   = "paths.append.rotate_failed"
+	CodeAppendRotateSplit    = "paths.append.rotate_split"
+	CodeAppendRecordTooLarge = "paths.append.record_too_large"
 )
 
 // AppendRotateThreshold is the byte-size ceiling beyond which the

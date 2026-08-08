@@ -37,9 +37,9 @@ func ExampleService_Get() {
 		return
 	}
 	out := r.Value.(deploys.GetOutput)
-	_ = out.Record.Env  // "preview"
-	_ = out.Record.By   // "Tobi"
-	_ = out.Notes       // "Deploy went smoothly."
+	_ = out.Record.Env // "preview"
+	_ = out.Record.By  // "Tobi"
+	_ = out.Notes      // "Deploy went smoothly."
 }
 
 // ExampleService_Create shows how to persist a new deploy record.

@@ -197,13 +197,17 @@ func TestSpawnPort_AllShimsEmitRejected_Ugly(t *core.T) {
 	}
 	rows := []shimRow{
 		{
-			name:    "Spawn",
-			invoke:  func(svc *Service) core.Result { return svc.Spawn(SpawnInput{Image: "lthn/dev:latest", Command: "echo"}) },
+			name: "Spawn",
+			invoke: func(svc *Service) core.Result {
+				return svc.Spawn(SpawnInput{Image: "lthn/dev:latest", Command: "echo"})
+			},
 			surface: "sandbox.Spawn",
 		},
 		{
-			name:    "SpawnLong",
-			invoke:  func(svc *Service) core.Result { return svc.SpawnLong(SpawnLongInput{Image: "lthn/dev:latest", Command: "opencode"}) },
+			name: "SpawnLong",
+			invoke: func(svc *Service) core.Result {
+				return svc.SpawnLong(SpawnLongInput{Image: "lthn/dev:latest", Command: "opencode"})
+			},
 			surface: "sandbox.SpawnLong",
 		},
 		{

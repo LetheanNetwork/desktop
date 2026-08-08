@@ -222,11 +222,11 @@ func TestManifest_ValidateManifest_Ugly(t *core.T) {
 		{"my-bundle", true},
 		{"bundle123", true},
 		{"123", true},
-		{"My-Bundle", false},    // upper-case
-		{"my_bundle", false},    // underscore
-		{"my.bundle", false},    // dot
-		{"my bundle", false},    // space
-		{"", false},             // empty
+		{"My-Bundle", false}, // upper-case
+		{"my_bundle", false}, // underscore
+		{"my.bundle", false}, // dot
+		{"my bundle", false}, // space
+		{"", false},          // empty
 	}
 
 	for _, tc := range cases {

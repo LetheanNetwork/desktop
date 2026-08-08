@@ -93,11 +93,11 @@ func TestCollectRecipients_Ugly(t *testing.T) {
 // TestExtensionOf_Good — extract file extension from filename.
 func TestExtensionOf_Good(t *testing.T) {
 	cases := map[string]string{
-		"invoice.pdf":   ".pdf",
-		"photo.jpg":     ".jpg",
+		"invoice.pdf":    ".pdf",
+		"photo.jpg":      ".jpg",
 		"archive.tar.gz": ".gz",
-		"noextension":   "",
-		"":              "",
+		"noextension":    "",
+		"":               "",
 	}
 	for input, want := range cases {
 		got := extensionOf(input)

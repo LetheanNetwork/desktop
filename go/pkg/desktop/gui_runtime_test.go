@@ -37,7 +37,7 @@ func guiRuntimeConfigFixture(t *core.T) (*core.Core, *config.Service) {
 }
 
 func TestGUIRuntime_ApplicationOptions_Good_PreservesTransport(t *core.T) {
-	transport := connection.NewService(connection.Options{}).Transport()
+	transport := connection.NewService(connection.Options{Address: "127.0.0.1:0"}).Transport()
 	bindingFixture := &guiRuntimeBindingFixture{}
 	binding := gui.Bind(bindingFixture)
 	options := guiApplicationOptions(gui.GuiConfig{
@@ -68,7 +68,7 @@ func TestGUIRuntime_ApplicationOptions_Good_UserConfigWinsRuntimeBaseline(t *cor
 		Windows: gui.WindowsOptions{
 			UseVisualHosting: false,
 		},
-	}, connection.NewService(connection.Options{}).Transport(), cfg)
+	}, connection.NewService(connection.Options{Address: "127.0.0.1:0"}).Transport(), cfg)
 
 	core.AssertEqual(t, "configured-lthn", options.Name)
 	core.AssertTrue(t, options.Windows.UseVisualHosting)
@@ -95,7 +95,7 @@ func TestGUIRuntime_New_Bad_NilTransport(t *core.T) {
 }
 
 func TestGUIRuntime_New_Ugly_NilCore(t *core.T) {
-	transport := connection.NewService(connection.Options{}).Transport()
+	transport := connection.NewService(connection.Options{Address: "127.0.0.1:0"}).Transport()
 	result := newGUIRuntime(nil, gui.GuiConfig{}, transport)
 	core.AssertFalse(t, result.OK)
 	core.AssertContains(t, result.Error(), "core is nil")
@@ -109,7 +109,7 @@ func TestGUIRuntime_New_Good_ConstructsRuntimeWithoutRun(t *core.T) {
 	t.Setenv("HOME", t.TempDir())
 	c := core.New()
 	t.Cleanup(func() { _ = c.ServiceShutdown(core.Background()) })
-	transport := connection.NewService(connection.Options{}).Transport()
+	transport := connection.NewService(connection.Options{Address: "127.0.0.1:0"}).Transport()
 
 	result := newGUIRuntime(c, gui.GuiConfig{}, transport)
 
@@ -127,7 +127,7 @@ func TestGUIRuntime_RegisterCoreGUIServices_Good_WiresWindowService(t *core.T) {
 	})
 	app := application.New(application.Options{
 		Name:      "lthn-test",
-		Transport: connection.NewService(connection.Options{}).Transport(),
+		Transport: connection.NewService(connection.Options{Address: "127.0.0.1:0"}).Transport(),
 	})
 
 	result := registerCoreGUIServices(c, app, gui.GuiConfig{})
@@ -151,7 +151,7 @@ func testWailsApp(t *core.T) *application.App {
 	t.Helper()
 	return application.New(application.Options{
 		Name:      "lthn-desktop-test",
-		Transport: connection.NewService(connection.Options{}).Transport(),
+		Transport: connection.NewService(connection.Options{Address: "127.0.0.1:0"}).Transport(),
 	})
 }
 

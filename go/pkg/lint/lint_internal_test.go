@@ -52,18 +52,14 @@ func TestFindLintBinary_Good_OnPath(t *core.T) {
 
 // TestFindLintBinary_Ugly_FallsBackWhenNotOnPath — with nothing on
 // $PATH and a fresh, repo-free $HOME, the PATH search and the
-// $HOME-derived candidates both miss. On Snider's own dev box the
-// loop still resolves via the hardcoded canonical candidate
-// (/Users/snider/Code/core/lint/bin/core-lint — a real file on that
-// machine), so this asserts the function degrades gracefully rather
-// than asserting an exact "" — see the doc comment on
-// TestWails_Service_Run_Bad_BinaryNotFound in ../lint (wails_test.go)
-// for the full leave-out writeup.
+// $HOME-derived candidates all miss, so the search reports "not
+// found" honestly instead of resolving somebody else's machine
+// layout. Every fallback is $HOME-relative, which is what makes this
+// assertable on any box.
 func TestFindLintBinary_Ugly_FallsBackWhenNotOnPath(t *core.T) {
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
-	got := findLintBinary() // "" on a clean CI box, the canonical path on Snider's
-	_ = got
+	core.AssertEqual(t, "", findLintBinary())
 }
 
 // ─── runLint ─────────────────────────────────────────────────────────

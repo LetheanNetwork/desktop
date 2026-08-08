@@ -20,16 +20,16 @@ import (
 // Only the values we route policy on are listed; anything else
 // returns "unknown".
 const (
-	magicEXT4     = 0xef53
-	magicXFS      = 0x58465342
-	magicBTRFS    = 0x9123683e
-	magicZFS      = 0x2fc12fc1
-	magicTMPFS    = 0x01021994
-	magicNFS      = 0x6969
-	magicSMB      = 0x517b
-	magicCIFS     = 0xff534d42
-	magicFUSE     = 0x65735546
-	magicOVERLAY  = 0x794c7630
+	magicEXT4    = 0xef53
+	magicXFS     = 0x58465342
+	magicBTRFS   = 0x9123683e
+	magicZFS     = 0x2fc12fc1
+	magicTMPFS   = 0x01021994
+	magicNFS     = 0x6969
+	magicSMB     = 0x517b
+	magicCIFS    = 0xff534d42
+	magicFUSE    = 0x65735546
+	magicOVERLAY = 0x794c7630
 )
 
 // statfsType reads the filesystem-type identifier for the directory

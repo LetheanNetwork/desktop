@@ -116,7 +116,7 @@ func TestDesktop_Run_Bad_NoConnection(t *core.T) {
 func TestDesktop_Run_Bad_NoManagedServices(t *core.T) {
 	s := desktop.NewService(desktop.Options{
 		Server:     server.NewService(server.Options{}),
-		Connection: connection.NewService(connection.Options{}),
+		Connection: connection.NewService(connection.Options{Address: "127.0.0.1:0"}),
 		Core:       core.New(),
 	})
 	r := s.Run()
@@ -129,7 +129,7 @@ func TestDesktop_Run_Bad_NoModelRuntime(t *core.T) {
 	c := core.New(core.WithName("services", manager.Register))
 	s := desktop.NewService(desktop.Options{
 		Server:     server.NewService(server.Options{}),
-		Connection: connection.NewService(connection.Options{}),
+		Connection: connection.NewService(connection.Options{Address: "127.0.0.1:0"}),
 		Core:       c,
 	})
 	r := s.Run()
@@ -174,7 +174,7 @@ func TestDesktop_Run_Ugly_ServiceLockStopsBeforeWailsConstruction(t *core.T) {
 		// service-lock boundary it means to exercise.
 		Frontend:   fstest.MapFS{"dist/index.html": &fstest.MapFile{Data: []byte("<html></html>")}},
 		Server:     server.NewService(server.Options{}),
-		Connection: connection.NewService(connection.Options{}),
+		Connection: connection.NewService(connection.Options{Address: "127.0.0.1:0"}),
 		Core:       c,
 	})
 	r := s.Run()
@@ -212,7 +212,7 @@ func TestDesktop_RegisterService_Good_ResolvesEveryOptionalDependencyFromCore(t 
 	keysResult := keysvc.New()
 	core.RequireTrue(t, keysResult.OK, keysResult.Error())
 	keysSvc := keysResult.Value.(*keys.Service)
-	connectionSvc := connection.NewService(connection.Options{})
+	connectionSvc := connection.NewService(connection.Options{Address: "127.0.0.1:0"})
 
 	c := core.New(
 		core.WithName("server", func(*core.Core) core.Result { return core.Ok(backend) }),

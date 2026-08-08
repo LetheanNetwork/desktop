@@ -47,9 +47,9 @@ func TestDoubleMetaphone_Empty_Bad(t *testing.T) {
 // the LEK detector cares about, not exact textbook codes.
 func TestDoubleMetaphone_BasicWords_Good(t *testing.T) {
 	cases := []struct {
-		word         string
-		wantPrimary  string
-		wantSecond   string // empty = expect same as primary
+		word        string
+		wantPrimary string
+		wantSecond  string // empty = expect same as primary
 	}{
 		// PH → F.
 		{"Philip", "FLP", ""},
@@ -93,10 +93,10 @@ func TestDoubleMetaphone_BasicWords_Good(t *testing.T) {
 // of the same word should match.
 func TestPhoneticEquivalent_CrossOrthography_Good(t *testing.T) {
 	pairs := [][2]string{
-		{"Smith", "Smyth"},     // Y/I substitution
-		{"Philip", "Phillip"},  // doubled consonant
+		{"Smith", "Smyth"},         // Y/I substitution
+		{"Philip", "Phillip"},      // doubled consonant
 		{"Catherine", "Katherine"}, // C/K initial
-		{"riddley", "riddly"},  // dropped vowel
+		{"riddley", "riddly"},      // dropped vowel
 	}
 	for _, p := range pairs {
 		if !PhoneticEquivalent(p[0], p[1]) {

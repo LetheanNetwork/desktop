@@ -50,7 +50,7 @@ func ExampleService_Bench() {
 	_ = svc.RegisterBencher(&benchmark.FixtureBencher{
 		BencherName: "fixture-local",
 		BencherKind: benchmark.KindLocal,
-		Canned: []benchmark.Run{{PpTokSec: 4800, TgTokSec: 47.2, PromptLen: 1024, OutputLen: 256}},
+		Canned:      []benchmark.Run{{PpTokSec: 4800, TgTokSec: 47.2, PromptLen: 1024, OutputLen: 256}},
 	})
 
 	r := svc.Bench(c.Context(), benchmark.Bench{Model: "gemma-4-e2b", Ctx: 2048}, "fixture-local")

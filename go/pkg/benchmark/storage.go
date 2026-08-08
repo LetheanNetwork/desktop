@@ -16,19 +16,19 @@ import (
 // Not exported — only Schemas() and the package-level helpers
 // (insertRun / listRuns / getRun) touch this type. Callers see Run.
 type runRow struct {
-	ID         string    `json:"id"`
-	Timestamp  core.Time `json:"timestamp"`
-	Bencher    string    `json:"bencher"`
-	Model      string    `json:"model"`
-	Ctx        int       `json:"ctx"`
-	PpTokSec   float64   `json:"pp_tok_sec"`
-	TgTokSec   float64   `json:"tg_tok_sec"`
-	PromptLen  int       `json:"prompt_len"`
-	OutputLen  int       `json:"output_len"`
-	PeakWatts  float64   `json:"peak_watts"`
-	PeakMemMB  float64   `json:"peak_mem_mb"`
-	Endpoint   string    `json:"endpoint"`
-	Extra      string    `json:"extra"` // JSON-encoded map[string]any, empty when no extra
+	ID        string    `json:"id"`
+	Timestamp core.Time `json:"timestamp"`
+	Bencher   string    `json:"bencher"`
+	Model     string    `json:"model"`
+	Ctx       int       `json:"ctx"`
+	PpTokSec  float64   `json:"pp_tok_sec"`
+	TgTokSec  float64   `json:"tg_tok_sec"`
+	PromptLen int       `json:"prompt_len"`
+	OutputLen int       `json:"output_len"`
+	PeakWatts float64   `json:"peak_watts"`
+	PeakMemMB float64   `json:"peak_mem_mb"`
+	Endpoint  string    `json:"endpoint"`
+	Extra     string    `json:"extra"` // JSON-encoded map[string]any, empty when no extra
 }
 
 // Schema declares the DuckDB shape for runRow. Registered at Service

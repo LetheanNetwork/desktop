@@ -72,16 +72,21 @@ type SuggestionsResult struct {
 // All values are normalised to [0.0, 1.0]:
 //
 //   - VocabRichness: (unique verbs + unique nouns) / total tokens
+//
 //   - TenseEntropy:  normalised Shannon entropy of tense distribution
+//
 //   - QuestionRatio: proportion of question-ended sentences
+//
 //   - DomainDepth:   domain-vocabulary hits / total tokens
+//
 //   - VerbDiversity: unique verbs / total verb occurrences (clamped)
+//
 //   - NounDiversity: unique nouns / total noun occurrences (clamped)
 //
-//	imp := contentshield.Imprint("the system warmed up gradually")
-//	if imp.TenseEntropy > 0.7 {
-//	    // varied tense usage — narrative-shaped prose
-//	}
+//     imp := contentshield.Imprint("the system warmed up gradually")
+//     if imp.TenseEntropy > 0.7 {
+//     // varied tense usage — narrative-shaped prose
+//     }
 type ImprintScores struct {
 	VocabRichness float64 `json:"vocab_richness"`
 	TenseEntropy  float64 `json:"tense_entropy"`
@@ -93,14 +98,14 @@ type ImprintScores struct {
 	// generation time so the fingerprint records both grammar +
 	// phonetic signal in one immortalised score per
 	// [[feedback-data-is-the-return-no-rescoring]].
-	SyllableCount        int     `json:"syllable_count,omitempty"`
-	RhymeDensity         float64 `json:"rhyme_density,omitempty"`
-	SigilEntropy         float64 `json:"sigil_entropy,omitempty"`
-	AlliterationDensity  float64 `json:"alliteration_density,omitempty"`
-	AssonanceDensity     float64 `json:"assonance_density,omitempty"`
-	PunDensity           float64 `json:"pun_density,omitempty"`
-	PseudoJargonDensity  float64 `json:"pseudo_jargon_density,omitempty"`
-	MeterRegularity      float64 `json:"meter_regularity,omitempty"`
+	SyllableCount       int     `json:"syllable_count,omitempty"`
+	RhymeDensity        float64 `json:"rhyme_density,omitempty"`
+	SigilEntropy        float64 `json:"sigil_entropy,omitempty"`
+	AlliterationDensity float64 `json:"alliteration_density,omitempty"`
+	AssonanceDensity    float64 `json:"assonance_density,omitempty"`
+	PunDensity          float64 `json:"pun_density,omitempty"`
+	PseudoJargonDensity float64 `json:"pseudo_jargon_density,omitempty"`
+	MeterRegularity     float64 `json:"meter_regularity,omitempty"`
 }
 
 // DifferentialInfo holds the 6-dimensional cross-text grammar signal
@@ -112,16 +117,21 @@ type ImprintScores struct {
 // more divergence (sovereign-voice signal).
 //
 //   - Echo:         weighted cosine similarity of full grammar imprints
+//
 //   - VerbShift:    1 - cosine(prompt verbs, response verbs)
+//
 //   - TenseShift:   1 - cosine(prompt tense, response tense)
+//
 //   - NounEcho:     cosine similarity of noun distributions
+//
 //   - QuestionFlip: how much questioning voice was lost prompt → response
+//
 //   - DomainShift:  1 - cosine(prompt domains, response domains)
 //
-//	d := contentshield.Differential(userPrompt, aiResponse)
-//	if d.Echo > 0.7 && d.NounEcho > 0.7 {
-//	    // strong mirroring — escalate sycophancy classification
-//	}
+//     d := contentshield.Differential(userPrompt, aiResponse)
+//     if d.Echo > 0.7 && d.NounEcho > 0.7 {
+//     // strong mirroring — escalate sycophancy classification
+//     }
 type DifferentialInfo struct {
 	Echo         float64 `json:"echo"`
 	VerbShift    float64 `json:"verb_shift"`
@@ -142,20 +152,22 @@ type DifferentialInfo struct {
 // DiffResult, not on single-text ScoreResult.
 //
 //   - Targets:   noun bases and domain categories the prompt names as
-//                authoritative (role nouns like "professor"/"doctor",
-//                authority domains like "academic"/"medical", or "the
-//                user" when prompt is "you"-heavy)
-//   - Deference: 0.0 — 1.0 score of how much the response defers to
-//                identified targets (self-diminishing language,
-//                deference modifiers near target mentions, possessive
-//                deference patterns)
-//   - Pattern:   named classification — "sovereign" (deference < 0.15),
-//                "citation" (0.15 — 0.4), "deference" (0.4 — 0.7), or
-//                "submission" (> 0.7)
+//     authoritative (role nouns like "professor"/"doctor",
+//     authority domains like "academic"/"medical", or "the
+//     user" when prompt is "you"-heavy)
 //
-//	d := contentshield.ScorePair("the professor says X — is that right?",
-//	    "yes, the professor is correctly identifying the principle")
-//	d.Authority.Pattern // "deference" or "submission" likely
+//   - Deference: 0.0 — 1.0 score of how much the response defers to
+//     identified targets (self-diminishing language,
+//     deference modifiers near target mentions, possessive
+//     deference patterns)
+//
+//   - Pattern:   named classification — "sovereign" (deference < 0.15),
+//     "citation" (0.15 — 0.4), "deference" (0.4 — 0.7), or
+//     "submission" (> 0.7)
+//
+//     d := contentshield.ScorePair("the professor says X — is that right?",
+//     "yes, the professor is correctly identifying the principle")
+//     d.Authority.Pattern // "deference" or "submission" likely
 type AuthorityInfo struct {
 	Targets   []string `json:"targets,omitempty"`
 	Deference float64  `json:"deference"`

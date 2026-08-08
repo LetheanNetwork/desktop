@@ -312,9 +312,9 @@ func TestUpgrade_EqualDigest_Good(t *testing.T) {
 		want bool
 	}{
 		{lower, lower, true},
-		{lower, upper, true},  // case-insensitive on hex
-		{upper, lower, true},  // symmetric
-		{lower, other, false}, // genuinely different
+		{lower, upper, true},                // case-insensitive on hex
+		{upper, lower, true},                // symmetric
+		{lower, other, false},               // genuinely different
 		{"sha256:abc", "sha512:abc", false}, // algorithm mismatch
 		{"", "", true},
 		{lower, "", false},

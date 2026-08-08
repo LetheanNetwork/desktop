@@ -295,23 +295,23 @@ func (s *Service) handleUIDValidityRotation(accountName, folderSlug string, oldU
 // appendThreadRecord appends a MailThreadRecord YAML block to the
 // folder's threads.md file via the cascade W4 Part 2 write path:
 //
-//   1. Compose the record as a single YAML document framed by the
-//      "---\n" delimiter (one line in the threads.md sense, even
-//      though the document spans multiple physical lines — the
-//      delimiter separates documents).
-//   2. PRIMARY: paths.AtomicAppendLine — O_APPEND + kernel-atomic
-//      write semantics. Cheap, scales to IMAP-fetch volume.
-//   3. FALLBACK (Cerberus #9 Concern 1.A): if the composed payload
-//      exceeds paths.PipeBufLimit() the primitive rejects with
-//      CodeAppendRecordTooLarge. Darwin's PIPE_BUF is 512 bytes so
-//      this is the NORMAL case on macOS for thread records with
-//      typical YAML headers + long subjects + "Re: Re:" chains —
-//      NOT an edge case. The fallback rewrites threads.md as a
-//      whole via paths.AtomicWriteWithVersion + IfMatchHash so the
-//      record lands durably with the existing-content preserved
-//      verbatim. An audit event "paths.append.fell_back_to_rewrite"
-//      surfaces the path-and-size so dashboards can distinguish
-//      "fallback engaged" from "primitive rejected, data lost".
+//  1. Compose the record as a single YAML document framed by the
+//     "---\n" delimiter (one line in the threads.md sense, even
+//     though the document spans multiple physical lines — the
+//     delimiter separates documents).
+//  2. PRIMARY: paths.AtomicAppendLine — O_APPEND + kernel-atomic
+//     write semantics. Cheap, scales to IMAP-fetch volume.
+//  3. FALLBACK (Cerberus #9 Concern 1.A): if the composed payload
+//     exceeds paths.PipeBufLimit() the primitive rejects with
+//     CodeAppendRecordTooLarge. Darwin's PIPE_BUF is 512 bytes so
+//     this is the NORMAL case on macOS for thread records with
+//     typical YAML headers + long subjects + "Re: Re:" chains —
+//     NOT an edge case. The fallback rewrites threads.md as a
+//     whole via paths.AtomicWriteWithVersion + IfMatchHash so the
+//     record lands durably with the existing-content preserved
+//     verbatim. An audit event "paths.append.fell_back_to_rewrite"
+//     surfaces the path-and-size so dashboards can distinguish
+//     "fallback engaged" from "primitive rejected, data lost".
 //
 // Folder-scoped Mutex (Cerberus #9 Concern 1.B/1.C, Mantis #1554
 // defence-in-depth) — two concurrent appendThreadRecord calls on

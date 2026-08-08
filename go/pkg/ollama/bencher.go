@@ -270,9 +270,9 @@ func (b *Bencher) Bench(ctx core.Context, req benchmark.Bench) core.Result {
 		TgTokSec:  tokSec(gr.EvalCount, gr.EvalDurationNs),
 		Endpoint:  b.opts.Endpoint,
 		Extra: map[string]any{
-			"ollama_model":           gr.Model,
-			"ollama_total_duration":  gr.TotalDurationNs,
-			"ollama_load_duration":   gr.LoadDurationNs,
+			"ollama_model":          gr.Model,
+			"ollama_total_duration": gr.TotalDurationNs,
+			"ollama_load_duration":  gr.LoadDurationNs,
 		},
 	}
 	if run.Model == "" {

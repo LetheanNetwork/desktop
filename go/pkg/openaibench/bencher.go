@@ -321,11 +321,11 @@ func (b *Bencher) Bench(ctx core.Context, req benchmark.Bench) core.Result {
 		TgTokSec:  tokSec(cr.Usage.CompletionTokens, totalNs),
 		Endpoint:  b.opts.Endpoint,
 		Extra: map[string]any{
-			"response_id":     cr.ID,
-			"response_model":  cr.Model,
-			"total_tokens":    cr.Usage.TotalTokens,
-			"wall_clock_ms":   totalNs / 1e6,
-			"measurement":     "approx-from-wall-clock",
+			"response_id":    cr.ID,
+			"response_model": cr.Model,
+			"total_tokens":   cr.Usage.TotalTokens,
+			"wall_clock_ms":  totalNs / 1e6,
+			"measurement":    "approx-from-wall-clock",
 		},
 	}
 	if len(cr.Choices) > 0 && cr.Choices[0].FinishReason != "" {

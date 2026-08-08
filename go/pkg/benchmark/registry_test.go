@@ -16,9 +16,9 @@ type stubBencher struct {
 	kind Kind
 }
 
-func (b *stubBencher) Name() string                  { return b.name }
-func (b *stubBencher) Kind() Kind                    { return b.kind }
-func (b *stubBencher) CanBench(_ Bench) bool         { return true }
+func (b *stubBencher) Name() string          { return b.name }
+func (b *stubBencher) Kind() Kind            { return b.kind }
+func (b *stubBencher) CanBench(_ Bench) bool { return true }
 func (b *stubBencher) Models(_ core.Context) core.Result {
 	return core.Ok([]string{"stub-model"})
 }

@@ -18,7 +18,6 @@
 package queue
 
 import (
-
 	core "dappco.re/go"
 
 	"dappco.re/lthn/desktop/pkg/account"

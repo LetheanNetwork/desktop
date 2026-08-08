@@ -7,7 +7,6 @@
 package bridge
 
 import (
-
 	core "dappco.re/go"
 )
 

@@ -343,13 +343,13 @@ const (
 	// codes (already_sealed renders "Account already sealed"; blob_invalid
 	// renders "Encrypted blob malformed"; version_unsupported renders
 	// "Unsupported envelope version").
-	codeAccountNotFound             = "account.not_found"
-	codeAccountSealBlobRequired     = "account.seal.blob.required"
-	codeAccountSealBlobInvalid      = "account.seal.blob.invalid"
+	codeAccountNotFound               = "account.not_found"
+	codeAccountSealBlobRequired       = "account.seal.blob.required"
+	codeAccountSealBlobInvalid        = "account.seal.blob.invalid"
 	codeAccountSealVersionUnsupported = "account.seal.version_unsupported"
-	codeAccountSealAlreadySealed    = "account.seal.already_sealed"
-	codeAccountSealAccountLocked    = "account.seal.account_locked"
-	codeAccountSealWriteFailed      = "account.seal.write_failed"
+	codeAccountSealAlreadySealed      = "account.seal.already_sealed"
+	codeAccountSealAccountLocked      = "account.seal.account_locked"
+	codeAccountSealWriteFailed        = "account.seal.write_failed"
 )
 
 // SealInput is the request body the frontend (or external CLI / SDK
@@ -428,7 +428,7 @@ type SealOutput struct {
 // package level so the test fixture can pin the values without
 // mocking the clock.
 const (
-	lockoutThreshold        = 5
-	lockoutWindowSeconds    = 5 * 60
-	lockoutCooldownSeconds  = 60
+	lockoutThreshold       = 5
+	lockoutWindowSeconds   = 5 * 60
+	lockoutCooldownSeconds = 60
 )

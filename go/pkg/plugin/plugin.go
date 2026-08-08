@@ -20,7 +20,6 @@
 package plugin
 
 import (
-
 	core "dappco.re/go"
 )
 
@@ -145,14 +144,14 @@ type InstalledPlugin struct {
 // plugin. The exported Status struct is computed from this on
 // demand so the UI sees a consistent shape.
 type pluginState struct {
-	manifest     Manifest
-	proc         *processHandle // nil when stopped; see runtime.go
-	state        string
-	port         int
-	pid          int
-	startedAt    core.Time
-	stoppedAt    core.Time
-	lastError    string
+	manifest  Manifest
+	proc      *processHandle // nil when stopped; see runtime.go
+	state     string
+	port      int
+	pid       int
+	startedAt core.Time
+	stoppedAt core.Time
+	lastError string
 	// bundleSecret is the per-launch gateway credential (Cerberus #1443).
 	// Generated in startPlugin, passed to the binary via --bundle-token,
 	// revoked in stopPlugin. Empty for plugins started before the fix.

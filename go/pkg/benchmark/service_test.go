@@ -101,10 +101,10 @@ func TestRecord_PreservesExplicitID(t *core.T) {
 func TestRecord_ExtraRoundTripsThroughJSON(t *core.T) {
 	svc := newRegisteredService(t)
 	extra := map[string]any{
-		"billed_cost":  0.0042,
-		"region":       "eu-west-1",
-		"gpu":          "H100",
-		"queue_ms":     45,
+		"billed_cost": 0.0042,
+		"region":      "eu-west-1",
+		"gpu":         "H100",
+		"queue_ms":    45,
 	}
 	r := svc.Record(benchmark.Run{
 		Bencher: "remote", Model: "llama-3-70b", Ctx: 8192,
@@ -199,7 +199,7 @@ func TestBench_DispatchesAndPersists(t *core.T) {
 	fx := &benchmark.FixtureBencher{
 		BencherName: "fix",
 		BencherKind: benchmark.KindLocal,
-		Canned: []benchmark.Run{{PpTokSec: 4800, TgTokSec: 47.2, PromptLen: 1024, OutputLen: 256}},
+		Canned:      []benchmark.Run{{PpTokSec: 4800, TgTokSec: 47.2, PromptLen: 1024, OutputLen: 256}},
 	}
 	core.RequireTrue(t, svc.RegisterBencher(fx).OK)
 
@@ -225,8 +225,8 @@ func TestBench_RejectsUnknownBencher(t *core.T) {
 // rejectorBencher always says it CanBench=false.
 type rejectorBencher struct{}
 
-func (rejectorBencher) Name() string                  { return "rejector" }
-func (rejectorBencher) Kind() benchmark.Kind          { return benchmark.KindLocal }
+func (rejectorBencher) Name() string                    { return "rejector" }
+func (rejectorBencher) Kind() benchmark.Kind            { return benchmark.KindLocal }
 func (rejectorBencher) CanBench(_ benchmark.Bench) bool { return false }
 func (rejectorBencher) Models(_ core.Context) core.Result {
 	return core.Ok([]string{})

@@ -56,11 +56,11 @@ const LockfileSuffix = ".lockfile"
 // frontend / audit-tail / log-tail surfaces pattern-match on these
 // literals.
 const (
-	CodeLockTimeout       = "paths.lock.timeout"
-	CodeLockNetworkFS     = "paths.lock.network_fs"
-	CodeLockOpen          = "paths.lock.open_failed"
-	CodeLockRelease       = "paths.lock.release_failed"
-	CodeLockIterationCap  = "paths.lock.iteration_cap"
+	CodeLockTimeout      = "paths.lock.timeout"
+	CodeLockNetworkFS    = "paths.lock.network_fs"
+	CodeLockOpen         = "paths.lock.open_failed"
+	CodeLockRelease      = "paths.lock.release_failed"
+	CodeLockIterationCap = "paths.lock.iteration_cap"
 )
 
 // lockIterationCap bounds the acquire loop against monotonic-clock
@@ -210,8 +210,8 @@ func WithFileLock(path string, timeout core.Duration, fn func() core.Result) cor
 //   - (true, nil)   — we hold the lock.
 //   - (false, nil)  — sentinel already exists; contention; retry.
 //   - (false, err)  — fatal I/O error (parent missing, permission,
-//                     read-only filesystem). Outer loop MUST surface
-//                     this rather than spin to timeout.
+//     read-only filesystem). Outer loop MUST surface
+//     this rather than spin to timeout.
 //
 // On success the file body is "<pid>\n<fork-time-unix-ns>\n" so the
 // reclaim path can validate the holder's identity.

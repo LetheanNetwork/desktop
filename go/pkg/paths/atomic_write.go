@@ -162,9 +162,9 @@ type WriteInput struct {
 // WriteOutput is the success-path payload (returned in Result.Value
 // of an OK Result).
 type WriteOutput struct {
-	Version int        `json:"version"`
-	Mtime   core.Time  `json:"mtime"`
-	Hash    string     `json:"hash"`
+	Version int       `json:"version"`
+	Mtime   core.Time `json:"mtime"`
+	Hash    string    `json:"hash"`
 }
 
 // VersionStale is the conflict-path payload. Surfaced via
@@ -181,10 +181,10 @@ type VersionStale struct {
 
 // ReadOutput is the payload returned by ReadVersion.
 type ReadOutput struct {
-	Version  int       `json:"version"`  // 0 when file has no version frontmatter OR does not exist
-	Mtime    core.Time `json:"mtime"`    // zero when file does not exist
-	Body     []byte    `json:"body"`     // empty when file does not exist
-	BodyHash string    `json:"body_hash"`// SHA-256 hex of body, empty when file does not exist
+	Version  int       `json:"version"`   // 0 when file has no version frontmatter OR does not exist
+	Mtime    core.Time `json:"mtime"`     // zero when file does not exist
+	Body     []byte    `json:"body"`      // empty when file does not exist
+	BodyHash string    `json:"body_hash"` // SHA-256 hex of body, empty when file does not exist
 }
 
 // AtRestEncryptedPrefixes returns the workspace-relative prefix list

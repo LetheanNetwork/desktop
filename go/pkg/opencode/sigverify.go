@@ -71,10 +71,10 @@ const (
 	// Closed-set rejection reasons for EventOpencodeImageSignatureRejected.
 	// MUST stay in lockstep with the const block in types.go and the
 	// audit-constants.ts mirror.
-	sigReasonMissing  = "signature_missing"
-	sigReasonNoKey    = "key_not_found"
-	sigReasonCorrupt  = "sig.corrupt"
-	sigReasonInvalid  = "sig.invalid"
+	sigReasonMissing   = "signature_missing"
+	sigReasonNoKey     = "key_not_found"
+	sigReasonCorrupt   = "sig.corrupt"
+	sigReasonInvalid   = "sig.invalid"
 	sigReasonNoNewLine = "release_id.newline_forbidden"
 )
 
@@ -182,9 +182,9 @@ func canonicalSigningBytes(digest, tag, releaseID string) ([]byte, bool) {
 //   - true  + signature supplied   → verify; reject on any mismatch
 //   - false + no signature supplied → ACCEPT (legacy / bootstrap)
 //   - false + signature supplied   → verify-when-supplied; reject on
-//                                    mismatch (defence-in-depth — if
-//                                    the operator threaded a sig, we
-//                                    treat it as load-bearing)
+//     mismatch (defence-in-depth — if
+//     the operator threaded a sig, we
+//     treat it as load-bearing)
 //
 // Usage example (internal — called from UpgradeWithConsent after
 // the digest gate passes, before the docker pull side-effect):

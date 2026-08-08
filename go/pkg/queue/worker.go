@@ -74,13 +74,14 @@ func processOne(c *core.Core) bool {
 // ready.
 //
 // CAS-via-orm: orm.Of[Job].Where("status","=","pending").
-//                              Where("scheduled_for","<=",now).
-//                              Order("enqueued_at","asc").
-//                              Limit(1).Get()
-//   then Save with Status=running. Single-worker means no race;
-//   multi-worker (v2) needs a real CAS (predicate-update returning
-//   rows-affected) which orm.DuckDBMedium can support via the
-//   ON CONFLICT clause if needed later.
+//
+//	                           Where("scheduled_for","<=",now).
+//	                           Order("enqueued_at","asc").
+//	                           Limit(1).Get()
+//	then Save with Status=running. Single-worker means no race;
+//	multi-worker (v2) needs a real CAS (predicate-update returning
+//	rows-affected) which orm.DuckDBMedium can support via the
+//	ON CONFLICT clause if needed later.
 func claimNext(c *core.Core) (Job, bool) {
 	now := core.Now().UTC()
 	// Memium's predicate engine doesn't honour `<=` on time

@@ -12,7 +12,6 @@
 package models
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/lthn/desktop/pkg/paths"
 )

@@ -17,7 +17,7 @@ func TestShellQuote_HappyPath_Good(t *core.T) {
 }
 
 // TestShellQuote_SingleQuoteEscaped_Good — embedded single quotes
-// switch to the '\'' close-escape-open pattern.
+// switch to the '\” close-escape-open pattern.
 func TestShellQuote_SingleQuoteEscaped_Good(t *core.T) {
 	got := shellQuote("a'b")
 	want := `'a'\''b'`

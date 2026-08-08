@@ -254,8 +254,8 @@ func TestAuth_ClearCaller_Good_RemovesStamp(t *testing.T) {
 func TestAuth_AsRenderer_Good(t *testing.T) {
 	c := core.New()
 	cases := []struct {
-		name    string
-		ctx     core.Context
+		name     string
+		ctx      core.Context
 		wantTier auth.CallerTier
 	}{
 		{"AsOperator", auth.AsOperator(c.Context(), "s", "src"), auth.TierOperator},

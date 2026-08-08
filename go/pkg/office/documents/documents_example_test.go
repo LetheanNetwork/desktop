@@ -33,6 +33,6 @@ func ExampleService_Get() {
 		return // not found or invalid slug
 	}
 	detail := r.Value.(documents.DocDetail)
-	_ = detail.Title  // "Release notes"
-	_ = detail.Body   // "# Release notes\n\n..."
+	_ = detail.Title // "Release notes"
+	_ = detail.Body  // "# Release notes\n\n..."
 }

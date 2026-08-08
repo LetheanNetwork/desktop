@@ -17,8 +17,8 @@ func TestMaskProviderKey(t *core.T) {
 		key  string
 		want string
 	}{
-		{"", ""},          // empty → empty
-		{"short", ""},     // ≤ 10 chars → empty
+		{"", ""},           // empty → empty
+		{"short", ""},      // ≤ 10 chars → empty
 		{"abcdefghij", ""}, // exactly 10 = head(6)+tail(4) → empty (not > head+tail)
 		// len=11, mid=1, 1 bullet → "abcdef" + "•" + "hijk"
 		{"abcdefghijk", "abcdef•hijk"},

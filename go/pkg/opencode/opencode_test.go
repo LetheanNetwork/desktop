@@ -174,4 +174,3 @@ func TestAllocatePort_ExhaustedAfterMax_Bad(t *testing.T) {
 		t.Errorf("exhausted.Meta.range missing")
 	}
 }
-

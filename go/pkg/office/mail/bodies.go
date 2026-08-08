@@ -185,15 +185,15 @@ func (s *Service) FetchBody(input FetchBodyInput) core.Result {
 //
 // When the future iteration lands, it MUST:
 //
-//   1. Acquire the per-account mutex via s.accountMutex(acct.Name)
-//      so the single-flight invariant the IfMtime comment relies on
-//      stays load-bearing.
-//   2. Resolve thread-id → IMAP UID via the folder state file or
-//      the threads.md record so the IMAP fetch targets the right
-//      message.
-//   3. Use BODY.PEEK[] to avoid marking the message Seen as a
-//      side-effect of the body fetch (the UI marks Seen explicitly
-//      when the user actually opens the message).
+//  1. Acquire the per-account mutex via s.accountMutex(acct.Name)
+//     so the single-flight invariant the IfMtime comment relies on
+//     stays load-bearing.
+//  2. Resolve thread-id → IMAP UID via the folder state file or
+//     the threads.md record so the IMAP fetch targets the right
+//     message.
+//  3. Use BODY.PEEK[] to avoid marking the message Seen as a
+//     side-effect of the body fetch (the UI marks Seen explicitly
+//     when the user actually opens the message).
 //
 // Until then, FetchBody is a substrate-shape demo + cache reader —
 // the at-rest write contract is real and tested; the IMAP fetch

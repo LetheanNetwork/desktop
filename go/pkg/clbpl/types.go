@@ -10,10 +10,10 @@
 // for an autonomous curriculum loop:
 //
 //   - EventPeak    fires on each detected local maximum (a "breakout"
-//                  in the iteration N descent toward grok)
+//     in the iteration N descent toward grok)
 //   - EventGroked  fires once N consecutive peaks fall within a small
-//                  amplitude band — the model has internalised the
-//                  current iteration's target, ready to switch subject
+//     amplitude band — the model has internalised the
+//     current iteration's target, ready to switch subject
 //
 // Stream usage:
 //
@@ -109,14 +109,16 @@ type Event struct {
 //
 //   - Window is the rolling-window size used to detect local maxima.
 //     Should be larger than the oscillation half-period. Default 8.
+//
 //   - GrokThreshold is the peak amplitude (max - min across recent
 //     peaks) below which the detector considers the model groked,
 //     relative to the loss scale of those peaks. Default 0.05.
+//
 //   - GrokConfirmPeaks is the number of consecutive peaks within the
 //     threshold needed to fire EventGroked. Default 3 — avoids
 //     false-positive groked on a single small peak.
 //
-//	opts := clbpl.Options{Window: 12, GrokThreshold: 0.03, GrokConfirmPeaks: 4}
+//     opts := clbpl.Options{Window: 12, GrokThreshold: 0.03, GrokConfirmPeaks: 4}
 type Options struct {
 	Window           int     `json:"window,omitempty"`
 	GrokThreshold    float64 `json:"grok_threshold,omitempty"`

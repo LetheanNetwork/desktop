@@ -65,13 +65,16 @@ type FixtureRunner struct {
 // tests:
 //
 //   - Model defaults to "fixture-runner".
+//
 //   - Substrate defaults to "CONT".
+//
 //   - Tier defaults to 0 (E2B-equivalent).
+//
 //   - StepsPerGrok defaults to 60 — enough peaks for clbpl.Defaults
 //     to fire EventGroked under the canonical Window=8 / Confirm=3.
 //
-//	r := training.NewFixtureRunner(training.FixtureConfig{})
-//	_ = r.ModelID() // "fixture-runner"
+//     r := training.NewFixtureRunner(training.FixtureConfig{})
+//     _ = r.ModelID() // "fixture-runner"
 func NewFixtureRunner(cfg FixtureConfig) *FixtureRunner {
 	if cfg.Model == "" {
 		cfg.Model = "fixture-runner"

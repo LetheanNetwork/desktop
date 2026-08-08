@@ -237,8 +237,8 @@ func TestBodyCap_LongestPrefixWins_Good(t *testing.T) {
 		// Declare in "wrong" order — shorter prefix first. The
 		// middleware must still pick the longer prefix when a request
 		// matches both.
-		{Prefix: "/v1/api/", Bytes: 1 << 20},          // 1 MiB
-		{Prefix: "/v1/api/gateway/", Bytes: 1 << 10},  // 1 KiB — more specific
+		{Prefix: "/v1/api/", Bytes: 1 << 20},         // 1 MiB
+		{Prefix: "/v1/api/gateway/", Bytes: 1 << 10}, // 1 KiB — more specific
 	}
 	eng := newCapEngine(t, server.MaxBodyBytesDefault, overrides)
 	// 2 KiB to /v1/api/gateway/foo/bar — under the looser /v1/api/ cap

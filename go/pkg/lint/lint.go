@@ -12,7 +12,6 @@
 package lint
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/process"
 )
@@ -56,18 +55,16 @@ func (s *Service) proc() *process.Service {
 	return ps
 }
 
-// findLintBinary searches PATH for core-lint, falling back to a
-// short list of canonical workstation paths Snider uses. Returns
-// "" when no candidate resolves.
+// findLintBinary searches PATH for core-lint, falling back to the
+// $HOME-relative places a dev checkout or a user install puts it.
+// Returns "" when no candidate resolves.
 func findLintBinary() string {
 	if found := (core.App{}).Find(coreLintBinary, coreLintBinary); found.OK {
 		if app, ok := found.Value.(*core.App); ok && app != nil {
 			return app.Path
 		}
 	}
-	candidates := []string{
-		core.PathJoin("/Users", "snider", "Code", "core", "lint", "bin", coreLintBinary),
-	}
+	var candidates []string
 	if home := core.UserHomeDir(); home.OK {
 		if h, ok := home.Value.(string); ok && h != "" {
 			candidates = append(candidates, core.PathJoin(h, "Code", "core", "lint", "bin", coreLintBinary))

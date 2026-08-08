@@ -48,12 +48,12 @@ import (
 // Any future addition MUST land alongside its gate AND its entry
 // here in the same commit.
 var gatedWailsMethods = map[string]bool{
-	"List":    true, // permits TierOperator + TierRenderer + TierCascade
-	"Get":     true, // permits TierOperator + TierRenderer + TierCascade
-	"Create":  true, // permits TierOperator + TierRenderer (ENFORCE-not-claim Reporter)
-	"Update":  true, // permits TierOperator + TierRenderer
-	"AddNote": true, // permits TierOperator + TierRenderer (ENFORCE-not-claim Author)
-	"Detect":  true, // permits TierOperator + TierRenderer (files core-lint findings as tasks)
+	"List":          true, // permits TierOperator + TierRenderer + TierCascade
+	"Get":           true, // permits TierOperator + TierRenderer + TierCascade
+	"Create":        true, // permits TierOperator + TierRenderer (ENFORCE-not-claim Reporter)
+	"Update":        true, // permits TierOperator + TierRenderer
+	"AddNote":       true, // permits TierOperator + TierRenderer (ENFORCE-not-claim Author)
+	"Detect":        true, // permits TierOperator + TierRenderer (files core-lint findings as tasks)
 	"DetectUpdates": true, // permits TierOperator + TierRenderer (files outdated-dependency tasks)
 	"ClearDetected": true, // permits TierOperator + TierRenderer (removes detector-filed tasks)
 }
@@ -79,12 +79,12 @@ var exemptWailsMethods = map[string]bool{}
 // never reaches the substrate (the wails3 generator only walks
 // *WailsService once registration switches over).
 var gatedWailsServiceMethods = map[string]bool{
-	"List":    true, // delegates to *Service.List
-	"Get":     true, // delegates to *Service.Get
-	"Create":  true, // delegates to *Service.Create (ENFORCE-not-claim Reporter via inner)
-	"Update":  true, // delegates to *Service.Update
-	"AddNote": true, // delegates to *Service.AddNote (ENFORCE-not-claim Author via inner)
-	"Detect":  true, // delegates to *Service.Detect (files core-lint findings as tasks)
+	"List":          true, // delegates to *Service.List
+	"Get":           true, // delegates to *Service.Get
+	"Create":        true, // delegates to *Service.Create (ENFORCE-not-claim Reporter via inner)
+	"Update":        true, // delegates to *Service.Update
+	"AddNote":       true, // delegates to *Service.AddNote (ENFORCE-not-claim Author via inner)
+	"Detect":        true, // delegates to *Service.Detect (files core-lint findings as tasks)
 	"DetectUpdates": true, // delegates to *Service.DetectUpdates (outdated-dependency tasks)
 	"ClearDetected": true, // delegates to *Service.ClearDetected (removes detector-filed tasks)
 }

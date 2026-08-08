@@ -31,16 +31,16 @@ import (
 // LockEvent kinds — closed schema. New kinds are reserved-schema
 // changes; consumers pattern-match on these literals.
 const (
-	EventLockAcquired    = "paths.lock.acquired"
-	EventLockReleased    = "paths.lock.released"
-	EventVersionStale    = "paths.write.version_stale"
-	EventWriteSucceeded  = "paths.write.succeeded"
+	EventLockAcquired   = "paths.lock.acquired"
+	EventLockReleased   = "paths.lock.released"
+	EventVersionStale   = "paths.write.version_stale"
+	EventWriteSucceeded = "paths.write.succeeded"
 	// EventWriteFailed is emitted when AtomicWriteWithVersion's
 	// open / write / fsync / rename step hits an I/O error. The
 	// event's Code field carries the typed paths.write.<step>_failed
 	// sentinel so operators can pattern-match without parsing
 	// free-form prose. Mantis #1551.
-	EventWriteFailed     = "paths.write.failed"
+	EventWriteFailed = "paths.write.failed"
 )
 
 // CodeAuditSyncRecordFailed surfaces a Sync-mode AuditRecorder

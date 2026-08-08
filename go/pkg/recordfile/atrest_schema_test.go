@@ -145,11 +145,11 @@ func TestAtRestSchema_ValidateHashTagList_Good(t *testing.T) {
 // TestAtRestSchema_ValidateHashTagList_Bad — plaintext / wrong length / wrong type rejected.
 func TestAtRestSchema_ValidateHashTagList_Bad(t *testing.T) {
 	bad := []any{
-		[]any{"plaintext-tag"},                // wrong length
-		[]any{"AABBCCDDEEFF0011"},             // upper hex
-		[]any{"deadbeef"},                     // short
-		[]any{42},                             // wrong type
-		"not-a-list",                          // wrong outer type
+		[]any{"plaintext-tag"},    // wrong length
+		[]any{"AABBCCDDEEFF0011"}, // upper hex
+		[]any{"deadbeef"},         // short
+		[]any{42},                 // wrong type
+		"not-a-list",              // wrong outer type
 	}
 	for _, b := range bad {
 		err := recordfile.ValidateHashTagList(b)

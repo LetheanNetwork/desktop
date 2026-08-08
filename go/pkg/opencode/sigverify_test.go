@@ -116,7 +116,7 @@ func TestOpencode_Upgrade_SignatureVerified_Good(t *testing.T) {
 //   - signature_missing — policy on, no sig supplied
 //   - key_not_found     — sig + pubkey supplied, pubkey not in trust store
 //   - sig.invalid       — sig + pubkey supplied, pubkey IS trusted, but
-//                          signature bytes don't verify under canon
+//     signature bytes don't verify under canon
 //   - release_id.newline_forbidden — caller put "\n" in release_id
 func TestOpencode_Upgrade_SignatureRejected_Bad(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)

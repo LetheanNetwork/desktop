@@ -156,11 +156,11 @@ func (s *Service) startPlugin(ctx core.Context, code, token string) core.Result 
 	}
 	// Mark starting so List/Status reflects intent immediately.
 	ps2 := &pluginState{
-		manifest:    m,
-		state:       "starting",
-		port:        port,
-		pid:         proc.Info().PID,
-		startedAt:   core.Now(),
+		manifest:     m,
+		state:        "starting",
+		port:         port,
+		pid:          proc.Info().PID,
+		startedAt:    core.Now(),
 		bundleSecret: bundleSecret,
 		proc: &processHandle{
 			proc:   proc,

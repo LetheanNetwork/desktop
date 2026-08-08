@@ -119,11 +119,11 @@ const (
 // AddedAt + AddedByAccount form the chain-of-custody trail for the
 // EventMarketplaceTrustedKeyMutated audit row.
 type TrustedKey struct {
-	Name            string `json:"name"`
-	KeyID           string `json:"keyid"`
-	Pubkey          string `json:"pubkey"`
-	AddedAt         string `json:"added_at"`
-	AddedByAccount  string `json:"added_by_account"`
+	Name           string `json:"name"`
+	KeyID          string `json:"keyid"`
+	Pubkey         string `json:"pubkey"`
+	AddedAt        string `json:"added_at"`
+	AddedByAccount string `json:"added_by_account"`
 }
 
 // TrustedKeysFile is the on-disk shape at
@@ -321,10 +321,10 @@ func LoadTrustedKeys() core.Result {
 // without UI evidence still produce the row — the auditor can spot
 // the missing confirmation chain.
 type WriteTrustedKeysInput struct {
-	Keys               []TrustedKey
-	Reason             string
-	OperatorConfirmed  bool
-	OperatorAccountID  string
+	Keys              []TrustedKey
+	Reason            string
+	OperatorConfirmed bool
+	OperatorAccountID string
 }
 
 // WriteTrustedKeys persists keys to ~/Lethean/conf/marketplace/trusted_keys.json

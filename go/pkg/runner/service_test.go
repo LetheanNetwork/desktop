@@ -8,7 +8,6 @@
 package runner_test
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/config"
 	"dappco.re/go/inference"

@@ -11,7 +11,6 @@
 package bridge
 
 import (
-
 	core "dappco.re/go"
 	"dappco.re/go/process"
 )

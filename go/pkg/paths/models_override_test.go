@@ -197,13 +197,13 @@ func TestModelsDir_IgnoresUnparseableOverrideFile_Ugly(t *core.T) {
 // We can't synthesise a real mid-write crash from a unit test, so
 // we assert the load-bearing post-conditions:
 //
-//   1. After a successful Set/Clear, paths.json parses cleanly
-//      (never half-written content reaching the final filename).
-//   2. The atomic-write contract is exposed via the implementation:
-//      a stale paths.json.tmp left behind by a prior aborted write
-//      MUST NOT be read by readPathsOverride — readers consult only
-//      the final filename. This defends against an OS that left a
-//      tmp file behind after a crash.
+//  1. After a successful Set/Clear, paths.json parses cleanly
+//     (never half-written content reaching the final filename).
+//  2. The atomic-write contract is exposed via the implementation:
+//     a stale paths.json.tmp left behind by a prior aborted write
+//     MUST NOT be read by readPathsOverride — readers consult only
+//     the final filename. This defends against an OS that left a
+//     tmp file behind after a crash.
 func TestPathsOverride_WriteIsAtomic_Ugly(t *core.T) {
 	home := homeFixture(t)
 	override := core.PathJoin(home, "atomic-models")

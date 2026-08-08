@@ -141,7 +141,7 @@ func (e *enc) encodeInline() {
 		e.add("S", "S")
 		i = 1
 	}
-	for ; i < e.length && (len(e.pri) < MetaphoneMaxCode || len(e.alt) < MetaphoneMaxCode); {
+	for i < e.length && (len(e.pri) < MetaphoneMaxCode || len(e.alt) < MetaphoneMaxCode) {
 		i = e.step(i)
 	}
 }
@@ -341,8 +341,9 @@ func detectSlavoGermanic(word string) bool {
 // position. The main rule dispatch — one case per consonant + a
 // vowels-only-at-start case.
 //
-//nolint:gocyclo // Algorithm-driven dispatch; splitting reduces
 // readability without reducing complexity.
+//
+//nolint:gocyclo // Algorithm-driven dispatch; splitting reduces
 func (e *enc) step(i int) int {
 	c := e.charAt(i)
 
