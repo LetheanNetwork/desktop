@@ -8,16 +8,16 @@ require (
 	dappco.re/go v0.12.0
 	dappco.re/go/api v0.19.0
 	dappco.re/go/config v0.18.0
-	dappco.re/go/container v0.12.0
+	dappco.re/go/container v0.13.0
 	dappco.re/go/crypt v0.10.0
 	dappco.re/go/i18n v0.12.1
 	dappco.re/go/inference v0.14.0
-	dappco.re/go/io v0.15.3
+	dappco.re/go/io v0.15.4
 	dappco.re/go/mcp v0.19.1
 	dappco.re/go/orm v0.1.2
-	dappco.re/go/process v0.16.1
+	dappco.re/go/process v0.16.2
 	dappco.re/go/ratelimit v0.12.1
-	dappco.re/go/render v0.20.3
+	dappco.re/go/render v0.21.0
 	dappco.re/go/scm v0.22.0
 	dappco.re/go/store v0.14.1
 	dappco.re/go/ws v0.7.1
@@ -82,7 +82,7 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/containerd/console v1.0.5 // indirect
-	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
+	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
@@ -104,8 +104,8 @@ require (
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
-	github.com/go-git/go-billy/v5 v5.9.0 // indirect
-	github.com/go-git/go-git/v5 v5.19.1 // indirect
+	github.com/go-git/go-billy/v5 v5.9.1 // indirect
+	github.com/go-git/go-git/v5 v5.19.2 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/go-task/template v0.2.0 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
@@ -131,7 +131,7 @@ require (
 	github.com/jaypipes/pcidb v1.1.1 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
-	github.com/kevinburke/ssh_config v1.4.0 // indirect
+	github.com/kevinburke/ssh_config v1.6.0 // indirect
 	github.com/klauspost/compress v1.19.1 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/konoui/go-qsort v0.1.0 // indirect
@@ -184,7 +184,7 @@ require (
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/tc-hib/winres v0.3.1 // indirect
-	github.com/tmc/apple v0.6.12 // indirect
+	github.com/tmc/apple v0.6.15 // indirect
 	github.com/ulikunitz/xz v0.5.15 // indirect
 	github.com/unrolled/secure v1.17.0 // indirect
 	github.com/wailsapp/task/v3 v3.40.1-patched3 // indirect
@@ -240,7 +240,7 @@ require (
 	github.com/cloudwego/base64x v0.1.7 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/coreos/go-oidc/v3 v3.17.0 // indirect
-	github.com/ebitengine/purego v0.10.1 // indirect
+	github.com/ebitengine/purego v0.10.2 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.15 // indirect
 	github.com/gin-contrib/authz v1.0.6 // indirect
