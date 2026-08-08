@@ -333,3 +333,50 @@ func TestImportFromHost_ProcessUnavailable_Bad(t *testing.T) {
 		t.Errorf("error = %q; want 'process service unavailable'", r.Error())
 	}
 }
+
+func TestImportFetchJSON_MalformedURL_Bad(t *testing.T) {
+	_, err := importFetchJSON("://not-a-url", "")
+	if err == nil {
+		t.Fatal("importFetchJSON with a malformed URL must fail")
+	}
+}
+
+func TestReadHostAuthJSON_EmptyFile_Good(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := core.PathJoin(home, ".local/share/opencode")
+	if r := core.MkdirAll(dir, 0o755); !r.OK {
+		t.Fatalf("mkdir: %s", r.Error())
+	}
+	if r := core.WriteFile(core.PathJoin(dir, "auth.json"), nil, 0o600); !r.OK {
+		t.Fatalf("write: %s", r.Error())
+	}
+
+	got := readHostAuthJSON()
+	if len(got) != 0 {
+		t.Errorf("readHostAuthJSON() with empty file = %+v; want empty map", got)
+	}
+}
+
+func TestPersistProjects_SandboxesAndIcon_Good(t *testing.T) {
+	c := newTestCore(t)
+	rows := []any{map[string]any{
+		"id":        "proj-sbx",
+		"worktree":  "/home/user/code/thing",
+		"sandboxes": []any{map[string]any{"id": "sbx-1"}},
+		"icon":      map[string]any{"color": "#fff", "url": "data:x"},
+		"time":      map[string]any{"created": float64(1700000000000)},
+	}}
+
+	if got := persistProjects(c, rows, core.Now()); got != 1 {
+		t.Fatalf("persistProjects = %d; want 1", got)
+	}
+	r := orm.Of[ImportedProject](c).Get()
+	if !r.OK {
+		t.Fatalf("read back: %s", r.Error())
+	}
+	saved := r.Value.([]ImportedProject)[0]
+	if saved.SandboxesJSON == "" || saved.IconColor != "#fff" {
+		t.Errorf("sandboxes/icon not captured: %+v", saved)
+	}
+}
